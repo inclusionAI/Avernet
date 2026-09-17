@@ -727,6 +727,15 @@ function SessionAnalysisDetail() {
       </div>
     );
   const d = diagnosis(task);
+  const diagnosisConclusion = field(
+    d.conclusion,
+    field(d.rootCauseSummary, "请查看完整诊断报告"),
+  );
+  const diagnosisCodes = Array.isArray(d.codes)
+    ? d.codes.filter((value): value is string => typeof value === "string")
+    : [d.primaryCode, ...(Array.isArray(d.secondaryCodes) ? d.secondaryCodes : [])].filter(
+        (value): value is string => typeof value === "string" && Boolean(value),
+      );
   const analysisResult = task.result?.analysis as
     | Record<string, unknown>
     | undefined;
@@ -1048,32 +1057,13 @@ function SessionAnalysisDetail() {
                   </p>
                 </div>
               )}
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-xl border bg-white p-4">
-                  <p className="text-xs text-gray-500">目标状态</p>
-                  <p className="mt-1 font-semibold">{field(d.goalStatus)}</p>
-                </div>
-                <div className="rounded-xl border bg-white p-4">
-                  <p className="text-xs text-gray-500">诊断结论</p>
-                  <p className="mt-1 font-semibold">{field(d.verdict)}</p>
-                </div>
-                <div className="rounded-xl border bg-white p-4">
-                  <p className="text-xs text-gray-500">主问题分类</p>
-                  <p className="mt-1 font-mono text-sm">
-                    {field(d.primaryCode)}
-                  </p>
-                </div>
-              </div>
               <div className="rounded-xl border-l-4 border-red-400 bg-red-50 p-4">
-                <p className="text-xs font-medium text-red-700">根因摘要</p>
-                <p className="mt-1 text-gray-900">
-                  {field(d.rootCauseSummary, "请查看完整诊断报告")}
+                <p className="text-xs font-medium text-red-700">诊断结论</p>
+                <p className="mt-1 whitespace-pre-wrap text-gray-900">{diagnosisConclusion}</p>
+                <p className="mt-3 text-xs font-medium text-red-700">问题分类</p>
+                <p className="mt-1 font-mono text-sm text-gray-700">
+                  {diagnosisCodes.length ? diagnosisCodes.join("、") : "未形成有证据支持的分类"}
                 </p>
-                {field(d.impactSummary, "") && (
-                  <p className="mt-2 text-sm text-gray-600">
-                    {field(d.impactSummary, "")}
-                  </p>
-                )}
               </div>
             </section>
           )}
