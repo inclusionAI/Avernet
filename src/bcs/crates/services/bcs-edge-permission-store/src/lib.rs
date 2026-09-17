@@ -1005,6 +1005,7 @@ impl DbBotActorConfigStore {
         })
     }
 
+    #[cfg(test)]
     async fn execute(&self, operation: &'static str, statement: DbStatement) -> ServiceResult<()> {
         self.db
             .execute(statement)

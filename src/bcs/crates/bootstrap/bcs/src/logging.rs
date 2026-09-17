@@ -469,34 +469,48 @@ fn cleanup_old_logs(output: &LogOutputConfig) {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
+    use tracing::Subscriber as _;
     use tracing_subscriber::layer::SubscriberExt;
 
+    // `tracing::enabled!` consults the process-global callsite Interest cache,
+    // which parallel tests poison (first evaluation of a callsite snapshots one
+    // subscriber's answer for the whole process). Probe the filter decisions
+    // directly instead: `Subscriber::enabled` on an env-filtered subscriber
+    // and `Targets::would_enable` are cache-free and deterministic.
     #[test]
     fn reply_profile_requires_explicit_target_even_at_global_debug() {
+        macro_rules! probe {
+            ($target:expr, $lvl:expr) => {{
+                let callsite = tracing::callsite! {
+                    name: "probe",
+                    kind: tracing::metadata::Kind::EVENT,
+                    target: $target,
+                    level: $lvl,
+                    fields: ,
+                };
+                use tracing::callsite::Callsite as _;
+                callsite.metadata()
+            }};
+        }
         for explicit in [false, true] {
             let mut config = LoggingConfig::default();
             config.default_level = "debug".into();
             if explicit { config.tags.insert("bcs_reply_profile".into(), "debug".into()); }
-            let console = tracing_subscriber::registry().with(
-                tracing_subscriber::fmt::layer().with_writer(std::io::sink).with_filter(build_env_filter_with_overlay(&config, None))
-            );
-            tracing::subscriber::with_default(console, || {
-                assert_eq!(tracing::enabled!(target: "bcs_reply_profile", Level::DEBUG), explicit);
-                assert!(tracing::enabled!(target: "ordinary_test", Level::DEBUG));
-                assert!(!tracing::enabled!(target: DELIVERY_MONITOR_TARGET, Level::INFO));
-            });
+            let console = tracing_subscriber::fmt()
+                .with_writer(std::io::sink)
+                .with_env_filter(build_env_filter_with_overlay(&config, None))
+                .finish();
+            assert_eq!(console.enabled(probe!("bcs_reply_profile", Level::DEBUG)), explicit);
+            assert!(console.enabled(probe!("ordinary_test", Level::DEBUG)));
+            assert!(!console.enabled(probe!(DELIVERY_MONITOR_TARGET, Level::INFO)));
             let mut output = config.outputs[0].clone();
             output.name = "main".into(); output.level = "debug".into();
             output.targets = vec!["*".into()];
             if explicit { output.targets.push("bcs_reply_profile".into()); }
-            let file = tracing_subscriber::registry().with(
-                tracing_subscriber::fmt::layer().with_writer(std::io::sink).with_filter(build_output_targets_filter(&output))
-            );
-            tracing::subscriber::with_default(file, || {
-                assert_eq!(tracing::enabled!(target: "bcs_reply_profile", Level::DEBUG), explicit);
-                assert!(tracing::enabled!(target: "ordinary_test", Level::DEBUG));
-                assert!(!tracing::enabled!(target: DELIVERY_MONITOR_TARGET, Level::INFO));
-            });
+            let targets = build_output_targets_filter(&output);
+            assert_eq!(targets.would_enable("bcs_reply_profile", &Level::DEBUG), explicit);
+            assert!(targets.would_enable("ordinary_test", &Level::DEBUG));
+            assert!(!targets.would_enable(DELIVERY_MONITOR_TARGET, &Level::INFO));
         }
     }
 

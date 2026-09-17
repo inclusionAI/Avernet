@@ -339,7 +339,6 @@ fn service_db_error(operation: &'static str, err: DbError) -> bcs_service_api::S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bcs_db_api::DbResult;
     use bcs_db_local::LocalSqliteDbPlugin;
 
     async fn sqlite_db() -> Arc<LocalSqliteDbPlugin> {

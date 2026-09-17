@@ -19,10 +19,12 @@ use bcs_service_api::{
     BotSearchCandidateQuery, BotSearchFriendshipFilter,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotTaskModesQuery, TaskModeMatch,
-    BotControlPlaneRecord, BotControlPlaneRepoPort, BotDynamicStatus, BotMetricCount,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotMetricCount,
     BotMetricsSnapshotPort, ConnectStreamError, FriendCheckInStrategy, RegisteredBot, ServiceError,
     ServiceResult, Skill, UserVisibility, is_mock_token,
 };
+#[cfg(test)]
+use bcs_service_api::BotDynamicStatus;
 
 fn unix_millis() -> u64 {
     std::time::SystemTime::now()

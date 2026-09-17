@@ -16,7 +16,6 @@ use tokio::sync::Mutex;
 
 struct TestContext {
     management: ProviderManagement,
-    provider_core: Arc<ProviderCore>,
     cleanup: Arc<RecordingCleanup>,
     _temp_dir: tempfile::TempDir,
 }
@@ -74,7 +73,6 @@ fn test_context() -> TestContext {
     .with_channel_binding_cleanup(cleanup.clone());
     TestContext {
         management,
-        provider_core,
         cleanup,
         _temp_dir: temp_dir,
     }

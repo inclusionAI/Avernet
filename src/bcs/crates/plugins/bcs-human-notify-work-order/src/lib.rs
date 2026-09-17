@@ -433,10 +433,6 @@ mod tests {
 
     #[derive(serde::Deserialize)]
     struct TestClaims {
-        iss: String,
-        aud: String,
-        iat: u64,
-        exp: u64,
         principals: serde_json::Value,
     }
 

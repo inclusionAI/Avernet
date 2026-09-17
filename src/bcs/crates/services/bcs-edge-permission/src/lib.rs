@@ -138,21 +138,6 @@ fn is_lock_wait_timeout(err: &ServiceError) -> bool {
     message.contains("1205") || message.to_ascii_lowercase().contains("lock wait timeout")
 }
 
-fn normalize_friend_sync_pair<'a>(
-    a: &'a str,
-    b: &'a str,
-) -> ServiceResult<Option<(&'a str, &'a str, ActorKind, ActorKind)>> {
-    if a == b {
-        return Err(ServiceError::CannotAddSelf);
-    }
-    match (actor_kind_of(a), actor_kind_of(b)) {
-        (ActorKind::Human, ActorKind::Bot) => Ok(Some((a, b, ActorKind::Human, ActorKind::Bot))),
-        (ActorKind::Bot, ActorKind::Human) => Ok(Some((b, a, ActorKind::Human, ActorKind::Bot))),
-        (ActorKind::Bot, ActorKind::Bot) => Ok(Some((a, b, ActorKind::Bot, ActorKind::Bot))),
-        (ActorKind::Human, ActorKind::Human) => Ok(None),
-    }
-}
-
 fn normalize_policy_value(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
@@ -762,28 +747,6 @@ impl ConnectService for DbConnectService {
 // ---- private helpers ------------------------------------------------------
 
 impl DbConnectService {
-    /// Verify `caller` owns `bot_id` (spec §3.2 ownership gate for config
-    /// writes).
-    ///
-    /// Rules (mirrors `docs/CLAUDE.md` "Bot Ownership Verification"):
-    /// - `created_by` present AND matches `caller` → allow.
-    /// - `created_by` present AND differs from `caller` → `Forbidden`.
-    /// - `created_by` absent (legacy bot) → allow (auto-claim; CLAUDE.md).
-    /// - bot not found in this env → `BotNotFound` (so `PUT` on a missing bot
-    ///   surfaces as 404 rather than a misleading 403).
-    async fn verify_ownership(&self, bot_id: &str, caller: &str) -> ServiceResult<()> {
-        match self.bot_config.get(bot_id, &self.env).await {
-            Some(cfg) => match &cfg.created_by {
-                Some(owner) if owner == caller => Ok(()),
-                Some(_) => Err(ServiceError::Forbidden(format!(
-                    "caller '{caller}' does not own bot '{bot_id}'"
-                ))),
-                None => Ok(()), // legacy bot (no created_by) → auto-claim
-            },
-            None => Err(ServiceError::BotNotFound(bot_id.to_string())),
-        }
-    }
-
     async fn resolve_user_department_code(
         &self,
         actor_id: &str,

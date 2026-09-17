@@ -15,14 +15,11 @@ use bcs_domain::{
     register_token_decode_and_verify, register_token_encode, RegisterTokenPayload,
 };
 use bcs_service_api::{
-    AdminBotOnboardCommand, BotConnectCommand, BotConnectResult, BotManagementService,
-    BotOnboardingService, BotStatusUpdateCommand, BotStatusUpdateResult,
-    BotUseCaseError, BotVisibilityCommand, BotVisibilityResult, BotLeaveCommand,
-    BotLeaveResult, OnboardActorIdentity, ServiceError, SwitchDeliveryToProviderCommand,
-    SwitchDeliveryToProviderResult,
+    AdminBotOnboardCommand, BotConnectCommand, BotManagementService,
+    BotOnboardingService, OnboardActorIdentity,
 };
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, BotRegistration,
+    ApplicationError, BotRegistration,
     IssueRegisterToken, RegisterBot, RegisterService, RegisterTokenView,
 };
 
@@ -148,6 +145,12 @@ mod tests {
     use std::collections::HashMap;
 
     use bcs_service_api::ActorKind;
+    use bcs_service_api::{
+        BotConnectResult, BotLeaveCommand, BotLeaveResult, BotStatusUpdateCommand,
+        BotStatusUpdateResult, BotUseCaseError, BotVisibilityCommand, BotVisibilityResult,
+        ServiceError, SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
+    };
+    use bcs_service_api::application::v1::{AuthenticatedCaller, AuthenticatedUserIdentity};
 
     struct FakeBotManagement {
         fail_connect: bool,
@@ -376,8 +379,7 @@ mod tests {
     #[tokio::test]
     async fn token_verification_failures_map_to_unauthenticated() {
         let (svc, _, _) = service(false, false);
-        let view = svc
-            .issue_register_token(IssueRegisterToken {
+        svc.issue_register_token(IssueRegisterToken {
                 caller: human_caller("staff-1"),
             })
             .await

@@ -12,11 +12,7 @@ use bcs_http::{
     router::build_router,
     state::{ChainUserIdentityPort, HttpAppState},
 };
-use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestStatus};
 use bcs_service_api::{
-    application::connect::{
-        ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage,
-    },
     application::v1::{
         ApplicationError, BotInternalAttributes, FriendCheckInStrategy,
         InternalBotAttributesService, UserVisibility,
@@ -26,7 +22,7 @@ use bcs_service_api::{
     BotManagementService, BotPagedListResult, BotQueryByIdsResult, BotQueryEntry, BotQueryService,
     BotRegistryCoreService, BotSearchResult, BotStatusUpdateCommand, BotStatusUpdateResult,
     BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryResult, BotVisibilityResult,
-    ConnectError, DynamicStatusResponse, ServiceError, ServiceResult, Skill,
+    ConnectError, DynamicStatusResponse, ServiceError, Skill,
 };
 use bcs_services_container::Services;
 use serde_json::Value;
@@ -55,83 +51,6 @@ impl InternalBotAttributesService for RecordingSearchPolicyService {
         Err(ApplicationError::internal("patch is not configured"))
     }
 }
-
-struct RecordingSearchConnectService {
-    list_friends_commands: tokio::sync::Mutex<Vec<String>>,
-    friends: Vec<FriendListEntry>,
-}
-
-impl RecordingSearchConnectService {
-    fn with_friends(friends: Vec<FriendListEntry>) -> Self {
-        Self {
-            list_friends_commands: tokio::sync::Mutex::new(Vec::new()),
-            friends,
-        }
-    }
-}
-
-#[async_trait]
-impl ConnectService for RecordingSearchConnectService {
-    async fn create_connect(
-        &self,
-        _: &str,
-        _: &str,
-        _: Option<String>,
-        _: Option<bcs_service_api::RequestAuthHeaders>,
-    ) -> ServiceResult<ConnectResult> {
-        Ok(ConnectResult {
-            request_ids: vec![],
-            edge_ids: vec![],
-            status: ConnectStatus::Pending,
-            auto_accepted: false,
-        })
-    }
-
-    async fn approve(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> {
-        Ok(vec![])
-    }
-
-    async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> {
-        Ok(())
-    }
-
-    async fn cancel(&self, _: &str) -> ServiceResult<()> {
-        Ok(())
-    }
-
-    async fn get_request(&self, _: &str) -> ServiceResult<PermissionRequest> {
-        Err(ServiceError::FriendRequestNotFound("not configured".to_string()))
-    }
-
-    async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> {
-        Ok(vec![])
-    }
-
-    async fn list_friends_paginated(
-        &self,
-        _: &str,
-        _: bcs_service_api::application::connect::FriendListQuery,
-    ) -> ServiceResult<bcs_service_api::application::connect::FriendEntriesPage> {
-        unreachable!("legacy caller must retain the unpaginated query")
-    }
-
-    async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>> {
-        self.list_friends_commands.lock().await.push(actor.to_string());
-        Ok(self.friends.clone())
-    }
-
-    async fn list_requests(
-        &self,
-        _: &str,
-        _: RequestDirection,
-        _: Option<RequestStatus>,
-        page: u32,
-        page_size: u32,
-    ) -> ServiceResult<RequestsPage> {
-        Ok(RequestsPage { items: vec![], total: 0, page, page_size })
-    }
-}
-
 fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
     let principal = AuthPrincipal {
         user_id: Some(staff_no.to_string()),
