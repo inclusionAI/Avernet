@@ -664,10 +664,32 @@ class ExecutionEngine:
         """plan 容错重试:planning 调用失败(parse/not_completed/empty 等,gap_detail 以 ``plan_`` 前缀)
         → 重试最多 MAX_HARNESS 次;耗尽后返回最后结果(has_gap=True → 编排核走深度闸门/HUNG)。
         非 ``plan_`` 前缀的空结果(gap 闭 has_gap=F / 真拆不出 has_gap=T)不经重试直接返回。
-        planning 是 owner bot 的耗时工作,失败同 exec_error 应重试而非静默 DONE/立即 HUNG。"""
+        planning 是 owner bot 的耗时工作,失败同 exec_error 应重试而非静默 DONE/立即 HUNG。
+
+        REQ-3 PLAN 轨迹闸门:每次尝试(retry attempt)发射一条 ``action_type=plan``
+        轨迹事件,与既有 post-loop ``_log_action(NodeAction.PLAN, ...)`` 旁路并存(
+        additive,既有调用零改动)。``attempt`` 即 ``range(max_h)`` 重试序号(0-based);
+        失败 mid-row(``plan_call_fail``/``plan_parse_fail`` 等 gap_detail 以 ``plan_`` 开
+        头)带 ``error_type=PLAN_FAILURE`` + ``error_msg`` + ``ext_info={strategy_name,
+        gap_detail, raw_response_digest}``;成功条带 ``ext_info={strategy_name, has_gap,
+        gap_detail, children, raw_response_digest}``、``error_*=None``。``action_input``
+        = ``prompt_digest``(workflow 策略 → None)。溯源在策略/gap-based 作用域内计算
+        (见 ``strategies.py::GapBasedPlanningStrategy.apply``),engine 仅读取。零侵入:
+        采集层 try/except + emitter swallow(决策 #14),失败不影响规划。"""
         max_h = self._max_harness(task_id)
+        # 解析轨迹/动作日志锚定节点 ``target_id``(retry 全程不变 —— ``planner.plan``
+        # 不增节点,loop 内图态不变,故提前一次性解析;既有 post-loop ``_log_action``
+        # 仍用同一 ``target_id``,逻辑等价)。缺图/缺根 → None,跳过轨迹与日志。
+        target_id = target_node_id
+        if target_id is None:
+            try:
+                root = self._root(task_id)
+                target_id = root.node_id if root else None
+            except Exception:  # noqa: BLE001  trajectory 旁路,异常 → None,不阻塞规划
+                target_id = None
         pr = None
         for attempt in range(max_h):
+            failure_msg: str | None = None
             try:
                 pr = await self._planner.plan(graph, target_node_id=target_node_id)
             except Exception as exc:  # 传输/HTTP 异常(sofa_tracer httpx send hook 等)->plan_call_fail 重试,不 abort on_execute
@@ -676,6 +698,11 @@ class ExecutionEngine:
                     task_id, attempt + 1, max_h, exc,
                 )
                 pr = PlanResult(children=[], has_gap=True, gap_detail="plan_call_fail")
+                failure_msg = f"{type(exc).__name__}: {exc}"
+            # REQ-3: 每次尝试发射一条 PLAN 轨迹事件(失败 mid-row + 成功条),
+            # additive 旁路 —— 与 post-loop ``_log_action(NodeAction.PLAN, ...)``
+            # 互不相干(emitter 独立 direct-INSERT,不动 task_action_log)。
+            self._emit_plan_trajectory(task_id, target_id, pr, attempt, failure_msg)
             if pr.children or not (pr.gap_detail or "").startswith("plan_"):
                 break  # 有子 / 真 gap 闭 / 真拆不出 → 不重试
             logger.warning(
@@ -698,10 +725,7 @@ class ExecutionEngine:
             ),
         )
         # 动作历史:PLAN 事件(gap 计算 + 产子结果)挂到被规划目标节点(根 gap 反复计算的轨迹留痕)
-        target_id = target_node_id
-        if target_id is None:
-            root = self._root(task_id)
-            target_id = root.node_id if root else None
+        # ``target_id`` 由上方 retry 前(REQ-3)一次性解析;既有 ``_log_action`` 调用字节不变。
         if target_id is not None:
             self._log_action(
                 task_id,
@@ -717,6 +741,81 @@ class ExecutionEngine:
                 status_to=Status.PLANNING,
             )
         return pr
+
+    def _emit_plan_trajectory(
+        self,
+        task_id: str,
+        target_id: str | None,
+        pr: PlanResult,
+        attempt: int,
+        failure_msg: str | None,
+    ) -> None:
+        """REQ-3 (P3-2) 每次尝试(retry attempt)发射一条 PLAN 轨迹事件。
+
+        additive 旁路:与既有 post-loop ``_log_action(NodeAction.PLAN, ...)`` 在同一
+        闸门位置、互不相干,经 ``emit_trajectory_event`` 独立 direct-INSERT 到
+        ``task_trajectory_events``(不走 ``task_action_log``)。``action_input=pr.prompt_digest``
+        (workflow 策略 → None);失败 mid-row(``gap_detail`` 以 ``plan_`` 开头)带
+        ``error_type=PLAN_FAILURE`` + 截断 ``error_msg`` + ``ext_info={strategy_name,
+        gap_detail, raw_response_digest}``;成功条带 ``ext_info={strategy_name, has_gap,
+        gap_detail, children, raw_response_digest}``、``error_*=None``。
+
+        全程防御:provenance/ext_info 装配 try/except → None;emitter 本身再
+        兜一层 try/except + WARNING(决策 #14),任一失败不影响规划主链路;``repo is
+        None`` 时 emitter 静默 no-op(测试/轻量 DI 取不到协议)。"""
+        if target_id is None:
+            # 无锚定节点(无根/缺图)——不发射,跳过;正常路径下不应发生(根已就绪)。
+            return
+        try:
+            gd = pr.gap_detail or ""
+            is_failure = gd.startswith("plan_")
+            if is_failure:
+                # plan_call_fail(plan 抛异常)/ plan_not_completed / plan_empty_content → call_fail;
+                # plan_parse_fail / plan_shape_unexpected → parse_fail(对齐 TrajectoryEvent.action_result 词表)
+                action_result = "parse_fail" if gd in (
+                    "plan_parse_fail", "plan_shape_unexpected",
+                ) else "call_fail"
+                raw_msg = failure_msg or gd
+                error_msg = raw_msg if len(raw_msg) <= 500 else raw_msg[:497] + "..."
+            else:
+                action_result = "success"
+                error_msg = None
+            # ext_info 装配:任一字段读不到 → 退回 None(emitter 会落 NULL;analyzer 防御读取)
+            try:
+                if is_failure:
+                    ext_info: dict[str, Any] | None = {
+                        "strategy_name": pr.strategy_name,
+                        "gap_detail": gd or None,
+                        "raw_response_digest": pr.raw_response_digest,
+                    }
+                else:
+                    ext_info = {
+                        "strategy_name": pr.strategy_name,
+                        "has_gap": pr.has_gap,
+                        "gap_detail": gd or None,
+                        "children": list(pr.planned_children or []),
+                        "raw_response_digest": pr.raw_response_digest,
+                    }
+            except Exception:  # noqa: BLE001  provenance 缺失 → ext_info=None,不阻塞
+                ext_info = None
+            self._log_trajectory(
+                task_id,
+                target_id,
+                "plan",  # TrajectoryActionType.PLAN.value(TYPE_CHECKING-only enum;emitter 接受 str)
+                action_result=action_result,
+                action_input=pr.prompt_digest,
+                error_type="plan_failure" if is_failure else None,
+                error_msg=error_msg,
+                ext_info=ext_info,
+                status_from=Status.PLANNING,
+                status_to=Status.PLANNING,
+                attempt=attempt,
+            )
+        except Exception as ex:  # noqa: BLE001  轨迹旁路:吞而不抛 + WARNING(决策 #14)
+            logger.warning(
+                "[task][trajectory][plan] task=%s attempt=%d 发射失败:%s",
+                task_id, attempt, ex,
+            )
 
     def _mark_planning(self, task_id: str, node_id: str) -> None:
         """节点进入规划委托态:PENDING→PLANNING(幂等,已 PLANNING 不重翻)。

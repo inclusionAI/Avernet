@@ -11,6 +11,7 @@ children 非空→add+dispatch;空+has_gap=F→gap 闭终验通过;空+has_gap=T
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Protocol
 
@@ -71,7 +72,10 @@ class WorkflowPlanningStrategy:
         cfg = graph.extend_props.get("execution_config", {}) or {}
         wf = cfg.get("workflow")
         if not wf:
-            return PlanResult(children=[], has_gap=False, gap_detail="done")
+            return PlanResult(
+                children=[], has_gap=False, gap_detail="done",
+                strategy_name="workflow",
+            )
         task_spec = target.task_spec  # workflow 子节点复用目标 task_spec(stub)
         if isinstance(wf, list):
             children = [_wf_node(nid, target.task_id, task_spec) for nid in wf]
@@ -80,7 +84,11 @@ class WorkflowPlanningStrategy:
             children = [_wf_node(nid, target.task_id, task_spec) for nid in kids]
         else:
             children = []
-        return PlanResult(children=children, has_gap=bool(children), gap_detail="workflow" if children else "done")
+        return PlanResult(
+            children=children, has_gap=bool(children),
+            gap_detail="workflow" if children else "done",
+            strategy_name="workflow",
+        )
 
 
 class GapBasedPlanningStrategy:
@@ -105,19 +113,49 @@ class GapBasedPlanningStrategy:
     async def apply(self, graph: TaskExecutionGraph, target: TaskNode) -> PlanResult:
         if self._bot is None:
             # 无规划端口:无法计算 gap / 产子 → 有 gap 拆不出(编排核走深度闸门 HUNG,不假 done)
-            return PlanResult(children=[], has_gap=True, gap_detail="no_planning_port")
+            return PlanResult(
+                children=[], has_gap=True, gap_detail="no_planning_port",
+                strategy_name="gap_based",
+            )
         owner = compose_bot_identity(
             str(graph.extend_props.get("owner_bot_id") or ""),
             graph.extend_props.get("owner_user_id"),
         )
         if not owner:
             # 有端口但无 owner bot(owner_bot_id 缺失):无人可投规划 prompt → 有 gap 拆不出(→ HUNG)
-            return PlanResult(children=[], has_gap=True, gap_detail="no_owner_bot")
+            return PlanResult(
+                children=[], has_gap=True, gap_detail="no_owner_bot",
+                strategy_name="gap_based",
+            )
         prompt = _compose_planning_prompt(graph, target)
         run = await self._bot.send_and_wait_async(
             bot_id=owner, message=prompt, metadata={"phase": "planning"},
         )
         pr = _parse_plan_result(run, target, graph)
+        # REQ-3 PLAN 轨迹溯源:在 prompt/response 都在作用域的策略层计算 SHA-256
+        # digest(plan 截断 500 字响应 → action_input=prompt_digest,ext_info 存
+        # raw_response_digest),不在 engine 算。**失败 mid-row 也带 digest**:用
+        # 该次尝试实际发出的 prompt + 收到的(无法解析的)响应,供轨迹回溯定位。
+        # try/except → None:任一字段缺失不影响规划完成(决策 #14 swallow at emitter)。
+        try:
+            response_text = ""
+            if isinstance(run.get("result"), dict):
+                response_text = str((run.get("result") or {}).get("content") or "")
+            else:
+                response_text = str(run.get("result") or "")
+            response_slice = response_text[:500]
+            prompt_digest = hashlib.sha256(
+                (str(prompt) + response_slice).encode("utf-8")
+            ).hexdigest()
+            raw_response_digest = hashlib.sha256(
+                response_slice.encode("utf-8")
+            ).hexdigest()
+        except Exception:  # noqa: BLE001  digest 缺失 → None,规划继续(轨迹旁路)
+            prompt_digest = None
+            raw_response_digest = None
+        pr.strategy_name = "gap_based"
+        pr.prompt_digest = prompt_digest
+        pr.raw_response_digest = raw_response_digest
         logger.info("[plan] owner=%s target=%s → children=%d has_gap=%s gap_detail=%s",
                     owner, target.node_id, len(pr.children), pr.has_gap, pr.gap_detail)
         return pr

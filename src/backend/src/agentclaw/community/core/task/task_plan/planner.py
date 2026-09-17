@@ -71,6 +71,12 @@ class TaskPlanner:
                 # 策略本身返空 + has_gap=True(有 gap 拆不出 / 无规划端口)→ 保留,编排核走深度闸门 HUNG(不假 done)。
                 if not pr.children and strategy_had_children:
                     pr.has_gap = False
+                # REQ-3 PLAN 轨迹溯源:planned_children = 去重后真正落图的子 node_id
+                # 列表(post-dedup,post-`has_gap` flip);planner 此处统一回填(对
+                # workflow / gap_based 两策略对称),engine 的 PLAN 轨迹事件据此填
+                # ext_info.children。strategy_name/prompt_digest/raw_response_digest
+                # 已由策略 apply 填好(additive;字段缺 → 默认 None,采集层防御读取)。
+                pr.planned_children = [n.node_id for n in pr.children]
                 logger.info("[task][planning] plan 策略=%s 产子=%d 去重后=%d has_gap=%s gap_detail=%s",
                             type(strategy).__name__, produced, len(pr.children), pr.has_gap, pr.gap_detail)
                 return pr
