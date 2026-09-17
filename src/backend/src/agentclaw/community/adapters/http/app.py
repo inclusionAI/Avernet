@@ -1,33 +1,26 @@
 """FastAPI composition root.
 
-Split in two phases, because importing this module and *initializing a worker*
-are different jobs and only the second has to happen after a ``fork``. Which of
-them an import performs is decided by ``AGENTCLAW_HTTP_BOOT_MODE`` — see
-:mod:`agentclaw.community.adapters.http.boot`, which owns that switch.
+Two phases, because importing this module and *initializing a worker* are
+different jobs and only the second has to happen after a ``fork``.
+``AGENTCLAW_HTTP_BOOT_MODE`` decides which an import performs;
+:mod:`agentclaw.community.adapters.http.boot` owns that switch and documents the
+split, its guards and the fork reasoning in full.
 
-**Phase 1 — construction. Always runs at import, in both modes.** Read the
-deploy profile and run the pre-DI registrations the injector will later read
-(``register_config_provider``, ``register_corp_modules``); run the pre-import
-side effects (``AGENTCLAW_CONFIG_PATH``, OpenClaw DB config); construct ``app =
-FastAPI(lifespan=_app_lifespan)``, whose lifespan body discovers every
-``Lifecycle`` participant in **the worker's** injector (``app.state.injector``)
-and drives the four phases (``bootstrap`` → ``startup`` → yield → ``shutdown``
-→ ``teardown``) concurrently within each; and register the exception handlers,
-the health endpoint and all routers. Nothing there builds an injector, opens a
-connection, reads a secret, or starts a thread — that is what makes the result
+Phase 1, always at import: read the deploy profile, run the pre-DI
+registrations, construct ``app``, and register the exception handlers, the
+health endpoint and every router. Nothing here builds an injector, opens a
+connection, reads a secret or starts a thread — that is what makes the result
 safe to ``fork``.
 
-**Phase 2 — :func:`finalize_worker_runtime`.** Builds the worker's injector,
-attaches it, runs the pre/prod eager binding check, initializes the gateway
-principal verifier, and installs the middleware stack. In ``eager`` mode it is
-called inline at the bottom of this module, so an import behaves exactly as it
-always has; in ``preload`` the consumer calls it once per worker, after the fork
-and **before** the first ASGI call.
+Phase 2, :func:`finalize_worker_runtime`: everything a worker owns. Inline at
+the bottom of this module under ``eager`` (the default); once per worker after
+the fork under ``preload``.
 
-Middleware bodies live in :mod:`agentclaw.community.adapters.http.middleware`.
-Startup and shutdown work lives on the components that own it — they implement
-:class:`agentclaw.community.kernel.lifecycle.Lifecycle`. There is no
-module-global injector handle: ``app.state.injector`` is the single one.
+Otherwise unchanged: ``_app_lifespan`` drives every ``Lifecycle`` participant in
+the worker's injector (``bootstrap`` → ``startup`` → yield → ``shutdown`` →
+``teardown``), middleware bodies live in
+:mod:`agentclaw.community.adapters.http.middleware`, startup work lives on the
+components that own it, and ``app.state.injector`` is the single injector handle.
 """
 import asyncio
 import logging
@@ -37,12 +30,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 
 # ─── Phase 1: pre-DI bootstrap ───────────────────────────────────────────
-# The injector is NOT built here. Routers and services resolve their deps via
-# ``Injected(X)``, a per-request lookup on ``request.app.state.injector`` —
-# declaring such a route at import returns a ``Depends`` object and calls
-# nothing, so registering every router needs no injector instance. Building one
-# is ``boot.finalize_worker_runtime``'s job, and under ``preload`` that happens
-# in the forked worker. What this section does is the pre-DI registration
+# No injector is built here. ``Injected(X)`` is a per-request lookup, so
+# declaring a route at import calls nothing and registering every router needs
+# no injector. What this section does is the pre-DI registration
 # ``build_injector`` later reads: registry mutation, safe to inherit across a
 # fork.
 from agentclaw.community.adapters.http.boot import (
@@ -73,9 +63,8 @@ register_config_provider(_deploy_profile)  # noqa: FLA010 — composition root, 
 # community / test / singlebox (B8).
 register_corp_modules(_deploy_profile)  # noqa: FLA010 — composition root, before build_injector
 
-# Construction, or construction plus initialization? Read once, here, the way
-# the deploy profile is. ``eager`` (the default) keeps every existing launch
-# site behaving as before; ``preload`` is for a master that forks.
+# Read once, here, the way the deploy profile is. ``eager`` (the default) keeps
+# every existing launch site behaving as before; ``preload`` is for a forking master.
 _boot_mode = BootMode.detect()
 # ──────────────────────────────────────────────────────────────────────────
 
