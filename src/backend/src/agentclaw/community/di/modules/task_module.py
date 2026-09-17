@@ -278,9 +278,17 @@ class TaskModule(Module):
         # 任务轨迹旁路采集落库(REQ-11):TaskPersistenceModule 装了即取到(与 task_info_repo /
         # callback_repo / task_node_repo 同模块绑定);未绑 → 取不到 → 引擎内 _log_trajectory 静默
         # no-op(纯内核/轻量测试路径用;与 task_info_repo 同语义,且与 task_action_log 完全解耦)。
+        # INFO(非 WARNING):该 except 在每个轻量 DI 测试里也会触发(故意不绑 trajectory repo),
+        # WARNING 会在那里噪音化 + 触发 log-assertion 测试失败;INFO 让 prod 真实 misbinding
+        # 对 grep 日志的运维可见(decision #14 "missing trajectory data is visible" 精神),
+        # 不与"测试有意不配置"的常态混淆 — 与下方 TaskClaimJoinGateProtocol 同款。
         try:
             trajectory_repo = injector.get(TaskTrajectoryRepositoryProtocol)
-        except Exception:  # noqa: BLE101 未绑定 → 跳过轨迹旁路采集
+        except Exception as exc:  # noqa: BLE001 未绑定 → 轨迹旁路采集 no-op
+            logger.info(
+                "[task][task-module] TaskTrajectoryRepositoryProtocol 未绑定 → 轨迹旁路采集 no-op:%s: %s",
+                type(exc).__name__, exc,
+            )
             trajectory_repo = None
         try:
             bot_service = injector.get(BotServiceProtocol)

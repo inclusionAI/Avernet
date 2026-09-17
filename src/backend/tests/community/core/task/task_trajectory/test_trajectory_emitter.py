@@ -173,7 +173,7 @@ def test_emit_normal_inserts_exactly_one_record_with_correct_fields():
         action_input="request_input原文",
         error_type=ReasonCatalog.UNDERLYING_INTERFACE_ERROR,
         error_msg="bot returned exec_error",
-        ext_info={"strategy": "search", "candidate": "b1", "score": 0.9},
+        ext_info={"strategy": "search", "candidate": "b1", "score": 0.9, "reason": "中文不转义"},
         status_from=Status.RUNNING,
         status_to=Status.RUNNING,
         now_ms=NOW_MS,
@@ -199,6 +199,10 @@ def test_emit_normal_inserts_exactly_one_record_with_correct_fields():
     assert payload["strategy"] == "search"
     assert payload["candidate"] == "b1"
     assert payload["score"] == 0.9
+    # ensure_ascii=False (codebase convention): Chinese content stays readable
+    # in the raw JSON string, not \uXXXX-escaped (Minor #2 regression guard).
+    assert payload["reason"] == "中文不转义"
+    assert "中文不转义" in rec.ext_info
     # gmt_* both set from now_ms (int-ms → datetime).
     assert rec.gmt_create == _now_from_ms()
     assert rec.gmt_modified == rec.gmt_create
@@ -231,20 +235,24 @@ def test_emit_defaults_attempt_to_zero_when_omitted():
 # ---------------------------------------------------------------------------
 
 
-def test_emit_with_repo_none_is_noop_and_does_not_raise():
+def test_emit_with_repo_none_is_noop_and_does_not_raise(caplog):
     """The engine runs without a trajectory repo in tests / lightweight DI —
     the emitter must skip silently (the engine never depends on the row being
-    written)."""
-    # No fake to count calls on — by construction there's no insert path here.
-    emit_trajectory_event(
-        None,  # type: ignore[arg-type]
-        "T-1", "N-1", TrajectoryActionType.EXECUTE,
-        action_result="failed",
-        action_input="anything",
-        ext_info={"a": 1},
-        now_ms=NOW_MS,
-    )
-    # No exception, no assertion needed beyond "we got here".
+    written). Pins the SILENCE contract, not just "didn't raise": the None
+    branch is silent at WARNING too, because decision #14's visibility is
+    reserved for actual emission failures, not for an intentionally-disabled
+    repo (intentionally-not-configured ≠ misbound)."""
+    with caplog.at_level(logging.WARNING, logger="task.trajectory"):
+        emit_trajectory_event(
+            None,  # type: ignore[arg-type]
+            "T-1", "N-1", TrajectoryActionType.EXECUTE,
+            action_result="failed",
+            action_input="anything",
+            ext_info={"a": 1},
+            now_ms=NOW_MS,
+        )
+    # No insert path taken AND no log emitted — None branch is silent.
+    assert not caplog.records
 
 
 # ---------------------------------------------------------------------------

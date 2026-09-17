@@ -35,13 +35,22 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
 from agentclaw.community.core.task.task_trajectory.models import (
     ReasonCatalog,
     TrajectoryActionType,
 )
+
+if TYPE_CHECKING:
+    # ``Status`` is used only in annotations (the emitter accepts a ``Status``
+    # instance at runtime and maps it to ``.value`` via ``getattr``; no runtime
+    # reference needs the class). Import under TYPE_CHECKING to keep the
+    # runtime import surface minimal and avoid a cross-module cycle in narrow
+    # test setups. ``from __future__ import annotations`` stringises the
+    # hints so they are never evaluated at runtime.
+    from agentclaw.community.core.task.domain.models import Status
 
 logger = logging.getLogger("task.trajectory")
 
@@ -50,13 +59,12 @@ logger = logging.getLogger("task.trajectory")
 # (and so far only) revision; P2 emits only this one.
 _EXT_INFO_SCHEMA_VERSION = 1
 
-# Domain status enum lives on the domain models; imported lazily through the
-# typing-only path to avoid cross-module import cycles in narrow test setups.
-# The emitter accepts ``Status`` objects and maps them to ``.value`` strings;
-# plain strings pass through unchanged. ``Status`` is a ``StrEnum`` so a name
-# import would also work, but the lazy ``getattr(x, "value", x)`` path keeps
-# the emitter robust to either an enum instance OR the already-serialized
-# ``.value`` string (a gate may pre-serialize for its own reasons).
+# Domain status enum: the emitter accepts ``Status`` objects and maps them to
+# ``.value`` strings; plain strings pass through unchanged. ``Status`` is a
+# ``StrEnum`` so a name import would also work, but the lazy
+# ``getattr(x, "value", x)`` path keeps the emitter robust to either an enum
+# instance OR the already-serialized ``.value`` string (a gate may pre-
+# serialize for its own reasons).
 
 
 class TaskTrajectoryRepositoryLike(Protocol):
@@ -121,7 +129,13 @@ def _serialize_ext_info(ext_info: dict[str, Any] | None) -> str | None:
         # payload rather than raising. (Logs WARNING via the outer guard /
         # the gate's own try/except; the record still lands with schema_v.)
         ext_info = {"_payload": str(ext_info)}
-    return json.dumps({"schema_v": _EXT_INFO_SCHEMA_VERSION, **ext_info})
+    # ``ensure_ascii=False`` keeps Chinese error_msg/short_profile/etc.
+    # readable in DB rows + logs (matches the codebase convention at 15+
+    # other json.dumps call sites). The trajectory DB column is TEXT utf8mb4.
+    return json.dumps(
+        {"schema_v": _EXT_INFO_SCHEMA_VERSION, **ext_info},
+        ensure_ascii=False,
+    )
 
 
 def build_trajectory_event_record(
@@ -134,8 +148,8 @@ def build_trajectory_event_record(
     action_input: str | None = None,
     error_type: ReasonCatalog | str | None = None,
     error_msg: str | None = None,
-    status_from: "Status | str | None" = None,  # noqa: F821 — Status imported lazily
-    status_to: "Status | str | None" = None,  # noqa: F821 — Status imported lazily
+    status_from: "Status | str | None" = None,
+    status_to: "Status | str | None" = None,
     ext_info: dict[str, Any] | None = None,
     now_ms: int | None = None,
 ) -> TrajectoryEventRecord:
@@ -188,8 +202,8 @@ def emit_trajectory_event(
     error_type: ReasonCatalog | str | None = None,
     error_msg: str | None = None,
     ext_info: dict[str, Any] | None = None,
-    status_from: "Status | str | None" = None,  # noqa: F821
-    status_to: "Status | str | None" = None,  # noqa: F821
+    status_from: "Status | str | None" = None,
+    status_to: "Status | str | None" = None,
     attempt: int = 0,
     now_ms: int | None = None,
 ) -> None:
