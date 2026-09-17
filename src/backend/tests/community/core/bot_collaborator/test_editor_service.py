@@ -391,3 +391,92 @@ def test_batch_operable_permissions_reads_roles_once_and_caches_space_membership
     space_access.require_space_member.assert_called_once_with(
         space_id=22, user_id=ADMIN
     )
+
+
+# ── the space-derived MEMBER grant ──────────────────────────────────────────
+
+
+def test_space_member_without_editor_row_reads_at_member(dependencies):
+    """A member of the bot's Space works at MEMBER with no collaborator row.
+
+    The Bot assigned to a Space is under that Space's collaboration contract,
+    so Space membership alone answers the read bar. Granted at exactly what
+    an explicit MEMBER row gives — ADMIN faces stay out of reach.
+    """
+    service, collaborator_repo, _, space_access = dependencies
+    collaborator_repo.get_user_role.return_value = None
+    space_access.require_space_reference.return_value = Mock(
+        id=22, space_type=SpaceType.TEAM
+    )
+    space_access.get_space_role.return_value = Mock(value="MEMBER")
+
+    level = service.get_operable_permission_level(
+        bot=_bot(space_id="22"), user_id=MEMBER, env="dev"
+    )
+
+    assert level is PermissionLevel.MEMBER
+    space_access.get_space_role.assert_called_once_with(
+        space_id=22, user_id=MEMBER
+    )
+
+
+def test_space_non_member_without_editor_row_gets_nothing(dependencies):
+    """Membership is the grant's only source: no role row, no access."""
+    service, collaborator_repo, _, space_access = dependencies
+    collaborator_repo.get_user_role.return_value = None
+    space_access.require_space_reference.return_value = Mock(
+        id=22, space_type=SpaceType.TEAM
+    )
+    space_access.get_space_role.return_value = None
+
+    level = service.get_operable_permission_level(
+        bot=_bot(space_id="22"), user_id=MEMBER, env="dev"
+    )
+
+    assert level is PermissionLevel.NONE
+
+
+def test_unassigned_space_grants_nothing(dependencies):
+    """A bot with no Space — or only its owner's personal one — has no
+    Space anyone could be a member of, so the grant is never consulted."""
+    service, collaborator_repo, _, space_access = dependencies
+    collaborator_repo.get_user_role.return_value = None
+
+    for space_id in (None, "personal:owner-1"):
+        assert (
+            service.get_operable_permission_level(
+                bot=_bot(space_id=space_id), user_id=MEMBER, env="dev"
+            )
+            is PermissionLevel.NONE
+        )
+
+    space_access.require_space_reference.assert_not_called()
+    space_access.get_space_role.assert_not_called()
+
+
+def test_batch_grants_space_members_their_page_members(dependencies):
+    """The inventory page shows a Space member their Space's row-less Bots.
+
+    The per-page cache pays each Space read once, the grant's probe and the
+    COSEC revocation recheck included.
+    """
+    service, collaborator_repo, _, space_access = dependencies
+    collaborator_repo.list_by_user.return_value = []
+    space_access.require_space_reference.return_value = Mock(
+        id=22, space_type=SpaceType.TEAM
+    )
+    space_access.get_space_role.return_value = Mock(value="MEMBER")
+
+    levels = service.get_operable_permission_levels(
+        bots=[
+            _bot(id=31, bot_id="bot-9", space_id="22"),
+            _bot(id=32, bot_id="bot-10", space_id="22"),
+        ],
+        user_id=MEMBER,
+        env="dev",
+    )
+
+    assert levels == {31: PermissionLevel.MEMBER, 32: PermissionLevel.MEMBER}
+    collaborator_repo.list_by_user.assert_called_once_with(MEMBER, "dev")
+    assert space_access.require_space_reference.call_count == 1
+    assert space_access.get_space_role.call_count == 1
