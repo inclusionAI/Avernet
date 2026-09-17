@@ -18,7 +18,9 @@ from agentclaw.community.api.caller_iam_token_service import (
 from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
     TeclawPublishTaskLifecycle,
 )
-from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.devices.services.baas_device_accessor import (
     BaasDeviceAccessor,
 )
@@ -97,6 +99,56 @@ def test_detect_raises_on_unknown(monkeypatch):
         DeployProfile.detect()
 
 
+def test_detect_error_message_lists_every_supported_profile(monkeypatch):
+    monkeypatch.setenv("DEPLOY_PROFILE", "staging")
+    with pytest.raises(RuntimeError) as error:
+        DeployProfile.detect()
+
+    message = str(error.value)
+    for value in (
+        "corp",
+        "singlebox",
+        "test",
+        "corp_test",
+        "community",
+        "local-k8s",
+    ):
+        assert value in message
+
+
+def test_unset_error_message_lists_every_supported_profile(monkeypatch):
+    monkeypatch.delenv("DEPLOY_PROFILE", raising=False)
+    with pytest.raises(RuntimeError) as error:
+        DeployProfile.detect()
+
+    assert "local-k8s" in str(error.value)
+
+
+def test_modules_for_local_k8s_uses_the_corp_registry():
+    """local-k8s boots the corp sofa path with community local data plugins."""
+    from agentclaw.community.di import modules_bootstrap
+
+    sentinel = [object()]
+    original = modules_bootstrap._corp_modules_provider
+    modules_bootstrap._corp_modules_provider = lambda: sentinel
+    try:
+        assert modules_for(DeployProfile.LOCAL_K8S) is sentinel
+    finally:
+        modules_bootstrap._corp_modules_provider = original
+
+
+def test_modules_for_local_k8s_raises_without_a_registered_column():
+    from agentclaw.community.di import modules_bootstrap
+
+    original = modules_bootstrap._corp_modules_provider
+    modules_bootstrap._corp_modules_provider = None
+    try:
+        with pytest.raises(RuntimeError, match="not registered"):
+            modules_for(DeployProfile.LOCAL_K8S)
+    finally:
+        modules_bootstrap._corp_modules_provider = original
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -105,6 +157,7 @@ def test_detect_raises_on_unknown(monkeypatch):
         ("test", DeployProfile.TEST),
         ("corp_test", DeployProfile.CORP_TEST),
         ("community", DeployProfile.COMMUNITY),
+        ("local-k8s", DeployProfile.LOCAL_K8S),
         ("  TEST  ", DeployProfile.TEST),  # stripped + lowercased
     ],
 )
@@ -327,7 +380,9 @@ def test_singlebox_rollout_policy_preserves_normalized_engine_bucket():
 
 
 @pytest.mark.parametrize("profile", [DeployProfile.TEST, DeployProfile.SINGLEBOX])
-def test_teclaw_publish_lifecycle_uses_real_dependencies_in_every_local_profile(profile):
+def test_teclaw_publish_lifecycle_uses_real_dependencies_in_every_local_profile(
+    profile,
+):
     injector = build_injector(profile=profile)
 
     lifecycle = injector.get(TeclawPublishTaskLifecycle)

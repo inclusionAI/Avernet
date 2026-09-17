@@ -148,10 +148,13 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         # "table doesn't exist" under concurrent create_all.
         lock_name = "gateway_schema_bootstrap"
         conn = self._sync_engine.connect()
+        acquired = False
         try:
-            acquired = conn.execute(
-                text("SELECT GET_LOCK(:name, 120)"), {"name": lock_name}
-            ).scalar()
+            acquired = bool(
+                conn.execute(
+                    text("SELECT GET_LOCK(:name, 120)"), {"name": lock_name}
+                ).scalar()
+            )
             if not acquired:
                 raise RuntimeError(
                     "MariaDbOrmPlugin: could not acquire named lock for create_all"
@@ -171,7 +174,8 @@ class MariaDbOrmPlugin(DataSourcePlugin):
             else:
                 raise
         finally:
-            conn.execute(text("SELECT RELEASE_LOCK(:name)"), {"name": lock_name})
+            if acquired:
+                conn.execute(text("SELECT RELEASE_LOCK(:name)"), {"name": lock_name})
             conn.close()
 
         logger.info(

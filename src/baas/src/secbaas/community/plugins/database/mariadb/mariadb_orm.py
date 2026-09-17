@@ -25,7 +25,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session, sessionmaker
 
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.database import DataSourcePlugin
+from secbaas.community.spi.database import (
+    BAAS_ORM_MODULES,
+    BAAS_OWNED_TABLES,
+    DataSourcePlugin,
+)
 
 logger = get_logger("database")
 
@@ -98,37 +102,16 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         logger.info("MariaDbOrmPlugin engines initialized")
 
     def create_all(self) -> None:
-        """Create BAAS-owned ORM tables using native MySQL/MariaDB dialect.
+        """Create the ORM tables owned by the BAAS service.
 
-        Only tables with a ``baas_`` prefix are created here. The ``ac_*``
-        tables (``ac_bots`` / ``ac_bot_publish`` / ``ac_entity_device_binding``
-        / ``ac_lock_table``) are owned by the backend's community ``Base.metadata``
-        — its ``BotModel`` is the authoritative, newer schema with ``space_id`` /
-        ``call_type`` / ``caller_config_revision`` / ``avernet_tenant``. If BAAS
-        created an ``ac_bots`` first with its older ``AcBotModel``, the backend
-        would later fail queries against columns it expects but the stale table
-        lacks. Filtering by prefix (rather than listing models) also covers any
-        ``ac_*`` model that other code imports into the shared metadata.
+        Provisions the ``baas_*`` tables plus ``ac_lock_table``, the only
+        ``ac_*`` table BAAS owns. ``ac_bots`` / ``ac_bot_publish`` /
+        ``ac_entity_device_binding`` are created by the AgentClaw backend, even
+        though BAAS reads (and for device binding, writes) them; BAAS's ``Base``
+        is a separate ``declarative_base()`` from the backend's, so the backend
+        can never register them here.
         """
-        _orm_models = [
-            "secbaas.community.core.repository.api_gateway._orm_model",
-            "secbaas.community.core.repository.arca_ttl._orm_model",
-            "secbaas.community.core.repository.bot._orm_model",
-            "secbaas.community.core.repository.bot_device_rel._orm_model",
-            "secbaas.community.core.repository.bot_run._orm_model",
-            "secbaas.community.core.repository.bot_session._orm_model",
-            "secbaas.community.core.repository.device._orm_model",
-            "secbaas.community.core.repository.device_binding._orm_model",
-            "secbaas.community.core.repository.device_template._orm_model",
-            "secbaas.community.core.repository.distributed_lock._orm_model",
-            "secbaas.community.core.repository.local_user_machine._orm_model",
-            "secbaas.community.core.repository.publish._orm_model",
-            "secbaas.community.core.repository.publish_batch._orm_model",
-            "secbaas.community.core.repository.publish_record._orm_model",
-            "secbaas.community.core.repository.system_config._orm_model",
-            "secbaas.community.core.repository.tenant._orm_model",
-            "secbaas.community.core.repository.ws_relay_session._orm_model",
-        ]
+        _orm_models = list(BAAS_ORM_MODULES)
         for _mod in _orm_models:
             try:
                 __import__(_mod)
@@ -139,7 +122,7 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         from secbaas.community.spi.database import Base
 
         baas_tables = [
-            t for t in Base.metadata.sorted_tables if t.name.startswith("baas_")
+            t for t in Base.metadata.sorted_tables if t.name in BAAS_OWNED_TABLES
         ]
         # Serialize schema bootstrap across workers with a MySQL named lock, so
         # one worker builds the whole schema and the others wait, then skip via
@@ -148,10 +131,13 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         # before the owning worker has finished creating it (1146).
         lock_name = "secbaas_schema_bootstrap"
         conn = self._sync_engine.connect()
+        acquired = False
         try:
-            acquired = conn.execute(
-                text("SELECT GET_LOCK(:name, 120)"), {"name": lock_name}
-            ).scalar()
+            acquired = bool(
+                conn.execute(
+                    text("SELECT GET_LOCK(:name, 120)"), {"name": lock_name}
+                ).scalar()
+            )
             if not acquired:
                 raise RuntimeError(
                     "MariaDbOrmPlugin: could not acquire named lock for create_all"
@@ -167,7 +153,8 @@ class MariaDbOrmPlugin(DataSourcePlugin):
             else:
                 raise
         finally:
-            conn.execute(text("SELECT RELEASE_LOCK(:name)"), {"name": lock_name})
+            if acquired:
+                conn.execute(text("SELECT RELEASE_LOCK(:name)"), {"name": lock_name})
             conn.close()
         logger.info("MariaDbOrmPlugin: BAAS tables created (%d)", len(baas_tables))
 

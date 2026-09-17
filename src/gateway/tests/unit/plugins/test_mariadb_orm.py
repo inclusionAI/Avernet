@@ -152,6 +152,45 @@ class TestSeed:
         assert True
 
 
+class _FakeResult:
+    """Mimics a SQLAlchemy ``Result`` for the named-lock SELECT."""
+
+    def __init__(self, value) -> None:
+        self._value = value
+
+    def scalar(self):
+        return self._value
+
+
+class _FakeLockConnection:
+    """Records the named-lock statements executed against it."""
+
+    def __init__(self, acquire_result=1) -> None:
+        self.statements: list[str] = []
+        self.closed = False
+        self._acquire_result = acquire_result
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        self.statements.append(sql)
+        if "GET_LOCK" in sql:
+            return _FakeResult(self._acquire_result)
+        return _FakeResult(None)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeSyncEngine:
+    """Minimal engine exposing ``connect()`` for the bootstrap lock."""
+
+    def __init__(self, acquire_result=1) -> None:
+        self.connection = _FakeLockConnection(acquire_result)
+
+    def connect(self):
+        return self.connection
+
+
 class TestCreateAll:
     def test_creates_only_gateway_owned_tables(
         self, plugin: MariaDbOrmPlugin, monkeypatch
@@ -180,7 +219,8 @@ class TestCreateAll:
             FakeBase,
         )
 
-        plugin._sync_engine = "sync-engine"
+        engine = _FakeSyncEngine()
+        plugin._sync_engine = engine
         plugin.create_all()
 
         names = [t[0] for t in created_tables]
@@ -190,7 +230,7 @@ class TestCreateAll:
             "avernet_access_key_token",
         ]
         assert "bcs_bots" not in names
-        assert all(engine == "sync-engine" for _, engine, _ in created_tables)
+        assert all(engine_ == engine for _, engine_, _ in created_tables)
         assert all(checkfirst is True for _, _, checkfirst in created_tables)
 
     def test_creates_tables(self, plugin: MariaDbOrmPlugin, monkeypatch) -> None:
@@ -214,14 +254,133 @@ class TestCreateAll:
             FakeBase,
         )
 
-        plugin._sync_engine = "sync-engine"
+        engine = _FakeSyncEngine()
+        plugin._sync_engine = engine
         plugin.create_all()
-        assert created_with["engine"] == "sync-engine"
+        assert created_with["engine"] is engine
         assert created_with["checkfirst"] is True
 
     def test_raises_when_not_initialized(self, plugin: MariaDbOrmPlugin) -> None:
         with pytest.raises(RuntimeError, match="not initialized"):
             plugin.create_all()
+
+    def test_serializes_bootstrap_with_named_lock(
+        self, plugin: MariaDbOrmPlugin, monkeypatch
+    ) -> None:
+        """A worker must acquire the named lock before creating tables, and
+        release it afterwards, so concurrent workers cannot race."""
+        created: list[str] = []
+
+        class Table:
+            def __init__(self, name):
+                self.name = name
+
+            def create(self, engine, checkfirst=True):
+                created.append(self.name)
+
+        class FakeBase:
+            metadata = types.SimpleNamespace(
+                sorted_tables=[Table("avernet_application")]
+            )
+
+        monkeypatch.setattr(
+            "gateway.community.spi.database.Base",
+            FakeBase,
+        )
+
+        engine = _FakeSyncEngine()
+        plugin._sync_engine = engine
+        plugin.create_all()
+
+        statements = engine.connection.statements
+        assert any("GET_LOCK" in s for s in statements)
+        assert any("RELEASE_LOCK" in s for s in statements)
+        assert created == ["avernet_application"]
+        assert engine.connection.closed is True
+
+    def test_raises_when_named_lock_cannot_be_acquired(
+        self, plugin: MariaDbOrmPlugin, monkeypatch
+    ) -> None:
+        """GET_LOCK returning 0 (timeout) must abort rather than create tables
+        unserialized."""
+
+        class FakeBase:
+            metadata = types.SimpleNamespace(
+                sorted_tables=[types.SimpleNamespace(name="avernet_application")]
+            )
+
+        monkeypatch.setattr(
+            "gateway.community.spi.database.Base",
+            FakeBase,
+        )
+
+        engine = _FakeSyncEngine(acquire_result=0)
+        plugin._sync_engine = engine
+        with pytest.raises(RuntimeError, match="could not acquire named lock"):
+            plugin.create_all()
+        assert not any("RELEASE_LOCK" in s for s in engine.connection.statements)
+        assert engine.connection.closed is True
+
+    def test_tolerates_already_exists_race(
+        self, plugin: MariaDbOrmPlugin, monkeypatch
+    ) -> None:
+        """A residual 1050 from a losing worker is treated as success — the
+        table demonstrably exists."""
+
+        class Table:
+            def __init__(self, name):
+                self.name = name
+
+            def create(self, engine, checkfirst=True):
+                raise RuntimeError(
+                    "(mysql.connector.errors.ProgrammingError) 1050 "
+                    "(42S01): Table 'avernet_application' already exists"
+                )
+
+        class FakeBase:
+            metadata = types.SimpleNamespace(
+                sorted_tables=[Table("avernet_application")]
+            )
+
+        monkeypatch.setattr(
+            "gateway.community.spi.database.Base",
+            FakeBase,
+        )
+
+        engine = _FakeSyncEngine()
+        plugin._sync_engine = engine
+        plugin.create_all()
+        assert any("RELEASE_LOCK" in s for s in engine.connection.statements)
+
+    def test_propagates_unrelated_table_creation_errors(
+        self, plugin: MariaDbOrmPlugin, monkeypatch
+    ) -> None:
+        """Only the concurrent-creation race is swallowed; a genuine failure
+        must still surface."""
+
+        class Table:
+            def __init__(self, name):
+                self.name = name
+
+            def create(self, engine, checkfirst=True):
+                raise RuntimeError("Access denied for user 'gateway'@'%'")
+
+        class FakeBase:
+            metadata = types.SimpleNamespace(
+                sorted_tables=[Table("avernet_application")]
+            )
+
+        monkeypatch.setattr(
+            "gateway.community.spi.database.Base",
+            FakeBase,
+        )
+
+        engine = _FakeSyncEngine()
+        plugin._sync_engine = engine
+        with pytest.raises(RuntimeError, match="Access denied"):
+            plugin.create_all()
+        assert any("RELEASE_LOCK" in s for s in engine.connection.statements)
+        assert engine.connection.closed is True
 
 
 class TestCreateTableNoTables:
