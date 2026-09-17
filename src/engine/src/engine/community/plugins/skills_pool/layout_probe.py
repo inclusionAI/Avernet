@@ -20,9 +20,17 @@ from engine.community.core.skills.layout_planner import (
     MAPPING_V3_CONTRACT_VERSION,
     LayoutIdentity,
     RuntimeLayoutContext,
-    ResolvedFilesystemLayoutPlan as _FilesystemPoolLayout,
     resolve_filesystem_skill_layout,
     resolved_filesystem_layout_evidence,
+)
+from engine.community.core.skills.layout_planner import (
+    ResolvedFilesystemLayoutPlan as _FilesystemPoolLayout,
+)
+from engine.community.plugins.skills_pool.active_marker_validation import (
+    active_entries_failure_reason as _active_entries_failure_reason,
+)
+from engine.community.plugins.skills_pool.active_marker_validation import (
+    active_marker_valid as _active_marker_valid,
 )
 from engine.community.plugins.skills_pool.center_mount import (
     CenterMountInspection,
@@ -388,101 +396,6 @@ def _managed_entries_valid(
         or record.get("valid") is not True
         for record in declared
     )
-
-
-def _active_marker_valid(
-    marker: object,
-    *,
-    layout: _FilesystemPoolLayout,
-    engine: str,
-    expected_contract_version: str,
-    preparation_id: str,
-) -> bool:
-    if not isinstance(marker, dict):
-        return False
-    if (
-        marker.get("engine") != engine
-        or marker.get("layout_contract_version") != expected_contract_version
-        or marker.get("preparation_id") != preparation_id
-        or marker.get("activation_state") not in {"finalizing", "active"}
-        or not isinstance(marker.get("migration_generation"), str)
-    ):
-        return False
-    if marker["activation_state"] == "active":
-        return True
-    mappings = marker.get("mappings")
-    if not isinstance(mappings, list):
-        return False
-    seen_targets: set[Path] = set()
-    for mapping in mappings:
-        if not isinstance(mapping, dict):
-            return False
-        source_value = mapping.get("source")
-        target_value = mapping.get("target")
-        if not isinstance(source_value, str) or not isinstance(target_value, str):
-            return False
-        source = Path(os.path.abspath(source_value))
-        target = Path(os.path.abspath(target_value))
-        if not (
-            source.is_relative_to(Path(os.path.abspath(layout.pool_local)))
-            or source.is_relative_to(Path(os.path.abspath(layout.pool_repo)))
-        ):
-            return False
-        if (
-            target.parent != Path(os.path.abspath(layout.active_root))
-            or target in {layout.local_bridge, layout.repo_bridge}
-            or target in seen_targets
-        ):
-            return False
-        seen_targets.add(target)
-    return True
-
-
-def _active_entries_failure_reason(
-    layout: _FilesystemPoolLayout,
-    *,
-    engine: str,
-) -> str | None:
-    """Validate mutable managed entries without freezing an old mapping set."""
-
-    pool_roots = tuple(
-        Path(os.path.abspath(root)) for root in (layout.pool_local, layout.pool_repo)
-    )
-    retired_roots = tuple(
-        Path(os.path.abspath(root))
-        for root in (
-            layout.legacy_local,
-            layout.legacy_repo,
-            layout.local_bridge,
-            layout.repo_bridge,
-        )
-    )
-    retired_active_corpus_roots = (
-        (
-            Path(os.path.abspath(layout.active_root / "skills-local")),
-            Path(os.path.abspath(layout.active_root / "skills-repo")),
-        )
-        if engine == "aicoding"
-        else ()
-    )
-    for entry in layout.active_root.iterdir():
-        if not entry.is_symlink():
-            continue
-        target = _lexical_symlink_target(entry)
-        if any(target.is_relative_to(root) for root in pool_roots):
-            try:
-                target_stat = entry.stat()
-            except (FileNotFoundError, NotADirectoryError):
-                return "active_managed_entry_invalid"
-            if not stat.S_ISDIR(target_stat.st_mode):
-                return "active_managed_entry_invalid"
-            continue
-        if any(target.is_relative_to(root) for root in retired_active_corpus_roots):
-            return "retired_active_corpus_reference_present"
-        if any(target.is_relative_to(root) for root in retired_roots):
-            return "active_managed_entry_invalid"
-        # External active entries predate Pool and remain outside this migration.
-    return None
 
 
 def inspect_runtime_layout(
