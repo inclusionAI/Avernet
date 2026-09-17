@@ -123,8 +123,12 @@ const field = (value: unknown, fallback = "—") =>
 function artifactLabel(name: string, mode: SessionAnalysisTask["mode"]) {
   if (name === "raw")
     return mode === "EXPORT_ALL" ? "下载 Session 压缩包" : "下载 Session 文件";
+  if (name === "trajectory") return "下载 Session 轨迹";
+  if (name === "trajectoryPath") return "下载轨迹路径";
   if (name === "report") return "下载诊断报告";
   if (name === "analysis") return "下载分析 JSON";
+  if (name === "runtimeBundle") return "下载 AIS 任务现场";
+  if (name === "openclawSessions") return "下载诊断 Agent 会话";
   return `下载 ${name}`;
 }
 
@@ -869,13 +873,13 @@ function SessionAnalysisDetail() {
                     : "Session 定位与导出"}
                 </h3>
                 <p className="mt-1 text-xs text-gray-500">
-                  AIS · claw_realtime_analysis
+                  AIS · 会话分析
                 </p>
                 <div className="mt-4 border-t border-gray-200/70 pt-3">
                   <p className="text-[10px] text-gray-400">交付物</p>
                   <p className="mt-1 text-xs text-gray-600">
                     {task.mode === "ANALYZE_SINGLE"
-                      ? "Session 文件 · 诊断报告"
+                      ? "Session 文件 · 诊断报告 · 运行现场"
                       : "Session 压缩包"}
                   </p>
                 </div>

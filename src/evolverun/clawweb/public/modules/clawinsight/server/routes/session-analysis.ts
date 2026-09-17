@@ -38,6 +38,12 @@ function safeSessionFilename(value: string | undefined): string {
   const normalized = (value ?? "session").replace(/[^\p{L}\p{N}_.-]+/gu, "_").replace(/^\.+/, "").slice(0, 240);
   return `${normalized || "session"}.jsonl`;
 }
+export function runtimeArtifactDownloadFilename(name: string, stepId: string): string | null {
+  const stem = stepId.replace(/[^A-Za-z0-9_.-]+/g, "_").replace(/^\.+/, "").slice(0, 200) || "session-analysis";
+  if (name === "runtimeBundle") return `${stem}-clawevolve-results.tar.gz`;
+  if (name === "openclawSessions") return `${stem}-openclaw-sessions.tar.gz`;
+  return null;
+}
 function attachmentHeader(filename: string): string {
   const fallback = filename.replace(/[^A-Za-z0-9_.-]+/g, "_") || "session.jsonl";
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
@@ -460,8 +466,10 @@ export function createSessionAnalysisRouter(
   }));
   router.get("/:id/artifacts/:name/download-url", asyncHandler(async (req, res) => { if (!repo) return res.status(503).json({ error: "任务数据库不可用" }); const task = await repo.findTask(param(req.params.id)); if (!task || !["session_analysis", "session_export"].includes(task.task_type)) return res.status(404).json({ error: "任务不存在" }); if (!canReadTask(req, task)) return res.status(403).json({ code: "TASK_NOT_SHARED", error: "权限不足，请联系任务 Owner 开启分享" }); const name = param(req.params.name); const cfg = configOf(task); const item = cfg.artifacts[name]; if (!item) return res.status(404).json({ error: "产物不存在" }); const step = await latestStep(repo, task.task_id); const output = parse<Record<string, unknown>>(step?.output_json ?? null); const uploaded = output?.artifacts as Record<string, Record<string, unknown>> | undefined;
     if (cfg.aisBase && (!uploaded?.[name] || uploaded[name].objectKey !== item.objectKey)) return res.status(404).json({ error: "产物尚未上传" });
-    const resolvedSessionId = typeof output?.sessionId === "string" ? output.sessionId : undefined; const filename = name === "raw" ? (isSingleSessionMode(cfg.mode) ? safeSessionFilename(resolvedSessionId || cfg.sessionIdentifier || cfg.sessionId || cfg.sessionKey) : "session.tar.gz") : ["trajectory", "trajectoryPath"].includes(name)
+    const resolvedSessionId = typeof output?.sessionId === "string" ? output.sessionId : undefined;
+    const runtimeFilename = runtimeArtifactDownloadFilename(name, step?.step_id ?? cfg.stepId ?? task.task_id);
+    const filename = runtimeFilename ?? (name === "raw" ? (isSingleSessionMode(cfg.mode) ? safeSessionFilename(resolvedSessionId || cfg.sessionIdentifier || cfg.sessionId || cfg.sessionKey) : "session.tar.gz") : ["trajectory", "trajectoryPath"].includes(name)
       ? safeSessionFilename(resolvedSessionId || cfg.sessionIdentifier || cfg.sessionId || cfg.sessionKey).replace(/\.jsonl$/, name === "trajectory" ? ".trajectory.jsonl" : ".trajectory-path.json")
-      : item.objectKey.split("/").at(-1) || name; res.json({ url: await downloadStore.createSignedUrl(item.objectKey, "GET", 300), filename, expiresInSeconds: 300 }); }));
+      : item.objectKey.split("/").at(-1) || name); res.json({ url: await downloadStore.createSignedUrl(item.objectKey, "GET", 300), filename, expiresInSeconds: 300 }); }));
   return router;
 }
