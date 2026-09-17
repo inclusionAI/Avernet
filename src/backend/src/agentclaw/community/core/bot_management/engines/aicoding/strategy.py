@@ -40,6 +40,7 @@ from ..provisioning import (
 )
 
 from ...services.aicoding.dima_workspace_capability import has_dima_workspace_enabled
+from .hosted_workspace_mixin import AicodingHostedWorkspaceMixin
 
 
 # Legacy coding template types.  This is only used for old call sites that
@@ -160,7 +161,7 @@ class AicodingBaasEngineBucketResolver:
         )
 
 
-class AicodingProvisioningStrategy(EngineProvisioningStrategy):
+class AicodingProvisioningStrategy(AicodingHostedWorkspaceMixin, EngineProvisioningStrategy):
     """Provisioning strategy shared by ``aicoding`` and ``claude_code`` engines."""
 
     def __init__(self, engine_type: str) -> None:
@@ -347,7 +348,6 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                 raise BotTemplateInvalidError(
                     f"template_config contains server-managed fields: {reserved}"
                 )
-        # 工厂快照默认不要求托管工作空间；仅当显式开启 workspace 托管能力时才要求，在取值处直接判定。
         sanitized = to_internal_template_config(template, reject_server_managed_fields=False)
         return PreparedBotCreate(
             template_type=declarative_type,
