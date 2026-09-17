@@ -201,6 +201,15 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
     ("DELETE", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
+    # The user-level delegation: the caller's own account, no bot addressed.
+    # The user is the verified principal (require_user_id binds them to
+    # themselves), and the application is read off the same principal.
+    ("POST", "/openapi/v1/bots/authorized-apps"):
+        NoCheck("the caller's own account-level delegation, not a bot"),
+    ("GET", "/openapi/v1/bots/authorized-apps"):
+        NoCheck("the caller's own account-level delegations, not a bot"),
+    ("DELETE", "/openapi/v1/bots/authorized-apps/{app_id}"):
+        NoCheck("the caller's own account-level delegation, not a bot"),
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): OWNER_SCOPED,
     # Config manifest. Read at MEMBER, write at ADMIN — the same split the
     # channels rows above make, and for the same reason: reading how a bot is
@@ -436,9 +445,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("tenant-guarded credential delete; the owner-app check is the service's"),
     ("GET", "/openapi/v1/org/dept"): NoCheck("the caller's own directory record"),
     ("GET", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
-    ("POST", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
+    ("POST", "/openapi/v1/bots"): NoCheck("a creation, not one addressed bot; an app-only caller is admitted on the user-level delegation (admission.py USER_DELEGATED) and granted the bot it creates"),
     ("POST", "/openapi/v1/bots/with-manifest"): NoCheck("a creation, not one addressed bot — as POST /openapi/v1/bots"),
-    ("GET", "/openapi/v1/bots/{bot_id}/with-manifest/status"): NoCheck("the caller's own creation: for most of one there is no bot record to check against, so what scopes it is that every row it reads — the job's idempotency key included — is keyed by the entity_id the caller's principal resolves to. That holds ONLY BECAUSE admission REFUSES an app-only caller here: for one of those require_user_id returns the user_id QUERY PARAMETER, and the entity_id would be request-supplied. Lifting that refusal without a check able to authorize an app→user pair before a bot exists invalidates this reason — see admission.py"),
+    ("GET", "/openapi/v1/bots/{bot_id}/with-manifest/status"): NoCheck("the caller's own creation: for most of one there is no bot record to check against, so what scopes it is that every row it reads — the job's idempotency key included — is keyed by the entity_id the caller's principal resolves to. For an app-only caller require_user_id returns the user_id QUERY PARAMETER, so the entity_id is request-supplied — and what authorizes it is the own-bot grant dependency the route declares (admission.py GRANT_CHECKED_OWN_BOT): the creation granted the submitting application this bot at submission, so an application naming a user who never delegated to it, or a bot_id it did not create, holds no grant and is refused before this read runs"),
     ("GET", "/openapi/v1/bots/all"): NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/authorized"):
         NoCheck("a collection, not one addressed bot"),

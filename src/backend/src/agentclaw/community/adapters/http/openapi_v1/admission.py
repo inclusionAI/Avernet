@@ -20,6 +20,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 )
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
+from agentclaw.community.api.user_app_grant_service import (
+    UserAppGrantServiceProtocol,
+)
 from agentclaw.community.log import get_logger
 logger = get_logger()
 _SPACE_SKILL_BASE = "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"
@@ -843,46 +846,45 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "DELETE",
         "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # ── USER_DELEGATED: acts for the named user, addresses no bot yet ────────
+    # The creations. None of these has a bot for a grant to cover when the
+    # request arrives: the id is allocated inside the handler, and for most of
+    # a creation's life there is no bot record at all. These used to be
+    # ``REFUSED`` for exactly that reason — admitting an application needed a
+    # check able to authorize an app→user pair *before* a bot exists, and the
+    # surface had none.
+    #
+    # It has one now. ``require_delegated_user`` asks the user-level
+    # delegation (``ac_user_app_grant``): has this person authorized this
+    # application to act as them where no bot is addressed? Without a live row
+    # the application is answered as if the user did not exist, the same 404 a
+    # missing bot grant gets — so guessing a ``user_id`` still buys nothing.
+    #
+    # And once admitted, **the application is granted the bot it creates**, as
+    # an ordinary bot grant written when the creation starts
+    # (``creation_grant.grant_the_creating_app``). That is what lets the polls
+    # below — bot-scoped, and carrying the authorization handles — take the
+    # own-bot dependency like every other bot operation rather than a special
+    # case: by the time an application polls, the grant it needs already exists.
+    # The bot's owner sees that grant in the bot's own listing and can withdraw
+    # it there, exactly as one they consented to by hand.
+    ("POST", "/openapi/v1/bots"): AdmissionMode.USER_DELEGATED,
+    ("POST", "/openapi/v1/bots/with-manifest"): AdmissionMode.USER_DELEGATED,
+    ("POST", "/openapi/v1/bots/local"): AdmissionMode.USER_DELEGATED,
+    # The creations' polls. Each completes or observes a creation the
+    # application was granted at submission, so each resolves the bot as the
+    # delegating user's own and checks that grant — the same dependency the
+    # ordinary ``auth-status`` poll above has carried all along.
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/with-manifest/status",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # ── REFUSED — each for its own reason ────────────────────────────────────
     # The caller's own identity. An app-only caller names no end user, so there
     # is nothing to return — its scope question is answered by
     # ``GET /openapi/v1/bots/authorized`` instead.
     ("GET", "/openapi/v1/org/user"): AdmissionMode.REFUSED,
-    # Local creation has no existing bot for a grant to cover and may initiate
-    # Passport consent. Polling completes that same creation transaction, so
-    # both require a human on the wire.
-    ("POST", "/openapi/v1/bots/local"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): AdmissionMode.REFUSED,
-    # No bot exists yet for a grant to cover, and creation spends the user's
-    # quota. Auto-granting the new bot would invent consent nobody gave.
-    ("POST", "/openapi/v1/bots"): AdmissionMode.REFUSED,
-    # Creating a bot with its manifest is the same creation, so it carries the
-    # same refusal — and the reason is sharper here than "no grant to check".
-    #
-    # These routes take their owner from ``UserIdDep``. For an app-only caller
-    # ``require_user_id`` returns the ``user_id`` **query parameter verbatim**,
-    # deferring the question of whether the app may act for that user to
-    # "whichever grant dependency the route declares". There is no grant
-    # dependency these routes *can* declare: a grant covers a bot, and at
-    # submission there is no bot. So admitting an app here would mean any
-    # application credential could create a bot as any user — spending that
-    # user's quota and running a caller-supplied startup script under their
-    # identity — with nothing anywhere proving the user ever authorized it.
-    #
-    # W13's reviewer asked for these to admit applications, and they should:
-    # this pair exists for unattended integration. But "admit" needs a check
-    # that can run *before* a bot exists, and the surface has none today. That
-    # is the user-level admission mode the review names as future work, not
-    # something ``OPEN`` provides — ``OPEN`` here would be no check at all.
-    #
-    # The poll carries the same refusal for the same mechanism: its ``user_id``
-    # is equally unchecked for an app-only caller, and what it returns includes
-    # the authorization handles.
-    ("POST", "/openapi/v1/bots/with-manifest"): AdmissionMode.REFUSED,
-    (
-        "GET",
-        "/openapi/v1/bots/{bot_id}/with-manifest/status",
-    ): AdmissionMode.REFUSED,
     # Delegation is a human act. An application must not be able to widen its
     # own access, withdraw a competitor's, or enumerate what else reaches a bot.
     ("POST", "/openapi/v1/bots/{bot_id}/authorized-apps"): AdmissionMode.REFUSED,
@@ -891,6 +893,13 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "DELETE",
         "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}",
     ): AdmissionMode.REFUSED,
+    # The user-level delegation — the consent the ``USER_DELEGATED`` group
+    # above is admitted on — is granted, listed and withdrawn by the user
+    # alone, for the same reason the bot-level group is: an application must
+    # not be able to delegate to itself.
+    ("POST", "/openapi/v1/bots/authorized-apps"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/authorized-apps"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/bots/authorized-apps/{app_id}"): AdmissionMode.REFUSED,
     # Bot logs: here ``user_id`` means *whose traces to read* over a
     # tenant-level observability surface, not *whose call this is*. A grant
     # covers a bot; it does not translate into that meaning.
@@ -946,6 +955,7 @@ ADMITTING_MODES = frozenset(
         AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
         AdmissionMode.GRANT_FILTERED,
         AdmissionMode.USER_GATED,
+        AdmissionMode.USER_DELEGATED,
         AdmissionMode.OPEN,
     }
 )
@@ -976,10 +986,82 @@ class ActingCaller:
     #: The grant reader. Never consulted for a human caller.
     grants: BotAppGrantServiceProtocol | None = None
 
+    #: The user-level delegation reader. Never consulted for a human caller.
+    #: Separate from ``grants`` because it answers a different question — "may
+    #: this app act as this user with no bot addressed" — against a different
+    #: record, and an operation that needs one must not be satisfied by the
+    #: other.
+    user_grants: UserAppGrantServiceProtocol | None = None
+
+    #: The calling application's display name, off the verified principal, so
+    #: a grant this request writes for itself can record it. ``None`` for a
+    #: human caller, like ``app_id``.
+    app_name: str | None = None
+
     @property
     def is_application(self) -> bool:
         """Whether a grant governs this request."""
         return self.app_id is not None
+
+    def has_user_delegation(self) -> bool:
+        """Whether the delegating user has delegated to this app at account level.
+
+        ``True`` for a human caller — there is no delegation to ask about and
+        nothing to refuse — and for an application holding a live row in
+        ``ac_user_app_grant`` from ``user_id``. ``False`` otherwise, which
+        includes an application on an app where the reader is not wired: the
+        alternative to a check is no check at all.
+        """
+        if self.app_id is None:
+            return True
+        if self.user_grants is None:
+            return False
+        return (
+            self.user_grants.find(user_id=self.user_id, app_id=self.app_id)
+            is not None
+        )
+
+    def require_user_delegation(self) -> None:
+        """Refuse an application with no user-level delegation from the user.
+
+        The check behind ``USER_DELEGATED``. Raises
+        :class:`GrantNotResolvableError` — the same refusal a missing bot grant
+        gets, mapped to the same 404 — so an application cannot tell "this user
+        never delegated to me" from "this user does not exist".
+        """
+        if self.has_user_delegation():
+            return
+        logger.warning(
+            "[user_app_grant] app_id=%s holds no live user-level delegation "
+            "from user=%s",
+            self.app_id,
+            for_log(self.user_id),
+        )
+        raise GrantNotResolvableError(
+            f"app {self.app_id} holds no user-level delegation from the named user"
+        )
+
+    def holds_delegation(self) -> bool:
+        """Whether *some* live delegation from the user reaches this app.
+
+        The proof of relationship the ``USER_GATED`` operations ask for — the
+        ceiling, device discovery, the owner's routines aggregate: reads about
+        the named user's account that address no bot. Either record proves it:
+        a user-level delegation, or any live bot grant. A human caller holds
+        it trivially.
+
+        The user-level delegation counts here on purpose, and not only because
+        it is the stronger claim. An application onboarded to *create* bots for
+        a user has, until its first creation completes, no bot grant at all —
+        and the reads it needs first (the ceiling, the devices) would refuse it
+        while the creation it is entitled to would not.
+        """
+        if self.app_id is None:
+            return True
+        if self.has_user_delegation():
+            return True
+        granted = self.granted_bot_ids()
+        return bool(granted)
 
     def require_bot(self, bot_id: str, *, owner_id: str) -> str:
         """Confirm the application may act on the addressed bot; return its owner.

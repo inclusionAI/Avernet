@@ -29,7 +29,8 @@ from agentclaw.community.adapters.http.openapi_v1.admission import ADMISSION
 from agentclaw.community.adapters.http.openapi_v1.admission_modes import AdmissionMode
 from agentclaw.community.adapters.http.openapi_v1.bots import create_with_manifest
 from agentclaw.community.adapters.http.openapi_v1.principal import (
-    refuse_app_only_caller,
+    require_delegated_user,
+    require_granted_own_bot,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
@@ -388,37 +389,47 @@ def test_the_poll_and_the_job_agree_on_what_never_comes_up():
     assert create_with_manifest._PROVISIONING_FAILED == _CONTAINER_FAILED_STATUSES
 
 
-def test_both_routes_refuse_an_app_only_caller():
-    """Not a preference — without it an application can create a bot as anyone.
+def test_the_submit_is_user_delegated_and_the_poll_is_grant_checked():
+    """An application creates a bot only for a user who delegated to it.
 
     Both routes take their owner from ``UserIdDep``. For a caller that names an
     application and no user, ``require_user_id`` returns the ``user_id`` **query
     parameter verbatim**, explicitly deferring "may this app act for that user?"
-    to whichever grant dependency the route declares. These routes can declare
-    none: a grant covers a bot, and at submission there is no bot yet.
+    to whichever dependency the route declares. At submission there is no bot
+    for a grant to cover, so the submit declares the *user-level* check —
+    ``require_delegated_user`` — and is refused without a live delegation from
+    the named user. Without that an app credential could
+    ``POST …/with-manifest?user_id=<someone else>`` and spend that user's quota.
 
-    So the refusal is the only check standing between an app credential and
-    ``POST …/with-manifest?user_id=<someone else>`` — which would spend that
-    user's quota and run a caller-supplied startup script under their identity.
-    The poll is the same mechanism and leaks the authorization handles.
+    The poll is bot-scoped and leaks the authorization handles, so it declares
+    the own-bot grant: the submit granted the application the bot it is
+    creating, and an application naming a bot it did not create holds none.
 
     Pinned in both places because either alone is insufficient: the table entry
     is what ``require_principal`` enforces centrally, and the route dependency
-    is what holds if the table entry were ever mislabelled to an admitting mode.
+    is what holds if the table entry were ever mislabelled.
     """
-    assert ADMISSION[_SUBMIT] is AdmissionMode.REFUSED
-    assert ADMISSION[_POLL] is AdmissionMode.REFUSED
+    assert ADMISSION[_SUBMIT] is AdmissionMode.USER_DELEGATED
+    assert ADMISSION[_POLL] is AdmissionMode.GRANT_CHECKED_OWN_BOT
 
     declared = {
         route.endpoint.__name__: route
         for route in create_with_manifest.router.routes
         if isinstance(route, APIRoute)
     }
-    for name in ("create_bot_with_manifest", "get_bot_create_with_manifest_status"):
-        route = declared[name]
-        assert any(
-            dep.call is refuse_app_only_caller for dep in route.dependant.dependencies
-        ), f"{name} must declare the refusal, not only be listed in the table"
+
+    def depends_on(dependant, target) -> bool:
+        if dependant.call is target:
+            return True
+        return any(depends_on(sub, target) for sub in dependant.dependencies)
+
+    assert depends_on(
+        declared["create_bot_with_manifest"].dependant, require_delegated_user
+    ), "the submit must declare the user-level check, not only be listed"
+    assert depends_on(
+        declared["get_bot_create_with_manifest_status"].dependant,
+        require_granted_own_bot,
+    ), "the poll must declare the own-bot grant, not only be listed"
 
 
 def test_the_poll_takes_nothing_but_its_path():

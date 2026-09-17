@@ -94,6 +94,10 @@ _BOT_FREE = frozenset(
     {
         "all",
         "authorized",
+        # The user-level delegation: the same resource name as the bot-scoped
+        # `{bot_id}/authorized-apps`, one level up, because it covers the user
+        # and no bot.
+        "authorized-apps",
         "ceiling",
         "check-name",
         "catalog",

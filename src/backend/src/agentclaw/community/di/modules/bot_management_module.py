@@ -819,6 +819,9 @@ class BotManagementModule(Module):
             creation_sequence=lambda engine: injector.get(
                 BotConfigManifestApplyService
             ).delivery_for_engine(engine).creation_sequence,
+            # A creation that gives up before a bot exists withdraws the grant
+            # the submitting application was given at submission.
+            grant_sweep_provider=lambda: injector.get(BotAppGrantService),
         )
 
     @singleton

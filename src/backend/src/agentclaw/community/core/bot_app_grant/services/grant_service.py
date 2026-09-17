@@ -131,6 +131,61 @@ class BotAppGrantService(BotAppGrantServiceProtocol):
             }
         )
 
+    def grant_for_creation(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        owner_id: str,
+        app_id: int,
+        app_name: str,
+    ) -> BotAppGrantRecord:
+        """Authorize ``app_id`` on the bot it is about to create as ``user_id``.
+
+        The same row :meth:`grant` writes, **without the liveness check**, and
+        that omission is the whole method: at the moment an application starts
+        a creation there is no bot record for ``filter_live_bots`` to find, and
+        there will not be one until the user authorizes — possibly minutes
+        later, through a poll that is itself bot-scoped and needs this row to
+        admit the application at all.
+
+        What makes skipping the check safe here is who may call it. The public
+        surface writes this only for a caller already admitted to the creation
+        under a live user-level delegation from ``user_id``, for a ``bot_id``
+        the platform allocated in the same request. So the row records consent
+        that was given — at the account level — narrowed to one bot the
+        application is bringing into existence for that user.
+
+        A creation that is abandoned or fails leaves this row naming a bot that
+        never came to exist. That row is inert: ``list_for_app`` filters it out
+        against live bots, ``find`` only matches it for a bot of that exact id
+        and owner, and the creation paths that can notice the failure withdraw
+        it (see ``adapters/http/openapi_v1/creation_grant.py`` and the manifest
+        creation job's discard).
+        """
+        for label, value in (("user_id", user_id), ("owner_id", owner_id)):
+            if len(value) > IDENTITY_MAX_LENGTH:
+                raise GrantIdentityTooLongError(
+                    f"{label} exceeds {IDENTITY_MAX_LENGTH} characters, which a "
+                    "grant cannot store or later resolve"
+                )
+        logger.info(
+            "[bot_app_grant] granting app_id=%s the bot it is creating: "
+            "bot_id=%s user_id=%s",
+            app_id,
+            bot_id,
+            user_id,
+        )
+        return self._repository.grant(
+            {
+                "app_id": app_id,
+                "app_name": app_name[:APP_NAME_MAX_LENGTH],
+                "bot_id": bot_id,
+                "user_id": user_id,
+                "owner_id": owner_id,
+            }
+        )
+
     def revoke(
         self, *, bot_id: str, user_id: str, owner_id: str, app_id: int
     ) -> None:

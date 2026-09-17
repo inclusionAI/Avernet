@@ -105,8 +105,7 @@ def _callback_credential(request: Request) -> WorkOrderCallbackCredential:
 
 
 def _require_user_delegation(caller: ActingCaller) -> str:
-    granted = caller.granted_bot_ids()
-    if granted is not None and not granted:
+    if not caller.holds_delegation():
         raise GrantNotResolvableError(
             "application holds no live delegation from the named user"
         )

@@ -245,12 +245,23 @@ user_config:
     "/openapi/v1/bots/work-order-notifications/**":
       user: required
 
-    "POST /openapi/v1/bots":
-      user: required
+    # `POST /openapi/v1/bots` no longer appears here. Creation admits an
+    # application acting alone — under a user-level delegation the backend
+    # checks (admission.py USER_DELEGATED) — so it inherits the wide rule
+    # above, exactly like the other operations that admit a machine caller.
 
     "GET /openapi/v1/bots/{bot_id}/authorized-apps":
       user: required
     "DELETE /openapi/v1/bots/{bot_id}/authorized-apps/{app_id}":
+      user: required
+
+    # The user-level delegation (`/openapi/v1/bots/authorized-apps`, no bot
+    # in the path): the same asymmetry as the bot-scoped group. Listing and
+    # withdrawing need only the user; granting needs both parties and is
+    # stated further down beside the bot-scoped grant.
+    "GET /openapi/v1/bots/authorized-apps":
+      user: required
+    "DELETE /openapi/v1/bots/authorized-apps/{app_id}":
       user: required
 
     "/openapi/v1/bots/mcp/servers/{server_code}/config":
@@ -368,6 +379,14 @@ user_config:
     # these to inherit would have quietly admitted an application to enumerating
     # and withdrawing the authorizations on a bot.
     "POST /openapi/v1/bots/{bot_id}/authorized-apps":
+      user: required
+      app: required
+
+    # The user-level delegation's consent moment — the user authorizing the
+    # calling application to act as them where no bot is addressed, which is
+    # what admits it to create bots for them. Both parties, for the same
+    # reason as the bot-scoped grant above.
+    "POST /openapi/v1/bots/authorized-apps":
       user: required
       app: required
 
