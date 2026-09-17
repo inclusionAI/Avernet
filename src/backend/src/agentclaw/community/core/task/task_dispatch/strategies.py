@@ -596,6 +596,15 @@ async def _prefetch_candidates(
     return result
 
 
+async def prefetch_candidates(
+    discover, node: TaskNode, graph: TaskExecutionGraph
+) -> list[dict]:
+    """Return the existing dispatch candidate catalog without making a decision."""
+    if discover is None:
+        return []
+    return await _prefetch_candidates(discover, node, graph)
+
+
 def _join_candidates_pool(candidates: list[dict], bot_pool: list[str]) -> list[str]:
     """off-path WHO:关键词候选 ∩ claim+public 池,按 product 归一,候选 score 降序保留。
 

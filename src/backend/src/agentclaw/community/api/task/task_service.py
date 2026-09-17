@@ -71,10 +71,33 @@ class TaskServiceProtocol(Protocol):
         可选过滤(为空不过滤),供 bbs/list 路由调用,委托 TaskGraphService.list_bbs_tasks_overview。"""
         ...
 
-    def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
+    def claim_bbs_task(
+        self, task_id: str, bot_id: str, node_id: str | None = None
+    ) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(恰一赢;输者/非 bbs 任务 → TaskStateError)。
 
         供 bbs/claim 路由(FR-PICK-02)调用,委托 TaskGraphService.claim_bbs_owner。"""
+        ...
+
+    async def report_task_event(
+        self, *, task_id: str, node_id: str, event_type: str, event_id: str,
+        holder_id: str, payload: dict, relay_turn: str | None = None,
+        progress_reason: str | None = None, failure_reason: str | None = None,
+    ) -> dict:
+        """Apply a signed, idempotent skill event to a relay task."""
+        ...
+
+    async def search_task_candidates(
+        self, *, task_id: str, node_id: str, holder_id: str, relay_turn: str,
+    ) -> dict:
+        """Return candidates only; the calling search skill owns the decision."""
+        ...
+
+    async def dispatch_task(
+        self, *, task_id: str, node_id: str, holder_id: str,
+        relay_turn: str, dispatch_id: str,
+    ) -> dict:
+        """Validate a persisted decision and dispatch it through the existing Runner."""
         ...
 
     def attach_bbs_node(
@@ -109,6 +132,8 @@ class TaskServiceProtocol(Protocol):
         output_patch: "dict | None" = None,
         acceptance_result: AcceptanceResult | None = None,
         exec_error: "str | None" = None,
+        progress_reason: "str | None" = None,
+        failure_reason: "str | None" = None,
         extend_props_patch: "dict | None" = None,
     ) -> NodeOpResult:
         """内部节点写口:直接更新节点 run_info(透传 ``TaskNodePatch`` 经 ``ExecutionEngine.on_report`` 落库)。

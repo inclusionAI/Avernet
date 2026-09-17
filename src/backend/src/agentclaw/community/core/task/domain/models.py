@@ -189,6 +189,8 @@ class RuntimeInfo:
     end_time: int | None = None           # 进终态时写(毫秒,int(time.time()*1000))
     output: dict[str, Any] = field(default_factory=dict)
     acceptance_result: AcceptanceResult | None = None
+    progress_reason: str | None = None  # why this node/assignee was advanced
+    failure_reason: str | None = None   # why planning/search/delivery/execution failed
     extend_props: dict[str, Any] = field(default_factory=dict)  # miss_events/崩溃栈/超时/hung_reason(stuck)
     action_log: list[NodeActionEvent] = field(default_factory=list)  # 动作级历史快照(append-only)
 
@@ -297,6 +299,8 @@ class TaskNodePatch:
     output_patch: dict[str, Any] | None = None               # fold 到 run_info.output
     acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(PASS→DONE/FAIL+gaps→DONE)
     exec_error: str | None = None                            # 执行报错信号(非验收;→ on_harness 重投,)
+    progress_reason: str | None = None                       # 推进原因(规划/搜推/派发)
+    failure_reason: str | None = None                        # 失败原因(规划/搜推/派发/执行)
     extend_props_patch: dict[str, Any] | None = None         # miss_events / hung_reason(stuck) / harness_retries / 崩溃栈
 
 

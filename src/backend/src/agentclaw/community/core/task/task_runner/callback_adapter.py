@@ -257,6 +257,8 @@ class CallbackAdapter:
             node_id=d.get("node_id") or body.get("node_id"),
             status=Status(d.get("status") or body.get("status")),
             output_patch={"output": body.get("output")} if body.get("output") is not None else None,
+            progress_reason=body.get("progress_reason"),
+            failure_reason=body.get("failure_reason"),
             acceptance_result=AcceptanceResult(
                 verdict=AcceptanceVerdict(accept.get("verdict")),
                 acceptances_metric=accept.get("acceptances_metric", []),

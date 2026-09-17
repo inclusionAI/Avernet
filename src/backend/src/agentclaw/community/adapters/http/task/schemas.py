@@ -134,6 +134,7 @@ class BbsClaimDTO(BaseModel):
 
     task_id: str = Field(..., description="任务ID(BBS 接力根级 CAS 占有目标)")
     bot_id: str = Field(..., description="发起占有的 bot id")
+    node_id: str | None = Field(None, description="分布式接力 BBS 节点ID；中心化模式不传")
 
 
 class BbsAttachDTO(BaseModel):
@@ -183,6 +184,8 @@ class TaskNodeUpdateDTO(BaseModel):
         None, description="验收结论(PASS→DONE / FAIL+gaps→FAILED)"
     )
     exec_error: str | None = Field(None, description="执行报错信号(非验收;→ on_harness 重投)")
+    progress_reason: str | None = Field(None, description="推进原因")
+    failure_reason: str | None = Field(None, description="失败原因")
     extend_props_patch: dict[str, Any] | None = Field(
         None, description="增量扩展属性(miss_events / hung_reason / harness_retries 等)"
     )
@@ -201,6 +204,39 @@ class TaskCallbackDataDTO(BaseModel):
         default_factory=dict,
         description="回投结果 {success: bool, data?: any, fail_detail?: str}",
     )
+
+
+class RelayTaskEventDTO(BaseModel):
+    """Unified callback/report event emitted by relay execution skills."""
+
+    task_id: str
+    node_id: str
+    event_type: Literal["EXECUTION_RESULT", "PLAN_RESULT", "SEARCH_RESULT"]
+    event_id: str = Field(..., min_length=1)
+    holder_id: str = Field(..., min_length=1)
+    relay_turn: str | None = None
+    progress_reason: str | None = None
+    failure_reason: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskSearchRequestDTO(BaseModel):
+    """Request the generic candidate catalog; the skill remains the decider."""
+
+    task_id: str
+    node_id: str
+    holder_id: str
+    relay_turn: str
+
+
+class TaskDispatchRequestDTO(BaseModel):
+    """Consume a persisted skill decision and hand the node to the existing Runner."""
+
+    task_id: str
+    node_id: str
+    holder_id: str
+    relay_turn: str
+    dispatch_id: str = Field(..., min_length=1)
 
 
 # ===== Response DTOs =====
@@ -261,6 +297,8 @@ class RuntimeInfoDTO(BaseModel):
         description="节点输出(checkpoint fold);adapter 路径以 output key 落 run_info.output,DTO 层展平为标量(去除两层 output 嵌套)",
     )
     acceptance_result: AcceptanceResultDTO | None = Field(None, description="验收结论")
+    progress_reason: str | None = Field(None, description="推进原因")
+    failure_reason: str | None = Field(None, description="失败原因")
     extend_props: dict[str, Any] = Field(
         default_factory=dict, description="运行时扩展属性"
     )
@@ -618,6 +656,8 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                     end_time=n.run_info.end_time,
                     output=_unwrap_node_output(n.run_info.output),
                     acceptance_result=ar_dto,
+                    progress_reason=n.run_info.progress_reason,
+                    failure_reason=n.run_info.failure_reason,
                     extend_props={
                         k: v
                         for k, v in n.run_info.extend_props.items()

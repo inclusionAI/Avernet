@@ -1,28 +1,7 @@
-"""Task 内部 HTTP adapter routes —— 不经 gateway spanner(内部 API)。
+"""Internal task HTTP adapter: execute, callbacks, settings and discovery.
 
-任务模块内部前缀 ``/api/v1/collaboration/tasks``。本 router 承载:
-- 公开面镜像(execute 副本):供内部调用方(bot / 服务间)免 gateway spanner 直调;
-  与 ``adapters/http/openapi_v1/task/`` 公开面同一 ``TaskServiceProtocol`` 委托,逻辑保持一致(改其一须同步)。
-- 回投 / BBS 接力 / 任务发现阶段:前端不直面的内部写口/阶段接口。
-前端公开面(经 gateway spanner)见 ``adapters/http/openapi_v1/task/``。本 router 只转协议,不持领域策略(Rule 22)。
-
-端点(同一任务模块,不同阶段):
-  POST /api/v1/collaboration/tasks/execute          — 提交任务(公开面镜像;delegate TaskServiceProtocol.execute)
-  POST /api/v1/collaboration/tasks/callback/report  — 执行实体回投(delegate TaskLoopCallbackProtocol.report_result)
-  POST /api/v1/collaboration/tasks/bbs/claim        — BBS 接力步②:CAS 占根(恰一赢,输者 409)
-  POST /api/v1/collaboration/tasks/bbs/attach        — BBS 接力步④:挂 run_mode=bbs scoped 子节点 + start
-  POST /api/v1/collaboration/tasks/bbs/result        — BBS 接力步⑤:回投终态 + 释放 claim
-  POST /api/v1/collaboration/tasks/discovery/discover — 任务发现阶段:读取任务 → per-bot engine 建 session → 投递通知
-  GET  /api/v1/collaboration/tasks/discovery/status   — 任务发现状态(读 SQLite db)
-
-task_loop inbound PUSH callback(前缀 ``/api/v1/collaboration/tasks/callback``):
-  POST .../callback/workflow_start | workflow_result | node_start | node_result
-
-成功经 ``envelope()`` → ``Envelope{code,message,data,request_id}``;领域异常
-(GraphAlreadyInitialized/TaskNotFound/TaskState/GraphIntegrity/CallbackAuth/Correlation…)
-直接上抛,由 ``@envelope_errors`` + ``ENVELOPE_ERRORS`` 映射为 ``ErrorEnvelope``——不经中央 handler。
-仅对纯输入校验(callback 原文非 JSON / discover 顶层失败)用 ``HTTPException``/``InternalError`` 上抛,
-落到中央 handler 时内部路径下为 ``{"detail": ...}`` 形。对齐 api/task/{task_service,task_loop_callback}.py Protocol。
+Domain work is delegated to ``TaskServiceProtocol``; this module only adapts
+transport DTOs and maps errors to the shared response envelope.
 """
 
 from __future__ import annotations
@@ -40,13 +19,11 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
 from agentclaw.community.adapters.http.task.schemas import (
-    BbsAttachDTO,
-    BbsClaimDTO,
-    BbsResultDTO,
     TaskCallbackDataDTO,
     TaskCallbackRequest,
     TaskInfoRequestDTO,
     TaskNodeUpdateDTO,
+    RelayTaskEventDTO,
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
     acceptance_result_from_dto,
@@ -59,8 +36,8 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskRevokeRequestDTO,
     TaskRevokeResultDTO,
     task_info_request_from_dto,
-    task_spec_from_dto,
 )
+from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
 from agentclaw.community.adapters.http.task.translator import (
     is_bcn_event_payload,
     is_claw_mind_payload,
@@ -81,6 +58,7 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     HARNESS_POLLER,
     SEARCH_SKILL,
     SKILL_REPORT,
+    RELAY_EXECUTION,
     TaskSettingsServiceProtocol,
 )
 from agentclaw.community.api.task.task_grant_service import (
@@ -114,7 +92,7 @@ logger = get_logger()
 
 
 router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
-
+router.include_router(relay_api_router)
 
 # ===== 公开面镜像(execute;内部 /api/v1 副本,不经 spanner)=====
 # 与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol`` 委托,
@@ -209,7 +187,7 @@ async def get_task_settings(
 ) -> Envelope[list[TaskSettingStateDTO]]:
     """读取全部已支持的任务开关状态。"""
     env = get_current_env()
-    setting_types = (CLAIM_JOIN_FILTER, HARNESS_POLLER, SEARCH_SKILL, SKILL_REPORT)
+    setting_types = (CLAIM_JOIN_FILTER, HARNESS_POLLER, SEARCH_SKILL, SKILL_REPORT, RELAY_EXECUTION)
     states = [
         TaskSettingStateDTO(
             setting_type=setting_type,
@@ -293,70 +271,6 @@ async def report_callback(
     return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry, enricher)
 
 
-@router.post("/bbs/claim", response_model=Envelope[dict[str, Any]])
-@envelope_errors
-async def bbs_claim(
-    body: BbsClaimDTO,
-    request: Request,
-    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[dict[str, Any]]:
-    """BBS 接力步②:任务根级 CAS 占有;恰一赢,输者/非 bbs 任务 → 409。
-
-    幂等:同 bot 重 claim 返 200(视为已占有);非 bbs 任务或已被他人占有 → TaskStateError
-    → ``@envelope_errors`` 映射 409。
-    """
-    result = service.claim_bbs_task(body.task_id, body.bot_id)
-    return envelope({"root_node_id": result.node_id, "task_id": body.task_id}, request)
-
-
-@router.post("/bbs/attach", response_model=Envelope[dict[str, Any]])
-@envelope_errors
-async def bbs_attach(
-    body: BbsAttachDTO,
-    request: Request,
-    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[dict[str, Any]]:
-    """BBS 接力步④:在 parent 下挂 run_mode=bbs scoped 子节点 + start(create+start 合一)。仅 claim 持有者可挂。
-
-    owner 校验失败 / BBS 深度闸 / 分解树完整性违反 → TaskStateError / GraphIntegrityError
-    → ``@envelope_errors`` 映射 409。
-    """
-    task_spec = task_spec_from_dto(body.task_spec)
-    node = service.attach_bbs_node(
-        body.task_id, body.parent_node_id, task_spec, body.bot_id
-    )
-    return envelope({"node_id": node.node_id, "task_id": body.task_id}, request)
-
-
-@router.post("/bbs/result", response_model=Envelope[dict[str, Any]])
-@envelope_errors
-async def bbs_result(
-    body: BbsResultDTO,
-    request: Request,
-    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[dict[str, Any]]:
-    """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim;收口由框架经 owner 复核根 gap 自行收口(非 bot 声明)。
-
-    ``acceptance_result``(PASS→DONE / FAIL+gaps→FAILED)/ ``output_patch``(checkpoint fold)/
-    ``exec_error``(执行报错 fold)。``bot_id`` 须为当前 ``bbs_owner``,否则 ``TaskStateError``
-    → ``@envelope_errors`` 映射 409。
-    """
-    ar = (
-        acceptance_result_from_dto(body.acceptance_result)
-        if body.acceptance_result
-        else None
-    )
-    await service.report_bbs_result(
-        body.task_id,
-        body.node_id,
-        body.bot_id,
-        acceptance_result=ar,
-        output_patch=body.output_patch,
-        exec_error=body.exec_error,
-    )
-    return envelope({"ok": True}, request)
-
-
 @router.post("/nodes/update", response_model=Envelope[dict[str, Any]])
 @envelope_errors
 async def update_task_node(
@@ -386,6 +300,8 @@ async def update_task_node(
         output_patch=body.output_patch,
         acceptance_result=ar,
         exec_error=body.exec_error,
+        progress_reason=body.progress_reason,
+        failure_reason=body.failure_reason,
         extend_props_patch=body.extend_props_patch,
     )
     return envelope(
@@ -912,6 +828,33 @@ async def _dispatch_impl(
     # must be rejected instead of being acknowledged as success.
     if not isinstance(_raw_obj, dict):
         raise HTTPException(status_code=422, detail="callback body must be a JSON object")
+
+    if _raw_obj.get("event_type") in {
+        "EXECUTION_RESULT", "PLAN_RESULT", "SEARCH_RESULT",
+    }:
+        try:
+            event = RelayTaskEventDTO.model_validate(_raw_obj)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="invalid relay task event") from exc
+        auth.verify(
+            source="task_loop",
+            headers=request.headers,
+            raw_body=raw,
+            method=request.method,
+            path=request.url.path,
+        )
+        result = await svc.report_task_event(
+            task_id=event.task_id,
+            node_id=event.node_id,
+            event_type=event.event_type,
+            event_id=event.event_id,
+            holder_id=event.holder_id,
+            relay_turn=event.relay_turn,
+            progress_reason=event.progress_reason,
+            failure_reason=event.failure_reason,
+            payload=event.payload,
+        )
+        return envelope(result, request)
 
     if is_common_task_payload(_raw_obj):
         logger.info("[task_callback] common_task_loop_callback session_id=%s, raw_obj=%s", _sid, _raw_obj)

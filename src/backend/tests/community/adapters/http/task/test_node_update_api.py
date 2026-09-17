@@ -33,6 +33,8 @@ class _StubService:
         output_patch=None,
         acceptance_result=None,
         exec_error=None,
+        progress_reason=None,
+        failure_reason=None,
         extend_props_patch=None,
     ) -> NodeOpResult:
         self.last = dict(
@@ -44,6 +46,8 @@ class _StubService:
             output_patch=output_patch,
             acceptance_result=acceptance_result,
             exec_error=exec_error,
+            progress_reason=progress_reason,
+            failure_reason=failure_reason,
             extend_props_patch=extend_props_patch,
         )
         return NodeOpResult(

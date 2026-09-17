@@ -97,6 +97,8 @@ def runtime_to_dict(runtime: RuntimeInfo) -> dict[str, Any]:
         "end_time": runtime.end_time,
         "output": dict(runtime.output),
         "acceptance_result": _acceptance_to_dict(runtime.acceptance_result),
+        "progress_reason": runtime.progress_reason,
+        "failure_reason": runtime.failure_reason,
         "extend_props": dict(runtime.extend_props),
     }
 
@@ -110,6 +112,8 @@ def runtime_from_dict(value: dict[str, Any] | None) -> RuntimeInfo:
         end_time=value.get("end_time"),
         output=dict(value.get("output", {})),
         acceptance_result=_acceptance_from_dict(value.get("acceptance_result")),
+        progress_reason=value.get("progress_reason"),
+        failure_reason=value.get("failure_reason"),
         extend_props=dict(value.get("extend_props", {})),
     )
 

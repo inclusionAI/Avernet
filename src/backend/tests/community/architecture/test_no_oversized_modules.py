@@ -149,10 +149,6 @@ _ALLOWLIST: dict[str, str] = {
         "~1504 lines — task center engine (run/dispatch/aggregation). Grew past the "
         "cap with the task-claim + stateless secbaas relay work; split run/dispatch "
         "and group-formation into sub-modules in a follow-up refactor.",
-    "adapters/http/task/router.py":
-        "~1027 lines — internal task router (execute/dashboard/list + callback + the "
-        "new grant/revoke/claim-join-filter surface). Borderline; split the claim-grant "
-        "sub-router into its own module in a follow-up.",
 }
 
 

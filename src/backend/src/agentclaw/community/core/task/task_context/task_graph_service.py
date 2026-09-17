@@ -60,7 +60,7 @@ _ACCEPTANCE_TRANSITIONS: dict[Status, set[Status]] = {
 _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
     Status.PENDING: {Status.PLANNING, Status.RUNNING, Status.HUNG, Status.DONE, Status.SUCCESS},
     Status.PLANNING: {Status.DONE, Status.SUCCESS, Status.HUNG},
-    Status.RUNNING: {Status.PENDING, Status.DONE, Status.SUCCESS, Status.HUNG},
+    Status.RUNNING: {Status.PENDING, Status.PLANNING, Status.DONE, Status.SUCCESS, Status.HUNG},
     Status.FAILED: {Status.PENDING, Status.HUNG},
     Status.HUNG: {Status.PLANNING},
 }
@@ -481,6 +481,10 @@ class TaskGraphService:
                 node.run_info.run_mode = patch.run_mode or None
             if patch.assignee is not None:
                 node.run_info.assignee = patch.assignee or None
+            if patch.progress_reason is not None:
+                node.run_info.progress_reason = patch.progress_reason or None
+            if patch.failure_reason is not None:
+                node.run_info.failure_reason = patch.failure_reason or None
             if patch.extend_props_patch is not None:
                 node.run_info.extend_props.update(patch.extend_props_patch)
             if (

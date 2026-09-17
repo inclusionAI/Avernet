@@ -22,11 +22,13 @@ CATEGORY = "task"
 CLAIM_JOIN_FILTER = "claim_join_filter"
 SEARCH_SKILL = "search_skill"
 SKILL_REPORT = "skill_report_enabled"
+RELAY_EXECUTION = "relay_execution"
 CLAIM_JOIN_FILTER_KEY = "claim_join_filter_enabled"
 # Backward-compatible names used by existing tests and callers.
 KEY = CLAIM_JOIN_FILTER_KEY
 SEARCH_SKILL_KEY = "search_skill_enabled"
 SKILL_REPORT_KEY = "skill_report_enabled"
+RELAY_EXECUTION_KEY = "relay_execution_enabled"
 # TaskHarness 旁路巡检开关(默认关闭);through tasks/settings API (harness_poller).
 HARNESS_POLLER = "harness_poller"
 HARNESS_POLLER_KEY = "harness_poller_enabled"
@@ -38,6 +40,7 @@ _SETTING_KEYS = {
     CLAIM_JOIN_FILTER: CLAIM_JOIN_FILTER_KEY,
     SEARCH_SKILL: SEARCH_SKILL_KEY,
     SKILL_REPORT: SKILL_REPORT_KEY,
+    RELAY_EXECUTION: RELAY_EXECUTION_KEY,
     HARNESS_POLLER: HARNESS_POLLER_KEY,
     MODE_COVERAGE: MODE_COVERAGE_KEY,
 }
@@ -95,6 +98,7 @@ class TaskSettingsService(TaskSettingsServiceProtocol):
             CLAIM_JOIN_FILTER: False,
             SEARCH_SKILL: False,
             SKILL_REPORT: True,
+            RELAY_EXECUTION: False,
             # TaskHarness 旁路巡检默认开启:常驻兜底(SLA 超时复位/FAILED 重派/PENDING 派发超时重搜推);
             # 事件驱动为主推进,此为旁路兜底。可经 tasks/settings harness_poller 跨副本热改关闭。
             HARNESS_POLLER: True,

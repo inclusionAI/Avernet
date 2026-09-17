@@ -39,6 +39,9 @@ from agentclaw.community.core.task.task_runner.modal_executor.task_executor_resu
     BcsGroupHandle,
     SingleBotHandle,
 )
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_bbs import (
+    TaskExecutorBbsMixin,
+)
 
 logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
@@ -63,11 +66,6 @@ def _human_observer_participant(owner_user_id: str) -> dict[str, Any]:
 # 推的是 CloudEvent(event_type/scope/data,无 loop_task_id)。要让 CloudEvent 真能走通,需在 /callback/report
 # 侧把 CloudEvent 适配成 TaskCallbackDataDTO(或让该路由兼容 CloudEvent),否则会 422。
 _BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
-
-
-from agentclaw.community.core.task.task_runner.modal_executor.task_executor_bbs import (
-    TaskExecutorBbsMixin,
-)
 
 
 class TaskExecutor(TaskExecutorBbsMixin):
@@ -214,6 +212,11 @@ class TaskExecutor(TaskExecutorBbsMixin):
             )
             return True
 
+    def _node_skill_report_enabled(self, node: TaskNode) -> bool:
+        graph = node.node_run_graph
+        config = graph.extend_props.get("execution_config", {}) if graph is not None else {}
+        return config.get("orchestration_mode") == "relay" or self._skill_report_enabled()
+
     def _singlebot_2_group_enabled(self, task_id: str) -> bool:
         """singlebot_2_group 旁路开关(默认 True):single_bot 改建"二人 chat 群"(driver bot + 人类观察者,不发言)。
         从 ``graph.extend_props["execution_config"]`` 读;graph 不可用/缺键 → True(默认走旁路);显式 False → 老链路。"""
@@ -249,7 +252,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
         assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
         openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
-        skill_report = self._skill_report_enabled()
+        skill_report = self._node_skill_report_enabled(node)
         session_id: str | None = None
         async with sem:
             # P2 旁路:singlebot_2_group(默认 true)且 owner 在场且 bcs/identity_resolver/graph 已接
@@ -402,7 +405,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
             "[task][task-executor] singlebot_2_group 取 session=%s task=%s node=%s group_id=%s",
             session_id, node.task_id, node.node_id, gid,
         )
-        if not self._skill_report_enabled():
+        if not self._node_skill_report_enabled(node):
             self._poller.register(
                 BcsGroupHandle(
                     loop_task_id=loop_task_id,
@@ -437,7 +440,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
             # chat / manager_worker:建群(create_group)已把任务指令作为 context 投入、且自带初始 session;
             # 复用该初始 session(get_group_session),不再 create_session 重复建群里的第二个 session。
             session_id = await self.get_group_session(group_id)
-            if not self._skill_report_enabled():
+            if not self._node_skill_report_enabled(node):
                 self._poller.register(
                     BcsGroupHandle(
                         loop_task_id=loop_task_id,
@@ -455,7 +458,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
 
     async def _dispatch_state_machine(self, node, group_id, meta, loop_task_id) -> bool:
         ctx = dict(self._context.build(node.task_id, node.node_id) or {})
-        ctx["skill_report_enabled"] = self._skill_report_enabled()
+        ctx["skill_report_enabled"] = self._node_skill_report_enabled(node)
         ctx["task_id"] = node.task_id
         ctx["node_id"] = node.node_id
         prompt = self._formatter.format_execute(ctx, node)
@@ -467,7 +470,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
             session_id=None,
             input={"query": prompt},
         )
-        if not self._skill_report_enabled():
+        if not self._node_skill_report_enabled(node):
             self._poller.register(
                 BcsGroupHandle(
                     loop_task_id=loop_task_id,
@@ -818,6 +821,8 @@ class TaskExecutor(TaskExecutorBbsMixin):
                     reporter_bot_id=_reporter_bot_id,
                     executor_bot_ids=[str(bot_id) for bot_id in bot_ids],
                     skill_report_enabled=_skill_report,
+                    relay_execution=bool(gf.extend_props.get("relay_execution")),
+                    relay_blackboard=gf.extend_props.get("relay_blackboard"),
                 )
             elif str(_task_instruction).lstrip().startswith("# 接自"):
                 # 接力协作群(static_plan):## 本群任务 正文(承接/执行/gap交接三步)已具备。但真正多 bot
