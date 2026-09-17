@@ -7,10 +7,7 @@ from injector import Injector, inject, provider, singleton
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
-from agentclaw.community.api.local_skill_package_runtime import (
-    LocalSkillPackageRuntimeProtocol,
-)
-from agentclaw.community.adapters.runtime.local_skill_package_runtime import (
+from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
     LocalSkillPackageRuntime,
 )
 from agentclaw.community.core.bot_collaborator.protocols import (
@@ -49,7 +46,7 @@ class LocalSkillUploadBindings:
         self,
         resolver: DeviceContextResolver,
         transport: DeviceAdapterTransport,
-    ) -> LocalSkillPackageRuntimeProtocol:
+    ) -> LocalSkillPackageRuntime:
         return LocalSkillPackageRuntime(resolver, transport)
 
     @singleton
@@ -65,7 +62,7 @@ class LocalSkillUploadBindings:
         edit_guard: SkillsPoolEditGuard,
         injector: Injector,
         runtime_reconciler: BotRuntimeProjectorProtocol,
-        package_runtime: LocalSkillPackageRuntimeProtocol,
+        package_runtime: LocalSkillPackageRuntime,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
             skill_repo,

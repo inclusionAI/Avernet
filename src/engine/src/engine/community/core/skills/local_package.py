@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import io
+import logging
 import os
 import re
 import shutil
@@ -35,6 +36,7 @@ MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_FILES = 500
 MAX_PATH_LENGTH = 256
 _SKILL_NAME = re.compile(r"^[A-Za-z0-9-]+$")
+log = logging.getLogger("engine.local_skill_package")
 
 
 def _remove_path(path: Path) -> None:
@@ -59,7 +61,6 @@ class LocalSkillPackagePublisher:
 
         stage = target.parent / f".{skill_name}.apply-{uuid4().hex}"
         backup = target.parent / f".{skill_name}.rollback-{uuid4().hex}"
-        failed = target.parent / f".{skill_name}.failed-{uuid4().hex}"
         try:
             self._write_stage(stage, entries)
             with self._target_lock(target):
@@ -89,17 +90,19 @@ class LocalSkillPackagePublisher:
                     try:
                         _remove_path(backup)
                     except OSError as exc:
-                        try:
-                            os.replace(target, failed)
-                            os.replace(backup, target)
-                            _remove_path(failed)
-                        except OSError as rollback_exc:
-                            raise LocalSkillPackageRollbackFailedError(
-                                "cleanup_and_rollback_failed"
-                            ) from rollback_exc
-                        raise LocalSkillPackagePublishFailedError(
-                            "unable_to_cleanup_replaced_package"
-                        ) from exc
+                        # The new package is already the committed authority.
+                        # Cleanup may have partially mutated ``backup`` (for
+                        # example an NFS .nfs* unlink failure), so it is no
+                        # longer a safe rollback source.  Keep the complete new
+                        # target and leave the unique hidden residue available
+                        # for an operator/collector to retry.
+                        log.warning(
+                            "local Skill package committed but old backup cleanup "
+                            "failed; target=%s residue=%s error=%s",
+                            target,
+                            backup,
+                            exc,
+                        )
         finally:
             _remove_path(stage)
 
@@ -205,10 +208,24 @@ class LocalSkillPackagePublisher:
         if len(manifests) != 1:
             raise LocalSkillPackageInvalidError("missing_or_multiple_root_manifest")
         try:
-            text = manifests[0].decode("utf-8")
-            if text.startswith("---\n"):
-                _marker, frontmatter, _body = text.split("---", 2)
-                metadata = yaml.safe_load(frontmatter)
+            try:
+                text = manifests[0].decode("utf-8")
+            except UnicodeDecodeError:
+                text = manifests[0].decode("gbk")
+            text = text.lstrip("\ufeff")
+            lines = text.splitlines()
+            if lines and lines[0].strip() == "---":
+                closing_index = next(
+                    (
+                        index
+                        for index, line in enumerate(lines[1:], start=1)
+                        if line.strip() == "---"
+                    ),
+                    None,
+                )
+                if closing_index is None:
+                    raise ValueError("manifest frontmatter is not closed")
+                metadata = yaml.safe_load("\n".join(lines[1:closing_index]))
             else:
                 # The existing Legacy upload contract accepts YAML-only
                 # manifests. Backend canonicalises the filename before this

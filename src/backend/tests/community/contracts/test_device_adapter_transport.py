@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.api.local_skill_package_runtime import (
-    LocalSkillPackageRuntimeProtocol,
+from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
+    LocalSkillPackageRuntime,
 )
 from agentclaw.community.core.cron.services.cron_relay import CronRelayService
 from agentclaw.community.core.skill_center.errors import LocalSkillStorageError
@@ -115,7 +115,7 @@ async def test_local_package_consumer_runs_over_multipart_transport(world) -> No
     )
     transport = world.get(DeviceAdapterTransport)
     assert isinstance(transport, InMemoryDeviceAdapterTransport)
-    runtime = world.get(LocalSkillPackageRuntimeProtocol)
+    runtime = world.get(LocalSkillPackageRuntime)
 
     result = await runtime.apply(
         bot_id="bot-package",
@@ -151,7 +151,7 @@ async def test_local_package_consumer_propagates_transport_failure(world) -> Non
         raise TimeoutError("unknown outcome")
 
     transport.set_override("invoke_multipart", fail_after_send)
-    runtime = world.get(LocalSkillPackageRuntimeProtocol)
+    runtime = world.get(LocalSkillPackageRuntime)
 
     with pytest.raises(LocalSkillStorageError):
         await runtime.apply(

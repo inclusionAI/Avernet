@@ -8,12 +8,13 @@ from pathlib import Path
 
 import pytest
 
+from engine.community.core.skills import local_package as local_package_module
 from engine.community.core.skills.local_package import (
     LocalSkillPackageAction,
     LocalSkillPackageInvalidError,
+    LocalSkillPackagePublisher,
     LocalSkillPackagePublishFailedError,
     LocalSkillPackagePublishInProgressError,
-    LocalSkillPackagePublisher,
     LocalSkillPackageRollbackFailedError,
     LocalSkillPackageTooLargeError,
 )
@@ -61,6 +62,30 @@ def test_publish_accepts_backend_canonical_legacy_manifest(tmp_path: Path) -> No
     )
 
     assert result.action is LocalSkillPackageAction.CREATED
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        b"---\r\nname: weather\r\ndescription: windows\r\n---\r\n",
+        b"\xef\xbb\xbf---\nname: weather\ndescription: bom\n---\n",
+        "---\nname: weather\ndescription: \u4e2d\u6587\u8bf4\u660e\n---\n".encode("gbk"),
+    ],
+    ids=["crlf", "utf8-bom", "gbk"],
+)
+def test_publish_accepts_legacy_backend_manifest_encodings(
+    tmp_path: Path, manifest: bytes
+) -> None:
+    package = _package({"SKILL.md": manifest})
+
+    result = LocalSkillPackagePublisher().publish(
+        skill_name="weather",
+        package=package,
+        target=tmp_path / "skills-local" / "weather",
+    )
+
+    assert result.action is LocalSkillPackageAction.CREATED
+    assert (tmp_path / "skills-local/weather/SKILL.md").read_bytes() == manifest
 
 
 def test_publish_replaces_exactly_and_removes_stale_files(tmp_path: Path) -> None:
@@ -279,3 +304,37 @@ def test_replace_and_rollback_failure_is_explicit(
     backups = list(target.parent.glob(".weather.rollback-*"))
     assert len(backups) == 1
     assert (backups[0] / "SKILL.md").read_bytes() == b"old"
+
+
+def test_partial_backup_cleanup_failure_keeps_committed_new_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "skills-local" / "weather"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_bytes(b"old")
+    (target / "old.txt").write_bytes(b"old")
+    package = _package(
+        {
+            "SKILL.md": b"---\nname: weather\ndescription: new\n---\n",
+            "new.txt": b"new",
+        }
+    )
+    original_remove_path = local_package_module._remove_path
+
+    def partially_remove_backup(path: Path) -> None:
+        if ".rollback-" in path.name:
+            (path / "SKILL.md").unlink()
+            raise OSError("simulated busy backup residue")
+        original_remove_path(path)
+
+    monkeypatch.setattr(local_package_module, "_remove_path", partially_remove_backup)
+
+    result = LocalSkillPackagePublisher().publish(
+        skill_name="weather", package=package, target=target
+    )
+
+    assert result.action is LocalSkillPackageAction.REPLACED
+    assert (target / "SKILL.md").read_bytes().startswith(b"---")
+    assert (target / "new.txt").read_bytes() == b"new"
+    assert not (target / "old.txt").exists()
+    assert len(list(target.parent.glob(".weather.rollback-*"))) == 1

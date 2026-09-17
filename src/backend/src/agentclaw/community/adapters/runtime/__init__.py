@@ -1,1 +1,0 @@
-"""Outbound Runtime delivery adapters."""

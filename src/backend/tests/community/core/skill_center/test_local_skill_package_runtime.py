@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentclaw.community.adapters.runtime.local_skill_package_runtime import (
+from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
     LocalSkillPackageRuntime,
 )
 from agentclaw.community.core.skill_center.errors import LocalSkillStorageError

@@ -43,8 +43,8 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     RuntimeProjectionResult,
 )
-from agentclaw.community.core.skill_center.local_skill_package_runtime_protocol import (
-    LocalSkillPackageRuntimeProtocol,
+from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
+    LocalSkillPackageRuntime,
     LocalSkillPackageRuntimeResult,
 )
 from agentclaw.community.core.skill_center.skill_package import (
@@ -88,7 +88,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
         runtime_reconciler: BotRuntimeProjectorProtocol,
         package_validator: SkillPackageValidator,
-        package_runtime: LocalSkillPackageRuntimeProtocol,
+        package_runtime: LocalSkillPackageRuntime,
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo

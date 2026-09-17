@@ -103,8 +103,11 @@ Runtime Projection. Retrying the same complete package converges.
 `api/skills` is a thin HTTP adapter over `SkillsService`. The shared
 `LocalSkillPackagePublisher` validates, stages, takes a non-blocking
 cross-process target lock, exact-replaces the package directory, rolls back on
-known publication failure, and cleans temporary content. Engine adapters only
-select a root and delegate.
+publication failure before commit, and cleans temporary content. Once the
+staged directory has become the authoritative target, cleanup failure for the
+old backup does not roll back from a possibly partial backup: the complete new
+package remains authoritative and the uniquely named hidden residue is logged
+for later cleanup. Engine adapters only select a root and delegate.
 
 `community/core/skills/layout_planner.py` remains the only canonical physical
 path table for the standard Python Engines. Package modules contain no second
