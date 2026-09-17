@@ -27,16 +27,16 @@
       add `.to_record()` mappers; add record dataclasses to `core/task/repository/types.py`.
 - [x] Verify singlebox `Base.metadata.create_all` creates the new tables (conftest in
       `tests/community/repository/task/` imports `core/task/repository/models`).
-- [ ] Implement `TaskTrajectoryRepository`: `insert_event`, `upsert_head(task_id, analysis=None)`
+- [x] Implement `TaskTrajectoryRepository`: `insert_event`, `upsert_head(task_id, analysis=None)`
       (preserve existing `analysis`/`gmt_modified` when head exists), `backfill_analysis(task_id,
       analysis_json)` UPDATE both tables `analysis`+`gmt_modified`, `list_events_by_task(task_id)`
       ascending by `gmt_create`. Add protocol. `orm_session()`/`db.flush()`, no explicit commit.
-- [ ] Implement `TaskCallbackCorrelationRepository`: `upsert_on_register(event_id, main_session_id,
+- [x] Implement `TaskCallbackCorrelationRepository`: `upsert_on_register(event_id, main_session_id,
       task_id, node_id, retry)`, `find_by_event_id(event_id)`. Add protocol.
-- [ ] Test `tests/community/repository/task/test_task_trajectory_repository.py`: insert→append
+- [x] Test `tests/community/repository/task/test_task_trajectory_repository.py`: insert→append
       (append-only, duplicate rows allowed), head UPSERT preserves analysis, backfill updates
       analysis+`gmt_modified`, list ascending by `gmt_create`.
-- [ ] Test `tests/community/repository/task/test_task_callback_correlation_repository.py`:
+- [x] Test `tests/community/repository/task/test_task_callback_correlation_repository.py`:
       register→find by event_id idempotent.
 
 ## P2 — Emission helper (REQ-11)

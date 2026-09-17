@@ -12,11 +12,14 @@ from injector import Binder, Module, singleton
 from agentclaw.community.core.repository.implementations.task.task_action_log_repository import (
     TaskActionLogRepository,
 )
-from agentclaw.community.core.repository.implementations.task.task_graph_repository import (
-    TaskGraphRepository,
+from agentclaw.community.core.repository.implementations.task.task_callback_correlation_repository import (
+    TaskCallbackCorrelationRepository,
 )
 from agentclaw.community.core.repository.implementations.task.task_callback_repository import (
     TaskCallbackRepository,
+)
+from agentclaw.community.core.repository.implementations.task.task_graph_repository import (
+    TaskGraphRepository,
 )
 from agentclaw.community.core.repository.implementations.task.task_info_repository import (
     TaskInfoRepository,
@@ -30,14 +33,19 @@ from agentclaw.community.core.repository.implementations.task.task_node_reposito
 from agentclaw.community.core.repository.implementations.task.task_node_run_info_repository import (
     TaskNodeRunInfoRepository,
 )
+from agentclaw.community.core.repository.implementations.task.task_trajectory_repository import (
+    TaskTrajectoryRepository,
+)
 from agentclaw.community.core.repository.protocols.task import (
     TaskActionLogRepositoryProtocol,
+    TaskCallbackCorrelationRepositoryProtocol,
     TaskCallbackRepositoryProtocol,
     TaskGraphRepositoryProtocol,
     TaskInfoRepositoryProtocol,
     TaskNodeRelationRepositoryProtocol,
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
+    TaskTrajectoryRepositoryProtocol,
 )
 
 
@@ -66,5 +74,15 @@ class TaskPersistenceModule(Module):
         binder.bind(
             TaskCallbackRepositoryProtocol,
             to=TaskCallbackRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            TaskTrajectoryRepositoryProtocol,
+            to=TaskTrajectoryRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            TaskCallbackCorrelationRepositoryProtocol,
+            to=TaskCallbackCorrelationRepository,
             scope=singleton,
         )

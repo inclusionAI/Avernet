@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
     from agentclaw.community.core.task.repository.types import (
         BbsTaskOverviewRecord,
+        TaskCallbackCorrelationRecord,
         TaskActionLogRecord,
         TaskCallbackRecord,
         TaskInfoRecord,
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
         TaskNodeRelationRecord,
         TaskNodeRunInfoRecord,
         TaskNodeRunInfoUpdate,
+        TaskTrajectoryRecord,
+        TrajectoryEventRecord,
     )
     from agentclaw.community.core.task.task_discovery.lock_models import (
         TaskDiscoveryLockRecord,
@@ -482,4 +485,107 @@ class TaskDiscoveryLockRepositoryProtocol(Protocol):
         deleting a row that was reaped and re-acquired by another instance
         after this holder lost interest.
         """
+        ...
+
+
+@runtime_checkable
+class TaskTrajectoryRepositoryProtocol(Protocol):
+    """Durable store for the trajectory旁路采集 tables (REQ-11).
+
+    Independent entity: NO FK / NO query dependency on ``task_action_log`` or
+    ``task_callback`` (spec invariant). ``gmt_*`` columns are ``DateTime`` on the
+    records (the int↔datetime conversion is NOT done here — the P2 emitter
+    supplies datetime on emit, the P4 assembler reads datetime and converts to
+    int on read).
+    """
+
+    @abstractmethod
+    def insert_event(self, record: "TrajectoryEventRecord") -> "TrajectoryEventRecord":
+        """INSERT one append-only event row (NO idempotency check — duplicate
+        emissions may produce duplicate rows, business-accepted; the table has
+        no unique constraint). Writes ``gmt_create``/``gmt_modified`` from the
+        record when supplied (datetime derived from the domain int-ms by the
+        P2 emitter); the ORM ``func.now()`` default is a fallback only.
+        ``ext_info``/``analysis`` are raw strings on the record and are
+        inserted as-is. Returns the stored record (with ``id``/``gmt_*``)."""
+        ...
+
+    @abstractmethod
+    def upsert_head(
+        self,
+        task_id: str,
+        *,
+        analysis: Optional[str] = None,
+    ) -> "TaskTrajectoryRecord":
+        """Ensure the per-task head row exists (``task_trajectory`` is unique on
+        ``task_id``). If a row already exists, **DO NOT overwrite**
+        ``analysis``/``gmt_modified`` — preserve the already-backfilled analysis
+        and its mtime (spec: "已有行的 analysis/gmt_modified 不被覆盖"). If absent,
+        insert a new head with the passed ``analysis`` (default ``None``) and
+        fresh ``gmt_create``/``gmt_modified`` (the ORM ``func.now()`` default
+        fires). Returns the existing-or-new record."""
+        ...
+
+    @abstractmethod
+    def backfill_analysis(
+        self,
+        task_id: str,
+        analysis_json: str,
+        *,
+        now: Optional[datetime] = None,
+    ) -> int:
+        """Two-table UPDATE: set ``analysis=analysis_json`` and
+        ``gmt_modified=(now or utcnow)`` on BOTH ``task_trajectory`` (WHERE
+        ``task_id``) and ``task_trajectory_events`` (WHERE ``task_id``).
+        ``gmt_modified`` is set EXPLICITLY in the UPDATE dict (do NOT rely on
+        the ORM ``onupdate=func.now()`` — bulk ``Query.update()`` bypasses
+        Python-side onupdate callbacks; setting it explicitly is deterministic
+        across SQLite + OceanBase). Never touches ``gmt_create``/typed columns/
+        ``ext_info``. Returns the total affected rows (head + events)."""
+        ...
+
+    @abstractmethod
+    def list_events_by_task(self, task_id: str) -> list["TrajectoryEventRecord"]:
+        """SELECT all event rows for ``task_id`` ordered by ``gmt_create ASC,
+        id ASC``. The ``id`` tiebreaker is REQUIRED — ``gmt_create`` is
+        timestamp-second-precision and same-second ties are explicitly accepted
+        by the spec, so ``id`` is the deterministic tiebreaker for a stable
+        timeline recovery."""
+        ...
+
+    @abstractmethod
+    def list_head(self, task_id: str) -> Optional["TaskTrajectoryRecord"]:
+        """Return the head record for ``task_id`` (the P4 assembler reads the
+        head's persisted ``analysis``), or ``None`` when the task has no head
+        row yet. Read counterpart of ``upsert_head``."""
+        ...
+
+
+@runtime_checkable
+class TaskCallbackCorrelationRepositoryProtocol(Protocol):
+    """Durable store for ``task_callback_correlation`` (REQ-P1) — persists the
+    callback↔(task, node, retry) correlation across restarts so in-flight
+    callbacks arriving after an instance restart can be re-attached to the
+    right node by ``event_id``."""
+
+    @abstractmethod
+    def upsert_on_register(
+        self,
+        event_id: str,
+        main_session_id: str,
+        task_id: str,
+        node_id: str,
+        retry: int,
+    ) -> "TaskCallbackCorrelationRecord":
+        """Idempotent on ``event_id``: if a row with ``event_id`` exists, return
+        it unchanged (DO NOT duplicate; do not mutate the stored correlation
+        fields). Else INSERT a new correlation row. Spec REQ-P1: "在
+        TaskLoopCallback 注册时写、回调处理完按 event_id 幂等"."""
+        ...
+
+    @abstractmethod
+    def find_by_event_id(
+        self, event_id: str
+    ) -> Optional["TaskCallbackCorrelationRecord"]:
+        """Return the correlation row for ``event_id`` or ``None`` when unknown."""
         ...
