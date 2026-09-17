@@ -77,7 +77,12 @@ from agentclaw.community.core.task.task_runner.callback_adapter import (
     EXEC_ERROR_ORIGIN_PARSE,
     EXEC_ERROR_ORIGIN_TERMINAL_INVALID,
     EXEC_ERROR_ORIGIN_TRANSPORT,
+    TaskLoopCallback,
     _classify_exec_error_origin,
+)
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor import (
+    TaskExecutor,
 )
 
 
@@ -842,3 +847,215 @@ class TestDefensiveAndDecision14:
         node = svc._get_node(graph, "c1")
         assert node.status == Status.HUNG  # gate main logic completed
         assert [ev for ev in node.run_info.action_log if ev.action.value == "execute"]
+
+
+# ---------------------------------------------------------------------------
+# Issue 1 (prod gap) — executor surfaces _exec_request_input onto the node
+# ---------------------------------------------------------------------------
+
+
+class _ExecBot:
+    """Minimal OpenApiBotPort stub: ``send_message`` returns a BotSendResult;
+    ``ensure_grant`` no-op (the executor may call it)."""
+
+    def __init__(self):
+        self.sent = []
+
+    async def ensure_grant(self, bot_id):
+        return None
+
+    async def send_message(self, *, bot_id, message, metadata):
+        self.sent.append((bot_id, message, metadata))
+        return BotSendResult(run_id="rid_stub", session_id="sid_stub")
+
+
+class _LongFormatter:
+    """Stub PromptFormatter returning a fixed long request原文 (>500 chars) to
+    assert the gate carries it verbatim (NOT truncated)."""
+
+    def __init__(self, payload: str):
+        self._payload = payload
+
+    def format_execute(self, ctx, node):
+        return self._payload
+
+
+class _ExecCtx:
+    def build(self, task_id, node_id):
+        return {"mode": "execute", "node_spec": None}
+
+
+class TestExecutorSurfacesExecRequestInput:
+    """Issue 1: ``TaskExecutor._dispatch_single_bot`` writes the downstream
+    request原文 (``message``) onto the dispatched node's
+    ``run_info.extend_props["_exec_request_input"]`` — persisted via
+    ``update_task_node_info`` (the same extend_props seam that carries
+    group_id/session_id/run_id, survives restart) — so the engine EXECUTE/VERIFY
+    gate can carry it as ``action_input`` (request原文, NOT truncated)."""
+
+    def test_executor_surfaces_long_request_input_then_gate_carries_it_verbatim(self):
+        svc = TaskGraphService()
+        graph = svc.initialize_graph(_task_info("t1"))
+        _set_running_node(svc, "t1", "c1", run_mode="single_bot", assignee="bot9:ent1")
+        long_req = "Q" * 2000  # >500 chars to assert NOT truncated
+        bot = _ExecBot()
+        exe = TaskExecutor(
+            bot=bot, bcs=None, formatter=_LongFormatter(long_req),
+            context=_ExecCtx(), sink=None, poller=None, graph=svc,
+            task_settings=None,  # skill_report defaults True → no poller.register
+        )
+        node = svc._get_node(graph, "c1")
+        ok = _run(exe.dispatch([node]))
+        assert ok == [True]
+        # the bot was actually sent the long request原文
+        assert bot.sent[0][1] == long_req
+        # the executor persisted _exec_request_input onto the node (non-truncated, persisted)
+        updated = svc._get_node(graph, "c1")
+        assert updated.run_info.extend_props["_exec_request_input"] == long_req
+        assert len(updated.run_info.extend_props["_exec_request_input"]) == 2000
+
+        # the engine EXECUTE(err) gate reads the surfaced request原文 as action_input
+        repo = _TrajRepo()
+        eng = _TrajectoryCaseEngine(
+            svc, planner=_StubPlanner(), dispatcher=_StubDispatcher(),
+            runner=_StubRunner(), trajectory_repo=repo,
+        )
+        patch = CallbackAdapter().adapt(
+            _data(loop_task_id="t1::c1", success=True, exec_error="底层接口 boom")
+        )
+        _run(eng.on_report(patch))
+        rec = _execute_records(repo)[0]
+        assert rec.action_input == long_req  # the gate read the surfaced request原文
+        assert len(rec.action_input) == 2000  # NOT truncated
+
+    def test_executor_send_failure_does_not_surface_request_input(self):
+        """If ``send_message`` raises a non-retryable OpenAPI error, the dispatch
+        returns False early (before the persist point) → no ``_exec_request_input``
+        is written; the gate later reads None. Asserts the persist does NOT happen
+        on a failed dispatch (defensive: a failed send must not leak a request原文)."""
+        from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
+            OpenApiBadRequestError,
+        )
+
+        class _FailBot(_ExecBot):
+            async def send_message(self, *, bot_id, message, metadata):
+                raise OpenApiBadRequestError("400")
+
+        svc = TaskGraphService()
+        graph = svc.initialize_graph(_task_info("t1"))
+        _set_running_node(svc, "t1", "c1", run_mode="single_bot", assignee="bot9:ent1")
+        exe = TaskExecutor(
+            bot=_FailBot(), bcs=None, formatter=_LongFormatter("Q" * 600),
+            context=_ExecCtx(), sink=None, poller=None, graph=svc, task_settings=None,
+        )
+        node = svc._get_node(graph, "c1")
+        ok = _run(exe.dispatch([node]))
+        assert ok == [False]
+        # no _exec_request_input written (the dispatch bailed before the persist point)
+        updated = svc._get_node(graph, "c1")
+        assert "_exec_request_input" not in updated.run_info.extend_props
+
+
+# ---------------------------------------------------------------------------
+# Issue 2a (prod gap) — ingest_parse_error emits a parse_error trajectory row
+# ---------------------------------------------------------------------------
+
+
+class _CapturingTrajRepo:
+    """Fake trajectory repo — captures insert_event calls (no SQLite)."""
+
+    def __init__(self):
+        self.records: list[TrajectoryEventRecord] = []
+
+    def insert_event(self, record):
+        self.records.append(record)
+        return record
+
+
+class _StubCallbackRepo:
+    """Fake callback repo — records upsert / upsert_error calls."""
+
+    def __init__(self):
+        self.upserted = []
+
+    def upsert_error(self, rec):
+        self.upserted.append(rec)
+
+    def upsert(self, rec):
+        self.upserted.append(rec)
+
+
+class TestIngestParseErrorEmitsParseTrajectory:
+    """Issue 2a: ``ingest_parse_error`` never reaches ``engine.on_report`` (no patch)
+    so the EXECUTE/VERIFY gate can't classify it. ``ingest_parse_error`` now fires a
+    ``parse_error`` trajectory event directly via the injected trajectory emitter
+    (optional dependency; None → no-op)."""
+
+    def test_ingest_parse_error_emits_parse_error_trajectory_with_callback_repo(self):
+        repo = _CapturingTrajRepo()
+        cb_repo = _StubCallbackRepo()
+        cb = TaskLoopCallback(
+            CallbackAdapter(), engine=None, callback_repo=cb_repo,
+            trajectory_repo=repo,
+        )
+        raw = {"flow_id": "flow-99",
+               "ext_info": {"flow_runs": {"origin_session_id": "S-9"}}}
+        _run(cb.ingest_parse_error(raw, "parse boom: malformed json"))
+        # exactly one parse_error trajectory row
+        assert len(repo.records) == 1
+        rec = repo.records[0]
+        assert rec.action_type == "execute"
+        assert rec.action_result == "parse_fail"
+        assert rec.error_type == "parse_error"
+        assert rec.error_msg is not None
+        assert "parse boom" in rec.error_msg
+        assert rec.error_msg == "parse boom: malformed json"  # ≤500, untruncated
+        assert rec.action_input is None  # request原文 not in scope for parse
+        assert rec.ext_info is not None
+        payload = json.loads(rec.ext_info)
+        assert payload["schema_v"] == 1
+        assert "parse_error" in payload
+        assert payload["parse_error"] == "parse boom: malformed json"
+        assert rec.status_to == "FAILED"
+        # the audit record write (main logic) ALSO happened and is NOT masked
+        assert len(cb_repo.upserted) == 1
+        assert cb_repo.upserted[0].exec_error == "parse boom: malformed json"
+
+    def test_ingest_parse_error_fires_trajectory_even_without_callback_repo(self):
+        """The parse trajectory fires regardless of whether the audit repo is
+        present (the parse error happened; the trajectory records it for root-cause
+        even when audit is skipped)."""
+        repo = _CapturingTrajRepo()
+        cb = TaskLoopCallback(
+            CallbackAdapter(), engine=None, callback_repo=None,
+            trajectory_repo=repo,
+        )
+        _run(cb.ingest_parse_error({"flow_id": "f1"}, "boom"))
+        assert len(repo.records) == 1
+        assert repo.records[0].error_type == "parse_error"
+
+    def test_ingest_parse_error_with_no_trajectory_repo_is_noop(self):
+        """``trajectory_repo=None`` (not injected) → emitter no-ops; the audit
+        record write still completes; no raise."""
+        cb_repo = _StubCallbackRepo()
+        cb = TaskLoopCallback(
+            CallbackAdapter(), engine=None, callback_repo=cb_repo,
+            trajectory_repo=None,
+        )
+        _run(cb.ingest_parse_error({"flow_id": "f1"}, "parse boom"))  # must NOT raise
+        assert len(cb_repo.upserted) == 1  # audit still wrote
+        # no trajectory repo → no trajectory row (no raise)
+
+    def test_ingest_parse_error_long_error_msg_is_truncated(self):
+        """``error_msg`` is truncated ≤500 (mirrors the gate / PLAN-gate convention)."""
+        repo = _CapturingTrajRepo()
+        cb = TaskLoopCallback(
+            CallbackAdapter(), engine=None, callback_repo=_StubCallbackRepo(),
+            trajectory_repo=repo,
+        )
+        long_err = "E" * 2000
+        _run(cb.ingest_parse_error({"flow_id": "f1"}, long_err))
+        rec = repo.records[0]
+        assert rec.error_msg is not None
+        assert len(rec.error_msg) <= 500
+        assert "..." in rec.error_msg

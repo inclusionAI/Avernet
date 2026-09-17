@@ -89,6 +89,12 @@ _DEFAULT_MAX_HARNESS = 2  # 执行报错 harness 重投上限(达上限→HUNG)
 # ``extend_props_patch["_exec_error_origin"]``)→ ReasonCatalog 映射,engine EXECUTE/VERIFY
 # 闸门据此设置轨迹事件的 ``error_type``。origin 字符串以 ``callback_adapter`` 的常量为
 # 单一真相源(避免漂移);未映射的 origin 值→ ``error_type=None``(gate 防御性降级)。
+#
+# ``transport`` origin 在本 EXECUTE/VERIFY 闸门是 **dormant-but-retained**:``plan_call_fail`` /
+# ``dispatch_exception`` 发生在 PLAN/DISPATCH 闸门(分别由 P3-2 PLAN 轨迹捕为 ``plan_failure``、
+# P3-1 DISPATCH 轨迹捕 dispatch 类结局),不途经 EXECUTE/VERIFY;无 prod 路径在此 surface
+# transport origin。该映射 + ``_classify_exec_error_origin`` 的 transport 分类单测覆盖之,留作
+# 末来若 patch 携带 transport origin 时的 gate 能正确分类(不新增 fire 路径)。
 _EXEC_ERROR_ORIGIN_TO_REASON: dict[str, ReasonCatalog] = {
     EXEC_ERROR_ORIGIN_BOT_INTERFACE: ReasonCatalog.UNDERLYING_INTERFACE_ERROR,
     EXEC_ERROR_ORIGIN_PARSE: ReasonCatalog.PARSE_ERROR,

@@ -20,6 +20,8 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
 )
 from agentclaw.community.core.task.task_loop_callback_protocol import TaskLoopCallbackProtocol
+from agentclaw.community.core.task.task_trajectory.models import ReasonCatalog
+from agentclaw.community.core.task.task_trajectory.payloads import emit_trajectory_event
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.protocols.task import (
@@ -364,12 +366,18 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         adapter: CallbackAdapter,
         engine,
         callback_repo: "TaskCallbackRepositoryProtocol | None" = None,
+        trajectory_repo=None,
     ) -> None:
         """adapter: CallbackAdapter;engine: ExecutionEngine(on_report async 入口)。
-        callback_repo: 回投落库协议(DI 在 prod 注入真实实现;``None`` 时跳过落库,纯内核/单测路径用)。"""
+        callback_repo: 回投落库协议(DI 在 prod 注入真实实现;``None`` 时跳过落库,纯内核/单测路径用)。
+        trajectory_repo: 任务轨迹旁路采集落库协议(可选,REQ-5):prod 经 DI 注入,供
+        ``ingest_parse_error`` 旁路发射 ``parse_error`` 轨迹事件(不进 on_report 链路);
+        ``None`` 时 emitter 静默 no-op(与引擎内 ``_log_trajectory`` 同约定)。镜像 ``callback_repo``
+        的注入形态(可选、None no-op),不破坏既有构造调用。"""
         self._adapter = adapter
         self._engine = engine
         self._callback_repo = callback_repo
+        self._trajectory_repo = trajectory_repo
 
     def _is_already_processed(self, event_id: str | None) -> bool:
         """event-idempotency guard (spec §12): a callback whose ``event_id`` is
@@ -485,29 +493,72 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
     async def ingest_parse_error(self, raw: dict, error: str) -> None:
         """回调解析失败兜底:按 ``(run_id=flow_id, node_id="")`` 经 ``upsert_error`` 仅落
         ``exec_error``(错误信息)+ ``extend_props``(原始上报数据),其它已有字段不动;不推进编排核。
-        无 callback_repo → 跳过(仅日志)。"""
-        if self._callback_repo is None:
+        无 callback_repo → 跳过审计落库(仅日志)。**REQ-5**:无论是否有 callback_repo,都旁路
+        发射一条 ``parse_error`` 轨迹事件(parse 失败不进 on_report,故从 ingest 路径直接发射)。"""
+        if self._callback_repo is not None:
+            ext = raw.get("ext_info") if isinstance(raw, dict) else None
+            flow_runs = (ext.get("flow_runs") if isinstance(ext, dict) else None) or {}
+            flow_runs = flow_runs if isinstance(flow_runs, dict) else {}
+            rec = TaskCallbackRecord(
+                id=0,
+                invoker="claw_mind",
+                run_id=(raw.get("flow_id") or "") if isinstance(raw, dict) else "",
+                node_id="",
+                main_session_id=(flow_runs.get("origin_session_key") or flow_runs.get("origin_session_id") or ""),
+                status=None,
+                orig_callback_data=(json.dumps(raw, ensure_ascii=False, default=str) if isinstance(raw, dict) else ""),
+                execution_graph=None,
+                result=None,
+                result_success=None,
+                exec_error=error,
+                extend_props=raw if isinstance(raw, dict) else None,
+            )
+            self._callback_repo.upsert_error(rec)
+            logger.info("[task][task_callback] 解析失败兜底已落库 run_id=%s exec_error=%s", rec.run_id, error[:120])
+        else:
             logger.warning("[task][task_callback] 解析失败兜底落库跳过(无 callback_repo): %s", error)
+        # REQ-5: 旁路发射 parse_error 轨迹事件(独立于上面的审计落库;emitter 决策 #14 吞+WARNING,
+        # 不掩盖上面的 upsert_error 主逻辑)。parse 失败不进 on_report,故从 ingest 路径直接发射。
+        self._emit_parse_trajectory(raw, error)
+
+    def _emit_parse_trajectory(self, raw: dict, error: str) -> None:
+        """REQ-5: 发射一条 ``parse_error`` 轨迹事件(不可解析的 execute/verify 回调)。
+
+        parse 失败不途径 ``engine.on_report`` (无 ``TaskNodePatch`` → EXECUTE/VERIFY 闸门不发),
+        故从 ``ingest_parse_error`` 直接旁路发射:
+          * ``action_type=execute`` (不可解析的 execute/verify 响应;无法区分时取 execute)
+          * ``error_type=ReasonCatalog.PARSE_ERROR`` ("parse_error")
+          * ``error_msg=<parse error string, 截断 ≤500>``
+          * ``action_input=None`` (请求原文不在 ingest_parse_error 作用域 — None 可接受)
+          * ``ext_info={"parse_error": <error>}`` (标识 + 诊断)
+          * ``status_to=Status.FAILED``;``task_id=flow_id``、``node_id=""`` (路由不可解析)
+
+        决策 #14:emitter 内 try/except + WARNING(吞而不抛);本方法在外层兜一层装配 try/except
+        + WARNING,使 fetch flow_id / 截断 等装配异常也不掩盖 ingest 主逻辑(审计落库已先行)。
+        ``self._trajectory_repo is None`` → 静默 no-op(轻量 DI / 未注入轨迹协议)。
+        """
+        if self._trajectory_repo is None:
             return
-        ext = raw.get("ext_info") if isinstance(raw, dict) else None
-        flow_runs = (ext.get("flow_runs") if isinstance(ext, dict) else None) or {}
-        flow_runs = flow_runs if isinstance(flow_runs, dict) else {}
-        rec = TaskCallbackRecord(
-            id=0,
-            invoker="claw_mind",
-            run_id=(raw.get("flow_id") or "") if isinstance(raw, dict) else "",
-            node_id="",
-            main_session_id=(flow_runs.get("origin_session_key") or flow_runs.get("origin_session_id") or ""),
-            status=None,
-            orig_callback_data=(json.dumps(raw, ensure_ascii=False, default=str) if isinstance(raw, dict) else ""),
-            execution_graph=None,
-            result=None,
-            result_success=None,
-            exec_error=error,
-            extend_props=raw if isinstance(raw, dict) else None,
-        )
-        self._callback_repo.upsert_error(rec)
-        logger.info("[task][task_callback] 解析失败兜底已落库 run_id=%s exec_error=%s", rec.run_id, error[:120])
+        try:
+            flow_id = (raw.get("flow_id") or "") if isinstance(raw, dict) else ""
+            err = error if isinstance(error, str) else str(error)
+            err_msg = err if len(err) <= 500 else err[:497] + "..."
+            emit_trajectory_event(
+                self._trajectory_repo,
+                flow_id,    # task_id = flow_id(callback routing,可能非框架 task)
+                "",         # node_id 未知(不可解析路由)
+                "execute",  # TrajectoryActionType.EXECUTE — 不可解析的 execute/verify 响应
+                action_result="parse_fail",
+                error_type=ReasonCatalog.PARSE_ERROR,
+                error_msg=err_msg,
+                action_input=None,
+                ext_info={"parse_error": err},
+                status_from=None,
+                status_to=Status.FAILED,
+                attempt=0,
+            )
+        except Exception as exc:  # noqa: BLE001  观测旁路:吞而不抛 + WARNING(决策 #14)
+            logger.warning("[task][trajectory][parse] ingest_parse_error 发射失败: %s", exc)
 
     def _fallback_persist_audit(self) -> None:
         """After a callback-driven graph mutation, if the graph service did not

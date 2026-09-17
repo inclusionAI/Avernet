@@ -323,7 +323,10 @@ class TaskExecutor(TaskExecutorBbsMixin):
                         session_id=session_id,
                     )
                 )
-            self._persist_dispatch_ids(node, session_id=session_id, run_id=run_id)
+            self._persist_dispatch_ids(
+                node, session_id=session_id, run_id=run_id,
+                exec_request_input=message,  # REQ-5: 下发请求原文(不截断)
+            )
             return True
 
     async def _dispatch_single_bot_2_group(
@@ -415,7 +418,10 @@ class TaskExecutor(TaskExecutorBbsMixin):
             )
         node.run_info.assignee = gid
         node.run_info.run_mode = "coop_group"
-        self._persist_dispatch_ids(node, group_id=gid, session_id=session_id, run_id=None)
+        self._persist_dispatch_ids(
+            node, group_id=gid, session_id=session_id, run_id=None,
+            exec_request_input=gf.extend_props,  # REQ-5: 群 context = 下发请求原文
+        )
         logger.info(
             "[task][task-executor] singlebot_2_group 旁路完成 task=%s node=%s group_id=%s session=%s → BcsGroupHandle 收敛",
             node.task_id, node.node_id, gid, session_id,
@@ -448,8 +454,13 @@ class TaskExecutor(TaskExecutorBbsMixin):
                         run_id=None,
                     )
                 )
+            # REQ-5: chat/manager_worker 群 context 在建群(form_coop_group)时已落群;此处 best-effort 落
+            # ``_context.build`` 作请求原文代表(精确群 context 的落点在 form_coop_group,后续迭代可补)。
+            try: _req_ctx = self._context.build(node.task_id, node.node_id)
+            except Exception: _req_ctx = None  # noqa: BLE001  best-effort; 不阻断投递
             self._persist_dispatch_ids(
-                node, group_id=group_id, session_id=session_id, run_id=None
+                node, group_id=group_id, session_id=session_id, run_id=None,
+                exec_request_input=_req_ctx,
             )
             return True
 
@@ -479,7 +490,8 @@ class TaskExecutor(TaskExecutorBbsMixin):
                 )
             )
         self._persist_dispatch_ids(
-            node, group_id=group_id, session_id=None, run_id=run_id
+            node, group_id=group_id, session_id=None, run_id=run_id,
+            exec_request_input=prompt,  # REQ-5: state_machine 请求原文 = format_execute 的 prompt
         )
         return True
 
@@ -490,11 +502,15 @@ class TaskExecutor(TaskExecutorBbsMixin):
         group_id: str | None = None,
         session_id: str | None = None,
         run_id: str | None = None,
+        exec_request_input: Any = None,
     ) -> None:
-        """动态派发后把 group_id/session_id/run_id 落进节点 run_info.extend_props(dashboard 可见)。
-        协作群(``coop_group``)写 group_id+session_id(chat/manager_worker)或 group_id+run_id(state_machine);
-        单 bot(``single_bot``)无群,只写 session_id 与 run_id(group_id 留空不落键),与协作群链路对齐,
-        便于 dashboard 观测及将来按 session_id 回调收敛。仅 extend_props fold,不翻态(节点已由 _drain 置 RUNNING)。"""
+        """动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props(dashboard 可见)。
+        协作群写 group_id+session_id(chat/manager_worker)或 group_id+run_id(state_machine);
+        单 bot 只写 session_id/run_id(group_id 不落键)。仅 extend_props fold,不翻态(节点已由 _drain 置 RUNNING)。
+
+        REQ-5: ``exec_request_input`` = 下发请求原文(NOT truncated),落 ``_exec_request_input`` 同 seam
+        (跨重启可读),供 engine EXECUTE/VERIFY 闸门读作轨迹 ``action_input``。str 原样;非 str 经
+        ``json.dumps``。serialize 失败 → INFO log + 跳过该键,绝不阻断投递(观测旁路)。"""
         if self._graph is None:
             return
         ep: dict[str, Any] = {}
@@ -504,6 +520,19 @@ class TaskExecutor(TaskExecutorBbsMixin):
             ep["session_id"] = session_id
         if run_id is not None:
             ep["run_id"] = run_id
+        if exec_request_input is not None:
+            try:
+                text = exec_request_input if isinstance(exec_request_input, str) else json.dumps(
+                    exec_request_input, ensure_ascii=False, default=str
+                )
+            except Exception:  # noqa: BLE001  观测旁路,绝不阻断投递
+                logger.info(
+                    "[task][task-executor] _exec_request_input serialize failed task=%s node=%s",
+                    node.task_id, node.node_id,
+                )
+                text = None
+            if text is not None:
+                ep["_exec_request_input"] = text
         self._graph.update_task_node_info(
             TaskNodePatch(
                 task_id=node.task_id, node_id=node.node_id, extend_props_patch=ep

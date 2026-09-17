@@ -149,7 +149,8 @@ class TaskService(TaskServiceExecutionMixin):
         self._bg_tasks: set[asyncio.Task] = set()
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
         self._callback = TaskLoopCallback(
-            CallbackAdapter(), self._engine, callback_repo=callback_repo
+            CallbackAdapter(), self._engine, callback_repo=callback_repo,
+            trajectory_repo=self._trajectory_repo,
         )
         # harness 复位重投入口回填(编排核已建,harness 才能拿到 on_harness)+ 启动旁路巡检 daemon 线程
         if self._harness is not None:
