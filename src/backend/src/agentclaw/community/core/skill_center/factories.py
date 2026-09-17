@@ -186,7 +186,7 @@ class LocalSkillPackageStorage:
 
     async def prepare(self) -> None:
         """Remove an orphaned failed upload before writing a first package."""
-        if not await self._filesystem.exists(self._device_directory):
+        if not await self.exists():
             return
         if not await self._filesystem.delete_tree(self._device_directory):
             raise OSError("unable to clear prior Local Skill upload")
@@ -200,7 +200,8 @@ class LocalSkillPackageStorage:
 
     async def exists(self) -> bool:
         """Whether this storage currently has an authoritative package."""
-        return await self._filesystem.exists(self._device_directory)
+        entries = await self._filesystem.list_dir(self._device_directory)
+        return entries is not None
 
     async def read_file(self, relative_path: str) -> bytes | None:
         """Read one validated package-relative file without exposing its locator."""
@@ -242,7 +243,7 @@ class LocalSkillPackageStorage:
         explicitly cleans it up.
         """
         files = await self._read_package_files()
-        if await target._filesystem.exists(target.directory):
+        if await target.exists():
             if not replace:
                 raise OSError("Local Skill copy target already exists")
             if not await target.cleanup():
