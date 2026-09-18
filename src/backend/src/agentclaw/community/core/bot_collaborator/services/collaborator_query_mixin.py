@@ -69,14 +69,15 @@ class CollaboratorQueryMixin:
         if not bot:
             raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
 
-        bot_pk = bot["id"]
         owner_id_from_bot = bot["owner_id"]
 
-        # 2. 检查用户权限（需要 MEMBER 或更高）
-        self.check_permission(
-            bot_pk=bot_pk,
+        # 2. 检查用户权限（需要 MEMBER 或更高）——有效阶梯而非行阶梯：
+        # 谁能读协作者名单是操作级问题，且锁信息的持有者解析经此门。
+        # 行阶梯在此拒绝无行空间成员 → 锁服务把异常吞成"无协作者" →
+        # 成员读到的永远是"无人持锁"。Bot 记录已在手，直走 operable。
+        self._check_operable_permission(
+            bot=bot,
             user_id=user_id,
-            owner_id=owner_id_from_bot,
             required_level=PermissionLevel.MEMBER,
             env=env,
         )

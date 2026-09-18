@@ -454,7 +454,9 @@ def test_list_collaborators_single_with_owner_keeps_legacy_behavior(
     record = Mock(bot_id="bot-123", owner_id=OWNER)
     bot_repo.get_by_id_and_owner.return_value = bot
     collaborator_repo.list_by_bot.return_value = [record]
-    service.check_permission = Mock()
+    # 名单门已换有效阶梯（行 ⊕ 空间授予 ⊕ COSEC）——直接替换同名内部
+    # 方法以保持本测试"门被以 MEMBER 一问"的既有观测点。
+    service._check_operable_permission = Mock()
 
     records = service.list_collaborators(
         bot_id="bot-123",
@@ -467,10 +469,9 @@ def test_list_collaborators_single_with_owner_keeps_legacy_behavior(
     assert records == [record]
     bot_repo.get_by_id_and_owner.assert_called_once_with("bot-123", OWNER)
     bot_repo.get_by_id.assert_not_called()
-    service.check_permission.assert_called_once_with(
-        bot_pk=11,
+    service._check_operable_permission.assert_called_once_with(
+        bot=bot,
         user_id=MEMBER,
-        owner_id=OWNER,
         required_level=PermissionLevel.MEMBER,
         env="dev",
     )

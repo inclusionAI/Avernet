@@ -290,6 +290,13 @@ class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
     ) -> None:
         """检查用户是否有足够的权限。
 
+        行阶梯（owner 短路 + 角色映射）：编辑器管理面（add/list/update 的
+        ADMIN 档）与内部便捷检的门。空间授予的上限是 MEMBER，任何
+        required_level 超过它的调用在此与在有效阶梯处同答，故不在此扩大
+        依赖面；需要有效阶梯语义的调用方（如 ``list_collaborators`` 的
+        名单门，锁信息路径依赖它）手边有记录，走
+        ``_check_operable_permission``。
+
         Args:
             bot_pk: Bot 主键
             user_id: 用户工号
