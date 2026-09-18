@@ -198,6 +198,34 @@ def test_migrated_active_marker_rejects_broken_managed_entry(tmp_path):
     assert result.evidence["reason"] == "active_managed_entry_invalid"
 
 
+@pytest.mark.parametrize("activation_state", ["active", "finalizing"])
+@pytest.mark.parametrize(
+    "missing_key", ["preparation_id", "migration_generation"]
+)
+def test_partial_migration_identity_is_invalid_without_ready_marker(
+    tmp_path,
+    activation_state,
+    missing_key,
+):
+    home, _, pool_local, pool_repo = _ready_home(tmp_path)
+    _write_active_marker(home, activation_state=activation_state)
+    (pool_local.parent / ".pool-ready").unlink()
+    marker_path = pool_local.parent / ".pool-active"
+    marker = json.loads(marker_path.read_text())
+    marker.pop(missing_key)
+    marker_path.write_text(json.dumps(marker))
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "active_marker_contract_mismatch"
+
+
 def test_minimal_steady_marker_does_not_require_migration_identity(tmp_path):
     home, active_root, _, pool_repo = _ready_home(tmp_path)
     (active_root / "skills-repo").unlink()

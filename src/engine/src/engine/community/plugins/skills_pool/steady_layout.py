@@ -105,12 +105,17 @@ def inspect_openclaw_steady_active(
             reason="active_marker_temporarily_unavailable",
             error=error,
         )
-    if isinstance(marker, dict) and marker.get("activation_state") == "finalizing":
-        return None
-    if isinstance(marker, dict) and (
-        "preparation_id" in marker or "migration_generation" in marker
-    ):
-        return None
+    if isinstance(marker, dict):
+        has_preparation = "preparation_id" in marker
+        has_generation = "migration_generation" in marker
+        if has_preparation != has_generation:
+            return _invalid(
+                layout=layout,
+                contract=expected_contract_version,
+                reason="active_marker_contract_mismatch",
+            )
+        if marker.get("activation_state") == "finalizing" or has_preparation:
+            return None
     if not steady_active_marker_valid(
         marker,
         engine="openclaw",
