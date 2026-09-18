@@ -620,6 +620,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # require_principal gate it behaves the same as USER_GATED.
     ("POST", "/openapi/v1/collaboration/tasks/execute"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/collaboration/tasks/trajectory"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): AdmissionMode.OPEN,
     # Grant/revoke are stateless relays to secbaas (api-key server-side; the

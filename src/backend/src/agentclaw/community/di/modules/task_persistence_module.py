@@ -71,7 +71,13 @@ from agentclaw.community.core.task.task_trajectory.assembler import (
 from agentclaw.community.core.task.task_trajectory.analyzer import (
     TaskTrajectoryAnalyzer,
 )
+from agentclaw.community.core.task.task_trajectory.trajectory_service import (
+    TaskTrajectoryService,
+)
 from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
+from agentclaw.community.api.task.task_trajectory_service import (
+    TaskTrajectoryServiceProtocol,
+)
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
 
 
@@ -157,3 +163,40 @@ class TaskPersistenceModule(Module):
             )
             config = None
         return TaskTrajectoryAnalyzer(bot=bot, config=config)
+
+    @singleton
+    @provider
+    def task_trajectory_service(
+        self, injector: Injector
+    ) -> TaskTrajectoryServiceProtocol:
+        """Construct the trajectory service facade (REQ-8, P5b consumption layer).
+
+        Wires the P4 assembler + P1b repo + P5a analyzer + deployment config
+        into the single ``get_trajectory(task_id, *, do_analysis)`` entrypoint.
+        The assembler / repo / analyzer are bound just above (or via the
+        ``task_trajectory_analyzer`` provider); the config is OPTIONAL — a
+        lightweight DI injector that did not bind ``TrajectoryAnalysisConfig``
+        (via ``TaskTrajectoryConfigModule``) gets ``config=None``, which the
+        service treats as "analysis bot not configured" → ``do_analysis=true``
+        raises ``TrajectoryAnalysisNotConfiguredError`` (503); the default read
+        path (``do_analysis=false``) never touches the config.
+
+        Bound here (alongside the assembler/analyzer) so the trajectory read +
+        analysis + service wiring lives in one module. ``get_trajectory`` is
+        async — invokable from the async router handler.
+        """
+        config: TrajectoryAnalysisConfig | None
+        try:
+            config = injector.get(TrajectoryAnalysisConfig)
+        except Exception as exc:  # noqa: BLE001  ConfigModule 未装配时降级 None
+            logger.info(
+                "[task-persistence] TrajectoryAnalysisConfig 未绑定 → 轨迹服务分析 bot 未配置:%s: %s",
+                type(exc).__name__, exc,
+            )
+            config = None
+        return TaskTrajectoryService(
+            assembler=injector.get(TaskTrajectoryAssembler),
+            repo=injector.get(TaskTrajectoryRepositoryProtocol),
+            analyzer=injector.get(TaskTrajectoryAnalyzer),
+            config=config,
+        )

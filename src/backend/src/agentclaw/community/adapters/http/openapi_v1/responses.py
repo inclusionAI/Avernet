@@ -283,6 +283,8 @@ from agentclaw.community.core.task.domain.errors import (
     TaskError,
     TaskNotFoundError,
     TaskStateError,
+    TrajectoryAnalysisError,
+    TrajectoryAnalysisNotConfiguredError,
 )
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
     LockNotHeldError,
@@ -812,6 +814,17 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     TaskStateError: (409, "Illegal state transition"),
     CallbackAuthError: (401, "Unauthorized"),
     CallbackCorrelationError: (400, "Bad request"),
+    # Trajectory analysis (REQ-8 / 决策 #10/#14). Two distinct statuses, two
+    # distinct operator fixes: 503 = the deployment never configured the analysis
+    # bot_id (``TrajectoryAnalysisNotConfiguredError`` — fix user_config
+    # ``task_trajectory.analysis_bot_id``); 504 = the bot was configured but the
+    # synchronous call timed out / failed / returned an unparseable response
+    # (``TrajectoryAnalysisError``). Both NO-backfill (the analyzer never returned
+    # a usable ``TrajectoryAnalysis`` → the service must not overwrite the
+    # persisted value). Listed BEFORE the ``TaskError`` base — both subclass it,
+    # and ENVELOPE_ERRORS returns on the first isinstance match in insertion order.
+    TrajectoryAnalysisNotConfiguredError: (503, "Trajectory analysis bot is not configured"),
+    TrajectoryAnalysisError: (504, "Trajectory analysis failed"),
     TaskError: (500, "Internal error"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A

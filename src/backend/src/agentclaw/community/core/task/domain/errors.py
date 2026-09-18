@@ -49,3 +49,14 @@ class TrajectoryAnalysisError(TaskError):
     (决策 #14 的吞错豁免仅限观测旁路发射,不覆盖分析执行)。P5b service 把此错映射为
     HTTP 504 且**不**回填 ``analysis``(覆盖语义在失败时保护既有值)。
     """
+
+
+class TrajectoryAnalysisNotConfiguredError(TaskError):
+    """轨迹分析 bot 未配置(``TrajectoryAnalysisConfig.analysis_bot_id is None``)。
+
+    REQ-8 + 决策 #10:``analysis_bot_id`` 是部署级配置(**非请求参数**),调用方不可选 bot。
+    未配置(部署未在 ``task_trajectory.analysis_bot_id`` 填 bot_id)时,``do_analysis=true``
+    无法分派 ``tc_bot`` 执行者 → 抛此错。P5b service 映射为 HTTP 503(服务能力未就绪,非 bot 调用失败
+    ——与 ``TrajectoryAnalysisError`` 的 504 bot 超时区分:503 = 修配置,504 = bot 挂了/慢)。``do_analysis=false``
+    纯读路径不触发此错(无需 bot)。不回填(本就没执行分析)。
+    """

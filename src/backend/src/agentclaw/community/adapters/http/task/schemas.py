@@ -825,3 +825,89 @@ class TaskSettingStateDTO(BaseModel):
     )
     enabled: bool = Field(..., description="当前开关状态")
     env: str = Field(..., description="生效环境(prod/pre/dev)")
+
+
+# ===== 任务轨迹(REQ-8 ``GET /tasks/{id}/trajectory``)DTO =====
+# 扁平投影:领域对象 ``TaskTrajectory`` / ``TrajectoryEvent`` → DTO(Rule 22 边界翻译)。
+# ``analysis`` 为 ``TrajectoryAnalysis`` JSON 字符串(客户端自行解析;执行者多源,保持 string 透出);
+# ``ext_info`` 不进领域对象(REQ-1),故事件 DTO 不含 ``ext_info``。两模式(do_analysis 真/假)同形态。
+
+
+class TrajectoryEventDTO(BaseModel):
+    """单条轨迹事件的扁平 DTO(对应领域 TrajectoryEvent,无 ext_info)。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    task_id: str = Field(..., description="归属任务 ID")
+    node_id: str = Field(..., description="节点 ID")
+    action_type: str = Field(
+        ..., description="动作类型(submit|plan|dispatch|execute|verify|reset|transition)"
+    )
+    action_result: str = Field(..., description="动作结果枚举(success|hit_single|miss|failed|sla_timeout|...)")
+    attempt: int = Field(..., description="harness 重试序号快照")
+    gmt_create: int = Field(..., description="事件发射时间(ms epoch;timeline 排序依据)")
+    gmt_modified: int = Field(..., description="最后修改时间(分析回填时更新,未回填时等于 gmt_create)")
+    action_input: str | None = Field(None, description="动作输入内容(submit=task_spec_digest/plan=prompt_digest/execute|verify=request_input;reset|transition=None)")
+    status_from: str | None = Field(None, description="动作前节点状态(未翻态时 None)")
+    status_to: str | None = Field(None, description="动作后节点状态(未翻态时 None)")
+    error_type: str | None = Field(None, description="ReasonCatalog 错误分类(成功为 None)")
+    error_msg: str | None = Field(None, description="截断后的错误消息(成功为 None)")
+    analysis: str | None = Field(None, description="内嵌 TrajectoryAnalysis JSON 字符串(未回填为 None)")
+
+
+class TaskTrajectoryDTO(BaseModel):
+    """任务轨迹 DTO(仅时间线;无 phases / 无 graph_snapshot)。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    task_id: str = Field(..., description="任务 ID")
+    timeline: list[TrajectoryEventDTO] = Field(
+        default_factory=list, description="按 gmt_create 升序的事件时间线"
+    )
+    analysis: str | None = Field(
+        None,
+        description="内嵌 TrajectoryAnalysis JSON 字符串(do_analysis=false 时取已落库值或 None;"
+        "do_analysis=true 时为本次分析结果;客户端自行解析)",
+    )
+    gmt_create: int = Field(..., description="组装产出时间(ms epoch)")
+    gmt_modified: int = Field(..., description="最后修改时间(分析回填时更新,未分析时等于 gmt_create)")
+
+
+def _enum_value(v: object) -> str | None:
+    """``StrEnum`` / ``Status`` → ``.value`` (str);``None`` → ``None``。"""
+    if v is None:
+        return None
+    return v.value if hasattr(v, "value") else str(v)
+
+
+def trajectory_to_dto(trajectory: "TaskTrajectory") -> TaskTrajectoryDTO:
+    """``TaskTrajectory``(领域)→ ``TaskTrajectoryDTO``(边界 DTO;Rule 22)。
+
+    扁平翻译:事件枚举(``action_type``/``status_from``/``status_to``/``error_type``)取 ``.value`` 字符串;
+    ``analysis`` 透传 JSON 字符串(客户端解析,不在边界反序列化为对象——执行者多源 + 保持 P0 扁平);
+    ``ext_info`` 不在领域对象(REQ-1),故事件 DTO 不含。两模式(do_analysis 真/假)返回同形态。
+    """
+    return TaskTrajectoryDTO(
+        task_id=trajectory.task_id,
+        timeline=[
+            TrajectoryEventDTO(
+                task_id=ev.task_id,
+                node_id=ev.node_id,
+                action_type=_enum_value(ev.action_type) or "",
+                action_result=ev.action_result,
+                attempt=ev.attempt,
+                gmt_create=ev.gmt_create,
+                gmt_modified=ev.gmt_modified,
+                action_input=ev.action_input,
+                status_from=_enum_value(ev.status_from),
+                status_to=_enum_value(ev.status_to),
+                error_type=_enum_value(ev.error_type),
+                error_msg=ev.error_msg,
+                analysis=ev.analysis,
+            )
+            for ev in trajectory.timeline
+        ],
+        analysis=trajectory.analysis,
+        gmt_create=trajectory.gmt_create,
+        gmt_modified=trajectory.gmt_modified,
+    )

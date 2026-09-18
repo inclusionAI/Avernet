@@ -310,6 +310,9 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/list"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/grant"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/revoke"),
+    # trajectory reads by task_id (the do_analysis=true trigger is a deployment-
+    # configured bot, not a caller-chosen one) — no caller-supplied user_id dim.
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/trajectory"),
 }
 
 # Read-only operations that accept a user_id as a caller-selected filter rather
@@ -461,7 +464,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: sit beside, so ``path`` 156 → 159 and nothing else moves.
 #: Dormant lifecycle adds one new bot-path operation (recycle); activate and
 #: status keep their existing paths while gaining addressed-owner scope.
-_BOT_ID_PLACEMENT = {"path": 160, "query": 1, "none": 104}
+#:
+#: Task trajectory (GET /collaboration/tasks/trajectory) is a task_id-keyed read
+#: with no bot_id dimension — adds one to ``none`` (104→105).
+_BOT_ID_PLACEMENT = {"path": 160, "query": 1, "none": 105}
 
 
 def _schema() -> dict:

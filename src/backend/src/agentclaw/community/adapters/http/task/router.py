@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
@@ -58,8 +58,10 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskGrantResultDTO,
     TaskRevokeRequestDTO,
     TaskRevokeResultDTO,
+    TaskTrajectoryDTO,
     task_info_request_from_dto,
     task_spec_from_dto,
+    trajectory_to_dto,
 )
 from agentclaw.community.adapters.http.task.translator import (
     is_bcn_event_payload,
@@ -87,6 +89,9 @@ from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.api.task.task_trajectory_service import (
+    TaskTrajectoryServiceProtocol,
+)
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -134,6 +139,29 @@ async def execute_task_internal(
     task_request = task_info_request_from_dto(body)
     result = await service.execute(task_request)
     return envelope(op_result_to_dto(result), request)
+
+
+@router.get("/trajectory", response_model=Envelope[TaskTrajectoryDTO])
+@envelope_errors
+async def get_task_trajectory_internal(
+    task_id: Annotated[str, Query(description="任务ID(创建时签发, bots 列表返回的 task_id)")],
+    request: Request,
+    do_analysis: Annotated[
+        bool, Query(description="是否触发 bot 总体分析(默认关闭)")
+    ] = False,
+    service: TaskTrajectoryServiceProtocol = Injected(TaskTrajectoryServiceProtocol),  # noqa: B008
+) -> Envelope[TaskTrajectoryDTO]:
+    """读取任务轨迹(内部副本;与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一
+    ``TaskTrajectoryServiceProtocol`` 委托,逻辑保持一致 —— 改其一须同步)。
+
+    do_analysis=false(默认,纯读):返回组装后的 TaskTrajectory,analysis 取已落库值或 None,
+    不写库、不调 bot;do_analysis=true:调 DI 配置注入的 bot 做总体分析(analysis_type=tc_bot、
+    analysis_executor=bot_id)→ 覆盖回填两表 analysis+gmt_modified → 返回携新 analysis 的同形态
+    TaskTrajectory。bot 未配置 → 503;bot 失败/超时 → 504 且不回填(决策 #10/#14)。原独立
+    /analysis 端点已并入此入口(决策 #10)。task_action_log / NodeAction 完全不触碰(独立旁路)。
+    """
+    trajectory = await service.get_trajectory(task_id, do_analysis=do_analysis)
+    return envelope(trajectory_to_dto(trajectory), request)
 
 
 # ===== 任务认领 Bot 授权(grant/revoke,无状态中继) =====

@@ -39,16 +39,21 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskOpResultDTO,
     TaskRevokeRequestDTO,
     TaskRevokeResultDTO,
+    TaskTrajectoryDTO,
     bbs_task_overview_to_dto,
     graph_to_dto,
     op_result_to_dto,
     task_info_record_to_dto,
     task_info_request_from_dto,
+    trajectory_to_dto,
 )
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.api.task.task_trajectory_service import (
+    TaskTrajectoryServiceProtocol,
+)
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -126,6 +131,32 @@ async def get_task_dashboard(
     else:
         graph = service.get_task_dashboard(task_id, node_id)
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
+
+
+@router.get("/trajectory", response_model=Envelope[TaskTrajectoryDTO])
+@envelope_errors
+async def get_task_trajectory(
+    task_id: Annotated[str, Query(description="任务ID(创建时签发, bots 列表返回的 task_id)")],
+    request: Request,
+    principal: PrincipalDep,
+    do_analysis: Annotated[
+        bool, Query(description="是否触发 bot 总体分析(默认关闭)")
+    ] = False,
+    service: TaskTrajectoryServiceProtocol = Injected(TaskTrajectoryServiceProtocol),  # noqa: B008
+) -> Envelope[TaskTrajectoryDTO]:
+    """读取任务轨迹(与 adapters/http/task/router.py 内部副本同一
+    TaskTrajectoryServiceProtocol 委托,逻辑保持一致 —— 改其一须同步)。
+
+    do_analysis=false(默认,纯读):返回组装后的 TaskTrajectory,analysis 取已落库值或 None,
+    不写库、不调 bot;do_analysis=true:调 DI 配置注入的 bot 做总体分析(analysis_type=tc_bot、
+    analysis_executor=bot_id,部署级配置非请求参数)→ 覆盖回填两表 analysis+gmt_modified → 返回
+    携新 analysis 的同形态 TaskTrajectory。bot 未配置 → 503;bot 失败/超时 → 504 且不回填
+    (决策 #10/#14,analysis-trigger 失败必须可见)。原独立 /analysis 端点已并入此入口(决策 #10);
+    ?narrative=true 不恢复(随 REQ-P2 裁剪)。task_action_log / NodeAction 完全不触碰(独立旁路)。
+    """
+    del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
+    trajectory = await service.get_trajectory(task_id, do_analysis=do_analysis)
+    return envelope(trajectory_to_dto(trajectory), request)
 
 
 @router.get(
