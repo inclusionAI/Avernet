@@ -362,9 +362,9 @@ lane/容量，保留 may_have_been_sent=true 和 last_error_code=unknown_ttl_exp
 | --- | --- | --- |
 | `GET /openapi/v1/collaboration/messages/{message_id}/deliveries` | query `session_id` | `DeliveryStatusView[]` |
 | `POST /openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query` | `{"message_ids":["..."]}` 或 `{"client_msg_id":"..."}` | `DeliveryStatusView[]` |
-| `POST /messages/{message_id}/deliveries/{delivery_id}/cancel` | `{"session_id":"..."}` | 每个目标的 `delivery` 和可选 `error` |
-| `POST /messages/{message_id}/deliveries/cancel` | `{"session_id":"..."}` | 同上，覆盖该消息的全部目标 |
-| `POST /messages/{message_id}/deliveries/{delivery_id}/resolve` | 见下文 | 单条 `DeliveryStatusView` |
+| `POST /openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/cancel` | `{"session_id":"..."}` | 每个目标的 `delivery` 和可选 `error` |
+| `POST /openapi/v1/collaboration/messages/{message_id}/deliveries/cancel` | `{"session_id":"..."}` | 同上，覆盖该消息的全部目标 |
+| `POST /openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/resolve` | 见下文 | 单条 `DeliveryStatusView` |
 
 批量查询最多 100 个 ID，两种选择器不能混用。client ID 查询仅匹配调用者自己的原消息。
 这些查询/取消接口使用 401、403、404、400、503 表达认证、权限、Session 不存在、无效参数和

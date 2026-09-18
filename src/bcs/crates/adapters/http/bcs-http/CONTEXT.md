@@ -7,6 +7,8 @@ GET/PUT /admin/message-delivery/policy allow authenticated Human identities from
 - HTTP delivery adapter for BCS.
 - Single resource-oriented router and route modules under `src/routes/`.
 - Request/response parsing, HTTP auth extraction, and HTTP error mapping.
+- Delivery query, cancel, and manual resolution routes share the
+  `/openapi/v1/collaboration` prefix; no unprefixed write aliases are mounted.
 - Authenticated Bot endpoints for querying current-session state-machine
   permission and submitting one-shot YAML, transient role bindings, and input.
 
