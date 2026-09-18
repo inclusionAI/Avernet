@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 700" width="1260" height="700" role="img" aria-label="架构治理闭环">
+  <style>
+    .t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
+    .m{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
+    .title{font-size:25px;font-weight:600;fill:#1F1E1C}
+    .sub{font-size:13.5px;fill:#75736E}
+    .bt{font-size:13.5px;font-weight:600}
+    .bn{font-size:22px;font-weight:600}
+    .bd{font-size:11px;fill:#5E5C57}
+    .lbl{font-size:12px;font-weight:600;fill:#8A8781;letter-spacing:.05em}
+    .loop{font-size:12px;fill:#A85C47;font-weight:600}
+    .gm{font-size:12px;font-weight:600}
+    .gd{font-size:11px;fill:#75736E}
+    .ft{font-size:12.5px;fill:#33322E}
+  </style>
+  <rect width="1260" height="700" fill="#FAF9F7"/>
+  <defs>
+    <marker id="d1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8781"/></marker>
+    <marker id="d2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#A85C47"/></marker>
+  </defs>
+  <g class="t">
+    <text x="44" y="50" class="title">架构怎么才能不腐烂：让边界不依赖记忆</text>
+    <text x="44" y="78" class="sub">在人和模型一起高速改代码的前提下，靠 review 记住边界是不现实的。这套东西的全部意图，是把「什么不许做」变成一次可执行的断言。</text>
+
+    <rect x="44" y="130" width="212" height="170" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
+    <text x="62" y="158" class="bt" fill="#643127">① 宪法</text>
+    <text x="62" y="192" class="bn" fill="#643127">25</text>
+    <text x="106" y="192" class="bd">条规则</text>
+    <text x="62" y="222" class="bd">分三级：Invariant 必须遵守</text>
+    <text x="62" y="242" class="bd">Policy 强默认、Guideline 建议</text>
+    <text x="62" y="268" class="bd">每条都写明「防止了什么」</text>
+    <text x="62" y="288" class="bd">明确声明自己不管什么</text>
+
+    <rect x="286" y="130" width="212" height="170" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <text x="304" y="158" class="bt" fill="#5E4519">② 模块自描述</text>
+    <text x="304" y="192" class="bn" fill="#5E4519">87</text>
+    <text x="348" y="192" class="bd">个模块边界声明</text>
+    <text x="304" y="222" class="bd">职责 / 对外提供 / 消费契约</text>
+    <text x="304" y="242" class="bd">允许依赖谁 —— 是白名单</text>
+    <text x="304" y="268" class="bd">写在模块自己的文档里</text>
+    <text x="304" y="288" class="bd">改动影响也在同一处交代</text>
+
+    <rect x="528" y="130" width="212" height="170" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
+    <text x="546" y="158" class="bt" fill="#26452F">③ 机器校验</text>
+    <text x="546" y="192" class="bn" fill="#26452F">53</text>
+    <text x="590" y="192" class="bd">组架构守护测试</text>
+    <text x="546" y="222" class="bd">静态分析，不必把系统跑起来</text>
+    <text x="546" y="242" class="bd">把真实依赖图与白名单比对</text>
+    <text x="546" y="268" class="bd">迁移期用允许清单收口</text>
+    <text x="546" y="288" class="bd">目标是把清单清空</text>
+
+    <rect x="770" y="130" width="212" height="170" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
+    <text x="788" y="158" class="bt" fill="#22405F">④ CI 门禁</text>
+    <text x="788" y="192" class="bn" fill="#22405F">7</text>
+    <text x="814" y="192" class="bd">类必过检查</text>
+    <text x="788" y="222" class="bd">依赖方向 · 内核无框架</text>
+    <text x="788" y="242" class="bd">环境访问 · 配置 schema</text>
+    <text x="788" y="268" class="bd">一致性测试 · 结构化 PR 清单</text>
+    <text x="788" y="288" class="bd">不允许为了通过而放宽检查</text>
+
+    <rect x="1012" y="130" width="212" height="170" rx="6" fill="#EBE5F3" stroke="#69539B"/>
+    <text x="1030" y="158" class="bt" fill="#3E315F">⑤ 违规出口</text>
+    <text x="1030" y="192" class="bn" fill="#3E315F">2</text>
+    <text x="1056" y="192" class="bd">条路，没有第三条</text>
+    <text x="1030" y="222" class="bd">要么改代码</text>
+    <text x="1030" y="242" class="bd">要么写一份豁免：有负责人</text>
+    <text x="1030" y="268" class="bd">有期限、经过评审</text>
+    <text x="1030" y="288" class="bd">现存豁免 1 条 —— 数量本身就是指标</text>
+
+    <line x1="260" y1="215" x2="282" y2="215" stroke="#8A8781" stroke-width="1.5" marker-end="url(#d1)"/>
+    <line x1="502" y1="215" x2="524" y2="215" stroke="#8A8781" stroke-width="1.5" marker-end="url(#d1)"/>
+    <line x1="744" y1="215" x2="766" y2="215" stroke="#8A8781" stroke-width="1.5" marker-end="url(#d1)"/>
+    <line x1="986" y1="215" x2="1008" y2="215" stroke="#8A8781" stroke-width="1.5" marker-end="url(#d1)"/>
+
+    <path d="M 1118 300 L 1118 348 L 150 348 L 150 306" fill="none" stroke="#A85C47" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#d2)"/>
+    <rect x="410" y="334" width="450" height="28" rx="14" fill="#FAF9F7"/>
+    <text x="635" y="353" class="loop" text-anchor="middle">系统级、难以回退的决策沉淀为架构决策记录（现 11 条），反过来修订宪法</text>
+
+    <text x="44" y="404" class="lbl">代表性门禁（节选）</text>
+    <rect x="44" y="418" width="1180" height="180" rx="6" fill="#F1EFEA" stroke="#D8D5CF"/>
+
+    <text x="66" y="446" class="gm" fill="#26452F">领域内核不得依赖传输框架</text>
+    <text x="66" y="465" class="gd">出现任何一处即失败 —— 领域逻辑不认识传输</text>
+    <text x="66" y="500" class="gm" fill="#26452F">底座不得依赖上层</text>
+    <text x="66" y="519" class="gd">依赖箭头只进不出，底座才对所有层安全</text>
+    <text x="66" y="554" class="gm" fill="#26452F">内核只认契约，不认实现</text>
+    <text x="66" y="573" class="gd">内核可以依赖系统边界契约，不得依赖任何一个具体实现</text>
+
+    <text x="660" y="446" class="gm" fill="#26452F">依赖图 vs 自己声明的白名单</text>
+    <text x="660" y="465" class="gd">逐模块逐条比对，未被覆盖的依赖即失败</text>
+    <text x="660" y="500" class="gm" fill="#26452F">开源依赖注入根不含内部实现</text>
+    <text x="660" y="519" class="gd">分发边界也是架构边界</text>
+    <text x="660" y="554" class="gm" fill="#26452F">超大模块预警</text>
+    <text x="660" y="573" class="gd">单个文件承担多个角色，往往就藏着边界违规</text>
+
+    <text x="44" y="640" class="ft">门禁的目的不是挡人，是让「不许做什么」在提交那一刻就说清楚，而不是等到某次线上事故之后再回头追溯。</text>
+    <text x="44" y="664" class="ft">豁免是允许的 —— 但必须写下来、有归属、有期限。能被数出来的例外，才是可以管理的例外。</text>
+  </g>
+</svg>

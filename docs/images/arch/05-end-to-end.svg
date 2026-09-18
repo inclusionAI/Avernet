@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 800" width="1260" height="800" role="img" aria-label="端到端请求链路">
+  <style>
+    .t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
+    .m{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
+    .title{font-size:25px;font-weight:600;fill:#1F1E1C}
+    .sub{font-size:13.5px;fill:#75736E}
+    .bt{font-size:12.5px;font-weight:600}
+    .bm{font-size:11px}
+    .bd{font-size:11px;fill:#5E5C57}
+    .lbl{font-size:11.5px;font-weight:600;fill:#8A8781;letter-spacing:.05em}
+    .num{font-size:13px;font-weight:600;fill:#8A8781}
+    .inv{font-size:12.5px;font-weight:600;fill:#7A3A2C}
+    .invd{font-size:11px;fill:#5E5C57}
+    .bnd{font-size:12px;font-weight:600;fill:#A85C47}
+  </style>
+  <rect width="1260" height="800" fill="#FAF9F7"/>
+  <defs>
+    <marker id="c1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8781"/></marker>
+    <marker id="c3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#3B7A73"/></marker>
+  </defs>
+  <g class="t">
+    <text x="44" y="50" class="title">一次请求怎么穿透两个模块</text>
+    <text x="44" y="78" class="sub">以一条开放 API 上的会话消息为例。值得记住的不是盒子的数量，而是中间那条边界线：过了它，就没有东西再约束这个请求了。</text>
+
+    <rect x="44" y="98" width="876" height="54" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
+    <text x="62" y="122" class="num">①</text>
+    <text x="86" y="122" class="bt" fill="#22405F">前端工作台　·　开放 API 客户端</text>
+    <text x="62" y="141" class="bd">一条开放 API 上的会话消息请求</text>
+    <rect x="940" y="98" width="276" height="54" rx="6" fill="none" stroke="#C9C5BD" stroke-dasharray="4 3"/>
+    <text x="956" y="120" class="bd">相邻边界，本次不展开：</text>
+    <text x="956" y="139" class="bd">BCS 协调 / 群聊 / 路由 · BaaS 运行时供给</text>
+
+    <rect x="44" y="172" width="1172" height="192" rx="8" fill="none" stroke="#B9B5AD" stroke-dasharray="5 4"/>
+    <text x="60" y="194" class="lbl">BACKEND · 管控面 —— 有租户轴，隔离在这里生效</text>
+
+    <rect x="60" y="206" width="264" height="140" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
+    <text x="76" y="230" class="num">②</text>
+    <text x="100" y="230" class="bt" fill="#22405F">传输协议适配</text>
+    <text x="76" y="252" class="bd">面向租户的 HTTP 表面</text>
+    <text x="76" y="276" class="bd">解析请求 · 解释鉴权上下文</text>
+    <text x="76" y="296" class="bd">协议校验 · 领域错误 → HTTP 状态</text>
+    <text x="76" y="322" class="bd">不持有任何领域策略</text>
+
+    <rect x="352" y="206" width="264" height="140" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <text x="368" y="230" class="num">③</text>
+    <text x="392" y="230" class="bt" fill="#5E4519">服务接口层</text>
+    <text x="368" y="252" class="bd">拿到的是契约，不是实现</text>
+    <text x="368" y="276" class="bd">传输协议适配层不认识具体服务类</text>
+    <text x="368" y="296" class="bd">换实现不需要改路由</text>
+    <text x="368" y="322" class="bd">契约由领域模块定义</text>
+
+    <rect x="644" y="206" width="264" height="140" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
+    <text x="660" y="230" class="num">④</text>
+    <text x="684" y="230" class="bt" fill="#26452F">领域编排</text>
+    <text x="660" y="252" class="bd">跨模块中继</text>
+    <text x="660" y="276" class="bd">按属主解析 Bot → 判定发布态</text>
+    <text x="660" y="296" class="bd">解析设备上下文 → 归一化应答</text>
+    <text x="660" y="322" class="bd">隔离只能在这里成立</text>
+
+    <rect x="936" y="206" width="264" height="140" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <text x="952" y="230" class="num">⑤</text>
+    <text x="976" y="230" class="bt" fill="#5E4519">出口契约</text>
+    <text x="952" y="252" class="bd">对端设备的传输契约</text>
+    <text x="952" y="276" class="bd">唯一真正跨系统的一跳</text>
+    <text x="952" y="296" class="bd">三套实现：企业 / 开源 / 内存</text>
+    <text x="952" y="322" class="bd">上面每层在测试里都跑真代码</text>
+
+    <line x1="44" y1="386" x2="1216" y2="386" stroke="#A85C47" stroke-width="2" stroke-dasharray="8 5"/>
+    <rect x="300" y="372" width="660" height="28" rx="14" fill="#FAF9F7"/>
+    <text x="630" y="391" class="bnd" text-anchor="middle">系统边界 · 一次跨系统调用 —— Engine 没有租户轴，请求落到设备上之后就没有东西再约束它</text>
+
+    <rect x="44" y="416" width="1172" height="192" rx="8" fill="none" stroke="#B9B5AD" stroke-dasharray="5 4"/>
+    <text x="60" y="438" class="lbl">ENGINE · 执行面 —— 单机，只服务它自己那个 Bot</text>
+
+    <rect x="60" y="450" width="264" height="140" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
+    <text x="76" y="474" class="num">⑥</text>
+    <text x="100" y="474" class="bt" fill="#22405F">统一表面</text>
+    <text x="76" y="496" class="bd">对外形状与引擎无关</text>
+    <text x="76" y="520" class="bd">HTTP + 长连接</text>
+    <text x="76" y="540" class="bd">只服务它自己那一个 Bot</text>
+    <text x="76" y="566" class="bd">换引擎，这一层不动</text>
+
+    <rect x="352" y="450" width="264" height="140" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
+    <text x="368" y="474" class="num">⑦</text>
+    <text x="392" y="474" class="bt" fill="#26452F">能力域协议</text>
+    <text x="368" y="496" class="bd">会话 / 对话 / 技能 …</text>
+    <text x="368" y="520" class="bd">领域模型与协议</text>
+    <text x="368" y="540" class="bd">不知道任何引擎的存在</text>
+    <text x="368" y="566" class="bd">能力不支持时明确拒绝</text>
+
+    <rect x="644" y="450" width="264" height="140" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
+    <text x="660" y="474" class="num">⑧</text>
+    <text x="684" y="474" class="bt" fill="#26452F">引擎适配层</text>
+    <text x="660" y="496" class="bd">每引擎一套</text>
+    <text x="660" y="520" class="bd">领域形状 ⇄ 引擎原生形状</text>
+    <text x="660" y="540" class="bd">引擎差异在这里被吸收</text>
+    <text x="660" y="566" class="bd">内核里唯一认识引擎的地方</text>
+
+    <rect x="936" y="450" width="264" height="140" rx="6" fill="#EBE5F3" stroke="#69539B"/>
+    <text x="952" y="474" class="num">⑨</text>
+    <text x="976" y="474" class="bt" fill="#3E315F">适配层协议的传输实现</text>
+    <text x="952" y="496" class="bd">每引擎一套</text>
+    <text x="952" y="520" class="bd">与网关之间的长连接</text>
+    <text x="952" y="540" class="bd">只负责连上去、收发帧</text>
+    <text x="952" y="566" class="bd">禁止依赖领域内核</text>
+
+    <rect x="60" y="628" width="360" height="96" rx="6" fill="#DFEDEC" stroke="#3B7A73"/>
+    <text x="76" y="652" class="num">⑩</text>
+    <text x="100" y="652" class="bt" fill="#234945">引擎网关</text>
+    <text x="76" y="676" class="bd">适配层背后的那一跳</text>
+    <text x="76" y="696" class="bd">从这里开始讲的是引擎自己的原生协议</text>
+    <text x="76" y="714" class="bd">每个引擎的网关怎么部署，由那个引擎自己决定</text>
+
+    <rect x="450" y="628" width="360" height="96" rx="6" fill="#DFEDEC" stroke="#3B7A73"/>
+    <text x="466" y="652" class="num">⑪</text>
+    <text x="490" y="652" class="bt" fill="#234945">引擎本体　·　在沙箱里</text>
+    <text x="466" y="676" class="bd">openclaw · claude_code · aicoding · hermes · deepseek_harness</text>
+    <text x="466" y="696" class="bd">技能与命令行工具在这里真正落盘、执行</text>
+    <text x="466" y="714" class="bd">Bot 的工作区文件也在这里</text>
+
+    <rect x="840" y="628" width="360" height="96" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <text x="856" y="652" class="num">⑫</text>
+    <text x="880" y="652" class="bt" fill="#5E4519">模型调用</text>
+    <text x="856" y="676" class="bd">整条链路的终点</text>
+    <text x="856" y="696" class="bd">前面十一步做的所有事，都是为了让这一步</text>
+    <text x="856" y="714" class="bd">在正确的 Bot、正确的会话、正确的现场发生</text>
+
+    <line x1="1180" y1="752" x2="80" y2="752" stroke="#3B7A73" stroke-width="1.5" marker-end="url(#c3)"/>
+    <text x="630" y="744" class="bd" text-anchor="middle">回程：流式事件沿同一条链路反向回传 —— 引擎网关 → 传输实现 → 引擎适配层 → 能力域协议 → 长连接 → 调用方</text>
+  </g>
+</svg>

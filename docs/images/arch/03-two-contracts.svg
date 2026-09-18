@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 720" width="1260" height="720" role="img" aria-label="Service API 与 Plugin API 的方向性对照">
+  <style>
+    .t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
+    .m{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
+    .title{font-size:25px;font-weight:600;fill:#1F1E1C}
+    .sub{font-size:13.5px;fill:#75736E}
+    .band{font-size:13px;font-weight:600;fill:#1F1E1C}
+    .bandsub{font-size:11.5px;fill:#8A8781}
+    .bt{font-size:13.5px;font-weight:600}
+    .bm{font-size:11.5px}
+    .bd{font-size:11px;fill:#5E5C57}
+    .arw{font-size:11px;fill:#8A8781}
+  </style>
+  <rect width="1260" height="720" fill="#FAF9F7"/>
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8781"/></marker>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#A1762E"/></marker>
+  </defs>
+  <g class="t">
+    <text x="44" y="50" class="title">两类契约，方向相反 —— 方向决定了谁实现、谁替换、怎么测</text>
+    <text x="44" y="78" class="sub">服务接口层是「外部调内核」，系统边界契约是「内核调外部」。把两者混为一谈，就会写出错误的兼容性假设，和错误的测试策略。</text>
+
+    <text x="44" y="122" class="band">① 控制流：一律从左到右</text>
+    <text x="232" y="122" class="bandsub">谁调用谁</text>
+
+    <rect x="44" y="142" width="200" height="110" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
+    <text x="60" y="174" class="bt" fill="#22405F">消费者</text>
+    <text x="60" y="198" class="bd">HTTP 路由 · 命令行</text>
+    <text x="60" y="220" class="bd">进程内嵌入方</text>
+    <text x="60" y="240" class="m bd">只认契约，不认实现</text>
+
+    <rect x="284" y="142" width="196" height="110" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <text x="300" y="174" class="bt" fill="#5E4519">服务接口层</text>
+    <text x="300" y="198" class="bd">声明外部能让内核做什么</text>
+    <text x="300" y="220" class="bd">与传输协议适配层分离定义</text>
+    <text x="300" y="240" class="bd">契约方向：外 → 内</text>
+
+    <rect x="520" y="142" width="200" height="110" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
+    <text x="536" y="174" class="bt" fill="#26452F">领域实现</text>
+    <text x="536" y="198" class="bd">领域逻辑的具体实现</text>
+    <text x="536" y="220" class="bd">实现自己的契约</text>
+    <text x="536" y="240" class="bd">无框架、无传输依赖</text>
+
+    <rect x="760" y="142" width="196" height="110" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <text x="776" y="174" class="bt" fill="#5E4519">系统边界契约</text>
+    <text x="776" y="198" class="bd">声明内核需要外部给什么</text>
+    <text x="776" y="220" class="bd">外部能力的契约</text>
+    <text x="776" y="240" class="bd">契约方向：内 → 外</text>
+
+    <rect x="996" y="142" width="220" height="110" rx="6" fill="#EBE5F3" stroke="#69539B"/>
+    <text x="1012" y="174" class="bt" fill="#3E315F">系统边界实现</text>
+    <text x="1012" y="198" class="bd">契约的具体实现</text>
+    <text x="1012" y="220" class="bd">数据库 / 缓存 / 存储</text>
+    <text x="1012" y="240" class="bd">身份 / 审批 / 传输</text>
+
+    <line x1="248" y1="197" x2="280" y2="197" stroke="#8A8781" stroke-width="1.5" marker-end="url(#a1)"/>
+    <line x1="484" y1="197" x2="516" y2="197" stroke="#8A8781" stroke-width="1.5" marker-end="url(#a1)"/>
+    <line x1="724" y1="197" x2="756" y2="197" stroke="#8A8781" stroke-width="1.5" marker-end="url(#a1)"/>
+    <line x1="960" y1="197" x2="992" y2="197" stroke="#8A8781" stroke-width="1.5" marker-end="url(#a1)"/>
+
+    <text x="44" y="310" class="band">② 依赖方向：两侧都指向契约</text>
+    <text x="292" y="310" class="bandsub">谁依赖谁 —— 这是依赖倒置真正落地的地方</text>
+
+    <line x1="144" y1="256" x2="144" y2="340" stroke="#D8D5CF" stroke-dasharray="3 3"/>
+    <line x1="382" y1="256" x2="382" y2="340" stroke="#D8D5CF" stroke-dasharray="3 3"/>
+    <line x1="620" y1="256" x2="620" y2="340" stroke="#D8D5CF" stroke-dasharray="3 3"/>
+    <line x1="858" y1="256" x2="858" y2="340" stroke="#D8D5CF" stroke-dasharray="3 3"/>
+    <line x1="1106" y1="256" x2="1106" y2="340" stroke="#D8D5CF" stroke-dasharray="3 3"/>
+
+    <rect x="284" y="340" width="196" height="46" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <text x="382" y="369" class="bm" fill="#5E4519" text-anchor="middle">服务接口层</text>
+    <rect x="760" y="340" width="196" height="46" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <text x="858" y="369" class="bm" fill="#5E4519" text-anchor="middle">系统边界契约</text>
+
+    <line x1="180" y1="363" x2="278" y2="363" stroke="#A1762E" stroke-width="1.5" marker-end="url(#a2)"/>
+    <line x1="584" y1="363" x2="486" y2="363" stroke="#A1762E" stroke-width="1.5" marker-end="url(#a2)"/>
+    <line x1="656" y1="363" x2="754" y2="363" stroke="#A1762E" stroke-width="1.5" marker-end="url(#a2)"/>
+    <line x1="1070" y1="363" x2="962" y2="363" stroke="#A1762E" stroke-width="1.5" marker-end="url(#a2)"/>
+    <text x="144" y="367" class="arw" text-anchor="middle">消费者</text>
+    <text x="620" y="358" class="arw" text-anchor="middle">内核</text>
+    <text x="620" y="376" class="arw" text-anchor="middle">两边都依赖契约</text>
+    <text x="1106" y="367" class="arw" text-anchor="middle">插件</text>
+    <text x="44" y="412" class="bd">没有任何一条箭头从实现指向实现 —— 消费者不知道内核里放了什么，内核也不知道插件是谁。两者只认契约。</text>
+
+    <text x="44" y="470" class="band">③ 同一份系统边界契约，多套实现 —— 由依赖注入根按部署形态挑选</text>
+    <text x="580" y="470" class="bandsub">这是「开源版与内部版同源、零分叉」的技术前提</text>
+
+    <rect x="44" y="490" width="300" height="164" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
+    <text x="62" y="518" class="bt" fill="#643127">部署形态开关</text>
+    <text x="62" y="540" class="m bd">启动时读一次，必须显式</text>
+    <text x="62" y="566" class="bm" fill="#643127">开源</text>
+    <text x="62" y="588" class="bm" fill="#643127">单机 / 测试</text>
+    <text x="62" y="610" class="bm" fill="#643127">企业 / 企业测试</text>
+    <text x="62" y="638" class="bd">未设置或未知值 = 启动硬失败</text>
+
+    <line x1="348" y1="572" x2="396" y2="572" stroke="#8A8781" stroke-width="1.5" marker-end="url(#a1)"/>
+
+    <rect x="404" y="490" width="250" height="164" rx="6" fill="#EBE5F3" stroke="#69539B"/>
+    <text x="422" y="518" class="bt" fill="#3E315F">开源实现</text>
+    <text x="422" y="544" class="bd">随开源分发</text>
+    <text x="422" y="566" class="bd">不依赖任何内部 SDK</text>
+    <text x="422" y="588" class="bd">对象存储 / 身份 / 审批</text>
+    <text x="422" y="610" class="bd">走通用协议与自带服务</text>
+
+    <rect x="684" y="490" width="250" height="164" rx="6" fill="#EBE5F3" stroke="#69539B"/>
+    <text x="702" y="518" class="bt" fill="#3E315F">本地替身</text>
+    <text x="702" y="544" class="bd">内存 / 本地替身</text>
+    <text x="702" y="566" class="bd">单机开发与测试用</text>
+    <text x="702" y="588" class="bd">上面的编排是真实代码</text>
+    <text x="702" y="610" class="bd">只有最外一跳被替换</text>
+
+    <rect x="964" y="490" width="250" height="164" rx="6" fill="#EBE5F3" stroke="#69539B"/>
+    <text x="982" y="518" class="bt" fill="#3E315F">企业实现</text>
+    <text x="982" y="544" class="bd">企业基础设施实现</text>
+    <text x="982" y="566" class="bd">只存在于内部分发</text>
+    <text x="982" y="588" class="bd">开源版里物理不存在</text>
+    <text x="982" y="610" class="bd">与左侧两套共用同一契约</text>
+  </g>
+</svg>
