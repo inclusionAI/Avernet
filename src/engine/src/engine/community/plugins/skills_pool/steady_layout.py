@@ -14,7 +14,8 @@ from engine.community.core.skills.layout_planner import (
     resolved_filesystem_layout_evidence,
 )
 from engine.community.plugins.skills_pool.active_marker_validation import (
-    steady_active_marker_valid,
+    active_entries_failure_reason,
+    startup_active_marker_valid,
 )
 from engine.community.plugins.skills_pool.center_mount import (
     inspect_center_mount,
@@ -105,13 +106,20 @@ def inspect_openclaw_steady_active(
             reason="active_marker_temporarily_unavailable",
             error=error,
         )
-    if isinstance(marker, dict) and marker.get("activation_state") == "finalizing":
-        return None
-    if isinstance(marker, dict) and (
-        "preparation_id" in marker or "migration_generation" in marker
-    ):
-        return None
-    if not steady_active_marker_valid(
+    migrated_active = False
+    if isinstance(marker, dict):
+        has_preparation = "preparation_id" in marker
+        has_generation = "migration_generation" in marker
+        if has_preparation != has_generation:
+            return _invalid(
+                layout=layout,
+                contract=expected_contract_version,
+                reason="active_marker_contract_mismatch",
+            )
+        if marker.get("activation_state") == "finalizing":
+            return None
+        migrated_active = has_preparation
+    if not startup_active_marker_valid(
         marker,
         engine="openclaw",
         expected_contract_version=expected_contract_version,
@@ -159,8 +167,42 @@ def inspect_openclaw_steady_active(
 
     try:
         repo_mounted = repo_is_mounted(layout.pool_repo)
-    except OSError:
+    except OSError as error:
+        if migrated_active:
+            return _transient(
+                layout=layout,
+                contract=expected_contract_version,
+                reason="pool_repo_temporarily_unavailable",
+                error=error,
+            )
         repo_mounted = False
+    if migrated_active and not repo_mounted:
+        return _invalid(
+            layout=layout,
+            contract=expected_contract_version,
+            reason="pool_repo_not_mounted",
+        )
+    if migrated_active:
+        try:
+            entries_failure = active_entries_failure_reason(
+                layout,
+                engine="openclaw",
+            )
+        except PermissionError:
+            entries_failure = "active_managed_entry_invalid"
+        except OSError as error:
+            return _transient(
+                layout=layout,
+                contract=expected_contract_version,
+                reason="active_entries_temporarily_unavailable",
+                error=error,
+            )
+        if entries_failure is not None:
+            return _invalid(
+                layout=layout,
+                contract=expected_contract_version,
+                reason=entries_failure,
+            )
     center_mount = inspect_center_mount(
         layout.pool_center,
         is_mounted=center_is_mounted or repo_is_mounted,

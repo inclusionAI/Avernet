@@ -47,11 +47,12 @@ from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
-    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
-    LayoutInitializationConfirmationError,
+    LayoutInitializationConflictError,
+    LayoutInitializationEvidenceError,
     LayoutInitializationConfirmationProtocol,
     McpSyncProtocol,
 )
+from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -1193,7 +1194,10 @@ class DeviceService:
         if record.status == DeviceBindingStatus.RELEASED.value:
             raise InvalidDeviceStatusError("cannot report status for released device")
 
-        if status == "SUCCEEDED" and layout_initialization is not None:
+        guarded_layout_callback = (
+            status == "SUCCEEDED" and layout_initialization is not None
+        )
+        if guarded_layout_callback:
             self._confirm_pool_layout_initialization(
                 record=record,
                 startup_identity=startup_identity,
@@ -1201,7 +1205,24 @@ class DeviceService:
             )
 
         # Update ac_bots.ext field
-        self._update_bot_start_status(binding_id=record.id, status=status, message=message)
+        if guarded_layout_callback:
+            if startup_identity is None or not (
+                self._repo.transition_layout_startup_status_if_matches(
+                    binding_id=record.id,
+                    startup_identity=startup_identity,
+                    status=status,
+                    message=message,
+                )
+            ):
+                raise LayoutInitializationConflictError(
+                    "startup identity changed after layout confirmation"
+                )
+        else:
+            self._update_bot_start_status(
+                binding_id=record.id,
+                status=status,
+                message=message,
+            )
 
         # If FAILED, update both ac_bots and ac_entity_device_binding status
         if status == "FAILED":
@@ -1229,21 +1250,7 @@ class DeviceService:
     ) -> None:
         """Validate current startup identity before advancing layout state."""
 
-        props = record.device_props or {}
-        expected_identity = next(
-            (
-                str(props[key])
-                for key in (
-                    "startup_identity",
-                    "restart_publish_id",
-                    "restart_request_id",
-                    "publish_id",
-                    "sandbox_id",
-                )
-                if props.get(key) is not None and str(props[key])
-            ),
-            None,
-        )
+        expected_identity = resolve_startup_identity(record.device_props)
         if (
             expected_identity is None
             or startup_identity is None
@@ -1261,32 +1268,28 @@ class DeviceService:
 
         try:
             self._layout_confirmation.confirm(
+                binding_id=record.id,
+                startup_identity=startup_identity,
                 env=record.env,
                 entity_id=record.entity_id,
                 bot_id=bot_id,
                 expected_engine=engine,
                 evidence=evidence,
             )
-        except LayoutInitializationConfirmationError as error:
+        except LayoutInitializationEvidenceError as error:
             message = str(error)
-            self._update_bot_start_status(
-                binding_id=record.id,
-                status="FAILED",
-                message=message,
-            )
-            self._update_bot_status_on_device_failed(binding_id=record.id)
-            self._repo.update_status(
-                binding_id=record.id,
-                status=DeviceBindingStatus.FAILED.value,
-            )
+            if startup_identity is None or not (
+                self._repo.transition_layout_startup_status_if_matches(
+                    binding_id=record.id,
+                    startup_identity=startup_identity,
+                    status="FAILED",
+                    message=message,
+                )
+            ):
+                raise LayoutInitializationConflictError(
+                    "startup identity changed before failure persistence"
+                ) from error
             raise
-
-        self._repo.update_device_props(
-            binding_id=record.id,
-            props={
-                LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY: startup_identity,
-            },
-        )
 
     def list_connectable_devices(
         self,

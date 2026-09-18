@@ -1249,6 +1249,16 @@ async def get_auth_status(
             error_code=5400,
             data=None,
         )
+    except BotCreationRetainedError as e:
+        logger.error(
+            "[bot_router.get_auth_status] Bot creation retained for retry: %s", e
+        )
+        return ApiResponse(
+            success=False,
+            message=f"创建Bot失败，可使用 bot_id 重试: {str(e)}",
+            error_code=500,
+            data={"bot_id": e.bot_id, "retryable": True},
+        )
     except Exception as e:
         logger.error(f"[bot_router.get_auth_status] Error: {e}")
         return ApiResponse(

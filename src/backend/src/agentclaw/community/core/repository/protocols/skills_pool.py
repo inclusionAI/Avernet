@@ -58,8 +58,10 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         *,
         scope: BotSkillLayoutScope,
         layout_contract_version: str,
+        binding_id: int,
+        startup_identity: str,
     ) -> bool:
-        """Idempotently confirm a Pool-native layout without migration identity."""
+        """Confirm Pool layout and record only the still-current startup."""
         ...
 
     @abstractmethod

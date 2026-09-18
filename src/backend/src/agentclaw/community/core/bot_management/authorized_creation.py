@@ -20,6 +20,13 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
+class _RetainedAuthRelationshipError(
+    BotCreationRetainedError,
+    AuthRelationshipError,
+):
+    """Retain the retry handle without changing the public 502 category."""
+
+
 def _record_owner_relationship(
     auth_rel_plugin: AuthRelationshipPlugin,
     *,
@@ -75,7 +82,12 @@ def _raise_with_retry_handle(
             or retained_bot.get("status") not in {"PENDING", "PROVISIONING"}
         ):
             raise error
-    raise BotCreationRetainedError(bot_id=bot_id, message=str(error)) from error
+    retained_error = (
+        _RetainedAuthRelationshipError
+        if isinstance(error, AuthRelationshipError)
+        else BotCreationRetainedError
+    )
+    raise retained_error(bot_id=bot_id, message=str(error)) from error
 
 
 def create_authorized_bot(

@@ -185,10 +185,11 @@ class DeviceBindingRepository(Protocol):
         binding_id: int,
         bot_id: str,
         owner_id: str,
+        expected_publish_id: str | None,
         bot_ext_patch: dict[str, Any],
         binding_props_patch: dict[str, Any],
     ) -> bool:
-        """Atomically persist Desktop restart identity and PENDING state."""
+        """Persist Desktop restart only while its prior identity is current."""
         ...
 
     @abstractmethod
@@ -279,6 +280,18 @@ class DeviceBindingRepository(Protocol):
     @abstractmethod
     def update_bot_start_status(self, *, binding_id: int, status: str, message: str | None) -> None:
         """更新 ac_bots 表 ext 字段中的启动状态."""
+        ...
+
+    @abstractmethod
+    def transition_layout_startup_status_if_matches(
+        self,
+        *,
+        binding_id: int,
+        startup_identity: str,
+        status: str,
+        message: str | None,
+    ) -> bool:
+        """Persist a layout callback only while its startup is current."""
         ...
 
     @abstractmethod

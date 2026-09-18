@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,37 @@ def test_empty_openclaw_home_initializes_minimal_active_layout(tmp_path: Path) -
     assert not (pool_root / ".pool-ready").exists()
     assert not (active_root / "skills-local").exists()
     assert not (active_root / "skills-repo").exists()
+    assert evidence.roots_initialized is True
+
+
+def test_concurrent_directory_creation_converges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    active_root = home / ".openclaw" / "workspace" / "skills"
+    original_mkdir = Path.mkdir
+    lost_once = False
+
+    def concurrent_mkdir(
+        path: Path,
+        mode: int = 0o777,
+        parents: bool = False,
+        exist_ok: bool = False,
+    ) -> None:
+        nonlocal lost_once
+        if path == active_root and not lost_once:
+            lost_once = True
+            original_mkdir(path, mode=mode, parents=parents, exist_ok=True)
+            raise FileExistsError(path)
+        original_mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", concurrent_mkdir)
+
+    evidence = initialize_pool_native(engine="openclaw", home=home)
+
+    assert lost_once
+    assert active_root.is_dir()
     assert evidence.roots_initialized is True
 
 
@@ -90,6 +122,32 @@ def test_restart_rejects_partial_migration_identity(tmp_path: Path) -> None:
 
     with pytest.raises(PoolNativeInitializationError, match="conflicts with startup"):
         initialize_pool_native(engine="openclaw", home=home)
+
+
+def test_concurrent_finalizing_marker_is_preserved_and_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    marker_path = home / ".openclaw/workspace/skills-pool/.pool-active"
+    finalizing = {
+        "engine": "openclaw",
+        "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+        "activation_state": "finalizing",
+        "preparation_id": "preparation-1",
+        "migration_generation": "generation-1",
+    }
+
+    def concurrent_create(_source: os.PathLike[str], target: os.PathLike[str]) -> None:
+        Path(target).write_text(json.dumps(finalizing))
+        raise FileExistsError
+
+    monkeypatch.setattr(os, "link", concurrent_create)
+
+    with pytest.raises(PoolNativeInitializationError, match="conflicts with startup"):
+        initialize_pool_native(engine="openclaw", home=home)
+
+    assert json.loads(marker_path.read_text()) == finalizing
 
 
 def test_non_openclaw_engine_is_rejected(tmp_path: Path) -> None:

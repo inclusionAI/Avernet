@@ -36,7 +36,6 @@ from agentclaw.community.core.devices.services.baas_container_init import (
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.protocols import (
     LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
-    LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY,
     LayoutInitializationConfirmationProtocol,
 )
 from agentclaw.community.core.events.bus import get_event_bus
@@ -1161,65 +1160,73 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "agentclaw_skills_layout_contract_version", ""
             ),
         }
+        binding_props_patch = {
+            "publish_id": str(publish_id) if publish_id else None,
+            "restart_publish_id": str(publish_id) if publish_id else None,
+            "envs": self._desktop_layout_env(layout_credentials),
+            LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY: None,
+        }
+        current_binding_props = (
+            binding.device_props if isinstance(binding.device_props, dict) else {}
+        )
+        prior_publish_id = current_binding_props.get(
+            "restart_publish_id"
+        ) or current_binding_props.get("publish_id")
+        expected_publish_id = (
+            str(prior_publish_id) if prior_publish_id is not None else None
+        )
+        tracking_retry: (
+            tuple[dict[str, Any], dict[str, Any], str | None] | None
+        ) = None
+        observe_only = False
         try:
             prepared = self._binding_repo.prepare_baas_desktop_restart(
                 binding_id=binding.id,
                 bot_id=bot_id,
                 owner_id=binding.entity_id,
+                expected_publish_id=expected_publish_id,
                 bot_ext_patch=ext_updates,
-                binding_props_patch={
-                    "publish_id": str(publish_id) if publish_id else None,
-                    "restart_publish_id": str(publish_id) if publish_id else None,
-                    "envs": self._desktop_layout_env(layout_credentials),
-                    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY: None,
-                    LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY: None,
-                },
+                binding_props_patch=binding_props_patch,
             )
         except Exception:
             logger.exception(
                 "[DesktopBotService.restart] atomic tracking write failed after "
-                "BaaS accepted restart: bot_id=%s publish_id=%s",
+                "BaaS accepted restart; polling will retry persistence: "
+                "bot_id=%s publish_id=%s",
                 bot_id,
                 publish_id,
             )
-            prepared = False
-        if not prepared:
-            # BaaS has already accepted the real restart.  Do not surface a
-            # retryable error that would dispatch a second restart; retain the
-            # older best-effort writes and always start the observer below.
-            self._merge_bot_ext(bot_id, binding.entity_id, ext_updates)
-            self._update_local_status(binding.id, bot_id, binding.entity_id, "PENDING")
-            try:
-                self._binding_repo.update_device_props(
-                    binding_id=binding.id,
-                    props={
-                        "publish_id": str(publish_id) if publish_id else None,
-                        "restart_publish_id": (
-                            str(publish_id) if publish_id else None
-                        ),
-                        "envs": self._desktop_layout_env(layout_credentials),
-                        LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY: None,
-                        LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY: None,
-                    },
-                )
-            except Exception:
-                logger.exception(
-                    "[DesktopBotService.restart] fallback tracking write failed: "
-                    "bot_id=%s publish_id=%s",
-                    bot_id,
+            tracking_retry = (
+                ext_updates,
+                binding_props_patch,
+                expected_publish_id,
+            )
+        else:
+            if not prepared:
+                # A guard rejection is lifecycle evidence, not a failed write.
+                # Observe the accepted remote operation without resurrecting a
+                # released/stopped binding or overwriting a newer restart.
+                current = self._binding_repo.get_by_id(binding.id)
+                observe_only = not self._restart_identity_matches(
+                    current,
                     publish_id,
                 )
 
         # 启动后台轮询 publish 进度
         if publish_id:
-            self._start_publish_polling(
-                publish_id=str(publish_id),
-                binding_id=str(binding.id),
-                bot_id=bot_id,
-                owner_id=binding.entity_id,
-                device_id=device_id,
-                engine_type=bot.get("active_engine", DEFAULT_ENGINE_TYPE),
-            )
+            polling_kwargs: dict[str, Any] = {
+                "publish_id": str(publish_id),
+                "binding_id": str(binding.id),
+                "bot_id": bot_id,
+                "owner_id": binding.entity_id,
+                "device_id": device_id,
+                "engine_type": bot.get("active_engine", DEFAULT_ENGINE_TYPE),
+            }
+            if tracking_retry is not None:
+                polling_kwargs["restart_tracking"] = tracking_retry
+            if observe_only:
+                polling_kwargs["observe_only"] = True
+            self._start_publish_polling(**polling_kwargs)
 
         return {
             "device_id": device_id,
@@ -1883,6 +1890,10 @@ class DesktopBotService(DesktopBotServiceProtocol):
         owner_id: str,
         device_id: str,
         engine_type: str = "",
+        restart_tracking: (
+            tuple[dict[str, Any], dict[str, Any], str | None] | None
+        ) = None,
+        observe_only: bool = False,
     ) -> None:
         """轮询 publish 进度，根据结果更新本地 bot 状态。
 
@@ -1901,6 +1912,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
         )
         start_time = time.monotonic()
         final_status = "FAILED"
+        layout_watchdog_dispatched = False
 
         logger.info(
             "[DesktopBotService._poll_publish_progress] start polling "
@@ -1912,6 +1924,38 @@ class DesktopBotService(DesktopBotServiceProtocol):
             while (time.monotonic() - start_time) < poll_timeout:
                 time.sleep(self._POLL_INTERVAL_SECONDS)
 
+                if restart_tracking is not None:
+                    (
+                        bot_ext_patch,
+                        binding_props_patch,
+                        expected_publish_id,
+                    ) = restart_tracking
+                    try:
+                        prepared = self._binding_repo.prepare_baas_desktop_restart(
+                            binding_id=int(binding_id),
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            expected_publish_id=expected_publish_id,
+                            bot_ext_patch=bot_ext_patch,
+                            binding_props_patch=binding_props_patch,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "[DesktopBotService._poll_publish_progress] "
+                            "restart tracking persistence retry failed: "
+                            "bot_id=%s publish_id=%s",
+                            bot_id,
+                            publish_id,
+                        )
+                        continue
+                    restart_tracking = None
+                    if not prepared:
+                        current = self._binding_repo.get_by_id(int(binding_id))
+                        observe_only = not self._restart_identity_matches(
+                            current,
+                            publish_id,
+                        )
+
                 try:
                     status = self._query_publish_status(publish_id)
                 except Exception as e:
@@ -1922,13 +1966,26 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     continue
 
                 if status == "SUCCESS":
-                    layout_status = self._confirm_desktop_layout_initialization(
+                    if observe_only:
+                        logger.info(
+                            "[DesktopBotService._poll_publish_progress] "
+                            "observe-only restart succeeded: bot_id=%s publish_id=%s",
+                            bot_id,
+                            publish_id,
+                        )
+                        return
+                    (
+                        layout_status,
+                        watchdog_dispatched,
+                    ) = self._confirm_desktop_layout_initialization(
                         publish_id=publish_id,
                         binding_id=binding_id,
                         bot_id=bot_id,
                         owner_id=owner_id,
                         device_id=device_id,
+                        dispatch_watchdog=not layout_watchdog_dispatched,
                     )
+                    layout_watchdog_dispatched |= watchdog_dispatched
                     if layout_status == _DesktopLayoutConfirmationStatus.PENDING:
                         continue
                     if layout_status == _DesktopLayoutConfirmationStatus.SUPERSEDED:
@@ -1954,6 +2011,14 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     break
 
                 if status == "FAILED":
+                    if observe_only:
+                        logger.warning(
+                            "[DesktopBotService._poll_publish_progress] "
+                            "observe-only restart failed: bot_id=%s publish_id=%s",
+                            bot_id,
+                            publish_id,
+                        )
+                        return
                     final_status = "FAILED"
                     break
 
@@ -1964,6 +2029,18 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "publish_id=%s final_status=%s elapsed=%.1fs",
                 publish_id, final_status, time.monotonic() - start_time,
             )
+
+            if restart_tracking is not None or observe_only:
+                logger.warning(
+                    "[DesktopBotService._poll_publish_progress] stopped without "
+                    "local writes: bot_id=%s publish_id=%s tracking_pending=%s "
+                    "observe_only=%s",
+                    bot_id,
+                    publish_id,
+                    restart_tracking is not None,
+                    observe_only,
+                )
+                return
 
         except Exception as e:
             logger.error(
@@ -2016,6 +2093,23 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "ext update failed: bot_id=%s error=%s", bot_id, e,
             )
 
+    @staticmethod
+    def _restart_identity_matches(binding: Any, publish_id: object) -> bool:
+        if binding is None or binding.status not in {
+            DeviceBindingStatus.PENDING.value,
+            DeviceBindingStatus.ACTIVE.value,
+        }:
+            return False
+        props = binding.device_props or {}
+        if not isinstance(props, dict):
+            return False
+        current_publish_id = props.get("restart_publish_id") or props.get(
+            "publish_id"
+        )
+        return current_publish_id is not None and str(current_publish_id) == str(
+            publish_id
+        )
+
     def _confirm_desktop_layout_initialization(
         self,
         *,
@@ -2024,13 +2118,14 @@ class DesktopBotService(DesktopBotServiceProtocol):
         bot_id: str,
         owner_id: str,
         device_id: str,
-    ) -> _DesktopLayoutConfirmationStatus:
+        dispatch_watchdog: bool,
+    ) -> tuple[_DesktopLayoutConfirmationStatus, bool]:
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
-            return _DesktopLayoutConfirmationStatus.PENDING
+            return _DesktopLayoutConfirmationStatus.PENDING, False
         ext = bot.get("ext") or {}
         if not isinstance(ext, dict) or ext.get("skills_layout") != "pool":
-            return _DesktopLayoutConfirmationStatus.CONFIRMED
+            return _DesktopLayoutConfirmationStatus.CONFIRMED, False
 
         try:
             binding = self._binding_repo.get_by_id(int(binding_id))
@@ -2041,50 +2136,44 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 bot_id,
                 publish_id,
             )
-            return _DesktopLayoutConfirmationStatus.PENDING
+            return _DesktopLayoutConfirmationStatus.PENDING, False
         if binding is None:
-            return _DesktopLayoutConfirmationStatus.FAILED
+            return _DesktopLayoutConfirmationStatus.FAILED, False
         if binding.status in {
             DeviceBindingStatus.RELEASED.value,
             DeviceBindingStatus.STOPPED.value,
         }:
-            return _DesktopLayoutConfirmationStatus.SUPERSEDED
+            return _DesktopLayoutConfirmationStatus.SUPERSEDED, False
 
         props = binding.device_props or {}
         if not isinstance(props, dict):
-            return _DesktopLayoutConfirmationStatus.FAILED
+            return _DesktopLayoutConfirmationStatus.FAILED, False
         current_publish_id = props.get("restart_publish_id") or props.get(
             "publish_id"
         )
         if current_publish_id is None:
-            return _DesktopLayoutConfirmationStatus.FAILED
+            return _DesktopLayoutConfirmationStatus.FAILED, False
         if str(current_publish_id) != str(publish_id):
-            return _DesktopLayoutConfirmationStatus.SUPERSEDED
+            return _DesktopLayoutConfirmationStatus.SUPERSEDED, False
         if binding.status == DeviceBindingStatus.FAILED.value:
-            return _DesktopLayoutConfirmationStatus.FAILED
+            return _DesktopLayoutConfirmationStatus.FAILED, False
         if str(props.get(LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY) or "") == str(
             publish_id
         ):
-            return _DesktopLayoutConfirmationStatus.CONFIRMED
+            return _DesktopLayoutConfirmationStatus.CONFIRMED, False
 
         callback_token = props.get("callback_token")
         if not isinstance(callback_token, str) or not callback_token:
-            return _DesktopLayoutConfirmationStatus.FAILED
-        if str(props.get(LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY) or "") != str(
-            publish_id
-        ):
+            return _DesktopLayoutConfirmationStatus.FAILED, False
+        if dispatch_watchdog:
             try:
                 BaasContainerInitializer(self._baas).dispatch_watchdog(
                     bot_uuid=device_id,
+                    # The callback contract calls this value ``device_id``;
+                    # Desktop bindings are keyed by BaaS bot_uuid.
                     client_id=device_id,
                     token=callback_token,
                     startup_identity=str(publish_id),
-                )
-                self._binding_repo.update_device_props(
-                    binding_id=binding.id,
-                    props={
-                        LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY: str(publish_id),
-                    },
                 )
             except Exception:
                 logger.exception(
@@ -2093,7 +2182,9 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     bot_id,
                     publish_id,
                 )
-        return _DesktopLayoutConfirmationStatus.PENDING
+                return _DesktopLayoutConfirmationStatus.PENDING, False
+            return _DesktopLayoutConfirmationStatus.PENDING, True
+        return _DesktopLayoutConfirmationStatus.PENDING, False
 
     def _query_publish_status(self, publish_id: str) -> str:
         """查询单次 publish 进度，返回 status 字符串。"""
@@ -2127,11 +2218,24 @@ class DesktopBotService(DesktopBotServiceProtocol):
         owner_id: str,
         device_id: str,
         engine_type: str = "",
+        restart_tracking: (
+            tuple[dict[str, Any], dict[str, Any], str | None] | None
+        ) = None,
+        observe_only: bool = False,
     ) -> None:
         """启动后台线程轮询 publish 进度。"""
         thread = threading.Thread(
             target=bind_current_avernet_tenant(self._poll_publish_progress),
-            args=(publish_id, binding_id, bot_id, owner_id, device_id, engine_type),
+            kwargs={
+                "publish_id": publish_id,
+                "binding_id": binding_id,
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "device_id": device_id,
+                "engine_type": engine_type,
+                "restart_tracking": restart_tracking,
+                "observe_only": observe_only,
+            },
             daemon=True,
             name=f"poll-publish-{publish_id}",
         )

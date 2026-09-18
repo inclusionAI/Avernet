@@ -65,6 +65,6 @@ def test_both_sides_are_handed_the_same_spec_entity_id():
     )
 
     authorization = inspect.getsource(create_flow.complete_bot_authorization)
-    assert "entity_id=spec.entity_id" in authorization, (
+    assert '"entity_id": spec.entity_id' in authorization, (
         "create_bot stopped being handed the spec's entity_id"
     )

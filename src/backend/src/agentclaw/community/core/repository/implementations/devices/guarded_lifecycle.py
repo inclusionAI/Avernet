@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import func
 
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
+from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.plugin_api.models import BotModel
 
 
@@ -61,12 +62,71 @@ class BaasDesktopRestartRepositoryMixin:
 
     def _bot_env(self): ...
 
+    def transition_layout_startup_status_if_matches(
+        self,
+        *,
+        binding_id: int,
+        startup_identity: str,
+        status: str,
+        message: str | None,
+    ) -> bool:
+        if status not in {"SUCCEEDED", "FAILED"}:
+            raise ValueError(f"unsupported layout startup status: {status}")
+        with self._db.orm_session() as db:
+            try:
+                begin_guarded_transaction(db, purpose="layout startup callback")
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == binding_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if (
+                    binding is None
+                    or binding.status not in {_PENDING, _ACTIVE}
+                    or resolve_startup_identity(
+                        load_device_props(binding.device_props)
+                    )
+                    != startup_identity
+                ):
+                    db.rollback()
+                    return False
+                bot = (
+                    db.query(BotModel)
+                    .filter(
+                        BotModel.binding_id == binding_id,
+                        BotModel.is_delete == 0,
+                        self._bot_env(),
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if bot is None:
+                    db.rollback()
+                    return False
+                ext = load_device_props(bot.ext)
+                ext["start_status"] = status
+                if message is not None:
+                    ext["start_message"] = message
+                bot.ext = json.dumps(ext, ensure_ascii=False)
+                bot.gmt_modified = func.now()
+                if status == "FAILED":
+                    bot.status = "FAILED"
+                    binding.status = "FAILED"
+                    binding.gmt_modified = func.now()
+                db.commit()
+                return True
+            except Exception:
+                db.rollback()
+                raise
+
     def prepare_baas_desktop_restart(
         self,
         *,
         binding_id: int,
         bot_id: str,
         owner_id: str,
+        expected_publish_id: str | None,
         bot_ext_patch: dict[str, Any],
         binding_props_patch: dict[str, Any],
     ) -> bool:
@@ -84,6 +144,18 @@ class BaasDesktopRestartRepositoryMixin:
                     or binding.device_provider != "baas"
                     or binding.status not in {_PENDING, _ACTIVE}
                 ):
+                    db.rollback()
+                    return False
+                binding_props = load_device_props(binding.device_props)
+                current_publish_id = binding_props.get(
+                    "restart_publish_id"
+                ) or binding_props.get("publish_id")
+                normalized_current = (
+                    str(current_publish_id)
+                    if current_publish_id is not None
+                    else None
+                )
+                if normalized_current != expected_publish_id:
                     db.rollback()
                     return False
                 bot = (
@@ -104,7 +176,6 @@ class BaasDesktopRestartRepositoryMixin:
 
                 bot_ext = load_device_props(bot.ext)
                 bot_ext.update(bot_ext_patch)
-                binding_props = load_device_props(binding.device_props)
                 binding_props.update(binding_props_patch)
                 bot.ext = json.dumps(bot_ext, ensure_ascii=False)
                 bot.status = _PENDING

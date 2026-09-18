@@ -22,6 +22,10 @@ from agentclaw.community.core.devices.errors import (
     DeviceNotFoundError,
     InvalidDeviceStatusError,
 )
+from agentclaw.community.core.devices.protocols import (
+    LayoutInitializationConflictError,
+    LayoutInitializationEvidenceError,
+)
 from agentclaw.community.core.skills_pool.native_confirmation import (
     PoolNativeLayoutConfirmationError,
 )
@@ -1314,10 +1318,25 @@ class TestReportDeviceStatus:
         )
 
         assert result is updated
-        confirmation.confirm.assert_called_once()
-        repo.update_device_props.assert_called_once_with(
+        confirmation.confirm.assert_called_once_with(
             binding_id=1,
-            props={"layout_confirmed_startup_identity": "sandbox-current"},
+            startup_identity="sandbox-current",
+            env=record.env,
+            entity_id=record.entity_id,
+            bot_id="bot-1",
+            expected_engine="openclaw",
+            evidence={
+                "actual_engine": "openclaw",
+                "actual_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "roots_initialized": True,
+            },
+        )
+        repo.transition_layout_startup_status_if_matches.assert_called_once_with(
+            binding_id=1,
+            startup_identity="sandbox-current",
+            status="SUCCEEDED",
+            message=None,
         )
 
     def test_invalid_pool_layout_evidence_marks_binding_and_bot_failed(self):
@@ -1338,7 +1357,7 @@ class TestReportDeviceStatus:
             "active_engine": "openclaw",
         }
         confirmation = MagicMock()
-        confirmation.confirm.side_effect = PoolNativeLayoutConfirmationError(
+        confirmation.confirm.side_effect = LayoutInitializationEvidenceError(
             "layout contract version is unsupported"
         )
         svc = _make_service(
@@ -1365,17 +1384,104 @@ class TestReportDeviceStatus:
                 },
             )
 
-        repo.update_bot_start_status.assert_called_once_with(
+        repo.transition_layout_startup_status_if_matches.assert_called_once_with(
             binding_id=1,
+            startup_identity="sandbox-current",
             status="FAILED",
             message="layout contract version is unsupported",
         )
-        repo.update_bot_status_on_device_failed.assert_called_once_with(binding_id=1)
-        repo.update_status.assert_called_once_with(
-            binding_id=1,
-            status=DeviceBindingStatus.FAILED.value,
-        )
         repo.update_device_props.assert_not_called()
+
+    def test_layout_confirmation_conflict_does_not_fail_current_binding(self):
+        record = _make_record(
+            device_provider=ARCA_DEVICE_PROVIDER,
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={
+                "callback_token": "tok",
+                "sandbox_id": "sandbox-current",
+            },
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "bot-1",
+            "entity_id": "u001",
+            "active_engine": "openclaw",
+        }
+        confirmation = MagicMock()
+        confirmation.confirm.side_effect = LayoutInitializationConflictError(
+            "startup superseded"
+        )
+        svc = _make_service(
+            repo=repo,
+            bot_query=bot_query,
+            layout_confirmation=confirmation,
+        )
+
+        with pytest.raises(LayoutInitializationConflictError):
+            svc.report_device_status(
+                device_id="staff_u001_default",
+                status="SUCCEEDED",
+                message=None,
+                token="tok",
+                startup_identity="sandbox-current",
+                layout_initialization={
+                    "actual_engine": "openclaw",
+                    "actual_layout": "pool",
+                    "layout_contract_version": "skills-pool-p3-v1",
+                    "roots_initialized": True,
+                },
+            )
+
+        repo.update_bot_start_status.assert_not_called()
+        repo.update_bot_status_on_device_failed.assert_not_called()
+        repo.update_status.assert_not_called()
+        repo.transition_layout_startup_status_if_matches.assert_not_called()
+
+    def test_layout_success_does_not_update_bot_after_startup_is_superseded(self):
+        record = _make_record(
+            device_provider=ARCA_DEVICE_PROVIDER,
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={
+                "callback_token": "tok",
+                "sandbox_id": "sandbox-current",
+            },
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.transition_layout_startup_status_if_matches.return_value = False
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "bot-1",
+            "entity_id": "u001",
+            "active_engine": "openclaw",
+        }
+        svc = _make_service(
+            repo=repo,
+            bot_query=bot_query,
+            layout_confirmation=MagicMock(),
+        )
+
+        with pytest.raises(
+            LayoutInitializationConflictError,
+            match="changed after layout confirmation",
+        ):
+            svc.report_device_status(
+                device_id="staff_u001_default",
+                status="SUCCEEDED",
+                message=None,
+                token="tok",
+                startup_identity="sandbox-current",
+                layout_initialization={
+                    "actual_engine": "openclaw",
+                    "actual_layout": "pool",
+                    "layout_contract_version": "skills-pool-p3-v1",
+                    "roots_initialized": True,
+                },
+            )
+
+        repo.update_bot_start_status.assert_not_called()
 
     def test_pool_layout_evidence_rejects_stale_startup_identity(self):
         record = _make_record(

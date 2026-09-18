@@ -1063,6 +1063,7 @@ class TestRestart:
         prepared = mocks["binding_repo"].prepare_baas_desktop_restart.call_args
         assert prepared.kwargs["bot_ext_patch"]["publish_id"] == "17"
         assert prepared.kwargs["binding_id"] == 1
+        assert prepared.kwargs["expected_publish_id"] is None
         assert prepared.kwargs["binding_props_patch"] == {
             "publish_id": "17",
             "restart_publish_id": "17",
@@ -1073,7 +1074,6 @@ class TestRestart:
                 ),
             },
             "layout_confirmed_startup_identity": None,
-            "layout_watchdog_startup_identity": None,
         }
 
     @patch(
@@ -1094,15 +1094,40 @@ class TestRestart:
         result = service.restart(bot_id="desktop_bot_001", user_id="u001")
 
         assert result["status"] == "PENDING"
-        mocks["binding_repo"].update_device_props.assert_called_once()
-        mock_start_poll.assert_called_once_with(
-            publish_id="5",
-            binding_id="1",
-            bot_id="desktop_bot_001",
-            owner_id="staff_u001",
-            device_id="m-001",
-            engine_type="openclaw",
-        )
+        mocks["binding_repo"].update_device_props.assert_not_called()
+        poll_kwargs = mock_start_poll.call_args.kwargs
+        assert poll_kwargs["publish_id"] == "5"
+        assert poll_kwargs["binding_id"] == "1"
+        assert poll_kwargs["bot_id"] == "desktop_bot_001"
+        assert poll_kwargs["owner_id"] == "staff_u001"
+        assert poll_kwargs["device_id"] == "m-001"
+        assert poll_kwargs["engine_type"] == "openclaw"
+        bot_patch, binding_patch, expected_publish_id = poll_kwargs[
+            "restart_tracking"
+        ]
+        assert bot_patch["publish_id"] == "5"
+        assert binding_patch["restart_publish_id"] == "5"
+        assert expected_publish_id is None
+
+    @patch(
+        "agentclaw.community.core.desktop_bot.services.desktop_bot_service."
+        "DesktopBotService._start_publish_polling"
+    )
+    def test_restart_guard_rejection_observes_without_resurrecting_binding(
+        self, mock_start_poll
+    ):
+        service, mocks = _make_service_with_mocks()
+        _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")
+        mocks["baas"].restart_bot.return_value = {"publish_id": 5}
+        mocks["baas"].approve_publish.return_value = {"status": "SUCCESS"}
+        mocks["binding_repo"].prepare_baas_desktop_restart.return_value = False
+
+        result = service.restart(bot_id="desktop_bot_001", user_id="u001")
+
+        assert result["status"] == "PENDING"
+        mocks["binding_repo"].update_device_props.assert_not_called()
+        mocks["binding_repo"].update_status.assert_not_called()
+        assert mock_start_poll.call_args.kwargs["observe_only"] is True
 
     def test_restart_no_publish_id_skips_approve(self):
         service, mocks = _make_service_with_mocks()
@@ -1284,6 +1309,7 @@ class TestPublishPolling:
             status="PENDING",
             device_props={
                 "callback_token": "callback-token",
+                "client_id": "runtime-client-001",
                 "publish_id": "pub-001",
             },
         )
@@ -1292,8 +1318,8 @@ class TestPublishPolling:
             status="PENDING",
             device_props={
                 "callback_token": "callback-token",
+                "client_id": "runtime-client-001",
                 "publish_id": "pub-001",
-                "layout_watchdog_startup_identity": "pub-001",
                 "layout_confirmed_startup_identity": "pub-001",
             },
         )
@@ -1313,11 +1339,72 @@ class TestPublishPolling:
 
         watchdog_call = mocks["baas"].exec_command_on_bot.call_args
         assert watchdog_call.kwargs["bot_uuid"] == "BOT-pool"
-        assert "starting_watchdog.sh" in watchdog_call.kwargs["cmd"]
-        assert "pub-001" in watchdog_call.kwargs["cmd"]
-        assert "cat /var/run/agentclaw" not in watchdog_call.kwargs["cmd"]
+        watchdog_cmd = watchdog_call.kwargs["cmd"]
+        assert "starting_watchdog.sh" in watchdog_cmd
+        assert "--client_id BOT-pool" in watchdog_cmd
+        assert "runtime-client-001" not in watchdog_cmd
+        assert "pub-001" in watchdog_cmd
+        assert "cat /var/run/agentclaw" not in watchdog_cmd
         mocks["layout_confirmation"].confirm.assert_not_called()
         service._trigger_device_alive.assert_called_once_with("BOT-pool")
+
+    def test_poll_retries_unpersisted_restart_tracking(self, poll_service):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._trigger_device_alive = MagicMock(return_value=True)
+        mocks["binding_repo"].prepare_baas_desktop_restart.side_effect = [
+            RuntimeError("DB down"),
+            True,
+        ]
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop_bot_001",
+            "owner_id": "u001",
+            "ext": {},
+        }
+
+        service._poll_publish_progress(
+            publish_id="pub-001",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-pool",
+            restart_tracking=(
+                {"publish_id": "pub-001"},
+                {"restart_publish_id": "pub-001"},
+                None,
+            ),
+        )
+
+        assert mocks["binding_repo"].prepare_baas_desktop_restart.call_count == 2
+        service._trigger_device_alive.assert_called_once_with("BOT-pool")
+
+    def test_poll_does_not_overwrite_newer_restart_after_tracking_retry(
+        self, poll_service
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._trigger_device_alive = MagicMock(return_value=True)
+        mocks["binding_repo"].prepare_baas_desktop_restart.return_value = False
+        mocks["binding_repo"].get_by_id.return_value = MagicMock(
+            status="PENDING",
+            device_props={"restart_publish_id": "newer-publish"},
+        )
+
+        service._poll_publish_progress(
+            publish_id="older-publish",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-pool",
+            restart_tracking=(
+                {"publish_id": "older-publish"},
+                {"restart_publish_id": "older-publish"},
+                "baseline-publish",
+            ),
+        )
+
+        service._trigger_device_alive.assert_not_called()
+        mocks["binding_repo"].update_status.assert_not_called()
 
     def test_pool_publish_surfaces_rejected_layout_callback_as_failed(
         self, poll_service
