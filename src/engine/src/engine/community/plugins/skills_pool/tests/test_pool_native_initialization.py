@@ -50,6 +50,35 @@ def test_restart_repairs_missing_marker_without_touching_pool_content(tmp_path: 
     assert (pool_local / "kept" / "SKILL.md").read_text() == "keep"
 
 
+def test_restart_accepts_matching_active_marker(tmp_path: Path) -> None:
+    home = tmp_path / "home" / "admin"
+    initialize_pool_native(engine="openclaw", home=home)
+
+    evidence = initialize_pool_native(engine="openclaw", home=home)
+
+    assert evidence.actual_layout == "pool"
+
+
+def test_non_openclaw_engine_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(PoolNativeInitializationError, match="unsupported for engine"):
+        initialize_pool_native(engine="hermes", home=tmp_path)
+
+
+def test_invalid_existing_active_marker_is_rejected(tmp_path: Path) -> None:
+    marker = (
+        tmp_path
+        / ".openclaw"
+        / "workspace"
+        / "skills-pool"
+        / ".pool-active"
+    )
+    marker.parent.mkdir(parents=True)
+    marker.write_text("not-json")
+
+    with pytest.raises(PoolNativeInitializationError, match="marker is invalid"):
+        initialize_pool_native(engine="openclaw", home=tmp_path)
+
+
 def test_conflicting_legacy_entry_is_preserved_and_rejected(tmp_path: Path) -> None:
     home = tmp_path / "home" / "admin"
     legacy_local = home / ".openclaw" / "workspace" / "skills" / "skills-local"
