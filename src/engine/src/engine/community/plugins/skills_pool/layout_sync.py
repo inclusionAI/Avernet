@@ -142,14 +142,30 @@ def merge_post_cutover_changes(
         "pool_local": str(Path(os.path.abspath(pool_local))),
         "publish_root": publish_root.name,
     }
+    source = snapshot_local(source_root)
+    changed = {
+        key
+        for key in set(baseline) | set(source)
+        if source.get(key) != baseline.get(key)
+    }
+    if not changed:
+        _remove_owned_publish_claim(
+            _publish_claim_root(
+                publish_root,
+                expected_owner=publish_owner,
+            )
+        )
+        _remove_owned_publish_root(
+            publish_root,
+            expected_owner=publish_owner,
+        )
+        return {
+            "applied": [],
+            "conflicts_preserved_in_pool": [],
+        }
+
     _prepare_publish_root(publish_root, expected_owner=publish_owner)
     try:
-        source = snapshot_local(source_root)
-        changed = {
-            key
-            for key in set(baseline) | set(source)
-            if source.get(key) != baseline.get(key)
-        }
         applied: list[str] = []
         conflicts: list[str] = sorted(key for key in changed if key not in source)
 
@@ -382,16 +398,16 @@ def _prepare_publish_root(
     *,
     expected_owner: dict[str, str],
 ) -> None:
+    claim_root = _publish_claim_root(
+        publish_root,
+        expected_owner=expected_owner,
+    )
     owner_bytes = json.dumps(
         expected_owner,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    owner_digest = hashlib.sha256(owner_bytes).hexdigest()[:16]
-    claim_root = publish_root.with_name(
-        f"{publish_root.name}.owner-{owner_digest}"
-    )
     _remove_owned_publish_claim(claim_root)
     _remove_owned_publish_root(
         publish_root,
@@ -423,6 +439,23 @@ def _prepare_publish_root(
     except OSError:
         _remove_path(claim_root)
         raise
+
+
+def _publish_claim_root(
+    publish_root: Path,
+    *,
+    expected_owner: dict[str, str],
+) -> Path:
+    owner_bytes = json.dumps(
+        expected_owner,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    owner_digest = hashlib.sha256(owner_bytes).hexdigest()[:16]
+    return publish_root.with_name(
+        f"{publish_root.name}.owner-{owner_digest}"
+    )
 
 
 def _remove_owned_publish_claim(claim_root: Path) -> None:

@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from engine.community.plugins.skills_pool.layout_sync import (
     merge_post_cutover_changes,
     mirror_local_tree,
@@ -157,6 +156,75 @@ def test_merge_replays_owned_staging_left_before_publish(
     assert result["applied"] == ["ask-matt/late.txt"]
     assert (pool_local / "ask-matt" / "late.txt").read_text() == "legacy-window"
     assert not publish_root.exists()
+
+
+def test_no_delta_merge_removes_owned_staging_without_recreating_it(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "quarantine" / "skills-local"
+    source_root.mkdir(parents=True)
+    pool_root = tmp_path / "skills-pool"
+    pool_local = pool_root / "skills-local"
+    pool_local.mkdir(parents=True)
+    publish_root = pool_root / ".post-sync-generation-1"
+    publish_root.mkdir()
+    owner = {
+        "schema": "skills-pool-layout-sync-publish.v1",
+        "pool_local": str(pool_local),
+        "publish_root": publish_root.name,
+    }
+    (publish_root / ".owner.json").write_text(
+        json.dumps(owner),
+        encoding="utf-8",
+    )
+    owner_bytes = json.dumps(
+        owner,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    claim_root = publish_root.with_name(
+        f"{publish_root.name}.owner-{hashlib.sha256(owner_bytes).hexdigest()[:16]}"
+    )
+    claim_root.mkdir()
+
+    result = merge_post_cutover_changes(
+        source_root=source_root,
+        pool_local=pool_local,
+        baseline={},
+        publish_root=publish_root,
+    )
+
+    assert result == {
+        "applied": [],
+        "conflicts_preserved_in_pool": [],
+    }
+    assert not publish_root.exists()
+    assert not claim_root.exists()
+
+
+def test_no_delta_merge_preserves_unowned_publish_staging(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "quarantine" / "skills-local"
+    source_root.mkdir(parents=True)
+    pool_root = tmp_path / "skills-pool"
+    pool_local = pool_root / "skills-local"
+    pool_local.mkdir(parents=True)
+    publish_root = pool_root / ".post-sync-generation-1"
+    publish_root.mkdir()
+    sentinel = publish_root / "user-owned.txt"
+    sentinel.write_text("do-not-delete", encoding="utf-8")
+
+    with pytest.raises(OSError):
+        merge_post_cutover_changes(
+            source_root=source_root,
+            pool_local=pool_local,
+            baseline={},
+            publish_root=publish_root,
+        )
+
+    assert sentinel.read_text(encoding="utf-8") == "do-not-delete"
 
 
 def test_merge_replays_owner_claim_left_before_marker_write(

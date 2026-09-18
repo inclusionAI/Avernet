@@ -68,7 +68,17 @@ def test_empty_local_cutover_does_not_recreate_staging_after_cleanup(
     staging = pool_local.parent / ".final-sync-generation-1"
     staging.mkdir()
     real_remove_path = layout_sync._remove_path
+    real_mkdir = Path.mkdir
     staging_removals = 0
+
+    def reject_empty_post_sync_staging(
+        path: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        if path.name.startswith(".post-sync-"):
+            raise OSError(errno.EINVAL, "Invalid argument")
+        real_mkdir(path, *args, **kwargs)
 
     def emulate_virtiofs_immediate_remove_failure(path: Path) -> None:
         nonlocal staging_removals
@@ -83,6 +93,7 @@ def test_empty_local_cutover_does_not_recreate_staging_after_cleanup(
         "_remove_path",
         emulate_virtiofs_immediate_remove_failure,
     )
+    monkeypatch.setattr(Path, "mkdir", reject_empty_post_sync_staging)
 
     result = activate_openclaw_pool(
         migration_generation="generation-1",
