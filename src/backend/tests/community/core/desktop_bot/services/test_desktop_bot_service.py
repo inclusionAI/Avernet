@@ -1,4 +1,5 @@
 """Unit tests for DesktopBotService."""
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -261,7 +262,7 @@ class TestCreate:
         mocks["baas"].post_bots_api.assert_not_called()
         mocks["baas"].approve_publish.assert_not_called()
         mocks["binding_repo"].insert_binding.assert_not_called()
-        mocks["bot_repo"].insert.assert_not_called()
+        mocks["bot_repo"].insert_with_initial_skill_layout.assert_not_called()
         # verify device_token passed to passport
         passport_call = mocks["passport"].apply_agent_passport.call_args.kwargs
         assert passport_call["device_token"] == "dev-tok-001"
@@ -337,7 +338,7 @@ class TestCreate:
             bot_id="desktop_bot_002", owner_workno="u001",
         )
         mocks["baas"].post_bots_api.assert_called_once()
-        bot_insert_call = mocks["bot_repo"].insert.call_args[0][0]
+        bot_insert_call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]
         assert bot_insert_call["ext"]["passport"]["agent_code"] == "ac-continue-001"
         # ext 中应包含创建时写入的不可变部署信息
         assert bot_insert_call["ext"]["machine_id"] == "m-002"
@@ -415,7 +416,7 @@ class TestCreate:
         payload = call_kwargs["payload"]
         assert payload["config"]["deploy_config"]["mount_path"] == "/custom/mount"
         # ext 中的 mount_path 应同步记录
-        bot_insert_call = mocks["bot_repo"].insert.call_args[0][0]
+        bot_insert_call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]
         assert bot_insert_call["ext"]["mount_path"] == "/custom/mount"
         assert bot_insert_call["ext"]["machine_id"] == "m-001"
 
@@ -458,7 +459,7 @@ class TestCreate:
         payload = call_kwargs["payload"]
         assert "mount_path" not in payload["config"]["deploy_config"]
         # 空白 mount_path 应存为空字符串
-        bot_insert_call = mocks["bot_repo"].insert.call_args[0][0]
+        bot_insert_call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]
         assert bot_insert_call["ext"]["mount_path"] == ""
 
     def test_create_continue_ext_stores_avatar_url(self):
@@ -481,7 +482,7 @@ class TestCreate:
             mount_path="/data/workspace",
         )
 
-        bot_insert_call = mocks["bot_repo"].insert.call_args[0][0]
+        bot_insert_call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]
         ext = bot_insert_call["ext"]
         assert ext["avatar_url"] == "https://img.example.com/bot.png"
         assert ext["machine_id"] == "m-avatar"
@@ -576,6 +577,8 @@ class TestCreate:
             baas_config=BaasConfig(desktop_template_uuid=""),
             device_service=mocks["device_service"],
             skill_set_factory=skill_set_factory,
+            skills_pool_native_creation_policy=MagicMock(),
+            layout_confirmation=MagicMock(),
         )
         service._fetch_machine_info = MagicMock(
             return_value={"device_token": "dev-tok-001"}
@@ -621,6 +624,57 @@ class TestCredentialsInDeployConfig:
         assert creds["agent_code"] == "ac-cred-001"
         assert creds["stage"] == "online"
         assert "version" not in creds
+
+    def test_pool_layout_is_persisted_before_external_desktop_allocation(self):
+        from agentclaw.community.core.skills_pool.types import (
+            InitialSkillLayoutSelection,
+            RolloutEvidence,
+        )
+
+        service, mocks = _make_service_with_mocks()
+        selection = InitialSkillLayoutSelection(
+            layout_contract_version="skills-pool-p3-v1",
+            rollout_evidence=RolloutEvidence(
+                env="dev",
+                config_id=7,
+                config_version="revision-1",
+                batch_id=None,
+                engine_type="openclaw",
+                decision_reason="owner_allowlist",
+            ),
+        )
+        mocks["native_creation_policy"].select.return_value = selection
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-cred-001",
+        }
+
+        def assert_persisted_before_baas(**_kwargs):
+            mocks["bot_repo"].insert_with_initial_skill_layout.assert_called_once()
+            return {"bot_uuid": "bu-001", "publish_id": 91}
+
+        mocks["baas"].post_bots_api.side_effect = assert_persisted_before_baas
+        mocks["binding_repo"].insert_binding.return_value = 1
+
+        service.create_after_authorization(
+            bot={
+                "bot_id": "desktop_pool",
+                "bot_name": "Pool",
+                "active_engine": "openclaw",
+            },
+            user_id="u001",
+            machine_id="m-001",
+        )
+
+        call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args
+        assert call.kwargs["layout"] is selection
+        credentials = mocks["baas"].post_bots_api.call_args.kwargs["payload"][
+            "config"
+        ]["deploy_config"]["credentials"]
+        assert credentials["agentclaw_skills_layout"] == "pool"
+        assert (
+            credentials["agentclaw_skills_layout_contract_version"]
+            == "skills-pool-p3-v1"
+        )
 
     def test_credentials_token_is_nonempty(self):
         """token field should be a non-empty string (secrets.token_urlsafe)."""
@@ -676,7 +730,7 @@ class TestCredentialsInDeployConfig:
             machine_id="m-001",
         )
 
-        bot_insert_call = mocks["bot_repo"].insert.call_args[0][0]
+        bot_insert_call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]
         ext = bot_insert_call["ext"]
         assert "client_id" in ext
         assert "callback_token" in ext
@@ -699,7 +753,7 @@ class TestCredentialsInDeployConfig:
 
         payload = mocks["baas"].post_bots_api.call_args.kwargs["payload"]
         creds = payload["config"]["deploy_config"]["credentials"]
-        ext = mocks["bot_repo"].insert.call_args[0][0]["ext"]
+        ext = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]["ext"]
 
         assert ext["client_id"] == creds["client_id"]
         assert ext["callback_token"] == creds["token"]
@@ -1042,6 +1096,54 @@ class TestPublishPolling:
         service._trigger_device_alive.assert_called_once_with("BOT-test")
         # _update_local_status 不再被调用（由 report_device_alive 内部处理）
         mocks["binding_repo"].update_status.assert_not_called()
+
+    def test_pool_publish_reads_current_vm_evidence_before_active(self, poll_service):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._trigger_device_alive = MagicMock(return_value=True)
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop-pool",
+            "owner_id": "u001",
+            "entity_id": "u001",
+            "ext": {
+                "skills_layout": "pool",
+                "publish_id": "pub-001",
+            },
+        }
+        mocks["baas"].exec_command_on_bot.return_value = {
+            "exit_code": 0,
+            "stdout": json.dumps(
+                {
+                    "actual_engine": "openclaw",
+                    "actual_layout": "pool",
+                    "layout_contract_version": "skills-pool-p3-v1",
+                    "roots_initialized": True,
+                }
+            ),
+        }
+
+        service._poll_publish_progress(
+            publish_id="pub-001",
+            binding_id="1",
+            bot_id="desktop-pool",
+            owner_id="u001",
+            device_id="BOT-pool",
+            engine_type="openclaw",
+        )
+
+        mocks["layout_confirmation"].confirm.assert_called_once_with(
+            env="dev",
+            entity_id="u001",
+            bot_id="desktop-pool",
+            expected_engine="openclaw",
+            evidence={
+                "actual_engine": "openclaw",
+                "actual_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "roots_initialized": True,
+            },
+        )
+        service._trigger_device_alive.assert_called_once_with("BOT-pool")
 
     def test_poll_failed_updates_status_to_failed(self, poll_service):
         service, mocks = poll_service()
@@ -1517,6 +1619,10 @@ def _make_service():
         baas_config=BaasConfig(desktop_template_uuid=DESKTOP_TEMPLATE_UUID),
         device_service=MagicMock(spec=DeviceService),
         skill_set_factory=skill_set_factory,
+        skills_pool_native_creation_policy=MagicMock(
+            select=MagicMock(return_value=None)
+        ),
+        layout_confirmation=MagicMock(),
     )
 
 
@@ -1535,6 +1641,10 @@ def _make_service_with_mocks():
         "bot_repo": MagicMock(),
         "device_service": MagicMock(spec=DeviceService),
         "skill_set_factory": skill_set_factory,
+        "native_creation_policy": MagicMock(
+            select=MagicMock(return_value=None)
+        ),
+        "layout_confirmation": MagicMock(),
     }
     service = DesktopBotService(
         baas_service=mocks["baas"],
@@ -1544,6 +1654,8 @@ def _make_service_with_mocks():
         baas_config=BaasConfig(desktop_template_uuid=DESKTOP_TEMPLATE_UUID),
         device_service=mocks["device_service"],
         skill_set_factory=mocks["skill_set_factory"],
+        skills_pool_native_creation_policy=mocks["native_creation_policy"],
+        layout_confirmation=mocks["layout_confirmation"],
     )
     # _fetch_machine_info makes a real HTTP call; mock it for all unit tests
     service._fetch_machine_info = MagicMock(

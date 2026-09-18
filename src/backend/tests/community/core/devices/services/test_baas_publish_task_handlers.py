@@ -84,6 +84,10 @@ def _make_restart_handler(
     common_config_service: MagicMock | None = None,
     clock=lambda: 200.0,
 ) -> tuple[BaasRestartPublishPollHandler, MagicMock]:
+    baas_device_service.dispatch_restart_layout_confirmation.return_value = (
+        True,
+        "layout confirmation not required",
+    )
     if common_config_service is None:
         common_config_service = MagicMock()
         common_config_service.get_value.return_value = {
@@ -1053,6 +1057,7 @@ def test_create_init_marks_active_after_init_and_alive():
         bot_id="bot-001",
         owner_id="owner-001",
         callback_token="tok-123",
+        startup_identity="1001",
         admins=["u1001", "u1002"],
         codefuse_token="plain-token",
     )
@@ -1725,6 +1730,67 @@ def test_restart_success_requests_runtime_projection_and_baas_reconciliation():
         ]
         assert activated == []
         assert delivery_order == ["runtime_projection", "baas_completed"]
+    finally:
+        reset_event_bus()
+
+
+def test_restart_confirmation_dispatch_failure_retries_without_finalizing():
+    reset_event_bus()
+    completed: list[BaasPublishCompletedEvent] = []
+    projected: list[RuntimeProjectionRequestedEvent] = []
+    get_event_bus().subscribe(BaasPublishCompletedEvent, completed.append)
+    get_event_bus().subscribe(RuntimeProjectionRequestedEvent, projected.append)
+    try:
+        repo = MagicMock()
+        binding = _make_binding(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"restart_publish_id": 1002},
+        )
+        repo.get_by_id.return_value = binding
+        bot_repository = MagicMock()
+        bot_repository.get_by_binding_id.return_value = {
+            "bot_id": "bot-001",
+            "owner_id": "owner-001",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+        }
+        bot_repository.get_by_id_and_owner.return_value = {"ext": {}}
+        baas_device_service = MagicMock()
+        baas_device_service.poll_publish_once.return_value = (
+            DeviceBindingStatus.ACTIVE.value
+        )
+        baas_device_service.refresh_codefuse_token_on_publish_success.return_value = (
+            None
+        )
+        handler, _ = _make_restart_handler(
+            repo=repo,
+            bot_repository=bot_repository,
+            baas_device_service=baas_device_service,
+        )
+        baas_device_service.dispatch_restart_layout_confirmation.return_value = (
+            False,
+            "layout confirmation dispatch failed",
+        )
+
+        outcome = handler.handle(
+            build_restart_publish_poll_payload(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1002,
+                started_at_epoch_s=190.0,
+                bot_uuid="baas-bot-1",
+            )
+        )
+
+        assert outcome == Retry("layout confirmation dispatch failed")
+        baas_device_service.dispatch_restart_layout_confirmation.assert_called_once_with(
+            binding=binding,
+            publish_id=1002,
+        )
+        repo.update_device_props.assert_not_called()
+        assert completed == []
+        assert projected == []
     finally:
         reset_event_bus()
 

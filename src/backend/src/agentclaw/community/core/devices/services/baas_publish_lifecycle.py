@@ -165,6 +165,7 @@ def run_start_service_polling(
                     bot_id=bot_id,
                     owner_id=owner_id,
                     callback_token=callback_token,
+                    startup_identity=str(publish_id),
                     admins=admins,
                     codefuse_token=codefuse_token,
                 )

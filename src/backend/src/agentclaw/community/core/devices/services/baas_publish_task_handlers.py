@@ -740,6 +740,14 @@ class BaasRestartPublishPollHandler:
         binding: DeviceBindingRecord,
         image_policy_on_success: str | None,
     ) -> TaskOutcome:
+        confirmation_dispatched, confirmation_message = (
+            self._baas_device_service.dispatch_restart_layout_confirmation(
+                binding=binding,
+                publish_id=publish_id,
+            )
+        )
+        if not confirmation_dispatched:
+            return Retry(confirmation_message)
         if image_policy_on_success == _DEFAULT_IMAGE_POLICY_VALUE:
             if self._bot_repository is None or self._publish_repository is None:
                 return Retry("default-image persistence service unavailable")

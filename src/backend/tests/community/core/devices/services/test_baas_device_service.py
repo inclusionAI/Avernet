@@ -1569,6 +1569,7 @@ class TestInitStepEdgeCases:
             entity_type="staff",
             stage="dev",
             admins="admin1",
+            startup_identity="publish-1001",
         )
 
         cmd = baas.exec_command_on_bot.call_args_list[0].kwargs["cmd"]
@@ -1576,6 +1577,49 @@ class TestInitStepEdgeCases:
         assert "--bot_id b123" in cmd
         assert "--owner_id u001" in cmd
         assert "--admins admin1" in cmd
+        assert "--startup_identity publish-1001" in cmd
+        watchdog_cmd = baas.exec_command_on_bot.call_args_list[1].kwargs["cmd"]
+        assert "--startup_identity publish-1001" in watchdog_cmd
+
+    def test_pool_restart_dispatches_current_publish_identity(self):
+        baas = MagicMock()
+        svc = _make_service(baas_service=baas)
+        binding = _make_binding_record(
+            device_props={
+                "bot_uuid": "BOT-1",
+                "client_id": "client-1",
+                "callback_token": "token-1",
+                "restart_publish_id": "2002",
+                "envs": {
+                    "AGENTCLAW_SKILLS_LAYOUT": "pool",
+                    "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": (
+                        "skills-pool-p3-v1"
+                    ),
+                },
+            }
+        )
+
+        ok, message = svc.dispatch_restart_layout_confirmation(
+            binding=binding,
+            publish_id=2002,
+        )
+
+        assert ok is True
+        assert message == "Skills Pool restart callback dispatched"
+        command = baas.exec_command_on_bot.call_args.kwargs["cmd"]
+        assert "starting_watchdog.sh" in command
+        assert "--startup_identity 2002" in command
+
+    def test_legacy_restart_does_not_dispatch_layout_confirmation(self):
+        baas = MagicMock()
+        svc = _make_service(baas_service=baas)
+        binding = _make_binding_record(device_props={"envs": {}})
+
+        assert svc.dispatch_restart_layout_confirmation(
+            binding=binding,
+            publish_id=2002,
+        ) == (True, "layout confirmation not required")
+        baas.exec_command_on_bot.assert_not_called()
 
     def test_deserialize_symbol_invalid_json(self):
         """Lines 540-544: invalid JSON returns empty list."""
@@ -1800,6 +1844,7 @@ class TestBaasCreateTaskHelpers:
 
         assert ok is False
         assert "report_device_alive failed: alive boom" in message
+        assert svc._run_container_init.call_args.kwargs["startup_identity"] == "1001"
 
 
 class TestAfterBindingPersisted:

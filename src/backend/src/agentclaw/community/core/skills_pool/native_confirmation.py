@@ -25,6 +25,14 @@ class PoolNativeLayoutConfirmationError(RuntimeError):
     """The reported layout cannot safely confirm the persisted selection."""
 
 
+_EVIDENCE_FIELDS = {
+    "actual_engine",
+    "actual_layout",
+    "layout_contract_version",
+    "roots_initialized",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class PoolLayoutInitializationEvidence:
     actual_engine: str
@@ -64,6 +72,10 @@ class SkillsPoolNativeLayoutConfirmationService:
         evidence: dict[str, object],
     ) -> None:
         scope = BotSkillLayoutScope(env=env, entity_id=entity_id, bot_id=bot_id)
+        if set(evidence) != _EVIDENCE_FIELDS:
+            raise PoolNativeLayoutConfirmationError(
+                "layout evidence fields do not match the contract"
+            )
         observed = PoolLayoutInitializationEvidence.from_mapping(evidence)
         if expected_engine != "openclaw" or observed.actual_engine != expected_engine:
             raise PoolNativeLayoutConfirmationError("layout engine does not match Bot")

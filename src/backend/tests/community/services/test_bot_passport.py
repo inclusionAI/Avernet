@@ -60,6 +60,10 @@ class TestBotServicePassportIntegration:
             teclaw_provision_service_provider=lambda: MagicMock(is_teclaw=MagicMock(return_value=False)),
             device_status_client=MagicMock(),
             cron_auto_setup_service_provider=lambda: MagicMock(),
+            skills_pool_native_creation_policy=MagicMock(
+                select=MagicMock(return_value=None)
+            ),
+            skill_layout_repository=MagicMock(),
         )
         return service
 
@@ -372,7 +376,7 @@ class TestCreateBotWithBotId(TestBotServicePassportIntegration):
         mock_device_service.apply_device.return_value = mock_device_result
 
         # Mock insert 返回新 bot
-        mock_bot_repository.insert.return_value = new_bot
+        mock_bot_repository.insert_with_initial_skill_layout.return_value = new_bot
         mock_bot_repository.update_by_owner.return_value = new_bot
 
         bot_service._device_service_provider = lambda: mock_device_service
@@ -388,8 +392,8 @@ class TestCreateBotWithBotId(TestBotServicePassportIntegration):
 
         # Verify: 使用传入的 bot_id 创建新 bot
         assert result["bot_id"] == "20260408_abc123"
-        mock_bot_repository.insert.assert_called_once()
-        call_args = mock_bot_repository.insert.call_args[0][0]
+        mock_bot_repository.insert_with_initial_skill_layout.assert_called_once()
+        call_args = mock_bot_repository.insert_with_initial_skill_layout.call_args[0][0]
         assert call_args["bot_id"] == "20260408_abc123"
 
 
@@ -705,6 +709,10 @@ class TestCreateServiceBotPublish:
             teclaw_provision_service_provider=lambda: MagicMock(is_teclaw=MagicMock(return_value=False)),
             device_status_client=MagicMock(),
             cron_auto_setup_service_provider=lambda: MagicMock(),
+            skills_pool_native_creation_policy=MagicMock(
+                select=MagicMock(return_value=None)
+            ),
+            skill_layout_repository=MagicMock(),
         )
         return service
 
@@ -733,7 +741,7 @@ class TestCreateServiceBotPublish:
         mock_device_service.apply_device.return_value = mock_device_result
 
         # Mock insert 返回新 bot
-        mock_bot_repository.insert.return_value = new_bot
+        mock_bot_repository.insert_with_initial_skill_layout.return_value = new_bot
         mock_bot_repository.update_by_owner.return_value = new_bot
 
         # Mock BotPublishRecord
@@ -808,7 +816,7 @@ class TestCreateServiceBotPublish:
         mock_device_service.apply_device.return_value = mock_device_result
 
         # Mock insert 返回新 bot
-        mock_bot_repository.insert.return_value = new_bot
+        mock_bot_repository.insert_with_initial_skill_layout.return_value = new_bot
         mock_bot_repository.update_by_owner.return_value = new_bot
 
         bot_service._device_service_provider = lambda: mock_device_service
@@ -865,7 +873,7 @@ class TestCreateServiceBotPublish:
         mock_device_service.apply_device.return_value = mock_device_result
 
         # Mock insert 返回新 bot
-        mock_bot_repository.insert.return_value = new_bot
+        mock_bot_repository.insert_with_initial_skill_layout.return_value = new_bot
         mock_bot_repository.update_by_owner.return_value = new_bot
 
         bot_service._device_service_provider = lambda: mock_device_service
@@ -887,6 +895,6 @@ class TestCreateServiceBotPublish:
 
         # Verify: 发布单创建被尝试调用，失败后 bot 行被软删
         mock_publish_service.create_publish.assert_called_once()
-        mock_bot_repository.soft_delete_by_owner.assert_called_once_with(
-            "service_bot_002", "123456"
+        mock_bot_repository.soft_delete_failed_creation.assert_called_once_with(
+            bot_id="service_bot_002", owner_id="123456"
         )

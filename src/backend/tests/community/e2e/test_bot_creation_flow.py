@@ -43,6 +43,7 @@ class FakeBotRepository:
 
     def __init__(self):
         self._store: dict[str, FakeBot] = {}
+        self.initial_layout = None
 
     def _key(self, owner_id: str, bot_id: str) -> str:
         return f"{owner_id}:{bot_id}"
@@ -71,6 +72,10 @@ class FakeBotRepository:
         self._store[self._key(owner_id, bot_id)] = bot
         return bot.__dict__
 
+    def insert_with_initial_skill_layout(self, bot_data: dict, *, layout) -> dict:
+        self.initial_layout = layout
+        return self.insert(bot_data)
+
     def update_by_owner(self, bot_id: str, owner_id: str, update_data: dict) -> dict:
         key = self._key(owner_id, bot_id)
         if key not in self._store:
@@ -91,6 +96,9 @@ class FakeBotRepository:
             else:
                 setattr(bot, k, v)
         return bot.__dict__
+
+    def soft_delete_failed_creation(self, *, bot_id: str, owner_id: str) -> bool:
+        return self._store.pop(self._key(owner_id, bot_id), None) is not None
 
     def list_by_owner(self, owner_id: str, page: int = 1, page_size: int = 100) -> tuple:
         items = [bot.__dict__ for bot in self._store.values() if bot.owner_id == owner_id]
@@ -157,6 +165,10 @@ class TestBotCreationFlow:
             teclaw_provision_service_provider=lambda: MagicMock(is_teclaw=MagicMock(return_value=False)),
             device_status_client=MagicMock(),
             cron_auto_setup_service_provider=lambda: MagicMock(),
+            skills_pool_native_creation_policy=MagicMock(
+                select=MagicMock(return_value=None)
+            ),
+            skill_layout_repository=MagicMock(),
         )
         return service
 
@@ -225,6 +237,81 @@ class TestBotCreationFlow:
 
         assert result["bot_id"] == "20260408_abc12345"
         assert result["owner_id"] == "user_001"
+
+    def test_create_persists_selected_layout_before_deferred_provisioning(
+        self, bot_service, fake_repo
+    ):
+        selection = object()
+        bot_service._skills_pool_native_creation_policy.select.return_value = selection
+
+        result = bot_service.create_bot(
+            user_id="user_001",
+            nick_name="Test User",
+            bot_name="Pool Native",
+            bot_id="native-bot",
+            bot_type="service",
+            engine_type="openclaw",
+            provision=False,
+        )
+
+        assert result["bot_id"] == "native-bot"
+        assert fake_repo.initial_layout is selection
+        bot_service._skills_pool_native_creation_policy.select.assert_called_once_with(
+            env="dev",
+            owner_id="user_001",
+            bot_id="native-bot",
+            engine_type="openclaw",
+            bot_type="service",
+        )
+
+    def test_creation_policy_failure_happens_before_bot_insert(
+        self, bot_service, fake_repo
+    ):
+        bot_service._skills_pool_native_creation_policy.select.side_effect = (
+            RuntimeError("policy unavailable")
+        )
+
+        with pytest.raises(Exception, match="policy unavailable"):
+            bot_service.create_bot(
+                user_id="user_001",
+                nick_name="Test User",
+                bot_name="Pool Native",
+                bot_id="native-bot",
+                bot_type="personal",
+                engine_type="openclaw",
+                provision=False,
+            )
+
+        assert fake_repo.get_by_id_and_owner("native-bot", "user_001") is None
+
+    def test_pool_selection_reaches_device_before_directory_setup(
+        self, bot_service, fake_repo, mock_device_service
+    ):
+        from agentclaw.community.core.skills_pool.types import SkillLayout
+
+        selection = object()
+        bot_service._skills_pool_native_creation_policy.select.return_value = selection
+        bot_service._skill_layout_repository.get.return_value = MagicMock(
+            active_layout=SkillLayout.POOL,
+            layout_contract_version="skills-pool-p3-v1",
+        )
+
+        bot_service.create_bot(
+            user_id="user_001",
+            nick_name="Test User",
+            bot_name="Pool Native",
+            bot_id="native-device-bot",
+            bot_type="personal",
+            engine_type="openclaw",
+        )
+
+        assert fake_repo.initial_layout is selection
+        extra_envs = mock_device_service.apply_device.call_args.kwargs["extra_envs"]
+        assert extra_envs["AGENTCLAW_SKILLS_LAYOUT"] == "pool"
+        assert (
+            extra_envs["AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION"]
+            == "skills-pool-p3-v1"
+        )
 
     # ==================== 场景 3: update_bot_ext ====================
 

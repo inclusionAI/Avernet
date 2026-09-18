@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.repository.models import (
         BotRestartLockRecord,
     )
+    from agentclaw.community.core.skills_pool.types import InitialSkillLayoutSelection
 
 
 @runtime_checkable
@@ -33,6 +34,16 @@ class BotRepository(Protocol):
     @abstractmethod
     def insert(self, bot_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new bot record."""
+        ...
+
+    @abstractmethod
+    def insert_with_initial_skill_layout(
+        self,
+        bot_data: Dict[str, Any],
+        *,
+        layout: InitialSkillLayoutSelection | None,
+    ) -> Dict[str, Any]:
+        """Create a Bot and its selected initial layout in one transaction."""
         ...
 
     @abstractmethod
@@ -288,6 +299,16 @@ class BotRepository(Protocol):
     @abstractmethod
     def soft_delete_by_owner(self, bot_id: str, owner_id: str) -> bool:
         """Soft delete a bot by bot_id and owner_id."""
+        ...
+
+    @abstractmethod
+    def soft_delete_failed_creation(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ) -> bool:
+        """Soft delete a failed new Bot and remove only its Native init row."""
         ...
 
     @abstractmethod

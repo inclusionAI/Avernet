@@ -24,7 +24,6 @@ from agentclaw.community.core.bot_management.capabilities import (
 )
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AICODING_ENGINE_TYPE,
-    CLAUDE_CODE_ENGINE_TYPE,
 )
 from agentclaw.community.core.bot_management.engines.registry import (
     normalize_engine_type,
@@ -96,6 +95,16 @@ from agentclaw.community.core.workspace.path_factory import (
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.skills_pool.native_creation import (
+    SkillsPoolNativeCreationPolicy,
+)
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    SkillLayout,
+)
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     apply_default_image_to_ext,
     clear_image_policy_from_ext,
@@ -356,6 +365,8 @@ class BotService(BotServiceProtocol):
         cron_auto_setup_service_provider: "Callable[[], CronAutoSetupService]",
         drm_reader: DRMReaderPlugin,
         caller_identity_repo: "CallerIdentityRepositoryProtocol",
+        skills_pool_native_creation_policy: SkillsPoolNativeCreationPolicy,
+        skill_layout_repository: SkillsPoolLayoutRepositoryProtocol,
         workspace_hosting_config: "cfg.WorkspaceHostingConfig | None" = None,
         policy_service: "PolicyServiceProtocol | None" = None,
         baas_template_resolver: "BaasTemplateResolverProtocol | None" = None,
@@ -368,6 +379,8 @@ class BotService(BotServiceProtocol):
         bot_storage_policy: BotStoragePolicyProtocol | None = None,
     ) -> None:
         self._repository = repository
+        self._skills_pool_native_creation_policy = skills_pool_native_creation_policy
+        self._skill_layout_repository = skill_layout_repository
         self._bot_storage_policy = bot_storage_policy
         self._allocation_config = allocation_config
         if workspace_hosting_config is None:
@@ -585,6 +598,26 @@ class BotService(BotServiceProtocol):
                 e,
             )
             return None
+
+    def _skills_layout_env(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+    ) -> dict[str, str]:
+        state = self._skill_layout_repository.get(
+            BotSkillLayoutScope(env=env, entity_id=entity_id, bot_id=bot_id)
+        )
+        if state.active_layout is not SkillLayout.POOL:
+            return {"AGENTCLAW_SKILLS_LAYOUT": SkillLayout.LEGACY.value}
+        contract = state.layout_contract_version
+        if not isinstance(contract, str) or not contract:
+            raise BotServiceError("Pool layout has no contract version")
+        return {
+            "AGENTCLAW_SKILLS_LAYOUT": SkillLayout.POOL.value,
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": contract,
+        }
 
     def _extract_engine_runtime_token(
         self,
@@ -1521,16 +1554,29 @@ class BotService(BotServiceProtocol):
                 "template_type": template_type,  # Template type (e.g., "applicationCoding")
                 "space_id": space_id,  # Business-space ownership: NULL -> personal fallback
             }
+            initial_layout = self._skills_pool_native_creation_policy.select(
+                env=get_current_env(),
+                owner_id=user_id,
+                bot_id=str(bot_id),
+                engine_type=resolved_active_engine,
+                bot_type=resolved_bot_type,
+            )
 
             if not space_quota:
-                bot_record = self._repository.insert(bot_data)
+                bot_record = self._repository.insert_with_initial_skill_layout(
+                    bot_data,
+                    layout=initial_layout,
+                )
             else:
                 # Serialize only the final count + row insert. Passport and
                 # device provisioning stay outside this short quota lease.
                 with self._require_bot_quota_service().guard_add(
                     owner_id=user_id, space_id=space_id
                 ):
-                    bot_record = self._repository.insert(bot_data)
+                    bot_record = self._repository.insert_with_initial_skill_layout(
+                        bot_data,
+                        layout=initial_layout,
+                    )
             logger.info(f"[bot_service.create_bot] Bot {bot_id} created with PENDING status")
 
             # Step 1.5: Create template record if template_config is provided
@@ -1565,7 +1611,7 @@ class BotService(BotServiceProtocol):
                         "no id bot_id=%s",
                         bot_id,
                     )
-                    self._repository.soft_delete_by_owner(bot_id, user_id)
+                    self._soft_delete_failed_creation(bot_id, user_id)
                     raise BotServiceError(
                         "applicationCoding workspace creation returned no id"
                     )
@@ -1574,7 +1620,7 @@ class BotService(BotServiceProtocol):
                         "[bot_service.create_bot] hosted workspace creation failed bot_id=%s",
                         bot_id,
                     )
-                    self._repository.soft_delete_by_owner(bot_id, user_id)
+                    self._soft_delete_failed_creation(bot_id, user_id)
                     raise BotServiceError(
                         "applicationCoding workspace creation failed"
                     ) from exc
@@ -1595,7 +1641,7 @@ class BotService(BotServiceProtocol):
                     if workspace_id:
                         # 已开通托管工作空间（dima_space_id）的 template 记录必须成功：
                         # workspace 开通成功但本地持久化失败时回滚 bot 行并报错。
-                        self._repository.soft_delete_by_owner(bot_id, user_id)
+                        self._soft_delete_failed_creation(bot_id, user_id)
                         raise BotServiceError(
                             "applicationCoding template creation failed"
                         ) from e
@@ -1745,6 +1791,16 @@ class BotService(BotServiceProtocol):
         except Exception as e:  # noqa: BLE001 — the original error is the one to raise
             logger.warning(f"[bot_service.provision_bot] could not release the claim for {bot_id}: {e}")
 
+    def _soft_delete_failed_creation(self, bot_id: str, user_id: str) -> None:
+        if not self._repository.soft_delete_failed_creation(
+            bot_id=bot_id,
+            owner_id=user_id,
+        ):
+            logger.warning(
+                "[bot_service.create_bot] failed creation row already absent: %s",
+                bot_id,
+            )
+
     def _provision_created_bot(
         self,
         bot_record: Dict[str, Any],
@@ -1888,6 +1944,14 @@ class BotService(BotServiceProtocol):
                     template_config=template_config,
                     log_context="bot_service.create_bot",
                 )
+                extra_envs = {
+                    **(extra_envs or {}),
+                    **self._skills_layout_env(
+                        env=get_current_env(),
+                        entity_id=resolved_entity_id,
+                        bot_id=str(bot_id),
+                    ),
+                }
 
                 create_kwargs = dict(
                     apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
@@ -1966,7 +2030,7 @@ class BotService(BotServiceProtocol):
                         "[bot_service.create_bot] Failed to create publish record for service bot %s",
                         bot_id,
                     )
-                    self._repository.soft_delete_by_owner(bot_id, user_id)
+                    self._soft_delete_failed_creation(bot_id, user_id)
                     raise BotServiceError(
                         f"Failed to create publish record for service bot {bot_id}"
                     ) from e
@@ -2030,13 +2094,13 @@ class BotService(BotServiceProtocol):
             # 设备申请失败，删除 bot 记录并立即抛出错误（default bot 除外）
             logger.error(f"[bot_service.create_bot] Device allocation failed for bot {bot_id}: {e}")
             if bot_id != "default":
-                self._repository.soft_delete_by_owner(bot_id, user_id)
+                self._soft_delete_failed_creation(bot_id, user_id)
             raise BotServiceError(f"设备申请失败: {e}")
         except Exception as e:
             # 其他异常（default bot 除外，不删除）
             logger.exception(f"[bot_service.create_bot] Unexpected error during device allocation for bot {bot_id}: {e}")
             if bot_id != "default":
-                self._repository.soft_delete_by_owner(bot_id, user_id)
+                self._soft_delete_failed_creation(bot_id, user_id)
             raise BotServiceError(f"设备申请失败: {e}")
 
     def _allocate_device_async(

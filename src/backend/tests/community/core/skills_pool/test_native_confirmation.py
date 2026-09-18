@@ -143,3 +143,28 @@ def test_mismatched_evidence_fails_closed(field: str, value: object) -> None:
         )
 
     repository.get.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ("unexpected", None))
+def test_evidence_shape_must_match_contract(field: str | None) -> None:
+    repository = MagicMock()
+    service = SkillsPoolNativeLayoutConfirmationService(repository)
+    evidence = _evidence()
+    if field is None:
+        evidence.pop("roots_initialized")
+    else:
+        evidence[field] = "value"
+
+    with pytest.raises(
+        PoolNativeLayoutConfirmationError,
+        match="fields do not match",
+    ):
+        service.confirm(
+            env="pre",
+            entity_id="staff_1",
+            bot_id="bot-1",
+            expected_engine="openclaw",
+            evidence=evidence,
+        )
+
+    repository.get.assert_not_called()
