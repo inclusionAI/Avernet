@@ -53,11 +53,26 @@ class TaskServiceProtocol(Protocol):
         """列持久化任务记录的一页(1-based),可选按状态(单值或逗号分隔多值)和 owner 过滤,返回 (items, total)。"""
         ...
 
-    def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
+    def claim_bbs_task(
+        self, task_id: str, bot_id: str, node_id: str | None = None
+    ) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(恰一赢;输者/非 bbs 任务 → TaskStateError)。
 
         供 bbs/claim 路由(FR-PICK-02)调用,委托 TaskGraphService.claim_bbs_owner。"""
         ...
+
+    async def report_task_event(
+        self, *, task_id: str, node_id: str, event_type: str, event_id: str,
+        holder_id: str, payload: dict, relay_turn: str | None = None,
+        progress_reason: str | None = None, failure_reason: str | None = None,
+    ) -> dict: ...
+
+    async def search_task_candidates(self, *, query: str) -> dict: ...
+
+    async def dispatch_task(
+        self, *, task_id: str, node_id: str, holder_id: str,
+        relay_turn: str, dispatch_id: str,
+    ) -> dict: ...
 
     def attach_bbs_node(
         self, task_id: str, parent_node_id: str, task_spec: TaskSpec, bot_id: str

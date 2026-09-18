@@ -25,7 +25,6 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskNodeRunInfoRepositoryProtocol,
     TaskTrajectoryRepositoryProtocol,
 )
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
     NodeOpResult,
@@ -37,10 +36,6 @@ from agentclaw.community.core.task.domain.models import (
     TaskOpResult,
     TaskSpec,
     TaskType,
-    Metadata,
-    Context,
-    Goal,
-    RuntimeInfo,
     effective_run_mode,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
@@ -49,8 +44,6 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.repository.types import (
     BbsTaskOverviewRecord,
     TaskInfoRecord,
-    TaskNodeRecord,
-    TaskNodeRunInfoRecord,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
@@ -58,15 +51,9 @@ from agentclaw.community.core.task.task_runner.callback_adapter import (
     CallbackAdapter,
     TaskLoopCallback,
 )
-from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
-
-logger = logging.getLogger("task.service")
-
-
 from agentclaw.community.core.task.task_center.task_service_support import (
     STATIC_PLAN_TEMPLATES,
     parse_status_filter,
-    resolve_coop_collab_mode,
     split_owner_bot_id,
 )
 
@@ -74,10 +61,13 @@ from agentclaw.community.core.task.task_center.task_service_execution import (
     TaskServiceExecutionMixin,
 )
 from agentclaw.community.core.task.task_trajectory.payloads import emit_submit_trajectory
+from agentclaw.community.core.task.task_center.task_service_relay import TaskServiceRelayMixin
+from agentclaw.community.core.task.task_dispatch.claim_join_gate import RELAY_EXECUTION
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 
+logger = logging.getLogger("task.service")
 
-
-class TaskService(TaskServiceExecutionMixin):
+class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
     """对外 facade;内部持 ExecutionEngine 编排核 + TaskGraphService + Harness(可选)+ TaskLoopCallback。
 
     验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。
@@ -109,19 +99,11 @@ class TaskService(TaskServiceExecutionMixin):
         bot_bindings=None,
         trajectory_repo: "TaskTrajectoryRepositoryProtocol | None" = None,
     ) -> None:
-        """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
-        bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
-        BBS 候选通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询。
+        """Build the facade from graph, execution ports and optional repositories.
 
-        ``task_info_repo``(可选):task_info 持久化协议(DI 在 prod 注入真实实现;``None``
-        时 execute 跳过持久化,纯内核/单测路径用)。``callback_repo``(可选):回投落库协议(同上,
-        ``None`` 时回投不落 ``task_callback``,纯内核/单测路径用)。``task_id_provider``:task_id 生成器(默认 uuid4;
-        测试注入确定性 provider)。``task_node_repo``/``task_node_run_info_repo``(可选):workflow/yaml
-        分支落 ``task_node``(RUNNING)+ ``task_node_run_info``(retry=0,run_mode,assignee,session_id,
-        start_time)用;``None`` 时跳过持久化(纯内核/单测路径用,与 ``task_info_repo`` 同语义)。
-        ``trajectory_repo``(可选):任务轨迹旁路采集落库协议(REQ-11,DI 在 prod 注入真实实现);
-        ``None`` 时引擎内 ``_log_trajectory`` 静默 no-op(纯内核/单测路径用,与 ``task_info_repo`` 同语义,
-        且与 ``task_action_log`` 完全解耦——不读不写 action log)。"""
+        ``task_info_repo``/``callback_repo``/``task_node_repo``/``task_node_run_info_repo``(可选):持久化协议(DI prod 注入;
+        ``None`` 跳过持久化,纯内核/单测路径)。``task_id_provider``:task_id 生成器(默认 uuid4)。``trajectory_repo``(可选,REQ-11):轨迹
+        旁路采集落库协议;``None`` 时 ``_log_trajectory`` 静默 no-op(与 ``task_action_log`` 解耦,不读不写 action log)。"""
         self._graph = graph
         self._harness = harness
         self._bcn = bcn
@@ -140,12 +122,9 @@ class TaskService(TaskServiceExecutionMixin):
         self._bot_token_provider = bot_token_provider
         self._notify_provider = notify_messages_provider
         self._bot_bindings = bot_bindings
-        # 任务轨迹旁路采集落库协议(可选,REQ-11):None 时引擎内 _log_trajectory 静默 no-op。
-        # 不进 _build_engine(seam)签名 — 测试子类按旧签名覆写 _build_engine 时仍可发 None 引擎;
-        # prod 的 _build_engine 实现读 self._trajectory_repo 透传给 ExecutionEngine。
+        # 任务轨迹旁路采集落库协议(可选,REQ-11);None → _log_trajectory 静默 no-op。经实例属性透传(不进 _build_engine 签名)。
         self._trajectory_repo = trajectory_repo
-        # _build_engine(seam)签名保持不变(测试子类按旧签名覆写);claim_on JOIN 经 self._task_auth_gate
-        # 传入 ExecutionEngine→dispatcher,不进签名避免破坏覆写 seam。
+        # claim_on JOIN 经 self._task_auth_gate 传入 dispatcher(不进签名,保持覆写 seam)。
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
         self._bg_tasks: set[asyncio.Task] = set()
@@ -167,14 +146,9 @@ class TaskService(TaskServiceExecutionMixin):
             )
 
     def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
-        """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=)。引擎内部 ``_build_*`` new 自带策略 +
-        接线 TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 策略/投递的引擎(测试 seam)。
-
-        claim_on JOIN 开关经实例属性 ``self._task_auth_gate`` 传入 ExecutionEngine→dispatcher(strategies),
-        不进本方法签名(保持覆写 seam 向后兼容);None/community 路径派发不做 claim_on 交集。
-
-        轨迹旁路采集协议(``self._trajectory_repo``)同样经实例属性透传给 ExecutionEngine
-        (不进 signature,保持覆写 seam 向后兼容);``None`` → 引擎内 ``_log_trajectory`` 静默 no-op。"""
+        """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=),引擎内部 ``_build_*`` new 自带策略 + 接线
+        TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 引擎(测试 seam)。``self._task_auth_gate``
+        与 ``self._trajectory_repo`` 经实例属性透传(不进签名,保持 seam 向后兼容);``None`` → no-op。"""
         return ExecutionEngine(
             self._graph,
             bot=bot,
@@ -300,10 +274,8 @@ class TaskService(TaskServiceExecutionMixin):
         patched_cfg.setdefault("static_plan_yaml", yaml_path.read_text(encoding="utf-8"))
         # 兜底补齐后的 inputs 落回(即便调用方传了空 template_input 也覆盖,避免 setdefault 丢值)
         patched_cfg["template_input"] = inputs
-        # 固定 plan 与动态 plan 等价:这里只把"提前固化的 yaml plan"补进 execution_config,
-        # 不自行合成任何占位 task_spec。调用方原始 task_spec(title/instruction/objective/
-        # context.background/acceptances)保留不动,与走 LLM planner 的动态任务在 taskinfo
-        # 封装上完全一致——唯一差别只是 plan 源:yaml 预置 vs planner 自发现。
+        # 固定 plan 与动态 plan 等价:这里只把"提前固化的 yaml plan"补进 execution_config,不自行合成占位
+        # task_spec。原始 task_spec 原样保留,与 LLM planner 动态任务唯一差别:plan 源(yaml 预置 vs 自发现)。
         return replace(request, execution_config=patched_cfg)
 
     @property
@@ -350,7 +322,9 @@ class TaskService(TaskServiceExecutionMixin):
         调用方经 ``get_task_dashboard`` 轮询观察推进。后台任务异常经 done_callback 记 log
         (不向调用方抛;图停在中间态由 harness 旁路巡检兜底复位)。"""
         request = self._normalize_owner_bot_id(request)
-        request = self._materialize_static_plan_if_needed(request)
+        request = self._apply_orchestration_mode(request)
+        if request.execution_config.get("orchestration_mode") != "relay":
+            request = self._materialize_static_plan_if_needed(request)
         task_id = self._task_id_provider()
         task_info = request.to_task_info(task_id)
         if self._task_info_repo is not None:
@@ -370,10 +344,8 @@ class TaskService(TaskServiceExecutionMixin):
                 return TaskOpResult(
                     task_id=task_id, success=False, error=f"persist failed: {exc}"
                 )
-        # REQ-6 SUBMIT trajectory gate: fire once at/after the task_info persist
-        # point (task exists now; covers all execute branches — this sits above
-        # the task_type branch). Persist IntegrityError short-circuits above; only
-        # trajectory assembly (digest/ext_info) is swallowed in the helper (决策 #14).
+        # REQ-6 SUBMIT trajectory gate: fire once after task_info persists (above task_type branch).
+        # Persist IntegrityError short-circuits above; trajectory assembly swallowed in helper (决策 #14).
         emit_submit_trajectory(
             self._trajectory_repo, task_id, task_info, submitted_at_ms=int(time.time() * 1000)
         )
@@ -387,6 +359,8 @@ class TaskService(TaskServiceExecutionMixin):
             graph.run_id,
         )
         task_type = request.execution_config.get("task_type")
+        if request.execution_config.get("orchestration_mode") == "relay":
+            return self._bootstrap_relay(task_id, request.owner_bot_id, graph.run_id)
         if task_type == TaskType.WORKFLOW:
             return await self._run_workflow(task_id, request, task_info, graph.run_id)
         if task_type == TaskType.YAML:
@@ -401,6 +375,22 @@ class TaskService(TaskServiceExecutionMixin):
         self._bg_tasks.add(bg)
         bg.add_done_callback(self._on_bg_done)
         return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
+
+    def _apply_orchestration_mode(self, request: TaskInfoRequest) -> TaskInfoRequest:
+        """Stamp the operations-owned orchestration mode; callers cannot select it."""
+        relay_enabled = False
+        if self._task_settings is not None:
+            relay_enabled = self._task_settings.is_enabled(RELAY_EXECUTION)
+        config = dict(request.execution_config)
+        # Relay is the skill-driven dynamic-task path. Static workflow/YAML/BBS
+        # submissions have their own execution adapters and no active owner-Bot
+        # conversation that can safely receive a relay root handle.
+        task_type = config.get("task_type", TaskType.DYNAMIC)
+        relay_capable = task_type == TaskType.DYNAMIC or task_type == TaskType.DYNAMIC.value
+        config["orchestration_mode"] = (
+            "relay" if relay_enabled and relay_capable else "centralized"
+        )
+        return replace(request, execution_config=config)
 
 
     async def converge_by_session(
@@ -623,11 +613,8 @@ class TaskService(TaskServiceExecutionMixin):
         按 root(node_id==task_id)的 ``run_info.extend_props['session_id']`` 反查 ``task_callback`` 最新回调,
         把回调审计的 ``execution_graph``(BCN/ClawMind DAG 快照)挂在图级,便于 dashboard 可见;无 session_id /
         无 callback / 未配 ``callback_repo`` → 留 ``None``。子树投影(node_id 入参)不挂(root 不在投影内)。"""
-        # Dashboard requests can land on a different worker than the one that
-        # accepted ``execute``.  Re-register the task on every full-graph read so
-        # that this worker's Harness also watches persisted PENDING nodes.
-        # Registration is idempotent and intentionally skipped for subtree reads,
-        # which are read-only projections rather than task lifecycle heartbeats.
+        # Dashboard requests can land on a different worker than the acceptor; re-register on every full-graph
+        # read so this worker's Harness also watches persisted PENDING nodes (idempotent; skipped for subtree reads).
         if node_id is None and self._harness is not None:
             self._harness.register(task_id)
         graph = self._graph.query_task_dashboard(task_id, node_id)
@@ -911,11 +898,15 @@ class TaskService(TaskServiceExecutionMixin):
             for r in records
         ]
 
-    def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
+    def claim_bbs_task(
+        self, task_id: str, bot_id: str, node_id: str | None = None
+    ) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(委托 TaskGraphService.claim_bbs_owner)。
 
         供 bbs/claim 路由(FR-PICK-02)调用:恰一赢,输者/非 bbs 任务 → TaskStateError。
         """
+        if node_id is not None:
+            return self._claim_relay_bbs(task_id, node_id, bot_id)
         return self._graph.claim_bbs_owner(task_id, bot_id)
 
     def attach_bbs_node(
@@ -966,6 +957,8 @@ class TaskService(TaskServiceExecutionMixin):
         output_patch: dict | None = None,
         acceptance_result: AcceptanceResult | None = None,
         exec_error: str | None = None,
+        progress_reason: str | None = None,
+        failure_reason: str | None = None,
         extend_props_patch: dict | None = None,
     ) -> NodeOpResult:
         """内部节点写口:透传 ``TaskNodePatch`` 经 ``ExecutionEngine.on_report`` 落库(+触发翻态/验收/收敛旁路)。
@@ -988,6 +981,8 @@ class TaskService(TaskServiceExecutionMixin):
             output_patch=output_patch,
             acceptance_result=acceptance_result,
             exec_error=exec_error,
+            progress_reason=progress_reason,
+            failure_reason=failure_reason,
             extend_props_patch=extend_props_patch,
         )
         return await self._engine.on_report(patch)
@@ -996,4 +991,3 @@ class TaskService(TaskServiceExecutionMixin):
 def run_execute(facade: TaskService, request: TaskInfoRequest) -> TaskOpResult:
     """同步执行 ``execute``(无事件循环依赖的调用方/单测用)。"""
     return asyncio.new_event_loop().run_until_complete(facade.execute(request))
-

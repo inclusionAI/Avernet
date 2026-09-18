@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackRequest, TaskNodeCallbackRequest, _normalize_execution_config,
     execution_graph_to_product_status, op_result_to_dto,
-    runtime_status_to_product_status,
+    runtime_status_to_product_status, TaskSettingRequestDTO, TaskSettingStateDTO,
 )
 from agentclaw.community.core.task.domain.models import TaskOpResult
 
@@ -48,6 +48,25 @@ def test_op_result_to_dto_returns_extend_props():
     ))
 
     assert dto.extend_props == {"group_id": "bcs_grp_1"}
+
+
+def test_task_settings_dtos_accept_relay_execution() -> None:
+    request = TaskSettingRequestDTO(
+        setting_type="relay_execution", enabled=True,
+    )
+    state = TaskSettingStateDTO(
+        setting_type="relay_execution", enabled=True, env="dev",
+    )
+
+    assert request.setting_type == "relay_execution"
+    assert state.setting_type == "relay_execution"
+
+
+def test_task_settings_dtos_reject_unknown_setting_type() -> None:
+    with pytest.raises(ValidationError):
+        TaskSettingRequestDTO(setting_type="unknown", enabled=True)
+    with pytest.raises(ValidationError):
+        TaskSettingStateDTO(setting_type="unknown", enabled=True, env="dev")
 
 
 @pytest.mark.parametrize(

@@ -124,6 +124,7 @@ class TaskRunner:
         (本节点兄弟)``run_info.output`` + 本节点 ``task_spec``】→ 组装执行 prompt 注入执行主体。
         数据流一律经结构父 P 中转,无跨兄弟直接数据边。"""
         node = self._get_node(task_id, node_id)
+        relay_blackboard = self._relay_blackboard(task_id)
         children = self._graph.get_child_tasks(task_id, node_id)
         if children:
             return {
@@ -134,10 +135,11 @@ class TaskRunner:
                 "goal": node.task_spec.goal if node else None,
                 "acceptances": node.task_spec.goal.acceptances if node else None,
                 "node_instruction": node.task_spec.metadata.instruction if node else None,
+                "relay_blackboard": relay_blackboard,
             }
         parent = self._graph.get_parent_task(task_id, node_id)
         if parent is None:
-            return {"mode": "execute", "parent_node_id": None, "parent_spec": None, "sibling_outputs": {}, "node_spec": node.task_spec if node else None}
+            return {"mode": "execute", "parent_node_id": None, "parent_spec": None, "sibling_outputs": {}, "node_spec": node.task_spec if node else None, "relay_blackboard": relay_blackboard}
         siblings = self._graph.get_child_tasks(task_id, parent.node_id)
         sibling_outputs = {
             s.node_id: s.run_info.output
@@ -150,6 +152,27 @@ class TaskRunner:
             "parent_spec": parent.task_spec,
             "sibling_outputs": sibling_outputs,
             "node_spec": node.task_spec if node else None,
+            "relay_blackboard": relay_blackboard,
+        }
+
+    def _relay_blackboard(self, task_id: str) -> dict[str, Any] | None:
+        graph = self._graph.query_task_dashboard(task_id)
+        config = graph.extend_props.get("execution_config", {}) or {}
+        if config.get("orchestration_mode") != "relay":
+            return None
+        root = next((node for node in graph.tasks if node.node_id == task_id), None)
+        return {
+            "root_goal": root.task_spec.goal.to_dict() if root else {},
+            "loop_round": graph.loop_round,
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "status": node.status.value,
+                    "goal": node.task_spec.goal.to_dict(),
+                    "output": node.run_info.output,
+                }
+                for node in graph.tasks
+            ],
         }
 
     def _get_node(self, task_id: str, node_id: str) -> TaskNode | None:

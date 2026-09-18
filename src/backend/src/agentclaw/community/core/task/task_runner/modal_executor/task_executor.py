@@ -39,6 +39,9 @@ from agentclaw.community.core.task.task_runner.modal_executor.task_executor_resu
     BcsGroupHandle,
     SingleBotHandle,
 )
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_bbs import (
+    TaskExecutorBbsMixin,
+)
 
 logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
@@ -65,11 +68,6 @@ def _human_observer_participant(owner_user_id: str) -> dict[str, Any]:
 _BCN_EVENT_CALLBACK_PATH = "/api/v1/collaboration/tasks/callback/report"
 
 
-from agentclaw.community.core.task.task_runner.modal_executor.task_executor_bbs import (
-    TaskExecutorBbsMixin,
-)
-
-
 class TaskExecutor(TaskExecutorBbsMixin):
     def __init__(
         self,
@@ -88,14 +86,10 @@ class TaskExecutor(TaskExecutorBbsMixin):
         task_settings=None,
         on_bbs_report=None,
     ) -> None:
-        """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
-        context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
-        graph: TaskGraphService|None,动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props
-        (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None。
-        bbs_runner 通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询任务模式候选。
-        api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。
-        task_settings: TaskSettingsServiceProtocol|None,读取 skill_report 开关决定
-        所有任务模式的结果回收链路(默认 skill HTTP 上报;关闭后走 poller 拉消息,两者互斥不并存)。"""
+        """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None; context:
+        TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。graph:
+        TaskGraphService|None(动态派发后落 group_id/session_id/run_id 到 run_info.extend_props;None 跳过)。
+        bcn/api_base_url/task_settings: BBS 候选查询身份/任务后端 url/skill_report 开关(默认 skill HTTP 上报,关闭走 poller)。"""
         self._bot = bot
         self._bcs = bcs
         self._bcn = bcn
@@ -214,6 +208,11 @@ class TaskExecutor(TaskExecutorBbsMixin):
             )
             return True
 
+    def _node_skill_report_enabled(self, node: TaskNode) -> bool:
+        graph = node.node_run_graph
+        config = graph.extend_props.get("execution_config", {}) if graph is not None else {}
+        return config.get("orchestration_mode") == "relay" or self._skill_report_enabled()
+
     def _singlebot_2_group_enabled(self, task_id: str) -> bool:
         """singlebot_2_group 旁路开关(默认 True):single_bot 改建"二人 chat 群"(driver bot + 人类观察者,不发言)。
         从 ``graph.extend_props["execution_config"]`` 读;graph 不可用/缺键 → True(默认走旁路);显式 False → 老链路。"""
@@ -249,7 +248,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
         assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
         openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
-        skill_report = self._skill_report_enabled()
+        skill_report = self._node_skill_report_enabled(node)
         session_id: str | None = None
         async with sem:
             # P2 旁路:singlebot_2_group(默认 true)且 owner 在场且 bcs/identity_resolver/graph 已接
@@ -405,7 +404,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
             "[task][task-executor] singlebot_2_group 取 session=%s task=%s node=%s group_id=%s",
             session_id, node.task_id, node.node_id, gid,
         )
-        if not self._skill_report_enabled():
+        if not self._node_skill_report_enabled(node):
             self._poller.register(
                 BcsGroupHandle(
                     loop_task_id=loop_task_id,
@@ -443,7 +442,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
             # chat / manager_worker:建群(create_group)已把任务指令作为 context 投入、且自带初始 session;
             # 复用该初始 session(get_group_session),不再 create_session 重复建群里的第二个 session。
             session_id = await self.get_group_session(group_id)
-            if not self._skill_report_enabled():
+            if not self._node_skill_report_enabled(node):
                 self._poller.register(
                     BcsGroupHandle(
                         loop_task_id=loop_task_id,
@@ -466,7 +465,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
 
     async def _dispatch_state_machine(self, node, group_id, meta, loop_task_id) -> bool:
         ctx = dict(self._context.build(node.task_id, node.node_id) or {})
-        ctx["skill_report_enabled"] = self._skill_report_enabled()
+        ctx["skill_report_enabled"] = self._node_skill_report_enabled(node)
         ctx["task_id"] = node.task_id
         ctx["node_id"] = node.node_id
         prompt = self._formatter.format_execute(ctx, node)
@@ -478,7 +477,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
             session_id=None,
             input={"query": prompt},
         )
-        if not self._skill_report_enabled():
+        if not self._node_skill_report_enabled(node):
             self._poller.register(
                 BcsGroupHandle(
                     loop_task_id=loop_task_id,
@@ -504,13 +503,10 @@ class TaskExecutor(TaskExecutorBbsMixin):
         run_id: str | None = None,
         exec_request_input: Any = None,
     ) -> None:
-        """动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props(dashboard 可见)。
-        协作群写 group_id+session_id(chat/manager_worker)或 group_id+run_id(state_machine);
-        单 bot 只写 session_id/run_id(group_id 不落键)。仅 extend_props fold,不翻态(节点已由 _drain 置 RUNNING)。
-
-        REQ-5: ``exec_request_input`` = 下发请求原文(NOT truncated),落 ``_exec_request_input`` 同 seam
-        (跨重启可读),供 engine EXECUTE/VERIFY 闸门读作轨迹 ``action_input``。str 原样;非 str 经
-        ``json.dumps``。serialize 失败 → INFO log + 跳过该键,绝不阻断投递(观测旁路)。"""
+        """动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props(dashboard 可见)。协作群写 group_id+
+        session_id(chat/manager_worker)或 group_id+run_id(state_machine);单 bot 只写 session_id/run_id(group_id 不落键)。
+        仅 extend_props fold,不翻态(节点已由 _drain 置 RUNNING)。REQ-5: ``exec_request_input`` = 下发请求原文(NOT truncated),
+        落 ``_exec_request_input`` 供 engine EXECUTE/VERIFY 闸门读轨迹;serialize 失败 → 跳过该键,绝不阻断投递(观测旁路)。"""
         if self._graph is None:
             return
         ep: dict[str, Any] = {}
@@ -799,10 +795,8 @@ class TaskExecutor(TaskExecutorBbsMixin):
             for a in (gf.extend_props.get("acceptances") or [])
             if isinstance(a, dict) and a.get("id")
         ]
-        # All group members receive the context, but exactly one Bot owns the
-        # terminal acceptance callback. Resolve it from the group semantics:
-        # manager for manager-worker, BCS driver for state-machine, and the
-        # originator/first driver for free-chat groups.
+        # All group members receive the context, but exactly one Bot owns the terminal acceptance callback.
+        # Resolve reporter from group semantics: manager(manager-worker)/BCS driver(state_machine)/originator(chat).
         if mode == "manager_worker":
             _reporter_bot_id = str(
                 gf.extend_props.get("manager_bot_id")
@@ -847,14 +841,13 @@ class TaskExecutor(TaskExecutorBbsMixin):
                     reporter_bot_id=_reporter_bot_id,
                     executor_bot_ids=[str(bot_id) for bot_id in bot_ids],
                     skill_report_enabled=_skill_report,
+                    relay_execution=bool(gf.extend_props.get("relay_execution")),
+                    relay_blackboard=gf.extend_props.get("relay_blackboard"),
                 )
             elif str(_task_instruction).lstrip().startswith("# 接自"):
-                # 接力协作群(static_plan):## 本群任务 正文(承接/执行/gap交接三步)已具备。但真正多 bot
-                # 协作群的 task_instruction 由 engine 直取 raw metadata.instruction,未走 format_execute,
-                # 缺 _static_relay_closure(承接→执行→交接三步硬约束)+ 中文输出约束——导致协作群 bot 塌缩
-                # 只做执行、跳过接力接自/gap与派发。此处按需(以 '三步缺一不可' 标记判定,避免
-                # singlebot_2_group 的 task_instruction 已含 closure 而重复注入)补齐 closure+中文,
-                # 再补 driver/reporter 定位脚注;不再重复 目标/验收标准(静态接力 acceptances=[] 会打印空)。
+                # 接力协作群(static_plan):真正的多 bot 协作群 task_instruction 由 engine 直取 raw metadata.instruction,未走
+                # format_execute,缺 _static_relay_closure(承接→执行→交接三步硬约束)+ 中文输出约束。此处按需(以 '三步缺一不可'
+                # 标记判定,避免 singlebot_2_group 已含 closure 重复注入)补齐 closure+中文+driver/reporter 脚注,不重复 目标/验收标准。
                 _ctx_body = _task_instruction.rstrip()
                 if "三步缺一不可" not in _ctx_body:
                     _ctx_body = f"{_ctx_body}\n{_static_relay_closure()}\n{OUTPUT_LANGUAGE_CONSTRAINT}"

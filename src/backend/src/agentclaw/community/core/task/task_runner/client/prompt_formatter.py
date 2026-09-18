@@ -79,6 +79,8 @@ def format_task_node_business_instruction(
     reporter_bot_id: str = "",
     executor_bot_ids: list[str] | None = None,
     skill_report_enabled: bool = True,
+    relay_execution: bool = False,
+    relay_blackboard: dict[str, Any] | None = None,
 ) -> str:
     """Build the one business protocol shared by every manager-worker node.
 
@@ -118,6 +120,31 @@ def format_task_node_business_instruction(
         "验收项覆盖要求：acceptances_metric 必须逐条且仅一次覆盖上面的每个验收项 id；每项包含 id、passed（布尔值）和 summary（证据摘要）。全部通过：status=SUCCESS、verdict=DONE、gaps=[]；存在未满足项：status=DONE、verdict=FAILED、gaps 必须逐条说明；只有实际执行异常才可使用 status=FAILED。",
         "执行约束：禁止联网检索、浏览外部网页或访问外部 API 获取信息；仅依据给定上下文与自身知识完成业务。下方指定的唯一节点回投接口不受此限制，必须按规定调用。",
     ]
+    if relay_execution:
+        event_payload = {
+            "task_id": task_id,
+            "node_id": node_id,
+            "event_type": "EXECUTION_RESULT",
+            "event_id": "每次事件使用新的 UUID",
+            "holder_id": reporter,
+            "progress_reason": "为什么当前结果可以进入下一步规划",
+            "failure_reason": None,
+            "payload": {"success": True, "output": "完整执行产出"},
+        }
+        parts.extend([
+            "【分布式接力闭环】你同时负责本棒执行、验收、gap 规划、搜推决策与下一棒派发；后端只维护共享任务图谱、校验决策并调用 Runner。",
+            f"共享任务黑板:{json.dumps(relay_blackboard or {}, ensure_ascii=False, default=str)}",
+            f"1. 完成本节点后 POST {callback}，请求体为：",
+            json.dumps(event_payload, ensure_ascii=False),
+            "响应 data.relay_turn 是后续规划、搜索、派发的唯一接力凭证，必须原样保存，不得自行生成。",
+            "2. 在本地加载任务规划 skill，对完整执行产出和根目标计算 gap。将 PLAN_RESULT POST 到同一 callback/report；保留 task_id、当前 node_id、holder_id、relay_turn，event_type=PLAN_RESULT，payload={has_gap, gap_detail, children}。有 gap 时 children 必须且只能包含一个下一棒节点，并带完整 task_spec.metadata/context/goal；metadata.instruction 必须是下一棒可直接执行的任务 prompt。无 gap 时 children=[]、has_gap=false，任务结束。",
+            f'3. 若产生下一步节点，先根据该节点 goal、gap 和 instruction 构造搜索 query，再 POST {backend}/api/v1/collaboration/tasks/search，请求体只能传 {{"query": "..."}}。搜索接口只返回候选事实，不感知任务图，也不决定执行模态。',
+            "4. 根据搜索返回的 bot_uuid、bot_name、bot_desc、bot_type、status、recommend 等真实字段，由 search skill 判断 HIT_SINGLE、HIT_MULTI_BOTS 或 MISS；不得假设存在未返回的 capability_*、skills、执行模态或 reachability 字段。将决策作为 SEARCH_RESULT POST callback/report：HIT_SINGLE 需 assignee；HIT_MULTI_BOTS 需 bot_ids、collab_mode、group_name、members_info；MISS 需 miss_reason，并在 failure_reason 写明搜推失败原因。不得传 catalog_id。progress_reason 必须说明为什么选择该 Bot/协作群。",
+            f"5. HIT_SINGLE/HIT_MULTI_BOTS 后 POST {backend}/api/v1/collaboration/tasks/dispatch，传 task_id、下一步 node_id、holder_id、relay_turn、唯一 dispatch_id。只有 HTTP 200 才算交接成功。MISS 由 SEARCH_RESULT 自动发布 BBS，无需调用 dispatch。",
+            "BBS 认领者执行完成后也从第1步开始，继续同一接力闭环。任一接口失败时不得伪造成功；在 failure_reason 记录真实原因。",
+            OUTPUT_LANGUAGE_CONSTRAINT,
+        ])
+        return "\n".join(parts)
     if not skill_report_enabled:
         parts.append(_no_callback_instruction())
         return "\n".join(parts)
@@ -211,6 +238,13 @@ class PromptFormatterImpl(PromptFormatter):
             reporter_bot_id=str(context.get("reporter_bot_id") or node.run_info.assignee or ""),
             executor_bot_ids=[str(node.run_info.assignee)] if node.run_info.assignee else None,
             skill_report_enabled=bool(context.get("skill_report_enabled", True)),
+            relay_execution=bool(
+                node.node_run_graph
+                and (node.node_run_graph.extend_props.get("execution_config", {}) or {}).get(
+                    "orchestration_mode"
+                ) == "relay"
+            ),
+            relay_blackboard=context.get("relay_blackboard"),
         )
 
     def format_verify(self, context: dict[str, Any], node: TaskNode) -> str:

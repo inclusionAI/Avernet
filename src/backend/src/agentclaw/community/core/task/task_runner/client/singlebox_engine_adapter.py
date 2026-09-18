@@ -36,10 +36,6 @@ from agentclaw.community.core.task.task_runner.client.ports import (
     BotSendResult,
     OpenApiBotPort,
 )
-from agentclaw.community.core.task.task_runner.client.protocols import (
-    BotPublicServiceProtocol,
-)
-from agentclaw.community.core.bot_public.catalog_metadata import BotCatalogCaller
 
 _WS_PATH = "/api/openclaw/ws"
 _CONNECT_PARAMS = {
@@ -802,84 +798,6 @@ class SingleboxBotProvisioner:  # pragma: no cover — singlebox local e2e provi
         )
         r.raise_for_status()
         return r.json()
-
-
-class CatalogKeywordBotDiscover:
-    """Catalog 关键字搜推适配:实现 ``BotDiscoverServiceProtocol.search_by_keyword``,
-    底层走 ``BotPublicService.search_catalog_public_bots_by_keyword``(BCS catalog 关键字搜索,
-    适配 OSS ``public='0'`` 部署 bot 也能命中)。
-
-    非单 ``singlebox`` 专用:corp / prod / community / singlebox 各 profile 的 task 派发候选预查
-    均复用此实现(``TaskModule._resolve_discover``)。底层经 BCS ``/bots/search`` 关键字检索后回 join
-    后端 bot 元数据,每个 item 自带完整 ``bot_uuid``(``{bot_id}:{entity_id}``,对齐 BCN onboard 的
-    ``bot_id:owner_id`` 形态),供下游 BCS 派发身份解析直接消费,无需搜推层再做 product→复合兜底。
-
-    - 关键词为空 → 返空(对齐 catalog 空关键词行为);
-    - 无语义 score → 合成 ``recommend.score``(命中次序降权),保 stable 排序供策略排序;
-    - ``filters``(runtime_state 等) 本类忽略(catalog 无 runtime 在线态维度),统一传 ``filters=None``
-      仅取 BCS ``visibility=public`` bot(公开可认领语义),不含 protected;
-    - 身份参数:catalog ``caller`` 在 ``search_public_bot_metadata`` 顶部即 ``del caller``(废弃),
-      占位 ``BotCatalogCaller(tenant_id="", user_id=None, app_id=None)`` 不影响检索结果;
-      ``request_id`` 仅日志,生成 ``task-prefetch-<uuid12>``;
-    - 端口/catalog 不可用(``BotCatalogSearchUnavailableError`` 等) → 返空,不阻断字段预查。
-    """
-
-    def __init__(self, bot_public_service: "BotPublicServiceProtocol") -> None:
-        self._bps = bot_public_service
-
-    def search_by_keyword(
-        self,
-        *,
-        keyword: str,
-        user_id: str,
-        top_k: int = 10,
-        min_score: float = 0.01,
-        filters: dict[str, Any] | None = None,
-        fallback_to_all: bool = False,
-    ) -> dict[str, Any]:
-        """catalog 候选预查:**决策非查找**——关键字命中返命中;命中 0 默认返空(收窄,不盲目塞全量
-        噪音 bot,避免 search skill 在无关候选里自由组合)。``fallback_to_all=True`` 时回落全量公开 bot
-        (显式场景:产品搜索等需要"有结果"兜底)。谁执行仍由 search skill 在候选里决,本层只供候选。"""
-        # 1) catalog 关键字命中(bot 按能力命名时能命中)
-        hits = self._query(user_id=user_id, search=keyword or None, top_k=top_k)
-        used_fallback = False
-        if not hits and fallback_to_all:
-            # 2) 显式回落:全部公开 bot(仅 fallback_to_all=True 时)
-            hits = self._query(user_id=user_id, search=None, top_k=top_k)
-            used_fallback = bool(hits)
-        # 合成 recommend.score(命中次序降权),对齐 BCSFuse items 形态供策略排序
-        for i, it in enumerate(hits):
-            rec = it.get("recommend")
-            if not isinstance(rec, dict):
-                rec = {}
-            if "score" not in rec:
-                rec["score"] = max(min_score, 1.0 - i * 0.05)
-            it["recommend"] = rec
-        return {
-            "total": len(hits),
-            "items": hits,
-            "context": {"mode": "catalog_keyword", "fallback_to_all": used_fallback},
-        }
-
-    def _query(
-        self, *, user_id: str, search: str | None, top_k: int
-    ) -> list[dict[str, Any]]:
-        """调 ``search_catalog_public_bots_by_keyword``(BCS catalog)并收口异常→空列表(不阻断预查)。
-
-        ``caller`` 占位(catalog service 顶部 ``del caller``)、``request_id`` 仅日志;``filters=None``
-        仅取 BCS ``visibility=public`` bot。返回 item 自带 ``bot_uuid``(``{bot_id}:{entity_id}``)。"""
-        try:
-            res = self._bps.search_catalog_public_bots_by_keyword(
-                search=search,
-                page=1,
-                page_size=top_k,
-                caller=BotCatalogCaller(tenant_id="", user_id=None, app_id=None),
-                request_id=f"task-prefetch-{uuid.uuid4().hex[:12]}",
-                filters=None,
-            )
-        except Exception:  # noqa: BLE001  端口/catalog 不可用→空候选
-            return []
-        return res.get("items") or []
 
 
 def _extract_final_text(payload: dict[str, Any]) -> str:

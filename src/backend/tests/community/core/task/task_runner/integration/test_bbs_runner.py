@@ -92,10 +92,13 @@ class _FakeBcn:
     def __init__(self, roster):
         self._roster = roster
 
-    def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any"):
+    def list_bots_by_task_modes(
+        self, *, claim=None, dream=None, match="any", visibility=None
+    ):
         assert claim is True
         assert dream is None
         assert match == "all"
+        assert visibility == "public"
         return list(self._roster)
 
 
@@ -106,11 +109,14 @@ class _FlakyBcn(_FakeBcn):
         self.failures = failures
         self.calls = 0
 
-    def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any"):
+    def list_bots_by_task_modes(
+        self, *, claim=None, dream=None, match="any", visibility=None
+    ):
         self.calls += 1
         assert claim is True
         assert dream is None
         assert match == "all"
+        assert visibility == "public"
         if self.calls <= self.failures:
             raise RuntimeError("roster unavailable")
         return list(self._roster)

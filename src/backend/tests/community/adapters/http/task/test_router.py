@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi import FastAPI
 from fastapi_injector import attach_injector
@@ -9,7 +11,7 @@ from injector import Injector, Module, provider, singleton
 from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator, NoopCallbackAuthenticator,
 )
-from agentclaw.community.adapters.http.task.router import task_callback_router
+from agentclaw.community.adapters.http.task.router import router, task_callback_router
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
@@ -78,6 +80,22 @@ class _StubService:
         """manager_worker 分流回调 stub:router BCN 分支调它;记录便于断言。"""
         self.callback.calls.append(("manager_worker", raw))
 
+    async def report_task_event(self, **kwargs):
+        self.callback.calls.append(("relay", kwargs))
+        return {"ok": True, "relay_turn": "turn-1"}
+
+    async def search_task_candidates(self, **kwargs):
+        self.callback.calls.append(("search", kwargs))
+        return {"candidates": [], "total": 0}
+
+    async def dispatch_task(self, **kwargs):
+        self.callback.calls.append(("dispatch", kwargs))
+        return {"ok": True, "node_id": kwargs["node_id"]}
+
+    def claim_bbs_task(self, task_id, bot_id, node_id=None):
+        self.callback.calls.append(("bbs_claim", (task_id, bot_id, node_id)))
+        return SimpleNamespace(node_id=task_id)
+
 
 class _StubTaskModule(Module):
     """绑定 callback router 三个 Protocol 到 stub/Noop/InMemory。"""
@@ -115,6 +133,16 @@ def client():
     return TestClient(app), svc
 
 
+@pytest.fixture
+def task_client():
+    injector = Injector([_StubTaskModule()])
+    svc = injector.get(TaskServiceProtocol)
+    app = FastAPI()
+    app.include_router(router)
+    attach_injector(app, injector)
+    return TestClient(app), svc
+
+
 def _body(node=False, **kw):
     d = dict(task_id="t1", workflow_source="bcn", workflow_id="w7",
              workflow_instance_id="i1", status="COMPLETED", is_success=True)
@@ -125,6 +153,84 @@ def _body(node=False, **kw):
 
 
 class TestRouter:
+    def test_unified_callback_report_accepts_typed_relay_event(self, task_client):
+        client, svc = task_client
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json={
+                "task_id": "t1",
+                "node_id": "t1",
+                "event_type": "EXECUTION_RESULT",
+                "event_id": "event-report-1",
+                "holder_id": "bot-1",
+                "progress_reason": "execution complete",
+                "payload": {"success": True, "output": {"result": "done"}},
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["relay_turn"] == "turn-1"
+        assert svc.callback.calls[0][0] == "relay"
+
+    def test_generic_search_returns_catalog_without_deciding(self, task_client):
+        client, svc = task_client
+        response = client.post(
+            "/api/v1/collaboration/tasks/search",
+            json={"query": "完成下一步研究"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["data"] == {"candidates": [], "total": 0}
+        assert svc.callback.calls == [
+            (
+                "search",
+                {"query": "完成下一步研究"},
+            )
+        ]
+
+    def test_generic_dispatch_consumes_persisted_decision(self, task_client):
+        client, svc = task_client
+        response = client.post(
+            "/api/v1/collaboration/tasks/dispatch",
+            json={
+                "task_id": "t1",
+                "node_id": "next",
+                "holder_id": "bot-1",
+                "relay_turn": "turn-1",
+                "dispatch_id": "dispatch-1",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["node_id"] == "next"
+        assert svc.callback.calls[0][0] == "dispatch"
+
+    def test_relay_bbs_claim_identifies_scoped_node(self, task_client):
+        client, svc = task_client
+        response = client.post(
+            "/api/v1/collaboration/tasks/bbs/claim",
+            json={"task_id": "t1", "node_id": "bbs-step", "bot_id": "bbs-bot"},
+        )
+        assert response.status_code == 200, response.text
+        assert svc.callback.calls == [
+            ("bbs_claim", ("t1", "bbs-bot", "bbs-step"))
+        ]
+
+    def test_relay_event_uses_typed_task_service_entry(self, client):
+        c, svc = client
+        body = {
+            "task_id": "t1",
+            "node_id": "t1",
+            "event_type": "EXECUTION_RESULT",
+            "event_id": "event-1",
+            "holder_id": "bot-1",
+            "progress_reason": "execution complete",
+            "payload": {"success": True, "output": {"result": "done"}},
+        }
+        r = c.post(
+            "/api/v1/collaboration/tasks/callback/workflow_result", json=body
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["data"]["relay_turn"] == "turn-1"
+        assert svc.callback.calls[0][0] == "relay"
+
     def test_workflow_result_success(self, client):
         c, svc = client
         r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=_body(loop_task_id="t1::root1"))
