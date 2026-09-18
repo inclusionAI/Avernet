@@ -225,7 +225,7 @@ class DeviceBindingRepository(Protocol):
 
     @abstractmethod
     def update_bot_status_on_device_active(self, *, binding_id: int) -> None:
-        """设备变 ACTIVE 时更新关联 Bot 状态为 ACTIVE（仅当 Bot 当前状态为 PENDING 时）."""
+        """设备变 ACTIVE 时将 PENDING/PROVISIONING Bot 更新为 ACTIVE."""
         ...
 
     @abstractmethod

@@ -720,12 +720,12 @@ class DeviceRepository(
     def update_bot_status_on_device_active(
         self, *, binding_id: int
     ) -> None:
-        """Flip BotModel.status PENDING → ACTIVE conditionally.
+        """Flip a pending/claimed Bot to ACTIVE conditionally.
         Single bulk UPDATE; exceptions propagate (prod parity)."""
         with self._db.orm_session() as db:
             db.query(BotModel).filter(
                 BotModel.binding_id == binding_id,
-                BotModel.status == "PENDING",
+                BotModel.status.in_(("PENDING", "PROVISIONING")),
                 self._bot_env(),
             ).update(
                 {

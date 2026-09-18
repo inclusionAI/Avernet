@@ -478,7 +478,7 @@ def test_update_bot_start_status_propagates_on_malformed_ext(repo, db):
         assert ext == {"start_status": "OK"}  # reset to {} + new keys
 
 
-def test_update_bot_status_on_device_active_only_when_pending(repo, db):
+def test_update_bot_status_on_device_active_only_from_creation_states(repo, db):
     bid = repo.insert_binding(**_binding())
     _bot(db, bot_id="b1", binding_id=bid, status="PENDING")
     _bot(db, bot_id="b2", binding_id=999, status="PENDING")
@@ -488,11 +488,22 @@ def test_update_bot_status_on_device_active_only_when_pending(repo, db):
         # untouched
         assert s.query(BotModel).filter_by(bot_id="b2").one().status == "PENDING"
 
-    # Non-PENDING bot is NOT flipped.
+    # A terminal failed bot is NOT flipped.
     _bot(db, bot_id="b3", binding_id=bid + 100, status="FAILED")
     repo.update_bot_status_on_device_active(binding_id=bid + 100)
     with db.orm_session() as s:
         assert s.query(BotModel).filter_by(bot_id="b3").one().status == "FAILED"
+
+
+def test_update_bot_status_on_device_active_accepts_provisioning_claim(repo, db):
+    """A claimed create converges when its asynchronous device becomes ACTIVE."""
+    bid = repo.insert_binding(**_binding())
+    _bot(db, bot_id="b1", binding_id=bid, status="PROVISIONING")
+
+    repo.update_bot_status_on_device_active(binding_id=bid)
+
+    with db.orm_session() as s:
+        assert s.query(BotModel).filter_by(bot_id="b1").one().status == "ACTIVE"
 
 
 def test_update_bot_status_on_device_failed_unconditional(repo, db):
