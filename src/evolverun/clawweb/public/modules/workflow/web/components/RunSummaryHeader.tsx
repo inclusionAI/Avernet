@@ -25,21 +25,27 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
 
   const handleDelete = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!confirming) { setConfirming(true); return }
+    if (!confirming) {
+      setConfirming(true)
+      return
+    }
     deleteMutation.mutate(run.flow_id)
     setConfirming(false)
   }, [confirming, deleteMutation, run.flow_id])
 
   const handleCancelDelete = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation(); setConfirming(false)
+    e.stopPropagation()
+    setConfirming(false)
   }, [])
 
   const handleRerun = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation(); rerunMutation.mutate(run.flow_id)
+    e.stopPropagation()
+    rerunMutation.mutate(run.flow_id)
   }, [rerunMutation, run.flow_id])
 
   const handleAutoHeal = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation(); onAutoHeal?.(run)
+    e.stopPropagation()
+    onAutoHeal?.(run)
   }, [onAutoHeal, run])
 
   const isAutoHealable = ['failed', 'blocked', 'waiting'].includes(run.status)
@@ -79,15 +85,29 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
           )}
           {confirming ? (
             <span className="inline-flex items-center gap-1">
-              <button type="button" onClick={handleDelete} disabled={deleteMutation.isPending} className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50">
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleteMutation.isPending}
+                className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
                 {deleteMutation.isPending ? '删除中…' : '确认删除'}
               </button>
-              <button type="button" onClick={handleCancelDelete} className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50">
+              <button
+                type="button"
+                onClick={handleCancelDelete}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+              >
                 取消
               </button>
             </span>
           ) : (
-            <button type="button" onClick={handleDelete} className="inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600" title="删除此运行实例">
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+              title="删除此运行实例"
+            >
               🗑 删除
             </button>
           )}

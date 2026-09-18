@@ -13,9 +13,10 @@ import RunEvolutionAnalysis from '../components/evolution/RunEvolutionAnalysis'
 import AggregationProgress from '../components/workflow-workspace/AggregationProgress'
 import type { RunEvolutionAnalysisResponse, WorkflowAnalysisProgressResponse } from '@avernet/clawweb-shared/web/api/client'
 import type { FlowRun, NodeExecution } from '@avernet/clawweb-shared/web/types'
+import RunArchivePanel from '../components/RunArchivePanel'
 import AutoHealPanel from '../components/AutoHealPanel'
 
-type TabId = 'nodes' | 'logs' | 'dag'
+type TabId = 'nodes' | 'logs' | 'dag' | 'archive'
 
 const ANALYSIS_STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   analyzing: { label: '分析中', cls: 'bg-amber-50 text-amber-700' },
@@ -237,6 +238,7 @@ export default function RunDetail() {
               <TabButton active={activeTab === 'nodes'} onClick={() => setActiveTab('nodes')} label="节点" />
               <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} label="日志" />
               <TabButton active={activeTab === 'dag'} onClick={() => setActiveTab('dag')} label="DAG" />
+              <TabButton active={activeTab === 'archive'} onClick={() => setActiveTab('archive')} label="运行档案" />
             </nav>
           </div>
 
@@ -266,6 +268,10 @@ export default function RunDetail() {
                   setActiveTab('nodes')
                 }}
               />
+            )}
+
+            {activeTab === 'archive' && (
+              <RunArchivePanel flowId={flowId ?? ''} runStatus={run?.status} />
             )}
 
 
