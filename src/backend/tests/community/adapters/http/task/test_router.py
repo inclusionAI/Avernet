@@ -86,7 +86,7 @@ class _StubService:
 
     async def search_task_candidates(self, **kwargs):
         self.callback.calls.append(("search", kwargs))
-        return {"catalog_id": "catalog-1", "candidates": []}
+        return {"candidates": [], "total": 0}
 
     async def dispatch_task(self, **kwargs):
         self.callback.calls.append(("dispatch", kwargs))
@@ -175,24 +175,14 @@ class TestRouter:
         client, svc = task_client
         response = client.post(
             "/api/v1/collaboration/tasks/search",
-            json={
-                "task_id": "t1",
-                "node_id": "next",
-                "holder_id": "bot-1",
-                "relay_turn": "turn-1",
-            },
+            json={"query": "完成下一步研究"},
         )
         assert response.status_code == 200, response.text
-        assert response.json()["data"] == {"catalog_id": "catalog-1", "candidates": []}
+        assert response.json()["data"] == {"candidates": [], "total": 0}
         assert svc.callback.calls == [
             (
                 "search",
-                {
-                    "task_id": "t1",
-                    "node_id": "next",
-                    "holder_id": "bot-1",
-                    "relay_turn": "turn-1",
-                },
+                {"query": "完成下一步研究"},
             )
         ]
 

@@ -17,8 +17,8 @@ authority* in backend services:
 executor result -> callback identity verification -> relay-turn CAS grant
   -> holder runs task-loop planning from the shared blackboard
   -> callback/report(PLAN_RESULT) writes planned nodes to blackboard
-  -> asks generic task search for catalogs -> runs task-loop search
-  -> callback/report(SEARCH_RESULT) writes selection to target node
+  -> calls pure candidate search with a Skill-built query
+  -> callback/report(SEARCH_RESULT) writes Skill selection to target node
   -> dispatches that already-configured node -> normal Runner dispatch
 ```
 
@@ -35,8 +35,9 @@ directly and becomes the first holder after reporting its result.
 Extend the existing `TaskServiceProtocol`; do not introduce a relay-specific
 service facade. The generic Task Service interface gains:
 
-1. `search_task_candidates(...)` — takes an authorized task/node context and
-   its persisted planned node, then returns server-built candidate catalogs.
+1. `search_task_candidates(query=...)` — searches candidates from the query
+   supplied by the Skill and returns only the current catalog-backed candidate
+   metadata. It does not read or update the task graph.
 2. `report_task_event(...)` — the service target behind the unified
    callback adapter. It accepts typed `PLAN_RESULT`, `SEARCH_RESULT`, and
    `EXECUTION_RESULT` reports and performs their constrained graph writes.
@@ -63,7 +64,7 @@ relay-prefixed APIs:
 
 | Operation | Route | Caller supplies | Backend returns / does |
 | --- | --- | --- | --- |
-| Search candidates | `POST /search` | authorized task/node context + locally planned task specs | server-built candidate catalogs only |
+| Search candidates | `POST /search` | `{query}` built by the Skill | current catalog-backed candidate metadata only |
 | Dispatch | `POST /dispatch` | task/node, relay turn, idempotency key | validates persisted plan/selection, then starts existing Runner |
 
 Extend the existing `POST /callback/report` task-loop envelope with
@@ -122,11 +123,13 @@ their execution node. They are not merely action-log payloads.
    node carries the trusted blackboard context.
 4. The holder runs local task-loop planning and reports `PLAN_RESULT` through
    `callback/report`; TaskService validates it and creates exactly one next graph
-   node. The holder calls `TaskService.search` for that planned spec, runs task-loop
-   search over the returned catalogs, then reports each `SEARCH_RESULT` through
-   the same callback endpoint. TaskService validates identity, candidate,
-   graph-version, topology, mode, depth, required reasons, and turn before
-   writing the target node's `run_mode`, `assignee`, and group information.
+   node. The holder builds a query from that planned spec and calls `TaskService.search`;
+   the search endpoint returns current candidate metadata only. The Skill decides
+   HIT_SINGLE, HIT_MULTI_BOTS, or MISS and reports `SEARCH_RESULT` through the
+   same callback endpoint. TaskService validates task identity, node state,
+   topology, mode, depth, required reasons, and turn before writing the target
+   node's `run_mode`, `assignee`, and group information; it does not validate
+   candidate membership against a Backend catalog snapshot.
    The holder calls `TaskService.dispatch` only after that write; it validates
    the persisted configured node and delegates delivery to the existing
    TaskRunner/TaskExecutor.

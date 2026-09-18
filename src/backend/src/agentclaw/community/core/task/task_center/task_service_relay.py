@@ -16,10 +16,7 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.repository.serializers import task_spec_from_dict
 from agentclaw.community.core.task.task_center.relay import RelayCoordinator
-from agentclaw.community.core.task.task_dispatch.strategies import (
-    GroupFormation,
-    prefetch_candidates,
-)
+from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
 
 class TaskServiceRelayMixin:
@@ -277,31 +274,48 @@ class TaskServiceRelayMixin:
             ancestor_id = parents.get(ancestor_id)
         self._graph.update_task_graph_info(task_id, TaskGraphPatch(status=Status.DONE))
 
-    async def search_task_candidates(
-        self, *, task_id: str, node_id: str, holder_id: str, relay_turn: str
-    ) -> dict[str, Any]:
-        relay = self._relay()
-        graph, node = self._relay_node(task_id, node_id)
-        turn_node_id = relay.require(task_id, node_id, holder_id, relay_turn)
-        if node.run_info.extend_props.get("relay_planned_by") != turn_node_id:
-            raise TaskStateError("relay search target was not planned by the current turn")
-        if node.status != Status.PENDING:
-            raise TaskStateError(f"relay search target must be PENDING node={node_id}")
-        candidates = await prefetch_candidates(self._engine._discover, node, graph)
-        catalog_id = uuid.uuid4().hex
-        snapshot = candidates[:20]
-        self._graph.update_task_node_info(
-            TaskNodePatch(
-                task_id=task_id,
-                node_id=node_id,
-                extend_props_patch={
-                    "relay_catalog_id": catalog_id,
-                    "relay_catalog": snapshot,
-                    "relay_catalog_at": int(time.time() * 1000),
-                },
+    @staticmethod
+    def _project_search_candidate(item: dict[str, Any]) -> dict[str, Any]:
+        """Expose only fields backed by the current Bot catalog/search result."""
+        candidate: dict[str, Any] = {
+            "bot_uuid": item.get("bot_uuid") or item.get("bot_id"),
+        }
+        for field_name in ("bot_name", "bot_desc", "bot_type", "status"):
+            if field_name in item:
+                candidate[field_name] = item[field_name]
+        recommend = item.get("recommend")
+        if isinstance(recommend, dict):
+            candidate["recommend"] = recommend
+        return candidate
+
+    async def search_task_candidates(self, *, query: str) -> dict[str, Any]:
+        """Search candidates only; task graph decisions remain Skill-owned."""
+        import asyncio
+
+        normalized_query = str(query or "").strip()
+        if not normalized_query:
+            raise TaskStateError("search query is required")
+        discover = self._engine._discover
+        if discover is None:
+            return {"candidates": [], "total": 0}
+        try:
+            result = await asyncio.to_thread(
+                discover.search_by_keyword,
+                keyword=normalized_query,
+                user_id="",
+                top_k=20,
+                min_score=0.01,
+                filters={"runtime_state": ["online"]},
             )
-        )
-        return {"catalog_id": catalog_id, "candidates": snapshot, "total": len(snapshot)}
+        except Exception:  # noqa: BLE001 - search failure is an empty candidate result
+            return {"candidates": [], "total": 0}
+        items = (result or {}).get("items") or []
+        candidates = [
+            self._project_search_candidate(item)
+            for item in items
+            if isinstance(item, dict) and (item.get("bot_uuid") or item.get("bot_id"))
+        ]
+        return {"candidates": candidates[:20], "total": len(candidates[:20])}
 
     async def _apply_search_result(
         self, graph, node, holder_id, payload, relay_turn, progress_reason, failure_reason
@@ -309,21 +323,10 @@ class TaskServiceRelayMixin:
         if node.status != Status.PENDING:
             raise TaskStateError(f"relay search decision target must be PENDING node={node.node_id}")
         outcome = str(payload.get("outcome") or "").upper()
-        catalog_id = str(payload.get("catalog_id") or "")
-        expected_catalog = str(node.run_info.extend_props.get("relay_catalog_id") or "")
-        if not expected_catalog or catalog_id != expected_catalog:
-            raise TaskStateError(f"relay search catalog mismatch node={node.node_id}")
-        candidates = node.run_info.extend_props.get("relay_catalog") or []
-        allowed = {
-            str(value)
-            for item in candidates
-            for value in (item.get("bot_id"), item.get("bot_uuid"))
-            if value
-        }
         if outcome == "HIT_SINGLE":
-            assignee = str(payload.get("assignee") or payload.get("bot_id") or "")
-            if assignee not in allowed:
-                raise TaskStateError(f"selected bot is outside relay catalog: {assignee}")
+            assignee = str(payload.get("assignee") or "").strip()
+            if not assignee:
+                raise TaskStateError("HIT_SINGLE requires assignee")
             patch = TaskNodePatch(
                 task_id=graph.task_id,
                 node_id=node.node_id,
@@ -334,9 +337,9 @@ class TaskServiceRelayMixin:
                 extend_props_patch={"relay_holder_id": assignee},
             )
         elif outcome == "HIT_MULTI_BOTS":
-            bot_ids = [str(item) for item in payload.get("bot_ids") or []]
-            if not bot_ids or any(item not in allowed for item in bot_ids):
-                raise TaskStateError("selected bots are outside relay catalog")
+            bot_ids = [str(item).strip() for item in payload.get("bot_ids") or []]
+            if not bot_ids or any(not item for item in bot_ids):
+                raise TaskStateError("HIT_MULTI_BOTS requires bot_ids")
             formation = GroupFormation(
                 bot_ids=bot_ids,
                 collab_mode=str(payload.get("collab_mode") or "manager_worker"),

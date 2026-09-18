@@ -221,12 +221,9 @@ class RelayTaskEventDTO(BaseModel):
 
 
 class TaskSearchRequestDTO(BaseModel):
-    """Request the generic candidate catalog; the skill remains the decider."""
+    """Search candidates from a skill-provided query; the skill remains the decider."""
 
-    task_id: str
-    node_id: str
-    holder_id: str
-    relay_turn: str
+    query: str = Field(..., min_length=1)
 
 
 class TaskDispatchRequestDTO(BaseModel):

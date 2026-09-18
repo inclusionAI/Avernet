@@ -51,11 +51,13 @@ acceptance closes or the configured iteration limit is reached.
    planning segment over the trusted blackboard context and produces a local
    `PlanResult`; planning itself makes no query API call. It reports that result
    through the unified callback endpoint, which creates the planned next nodes
-   in the blackboard. The holder then uses generic TaskService search to obtain
-   catalogs, runs task-loop search, reports its `SearchResult` through that same
-   callback endpoint to fill the single next node's execution information, and finally
-   calls generic TaskService dispatch. Backend validates each stage and invokes
-   the normal Runner only for an already-planned and already-selected node.
+   in the blackboard. The holder constructs a search `query` from the next
+   node's goal/gap/instruction and calls generic TaskService search. Search
+   returns only current candidate metadata. The Skill decides single Bot,
+   collaboration group, or MISS, reports its `SearchResult` through the same
+   callback endpoint, and finally calls generic TaskService dispatch. Backend
+   validates each task-graph stage and invokes the normal Runner only for an
+   already-planned and already-selected node.
 5. A cooperative group has exactly one continuation holder: its authenticated
    reporter/master/manager. Other members may contribute output but cannot
    continue the graph.
@@ -89,8 +91,10 @@ acceptance closes or the configured iteration limit is reached.
 - A skill's `PlanResult` and `SearchResult` are proposals, not graph writes.
   They are reported only through authenticated `callback/report` events. The
   backend checks parent/child topology, node-id uniqueness, state readiness,
-  candidate membership, authorized mode, graph version, limits, actor lease,
-  and required reasons before using TaskGraphService and TaskRunner.
+  authorized mode, graph version, limits, actor lease, and required reasons
+  before using TaskGraphService and TaskRunner. Search does not create a
+  catalog snapshot and `SEARCH_RESULT` does not carry `catalog_id`; `event_id`
+  provides callback idempotency.
 - Relay planning creates exactly one next node per turn. This is a serial baton;
   centralized planning retains its existing multi-child behaviour.
 - A state-advancing plan/selection report must provide a non-empty

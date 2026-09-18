@@ -67,9 +67,7 @@ class TaskServiceProtocol(Protocol):
         progress_reason: str | None = None, failure_reason: str | None = None,
     ) -> dict: ...
 
-    async def search_task_candidates(
-        self, *, task_id: str, node_id: str, holder_id: str, relay_turn: str,
-    ) -> dict: ...
+    async def search_task_candidates(self, *, query: str) -> dict: ...
 
     async def dispatch_task(
         self, *, task_id: str, node_id: str, holder_id: str,

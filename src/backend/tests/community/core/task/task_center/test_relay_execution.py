@@ -129,10 +129,7 @@ def _plan_and_select(
         progress_reason="当前全局 gap 需要下一棒补齐",
         payload={"has_gap": True, "children": [{"node_id": child_node_id, "task_spec": spec}]},
     ))
-    catalog = _run(service.search_task_candidates(
-        task_id="relay-task", node_id=child_node_id,
-        holder_id=holder_id, relay_turn=turn,
-    ))
+    _run(service.search_task_candidates(query="补齐市场研究 gap"))
     _run(service.report_task_event(
         task_id="relay-task", node_id=child_node_id,
         event_type="SEARCH_RESULT", event_id=f"search-{event_suffix}",
@@ -140,7 +137,6 @@ def _plan_and_select(
         progress_reason="候选 Bot 能力与下一节点目标匹配",
         payload={
             "outcome": "HIT_SINGLE",
-            "catalog_id": catalog["catalog_id"],
             "assignee": "research-bot",
         },
     ))
@@ -222,15 +218,13 @@ def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_r
         progress_reason="需要 BBS 承接下一棒",
         payload={"has_gap": True, "children": [{"node_id": "bbs-step", "task_spec": _child_spec()}]},
     ))
-    catalog = _run(service.search_task_candidates(
-        task_id="relay-task", node_id="bbs-step", holder_id="main-bot", relay_turn=turn,
-    ))
+    _run(service.search_task_candidates(query="补齐市场研究 gap"))
     published = _run(service.report_task_event(
         task_id="relay-task", node_id="bbs-step", event_type="SEARCH_RESULT",
         event_id="miss", holder_id="main-bot", relay_turn=turn,
         progress_reason="无直接候选，发布 BBS 广场",
         failure_reason="候选能力均不匹配", payload={
-            "outcome": "MISS", "catalog_id": catalog["catalog_id"],
+            "outcome": "MISS",
             "miss_reason": "no capability match",
         },
     ))
@@ -264,14 +258,11 @@ def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_r
     assert graph_service.query_task_dashboard("relay-task").status == Status.DONE
 
 
-def test_relay_rejects_forged_turn() -> None:
+def test_relay_search_is_independent_from_task_context() -> None:
     service, _ = _service()
-    _run(service.execute(_request()))
-    with pytest.raises(TaskStateError):
-        _run(service.search_task_candidates(
-            task_id="relay-task", node_id="relay-task",
-            holder_id="main-bot", relay_turn="forged",
-        ))
+    result = _run(service.search_task_candidates(query="补齐市场研究 gap"))
+    assert result["candidates"][0]["bot_uuid"] == "research-bot:owner-2"
+    assert "catalog_id" not in result
 
 
 def test_root_holder_accepts_frontend_composite_bot_identity() -> None:
@@ -380,16 +371,13 @@ def test_only_group_manager_can_report_and_continue() -> None:
         progress_reason="下一棒需要多 Bot 协作",
         payload={"has_gap": True, "children": [{"node_id": "group-step", "task_spec": spec}]},
     ))
-    catalog = _run(service.search_task_candidates(
-        task_id="relay-task", node_id="group-step", holder_id="main-bot", relay_turn=turn,
-    ))
+    _run(service.search_task_candidates(query="补齐市场研究 gap"))
     _run(service.report_task_event(
         task_id="relay-task", node_id="group-step", event_type="SEARCH_RESULT",
         event_id="group-search", holder_id="main-bot", relay_turn=turn,
         progress_reason="两个 Bot 能力互补，由 manager 汇总",
         payload={
             "outcome": "HIT_MULTI_BOTS",
-            "catalog_id": catalog["catalog_id"],
             "bot_ids": ["manager-bot", "member-bot"],
             "collab_mode": "manager_worker",
         },
