@@ -156,3 +156,22 @@ def is_migrated_pool_active_state(
         and state.data_plane_cutover_committed
         and state.layout_contract_version == layout_contract_version
     )
+
+
+def is_repaired_migrated_pool_active_state(
+    state: BotSkillLayoutState,
+    engine_type: str,
+    observed_contract_version: str | None,
+    observed_preparation_id: str | None,
+) -> bool:
+    """Whether a completed migration is observed through a minimal marker."""
+
+    return (
+        engine_type == "openclaw"
+        and observed_preparation_id is None
+        and observed_contract_version == state.layout_contract_version
+        and is_migrated_pool_active_state(
+            state,
+            layout_contract_version=state.layout_contract_version,
+        )
+    )
