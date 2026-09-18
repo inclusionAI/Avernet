@@ -39,6 +39,7 @@ from agentclaw.community.api.task.task_grant_service import (
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.repository.protocols.task import (
+    TaskCallbackCorrelationRepositoryProtocol,
     TaskCallbackRepositoryProtocol,
     TaskGraphRepositoryProtocol,
     TaskInfoRepositoryProtocol,
@@ -118,11 +119,9 @@ class TaskModule(Module):
         binder.bind(TaskGraphService, to=TaskGraphService, scope=singleton)
         # task_loop inbound callback 服务的进程内可信默认绑定(社区分布)。
         # CORP/prod 的 HmacCallbackAuthenticator + 真实密钥由 corp adapter 覆写(经模块替换/子类)。
-        binder.bind(
-            InMemoryCallbackCorrelationRegistry,
-            to=InMemoryCallbackCorrelationRegistry,
-            scope=singleton,
-        )
+        # InMemoryCallbackCorrelationRegistry 经下方 in_memory_callback_correlation_registry
+        # provider 构造(注入可选 TaskCallbackCorrelationRepositoryProtocol 开启 REQ-P1 重启恢复),
+        # 不在此直绑,否则无参构造会漏掉 repo 注入。
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
         )
@@ -432,6 +431,34 @@ class TaskModule(Module):
     def task_loop_callback_protocol(self, svc: TaskService) -> TaskLoopCallbackProtocol:
         """回投 Protocol = TaskService.callback(已 internal 持 TaskLoopCallback)。"""
         return svc.callback
+
+    @singleton
+    @provider
+    @inject
+    def in_memory_callback_correlation_registry(
+        self, injector: Injector
+    ) -> InMemoryCallbackCorrelationRegistry:
+        """task 级回调→节点寻址 registry(社区 in-mem,进程内可信;REQ-P1 重启恢复)。
+
+        可选注入 ``TaskCallbackCorrelationRepositoryProtocol``:prod 经
+        TaskPersistenceModule 绑定真实 repo → register 旁写 ``task_callback_correlation``、
+        resolve 缓存未命中回查 DB,使重启后到达的 in-flight 回调仍能关联回节点。未绑
+        (轻量测试/纯内核路径)→ ``None`` → 退化为纯内存(原行为),不破坏既有构造。
+        镜像 P2 ``trajectory_repo`` 的可选注入约定(try/except → None + INFO 日志;INFO
+        而非 WARNING:该 except 在每个有意不绑 repo 的轻量 DI 测试里都会触发,WARNING
+        会噪音化 + 触发 log-assertion 失败,INFO 让 prod 真实 misbinding 对 grep 日志的
+        运维可见,不与"测试有意不配置"的常态混淆)。
+        """
+        try:
+            correlation_repo = injector.get(TaskCallbackCorrelationRepositoryProtocol)
+        except Exception as exc:  # noqa: BLE101 未绑定 → 重启恢复 no-op(纯内存)
+            logger.info(
+                "[task][task-module] TaskCallbackCorrelationRepositoryProtocol 未绑定 → "
+                "callback correlation 重启恢复 no-op(纯内存):%s: %s",
+                type(exc).__name__, exc,
+            )
+            correlation_repo = None
+        return InMemoryCallbackCorrelationRegistry(correlation_repo=correlation_repo)
 
     @singleton
     @provider
