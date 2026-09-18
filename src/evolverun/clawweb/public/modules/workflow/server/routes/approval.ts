@@ -25,6 +25,27 @@ export function createApprovalRouter(db: IDatabase): Router {
   const repo = new ApprovalCardRepository(db);
 
   /**
+   * POST /api/approval/auth/dingtalk — exchange DingTalk authCode for userId
+   *
+   * Body: { authCode: string }
+   * Returns: { ok: boolean, userId?: string, error?: string }
+   *
+   * In community/open-source mode there is no DingTalk backend; the caller
+   * should fall back to URL-based empId.  We return ok=false so the frontend
+   * can gracefully degrade.
+   */
+  router.post("/auth/dingtalk", asyncHandler(async (req: Request, res: Response) => {
+    const { authCode } = req.body as { authCode?: string };
+    if (!authCode) {
+      res.status(400).json({ ok: false, error: "缺少 authCode" });
+      return;
+    }
+    // Community stub: no DingTalk OAuth backend configured.
+    // Internal deployments override this route with a real token exchange.
+    res.json({ ok: false, error: "社区版未配置钉钉认证" });
+  }));
+
+  /**
    * GET /api/approval/:id — get approval details
    *
    * Query param: empId (optional) — if provided, checks if this person is an approver

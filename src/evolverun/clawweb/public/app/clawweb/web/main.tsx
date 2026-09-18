@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./style.css";
 
 const WorkflowWorkspace = lazy(() => import("@avernet/workflow/web/pages/WorkflowWorkspace"));
+const Approval = lazy(() => import("@avernet/workflow/web/pages/Approval"));
 const InsightCenter = lazy(() => import("@avernet/clawinsight/web/pages/InsightCenter/index"));
 const ClawevolveApp = lazy(() => import("@avernet/clawevolve/web").then(({ ClawevolveApp }) => ({ default: ClawevolveApp })));
 
@@ -22,6 +23,7 @@ function App() {
       <Suspense fallback={<div className="p-6">加载中...</div>}>
         <Routes>
           <Route path="/" element={<Navigate to="/evolve" replace />} />
+          <Route path="/approval/:id" element={<Approval />} />
           <Route path="/workflows/workspace" element={<WorkflowWorkspace />} />
           <Route path="/insight" element={<InsightCenter />} />
           <Route path="/evolve/*" element={<ClawevolveApp />} />
