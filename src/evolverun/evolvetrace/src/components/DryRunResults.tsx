@@ -10,6 +10,7 @@ const STATUS_ORDER: Record<NodeStatus, number> = {
   failed: 5,
   skipped: 6,
   blocked: 7,
+  cancelled: 8,
 }
 
 interface DryRunResultsProps {

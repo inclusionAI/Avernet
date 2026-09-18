@@ -252,6 +252,18 @@ export function useRerunFlowRun() {
   })
 }
 
+export function useAbortFlowRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (flowId: string) => api.runs.abort(flowId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
+      void queryClient.invalidateQueries({ queryKey: ['run'] })
+    },
+  })
+}
+
 export function useFlowRun(flowId: string) {
   return useQuery({
     queryKey: ['run', flowId],

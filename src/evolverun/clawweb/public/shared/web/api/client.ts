@@ -84,6 +84,7 @@ import type {
   HttpCallbackConfigCreateInput,
   HttpCallbackConfigUpdateInput,
   RerunResult,
+  AbortResult,
   SmartOnboardingGenerateRequest,
   SmartOnboardingGenerateResult,
   SmartOnboardingGenerationStatus,
@@ -1337,6 +1338,12 @@ export const api = {
 
     rerun(flowId: string): Promise<RerunResult> {
       return fetchJson<RerunResult>(`${BASE}/runs/${encodeURIComponent(flowId)}/rerun`, {
+        method: 'POST',
+      })
+    },
+
+    abort(flowId: string): Promise<AbortResult> {
+      return fetchJson<AbortResult>(`${BASE}/runs/${encodeURIComponent(flowId)}/abort`, {
         method: 'POST',
       })
     },

@@ -311,6 +311,7 @@ export type NodeStatus =
   | 'failed'
   | 'blocked'
   | 'skipped'
+  | 'cancelled'
 
 export interface FlowRun {
   flow_id: string
@@ -1730,6 +1731,15 @@ export interface RerunResult {
   flowId: string
   newFlowId: string | null
   sessionId: string | null
+}
+
+// ── Abort ──────────────────────────────────────────────────
+
+export interface AbortResult {
+  ok: boolean
+  flowId: string
+  status: string
+  reconciledNodes: number
 }
 
 // ── Smart Onboarding ──────────────────────────────────────

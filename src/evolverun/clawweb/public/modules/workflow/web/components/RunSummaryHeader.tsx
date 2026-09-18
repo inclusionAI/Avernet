@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import type { FlowRun } from '@avernet/clawweb-shared/web/types'
 import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
-import { useDeleteFlowRun, useRerunFlowRun } from '@avernet/clawweb-shared/web/api/hooks'
+import { useDeleteFlowRun, useRerunFlowRun, useAbortFlowRun } from '@avernet/clawweb-shared/web/api/hooks'
 
 interface RunSummaryHeaderProps {
   run: FlowRun
@@ -21,7 +21,9 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
 
   const deleteMutation = useDeleteFlowRun()
   const rerunMutation = useRerunFlowRun()
+  const abortMutation = useAbortFlowRun()
   const [confirming, setConfirming] = useState(false)
+  const [confirmingAbort, setConfirmingAbort] = useState(false)
 
   const handleDelete = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
@@ -43,12 +45,28 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
     rerunMutation.mutate(run.flow_id)
   }, [rerunMutation, run.flow_id])
 
+  const handleAbort = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirmingAbort) {
+      setConfirmingAbort(true)
+      return
+    }
+    abortMutation.mutate(run.flow_id)
+    setConfirmingAbort(false)
+  }, [confirmingAbort, abortMutation, run.flow_id])
+
+  const handleCancelAbort = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    setConfirmingAbort(false)
+  }, [])
+
   const handleAutoHeal = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
     onAutoHeal?.(run)
   }, [onAutoHeal, run])
 
   const isAutoHealable = ['failed', 'blocked', 'waiting'].includes(run.status)
+  const isAbortable = ['running', 'waiting', 'blocked', 'pending', 'queued', 'postActionsRunning'].includes(run.status)
   const canRerun = !!run.origin_bot_id
 
   return (
@@ -73,6 +91,37 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
               {rerunMutation.isPending ? '⏳' : '🔄 重跑'}
             </button>
           )}
+          {isAbortable && (
+            confirmingAbort ? (
+              <span className="inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleAbort}
+                  disabled={abortMutation.isPending}
+                  className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                >
+                  {abortMutation.isPending ? '中止中…' : '确认中止'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelAbort}
+                  className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+                >
+                  取消
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleAbort}
+                disabled={abortMutation.isPending}
+                className="inline-flex items-center gap-0.5 rounded-md border border-red-200 bg-white px-2 py-1 text-xs text-red-600 transition-colors hover:border-red-400 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                title="中止运行中的工作流"
+              >
+                ⛔ 中止
+              </button>
+            )
+          )}
           {isAutoHealable && (
             <button
               type="button"
@@ -80,7 +129,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
               className="inline-flex items-center gap-0.5 rounded-md border border-blue-200 bg-white px-2 py-1 text-xs text-blue-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
               title="AI 自动诊断与修复"
             >
-              🩹 中止
+              🩹 修复
             </button>
           )}
           {confirming ? (

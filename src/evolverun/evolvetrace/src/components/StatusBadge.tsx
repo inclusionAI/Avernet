@@ -9,6 +9,7 @@ const STATUS_STYLES: Record<NodeStatus, string> = {
   skipped: 'bg-status-skipped/15 text-status-skipped',
   blocked: 'bg-status-blocked/15 text-status-blocked',
   postActionsRunning: 'bg-status-running/15 text-status-running',
+  cancelled: 'bg-status-failed/15 text-status-failed',
 }
 
 const STATUS_LABELS: Record<NodeStatus, string> = {
@@ -20,6 +21,7 @@ const STATUS_LABELS: Record<NodeStatus, string> = {
   skipped: '已跳过',
   blocked: '已阻塞',
   postActionsRunning: '后置动作',
+  cancelled: '已中止',
 }
 
 interface StatusBadgeProps {
