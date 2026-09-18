@@ -5,13 +5,13 @@ import { getRequestCookie, decodeJwtPayload } from "../middleware/admin-auth.js"
 export type WorkflowAccessMode = "view" | "edit";
 
 export function resolveWorkflowActorId(req: Request): string | null {
-  const cookies = req.cookies as Record<string, string> | undefined;
-  // 1. header / staff_id cookie
+  // 1. header / staff_id cookie (getRequestCookie handles both cookie-parser
+  //    and raw Cookie header parsing, so it works without cookie-parser middleware)
   const headerValue = [
     req.header("X-Staff-Id"),
     req.header("staff_id"),
     req.header("X-User-Id"),
-    cookies?.staff_id,
+    getRequestCookie(req, "staff_id"),
   ].map((item) => item?.trim()).find(Boolean);
   if (headerValue) return headerValue;
 
