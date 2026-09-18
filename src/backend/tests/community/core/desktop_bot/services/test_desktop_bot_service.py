@@ -1,5 +1,4 @@
 """Unit tests for DesktopBotService."""
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1073,13 +1072,15 @@ class TestRestart:
                     "skills-pool-p3-v1"
                 ),
             },
+            "layout_confirmed_startup_identity": None,
+            "layout_watchdog_startup_identity": None,
         }
 
     @patch(
         "agentclaw.community.core.desktop_bot.services.desktop_bot_service."
         "DesktopBotService._start_publish_polling"
     )
-    def test_restart_aborts_when_publish_identity_persistence_fails(
+    def test_restart_keeps_tracking_when_atomic_identity_write_fails(
         self, mock_start_poll
     ):
         service, mocks = _make_service_with_mocks()
@@ -1090,12 +1091,18 @@ class TestRestart:
             "DB down"
         )
 
-        with pytest.raises(
-            DesktopBotServiceError, match="重启发布身份持久化失败"
-        ):
-            service.restart(bot_id="desktop_bot_001", user_id="u001")
+        result = service.restart(bot_id="desktop_bot_001", user_id="u001")
 
-        mock_start_poll.assert_not_called()
+        assert result["status"] == "PENDING"
+        mocks["binding_repo"].update_device_props.assert_called_once()
+        mock_start_poll.assert_called_once_with(
+            publish_id="5",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="staff_u001",
+            device_id="m-001",
+            engine_type="openclaw",
+        )
 
     def test_restart_no_publish_id_skips_approve(self):
         service, mocks = _make_service_with_mocks()
@@ -1259,7 +1266,7 @@ class TestPublishPolling:
         # _update_local_status 不再被调用（由 report_device_alive 内部处理）
         mocks["binding_repo"].update_status.assert_not_called()
 
-    def test_pool_publish_reads_current_vm_evidence_before_active(self, poll_service):
+    def test_pool_publish_waits_for_authenticated_layout_callback(self, poll_service):
         service, mocks = poll_service()
         service._query_publish_status = MagicMock(return_value="SUCCESS")
         service._trigger_device_alive = MagicMock(return_value=True)
@@ -1272,17 +1279,28 @@ class TestPublishPolling:
                 "publish_id": "pub-001",
             },
         }
-        mocks["baas"].exec_command_on_bot.return_value = {
-            "exit_code": 0,
-            "stdout": json.dumps(
-                {
-                    "actual_engine": "openclaw",
-                    "actual_layout": "pool",
-                    "layout_contract_version": "skills-pool-p3-v1",
-                    "roots_initialized": True,
-                }
-            ),
-        }
+        pending_binding = MagicMock(
+            id=1,
+            status="PENDING",
+            device_props={
+                "callback_token": "callback-token",
+                "publish_id": "pub-001",
+            },
+        )
+        confirmed_binding = MagicMock(
+            id=1,
+            status="PENDING",
+            device_props={
+                "callback_token": "callback-token",
+                "publish_id": "pub-001",
+                "layout_watchdog_startup_identity": "pub-001",
+                "layout_confirmed_startup_identity": "pub-001",
+            },
+        )
+        mocks["binding_repo"].get_by_id.side_effect = [
+            pending_binding,
+            confirmed_binding,
+        ]
 
         service._poll_publish_progress(
             publish_id="pub-001",
@@ -1293,19 +1311,51 @@ class TestPublishPolling:
             engine_type="openclaw",
         )
 
-        mocks["layout_confirmation"].confirm.assert_called_once_with(
-            env="dev",
-            entity_id="u001",
-            bot_id="desktop-pool",
-            expected_engine="openclaw",
-            evidence={
-                "actual_engine": "openclaw",
-                "actual_layout": "pool",
-                "layout_contract_version": "skills-pool-p3-v1",
-                "roots_initialized": True,
+        watchdog_call = mocks["baas"].exec_command_on_bot.call_args
+        assert watchdog_call.kwargs["bot_uuid"] == "BOT-pool"
+        assert "starting_watchdog.sh" in watchdog_call.kwargs["cmd"]
+        assert "pub-001" in watchdog_call.kwargs["cmd"]
+        assert "cat /var/run/agentclaw" not in watchdog_call.kwargs["cmd"]
+        mocks["layout_confirmation"].confirm.assert_not_called()
+        service._trigger_device_alive.assert_called_once_with("BOT-pool")
+
+    def test_pool_publish_surfaces_rejected_layout_callback_as_failed(
+        self, poll_service
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._trigger_device_alive = MagicMock(return_value=True)
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop-pool",
+            "owner_id": "u001",
+            "ext": {
+                "skills_layout": "pool",
+                "publish_id": "pub-001",
+            },
+        }
+        mocks["binding_repo"].get_by_id.return_value = MagicMock(
+            id=1,
+            status="FAILED",
+            device_props={
+                "callback_token": "callback-token",
+                "publish_id": "pub-001",
             },
         )
-        service._trigger_device_alive.assert_called_once_with("BOT-pool")
+
+        service._poll_publish_progress(
+            publish_id="pub-001",
+            binding_id="1",
+            bot_id="desktop-pool",
+            owner_id="u001",
+            device_id="BOT-pool",
+            engine_type="openclaw",
+        )
+
+        service._trigger_device_alive.assert_not_called()
+        mocks["binding_repo"].update_status.assert_called_once_with(
+            binding_id="1",
+            status="FAILED",
+        )
 
     def test_poll_failed_updates_status_to_failed(self, poll_service):
         service, mocks = poll_service()

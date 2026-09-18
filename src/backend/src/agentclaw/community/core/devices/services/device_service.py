@@ -47,6 +47,8 @@ from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
+    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
+    LayoutInitializationConfirmationError,
     LayoutInitializationConfirmationProtocol,
     McpSyncProtocol,
 )
@@ -1257,12 +1259,33 @@ class DeviceService:
         if not isinstance(bot_id, str) or not bot_id or not isinstance(engine, str):
             raise InvalidDeviceStatusError("invalid Bot identity for layout confirmation")
 
-        self._layout_confirmation.confirm(
-            env=record.env,
-            entity_id=record.entity_id,
-            bot_id=bot_id,
-            expected_engine=engine,
-            evidence=evidence,
+        try:
+            self._layout_confirmation.confirm(
+                env=record.env,
+                entity_id=record.entity_id,
+                bot_id=bot_id,
+                expected_engine=engine,
+                evidence=evidence,
+            )
+        except LayoutInitializationConfirmationError as error:
+            message = str(error)
+            self._update_bot_start_status(
+                binding_id=record.id,
+                status="FAILED",
+                message=message,
+            )
+            self._update_bot_status_on_device_failed(binding_id=record.id)
+            self._repo.update_status(
+                binding_id=record.id,
+                status=DeviceBindingStatus.FAILED.value,
+            )
+            raise
+
+        self._repo.update_device_props(
+            binding_id=record.id,
+            props={
+                LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY: startup_identity,
+            },
         )
 
     def list_connectable_devices(

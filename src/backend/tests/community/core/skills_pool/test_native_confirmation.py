@@ -75,6 +75,22 @@ def test_matching_native_evidence_uses_repository_cas() -> None:
     )
 
 
+def test_retried_native_callback_accepts_already_active_state() -> None:
+    repository = MagicMock()
+    repository.get.return_value = _state(phase=SkillLayoutPhase.POOL_ACTIVE)
+    service = SkillsPoolNativeLayoutConfirmationService(repository)
+
+    service.confirm(
+        env="pre",
+        entity_id="staff_1",
+        bot_id="bot-1",
+        expected_engine="openclaw",
+        evidence=_evidence(),
+    )
+
+    repository.confirm_pool_initializing.assert_not_called()
+
+
 def test_migration_identity_cannot_use_native_confirmation() -> None:
     repository = MagicMock()
     repository.get.return_value = _state(

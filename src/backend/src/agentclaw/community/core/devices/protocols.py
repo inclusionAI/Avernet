@@ -13,6 +13,14 @@ from pathlib import Path
 from typing import Any, Protocol
 
 
+class LayoutInitializationConfirmationError(RuntimeError):
+    """Authenticated layout evidence cannot confirm the current startup."""
+
+
+LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY = "layout_confirmed_startup_identity"
+LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY = "layout_watchdog_startup_identity"
+
+
 class LayoutInitializationConfirmationProtocol(Protocol):
     """Confirm authenticated root-level layout evidence for one Bot startup."""
 

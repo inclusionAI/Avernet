@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -29,7 +30,13 @@ from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
 from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.devices.services.baas_container_init import (
+    BaasContainerInitializer,
+)
+from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.protocols import (
+    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
+    LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY,
     LayoutInitializationConfirmationProtocol,
 )
 from agentclaw.community.core.events.bus import get_event_bus
@@ -69,6 +76,13 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 _DESKTOP_PROVISIONING_CLAIM_STALE_SECONDS = 5 * 60
+
+
+class _DesktopLayoutConfirmationStatus(StrEnum):
+    CONFIRMED = "confirmed"
+    PENDING = "pending"
+    FAILED = "failed"
+    SUPERSEDED = "superseded"
 
 
 def _generate_request_id(
@@ -1157,18 +1171,44 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     "publish_id": str(publish_id) if publish_id else None,
                     "restart_publish_id": str(publish_id) if publish_id else None,
                     "envs": self._desktop_layout_env(layout_credentials),
+                    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY: None,
+                    LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY: None,
                 },
             )
-        except Exception as error:
-            raise DesktopBotServiceError(
-                "重启发布身份持久化失败，未启动状态轮询: "
-                f"bot_id={bot_id}, publish_id={publish_id}"
-            ) from error
-        if not prepared:
-            raise DesktopBotServiceError(
-                "重启发布身份持久化失败，未启动状态轮询: "
-                f"bot_id={bot_id}, publish_id={publish_id}"
+        except Exception:
+            logger.exception(
+                "[DesktopBotService.restart] atomic tracking write failed after "
+                "BaaS accepted restart: bot_id=%s publish_id=%s",
+                bot_id,
+                publish_id,
             )
+            prepared = False
+        if not prepared:
+            # BaaS has already accepted the real restart.  Do not surface a
+            # retryable error that would dispatch a second restart; retain the
+            # older best-effort writes and always start the observer below.
+            self._merge_bot_ext(bot_id, binding.entity_id, ext_updates)
+            self._update_local_status(binding.id, bot_id, binding.entity_id, "PENDING")
+            try:
+                self._binding_repo.update_device_props(
+                    binding_id=binding.id,
+                    props={
+                        "publish_id": str(publish_id) if publish_id else None,
+                        "restart_publish_id": (
+                            str(publish_id) if publish_id else None
+                        ),
+                        "envs": self._desktop_layout_env(layout_credentials),
+                        LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY: None,
+                        LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY: None,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "[DesktopBotService.restart] fallback tracking write failed: "
+                    "bot_id=%s publish_id=%s",
+                    bot_id,
+                    publish_id,
+                )
 
         # 启动后台轮询 publish 进度
         if publish_id:
@@ -1882,14 +1922,27 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     continue
 
                 if status == "SUCCESS":
-                    if not self._confirm_desktop_layout_initialization(
+                    layout_status = self._confirm_desktop_layout_initialization(
                         publish_id=publish_id,
+                        binding_id=binding_id,
                         bot_id=bot_id,
                         owner_id=owner_id,
                         device_id=device_id,
-                        engine_type=engine_type or DEFAULT_ENGINE_TYPE,
-                    ):
+                    )
+                    if layout_status == _DesktopLayoutConfirmationStatus.PENDING:
                         continue
+                    if layout_status == _DesktopLayoutConfirmationStatus.SUPERSEDED:
+                        logger.info(
+                            "[DesktopBotService._poll_publish_progress] "
+                            "publish superseded; stopping without writes: "
+                            "bot_id=%s publish_id=%s",
+                            bot_id,
+                            publish_id,
+                        )
+                        return
+                    if layout_status == _DesktopLayoutConfirmationStatus.FAILED:
+                        final_status = "FAILED"
+                        break
                     final_status = "ACTIVE"
                     if not self._trigger_device_alive(device_id):
                         logger.warning(
@@ -1967,46 +2020,80 @@ class DesktopBotService(DesktopBotServiceProtocol):
         self,
         *,
         publish_id: str,
+        binding_id: str,
         bot_id: str,
         owner_id: str,
         device_id: str,
-        engine_type: str,
-    ) -> bool:
+    ) -> _DesktopLayoutConfirmationStatus:
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
-            return False
+            return _DesktopLayoutConfirmationStatus.PENDING
         ext = bot.get("ext") or {}
         if not isinstance(ext, dict) or ext.get("skills_layout") != "pool":
-            return True
-        if str(ext.get("publish_id") or "") != str(publish_id):
-            return False
+            return _DesktopLayoutConfirmationStatus.CONFIRMED
+
         try:
-            result = self._baas.exec_command_on_bot(
-                bot_uuid=device_id,
-                cmd="cat /var/run/agentclaw/skills_layout_initialization.json",
-                timeout_seconds=10,
-            )
-            if int(result.get("exit_code", 1)) != 0:
-                return False
-            evidence = json.loads(str(result.get("stdout") or ""))
-            if not isinstance(evidence, dict):
-                return False
-            self._layout_confirmation.confirm(
-                env=get_current_env(),
-                entity_id=str(bot.get("entity_id") or owner_id),
-                bot_id=bot_id,
-                expected_engine=engine_type,
-                evidence=evidence,
-            )
+            binding = self._binding_repo.get_by_id(int(binding_id))
         except Exception:
             logger.exception(
-                "[DesktopBotService] layout confirmation failed: bot_id=%s "
-                "publish_id=%s",
+                "[DesktopBotService] layout confirmation binding lookup failed: "
+                "bot_id=%s publish_id=%s",
                 bot_id,
                 publish_id,
             )
-            return False
-        return True
+            return _DesktopLayoutConfirmationStatus.PENDING
+        if binding is None:
+            return _DesktopLayoutConfirmationStatus.FAILED
+        if binding.status in {
+            DeviceBindingStatus.RELEASED.value,
+            DeviceBindingStatus.STOPPED.value,
+        }:
+            return _DesktopLayoutConfirmationStatus.SUPERSEDED
+
+        props = binding.device_props or {}
+        if not isinstance(props, dict):
+            return _DesktopLayoutConfirmationStatus.FAILED
+        current_publish_id = props.get("restart_publish_id") or props.get(
+            "publish_id"
+        )
+        if current_publish_id is None:
+            return _DesktopLayoutConfirmationStatus.FAILED
+        if str(current_publish_id) != str(publish_id):
+            return _DesktopLayoutConfirmationStatus.SUPERSEDED
+        if binding.status == DeviceBindingStatus.FAILED.value:
+            return _DesktopLayoutConfirmationStatus.FAILED
+        if str(props.get(LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY) or "") == str(
+            publish_id
+        ):
+            return _DesktopLayoutConfirmationStatus.CONFIRMED
+
+        callback_token = props.get("callback_token")
+        if not isinstance(callback_token, str) or not callback_token:
+            return _DesktopLayoutConfirmationStatus.FAILED
+        if str(props.get(LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY) or "") != str(
+            publish_id
+        ):
+            try:
+                BaasContainerInitializer(self._baas).dispatch_watchdog(
+                    bot_uuid=device_id,
+                    client_id=device_id,
+                    token=callback_token,
+                    startup_identity=str(publish_id),
+                )
+                self._binding_repo.update_device_props(
+                    binding_id=binding.id,
+                    props={
+                        LAYOUT_WATCHDOG_STARTUP_IDENTITY_KEY: str(publish_id),
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "[DesktopBotService] layout watchdog dispatch failed: "
+                    "bot_id=%s publish_id=%s",
+                    bot_id,
+                    publish_id,
+                )
+        return _DesktopLayoutConfirmationStatus.PENDING
 
     def _query_publish_status(self, publish_id: str) -> str:
         """查询单次 publish 进度，返回 status 字符串。"""

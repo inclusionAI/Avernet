@@ -7,6 +7,9 @@ from typing import Mapping
 
 from injector import inject
 
+from agentclaw.community.core.devices.protocols import (
+    LayoutInitializationConfirmationError,
+)
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
@@ -16,13 +19,13 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayout,
+    SkillLayoutPhase,
     is_migrated_pool_active_state,
     is_pool_native_state,
 )
 
 
-class PoolNativeLayoutConfirmationError(RuntimeError):
-    """The reported layout cannot safely confirm the persisted selection."""
+PoolNativeLayoutConfirmationError = LayoutInitializationConfirmationError
 
 
 _EVIDENCE_FIELDS = {
@@ -98,16 +101,17 @@ class SkillsPoolNativeLayoutConfirmationService:
             # A steady restart can report the same physical facts.  It must not
             # rerun or erase the completed migration transaction.
             return
-        if (
-            not is_pool_native_state(
-                state,
-                layout_contract_version=observed.layout_contract_version,
-                engine_type=expected_engine,
-            )
-        ):
+        pool_native = is_pool_native_state(
+            state,
+            layout_contract_version=observed.layout_contract_version,
+            engine_type=expected_engine,
+        )
+        if not pool_native:
             raise PoolNativeLayoutConfirmationError(
                 "persisted layout is not confirmable Pool-native state"
             )
+        if state.phase == SkillLayoutPhase.POOL_ACTIVE:
+            return
         if not self._layouts.confirm_pool_initializing(
             scope=scope,
             layout_contract_version=observed.layout_contract_version,
