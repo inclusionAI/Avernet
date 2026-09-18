@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from threading import Barrier
 
+import pytest
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import sessionmaker
@@ -132,6 +133,7 @@ def add_startup_binding(
     *,
     binding_id: int = 17,
     startup_identity: str = "startup-1",
+    status: str = "PENDING",
 ) -> None:
     with database.transactional_orm_session() as session:
         session.add(
@@ -143,7 +145,7 @@ def add_startup_binding(
                 device_provider="arca",
                 env="pre",
                 device_props=json.dumps({"startup_identity": startup_identity}),
-                status="PENDING",
+                status=status,
                 applied_by="staff-1",
             )
         )
@@ -155,11 +157,14 @@ def test_layout_repository_satisfies_public_protocol_shape() -> None:
     assert isinstance(repository, SkillsPoolLayoutRepositoryProtocol)
 
 
-def test_confirm_pool_initializing_commits_native_pool_without_migration_identity() -> None:
+@pytest.mark.parametrize("binding_status", ("PENDING", "ACTIVE"))
+def test_confirm_pool_initializing_commits_native_pool_without_migration_identity(
+    binding_status: str,
+) -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)
     scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
-    add_startup_binding(database)
+    add_startup_binding(database, status=binding_status)
     with database.transactional_orm_session() as session:
         session.add(
             BotSkillLayoutStateModel(
@@ -251,6 +256,35 @@ def test_confirm_pool_initializing_rejects_superseded_startup_identity() -> None
         layout_contract_version="skills-pool-p3-v1",
         binding_id=17,
         startup_identity="startup-old",
+    )
+    assert repository.get(scope).phase is SkillLayoutPhase.POOL_INITIALIZING
+
+
+def test_confirm_pool_initializing_rejects_released_binding() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    add_startup_binding(database, status="RELEASED")
+    with database.transactional_orm_session() as session:
+        session.add(
+            BotSkillLayoutStateModel(
+                env=scope.env,
+                entity_id=scope.entity_id,
+                bot_id=scope.bot_id,
+                active_layout=SkillLayout.POOL.value,
+                target_layout=None,
+                phase=SkillLayoutPhase.POOL_INITIALIZING.value,
+                migration_generation=None,
+                preparation_id=None,
+                layout_contract_version="skills-pool-p3-v1",
+            )
+        )
+
+    assert not repository.confirm_pool_initializing(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        binding_id=17,
+        startup_identity="startup-1",
     )
     assert repository.get(scope).phase is SkillLayoutPhase.POOL_INITIALIZING
 

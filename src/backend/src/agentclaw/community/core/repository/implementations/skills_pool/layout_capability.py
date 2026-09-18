@@ -9,6 +9,7 @@ from sqlalchemy import func
 from agentclaw.community.core.devices.startup_identity import (
     resolve_startup_identity,
 )
+from agentclaw.community.core.devices.models import DeviceBindingStatus
 
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
@@ -46,6 +47,12 @@ class SkillsPoolCapabilityRepositoryMixin:
                     EntityDeviceBinding.id == binding_id,
                     EntityDeviceBinding.env == scope.env,
                     EntityDeviceBinding.entity_id == scope.entity_id,
+                    EntityDeviceBinding.status.in_(
+                        (
+                            DeviceBindingStatus.PENDING.value,
+                            DeviceBindingStatus.ACTIVE.value,
+                        )
+                    ),
                 )
                 .with_for_update()
                 .one_or_none()
