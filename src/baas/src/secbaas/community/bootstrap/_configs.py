@@ -173,7 +173,7 @@ class SandboxPluginConfig(BaseSettings):
 
     model_config = _CFG
     arca: str = Field(
-        default="stub", pattern=r"^(arca_sdk|stub|local_proc|aliyun_ack)$"
+        default="stub", pattern=r"^(arca_sdk|stub|local_proc|local_k8s|aliyun_ack)$"
     )
     desktop: str = Field(default="stub", pattern=r"^(real|stub)$")
     k8s: str = Field(default="stub", pattern=r"^(real|stub)$")
