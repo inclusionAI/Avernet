@@ -460,18 +460,18 @@ def test_get_latest_built_by_source_bot_id_returns_none_when_no_built(repo):
 
 def test_get_draft_by_source_bot_id_returns_draft(repo):
     repo.insert(_data(source_bot_id="src-1", status="built", env="dev"))
-    draft = repo.insert(_data(source_bot_id="src-1", status="DRAFT", version=2, env="dev"))
+    draft = repo.insert(_data(source_bot_id="src-1", status="draft", version=2, env="dev"))
 
     result = repo.get_draft_by_source_bot_id("src-1", "dev")
     assert result is not None
     assert result.id == draft.id
-    assert result.status == "DRAFT"
+    assert result.status == "draft"
 
 
 def test_get_draft_by_source_bot_id_returns_latest_draft(repo):
     """多条 DRAFT 记录时返回 id 最大的。"""
-    repo.insert(_data(source_bot_id="src-1", status="DRAFT", env="dev"))
-    later = repo.insert(_data(source_bot_id="src-1", status="DRAFT", version=2, env="dev"))
+    repo.insert(_data(source_bot_id="src-1", status="draft", env="dev"))
+    later = repo.insert(_data(source_bot_id="src-1", status="draft", version=2, env="dev"))
 
     result = repo.get_draft_by_source_bot_id("src-1", "dev")
     assert result is not None
@@ -486,8 +486,8 @@ def test_get_draft_by_source_bot_id_returns_none_when_no_draft(repo):
 
 
 def test_get_draft_by_source_bot_id_filters_by_env(repo):
-    repo.insert(_data(source_bot_id="src-1", status="DRAFT", env="dev"))
-    repo.insert(_data(source_bot_id="src-1", status="DRAFT", version=2, env="prod"))
+    repo.insert(_data(source_bot_id="src-1", status="draft", env="dev"))
+    repo.insert(_data(source_bot_id="src-1", status="draft", version=2, env="prod"))
 
     result = repo.get_draft_by_source_bot_id("src-1", "dev")
     assert result is not None
