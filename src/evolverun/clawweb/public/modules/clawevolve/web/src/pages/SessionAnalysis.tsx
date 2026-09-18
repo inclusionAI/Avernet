@@ -121,6 +121,7 @@ const field = (value: unknown, fallback = "—") =>
   typeof value === "string" && value ? value : fallback;
 
 function artifactLabel(name: string, mode: SessionAnalysisTask["mode"]) {
+  if (name === "artifactBundle") return "下载任务产物包";
   if (name === "raw")
     return mode === "EXPORT_ALL" ? "下载 Session 压缩包" : "下载 Session 文件";
   if (name === "trajectory") return "下载 Session 轨迹";
@@ -130,6 +131,19 @@ function artifactLabel(name: string, mode: SessionAnalysisTask["mode"]) {
   if (name === "runtimeBundle") return "下载 AIS 任务现场";
   if (name === "openclawSessions") return "下载诊断 Agent 会话";
   return `下载 ${name}`;
+}
+
+const logArtifactNames = ["openclawSessions", "runtimeBundle"] as const;
+const isLogArtifact = (name: string) => (logArtifactNames as readonly string[]).includes(name);
+
+function taskArtifactNames(task: SessionAnalysisTask): string[] {
+  const artifacts = task.artifacts ?? [];
+  if (artifacts.includes("artifactBundle")) return ["artifactBundle"];
+  return artifacts.filter(
+    (name) =>
+      !["result", "manifest"].includes(name) && !isLogArtifact(name) &&
+      !(task.mode === "ANALYZE_SINGLE" && name === "raw"),
+  );
 }
 
 function taskStatus(status: string) {
@@ -1203,17 +1217,11 @@ function SessionAnalysisDetail() {
               </div>
             </section>
           )}
-          {task.status === "completed" && task.artifacts && (
+          {task.status === "completed" && taskArtifactNames(task).length > 0 && (
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <h2 className="mb-3 text-base font-semibold">任务产物</h2>
               <div className="flex flex-wrap gap-2">
-                {task.artifacts
-                  .filter(
-                    (name) =>
-                      !["result", "manifest"].includes(name) &&
-                      !(task.mode === "ANALYZE_SINGLE" && name === "raw"),
-                  )
-                  .map((name) => (
+                {taskArtifactNames(task).map((name) => (
                     <button
                       key={name}
                       onClick={() => void download(name)}
@@ -1290,6 +1298,25 @@ function SessionAnalysisDetail() {
               </div>
             )}
           </section>
+          {task.status === "completed" && task.artifacts?.some(isLogArtifact) && (
+            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <h2 className="text-sm font-semibold text-gray-900">任务日志</h2>
+              <p className="mt-1 text-xs leading-5 text-gray-500">诊断 Agent 会话与 AIS 执行现场。</p>
+              <div className="mt-4 flex flex-col gap-2">
+                {logArtifactNames
+                  .filter((name) => task.artifacts?.includes(name))
+                  .map((name) => (
+                    <button
+                      key={name}
+                      onClick={() => void download(name)}
+                      className={`${secondaryButton} w-full justify-center`}
+                    >
+                      {artifactLabel(name, task.mode)}
+                    </button>
+                  ))}
+              </div>
+            </section>
+          )}
         </aside>
       </div>
     </div>
