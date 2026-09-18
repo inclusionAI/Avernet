@@ -107,6 +107,10 @@ def inspect_openclaw_steady_active(
         )
     if isinstance(marker, dict) and marker.get("activation_state") == "finalizing":
         return None
+    if isinstance(marker, dict) and (
+        "preparation_id" in marker or "migration_generation" in marker
+    ):
+        return None
     if not steady_active_marker_valid(
         marker,
         engine="openclaw",

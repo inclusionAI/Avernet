@@ -17,7 +17,7 @@ from engine.community.core.skills.layout_planner import (
     resolve_filesystem_skill_layout,
 )
 from engine.community.plugins.skills_pool.active_marker_validation import (
-    steady_active_marker_valid,
+    startup_active_marker_valid,
 )
 
 
@@ -72,7 +72,7 @@ def _read_active_marker(path: Path) -> dict[str, object] | None:
 
 
 def _validate_active_marker(marker: dict[str, object], *, engine: str) -> None:
-    if not steady_active_marker_valid(
+    if not startup_active_marker_valid(
         marker,
         engine=engine,
         expected_contract_version=LAYOUT_CONTRACT_VERSION,
@@ -80,7 +80,7 @@ def _validate_active_marker(marker: dict[str, object], *, engine: str) -> None:
         raise PoolNativeInitializationError("Pool active marker conflicts with startup")
 
 
-def _atomic_write_active_marker(path: Path, marker: dict[str, str]) -> None:
+def _atomic_create_active_marker(path: Path, marker: dict[str, str]) -> bool:
     payload = json.dumps(
         marker,
         ensure_ascii=False,
@@ -93,12 +93,16 @@ def _atomic_write_active_marker(path: Path, marker: dict[str, str]) -> None:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            return False
         directory_fd = os.open(path.parent, os.O_RDONLY)
         try:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
+        return True
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -138,7 +142,7 @@ def initialize_pool_native(
     _require_directory(layout.pool_local, create=True)
 
     if marker is None:
-        _atomic_write_active_marker(
+        created = _atomic_create_active_marker(
             layout.active_marker,
             {
                 "engine": engine,
@@ -146,6 +150,13 @@ def initialize_pool_native(
                 "activation_state": "active",
             },
         )
+        if not created:
+            concurrent_marker = _read_active_marker(layout.active_marker)
+            if concurrent_marker is None:
+                raise PoolNativeInitializationError(
+                    "Pool active marker disappeared during initialization"
+                )
+            _validate_active_marker(concurrent_marker, engine=engine)
 
     return PoolNativeInitializationEvidence(
         actual_engine=engine,
