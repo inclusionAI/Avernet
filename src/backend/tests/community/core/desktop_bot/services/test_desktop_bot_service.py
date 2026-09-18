@@ -1090,6 +1090,28 @@ class TestRestart:
             },
         )
 
+    @patch(
+        "agentclaw.community.core.desktop_bot.services.desktop_bot_service."
+        "DesktopBotService._start_publish_polling"
+    )
+    def test_restart_aborts_when_publish_identity_persistence_fails(
+        self, mock_start_poll
+    ):
+        service, mocks = _make_service_with_mocks()
+        _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")
+        mocks["baas"].restart_bot.return_value = {"publish_id": 5}
+        mocks["baas"].approve_publish.return_value = {"status": "SUCCESS"}
+        mocks["bot_repo"].update_by_owner.side_effect = RuntimeError("DB down")
+
+        with pytest.raises(
+            DesktopBotServiceError, match="重启发布身份持久化失败"
+        ):
+            service.restart(bot_id="desktop_bot_001", user_id="u001")
+
+        mocks["binding_repo"].update_device_props.assert_not_called()
+        mocks["binding_repo"].update_status.assert_not_called()
+        mock_start_poll.assert_not_called()
+
     def test_restart_no_publish_id_skips_approve(self):
         service, mocks = _make_service_with_mocks()
         _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")

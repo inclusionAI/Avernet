@@ -55,6 +55,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
     BotCombinationUnsupportedError,
+    BotCreationRetainedError,
     BotLookupAmbiguousError,
     BotTemplateInvalidError,
     CreateBotForOthersError,
@@ -1074,6 +1075,16 @@ async def create_bot(
             message=f"授权申请异常: {e}",
             error_code=5400,
             data=None,
+        )
+    except BotCreationRetainedError as e:
+        logger.error(
+            "[bot_router.create_bot] Bot creation retained for retry: %s", e
+        )
+        return ApiResponse(
+            success=False,
+            message=f"创建Bot失败，可使用 bot_id 重试: {str(e)}",
+            error_code=500,
+            data={"bot_id": e.bot_id, "retryable": True},
         )
     except DeviceAllocationError as e:
         logger.error(f"[bot_router.create_bot] Device allocation error: {e}")

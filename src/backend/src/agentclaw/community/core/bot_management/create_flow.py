@@ -46,9 +46,11 @@ from agentclaw.community.core.bot_management.manifest_seam import (
 )
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
+    BotCreationRetainedError,
     BotTemplateInvalidError,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNotFoundError,
     BotServiceError,
     validate_bot_name,
 )
@@ -511,24 +513,42 @@ def create_bot_with_authorization(
     )
 
     # Token present → create the bot inline.
-    result = bot_service.create_bot(
-        user_id=user_id,
-        nick_name=nick_name,
-        bot_name=bot_name,
-        bot_desc=spec.bot_desc,
-        entity_id=spec.entity_id,
-        entity_type=spec.entity_type,
-        share_policy=spec.share_policy,
-        engine_type=spec.engine_type,
-        ext=_build_ext(avatar_url=spec.avatar_url, agent_code=agent_code),
-        bot_id=bot_id,
-        bot_type=spec.bot_type,
-        template_type=spec.template_type,
-        template_config=spec.template_config,
-        cookie=cookie,
-        space_id=spec.space_id,
-        space_quota=context.space_quota,
-    )
+    try:
+        result = bot_service.create_bot(
+            user_id=user_id,
+            nick_name=nick_name,
+            bot_name=bot_name,
+            bot_desc=spec.bot_desc,
+            entity_id=spec.entity_id,
+            entity_type=spec.entity_type,
+            share_policy=spec.share_policy,
+            engine_type=spec.engine_type,
+            ext=_build_ext(avatar_url=spec.avatar_url, agent_code=agent_code),
+            bot_id=bot_id,
+            bot_type=spec.bot_type,
+            template_type=spec.template_type,
+            template_config=spec.template_config,
+            cookie=cookie,
+            space_id=spec.space_id,
+            space_quota=context.space_quota,
+        )
+    except BotServiceError as exc:
+        try:
+            retained_bot = bot_service.get_bot(bot_id, user_id)
+        except BotNotFoundError:
+            raise exc
+        except BotServiceError:
+            raise exc
+        if (
+            not isinstance(retained_bot, dict)
+            or retained_bot.get("bot_id") != bot_id
+            or retained_bot.get("status") not in {"PENDING", "PROVISIONING"}
+        ):
+            raise exc
+        raise BotCreationRetainedError(
+            bot_id=bot_id,
+            message=str(exc),
+        ) from exc
 
     _record_owner_relationship(
         auth_rel_plugin, user_id=user_id, agent_code=agent_code,

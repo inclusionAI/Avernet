@@ -492,6 +492,56 @@ class TestRouterLogic:
         mock_bot_service.create_bot.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_create_bot_router_returns_retained_bot_retry_handle(self):
+        from agentclaw.community.adapters.http.bot_management.router import create_bot
+        from agentclaw.community.adapters.http.dependencies import RequestContext
+        from agentclaw.community.core.bot_management.services.bot_service import (
+            BotServiceError,
+        )
+        from unittest.mock import AsyncMock as NewAsyncMock
+
+        bot_id = "20260731_retry001"
+        mock_ctx = MagicMock(spec=RequestContext)
+        mock_ctx.user_id = "user_001"
+        mock_ctx.nick_name = "Test User"
+        mock_passport_plugin = MagicMock()
+        mock_passport_plugin.apply_first_agent_passport.return_value = {
+            "token": "passport_token_123",
+            "agent_code": "agent-test",
+        }
+        mock_bot_service = MagicMock()
+        mock_bot_service.check_create_bot_preflight.return_value = None
+        mock_bot_service.is_first_bot.return_value = True
+        mock_bot_service.create_bot.side_effect = BotServiceError(
+            "device allocation failed"
+        )
+        mock_bot_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "status": "PENDING",
+        }
+        mock_request = MagicMock()
+        mock_request.json = NewAsyncMock(return_value={"bot_name": "Retry Bot"})
+        mock_factory = MagicMock()
+        mock_factory.create.return_value.get_bot_mcp_codes.return_value = []
+
+        with patch(
+            "agentclaw.community.adapters.http.bot_management.router.generate_bot_id",
+            return_value=bot_id,
+        ):
+            result = await create_bot(
+                mock_request,
+                mock_ctx,
+                bot_service=mock_bot_service,
+                passport_plugin=mock_passport_plugin,
+                auth_rel_plugin=MagicMock(),
+                skill_set_factory=mock_factory,
+            )
+
+        assert result.success is False
+        assert result.error_code == 500
+        assert result.data == {"bot_id": bot_id, "retryable": True}
+
+    @pytest.mark.asyncio
     async def test_create_bot_router_need_authorization(self):
         """
         从 Router 视角测试首Bot创建需要授权流程。

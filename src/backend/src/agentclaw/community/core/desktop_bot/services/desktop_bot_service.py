@@ -315,12 +315,12 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 binding_id,
             )
 
-    def _merge_bot_ext(self, bot_id: str, owner_id: str, patch: dict) -> None:
+    def _merge_bot_ext(self, bot_id: str, owner_id: str, patch: dict) -> bool:
         """Read-modify-write bot ext field, merging only specified keys."""
         try:
             bot = self._bot_repo.get_by_id_and_owner(bot_id=bot_id, owner_id=owner_id)
             if not bot:
-                return
+                return False
             ext_raw = bot.get("ext") or {}
             if isinstance(ext_raw, str):
                 try:
@@ -329,13 +329,15 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     ext_raw = {}
             ext = dict(ext_raw)
             ext.update(patch)
-            self._bot_repo.update_by_owner(
+            updated = self._bot_repo.update_by_owner(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 update_data={"ext": ext},
             )
+            return updated is not None
         except Exception as e:
             logger.warning("[_merge_bot_ext] failed bot=%s: %s", bot_id, e)
+            return False
 
     # ── verify_ownership ─────────────────────────────────────────────────
 
@@ -1134,8 +1136,6 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     f"重启审批失败: publish_id={publish_id}, error={e}"
                 )
 
-        self._update_local_status(binding.id, bot_id, binding.entity_id, "PENDING")
-
         # 记录本次进入 PENDING 的时刻,供周期扫描的过渡超时兜底使用。
         # 必须用这个独立时间戳而非 gmt_create:老 bot 的 gmt_create 早超
         # 超时窗,会让老 bot 一重启就被误判 OFFLINE。
@@ -1147,7 +1147,12 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "agentclaw_skills_layout_contract_version", ""
             ),
         }
-        self._merge_bot_ext(bot_id, binding.entity_id, ext_updates)
+        if not self._merge_bot_ext(bot_id, binding.entity_id, ext_updates):
+            raise DesktopBotServiceError(
+                "重启发布身份持久化失败，未启动状态轮询: "
+                f"bot_id={bot_id}, publish_id={publish_id}"
+            )
+        self._update_local_status(binding.id, bot_id, binding.entity_id, "PENDING")
         self._binding_repo.update_device_props(
             binding_id=binding.id,
             props={
