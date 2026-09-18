@@ -59,6 +59,39 @@ def test_restart_accepts_matching_active_marker(tmp_path: Path) -> None:
     assert evidence.actual_layout == "pool"
 
 
+def test_restart_accepts_and_preserves_completed_migration_marker(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    initialize_pool_native(engine="openclaw", home=home)
+    marker_path = home / ".openclaw/workspace/skills-pool/.pool-active"
+    marker = json.loads(marker_path.read_text())
+    marker.update(
+        {
+            "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
+            "migration_generation": "generation-1",
+        }
+    )
+    marker_path.write_text(json.dumps(marker))
+
+    evidence = initialize_pool_native(engine="openclaw", home=home)
+
+    assert evidence.actual_layout == "pool"
+    assert json.loads(marker_path.read_text()) == marker
+
+
+def test_restart_rejects_partial_migration_identity(tmp_path: Path) -> None:
+    home = tmp_path / "home" / "admin"
+    initialize_pool_native(engine="openclaw", home=home)
+    marker_path = home / ".openclaw/workspace/skills-pool/.pool-active"
+    marker = json.loads(marker_path.read_text())
+    marker["preparation_id"] = "2a958f59-8cf4-4413-a267-7d56d3382f23"
+    marker_path.write_text(json.dumps(marker))
+
+    with pytest.raises(PoolNativeInitializationError, match="conflicts with startup"):
+        initialize_pool_native(engine="openclaw", home=home)
+
+
 def test_non_openclaw_engine_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(PoolNativeInitializationError, match="unsupported for engine"):
         initialize_pool_native(engine="hermes", home=tmp_path)

@@ -17,7 +17,7 @@ from engine.community.core.skills.layout_planner import (
     resolve_filesystem_skill_layout,
 )
 from engine.community.plugins.skills_pool.active_marker_validation import (
-    steady_active_marker_valid,
+    startup_active_marker_valid,
 )
 
 
@@ -72,7 +72,7 @@ def _read_active_marker(path: Path) -> dict[str, object] | None:
 
 
 def _validate_active_marker(marker: dict[str, object], *, engine: str) -> None:
-    if not steady_active_marker_valid(
+    if not startup_active_marker_valid(
         marker,
         engine=engine,
         expected_contract_version=LAYOUT_CONTRACT_VERSION,
