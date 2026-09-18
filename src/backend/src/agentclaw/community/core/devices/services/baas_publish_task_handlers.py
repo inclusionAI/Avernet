@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import time
-from dataclasses import replace
 from typing import Any, Callable, Optional, cast
 
-from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.common_config.service import CommonConfigService
-from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
+from agentclaw.community.core.bot_management.utils import (
+    build_baas_restart_ext,
+)
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.services.baas_restart_support import (
+    RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
+    RESTART_REQUEST_ID_KEY,
+    RESTART_WORKFLOW_BASELINE_KEY,
+    read_bot_ext_snapshot,
+    read_restart_codefuse_token,
+    resolve_restart_image_policy,
+)
 from agentclaw.community.core.events.bus import get_event_bus
 from agentclaw.community.core.events.types import (
     BaasPublishCompletedEvent,
@@ -32,9 +40,6 @@ from agentclaw.community.log import get_logger
 BAAS_CREATE_PUBLISH_POLL_TASK = "baas.create.publish_poll"
 BAAS_CREATE_INIT_TASK = "baas.create.init"
 BAAS_RESTART_PUBLISH_POLL_TASK = "baas.restart.publish_poll"
-RESTART_IMAGE_POLICY_ON_SUCCESS_KEY = "restart_image_policy_on_success"
-RESTART_REQUEST_ID_KEY = "restart_request_id"
-RESTART_WORKFLOW_BASELINE_KEY = "restart_workflow_baseline"
 _DEFAULT_IMAGE_POLICY_VALUE = "default"
 _CREATE_PUBLISH_TIMEOUT_SECONDS = 600
 _RESTART_PUBLISH_TIMEOUT_SECONDS = 600
@@ -431,14 +436,22 @@ class BaasRestartPublishPollHandler:
                 workflow_baseline=workflow_baseline,
             )
             if isinstance(publish_id, Fail):
-                self._persist_failed(
+                persisted = self._persist_failed(
                     bot_id=bot_id,
                     owner_id=owner_id,
                     binding_id=binding_id,
                     publish_id=None,
+                    request_id=request_id,
                     message=publish_id.error,
                 )
-                self._clear_restart_recovery_intent(binding_id=binding_id)
+                if not persisted:
+                    return Retry("BaaS restart failure CAS conflict")
+                if not self._clear_restart_recovery_intent(
+                    binding_id=binding_id,
+                    publish_id=None,
+                    request_id=request_id,
+                ):
+                    return Retry("BaaS restart intent clear CAS conflict")
                 return publish_id
             if isinstance(publish_id, (Complete, Reschedule, Retry)):
                 if _business_timed_out(
@@ -446,18 +459,26 @@ class BaasRestartPublishPollHandler:
                     timeout_s=_RESTART_PUBLISH_TIMEOUT_SECONDS,
                     clock=self._clock,
                 ):
-                    self._persist_failed(
+                    persisted = self._persist_failed(
                         bot_id=bot_id,
                         owner_id=owner_id,
                         binding_id=binding_id,
                         publish_id=None,
+                        request_id=request_id,
                         message="BaaS restart could not adopt an accepted workflow",
                     )
-                    self._clear_restart_recovery_intent(binding_id=binding_id)
+                    if not persisted:
+                        return Retry("BaaS restart failure CAS conflict")
+                    if not self._clear_restart_recovery_intent(
+                        binding_id=binding_id,
+                        publish_id=None,
+                        request_id=request_id,
+                    ):
+                        return Retry("BaaS restart intent clear CAS conflict")
                     return Complete()
                 return publish_id
 
-        image_policy_on_success = self._resolve_image_policy_on_success(
+        image_policy_on_success = resolve_restart_image_policy(
             binding=binding,
             publish_id=publish_id,
             payload_value=image_policy_on_success,
@@ -480,17 +501,25 @@ class BaasRestartPublishPollHandler:
             timeout_s=_RESTART_PUBLISH_TIMEOUT_SECONDS,
             clock=self._clock,
         ):
-            self._persist_failed(
+            persisted = self._persist_failed(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 binding_id=binding_id,
                 publish_id=publish_id,
+                request_id=request_id,
                 message=(
                     "BaaS publish timeout after "
                     f"{_RESTART_PUBLISH_TIMEOUT_SECONDS}s (publish_id={publish_id})"
                 ),
             )
-            self._clear_restart_recovery_intent(binding_id=binding_id)
+            if not persisted:
+                return Retry("BaaS restart failure CAS conflict")
+            if not self._clear_restart_recovery_intent(
+                binding_id=binding_id,
+                publish_id=publish_id,
+                request_id=request_id,
+            ):
+                return Retry("BaaS restart intent clear CAS conflict")
             return Complete()
         if self._baas_device_service is None:
             return Retry("restart publish status service unavailable")
@@ -506,9 +535,9 @@ class BaasRestartPublishPollHandler:
             owner_id=owner_id,
             binding_id=binding_id,
             publish_id=publish_id,
+            request_id=request_id,
             bot_uuid=bot_uuid,
             bot=bot,
-            binding=binding,
             image_policy_on_success=image_policy_on_success,
         )
 
@@ -584,13 +613,14 @@ class BaasRestartPublishPollHandler:
                 f"restart workflow adoption is ambiguous for bot_uuid={bot_uuid}: {ids}"
             )
         publish_id = int(candidates[0]["id"])
-        self._binding_repository.update_device_props(
+        adopted = self._binding_repository.adopt_baas_restart_publish_if_matches(
             binding_id=binding_id,
-            props={
-                "publish_id": str(publish_id),
-                "restart_publish_id": str(publish_id),
-            },
+            request_id=request_id,
+            workflow_baseline=workflow_baseline,
+            publish_id=publish_id,
         )
+        if not adopted:
+            return Retry("restart workflow adoption CAS conflict")
         logger.info(
             "[BaasRestartPublishPollHandler] adopted restart workflow: "
             "binding_id=%s request_id=%s publish_id=%s",
@@ -600,37 +630,23 @@ class BaasRestartPublishPollHandler:
         )
         return publish_id
 
-    def _clear_restart_recovery_intent(self, *, binding_id: int) -> None:
-        self._binding_repository.update_device_props(
-            binding_id=binding_id,
-            props={
-                RESTART_REQUEST_ID_KEY: None,
-                RESTART_WORKFLOW_BASELINE_KEY: None,
-                RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: None,
-            },
-        )
-
-    @staticmethod
-    def _resolve_image_policy_on_success(
+    def _clear_restart_recovery_intent(
+        self,
         *,
-        binding: Any,
-        publish_id: int,
-        payload_value: str | None,
+        binding_id: int,
+        publish_id: int | None,
         request_id: str | None,
-    ) -> str | None:
-        """Read the restart intent from Binding, with old-task compatibility."""
-        props = getattr(binding, "device_props", None) or {}
-        request_matches = (
-            request_id is not None
-            and props.get(RESTART_REQUEST_ID_KEY) == request_id
+    ) -> bool:
+        return self._binding_repository.clear_baas_restart_intent_if_matches(
+            binding_id=binding_id,
+            publish_id=publish_id,
+            request_id=request_id,
+            keys=(
+                RESTART_REQUEST_ID_KEY,
+                RESTART_WORKFLOW_BASELINE_KEY,
+                RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
+            ),
         )
-        if request_matches or _payload_publish_id_matches(
-            binding, publish_id, "restart_publish_id"
-        ):
-            if RESTART_IMAGE_POLICY_ON_SUCCESS_KEY in props:
-                value = props.get(RESTART_IMAGE_POLICY_ON_SUCCESS_KEY)
-                return value if isinstance(value, str) else None
-        return payload_value
 
     def _preflight(
         self,
@@ -653,6 +669,11 @@ class BaasRestartPublishPollHandler:
             binding, publish_id, "restart_publish_id"
         ):
             return Complete()
+        if getattr(binding, "status", None) in {
+            DeviceBindingStatus.RELEASED.value,
+            DeviceBindingStatus.STOPPED.value,
+        }:
+            return Complete()
         # ACTIVE can belong to the runtime that existed before this restart.
         # It is therefore not proof that the current BaaS publish succeeded;
         # matching restart tasks must still poll that publish. FAILED remains a
@@ -663,7 +684,11 @@ class BaasRestartPublishPollHandler:
                 # transient race while clearing the durable intent. Retry that
                 # cleanup before completing the task; an exception here keeps
                 # TaskWorker retrying instead of permanently blocking restart.
-                self._clear_restart_recovery_intent(binding_id=binding_id)
+                self._clear_restart_recovery_intent(
+                    binding_id=binding_id,
+                    publish_id=publish_id,
+                    request_id=request_id,
+                )
             return Complete()
         return None
 
@@ -675,13 +700,17 @@ class BaasRestartPublishPollHandler:
         owner_id: str,
         binding_id: int,
         publish_id: int,
+        request_id: str | None,
         bot_uuid: str | None,
         bot: Any,
-        binding: DeviceBindingRecord,
         image_policy_on_success: str | None = None,
     ) -> TaskOutcome:
         if status == DeviceBindingStatus.ACTIVE.value:
-            codefuse_token = self._read_codefuse_token(bot_id=bot_id, bot=bot)
+            codefuse_token = read_restart_codefuse_token(
+                bot_id=bot_id,
+                bot=bot,
+                template_service=self._template_service,
+            )
             write_err = (
                 self._baas_device_service.refresh_codefuse_token_on_publish_success(
                     bot_uuid=bot_uuid,
@@ -696,36 +725,56 @@ class BaasRestartPublishPollHandler:
                     publish_id,
                     write_err,
                 )
-                self._persist_failed(
+                persisted = self._persist_failed(
                     bot_id=bot_id,
                     owner_id=owner_id,
                     binding_id=binding_id,
                     publish_id=publish_id,
+                    request_id=request_id,
                 )
-                self._clear_restart_recovery_intent(binding_id=binding_id)
+                if not persisted:
+                    return Retry("BaaS restart failure CAS conflict")
+                if not self._clear_restart_recovery_intent(
+                    binding_id=binding_id,
+                    publish_id=publish_id,
+                    request_id=request_id,
+                ):
+                    return Retry("BaaS restart intent clear CAS conflict")
                 return Complete()
-            self._persist_restart_status(
+            persisted = self._persist_restart_status(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 binding_id=binding_id,
                 status=DeviceBindingStatus.ACTIVE.value,
                 publish_id=publish_id,
+                request_id=request_id,
             )
+            if not persisted:
+                return Retry("BaaS restart terminal CAS conflict")
             return self._finalize_success(
                 binding_id=binding_id,
                 bot_id=bot_id,
                 owner_id=owner_id,
                 publish_id=publish_id,
+                request_id=request_id,
                 image_policy_on_success=image_policy_on_success,
             )
         if status == DeviceBindingStatus.FAILED.value:
-            self._persist_failed(
+            persisted = self._persist_failed(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 binding_id=binding_id,
                 publish_id=publish_id,
+                request_id=request_id,
             )
-            self._clear_restart_recovery_intent(binding_id=binding_id)
+            if not persisted:
+                return Retry("BaaS restart failure CAS conflict")
+            if not self._clear_restart_recovery_intent(
+                binding_id=binding_id,
+                publish_id=publish_id,
+                request_id=request_id,
+            ):
+                return Retry("BaaS restart intent clear CAS conflict")
             return Complete()
         return Retry(f"unexpected publish status: {status}")
 
@@ -736,6 +785,7 @@ class BaasRestartPublishPollHandler:
         bot_id: str,
         owner_id: str,
         publish_id: int,
+        request_id: str | None,
         image_policy_on_success: str | None,
     ) -> TaskOutcome:
         binding = self._binding_repository.get_by_id(binding_id)
@@ -772,7 +822,12 @@ class BaasRestartPublishPollHandler:
                 return Retry(str(exc))
         # Clear only after every success-side persistence step has completed.
         # A failure above keeps the durable request/baseline/policy for replay.
-        self._clear_restart_recovery_intent(binding_id=binding_id)
+        if not self._clear_restart_recovery_intent(
+            binding_id=binding_id,
+            publish_id=publish_id,
+            request_id=request_id,
+        ):
+            return Retry("BaaS restart intent clear CAS conflict")
         _request_baas_runtime_projection(binding)
         _publish_baas_completed(
             binding_id=binding_id,
@@ -790,14 +845,16 @@ class BaasRestartPublishPollHandler:
         owner_id: str,
         binding_id: int,
         publish_id: int | None,
+        request_id: str | None,
         message: str | None = None,
-    ) -> None:
-        self._persist_restart_status(
+    ) -> bool:
+        return self._persist_restart_status(
             bot_id=bot_id,
             owner_id=owner_id,
             binding_id=binding_id,
             status=DeviceBindingStatus.FAILED.value,
             publish_id=publish_id,
+            request_id=request_id,
             failure_message=message,
         )
 
@@ -809,124 +866,40 @@ class BaasRestartPublishPollHandler:
         binding_id: int,
         status: str,
         publish_id: int | None,
+        request_id: str | None,
         failure_message: str | None = None,
-    ) -> None:
-        if self._bot_repository is not None:
-            updated_bot = self._bot_repository.update_by_owner(
-                bot_id, owner_id, {"status": status}
+    ) -> bool:
+        for _attempt in range(3):
+            snapshot = read_bot_ext_snapshot(
+                self._bot_repository,
+                bot_id=bot_id, owner_id=owner_id
             )
-            if updated_bot is None:
-                raise RuntimeError(f"Bot status update did not match: bot_id={bot_id}")
-            for _attempt in range(3):
-                snapshot = self._get_current_ext_snapshot(
-                    bot_id=bot_id, owner_id=owner_id
+            if snapshot is None:
+                raise RuntimeError(
+                    f"Bot restart ext snapshot unavailable: bot_id={bot_id}"
                 )
-                if snapshot is None:
-                    break
-                current_ext, expected_ext = snapshot
-                updated_ext = self._build_bot_ext(
-                    current_ext=current_ext,
-                    status=status,
-                    publish_id=publish_id,
-                    failure_message=failure_message,
-                )
-                if updated_ext == current_ext:
-                    break
-                updated = self._bot_repository.compare_and_set_ext(
+            current_ext, expected_ext = snapshot
+            updated_ext = build_baas_restart_ext(
+                current_ext=current_ext,
+                status=status,
+                publish_id=publish_id,
+                failure_message=failure_message,
+            )
+            transitioned = (
+                self._binding_repository.transition_baas_restart_terminal(
+                    binding_id=binding_id,
                     bot_id=bot_id,
                     owner_id=owner_id,
-                    expected_ext=expected_ext,
-                    ext=updated_ext,
+                    publish_id=publish_id,
+                    request_id=request_id,
+                    status=status,
+                    expected_bot_ext=expected_ext,
+                    bot_ext=updated_ext,
                 )
-                if updated is not None:
-                    break
-            else:
-                raise RuntimeError(
-                    f"Bot restart ext CAS conflicted repeatedly: bot_id={bot_id}"
-                )
-        self._binding_repository.update_status(
-            binding_id=binding_id,
-            status=status,
-        )
-
-    @staticmethod
-    def _build_bot_ext(
-        *,
-        current_ext: dict,
-        status: str,
-        publish_id: int | None,
-        failure_message: str | None = None,
-    ) -> dict:
-        restart_publish_id = str(publish_id) if publish_id is not None else None
-        if status == DeviceBindingStatus.ACTIVE.value:
-            ext = clear_baas_publish_failure_ext(current_ext)
-            if restart_publish_id is not None:
-                ext["restart_publish_id"] = restart_publish_id
-            return ext
-        elif status == DeviceBindingStatus.FAILED.value:
-            ext = clear_baas_publish_failure_ext(current_ext)
-            ext["start_status"] = "FAILED"
-            ext["start_message"] = (
-                failure_message
-                or f"BaaS publish FAILED: publish_id={restart_publish_id}"
             )
-            if restart_publish_id is not None:
-                ext["restart_publish_id"] = restart_publish_id
-            return ext
-        return current_ext
-
-    def _get_current_ext_snapshot(
-        self, *, bot_id: str, owner_id: str
-    ) -> tuple[dict, dict | None] | None:
-        if self._bot_repository is None:
-            return None
-        getter = getattr(self._bot_repository, "get_by_id_and_owner", None)
-        if getter is None:
-            return None
-        try:
-            bot = getter(bot_id, owner_id)
-        except Exception as exc:
-            logger.warning(
-                "[BaasRestartPublishPollHandler] failed to read bot ext "
-                "for bot_id=%s owner_id=%s: %s",
-                bot_id,
-                owner_id,
-                exc,
-            )
-            return None
-        ext = (bot or {}).get("ext") if isinstance(bot, dict) else None
-        return (dict(ext) if isinstance(ext, dict) else {}, ext)
-
-    def _read_codefuse_token(self, *, bot_id: str, bot: Any) -> str | None:
-        if not isinstance(bot, dict):
-            return None
-        base_ctx, strategy = resolve_provisioning(
-            bot_id=bot_id,
-            owner_id=bot.get("owner_id") or "",
-            active_engine=bot.get("active_engine"),
-            bot_type=bot.get("bot_type") or "",
-            template_type=bot.get("template_type"),
-            template_config=None,
-        )
-        # Fast no-op for engines/templates that never deploy runtime tokens.
-        if not strategy.should_encrypt_template_token(base_ctx):
-            return None
-        if self._template_service is None:
-            return None
-        try:
-            template_config = self._template_service.get_template_config(bot_id)
-        except Exception as exc:
-            logger.warning(
-                "[BaasRestartPublishPollHandler] failed to reload template config "
-                "for bot_id=%s: %s",
-                bot_id,
-                exc,
-            )
-            return None
-        if not isinstance(template_config, dict):
-            return None
-        ctx = replace(base_ctx, template_config=template_config)
-        return strategy.extract_runtime_token(ctx)
+            if transitioned:
+                return True
+        return False
 
 
 class BaasPublishTaskLifecycle(LifecycleBase):

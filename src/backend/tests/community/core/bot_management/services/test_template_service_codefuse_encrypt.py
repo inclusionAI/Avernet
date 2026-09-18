@@ -82,6 +82,29 @@ class TestUpdateTemplateEncryptsToken:
 
 
 class TestCreateOrUpdateTemplateEncryptsToken:
+    def test_factory_token_encrypted_when_active_engine_consumes_snapshot(self):
+        svc, repo = _make_service()
+        cfg = {
+            "template_key": "factory-template",
+            "template_uid": "factory-template-v1",
+            "token": "abcdef0123456789",
+        }
+        svc.exists_template = MagicMock(return_value=False)
+
+        svc.create_or_update_template(
+            bot_id="B1",
+            template_config=cfg,
+            template_type="normalCC",
+            active_engine="claude_code",
+        )
+
+        stored = repo.insert.call_args.args[0]["ext"]
+        assert stored["token"].startswith(CIPHER_PREFIX)
+        assert (
+            svc._vault.decrypt_or_passthrough(stored["token"])
+            == "abcdef0123456789"
+        )
+
     def test_exists_branch_calls_update_with_encryption(self):
         svc, repo = _make_service()
         cfg = {"token": "abcdef0123456789"}
