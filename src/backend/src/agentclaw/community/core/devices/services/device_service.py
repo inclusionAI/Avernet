@@ -1096,14 +1096,19 @@ class DeviceService:
 
         self._repo.update_status_and_alive_at(binding_id=record.id, status=new_status)
 
+        # Reconcile the Bot on every authenticated heartbeat. The Binding may
+        # already be ACTIVE when a previous best-effort Bot status write was
+        # lost; the repository guard only advances the same binding's
+        # PENDING/PROVISIONING Bot, so retries cannot overwrite terminal state.
+        _t_cb = _time.time()
+        self._update_bot_status_on_device_active(binding_id=record.id)
+
         # If status changed from PENDING to ACTIVE, sync bot status and trigger callbacks
         if record.status == DeviceBindingStatus.PENDING.value:
             logger.info(
                 f"[report_device_alive] device_id={device_id} PENDING→ACTIVE callbacks start: "
                 f"binding_id={record.id}"
             )
-            _t_cb = _time.time()
-            self._update_bot_status_on_device_active(binding_id=record.id)
             logger.info(
                 f"[report_device_alive] device_id={device_id} update_bot_status done: "
                 f"cost_ms={(_time.time() - _t_cb) * 1000:.0f}"

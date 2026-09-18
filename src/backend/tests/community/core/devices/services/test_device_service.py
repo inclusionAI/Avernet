@@ -809,6 +809,22 @@ class TestReportDeviceAlive:
             binding_id=1, status=DeviceBindingStatus.ACTIVE.value
         )
 
+    def test_active_heartbeat_retries_bot_activation_reconciliation(self):
+        """A lost Bot-status write is retried after the Binding is already ACTIVE."""
+        record = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={"callback_token": "tok123"},
+        )
+        updated = _make_record(status=DeviceBindingStatus.ACTIVE.value)
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = updated
+        svc = _make_service(repo=repo)
+
+        svc.report_device_alive(device_id="staff_u001_default", token="tok123")
+
+        repo.update_bot_status_on_device_active.assert_called_once_with(binding_id=1)
+
     def test_invalid_token_raises(self):
         record = _make_record(device_props={"callback_token": "correct_token"})
         repo = MagicMock()
