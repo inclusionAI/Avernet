@@ -1199,6 +1199,39 @@ class TestReportDeviceStatus:
         )
         repo.update_bot_status_on_device_failed.assert_called_once_with(binding_id=1)
 
+    def test_failed_status_ignores_layout_evidence_and_updates_device_and_bot(self):
+        record = _make_record(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"callback_token": "tok", "sandbox_id": "sandbox-current"},
+        )
+        updated = _make_record(status=DeviceBindingStatus.FAILED.value)
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = updated
+        confirmation = MagicMock()
+        svc = _make_service(repo=repo, layout_confirmation=confirmation)
+
+        result = svc.report_device_status(
+            device_id="staff_u001_default",
+            status="FAILED",
+            message="boot error",
+            token="tok",
+            startup_identity="sandbox-current",
+            layout_initialization={
+                "actual_engine": "openclaw",
+                "actual_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "roots_initialized": False,
+            },
+        )
+
+        assert result is updated
+        confirmation.confirm.assert_not_called()
+        repo.update_status.assert_called_once_with(
+            binding_id=1, status=DeviceBindingStatus.FAILED.value
+        )
+        repo.update_bot_status_on_device_failed.assert_called_once_with(binding_id=1)
+
     def test_invalid_token_raises(self):
         record = _make_record(device_props={"callback_token": "right"})
         repo = MagicMock()

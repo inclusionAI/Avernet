@@ -716,7 +716,6 @@ class BaasRestartPublishPollHandler:
                 bot_id=bot_id,
                 owner_id=owner_id,
                 publish_id=publish_id,
-                binding=binding,
                 image_policy_on_success=image_policy_on_success,
             )
         if status == DeviceBindingStatus.FAILED.value:
@@ -737,9 +736,11 @@ class BaasRestartPublishPollHandler:
         bot_id: str,
         owner_id: str,
         publish_id: int,
-        binding: DeviceBindingRecord,
         image_policy_on_success: str | None,
     ) -> TaskOutcome:
+        binding = self._binding_repository.get_by_id(binding_id)
+        if binding is None:
+            return Complete()
         confirmation_dispatched, confirmation_message = (
             self._baas_device_service.dispatch_restart_layout_confirmation(
                 binding=binding,

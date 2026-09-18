@@ -1191,10 +1191,9 @@ class DeviceService:
         if record.status == DeviceBindingStatus.RELEASED.value:
             raise InvalidDeviceStatusError("cannot report status for released device")
 
-        if layout_initialization is not None:
+        if status == "SUCCEEDED" and layout_initialization is not None:
             self._confirm_pool_layout_initialization(
                 record=record,
-                status=status,
                 startup_identity=startup_identity,
                 evidence=layout_initialization,
             )
@@ -1223,16 +1222,11 @@ class DeviceService:
         self,
         *,
         record: DeviceBindingRecord,
-        status: str,
         startup_identity: str | None,
         evidence: dict[str, object],
     ) -> None:
         """Validate current startup identity before advancing layout state."""
 
-        if status != "SUCCEEDED":
-            raise InvalidDeviceStatusError(
-                "layout initialization evidence requires SUCCEEDED status"
-            )
         props = record.device_props or {}
         expected_identity = next(
             (

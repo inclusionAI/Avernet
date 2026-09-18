@@ -537,6 +537,32 @@ def test_template_creation_failure_is_fatal() -> None:
     svc._repository.soft_delete_by_owner.assert_not_called()
 
 
+def test_creation_uses_idempotent_workspace_ensure_before_template_insert() -> None:
+    svc = _create_bot_service()
+    svc._template_service.exists_template.side_effect = [False, True]
+
+    def create_workspace(**kwargs):
+        kwargs["template_config"]["dima_space_id"] = "ws-1"
+        return "ws-1"
+
+    svc._workspace_hosting_service.create_workspace_for_bot.side_effect = (
+        create_workspace
+    )
+
+    svc._prepare_creation_template(
+        bot_id="b1",
+        user_id="u1",
+        bot_name="app-coding-bot",
+        bot_type="personal",
+        active_engine="claude_code",
+        template_type="applicationCoding",
+        template_config={"devflow_workflow": "x"},
+    )
+
+    svc._template_service.create_or_update_template.assert_called_once()
+    svc._template_service.create_template.assert_not_called()
+
+
 def test_is_workspace_hosting_available() -> None:
     svc = _create_bot_service()
     svc._workspace_hosting_service = None

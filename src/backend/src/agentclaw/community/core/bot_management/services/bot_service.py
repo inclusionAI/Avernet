@@ -1673,6 +1673,7 @@ class BotService(BotServiceProtocol):
         if self._template_service.exists_template(bot_id):
             return
         from agentclaw.community.core.bot_management.engines import (
+            HostedWorkspaceNotEligibleError,
             HostedWorkspaceProvisioningError,
             resolve_provisioning,
         )
@@ -1685,12 +1686,18 @@ class BotService(BotServiceProtocol):
             template_type=template_type,
             template_config=template_config,
         )
+        hosted_workspace_eligible = True
         try:
-            workspace_id = provision_strategy.provision_hosted_workspace(
+            workspace_id = provision_strategy.ensure_hosted_workspace(
                 provision_ctx,
                 bot_name=bot_name,
+                template_config=template_config,
+                template_service=self._template_service,
                 workspace_hosting_provider=self._require_workspace_hosting,
             )
+        except HostedWorkspaceNotEligibleError:
+            hosted_workspace_eligible = False
+            workspace_id = None
         except HostedWorkspaceProvisioningError as exc:
             raise BotServiceError(
                 "applicationCoding workspace creation returned no id"
@@ -1699,6 +1706,12 @@ class BotService(BotServiceProtocol):
             raise BotServiceError(
                 "applicationCoding workspace creation failed"
             ) from exc
+        if hosted_workspace_eligible and not workspace_id:
+            raise BotServiceError(
+                "applicationCoding workspace creation returned no id"
+            )
+        if workspace_id and self._template_service.exists_template(bot_id):
+            return
         try:
             self._template_service.create_template(
                 bot_id=bot_id,
