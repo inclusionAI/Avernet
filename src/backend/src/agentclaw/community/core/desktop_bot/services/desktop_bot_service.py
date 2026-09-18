@@ -1221,6 +1221,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "owner_id": binding.entity_id,
                 "device_id": device_id,
                 "engine_type": bot.get("active_engine", DEFAULT_ENGINE_TYPE),
+                "restart_publish_id": str(publish_id),
             }
             if tracking_retry is not None:
                 polling_kwargs["restart_tracking"] = tracking_retry
@@ -1894,6 +1895,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
             tuple[dict[str, Any], dict[str, Any], str | None] | None
         ) = None,
         observe_only: bool = False,
+        restart_publish_id: str | None = None,
     ) -> None:
         """轮询 publish 进度，根据结果更新本地 bot 状态。
 
@@ -2011,6 +2013,14 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     break
 
                 if status == "FAILED":
+                    if restart_publish_id is not None:
+                        self._transition_desktop_restart_failed_if_current(
+                            binding_id=binding_id,
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            publish_id=restart_publish_id,
+                        )
+                        return
                     if observe_only:
                         logger.warning(
                             "[DesktopBotService._poll_publish_progress] "
@@ -2186,6 +2196,42 @@ class DesktopBotService(DesktopBotServiceProtocol):
             return _DesktopLayoutConfirmationStatus.PENDING, True
         return _DesktopLayoutConfirmationStatus.PENDING, False
 
+    def _transition_desktop_restart_failed_if_current(
+        self,
+        *,
+        binding_id: str,
+        bot_id: str,
+        owner_id: str,
+        publish_id: str,
+    ) -> bool:
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if bot is None:
+            return False
+        current_ext = bot.get("ext") or {}
+        if not isinstance(current_ext, dict):
+            return False
+        failed_ext = dict(current_ext)
+        failed_ext["start_status"] = "FAILED"
+        try:
+            return self._binding_repo.transition_baas_restart_terminal(
+                binding_id=int(binding_id),
+                bot_id=bot_id,
+                owner_id=owner_id,
+                publish_id=publish_id,
+                request_id=None,
+                status="FAILED",
+                expected_bot_ext=current_ext,
+                bot_ext=failed_ext,
+            )
+        except Exception:
+            logger.exception(
+                "[DesktopBotService] guarded restart failure transition failed: "
+                "bot_id=%s publish_id=%s",
+                bot_id,
+                publish_id,
+            )
+            return False
+
     def _query_publish_status(self, publish_id: str) -> str:
         """查询单次 publish 进度，返回 status 字符串。"""
         with httpx.Client(timeout=10.0) as client:
@@ -2222,6 +2268,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
             tuple[dict[str, Any], dict[str, Any], str | None] | None
         ) = None,
         observe_only: bool = False,
+        restart_publish_id: str | None = None,
     ) -> None:
         """启动后台线程轮询 publish 进度。"""
         thread = threading.Thread(
@@ -2235,6 +2282,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "engine_type": engine_type,
                 "restart_tracking": restart_tracking,
                 "observe_only": observe_only,
+                "restart_publish_id": restart_publish_id,
             },
             daemon=True,
             name=f"poll-publish-{publish_id}",

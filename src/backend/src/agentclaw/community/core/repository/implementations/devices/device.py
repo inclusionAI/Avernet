@@ -608,7 +608,7 @@ class DeviceRepository(
         binding_id: int,
         bot_id: str,
         owner_id: str,
-        publish_id: int | None,
+        publish_id: int | str | None,
         request_id: str | None,
         status: str,
         expected_bot_ext: dict[str, Any] | None,

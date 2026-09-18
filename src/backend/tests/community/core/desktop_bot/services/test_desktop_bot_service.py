@@ -1102,6 +1102,7 @@ class TestRestart:
         assert poll_kwargs["owner_id"] == "staff_u001"
         assert poll_kwargs["device_id"] == "m-001"
         assert poll_kwargs["engine_type"] == "openclaw"
+        assert poll_kwargs["restart_publish_id"] == "5"
         bot_patch, binding_patch, expected_publish_id = poll_kwargs[
             "restart_tracking"
         ]
@@ -1470,6 +1471,30 @@ class TestPublishPolling:
             binding_id="1", status="FAILED",
         )
 
+    def test_superseded_restart_failure_cannot_overwrite_new_publish(
+        self, poll_service
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="FAILED")
+        mocks["binding_repo"].transition_baas_restart_terminal.return_value = False
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop_bot_001",
+            "owner_id": "u001",
+            "ext": {"publish_id": "newer-publish"},
+        }
+
+        service._poll_publish_progress(
+            publish_id="older-publish",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-pool",
+            restart_publish_id="older-publish",
+        )
+
+        mocks["binding_repo"].transition_baas_restart_terminal.assert_called_once()
+        mocks["binding_repo"].update_status.assert_not_called()
+
     @patch("time.sleep", return_value=None)
     @patch("time.monotonic")
     def test_poll_timeout_keeps_pending_and_sets_downloading(self, mock_monotonic, mock_sleep, poll_service):
@@ -1708,6 +1733,7 @@ class TestPublishPolling:
             owner_id="staff_u001",
             device_id="m-001",
             engine_type="openclaw",
+            restart_publish_id="5",
         )
 
     @patch(
@@ -1741,6 +1767,7 @@ class TestPublishPolling:
             owner_id="staff_u001",
             device_id="m-001",
             engine_type="claude_code",
+            restart_publish_id="5",
         )
 
 
