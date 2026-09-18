@@ -508,6 +508,31 @@ class TestCreate:
                 machine_id="m-001",
             )
 
+    def test_create_continue_binding_update_must_match_created_bot(self):
+        service, mocks = _make_service_with_mocks()
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-001",
+        }
+        mocks["baas"].post_bots_api.return_value = {
+            "bot_uuid": "bu-001",
+            "publish_id": 1,
+        }
+        mocks["baas"].approve_publish.return_value = {"status": "SUCCESS"}
+        mocks["binding_repo"].insert_binding.return_value = 1
+        mocks["bot_repo"].update_by_owner.return_value = None
+
+        with pytest.raises(DesktopBotServiceError, match="binding update did not match"):
+            service.create_after_authorization(
+                bot={"bot_id": "desktop_bot_003", "bot_name": "B"},
+                user_id="u001",
+                machine_id="m-001",
+            )
+
+        mocks["bot_repo"].soft_delete_failed_creation.assert_called_once_with(
+            bot_id="desktop_bot_003",
+            owner_id="u001",
+        )
+
     def test_create_continue_missing_bot_id_raises(self):
         service, mocks = _make_service_with_mocks()
 

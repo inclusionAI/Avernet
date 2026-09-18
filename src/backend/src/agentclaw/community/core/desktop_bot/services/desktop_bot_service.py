@@ -798,7 +798,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 **initial_ext,
                 "publish_id": str(publish_id) if publish_id else "",
             }
-            self._bot_repo.update_by_owner(
+            updated_bot = self._bot_repo.update_by_owner(
                 bot_id=bot_id,
                 owner_id=user_id,
                 update_data={
@@ -807,6 +807,10 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     "ext": ext,
                 },
             )
+            if updated_bot is None:
+                raise DesktopBotServiceError(
+                    f"Desktop bot binding update did not match: bot_id={bot_id}"
+                )
 
             # The desktop flow has its own Bot insert and must establish the
             # same DB-only Installation facts before it starts publish polling.
