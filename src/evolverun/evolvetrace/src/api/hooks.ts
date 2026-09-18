@@ -294,6 +294,19 @@ export function useTCLogTrace(
 
 // --- Stubs for editor panels migrated from clawweb ---
 
+export function useAbortFlowRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (flowId: string) => fetchJson(`${BASE}/runs/${encodeURIComponent(flowId)}/abort`, {
+      method: 'POST',
+    }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
+    },
+  })
+}
+
 export function useKnowledgeBases(_enabledOnly = false) {
   return { data: [] as any[], isLoading: false, error: null }
 }

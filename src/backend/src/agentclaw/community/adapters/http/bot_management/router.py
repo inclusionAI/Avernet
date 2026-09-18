@@ -23,6 +23,9 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.access.admin_scopes import super_admin
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.execution_identity_service import (
+    ExecutionIdentityServiceProtocol,
+)
 from agentclaw.community.api.create_bot_for_others_service import (
     CreateBotForOthersServiceProtocol,
 )
@@ -51,6 +54,11 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     DeviceLimitError,
     generate_bot_id,
     validate_bot_name,
+)
+from agentclaw.community.core.execution_identity.contracts import (
+    ExecutionIdentityError,
+    ExecutionIdentityNotFoundError,
+    ExecutionIdentityOperationNotAllowedError,
 )
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
@@ -156,6 +164,15 @@ class BotListData(BaseModel):
     """Bot list data."""
     total: int
     items: list
+
+
+class ExecutionIdentityChangeRequest(BaseModel):
+    """Operator-only AgentPass execution identity transition."""
+
+    owner_id: str
+    execution_workno: str | None = None
+    identity_type: Literal["STAFF", "DIGITAL_EMPLOYEE"] | None = None
+    action: Literal["reissue", "activate"] = "reissue"
 
 
 # ==================== API Endpoints ====================
@@ -2068,6 +2085,60 @@ async def get_bot_detail_by_owner(
             error_code=500,
             data=None,
         )
+
+
+@router.post(
+    "/{bot_id}/admin/execution-identity",
+    response_model=ApiResponse,
+)
+async def change_bot_execution_identity(
+    bot_id: str,
+    body: ExecutionIdentityChangeRequest,
+    user: AuthenticatedUser = Depends(require_operator),  # noqa: B008
+    execution_identity_service: ExecutionIdentityServiceProtocol = Injected(
+        ExecutionIdentityServiceProtocol
+    ),
+) -> ApiResponse:
+    """Reissue AgentPass for a new executor, then inject an issued token.
+
+    ``reissue`` starts the parallel ALC/AAC/AEC issuance. If authorization is
+    pending, the response carries the provider's confirmation URL and performs
+    no runtime mutation. After approval, ``activate`` polls the exact latest
+    authorization and injects its token into the service Bot runtimes.
+    """
+    try:
+        result = await asyncio.to_thread(
+            execution_identity_service.change_execution_identity,
+            bot_id=bot_id,
+            owner_id=body.owner_id.strip(),
+            execution_workno=(body.execution_workno or "").strip() or None,
+            identity_type=body.identity_type,
+            action=body.action,
+            modifier_id=user.staffId,
+        )
+        logger.info(
+            "execution_identity_operation_succeeded bot_id=%s action=%s "
+            "operator=%s token_injected=%s",
+            bot_id,
+            body.action,
+            user.staffId,
+            result.get("token_injected"),
+        )
+        return ApiResponse(success=True, data=result)
+    except (ExecutionIdentityNotFoundError, BotNotFoundError) as exc:
+        return ApiResponse(success=False, message=str(exc), error_code=404)
+    except ExecutionIdentityOperationNotAllowedError as exc:
+        return ApiResponse(success=False, message=str(exc), error_code=400)
+    except (ExecutionIdentityError, BotServiceError, PassportError) as exc:
+        logger.warning(
+            "execution_identity_operation_failed bot_id=%s action=%s "
+            "operator=%s error_type=%s",
+            bot_id,
+            body.action,
+            user.staffId,
+            type(exc).__name__,
+        )
+        return ApiResponse(success=False, message=str(exc), error_code=500)
 
 
 @router.get("/{bot_id}/appcoding-bots", response_model=ApiResponse)

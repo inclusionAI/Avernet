@@ -157,9 +157,6 @@ user_config:
     candidates_per_bot: 5
     max_concurrent: 50
     heartbeat_interval_seconds: 30.0
-    machine_count: 1
-    bucket_sweep_interval_seconds: 300.0
-    bucket_idle_ttl_seconds: 600.0
 
   # BCN 下行协议配置
   bcn:
@@ -183,6 +180,14 @@ user_config:
     base_url: "https://backend.example.com"
     timeout: 10
     max_retries: 0
+    # app-caller-connection 的 Principal 签发（密钥本身不放这里，走 secret 插件，
+    # 默认从 other_manual_teamclawgw_principal_signing_key 取共享 HMAC 密钥）。
+    # app_* / tenant 为 BaaS 在 backend 侧登记的应用身份，按环境填真实值。
+    principal:
+      secret_name: "other_manual_teamclawgw_principal_signing_key"
+      issuer: "gateway"
+      audience: "backend"
+      ttl_seconds: 60
 
   # agentclawproxy 代理服务主机名（按环境）
   # 用于 proxypass URL 和 WS relay 构造。

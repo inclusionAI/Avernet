@@ -7,8 +7,13 @@
 """
 import copy
 import json
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request
+from agentclaw.community.api.publish_ignore_service import (
+    PublishIgnoreCommand, PublishIgnoreError, PublishIgnoreServiceProtocol,
+)
+from agentclaw.community.adapters.http.service_bot.schemas_publish import PublishIgnoreRequest
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -67,6 +72,26 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 router = APIRouter(prefix="/api/service-bot/publish", tags=["service-bot-publish"])
+
+
+@router.post("/ops/publish-ignore", response_model=ApiResponse)
+async def change_publish_ignore(
+    request: PublishIgnoreRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: PublishIgnoreServiceProtocol = Injected(PublishIgnoreServiceProtocol),
+) -> ApiResponse:
+    """Update a rule on the selected stage's current runtime instances."""
+    command = PublishIgnoreCommand(**request.model_dump(), request_id=str(uuid4()))
+    try:
+        result = await service.change(command, user.staffId, is_admin=user.staffId in super_admin())
+        return ApiResponse(success=result["success"], data=result)
+    except PublishIgnoreError as exc:
+        return ApiResponse(success=False, message=exc.code,
+                           error_code=403 if exc.code == "permission_denied" else 409)
+    except Exception as exc:
+        logger.warning("backend.publish_ignore.http_failure request_id=%s error_type=%s",
+                       command.request_id, type(exc).__name__)
+        return ApiResponse(success=False, message="publish_ignore_failed", error_code=500)
 
 
 # ============================================================================
@@ -181,21 +206,25 @@ async def get_bot_stage_binding_info(
     bot_id: str,
     owner_id: str,
     stage: str,
+    default_tag: str | None = None,
     publish_service: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
 ) -> ApiResponse:
     """查询 bot 在指定阶段对应的 binding / BaaS 信息.
 
     GET /api/service-bot/publish/{bot_id}/binding?owner_id=u1&stage=online
+    GET /api/service-bot/publish/{bot_id}/binding?owner_id=u1&stage=eval&default_tag=default
     """
     try:
         logger.info(
-            f"[get_bot_stage_binding_info] Query: bot_id={bot_id}, stage={stage}, owner_id={owner_id}"
+            f"[get_bot_stage_binding_info] Query: bot_id={bot_id}, stage={stage}, "
+            f"owner_id={owner_id}, default_tag={default_tag}"
         )
 
         result = publish_service.get_bot_stage_binding_info(
             bot_id=bot_id,
             owner_id=owner_id,
             stage=stage,
+            default_tag=default_tag,
         )
 
         return ApiResponse(

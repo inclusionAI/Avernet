@@ -26,12 +26,13 @@ uv run --with pytest --with pyyaml --with jsonschema \
 collaboration API. Domain models and resource path items live in separate YAML
 fragments so a domain can evolve without creating one monolithic file.
 
-The current public OpenAPI contract contains 65 approved operations: 60
+The current public OpenAPI contract contains 72 approved operations: 67
 collaboration operations below `/openapi/v1/collaboration/**` and 5 auth
 operations below `/openapi/v1/auth/**`. Collaboration operations span Bot,
-Group, GroupParticipant, Session, SessionParticipant, Invitation, Friendship,
-FriendRequest, Event Subscription, Event Delivery, and session-bound WebSocket
-resources. These are the exact endpoints served externally by BCN.
+Group, GroupParticipant, Session, SessionParticipant, Invitation, Invite Code,
+Friendship, FriendRequest, Message Delivery, Event Subscription, Event
+Delivery, and session-bound WebSocket resources. These are the exact endpoints
+served externally by BCN.
 
 The Human control-plane Bot batch contains exactly six public operations:
 

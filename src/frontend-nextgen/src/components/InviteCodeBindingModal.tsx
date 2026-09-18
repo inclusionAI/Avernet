@@ -116,7 +116,7 @@ export function InviteCodeBindingModal(): React.ReactElement {
             {submitting ? '正在提交…' : '提交邀请码'}
           </Button>
         </ModalFooter>
-        <p className="text-center text-xs text-muted-foreground">没有邀请码？请联系管理员获取。</p>
+        <p className="text-center text-xs text-muted-foreground">没有邀请码？请联系管理员/扫码领取。</p>
       </ModalContent>
     </Modal>
   );

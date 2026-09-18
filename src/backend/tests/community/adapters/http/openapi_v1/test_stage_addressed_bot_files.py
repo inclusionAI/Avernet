@@ -15,11 +15,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi_injector import attach_injector
 from injector import Injector, Module
+from injector import InstanceProvider
 
 from agentclaw.community.adapters.http.openapi_v1.bots.engine_config import (
     router as engine_config_router,
 )
 from agentclaw.community.adapters.http.openapi_v1.deprecated import (
+    ADDRESSED_GROUPS as _LEGACY_ADDRESSED,
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
     GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
 )
@@ -29,10 +31,21 @@ from agentclaw.community.adapters.http.openapi_v1.identity import (
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
+from agentclaw.community.api.collaborator_lock_service import (
+    CollaboratorLockServiceProtocol,
+)
+from agentclaw.community.api.member_management_capability import (
+    MemberManagementCapabilityProtocol,
+)
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
 from agentclaw.community.core.engine_runtime.errors import (
     EngineStageNotLiveError,
     EngineStageReadOnlyError,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.services.identity import IdentityService
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
@@ -93,6 +106,36 @@ def identity():
     return m
 
 
+class _OwnerBots:
+    """The addressable bot, for the identity rows the gate adjudicates."""
+
+    def get_by_id_and_owner(self, bot_id, owner_id):
+        if bot_id != BOT or owner_id != USER:
+            return None
+        return {"bot_id": BOT, "owner_id": USER}
+
+
+class _OwnerCollaborators:
+    """The caller is the owner: the gate's level answer on this test app."""
+
+    def resolve_operable_permission_level(self, *, bot, user_id, owner_id):
+        return PermissionLevel.OWNER if user_id == owner_id else PermissionLevel.NONE
+
+
+class _NoCollaborators:
+    """``has_collaborators`` false, so the identity write's EDIT_LOCK bar passes."""
+
+    def get_lock_info(self, *, bot_id, owner_id, user_id):
+        return type("LockInfo", (), {"has_collaborators": False, "lock": None})()
+
+
+class _PlainBot:
+    """The capability lookup the EDIT_LOCK bar makes: a plain collaborative bot."""
+
+    def uses_member_management_semantics(self, bot, bot_id):
+        return False
+
+
 @pytest.fixture
 def client(bot_service, engine_config, identity):
     class _M(Module):
@@ -100,11 +143,29 @@ def client(bot_service, engine_config, identity):
             binder.bind(BotServiceProtocol, to=bot_service)
             binder.bind(EngineConfigServiceProtocol, to=engine_config)
             binder.bind(IdentityService, to=identity)
+            # The identity rows moved onto the seam: the gate reads these three.
+            binder.bind(BotRepository, to=InstanceProvider(_OwnerBots()))
+            binder.bind(
+                CollaboratorServiceProtocol,
+                to=InstanceProvider(_OwnerCollaborators()),
+            )
+            binder.bind(
+                CollaboratorLockServiceProtocol,
+                to=InstanceProvider(_NoCollaborators()),
+            )
+            binder.bind(
+                MemberManagementCapabilityProtocol,
+                to=InstanceProvider(_PlainBot()),
+            )
 
     app = FastAPI()
     app.include_router(engine_config_router)
     app.include_router(identity_router)
-    for legacy in (*_LEGACY_ENGINE_RUNTIME, *_LEGACY_GRANT_CHECKED):
+    for legacy in (
+        *_LEGACY_ENGINE_RUNTIME,
+        *_LEGACY_GRANT_CHECKED,
+        *_LEGACY_ADDRESSED,
+    ):
         app.include_router(legacy)
     app.dependency_overrides[require_principal] = lambda: {"user_id": USER}
     attach_injector(app, Injector([_M()]))

@@ -266,6 +266,58 @@ pub async fn message_delivery_repo_port_contract_tests<
     let due = due.iter().find(|row| row.delivery_id == uncertain.delivery_id).ok_or("missing uncertain expiry")?;
     assert_eq!(due.transport_context_json, uncertain.transport_context_json);
     run_reply_contract(repo).await?;
+    chat_error_contract(repo).await?;
+    Ok(())
+}
+
+async fn chat_error_contract<T: MessageDeliveryRepoPort + MessageRepoPort>(repo: &T) -> Result<(), Box<dyn std::error::Error>> {
+    let source = repo.admit(command("error-input", &[("error-bot", DeliveryType::Send)])).await?;
+    let mut error = command("error-projection", &[]);
+    error.message.message_type = bcs_domain::CHAT_ERROR_MESSAGE_TYPE.into();
+    error.message.sender_type = SenderType::Bot;
+    error.message.sender_id = "error-bot".into();
+    error.message.run_id = "error-run".into();
+    error.message.content = serde_json::json!("失败");
+    error.message.client_msg_id = Some("chat-error:error-run".into());
+    let mut partial = error.message.clone();
+    partial.message_type = "chat".into();
+    partial.content = serde_json::json!("部分回复");
+    partial.client_msg_id = Some("error-partial".into());
+    error.display_message = Some(DeliveryDisplayMessage { message_id: "error-partial".into(), message: partial, event: None });
+    let mut forbidden = error.clone();
+    forbidden.targets = command("unused", &[("peer", DeliveryType::Inject)]).targets;
+    assert!(repo.admit(forbidden).await.is_err(), "error cannot become Bot input");
+    let mut invalid_task = error.clone();
+    invalid_task.flow_kind = DeliveryFlowKind::Task;
+    invalid_task.targets = command("unused-task", &[("manager", DeliveryType::Send)]).targets;
+    assert!(repo.admit(invalid_task).await.is_err(), "task error target requires an explicit result projection");
+    let before = repo.get_current_seq(&error.message.session_id).await?;
+    let mut terminal = source.deliveries[0].clone();
+    terminal.state.status = Status::Failed;
+    terminal.state.state_version += 1;
+    assert!(repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version: 99, delivery: terminal.clone() }], Some(error.clone())).await.is_err());
+    assert_eq!(repo.get_current_seq(&error.message.session_id).await?, before);
+    assert!(repo.get_message_by_id(&error.message.session_id, "error-partial").await?.is_none());
+    let committed = repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version: 1, delivery: terminal }], Some(error.clone())).await?.unwrap();
+    assert!(committed.deliveries.is_empty());
+    assert_eq!(committed.message.session_seq, before + 2);
+    let partial = repo.get_message_by_id(&error.message.session_id, "error-partial").await?.unwrap();
+    assert_eq!(partial.session_seq, before + 1);
+    let segments = repo.run_chat_segments(&error.message.session_id, "error-bot", "error-run").await?;
+    assert_eq!(segments.len(), 1, "error is not successful reply reconstruction text");
+    assert_eq!(segments[0].content, serde_json::json!("部分回复"));
+
+    let mut task_error = error;
+    task_error.message_id = "task-error-projection".into();
+    task_error.message.run_id = "task-error-run".into();
+    task_error.message.client_msg_id = Some("chat-error:task-error".into());
+    task_error.display_message = None;
+    task_error.flow_kind = DeliveryFlowKind::Task;
+    task_error.targets = command("unused-task", &[("manager", DeliveryType::Send)]).targets;
+    task_error.targets[0].semantic_projection_json = serde_json::json!({"task":{"leg":"result"}});
+    let admitted = repo.admit(task_error).await?;
+    assert_eq!(admitted.deliveries.len(), 1);
+    assert_eq!(admitted.deliveries[0].target_bot_id, "manager");
     Ok(())
 }
 

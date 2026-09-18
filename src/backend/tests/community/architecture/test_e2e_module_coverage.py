@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.community._flows.digital_employee.api_lifecycle import DIGITAL_EMPLOYEE_FLOWS
 from tests.community._flows.access.api_lifecycle import ACCESS_LIFECYCLE_FLOWS
 from tests.community._flows.bot_chat.api_lifecycle import BOT_CHAT_LIFECYCLE_FLOWS
 from tests.community._flows.bot_collaborator.api_lifecycle import BOT_COLLABORATOR_LIFECYCLE_FLOWS
@@ -37,6 +38,7 @@ from tests.community.framework.flow_coverage import (
 # Plan C appends real flows here (or swaps for a registry). 新模块的流 import
 # 进来 extend 此列表。
 REGISTERED_FLOWS: list = [
+    *DIGITAL_EMPLOYEE_FLOWS,
     *API_LIFECYCLE_FLOWS,
     *ACCESS_LIFECYCLE_FLOWS,
     *BOT_CHAT_LIFECYCLE_FLOWS,

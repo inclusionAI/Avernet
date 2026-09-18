@@ -121,9 +121,8 @@ class AvernetTenantMiddleware:
     """Bind each request's data-isolation tenant for the request's lifetime.
 
     Public-API requests (``/openapi/v1/*``) resolve their tenant through the
-    single seam ``resolve_avernet_tenant``. The application Caller connection
-    path uses the ordinary-HTTP verifier's tenant; every other path — the internal API
-    and anything non-public — is the default tenant. ``avernet_tenant_scope``
+    single seam ``resolve_avernet_tenant``. Every other path, including the BaaS
+    Caller connection entrance, uses the server default tenant. ``avernet_tenant_scope``
     resets on the way out (including on error), so a tenant never survives its
     request or leaks into the next one that reuses the worker.
 
@@ -155,12 +154,6 @@ class AvernetTenantMiddleware:
                 resolve_avernet_tenant,
             )
             tenant = resolve_avernet_tenant(Request(scope))
-        elif scope["path"] == "/api/v1/expert-chats/app-caller-connection":
-            from agentclaw.community.adapters.http.org.dependencies import (
-                resolve_ordinary_http_tenant,
-            )
-            # COSEC: scope repositories before DI using only verified identity.
-            tenant = resolve_ordinary_http_tenant(Request(scope))
         else:
             tenant = DEFAULT_AVERNET_TENANT
 

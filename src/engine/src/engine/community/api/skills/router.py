@@ -9,8 +9,10 @@ marshals HTTP↔Plugin types and applies capability guards.
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from engine.community.api.caps import check_capability
@@ -44,6 +46,12 @@ from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.exceptions import CapabilityNotSupportedError
 from engine.community.core.skills.exceptions import (
     InvalidPoolMappingRequestError,
+    LocalSkillPackageInvalidError,
+    LocalSkillPackagePublishFailedError,
+    LocalSkillPackagePublishInProgressError,
+    LocalSkillPackagePublishLockUnavailableError,
+    LocalSkillPackageRollbackFailedError,
+    LocalSkillPackageTooLargeError,
 )
 from engine.community.core.skills.layout_planner import (
     LayoutIdentity,
@@ -51,17 +59,20 @@ from engine.community.core.skills.layout_planner import (
     SkillLayoutResolutionError,
     resolve_skill_layout,
 )
+from engine.community.core.skills.local_package import MAX_COMPRESSED_BYTES
 from engine.community.core.skills.models import (
     CenterEnsureItem,
     CenterEnsureRequest,
     CleanSymlinksRequest,
-    PoolMappingApplyMode,
+    LocalSkillPackageApplyRequest,
+    LocalSkillPackageLayout,
     PoolCenterContentPackage,
-    PoolMappingApplyRequest,
     PoolCenterContentPendingPackage,
     PoolCenterContentReadyPackage,
     PoolCenterContentRequest,
     PoolCenterContentUnavailablePackage,
+    PoolMappingApplyMode,
+    PoolMappingApplyRequest,
     PoolMappingSourceLayout,
     PoolSkillMappingIntent,
     SymlinkItem,
@@ -133,6 +144,78 @@ def _center_content_package(package: BaseModel) -> PoolCenterContentPackage:
     if state == "UNAVAILABLE":
         return PoolCenterContentUnavailablePackage(**data)
     raise AssertionError("Pydantic must reject unknown Center content states")
+
+
+def _local_package_error(status_code: int, error: str, message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"success": False, "error": error, "message": message},
+    )
+
+
+@router.post("/local/apply", response_model=ApiResponse)
+async def apply_local_skill_package(
+    skill_name: Annotated[str, Form()],
+    layout: Annotated[str, Form()],
+    file: Annotated[UploadFile, File()],
+) -> ApiResponse | JSONResponse:
+    """Apply one complete canonical ZIP through the active Engine service."""
+
+    warning = check_capability(Capability.SKILLS_LOCAL_PACKAGE_APPLY)
+    try:
+        selected_layout = LocalSkillPackageLayout(layout)
+    except ValueError:
+        return _local_package_error(
+            400, "invalid_package", "layout must be LEGACY or POOL"
+        )
+    package = await file.read(MAX_COMPRESSED_BYTES + 1)
+    if len(package) > MAX_COMPRESSED_BYTES:
+        return _local_package_error(
+            413, "package_too_large", "Skill package is too large"
+        )
+    try:
+        result = await _skills_plugin().apply_local_package(
+            LocalSkillPackageApplyRequest(
+                skill_name=skill_name,
+                layout=selected_layout,
+                package=package,
+            )
+        )
+    except LocalSkillPackageTooLargeError:
+        return _local_package_error(
+            413, "package_too_large", "Skill package is too large"
+        )
+    except LocalSkillPackageInvalidError:
+        return _local_package_error(400, "invalid_package", "Invalid Skill package")
+    except LocalSkillPackagePublishInProgressError:
+        return _local_package_error(
+            409, "publish_in_progress", "Skill package publish is in progress"
+        )
+    except LocalSkillPackagePublishLockUnavailableError:
+        return _local_package_error(
+            503,
+            "publish_lock_unavailable",
+            "Skill package publish lock is unavailable",
+        )
+    except LocalSkillPackagePublishFailedError:
+        return _local_package_error(
+            500, "publish_failed", "Skill package publish failed"
+        )
+    except LocalSkillPackageRollbackFailedError:
+        return _local_package_error(
+            500, "rollback_failed", "Skill package rollback failed"
+        )
+    except Exception:
+        log.exception("Unexpected Local Skill package apply failure")
+        return _local_package_error(
+            500, "rollback_failed", "Skill package final state is unknown"
+        )
+    return ApiResponse(
+        success=True,
+        data=result.to_data(),
+        message="Local Skill package applied",
+        warning=warning,
+    )
 
 
 @router.post("/mappings/apply", response_model=ApiResponse)

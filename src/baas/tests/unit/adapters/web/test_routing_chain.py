@@ -29,7 +29,11 @@ from secbaas.community.api.bot_runtime import (
     SessionInfo,
 )
 from secbaas.community.bootstrap import ApplicationContainer, Provide
-from secbaas.community.core.service.bot_run import BotRunner, BotServiceSelector
+from secbaas.community.core.service.bot_run import (
+    BotBindingResolver,
+    BotRunner,
+    BotServiceSelector,
+)
 from secbaas.community.core.service.bot_run._internal_protocols import MessageDispatcher
 from secbaas.community.spi.bot_service import BotBindingData
 from tests.unit.adapters.web.conftest import iter_api_routes
@@ -97,6 +101,7 @@ def _make_runner(selector, run_repo, binding_data=None):
         bot_service_selector=selector,
         run_repository=run_repo,
         bot_service_plugin=mock_plugin,
+        binding_resolver=BotBindingResolver(mock_plugin),
         dispatchers=[mock_dispatcher],
         system_config_service=MagicMock(),
         eval_session_log=MagicMock(),
@@ -216,7 +221,7 @@ class TestBaasAppTypeFlow:
         self._runner = runner
 
     @pytest.mark.asyncio
-    async def test_create_session_and_dispatch(self):
+    async def test_chat_and_dispatch(self):
         with TestClient(self._app) as client:
             resp = client.post(
                 "/openapi/v1/runs",
@@ -224,7 +229,8 @@ class TestBaasAppTypeFlow:
                 headers={"Authorization": "Bearer test_key_12345678"},
             )
         assert resp.status_code == 200
-        self._baas.create_session.assert_called_once()
+        # 会话延迟物化：chat 只做 plan + dispatch，create 在 worker 执行阶段
+        self._baas.create_session.assert_not_called()
         self._runner._dispatchers[0].dispatch_send.assert_called_once()
 
 
@@ -234,9 +240,6 @@ class TestBaasAppTypeErrorFlow:
         from secbaas.community.adapters.web.routers.open_api import run_router as router
 
         mock_baas = MagicMock()
-        mock_baas.create_session = AsyncMock(
-            side_effect=BotServiceError("baas unavailable"),
-        )
         mock_run = MagicMock()
 
         app = FastAPI()
@@ -247,6 +250,10 @@ class TestBaasAppTypeErrorFlow:
         selector = BotServiceSelector(claw_service=mock_baas, baas_service=mock_baas)
         runner = _make_runner(
             selector, mock_run, binding_data=_make_baas_binding_data()
+        )
+        # 会话延迟物化：service 错误从同步投递链路（dispatch_send）注入
+        runner._dispatchers[0].dispatch_send = AsyncMock(
+            side_effect=BotServiceError("baas unavailable"),
         )
 
         app.dependency_overrides[validate_api_key] = override_val
@@ -310,14 +317,14 @@ class TestArcaBindingFlow:
         self._claw = mock_claw
         self._runner = runner
 
-    def test_binding_info_passed_to_create_session(self):
+    def test_binding_info_passed_to_dispatch(self):
         with TestClient(self._app) as client:
             client.post(
                 "/openapi/v1/runs",
                 json={"message": "hello"},
                 headers={"Authorization": "Bearer test_key_12345678"},
             )
-        kw = self._claw.create_session.call_args.kwargs
+        kw = self._runner._dispatchers[0].dispatch_send.call_args.kwargs
         # arca provider: sandbox_id == device_id
         assert kw["binding_info"].sandbox_id == DEVICE_ID_ARCA
         assert kw["binding_info"].device_provider == "arca"
@@ -330,7 +337,8 @@ class TestArcaBindingFlow:
                 json={"message": "hello"},
                 headers={"Authorization": "Bearer test_key_12345678"},
             )
-        self._claw.create_session.assert_called_once()
+        # 会话延迟物化：chat 只做 plan + dispatch，create 在 worker 执行阶段
+        self._claw.create_session.assert_not_called()
         self._runner._dispatchers[0].dispatch_send.assert_called_once()
 
 
@@ -379,9 +387,6 @@ class TestArcaBindingErrorFlow:
         from secbaas.community.adapters.web.routers.open_api.run_router import router
 
         mock_claw = MagicMock()
-        mock_claw.create_session = AsyncMock(
-            side_effect=BotNotFoundError("bot not found")
-        )
         mock_run = MagicMock()
         app = FastAPI()
 
@@ -391,6 +396,10 @@ class TestArcaBindingErrorFlow:
         selector = BotServiceSelector(claw_service=mock_claw, baas_service=MagicMock())
         runner = _make_runner(
             selector, mock_run, binding_data=_make_arca_binding_data()
+        )
+        # 会话延迟物化：错误从同步投递链路（dispatch_send）注入
+        runner._dispatchers[0].dispatch_send = AsyncMock(
+            side_effect=BotNotFoundError("bot not found")
         )
 
         app.dependency_overrides[validate_api_key] = ov
@@ -414,9 +423,6 @@ class TestArcaBindingErrorFlow:
         from secbaas.community.adapters.web.routers.open_api.run_router import router
 
         mock_claw = MagicMock()
-        mock_claw.create_session = AsyncMock(
-            side_effect=BotNotAvailableError("bot offline", "unavailable"),
-        )
         mock_run = MagicMock()
         app = FastAPI()
 
@@ -426,6 +432,10 @@ class TestArcaBindingErrorFlow:
         selector = BotServiceSelector(claw_service=mock_claw, baas_service=MagicMock())
         runner = _make_runner(
             selector, mock_run, binding_data=_make_arca_binding_data()
+        )
+        # 会话延迟物化：错误从同步投递链路（dispatch_send）注入
+        runner._dispatchers[0].dispatch_send = AsyncMock(
+            side_effect=BotNotAvailableError("bot offline", "unavailable"),
         )
 
         app.dependency_overrides[validate_api_key] = ov
@@ -482,16 +492,18 @@ class TestBaasBindingFlow:
         self._baas = mock_baas
         self._runner = runner
 
-    def test_bot_id_overridden_with_device_id(self):
+    def test_delegated_binding_carries_device_id(self):
         with TestClient(self._app) as client:
             client.post(
                 "/openapi/v1/runs",
                 json={"message": "hello"},
                 headers={"Authorization": "Bearer test_key_12345678"},
             )
-        kw = self._baas.create_session.call_args.kwargs
-        assert kw["bot_id"] == DEVICE_ID_BAAS
-        assert kw["bot_id"] != f"{BOT_ID}:{ENTITY_ID}"
+        kw = self._runner._dispatchers[0].dispatch_send.call_args.kwargs
+        # baas provider：device_id 是实际 bot_id（worker 侧 resolve_bot_id 覆盖），
+        # dispatch 阶段随 binding_info 下发
+        assert kw["binding_info"].device_id == DEVICE_ID_BAAS
+        assert kw["binding_info"].device_provider == "baas"
 
     @pytest.mark.asyncio
     async def test_delegated_chat_cycle(self):
@@ -501,7 +513,8 @@ class TestBaasBindingFlow:
                 json={"message": "hello"},
                 headers={"Authorization": "Bearer test_key_12345678"},
             )
-        self._baas.create_session.assert_called_once()
+        # 会话延迟物化：chat 只做 plan + dispatch，create 在 worker 执行阶段
+        self._baas.create_session.assert_not_called()
         self._runner._dispatchers[0].dispatch_send.assert_called_once()
 
 

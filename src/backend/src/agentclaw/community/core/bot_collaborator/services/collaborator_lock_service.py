@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.bot_collaborator.models import BotCollabLockRecord, LockInfoResult, SessionLockInfoResult
+from agentclaw.community.core.bot_collaborator.models import (
+    BotCollabLockRecord,
+    LockInfoResult,
+    PermissionLevel,
+    SessionLockInfoResult,
+)
 from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_collaborator.collaborator_lock_service_protocol import CollaboratorLockServiceProtocol
@@ -287,9 +292,19 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         collaborators = self._list_collaborators_safe(bot_id, owner_id, user_id)
         has_collaborators = len(collaborators) > 0
 
-        # 没有协作者直接返回，不查询锁
-        if not has_collaborators:
+        # 没有协作者行时不能直接断言"无协作面"：挂在 Space 下的 Bot，
+        # 空间成员与显式行同权（含锁纪律）。零行短路曾把成员的取锁重试
+        # 变成永久 423 —— acquire 写下的锁表行在这里永远看不见。名单
+        # 为空且名单门异常（空间成员走行阶梯被拒）同样落此分支，所以以
+        # 有效阶梯（行 ⊕ 空间授予 ⊕ COSEC）问一次调用者。
+        if not has_collaborators and not self._caller_holds_space_grant(
+            bot_id, owner_id, user_id
+        ):
             return LockInfoResult(lock=None, holder_name=None, has_collaborators=False, is_owner=False)
+        if not has_collaborators:
+            # 空间授予成立，但名单仍读不出行——按"有协作面"进入锁查询；
+            # holder 名字解析稍后对无行持有者返回 None，不在证明面上撒谎。
+            has_collaborators = True
 
         # 有协作者，查询锁信息
         lock_key = self._make_lock_key(bot_id, owner_id)
@@ -435,6 +450,33 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         return SessionLockInfoResult(
             locked=True, lock=lock, holder_name=holder_name, is_mine=is_mine,
         )
+
+    def _caller_holds_space_grant(
+        self, bot_id: str, owner_id: str, user_id: str
+    ) -> bool:
+        """调用者是否**仅凭空间授予**拿到这枚 Bot 的协作面。
+
+        只在"协作者名单为空"的短路前被调用 —— 行里已有答案时不需要再问。
+        用 ``check_collaborator_permission``（换轨后的有效阶梯）一次性回答：
+        空间成员为 True。**owner 恒 False**：无行 Bot 的 owner 从拦截器/公开
+        面的无行分支直通，"协作面成立"若由锁服务为他翻转，他就被推进
+        "必须持锁"的流里 —— 取之不尽的 423。行级用户名单为空是读取退化
+        态，其答案同样有效（他们本就有行，has_collaborators 本该 True）。
+        任何失败不给授予（fail-closed）—— 短路回 has_collaborators=False
+        的旧行为。
+        """
+        if user_id == owner_id:
+            return False
+        try:
+            result = self._collab_service.check_collaborator_permission(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                user_id=user_id,
+                required_level=PermissionLevel.MEMBER,
+            )
+        except Exception:
+            return False
+        return bool(result.get("has_permission"))
 
     def _list_collaborators_safe(
         self,

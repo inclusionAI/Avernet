@@ -28,7 +28,12 @@ from typing import Iterable, Mapping
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
-from tests.community.framework.case import EndpointCase, ExpectError, ExpectSuccess
+from tests.community.framework.case import (
+    EndpointCase,
+    ExpectError,
+    ExpectRetired,
+    ExpectSuccess,
+)
 
 
 BASELINE_PATH = pathlib.Path(__file__).parent / "coverage_baseline.txt"
@@ -97,7 +102,9 @@ def _classify(cases: Iterable[EndpointCase]) -> Mapping[tuple[str, str], set[str
     for case in cases:
         key = (case.method, case.path)
         kinds = shapes.setdefault(key, set())
-        if isinstance(case.expect, ExpectSuccess):
+        if isinstance(case.expect, ExpectRetired):
+            kinds.update(("happy", "error"))
+        elif isinstance(case.expect, ExpectSuccess):
             kinds.add("happy")
         elif isinstance(case.expect, ExpectError):
             kinds.add("error")

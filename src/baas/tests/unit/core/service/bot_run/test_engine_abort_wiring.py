@@ -25,6 +25,10 @@ from secbaas.community.core.service.bot_run._claw_service import (
     BotServiceConfig,
     ClawBotService,
 )
+from secbaas.community.core.service.bot_run._engine_adapter_registry import (
+    BotEngineAdapterRegistry,
+)
+from secbaas.community.plugins.eval_env.stub import NoopEvalConsistencyCheck
 from secbaas.community.spi.secret import SecretStorePlugin
 
 
@@ -93,6 +97,8 @@ async def test_baas_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
         client_pool=pool,
         wss_resolver=resolver,
         session_service=session_service,
+        engine_adapter_registry=BotEngineAdapterRegistry({}),
+        eval_consistency_check=NoopEvalConsistencyCheck(),
     )
 
     await service.abort(
@@ -123,6 +129,8 @@ async def test_baas_bot_service_abort_logs_on_resolution_failure(
         client_pool=pool,
         wss_resolver=resolver,
         session_service=session_service,
+        engine_adapter_registry=BotEngineAdapterRegistry({}),
+        eval_consistency_check=NoopEvalConsistencyCheck(),
     )
 
     await service.abort(
@@ -150,6 +158,8 @@ async def test_baas_bot_service_abort_logs_on_chat_abort_failure(
         client_pool=pool,
         wss_resolver=resolver,
         session_service=session_service,
+        engine_adapter_registry=BotEngineAdapterRegistry({}),
+        eval_consistency_check=NoopEvalConsistencyCheck(),
     )
 
     await service.abort(
@@ -179,6 +189,7 @@ async def test_claw_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
         ),
         client_pool=pool,
         secret_store=secret_store,
+        engine_adapter_registry=BotEngineAdapterRegistry({}),
     )
 
     await service.abort(
@@ -210,6 +221,7 @@ async def test_claw_bot_service_abort_without_sandbox_id_is_noop(
         ),
         client_pool=pool,
         secret_store=secret_store,
+        engine_adapter_registry=BotEngineAdapterRegistry({}),
     )
     no_sandbox = replace(binding_info, sandbox_id=None)
 
@@ -241,6 +253,7 @@ async def test_claw_bot_service_abort_swallows_engine_error(
         ),
         client_pool=pool,
         secret_store=secret_store,
+        engine_adapter_registry=BotEngineAdapterRegistry({}),
     )
 
     await service.abort(

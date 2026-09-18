@@ -20,7 +20,7 @@ export function RunCountTrendCard({
 }: {
   workflowId: string
   currentTotalRuns: string
-  days?: 1 | 7 | 30
+  days?: 1 | 'yesterday' | 7 | 30
   embedded?: boolean
 }) {
   const [data, setData] = useState<TrendPoint[]>([])
@@ -34,7 +34,8 @@ export function RunCountTrendCard({
       setLoading(true)
       setError(false)
       try {
-        const res = await fetch(`/api/workflows/${encodeURIComponent(workflowId)}/success-trend?days=${days}`)
+        const apiDays = days === 'yesterday' ? 1 : days
+        const res = await fetch(`/api/workflows/${encodeURIComponent(workflowId)}/success-trend?days=${apiDays}`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const json = await res.json()
         if (!cancelled) setData(json.data ?? [])
@@ -63,7 +64,6 @@ export function RunCountTrendCard({
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-semibold text-slate-900">运行实例趋势</span>
-          <span className="text-2xl font-bold text-slate-950">{currentTotalRuns}</span>
         </div>
         <span className="text-[10px] text-slate-400">近 {days} 天 · 每日实例数</span>
       </div>

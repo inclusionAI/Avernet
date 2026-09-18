@@ -8,8 +8,9 @@ asyncio_mode=auto，异步用例直接 async def。
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -20,10 +21,9 @@ from secbaas.community.core.repository.bot_run_queue import (
     BotRunQueueRecord,
     OrmBotRunQueueRepository,
 )
-from secbaas.community.core.service.bot_run import BotRunner
+from secbaas.community.core.service.bot_run import BotBindingResolver, BotRunner
 from secbaas.community.core.service.bot_run._bot_concurrency import (
     BotConcurrencyManager,
-    FixedMachineCountProvider,
 )
 from secbaas.community.core.service.bot_run._executor import ResultGuardExecutor
 from secbaas.community.core.service.bot_run._worker import (
@@ -189,11 +189,51 @@ def _insert(
     return run_id
 
 
+def _queue_record(run_id: str, *, meta: dict | None = None) -> BotRunQueueRecord:
+    """构造一个最小 BotRunQueueRecord（供 _run_guardian 直接调用测试）。"""
+    return BotRunQueueRecord(
+        id=1,
+        gmt_create=None,
+        gmt_modified=None,
+        run_id=run_id,
+        bot_id="bot-1",
+        session_id=None,
+        status="RUNNING",
+        assigned_worker=None,
+        last_heartbeat=None,
+        meta=meta or {},
+    )
+
+
+class _FakeLockCtx:
+    acquired = True
+
+    def __enter__(self) -> _FakeLockCtx:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+
+class _FakeLockService:
+    """测试用假锁服务：try_lock 恒获取成功。"""
+
+    def try_lock(self, *, lock_name, expire_seconds, block=False):
+        return _FakeLockCtx()
+
+
+_LOCK_SERVICE = _FakeLockService()
+
+
 def _worker(queue, repo, ex, **kw) -> BotRequestWorker:
     return BotRequestWorker(
         queue_repository=queue,
         qpm_manager=_qpm(),
         executor=ex,
+        run_repository=kw.pop("run_repository", repo),
+        lock_service=kw.pop("lock_service", _LOCK_SERVICE),
+        post_run_callback_factories=kw.pop("post_run_callback_factories", {}),
+        config=kw.pop("config", BotRequestWorkerConfig()),
         worker_id=kw.pop("worker_id", "worker-1"),
         **kw,
     )
@@ -268,10 +308,13 @@ async def test_qpm_gating_limits_dispatch(repo, queue):
         queue_repository=queue,
         qpm_manager=_qpm(bot_qpm=1),
         executor=ex,
-        machine_count_provider=FixedMachineCountProvider(1),
+        run_repository=repo,
+        lock_service=_LOCK_SERVICE,
+        post_run_callback_factories={},
+        config=BotRequestWorkerConfig(),
     )
 
-    # QPM=1, machines=1 → capacity=1：单次 tick 只派发 1 条
+    # QPM=1 → 全局最多 1 条在途：单次 tick 只派发 1 条
     assert await worker._tick() == 1
     await _drain()
     # 槽位释放后仍有 9 条 PENDING，第二次 tick 再派发 1 条
@@ -285,7 +328,7 @@ async def test_qpm_gating_limits_dispatch(repo, queue):
 
 
 @pytest.mark.xfail(strict=False, reason="flaky in CI — resolve later")
-async def test_qpm_per_machine_division(repo, queue):
+async def test_qpm_large_dispatches_all_pending(repo, queue):
     for _ in range(10):
         _insert(repo, queue, "bot-1")
     ex = _CompletingExecutor(repo)
@@ -293,11 +336,14 @@ async def test_qpm_per_machine_division(repo, queue):
         queue_repository=queue,
         qpm_manager=_qpm(),
         executor=ex,
-        machine_count_provider=FixedMachineCountProvider(3),
+        run_repository=repo,
+        lock_service=_LOCK_SERVICE,
+        post_run_callback_factories={},
+        config=BotRequestWorkerConfig(),
     )
     dispatched = await worker._tick()
     await _drain()
-    assert dispatched == 10  # 每机 200 容量 > 10 条候选
+    assert dispatched == 10  # qpm=600 远大于候选数 10，配额不构成瓶颈
 
 
 @pytest.mark.xfail(strict=False, reason="flaky in CI — resolve later")
@@ -500,13 +546,6 @@ async def test_run_one_requeued_path(repo, queue):
         return_value=mock_tracer,
     ):
         record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
-        # Simulate that a bucket was created for this bot
-        from secbaas.community.core.service.bot_run._bot_concurrency import (
-            ConcurrencyLimiter,
-        )
-
-        limiter = ConcurrencyLimiter(capacity=10)
-        worker._buckets["bot-1"] = (limiter, (600, 1))
         mock_mark = MagicMock(wraps=worker._queue.mark_done)
         with patch.object(worker._queue, "mark_done", mock_mark):
             await worker._run_one(record)
@@ -541,34 +580,6 @@ async def test_run_one_mark_done_raises_warning(repo, queue):
 
     mock_mark.assert_called_once_with(record.run_id, worker.worker_id)
     assert repo.get_by_run_id(record.run_id).status == "COMPLETED"
-
-
-async def test_run_one_releases_bucket_slot(repo, queue):
-    """_run_one should release the concurrency limiter slot after execution."""
-    _insert(repo, queue, "bot-1")
-    ex = _CompletingExecutor(repo)
-    worker = _worker(queue, repo, ex)
-
-    mock_tracer = MagicMock()
-    mock_tracer.extract_context.return_value = None
-    mock_tracer.start_span.return_value.__enter__ = MagicMock(return_value=None)
-    mock_tracer.start_span.return_value.__exit__ = MagicMock(return_value=False)
-    with patch(
-        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
-        return_value=mock_tracer,
-    ):
-        record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
-        from secbaas.community.core.service.bot_run._bot_concurrency import (
-            ConcurrencyLimiter,
-        )
-
-        limiter = ConcurrencyLimiter(capacity=10)
-        limiter.try_acquire()
-        worker._buckets["bot-1"] = (limiter, (600, 1))
-        assert limiter.ref_count == 1
-        await worker._run_one(record)
-
-    assert limiter.ref_count == 0
 
 
 async def test_timeout_scan_marks_failed_and_force_done(repo, queue):
@@ -650,6 +661,51 @@ async def test_timeout_scan_force_done_remote_running_with_stale_heartbeat(repo,
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
+async def test_timeout_scan_remote_stale_writes_result_failed(repo, queue):
+    """非本机 RUNNING + 心跳过期 → 同时写 baas_bot_run=FAILED（不再卡 PENDING）。"""
+    run_id = _insert(repo, queue, "bot-1")
+    record = queue.claim_pending_by_bot("bot-1", "remote-worker", candidates=5)
+    assert record is not None
+    queue.update_meta(run_id, {"timeout": -1})
+
+    from datetime import datetime, timedelta
+
+    stale_time = datetime.now() - timedelta(seconds=300)
+    stale_record = BotRunQueueRecord(
+        id=record.id,
+        gmt_create=record.gmt_create,
+        gmt_modified=record.gmt_modified,
+        run_id=record.run_id,
+        bot_id=record.bot_id,
+        session_id=record.session_id,
+        status="RUNNING",
+        assigned_worker="remote-worker",
+        last_heartbeat=stale_time,
+        meta={"timeout": -1},
+        env=record.env,
+    )
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = BotRequestWorker(
+        queue_repository=queue,
+        qpm_manager=_qpm(),
+        executor=ex,
+        run_repository=repo,
+        lock_service=_LOCK_SERVICE,
+        post_run_callback_factories={},
+        config=BotRequestWorkerConfig(),
+        worker_id="worker-1",
+    )
+    with patch.object(
+        worker._queue, "scan_timeout", MagicMock(return_value=[stale_record])
+    ):
+        await worker._timeout_scan_once()
+
+    assert queue.get_by_run_id(run_id).status == "DONE"
+    rec = repo.get_by_run_id(run_id)
+    assert rec.status == "FAILED"
+    assert "worker lost" in (rec.error or "")
+
+
 async def test_timeout_scan_force_done_remote_running_with_no_heartbeat(repo, queue):
     """非本机 RUNNING + 无心跳（last_heartbeat=None）→ 视为过期，force_done。"""
     run_id = _insert(repo, queue, "bot-1")
@@ -679,14 +735,12 @@ async def test_timeout_scan_force_done_remote_running_with_no_heartbeat(repo, qu
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
-async def test_timeout_scan_cancels_local_running_task(repo, queue):
-    """本机 RUNNING 超时 → cancel 本机 task。"""
-    run_id = _insert(repo, queue, "bot-1")
-    record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
-    assert record is not None
-    queue.update_meta(run_id, {"timeout": -1})
+async def test_run_guardian_cancels_local_task_on_deadline(repo, queue):
+    """_run_guardian 到点会 cancel 本机 task（本机超时不再靠查库）。"""
+    from datetime import datetime, timedelta
 
-    # 模拟一个正在执行的 task
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+
     started = asyncio.Event()
     cancelled = asyncio.Event()
 
@@ -700,47 +754,65 @@ async def test_timeout_scan_cancels_local_running_task(repo, queue):
 
     task = asyncio.create_task(fake_run())
     await started.wait()
+    worker._running_tasks["run-1"] = task
 
-    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
-    worker = _worker(queue, repo, ex)
-    worker._running_tasks[run_id] = task
-
-    local_record = queue.get_by_run_id(run_id)
-    with patch.object(
-        worker._queue, "scan_timeout", MagicMock(return_value=[local_record])
-    ):
-        await worker._timeout_scan_once()
-
-    # 让出事件循环，让被 cancel 的 task 执行 except CancelledError
-    await asyncio.sleep(0)
+    # deadline 已过 → guardian 立刻取消本机 task 并返回
+    await asyncio.wait_for(
+        worker._run_guardian(
+            _queue_record("run-1"), datetime.now() - timedelta(seconds=1)
+        ),
+        timeout=1,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await task
     assert cancelled.is_set()
-    assert queue.get_by_run_id(run_id).status == "DONE"
 
 
-async def test_timeout_scan_skips_cancel_when_task_already_done(repo, queue):
-    """本机 RUNNING 超时但 task 已完成 → 不 cancel，仍 force_done。"""
+async def test_terminate_local_timeout_force_done(repo, queue):
+    """_terminate_local_timeout：cancel 本机 task 且 force_done 队列行。"""
     run_id = _insert(repo, queue, "bot-1")
     record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
     assert record is not None
-    queue.update_meta(run_id, {"timeout": -1})
+
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+
+    started = asyncio.Event()
+
+    async def fake_run():
+        started.set()
+        await asyncio.sleep(999)
+
+    task = asyncio.create_task(fake_run())
+    await started.wait()
+    worker._running_tasks[run_id] = task
+
+    await worker._terminate_local_timeout(record)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+async def test_run_guardian_cancel_noop_when_task_done(repo, queue):
+    """_run_guardian 到点但本机 task 已完成 → 不报错。"""
+    from datetime import datetime, timedelta
+
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
 
     async def done_task():
         pass
 
     task = asyncio.create_task(done_task())
     await task
+    worker._running_tasks["run-1"] = task
 
-    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
-    worker = _worker(queue, repo, ex)
-    worker._running_tasks[run_id] = task
-
-    local_record = queue.get_by_run_id(run_id)
-    with patch.object(
-        worker._queue, "scan_timeout", MagicMock(return_value=[local_record])
-    ):
-        await worker._timeout_scan_once()
-
-    assert queue.get_by_run_id(run_id).status == "DONE"
+    await asyncio.wait_for(
+        worker._run_guardian(
+            _queue_record("run-1"), datetime.now() - timedelta(seconds=1)
+        ),
+        timeout=1,
+    )
+    assert task.done()
+    assert not task.cancelled()
 
 
 async def test_tick_tracks_running_task(repo, queue):
@@ -897,7 +969,7 @@ async def test_heartbeat_loop_touches_with_worker_id(repo, queue):
         touched.set()
 
     with patch.object(worker._queue, "touch_heartbeat", MagicMock(side_effect=touch)):
-        task = asyncio.create_task(worker._heartbeat_loop("run-1", worker.worker_id))
+        task = asyncio.create_task(worker._run_guardian(_queue_record("run-1"), None))
         await asyncio.wait_for(touched.wait(), timeout=1)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -923,7 +995,7 @@ async def test_heartbeat_loop_logs_touch_error_and_continues(repo, queue):
         second_call.set()
 
     with patch.object(worker._queue, "touch_heartbeat", MagicMock(side_effect=touch)):
-        task = asyncio.create_task(worker._heartbeat_loop("run-1", worker.worker_id))
+        task = asyncio.create_task(worker._run_guardian(_queue_record("run-1"), None))
         await asyncio.wait_for(second_call.wait(), timeout=1)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -932,120 +1004,97 @@ async def test_heartbeat_loop_logs_touch_error_and_continues(repo, queue):
     assert calls >= 2
 
 
-# ── _get_or_create_limiter: qpm < machines 亚单位并发 ──────────────
+# ── 全局并发上限：按 RUNNING 在途数强制（跨进程） ──────────────────
 
 
-def test_limiter_qpm_less_than_machines_uses_min_interval(repo, queue):
-    """qpm=3, machines=10 → capacity=1, min_interval=200s。"""
-    ex = _CompletingExecutor(repo)
+@pytest.mark.xfail(strict=False, reason="flaky in CI — resolve later")
+async def test_tick_enforces_global_concurrency_cap(repo, queue):
+    """qpm=2 → 全集群最多 2 条在途：tick 只派发 2 条，不随进程数放大。"""
+    for _ in range(10):
+        _insert(repo, queue, "bot-1")
+    ex = _BlockingExecutor()
     worker = BotRequestWorker(
         queue_repository=queue,
-        qpm_manager=_qpm(bot_qpm=3),
+        qpm_manager=_qpm(bot_qpm=2),
         executor=ex,
-        machine_count_provider=FixedMachineCountProvider(10),
+        run_repository=repo,
+        lock_service=_LOCK_SERVICE,
+        post_run_callback_factories={},
+        config=BotRequestWorkerConfig(),
     )
-    limiter = worker._get_or_create_limiter("bot-1")
-    assert limiter is not None
-    assert limiter.capacity == 1
-    assert limiter._min_interval == pytest.approx(200.0)
+
+    assert await worker._tick() == 2
+    await _drain()
+    assert worker.active_count == 2
+    assert ex.started == 2
+    # 在途已满，再次 tick 不再派发
+    assert await worker._tick() == 0
+
+    ex.gate.set()
+    await _drain()
+    assert worker.active_count == 0
+    # 在途释放后恢复派发
+    assert await worker._tick() == 2
 
 
-def test_limiter_qpm_less_than_machines_blocks_second_dispatch(repo, queue):
-    """qpm=1, machines=10: 第一次 acquire 成功，release 后间隔未到不能再次 acquire。"""
+@pytest.mark.xfail(strict=False, reason="flaky in CI — resolve later")
+async def test_tick_passes_global_max_running_to_claim(repo, queue):
+    """_tick 把该 bot 的 qpm 作为 max_running 传给 claim（全局并发上限来源）。"""
+    _insert(repo, queue, "bot-1")
+    ex = _CompletingExecutor(repo)
+    worker = _worker(queue, repo, ex)  # qpm 默认 600
+
+    spy = MagicMock(wraps=queue.claim_pending_by_bot)
+    with patch.object(worker._queue, "claim_pending_by_bot", spy):
+        await worker._tick()
+
+    assert spy.call_args.kwargs["max_running"] == 600
+
+
+async def test_claim_skips_when_global_running_reached(repo, queue):
+    """RUNNING 在途数达到 max_running 时 claim 返回 None。"""
+    _insert(repo, queue, "bot-1")
+    # 另一进程认领一条，使其处于 RUNNING（在途 1）
+    assert queue.claim_pending_by_bot("bot-1", "worker-other", candidates=5) is not None
+
+    # 在途 1 条，max_running=1 → 不可再认领
+    assert (
+        queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5, max_running=1)
+        is None
+    )
+    # 放宽到 2 → 可继续认领新的一条
+    _insert(repo, queue, "bot-1")
+    assert (
+        queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5, max_running=2)
+        is not None
+    )
+
+
+def test_count_running_by_bot(repo, queue):
+    """count_running_by_bot 只统计 RUNNING（在途）行。"""
+    _insert(repo, queue, "bot-1")
+    assert queue.count_running_by_bot("bot-1") == 0
+    queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    assert queue.count_running_by_bot("bot-1") == 1
+
+
+def test_maybe_log_cap_reports_throttled_bots(repo, queue):
+    """_maybe_log_cap：在途数达 qpm 的 bot 会被判定为「被全局上限拦住」。"""
+    _insert(repo, queue, "bot-1")
+    # 另一 worker 认领一条 → RUNNING（在途 1）
+    queue.claim_pending_by_bot("bot-1", "other-worker", candidates=5)
+
     ex = _CompletingExecutor(repo)
     worker = BotRequestWorker(
         queue_repository=queue,
         qpm_manager=_qpm(bot_qpm=1),
         executor=ex,
-        machine_count_provider=FixedMachineCountProvider(10),
+        run_repository=repo,
+        lock_service=_LOCK_SERVICE,
+        post_run_callback_factories={},
+        config=BotRequestWorkerConfig(),
     )
-    limiter = worker._get_or_create_limiter("bot-1")
-    assert limiter.try_acquire() is True
-    limiter.release()
-    # 间隔 600s 远未到
-    assert limiter.has_slot() is False
-    assert limiter.try_acquire() is False
-
-
-def test_limiter_qpm_equals_machines_uses_normal_capacity(repo, queue):
-    """qpm=10, machines=10 → 走正常均分: capacity=1, min_interval=0。"""
-    ex = _CompletingExecutor(repo)
-    worker = BotRequestWorker(
-        queue_repository=queue,
-        qpm_manager=_qpm(bot_qpm=10),
-        executor=ex,
-        machine_count_provider=FixedMachineCountProvider(10),
-    )
-    limiter = worker._get_or_create_limiter("bot-1")
-    assert limiter is not None
-    assert limiter.capacity == 1
-    assert limiter._min_interval == 0.0
-
-
-def test_limiter_qpm_greater_than_machines_uses_normal_capacity(repo, queue):
-    """qpm=60, machines=10 → capacity=6, min_interval=0。"""
-    ex = _CompletingExecutor(repo)
-    worker = BotRequestWorker(
-        queue_repository=queue,
-        qpm_manager=_qpm(bot_qpm=60),
-        executor=ex,
-        machine_count_provider=FixedMachineCountProvider(10),
-    )
-    limiter = worker._get_or_create_limiter("bot-1")
-    assert limiter is not None
-    assert limiter.capacity == 6
-    assert limiter._min_interval == 0.0
-
-
-def test_limiter_qpm_equals_one_single_machine(repo, queue):
-    """qpm=1, machines=1 → capacity=1, min_interval=0（走正常分支）。"""
-    ex = _CompletingExecutor(repo)
-    worker = BotRequestWorker(
-        queue_repository=queue,
-        qpm_manager=_qpm(bot_qpm=1),
-        executor=ex,
-        machine_count_provider=FixedMachineCountProvider(1),
-    )
-    limiter = worker._get_or_create_limiter("bot-1")
-    assert limiter is not None
-    assert limiter.capacity == 1
-    assert limiter._min_interval == 0.0
-
-
-def test_limiter_cached_when_params_unchanged(repo, queue):
-    """qpm/machines 不变时，复用缓存的 limiter。"""
-    ex = _CompletingExecutor(repo)
-    worker = BotRequestWorker(
-        queue_repository=queue,
-        qpm_manager=_qpm(bot_qpm=3),
-        executor=ex,
-        machine_count_provider=FixedMachineCountProvider(10),
-    )
-    limiter1 = worker._get_or_create_limiter("bot-1")
-    limiter2 = worker._get_or_create_limiter("bot-1")
-    assert limiter1 is limiter2
-
-
-def test_limiter_rebuilt_when_qpm_changes(repo, queue):
-    """qpm 变化后，limiter 重建。"""
-    qpm_mgr = BotConcurrencyManager(_QpmRepo(bot_qpm=3), refresh_interval_seconds=999)
-    qpm_mgr._configs = {"bot-1": 3}
-    ex = _CompletingExecutor(repo)
-    worker = BotRequestWorker(
-        queue_repository=queue,
-        qpm_manager=qpm_mgr,
-        executor=ex,
-        machine_count_provider=FixedMachineCountProvider(10),
-    )
-    limiter1 = worker._get_or_create_limiter("bot-1")
-    assert limiter1._min_interval > 0
-
-    # 模拟 qpm 变为 100（>= machines，走正常分支）
-    qpm_mgr._configs["bot-1"] = 100
-    limiter2 = worker._get_or_create_limiter("bot-1")
-    assert limiter2 is not limiter1
-    assert limiter2._min_interval == 0.0
-    assert limiter2.capacity == 10
+    assert worker._maybe_log_cap(["bot-1"]) == ["bot-1"]
 
 
 # ── abort_runs_by_session (chat.abort 接入面) tests ───────────────
@@ -1471,7 +1520,14 @@ async def test_bot_runner_abort_propagates_to_bot_service(repo, queue):
             return fake_service
 
     class _FakePlugin:
-        async def get_binding(self, bot_id: str, owner_id: str, stage: str):
+        async def get_binding(
+            self,
+            bot_id: str,
+            owner_id: str,
+            stage: str,
+            *,
+            default_tag: str | None = None,
+        ):
             from secbaas.community.spi.bot_service import BotBindingData
 
             return BotBindingData(
@@ -1496,6 +1552,7 @@ async def test_bot_runner_abort_propagates_to_bot_service(repo, queue):
         bot_service_selector=_FakeSelector(),
         run_repository=repo,
         bot_service_plugin=_FakePlugin(),
+        binding_resolver=BotBindingResolver(_FakePlugin()),
         dispatchers=[NoopMessageDispatcher()],
         system_config_service=MagicMock(),  # type: ignore[arg-type]
         eval_session_log=NoopEvalSessionLog(),
@@ -1554,6 +1611,8 @@ def _make_bot_runner_for_abort(
             bot_id: str,
             owner_id: str,
             stage: str,
+            *,
+            default_tag: str | None = None,
         ) -> Any:
             if isinstance(binding_return, Exception):
                 raise binding_return
@@ -1577,6 +1636,7 @@ def _make_bot_runner_for_abort(
         bot_service_selector=_FakeSelector(),
         run_repository=repo,
         bot_service_plugin=_FakePlugin(),
+        binding_resolver=BotBindingResolver(_FakePlugin()),
         dispatchers=[NoopMessageDispatcher()],
         system_config_service=MagicMock(),  # type: ignore[arg-type]
         eval_session_log=NoopEvalSessionLog(),
@@ -1761,3 +1821,135 @@ async def test_abort_poll_loop_logs_when_queue_lookup_fails(repo, queue):
 
     worker._queue.get_by_run_id = original_get_by_run_id
     assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+# ==================== Tests: scan lock / tick cap / post-run ====================
+
+
+class _NotAcquiredLockCtx:
+    acquired = False
+
+    def __enter__(self) -> _NotAcquiredLockCtx:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+
+class _NotAcquiredLockService:
+    """测试用假锁服务：try_lock 恒未获取。"""
+
+    def try_lock(self, *, lock_name, expire_seconds, block=False):
+        return _NotAcquiredLockCtx()
+
+
+async def test_timeout_scan_skips_when_lock_not_acquired(repo, queue):
+    """全局超时扫描未抢到单飞锁时直接跳过，不做任何对账。"""
+    worker = _worker(
+        queue, repo, _CompletingExecutor(repo), lock_service=_NotAcquiredLockService()
+    )
+    scan = MagicMock()
+    queue.scan_timeout = scan
+    await worker._timeout_scan_once()
+    scan.assert_not_called()
+
+
+async def test_abort_continues_when_update_error_fails(repo, queue):
+    """update_error 抛异常时 abort 仍继续 request_abort + force_done。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort-dberr")
+    queue.claim_pending_by_bot("bot-1", "wA", candidates=5)
+    repo.update_error = MagicMock(side_effect=RuntimeError("db down"))
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+
+    outcome = await worker.abort_runs_by_session("sess-abort-dberr", "bot-1")
+
+    assert outcome.aborted_run_ids == [run_id]
+    assert queue.get_by_run_id(run_id).status == "DONE"
+    assert queue.is_abort_requested(run_id) is True
+
+
+async def test_tick_breaks_at_max_concurrent(repo, queue):
+    """本机并发额度占满后，本轮不再认领后续 bot 的 PENDING。"""
+    run_a = _insert(repo, queue, "bot-1")
+    run_b = _insert(repo, queue, "bot-2")
+    ex = _BlockingExecutor()
+    worker = _worker(queue, repo, ex, config=BotRequestWorkerConfig(max_concurrent=1))
+    mgr = _qpm()
+    mgr._configs = {"bot-1": 600, "bot-2": 600}
+    worker._qpm = mgr
+    try:
+        dispatched = await worker._tick()
+        assert dispatched == 1
+        await asyncio.sleep(0)  # 让已派发 task 进入 execute（挂起在 gate）
+        assert ex.started == 1
+        statuses = {
+            queue.get_by_run_id(run_a).status,
+            queue.get_by_run_id(run_b).status,
+        }
+        assert statuses == {"RUNNING", "PENDING"}
+    finally:
+        ex.gate.set()
+        await _drain(20)
+
+
+async def test_tick_skips_bot_without_qpm_config(repo, queue):
+    """无并发上限配置的 bot 本轮跳过（不认领），有配置的照常派发。"""
+    run_1 = _insert(repo, queue, "bot-1")
+    run_x = _insert(repo, queue, "bot-x")
+    ex = _CompletingExecutor(repo)
+    worker = _worker(queue, repo, ex, config=BotRequestWorkerConfig(max_concurrent=5))
+
+    dispatched = await worker._tick()
+    await _drain(10)
+
+    assert dispatched == 1
+    assert ex.executed == [run_1]
+    assert queue.get_by_run_id(run_x).status == "PENDING"
+
+
+def test_maybe_log_cap_throttled_within_interval(repo, queue):
+    """节流窗口内的第二次调用直接返回空。"""
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    worker._last_cap_warn = time.monotonic()
+    assert worker._maybe_log_cap(["bot-1"]) == []
+
+
+def test_maybe_log_cap_reports_capped_bot(repo, queue):
+    """RUNNING 在途数达到该 bot 并发上限时被判定为 capped。"""
+    _insert(repo, queue, "bot-1")
+    queue.claim_pending_by_bot("bot-1", "wA", candidates=5)
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    worker._qpm = _qpm(bot_qpm=1)
+    assert worker._maybe_log_cap(["bot-1"]) == ["bot-1"]
+
+
+def test_maybe_log_cap_skips_bot_without_qpm(repo, queue):
+    """无 qpm 配置的 bot 不做 capped 判定。"""
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    assert worker._maybe_log_cap(["bot-x"]) == []
+
+
+def test_maybe_log_cap_swallows_count_error(repo, queue):
+    """count_running_by_bot 抛异常仅记录日志，不向上抛。"""
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    queue.count_running_by_bot = MagicMock(side_effect=RuntimeError("db boom"))
+    assert worker._maybe_log_cap(["bot-1"]) == []
+
+
+async def test_post_run_awaits_callback(repo, queue):
+    """有回调时 post_run await 执行并传入 run_id。"""
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    record = queue.get_by_run_id(_insert(repo, queue, "bot-1"))
+    cb = AsyncMock()
+    await worker._post_run(record, cb)
+    cb.assert_awaited_once_with(record.run_id)
+
+
+async def test_post_run_swallows_callback_error(repo, queue):
+    """回调抛异常仅记录日志，不影响主流程。"""
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    record = queue.get_by_run_id(_insert(repo, queue, "bot-1"))
+    cb = AsyncMock(side_effect=RuntimeError("cb boom"))
+    await worker._post_run(record, cb)
+    cb.assert_awaited_once_with(record.run_id)

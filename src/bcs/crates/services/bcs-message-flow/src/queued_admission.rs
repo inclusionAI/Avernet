@@ -307,6 +307,7 @@ pub(crate) async fn commit_routed_reply(
         .and_then(|r| r.run_id.clone())
         .unwrap_or_else(|| event.run_id.clone());
     let successful = event.state == bcs_service_api::ChatEventState::Final;
+    let failed = event.state == bcs_service_api::ChatEventState::Error;
     let mut content = serde_json::json!({"text":text});
     if let Some(reply) = normalized {
         content["normalization"] = serde_json::json!({"version":1,"method":reply.method,
@@ -325,9 +326,9 @@ pub(crate) async fn commit_routed_reply(
         session_id,
         sender_id: event.bot_id.clone(),
         sender_type: SenderType::Bot,
-        message_type: if successful { "run_reply" } else { "chat" }.into(),
-        content,
-        client_msg_id: Some(format!("run-reply:{run_id}")),
+        message_type: if failed { bcs_domain::CHAT_ERROR_MESSAGE_TYPE } else if successful { "run_reply" } else { "chat" }.into(),
+        content: if failed { serde_json::Value::String(crate::bot_event::error_display_text(&event.event_payload)) } else { content },
+        client_msg_id: Some(if failed { format!("chat-error:{run_id}") } else { format!("run-reply:{run_id}") }),
         visibility_domain,
         audience,
         owner_bot_id,
@@ -335,7 +336,7 @@ pub(crate) async fn commit_routed_reply(
         run_id,
     };
     let display_text = normalized.map(|r| r.display.as_str()).unwrap_or(text);
-    let display_message = if successful && !display_text.is_empty() {
+    let display_message = if (successful || failed) && !display_text.is_empty() {
         let id = uuid::Uuid::new_v4().to_string();
         let mut display = message.clone();
         display.message_type = "chat".into();
@@ -344,7 +345,7 @@ pub(crate) async fn commit_routed_reply(
         let event = prepare_message_event(flow, &id, &display)?;
         Some(bcs_service_api::port::repo::message_delivery::DeliveryDisplayMessage { message_id: id, message: display, event })
     } else { None };
-    let record = if successful { None } else { prepare_message_event(flow, &message_id, &message)? };
+    let record = if successful || failed { None } else { prepare_message_event(flow, &message_id, &message)? };
     let reply = AdmitMessageDeliveries {
         display_message,
         message_id,
@@ -404,6 +405,11 @@ pub(crate) async fn commit_routed_reply(
     let rows = crate::storage_retry::retry(crate::storage_retry::shutdown(flow), "relay_admission_lookup",
         crate::storage_retry::managed_storage, || service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Message(reply_message_id.clone())))
         .await.map_err(|_| ServiceError::InternalError("queue relay admission lookup failed".into()))?;
+    if failed {
+        tracing::info!(group_id = %group.id, session_id = %command.session_id.as_deref().unwrap_or_default(),
+            run_id = %event.run_id, bot_id = %event.bot_id, message_id = %reply_message_id,
+            "terminal error projection committed with failed delivery");
+    }
     let relayed = fresh && rows.iter().any(|row| !matches!(row.state.status,
         bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity | bcs_domain::message_delivery::MessageDeliveryStatus::Failed));
     Ok(Some(QueuedReply { target_ids, relayed }))

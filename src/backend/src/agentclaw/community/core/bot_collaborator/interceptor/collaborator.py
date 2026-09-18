@@ -215,13 +215,52 @@ class CollaboratorPermissionInterceptor:
 
         has_collaborators = lock_info.has_collaborators if lock_info else False
 
-        # 没有协作者时的逻辑
+        # 空间授予结果：None = 无授予（非成员/解析失败/档位够不着），dict =
+        # 授予成立（含换轨后 check 的完整答案）。整个无行流派生自此。
+        grant: dict | None = None
+
+        # 没有协作者行时的逻辑
+        if not has_collaborators and user_id != params.owner_id:
+            # 空间授予：Bot 挂在 Space 下时，空间成员与显式协作者行同权
+            # （"同一空间可见"的产品语义）——空行不能挡住他们。真获得了
+            # 授予，就按"有协作者"同流继续走：锁语义（无锁先取锁、他人
+            # 持锁 423）与权限复查，与显式 MEMBER 行一视同仁。未获得授予
+            # 的非 owner 维持 403。
+            #
+            # 天花板短路：授予上限是 MEMBER，required_level 更高档的路由上
+            # 探针静态不可能命中——直接不问，陌生人扫描面也不为此付出
+            # 行读+角色读+Space 读的全价。
+            # to_thread：探针是同步 DB 链（bot 行 + 角色 + Space 活性读），
+            # before() 跑在事件循环上（after() 的既有 offloop 先例同理）。
+            if params.bot_id and self.required_level <= PermissionLevel.MEMBER:
+                grant = await asyncio.to_thread(
+                    self._space_granted_permission, ctx, params, user_id
+                )
+            if grant is not None:
+                # 授予成立后必须复读锁信息：探针之前那次在零行 bot 上被
+                # 锁服务的无行短路吞掉（lock≡None），不复读则成员按取锁
+                # 指令重试也永远撞同一堵墙，"与显式行同权"就是空话。
+                try:
+                    lock_info = self._get_lock_service(ctx).get_lock_info(
+                        bot_id=params.bot_id,
+                        owner_id=params.owner_id,
+                        user_id=user_id,
+                    )
+                except Exception as e:
+                    # 锁信息服务不可用：按"无锁"处理（成员先取锁的指令不
+                    # 撒谎），锁写入本身没有该服务同样不可用。
+                    logger.warning(
+                        "[before] Failed to re-read lock info after space grant: %s", e
+                    )
+                    lock_info = None
+                has_collaborators = True
+                ctx.metadata["permission_level"] = grant.get("level")
         if not has_collaborators:
             # owner 直接放行
             if user_id == params.owner_id:
                 ctx.metadata["permission_level"] = PermissionLevel.OWNER.name
                 return ctx
-            # 非 owner 没有权限
+            # 非 owner 且无空间授予：没有权限
             ctx.response = InterceptedResponse(
                 success=False,
                 message="权限不足：需要 OWNER 权限",
@@ -243,26 +282,41 @@ class CollaboratorPermissionInterceptor:
             if skip_lock:
                 # owner 已经在上面放行
                 if user_id != params.owner_id and params.bot_id:
-                    service = self._get_collaborator_service(ctx)
-                    if service:
-                        try:
-                            result = service.check_collaborator_permission(
-                                bot_id=params.bot_id,
-                                owner_id=params.owner_id,
-                                user_id=user_id,
-                                required_level=self.required_level,
-                            )
-                            if not result["has_permission"]:
+                    # 空间授予者的答复已在手——同请求内一次裁决，不重复
+                    # 问数据库（两次问还可能在中间漂移出两个不同答案）。
+                    if grant is None:
+                        service = self._get_collaborator_service(ctx)
+                        if service:
+                            try:
+                                result = service.check_collaborator_permission(
+                                    bot_id=params.bot_id,
+                                    owner_id=params.owner_id,
+                                    user_id=user_id,
+                                    required_level=self.required_level,
+                                )
+                                if not result["has_permission"]:
+                                    ctx.response = InterceptedResponse(
+                                        success=False,
+                                        message=f"权限不足：需要 {self.required_level.name} 权限",
+                                        error_code=403,
+                                    )
+                                    return None
+                                ctx.metadata["permission_level"] = result["level"]
+                            except Exception as e:
+                                # fail-closed：与探针及公开面同向。此处历来
+                                # fail-open（异常=放行），但 check 换轨后成了
+                                # 含实时 Space 读的长链，把抖动放行会把
+                                # "未裁决执行"与"审计缺失"叠在一个请求里。
+                                logger.warning(
+                                    "[before] permission check failed; refusing: %s", e
+                                )
+                                ctx.metadata["permission_check_error"] = str(e)
                                 ctx.response = InterceptedResponse(
                                     success=False,
-                                    message=f"权限不足：需要 {self.required_level.name} 权限",
-                                    error_code=403,
+                                    message="权限校验暂时不可用，请稍后重试",
+                                    error_code=503,
                                 )
                                 return None
-                            ctx.metadata["permission_level"] = result["level"]
-                        except Exception as e:
-                            # Bot 不存在或其他错误，放行让业务处理
-                            ctx.metadata["permission_check_error"] = str(e)
                 return ctx
 
             # 检查锁状态（有协作者时必须持锁才能操作）
@@ -294,26 +348,39 @@ class CollaboratorPermissionInterceptor:
 
             # 自己持锁，检查权限（owner 已经在上面放行）
             if user_id != params.owner_id and params.bot_id:
-                service = self._get_collaborator_service(ctx)
-                if service:
-                    try:
-                        result = service.check_collaborator_permission(
-                            bot_id=params.bot_id,
-                            owner_id=params.owner_id,
-                            user_id=user_id,
-                            required_level=self.required_level,
-                        )
-                        if not result["has_permission"]:
+                # 空间授予者同上：答案已在手，且锁已核实为本人持有。
+                if grant is None:
+                    service = self._get_collaborator_service(ctx)
+                    if service:
+                        try:
+                            result = service.check_collaborator_permission(
+                                bot_id=params.bot_id,
+                                owner_id=params.owner_id,
+                                user_id=user_id,
+                                required_level=self.required_level,
+                            )
+                            if not result["has_permission"]:
+                                ctx.response = InterceptedResponse(
+                                    success=False,
+                                    message=f"权限不足：需要 {self.required_level.name} 权限",
+                                    error_code=403,
+                                )
+                                return None
+                            ctx.metadata["permission_level"] = result["level"]
+                        except Exception as e:
+                            # fail-closed：同 skip_lock 分支的理由。503 而非
+                            # 403：校验服务崩溃是"暂时不可用"，403 会对
+                            # 调用者谎称"没有权限"。
+                            logger.warning(
+                                "[before] permission check failed; refusing: %s", e
+                            )
+                            ctx.metadata["permission_check_error"] = str(e)
                             ctx.response = InterceptedResponse(
                                 success=False,
-                                message=f"权限不足：需要 {self.required_level.name} 权限",
-                                error_code=403,
+                                message="权限校验暂时不可用，请稍后重试",
+                                error_code=503,
                             )
                             return None
-                        ctx.metadata["permission_level"] = result["level"]
-                    except Exception as e:
-                        # Bot 不存在或其他错误，放行让业务处理
-                        ctx.metadata["permission_check_error"] = str(e)
 
         return ctx
 
@@ -490,6 +557,40 @@ class CollaboratorPermissionInterceptor:
             return ctx.injector.get(CollaboratorService)
         except Exception:
             return None
+
+    def _space_granted_permission(
+        self,
+        ctx: InterceptorContext,
+        params: PermissionParams,
+        user_id: str,
+    ) -> dict | None:
+        """以有效阶梯问权限，返回 check 的完整答复（无授予时 None）。
+
+        走换轨后的 ``check_collaborator_permission``（有效权限 = 协作者行
+        ⊕ 空间成员授予 ⊕ COSEC 复核）：解析失败（服务不可用/Bot 不存在/
+        低于所需级别）一律不给授予（fail-closed），尤其不能在异常时放行。
+        仅在"无协作者行"分支被调用，此时任何过线答案都只能来自空间授予
+        （行级用户在此分支意味着锁服务退化，其答案同样有效，但会走与显
+        式行相同的复查，不会被误标成空间授予）。
+        返回完整 dict 而非压扁的 bool：无行派生流内的两处复查直接复用，
+        同一请求一次裁决，不会二次问库，也不会中途漂移出两个答案。
+        """
+        if params.bot_id is None or params.owner_id is None:
+            return None
+        service = self._get_collaborator_service(ctx)
+        if service is None:
+            return None
+        try:
+            result = service.check_collaborator_permission(
+                bot_id=params.bot_id,
+                owner_id=params.owner_id,
+                user_id=user_id,
+                required_level=self.required_level,
+            )
+        except Exception:
+            # Bot 不存在等——按无授予处理，让业务层回答更具体的错误。
+            return None
+        return result if result.get("has_permission") else None
 
     def _is_coding_app(
         self, ctx: InterceptorContext, bot_id: str | None, owner_id: str | None

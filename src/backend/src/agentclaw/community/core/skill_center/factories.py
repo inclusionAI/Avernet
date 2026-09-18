@@ -15,6 +15,7 @@ needs the dispatcher *types* under ``TYPE_CHECKING``.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, TYPE_CHECKING
 
@@ -88,6 +89,14 @@ logger = get_logger()
 # caller in the process, so an unbounded ``gather`` over a large package would starve
 # unrelated work.
 _PACKAGE_IO_CONCURRENCY = 8
+
+
+@dataclass(frozen=True, slots=True)
+class LocalSkillPackageLocation:
+    """DB-compatible locator plus the logical layout sent to Engine Runtime."""
+
+    directory: str
+    layout: str
 
 
 async def _gather_package_io(coroutines: list) -> list:
@@ -177,7 +186,7 @@ class LocalSkillPackageStorage:
 
     async def prepare(self) -> None:
         """Remove an orphaned failed upload before writing a first package."""
-        if not await self._filesystem.exists(self._device_directory):
+        if not await self.exists():
             return
         if not await self._filesystem.delete_tree(self._device_directory):
             raise OSError("unable to clear prior Local Skill upload")
@@ -191,7 +200,8 @@ class LocalSkillPackageStorage:
 
     async def exists(self) -> bool:
         """Whether this storage currently has an authoritative package."""
-        return await self._filesystem.exists(self._device_directory)
+        entries = await self._filesystem.list_dir(self._device_directory)
+        return entries is not None
 
     async def read_file(self, relative_path: str) -> bytes | None:
         """Read one validated package-relative file without exposing its locator."""
@@ -233,7 +243,7 @@ class LocalSkillPackageStorage:
         explicitly cleans it up.
         """
         files = await self._read_package_files()
-        if await target._filesystem.exists(target.directory):
+        if await target.exists():
             if not replace:
                 raise OSError("Local Skill copy target already exists")
             if not await target.cleanup():
@@ -439,6 +449,46 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
         to the stable ``name`` directory.  Metadata never points at the
         internal directory.
         """
+        location = self.local_skill_package_location(
+            entity_id=entity_id,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            entity_type=entity_type,
+            is_desktop=is_desktop,
+            is_teclaw=is_teclaw,
+            name=name,
+            directory_name=directory_name,
+        )
+        service = self.create(
+            entity_id=entity_id,
+            bot_owner_id=owner_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+        )
+        local_skill_path_adapter = service._local_skill_path_adapter
+        if is_teclaw and not service.runtime_uses_pool_paths:
+            local_skill_path_adapter = to_local_skill_engine_path
+        return location.directory, LocalSkillPackageStorage(
+            service._device_fs_factory(bot_id, owner_id),
+            local_skill_path_adapter(location.directory),
+        )
+
+    def local_skill_package_location(
+        self,
+        *,
+        entity_id: str,
+        owner_id: str,
+        bot_id: str,
+        engine_type: str | None,
+        entity_type: str,
+        is_desktop: bool,
+        is_teclaw: bool,
+        name: str,
+        directory_name: str | None = None,
+    ) -> LocalSkillPackageLocation:
+        """Resolve layout and the existing DB locator policy without device I/O."""
+
         service = self.create(
             entity_id=entity_id,
             bot_owner_id=owner_id,
@@ -461,14 +511,12 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
                 is_desktop=is_desktop,
                 is_teclaw=is_teclaw,
             )
-            local_dir = self.resolve_local_skill_root(runtime_engine or "openclaw", local_dir)
-        directory = str(local_dir / (directory_name or name))
-        local_skill_path_adapter = service._local_skill_path_adapter
-        if is_teclaw and not service.runtime_uses_pool_paths:
-            local_skill_path_adapter = to_local_skill_engine_path
-        return directory, LocalSkillPackageStorage(
-            service._device_fs_factory(bot_id, owner_id),
-            local_skill_path_adapter(directory),
+            local_dir = self.resolve_local_skill_root(
+                runtime_engine or "openclaw", local_dir
+            )
+        return LocalSkillPackageLocation(
+            directory=str(local_dir / (directory_name or name)),
+            layout="POOL" if service.runtime_uses_pool_paths else "LEGACY",
         )
 
     def local_skill_package_storage_for_locator(

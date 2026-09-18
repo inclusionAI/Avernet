@@ -698,6 +698,104 @@ export function createRunsRouter(
     }
   }));
 
+  /** POST /:flowId/abort — abort a running workflow
+   *  Marks the flow run as "failed" (user-initiated abort) and reconciles all
+   *  still-running node_executions to "failed" with an abort reason.  The abort
+   *  action is recorded in both flow_events and node_executions tables.  Only
+   *  flows in an active state (running, waiting, blocked, pending) can be aborted. */
+  router.post("/:flowId/abort", asyncHandler(async (req: Request, res: Response) => {
+    if (!flowRunRepo || !nodeExecRepo) {
+      res.status(503).json({ error: "Service Unavailable", message: "Database not configured" });
+      return;
+    }
+    try {
+      const flowId = String(req.params.flowId);
+
+      const run = await flowRunRepo.findByFlowId(flowId);
+      if (!run) {
+        res.status(404).json({ error: "Not Found", message: `Flow ${flowId} not found` });
+        return;
+      }
+
+      // Only active flows can be aborted
+      const ACTIVE_STATUSES = new Set(["running", "waiting", "blocked", "pending", "queued", "postActionsRunning"]);
+      if (!ACTIVE_STATUSES.has(run.status)) {
+        res.status(409).json({
+          error: "Conflict",
+          message: `工作流当前状态为「${run.status}」，无法中止。只有运行中的流程可以中止。`,
+        });
+        return;
+      }
+
+      // Get operator identity
+      const operatorId = (req.headers["x-user-id"] as string | undefined)?.trim() || "unknown";
+      const operatorName = (req.headers["x-user-name"] as string | undefined)?.trim() || operatorId;
+      const reason = (req.body as { reason?: string })?.reason ?? `用户 ${operatorName} 手动中止工作流`;
+
+      // 1. Update flow_runs status to "failed" with abort info, set completed_at
+      const completedAt = Math.floor(Date.now() / 1000);
+      const updated = await flowRunRepo.abort(flowId, reason);
+
+      if (!updated) {
+        res.status(500).json({ error: "Internal Server Error", message: "中止操作失败：无法更新流程状态" });
+        return;
+      }
+
+      // 2. Reconcile all still-running node_executions to "failed" with abort reason
+      //    This writes the abort action into the node process table (node_executions)
+      const reconciledNodes = await nodeExecRepo.reconcileStaleRunning(flowId, "failed", `Workflow aborted by ${operatorName}(${operatorId}): ${reason}`);
+
+      // 3. Release flow control slots if available
+      if (flowControlRepo) {
+        try {
+          const slotsReleased = await flowControlRepo.releaseAllSlotsForFlowByFlowId(flowId);
+          const queueDeleted = await flowControlRepo.deleteQueueEntriesForFlowByFlowId(flowId);
+          if (slotsReleased > 0 || queueDeleted > 0) {
+            console.log(`[runs] released flow-control for aborted flow ${flowId}: slots=${slotsReleased}, queue=${queueDeleted}`);
+          }
+        } catch (fcErr) {
+          console.warn(`[runs] failed to release flow-control for aborted flow ${flowId}:`, fcErr);
+        }
+      }
+
+      // 4. Record abort event for audit trail (written to flow_events table)
+      if (eventRepo) {
+        try {
+          await eventRepo.insert({
+            id: `abort-${flowId}-${Date.now()}`,
+            time: completedAt,
+            type: "flow_aborted",
+            flowId,
+            workflowId: run.workflow_id,
+            nodeId: null,
+            data: {
+              action: "abort",
+              operatorId,
+              operatorName,
+              previousStatus: run.status,
+              reconciledNodes,
+              reason,
+            },
+          });
+        } catch (eventErr) {
+          console.warn(`[runs] failed to record abort event for ${flowId}:`, eventErr);
+        }
+      }
+
+      console.log(`[runs] flow ${flowId} aborted by ${operatorName}(${operatorId}): previousStatus=${run.status}, reconciledNodes=${reconciledNodes}`);
+
+      res.json({
+        ok: true,
+        flowId,
+        status: "failed",
+        reconciledNodes,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: "Internal Server Error", message: msg });
+    }
+  }));
+
   /** POST /:flowId/chat — send a free-text chat message via BaaS (multi-turn conversation) */
   router.post("/:flowId/chat", asyncHandler(async (req: Request, res: Response) => {
     if (!flowRunRepo) {

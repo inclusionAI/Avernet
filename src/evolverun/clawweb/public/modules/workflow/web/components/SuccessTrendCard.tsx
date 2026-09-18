@@ -22,7 +22,7 @@ export function SuccessTrendCard({
   currentSuccessRate: string
   currentDetail: string
   compact?: boolean
-  days?: 1 | 7 | 30
+  days?: 1 | 'yesterday' | 7 | 30
   onDaysChange?: (days: 7 | 30) => void
   showRangeSelector?: boolean
   embedded?: boolean
@@ -40,7 +40,8 @@ export function SuccessTrendCard({
       setLoading(true)
       setError(false)
       try {
-        const res = await fetch(`/api/workflows/${encodeURIComponent(workflowId)}/success-trend?days=${days}`)
+        const apiDays = days === 'yesterday' ? 1 : days
+        const res = await fetch(`/api/workflows/${encodeURIComponent(workflowId)}/success-trend?days=${apiDays}`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const json = await res.json()
         if (!cancelled) setData(json.data ?? [])

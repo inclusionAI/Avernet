@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any, Optional
 
 import httpx
@@ -124,6 +124,58 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
             if timeout is not None and isinstance(exc, httpx.TimeoutException):
                 raise DeviceAdapterTimeoutError(
                     f"Adapter request timed out: {method} {path}"
+                ) from exc
+            raise ValueError(f"Failed to connect to adapter: {exc}") from exc
+        except BaasServiceError as exc:
+            raise ValueError(f"Failed to resolve adapter connection: {exc}") from exc
+
+    async def invoke_multipart(
+        self,
+        conn_info: dict[str, Any],
+        path: str,
+        *,
+        files: Mapping[str, tuple[str, bytes, str]],
+        data: Mapping[str, str],
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        request_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
+        request_headers = dict(headers or {})
+        if "x-proxypass-token" in request_headers:
+            raise ValueError("multipart headers must not override the transport token")
+        try:
+            info = await asyncio.to_thread(
+                self._baas_service.get_http_info,
+                bind_id=_binding_id(conn_info),
+                port=int(conn_info.get("engine_port", 20003)),
+                path=path,
+                tenant=conn_info.get("tenant") or None,
+                device_affinity=conn_info.get("device_affinity") or None,
+                device_uuid=conn_info.get("device_uuid") or None,
+            )
+            request_headers["x-proxypass-token"] = info.token
+
+            def post() -> httpx.Response:
+                with httpx.Client(timeout=request_timeout) as client:
+                    return client.post(
+                        info.http_url,
+                        files=dict(files),
+                        data=dict(data),
+                        headers=request_headers,
+                    )
+
+            response = await asyncio.to_thread(post)
+            response.raise_for_status()
+            result = response.json()
+            if not isinstance(result, dict):
+                raise ValueError("Adapter returned a non-object JSON response")
+            return result
+        except httpx.HTTPStatusError as exc:
+            raise self._map_status_error(exc) from exc
+        except httpx.RequestError as exc:
+            if timeout is not None and isinstance(exc, httpx.TimeoutException):
+                raise DeviceAdapterTimeoutError(
+                    f"Adapter request timed out: POST {path}"
                 ) from exc
             raise ValueError(f"Failed to connect to adapter: {exc}") from exc
         except BaasServiceError as exc:

@@ -1,14 +1,11 @@
-"""Service API Protocol for Skills Pool rollout control."""
+"""Service API for Engine-scoped Skills Pool admission policy."""
 
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from agentclaw.community.core.skills_pool.operations import (
-    BatchPromotionEvidence,
+from agentclaw.community.core.skills_pool.operation_models import (
     RolloutConfigSnapshot,
-    RolloutControlGroup,
-    WhitelistMutationResult,
 )
 
 
@@ -21,82 +18,67 @@ class SkillsPoolRolloutServiceProtocol(Protocol):
         *,
         env: str,
         enabled: bool,
+        expected_revision: str | None,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot: ...
 
-    def set_full_rollout(
+    def set_engine_admission(
         self,
         *,
         env: str,
+        engine: str,
         enabled: bool,
-        engine: str | None = None,
+        expected_revision: str | None,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot: ...
 
-    def set_owner_full_rollout(
+    def set_environment_rollout(
+        self,
+        *,
+        env: str,
+        engine: str,
+        enabled: bool,
+        expected_revision: str | None,
+        operator: str,
+        reason: str,
+    ) -> RolloutConfigSnapshot: ...
+
+    def set_owner_rollout(
         self,
         *,
         env: str,
         owner_id: str,
         engine: str,
         enabled: bool,
-        acceptance_batch_id: str | None,
+        expected_revision: str | None,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot: ...
 
-    def promote_engine(
+    def set_bot_allow(
         self,
         *,
         env: str,
+        owner_id: str,
+        bot_id: str,
         engine: str,
-        operator: str,
-        reason: str,
-        acceptance_batch_id: str | None = None,
-    ) -> RolloutConfigSnapshot: ...
-
-    def accept_batch(
-        self,
-        *,
-        env: str,
-        acceptance: BatchPromotionEvidence,
-        operator: str,
-        reason: str,
-    ) -> RolloutConfigSnapshot: ...
-
-    def add_bot(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-        batch_id: str,
-        acceptance_batch_id: str | None,
-        operator: str,
-        reason: str,
-    ) -> WhitelistMutationResult: ...
-
-    def remove_bot(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-        operator: str,
-        reason: str,
-    ) -> WhitelistMutationResult: ...
-
-    def set_control_bot(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-        batch_id: str,
-        group: RolloutControlGroup,
         present: bool,
+        expected_revision: str | None,
+        operator: str,
+        reason: str,
+    ) -> RolloutConfigSnapshot: ...
+
+    def set_bot_exclusion(
+        self,
+        *,
+        env: str,
+        owner_id: str,
+        bot_id: str,
+        engine: str,
+        present: bool,
+        expected_revision: str | None,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot: ...

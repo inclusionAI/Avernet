@@ -32,6 +32,8 @@ from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.api.sse import SseEvent, StreamChunk
 from secbaas.community.core.service.bot_run import (
     BotBindingNotFoundError,
+    BotBindingResolver,
+    BotEngineAdapterRegistry,
     BotRunner,
     BotServiceSelector,
 )
@@ -42,10 +44,16 @@ from secbaas.community.core.service.bot_run._task_concurrency_pool import (
 from secbaas.community.core.service.bot_run._task_message_dispatcher import (
     TaskMessageDispatcher,
 )
+from secbaas.community.plugins.bot.engine_adapter.openclaw.real import (
+    OpenClawAdapter,
+)
 from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
 from secbaas.community.spi.bot_service import BotBindingData
 
 # ==================== Fixtures ====================
+
+# openclaw 走 adapter 表达亲和键（agent:main: 前缀），对齐生产装配
+_OPENCLAW_REGISTRY = BotEngineAdapterRegistry({"openclaw": OpenClawAdapter()})
 
 BOT_ID = "test-bot-000001"
 ENTITY_ID = "test-entity-001"
@@ -153,9 +161,11 @@ def _make_runner(
         bot_service_selector=mock_selector,
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
+        binding_resolver=BotBindingResolver(mock_bot_service_plugin),
         dispatchers=[dispatcher],
         system_config_service=_make_config_service(),
         eval_session_log=MagicMock(),
+        engine_adapter_registry=_OPENCLAW_REGISTRY,
     )
 
 
@@ -174,10 +184,178 @@ def _make_runner_with_task_dispatcher(
         bot_service_selector=mock_selector,
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
+        binding_resolver=BotBindingResolver(mock_bot_service_plugin),
         dispatchers=[dispatcher],
         system_config_service=_make_config_service(),
         eval_session_log=MagicMock(),
+        engine_adapter_registry=_OPENCLAW_REGISTRY,
     )
+
+
+# ==================== Tests: caller 模式后台 dispatch ====================
+
+
+class TestRunnerCallerMode:
+    """caller 模式：HTTP 链路秒回，拉容器 + dispatch 后台化；cookie 不落库。"""
+
+    @pytest.mark.asyncio
+    async def test_deliver_defers_container_provisioning(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """容器拉起挂起时 deliver_message 立即返回；就绪后后台入队。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        container_ready = asyncio.get_running_loop().create_future()
+
+        async def _slow_pull(*args, **kwargs):
+            return await container_ready
+
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(
+            side_effect=_slow_pull
+        )
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        dispatcher.dispatch_inject = AsyncMock()
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        message_id, session_id = await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"cookie": "iam-token", "user_id": "u-1"},
+        )
+
+        # 拉起仍挂起：请求已返回，未入队
+        assert message_id
+        assert session_id
+        dispatcher.dispatch_send.assert_not_awaited()
+
+        # 容器就绪 → 后台任务组 caller binding 并入队
+        container_ready.set_result("sbx-caller-1")
+        for _ in range(100):
+            if not runner._caller_dispatch_tasks:
+                break
+            await asyncio.sleep(0)
+        dispatcher.dispatch_send.assert_awaited_once()
+        kwargs = dispatcher.dispatch_send.await_args.kwargs
+        assert kwargs["binding_info"].sandbox_id == "sbx-caller-1"
+        assert kwargs["binding_info"].device_provider == "caller"
+        mock_bot_service_plugin.get_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="u-1",
+            cookie="IAM_TOKEN=iam-token",
+        )
+
+    @pytest.mark.asyncio
+    async def test_deliver_strips_cookie_from_persisted_run(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """落库的 run metadata 不含 cookie（敏感凭据只留内存链路）。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(return_value="sbx-1")
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"cookie": "iam-token", "user_id": "u-1", "foo": "bar"},
+        )
+        for _ in range(100):
+            if not runner._caller_dispatch_tasks:
+                break
+            await asyncio.sleep(0)
+
+        persisted = mock_run_repo.insert_run.call_args.kwargs["metadata"]
+        assert "cookie" not in persisted
+        assert persisted["foo"] == "bar"
+
+    @pytest.mark.asyncio
+    async def test_caller_dispatch_failure_marks_run_failed(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """后台拉起失败：run 落 FAILED，HTTP 不抛（已提前返回）。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(
+            side_effect=RuntimeError("provisioning failed")
+        )
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        message_id, _ = await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"cookie": "iam-token"},
+        )
+        for _ in range(100):
+            if not runner._caller_dispatch_tasks:
+                break
+            await asyncio.sleep(0)
+
+        dispatcher.dispatch_send.assert_not_awaited()
+        mock_run_repo.update_error.assert_called_once()
+        assert mock_run_repo.update_error.call_args.kwargs["run_id"] == message_id
+
+    @pytest.mark.asyncio
+    async def test_inject_message_defers_caller_dispatch(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """inject 入口同样后台化（dispatch_inject）。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(
+            return_value="sbx-inj"
+        )
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_inject = AsyncMock()
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        message_id, session_id = await runner.inject_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"cookie": "iam-token"},
+            message_id="msg-caller-1",
+        )
+        assert message_id == "msg-caller-1"
+        assert session_id
+        dispatcher.dispatch_inject.assert_not_awaited()
+
+        for _ in range(100):
+            if not runner._caller_dispatch_tasks:
+                break
+            await asyncio.sleep(0)
+        dispatcher.dispatch_inject.assert_awaited_once()
+        kwargs = dispatcher.dispatch_inject.await_args.kwargs
+        assert kwargs["binding_info"].sandbox_id == "sbx-inj"
+        assert kwargs["binding_info"].device_provider == "caller"
 
 
 # ==================== Tests: binding_info passthrough ====================
@@ -196,7 +374,15 @@ class TestBindingInfoPassthrough:
     ):
         mock_bot_service_plugin.get_binding.return_value = arca_binding_data
 
-        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        dispatcher.dispatch_inject = AsyncMock()
+        runner = _make_runner(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            dispatcher=dispatcher,
+        )
         await runner.chat(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             context=context,
@@ -204,8 +390,10 @@ class TestBindingInfoPassthrough:
             metadata={},
         )
 
-        mock_bot_service.create_session.assert_called_once()
-        kw = mock_bot_service.create_session.call_args.kwargs
+        # openclaw 路径走 _plan_session 提前构造，create_session 不再同步调用
+        # binding_info 通过 dispatcher.dispatch_send 透传
+        dispatcher.dispatch_send.assert_called_once()
+        kw = dispatcher.dispatch_send.call_args.kwargs
         binding_info = kw["binding_info"]
         assert isinstance(binding_info, BotBindingInfo)
         assert binding_info.bot_id == BOT_ID
@@ -213,6 +401,8 @@ class TestBindingInfoPassthrough:
         # arca: sandbox_id == device_id
         assert binding_info.sandbox_id == "staff_bot_123"
         assert binding_info.device_provider == "arca"
+        # 提前构造了 session_id，标记为 pending
+        assert kw["session_pending"] is True
 
     @pytest.mark.asyncio
     async def test_no_binding_info_raises_error(
@@ -287,9 +477,12 @@ class TestBotIdOverride:
             metadata={},
         )
 
-        kw = mock_bot_service.create_session.call_args.kwargs
-        assert kw["bot_id"] == APP_ID_BAAS
-        assert kw["bot_id"] != f"{BOT_ID}:{ENTITY_ID}"
+        # baas binding: planned session_id 用 device_id 作为 tc_bot_id
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
+        assert kw["binding_info"].device_id == APP_ID_BAAS
+        # openclaw planned: agent:main:session:{run_id}:user:{user_id}
+        assert kw["session_id"].startswith("agent:main:session:")
+        assert kw["session_pending"] is True
 
     @pytest.mark.asyncio
     async def test_arca_binding_overrides_with_bot_id(
@@ -311,10 +504,10 @@ class TestBotIdOverride:
             metadata={},
         )
 
-        kw = mock_bot_service.create_session.call_args.kwargs
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
         # Arca uses bot_id (not device_id)
-        assert kw["bot_id"] == BOT_ID
-        assert kw["bot_id"] != f"{BOT_ID}:{ENTITY_ID}"
+        assert kw["binding_info"].bot_id == BOT_ID
+        assert kw["session_pending"] is True
 
     @pytest.mark.asyncio
     async def test_deliver_message_also_overrides_with_bot_id(
@@ -337,8 +530,8 @@ class TestBotIdOverride:
             message_id=None,
         )
 
-        kw = mock_bot_service.create_session.call_args.kwargs
-        assert kw["bot_id"] == BOT_ID
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
+        assert kw["binding_info"].bot_id == BOT_ID
 
 
 # ==================== Tests: no binding_info ====================
@@ -392,7 +585,8 @@ class TestContextPassthrough:
             metadata={},
         )
 
-        kw = mock_bot_service.create_session.call_args.kwargs
+        # context 通过 dispatcher.dispatch_send 透传
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
         assert kw["context"] is context
 
     @pytest.mark.asyncio
@@ -472,9 +666,9 @@ class TestSendMessageFlow:
             metadata={},
         )
 
-        # create_session called with binding_info
-        mock_bot_service.create_session.assert_called_once()
-        kw = mock_bot_service.create_session.call_args.kwargs
+        # binding_info 通过 dispatcher.dispatch_send 透传
+        runner._dispatchers[0].dispatch_send.assert_called_once()
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
         assert isinstance(kw["binding_info"], BotBindingInfo)
         # run inserted to DB
         mock_run_repo.insert_run.assert_called_once()
@@ -507,8 +701,8 @@ class TestDeliverMessageFlow:
             message_id=None,
         )
 
-        kw = mock_bot_service.create_session.call_args.kwargs
-        assert kw["bot_id"] == BOT_ID
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
+        assert kw["binding_info"].bot_id == BOT_ID
 
     @pytest.mark.asyncio
     async def test_deliver_message_baas_binding_overrides_with_device_id(
@@ -533,8 +727,8 @@ class TestDeliverMessageFlow:
             message_id=None,
         )
 
-        kw = mock_bot_service.create_session.call_args.kwargs
-        assert kw["bot_id"] == APP_ID_BAAS
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
+        assert kw["binding_info"].device_id == APP_ID_BAAS
 
     @pytest.mark.asyncio
     async def test_deliver_message_ignore_result_metadata(
@@ -686,17 +880,16 @@ class TestDBFirstFlow:
         arca_binding_data,
         context,
     ):
-        """DB-first: insert_run is called before create_session."""
+        """DB-first: insert_run is called before session planning."""
         mock_bot_service_plugin.get_binding.return_value = arca_binding_data
         call_order = []
 
         mock_run_repo.insert_run.side_effect = lambda **kw: call_order.append(
             "insert_run"
         )
-        mock_bot_service.create_session.side_effect = lambda **kw: (
-            call_order.append("create_session"),
-            MagicMock(session_id="sess-001"),
-        )[1]
+        mock_run_repo.update_session_id.side_effect = lambda *a: call_order.append(
+            "update_session_id"
+        )
 
         runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
         await runner.deliver_message(
@@ -707,7 +900,8 @@ class TestDBFirstFlow:
             message_id="test-msg-id",
         )
 
-        assert call_order == ["insert_run", "create_session"]
+        # openclaw 路径：insert_run → plan_session(update_session_id)
+        assert call_order == ["insert_run", "update_session_id"]
 
     @pytest.mark.asyncio
     async def test_deliver_message_marks_failed_when_create_session_fails(
@@ -719,9 +913,13 @@ class TestDBFirstFlow:
         arca_binding_data,
         context,
     ):
-        """When create_session fails, the PENDING record is marked FAILED."""
-        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
-        mock_bot_service.create_session.side_effect = RuntimeError(
+        """When session resolution fails, the PENDING record is marked FAILED.
+
+        plan_session_id 精简后不再返回 None，runner 主链路的 _create_session
+        仅在 _plan_session 内部异常时不可达；同步路径的失败语义改由
+        binding 解析失败覆盖，此处保留对异常路径的 FAILED 标记验证。
+        """
+        mock_bot_service_plugin.get_binding.side_effect = RuntimeError(
             "session creation failed"
         )
 
@@ -741,7 +939,38 @@ class TestDBFirstFlow:
         mock_run_repo.update_error.assert_called_once()
         call_kw = mock_run_repo.update_error.call_args.kwargs
         assert call_kw["run_id"] == "test-msg-id"
-        assert "Session creation failed" in call_kw["error"]
+        assert "session creation failed" in call_kw["error"]
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_marks_failed_when_binding_not_found(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        context,
+    ):
+        """WHEN binding resolution fails after the DB-first insert,
+        THEN the PENDING record is marked FAILED and the error is recorded."""
+        mock_bot_service_plugin.get_binding.side_effect = PaasError(
+            ErrorCode.NOT_FOUND, "not found"
+        )
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        with pytest.raises(BotBindingNotFoundError):
+            await runner.deliver_message(
+                bot_id=f"{BOT_ID}:{ENTITY_ID}",
+                message="hello",
+                context=context,
+                metadata={},
+                message_id="test-msg-id",
+            )
+
+        mock_run_repo.insert_run.assert_called_once()
+        mock_run_repo.update_error.assert_called_once()
+        call_kw = mock_run_repo.update_error.call_args.kwargs
+        assert call_kw["run_id"] == "test-msg-id"
+        assert "BotBindingNotFoundError" in call_kw["error"]
 
     @pytest.mark.asyncio
     async def test_deliver_message_stores_session_id_after_create_session(
@@ -765,9 +994,11 @@ class TestDBFirstFlow:
             message_id="test-msg-id",
         )
 
-        mock_run_repo.update_session_id.assert_called_once_with(
-            "test-msg-id", "agent:main:sess-001"
-        )
+        # openclaw 路径：_plan_session 提前构造并落库
+        mock_run_repo.update_session_id.assert_called_once()
+        call_args = mock_run_repo.update_session_id.call_args
+        assert call_args.args[0] == "test-msg-id"
+        assert call_args.args[1].startswith("agent:main:session:")
 
     @pytest.mark.asyncio
     async def test_deliver_message_idempotent_with_existing_session_id(
@@ -836,6 +1067,78 @@ class TestDBFirstFlow:
         mock_bot_service.create_session.assert_not_called()
         # No insert_run for idempotent hit
         mock_run_repo.insert_run.assert_not_called()
+
+
+# ==================== Tests: explicit session_id reuse ====================
+
+
+class TestExplicitSessionIdReuse:
+    @pytest.mark.asyncio
+    async def test_explicit_session_id_non_teclaw_reused_no_pending(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """非 teclaw 引擎显式传入 session_id：视为已存在，直接复用、不物化。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        mock_run_repo.get_by_run_id.return_value = None
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"session_id": "existing-sess-777"},
+            message_id="msg-explicit-1",
+        )
+
+        # 显式 session_id 直接复用：不走 create_session，也不标记 pending
+        mock_bot_service.create_session.assert_not_called()
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
+        assert kw["session_id"] == "existing-sess-777"
+        assert kw["session_pending"] is False
+        mock_run_repo.update_session_id.assert_called_once_with(
+            "msg-explicit-1", "existing-sess-777"
+        )
+
+    @pytest.mark.asyncio
+    async def test_explicit_session_id_teclaw_keeps_pending(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        context,
+    ):
+        """teclaw 显式传入 session_id：无"传入即存在"前提，仍走物化 get-or-create。"""
+        teclaw_binding = BotBindingData(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            bot_type="service",
+            engine_type="teclaw",
+            binding_id=100101,
+            device_provider="baas",
+            device_id=APP_ID_BAAS,
+        )
+        mock_bot_service_plugin.get_binding.return_value = teclaw_binding
+        mock_run_repo.get_by_run_id.return_value = None
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"session_id": "teclaw-sess-777"},
+            message_id="msg-explicit-2",
+        )
+
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
+        assert kw["session_id"] == "teclaw-sess-777"
+        assert kw["session_pending"] is True
 
 
 # ==================== Tests: inject_message idempotency ====================
@@ -959,9 +1262,14 @@ class TestInjectMessageIdempotency:
         )
 
         assert msg_id == "new-msg-id"
-        assert sess_id == "agent:main:sess-001"
+        # openclaw 路径：_plan_session 提前构造 session_id
+        assert sess_id.startswith("agent:main:session:")
         mock_run_repo.insert_run.assert_called_once()
-        mock_bot_service.create_session.assert_called_once()
+        # create_session 不再同步调用（延迟到物化）
+        mock_bot_service.create_session.assert_not_called()
+        # session_pending 透传给 dispatcher
+        kw = runner._dispatchers[0].dispatch_inject.call_args.kwargs
+        assert kw["session_pending"] is True
 
 
 # ==================== Tests: deliver_message_stream idempotency ====================
@@ -1014,10 +1322,6 @@ class TestDeliverMessageStreamIdempotency:
             return
             yield  # make it an async generator
 
-        mock_bot_service.create_session = AsyncMock(
-            return_value=MagicMock(session_id="sess-stream-1")
-        )
-
         runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
         # Patch dispatch_send_stream to return a dummy async iterator
         runner._dispatchers[0].dispatch_send_stream = MagicMock(
@@ -1033,8 +1337,12 @@ class TestDeliverMessageStreamIdempotency:
         )
 
         assert msg_id == "new-stream-id"
-        assert sess_id == "sess-stream-1"
+        # openclaw 路径：_plan_session 提前构造 session_id
+        assert sess_id.startswith("agent:main:session:")
         mock_run_repo.insert_run.assert_called_once()
+        # session_pending 透传给 dispatcher
+        kw = runner._dispatchers[0].dispatch_send_stream.call_args.kwargs
+        assert kw["session_pending"] is True
 
 
 # ==================== Tests: _check_idempotency direct ====================
@@ -1478,9 +1786,11 @@ def _make_runner_with_config(
         bot_service_selector=mock_selector,
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
+        binding_resolver=BotBindingResolver(mock_bot_service_plugin),
         dispatchers=dispatchers,
         system_config_service=config_service,
         eval_session_log=MagicMock(),
+        engine_adapter_registry=_OPENCLAW_REGISTRY,
     )
 
 
@@ -1498,6 +1808,7 @@ class TestSelectDispatcherConfig:
             bot_service_selector=mock_selector,
             run_repository=mock_run_repo,
             bot_service_plugin=mock_bot_service_plugin,
+            binding_resolver=BotBindingResolver(mock_bot_service_plugin),
             dispatchers=[queue_d, task_d],
             system_config_service=_make_config_service(),
             eval_session_log=MagicMock(),
@@ -1768,6 +2079,7 @@ class TestSelectDispatcherBcnSwitch:
             bot_service_selector=mock_selector,
             run_repository=mock_run_repo,
             bot_service_plugin=mock_bot_service_plugin,
+            binding_resolver=BotBindingResolver(mock_bot_service_plugin),
             dispatchers=[queue_d, task_d],
             system_config_service=_make_config_service(),
             eval_session_log=MagicMock(),
@@ -2104,6 +2416,7 @@ class TestListSessions:
             bot_service_selector=mock_selector,
             run_repository=mock_run_repo,
             bot_service_plugin=None,
+            binding_resolver=MagicMock(),
             dispatchers=[],
             system_config_service=_make_config_service(),
             eval_session_log=MagicMock(),
@@ -2333,6 +2646,7 @@ def _make_runner_with_eval_session_log(
         bot_service_selector=mock_selector,
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
+        binding_resolver=BotBindingResolver(mock_bot_service_plugin),
         dispatchers=[dispatcher],
         system_config_service=_make_config_service(),
         eval_session_log=eval_session_log,
@@ -2685,3 +2999,142 @@ class TestEvalSessionLogStream:
             context=context,
             metadata={"eval_id": "eval-str-4", "session_id": "original-sess"},
         )
+
+
+# ==================== Tests: _resolve_binding default_tag passthrough ====================
+
+
+class TestResolveBindingDefaultTag:
+    """_resolve_binding 中 default_tag 从 metadata 提取并透传给 get_binding。"""
+
+    @pytest.mark.asyncio
+    async def test_eval_stage_extracts_default_tag_from_metadata(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin, arca_binding_data
+    ):
+        """lifecycle_stage=eval + metadata 含 default_tag → 透传给 get_binding。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner._resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            lifecycle_stage="eval",
+            metadata={"default_tag": "default"},
+        )
+
+        assert result is not None
+        mock_bot_service_plugin.get_binding.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            stage="eval",
+            default_tag="default",
+        )
+
+    @pytest.mark.asyncio
+    async def test_eval_stage_no_default_tag_in_metadata(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin, arca_binding_data
+    ):
+        """lifecycle_stage=eval + metadata 不含 default_tag → default_tag=None。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner._resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            lifecycle_stage="eval",
+            metadata={"eval_id": "eval-001"},
+        )
+
+        assert result is not None
+        mock_bot_service_plugin.get_binding.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            stage="eval",
+            default_tag=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_eval_stage_metadata_is_none(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin, arca_binding_data
+    ):
+        """lifecycle_stage=eval + metadata=None → default_tag=None。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner._resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            lifecycle_stage="eval",
+            metadata=None,
+        )
+
+        assert result is not None
+        call_kw = mock_bot_service_plugin.get_binding.call_args.kwargs
+        assert call_kw["default_tag"] is None
+
+    @pytest.mark.asyncio
+    async def test_online_stage_ignores_default_tag(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin, arca_binding_data
+    ):
+        """lifecycle_stage=online → 即使 metadata 含 default_tag 也不透传。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner._resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            lifecycle_stage="online",
+            metadata={"default_tag": "default"},
+        )
+
+        assert result is not None
+        mock_bot_service_plugin.get_binding.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            stage="online",
+            default_tag=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_not_found_error_returns_none_with_default_tag(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """lifecycle_stage=eval + default_tag + NOT_FOUND → 返回 None（不抛异常）。"""
+        mock_bot_service_plugin.get_binding.side_effect = PaasError(
+            ErrorCode.NOT_FOUND, "binding not found"
+        )
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner._resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            lifecycle_stage="eval",
+            metadata={"default_tag": "default"},
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_chat_with_eval_default_tag_passes_through(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """chat() 入口：metadata 含 lifecycle_stage=eval + default_tag →
+        _resolve_binding 提取 default_tag 并透传给 get_binding。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.chat(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            context=context,
+            message="hello",
+            metadata={
+                "bot_options": {"lifecycle_stage": "eval"},
+                "default_tag": "default",
+            },
+        )
+
+        # 验证 get_binding 收到 default_tag="default"
+        call_kw = mock_bot_service_plugin.get_binding.call_args.kwargs
+        assert call_kw["stage"] == "eval"
+        assert call_kw["default_tag"] == "default"

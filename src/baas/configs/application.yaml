@@ -83,13 +83,10 @@ user_config:
     session_lock_renew_seconds: 60    # session 串行锁自动续期间隔（秒）
     qpm_refresh_seconds: 30.0         # QPM 配置刷新间隔（秒）
     poll_interval_seconds: 0.1        # Worker 轮询间隔（秒）
-    discover_limit: 50                # 每轮发现的 bot 数上限
+    discover_limit: 200               # 每轮发现的 bot 数上限
     candidates_per_bot: 5             # 每个 bot 单次认领的候选数
     max_concurrent: 50                # 单 Worker 最大并发执行数
     heartbeat_interval_seconds: 30.0  # 心跳间隔（秒）
-    machine_count: 1                  # 在线 Worker 机器数（用于均分 QPM）
-    bucket_sweep_interval_seconds: 300.0  # 分桶扫描间隔（秒）
-    bucket_idle_ttl_seconds: 600.0        # 分桶空闲 TTL（秒）
 
   teamclaw:
     base_url: "https://teamclaw.example.com"
@@ -184,6 +181,13 @@ user_config:
     base_url: "https://backend.example.com"
     timeout: 10
     max_retries: 0
+    # app-caller-connection 的 Principal 签发（密钥本身不放这里，走 secret 插件）。
+    # issuer / audience 为对端 decode 值校验的契约值。
+    principal:
+      secret_name: "signing_key"
+      issuer: "baas"
+      audience: "backend"
+      ttl_seconds: 60
 
   # agentclawproxy 代理服务主机名（按环境）
   # 用于 proxypass URL 和 WS relay 构造。

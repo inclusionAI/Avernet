@@ -352,11 +352,6 @@ class SkillCenterModule(
             scope=singleton,
         )
         binder.bind(
-            BotRuntimeProjector,
-            to=BotRuntimeProjector,
-            scope=singleton,
-        )
-        binder.bind(
             DirectActivationServiceProtocol,
             to=DirectActivationService,
             scope=singleton,
@@ -381,6 +376,14 @@ class SkillCenterModule(
             to=SkillPublishService,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    def employee_guarded_runtime_projector(self, injector: Injector) -> BotRuntimeProjector:
+        from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeServiceProtocol
+        return injector.create_object(BotRuntimeProjector, additional_kwargs={
+            "employee_service_provider": lambda: injector.get(DigitalEmployeeServiceProtocol),
+        })
 
     @singleton
     @provider

@@ -1,14 +1,11 @@
 """Hermes 引擎 adapter。
 
-两处引擎特有行为:
+一处引擎特有行为（``session_consistency_key`` 用基类默认通用亲和键格式）:
 
-1. ``session_consistency_key`` 返回 ``agent:{tc_bot_id}:session:{run_id}:user:{user_id}``
-   作为 device 亲和键（与 claude_code 同形），让同一会话的请求稳定落到同一设备。
-
-2. ``create_adapter_session``:Hermes 侧新建 session 后，其真正可用的 session_id 是异步
-   持久化产生的（形如 ``YYYYMMDD_HHMMSS_xxxxxx`` 或 ``api-xxxxx``）。若直接用创建即时返回的
-   临时 id 去发消息会失效，因此这里在创建后轮询等待持久化 id 就绪;超过
-   ``session_persist_timeout_seconds`` 仍未就绪则抛 ``BotNotAvailableError``。
+``create_adapter_session``:Hermes 侧新建 session 后，其真正可用的 session_id 是异步
+持久化产生的（形如 ``YYYYMMDD_HHMMSS_xxxxxx`` 或 ``api-xxxxx``）。若直接用创建即时返回的
+临时 id 去发消息会失效，因此这里在创建后轮询等待持久化 id 就绪;超过
+``session_persist_timeout_seconds`` 仍未就绪则抛 ``BotNotAvailableError``。
 """
 
 from __future__ import annotations
@@ -20,6 +17,7 @@ from typing import Any
 
 from secbaas.community.api.bot_runtime import BotNotAvailableError
 from secbaas.community.logger import get_logger
+from secbaas.community.spi.bot.engine_adapter import extract_session_key_from_planned_id
 
 from ..._base import BaseEngineAdapter
 
@@ -51,39 +49,28 @@ class HermesAdapter(BaseEngineAdapter):
         self._persist_timeout = session_persist_timeout_seconds
         self._poll_interval = poll_interval_seconds
 
-    def session_consistency_key(
-        self,
-        *,
-        tc_bot_id: str,
-        user_id: str,
-        run_id: str | None,
-        session_id: str | None = None,
-    ) -> str | None:
-        if session_id is not None:
-            return session_id
-        return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"
-
     async def create_adapter_session(
         self,
         *,
         session_client: Any,
-        session_id: str | None,
+        planned_id: str,
         user_id: str,
         metadata: dict[str, Any],
         bot_id: str,
-        run_id: str | None,
+        session_pending: bool = True,
     ) -> tuple[str, bool]:
-        if session_id:
+        """hermes：pending 解析裸 key 以 uuid 新建并轮询持久化；显式 id 复用。"""
+        if not session_pending:
             logger.info(
-                "Adapter session already exists: session_id=%s, reusing", session_id
+                "Adapter session already exists: session_id=%s, reusing", planned_id
             )
-            return session_id, True
-
+            return planned_id, True
+        key = extract_session_key_from_planned_id(planned_id)
         adapter_session = await session_client.create_session(
             title=metadata.get("title", None),
             user_id=user_id,
             agent_id=bot_id,
-            uuid=run_id,
+            uuid=key,
             model=metadata.get("model", None),
             engine=self.engine_type,
         )

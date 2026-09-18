@@ -112,6 +112,48 @@ class EditorPolicy:
                 "editor must be a member of the Bot Team Space"
             )
 
+    def space_member(
+        self,
+        *,
+        bot: Mapping[str, Any],
+        user_id: str,
+        cache: dict[str, bool] | None = None,
+    ) -> bool:
+        """Whether the user is a live member of the bot's Space.
+
+        The source of the space-derived MEMBER grant: a Bot assigned to a
+        Space is under that Space's collaboration contract, so a member of
+        the Space may work on it at MEMBER even without an explicit
+        collaborator row. This is a *granting* probe, unlike
+        :meth:`allows_editor`, which is a *revoking* one — an unresolvable
+        Space reference therefore answers ``False`` (fail closed: no grant
+        from a Space we cannot see) rather than the permissive answer
+        :meth:`allows_editor` gives for its own question. A bot with no
+        Space, or only its owner's personal one, has nobody to grant from.
+
+        ``cache`` shares a dict with :meth:`allows_editor` under distinct
+        keys, so one bulk resolve can pay each Space read once.
+        """
+        raw_space_id = bot.get("space_id")
+        if raw_space_id in (None, "") or str(raw_space_id).startswith("personal:"):
+            return False
+        key = f"member:{raw_space_id}"
+        if cache is not None and key in cache:
+            return cache[key]
+        try:
+            space = self._space_access_service.require_space_reference(
+                space_ref=str(raw_space_id)
+            )
+            role = self._space_access_service.get_space_role(
+                space_id=space.id, user_id=user_id
+            )
+            member = role is not None
+        except (SpaceAccessDeniedError, SpaceNotFoundError, ValueError):
+            member = False
+        if cache is not None:
+            cache[key] = member
+        return member
+
     def allows_editor(
         self,
         *,

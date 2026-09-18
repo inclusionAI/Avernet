@@ -13,14 +13,25 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from secbaas.community.api.bot_runtime import BotChatContext
-from secbaas.community.core.service.bot_run import BotRunner, BotServiceSelector
+from secbaas.community.core.service.bot_run import (
+    BotBindingResolver,
+    BotEngineAdapterRegistry,
+    BotRunner,
+    BotServiceSelector,
+)
 from secbaas.community.core.service.bot_run._internal_protocols import MessageDispatcher
+from secbaas.community.plugins.bot.engine_adapter.openclaw.real import (
+    OpenClawAdapter,
+)
 from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
 from secbaas.community.spi.bot_service import (
     BotBindingData,
     BotServicePlugin,
     LogRelationPayload,
 )
+
+# openclaw 走 adapter 表达亲和键（agent:main: 前缀），对齐生产装配
+_OPENCLAW_REGISTRY = BotEngineAdapterRegistry({"openclaw": OpenClawAdapter()})
 
 # ==================== Fixtures ====================
 
@@ -111,9 +122,11 @@ def _make_runner(
         bot_service_selector=mock_selector,
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
+        binding_resolver=BotBindingResolver(mock_bot_service_plugin),
         dispatchers=[dispatcher],
         system_config_service=MagicMock(),
         eval_session_log=NoopEvalSessionLog(),
+        engine_adapter_registry=_OPENCLAW_REGISTRY,
     )
 
 
@@ -376,6 +389,10 @@ class TestMetadataBizFields:
 
         await _flush_background_report()
         payload = mock_bot_service_plugin.report.call_args[0][0]
+        # openclaw 路径：session_id 为 _plan_session 提前构造的结构化 id
         assert payload.refs == [
-            {"ref_type": "session_key", "ref_value": "agent:main:sess-001"}
+            {
+                "ref_type": "session_key",
+                "ref_value": f"agent:main:session:test-msg-id:user:{ENTITY_ID}",
+            }
         ]

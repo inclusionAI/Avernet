@@ -1596,6 +1596,51 @@ export class EvolveRepository {
       [userId, ...taskTypes, limit],
     );
   }
+  /** Only Base-backed session analysis participates in Host recovery. */
+  async listActiveSessionAisTasks(afterId: number, limit: number): Promise<EvolveTaskRow[]> {
+    return this.db.query<EvolveTaskRow>(
+      `SELECT * FROM ce_tasks WHERE task_type = 'session_analysis'
+       AND status IN ('pending', 'running') AND id > ? ORDER BY id LIMIT ?`,
+      [afterId, limit],
+    );
+  }
+
+  /** Atomically settle the current Base-backed session analysis attempt. */
+  async applySessionAisStatus(taskId: string, stepId: string, input: {
+    status: 'running' | 'succeeded' | 'failed'; summary?: string; output?: Record<string, unknown>;
+    errorCode?: string; errorMessage?: string; retryable?: boolean;
+  }): Promise<boolean> {
+    const now = this.db.dialect.now();
+    return this.db.transaction(async tx => {
+      const task = (await tx.query<EvolveTaskRow>(
+        "SELECT * FROM ce_tasks WHERE task_id = ? AND task_type = 'session_analysis'",
+        [taskId],
+      ))[0];
+      if (!task || !['pending', 'running'].includes(task.status)
+        || JSON.parse(task.config_json).stepId !== stepId) return false;
+      // 以下为安全注释COSEC：当前 attempt 与终态 CAS，拒绝旧容器或监控覆盖已完成结果。
+      const updated = await tx.exec(
+        `UPDATE ce_steps SET status = ?, summary = COALESCE(?, summary),
+         output_json = COALESCE(?, output_json), error_code = COALESCE(?, error_code),
+         error_message = COALESCE(?, error_message), retryable = COALESCE(?, retryable),
+         started_at = COALESCE(started_at, ?), completed_at = ?, gmt_modified = ?
+         WHERE step_id = ? AND task_id = ? AND step_type = 'session_ais'
+         AND status NOT IN ('succeeded', 'failed', 'canceled')
+         AND EXISTS (SELECT 1 FROM ce_tasks WHERE task_id = ? AND config_json = ?
+                     AND status IN ('pending', 'running'))`,
+        [input.status, input.summary ?? null, input.output === undefined ? null : JSON.stringify(input.output),
+          input.errorCode ?? null, input.errorMessage ?? null, input.retryable == null ? null : Number(input.retryable),
+          now, input.status === 'running' ? null : now, now, stepId, taskId, taskId, task.config_json],
+      );
+      if (updated.affectedRows !== 1) return false;
+      await tx.exec(
+        "UPDATE ce_tasks SET status = ?, error_message = ?, gmt_modified = ? WHERE task_id = ?",
+        [input.status === 'succeeded' ? 'completed' : input.status, input.errorMessage ?? null, now, taskId],
+      );
+      return true;
+    });
+  }
+
   async listActiveTasksByTypes(taskTypes: string[], limit = 100): Promise<EvolveTaskRow[]> {
     if (!taskTypes.length) return [];
     return this.db.query<EvolveTaskRow>(

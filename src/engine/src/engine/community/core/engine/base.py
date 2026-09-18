@@ -153,6 +153,7 @@ _PLUGIN_CAPABILITY_DOMAINS: tuple[tuple[str, tuple[Capability, ...]], ...] = (
             Capability.SKILLS_SYNC_SYMLINKS,
             Capability.SKILLS_SYNC_BINDPATHS,
             Capability.SKILLS_CLEAN_SYMLINKS,
+            Capability.SKILLS_LOCAL_PACKAGE_APPLY,
         ),
     ),
     (

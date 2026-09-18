@@ -22,6 +22,11 @@ vi.mock('../../NodeAnalysisPanel', () => ({ default: () => <div>节点分析</di
 vi.mock('@avernet/workflow/web/api/hooks', () => ({
   useEligibleBotsForAnalyze: () => ({ data: { bots: [{ botId: 'origin', botName: 'Origin Bot', env: 'prod' }] }, isLoading: false }),
 }))
+vi.mock('@avernet/clawweb-shared/web/api/hooks', () => ({
+  useDeleteFlowRun: () => ({ mutate: vi.fn(), isPending: false }),
+  useRerunFlowRun: () => ({ mutate: vi.fn(), isPending: false }),
+  useRunArchive: () => ({ data: null, isLoading: false, isError: false, error: null }),
+}))
 
 import OverviewTab from '../OverviewTab'
 
@@ -73,15 +78,14 @@ describe('task escort overview layout', () => {
     const data = mocks.useFlowRuns().data
     data.runs = [{ flow_id: 'run-1', workflow_id: workflow.workflow_id, origin_bot_id: 'origin:owner', status: 'failed', node_count: 1, failed_count: 1, succeeded_count: 0 }]
     const view = render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
-    await userEvent.click(screen.getByRole('button', { name: '分析', exact: true }))
+    await userEvent.click(screen.getByTitle('分析'))
     expect(screen.getByText('选择 Bot 分析运行')).toBeInTheDocument()
     expect(screen.getByText('发起 Bot')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '确认分析' }))
     expect(mocks.analyze.mutate).toHaveBeenCalledWith({ flowId: 'run-1', botId: 'origin', botEnv: 'prod' }, expect.any(Object))
     Object.assign(mocks.analyze, { isPending: true, variables: { flowId: 'run-1' } })
     view.rerender(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
-    expect(screen.getByRole('button', { name: '派发中' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '分析中...' })).toBeDisabled()
+    expect(screen.getByTitle('分析')).toBeDisabled()
     Object.assign(mocks.analyze, { isPending: false, isError: true, error: new Error('Bot unavailable') })
     view.rerender(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
     expect(screen.getByRole('alert')).toHaveTextContent('Bot unavailable')
@@ -111,7 +115,7 @@ describe('task escort overview layout', () => {
     mockQueries()
     mocks.useFlowRuns().data.runs = [{ flow_id: 'run-retry', workflow_id: workflow.workflow_id, status: 'failed', evolution_analysis_status: status, node_count: 1, failed_count: 1, succeeded_count: 0 }]
     render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
-    await userEvent.click(screen.getByRole('button', { name: '重新分析' }))
+    await userEvent.click(screen.getByTitle('重新分析'))
     expect(screen.getByText('选择 Bot 分析运行')).toBeInTheDocument()
   })
 

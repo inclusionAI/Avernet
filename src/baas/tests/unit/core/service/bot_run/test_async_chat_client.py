@@ -47,8 +47,8 @@ def mock_bot_ws_instance(mock_bot_ws):
         }
     )
     instance.close = AsyncMock()
-    instance.chat_send = AsyncMock()
-    instance.chat_inject = AsyncMock()
+    instance.chat_send = AsyncMock(return_value={"ok": True})
+    instance.chat_inject = AsyncMock(return_value={"ok": True})
     instance.connected = True
     return instance
 
@@ -246,6 +246,7 @@ class TestSendMessage:
             if state:
                 state.content = "Hello, world!"
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = fire_chat_complete
 
@@ -295,6 +296,7 @@ class TestSendMessage:
             state = client._sessions.get(sk)
             if state:
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = fire_chat_complete
 
@@ -342,6 +344,7 @@ class TestSendMessage:
             state = client._sessions.get(sk)
             if state:
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = fire_chat_complete
 
@@ -395,6 +398,7 @@ class TestSendMessage:
             if s:
                 s.content = "new content"
                 s.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = fire_chat_complete
 
@@ -826,6 +830,7 @@ class TestIntegration:
                     "message": {"content": [{"text": "full response"}]},
                 }
             )
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = simulate_chat_response
 
@@ -863,6 +868,7 @@ class TestIntegration:
                     "message": {"content": [{"text": "done"}]},
                 }
             )
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = simulate_with_agent
 
@@ -891,7 +897,7 @@ class TestIntegration:
         await client.connect()
 
         async def slow_chat_send(*args, **kwargs):
-            pass
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = slow_chat_send
 
@@ -932,6 +938,7 @@ class TestIntegration:
         async def never_complete(*args, **kwargs):
             # 模拟一个永远不完成的发送（不设置 chat_complete）
             await asyncio.sleep(10)
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = never_complete
 
@@ -986,6 +993,7 @@ class TestConcurrencySemaphore:
             state = client._sessions.get(sk)
             if state:
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = slow_chat_send
 
@@ -1018,6 +1026,7 @@ class TestConcurrencySemaphore:
             state = client._sessions.get(sk)
             if state:
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = instant_chat_send
 
@@ -1061,6 +1070,7 @@ class TestSessionKeyQueueing:
                 state.content = "first response"
                 state.chat_complete.set()
             order.append("first_end")
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = first_send
 
@@ -1078,6 +1088,7 @@ class TestSessionKeyQueueing:
                 state.content = "second response"
                 state.chat_complete.set()
             order.append("second_end")
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = second_send
 
@@ -1111,6 +1122,7 @@ class TestSessionKeyQueueing:
 
         async def never_complete(*args, **kwargs):
             await asyncio.sleep(10)
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = never_complete
 
@@ -1146,6 +1158,7 @@ class TestSessionKeyQueueing:
             state = client._sessions.get(sk)
             if state:
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = instant_send
 
@@ -1362,6 +1375,7 @@ class TestInjectMessageSemaphore:
         async def slow_inject(*args, **kwargs):
             in_inject.set()
             await barrier.wait()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_inject.side_effect = slow_inject
 
@@ -1375,6 +1389,7 @@ class TestInjectMessageSemaphore:
 
         async def inject_with_signal(*args, **kwargs):
             started.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_inject.side_effect = inject_with_signal
 
@@ -1412,6 +1427,7 @@ class TestInjectMessageSemaphore:
         async def count_inject(*args, **kwargs):
             nonlocal call_count
             call_count += 1
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_inject.side_effect = count_inject
 
@@ -1450,12 +1466,14 @@ class TestChatRequestErrorPropagation:
         client = AsyncChatClient(uri="ws://host/ws")
         await client.connect()
 
-        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
-            message="chat.send failed: UNAVAILABLE - Session validation failed",
-            error_code="UNAVAILABLE",
-            error_message="Session validation failed",
-            retryable=True,
-        )
+        mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
+            "ok": False,
+            "error": {
+                "code": "UNAVAILABLE",
+                "message": "Session validation failed",
+                "retryable": True,
+            },
+        }
 
         with pytest.raises(ChatRequestError, match="chat.send failed"):
             await client.send_message("Hi", session_key="sk-err")
@@ -1480,7 +1498,7 @@ class TestChatRequestErrorPropagation:
         client = AsyncChatClient(uri="ws://host/ws")
         await client.connect()
 
-        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
+        error_obj = ChatRequestError(
             message="chat.send failed: UNAVAILABLE - Session validation failed",
             error_code="UNAVAILABLE",
             error_message="Session validation failed",
@@ -1489,13 +1507,17 @@ class TestChatRequestErrorPropagation:
         # Capture session state before the error to verify chat_complete is set
         captured_state = None
 
-        original_chat_send = mock_bot_ws_instance.chat_send.side_effect
-
         async def chat_send_with_state_capture(*args, **kwargs):
             state = client._sessions.get(kwargs.get("session_key"))
             nonlocal captured_state
             captured_state = state
-            raise original_chat_send
+            return {
+                "ok": False,
+                "error": {
+                    "code": "UNAVAILABLE",
+                    "message": "Session validation failed",
+                },
+            }
 
         mock_bot_ws_instance.chat_send.side_effect = chat_send_with_state_capture
 
@@ -1526,11 +1548,13 @@ class TestChatRequestErrorPropagation:
         client = AsyncChatClient(uri="ws://host/ws")
         await client.connect()
 
-        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
-            message="chat.send failed: UNAVAILABLE - Session validation failed",
-            error_code="UNAVAILABLE",
-            error_message="Session validation failed",
-        )
+        mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
+            "ok": False,
+            "error": {
+                "code": "UNAVAILABLE",
+                "message": "Session validation failed",
+            },
+        }
 
         with pytest.raises(ChatRequestError, match="chat.send failed"):
             await client.send_message("Hi", session_key="sk-err")
@@ -1566,11 +1590,13 @@ class TestChatRequestErrorStream:
         client = AsyncChatClient(uri="ws://host/ws")
         await client.connect()
 
-        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
-            message="chat.send failed: UNAVAILABLE - Session validation failed",
-            error_code="UNAVAILABLE",
-            error_message="Session validation failed",
-        )
+        mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
+            "ok": False,
+            "error": {
+                "code": "UNAVAILABLE",
+                "message": "Session validation failed",
+            },
+        }
 
         chunks = []
         async for chunk in client.send_message_stream("Hi", session_key="sk-err"):
@@ -1608,11 +1634,13 @@ class TestChatRequestErrorStream:
         state = SessionState()
         client._sessions[sk] = state
 
-        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
-            message="chat.send failed: UNAVAILABLE - Session validation failed",
-            error_code="UNAVAILABLE",
-            error_message="Session validation failed",
-        )
+        mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
+            "ok": False,
+            "error": {
+                "code": "UNAVAILABLE",
+                "message": "Session validation failed",
+            },
+        }
 
         chunks = []
         async for chunk in client.send_message_stream("Hi", session_key=sk):
@@ -1643,11 +1671,13 @@ class TestChatRequestErrorStream:
         client = AsyncChatClient(uri="ws://host/ws")
         await client.connect()
 
-        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
-            message="chat.send failed: UNAVAILABLE - Session validation failed",
-            error_code="UNAVAILABLE",
-            error_message="Session validation failed",
-        )
+        mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
+            "ok": False,
+            "error": {
+                "code": "UNAVAILABLE",
+                "message": "Session validation failed",
+            },
+        }
 
         chunks = []
         async for chunk in client.send_message_stream("Hi", session_key="sk-err"):
@@ -1689,6 +1719,7 @@ class TestBotSessionError:
                 state.state = "error"
                 state.content = "CONNECTION_ERROR"
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = fire_error_chat_complete
 
@@ -1719,6 +1750,7 @@ class TestBotSessionError:
                 state.state = "final"
                 state.content = "normal response"
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = fire_final_chat_complete
 
@@ -1753,6 +1785,7 @@ class TestBotSessionError:
                     "errorMessage": "CONNECTION_ERROR",
                 }
             )
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = simulate_agent_error
 
@@ -1778,11 +1811,13 @@ class TestBotSessionError:
         client = AsyncChatClient(uri="ws://host/ws")
         await client.connect()
 
-        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
-            message="chat.send failed: UNAVAILABLE - Session validation failed",
-            error_code="UNAVAILABLE",
-            error_message="Session validation failed",
-        )
+        mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
+            "ok": False,
+            "error": {
+                "code": "UNAVAILABLE",
+                "message": "Session validation failed",
+            },
+        }
 
         chunks = []
         async for chunk in client.send_message_stream("Hi", session_key="sk-err"):
@@ -1820,11 +1855,13 @@ class TestBotSessionError:
         state = SessionState()
         client._sessions[sk] = state
 
-        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
-            message="chat.send failed: UNAVAILABLE - Session validation failed",
-            error_code="UNAVAILABLE",
-            error_message="Session validation failed",
-        )
+        mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
+            "ok": False,
+            "error": {
+                "code": "UNAVAILABLE",
+                "message": "Session validation failed",
+            },
+        }
 
         chunks = []
         async for chunk in client.send_message_stream("Hi", session_key=sk):
@@ -1855,11 +1892,13 @@ class TestBotSessionError:
         client = AsyncChatClient(uri="ws://host/ws")
         await client.connect()
 
-        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
-            message="chat.send failed: UNAVAILABLE - Session validation failed",
-            error_code="UNAVAILABLE",
-            error_message="Session validation failed",
-        )
+        mock_bot_ws_instance.chat_send.side_effect = lambda *a, **kw: {
+            "ok": False,
+            "error": {
+                "code": "UNAVAILABLE",
+                "message": "Session validation failed",
+            },
+        }
 
         chunks = []
         async for chunk in client.send_message_stream("Hi", session_key="sk-err"):

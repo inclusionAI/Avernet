@@ -19,10 +19,13 @@ class RolloutOperationError(ValueError):
 class RolloutBotEntry:
     owner_id: str
     bot_id: str
+    engine: str | None = None
     batch_id: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         value = {"owner_id": self.owner_id, "bot_id": self.bot_id}
+        if self.engine is not None:
+            value["engine"] = self.engine
         if self.batch_id is not None:
             value["batch_id"] = self.batch_id
         return value
@@ -79,14 +82,42 @@ class RolloutConfigSnapshot:
     record_version: str | None
     config_revision: str | None
     enabled: bool
-    enable_all: bool
-    promoted_engines: tuple[str, ...]
-    whitelist: tuple[RolloutBotEntry, ...]
-    negative_controls: tuple[RolloutBotEntry, ...]
-    teclaw_controls: tuple[RolloutBotEntry, ...]
+    schema_version: int
+    engine_admission: dict[str, bool]
+    bot_allowlist: tuple[RolloutBotEntry, ...]
+    owner_rollouts: tuple[RolloutOwnerEntry, ...]
+    environment_rollouts: tuple[str, ...]
+    bot_exclusions: tuple[RolloutBotEntry, ...]
     audit_log: tuple[RolloutAuditEvent, ...]
-    full_rollout_engines: tuple[str, ...] = ()
-    full_rollout_owners: tuple[RolloutOwnerEntry, ...] = ()
+    legacy_teclaw_controls: tuple[RolloutBotEntry, ...] = ()
+
+    @property
+    def promoted_engines(self) -> tuple[str, ...]:
+        """v1 read compatibility for historical batch reporting."""
+
+        return tuple(
+            engine for engine, enabled in self.engine_admission.items() if enabled
+        )
+
+    @property
+    def whitelist(self) -> tuple[RolloutBotEntry, ...]:
+        return self.bot_allowlist
+
+    @property
+    def negative_controls(self) -> tuple[RolloutBotEntry, ...]:
+        return self.bot_exclusions
+
+    @property
+    def teclaw_controls(self) -> tuple[RolloutBotEntry, ...]:
+        return self.legacy_teclaw_controls
+
+    @property
+    def full_rollout_engines(self) -> tuple[str, ...]:
+        return self.environment_rollouts
+
+    @property
+    def full_rollout_owners(self) -> tuple[RolloutOwnerEntry, ...]:
+        return self.owner_rollouts
 
 
 @dataclass(frozen=True, slots=True)

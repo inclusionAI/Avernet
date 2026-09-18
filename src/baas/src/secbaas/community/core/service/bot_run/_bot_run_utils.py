@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING, Any
 
+import aiohttp
+
 from secbaas.community.api.bot_runtime import BotBindingInfo
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotBindingData
@@ -10,22 +12,27 @@ from secbaas.community.spi.eval_env import EvalSessionLog
 if TYPE_CHECKING:
     from secbaas.community.api.bot_runtime import BotChatContext
     from secbaas.community.core.repository.bot_run import BotRunRecord
+    from secbaas.community.spi.bot.engine_adapter import BotEngineAdapter
 
 logger = get_logger("core-bot-run")
 
+# openclaw 给持久化 session id 加的固定前缀; 路由亲和键必须对有无该前缀不敏感,
+# 否则同一会话经 DingTalk(裸 id)与 Open API(带前缀 id)两次投递会哈希到不同实例。
+_AGENT_MAIN_PREFIX = "agent:main:"
+
 _SUPPORTED_ENGINES = frozenset(
-    {
-        "openclaw",
-        "teclaw",
-        "aicoding",
-        "hermes",
-        "claude_code",
-        "deepseek_harness",
-    }
+    {"openclaw", "teclaw", "aicoding", "hermes", "claude_code", "deepseek_harness"}
 )
 
-
 _AICODING_FAMILY_TEMPLATES = frozenset({"personalCoding", "applicationCoding"})
+
+BAAS_DEVICE_PROVIDERS = frozenset({"baas", "teclaw"})
+
+#: caller 模式的 device_provider 标记（BotServiceSelector 据此路由到 CallerBotService）。
+CALLER_DEVICE_PROVIDER = "caller"
+
+#: 队列 meta 中承载 caller 容器 sandbox_id 的 key（入队时写入，worker 复用）。
+CALLER_SANDBOX_META_KEY = "caller_sandbox_id"
 
 
 def normalize_engine_type(
@@ -201,16 +208,52 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
     )
 
 
+def is_caller_mode(metadata: dict[str, Any] | None) -> bool:
+    """metadata 携带 ``cookie`` 即视作 caller 模式。
+
+    ``cookie`` 同时是模式开关与拉容器的 IAM 凭据：值只允许存在于内存
+    请求链路（runner 入口 → 后台 dispatch 闭包），落库前必须经
+    :func:`strip_sensitive_metadata` 剥离。
+    """
+    return bool(metadata and metadata.get("cookie"))
+
+
+def strip_sensitive_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """落库副本：剥离敏感凭据（cookie），其余键原样保留。
+
+    run 记录 / queue meta 等持久化处一律使用本函数的返回值；原始
+    ``metadata``（含 cookie）只在内存链路（resolver 拉容器、后台任务
+    闭包）流转。
+    """
+    if "cookie" not in metadata:
+        return metadata
+    return {k: v for k, v in metadata.items() if k != "cookie"}
+
+
+def build_caller_binding(bot_id: str, sandbox_id: str) -> BotBindingInfo:
+    """用指定的 caller 容器 sandbox_id 构造 binding（``device_provider="caller"``）。"""
+    real_bot_id, entity_id = parse_bot_id(bot_id)
+    return BotBindingInfo(
+        bot_id=real_bot_id,
+        entity_id=entity_id,
+        sandbox_id=sandbox_id,
+        device_id=sandbox_id,
+        device_provider=CALLER_DEVICE_PROVIDER,
+    )
+
+
 def build_chat_metadata(
     metadata: dict[str, Any] | None,
     run_id: str,
     eval_session_log: EvalSessionLog,
-) -> dict[str, str] | None:
+) -> dict[str, str]:
     """从 metadata 中构造 chat_metadata，用于透传到 WS chat 请求。
 
     参考 _report_log_relation 的取值逻辑，提取 biz_task_id / biz_scene。
     当 metadata 中包含 eval_id / default_tag 时，通过
     EvalSessionLogProtocol Plugin 增加观测字段。
+    title/model 复制到 chat_metadata，供 send 时
+    _materialize_session 恢复会话属性（引擎忽略未知字段）。
     """
     metadata = metadata or {}
     biz_task_id = (
@@ -238,8 +281,82 @@ def build_chat_metadata(
     if metadata.get("default_tag"):
         chat_metadata["default_tag"] = str(metadata["default_tag"])
     # eval 观测字段注入 — 委托 Plugin
-    enriched = eval_session_log.enrich_chat_metadata(
+    chat_metadata = eval_session_log.enrich_chat_metadata(
         metadata=chat_metadata,
         run_id=run_id,
     )
-    return enriched
+    # 在 enrich 之后写入，避免 Plugin 返回新 dict 时丢失
+    if metadata.get("title"):
+        chat_metadata["title"] = str(metadata["title"])
+    if metadata.get("model"):
+        chat_metadata["model"] = str(metadata["model"])
+    return chat_metadata
+
+
+class _DefaultEngineAdapter:
+    """core 内置兜底 adapter：adapter 未传入/未注册时的通用亲和键格式。
+
+    core 不得 import plugins（registry 装配在 bootstrap 完成），plan 的
+    兜底语义在 core 内以最小 duck-typed 实现提供，与 plugins 侧
+    ``BaseEngineAdapter`` 的默认格式保持一致。
+    """
+
+    engine_type = ""
+
+    def session_consistency_key(
+        self,
+        *,
+        tc_bot_id: str,
+        user_id: str,
+        run_id: str,
+    ) -> str:
+        return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"
+
+
+_DEFAULT_ENGINE_ADAPTER = _DefaultEngineAdapter()
+
+
+def plan_session_id(
+    *,
+    tc_bot_id: str,
+    user_id: str,
+    run_id: str,
+    eval_id: str | None = None,
+    adapter: "BotEngineAdapter | None" = None,
+) -> str:
+    key = eval_id or run_id
+    effective = adapter if adapter is not None else _DEFAULT_ENGINE_ADAPTER
+    session_id = effective.session_consistency_key(
+        tc_bot_id=tc_bot_id,
+        user_id=user_id,
+        run_id=key,
+    )
+    return session_id
+
+
+def strip_agent_main_prefix(session_id: str) -> str:
+    """剥离前导 ``agent:main:`` 前缀,使设备路由亲和键对前缀有无不敏感。
+
+    openclaw 会在持久化/返回 session id 时加上 ``agent:main:`` 前缀,而 DingTalk 入站
+    携带的是裸 id;若直接把调用方原样传入的 session_id 作为 ``device_affinity`` 哈希,
+    同一会话两次调用(裸 id vs 带前缀 id)会命中不同实例。在构造亲和键处统一剥离前缀,
+    使两种形式哈希到同一设备。循环剥离以对重复前缀幂等。
+    """
+    while session_id.startswith(_AGENT_MAIN_PREFIX):
+        session_id = session_id[len(_AGENT_MAIN_PREFIX) :]
+    return session_id
+
+
+def safe_client_msg(exc: Exception) -> str:
+    """返回可安全外抛给客户端的异常消息(剥离 aiohttp 请求 url 等内部信息)。
+
+    aiohttp.ClientResponseError 的 str(),
+    其中 url 是内部代理地址,不应外泄。这里只取业务 message。
+    其他 aiohttp.ClientError 子类(如 ClientConnectorError / InvalidURL)的 str()
+    同样可能包含内部 hostname/URL,统一返回通用消息;完整异常由调用方记入日志。
+    """
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return exc.message or f"HTTP {exc.status}"
+    if isinstance(exc, aiohttp.ClientError):
+        return "Connection failed"
+    return str(exc)

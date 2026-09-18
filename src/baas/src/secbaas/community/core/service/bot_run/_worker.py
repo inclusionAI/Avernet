@@ -1,7 +1,7 @@
 """Bot 请求队列 Worker（阶段一）。
 
 每台机器运行的 Worker：轮询 ``baas_bot_run_queue`` 里 PENDING 的工作项，按 bot
-维度做 QPM 限流后无锁认领（claim），再交给注入的 ``RequestExecutor`` 执行。
+维度做全局并发限流后无锁认领（claim），再交给注入的 ``RequestExecutor`` 执行。
 Worker 只负责"发现 → 限流 → 认领 → 并发控制 → 心跳 → 队列终态标记"；
 真正的 binding 解析 / 建会话 / 发消息 / 写结果（落 ``baas_bot_run``），
 以及 session 串行锁，由 executor 负责（见增量 4/5/6）。
@@ -24,8 +24,8 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Generator
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.repository.bot_run_queue import (
@@ -35,18 +35,16 @@ from secbaas.community.core.repository.bot_run_queue import (
 from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
-from ._bot_concurrency import (
-    BotConcurrencyManager,
-    ConcurrencyLimiter,
-    FixedMachineCountProvider,
-)
+from ._bot_concurrency import BotConcurrencyManager
 from ._executor import RequeuedToPendingError
 from ._internal_protocols import (
     AbortOutcome,
-    MachineCountProvider,
     PostRunCallback,
     RequestExecutor,
 )
+
+if TYPE_CHECKING:
+    from secbaas.community.core.service.distributed_lock import DistributedLockService
 
 logger = get_logger("core-bot-run")
 
@@ -76,15 +74,18 @@ class BotRequestWorkerConfig:
 
     enabled: bool = True
     poll_interval_seconds: float = 1
-    discover_limit: int = 50  # 每轮发现的 bot 数上限
+    discover_limit: int = (
+        200  # 每轮发现的 bot 数上限（活跃 bot 超过该值时需上轮转游标）
+    )
     candidates_per_bot: int = 5  # 每个 bot 单次认领的候选数
     max_concurrent: int = 50  # 单 Worker 最大并发执行数
     heartbeat_interval_seconds: float = 30.0
-    abort_poll_interval_seconds: float = 1.0  # 外部 abort 信号轮询间隔
     timeout_scan_interval_seconds: float = 5.0  # 超时扫描间隔
     stale_heartbeat_seconds: float = 120.0  # 心跳过期阈值（判定对端 worker 已 down）
-    bucket_sweep_interval_seconds: float = 300.0  # 空闲桶扫描间隔
-    bucket_idle_ttl_seconds: float = 600.0  # 空闲桶淘汰 TTL
+    cap_warn_interval_seconds: float = 30.0  # 全局并发上限拦截日志的节流间隔
+    timeout_scan_lock_name: str = "bot_run_timeout_scan_lock"  # 全局超时扫描单飞锁
+    timeout_scan_lock_expire_seconds: int = 60  # 单飞锁过期时间（秒）
+    abort_poll_interval_seconds: float = 1.0  # abort 信号轮询间隔
 
 
 #: Engine 通知回调类型：``chat.abort`` best-effort 通知 engine 取消 session/run。
@@ -106,32 +107,30 @@ class BotRequestWorker:
         qpm_manager: BotConcurrencyManager,
         executor: RequestExecutor,
         *,
-        run_repository: BotRunRepository | None = None,
+        run_repository: BotRunRepository,
+        lock_service: DistributedLockService,
+        post_run_callback_factories: dict[str, PostRunCallback],
+        config: BotRequestWorkerConfig,
         engine_abort_notifier: EngineAbortNotifier | None = None,
-        post_run_callback_factories: dict[str, PostRunCallback] | None = None,
-        machine_count_provider: MachineCountProvider | None = None,
-        config: BotRequestWorkerConfig | None = None,
         worker_id: str | None = None,
     ) -> None:
         self._queue = queue_repository
         self._qpm = qpm_manager
         self._executor = executor
-        # 结果正文仓库（baas_bot_run），用于 abort 时将未终结 run 标 FAILED。
-        # 保留可选以兼容既有不依赖 abort 的装配/测试。
+        # 结果正文仓库（baas_bot_run），用于 abort/超时回收时写未终结 run 终态。
         self._run_repository = run_repository
         # best-effort 通知 engine 取消 session/run（BotWebsocketClient.chat_abort seam）。
-        # None 时仅跳过 engine 通知，不影响本机 cancel+force_done+mark_failed。
+        # DI 未注入时为 None，仅跳过 engine 通知，不影响本机 cancel+force_done+mark_failed。
         self._engine_abort_notifier = engine_abort_notifier
         # callback 名称 -> 已构造的 PostRunCallback 实例（DI 注入）
-        self._callback_factories = post_run_callback_factories or {}
-        self._machines = machine_count_provider or FixedMachineCountProvider(1)
-        self._config = config or BotRequestWorkerConfig()
+        self._callback_factories = post_run_callback_factories
+        # 全局超时扫描的单飞锁（DI 注入）
+        self._lock_service = lock_service
+        self._config = config
         self._worker_id = worker_id or _default_worker_id()
 
-        # bot_id -> (ConcurrencyLimiter, (qpm, machine_count)) 缓存，参数变化时重建
-        self._buckets: dict[str, tuple[ConcurrencyLimiter, tuple[int, int]]] = {}
-        self._last_bucket_sweep = time.monotonic()
         self._active = 0
+        self._last_cap_warn = 0.0
         self._stop_event: asyncio.Event | None = None
         self._loop_task: asyncio.Task[None] | None = None
         self._timeout_task: asyncio.Task[None] | None = None
@@ -160,9 +159,8 @@ class BotRequestWorker:
         self._loop_task = asyncio.create_task(self._run_loop())
         self._timeout_task = asyncio.create_task(self._timeout_scan_loop())
         logger.info(
-            "[BotRequestWorker] started worker_id=%s machine_count=%s max_concurrent=%s",
+            "[BotRequestWorker] started worker_id=%s max_concurrent=%s",
             self._worker_id,
-            self._machines.get_machine_count(),
             self._config.max_concurrent,
         )
 
@@ -197,11 +195,11 @@ class BotRequestWorker:
             await asyncio.sleep(self._config.poll_interval_seconds)
 
     async def _timeout_scan_loop(self) -> None:
-        """独立于 _run_loop 的超时扫描协程。
+        """独立于 _run_loop 的全局超时对账协程（单飞）。
 
-        定期扫描 PENDING/RUNNING 中已超时的工作项，直接标记失败并终结，
-        不依赖 executor 是否拿到锁——解决拿不到 session 锁时 death loop
-        导致超时任务无法及时终止的问题。
+        只处理「无需本机能力」的两类：PENDING 超时、非本机 stale RUNNING（owner
+        已 down）。本机 RUNNING 的超时由各进程的 ``_run_guardian`` 负责（只有 owner
+        能 cancel）。整体由分布式锁保证集群内单飞，避免每进程重复扫描放大 DB 压力。
         """
         assert self._stop_event is not None
         interval = self._config.timeout_scan_interval_seconds
@@ -220,20 +218,46 @@ class BotRequestWorker:
         return elapsed > self._config.stale_heartbeat_seconds
 
     async def _timeout_scan_once(self) -> None:
-        """扫描一轮超时工作项：区分 PENDING / 本机 RUNNING / 非本机 RUNNING。
+        """全局超时对账（单飞）。
 
-        - PENDING：委托 executor 写结果终态后强制终结队列项。
-        - RUNNING + 本机：cancel 本机 task，再由 executor 标 FAILED + force_done。
-        - RUNNING + 非本机：仅当心跳过期（对端 worker 已 down）才 force_done；
-          心跳正常则跳过（对端还在执行，由对端的超时检查兜底）。
+        抢到锁的进程才执行，其余进程直接跳过，避免每进程重复扫描。
+        """
+        with self._lock_service.try_lock(
+            lock_name=self._config.timeout_scan_lock_name,
+            expire_seconds=self._config.timeout_scan_lock_expire_seconds,
+            block=False,
+        ) as lock:
+            if not lock.acquired:
+                logger.debug(
+                    "[BotRequestWorker] timeout scan skipped: lock %s held by "
+                    "another process",
+                    self._config.timeout_scan_lock_name,
+                )
+                return
+            await self._timeout_scan_global()
+
+    async def _timeout_scan_global(self) -> None:
+        """对账 PENDING 超时 与 非本机 stale RUNNING。
+
+        本机 RUNNING 的超时由各自的 ``_run_guardian`` 负责（只有 owner 能 cancel），
+        这里只处理不需要本机能力的两类：
+        - PENDING 超时（从未被认领）：委托 executor 写结果终态后 force_done；
+        - RUNNING 且心跳过期（owner 已 down）：写结果终态 + force_done；
+          RUNNING 但心跳正常（owner 还活着，含本机）→ 跳过。
         """
         records = self._queue.scan_timeout()
         for record in records:
-            if record.status == "RUNNING" and record.assigned_worker != self._worker_id:
+            if record.status == "RUNNING":
                 if not self._is_heartbeat_stale(record):
-                    # 对端 worker 还活着，由对端自己处理超时
+                    # owner 还活着（含本机），由各自 guardian 处理超时
                     continue
-                # 对端 worker 已 down，直接 force_done
+                # owner 已 down：先写结果终态再 force_done。否则队列置 DONE 后
+                # recovery/reset_stale_running 不再命中（按 RUNNING 过滤），
+                # baas_bot_run 会永远停在 PENDING/RUNNING。update_error 幂等。
+                with contextlib.suppress(Exception):
+                    self._run_repository.update_error(
+                        record.run_id, "worker lost (stale heartbeat)"
+                    )
                 with contextlib.suppress(Exception):
                     self._queue.force_done(record.run_id)
                 logger.warning(
@@ -243,68 +267,51 @@ class BotRequestWorker:
                     record.status,
                     record.assigned_worker,
                 )
-                callback = self._resolve_callback(record)
-                if callback is not None:
-                    try:
-                        await callback(record.run_id)
-                    except Exception as e:
-                        logger.error(
-                            "[BotRequestWorker] timeout scan callback failed run_id=%s: %s",
-                            record.run_id,
-                            e,
-                            exc_info=True,
-                        )
-                continue
+            else:
+                # PENDING 超时：走 executor 标 FAILED + force_done
+                await self._executor.execute(record)
+                with contextlib.suppress(Exception):
+                    self._queue.force_done(record.run_id)
+                logger.warning(
+                    "[BotRequestWorker] timeout scan: run_id=%s status=%s marked failed",
+                    record.run_id,
+                    record.status,
+                )
+            await self._fire_timeout_callback(record)
 
-            # PENDING 或本机 RUNNING：走 executor 标 FAILED + force_done
-            await self._executor.execute(record)
-            with contextlib.suppress(Exception):
-                self._queue.force_done(record.run_id)
-            logger.warning(
-                "[BotRequestWorker] timeout scan: run_id=%s status=%s marked failed",
+    async def _fire_timeout_callback(self, record: BotRunQueueRecord) -> None:
+        """best-effort 触发该工作项的 post-run callback（超时/回收路径）。"""
+        callback = self._resolve_callback(record)
+        if callback is None:
+            return
+        try:
+            await callback(record.run_id)
+        except Exception as e:
+            logger.error(
+                "[BotRequestWorker] timeout scan callback failed run_id=%s: %s",
                 record.run_id,
-                record.status,
+                e,
+                exc_info=True,
             )
-            # cancel 本机正在执行的超时任务
-            if record.assigned_worker == self._worker_id:
-                running_task = self._running_tasks.get(record.run_id)
-                if running_task is not None and not running_task.done():
-                    running_task.cancel()
-                    logger.warning(
-                        "[BotRequestWorker] timeout scan: cancelled local task run_id=%s",
-                        record.run_id,
-                    )
-            callback = self._resolve_callback(record)
-            if callback is not None:
-                try:
-                    await callback(record.run_id)
-                except Exception as e:
-                    logger.error(
-                        "[BotRequestWorker] timeout scan callback failed run_id=%s: %s",
-                        record.run_id,
-                        e,
-                        exc_info=True,
-                    )
 
     # ----------------------------- chat.abort 接入面 -----------------------------
 
     async def abort_runs_by_session(self, session_id: str, bot_id: str) -> AbortOutcome:
         """按 (bot_id, session_id) 维度取消目标 bot 的 RUNNING run。
 
-        复用 ``_timeout_scan_once`` 的 cancel+force_done 模板，顺序：
-        1. ``queue.request_abort(run_id)`` 写 abort 信号；
-           多机场景下非本机 RUNNING run 依赖该信号，由实际持有 run 的 Worker 在
-           ``_abort_poll_loop`` 中通过 ``queue.is_abort_requested`` 轮询感知并取消
-           本机 task（语义参考 ``bot_interaction.should_poll``）。
-        2. ``run_repository.update_error(run_id, ...)`` 标 FAILED（幂等：已终态时 no-op）；
+        复用 ``_terminate_local_timeout`` 的 cancel+force_done 模板，顺序：
+        1. ``run_repository.update_error(run_id, ...)`` 标 FAILED（幂等：已终态时 no-op）；
+        2. ``queue.request_abort(run_id)`` 写跨实例信号（持有该 run 的 Worker 通过
+           ``_abort_poll_loop`` 轮询感知后 cancel 本机 task）；
         3. ``queue.force_done(run_id)`` 终结队列工作项（幂等）；
-        4. 若 ``assigned_worker == 本 worker``，立即 cancel 本机 ``_running_tasks[run_id]``；
+        4. 若 ``assigned_worker == 本 worker``，cancel 本机 ``_running_tasks[run_id]``；
         5. best-effort 通知 engine（``engine_abort_notifier``），失败仅记录日志。
 
         群聊多 bot 共享同一 ``session_id`` 时仅取消目标 bot 的 RUNNING run；PENDING
-        不命中（由 ``_timeout_scan_once`` 超时路径兜底）。
-        ``update_meta`` / ``update_error`` / ``force_done`` 均幂等，abort 与 timeout
-        并发争抢同一 run 时靠幂等收敛到同一终态（R1）。
+        不命中（由 ``_timeout_scan_once`` 超时路径兜底）。非本机 RUNNING run 无法本机
+        cancel，由 force_done + engine 通知 + 对端超时/心跳兜底（与 timeout 同构）。
+        ``update_error`` 与 ``force_done`` 均幂等，abort 与 timeout 并发争抢同一 run
+        时靠幂等收敛到同一终态（R1）。
 
         Returns:
             AbortOutcome: 被取消的 run_id 列表，以及目标 bot 在该 session 下是否存在
@@ -321,20 +328,19 @@ class BotRequestWorker:
         aborted_run_ids: list[str] = []
         for record in records:
             run_id = record.run_id
-            # 1. 写 abort 信号到队列：多机场景下实际持有 run 的 Worker 靠轮询感知并取消
+            # 1. 写终态（FAILED）—— update_error 仅在 PENDING/RUNNING 时生效，已终态 no-op
+            try:
+                self._run_repository.update_error(run_id, "aborted by chat.abort")
+            except Exception as e:
+                logger.error(
+                    "[BotRequestWorker] abort update_error failed run_id=%s: %s",
+                    run_id,
+                    e,
+                    exc_info=True,
+                )
+            # 2. 写跨实例 abort 信号（持有该 run 的 Worker 轮询感知后 cancel 本机 task）
             with contextlib.suppress(Exception):
                 self._queue.request_abort(run_id)
-            # 2. 写终态（FAILED）—— update_error 仅在 PENDING/RUNNING 时生效，已终态 no-op
-            if self._run_repository is not None:
-                try:
-                    self._run_repository.update_error(run_id, "aborted by chat.abort")
-                except Exception as e:
-                    logger.error(
-                        "[BotRequestWorker] abort update_error failed run_id=%s: %s",
-                        run_id,
-                        e,
-                        exc_info=True,
-                    )
             # 3. force_done 终结队列工作项（幂等）
             with contextlib.suppress(Exception):
                 self._queue.force_done(run_id)
@@ -383,6 +389,7 @@ class BotRequestWorker:
 
         bots = self._queue.discover_active_bots(self._config.discover_limit)
         dispatched = 0
+        idle_bots: list[str] = []
         for bot_id in bots:
             if self._active >= self._config.max_concurrent:
                 logger.info(
@@ -393,30 +400,75 @@ class BotRequestWorker:
                 )
                 break
 
-            bucket = self._get_or_create_limiter(bot_id)
-            if bucket is None:
+            max_running = self._qpm.get_concurrency_num(bot_id)
+            if max_running is None:
                 logger.error(
-                    "[BotRequestWorker] create bucket fail, must set qpm for %s", bot_id
+                    "[BotRequestWorker] bot has no concurrency limit configured, "
+                    "skip %s",
+                    bot_id,
                 )
                 continue
-            # 在并发与 QPM 预算内，尽量多地从该 bot 排空 PENDING（不同请求可并行），
-            # 而非每轮每 bot 只放一个，避免高 QPM bot 被 poll 周期卡成瓶颈。
-            while self._active < self._config.max_concurrent and bucket.has_slot():
+            # 全局并发上限由队列层按 RUNNING 在途数强制（claim 时校验 max_running），
+            # 跨进程生效；这里只受本机 max_concurrent 与该 bot 全局在途数约束。
+            # 尽量多地从该 bot 排空 PENDING（不同请求可并行），避免高并发 bot
+            # 被 poll 周期卡成瓶颈。
+            claimed_here = 0
+            while self._active < self._config.max_concurrent:
                 record = self._queue.claim_pending_by_bot(
                     bot_id,
                     self._worker_id,
                     candidates=self._config.candidates_per_bot,
+                    max_running=max_running,
                 )
                 if record is None:
-                    break  # 该 bot 已无可认领的 PENDING
-                bucket.try_acquire()
+                    break  # 已无可认领的 PENDING，或已达该 bot 全局并发上限
+                claimed_here += 1
                 self._active += 1
                 dispatched += 1
                 task = asyncio.create_task(self._run_one(record))
                 self._running_tasks[record.run_id] = task
+            if claimed_here == 0:
+                idle_bots.append(bot_id)
 
-        self._sweep_idle_buckets()
+        self._maybe_log_cap(idle_bots)
         return dispatched
+
+    def _maybe_log_cap(self, idle_bots: list[str]) -> list[str]:
+        """观测性：本轮「有 PENDING 但一个都没认领到」的 bot 中，若确实是被全局并发
+        上限拦住的，按节流打一条 INFO，便于区分「被限流」与「没活了」。
+
+        计数查询只在节流窗口内做一次，不落在每轮热路径上。
+
+        Returns:
+            本轮判定为「被全局并发上限拦住」的 bot_id 列表（供观测/测试）。
+        """
+        if not idle_bots:
+            return []
+        now = time.monotonic()
+        if now - self._last_cap_warn < self._config.cap_warn_interval_seconds:
+            return []
+        self._last_cap_warn = now
+        capped: list[str] = []
+        for bot_id in idle_bots:
+            max_running = self._qpm.get_concurrency_num(bot_id)
+            if max_running is None:
+                continue
+            try:
+                if self._queue.count_running_by_bot(bot_id) >= max_running:
+                    capped.append(bot_id)
+            except Exception:
+                logger.warning(
+                    "[BotRequestWorker] count_running_by_bot failed bot_id=%s",
+                    bot_id,
+                    exc_info=True,
+                )
+        if capped:
+            logger.info(
+                "[BotRequestWorker] %d bot(s) throttled by global concurrency cap: %s",
+                len(capped),
+                capped[:10],
+            )
+        return capped
 
     def _resolve_callback(self, record: BotRunQueueRecord) -> PostRunCallback | None:
         """根据 ``record.meta["callback_function"]`` 从 DI 注入的 factories 查找回调实例。"""
@@ -426,18 +478,22 @@ class BotRequestWorker:
         return self._callback_factories.get(cb_name)
 
     async def _run_one(self, record: BotRunQueueRecord) -> None:
-        """包裹单个工作项的执行：心跳续约 + 队列终态标记 + 并发计数。
+        """包裹单个工作项的执行：后台守护（心跳 + 到点取消）+ 队列终态标记 + 并发计数。
 
         ``finally`` 只做本地资源清理。``baas_bot_run`` 的业务终态由 executor
         链负责；Worker 只根据 executor 结果推进 ``baas_bot_run_queue``。
         """
         post_run_callback = self._resolve_callback(record)
 
-        current_task = asyncio.current_task()
-        heartbeat = asyncio.create_task(
-            self._heartbeat_loop(record.run_id, self._worker_id)
+        run_task = asyncio.current_task()
+        guardian = asyncio.create_task(
+            self._run_guardian(record, self._record_deadline(record))
         )
-        abort_poll = asyncio.create_task(self._abort_poll_loop(record, current_task))
+        abort_poll_task = (
+            asyncio.create_task(self._abort_poll_loop(record, run_task))
+            if run_task is not None
+            else None
+        )
         try:
             with _trace_context_from_meta(record.meta):
                 try:
@@ -450,17 +506,25 @@ class BotRequestWorker:
                 self._mark_queue_done(record)
         finally:
             self._running_tasks.pop(record.run_id, None)
-            heartbeat.cancel()
-            abort_poll.cancel()
+            guardian.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat
-            with contextlib.suppress(asyncio.CancelledError):
-                await abort_poll
+                await guardian
+            if abort_poll_task is not None:
+                abort_poll_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await abort_poll_task
             self._active -= 1
-            # 归还该 bot 的并发槽位
-            cached = self._buckets.get(record.bot_id)
-            if cached is not None:
-                cached[0].release()
+
+    @staticmethod
+    def _record_deadline(record: BotRunQueueRecord) -> datetime | None:
+        """按 ``gmt_create + meta.timeout`` 计算执行截止时间（与 scan_timeout 同源）。
+
+        无 meta.timeout 或 gmt_create 缺失时返回 None（不设 deadline，只做心跳）。
+        """
+        timeout = record.meta.get("timeout")
+        if timeout is None or record.gmt_create is None:
+            return None
+        return record.gmt_create + timedelta(seconds=float(timeout))
 
     async def _requeue_pending(
         self,
@@ -529,116 +593,107 @@ class BotRequestWorker:
                 self._worker_id,
             )
 
-    async def _heartbeat_loop(self, run_id: str, worker_id: str) -> None:
-        """执行期间周期刷新队列工作项的 last_heartbeat，供宕机恢复判活。"""
-        interval = self._config.heartbeat_interval_seconds
-        while True:
-            await asyncio.sleep(interval)
-            try:
-                self._queue.touch_heartbeat(run_id, worker_id)
-            except Exception as e:
-                logger.warning(
-                    "[BotRequestWorker] heartbeat failed run_id=%s: %s", run_id, e
-                )
-
     async def _abort_poll_loop(
-        self,
-        record: BotRunQueueRecord,
-        run_task: asyncio.Task[None] | None,
+        self, record: BotRunQueueRecord, run_task: asyncio.Task[None]
     ) -> None:
-        """执行期间轮询队列 meta，收到外部 abort 信号时取消本机 task。
+        """轮询 meta 的 ``abort_requested`` 信号，感知后取消本机执行 task。
 
-        多机场景下 chat.abort 可能由另一台实例发起，并在目标 run 的队列 meta 中
-        写入 ``abort_requested``。本机轮询感知后 ``force_done`` 队列并取消当前
-        task，让执行链靠异常/超时兜底结束，避免远端 run 继续执行。
+        供 chat.abort 跨实例通知：``abort_runs_by_session`` 写入
+        ``request_abort`` 信号 + force_done 后，实际持有该 run 的 Worker 由
+        本循环感知信号并 cancel 本机 task；engine 通知 best-effort，失败
+        仅记录日志。run_task 结束（正常完成/超时/被取消）时循环自然退出。
         """
         interval = self._config.abort_poll_interval_seconds
         run_id = record.run_id
-        session_id = record.session_id
-        while True:
+        while not run_task.done():
             await asyncio.sleep(interval)
-            if run_task is None or run_task.done():
-                return
             try:
-                fresh = self._queue.get_by_run_id(run_id)
-                if fresh is None:
+                if self._queue.get_by_run_id(run_id) is None:
                     continue
-                if self._queue.is_abort_requested(run_id):
-                    logger.info(
-                        "[BotRequestWorker] abort poll: signal received, "
-                        "cancelling local task run_id=%s session_id=%s worker=%s",
-                        run_id,
-                        session_id,
-                        self._worker_id,
-                    )
-                    with contextlib.suppress(Exception):
-                        self._queue.force_done(run_id)
-                    run_task.cancel()
-                    if self._engine_abort_notifier is not None:
-                        try:
-                            await self._engine_abort_notifier(session_id, run_id)
-                        except Exception as e:
-                            logger.warning(
-                                "[BotRequestWorker] abort poll engine notify failed "
-                                "run_id=%s: %s",
-                                run_id,
-                                e,
-                                exc_info=True,
-                            )
-                    return
+                if not self._queue.is_abort_requested(run_id):
+                    continue
             except Exception as e:
                 logger.warning(
-                    "[BotRequestWorker] abort poll loop failed run_id=%s: %s",
+                    "[BotRequestWorker] abort poll failed run_id=%s: %s",
                     run_id,
                     e,
                 )
-
-    # ----------------------------- 并发限制器 -----------------------------
-
-    def _sweep_idle_buckets(self) -> None:
-        """淘汰长时间空闲且无在执行请求的桶，防止 bot_id 过多导致内存泄漏。"""
-        now = time.monotonic()
-        if now - self._last_bucket_sweep < self._config.bucket_sweep_interval_seconds:
-            return
-        self._last_bucket_sweep = now
-        evicted = [
-            bot_id
-            for bot_id, (limiter, _) in self._buckets.items()
-            if limiter.ref_count == 0
-            and now - limiter.last_used > self._config.bucket_idle_ttl_seconds
-        ]
-        for bot_id in evicted:
-            del self._buckets[bot_id]
-        if evicted:
+                continue
             logger.info(
-                "[BotRequestWorker] swept %d idle bucket(s), remaining=%d",
-                len(evicted),
-                len(self._buckets),
+                "[BotRequestWorker] abort signal detected, cancelling local task "
+                "run_id=%s session_id=%s",
+                run_id,
+                record.session_id,
             )
-        logger.info("[BotRequestWorker] buckets size %s", len(self._buckets))
+            if not run_task.done():
+                run_task.cancel()
+            with contextlib.suppress(Exception):
+                self._queue.force_done(run_id)
+            if self._engine_abort_notifier is not None:
+                try:
+                    await self._engine_abort_notifier(record.session_id, run_id)
+                except Exception as e:
+                    logger.warning(
+                        "[BotRequestWorker] abort engine notify failed run_id=%s: %s",
+                        run_id,
+                        e,
+                        exc_info=True,
+                    )
+            return
 
-    def _get_or_create_limiter(self, bot_id: str) -> ConcurrencyLimiter | None:
-        qpm = self._qpm.get_concurrency_num(bot_id)
-        if qpm is None:
-            return None
-        machines = self._machines.get_machine_count()
-        params = (qpm, machines)
+    async def _run_guardian(
+        self, record: BotRunQueueRecord, deadline: datetime | None
+    ) -> None:
+        """单个执行期间的后台守护：周期心跳续约 + 到点终结本机超时 task。
 
-        cached = self._buckets.get(bot_id)
-        if cached is not None and cached[1] == params:
-            return cached[0]
+        合并原 heartbeat 与本地超时 watchdog：
+        - 周期 ``touch_heartbeat`` 刷新 last_heartbeat，供 recovery 判活（避免活着的
+          owner 被误回收）；
+        - ``deadline`` 到点则终结本机 task：cancel 执行 task（走 executor 的
+          CancelledError → 标结果 FAILED）+ force_done 队列行 + 触发 post-run 回调，
+          保证本机超时后队列表/结果表都收敛、回调不丢。``sleep`` 取
+          ``min(heartbeat_interval, 剩余时间)`` 保证到点精度。
+        """
+        interval = self._config.heartbeat_interval_seconds
+        while True:
+            remaining: float | None = None
+            if deadline is not None:
+                remaining = (deadline - datetime.now()).total_seconds()
+                if remaining <= 0:
+                    await self._terminate_local_timeout(record)
+                    return
+            await asyncio.sleep(
+                interval if remaining is None else min(interval, remaining)
+            )
+            try:
+                self._queue.touch_heartbeat(record.run_id, self._worker_id)
+            except Exception as e:
+                logger.warning(
+                    "[BotRequestWorker] heartbeat failed run_id=%s: %s",
+                    record.run_id,
+                    e,
+                )
 
-        machines = max(1, machines)
-        if qpm >= machines:
-            # 均分策略：本机并发上限 = qpm / 机器数（至少 1）
-            per_machine = max(1, qpm // machines)
-            limiter = ConcurrencyLimiter(capacity=per_machine)
-        else:
-            # 亚单位并发：QPM < 机器数，每台机器 capacity=1，
-            # 通过最小间隔限制使全局 TPM ≈ qpm。
-            # 间隔 = 机器数 * 60s / qpm，即每台机器平均每 (machines*60/qpm) 秒放行 1 个请求，
-            # machines 台机器合计每 60s 放行 qpm 个。
-            min_interval = machines * 60.0 / qpm
-            limiter = ConcurrencyLimiter(capacity=1, min_interval_seconds=min_interval)
-        self._buckets[bot_id] = (limiter, params)
-        return limiter
+    async def _terminate_local_timeout(self, record: BotRunQueueRecord) -> None:
+        """本机超时终结：cancel 本机 task + force_done 队列行 + 触发回调。
+
+        结果终态（FAILED）由被 cancel 的 executor 链（ResultGuardExecutor 的
+        CancelledError 分支）负责；这里补齐队列终态与回调，避免本机超时后队列行
+        停在 RUNNING（占并发额度）且回调丢失。force_done/回调均幂等。
+        """
+        self._cancel_local_task(record.run_id)
+        with contextlib.suppress(Exception):
+            self._queue.force_done(record.run_id)
+        await self._fire_timeout_callback(record)
+
+    def _cancel_local_task(self, run_id: str) -> None:
+        """到点取消本机正在执行的 task（若仍在运行）。"""
+        task = self._running_tasks.get(run_id)
+        if task is not None and not task.done():
+            task.cancel()
+            logger.warning(
+                "[BotRequestWorker] deadline reached, cancelled local task run_id=%s",
+                run_id,
+            )
+
+    # ----------------------------- 并发限制 -----------------------------

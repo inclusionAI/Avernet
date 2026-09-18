@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from collections.abc import Callable
-import logging
 import time
 
 from agentclaw.community.plugin_api.tc_resource_ready import (
@@ -19,8 +18,14 @@ from agentclaw.community.core.session_resources.types import (
 from agentclaw.community.core.tc_file_upload_integrations.service_protocol import (
     TcResourceReadyObserverProtocol,
 )
+from agentclaw.community.log import get_logger
 
-logger = logging.getLogger("tc_resource_ready.coordinator")
+# Route through the community logger registry: the corp/prod profile swaps the
+# factory for the sofapy logger, whose file handlers land in the antlogs-tailed
+# start.log/-error.log files. A plain ``logging.getLogger`` logger bypasses the
+# registry — under corp it keeps no handlers of its own and propagates to a root
+# console handler, so these lines would never reach collected log files.
+logger = get_logger()
 
 
 class TcResourceReadyCoordinator(TcResourceReadyObserverProtocol):

@@ -231,15 +231,30 @@ class SkillPackageValidator:
         allow_legacy_local_manifest: bool,
         require_wrapper_name_match: bool,
     ) -> ValidatedSkillPackage:
-        skill_files = [
-            entry for entry in entries if entry[0].split("/")[-1] == "SKILL.md"
+        normalized_entries = list(entries)
+        skill_indexes = [
+            index
+            for index, (path, _content) in enumerate(normalized_entries)
+            if path.split("/")[-1] == "SKILL.md"
+            or (
+                allow_legacy_local_manifest
+                and path.split("/")[-1].lower() == "skill.md"
+            )
         ]
+        skill_files = [normalized_entries[index] for index in skill_indexes]
         if not skill_files:
             raise SkillManifestMissingError("missing_skill_file")
         if len(skill_files) > 1:
             raise SkillManifestMultipleError("multiple_skill_files")
 
         skill_path, markdown = skill_files[0]
+        if skill_path.split("/")[-1] != "SKILL.md":
+            canonical_skill_path = "/".join(
+                [*skill_path.split("/")[:-1], "SKILL.md"]
+            )
+            normalized_entries[skill_indexes[0]] = (canonical_skill_path, markdown)
+            skill_path = canonical_skill_path
+        entries = normalized_entries
         roots = {path.split("/")[0] for path, _content in entries}
         wrapper = skill_path.split("/")[0] if "/" in skill_path else None
         if wrapper is not None and len(roots) != 1:
@@ -331,6 +346,8 @@ class SkillPackageValidator:
         name = parts[-1]
         return (
             name == ".DS_Store"
+            or name.startswith("._")
+            or name in {"Thumbs.db", "ehthumbs.db", "Desktop.ini"}
             or parts[0] == "__MACOSX"
             or ".git" in parts
             or "__pycache__" in parts

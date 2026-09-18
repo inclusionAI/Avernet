@@ -86,6 +86,45 @@ def test_invoke_accepts_legacy_bind_id_alias():
     assert baas.invoke_http.call_args.kwargs["bind_id"] == 23
 
 
+def test_invoke_multipart_forwards_replayable_package_and_provider_header():
+    transport, baas = _transport()
+    baas.get_http_info.return_value = HttpConnectionInfo(
+        http_url="https://proxy.example/api/skills/local/apply",
+        token="token-1",
+        target="ARCA_device@0:20003",
+    )
+    response = _response(200, {"success": True, "data": {"action": "created"}})
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.__exit__.return_value = False
+    client.post.return_value = response
+
+    with patch(
+        "agentclaw.community.plugins.community.device_adapter_transport.httpx.Client",
+        return_value=client,
+    ):
+        result = asyncio.run(
+            transport.invoke_multipart(
+                {"binding_id": 17, "engine_port": 20003},
+                "/api/skills/local/apply",
+                files={"file": ("weather.zip", b"zip", "application/zip")},
+                data={"skill_name": "weather", "layout": "LEGACY"},
+                headers={"x-target-bot-id": "bot-1"},
+            )
+        )
+
+    assert result["success"] is True
+    assert client.post.call_args.kwargs["files"]["file"][1] == b"zip"
+    assert client.post.call_args.kwargs["data"] == {
+        "skill_name": "weather",
+        "layout": "LEGACY",
+    }
+    assert client.post.call_args.kwargs["headers"] == {
+        "x-target-bot-id": "bot-1",
+        "x-proxypass-token": "token-1",
+    }
+
+
 @pytest.mark.parametrize(
     ("status", "expected"),
     [

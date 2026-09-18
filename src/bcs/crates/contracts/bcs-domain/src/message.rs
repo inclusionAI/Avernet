@@ -3,6 +3,9 @@
 use crate::{AttachmentType, MessageViewScope};
 use serde::{Deserialize, Serialize};
 
+/// Human-facing terminal failure projection; never Bot context or routed chat.
+pub const CHAT_ERROR_MESSAGE_TYPE: &str = "chat_error";
+
 /// Business producer domain used to select the server-side projection.
 ///
 /// This value is independent from the containing Group strategy so a

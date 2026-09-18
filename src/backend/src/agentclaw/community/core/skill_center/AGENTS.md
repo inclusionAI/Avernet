@@ -88,8 +88,8 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 ## 4. Local、Repo、Center 的内容身份
 
 - `local://...`：Bot-owned 可变内容，由 Local upload/delete 服务及文件适配器管理；上传协议保留 raw ZIP，同时提供 multipart `files + file_paths` 文件夹上传。GET Bot Skills 的 `source=LOCAL` 仅列出该 Bot 上传资产，`active` 再筛选 Desired State；省略 source 保留完整可达资产列表。
-- Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义，历史 locator 超出当前包根时在写入前拒绝，迁移另行处理。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `src/backend/`）。
-- Local 内容替换、删除与 Skills Pool 文件迁移通过其 edit guard 协调。替换保留文件/DB 失败恢复；删除则在权限、引用和就绪检查后，先委托运行时以一次包级操作删除完整内容根，再删除 Backend 元数据，不再由 Backend 执行文件枚举、quarantine、逐文件删除或恢复。运行时删除只有成功才允许进入元数据删除；两者不属于同一事务，后续元数据失败可能留下“记录仍在、运行时包已删除”的状态，并统一返回存储错误。该 guard 的用途与普通 Set/Direct 命令不同；不能把 `_mutation_flow.py` 的无 Runtime 补偿规则推广到其他文件写入。
+- Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义，历史 locator 超出当前包根时在写入前拒绝，迁移另行处理。包根是目录，存在性判定必须使用 `list_dir`，不得用 `read_file` 读取目录进行探测。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `src/backend/`）。
+- Local 内容替换、删除与 Skills Pool 文件迁移通过其 edit guard 协调。声明 `skills.local_package.apply.v1` 的标准 Engine 以及全量切流的 Teclaw 接收 canonical ZIP 并在运行时完成 staging、exact replace、rollback 和 cleanup；Backend 只传 `skill_name + LEGACY|POOL`，校验返回 digest 后写 DB。旧标准 Engine 在写前 capability 明确缺失时继续走 Legacy Adapter；新请求发出后任何不确定结果都禁止回落旧协议。Replace 逐字保留既有 `git_path`，Engine `target_path` 只作诊断。运行时成功后的 DB 失败不反向删除文件，重试同一完整包收敛。删除则在权限、引用和就绪检查后，先委托运行时以一次包级操作删除完整内容根，再删除 Backend 元数据，不再由 Backend 执行文件枚举、quarantine、逐文件删除或恢复。运行时删除只有成功才允许进入元数据删除；两者不属于同一事务。该 guard 的用途与普通 Set/Direct 命令不同；不能把 `_mutation_flow.py` 的无 Runtime 补偿规则推广到其他文件写入。
 - `git://...`：Repo 内容定位；`services/git_sync.py::GitSyncService` 管理 bootstrap、周期同步、DB/缓存、OSS 散目录及下载包。Backend 启动只注册周期任务，不以远程 Git/OSS 对账作为就绪条件；首次自动对账等待完整同步周期并叠加既有 jitter。同步周期必须为正数、jitter 不能为负，无效环境配置在构造期 fail-fast。`sync_bootstrap()` 继续供显式手动同步及周期同步发现本地 bare repo 缺失时自愈；bootstrap clone 不设置进程级全局超时，Git 明确失败后仍进入既有 OSS fallback。发布的 Singlebox 默认配置不提供远程 Repo URL，是启动期本地 seed 的明确例外：只从已有的 host-side `~/aiworkbench/skills-repo` 初始化 SQLite 和 MarketCache，本地目录不存在时记录缺失并继续启动。显式运行时 overlay 配置 URL 时同样按周期对账，不在启动期 clone。改 Git 供给时同时核对 `repository_catalog_service.py` 和实际消费端，避免只验证 DB。
 - `center://<skill_code>`：SC 外部定位。`skill_code` 可为普通字符串，不要求 UUID，也不等于运行时名称。
 - `ac_skill.skill_uuid`：TeamClaw 内部稳定身份。Space 自建 Skill 发布时使用该 UUID 作为 SC code；Public 导入由 `public_center_identity.py` 基于 tenant/env/code 确定性派生内部 UUID。复用资产按来源身份，不能按名称复用 Local/Repo。
@@ -261,3 +261,7 @@ Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_ce
 以上测试路径除第一项外均相对 `src/backend/`。检查接口时从 Router 回溯到注入 Protocol、服务、Repository/Plugin 和错误映射；检查后台链路时再追到生命周期注册和 TaskQueue handler。列出尚未验证的外部消费者，避免以返回 200 或 Task enqueue 成功作为最终验收。
 
 历史 Spec 和前端联调文档位于 `src/backend/specs/2026-08-20-skill-capability-upgrade/`，Installation 设计位于 `src/backend/specs/2026-08-24-installation-single-source-of-truth/`。它们用于追溯决定；旧术语、废弃状态和未实现接口须与本文件及当前代码逐项核对后再使用。
+
+## 数字员工共享凭证保护
+
+已绑定数字员工的服务 Bot 在完整能力投影更新 AgentPass 前，通过数字员工服务申请非公开 MCP 权限，并保留历史 MCP 授权与草稿期望范围的并集。删除仅影响草稿 Runtime 配置；审批通过的发布流程在最终上线时收敛凭证范围。未绑定 Bot 的投影语义保持不变。

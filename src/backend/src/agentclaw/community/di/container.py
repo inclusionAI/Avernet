@@ -53,6 +53,8 @@ from agentclaw.community.di.modules.economy_governance_module import EconomyGove
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
 from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
+from agentclaw.community.di.modules.execution_identity_module import ExecutionIdentityModule
+from agentclaw.community.di.modules.digital_employee_module import DigitalEmployeeModule
 from agentclaw.community.di.modules.grt_chat_module import GrtChatModule
 from agentclaw.community.di.modules.harness_module import HarnessModule
 from agentclaw.community.di.modules.http_client_module import HttpClientModule
@@ -142,6 +144,8 @@ def build_injector(
         SystemConfigModule(),
         CommonConfigModule(),
         BotManagementModule(),
+        ExecutionIdentityModule(),
+        DigitalEmployeeModule(),
         BotQuotaModule(),
         ManifestFetchModule(),
         BotInventoryModule(),

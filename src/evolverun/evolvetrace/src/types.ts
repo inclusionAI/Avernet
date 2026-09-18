@@ -21,6 +21,7 @@ export type NodeStatus =
   | 'failed'
   | 'blocked'
   | 'skipped'
+  | 'cancelled'
 
 export type WorkflowTypeRow = {
   workflow_id: string

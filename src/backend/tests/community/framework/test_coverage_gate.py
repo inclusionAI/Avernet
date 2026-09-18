@@ -17,13 +17,12 @@ import pytest
 from fastapi import FastAPI
 
 from tests.community.framework.case import (
-    CaseInput,
     EndpointCase,
     ExpectError,
+    ExpectRetired,
     ExpectSuccess,
 )
 from tests.community.framework.coverage_gate import (
-    BaselineDiff,
     CoverageGap,
     compute_missing_coverage,
     diff_against_baseline,
@@ -123,6 +122,20 @@ def test_full_coverage_reports_no_gaps(stub_two_endpoints) -> None:
         _ok("POST", "/b"),
         _err("POST", "/b"),
     ]
+    assert compute_missing_coverage(stub_two_endpoints, cases) == []
+
+
+def test_explicitly_retired_route_needs_no_impossible_happy_case(
+    stub_two_endpoints,
+) -> None:
+    retired = EndpointCase(
+        method="GET",
+        path="/a",
+        scenario="retired",
+        expect=ExpectRetired(),
+    )
+    cases = [retired, _ok("POST", "/b"), _err("POST", "/b")]
+
     assert compute_missing_coverage(stub_two_endpoints, cases) == []
 
 
@@ -261,5 +274,3 @@ def test_diff_partial_progress_surfaces_as_both_new_and_stale() -> None:
     diff = diff_against_baseline(current, baseline)
     assert diff.new == (CoverageGap("GET", "/x", ("error",)),)
     assert diff.stale == (CoverageGap("GET", "/x", ("happy", "error")),)
-
-

@@ -79,6 +79,16 @@ def test_context_snapshot_maps_authoritative_direct_session_state() -> None:
     }
 
 
+def test_context_snapshot_accepts_personal_bot_chat_as_direct_scope() -> None:
+    record = replace(_record(), scope_type="personal_bot_chat")
+
+    snapshot = _service(record).resolve("sr_001")
+
+    assert snapshot.scope_type == "direct"
+    assert snapshot.group_id is None
+    assert snapshot.members == ()
+
+
 def test_context_snapshot_marks_deleted_state_inactive() -> None:
     record = replace(
         _record(),

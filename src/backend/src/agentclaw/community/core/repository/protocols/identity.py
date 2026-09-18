@@ -16,6 +16,10 @@ if TYPE_CHECKING:
     from agentclaw.community.core.access.models import AccessControlPolicyRecord, ConfigItemRecord, UserInfoRecord
     from agentclaw.community.core.caller_identity.contracts import CliCallTypeMutationResult, DraftCallTypeCompensationResult, DraftCallTypeMutationResult
     from agentclaw.community.core.caller_identity.models import McpCallType
+    from agentclaw.community.core.execution_identity.contracts import (
+        ExecutionIdentityBinding,
+        ExecutionIdentityType,
+    )
 
 
 @runtime_checkable
@@ -134,6 +138,47 @@ class CallerIdentityRepositoryProtocol(Protocol):
         bot_pk: int,
         engine_type: str,
     ) -> Mapping[str, McpCallType]: ...
+
+
+@runtime_checkable
+class ExecutionIdentityRepositoryProtocol(Protocol):
+    @abstractmethod
+    def get_active(self, *, bot_pk: int) -> ExecutionIdentityBinding | None: ...
+
+    @abstractmethod
+    def get_pending(self, *, bot_pk: int) -> ExecutionIdentityBinding | None: ...
+
+    @abstractmethod
+    def begin_pending(
+        self,
+        *,
+        bot_pk: int,
+        execution_workno: str,
+        identity_type: ExecutionIdentityType,
+        modifier_id: str,
+    ) -> ExecutionIdentityBinding: ...
+
+    @abstractmethod
+    def record_credential_result(
+        self,
+        *,
+        binding_id: int,
+        authorization_id: str | None,
+        credential_id: str | None,
+        agent_id: str | None,
+        credential_status: str | None,
+        modifier_id: str,
+    ) -> ExecutionIdentityBinding: ...
+
+    @abstractmethod
+    def activate_pending(
+        self, *, binding_id: int, modifier_id: str
+    ) -> ExecutionIdentityBinding: ...
+
+    @abstractmethod
+    def mark_failed(
+        self, *, binding_id: int, failure_reason: str, modifier_id: str
+    ) -> None: ...
 
 
 @runtime_checkable

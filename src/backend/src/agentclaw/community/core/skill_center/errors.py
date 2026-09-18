@@ -93,6 +93,10 @@ class LocalSkillStorageError(Exception):
     """A package persistence or compensating cleanup operation failed."""
 
 
+class LocalSkillRuntimeUnavailableError(LocalSkillStorageError):
+    """Runtime delivery failed before its outcome could be confirmed."""
+
+
 class SkillParameterValidationError(Exception):
     """The full Bot-level parameter object violates SKILL.md config."""
 

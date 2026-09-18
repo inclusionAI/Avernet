@@ -165,6 +165,58 @@ async def test_an_invalid_listed_path_is_rejected_before_any_read():
 
 
 @pytest.mark.asyncio
+async def test_package_exists_lists_directory_without_reading_it_as_a_file():
+    """A package probe must work with engines that reject ``read(directory)``."""
+    from unittest.mock import MagicMock, call
+
+    import httpx
+
+    from agentclaw.community.core.devices.services.baas_device_filesystem import (
+        BaasDeviceFileSystem,
+    )
+
+    directory_listing = httpx.Response(
+        status_code=200,
+        json={
+            "data": {
+                "files": [
+                    {
+                        "relative_path": "SKILL.md",
+                        "is_dir": False,
+                    }
+                ]
+            }
+        },
+        request=httpx.Request("POST", "http://fake/api/file/list"),
+    )
+    directory_read_error = httpx.Response(
+        status_code=500,
+        json={"detail": "Is a directory (os error 21)"},
+        request=httpx.Request("POST", "http://fake/api/file/read"),
+    )
+    transport = MagicMock()
+    transport.post.side_effect = lambda path, **_kwargs: (
+        directory_read_error if path == "/api/file/read" else directory_listing
+    )
+    storage = LocalSkillPackageStorage(
+        BaasDeviceFileSystem(
+            transport=transport,
+            conn_info={"paas_device_id": "BOT-aicoding"},
+            path_mapper=lambda path: path,
+        ),
+        DIRECTORY,
+    )
+
+    assert await storage.exists() is True
+    assert transport.post.call_args_list == [
+        call(
+            "/api/file/list",
+            json={"dir_path": DIRECTORY, "recursive": False},
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_a_package_upload_resolves_http_info_once_for_the_whole_batch():
     """storage → BaasDeviceFileSystem → BaasInvokeTransport, wired for real.
 

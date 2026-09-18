@@ -612,6 +612,36 @@ async fn handle_response_frame(
         handle_state_machine_response(state, run_id, res).await;
     } else {
         // Error response - request was rejected
+        let active = state.bot_run_context.find_active_run(run_id).await.map_err(|error| {
+            warn!(request_id = %run_id, "chat rejection scope lookup failed; retaining run");
+            BotWsDispatchError::ServiceError(error)
+        })?;
+        if let Some(active) = active.filter(|active| !active.scope.group_id.is_empty()) {
+            if registered_bot_id.as_deref() != Some(active.scope.bot_id.as_str())
+                || active.transport_owner != bcs_service_api::BotRunTransportOwner::WebSocket {
+                return Err(BotWsDispatchError::InvalidFrameFormat("chat rejection owner mismatch".into()));
+            }
+            let state_machine = state.collaboration_runtime.lookup_delivery_correlation(run_id).await
+                .map_err(|error| BotWsDispatchError::ServiceError(ServiceError::InternalError(
+                    format!("chat rejection correlation lookup failed: {error}"))))?.is_some();
+            if !state_machine {
+            let text = res.error.as_ref().map(|error| error.message.as_str()).unwrap_or("");
+            state.message_flow.handle_bot_event(BotEventCommand {
+                bot_id: active.scope.bot_id,
+                run_id: active.canonical_run_id.clone(),
+                group_id: active.scope.group_id.clone(),
+                bcs_session_id: Some(active.scope.session_id.clone()),
+                event_type: "chat.event".into(),
+                state: AppChatEventState::Error,
+                event_payload: serde_json::json!({
+                    "run_id": active.canonical_run_id, "bcs_group_id": active.scope.group_id,
+                    "session_id": active.scope.session_id, "state": "error", "errorMessage": text,
+                }),
+            }).await?;
+            return Ok(());
+            }
+        }
+        debug!(run_id = %run_id, "chat rejection has no ordinary active group scope; using direct response path");
         let error = res
             .error
             .as_ref()

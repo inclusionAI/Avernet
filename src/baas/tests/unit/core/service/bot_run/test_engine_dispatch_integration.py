@@ -10,6 +10,7 @@ WS path、device 亲和 key、session_client.create_session 的 engine 入参、
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -25,8 +26,16 @@ from secbaas.community.core.service.bot_run import (
 
 _TC_BOT_ID = "20260701_dispatch"
 _USER_ID = "374193"
-_RUN_ID = "run-1"
-_AGENT_KEY = f"agent:{_TC_BOT_ID}:session:{_RUN_ID}:user:{_USER_ID}"
+# session_id=None 时 create_session 现场生成 run uuid，测试固定之
+_RUN_UUID_STR = "00000000-0000-0000-0000-0000000000aa"
+_UUID_PATCH = "secbaas.community.core.service.bot_run._baas_service.uuid.uuid4"
+_AGENT_KEY = f"agent:{_TC_BOT_ID}:session:{_RUN_UUID_STR}:user:{_USER_ID}"
+
+
+def _make_context():
+    from secbaas.community.api.bot_runtime import BotChatContext
+
+    return BotChatContext(api_key_prefix="", app_id="", app_type="test", tenant="t1")
 
 
 def _make_conn_info() -> WsConnectionInfo:
@@ -72,10 +81,13 @@ class _FakeSessionClient:
     async def get_session(
         self, session_id: str, engine: str | None = None
     ) -> SimpleNamespace:
-        return SimpleNamespace(id=session_id)
+        # teclaw 探测语义：默认模拟 session 不存在（走创建分支）
+        raise RuntimeError(f"session not found: {session_id}")
 
 
 def _make_service(wss_resolver: AsyncMock) -> BaasBotService:
+    from secbaas.community.plugins.eval_env.stub import NoopEvalConsistencyCheck
+
     return BaasBotService(
         config=BaasBotServiceConfig(
             adapter_port=20003,
@@ -87,12 +99,13 @@ def _make_service(wss_resolver: AsyncMock) -> BaasBotService:
         wss_resolver=wss_resolver,
         session_service=MagicMock(),
         engine_adapter_registry=_real_engine_adapter_registry(),
+        eval_consistency_check=NoopEvalConsistencyCheck(),
     )
 
 
 # (engine_type, 下游返回的 created_id, 期望 ws path, 期望 device_affinity, 期望返回 session_id)
 _CASES = [
-    ("aicoding", "sess-aic", "/api/ws", None, "sess-aic"),
+    ("aicoding", "sess-aic", "/api/ws", _AGENT_KEY, "sess-aic"),
     (
         "hermes",
         "20260701_120000_abcdef",
@@ -101,21 +114,20 @@ _CASES = [
         "20260701_120000_abcdef",
     ),
     ("claude_code", "sess-cc", "/api/claude_code/ws", _AGENT_KEY, "sess-cc"),
-    # openclaw / teclaw 不在 registry(走 else 原始分支)—— 锁死老引擎行为
+    # openclaw / teclaw 亦经 registry adapter 表达（agent:main: 亲和键差异）
     (
         "openclaw",
         "sess-oc",
         "/api/openclaw/ws",
-        f"session:{_RUN_ID}:user:{_USER_ID}",
+        f"session:{_RUN_UUID_STR}:user:{_USER_ID}",
         "agent:main:sess-oc",
     ),
-    ("teclaw", "sess-tc", "/api/teclaw/ws", None, "sess-tc"),
     (
-        "deepseek_harness",
-        "sess-dsh",
-        "/api/deepseek_harness/ws",
-        _AGENT_KEY,
-        "sess-dsh",
+        "teclaw",
+        "sess-tc",
+        "/api/teclaw/ws",
+        f"default:{_RUN_UUID_STR}:user:{_USER_ID}",
+        "sess-tc",
     ),
 ]
 
@@ -138,14 +150,16 @@ async def test_engine_dispatch(
     svc = _make_service(resolver)
     fake_client = _FakeSessionClient(created_id)
 
-    with patch.object(svc, "_create_session_client", return_value=fake_client):
+    with (
+        patch.object(svc, "_create_session_client", return_value=fake_client),
+        patch(_UUID_PATCH, return_value=uuid.UUID(_RUN_UUID_STR)),
+    ):
         info = await svc.create_session(
             bot_id=_TC_BOT_ID,
             session_id=None,
             metadata={"tenant": "t1"},  # 有 tenant、无 invoker -> 跳过持久化
             binding_info=_make_binding(engine),
-            context=None,
-            run_id=_RUN_ID,
+            context=_make_context(),
         )
 
     # 接缝②:WS path 传给 resolver
@@ -168,16 +182,18 @@ async def test_openclaw_gets_agent_main_prefix_but_aicoding_does_not() -> None:
         resolver = AsyncMock()
         resolver.dispatch_bot_ws_conn_info = AsyncMock(return_value=_make_conn_info())
         svc = _make_service(resolver)
-        with patch.object(
-            svc, "_create_session_client", return_value=_FakeSessionClient("raw-id")
+        with (
+            patch.object(
+                svc, "_create_session_client", return_value=_FakeSessionClient("raw-id")
+            ),
+            patch(_UUID_PATCH, return_value=uuid.UUID(_RUN_UUID_STR)),
         ):
             info = await svc.create_session(
                 bot_id=_TC_BOT_ID,
                 session_id=None,
                 metadata={"tenant": "t1"},
                 binding_info=_make_binding(engine),
-                context=None,
-                run_id=_RUN_ID,
+                context=_make_context(),
             )
         results[engine] = info.session_id
     assert results["openclaw"] == "agent:main:raw-id"

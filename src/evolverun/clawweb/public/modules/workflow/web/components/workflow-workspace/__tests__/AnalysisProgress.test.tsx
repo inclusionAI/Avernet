@@ -33,6 +33,11 @@ vi.mock('../../../api/hooks', () => ({
 }))
 vi.mock('../../SuccessTrendCard', () => ({ SuccessTrendCard: () => <div>成功率趋势</div> }))
 vi.mock('../../NodeAnalysisPanel', () => ({ default: () => <div>节点分析</div> }))
+vi.mock('@avernet/clawweb-shared/web/api/hooks', () => ({
+  useDeleteFlowRun: () => ({ mutate: vi.fn(), isPending: false }),
+  useRerunFlowRun: () => ({ mutate: vi.fn(), isPending: false }),
+  useRunArchive: () => ({ data: null, isLoading: false, isError: false, error: null }),
+}))
 
 import OverviewTab from '../OverviewTab'
 
@@ -43,10 +48,9 @@ describe('Task Guard managed-analysis progress', () => {
       last_status: 'failed', last_run_at: 1, updated_at: 1,
     }} /></MemoryRouter>)
 
-    expect(screen.getByText('Agent 正在分析')).toBeInTheDocument()
-    expect(screen.getByText('已用时 42秒')).toBeInTheDocument()
-    expect(screen.getByText('证据 10/12 · 节点 3（失败 1）· Trace 5')).toBeInTheDocument()
-    expect(screen.getByText('输入已截断')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '分析中' })).toBeDisabled()
+    // The analyzing state renders a spinner with title="分析中"
+    expect(screen.getByTitle('分析中')).toBeInTheDocument()
+    // The analyze button is disabled while analyzing
+    expect(screen.getByTitle('分析')).toBeDisabled()
   })
 })

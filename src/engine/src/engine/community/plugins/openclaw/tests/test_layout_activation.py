@@ -10,6 +10,7 @@ from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
 from engine.community.core.skills.exceptions import (
     InvalidPoolMappingRequestError,
@@ -43,9 +44,11 @@ from engine.community.plugins.openclaw.layout_sync import (
     mirror_local_tree,
     write_baseline_manifest,
 )
-from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 from engine.community.plugins.skills_pool import layout_atomic
+from engine.community.plugins.skills_pool.center_content import (
+    MountedCenterContentAdapter,
+)
 from engine.community.plugins.skills_pool.layout_activation import (
     mapping_sources_use_pool,
 )
@@ -289,6 +292,33 @@ def test_registered_local_cutover_syncs_latest_content_and_retires_bridges(
         repo_is_mounted=lambda path: path == pool_repo,
     )
     assert repeated.status is PoolActivationStatus.ALREADY_COMMITTED
+
+
+def test_cutover_commits_with_managed_center_mapping(tmp_path: Path) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    pool_center = pool_local.parent / "skill-center"
+    center_source = (
+        pool_center
+        / "e5ae3b3a-e94d-4100-af03-5c5a659db7e7"
+        / "v1.5.11"
+    )
+    center_source.mkdir(parents=True)
+    target = legacy_local.parent / "mdata-skills"
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[SkillMapping(source=str(center_source), target=str(target))],
+        home=home,
+        repo_is_mounted=lambda path: path in {pool_repo, pool_center},
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert target.is_symlink()
+    assert target.resolve() == center_source
+    marker = json.loads((pool_local.parent / ".pool-active").read_text())
+    assert marker["activation_state"] == "active"
 
 
 def test_invalid_registered_name_is_rejected_before_cutover(
@@ -1007,8 +1037,6 @@ def test_post_rename_new_file_uses_no_clobber_create(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import os
-
     from engine.community.plugins.openclaw import layout_sync
 
     home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
@@ -1016,14 +1044,18 @@ def test_post_rename_new_file_uses_no_clobber_create(
     def add_legacy_file_before_retire() -> None:
         (legacy_local / "handmade" / "raced.txt").write_text("legacy-window")
 
-    real_link = os.link
+    real_publish = layout_sync.atomic_rename_if_absent
 
-    def race_link(source: Path, target: Path) -> None:
+    def race_publish(source: Path, target: Path) -> bool:
         if Path(target).name == "raced.txt":
             Path(target).write_text("pool-after-exchange")
-        real_link(source, target)
+        return real_publish(source, target)
 
-    monkeypatch.setattr(layout_sync.os, "link", race_link)
+    monkeypatch.setattr(
+        layout_sync,
+        "atomic_rename_if_absent",
+        race_publish,
+    )
     result = activate_openclaw_pool(
         migration_generation="generation-1",
         preparation_id=PREPARATION_ID,
@@ -1041,6 +1073,102 @@ def test_post_rename_new_file_uses_no_clobber_create(
     assert result.evidence["post_sync"]["conflicts_preserved_in_pool"] == [
         "handmade/raced.txt"
     ]
+
+
+def test_post_rename_unsupported_no_clobber_publish_stays_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.openclaw import layout_sync
+
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+
+    def add_legacy_file_before_retire() -> None:
+        (legacy_local / "handmade" / "late.txt").write_text("legacy-window")
+
+    real_publish = layout_sync.atomic_rename_if_absent
+
+    def reject_late_publish(source: Path, target: Path) -> bool:
+        if target.name == "late.txt":
+            raise OSError(errno.ENOTSUP, "injected unsupported publish")
+        return real_publish(source, target)
+
+    monkeypatch.setattr(
+        layout_sync,
+        "atomic_rename_if_absent",
+        reject_late_publish,
+    )
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        before_legacy_retire=add_legacy_file_before_retire,
+    )
+
+    assert result.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert result.evidence["reason"] == "post_cutover_sync_failed"
+    assert result.evidence["errno"] == errno.ENOTSUP
+    assert not (pool_local / "handmade" / "late.txt").exists()
+    assert not (pool_local.parent / ".post-sync-generation-1").exists()
+
+
+def test_post_rename_publish_cleanup_must_finish_before_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.openclaw import layout_sync
+
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    publish_root = pool_local.parent / ".post-sync-generation-1"
+
+    def add_legacy_file_before_retire() -> None:
+        (legacy_local / "handmade" / "late.txt").write_text("legacy-window")
+
+    real_remove = layout_sync._remove_path
+    fail_cleanup_once = True
+
+    def fail_first_publish_cleanup(path: Path) -> None:
+        nonlocal fail_cleanup_once
+        if fail_cleanup_once and path == publish_root and path.exists():
+            fail_cleanup_once = False
+            raise OSError(errno.EIO, "injected publish cleanup failure")
+        real_remove(path)
+
+    monkeypatch.setattr(layout_sync, "_remove_path", fail_first_publish_cleanup)
+
+    first = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        before_legacy_retire=add_legacy_file_before_retire,
+    )
+
+    assert first.status is PoolActivationStatus.POST_CUTOVER_SYNC_PENDING
+    assert first.evidence["reason"] == "post_cutover_sync_failed"
+    assert publish_root.is_dir()
+    assert (pool_local / "handmade" / "late.txt").read_text() == "legacy-window"
+
+    retry = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[],
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert retry.status is PoolActivationStatus.ALREADY_COMMITTED
+    assert not publish_root.exists()
+    assert not (
+        pool_local.parent / ".cutover-baseline-generation-1.json"
+    ).exists()
 
 
 def test_post_rename_pool_parent_deletion_is_not_resurrected(

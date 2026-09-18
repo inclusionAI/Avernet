@@ -52,10 +52,10 @@ class BotService(Protocol):
         self,
         *,
         bot_id: str,
+        metadata: dict[str, Any],
+        binding_info: BotBindingInfo,
+        context: BotChatContext,
         session_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        binding_info: BotBindingInfo | None = None,
-        context: BotChatContext | None = None,
         run_id: str | None = None,
     ) -> SessionInfo:
         """创建对话会话
@@ -66,9 +66,9 @@ class BotService(Protocol):
         Args:
             bot_id: Bot 唯一标识
             session_id: 会话 ID
-            metadata: 可选的会话元数据
-            binding_info: 可选的已解析 binding 信息（避免重复 DB 查询）
-            context: 可选的请求上下文（身份认证、调用者信息等）
+            metadata: 会话元数据
+            binding_info: 已解析的 binding 信息（避免重复 DB 查询）
+            context: 请求上下文（身份认证、调用者信息等）
             run_id: 可选的运行 ID，用于关联 session 与 run 记录
 
         Returns:
@@ -91,6 +91,7 @@ class BotService(Protocol):
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> BotResponse:
         """发送消息并获取响应
 
@@ -102,6 +103,9 @@ class BotService(Protocol):
             context: 可选的请求上下文（身份认证、调用者信息等）
             timeout: 可选的超时时间（秒），None 表示不限制
             chat_metadata: 可选的 chat 请求元数据，透传给底层实现
+            attachments: 附件
+            session_pending: session_id 为提前构造的计划值，尚未在 adapter 侧物化，
+                发送前需先执行物化
         """
         ...
 
@@ -113,12 +117,17 @@ class BotService(Protocol):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         timeout: float,
+        chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，返回 StreamChunk 迭代器。
 
         每个 delta/final/error/agent 事件对应一个 StreamChunk。
         流结束时迭代器自然结束（收到 final 或 error chunk 后 stop）。
+
+        chat_metadata 兼作 session_pending 物化时 title/model 的透传通道
+        （``title`` / ``model`` 键）。
         """
         ...
 
@@ -130,6 +139,7 @@ class BotService(Protocol):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """注入消息到已有会话
 
@@ -141,6 +151,9 @@ class BotService(Protocol):
             message: 注入的消息内容
             binding_info: 已解析的 binding 信息（用于创建底层连接）
             context: 可选的请求上下文（身份认证、调用者信息等）
+            attachments: 附件
+            session_pending: session_id 为提前构造的计划值，尚未在 adapter 侧物化，
+                注入前需先执行物化
         """
         ...
 
@@ -277,6 +290,7 @@ class MessageDispatcher(Protocol):
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """分发消息发送以进行异步执行
 
@@ -296,6 +310,8 @@ class MessageDispatcher(Protocol):
             callback: 可选的完成回调，签名与
                       asyncio.Task.add_done_callback 一致
             chat_metadata: 可选的 chat 请求元数据，透传给 BotService.send_message
+            attachments: 附件
+            session_pending: session_id 为提前构造的计划值，尚未在 adapter 侧物化
         """
         ...
 
@@ -310,7 +326,9 @@ class MessageDispatcher(Protocol):
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """流式消息发送分发，返回 StreamChunk 迭代器。
 
@@ -333,6 +351,7 @@ class MessageDispatcher(Protocol):
         context: BotChatContext | None = None,
         bot_id: str = "",
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """分发消息注入以进行异步执行
 
@@ -347,15 +366,10 @@ class MessageDispatcher(Protocol):
             binding_info: 已解析的绑定信息
             context: 可选的请求上下文
             bot_id: 用于队列模式下的每键限制
+            attachments: 附件
+            session_pending: session_id 为提前构造的计划值，尚未在 adapter 侧物化
         """
         ...
-
-
-@runtime_checkable
-class MachineCountProvider(Protocol):
-    """在线 Worker 机器数来源（用于均分 QPM）。"""
-
-    def get_machine_count(self) -> int: ...
 
 
 @runtime_checkable

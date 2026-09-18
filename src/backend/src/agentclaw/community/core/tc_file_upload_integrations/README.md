@@ -16,6 +16,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.platform
   - agentclaw.community.plugin_api.tc_resource_ready
   - agentclaw.community.core.session_resources
+  - agentclaw.community.log
 ```
 
 ### Change impact

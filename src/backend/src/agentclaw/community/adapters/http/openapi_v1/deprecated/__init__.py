@@ -50,11 +50,17 @@ from . import skills as _skills
 #: Mounted with the engine-runtime response table, like their replacements.
 ENGINE_RUNTIME_GROUPS = _engine_runtime.ENGINE_RUNTIME + [_approvals.router]
 
-#: Mounted grant-checked (own-bot), like their replacements.
-#: ``require_granted_own_bot`` reads the bot off the path *or* the query
-#: string, so the resources and routines legacy addresses are covered by it
-#: exactly as the new ones are.
-GRANT_CHECKED_GROUPS = _engine_runtime.GRANT_CHECKED + [
+#: Mounted with the addressed-bot grant, like their replacements: the
+#: retiring identity addresses still carry ``{bot_id}`` on the path and
+#: resolve ``OwnerIdDep``, so they take the same check-and-grant pair the
+#: current address does.
+ADDRESSED_GROUPS = _engine_runtime.ADDRESSED
+
+#: Mounted grant-checked (own-bot): the owners of these operations' bots are
+#: themselves — the resources and routines retiring shims pin the owner to the
+#: caller (``_requery.pin_owner_to_user``), so ``require_granted_own_bot``'s
+#: caller-is-the-owner grant is the one congruent with what the handler reads.
+GRANT_CHECKED_GROUPS = [
     _auth_status.router,
     _bots.router,
     _resources.router,
@@ -86,12 +92,21 @@ def _inherit_admission_modes() -> None:
     same operation at its old address, so writing the mode out again would be a
     second copy of one decision, free to drift from the first.
 
+    One exception, and it is visible as such: the pinned retiring addresses
+    (``admission.py``'s "Pinned retiring addresses" rows) keep the own-bot
+    mode their shims enforce — their replacements moved onto the addressed
+    grant, but the retiring shims resolve the owner as the caller and must not
+    carry a mode promising more. Already-decided rows are filled first, so a
+    written row is an override by construction rather than by silent luck.
+
     Run at import, before any request: ``ADMISSION`` is read per request by
     ``require_principal``'s admission check, and an operation missing from it
     is refused. ``test_admission_inventory`` is what fails if a legacy address
     ever names a replacement that is not itself in the table.
     """
     for (method, legacy_path), replacement in LEGACY_ROUTES.items():
+        if (method, legacy_path) in ADMISSION:
+            continue
         mode = ADMISSION.get((method, replacement))
         if mode is not None:
             ADMISSION[(method, legacy_path)] = mode
@@ -100,6 +115,7 @@ def _inherit_admission_modes() -> None:
 _inherit_admission_modes()
 
 __all__ = [
+    "ADDRESSED_GROUPS",
     "ENGINE_RUNTIME_GROUPS",
     "GRANT_CHECKED_GROUPS",
     "LEGACY_ROUTES",

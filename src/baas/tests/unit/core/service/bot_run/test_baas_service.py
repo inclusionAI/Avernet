@@ -8,10 +8,10 @@ Covers:
 - _persist_session_create: persistence gating and metadata handling
 - _mark_session_completed / _mark_session_failed: DB status updates
 - _build_base_url: URL conversion logic
-- _get_or_create_adapter_session: session reuse vs creation
 - _resolve_ws_connection_for_binding: binding_info-based resolution
 """
 
+import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -35,6 +35,18 @@ from secbaas.community.core.service.bot_run._async_chat_client import (
 from secbaas.community.core.service.bot_run._async_chat_client_pool import (
     AsyncChatClientPool,
 )
+from secbaas.community.core.service.bot_run._bot_run_utils import plan_session_id
+from secbaas.community.plugins.bot.engine_adapter.aicoding.real import (
+    AICodingAdapter,
+)
+from secbaas.community.plugins.bot.engine_adapter.claude_code.real import (
+    ClaudeCodeAdapter,
+)
+from secbaas.community.plugins.bot.engine_adapter.hermes.real import HermesAdapter
+from secbaas.community.plugins.bot.engine_adapter.openclaw.real import (
+    OpenClawAdapter,
+)
+from secbaas.community.plugins.bot.engine_adapter.teclaw.real import TeClawAdapter
 
 # ==================== Fixtures ====================
 
@@ -85,6 +97,21 @@ def _make_binding_info(**overrides):
     return BotBindingInfo(**defaults)
 
 
+def _make_context(**overrides):
+    from secbaas.community.api.bot_runtime import BotChatContext
+
+    # app_id 留空：resolve_user_id 不走 context 分支，fallback 到 bot_id，
+    # 维持"调用方未携带身份"的既有测试语义
+    defaults = {
+        "api_key_prefix": INVOKER,
+        "app_id": "",
+        "app_type": "test-type",
+        "tenant": "",
+    }
+    defaults.update(overrides)
+    return BotChatContext(**defaults)
+
+
 @pytest.fixture
 def mock_pool():
     pool = MagicMock(spec=AsyncChatClientPool)
@@ -111,11 +138,25 @@ def config():
 
 @pytest.fixture
 def service(config, wss_resolver, mock_pool):
+    from secbaas.community.core.service.bot_run import BotEngineAdapterRegistry
+    from secbaas.community.plugins.eval_env.stub import NoopEvalConsistencyCheck
+
     return BaasBotService(
         config=config,
         client_pool=mock_pool,
         wss_resolver=wss_resolver,
         session_service=MagicMock(),
+        # 全部 5 引擎注册 adapter（对齐生产装配），create_session 直接走 adapter。
+        engine_adapter_registry=BotEngineAdapterRegistry(
+            {
+                "openclaw": OpenClawAdapter(),
+                "teclaw": TeClawAdapter(),
+                "aicoding": AICodingAdapter(),
+                "hermes": HermesAdapter(),
+                "claude_code": ClaudeCodeAdapter(),
+            }
+        ),
+        eval_consistency_check=NoopEvalConsistencyCheck(),
     )
 
 
@@ -127,29 +168,35 @@ class TestCreateSessionTenantValidation:
 
     @pytest.mark.asyncio
     async def test_missing_tenant_raises_bot_service_error(self, service):
-        """Missing tenant in metadata must raise BotServiceError."""
+        """Missing tenant in context must raise BotServiceError."""
         with pytest.raises(BotServiceError, match="tenant is required"):
             await service.create_session(
                 bot_id=BOT_UUID,
                 metadata={"invoker": INVOKER},
+                binding_info=_make_binding_info(),
+                context=_make_context(),
             )
 
     @pytest.mark.asyncio
     async def test_empty_tenant_raises_bot_service_error(self, service):
-        """Empty string tenant must raise BotServiceError."""
+        """Empty string tenant in context must raise BotServiceError."""
         with pytest.raises(BotServiceError, match="tenant is required"):
             await service.create_session(
                 bot_id=BOT_UUID,
                 metadata={"tenant": "", "invoker": INVOKER},
+                binding_info=_make_binding_info(),
+                context=_make_context(),
             )
 
     @pytest.mark.asyncio
-    async def test_none_metadata_raises_bot_service_error(self, service):
-        """None metadata must raise BotServiceError (no tenant key at all)."""
+    async def test_empty_metadata_no_tenant_raises_bot_service_error(self, service):
+        """空 metadata（无 tenant key）且 context.tenant 为空时 raise BotServiceError。"""
         with pytest.raises(BotServiceError, match="tenant is required"):
             await service.create_session(
                 bot_id=BOT_UUID,
-                metadata=None,
+                metadata={},
+                binding_info=_make_binding_info(),
+                context=_make_context(),
             )
 
     @pytest.mark.asyncio
@@ -166,25 +213,31 @@ class TestCreateSessionTenantValidation:
 
         binding = _make_binding_info()
         # resolve_user_id falls back to bot_id for service bot_type without context;
-        # create_session strips the agent:main: prefix (line 271) before passing
-        # the consistency key to _resolve_ws_connection.
-        consistency_key = f"session:None:user:{BOT_UUID}"
+        # 无显式 session_id 时 run_id 现场生成 uuid，亲和键含该 uuid
+        consistency_key = (
+            "session:00000000-0000-0000-0000-000000000001:user:" + BOT_UUID
+        )
 
         with (
             patch.object(
                 service, "_create_session_client", return_value=mock_session_client
             ),
             patch.object(service, "_persist_session_create", return_value=None),
+            patch(
+                "secbaas.community.core.service.bot_run._baas_service.uuid.uuid4",
+                return_value=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+            ),
         ):
             session = await service.create_session(
                 bot_id=BOT_UUID,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             assert session.bot_id == BOT_UUID
             # Verify tenant was passed to wss_resolver
             wss_resolver.dispatch_bot_ws_conn_info.assert_called_once_with(
-                bot_uuid=BOT_UUID,
+                bot_uuid=DEVICE_UUID,
                 port=20003,
                 path="/api/openclaw/ws",
                 tenant=TENANT,
@@ -193,47 +246,23 @@ class TestCreateSessionTenantValidation:
 
 
 class TestSessionRoutingAffinityPrefix:
-    """device_affinity 必须对 ``agent:main:`` 前缀不敏感。
+    """plan_session_id 构造亲和键（无显式 session_id 时被调用）。
 
-    同一会话经 DingTalk(裸 id)与 Open API(带前缀 id)两次投递必须哈希到同一实例。
-    前缀剥离职责在调用点(create_session 271 行 / _resolve_ws_connection_for_binding
-    842 行),_create_session_consistency_key 只负责构造亲和键,不做规范化。
+    显式 session_id 的复用/透传由调用方前置处理（runner._resolve_session /
+    create_session 的 if session_id 分支），此处只测构造规则。
+    引擎差异经 ``adapter.session_consistency_key`` 表达：openclaw/teclaw 传
+    对应 adapter；未传 adapter（registry 空的测试环境/未注册引擎）走 core
+    兜底通用格式。
     """
 
-    def test_consistency_key_returns_session_id_as_is(self, service):
-        """_create_session_consistency_key 不再剥离前缀,原样返回 session_id。"""
+    def test_openclaw_synthetic_key(self, service):
+        """openclaw 构造 agent:main: 前缀的合成键。"""
         assert (
-            service._create_session_consistency_key(
-                engine_type="openclaw",
+            plan_session_id(
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
                 run_id="run-1",
-                session_id="agent:main:bcs-sess-123",
-            )
-            == "agent:main:bcs-sess-123"
-        )
-
-    def test_non_prefix_id_unchanged(self, service):
-        assert (
-            service._create_session_consistency_key(
-                engine_type="openclaw",
-                tc_bot_id=BOT_UUID,
-                user_id="u-1",
-                run_id="run-1",
-                session_id="plain-sess",
-            )
-            == "plain-sess"
-        )
-
-    def test_none_branch_synthetic_key_unchanged(self, service):
-        """session_id=None 的合成键保持不变,不动既有 first-call 路由 stickiness。"""
-        assert (
-            service._create_session_consistency_key(
-                engine_type="openclaw",
-                tc_bot_id=BOT_UUID,
-                user_id="u-1",
-                run_id="run-1",
-                session_id=None,
+                adapter=OpenClawAdapter(),
             )
             == "agent:main:session:run-1:user:u-1"
         )
@@ -241,26 +270,23 @@ class TestSessionRoutingAffinityPrefix:
     def test_eval_id_replaces_run_id_in_openclaw_key(self, service):
         """eval_id 存在时用 evalId 替换 run_id 作为 session 字段值。"""
         assert (
-            service._create_session_consistency_key(
-                engine_type="openclaw",
+            plan_session_id(
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
                 run_id="run-1",
-                session_id=None,
                 eval_id="eval-abc123",
+                adapter=OpenClawAdapter(),
             )
             == "agent:main:session:eval-abc123:user:u-1"
         )
 
     def test_eval_id_replaces_run_id_in_claude_code_key(self, service):
-        """eval_id 存在时 claude_code 引擎也用 evalId 替换 run_id。"""
+        """eval_id 存在时 claude_code 引擎也用 evalId 替换 run_id（兜底通用格式）。"""
         assert (
-            service._create_session_consistency_key(
-                engine_type="claude_code",
+            plan_session_id(
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
                 run_id="run-1",
-                session_id=None,
                 eval_id="eval-abc123",
             )
             == f"agent:{BOT_UUID}:session:eval-abc123:user:u-1"
@@ -269,12 +295,10 @@ class TestSessionRoutingAffinityPrefix:
     def test_eval_id_none_falls_back_to_run_id(self, service):
         """eval_id=None 时回退到 run_id，与原有行为一致。"""
         assert (
-            service._create_session_consistency_key(
-                engine_type="claude_code",
+            plan_session_id(
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
                 run_id="run-1",
-                session_id=None,
                 eval_id=None,
             )
             == f"agent:{BOT_UUID}:session:run-1:user:u-1"
@@ -284,71 +308,49 @@ class TestSessionRoutingAffinityPrefix:
     def test_deepseek_harness_uses_structured_affinity_key(self, service, eval_id):
         session_key = eval_id or "run-1"
         assert (
-            service._create_session_consistency_key(
-                engine_type="deepseek_harness",
+            plan_session_id(
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
                 run_id="run-1",
-                session_id=None,
                 eval_id=eval_id,
             )
             == f"agent:{BOT_UUID}:session:{session_key}:user:u-1"
         )
 
-    def test_eval_id_ignored_when_session_id_provided(self, service):
-        """session_id 已传入时直接返回，eval_id 不生效。"""
-        assert (
-            service._create_session_consistency_key(
-                engine_type="openclaw",
-                tc_bot_id=BOT_UUID,
-                user_id="u-1",
-                run_id="run-1",
-                session_id="existing-session",
-                eval_id="eval-abc123",
-            )
-            == "existing-session"
-        )
-
     def test_teclaw_eval_id_replaces_run_id_in_key(self, service):
-        """teclaw 引擎评测流量（eval_id 存在）时构造结构化 key。"""
+        """teclaw 引擎评测流量（eval_id 存在）时构造 teclaw 结构化 key。"""
         assert (
-            service._create_session_consistency_key(
-                engine_type="teclaw",
+            plan_session_id(
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
                 run_id="run-1",
-                session_id=None,
                 eval_id="eval-abc123",
+                adapter=TeClawAdapter(),
             )
-            == f"agent:{BOT_UUID}:session:eval-abc123:user:u-1"
+            == "agent:main:default:eval-abc123:user:u-1"
         )
 
-    def test_teclaw_no_eval_id_returns_none(self, service):
-        """teclaw 引擎生产流量（无 eval_id）返回 None，保持原有 sessionKey 生成逻辑。"""
+    def test_teclaw_no_eval_id_returns_structured_key(self, service):
+        """teclaw 生产流量也统一构造 teclaw 结构化 key（延迟物化 get-or-create）。"""
         assert (
-            service._create_session_consistency_key(
-                engine_type="teclaw",
+            plan_session_id(
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
                 run_id="run-1",
-                session_id=None,
-                eval_id=None,
+                adapter=TeClawAdapter(),
             )
-            is None
+            == "agent:main:default:run-1:user:u-1"
         )
 
-    def test_unsupported_engine_type_returns_none_with_warning(self, service):
-        """未知引擎类型返回 None 并记录 WARNING。"""
+    def test_unsupported_engine_type_returns_structured_key(self, service):
+        """未注册 adapter 的引擎走 core 兜底（通用结构化 key）。"""
         assert (
-            service._create_session_consistency_key(
-                engine_type="unknown_engine",
+            plan_session_id(
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
                 run_id="run-1",
-                session_id=None,
-                eval_id=None,
             )
-            is None
+            == f"agent:{BOT_UUID}:session:run-1:user:u-1"
         )
 
     @pytest.mark.asyncio
@@ -440,6 +442,7 @@ class TestCreateSessionBotResolution:
                 bot_id=BOT_UUID,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=_make_binding_info(),
+                context=_make_context(tenant=TENANT),
             )
 
     @pytest.mark.asyncio
@@ -453,6 +456,7 @@ class TestCreateSessionBotResolution:
                 bot_id=BOT_UUID,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=_make_binding_info(),
+                context=_make_context(tenant=TENANT),
             )
 
     @pytest.mark.asyncio
@@ -468,6 +472,7 @@ class TestCreateSessionBotResolution:
                 bot_id=BOT_UUID,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=_make_binding_info(),
+                context=_make_context(tenant=TENANT),
             )
 
     @pytest.mark.asyncio
@@ -481,6 +486,7 @@ class TestCreateSessionBotResolution:
                 bot_id=BOT_UUID,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=_make_binding_info(),
+                context=_make_context(tenant=TENANT),
             )
 
 
@@ -513,6 +519,7 @@ class TestCreateSessionSetsBindingInfo:
                 bot_id=BOT_UUID,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             assert binding.baas_session_id == "BAAS-SESS-123"
 
@@ -542,6 +549,7 @@ class TestCreateSessionPersistence:
                 bot_id=BOT_UUID,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=_make_binding_info(),
+                context=_make_context(tenant=TENANT),
             )
             mock_persist.assert_called_once()
 
@@ -807,6 +815,7 @@ class TestInjectMessage:
                 session_id=SESSION_ID,
                 message="instruction",
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
 
         mock_client.inject_message.assert_awaited_once()
@@ -876,6 +885,7 @@ class TestGetMessages:
             result = await service.get_messages(
                 session_id=SESSION_ID,
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             assert len(result) == 1
             assert result[0].content == "hello"
@@ -1005,56 +1015,6 @@ class TestBuildBaseUrl:
             result
             == "https://gateway.example.com/proxypass/ARCA_sb1:20003/api/openclaw/ws"
         )
-
-
-class TestGetOrCreateAdapterSession:
-    """Test _get_or_create_adapter_session logic."""
-
-    @pytest.mark.asyncio
-    async def test_existing_session_id_is_reused(self, service):
-        """When session_id is provided, it's reused without adapter call."""
-        mock_session_client = AsyncMock()
-        result = await service._get_or_create_adapter_session(
-            session_client=mock_session_client,
-            session_id="agent:main:existing-sess",
-            user_id="user-001",
-            metadata={},
-        )
-        assert result == ("agent:main:existing-sess", True)
-        mock_session_client.get_session.assert_not_called()
-        mock_session_client.create_session.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_new_session_creates_adapter_session(self, service):
-        """When session_id is None, a new adapter session is created."""
-        mock_session_client = AsyncMock()
-        mock_session = MagicMock()
-        mock_session.id = "agent:main:new-sess-001"
-        mock_session_client.create_session = AsyncMock(return_value=mock_session)
-
-        result = await service._get_or_create_adapter_session(
-            session_client=mock_session_client,
-            session_id=None,
-            user_id="user-001",
-            metadata={"title": "Test", "model": "gpt-4"},
-        )
-        assert result == ("agent:main:new-sess-001", False)
-
-    @pytest.mark.asyncio
-    async def test_new_session_adds_agent_main_prefix(self, service):
-        """When adapter returns session id without prefix, agent:main: is added."""
-        mock_session_client = AsyncMock()
-        mock_session = MagicMock()
-        mock_session.id = "raw-sess-002"
-        mock_session_client.create_session = AsyncMock(return_value=mock_session)
-
-        result = await service._get_or_create_adapter_session(
-            session_client=mock_session_client,
-            session_id=None,
-            user_id="user-001",
-            metadata={},
-        )
-        assert result == ("agent:main:raw-sess-002", False)
 
 
 class TestResolveWsConnectionForBinding:
@@ -1228,26 +1188,35 @@ class TestCreateSessionEngineType:
         mock_session_client.__aenter__ = AsyncMock(return_value=mock_session_client)
         mock_session_client.__aexit__ = AsyncMock(return_value=False)
 
-        binding = _make_binding_info(engine_type="arklet")
+        binding = _make_binding_info(engine_type="claude_code")
 
         with (
             patch.object(
                 service, "_create_session_client", return_value=mock_session_client
             ),
             patch.object(service, "_persist_session_create", return_value=None),
+            patch(
+                "secbaas.community.core.service.bot_run._baas_service.uuid.uuid4",
+                return_value=uuid.UUID("00000000-0000-0000-0000-000000000002"),
+            ),
         ):
             await service.create_session(
                 bot_id=BOT_UUID,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
-            # 验证 wss_resolver 被调用时 path 使用了 engine_type
+            # 验证 wss_resolver 被调用时 path 使用了 engine_type（引擎专属 router）
+            # 非 openclaw 引擎统一返回结构化亲和键（无 session_id 时 run_id 现场生成）
             wss_resolver.dispatch_bot_ws_conn_info.assert_called_once_with(
-                bot_uuid=BOT_UUID,
+                bot_uuid=DEVICE_UUID,
                 port=20003,
-                path="/api/arklet/ws",
+                path="/api/claude_code/ws",
                 tenant=TENANT,
-                device_affinity=None,
+                device_affinity=(
+                    f"agent:{BOT_UUID}:session:00000000-0000-0000-0000-000000000002"
+                    f":user:{BOT_UUID}"
+                ),
             )
 
     @pytest.mark.asyncio
@@ -1265,23 +1234,29 @@ class TestCreateSessionEngineType:
 
         binding = _make_binding_info()
         # resolve_user_id falls back to bot_id for service bot_type without context;
-        # create_session strips the agent:main: prefix (line 271) before passing
-        # the consistency key to _resolve_ws_connection.
-        consistency_key = f"session:None:user:{BOT_UUID}"
+        # 无显式 session_id 时 run_id 现场生成 uuid，亲和键含该 uuid
+        consistency_key = (
+            "session:00000000-0000-0000-0000-000000000003:user:" + BOT_UUID
+        )
 
         with (
             patch.object(
                 service, "_create_session_client", return_value=mock_session_client
             ),
             patch.object(service, "_persist_session_create", return_value=None),
+            patch(
+                "secbaas.community.core.service.bot_run._baas_service.uuid.uuid4",
+                return_value=uuid.UUID("00000000-0000-0000-0000-000000000003"),
+            ),
         ):
             await service.create_session(
                 bot_id=BOT_UUID,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             wss_resolver.dispatch_bot_ws_conn_info.assert_called_once_with(
-                bot_uuid=BOT_UUID,
+                bot_uuid=DEVICE_UUID,
                 port=20003,
                 path="/api/openclaw/ws",
                 tenant=TENANT,
@@ -1337,11 +1312,12 @@ class TestCreateSessionEffectiveSessionId:
                     "eval_id": "eval-abc123",
                 },
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             # 验证 adapter.create_adapter_session 收到的是 consistency_key（含 evalId）
             mock_adapter.create_adapter_session.assert_called_once()
             call_kwargs = mock_adapter.create_adapter_session.call_args
-            assert call_kwargs.kwargs["session_id"] == expected_eval_session_id
+            assert call_kwargs.kwargs["planned_id"] == expected_eval_session_id
             assert session.session_id == expected_eval_session_id
 
     @pytest.mark.asyncio
@@ -1380,10 +1356,11 @@ class TestCreateSessionEffectiveSessionId:
                     "eval_id": "eval-abc123",
                 },
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             # 验证 adapter 收到的是调用方传入的 session_id，不是 consistency_key
             call_kwargs = mock_adapter.create_adapter_session.call_args
-            assert call_kwargs.kwargs["session_id"] == caller_session_id
+            assert call_kwargs.kwargs["planned_id"] == caller_session_id
 
     @pytest.mark.asyncio
     async def test_no_effective_session_id_when_no_eval_id(self, service, wss_resolver):
@@ -1410,6 +1387,7 @@ class TestCreateSessionEffectiveSessionId:
                 session_id=None,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             # 非 adapter 路径：session_id=None → adapter 创建新 session
             mock_session_client.create_session.assert_called_once()
@@ -1460,6 +1438,7 @@ class TestCreateSessionDegradation:
                 session_id="agent:hermes-bot:sess-original:user:u1",
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             # 验证退化 warning 被调用
             warning_calls = [
@@ -1506,6 +1485,7 @@ class TestCreateSessionDegradation:
                 session_id="agent:hermes-bot:sess-same:user:u1",
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             warning_calls = [
                 c
@@ -1544,6 +1524,7 @@ class TestCreateSessionDegradation:
                 session_id=None,
                 metadata={"tenant": TENANT, "invoker": INVOKER},
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             warning_calls = [
                 c
@@ -1634,44 +1615,15 @@ class TestCreateSessionInvokerInjection:
             assert session.metadata.get("tenant") == "ctx-tenant"
 
     @pytest.mark.asyncio
-    async def test_metadata_tenant_fallback_when_no_context(
-        self, service, wss_resolver
-    ):
-        # [单测用例]测试场景：无 context 时从 metadata 获取 tenant
-        """When no context, tenant falls back to metadata."""
-        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
-
-        mock_session_client = AsyncMock()
-        mock_session = MagicMock()
-        mock_session.id = "agent:main:sess-meta"
-        mock_session_client.create_session = AsyncMock(return_value=mock_session)
-        mock_session_client.__aenter__ = AsyncMock(return_value=mock_session_client)
-        mock_session_client.__aexit__ = AsyncMock(return_value=False)
-
-        binding = _make_binding_info()
-        # resolve_user_id falls back to bot_id for service bot_type without context;
-        # create_session strips the agent:main: prefix (line 271) before passing
-        # the consistency key to _resolve_ws_connection.
-        consistency_key = f"session:None:user:{BOT_UUID}"
-
-        with (
-            patch.object(
-                service, "_create_session_client", return_value=mock_session_client
-            ),
-            patch.object(service, "_persist_session_create", return_value=None),
-        ):
-            session = await service.create_session(
+    async def test_no_context_tenant_rejects_even_with_metadata_tenant(self, service):
+        # [单测用例]测试场景：context 缺 tenant 时不再 fallback 到 metadata
+        """context 缺 tenant 时不再 fallback 到 metadata，直接拒绝。"""
+        with pytest.raises(BotServiceError, match="tenant is required"):
+            await service.create_session(
                 bot_id=BOT_UUID,
                 metadata={"tenant": "meta-tenant", "invoker": INVOKER},
-                binding_info=binding,
-            )
-            assert session.bot_id == BOT_UUID
-            wss_resolver.dispatch_bot_ws_conn_info.assert_called_once_with(
-                bot_uuid=BOT_UUID,
-                port=20003,
-                path="/api/openclaw/ws",
-                tenant="meta-tenant",
-                device_affinity=consistency_key,
+                binding_info=_make_binding_info(),
+                context=_make_context(),
             )
 
 
@@ -1706,6 +1658,7 @@ class TestCreateSessionAdapterErrors:
                     bot_id=BOT_UUID,
                     metadata={"tenant": TENANT, "invoker": INVOKER},
                     binding_info=_make_binding_info(),
+                    context=_make_context(tenant=TENANT),
                 )
 
     @pytest.mark.asyncio
@@ -1713,11 +1666,11 @@ class TestCreateSessionAdapterErrors:
         self, service, wss_resolver
     ):
         # [单测用例]测试场景：ClientResponseError 含内部代理 url,外抛消息不得包含 url
-        """_safe_client_msg strips aiohttp request url from ClientResponseError."""
+        """safe_client_msg strips aiohttp request url from ClientResponseError."""
         import aiohttp
 
-        from secbaas.community.core.service.bot_run._baas_service import (
-            _safe_client_msg,
+        from secbaas.community.core.service.bot_run._bot_run_utils import (
+            safe_client_msg,
         )
 
         cre = aiohttp.ClientResponseError(
@@ -1731,12 +1684,12 @@ class TestCreateSessionAdapterErrors:
             "https://agentclawproxy-pre.alipay.com/proxypass/ARCA_sb/api/sessions"  # type: ignore[attr-defined]
         )
 
-        safe = _safe_client_msg(cre)
+        safe = safe_client_msg(cre)
         assert "agentclawproxy" not in safe
         assert "/api/sessions" not in safe
         assert "Unsupported engine type" in safe  # 业务错误保留
         # 普通异常照常 str()
-        assert _safe_client_msg(RuntimeError("boom")) == "boom"
+        assert safe_client_msg(RuntimeError("boom")) == "boom"
 
     @pytest.mark.asyncio
     async def test_safe_client_msg_generic_client_error_does_not_leak_url(
@@ -1744,11 +1697,11 @@ class TestCreateSessionAdapterErrors:
     ):
         # [单测用例]测试场景：ClientConnectorError 等 ClientError 子类 str() 含内部
         # hostname/URL，外抛消息须统一为通用消息，不得泄露内部地址
-        """_safe_client_msg returns generic message for other aiohttp.ClientError."""
+        """safe_client_msg returns generic message for other aiohttp.ClientError."""
         import aiohttp
 
-        from secbaas.community.core.service.bot_run._baas_service import (
-            _safe_client_msg,
+        from secbaas.community.core.service.bot_run._bot_run_utils import (
+            safe_client_msg,
         )
 
         # ClientConnectorError 的 str() 形如
@@ -1760,7 +1713,7 @@ class TestCreateSessionAdapterErrors:
             ),
         )
 
-        safe = _safe_client_msg(cce)
+        safe = safe_client_msg(cce)
         assert safe == "Connection failed"
         assert "agentclawproxy" not in safe
         assert "alipay.com" not in safe
@@ -1788,6 +1741,7 @@ class TestCreateSessionAdapterErrors:
                     session_id="agent:main:existing-id",
                     metadata={"tenant": TENANT, "invoker": INVOKER},
                     binding_info=_make_binding_info(),
+                    context=_make_context(tenant=TENANT),
                 )
 
 
@@ -2066,6 +2020,7 @@ class TestInjectMessageExtended:
                 session_id=SESSION_ID,
                 message="instruction",
                 binding_info=binding,
+                context=None,
             )
             mock_client.inject_message.assert_awaited_once_with(
                 message="instruction",
@@ -2125,6 +2080,7 @@ class TestInjectMessageExtended:
                 session_id=SESSION_ID,
                 message="instruction",
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             mock_completed.assert_called_once_with(
                 "SESSION-xyz", result={"content": "inject success"}
@@ -2265,6 +2221,7 @@ class TestGetMessagesExtended:
             result = await service.get_messages(
                 session_id=SESSION_ID,
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             assert result == []
 
@@ -2304,6 +2261,7 @@ class TestGetMessagesExtended:
             result = await service.get_messages(
                 session_id=SESSION_ID,
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             assert len(result) == 3
             assert result[0].role == "user"
@@ -2336,6 +2294,7 @@ class TestGetMessagesExtended:
             await service.get_messages(
                 session_id=SESSION_ID,
                 binding_info=binding,
+                context=_make_context(tenant=TENANT),
             )
             # Verify called with engine_type="arklet"
             mock_create.assert_called_once()
@@ -2470,95 +2429,6 @@ class TestResolveWsConnectionForBindingExtended:
 
         call_kwargs = wss_resolver.dispatch_bot_ws_conn_info.call_args[1]
         assert call_kwargs["tenant"] == ""
-
-
-# ==================== TestGetOrCreateAdapterSessionExtended ====================
-
-
-class TestGetOrCreateAdapterSessionExtended:
-    """Extended tests for _get_or_create_adapter_session."""
-
-    @pytest.mark.asyncio
-    async def test_existing_session_raises_on_exception(self, service):
-        # [单测用例]测试场景：session_id 已存在但异常时 re-raise
-        """When session_id is provided but an exception occurs, it is re-raised."""
-        mock_session_client = AsyncMock()
-        # The current implementation just logs and returns (session_id, True),
-        # no get_session call anymore. Let's test the else branch instead.
-        # Since session_id is truthy, it goes into the if branch and returns
-        # (session_id, True) without any async calls that could fail.
-        result = await service._get_or_create_adapter_session(
-            session_client=mock_session_client,
-            session_id="agent:main:existing-id",
-            user_id="user-001",
-            metadata={},
-        )
-        assert result == ("agent:main:existing-id", True)
-
-    @pytest.mark.asyncio
-    async def test_create_session_passes_metadata(self, service):
-        # [单测用例]测试场景：创建 adapter session 时传递 title 和 model
-        """title and model from metadata are passed to adapter create_session."""
-        mock_session_client = AsyncMock()
-        mock_session = MagicMock()
-        mock_session.id = "agent:main:sess-meta"
-        mock_session_client.create_session = AsyncMock(return_value=mock_session)
-
-        await service._get_or_create_adapter_session(
-            session_client=mock_session_client,
-            session_id=None,
-            user_id="user-001",
-            metadata={"title": "Test Title", "model": "gpt-4o"},
-        )
-        mock_session_client.create_session.assert_awaited_once_with(
-            title="Test Title",
-            user_id="user-001",
-            agent_id="",
-            uuid=None,
-            model="gpt-4o",
-            engine="openclaw",
-        )
-
-    @pytest.mark.asyncio
-    async def test_create_session_with_none_metadata_fields(self, service):
-        # [单测用例]测试场景：metadata 中无 title/model 时传 None
-        """When title and model are absent from metadata, None is passed."""
-        mock_session_client = AsyncMock()
-        mock_session = MagicMock()
-        mock_session.id = "agent:main:sess-no-meta"
-        mock_session_client.create_session = AsyncMock(return_value=mock_session)
-
-        await service._get_or_create_adapter_session(
-            session_client=mock_session_client,
-            session_id=None,
-            user_id="user-001",
-            metadata={},
-        )
-        mock_session_client.create_session.assert_awaited_once_with(
-            title=None,
-            user_id="user-001",
-            agent_id="",
-            uuid=None,
-            model=None,
-            engine="openclaw",
-        )
-
-    @pytest.mark.asyncio
-    async def test_session_id_with_prefix_already(self, service):
-        # [单测用例]测试场景：adapter 返回的 session_id 已有 agent:main: 前缀不重复添加
-        """When adapter returns session_id with agent:main: prefix, no duplicate prefix."""
-        mock_session_client = AsyncMock()
-        mock_session = MagicMock()
-        mock_session.id = "agent:main:prefixed-sess"
-        mock_session_client.create_session = AsyncMock(return_value=mock_session)
-
-        result = await service._get_or_create_adapter_session(
-            session_client=mock_session_client,
-            session_id=None,
-            user_id="user-001",
-            metadata={},
-        )
-        assert result == ("agent:main:prefixed-sess", False)
 
 
 # ==================== TestPersistSessionCreateExtended ====================
@@ -3129,6 +2999,8 @@ class TestSendMessageEvalConsistencyCheck:
         """创建带 eval_consistency_check 的 BaasBotService。"""
         from unittest.mock import MagicMock
 
+        from secbaas.community.core.service.bot_run import BotEngineAdapterRegistry
+
         eval_check = MagicMock()
         eval_check.check_default_tag_consistency.return_value = True
         return BaasBotService(
@@ -3136,6 +3008,7 @@ class TestSendMessageEvalConsistencyCheck:
             client_pool=mock_pool,
             wss_resolver=wss_resolver,
             session_service=MagicMock(),
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
             eval_consistency_check=eval_check,
         ), eval_check
 
@@ -3200,16 +3073,20 @@ class TestSendMessageEvalConsistencyCheck:
         eval_check.check_default_tag_consistency.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_send_message_eval_id_no_plugin_logs_warning(
+    async def test_send_message_eval_id_noop_check_skips_warning(
         self, config, wss_resolver, mock_pool
     ):
-        """send_message 中 eval_id 存在但 eval_consistency_check=None 时记录警告。"""
+        """send_message 中 eval_id 存在时走 Noop 一致性检查（DI 恒注入，不再有 None 警告分支）。"""
+        from secbaas.community.core.service.bot_run import BotEngineAdapterRegistry
+        from secbaas.community.plugins.eval_env.stub import NoopEvalConsistencyCheck
+
         service = BaasBotService(
             config=config,
             client_pool=mock_pool,
             wss_resolver=wss_resolver,
             session_service=MagicMock(),
-            eval_consistency_check=None,
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
+            eval_consistency_check=NoopEvalConsistencyCheck(),
         )
         binding = _make_binding_info(baas_session_id="SESSION-eval")
 
@@ -3242,6 +3119,8 @@ class TestSendMessageStreamEvalConsistencyCheck:
         """创建带 eval_consistency_check 的 BaasBotService。"""
         from unittest.mock import MagicMock
 
+        from secbaas.community.core.service.bot_run import BotEngineAdapterRegistry
+
         eval_check = MagicMock()
         eval_check.check_default_tag_consistency.return_value = True
         return BaasBotService(
@@ -3249,6 +3128,7 @@ class TestSendMessageStreamEvalConsistencyCheck:
             client_pool=mock_pool,
             wss_resolver=wss_resolver,
             session_service=MagicMock(),
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
             eval_consistency_check=eval_check,
         ), eval_check
 
@@ -3331,18 +3211,21 @@ class TestSendMessageStreamEvalConsistencyCheck:
         eval_check.check_default_tag_consistency.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_send_message_stream_eval_id_no_plugin_logs_warning(
+    async def test_send_message_stream_eval_id_noop_check_skips_warning(
         self, config, wss_resolver, mock_pool
     ):
-        """send_message_stream 中 eval_id 存在但 eval_consistency_check=None 时记录警告。"""
+        """send_message_stream 中 eval_id 存在时走 Noop 一致性检查（DI 恒注入，不再有 None 警告分支）。"""
         from secbaas.community.api.sse import StreamChunk
+        from secbaas.community.core.service.bot_run import BotEngineAdapterRegistry
+        from secbaas.community.plugins.eval_env.stub import NoopEvalConsistencyCheck
 
         service = BaasBotService(
             config=config,
             client_pool=mock_pool,
             wss_resolver=wss_resolver,
             session_service=MagicMock(),
-            eval_consistency_check=None,
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
+            eval_consistency_check=NoopEvalConsistencyCheck(),
         )
         binding = _make_binding_info(baas_session_id="SESSION-eval")
 
@@ -3432,154 +3315,297 @@ class TestCreateSessionClientEvalIdHeader:
         assert "X-Eval-Id" not in client.headers
 
 
-class TestSendMessageEvalHeaders:
-    """send_message / send_message_stream propagate eval headers in WS handshake."""
+# ==================== TestMaterializeSession ====================
 
-    @pytest.mark.asyncio
-    async def test_send_message_injects_eval_headers(self, service, mock_pool):
-        """chat_metadata 含 eval_id + default_tag 时，WS 握手 headers 注入对应 header。"""
-        binding = _make_binding_info(baas_session_id="SESSION-xyz")
-        mock_client = AsyncMock()
-        mock_client.send_message = AsyncMock(return_value=("ok", "done"))
-        mock_pool.get.return_value = mock_client
 
-        with patch.object(
-            service,
-            "_resolve_ws_connection_for_binding",
-            return_value=_make_conn_info(),
-        ):
-            await service.send_message(
-                session_id=SESSION_ID,
-                message="hello",
-                binding_info=binding,
-                timeout=30.0,
-                chat_metadata={
-                    "eval_id": "eval-abc123",
-                    "default_tag": "eval",
-                },
+PLANNED_SESSION_ID = "agent:main:session:sess-planned-1:user:u-1"
+
+
+def _make_session_client_stub():
+    client = AsyncMock()
+    session = MagicMock()
+    session.id = "agent:main:sess-new"
+    client.create_session = AsyncMock(return_value=session)
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    return client
+
+
+class TestMaterializeSession:
+    """延迟物化：teclaw 走 get-or-create，其余 engine 用裸 key 直接创建。"""
+
+    async def test_missing_tenant_raises(self, service):
+        with pytest.raises(BotServiceError, match="tenant is required"):
+            await service._materialize_session(
+                session_id=PLANNED_SESSION_ID,
+                binding_info=_make_binding_info(),
+                context=None,
+                metadata={},
             )
-        # mock_pool.get(pool_key, ws_url, headers) — 验证第三个参数
-        call_args = mock_pool.get.call_args
-        headers = call_args[0][2] if call_args[0] else call_args.kwargs.get("headers")
-        assert headers["X-Eval-Id"] == "eval-abc123"
-        assert headers["X-Agentclaw-Default-Tag"] == "eval"
 
-    @pytest.mark.asyncio
-    async def test_send_message_no_eval_headers_without_metadata(
-        self, service, mock_pool
-    ):
-        """chat_metadata 为 None 时，WS 握手 headers 不含评测 header。"""
-        binding = _make_binding_info(baas_session_id="SESSION-xyz")
-        mock_client = AsyncMock()
-        mock_client.send_message = AsyncMock(return_value=("ok", "done"))
-        mock_pool.get.return_value = mock_client
-
-        with patch.object(
-            service,
-            "_resolve_ws_connection_for_binding",
-            return_value=_make_conn_info(),
+    async def test_tenant_falls_back_to_context_and_injects_invoker(self, service):
+        """metadata 无 tenant 时从 context.tenant 补齐，invoker/tenant 注入 metadata。"""
+        session_client = _make_session_client_stub()
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection",
+                AsyncMock(return_value=_make_conn_info()),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+            patch.object(service, "_persist_session_create", return_value=None),
         ):
-            await service.send_message(
-                session_id=SESSION_ID,
-                message="hello",
-                binding_info=binding,
-                timeout=30.0,
+            metadata: dict = {}
+            await service._materialize_session(
+                session_id=PLANNED_SESSION_ID,
+                binding_info=_make_binding_info(),
+                context=_make_context(tenant="ctx-tenant"),
+                metadata=metadata,
             )
-        call_args = mock_pool.get.call_args
-        headers = call_args[0][2] if call_args[0] else call_args.kwargs.get("headers")
-        assert "X-Eval-Id" not in headers
-        assert "X-Agentclaw-Default-Tag" not in headers
+            assert metadata["tenant"] == "ctx-tenant"
+            assert metadata["invoker"] == INVOKER
 
-    @pytest.mark.asyncio
-    async def test_send_message_only_eval_id(self, service, mock_pool):
-        """chat_metadata 只含 eval_id 时，只注入 X-Eval-Id。"""
-        binding = _make_binding_info(baas_session_id="SESSION-xyz")
-        mock_client = AsyncMock()
-        mock_client.send_message = AsyncMock(return_value=("ok", "done"))
-        mock_pool.get.return_value = mock_client
-
-        with patch.object(
-            service,
-            "_resolve_ws_connection_for_binding",
-            return_value=_make_conn_info(),
+    async def test_non_teclaw_creates_with_bare_key(self, service):
+        """非 teclaw：用裸 session key 直接 create_session，回填 baas_session_id。"""
+        conn_info = _make_conn_info()
+        session_client = _make_session_client_stub()
+        binding = _make_binding_info(engine_type="openclaw")
+        with (
+            patch.object(
+                service, "_resolve_ws_connection", AsyncMock(return_value=conn_info)
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+            patch.object(service, "_persist_session_create", return_value="baas-42"),
         ):
-            await service.send_message(
-                session_id=SESSION_ID,
-                message="hello",
+            await service._materialize_session(
+                session_id=PLANNED_SESSION_ID,
                 binding_info=binding,
-                timeout=30.0,
-                chat_metadata={"eval_id": "eval-xyz"},
+                context=_make_context(tenant=TENANT),
+                metadata={"tenant": TENANT},
             )
-        call_args = mock_pool.get.call_args
-        headers = call_args[0][2] if call_args[0] else call_args.kwargs.get("headers")
-        assert headers["X-Eval-Id"] == "eval-xyz"
-        assert "X-Agentclaw-Default-Tag" not in headers
+            session_client.create_session.assert_awaited_once_with(
+                title=None,
+                user_id=BOT_UUID,
+                agent_id=BOT_UUID,
+                model=None,
+                engine="openclaw",
+                uuid="sess-planned-1",
+            )
+            assert binding.baas_session_id == "baas-42"
 
-    @pytest.mark.asyncio
-    async def test_send_message_stream_injects_eval_headers(self, service, mock_pool):
-        """send_message_stream: chat_metadata 含 eval_id + default_tag 时注入对应 header。"""
-        binding = _make_binding_info(baas_session_id="SESSION-xyz")
-        mock_client = AsyncMock()
+    async def test_teclaw_materialize_probes_and_reuses(self, service):
+        """teclaw 物化：探测命中直接复用 planned id，不触发创建。"""
+        session_client = _make_session_client_stub()
+        binding = _make_binding_info(engine_type="teclaw")
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection",
+                AsyncMock(return_value=_make_conn_info()),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+            patch.object(service, "_persist_session_create", return_value=None),
+        ):
+            await service._materialize_session(
+                session_id=PLANNED_SESSION_ID,
+                binding_info=binding,
+                context=_make_context(tenant=TENANT),
+                metadata={"tenant": TENANT},
+            )
+            session_client.get_session.assert_awaited_once_with(
+                PLANNED_SESSION_ID, "teclaw"
+            )
+            session_client.create_session.assert_not_called()
+            assert binding.baas_session_id is None
 
-        async def _fake_stream(**kwargs):
-            from secbaas.community.api.sse._models import StreamChunk
+    async def test_teclaw_materialize_creates_with_planned_id(self, service):
+        """teclaw 物化：探测未命中时以 planned id 作为 sessionKey 创建。"""
+        session_client = _make_session_client_stub()
+        session_client.get_session = AsyncMock(side_effect=RuntimeError("not found"))
+        binding = _make_binding_info(engine_type="teclaw")
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection",
+                AsyncMock(return_value=_make_conn_info()),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+            patch.object(service, "_persist_session_create", return_value=None),
+        ):
+            await service._materialize_session(
+                session_id=PLANNED_SESSION_ID,
+                binding_info=binding,
+                context=_make_context(tenant=TENANT),
+                metadata={"tenant": TENANT},
+            )
+            session_client.create_session.assert_awaited_once_with(
+                title=None,
+                user_id=BOT_UUID,
+                model=None,
+                engine="teclaw",
+                agent_id=BOT_UUID,
+                session_id=PLANNED_SESSION_ID,
+            )
 
-            yield StreamChunk(type="delta", content="hi")
+    async def test_unregistered_engine_materialize_raises(self, service):
+        """未注册 adapter 的引擎不允许静默降级，直接抛 BotServiceError。"""
+        binding = _make_binding_info(engine_type="deepseek_harness")
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection",
+                AsyncMock(return_value=_make_conn_info()),
+            ),
+            patch.object(
+                service,
+                "_create_session_client",
+                return_value=_make_session_client_stub(),
+            ),
+        ):
+            with pytest.raises(BotServiceError, match="No engine adapter registered"):
+                await service._materialize_session(
+                    session_id=PLANNED_SESSION_ID,
+                    binding_info=binding,
+                    context=None,
+                    metadata={"tenant": TENANT},
+                )
 
-        mock_client.send_message_stream = _fake_stream
-        mock_pool.get.return_value = mock_client
-
+    async def test_ws_resolve_failure_raises(self, service):
         with patch.object(
             service,
-            "_resolve_ws_connection_for_binding",
-            return_value=_make_conn_info(),
+            "_resolve_ws_connection",
+            AsyncMock(side_effect=RuntimeError("ws boom")),
         ):
-            chunks = []
-            async for chunk in service.send_message_stream(
-                session_id=SESSION_ID,
-                message="hello",
-                binding_info=binding,
-                timeout=30.0,
-                chat_metadata={
-                    "eval_id": "eval-stream-1",
-                    "default_tag": "eval",
-                },
+            with pytest.raises(
+                BotServiceError, match="Failed to resolve WS connection"
             ):
-                chunks.append(chunk)
-        call_args = mock_pool.get.call_args
-        headers = call_args[0][2] if call_args[0] else call_args.kwargs.get("headers")
-        assert headers["X-Eval-Id"] == "eval-stream-1"
-        assert headers["X-Agentclaw-Default-Tag"] == "eval"
+                await service._materialize_session(
+                    session_id=PLANNED_SESSION_ID,
+                    binding_info=_make_binding_info(),
+                    context=None,
+                    metadata={"tenant": TENANT},
+                )
 
-    @pytest.mark.asyncio
-    async def test_send_message_stream_no_eval_headers_without_metadata(
-        self, service, mock_pool
-    ):
-        """send_message_stream: chat_metadata 为 None 时不含评测 header。"""
-        binding = _make_binding_info(baas_session_id="SESSION-xyz")
-        mock_client = AsyncMock()
-
-        async def _fake_stream(**kwargs):
-            from secbaas.community.api.sse._models import StreamChunk
-
-            yield StreamChunk(type="delta", content="hi")
-
-        mock_client.send_message_stream = _fake_stream
-        mock_pool.get.return_value = mock_client
-
-        with patch.object(
-            service,
-            "_resolve_ws_connection_for_binding",
-            return_value=_make_conn_info(),
+    async def test_create_failure_wraps_as_bot_service_error(self, service):
+        session_client = _make_session_client_stub()
+        session_client.create_session = AsyncMock(side_effect=RuntimeError("net"))
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection",
+                AsyncMock(return_value=_make_conn_info()),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
         ):
-            async for _ in service.send_message_stream(
-                session_id=SESSION_ID,
-                message="hello",
-                binding_info=binding,
-                timeout=30.0,
+            with pytest.raises(BotServiceError, match="Failed to materialize"):
+                await service._materialize_session(
+                    session_id=PLANNED_SESSION_ID,
+                    binding_info=_make_binding_info(),
+                    context=None,
+                    metadata={"tenant": TENANT},
+                )
+
+    async def test_bot_service_error_passes_through(self, service):
+        session_client = _make_session_client_stub()
+        session_client.create_session = AsyncMock(side_effect=BotServiceError("boom"))
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection",
+                AsyncMock(return_value=_make_conn_info()),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            with pytest.raises(BotServiceError, match="^boom$"):
+                await service._materialize_session(
+                    session_id=PLANNED_SESSION_ID,
+                    binding_info=_make_binding_info(),
+                    context=None,
+                    metadata={"tenant": TENANT},
+                )
+
+
+class TestSessionPendingDispatch:
+    """send_message / stream / inject 在 session_pending 时先物化再发送。"""
+
+    async def test_send_message_materializes_pending_session(self, service):
+        mat = AsyncMock()
+        with (
+            patch.object(service, "_materialize_session", mat),
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                AsyncMock(side_effect=RuntimeError("no ws")),
+            ),
+        ):
+            with pytest.raises(
+                BotServiceError, match="Failed to resolve WS connection"
             ):
-                pass
-        call_args = mock_pool.get.call_args
-        headers = call_args[0][2] if call_args[0] else call_args.kwargs.get("headers")
-        assert "X-Eval-Id" not in headers
-        assert "X-Agentclaw-Default-Tag" not in headers
+                await service.send_message(
+                    session_id=SESSION_ID,
+                    message="hello",
+                    binding_info=_make_binding_info(),
+                    context=_make_context(tenant=TENANT),
+                    timeout=1.0,
+                    chat_metadata={"title": "t"},
+                    session_pending=True,
+                )
+        mat.assert_awaited_once()
+        assert mat.await_args.kwargs["session_id"] == SESSION_ID
+        assert mat.await_args.kwargs["metadata"] == {"title": "t"}
+
+    async def test_send_message_stream_materializes_pending_session(self, service):
+        mat = AsyncMock()
+        with (
+            patch.object(service, "_materialize_session", mat),
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                AsyncMock(side_effect=RuntimeError("no ws")),
+            ),
+        ):
+            with pytest.raises(
+                BotServiceError, match="Failed to resolve WS connection"
+            ):
+                async for _ in service.send_message_stream(
+                    session_id=SESSION_ID,
+                    message="hello",
+                    binding_info=_make_binding_info(),
+                    context=_make_context(tenant=TENANT),
+                    timeout=1.0,
+                    session_pending=True,
+                ):
+                    pass
+        mat.assert_awaited_once()
+
+    async def test_inject_message_materializes_pending_session(self, service):
+        mat = AsyncMock()
+        with (
+            patch.object(service, "_materialize_session", mat),
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                AsyncMock(side_effect=RuntimeError("no ws")),
+            ),
+        ):
+            with pytest.raises(BotServiceError, match="Failed to resolve"):
+                await service.inject_message(
+                    session_id=SESSION_ID,
+                    message="hello",
+                    binding_info=_make_binding_info(),
+                    context=_make_context(tenant=TENANT),
+                    session_pending=True,
+                )
+        mat.assert_awaited_once()

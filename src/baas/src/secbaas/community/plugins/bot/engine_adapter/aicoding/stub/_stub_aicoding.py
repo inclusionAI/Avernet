@@ -25,20 +25,21 @@ class NoopAICodingAdapter:
         *,
         tc_bot_id: str,
         user_id: str,
-        run_id: str | None,
-        session_id: str | None = None,
+        run_id: str,
     ) -> str | None:
-        return None
+        # Noop 安全零值 = 通用亲和键格式（纯函数无 I/O）；plan 纯委托后
+        # 返回 None 会向上传播，违反 plan_session_id 的"恒非 None"契约。
+        return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"
 
     async def create_adapter_session(
         self,
         *,
         session_client: Any,
-        session_id: str | None,
+        planned_id: str,
         user_id: str,
         metadata: dict[str, Any],
         bot_id: str,
-        run_id: str | None,
+        session_pending: bool = True,
     ) -> tuple[str, bool]:
         if os.getenv("BAAS_STUB_ENGINE_SESSION_ERROR"):
             raise RuntimeError("stub aicoding: simulated session creation failure")
@@ -67,25 +68,20 @@ class MockAICodingAdapter:
         *,
         tc_bot_id: str,
         user_id: str,
-        run_id: str | None,
-        session_id: str | None = None,
+        run_id: str,
     ) -> str | None:
-        self.calls.append(
-            ("session_consistency_key", tc_bot_id, user_id, run_id, session_id)
-        )
-        if session_id is not None:
-            return session_id
+        self.calls.append(("session_consistency_key", tc_bot_id, user_id, run_id))
         return None
 
     async def create_adapter_session(
         self,
         *,
         session_client: Any,
-        session_id: str | None,
+        planned_id: str,
         user_id: str,
         metadata: dict[str, Any],
         bot_id: str,
-        run_id: str | None,
+        session_pending: bool = True,
     ) -> tuple[str, bool]:
-        self.calls.append(("create_adapter_session", bot_id, session_id, run_id))
+        self.calls.append(("create_adapter_session", bot_id, planned_id))
         return self._session_result

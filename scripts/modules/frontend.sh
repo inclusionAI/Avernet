@@ -3,6 +3,14 @@
 [[ -n "${_FRONTEND_SH_LOADED:-}" ]] && return 0
 _FRONTEND_SH_LOADED=1
 
+# All network git in this file runs through the same bounds: git/curl has no
+# default low-speed abort, so a silently stalling remote would otherwise park
+# the start/pull path in a TCP connect timeout on every invocation.
+bounded_git() {
+    GIT_SSH_COMMAND="ssh -o ConnectTimeout=10" \
+        git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"
+}
+
 # Explicit composition-root choice; never accept an arbitrary source path.
 frontend_select_variant() {
     case "${FRONTEND_VARIANT:-legacy}" in
@@ -50,14 +58,10 @@ frontend_teamclaw_sync_latest() {
         log_warn "TEAMCLAW_DIR is not a git checkout; skipping frontend auto-update"
         return 0
     }
-    # Bounded fetch: git/curl has no default low-speed abort, so a remote that
-    # silently drops packets would otherwise park the start path in the TCP
-    # connect timeout on every invocation. --no-tags trims the default refspec
-    # to what the upstream/behind checks below need. Any failure stays
+    # Bounded fetch (bounds live in bounded_git). --no-tags trims the default
+    # refspec to what the upstream/behind checks below need. Any failure stays
     # warn-and-continue: auto-update must never block startup.
-    if ! GIT_SSH_COMMAND="ssh -o ConnectTimeout=10" git -C "$dir" \
-        -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 \
-        fetch --quiet --no-tags origin 2>/dev/null; then
+    if ! bounded_git -C "$dir" fetch --quiet --no-tags origin 2>/dev/null; then
         log_warn "teamclaw frontend: git fetch failed; continuing with current tree"
         return 0
     fi
@@ -89,6 +93,104 @@ frontend_teamclaw_sync_latest() {
         log_info "teamclaw frontend updated to ${branch}@$(git -C "$dir" rev-parse --short HEAD) (was ${behind} behind)"
     else
         log_warn "teamclaw frontend ff-merge failed (diverged?); continuing with ${branch}@$(git -C "$dir" rev-parse --short HEAD)"
+    fi
+    return 0
+}
+
+# Explicit pull-to-latest for the teamclaw frontend checkout
+# (singlebox.sh frontend-pull). The sync that rides frontend_setup is
+# best-effort; this is the on-demand, operator-facing version of that update
+# and refuses loudly where sync only warns. A dirty tree is never stashed or
+# overwritten (user work is untouchable), a detached HEAD is refused
+# (advancing a detached checkout would disarm the upstream-based auto-update
+# sync depends on), and the merge is ff-only toward the checkout's own
+# upstream — Avernet has no submodule declaring a tracking branch (the
+# external TEAMCLAW_DIR owns its branch state), so the checkout's upstream is
+# the only pull authority, and a missing one is a hard refusal: never guess a
+# ref like master, a wrong ff target would move the checkout onto an
+# unrelated branch. After the advance the dependency install is re-run with
+# the same contract as the frontend setup path (install_frontend_deps;
+# OCB_SKIP_FRONTEND_INSTALL=1 skips); a failed install warns but never
+# repaints an already-successful pull as a failure.
+frontend_pull() {
+    case "${1:-}" in
+        "") ;;
+        *) log_error "unknown argument: ${1} (usage: singlebox.sh frontend-pull)"; return 1 ;;
+    esac
+
+    # The pull target is the teamclaw external checkout and nothing else —
+    # Avernet has no submodule, so an unset TEAMCLAW_DIR has nowhere to pull
+    # (src/frontend-nextgen is the in-repo nextgen export, not teamclaw).
+    local dir="${TEAMCLAW_DIR:-}"
+    if [ -z "${dir}" ]; then
+        log_error "frontend-pull updates the teamclaw checkout; TEAMCLAW_DIR is not set (set FRONTEND_VARIANT=teamclaw and TEAMCLAW_DIR in .env.local)"
+        return 1
+    fi
+    if [ ! -d "${dir}" ]; then
+        log_error "frontend dir missing: ${dir}"
+        return 1
+    fi
+    # A non-repo dir must fail here, not vacuously pass the porcelain guard.
+    if ! git -C "${dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        log_error "frontend dir is not a git checkout: ${dir}"
+        return 1
+    fi
+    if [ -n "$(git -C "${dir}" status --porcelain 2>/dev/null)" ]; then
+        log_error "working tree dirty; commit or stash first (frontend-pull refuses to touch user work)"
+        return 1
+    fi
+    if [ "$(git -C "${dir}" rev-parse --abbrev-ref HEAD)" = "HEAD" ]; then
+        log_error "checkout is detached at $(git -C "${dir}" rev-parse --short HEAD); frontend-pull only advances an on-branch checkout — attach one first (git -C \"${dir}\" checkout <branch>)"
+        return 1
+    fi
+
+    # Pull target: the checkout's own upstream. Never guess a ref: a wrong ff
+    # target moves the checkout onto an unrelated branch, which is exactly the
+    # damage this command refuses to do.
+    local remote branch=""
+    local upstream
+    upstream="$(git -C "${dir}" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)"
+    if [ -z "${upstream}" ] || [ "${upstream}" = "HEAD" ]; then
+        log_error "no pull target: the current branch has no upstream; refusing to guess in ${dir}"
+        return 1
+    fi
+    remote="${upstream%%/*}"
+    branch="${upstream#*/}"
+
+    # Transport bounds live in bounded_git. Errors surface: pull is an
+    # explicit command, so the real cause (auth, network, removed sprint
+    # branch) must not be eaten.
+    log_info "Pulling ${dir} toward ${remote}/${branch}..."
+    if ! bounded_git -C "${dir}" \
+        fetch --quiet --no-tags "${remote}" "${branch}"; then
+        log_error "fetch failed (${remote}/${branch})"
+        return 1
+    fi
+
+    local before after
+    before="$(git -C "${dir}" rev-parse HEAD)"
+    if ! git -C "${dir}" merge --ff-only FETCH_HEAD >/dev/null 2>&1; then
+        log_error "not fast-forwardable onto ${branch} (diverged or a different branch); resolve manually in ${dir}"
+        return 1
+    fi
+    after="$(git -C "${dir}" rev-parse HEAD)"
+    if [ "${before}" = "${after}" ]; then
+        log_info "frontend already up to date: ${branch}@$(git -C "${dir}" rev-parse --short HEAD)"
+    else
+        log_info "frontend pulled to ${branch}@$(git -C "${dir}" rev-parse --short HEAD) (was $(git -C "${dir}" rev-parse --short "${before}"))"
+    fi
+
+    # Re-run the dependency install scoped to the pull target — the same
+    # install_frontend_deps contract setup runs (npm ci against a committed
+    # lockfile, npm install --legacy-peer-deps for the internal graph's
+    # sibling peer ranges; HUSKY=0 installs no hooks). The subshell keeps the
+    # mapping local; install failure degrades to a warn: the git state is
+    # already at tip and that is what this command promises.
+    if [ "${OCB_SKIP_FRONTEND_INSTALL:-0}" != "1" ]; then
+        (
+            FRONTEND_DIR="${dir}"
+            install_frontend_deps
+        ) || log_warn "frontend dependency install failed; deps may be stale — re-run: ./scripts/singlebox.sh setup frontend"
     fi
     return 0
 }

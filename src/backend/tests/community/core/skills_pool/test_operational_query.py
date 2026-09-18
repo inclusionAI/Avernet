@@ -9,6 +9,7 @@ from agentclaw.community.core.skills_pool.operational_query import (
     SkillsPoolOperationalQuery,
 )
 from agentclaw.community.core.skills_pool.operations import (
+    RolloutAuditEvent,
     RolloutBotEntry,
     RolloutConfigSnapshot,
 )
@@ -27,6 +28,56 @@ from agentclaw.community.core.skills_pool.types import (
 
 
 SCOPE = BotSkillLayoutScope(env="pre", entity_id="owner-1", bot_id="bot-1")
+
+
+def test_v2_snapshot_recovers_final_v1_batch_membership_for_read_only_query() -> None:
+    snapshot = RolloutConfigSnapshot(
+        env="pre",
+        config_id=7,
+        config_version="v2",
+        record_version="record-v2",
+        config_revision="v2",
+        enabled=True,
+        schema_version=2,
+        engine_admission={"openclaw": True},
+        bot_allowlist=(),
+        owner_rollouts=(),
+        environment_rollouts=(),
+        bot_exclusions=(),
+        audit_log=(
+            RolloutAuditEvent(
+                env="pre",
+                action="engine_admission:openclaw:enable",
+                operator="freddie",
+                reason="v2 cutover",
+                batch_id=None,
+                based_on_config_version="v1",
+                effective_config_version="v2",
+                effective_at="2026-09-16T12:00:00+00:00",
+                evidence={
+                    "legacy_policy": {
+                        "whitelist": [
+                            {
+                                "owner_id": "owner-1",
+                                "bot_id": "bot-1",
+                                "batch_id": "batch-1",
+                            }
+                        ]
+                    }
+                },
+            ),
+        ),
+    )
+
+    entries = SkillsPoolOperationalQuery._legacy_batch_entries(
+        snapshot,
+        current=snapshot.whitelist,
+        key="whitelist",
+    )
+
+    assert entries == (
+        RolloutBotEntry("owner-1", "bot-1", batch_id="batch-1"),
+    )
 
 
 class FakeBots:
@@ -155,7 +206,7 @@ class FakeRollout:
         whitelist: tuple[RolloutBotEntry, ...] | None = None,
     ) -> None:
         self.whitelist = (
-            (RolloutBotEntry("owner-1", "bot-1", "batch-1"),)
+            (RolloutBotEntry("owner-1", "bot-1", batch_id="batch-1"),)
             if whitelist is None
             else whitelist
         )
@@ -168,14 +219,16 @@ class FakeRollout:
             record_version="2026-07-25T10:00:00",
             config_revision="v7",
             enabled=True,
-            enable_all=False,
-            promoted_engines=("openclaw",),
-            whitelist=self.whitelist,
-            negative_controls=(
-                RolloutBotEntry("owner-2", "negative-1", "batch-1"),
+            schema_version=1,
+            engine_admission={"openclaw": True},
+            bot_allowlist=self.whitelist,
+            owner_rollouts=(),
+            environment_rollouts=(),
+            bot_exclusions=(
+                RolloutBotEntry("owner-2", "negative-1", batch_id="batch-1"),
             ),
-            teclaw_controls=(
-                RolloutBotEntry("owner-3", "teclaw-1", "batch-1"),
+            legacy_teclaw_controls=(
+                RolloutBotEntry("owner-3", "teclaw-1", batch_id="batch-1"),
             ),
             audit_log=(),
         )
@@ -267,8 +320,10 @@ def test_missing_whitelist_member_blocks_batch_acceptance() -> None:
     report = build_query(
         rollout=FakeRollout(
             (
-                RolloutBotEntry("owner-1", "bot-1", "batch-1"),
-                RolloutBotEntry("missing-owner", "missing-bot", "batch-1"),
+                    RolloutBotEntry("owner-1", "bot-1", batch_id="batch-1"),
+                    RolloutBotEntry(
+                        "missing-owner", "missing-bot", batch_id="batch-1"
+                    ),
             )
         ),
     ).summarize_batch(
@@ -288,8 +343,8 @@ def test_wrong_engine_whitelist_member_blocks_batch_acceptance() -> None:
     report = build_query(
         rollout=FakeRollout(
             (
-                RolloutBotEntry("owner-1", "bot-1", "batch-1"),
-                RolloutBotEntry("owner-3", "teclaw-1", "batch-1"),
+                    RolloutBotEntry("owner-1", "bot-1", batch_id="batch-1"),
+                    RolloutBotEntry("owner-3", "teclaw-1", batch_id="batch-1"),
             )
         ),
     ).summarize_batch(
@@ -361,7 +416,7 @@ def test_promotion_matches_exact_eligible_and_active_bot_scopes() -> None:
         bots=FakeBots([*FakeBots.default_records, bot_b]),
         gate=FakeGate({"bot-2"}),
         rollout=FakeRollout(
-            (RolloutBotEntry("owner-4", "bot-2", "batch-1"),)
+            (RolloutBotEntry("owner-4", "bot-2", batch_id="batch-1"),)
         ),
     )
 

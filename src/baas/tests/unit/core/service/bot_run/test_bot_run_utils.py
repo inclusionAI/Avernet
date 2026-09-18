@@ -9,12 +9,13 @@ Covers:
 - parse_wait_result: 从 metadata 解析 ignore_content / ignore_result 标志
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from secbaas.community.api.bot_runtime import BotBindingInfo
 from secbaas.community.core.service.bot_run import (
+    BotBindingResolver,
     binding_data_to_info,
     extract_lifecycle_stage,
     extract_session_id_from_record,
@@ -23,8 +24,12 @@ from secbaas.community.core.service.bot_run import (
     resolve_bot_id,
     resolve_user_id,
 )
-from secbaas.community.core.service.bot_run._bot_run_utils import build_chat_metadata
+from secbaas.community.core.service.bot_run._bot_run_utils import (
+    build_caller_binding,
+    build_chat_metadata,
+)
 from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
+from secbaas.community.spi.bot.engine_adapter import extract_session_key_from_planned_id
 from secbaas.community.spi.bot_service import BotBindingData
 
 BOT_ID = "test-bot-000001"
@@ -688,3 +693,152 @@ class TestBuildChatMetadataEval:
         )
         assert result["eval_id"] == "eval-xyz789"
         assert "default_tag" not in result
+
+
+# ==================== Tests: caller binding ====================
+
+
+class TestBuildCallerBinding:
+    """测试 build_caller_binding：用指定 sandbox 构造 caller 模式 binding。"""
+
+    def test_builds_binding_with_caller_provider(self):
+        info = build_caller_binding(f"{BOT_ID}:{ENTITY_ID}", "sbx-1")
+        assert info.bot_id == BOT_ID
+        assert info.entity_id == ENTITY_ID
+        assert info.sandbox_id == "sbx-1"
+        assert info.device_id == "sbx-1"
+        assert info.device_provider == "caller"
+
+    def test_plain_bot_id_without_entity(self):
+        info = build_caller_binding(BOT_ID, "sbx-2")
+        assert info.bot_id == BOT_ID
+        assert info.entity_id == ""
+
+
+class TestResolveCallerBinding:
+    """测试 BotBindingResolver.resolve_caller_binding：调 caller-connection 拉容器。
+
+    metadata 的 ``cookie`` 是裸 IAM token 值；resolver 包装成 Cookie 头格式
+    ``IAM_TOKEN=<值>`` 传给插件。
+    """
+
+    async def test_resolves_sandbox_via_caller_connection(self):
+        plugin = MagicMock()
+        plugin.get_caller_connection = AsyncMock(return_value="sbx-9")
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_caller_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={
+                "user_id": "u-9",
+                "cookie": "test-value",
+            },
+        )
+        plugin.get_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="u-9",
+            cookie="IAM_TOKEN=test-value",
+        )
+        assert info.sandbox_id == "sbx-9"
+        assert info.device_provider == "caller"
+
+    async def test_user_id_defaults_to_empty_string(self):
+        """metadata 无 user_id 时直接传空串（无兜底推导）；cookie 空值包装。"""
+        plugin = MagicMock()
+        plugin.get_caller_connection = AsyncMock(return_value="sbx-8")
+        resolver = BotBindingResolver(plugin)
+        await resolver.resolve_caller_binding(bot_id=BOT_ID, metadata={})
+        plugin.get_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID, owner_id="", user_id="", cookie="IAM_TOKEN="
+        )
+
+
+class TestResolveBindingNormalOnly:
+    """resolve_binding 只做正常解析：caller 模式的容器拉起不在本方法。"""
+
+    async def test_caller_mode_metadata_resolves_normally(self):
+        """caller 模式 metadata 同样走正常 get_binding，不调 caller-connection。"""
+        plugin = MagicMock()
+        plugin.get_binding = AsyncMock(
+            return_value=BotBindingData(
+                bot_id=BOT_ID,
+                owner_id=ENTITY_ID,
+                bot_type="service",
+                engine_type="teclaw",
+                publish_id=None,
+                publish_status=None,
+                binding_id=0,
+                device_provider="teclaw",
+                device_id="dev-1",
+            )
+        )
+        plugin.get_caller_connection = AsyncMock()
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={"cookie": "iam-token-value", "user_id": "u-1"},
+        )
+        assert info is not None
+        assert info.device_provider == "teclaw"
+        plugin.get_binding.assert_awaited_once()
+        plugin.get_caller_connection.assert_not_called()
+
+    async def test_empty_real_bot_id_returns_none(self):
+        """空 bot_id 防御：parse 后 real_bot_id 为空时返回 None。"""
+        plugin = MagicMock()
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_binding(bot_id="", metadata={})
+        assert info is None
+
+
+# ==================== Tests: extract_session_key_from_planned_id ====================
+
+
+class TestExtractSessionKeyFromPlannedId:
+    """测试 extract_session_key_from_planned_id：planned id → 裸 session key。"""
+
+    def test_openclaw_planned_id(self):
+        assert (
+            extract_session_key_from_planned_id("agent:main:session:abc-123:user:u-1")
+            == "abc-123"
+        )
+
+    def test_generic_planned_id(self):
+        assert (
+            extract_session_key_from_planned_id(f"agent:{BOT_ID}:session:k-9:user:u-2")
+            == "k-9"
+        )
+
+    def test_no_session_marker_returns_as_is(self):
+        """无 ":session:" 标记（非 planned 构造）原样返回。"""
+        assert extract_session_key_from_planned_id("sess-plain") == "sess-plain"
+
+    def test_missing_user_marker_returns_as_is(self):
+        """有 ":session:" 但无 ":user:" 时格式不完整，原样返回。"""
+        assert (
+            extract_session_key_from_planned_id("agent:main:session:abc-1")
+            == "agent:main:session:abc-1"
+        )
+
+
+# ==================== Tests: build_chat_metadata title/model ====================
+
+
+class TestBuildChatMetadataTitleModel:
+    """title/model 复制到 chat_metadata（供 materialize 恢复会话属性）。"""
+
+    def test_title_and_model_copied_as_str(self):
+        result = build_chat_metadata(
+            {"title": 123, "model": "m-1"},
+            run_id="run-1",
+            eval_session_log=NoopEvalSessionLog(),
+        )
+        assert result["title"] == "123"
+        assert result["model"] == "m-1"
+
+    def test_absent_title_model_omitted(self):
+        result = build_chat_metadata(
+            {}, run_id="run-2", eval_session_log=NoopEvalSessionLog()
+        )
+        assert "title" not in result
+        assert "model" not in result

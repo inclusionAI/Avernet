@@ -1,6 +1,7 @@
 const TIME_RANGE_OPTIONS = [
   { value: '', label: '全部时间' },
   { value: '1d', label: '最近1天' },
+  { value: '2d', label: '最近2天' },
   { value: '3d', label: '最近3天' },
   { value: '7d', label: '最近7天' },
 ] as const
@@ -17,6 +18,9 @@ export function toTimeRange(value: string): { from?: string; to?: string } {
   switch (value) {
     case '1d':
       from.setDate(now.getDate() - 1)
+      break
+    case '2d':
+      from.setDate(now.getDate() - 2)
       break
     case '3d':
       from.setDate(now.getDate() - 3)

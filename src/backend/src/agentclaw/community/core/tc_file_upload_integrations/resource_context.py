@@ -104,7 +104,12 @@ class TcResourceContextService:
             raise ValueError("resource_context_incomplete")
         if record.size_bytes is None or record.size_bytes < 0:
             raise ValueError("resource_context_incomplete")
-        if record.scope_type not in {"session", "openapi_session", "friend_bot_chat"}:
+        if record.scope_type not in {
+            "session",
+            "openapi_session",
+            "friend_bot_chat",
+            "personal_bot_chat",
+        }:
             raise ValueError("resource_context_unsupported_scope")
 
         digest = record.client_content_hash

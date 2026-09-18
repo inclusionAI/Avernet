@@ -521,6 +521,12 @@ fn persisted_to_group_message(
             .to_string()
     });
     let (role, metadata, content_str, attachments) = match pm.message_type.as_str() {
+        bcs_domain::CHAT_ERROR_MESSAGE_TYPE => (
+            MessageRole::Assistant,
+            Some(serde_json::json!({"terminal_state": "error", "is_error": true})),
+            pm.content.as_str().unwrap_or_default().to_string(),
+            None,
+        ),
         "chat" | "text" | "system" => {
             let role = match pm.sender_type {
                 bcs_domain::SenderType::Human => MessageRole::User,
@@ -676,7 +682,7 @@ impl GroupMessageHistoryService for MessageService {
             let mut messages: Vec<GroupMessage> = {
                 let mut result = Vec::with_capacity(page.messages.len());
                 for pm in page.messages.into_iter().filter(|message| {
-                    !hide_opening_message || message.message_type != SESSION_OPENING_MESSAGE_TYPE
+                    !hide_opening_message || !matches!(message.message_type.as_str(), SESSION_OPENING_MESSAGE_TYPE | bcs_domain::CHAT_ERROR_MESSAGE_TYPE)
                 }) {
                     let bot_name = match bot_names.entry(pm.sender_id.clone()) {
                         std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
@@ -905,7 +911,7 @@ impl GroupMessageHistoryService for MessageService {
             let messages: Vec<GroupMessage> = {
                 let mut result = Vec::with_capacity(page.messages.len());
                 for pm in page.messages.into_iter().filter(|message| {
-                    !hide_opening_message || message.message_type != SESSION_OPENING_MESSAGE_TYPE
+                    !hide_opening_message || !matches!(message.message_type.as_str(), SESSION_OPENING_MESSAGE_TYPE | bcs_domain::CHAT_ERROR_MESSAGE_TYPE)
                 }) {
                     let bot_name = match bot_names.entry(pm.sender_id.clone()) {
                         std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
@@ -1889,6 +1895,35 @@ mod tests {
                 .and_then(|metadata| metadata["state_machine"]["event"].as_str()),
             Some("output")
         );
+    }
+
+    #[tokio::test]
+    async fn chat_error_history_is_visible_to_humans_but_not_bot_context() {
+        let (service, repo, _sessions, fallback, session_id) =
+            service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
+        repo.append_message(NewMessage {
+            group_id: "group-1".into(), session_id: session_id.clone(), sender_id: "worker-a".into(),
+            sender_type: SenderType::Bot, message_type: bcs_domain::CHAT_ERROR_MESSAGE_TYPE.into(),
+            content: serde_json::json!("请求超时"), client_msg_id: Some("chat-error:run".into()),
+            created_at: 1, run_id: "run".into(), owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::Chat,
+            audience: None,
+        }).await.unwrap();
+        let human = SessionHistoryCommand {
+            caller: CallerContext::Human(HumanActor { actor_id: "human-1".into(), staff_no: "human-1".into() }),
+            group_id: "group-1".into(), session_id: session_id.clone(), session_participants: Vec::new(),
+            view_bot_id: None, limit: 50, before: None,
+        };
+        let result = service.get_session_history(human).await.unwrap();
+        assert_eq!(result.messages.len(), 1);
+        assert_eq!(result.messages[0].metadata.as_ref().unwrap()["terminal_state"], "error");
+        let result = service.get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Bot(BotActor { bot_uuid: "worker-a".into() }),
+            group_id: "group-1".into(), session_id, session_participants: Vec::new(),
+            view_bot_id: Some("worker-a".into()), limit: 50, before: None,
+        }).await.unwrap();
+        assert!(result.messages.is_empty());
+        assert_eq!(fallback.session_calls().await, 0);
     }
 
     #[tokio::test]
@@ -2965,6 +3000,17 @@ mod tests {
             let atts = gm.attachments.expect("attachments");
             assert_eq!(atts[0].attachment_id, "a");
             assert!(atts[0].url.is_none());
+        }
+
+        #[test]
+        fn persisted_chat_error_is_assistant_text_with_terminal_metadata() {
+            let mut row = pm(serde_json::json!("回复失败"));
+            row.message_type = bcs_domain::CHAT_ERROR_MESSAGE_TYPE.into();
+            let message = persisted_to_group_message(row, None);
+            assert_eq!(message.role, MessageRole::Assistant);
+            assert_eq!(message.content, "回复失败");
+            assert_eq!(message.metadata.unwrap()["terminal_state"], "error");
+            assert!(message.attachments.is_none());
         }
     }
 }

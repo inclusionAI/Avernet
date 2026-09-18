@@ -34,6 +34,9 @@ from collections.abc import Sequence
 from typing import Any
 
 from engine.community.core.engine.context import AuthContext
+from engine.community.core.skills.local_package_application import (
+    LocalSkillPackageApplication,
+)
 from engine.community.core.skills.models import (
     CenterEnsureFailure,
     CenterEnsureItem,
@@ -41,6 +44,8 @@ from engine.community.core.skills.models import (
     CenterEnsureResult,
     CleanSymlinksRequest,
     CleanSymlinksResult,
+    LocalSkillPackageApplyRequest,
+    LocalSkillPackageApplyResult,
     PoolLayoutActivateRequest,
     PoolLayoutActivationResult,
     PoolLayoutActivationStatus,
@@ -162,6 +167,14 @@ class ClaudeCodeSkillsAdapter(SkillsService):
 
     def __init__(self, port: ClaudeCodeSkillsPort) -> None:
         self._port = port
+        self._local_packages = LocalSkillPackageApplication("claude_code")
+
+    async def apply_local_package(
+        self,
+        request: LocalSkillPackageApplyRequest,
+        auth: AuthContext | None = None,
+    ) -> LocalSkillPackageApplyResult:
+        return await self._local_packages.apply(request)
 
     # ── Per-skill management ──────────────────────────────────────────────────
 

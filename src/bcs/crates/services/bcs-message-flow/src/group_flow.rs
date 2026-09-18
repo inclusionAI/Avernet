@@ -573,7 +573,7 @@ pub(crate) async fn try_persist_group_message(
             group_strategy,
             GroupStrategy::Chat | GroupStrategy::ManagerWorker
         );
-    let effective_session_id = if strategy_supports_message_event {
+    let effective_session_id = if strategy_supports_message_event || message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE {
         match session_id.filter(|session_id| !session_id.is_empty()) {
             Some(session_id) => session_id.to_string(),
             None => {
@@ -607,7 +607,8 @@ pub(crate) async fn try_persist_group_message(
     } else {
         session_id.unwrap_or_default().to_string()
     };
-    let (visibility_domain, audience) = persisted_message_visibility(group.as_ref(), sender_id, sender_type, message_type, owner_bot_id.as_deref())?;
+    let visibility_type = if message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE { "chat" } else { message_type };
+    let (visibility_domain, audience) = persisted_message_visibility(group.as_ref(), sender_id, sender_type, visibility_type, owner_bot_id.as_deref())?;
     let msg = NewMessage {
         group_id: group_id.to_string(),
         session_id: effective_session_id.clone(),
@@ -722,6 +723,10 @@ pub(crate) async fn try_persist_group_message(
         repo.append_message(msg).await
     }
     .map_err(|error| {
+        if message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE {
+            tracing::warn!(group_id, session_id = %effective_session_id, run_id, bot_id = sender_id,
+                error_code = "chat_error_persistence_failed", "terminal error projection was not persisted");
+        }
         ServiceError::InternalError(format!(
             "failed to persist group message for Group '{group_id}': {error}"
         ))
@@ -2470,8 +2475,9 @@ pub async fn handle_chat_abort(
         });
         let provider_bypass_headers = header_sets.next().unwrap_or_default();
         let provider_headers_match = header_sets.all(|headers| headers == provider_bypass_headers);
-        let provider_session_keys: HashSet<_> = provider_runs.iter().map(|run|
-            run.downstream_session_key.clone().unwrap_or_else(|| cmd.session_id.clone())).collect();
+        // The Provider adapter sends the canonical BCS session id. The stored
+        // downstream_session_key is the Bot WS/plugin wire scope and may still
+        // be a legacy group key, so it must not drive a Provider scope abort.
         let expected_by_downstream: HashMap<String, ActiveBotRunContext> = provider_runs
             .iter()
             .cloned()
@@ -2488,7 +2494,7 @@ pub async fn handle_chat_abort(
                 request_id: cmd.run_id.clone(),
             }),
             (true, 1, Ok(target))
-                if provider_session_keys.len() == 1 && provider_owner_matches_target(
+                if provider_owner_matches_target(
                     owners.iter().next().expect("one owner"),
                     &target,
                 ) =>
@@ -2498,7 +2504,7 @@ pub async fn handle_chat_abort(
                         target,
                         command_id: uuid::Uuid::new_v4().to_string(),
                         group_id: cmd.group_id.clone(),
-                        session_id: provider_session_keys.iter().next().cloned().unwrap_or_else(|| cmd.session_id.clone()),
+                        session_id: cmd.session_id.clone(),
                         run_id: None,
                         provider_bypass_headers,
                         timeout_ms: ABORT_DELIVERY_TIMEOUT_MS,

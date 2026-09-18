@@ -73,5 +73,10 @@ class RealEvalSessionLog(EvalSessionLog):
                 )
         if x_default_tag:
             metadata["default_tag"] = x_default_tag
-            metadata.setdefault("bot_options", {})["lifecycle_stage"] = x_default_tag
+            # lifecycle_stage 映射：
+            #   "default" → "eval"（评测环境统一走 eval 路径）
+            #   "eval" → "eval"（保持不变）
+            #   其他值 → 保持原样（如 "verify"、"staging"、"production" 等）
+            stage = "eval" if x_default_tag in ("default", "eval") else x_default_tag
+            metadata.setdefault("bot_options", {})["lifecycle_stage"] = stage
         return metadata

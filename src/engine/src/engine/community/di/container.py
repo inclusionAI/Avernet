@@ -24,6 +24,7 @@ from engine.community.di.modules.resource_materialization_module import (
 from engine.community.di.modules.router_collection import SharedRoutersModule
 from engine.community.di.profile_modules import modules_for
 from engine.community.di.runtime_mode import RuntimeConfig
+from engine.community.di.publish_ignore_config import PublishIgnoreModule
 
 
 def build_injector(
@@ -43,6 +44,7 @@ def build_injector(
         ProcessModule(),
         ManagerModule(),
         ResourceMaterializationModule(),
+        PublishIgnoreModule(),
         SharedRoutersModule(),
     ]
     modules.extend(modules_for(config.profile))

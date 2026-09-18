@@ -11,7 +11,7 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_lock_servic
     LockNotHeldError,
     LockReleaseDeniedError,
 )
-from agentclaw.community.core.bot_collaborator.models import BotCollabLockRecord
+from agentclaw.community.core.bot_collaborator.models import BotCollabLockRecord, PermissionLevel
 
 
 @pytest.fixture
@@ -22,8 +22,17 @@ def lock_repo():
 
 @pytest.fixture
 def collab_service():
-    """Create a mock collaborator service."""
-    return Mock()
+    """Create a mock collaborator service.
+
+    ``check_collaborator_permission`` 默认拒绝：零行短路前的空间授予探针
+    走它，truthy 的 MagicMock 返回值会把任何调用者当成员放行——测试想要
+    "无授予"，就要把话说清楚。
+    """
+    service = Mock()
+    service.check_collaborator_permission.return_value = {
+        "has_permission": False, "level": "NONE", "level_value": 0,
+    }
+    return service
 
 
 @pytest.fixture
@@ -168,6 +177,51 @@ def test_get_lock_info_no_collaborators_returns_early(service, lock_repo, collab
     # Should NOT call lock_repo or bot_service when no collaborators
     lock_repo.get_by_key.assert_not_called()
     bot_service.get_bot.assert_not_called()
+
+
+
+
+def test_get_lock_info_space_member_without_rows_still_reads_the_lock(service, lock_repo, collab_service):
+    """零行 + 空间成员：has_collaborators 不再撒谎，锁表被真实读到。
+
+    这是死循环修复的服务侧：探针（有效阶梯）说调用者有协作面，短路就
+    不能再把"无行"当成"无协作"。成员 acquire 之后写下的锁表行从此可
+    见——无锁返回 lock=None + has_collaborators=True（先取锁的指令），
+    有人持有则如实带出持有者。
+    """
+    collab_service.list_collaborators.return_value = []  # 无行
+    collab_service.check_collaborator_permission.return_value = {
+        "has_permission": True, "level": "MEMBER", "level_value": 1,
+    }
+    lock_repo.get_by_key.return_value = _make_lock_record(
+        "bot-1", "owner-1", holder_user_id="member-9"
+    )
+
+    result = service.get_lock_info("bot-1", "owner-1", "member-9")
+
+    assert result.has_collaborators is True
+    assert result.lock is not None
+    assert result.lock.holder_user_id == "member-9"
+    collab_service.check_collaborator_permission.assert_called_once_with(
+        bot_id="bot-1",
+        owner_id="owner-1",
+        user_id="member-9",
+        required_level=PermissionLevel.MEMBER,
+    )
+
+
+def test_get_lock_info_space_member_holding_no_lock_is_told_to_acquire(service, lock_repo, collab_service):
+    """零行 + 空间成员 + 锁表无行：如实回答 has_collaborators=True、lock=None。"""
+    collab_service.list_collaborators.return_value = []
+    collab_service.check_collaborator_permission.return_value = {
+        "has_permission": True, "level": "MEMBER", "level_value": 1,
+    }
+    lock_repo.get_by_key.return_value = None
+
+    result = service.get_lock_info("bot-1", "owner-1", "member-9")
+
+    assert result.has_collaborators is True
+    assert result.lock is None
 
 
 def test_get_lock_info_returns_record_with_owner_name(service, lock_repo, collab_service, bot_service):
@@ -608,3 +662,22 @@ def test_session_lock_reentrant_steal_release_on_real_sqlite(real_lock_service):
     # 持有者释放后可再抢
     assert svc.release_session_lock("botX", "ownerX", "s1", "userB") is True
     assert svc.acquire_session_lock("botX", "ownerX", "s1", "userA") is not None
+
+def test_get_lock_info_owner_with_zero_rows_keeps_the_owner_short_circuit(
+    service, collab_service
+):
+    """零行 Bot 的 owner 不被锁服务翻转成"协作面成立"。
+
+    owner 从无行分支直通是拦截器/公开面的既有语义；探针若把他的
+    OWNER 答案也算成授予，他就被推进"必须持锁"的流——永久 423。
+    """
+    collab_service.list_collaborators.return_value = []
+    collab_service.check_collaborator_permission.return_value = {
+        "has_permission": True, "level": "OWNER", "level_value": 3,
+    }
+
+    result = service.get_lock_info("bot-1", "owner-1", "owner-1")
+
+    assert result.has_collaborators is False
+    assert result.lock is None
+    collab_service.check_collaborator_permission.assert_not_called()

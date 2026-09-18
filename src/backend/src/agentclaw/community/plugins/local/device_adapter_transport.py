@@ -18,7 +18,8 @@ Response shapes mirror the real adapter's envelopes. ``bot_id`` /
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
+import hashlib
 from typing import Any, Optional
 
 from agentclaw.community.plugin_api.device_adapter_transport import (
@@ -138,6 +139,15 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
     ) -> dict[str, Any]:
         if path == "/health":
             return {"status": "ok", "engine": conn_info.get("engine", "openclaw")}
+        if path == "/api/engine/capabilities":
+            return {
+                "success": True,
+                "data": {
+                    "supported": ["skills.local_package.apply.v1"],
+                    "limited": {},
+                    "fallback": {},
+                },
+            }
         if path == "/api/skills/mappings/apply":
             request = body or {}
             # Mirror the Engine's logical deduplication and replacement-owned
@@ -292,6 +302,40 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
             "message": f"unhandled path {path}",
             "error_code": 404,
         }
+
+    async def invoke_multipart(
+        self,
+        conn_info: dict[str, Any],
+        path: str,
+        *,
+        files: Mapping[str, tuple[str, bytes, str]],
+        data: Mapping[str, str],
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        uploaded = files.get("file")
+        if uploaded is None:
+            return {"success": False, "error": "invalid_package"}
+        package = uploaded[1]
+        skill_name = data.get("skill_name") or data.get("skills_name") or ""
+        digest = hashlib.sha256(package).hexdigest()
+        result = {
+            "skill_name": skill_name,
+            "action": "replaced",
+            "content_digest": f"sha256:{digest}",
+            "target_path": f"/runtime/skills-local/{skill_name}",
+        }
+        if path == "/api/v1/file/skill-package":
+            return {
+                "success": True,
+                "skill_name": skill_name,
+                "action": "replaced",
+                "sha256": digest,
+                "target_path": result["target_path"],
+            }
+        if path == "/api/skills/local/apply":
+            return {"success": True, "data": result}
+        return {"success": False, "error": "unsupported_route"}
 
     async def stream(
         self,

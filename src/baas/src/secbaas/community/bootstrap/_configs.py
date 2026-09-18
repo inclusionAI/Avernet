@@ -173,7 +173,7 @@ class SandboxPluginConfig(BaseSettings):
 
     model_config = _CFG
     arca: str = Field(
-        default="stub", pattern=r"^(arca_sdk|stub|local_proc|aliyun_ack)$"
+        default="stub", pattern=r"^(arca_sdk|stub|local_proc|local_k8s|aliyun_ack)$"
     )
     desktop: str = Field(default="stub", pattern=r"^(real|stub)$")
     k8s: str = Field(default="stub", pattern=r"^(real|stub)$")
@@ -438,6 +438,20 @@ class GatewayConfig(ConfigSchema):
     jwt: _GatewayJwtConfig = Field(default_factory=_GatewayJwtConfig)
 
 
+class CallerPrincipalSettings(BaseSettings):
+    """app-caller-connection Principal 签发配置（bot_chat_log_relation.principal）。
+
+    密钥本身不放这里——经 secret 插件按 ``secret_name`` 取（与 backend 共享的
+    HMAC 密钥）。``issuer`` / ``audience`` 是对端 decode 值校验的契约值。
+    """
+
+    model_config = _CFG
+    secret_name: str = "other_manual_teamclawgw_principal_signing_key"
+    issuer: str = "gateway"
+    audience: str = "backend"
+    ttl_seconds: int = Field(default=60, ge=1)
+
+
 class BotChatLogRelationConfig(ConfigSchema):
     """Bot chat log relation service 配置"""
 
@@ -445,6 +459,7 @@ class BotChatLogRelationConfig(ConfigSchema):
     base_url: str = ""
     timeout: float = Field(default=10.0, gt=0)
     max_retries: int = Field(default=0, ge=0)  # 默认0，不重试
+    principal: CallerPrincipalSettings = Field(default_factory=CallerPrincipalSettings)
 
 
 class BotRunQueueConfig(ConfigSchema):
@@ -460,9 +475,6 @@ class BotRunQueueConfig(ConfigSchema):
     candidates_per_bot: int = Field(default=5, ge=1)
     max_concurrent: int = Field(default=50, ge=1)
     heartbeat_interval_seconds: float = Field(default=30.0, gt=0)
-    machine_count: int = Field(default=1, ge=1)
-    bucket_sweep_interval_seconds: float = Field(default=300.0, gt=0)
-    bucket_idle_ttl_seconds: float = Field(default=600.0, gt=0)
 
 
 def _schema_defaults() -> dict:

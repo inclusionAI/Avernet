@@ -2,7 +2,7 @@
 
 验证目标(防升级改坏):
 1. ``config.plugins.engine_adapter=stub`` 时 ApplicationContainer 能正常装配,
-   ``engine_adapter_registry`` 解析出 3 个 Noop adapter(aicoding/hermes/claude_code)。
+   ``engine_adapter_registry`` 解析出 5 个 Noop adapter(全部引擎)。
 2. ``/openapi/v1/runs`` 与 ``/openapi/v1/messages`` 路由已挂载,鉴权链路通(无 token → 401)。
 3. 响应体带 ``trace_id`` 字段(印证 trace_id 上提到 ``ApiResponse`` 基类)。
 
@@ -24,6 +24,10 @@ from secbaas.community.plugins.bot.engine_adapter.claude_code.stub import (
     NoopClaudeCodeAdapter,
 )
 from secbaas.community.plugins.bot.engine_adapter.hermes.stub import NoopHermesAdapter
+from secbaas.community.plugins.bot.engine_adapter.openclaw.stub import (
+    NoopOpenClawAdapter,
+)
+from secbaas.community.plugins.bot.engine_adapter.teclaw.stub import NoopTeClawAdapter
 
 pytestmark = [pytest.mark.e2e_asgi]
 
@@ -32,19 +36,20 @@ class TestStubAdapterBoot:
     """stub adapter 配置下的应用装配与端点可达性。"""
 
     def test_registry_resolves_three_noop_adapters(self, bootstrap_init):
-        """stub 配置下 registry 注入 3 个 Noop adapter,证明装配链路没坏。"""
+        """stub 配置下 registry 注入 5 个 Noop adapter,证明装配链路没坏。"""
         registry = bootstrap_init.services.engine_adapter_registry()
 
         assert registry.has("aicoding")
         assert registry.has("hermes")
         assert registry.has("claude_code")
-        # openclaw / teclaw 不注册(走 BaasBotService else 分支)
-        assert not registry.has("openclaw")
-        assert not registry.has("teclaw")
+        assert registry.has("openclaw")
+        assert registry.has("teclaw")
 
         assert isinstance(registry.get("aicoding"), NoopAICodingAdapter)
         assert isinstance(registry.get("hermes"), NoopHermesAdapter)
         assert isinstance(registry.get("claude_code"), NoopClaudeCodeAdapter)
+        assert isinstance(registry.get("openclaw"), NoopOpenClawAdapter)
+        assert isinstance(registry.get("teclaw"), NoopTeClawAdapter)
 
     def test_runs_endpoint_rejects_missing_token(self, bootstrap_init):
         """POST /openapi/v1/runs 无 token → 401(鉴权链路通,路由已挂载)。"""

@@ -58,11 +58,13 @@ pub async fn handle_bot_event(
     let mut cmd = cmd;
     let admission_timing = crate::reply_timing::Timer::new("event.lookup_and_lock");
     let managed = crate::queued_admission::find_managed_run(flow, &cmd).await?;
+    let task_lock_id = flow.task_store.resolve_task_id(&cmd.run_id).await;
     // Serialize all events for a managed run, including two simultaneous
     // finals. Holding this guard spans the committed terminal and its
     // best-effort effects, not merely the first state lookup.
     let _event_guard = {
-        let lock_id = managed.as_ref().map(|row| row.delivery_id.clone())
+        let lock_id = task_lock_id.map(|id| format!("task:{id}"))
+            .or_else(|| managed.as_ref().map(|row| row.delivery_id.clone()))
             .unwrap_or_else(|| format!("run:{}", crate::run_reply::chat_key(&cmd)));
         let lock = {
             let mut locks = flow.delivery_event_locks.lock().await;
@@ -107,6 +109,60 @@ pub async fn handle_bot_event(
     drop(admission_timing);
     let task_id_for_event = flow.task_store.resolve_task_id(&cmd.run_id).await;
     log_incoming_bot_event(&cmd, task_id_for_event.as_deref());
+
+    let error_group = if cmd.state == ChatEventState::Error
+        && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+        && !cmd.group_id.is_empty()
+    {
+        flow.group.try_get(&cmd.group_id).await?
+    } else {
+        None
+    };
+    if managed_terminal && cmd.state == ChatEventState::Error && error_group.is_none() {
+        return Err(ServiceError::InvalidOperation {
+            message: "cannot persist terminal error without its Group".into(),
+            request_id: None,
+        });
+    }
+    let history_error = error_group
+        .is_some_and(|group| group.group_strategy != GroupStrategy::StateMachine);
+    if history_error {
+        let text = error_display_text(&cmd.event_payload);
+        inject_synthesized_message(&mut cmd.event_payload, &text);
+        cmd.event_payload["errorMessage"] = Value::String(text);
+        if task_id_for_event.is_none() {
+            if managed_terminal {
+                let partial = flow
+                    .message_tracker
+                    .peek_chat_buf(&crate::run_reply::chat_key(&cmd))
+                    .await
+                    .unwrap_or_default();
+                crate::queued_admission::settle_without_relay(flow, &cmd, &partial, None)
+                    .await?;
+            } else {
+                flush_chat_segment(flow, &cmd, None).await?;
+                persist_chat_error(flow, &cmd).await?;
+            }
+            let frontend_deliveries = publish_incoming_event(flow, &cmd, None).await?;
+            try_channel_outbound(flow, &cmd).await;
+            flow.complete_send_context(&cmd.run_id).await?;
+            flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
+            flow.message_tracker.cleanup_run(&cmd.run_id).await;
+            flow.message_tracker
+                .cleanup_run(&crate::run_reply::chat_key(&cmd))
+                .await;
+            notify_terminal_observer(flow, &cmd).await;
+            return Ok(BotEventOutcome {
+                bot_deliveries: Vec::new(),
+                frontend_deliveries,
+                unregistered_run_ids: final_run_ids(&cmd),
+                mentions: Vec::new(),
+                delivered_count: 0,
+                failed_count: 0,
+                delivery_results: Vec::new(),
+            });
+        }
+    }
 
     // Persist streaming chat deltas, collapsing a segment's consecutive deltas
     // into ONE row rather than one row per delta. A segment ends when a
@@ -182,8 +238,14 @@ pub async fn handle_bot_event(
             }
         }
     }
-    let mut frontend_deliveries = if managed_terminal { Vec::new() } else { publish_incoming_event(flow, &cmd, task_id_for_event.as_deref()).await? };
-    if !managed_terminal { try_channel_outbound(flow, &cmd).await; }
+    let mut frontend_deliveries = if managed_terminal || history_error {
+        Vec::new()
+    } else {
+        publish_incoming_event(flow, &cmd, task_id_for_event.as_deref()).await?
+    };
+    if !managed_terminal && !history_error {
+        try_channel_outbound(flow, &cmd).await;
+    }
     let mut bot_deliveries = Vec::new();
 
     // Persist tool call events (identified by payload.stream == "tool", distinguished by payload.data.phase)
@@ -229,7 +291,7 @@ pub async fn handle_bot_event(
     if is_chat_segment_boundary_stream(&cmd.event_payload) {
         flush_chat_segment(flow, &cmd, None).await?;
     }
-    if is_terminal_state(&cmd.state) {
+    if is_terminal_state(&cmd.state) && !history_error {
         if !managed_terminal && matches!(cmd.event_type.as_str(), "chat" | "chat.event") {
             flow.complete_send_context(&cmd.run_id).await?;
         }
@@ -274,6 +336,20 @@ pub async fn handle_bot_event(
             flow.complete_send_context(&cmd.run_id).await?;
             flow.message_tracker.cleanup_run(&cmd.run_id).await;
             flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(&cmd)).await;
+        }
+        if history_error
+            && flow
+                .task_store
+                .get(&task_id)
+                .await
+                .is_some_and(|entry| entry.status != TaskLedgerStatus::Dispatched)
+        {
+            frontend_deliveries.extend(
+                publish_incoming_event(flow, &cmd, Some(&task_id)).await?,
+            );
+            try_channel_outbound(flow, &cmd).await;
+            flow.complete_send_context(&cmd.run_id).await?;
+            flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
         }
         notify_terminal_observer(flow, &cmd).await;
         return Ok(BotEventOutcome {
@@ -356,6 +432,71 @@ async fn notify_terminal_observer(flow: &BcsMessageFlow, cmd: &BotEventCommand) 
             text: terminal_event_text(&cmd.event_payload),
         })
         .await;
+}
+
+/// Normalize only user-visible text, never serialize arbitrary provider objects.
+pub(crate) fn error_display_text(event: &Value) -> String {
+    let message = extract_message_text(event);
+    if !message.trim().is_empty() {
+        return message;
+    }
+    for field in ["errorMessage", "error_message"] {
+        if let Some(text) = event
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty())
+        {
+            return text.to_string();
+        }
+    }
+    "本次回复失败，请稍后重试。".to_string()
+}
+
+#[cfg(test)]
+mod error_projection_tests {
+    use super::error_display_text;
+    use serde_json::json;
+
+    #[test]
+    fn normalize_display_fields_without_serializing_transport_objects() {
+        assert_eq!(
+            error_display_text(&json!({"message":{"content":[{"type":"text","text":" human text "}]},"errorMessage":"fallback"})),
+            " human text "
+        );
+        assert_eq!(
+            error_display_text(&json!({"message":{"content":"  "},"errorMessage":"fallback"})),
+            "fallback"
+        );
+        assert_eq!(error_display_text(&json!({"error_message":"legacy"})), "legacy");
+        assert_eq!(
+            error_display_text(&json!({"errorMessage":{"stack":"private"},"request":{"token":"private"}})),
+            "本次回复失败，请稍后重试。"
+        );
+    }
+}
+
+async fn persist_chat_error(flow: &BcsMessageFlow, cmd: &BotEventCommand) -> ServiceResult<()> {
+    let owner = crate::group_flow::manager_worker_self_owner(
+        flow,
+        &cmd.group_id,
+        cmd.bcs_session_id.as_deref(),
+        &cmd.bot_id,
+    )
+    .await;
+    crate::group_flow::try_persist_group_message(
+        flow,
+        &cmd.group_id,
+        cmd.bcs_session_id.as_deref(),
+        &cmd.bot_id,
+        SenderType::Bot,
+        bcs_domain::CHAT_ERROR_MESSAGE_TYPE,
+        Value::String(error_display_text(&cmd.event_payload)),
+        Some(&format!("chat-error:{}", cmd.run_id)),
+        owner,
+        &cmd.run_id,
+    )
+    .await?;
+    Ok(())
 }
 
 fn terminal_event_text(event: &Value) -> String {

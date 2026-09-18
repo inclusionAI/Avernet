@@ -24,8 +24,8 @@ import traceback
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from agentclaw.community.adapters.http.org.dependencies import require_app_caller
-from agentclaw.community.core.gateway_principal import VerifiedCaller
+from agentclaw.community.adapters.http.org.dependencies import require_baas_caller
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 from agentclaw.community.adapters.http.expert_chat.schemas import (
     AddChatBotRequest,
@@ -610,34 +610,30 @@ def _application_log_value(value):
     return value
 
 
-@router.post("/app-caller-connection", response_model=ApiResponse)
+@router.post("/app-caller-connection", response_model=ApiResponse, dependencies=[Depends(require_baas_caller)])
 async def get_caller_connection_for_application(
     request: Request,
     bot_id: str = Query(..., description="Bot ID"),
     owner_id: str = Query(..., description="Bot 所有者ID"),
     user_id: str = Query(..., description="目标 Caller 用户ID"),
     force_upgrade: bool = Query(False, description="强制升级，跳过版本检查"),
-    caller: VerifiedCaller = Depends(require_app_caller),
     instance_service: ExpertChatInstanceServiceProtocol = Injected(
         ExpertChatInstanceServiceProtocol
     ),
 ):
-    """Connect an existing caller instance for any verified app in its tenant."""
+    """Create or connect a caller instance for the authenticated BaaS service."""
     started_at = time.perf_counter()
     context = {
         "system": "backend", "direction": "inbound",
         "operation": "app_caller_connection", "method": "POST",
         "route": request.url.path, "request_id": request.headers.get("x-request-id"),
-        "tenant": caller.tenant, "app_id": caller.app_id,
+        "tenant": get_current_avernet_tenant(),
         "bot_id": bot_id, "owner_id": owner_id, "user_id": user_id,
         "force_upgrade": force_upgrade,
     }
     logger.info("event=expert_chat.app_caller_connection.request context=%s", context)
     try:
-        # require_app_caller has validated that an application identity exists.
-        assert caller.app_id is not None
         result = await instance_service.get_application_caller_connection(
-            app_id=caller.app_id, tenant=caller.tenant,
             bot_id=bot_id, owner_id=owner_id, user_id=user_id,
             force_upgrade=force_upgrade,
         )

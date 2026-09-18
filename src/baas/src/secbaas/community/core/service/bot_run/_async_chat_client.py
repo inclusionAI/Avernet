@@ -31,7 +31,6 @@ from ._bot_websocket_client import BotWebSocketClient, ChatRequestError
 from ._interaction_protocol import (
     EngineInteractionRequestedEvent,
     EngineInteractionResolvedEvent,
-    JsonObject,
 )
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import SessionState
@@ -40,10 +39,10 @@ logger = get_logger("core-bot-run")
 
 
 def _public_interaction_envelope(
-    envelope: JsonObject,
+    envelope: dict[str, object],
     *,
     baas_interaction_id: str,
-) -> JsonObject:
+) -> dict[str, object]:
     """Copy an Engine envelope and replace only its externally visible ID."""
     public_envelope = dict(envelope)
     engine_payload = envelope.get("payload")
@@ -340,6 +339,7 @@ class AsyncChatClient:
             auth_token: 认证令牌，为空时传 OPEN_API:NOT_PROVIDED
             app_id: 应用标识，用于标识调用方应用
             chat_metadata: chat metadata
+            attachments: 附件
 
         Returns:
             Tuple[content, agent_events]: 返回 (响应内容, agent事件列表)
@@ -401,39 +401,20 @@ class AsyncChatClient:
                     raise NotConnectedError("Connection lost before sending message.")
 
                 # 4. 发送消息
-                #
-                logger.info(
-                    "[send] Sending message: session_key=%s, wait_result=%s, timeout=%s",
-                    session_key,
-                    wait_result,
-                    timeout,
-                )
-                assert self._client is not None
                 try:
-                    send_result = await self._client.chat_send(
+                    await self._send_chat_request(
                         session_key=session_key,
                         message=message,
                         auth_token=auth_token,
                         app_id=app_id,
-                        timeout_ms=int(timeout * 1000) if timeout else None,
+                        timeout=timeout,
                         chat_metadata=chat_metadata,
                         attachments=attachments,
+                        caller_label="send",
                     )
-                except ChatRequestError as e:
-                    logger.error(
-                        "[send] chat.send failed: session_key=%s, error_code=%s, error_message=%s",
-                        session_key,
-                        e.error_code,
-                        e.error_message,
-                    )
+                except ChatRequestError:
                     state.chat_complete.set()
                     raise
-
-                logger.info(
-                    "[send] Sent successfully: session_key=%s, result=%s",
-                    session_key,
-                    send_result,
-                )
 
                 if not wait_result:
                     return state.content, state.agent_payloads
@@ -557,29 +538,18 @@ class AsyncChatClient:
                 if not self.is_connected:
                     raise NotConnectedError("Connection lost before sending message.")
 
-                logger.info(
-                    "[send_stream] Sending: session_key=%s, timeout=%s",
-                    session_key,
-                    timeout,
-                )
-                assert self._client is not None
                 try:
-                    await self._client.chat_send(
+                    await self._send_chat_request(
                         session_key=session_key,
                         message=message,
                         auth_token=auth_token,
                         app_id=app_id,
-                        timeout_ms=int(timeout * 1000) if timeout else None,
+                        timeout=timeout,
                         chat_metadata=chat_metadata,
                         attachments=attachments,
+                        caller_label="send_stream",
                     )
                 except ChatRequestError as e:
-                    logger.error(
-                        "[send_stream] chat.send failed: session_key=%s, error_code=%s, error_message=%s",
-                        session_key,
-                        e.error_code,
-                        e.error_message,
-                    )
                     state.chat_complete.set()
                     yield StreamChunk(
                         type="error",
@@ -639,13 +609,33 @@ class AsyncChatClient:
             # 发送消息（不等待响应）
             logger.info("[inject] Injecting message: session_key=%s", session_key)
             assert self._client is not None
-            await self._client.chat_inject(
+            inject_result = await self._client.chat_inject(
                 session_key=session_key,
                 message=message,
                 auth_token=auth_token,
                 chat_metadata=chat_metadata,
                 attachments=attachments,
             )
+            logger.debug(
+                "[inject] chat.inject raw result: session_key=%s result=%s",
+                session_key,
+                inject_result,
+            )
+            if not inject_result.get("ok"):
+                error_payload = inject_result.get("error", {})
+                logger.error(
+                    "[inject] chat.inject failed: session_key=%s, error_code=%s, "
+                    "error_message=%s",
+                    session_key,
+                    error_payload.get("code"),
+                    error_payload.get("message"),
+                )
+                raise ChatRequestError(
+                    message=f"chat.inject failed: {error_payload.get('code')} - {error_payload.get('message')}",
+                    error_code=error_payload.get("code"),
+                    error_message=error_payload.get("message"),
+                    retryable=error_payload.get("retryable"),
+                )
             logger.info(
                 "[inject] injected message not wait, return as soon as possible"
             )
@@ -717,6 +707,73 @@ class AsyncChatClient:
                 return
 
     # ── 私有方法 ──────────────────────────────────────────────────────────
+
+    async def _send_chat_request(
+        self,
+        *,
+        session_key: str,
+        message: str,
+        auth_token: str | None,
+        app_id: str | None,
+        timeout: float | None,
+        chat_metadata: dict[str, str] | None,
+        attachments: list[Any] | None,
+        caller_label: str,
+    ) -> dict[str, Any]:
+        """统一封装 chat_send 调用：打印 result + 判断 ok + 构造异常。
+
+        WS client 只返回原始 result dict（纯数据边界）。本方法是**唯一的**
+        ok 判断点、日志点和异常构造点：
+        1. 打印完整 ``result``（debug 级别，成功/失败都打）；
+        2. ``ok=False`` 时：打 error 日志 + 从 result 构造 ``ChatRequestError`` 并抛出；
+        3. ``ok=True`` 时：打 info 日志 + 返回 result。
+        """
+        assert self._client is not None
+        logger.info(
+            "[%s] Sending: session_key=%s, timeout=%s",
+            caller_label,
+            session_key,
+            timeout,
+        )
+        send_result = await self._client.chat_send(
+            session_key=session_key,
+            message=message,
+            auth_token=auth_token,
+            app_id=app_id,
+            timeout_ms=int(timeout * 1000) if timeout else None,
+            chat_metadata=chat_metadata,
+            attachments=attachments,
+        )
+
+        logger.debug(
+            "[%s] chat.send raw result: session_key=%s result=%s",
+            caller_label,
+            session_key,
+            send_result,
+        )
+
+        if not send_result.get("ok"):
+            error_payload = send_result.get("error", {})
+            logger.error(
+                "[%s] chat.send failed: session_key=%s, error_code=%s, error_message=%s",
+                caller_label,
+                session_key,
+                error_payload.get("code"),
+                error_payload.get("message"),
+            )
+            raise ChatRequestError(
+                message=f"chat.send failed: {error_payload.get('code')} - {error_payload.get('message')}",
+                error_code=error_payload.get("code"),
+                error_message=error_payload.get("message"),
+                retryable=error_payload.get("retryable"),
+            )
+
+        logger.info(
+            "[%s] Sent successfully: session_key=%s",
+            caller_label,
+            session_key,
+        )
+        return send_result
 
     def _get_session(self, session_key: str) -> SessionState | None:
         """获取指定 sessionKey 的状态（支持模糊匹配）。"""
@@ -916,7 +973,7 @@ class AsyncChatClient:
     @_with_session_trace("_on_interaction_requested")
     def _on_interaction_requested(
         self,
-        payload: JsonObject,
+        payload: dict[str, object],
         *,
         session_key: str,
         state: SessionState | None,
@@ -980,7 +1037,7 @@ class AsyncChatClient:
     @_with_session_trace("_on_interaction_resolved")
     def _on_interaction_resolved(
         self,
-        payload: JsonObject,
+        payload: dict[str, object],
         *,
         session_key: str,
         state: SessionState | None,
@@ -1021,7 +1078,7 @@ class AsyncChatClient:
     @_with_session_trace("_on_mode_transition_resolved")
     def _on_mode_transition_resolved(
         self,
-        payload: JsonObject,
+        payload: dict[str, object],
         *,
         session_key: str,
         state: SessionState | None,
@@ -1255,8 +1312,11 @@ class AsyncChatClient:
         由 BotWebSocketClient._recv_loop 的 finally 块调用，
         替代 1 秒轮询，使断连检测和重连启动接近零延迟。
 
-        同时向所有活跃的 stream_queue 推送 error chunk，
-        使流式消费者不会无限等待。
+        同时把所有在途会话包装成终态 error（复用 _handle_terminal_error）：
+        等待 chat_complete 的调用方立即得到 BotSessionError，
+        流式消费者收到 error chunk 后结束，而不是等自身 timeout。
+        已完成（chat_complete 已置位）的会话跳过，避免把
+        已正常收尾的结果覆盖成 error。
         """
         logger.info(
             "[on_disconnect] event=%s, payload=%s, uri=%s",
@@ -1264,11 +1324,12 @@ class AsyncChatClient:
             payload,
             self.uri,
         )
-        for state in self._sessions.values():
-            if state.stream_queue is not None:
-                state.stream_queue.put_nowait(
-                    StreamChunk(type="error", content="connection lost")
-                )
+        for session_key, state in self._sessions.items():
+            if state.chat_complete.is_set():
+                continue
+            self._handle_terminal_error(
+                state, session_key, "connection lost", "disconnect"
+            )
         self._notify_disconnect()
 
     def _notify_disconnect(self) -> None:
@@ -1284,8 +1345,8 @@ class AsyncChatClient:
 
         使用 _disconnect_event 事件驱动检测断连（替代轮询），
         当底层 BotWebSocketClient 断连时被唤醒，以 exponential backoff
-        尝试重建连接。重连成功后新请求可继续使用；在途请求依赖自身
-        timeout 自然超时——这是 best-effort 行为。
+        尝试重建连接。重连成功后新请求可继续使用；在途会话已在
+        _on_disconnect 中被标记为终态 error，不再等待自身 timeout。
         """
         while not self._closed_intentionally:
             # 等待连接断开：事件驱动，比轮询更及时

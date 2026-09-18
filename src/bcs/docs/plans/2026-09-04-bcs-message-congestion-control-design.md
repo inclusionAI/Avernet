@@ -939,7 +939,8 @@ queued 数据可恢复；外部执行结果可能需要迟到事件、已有状�
 - run deadline 到达：持久化取消意图，再通过后台任务尝试现有 Abort。
 - Abort 无法确认：cancel_unknown，不无限循环 Abort；重新计算的队列 TTL 到期后自动 expired。
 - 同 Bot 其他 lane 在剩余 active 容量内可继续；如果容量已被 Unknown 占满，则整个 Bot 等待。
-- 人工恢复提供普通 Human API `POST /messages/{message_id}/deliveries/{delivery_id}/resolve`。
+- 人工恢复提供普通 Human API
+  `POST /openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/resolve`。
   只接受 `unknown / cancel_unknown` Send，要求 session 成员及消息可见性，且调用者为
   原发送者或目标 Bot 所有者；携带 expected_state_version 和非空 reason。
   `confirmed_not_sent` 确认未发送后终结旧 delivery 并释放 context；`confirmed_stopped`
@@ -1225,8 +1226,8 @@ HTTP 计划增加：
 ~~~text
 GET  /openapi/v1/collaboration/messages/{message_id}/deliveries
 POST /openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query
-POST /messages/{message_id}/deliveries/{delivery_id}/cancel
-POST /messages/{message_id}/deliveries/cancel
+POST /openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/cancel
+POST /openapi/v1/collaboration/messages/{message_id}/deliveries/cancel
 ~~~
 
 路径按现有 route 分组落地，不重构无关 API。批量查询最多 100 个 message ID，逐项检查权限。

@@ -20,6 +20,7 @@ import importlib
 
 from tests.community.adapters.http.openapi_v1.conftest import (
     SeamCollaborators,
+    bind_bot_access_seam,
     mount_public_error_handlers,
     user_scoped_client,
 )
@@ -249,8 +250,11 @@ def client(
             binder.bind(PolicyServiceProtocol, to=policy)
             binder.bind(PassportPlugin, to=passport)
             binder.bind(EngineConfigServiceProtocol, to=engine_config)
-            binder.bind(BotRepository, to=bot_repo)
-            binder.bind(CollaboratorServiceProtocol, to=SeamCollaborators())
+            # The startup-script/data-init rows moved onto the seam: the edit
+            # lock's services join the repositories the gate already read.
+            bind_bot_access_seam(
+                binder, bots=bot_repo, collaborators=SeamCollaborators()
+            )
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
             binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
@@ -286,6 +290,93 @@ def test_get_bot(client):
     assert data["engine"] == "teclaw"
     assert data["cluster_name"] == "ANDC"  # derived from engine
     assert data["owner_entity_id"] == "u1"
+
+
+@pytest.fixture
+def collaborator_client(
+    svc,
+    quota,
+    bot_space,
+    policy,
+    passport,
+    engine_config,
+    bot_repo,
+    skill_set_factory,
+    auth_rel,
+    startup_script,
+    service_publication,
+):
+    """The shared-bot reader: a MEMBER collaborator addressing u1's bot.
+
+    Same app as ``client`` with two turns: the principal is ``collab-1``, and
+    the seam's collaborator answer is MEMBER rather than the owner
+    short-circuit ``user_id == owner_id`` gives. Every request this client
+    makes is a collaborator's read of somebody else's bot.
+    """
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+
+    space = _CountingNoopSpace()
+
+    class _M(Module):
+        def configure(self, binder):
+            binder.bind(BotServiceProtocol, to=svc)
+            binder.bind(BotQuotaServiceProtocol, to=quota)
+            binder.bind(BotSpaceServiceProtocol, to=bot_space)
+            binder.bind(PolicyServiceProtocol, to=policy)
+            binder.bind(PassportPlugin, to=passport)
+            binder.bind(EngineConfigServiceProtocol, to=engine_config)
+            bind_bot_access_seam(
+                binder,
+                bots=bot_repo,
+                collaborators=SeamCollaborators(level=PermissionLevel.MEMBER),
+            )
+            binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
+            binder.bind(AuthRelationshipPlugin, to=auth_rel)
+            binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
+            binder.bind(ServicePublicationFacadeProtocol, to=service_publication)
+            binder.bind(BusinessSpaceContextProtocol, to=space)
+
+    app = FastAPI()
+    app.include_router(router)
+    app.include_router(engine_config_router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "collab-1"}
+    attach_injector(app, Injector([_M()]))
+    mount_public_error_handlers(app)
+    return user_scoped_client(app, "collab-1")
+
+
+# ── the collaborator read is the record without the owner's secrets ──────────
+
+
+def test_a_collaborators_detail_carries_no_template_snapshot(collaborator_client):
+    """The passthrough decision's premise, name-checked where it holds.
+
+    The 2026-09-01 decision returned ``template_config`` verbatim *because the
+    query faces were owner-scoped* — the echo is the caller's own input. A
+    collaborator reading a shared bot meets none of that premise, and the
+    snapshot's ``token`` / ``thetaKey`` would be somebody else's secrets. The
+    record itself still reaches them: the base read is MEMBER work, and
+    ``template_type`` stays — it names the template, it carries none of it.
+    """
+    data = _ok(
+        collaborator_client.get(
+            "/openapi/v1/bots/b1", params={"user_id": "collab-1", "owner_id": "u1"}
+        )
+    )
+    assert data["bot_id"] == "b1"
+    assert data["template_type"] == "applicationCoding"
+    assert data["template_config"] is None
+
+
+def test_the_owner_still_receives_the_snapshot_verbatim(client):
+    """The masking is caller-relative: the owner's own read is unchanged."""
+    data = _ok(client.get("/openapi/v1/bots/b1"))
+    assert data["template_config"] == {
+        "devflow_workflow": "release-notes",
+        "token": "echoed-to-owner",
+        "bot_template_config": {"ext_config": {"thetaKey": "enc:v1:x"}},
+        "runtime": "codefuse",
+    }
 
 
 def test_list_bots(client):

@@ -10,6 +10,12 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     SimplePermissionParamsExtractor,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
+    CollaboratorLockService,
+)
+from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+    CollaboratorService,
+)
 
 
 class TestInterceptorContext:
@@ -204,6 +210,196 @@ class TestCollaboratorPermissionInterceptor:
         assert ctx.response is not None
         assert ctx.response.error_code == 403
         assert ctx.metadata.get("owner_id_resolved") is True
+
+
+    @pytest.mark.asyncio
+    async def test_before_space_member_without_rows_is_treated_as_collaborator(self):
+        """无协作者行的空间成员：过权限后与显式协作者同流——先要求取锁。"""
+        from agentclaw.community.core.repository.protocols.bot import BotRepository
+
+        interceptor = CollaboratorPermissionInterceptor(
+            bot_id="$request.bot_id",
+            owner_id="$request.owner_id",
+            required_level=PermissionLevel.MEMBER,
+        )
+
+        mock_injector = MagicMock()
+        ctx = InterceptorContext(
+            user=self.user,  # user_001 是空间成员，不是 owner
+            route_kwargs={"request": {"bot_id": "bot_shared", "owner_id": "owner_other"}},
+            injector=mock_injector,
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"owner_id": "owner_other"}
+        # 锁信息：无协作者行（锁服务零行短路）、无锁。空间授予成立后必须
+        # **复读**一次锁信息——复读对齐后的真实服务（修复死循环的关键）；
+        # 授予成员随后落入"有协作者"流：无锁 ⇒ 423 先取锁。
+        mock_lock_info = MagicMock()
+        mock_lock_info.has_collaborators = False
+        mock_lock_info.lock = None
+        mock_lock_service = MagicMock()
+        mock_lock_service.get_lock_info.return_value = mock_lock_info
+        # 换轨后的 check：空间成员在 MEMBER 档下 has_permission=True
+        mock_collab = MagicMock()
+        mock_collab.check_collaborator_permission.return_value = {
+            "has_permission": True, "level": "MEMBER", "level_value": 1,
+        }
+
+        def _get(cls):
+            if cls is BotRepository:
+                return mock_repo
+            if cls is CollaboratorLockService:
+                return mock_lock_service
+            if cls is CollaboratorService:
+                return mock_collab
+            return None
+
+        mock_injector.get.side_effect = _get
+
+        result = await interceptor.before(ctx)
+        # 空间授予成立 ⇒ 与显式协作者同流 ⇒ 无锁先取锁
+        assert result is None
+        assert ctx.response is not None
+        assert ctx.response.error_code == 423
+        assert ctx.metadata.get("permission_level") == "MEMBER"
+        # 同一请求一次裁决：探针的答案被复查直接复用，不二次问库。
+        mock_collab.check_collaborator_permission.assert_called_once()
+        # 授予后复读锁信息——没有这次复读，成员按取锁指令重试也永远
+        # 撞同一堵短路（死循环）。
+        assert mock_lock_service.get_lock_info.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_before_space_non_member_without_rows_stays_403(self):
+        """非空间成员（check 拒绝）维持无行时 403，不因探针引入任何放行。"""
+        from agentclaw.community.core.repository.protocols.bot import BotRepository
+
+        interceptor = CollaboratorPermissionInterceptor(
+            bot_id="$request.bot_id",
+            owner_id="$request.owner_id",
+        )
+
+        mock_injector = MagicMock()
+        ctx = InterceptorContext(
+            user=self.user,
+            route_kwargs={"request": {"bot_id": "bot_shared", "owner_id": "owner_other"}},
+            injector=mock_injector,
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"owner_id": "owner_other"}
+        mock_lock_info = MagicMock()
+        mock_lock_info.has_collaborators = False
+        mock_lock_service = MagicMock()
+        mock_lock_service.get_lock_info.return_value = mock_lock_info
+        mock_collab = MagicMock()
+        mock_collab.check_collaborator_permission.return_value = {
+            "has_permission": False, "level": "NONE", "level_value": 0,
+        }
+
+        def _get(cls):
+            if cls is BotRepository:
+                return mock_repo
+            if cls is CollaboratorLockService:
+                return mock_lock_service
+            if cls is CollaboratorService:
+                return mock_collab
+            return None
+
+        mock_injector.get.side_effect = _get
+
+        result = await interceptor.before(ctx)
+        assert result is None
+        assert ctx.response is not None
+        assert ctx.response.error_code == 403
+        assert ctx.metadata.get("space_granted") is None
+
+    @pytest.mark.asyncio
+    async def test_before_admin_required_route_never_probes_the_space_grant(self):
+        """探针天花板短路：required_level 高于 MEMBER 的路由静态问不出空间授予。"""
+        from agentclaw.community.core.repository.protocols.bot import BotRepository
+
+        interceptor = CollaboratorPermissionInterceptor(
+            bot_id="$request.bot_id",
+            owner_id="$request.owner_id",
+        )  # 默认 required_level=ADMIN
+
+        mock_injector = MagicMock()
+        ctx = InterceptorContext(
+            user=self.user,
+            route_kwargs={"request": {"bot_id": "bot_shared", "owner_id": "owner_other"}},
+            injector=mock_injector,
+        )
+
+        mock_repo = MagicMock()
+        mock_lock_info = MagicMock()
+        mock_lock_info.has_collaborators = False
+        mock_lock_service = MagicMock()
+        mock_lock_service.get_lock_info.return_value = mock_lock_info
+        mock_collab = MagicMock()
+
+        def _get(cls):
+            if cls is BotRepository:
+                return mock_repo
+            if cls is CollaboratorLockService:
+                return mock_lock_service
+            if cls is CollaboratorService:
+                return mock_collab
+            return None
+
+        mock_injector.get.side_effect = _get
+
+        result = await interceptor.before(ctx)
+        assert result is None
+        assert ctx.response is not None
+        assert ctx.response.error_code == 403
+        # 天花板短路：一次空间探针都不发生（连 check 的 DB 链都不启动）
+        mock_collab.check_collaborator_permission.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_before_recheck_failure_is_fail_closed_not_pass_through(self):
+        """复查分支 fail-closed（503）：check 崩溃不再放行+无审计，也不谎报 403。"""
+        from agentclaw.community.core.repository.protocols.bot import BotRepository
+
+        interceptor = CollaboratorPermissionInterceptor(
+            bot_id="$request.bot_id",
+            owner_id="$request.owner_id",
+            persist_audit_log=False,  # 走 skip_lock 复查分支
+        )
+
+        mock_injector = MagicMock()
+        ctx = InterceptorContext(
+            user=self.user,  # user_001 不是 owner
+            route_kwargs={"request": {"bot_id": "bot_shared", "owner_id": "owner_other"}},
+            injector=mock_injector,
+        )
+
+        mock_repo = MagicMock()
+        mock_lock_info = MagicMock()
+        mock_lock_info.has_collaborators = True  # 有行 → 直接进有协作者流
+        mock_lock_service = MagicMock()
+        mock_lock_service.get_lock_info.return_value = mock_lock_info
+        mock_collab = MagicMock()
+        mock_collab.check_collaborator_permission.side_effect = RuntimeError("db blip")
+
+        def _get(cls):
+            if cls is BotRepository:
+                return mock_repo
+            if cls is CollaboratorLockService:
+                return mock_lock_service
+            if cls is CollaboratorService:
+                return mock_collab
+            return None
+
+        mock_injector.get.side_effect = _get
+
+        result = await interceptor.before(ctx)
+        assert result is None
+        assert ctx.response is not None
+        # fail-closed 但诚实：校验服务崩溃是 503（暂时不可用），不是 403
+        # （对调用者谎称"没有权限"）。skill_center 面的同款翻译亦为 503。
+        assert ctx.response.error_code == 503
+        assert "permission_check_error" in ctx.metadata
 
     @pytest.mark.asyncio
     async def test_before_no_owner_id_skips_when_repo_unavailable(self):

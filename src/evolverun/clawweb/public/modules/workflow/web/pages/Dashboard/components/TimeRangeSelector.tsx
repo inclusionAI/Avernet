@@ -2,6 +2,7 @@ import type { TimeRangeKey } from '../../../types/dashboard'
 
 const OPTIONS: { key: TimeRangeKey; label: string }[] = [
   { key: 'today', label: '今天' },
+  { key: 'yesterday', label: '昨天' },
   { key: '7d', label: '7天' },
   { key: '30d', label: '30天' },
 ]

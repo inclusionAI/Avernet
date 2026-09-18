@@ -186,7 +186,7 @@ def validate_contract(
             schema = _response_schema(response)
             if schema is None and not websocket_upgrade and not raw_success:
                 errors.append(f"{location} {status}: missing JSON response schema")
-            elif schema is not None:
+            elif schema is not None and not raw_success:
                 required = set(schema.get("required", []))
                 if not ENVELOPE_FIELDS.issubset(required):
                     errors.append(f"{location} {status}: response is not an envelope")

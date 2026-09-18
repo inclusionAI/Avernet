@@ -24,6 +24,7 @@ from secbaas.community.core.service.bot_run import (
     AsyncChatClientPool,
     BaasBotService,
     BaasBotServiceConfig,
+    BotBindingResolver,
     BotConcurrencyManager,
     BotRequestWorker,
     BotRequestWorkerConfig,
@@ -31,8 +32,8 @@ from secbaas.community.core.service.bot_run import (
     BotRunRequestExecutor,
     BotServiceConfig,
     BotServiceSelector,
+    CallerBotService,
     ClawBotService,
-    FixedMachineCountProvider,
     QueueTaskMessageDispatcher,
     ResultGuardExecutor,
     SerializingExecutor,
@@ -92,10 +93,42 @@ from secbaas.community.core.service.tenant_manage import DefaultTenantManageServ
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
 
 
-def _real_bot_service_plugin(base_url: str = "", timeout: float = 10.0):
+def _real_bot_service_plugin(
+    base_url: str = "",
+    timeout: float = 10.0,
+    principal_signer=None,
+):
     from secbaas.community.plugins.bot_service import AiohttpBotServicePlugin
 
-    return AiohttpBotServicePlugin(base_url=base_url, timeout=timeout)
+    return AiohttpBotServicePlugin(
+        base_url=base_url,
+        timeout=timeout,
+        principal_signer=principal_signer,
+    )
+
+
+def _caller_principal_signer(
+    secret_plugin,
+    secret_name,
+    issuer,
+    audience,
+    ttl_seconds,
+):
+    """装配 principal 签发器：密钥走 secret 插件，claims 取值走配置。"""
+    from secbaas.community.plugins.bot_service import (
+        CallerPrincipalConfig,
+        CallerPrincipalSigner,
+    )
+
+    return CallerPrincipalSigner(
+        secret_store=secret_plugin,
+        config=CallerPrincipalConfig(
+            secret_name=secret_name,
+            issuer=issuer,
+            audience=audience,
+            ttl_seconds=ttl_seconds,
+        ),
+    )
 
 
 def _stub_bot_service_plugin():
@@ -121,9 +154,11 @@ def _create_system_default_paas_service(factory: PaasServiceFactory):
 
 
 def _real_engine_adapter_registry():
-    """装配 3 个 real adapter(连真实 engine/proxy 通道)。
+    """装配 5 个 real adapter(连真实 engine/proxy 通道)。
 
     延迟 import:core 层不得 module-level import plugins,故装配在 bootstrap 完成。
+    openclaw/teclaw 的 plan 亲和键与 session 创建语义亦经 adapter 表达
+    (plan_session_id 纯委托 adapter,不再持有引擎 if-else)。
     """
     from secbaas.community.core.service.bot_run import BotEngineAdapterRegistry
     from secbaas.community.plugins.bot.engine_adapter.aicoding.real import (
@@ -133,9 +168,17 @@ def _real_engine_adapter_registry():
         ClaudeCodeAdapter,
     )
     from secbaas.community.plugins.bot.engine_adapter.hermes.real import HermesAdapter
+    from secbaas.community.plugins.bot.engine_adapter.openclaw.real import (
+        OpenClawAdapter,
+    )
+    from secbaas.community.plugins.bot.engine_adapter.teclaw.real import (
+        TeClawAdapter,
+    )
 
     return BotEngineAdapterRegistry(
         {
+            "openclaw": OpenClawAdapter(),
+            "teclaw": TeClawAdapter(),
             "aicoding": AICodingAdapter(),
             "hermes": HermesAdapter(),
             "claude_code": ClaudeCodeAdapter(),
@@ -144,7 +187,7 @@ def _real_engine_adapter_registry():
 
 
 def _stub_engine_adapter_registry():
-    """装配 3 个 Noop adapter(安全零值,不连真实 engine;用于测试/本地)。"""
+    """装配 5 个 Noop adapter(安全零值,不连真实 engine;用于测试/本地)。"""
     from secbaas.community.core.service.bot_run import BotEngineAdapterRegistry
     from secbaas.community.plugins.bot.engine_adapter.aicoding.stub import (
         NoopAICodingAdapter,
@@ -155,9 +198,17 @@ def _stub_engine_adapter_registry():
     from secbaas.community.plugins.bot.engine_adapter.hermes.stub import (
         NoopHermesAdapter,
     )
+    from secbaas.community.plugins.bot.engine_adapter.openclaw.stub import (
+        NoopOpenClawAdapter,
+    )
+    from secbaas.community.plugins.bot.engine_adapter.teclaw.stub import (
+        NoopTeClawAdapter,
+    )
 
     return BotEngineAdapterRegistry(
         {
+            "openclaw": NoopOpenClawAdapter(),
+            "teclaw": NoopTeClawAdapter(),
             "aicoding": NoopAICodingAdapter(),
             "hermes": NoopHermesAdapter(),
             "claude_code": NoopClaudeCodeAdapter(),
@@ -426,6 +477,13 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         engine_adapter_registry=engine_adapter_registry,
     )
 
+    # caller 模式：容器由 caller-connection 显式指定（binding.device_provider=="caller"），
+    # 传输层复用 claw，caller 专属校验在 CallerBotService 内（见 _caller_service.py）。
+    caller_bot_service = providers.Singleton(
+        CallerBotService,
+        inner=claw_bot_service,
+    )
+
     # ── Service providers ─────────────────────────────────────────────────────
 
     device_template_service = providers.Singleton(
@@ -555,6 +613,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         BotServiceSelector,
         claw_service=claw_bot_service,
         baas_service=baas_bot_service,
+        caller_service=caller_bot_service,
     )
 
     task_concurrency_pool = providers.Singleton(
@@ -592,6 +651,14 @@ class CoreServiceContainer(containers.DeclarativeContainer):
             _real_bot_service_plugin,
             base_url=config.bot_chat_log_relation.base_url,
             timeout=config.bot_chat_log_relation.timeout,
+            principal_signer=providers.Singleton(
+                _caller_principal_signer,
+                secret_plugin=secret_plugin,
+                secret_name=config.bot_chat_log_relation.principal.secret_name,
+                issuer=config.bot_chat_log_relation.principal.issuer,
+                audience=config.bot_chat_log_relation.principal.audience,
+                ttl_seconds=config.bot_chat_log_relation.principal.ttl_seconds,
+            ),
         ),
         local=providers.Singleton(_local_bot_service_plugin),
         stub=providers.Singleton(_stub_bot_service_plugin),
@@ -639,11 +706,17 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         system_config_service=system_config_service,
     )
 
+    bot_binding_resolver = providers.Singleton(
+        BotBindingResolver,
+        bot_service_plugin=bot_service_plugin,
+    )
+
     bot_runner = providers.Singleton(
         BotRunner,
         bot_service_selector=bot_service_selector,
         run_repository=bot_run_repository,
         bot_service_plugin=bot_service_plugin,
+        binding_resolver=bot_binding_resolver,
         dispatchers=providers.List(
             queue_task_message_dispatcher,
             task_message_dispatcher,
@@ -651,6 +724,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         system_config_service=system_config_service,
         default_request_timeout=config.bot_runner.default_timeout,
         eval_session_log=eval_session_log,
+        engine_adapter_registry=engine_adapter_registry,
     )
 
     # ── SSE stream converter factory ────────────────────────────────────────
@@ -666,7 +740,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     bot_run_request_executor = providers.Singleton(
         BotRunRequestExecutor,
         run_repository=bot_run_repository,
-        bot_service_plugin=bot_service_plugin,
+        binding_resolver=bot_binding_resolver,
         bot_service_selector=bot_service_selector,
         chunk_repository=bot_run_queue_chunk_repository,
         cache_plugin=cache_plugin,
@@ -694,13 +768,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         candidates_per_bot=config.bot_run_queue.candidates_per_bot,
         max_concurrent=config.bot_run_queue.max_concurrent,
         heartbeat_interval_seconds=config.bot_run_queue.heartbeat_interval_seconds,
-        bucket_sweep_interval_seconds=config.bot_run_queue.bucket_sweep_interval_seconds,
-        bucket_idle_ttl_seconds=config.bot_run_queue.bucket_idle_ttl_seconds,
-    )
-
-    machine_count_provider = providers.Singleton(
-        FixedMachineCountProvider,
-        count=config.bot_run_queue.machine_count,
     )
 
     engine_abort_notifier = providers.Callable(
@@ -720,7 +787,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
                 "http_callback": http_callback,
             }
         ),
-        machine_count_provider=machine_count_provider,
+        lock_service=distributed_lock_service,
         config=bot_request_worker_config,
         engine_abort_notifier=engine_abort_notifier,
     )
