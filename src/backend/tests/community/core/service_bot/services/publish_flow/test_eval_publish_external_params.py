@@ -83,15 +83,19 @@ class _FakeEvalPublishService(EvalPublishMixin):
         return "baas"
 
 
+_TEARDOWN_PATCH = (
+    "agentclaw.community.core.service_bot.services.publish_flow.tasks"
+    ".enqueue_eval_teardown"
+)
+
+
 @pytest.mark.asyncio
 async def test_eval_publish_with_external_migration_path() -> None:
     """外部传入 migration_path 时优先使用。"""
     record = _record(ext={"migration_path": ""})  # ext 中无值
     svc = _FakeEvalPublishService(publish_record=record)
 
-    with patch(
-        "agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mixin.enqueue_eval_teardown"
-    ):
+    with patch(_TEARDOWN_PATCH):
         result = await svc.eval_publish(
             publish_id=42,
             operator="tester",
@@ -99,11 +103,6 @@ async def test_eval_publish_with_external_migration_path() -> None:
         )
 
     assert result["success"] is True
-    # 验证 _issue 内部使用了外部传入的 migration_path
-    call_kwargs = svc._operation_runner.acquire_workflow.call_args[0][1].__globals__
-    # 更直接的验证：通过 release_async 调用参数
-    # acquire_workflow 的第二个参数是 _issue 协程，不能直接检视参数
-    # 替代方案：验证不报错即说明外部 migration_path 生效
 
 
 @pytest.mark.asyncio
@@ -112,9 +111,7 @@ async def test_eval_publish_without_external_migration_path_fallback() -> None:
     record = _record(ext={"migration_path": "/arca/snapshot"})
     svc = _FakeEvalPublishService(publish_record=record)
 
-    with patch(
-        "agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mixin.enqueue_eval_teardown"
-    ):
+    with patch(_TEARDOWN_PATCH):
         result = await svc.eval_publish(
             publish_id=42,
             operator="tester",
@@ -126,14 +123,15 @@ async def test_eval_publish_without_external_migration_path_fallback() -> None:
 @pytest.mark.asyncio
 async def test_eval_publish_fails_without_any_migration_path() -> None:
     """既无外部传入又无 ext 中的 migration_path 时报错。"""
-    record = _record(ext={})
+    record = _record(ext={"config_artifact": None})
     svc = _FakeEvalPublishService(publish_record=record)
 
-    with pytest.raises(PublishFlowServiceError, match="Build artifact path not found"):
-        await svc.eval_publish(
-            publish_id=42,
-            operator="tester",
-        )
+    with patch(_TEARDOWN_PATCH):
+        with pytest.raises(PublishFlowServiceError, match="Build artifact path not found"):
+            await svc.eval_publish(
+                publish_id=42,
+                operator="tester",
+            )
 
 
 @pytest.mark.asyncio
@@ -142,9 +140,7 @@ async def test_eval_publish_with_external_docker_image() -> None:
     record = _record(ext={"migration_path": "/arca/snapshot"})
     svc = _FakeEvalPublishService(publish_record=record)
 
-    with patch(
-        "agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mixin.enqueue_eval_teardown"
-    ):
+    with patch(_TEARDOWN_PATCH):
         result = await svc.eval_publish(
             publish_id=42,
             operator="tester",

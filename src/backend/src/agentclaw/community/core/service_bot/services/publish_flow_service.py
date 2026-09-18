@@ -1,7 +1,4 @@
-"""Bot publish flow processing service.
-
-Advances the different stages of the publish flow based on the publish record status.
-"""
+"""Bot publish flow processing service — stage advances based on publish record status."""
 
 from __future__ import annotations
 
@@ -172,18 +169,9 @@ class PublishFlowService(
     DraftRestoreOpsMixin,
     PublishImagePolicyMixin,
 ):
-    """Bot publish flow processing service.
+    """Bot publish flow: stage coordination and status transitions.
 
-    Responsibilities:
-    - Determine the current stage based on the publish record status
-    - Coordinate BotBuildService and BotPublishService to complete the publish flow
-    - Manage status transitions
-
-    Status transitions:
-    - DRAFT -> BUILDING -> BUILT (build stage)
-    - BUILT -> VALIDATE_PUB -> VALIDATING (verify environment publish stage)
-    - VALIDATING -> ONLINE_PUB -> SUCCESS (online publish stage)
-    - Any status -> FAILED (failure)
+    DRAFT→BUILDING→BUILT→VALIDATE_PUB→VALIDATING→ONLINE_PUB→SUCCESS; any→FAILED.
     """
 
     @inject
@@ -528,13 +516,7 @@ class PublishFlowService(
         self,
         publish_record: BotPublishRecord,
     ) -> BuildArtifactOnlyResult:
-        """Run the build artifact production without advancing publish status.
-
-        Delegates to ``BuildStageRunner.build_artifact_only``. Used by the
-        Eval DRAFT build path to produce artifacts from a DRAFT record
-        without changing its status. The caller is responsible for passing
-        the returned ``BuildArtifactOnlyResult`` to ``eval_publish``.
-        """
+        """Build artifact without advancing publish status (Eval DRAFT path)."""
         return await self._build_stage_runner.build_artifact_only(publish_record)
 
     async def execute_verify_release_phase(

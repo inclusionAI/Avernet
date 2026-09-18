@@ -119,16 +119,22 @@ async def test_build_artifact_only_returns_artifact() -> None:
 
 @pytest.mark.asyncio
 async def test_build_artifact_only_extracts_config_artifact() -> None:
-    """config_artifact 类型的 producer 正确提取字段。"""
+    """config_artifact 类型的 producer 正确提取字段。
+
+    exact_center_refs_from_artifact_ext 在 validate_full_artifact=False
+    时对不含 "skills" 键的 config_artifact dict 快速退出，不进入
+    BotConfigArtifact.from_dict 解析。此处用此结构避免解析异常。
+    """
     producer = _SimpleProducer(
-        artifact_ext={"config_artifact": "oss://bucket/config.json"}
+        artifact_ext={"config_artifact": {"schema_version": 1, "engine_type": "openclaw"}}
     )
     runner, _ = _runner(producer)
 
     result = await runner.build_artifact_only(_record())
 
     assert result.migration_path == ""
-    assert result.config_artifact == "oss://bucket/config.json"
+    assert isinstance(result.config_artifact, dict)
+    assert result.config_artifact["schema_version"] == 1
 
 
 @pytest.mark.asyncio
