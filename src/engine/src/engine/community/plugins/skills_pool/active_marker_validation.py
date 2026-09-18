@@ -94,6 +94,8 @@ def steady_active_marker_valid(
         and marker.get("engine") == engine
         and marker.get("layout_contract_version") == expected_contract_version
         and marker.get("activation_state") == "active"
+        and "preparation_id" not in marker
+        and "migration_generation" not in marker
     )
 
 
