@@ -36,14 +36,30 @@ the P7 task's "don't touch the four reviewed files" guidance). The real
 ``TaskTrajectoryRepository`` (in-memory SQLite) replaces the per-gate
 ``_TrajRepo`` fake so the end-to-end persistence + assemble path is exercised.
 
-Terminal TRANSITION gap: the engine wires trajectory emission for submit/plan/
-dispatch/execute/verify/reset but NOT for ``transition`` (status-flip) today.
-The analyzer's ``failure_reason`` terminal gate requires a terminal TRANSITION
-event. Each case completes the timeline by emitting the terminal TRANSITION via
-the REAL ``emit_trajectory_event`` helper into the SAME real repo — a faithful
-"transition gate" emission (what a future engine wiring would emit) so the real
-assembly + analysis path is exercised end-to-end. Tests only — NOT a prod-code
-change.
+Terminal TRANSITION gate (WIRED in production): the engine fires an ADDITIVE
+``TrajectoryActionType.TRANSITION`` trajectory event at each of the 3
+``_log_action(NodeAction.TRANSITION, ...)`` sites — ``_on_pass_collect`` non-root
+gap closure (PLANNING→SUCCESS), ``_hung_and_escalate`` (node→HUNG), and
+``_maybe_finish_graph`` (root→SUCCESS). Each acceptance case now drives the
+task to its terminal state through the REAL engine path that fires the real
+transition gate (NO manual transition injection):
+
+* success — ``_drive_execute_success`` sets the leaf SUCCESS so ``_on_pass_collect``
+  converges to ``_maybe_finish_graph`` (root→SUCCESS, site 3).
+* interface_error — ``_drive_execute_interface_error`` (retries>=MAX) escalates
+  to HUNG via ``_hung_and_escalate`` (site 2); the terminal HUNG opens
+  ``failure_reason`` derivation and bullet 2 (underlying_interface_error) fires.
+* timeout — ``_drive_reset_sla_timeout`` fires the real SLA-timeout RESET row
+  (non-terminal re-dispatch), then ``_drive_reset_harness_max`` escalates to
+  HUNG via the real ``_hung_and_escalate`` (site 2) so the task is terminal;
+  bullet 1 (sla_timeout RESET) still derives ``execution_timeout:``.
+* hung — ``_drive_reset_harness_max`` escalates to HUNG via ``_hung_and_escalate``
+  (site 2), which emits the real transition row carrying ``error_type=HUNG``
+  + the hung_reason (the analyzer's bullet 4 input).
+
+The focused ``test_transition_gate_emits_trajectory_row`` pins that the real
+engine transition path lands an ``action_type=transition`` row in
+``task_trajectory_events`` in production-representative conditions.
 
 Two additional P7 deliverables:
 
@@ -117,7 +133,6 @@ from agentclaw.community.core.task.task_trajectory.models import (
 )
 from agentclaw.community.core.task.task_trajectory.payloads import (
     emit_submit_trajectory,
-    emit_trajectory_event,
 )
 from agentclaw.community.core.task.task_trajectory.trajectory_service import (
     TaskTrajectoryService,
@@ -419,15 +434,19 @@ def _drive_dispatch(repo, graph_svc, *, task_id: str, child_node_id: str,
 
 def _drive_execute_success(repo, graph_svc, *, task_id: str,
                            child_node_id: str) -> None:
-    """EXECUTE+VERIFY (success): ``on_report`` on the child with acceptance
-    DONE → real gates fire ``execute(ok)`` + ``verify(accept_pass)``."""
+    """EXECUTE+VERIFY (success) + terminal TRANSITION: ``on_report`` on the
+    child with acceptance DONE → real gates fire ``execute(ok)`` +
+    ``verify(accept_pass)``. The leaf is set SUCCESS (not DONE) so
+    ``_on_pass_collect`` sees all-SUCCESS siblings and converges to
+    ``_maybe_finish_graph`` → the REAL root→SUCCESS transition gate fires
+    (site 3, ``reason=root_gap_closed``) — no manual transition injection."""
     _set_running_node(graph_svc, task_id, child_node_id, request_input="bot-request-payload")
     eng = _TrajectoryCaseEngine(
         graph_svc, planner=_StubPlanner(),
         dispatcher=_RationaleStubDispatcher(outcome="hit_single", bot_id="bot1"),
         runner=_StubRunner(), trajectory_repo=repo,
     )
-    patch = _patch(task_id, child_node_id, status=Status.DONE,
+    patch = _patch(task_id, child_node_id, status=Status.SUCCESS,
                    acceptance_result=_accept(AcceptanceVerdict.DONE))
     _run(eng.on_report(patch))
 
@@ -501,29 +520,6 @@ def _drive_reset_harness_max(repo, graph_svc, *, task_id: str,
     _run(_go())
 
 
-def _emit_terminal_transition(repo, *, task_id: str, node_id: str,
-                             status_to: Status, error_type: ReasonCatalog | None = None,
-                             error_msg: str | None = None) -> None:
-    """Emit a terminal TRANSITION via the REAL ``emit_trajectory_event`` helper
-    into ``repo`` (the engine wires submit/plan/dispatch/execute/verify/reset
-    but NOT ``transition`` today; this completes the timeline the real
-    analyzer's terminal gate reads — same helper the gates use, same repo)."""
-    emit_trajectory_event(
-        repo,
-        task_id,
-        node_id,
-        TrajectoryActionType.TRANSITION,
-        action_result=status_to.value.lower(),  # SUCCESS→"success", FAILED→"failed", HUNG→"hung"
-        action_input=None,
-        error_type=error_type,
-        error_msg=error_msg,
-        ext_info=None,
-        status_from=None,
-        status_to=status_to,
-        attempt=0,
-    )
-
-
 def _assemble_and_analyze(repo, *, task_id: str) -> tuple[TaskTrajectory, TrajectoryAnalysis]:
     """The REAL read + analysis path: real assembler → real ``ext_info_lookup``
     closure (the service's seam) → real analyzer ``rule`` executor (REQ-9).
@@ -560,10 +556,10 @@ class TestE2EFourFailureTypesAcceptance:
     the REAL analyzer's ``rule`` executor — assert the timeline shape + the
     spec's ``failure_reason`` / ``boost_reason`` derivation.
 
-    The real emission gates fire submit/plan/dispatch/execute/verify/reset
-    into the real repo (SQL INSERTs). The terminal TRANSITION is emitted via
-    the real ``emit_trajectory_event`` helper (the one gate the engine
-    doesn't wire today — see module docstring). The real
+    The real emission gates fire submit/plan/dispatch/execute/verify/reset AND
+    the terminal TRANSITION (now wired in production at the 3
+    ``_log_action(NodeAction.TRANSITION, ...)`` sites) into the real repo (SQL
+    INSERTs) — NO manual transition injection. The real
     ``_build_ext_info_lookup`` closure re-queries the repo so the analyzer
     reads the persisted ``ext_info`` JSON (the assembler dropped it)."""
 
@@ -571,7 +567,8 @@ class TestE2EFourFailureTypesAcceptance:
         """Case 1 (success): submit→plan→dispatch→execute(→verify) timeline,
         ``timeline[0].action_type == "submit"``, terminal TRANSITION to
         SUCCESS → ``failure_reason is None``; boost_reason carries the
-        DISPATCH rationale summary."""
+        DISPATCH rationale summary. The terminal TRANSITION is fired by the
+        REAL ``_maybe_finish_graph`` gate (site 3) — no manual injection."""
         db = _make_db()
         repo = TaskTrajectoryRepository(db)
         task_id, child = "e2e-success", "c1"
@@ -582,8 +579,7 @@ class TestE2EFourFailureTypesAcceptance:
         _drive_dispatch(repo, graph_svc, task_id=task_id, child_node_id=child,
                         rationale=_SAMPLE_RATIONALE)
         _drive_execute_success(repo, graph_svc, task_id=task_id, child_node_id=child)
-        _emit_terminal_transition(repo, task_id=task_id, node_id=child,
-                                 status_to=Status.SUCCESS)
+        # the real root→SUCCESS transition (site 3) fires inside _drive_execute_success
 
         trajectory, analysis = _assemble_and_analyze(repo, task_id=task_id)
 
@@ -595,7 +591,7 @@ class TestE2EFourFailureTypesAcceptance:
             assert required in actions, f"missing {required} in timeline: {actions}"
         # EXECUTE success → VERIFY row present (accept_pass)
         assert "verify" in actions, f"success EXECUTE should be followed by VERIFY: {actions}"
-        # terminal TRANSITION last
+        # terminal TRANSITION last (fired by the real _maybe_finish_graph gate)
         assert actions[-1] == "transition", f"terminal transition must be last: {actions}"
         assert trajectory.timeline[-1].status_to == Status.SUCCESS
 
@@ -631,9 +627,10 @@ class TestE2EFourFailureTypesAcceptance:
                         rationale=_SAMPLE_RATIONALE)
         _drive_execute_interface_error(repo, graph_svc, task_id=task_id,
                                       child_node_id=child, exec_error=iface_msg)
-        # terminal TRANSITION to FAILED (the interface error failed the task)
-        _emit_terminal_transition(repo, task_id=task_id, node_id=child,
-                                 status_to=Status.FAILED)
+        # the real node→HUNG transition (site 2) fires inside
+        # _drive_execute_interface_error (retries>=MAX → _hung_and_escalate);
+        # the terminal HUNG opens failure_reason derivation, bullet 2
+        # (underlying_interface_error) fires before bullet 4 (hung).
 
         trajectory, analysis = _assemble_and_analyze(repo, task_id=task_id)
 
@@ -676,9 +673,12 @@ class TestE2EFourFailureTypesAcceptance:
                         rationale=_SAMPLE_RATIONALE)
         start_time = _drive_reset_sla_timeout(repo, graph_svc, task_id=task_id,
                                               child_node_id=child)
-        # terminal TRANSITION to FAILED (SLA timeout → re-dispatched, eventually FAILED)
-        _emit_terminal_transition(repo, task_id=task_id, node_id=child,
-                                 status_to=Status.FAILED)
+        # The SLA-timeout RESET re-dispatches (non-terminal: RUNNING→PENDING).
+        # Drive the node to terminal HUNG via the REAL harness_max path so a
+        # terminal TRANSITION fires (site 2, ``_hung_and_escalate``) — the
+        # analyzer's bullet 1 still derives ``execution_timeout:`` from the
+        # sla_timeout RESET row (bullet 1 has priority over bullet 4 hung).
+        _drive_reset_harness_max(repo, graph_svc, task_id=task_id, child_node_id=child)
 
         trajectory, analysis = _assemble_and_analyze(repo, task_id=task_id)
 
@@ -719,22 +719,26 @@ class TestE2EFourFailureTypesAcceptance:
         _drive_dispatch(repo, graph_svc, task_id=task_id, child_node_id=child,
                         rationale=_SAMPLE_RATIONALE)
         _drive_reset_harness_max(repo, graph_svc, task_id=task_id, child_node_id=child)
-        # terminal TRANSITION to HUNG carrying error_type=HUNG + the hung_reason
-        hung_reason = "stuck: retries exhausted (harness_max)"
-        _emit_terminal_transition(repo, task_id=task_id, node_id=child,
-                                 status_to=Status.HUNG,
-                                 error_type=ReasonCatalog.HUNG,
-                                 error_msg=hung_reason)
+        # the real node→HUNG transition (site 2, ``_hung_and_escalate``) fires
+        # inside _drive_reset_harness_max, carrying error_type=HUNG + the
+        # hung_reason the engine passes ("exec_stuck" from _on_harness_collect).
+        hung_reason = "exec_stuck"
 
         trajectory, analysis = _assemble_and_analyze(repo, task_id=task_id)
 
-        # the RESET row + the terminal TRANSITION to HUNG both present
+        # the RESET row + the terminal TRANSITION to HUNG both present. The
+        # real ``_on_harness_collect`` emits the HUNG transition (site 2) and
+        # THEN the harness_max RESET, so the transition need not be the literal
+        # last action — assert a HUNG transition exists (the analyzer's
+        # ``_terminal_status`` walks back past the trailing reset to find it).
         actions = _timeline_action_types(trajectory)
         assert "reset" in actions, f"reset row missing: {actions}"
-        assert actions[-1] == "transition"
-        assert trajectory.timeline[-1].status_to == Status.HUNG
+        assert "transition" in actions, f"transition row missing: {actions}"
+        trans_events = [ev for ev in trajectory.timeline
+                        if ev.action_type == TrajectoryActionType.TRANSITION]
+        assert trans_events[-1].status_to == Status.HUNG
 
-        # analyzer: failure_reason starts with hung: + the hung_reason
+        # analyzer: failure_reason starts with hung: + the real gate's hung_reason
         assert analysis.failure_reason is not None
         assert analysis.failure_reason.startswith("hung:"), (
             f"failure_reason must start with 'hung:'; got {analysis.failure_reason!r}"
@@ -762,6 +766,67 @@ class TestE2EFourFailureTypesAcceptance:
             assert actions[0] == "submit", (
                 f"case={case} timeline[0] must be submit; got {actions}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Transition gate — focused: the REAL engine transition path lands an
+# ``action_type=transition`` row in ``task_trajectory_events`` (pins that the
+# newly-wired gate fires in production-representative conditions, closing the
+# gap the P7 e2e uncovered: no terminal transition was emitted in production).
+# ---------------------------------------------------------------------------
+
+
+class TestTransitionGateEmitsTrajectoryRow:
+    """Drive the REAL engine transition path (the HUNG escalation via
+    ``on_harness`` retries>=MAX → ``_hung_and_escalate``, site 2) into the REAL
+    in-memory SQLite repo and assert a ``task_trajectory_events`` row with
+    ``action_type=transition`` + the right ``action_result``/``status_from``/
+    ``status_to``/``error_type`` lands in the DB — pinning that the new
+    transition gate fires (production ``failure_reason`` is no longer ``None``
+    for terminal tasks)."""
+
+    def test_transition_gate_emits_trajectory_row(self):
+        db = _make_db()
+        repo = TaskTrajectoryRepository(db)
+        task_id, child = "e2e-trans-gate", "ct"
+        graph_svc = TaskGraphService()
+
+        _drive_submit(repo, graph_svc, task_id=task_id)
+        _drive_plan(repo, graph_svc, task_id=task_id, child_node_id=child)
+        _drive_dispatch(repo, graph_svc, task_id=task_id, child_node_id=child,
+                        rationale=_SAMPLE_RATIONALE)
+        # REAL engine transition path: harness retries>=MAX → _hung_and_escalate
+        # fires the terminal HUNG transition (site 2) into the real repo.
+        _drive_reset_harness_max(repo, graph_svc, task_id=task_id, child_node_id=child)
+
+        # the transition row landed in task_trajectory_events (real SQL INSERT)
+        events = repo.list_events_by_task(task_id)
+        transition_rows = [e for e in events if e.action_type == "transition"]
+        assert transition_rows, (
+            f"no transition row landed in task_trajectory_events; "
+            f"action_types={[e.action_type for e in events]}"
+        )
+        rec = transition_rows[-1]
+        assert rec.action_type == "transition"
+        assert rec.action_result == "hung"  # status_to-derived (HUNG→"hung")
+        assert rec.status_to == Status.HUNG
+        assert rec.status_from == Status.RUNNING  # node was RUNNING before the HUNG flip
+        assert rec.action_input is None  # REQ-1: transition action_input=null
+        assert rec.error_type == ReasonCatalog.HUNG.value
+        assert rec.error_msg == "exec_stuck"  # _on_harness_collect's hung_reason
+        # ext_info carries the transition trigger reason
+        assert rec.ext_info is not None
+        ext = json.loads(rec.ext_info)
+        assert ext["schema_v"] == 1
+        assert ext["reason"] == "exec_stuck"
+
+        # the real assembler reads the transition row back; the analyzer's
+        # terminal gate now finds the terminal HUNG transition (NOT None).
+        trajectory = TaskTrajectoryAssembler(repo).assemble(task_id)
+        trans_events = [ev for ev in trajectory.timeline
+                        if ev.action_type == TrajectoryActionType.TRANSITION]
+        assert trans_events, "assembled timeline missing the transition event"
+        assert trans_events[-1].status_to == Status.HUNG
 
 
 # ---------------------------------------------------------------------------
@@ -817,8 +882,8 @@ class TestDoAnalysisTrueServicePath:
                         rationale=_SAMPLE_RATIONALE)
         _drive_execute_interface_error(repo, graph_svc, task_id=task_id,
                                       child_node_id=child, exec_error=iface_msg)
-        _emit_terminal_transition(repo, task_id=task_id, node_id=child,
-                                 status_to=Status.FAILED)
+        # the real node→HUNG transition (site 2) fires inside
+        # _drive_execute_interface_error — no manual terminal injection here.
 
         # Wire the REAL service with a fake bot that returns a scripted analysis
         # mirroring the rule executor's shape for an interface_error terminal task.
@@ -924,8 +989,8 @@ class TestCrossRestartReadability:
         _drive_dispatch(repo, graph_svc, task_id=task_id, child_node_id=child,
                         rationale=_SAMPLE_RATIONALE)
         _drive_execute_success(repo, graph_svc, task_id=task_id, child_node_id=child)
-        _emit_terminal_transition(repo, task_id=task_id, node_id=child,
-                                 status_to=Status.SUCCESS)
+        # the real root→SUCCESS transition (site 3) fires inside
+        # _drive_execute_success — no manual terminal injection here.
 
         # Backfill a scripted analysis directly (isolates cross-restart READ
         # from the bot-call path). The head row must exist before backfill

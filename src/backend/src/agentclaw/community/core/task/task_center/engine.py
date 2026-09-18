@@ -1004,6 +1004,44 @@ class ExecutionEngine:
         )
 
     # ------------------------------------------------------------------
+    # REQ-1 — TRANSITION trajectory gate helper (additive to _log_action)
+    # ------------------------------------------------------------------
+    #
+    # The 3 ``_log_action(NodeAction.TRANSITION, ...)`` sites (engine.py
+    # ``_on_pass_collect`` non-root gap closure / ``_hung_and_escalate`` /
+    # ``_maybe_finish_graph`` root gap closure) each fire an ADDITIVE
+    # ``TrajectoryActionType.TRANSITION`` trajectory event next to the
+    # unchanged ``_log_action`` call. ``action_result`` is the
+    # status_to-derived lowercase name (the spec's enumeration is open-ended);
+    # the analyzer's ``_terminal_status`` reads ``status_to`` (NOT
+    # ``action_result``) so a clear status-derived string is sufficient.
+    # ``action_input`` = None per REQ-1 ("reset/transition→null"); the trigger
+    # reason rides in ``ext_info={"reason": ...}``. ``attempt=0`` because
+    # transitions are structural/terminal flips (the analyzer's terminal gate
+    # does not consume ``attempt``). 决策 #14: only the emission is swallowed
+    # (inside ``emit_trajectory_event``); the gate's status mutation is NOT
+    # wrapped — the ``_log_trajectory`` call sits alongside ``_log_action``,
+    # never around the ``update_task_node_info`` flip.
+
+    @staticmethod
+    def _transition_action_result(status_to: Status | None) -> str:
+        """Map a TRANSITION's ``status_to`` to a trajectory ``action_result``
+        (REQ-1's open-ended ``...`` enumeration). The status_to-derived
+        lowercase name mirrors the ``_log_action`` payload's ``to`` field and
+        is what the analyzer's ``_terminal_status`` keys on (via ``status_to``
+        membership in the terminal set, not ``action_result``). Mapping:
+
+            SUCCESS→"success"   HUNG→"hung"   FAILED→"failed"
+            CANCELLED→"cancelled"   DONE→"done"   RUNNING→"running"
+            PENDING→"pending"   PLANNING→"planning"
+
+        ``None`` (defensive — no status_to on the event) → ``"transition"``.
+        """
+        if status_to is None:
+            return "transition"
+        return str(getattr(status_to, "value", status_to)).lower()
+
+    # ------------------------------------------------------------------
     # REQ-5 — EXECUTE/VERIFY trajectory emission (additive to _log_action)
     # ------------------------------------------------------------------
 
@@ -2372,6 +2410,23 @@ class ExecutionEngine:
                 status_from=Status.PLANNING,
                 status_to=Status.SUCCESS,
             )
+            # 轨迹旁路:TRANSITION(非根 gap 闭传播 → 父 SUCCESS)—— 与既有
+            # ``_log_action(NodeAction.TRANSITION, ...)`` 同闸门位置、独立直插
+            # ``task_trajectory_events``(additive,非替换)。action_result=status_to
+            # 派生(SUCCESS→"success");action_input=null(REQ-1:transition 触发原因
+            # 由 action_result/ext_info 承载);ext_info 携带 reason。决策 #14:仅发射
+            # 被吞(emitter 内 try/except+WARNING),上面的状态翻转不在 swallow 内。
+            self._log_trajectory(
+                task_id,
+                parent.node_id,
+                "transition",  # TrajectoryActionType.TRANSITION.value
+                action_result=self._transition_action_result(Status.SUCCESS),
+                action_input=None,
+                ext_info={"reason": "gap_closed_propagate"},
+                status_from=Status.PLANNING,
+                status_to=Status.SUCCESS,
+                attempt=0,
+            )
             await self._on_pass_collect(task_id, parent.node_id, side)
         else:
             self._hung_and_escalate(task_id, parent.node_id, "gap_no_progress")
@@ -2866,6 +2921,24 @@ class ExecutionEngine:
             {"reason": hung_reason, "to": "HUNG"},
             status_from=_prev,
             status_to=Status.HUNG,
+        )
+        # 轨迹旁路:TRANSITION(节点 → HUNG)—— additive 独立直插。HUNG 是终态错误
+        # (需人介入),error_type=HUNG + error_msg=hung_reason 供 analyzer 末事件
+        # bullet 4 派生 "hung: {reason}";action_input=null(REQ-1);ext_info 携带
+        # reason。决策 #14:仅发射被吞(emitter 内 try/except+WARNING),上面的
+        # status=HUNG 翻转 + 后续 _escalate_hung 均不在 swallow 内。
+        self._log_trajectory(
+            task_id,
+            node_id,
+            "transition",  # TrajectoryActionType.TRANSITION.value
+            action_result=self._transition_action_result(Status.HUNG),
+            action_input=None,
+            error_type=ReasonCatalog.HUNG,
+            error_msg=hung_reason,
+            ext_info={"reason": hung_reason},
+            status_from=_prev,
+            status_to=Status.HUNG,
+            attempt=0,
         )
         logger.info(
             "[task][hung] task=%s node=%s reason=%s → 向上评估根级 BBS",
@@ -3649,6 +3722,22 @@ class ExecutionEngine:
                 {"reason": "root_gap_closed", "to": "SUCCESS"},
                 status_from=_rprev,
                 status_to=Status.SUCCESS,
+            )
+            # 轨迹旁路:TRANSITION(根 gap 闭终验通过 → root SUCCESS)—— additive
+            # 独立直插。action_result=status_to 派生(SUCCESS→"success");action_input
+            # =null(REQ-1);ext_info 携带 reason。决策 #14:仅发射被吞(emitter 内
+            # try/except+WARNING),上面的 root run_info 补全与下方 _sync_graph_status
+            # _to_root 镜像均不在 swallow 内。
+            self._log_trajectory(
+                task_id,
+                root.node_id,
+                "transition",  # TrajectoryActionType.TRANSITION.value
+                action_result=self._transition_action_result(Status.SUCCESS),
+                action_input=None,
+                ext_info={"reason": "root_gap_closed"},
+                status_from=_rprev,
+                status_to=Status.SUCCESS,
+                attempt=0,
             )
         # 终态镜像:root 已 DONE → graph 镜像 DONE(all_done 标记);不再 graph 独立先写 status
         self._sync_graph_status_to_root(task_id)
