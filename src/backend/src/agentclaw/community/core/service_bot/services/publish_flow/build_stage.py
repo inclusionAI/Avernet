@@ -15,6 +15,7 @@ friend of the facade.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from collections.abc import Callable
@@ -69,6 +70,22 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
+@dataclass(frozen=True)
+class BuildArtifactOnlyResult:
+    """eval 构建路径的产物——不推进 ac_bot_publish 状态。
+
+    由 ``build_artifact_only`` 返回，供调用方直接传给 eval_publish。
+    ``artifact_ext`` 是完整的 producer 产出 ext dict，供 ``build()``
+    做状态提交时合并写回 ac_bot_publish.ext。
+    """
+
+    migration_path: str           # ARCA 路径或空串
+    config_artifact: str | None   # 外部 producer 产出的 config_artifact 或 None
+    docker_image: str | None      # 解析的镜像 pin
+    center_skill_uuids: tuple[str, ...]
+    artifact_ext: dict            # 完整的 artifact.ext，供 build() 合并
+
+
 class BuildStageRunner:
     """Run the build phase for one publish record."""
 
@@ -93,143 +110,180 @@ class BuildStageRunner:
         self._runtime_projector = runtime_projector
         self._runtime_layout_probe = runtime_layout_probe
 
+    async def build_artifact_only(
+        self,
+        publish_record: BotPublishRecord,
+    ) -> BuildArtifactOnlyResult:
+        """执行构建步骤但不推进 ac_bot_publish 状态。
+
+        覆盖 build 阶段的核心逻辑（获取 bot → runtime_projector →
+        解析 provider → produce_artifact → stage_build_files），但不执行
+        ext 合并、commit_built_artifact 和状态推进。DRAFT 状态不变。
+
+        返回 ``BuildArtifactOnlyResult`` 供调用方直接传给 eval_publish。
+        """
+        publish_id = publish_record.id
+        bot_id = publish_record.source_bot_id
+        version = publish_record.version or 1
+        owner_id = self._ext_state.owner_id(publish_record)
+
+        logger.info(
+            "[BuildStageRunner] Starting build_artifact_only: publish_id=%s, "
+            "bot_id=%s, owner_id=%s",
+            publish_id,
+            bot_id,
+            owner_id,
+        )
+
+        bot = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
+        if not bot:
+            raise PublishFlowServiceError(f"Bot not found: {bot_id}")
+
+        try:
+            await self._runtime_projector.project(
+                bot_id=str(bot["bot_id"]),
+                owner_id=str(bot["owner_id"]),
+                scope=ProjectionScope.everything(),
+            )
+        except Exception:
+            logger.exception(
+                "[BuildStageRunner] Runtime projection did not complete "
+                "before build_artifact_only: bot_id=%s",
+                bot_id,
+            )
+
+        device_provider = self._baas_service.resolve_container_provider(bot)
+        producer = self._producer_router.resolve(device_provider)
+        behavior = self._provider_behaviors.resolve(device_provider)
+        layout_observation = None
+        if producer.requires_runtime_layout_observation:
+            runtime_engine = runtime_layout_engine_for_bot(bot)
+            probe = await self._runtime_layout_probe.probe_bot(
+                bot_id=str(bot["bot_id"]),
+                user_id=str(bot["owner_id"]),
+                engine=runtime_engine,
+            )
+            layout_observation = ServiceArtifactLayoutObservation.from_probe(
+                probe,
+                expected_engine=runtime_engine,
+            )
+            logger.info(
+                "[BuildStageRunner] Runtime layout observed: bot_id=%s, "
+                "engine=%s, status=%s, center_mount=%s, reason=%s",
+                bot_id,
+                runtime_engine,
+                layout_observation.status.value,
+                layout_observation.center_mount_status,
+                layout_observation.reason,
+            )
+            if layout_observation.resolved_layout is not None:
+                resolved = layout_observation.resolved_layout
+                logger.debug(
+                    "[BuildStageRunner] Runtime layout paths: bot_id=%s, "
+                    "active_root=%s, local_root=%s, repo_root=%s, "
+                    "center_root=%s",
+                    bot_id,
+                    resolved.active_root,
+                    resolved.local_root,
+                    resolved.repo_root,
+                    resolved.center_root,
+                )
+
+        request = ArtifactBuildRequest.create(
+            bot=bot,
+            version=version,
+            layout_observation=layout_observation,
+        )
+        artifact = await asyncio.to_thread(producer.produce_artifact, request)
+
+        if not artifact.success:
+            raise ServiceArtifactBuildError(
+                ServiceArtifactBuildErrorCode.SNAPSHOT_INVALID,
+                artifact.message or "Service Artifact snapshot build failed",
+            )
+
+        await behavior.stage_build_files(
+            artifact=artifact,
+            bot=bot,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            publish_id=publish_id,
+        )
+
+        # 从 artifact.ext 中提取 migration_path 和 config_artifact，
+        # 不写入 ac_bot_publish.ext
+        migration_path = artifact.ext.get("migration_path", "")
+        config_artifact = artifact.ext.get("config_artifact")
+
+        center_skill_uuids = tuple(
+            sorted(
+                {
+                    ref.skill_uuid
+                    for ref in exact_center_refs_from_artifact_ext(
+                        artifact.ext, validate_full_artifact=False
+                    )
+                }
+            )
+        )
+
+        logger.info(
+            "[BuildStageRunner] build_artifact_only completed: "
+            "publish_id=%s, provider=%s, migration_path=%s",
+            publish_id,
+            device_provider,
+            bool(migration_path),
+        )
+
+        return BuildArtifactOnlyResult(
+            migration_path=migration_path or "",
+            config_artifact=config_artifact,
+            docker_image=None,  # 由调用方通过 resolve_publish_image_pin 解析
+            center_skill_uuids=center_skill_uuids,
+            artifact_ext=artifact.ext,
+        )
+
     async def build(
         self,
         publish_record: BotPublishRecord,
         operator: str,
     ) -> PublishFlowResult:
         publish_id = publish_record.id
-        bot_id = publish_record.source_bot_id
-        version = publish_record.version or 1
-        owner_id = self._ext_state.owner_id(publish_record)
 
         try:
-            # The record is already at BUILDING: the user-driven ``process`` (or a
-            # retry) owns the DRAFT -> BUILDING advance under the optimistic lock, so
-            # the build runs within BUILDING and closes it out at BUILT below. A
-            # crash mid-build leaves BUILDING and a task re-run simply rebuilds.
             logger.info(
                 "[BuildStageRunner] Starting build: publish_id=%s, bot_id=%s, "
                 "operator=%s, owner_id=%s",
                 publish_id,
-                bot_id,
+                publish_record.source_bot_id,
                 operator,
-                owner_id,
+                self._ext_state.owner_id(publish_record),
             )
 
-            bot = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
-            if not bot:
-                raise PublishFlowServiceError(f"Bot not found: {bot_id}")
+            result = await self.build_artifact_only(publish_record)
 
-            # A new service build first converges the complete Draft runtime.
-            # The projector owns Reader flush/version resolution and every
-            # engine-specific application contract. Restart/scale/rollback of
-            # a frozen release never enters this build path.
-            try:
-                await self._runtime_projector.project(
-                    bot_id=str(bot["bot_id"]),
-                    owner_id=str(bot["owner_id"]),
-                    scope=ProjectionScope.everything(),
-                )
-            except Exception:
-                # Draft verification is the product gate for Service Bot
-                # publication. Runtime convergence remains best-effort here;
-                # Artifact construction below decides Build success.
-                logger.exception(
-                    "[BuildStageRunner] Runtime projection did not complete "
-                    "before Service Bot build: bot_id=%s",
-                    bot_id,
-                )
-
-            # Select the artifact producer by device_provider: ARCA/baas → the
-            # existing build(); teclaw → compose + freeze. produce_artifact is
-            # synchronous, so wrap it in to_thread to reproduce build_async's
-            # non-blocking semantics.
-            device_provider = self._baas_service.resolve_container_provider(bot)
-            producer = self._producer_router.resolve(device_provider)
-            behavior = self._provider_behaviors.resolve(device_provider)
-            layout_observation = None
-            if producer.requires_runtime_layout_observation:
-                # TODO: let BotRuntimeProjector hand off its fresh observation
-                # once that Service API can do so without coupling projection
-                # results to filesystem Artifact producers. Until then, one
-                # read-only probe keeps the build contract explicit and current.
-                runtime_engine = runtime_layout_engine_for_bot(bot)
-                probe = await self._runtime_layout_probe.probe_bot(
-                    bot_id=str(bot["bot_id"]),
-                    user_id=str(bot["owner_id"]),
-                    engine=runtime_engine,
-                )
-                layout_observation = ServiceArtifactLayoutObservation.from_probe(
-                    probe,
-                    expected_engine=runtime_engine,
-                )
-                logger.info(
-                    "[BuildStageRunner] Runtime layout observed: bot_id=%s, "
-                    "engine=%s, status=%s, center_mount=%s, reason=%s",
-                    bot_id,
-                    runtime_engine,
-                    layout_observation.status.value,
-                    layout_observation.center_mount_status,
-                    layout_observation.reason,
-                )
-                if layout_observation.resolved_layout is not None:
-                    resolved = layout_observation.resolved_layout
-                    logger.debug(
-                        "[BuildStageRunner] Runtime layout paths: bot_id=%s, "
-                        "active_root=%s, local_root=%s, repo_root=%s, "
-                        "center_root=%s",
-                        bot_id,
-                        resolved.active_root,
-                        resolved.local_root,
-                        resolved.repo_root,
-                        resolved.center_root,
-                    )
-
-            request = ArtifactBuildRequest.create(
-                bot=bot,
-                version=version,
-                layout_observation=layout_observation,
-            )
-            employee_snapshot = None
+            # 阶段 B：提交 / 状态推进（BUILDING → BUILT）
+            # 数字员工快照校验 — 如果构建期间数字员工能力发生变化，拒绝发布
             if self._employee_publication_provider is not None:
-                employee_snapshot = await asyncio.to_thread(self._employee_publication_provider().capture, bot)
-            artifact = await asyncio.to_thread(producer.produce_artifact, request)
-            if not artifact.success:
-                raise ServiceArtifactBuildError(
-                    ServiceArtifactBuildErrorCode.SNAPSHOT_INVALID,
-                    artifact.message or "Service Artifact snapshot build failed",
+                owner_id = self._ext_state.owner_id(publish_record)
+                bot = self._bot_service.get_bot(
+                    bot_id=publish_record.source_bot_id, user_id=owner_id,
                 )
-
-            # Provider-specific post-build file staging (teclaw snapshots the
-            # running source container's files into OSS and embeds the refs;
-            # ARCA/baas write the live FS the build already sees → no-op).
-            await behavior.stage_build_files(
-                artifact=artifact,
-                bot=bot,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                publish_id=publish_id,
-            )
-
-            if employee_snapshot is not None:
+                employee_snapshot = await asyncio.to_thread(
+                    self._employee_publication_provider().capture, bot
+                )
                 employee_service = self._employee_publication_provider()
                 current = await asyncio.to_thread(employee_service.capture, bot)
                 if current is None or capability_digest(current) != capability_digest(employee_snapshot):
                     raise ValueError("数字员工能力在构建期间发生变化，请重新构建")
-                frozen = await asyncio.to_thread(employee_service.capture_artifact, bot, artifact.ext)
+                frozen = await asyncio.to_thread(employee_service.capture_artifact, bot, result.artifact_ext)
                 if runtime_capability_digest(frozen) != runtime_capability_digest(current):
                     raise ValueError("发布产物与当前数字员工能力不一致，请同步配置后重新构建")
-                artifact.ext["digital_employee_snapshot"] = frozen
-
-            # Build succeeded: merge the artifact pointers into ext (ARCA =
-            # migration_path/build_target_path; external = config_artifact/
-            # content_hash/engine_ext).
+                result.artifact_ext["digital_employee_snapshot"] = frozen
             ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
             ext.pop("error_code", None)
             ext.pop("error_message", None)
             ext.pop("source_status", None)
-            ext.update(artifact.ext)
+            ext.update(result.artifact_ext)
             center_skill_uuids = tuple(
                 sorted(
                     {
@@ -249,9 +303,8 @@ class BuildStageRunner:
             )
 
             logger.info(
-                "[BuildStageRunner] Build completed: publish_id=%s, provider=%s",
+                "[BuildStageRunner] Build completed: publish_id=%s",
                 publish_id,
-                device_provider,
             )
 
             return PublishFlowResult(

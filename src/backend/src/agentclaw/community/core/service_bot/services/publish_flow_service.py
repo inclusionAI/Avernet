@@ -59,6 +59,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.provider_behavio
     TeclawProviderBehavior,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.build_stage import (
+    BuildArtifactOnlyResult,
     BuildStageRunner,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.progress_sync_mixin import (
@@ -522,6 +523,19 @@ class PublishFlowService(
     ) -> PublishFlowResult:
         """Run the build stage (BUILDING → BUILT). Delegates to BuildStageRunner."""
         return await self._build_stage_runner.build(publish_record, operator)
+
+    async def execute_build_artifact_only(
+        self,
+        publish_record: BotPublishRecord,
+    ) -> BuildArtifactOnlyResult:
+        """Run the build artifact production without advancing publish status.
+
+        Delegates to ``BuildStageRunner.build_artifact_only``. Used by the
+        Eval DRAFT build path to produce artifacts from a DRAFT record
+        without changing its status. The caller is responsible for passing
+        the returned ``BuildArtifactOnlyResult`` to ``eval_publish``.
+        """
+        return await self._build_stage_runner.build_artifact_only(publish_record)
 
     async def execute_verify_release_phase(
         self,

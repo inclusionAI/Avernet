@@ -38,6 +38,9 @@ class EvalPublishMixin:
         default_tag: str = "",
         template_uuid: str = "",
         ttl_seconds: int | None = None,
+        migration_path: str | None = None,
+        config_artifact: str | None = None,
+        docker_image: str | None = None,
     ) -> dict:
         """Publish to the eval environment.
 
@@ -57,6 +60,12 @@ class EvalPublishMixin:
                 _resolve_baas_template_uuid 路由，用于评测沙箱强制注入评测模板。
             ttl_seconds: TTL 安全网延迟秒数。未指定时使用默认值 86400（24h），
                 对应 Default 区常驻场景。Eval 区（即拉即销）应传 7200（120min）。
+            migration_path: 外部传入的构建产物路径（可选）。优先级高于
+                publish_record.ext 中的值，用于 Eval DRAFT 构建路径。
+            config_artifact: 外部传入的 config_artifact（可选）。优先级高于
+                publish_record.ext 中的值。
+            docker_image: 外部传入的镜像 pin（可选）。非空时跳过
+                resolve_publish_image_pin，用于 Eval DRAFT 构建路径。
         """
         # This flow is EVAL-only; the stage is fixed here rather than taken as an arg.
         publish_stage = PublishStage.EVAL
@@ -70,9 +79,9 @@ class EvalPublishMixin:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
         owner_id = self._get_owner_id(publish_record)
-        migration_path = (publish_record.ext or {}).get("migration_path", "")
-        config_artifact = (publish_record.ext or {}).get("config_artifact")
-        if not migration_path and not config_artifact:
+        mp = migration_path or (publish_record.ext or {}).get("migration_path", "")
+        ca = config_artifact or (publish_record.ext or {}).get("config_artifact")
+        if not mp and not ca:
             raise PublishFlowServiceError("Build artifact path not found; run the build first")
 
         bot = self._bot_service.get_bot(
@@ -86,9 +95,13 @@ class EvalPublishMixin:
         # config_artifact read above is only the build-artifact presence guard. Eval
         # does not persist, so the applied overrides are discarded.
         delivery, _ = self._ext_state.compose_live(publish_record, publish_stage)
-        image_pin = self.resolve_publish_image_pin(
-            publish_record, device_provider=self.device_provider(bot)
-        )
+        if docker_image:
+            image_pin_docker_image = docker_image
+        else:
+            image_pin = self.resolve_publish_image_pin(
+                publish_record, device_provider=self.device_provider(bot)
+            )
+            image_pin_docker_image = image_pin.docker_image
 
         ext_info = {}
         if biz_id:
@@ -119,14 +132,14 @@ class EvalPublishMixin:
             release_kwargs: dict[str, Any] = dict(
                 bot=bot,
                 user_id=owner_id,
-                migration_path=migration_path,
+                migration_path=mp,
                 device_count=1,
                 publish_stage=publish_stage,
                 version=str(publish_record.version or 1),
                 delivery=delivery,
                 ext_info=ext_info,
                 extra_envs=eval_envs,
-                docker_image=image_pin.docker_image,
+                docker_image=image_pin_docker_image,
                 template_config=service_publish_template_config(bot),
             )
             if template_uuid:
