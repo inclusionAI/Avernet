@@ -61,6 +61,9 @@ pub trait MessageRepoPort: Send + Sync + 'static {
         None
     }
     /// Append a message to a session. Allocates `session_seq` atomically.
+    /// chat_error retries are unique per environment/group/session/sender/run,
+    /// including concurrent writes; run_id is required. SQL uses a scoped
+    /// deterministic primary key, memory repositories serialize the same rule.
     async fn append_message(&self, msg: NewMessage) -> Result<PersistedMessage, MessageRepoError>;
 
     async fn append_message_with_event(

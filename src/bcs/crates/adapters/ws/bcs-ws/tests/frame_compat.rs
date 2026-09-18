@@ -63,10 +63,16 @@ struct RecordingCollaborationRuntime {
 #[derive(Default)]
 struct RecordingBotRunContext {
     contexts: Mutex<HashMap<String, BotRunContext>>,
+    active: Mutex<Option<bcs_service_api::ActiveBotRunContext>>,
+    fail_lookup: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
 impl BotRunContextPort for RecordingBotRunContext {
+    async fn find_active_run(&self, _: &str) -> ServiceResult<Option<bcs_service_api::ActiveBotRunContext>> {
+        if self.fail_lookup.load(Ordering::SeqCst) { return Err(ServiceError::InternalError("lookup failed".into())); }
+        Ok(self.active.lock().await.clone())
+    }
     async fn put_context(&self, context: BotRunContext) {
         self.contexts
             .lock()
@@ -1856,6 +1862,32 @@ fn assert_gen_ai_output_message(
     assert_eq!(messages[0]["parts"][0]["type"], "text");
     assert_eq!(messages[0]["parts"][0]["content"], expected_content);
     assert_eq!(messages[0]["finish_reason"], expected_finish_reason);
+}
+
+#[tokio::test]
+async fn rejected_group_request_uses_canonical_message_flow_error_and_retains_lookup_failure() {
+    let state = new_state();
+    *state.bot_run_context.active.lock().await = Some(bcs_service_api::ActiveBotRunContext {
+        canonical_run_id: "canonical".into(), downstream_run_id: "alias".into(),
+        downstream_session_key: None, provider_bypass_headers: Vec::new(), deadline_ms: 1,
+        scope: bcs_service_api::BotRunScope { group_id: "group".into(), session_id: "session".into(), bot_id: "bot".into() },
+        transport_owner: bcs_service_api::BotRunTransportOwner::WebSocket,
+    });
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered = Some("bot".to_string());
+    let frame = serde_json::to_string(&BcsFrame::Response(ResponseFrame::error("alias", "LIMIT", "请求过多"))).unwrap();
+    dispatch_frame(&state.dispatch_state, &frame, &tx, &mut registered).await.unwrap();
+    let events = state.message_flow.bot_events.lock().await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].run_id, "canonical");
+    assert_eq!(events[0].bcs_session_id.as_deref(), Some("session"));
+    assert_eq!(events[0].state, ChatEventState::Error);
+    assert_eq!(events[0].event_payload["errorMessage"], "请求过多");
+    drop(events);
+    assert!(rx.try_recv().is_err(), "no second direct error response");
+    state.bot_run_context.fail_lookup.store(true, Ordering::SeqCst);
+    assert!(dispatch_frame(&state.dispatch_state, &frame, &tx, &mut registered).await.is_err());
+    assert_eq!(state.message_flow.bot_events.lock().await.len(), 1);
 }
 
 #[tokio::test]

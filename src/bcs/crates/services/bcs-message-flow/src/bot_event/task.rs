@@ -19,11 +19,37 @@ pub(super) async fn handle_task_bot_event(
         return Ok(Vec::new());
     }
 
-    let response_text = preview_task_response_text(flow, &entry, cmd).await;
+    let response_text = if cmd.state == ChatEventState::Error {
+        error_display_text(&cmd.event_payload)
+    } else {
+        preview_task_response_text(flow, &entry, cmd).await
+    };
     if let Some(row) = crate::queued_admission::find_managed_run(flow, cmd).await? {
         if crate::queued_task::intent(&row)?.is_some() {
-            let normalized = crate::run_reply::prepare(flow, cmd, &extract_message_text(&cmd.event_payload), true).await?;
-            let response_text = if entry.response_mode == ChatResponseMode::Full {
+            let normalized = if cmd.state == ChatEventState::Error {
+                crate::run_reply::RunReply {
+                    text: response_text.clone(),
+                    display: flow
+                        .message_tracker
+                        .peek_chat_buf(&crate::run_reply::chat_key(cmd))
+                        .await
+                        .unwrap_or_default(),
+                    method: "error",
+                    raw_final: response_text.clone(),
+                    source_ids: Vec::new(),
+                }
+            } else {
+                crate::run_reply::prepare(
+                    flow,
+                    cmd,
+                    &extract_message_text(&cmd.event_payload),
+                    true,
+                )
+                .await?
+            };
+            let response_text = if cmd.state == ChatEventState::Error
+                || entry.response_mode == ChatResponseMode::Full
+            {
                 normalized.text.clone()
             } else {
                 // Normalize final once before selecting the task window. An
@@ -63,71 +89,83 @@ pub(super) async fn handle_task_bot_event(
         .target_bot_name
         .as_deref()
         .unwrap_or(entry.target_bot.as_str());
-    let manager_result_run_id = uuid::Uuid::new_v4().to_string();
-    let delivery_target = flow
-        .registry
-        .resolve_delivery_target(&entry.driver_bot)
-        .await?;
-    let provider_tags = if delivery_target.is_http_provider() {
-        group
-            .as_ref()
-            .and_then(|group| {
-                group
-                    .participants
-                    .iter()
-                    .find(|participant| participant.bot_uuid == entry.driver_bot)
-            })
-            .map(|participant| participant.tags.as_slice())
-            .unwrap_or(&[])
-    } else {
-        &[]
-    };
-    let frame = build_task_result_frame(
-        group.as_ref(),
-        &entry.group_id,
-        entry.session_id.as_deref().unwrap_or(&entry.group_id),
-        &entry.driver_bot,
-        &entry.target_bot,
-        target_bot_name,
-        &response_text,
-        &entry.task_id,
-        &manager_result_run_id,
-        provider_tags,
-    );
-    let delivery_kind = BotDeliveryKind::TaskResult;
-    flow.register_send_context(
-        DeliveryType::Send,
-        &delivery_target,
-        &frame,
-        &manager_result_run_id,
-        &entry.driver_bot,
-        &entry.group_id,
-        entry.session_id.as_deref(),
-        &[],
-    )
-    .await?;
-    let delivery = flow
-        .bot_delivery
-        .deliver(BotDeliveryCommand {
-            target: delivery_target,
-            run_id: manager_result_run_id.clone(),
-            frame,
-            delivery_kind,
-            provider_transport: Default::default(),
-            provider_bypass_headers: Vec::new(),
-        })
-        .await;
-    let result = match delivery {
-        Ok(result) => result,
-        Err(error) => {
-            flow.discard_send_context(&manager_result_run_id).await?;
-            return Err(error);
+    let result = if entry.terminal_result_delivered {
+        BotDeliveryResult {
+            target_bot_id: entry.driver_bot.clone(),
+            delivered: true,
+            error: None,
         }
+    } else {
+        let manager_result_run_id = uuid::Uuid::new_v4().to_string();
+        let delivery_target = flow
+            .registry
+            .resolve_delivery_target(&entry.driver_bot)
+            .await?;
+        let provider_tags = if delivery_target.is_http_provider() {
+            group
+                .as_ref()
+                .and_then(|group| {
+                    group
+                        .participants
+                        .iter()
+                        .find(|participant| participant.bot_uuid == entry.driver_bot)
+                })
+                .map(|participant| participant.tags.as_slice())
+                .unwrap_or(&[])
+        } else {
+            &[]
+        };
+        let frame = build_task_result_frame(
+            group.as_ref(),
+            &entry.group_id,
+            entry.session_id.as_deref().unwrap_or(&entry.group_id),
+            &entry.driver_bot,
+            &entry.target_bot,
+            target_bot_name,
+            &response_text,
+            &entry.task_id,
+            &manager_result_run_id,
+            provider_tags,
+        );
+        let delivery_kind = BotDeliveryKind::TaskResult;
+        flow.register_send_context(
+            DeliveryType::Send,
+            &delivery_target,
+            &frame,
+            &manager_result_run_id,
+            &entry.driver_bot,
+            &entry.group_id,
+            entry.session_id.as_deref(),
+            &[],
+        )
+        .await?;
+        let delivery = flow
+            .bot_delivery
+            .deliver(BotDeliveryCommand {
+                target: delivery_target,
+                run_id: manager_result_run_id.clone(),
+                frame,
+                delivery_kind,
+                provider_transport: Default::default(),
+                provider_bypass_headers: Vec::new(),
+            })
+            .await;
+        let result = match delivery {
+            Ok(result) => result,
+            Err(error) => {
+                flow.discard_send_context(&manager_result_run_id).await?;
+                return Err(error);
+            }
+        };
+        if !result.delivered {
+            flow.discard_send_context(&manager_result_run_id).await?;
+            return Ok(vec![result]);
+        }
+        if cmd.state == ChatEventState::Error {
+            flow.task_store.record_terminal_delivery(task_id).await;
+        }
+        result
     };
-    if !result.delivered {
-        flow.discard_send_context(&manager_result_run_id).await?;
-        return Ok(vec![result]);
-    }
 
     record_task_response_event(flow, task_id, cmd).await;
 
@@ -140,8 +178,6 @@ pub(super) async fn handle_task_bot_event(
         } else {
             flush_chat_segment(flow, cmd, None).await?;
         }
-        flow.message_tracker.cleanup_run(&cmd.run_id).await;
-        flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(cmd)).await;
     }
 
     if let Some(group) = group.as_ref() {
@@ -152,9 +188,18 @@ pub(super) async fn handle_task_bot_event(
                 Some(entry.session_id.as_deref().unwrap_or(&entry.group_id)),
                 &entry.target_bot,
                 SenderType::Bot,
-                "chat",
+                if cmd.state == ChatEventState::Error {
+                    bcs_domain::CHAT_ERROR_MESSAGE_TYPE
+                } else {
+                    "chat"
+                },
                 Value::String(response_text.clone()),
-                None,
+                if cmd.state == ChatEventState::Error {
+                    Some(format!("chat-error:{}", entry.task_id))
+                } else {
+                    None
+                }
+                .as_deref(),
                 None,
                 &entry.task_id,
             )
@@ -164,6 +209,10 @@ pub(super) async fn handle_task_bot_event(
     if matches!(cmd.state, ChatEventState::Final) {
         crate::task_flow::record_task_completed(flow, &entry, &response_text, now_ms()).await?;
     }
+    flow.message_tracker.cleanup_run(&cmd.run_id).await;
+    flow.message_tracker
+        .cleanup_run(&crate::run_reply::chat_key(cmd))
+        .await;
     flow.task_store.mark_replied(task_id).await;
     if let Some(group) = group.as_ref() {
         crate::task_flow::emit_task_ledger_status(

@@ -281,8 +281,21 @@ async fn running_abort_and_error_create_one_explicit_failure_result() {
         assert_eq!(rows.iter().filter(|r| r.semantic_projection_json["task"]["leg"] == "result").count(), 1);
         let result = rows.iter().find(|r| r.semantic_projection_json["task"]["leg"] == "result").unwrap();
         let source = f.repo.get_message_by_id(SESSION, &result.source_message_id).await.unwrap().unwrap();
-        assert_eq!(source.content["task_state"], if state == ChatEventState::Aborted { "cancelled" } else { "failed" });
-        assert!(source.content["task_result_text"].as_str().unwrap().starts_with("[task "));
+        if state == ChatEventState::Error {
+            assert_eq!(source.message_type, bcs_domain::CHAT_ERROR_MESSAGE_TYPE);
+            assert_eq!(source.content, json!("WORKER_RESULT"));
+            let expected = format!(
+                "chat-error:{}",
+                row.semantic_projection_json["task"]["task_id"]
+                    .as_str()
+                    .unwrap()
+            );
+            assert_eq!(source.client_msg_id.as_deref(), Some(expected.as_str()));
+        } else {
+            assert_eq!(source.message_type, "run_reply");
+            assert_eq!(source.content["task_state"], "cancelled");
+            assert!(source.content["task_result_text"].as_str().unwrap().starts_with("[task "));
+        }
     }
 }
 

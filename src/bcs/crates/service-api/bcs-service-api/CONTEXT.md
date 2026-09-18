@@ -41,6 +41,11 @@ and lifecycle CAS. Public history excludes internal summaries before pagination;
 canonical ID reads remain unfiltered. Memory/SQL implementations and caller/test
 construction propagate this internal contract change together.
 
+Failed Group terminals admit a primary chat_error string projection and an
+optional preceding chat display companion, atomically with Failed lifecycle CAS.
+The error has no delivery targets or message.created event and never enters
+run_reply reconstruction. Bot history filters the projection before conversion.
+
 Control work_batch ignores the legacy ID cursor and reserves per-action shares
 under one total limit; timeout classes use deadline order. This internal contract
 change propagates to the runtime and both SQL/Memory repositories, with shared

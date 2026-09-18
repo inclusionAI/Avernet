@@ -36,6 +36,11 @@ pub(super) async fn finish(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
         Status::Cancelled => ChatEventState::Aborted,
         _ => ChatEventState::Error,
     };
+    if terminal.state == ChatEventState::Error {
+        let text = error_display_text(&terminal.event_payload);
+        inject_synthesized_message(&mut terminal.event_payload, &text);
+        terminal.event_payload["errorMessage"] = Value::String(text);
+    }
     let mut error = record_completion(flow, row, &mut terminal, replay).await.err();
     let frontend_deliveries = match publish_incoming_event(flow, &terminal, Some(&task.task_id)).await {
         Ok(deliveries) => deliveries,

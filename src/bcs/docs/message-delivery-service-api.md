@@ -108,8 +108,23 @@ master 在运行期间每 5 秒读取一次 DB 策略记录并校验版本，仅
 末条历史记录。末段非空时另写普通 `chat`，同时创建其既有 `message.created` 事件。
 展示段、汇总消息、目标准入、原输入 delivery 终态在同一事务提交，CAS/写入失败全部回滚。
 幂等键受 env/session/sender 约束，run 作为键的一部分，重复 final 不重复入队。
-全 run 无正文只结束输入运行，不生成空白下行；error/abort 保持既有部分正文保存策略，
-不会当成功回复广播。普通非受管 Group 仍只写展示历史；task/A2A 专有回复语义不在此轮改造。
+全 run 无正文只结束输入运行，不生成空白下行。Group error 将独立 `chat_error` 字符串
+投影、可选前序 `chat` 部分正文及输入 delivery 的 Failed 状态原子提交；普通 Group
+error 不产生下游 delivery，Task error 仅允许一个 `leg=result` 的 manager Send delivery，
+其语义投影是任务结果而不是把 `chat_error` 当作 Bot 会话输入。两者均不产生
+`message.created`，也不进入 `run_reply` 重建。内部 display companion 契约
+显式支持这组前序 chat + 主错误投影，不把错误塞进成功汇总。abort 只保留已有部分正文。
+普通非受管 Group 仍只写展示历史；task/A2A 专有回复语义不在队列回复归一化改造内。
+
+`chat_error` 是会话事实的展示投影，不是 Bot 可消费领域事件。human 历史映射为
+assistant、metadata.terminal_state=error、is_error=true；正常消息不设置 terminal_state，
+工具 is_error 不代表 run 失败。Bot 历史在响应转换前过滤此投影。新 MessageRepoPort
+路径提供刷新回放，不改已废弃的 legacy Bot-history fallback。
+非受管 append 以 env/group/session/sender/run 的 SHA-256 作为错误记录 message_id，
+沿用数据库主键处理并发冲突及提交结果丢失；业务 client_msg_id 为 chat-error:<run_id>。
+受管提交由原 delivery 的 state_version CAS 兜底。无需新增迁移，不保证跨进程崩溃的
+端到端 exactly-once。manager 任务错误保留先交付结果后写历史的边界；内存交付标记
+避免历史失败后的重试再次发送 task result，进程重启不保留该标记。
 
 history 的两种分页查询均在 LIMIT 前排除 `run_reply`，内部按 ID 读取保留原始正文。
 汇总不发 `message.created`，因此不会进入会话预览或实时/IM 消息广播。会话序号允许间隙。

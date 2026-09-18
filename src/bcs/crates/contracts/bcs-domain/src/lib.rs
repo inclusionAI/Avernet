@@ -71,6 +71,7 @@ pub use group_id::{
     channel_group_id, generated_group_id, is_valid_channel_type,
 };
 pub use message::{
+    CHAT_ERROR_MESSAGE_TYPE,
     AuditEntry, BCS_SESSION_OPENING_MESSAGE_SENDER, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
     BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME, DeliveryType,
     GroupMessage, GroupMessageType, HumanMessageView, MessageAttachment, MessageAudience, MessageOwnerFilter,

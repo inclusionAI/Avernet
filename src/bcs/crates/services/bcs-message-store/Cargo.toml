@@ -15,6 +15,7 @@ bcs-config-api = { workspace = true }
 bcs-event-store = { workspace = true }
 bcs-service-api = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
@@ -27,7 +28,6 @@ bcs-test-support = { workspace = true }
 bcs-db-local = { workspace = true }
 # migrations.rs is pulled into integration tests via #[path]; it needs sha2/hex
 # to compile (same versions as the bcs crate that owns the file).
-sha2 = { workspace = true }
 hex = { workspace = true }
 
 [lints]

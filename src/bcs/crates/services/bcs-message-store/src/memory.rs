@@ -74,8 +74,19 @@ impl MessageRepoPort for MemoryMessageRepo {
         let mut sessions = self.sessions.write().await;
         let entry = sessions.entry(msg.session_id.clone()).or_default();
 
+        if msg.message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE {
+            if msg.run_id.is_empty() {
+                return Err(MessageRepoError::StorageError("chat_error requires run_id".into()));
+            }
+            if let Some(existing) = entry.messages.iter().find(|m| m.group_id == msg.group_id
+                && m.sender_id == msg.sender_id && m.run_id == msg.run_id
+                && m.message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE) {
+                return Ok(existing.clone());
+            }
+        }
+
         // Check idempotency
-        if let Some(ref client_msg_id) = msg.client_msg_id {
+        if let Some(client_msg_id) = msg.client_msg_id.as_ref().filter(|_| msg.message_type != bcs_domain::CHAT_ERROR_MESSAGE_TYPE) {
             if let Some(existing) = entry.messages.iter().find(|m| {
                 m.sender_id == msg.sender_id && m.client_msg_id.as_deref() == Some(client_msg_id)
             }) {

@@ -69,7 +69,28 @@ async fn result_admission(flow: &BcsMessageFlow, group: &bcs_domain::Group, sess
 ) -> ServiceResult<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries> {
     let reply = queued_task::command(flow, group, session, task.clone(), result_text, None,
         &task.worker_name, drain).await?;
-    let normalized = crate::run_reply::prepare(flow, cmd, &crate::bot_event::extract_message_text(&cmd.event_payload), false).await?;
+    let normalized = if cmd.state == ChatEventState::Error {
+        let text = crate::bot_event::error_display_text(&cmd.event_payload);
+        crate::run_reply::RunReply {
+            text: text.clone(),
+            display: flow
+                .message_tracker
+                .peek_chat_buf(&crate::run_reply::chat_key(cmd))
+                .await
+                .unwrap_or_default(),
+            method: "error",
+            raw_final: text,
+            source_ids: Vec::new(),
+        }
+    } else {
+        crate::run_reply::prepare(
+            flow,
+            cmd,
+            &crate::bot_event::extract_message_text(&cmd.event_payload),
+            false,
+        )
+        .await?
+    };
     normalize_result(flow, reply, &task, cmd, result_text, normalized)
 }
 
@@ -84,14 +105,22 @@ fn normalize_result(flow: &BcsMessageFlow,
         ChatEventState::Aborted => format!("[task cancelled] {result_text}"),
         _ => format!("[task failed] {result_text}"),
     };
-    reply.message.content["task_result_text"] = serde_json::json!(result_text);
-    reply.message.content["text"] = serde_json::json!(normalized.text);
-    reply.message.content["task_state"] = serde_json::json!(match cmd.state {
-        ChatEventState::Final => "completed", ChatEventState::Aborted => "cancelled", _ => "failed",
-    });
     reply.message.run_id = cmd.run_id.clone();
-    reply.message.client_msg_id = Some(format!("task-result:{}", task.task_id));
-    reply.message.message_type = "run_reply".into();
+    if cmd.state == ChatEventState::Error {
+        reply.message.content = serde_json::Value::String(normalized.text.clone());
+        reply.message.client_msg_id = Some(format!("chat-error:{}", task.task_id));
+        reply.message.message_type = bcs_domain::CHAT_ERROR_MESSAGE_TYPE.into();
+    } else {
+        reply.message.content["task_result_text"] = serde_json::json!(result_text);
+        reply.message.content["text"] = serde_json::json!(normalized.text);
+        reply.message.content["task_state"] = serde_json::json!(match cmd.state {
+            ChatEventState::Final => "completed",
+            ChatEventState::Aborted => "cancelled",
+            _ => "failed",
+        });
+        reply.message.client_msg_id = Some(format!("task-result:{}", task.task_id));
+        reply.message.message_type = "run_reply".into();
+    }
     reply.event = None;
     if !normalized.display.is_empty() {
         let mut display = reply.message.clone();

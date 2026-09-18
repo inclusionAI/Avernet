@@ -166,7 +166,7 @@ pub(crate) fn validate_admission(
     if let Some(display) = &command.display_message {
         let m = &display.message;
         crate::mysql::serialize_visibility(m).map_err(|e| MessageDeliveryRepoError::Invalid(e.to_string()))?;
-        if command.message.message_type != "run_reply" || command.event.is_some()
+        if !matches!(command.message.message_type.as_str(), "run_reply" | bcs_domain::CHAT_ERROR_MESSAGE_TYPE) || command.event.is_some()
             || m.message_type != "chat" || m.session_id != command.message.session_id
             || m.group_id != command.message.group_id || m.sender_id != command.message.sender_id
             || m.sender_type != command.message.sender_type || m.owner_bot_id != command.message.owner_bot_id
@@ -186,6 +186,22 @@ pub(crate) fn validate_admission(
     if command.message.message_type == "run_reply" && command.event.is_some() {
         return Err(MessageDeliveryRepoError::Invalid("run reply must not publish a message event".into()));
     }
+    let task_error_target = command.flow_kind
+        == bcs_domain::message_delivery::DeliveryFlowKind::Task
+        && command.targets.len() == 1
+        && command.targets[0].kind == DeliveryType::Send
+        && command.targets[0].semantic_projection_json["task"]["leg"] == "result";
+    if command.message.message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE
+        && (command.event.is_some()
+            || (!command.targets.is_empty() && !task_error_target)
+            || command.message.run_id.is_empty()
+            || !command.message.content.is_string())
+    {
+        return Err(MessageDeliveryRepoError::Invalid(
+            "chat error requires a run and display text; only a single Task result Send target is allowed"
+                .into(),
+        ));
+    }
     if command.message.message_type == "run_reply" && command.message.run_id.is_empty() {
         return Err(MessageDeliveryRepoError::Invalid("run reply requires a run identity".into()));
     }
@@ -203,12 +219,12 @@ pub(crate) fn validate_admission(
         || command.message.session_id.is_empty()
         || command.message.group_id.is_empty()
         || command.now_ms < 0
-        || command
+        || (command.message.message_type != bcs_domain::CHAT_ERROR_MESSAGE_TYPE && command
             .message
             .content
             .get("text")
             .and_then(serde_json::Value::as_str)
-            .is_none()
+            .is_none())
     {
         return Err(MessageDeliveryRepoError::Invalid(
             "canonical message identity/text is required".into(),

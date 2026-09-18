@@ -5732,7 +5732,30 @@ async fn manager_worker_task_message_persists_worker_message_to_manager_history_
 }
 
 #[tokio::test]
-async fn bot_error_terminal_with_display_message_only_publishes_frontend() {
+async fn manager_task_error_storage_retry_does_not_redeliver_result() {
+    let (support, repo, flow) = manager_worker_flow_with_repo().await;
+    register_manager_worker_task(&flow, "task-error-retry", ChatResponseMode::Full).await;
+    let command = BotEventCommand {
+        bot_id: "bot-worker".into(), run_id: "task-error-retry".into(), group_id: "group-1".into(),
+        bcs_session_id: Some("group-1:abcdef12".into()), event_type: "chat.event".into(),
+        state: ChatEventState::Error, event_payload: json!({"errorMessage":"失败"}),
+    };
+    repo.set_fail_appends(true);
+    assert!(flow.handle_bot_event(command.clone()).await.is_err());
+    assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskResult]);
+    assert!(support.frontend_delivery.events().await.is_empty());
+    repo.set_fail_appends(false);
+    flow.handle_bot_event(command.clone()).await.unwrap();
+    flow.handle_bot_event(command).await.unwrap();
+    assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskResult]);
+    let rows = repo.appended().await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].message_type, "chat_error");
+    assert_eq!(rows[0].run_id, "task-error-retry");
+}
+
+#[tokio::test]
+async fn bot_error_terminal_persists_display_without_bot_delivery() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let repo = Arc::new(RecordingMessageRepo::default());
     let flow = BcsMessageFlow::new(
@@ -5763,7 +5786,7 @@ async fn bot_error_terminal_with_display_message_only_publishes_frontend() {
                 },
             }),
             state: ChatEventState::Error,
-            bcs_session_id: None,
+            bcs_session_id: Some("group-1:error-session".into()),
         })
         .await
         .unwrap();
@@ -5776,10 +5799,11 @@ async fn bot_error_terminal_with_display_message_only_publishes_frontend() {
         support.bot_delivery.frames().await.is_empty(),
         "error terminal must not broadcast through bot delivery"
     );
-    assert!(
-        repo.appended().await.is_empty(),
-        "error message itself must not be persisted as chat history"
-    );
+    let rows = repo.appended().await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].message_type, "chat_error");
+    assert_eq!(rows[0].content, json!(error));
+    assert_eq!(rows[0].client_msg_id.as_deref(), Some("chat-error:run-error-only"));
 
     let events = support.frontend_delivery.events().await;
     assert_eq!(events.len(), 1);
@@ -6278,7 +6302,7 @@ async fn bot_error_terminal_flushes_buffered_chat_segment() {
             event_type: "chat.event".to_string(),
             event_payload: json!({ "state": "delta", "delta_text": delta }),
             state: ChatEventState::Delta,
-            bcs_session_id: None,
+            bcs_session_id: Some("group-1:error-session".into()),
         })
         .await
         .unwrap();
@@ -6296,7 +6320,7 @@ async fn bot_error_terminal_flushes_buffered_chat_segment() {
         event_type: "chat.event".to_string(),
         event_payload: json!({ "state": "error", "errorMessage": "engine crashed" }),
         state: ChatEventState::Error,
-        bcs_session_id: None,
+        bcs_session_id: Some("group-1:error-session".into()),
     })
     .await
     .unwrap();
@@ -6304,9 +6328,11 @@ async fn bot_error_terminal_flushes_buffered_chat_segment() {
     let appended = repo.appended().await;
     assert_eq!(
         appended.len(),
-        1,
-        "error terminal must flush the buffered chat segment exactly once"
+        2,
+        "error terminal must flush the partial reply and persist the error"
     );
+    assert_eq!(appended[1].message_type, "chat_error");
+    assert_eq!(appended[1].content, json!("engine crashed"));
     assert_eq!(appended[0].message_type, "chat");
     assert_eq!(appended[0].run_id, "run-err");
     assert_eq!(
@@ -6847,4 +6873,3 @@ async fn bot_event_policy_blocked_message_does_not_notify() {
         "policy-blocked content must not reach humans via notifications"
     );
 }
-
