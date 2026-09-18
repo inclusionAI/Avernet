@@ -1194,10 +1194,13 @@ class DeviceService:
         if record.status == DeviceBindingStatus.RELEASED.value:
             raise InvalidDeviceStatusError("cannot report status for released device")
 
-        guarded_layout_callback = (
+        layout_confirmation_callback = (
             status == "SUCCEEDED" and layout_initialization is not None
         )
-        if guarded_layout_callback:
+        guarded_status_callback = (
+            startup_identity is not None and status in {"SUCCEEDED", "FAILED"}
+        )
+        if layout_confirmation_callback:
             self._confirm_pool_layout_initialization(
                 record=record,
                 startup_identity=startup_identity,
@@ -1205,8 +1208,9 @@ class DeviceService:
             )
 
         # Update ac_bots.ext field
-        if guarded_layout_callback:
-            if startup_identity is None or not (
+        if guarded_status_callback:
+            assert startup_identity is not None
+            if not (
                 self._repo.transition_layout_startup_status_if_matches(
                     binding_id=record.id,
                     startup_identity=startup_identity,
@@ -1227,8 +1231,12 @@ class DeviceService:
         # If FAILED, update both ac_bots and ac_entity_device_binding status
         if status == "FAILED":
             logger.info(f"[report_device_status] Status is FAILED, updating bot and device status: device_id={device_id}")
-            self._update_bot_status_on_device_failed(binding_id=record.id)
-            self._repo.update_status(binding_id=record.id, status=DeviceBindingStatus.FAILED.value)
+            if not guarded_status_callback:
+                self._update_bot_status_on_device_failed(binding_id=record.id)
+                self._repo.update_status(
+                    binding_id=record.id,
+                    status=DeviceBindingStatus.FAILED.value,
+                )
 
         elif status == "SUCCEEDED":
             # 设备自报启动成功，前置条件 bot_status=ACTIVE + start_status=SUCCEEDED 均已满足

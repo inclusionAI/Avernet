@@ -1234,10 +1234,39 @@ class TestReportDeviceStatus:
 
         assert result is updated
         confirmation.confirm.assert_not_called()
-        repo.update_status.assert_called_once_with(
-            binding_id=1, status=DeviceBindingStatus.FAILED.value
+        repo.transition_layout_startup_status_if_matches.assert_called_once_with(
+            binding_id=1,
+            startup_identity="sandbox-current",
+            status="FAILED",
+            message="boot error",
         )
-        repo.update_bot_status_on_device_failed.assert_called_once_with(binding_id=1)
+        repo.update_status.assert_not_called()
+        repo.update_bot_status_on_device_failed.assert_not_called()
+
+    def test_stale_failed_callback_cannot_fail_new_startup(self):
+        record = _make_record(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"callback_token": "tok", "sandbox_id": "sandbox-old"},
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.transition_layout_startup_status_if_matches.return_value = False
+        svc = _make_service(repo=repo)
+
+        with pytest.raises(
+            LayoutInitializationConflictError,
+            match="changed after layout confirmation",
+        ):
+            svc.report_device_status(
+                device_id="staff_u001_default",
+                status="FAILED",
+                message="old failure",
+                token="tok",
+                startup_identity="sandbox-old",
+            )
+
+        repo.update_status.assert_not_called()
+        repo.update_bot_status_on_device_failed.assert_not_called()
 
     def test_invalid_token_raises(self):
         record = _make_record(device_props={"callback_token": "right"})

@@ -109,7 +109,7 @@ class SkillsPoolNativeLayoutConfirmationService:
             engine_type=expected_engine,
         )
         if not migrated_active and not pool_native:
-            raise LayoutInitializationEvidenceError(
+            raise LayoutInitializationConflictError(
                 "persisted layout is not confirmable Pool-native state"
             )
         if not self._layouts.confirm_pool_initializing(
