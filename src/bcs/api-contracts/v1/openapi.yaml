@@ -85,6 +85,16 @@ paths:
     $ref: ./openapi/sessions.yaml#/SessionCollectionPath
   /openapi/v1/collaboration/sessions/{session_id}/messages:
     $ref: ./openapi/sessions.yaml#/SessionMessagesPath
+  /openapi/v1/collaboration/messages/{message_id}/deliveries:
+    $ref: ./openapi/message-deliveries.yaml#/MessageDeliveriesPath
+  /openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query:
+    $ref: ./openapi/message-deliveries.yaml#/SessionMessageDeliveriesQueryPath
+  /openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/cancel:
+    $ref: ./openapi/message-deliveries.yaml#/MessageDeliveryCancelPath
+  /openapi/v1/collaboration/messages/{message_id}/deliveries/cancel:
+    $ref: ./openapi/message-deliveries.yaml#/MessageDeliveriesCancelPath
+  /openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/resolve:
+    $ref: ./openapi/message-deliveries.yaml#/MessageDeliveryResolvePath
   /openapi/v1/collaboration/sessions/{session_id}/token:
     $ref: ./openapi/connections.yaml#/SessionConnectionTokenPath
   /openapi/v1/collaboration/sessions/{session_id}/participants:

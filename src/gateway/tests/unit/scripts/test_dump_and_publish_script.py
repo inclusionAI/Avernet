@@ -39,9 +39,9 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     document = json.loads((tmp_path / "bcn.openapi.json").read_text(encoding="utf-8"))
-    # 62 collaboration operations + the five public auth operations exposed by
+    # 67 collaboration operations + the five public auth operations exposed by
     # the authentication facade.
-    assert sum(len(path_item) for path_item in document["paths"].values()) == 67
+    assert sum(len(path_item) for path_item in document["paths"].values()) == 72
     assert (
         "get"
         in document["paths"][

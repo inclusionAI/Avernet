@@ -1,0 +1,467 @@
+MessageIdPath:
+  name: message_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+DeliveryIdPath:
+  name: delivery_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+SessionIdQuery:
+  name: session_id
+  in: query
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+SessionScopeRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - session_id
+  properties:
+    session_id:
+      type: string
+      minLength: 1
+
+BatchDeliveryQueryRequest:
+  type: object
+  additionalProperties: false
+  properties:
+    message_ids:
+      type: array
+      minItems: 1
+      maxItems: 100
+      items:
+        type: string
+        minLength: 1
+    client_msg_id:
+      type: string
+      minLength: 1
+      pattern: ".*\\S.*"
+  oneOf:
+    - required: [message_ids]
+    - required: [client_msg_id]
+
+ResolveMessageDeliveryRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - session_id
+    - expected_state_version
+    - resolution
+    - reason
+  properties:
+    session_id:
+      type: string
+      minLength: 1
+    expected_state_version:
+      type: integer
+      format: uint64
+      minimum: 0
+    resolution:
+      type: string
+      enum:
+        - confirmed_not_sent
+        - confirmed_stopped
+    reason:
+      type: string
+      minLength: 1
+      maxLength: 1024
+
+DeliveryStatusView:
+  type: object
+  additionalProperties: false
+  required:
+    - delivery_id
+    - message_id
+    - target_bot_id
+    - flow_kind
+    - kind
+    - status
+    - state_version
+    - run_id
+    - wait_reason
+  properties:
+    admission_error:
+      type: string
+      enum:
+        - delivery_provider_headers_unsupported
+    delivery_id:
+      type: string
+      minLength: 1
+    message_id:
+      type: string
+      minLength: 1
+    target_bot_id:
+      type: string
+      minLength: 1
+    flow_kind:
+      type: string
+      enum:
+        - group
+        - direct_a2a
+        - task
+        - system
+        - state_machine
+    kind:
+      type: string
+      enum:
+        - send
+        - inject
+    status:
+      type: string
+      enum:
+        - queued
+        - dispatching
+        - running
+        - unknown
+        - cancelling
+        - cancel_unknown
+        - completed
+        - failed
+        - cancelled
+        - expired
+        - rejected_capacity
+        - pending_context
+        - bound
+        - consumed
+        - discarded_context
+    state_version:
+      type: integer
+      format: uint64
+      minimum: 0
+    run_id:
+      type: [string, "null"]
+    wait_reason:
+      type: [string, "null"]
+      enum:
+        - prior_message_running
+        - bot_capacity
+        - rate_limited
+        - bot_offline
+        - retry_backoff
+        - paused
+        - null
+    content_preview:
+      type: string
+
+CancelMessageDeliveryResult:
+  type: object
+  additionalProperties: false
+  required:
+    - delivery
+    - error
+  properties:
+    delivery:
+      $ref: "#/DeliveryStatusView"
+    error:
+      type: [string, "null"]
+
+DeliveryStatusList:
+  type: array
+  items:
+    $ref: "#/DeliveryStatusView"
+
+CancelMessageDeliveryResultList:
+  type: array
+  items:
+    $ref: "#/CancelMessageDeliveryResult"
+
+MessageDeliveriesPath:
+  get:
+    operationId: get_message_deliveries
+    tags: ["Collaboration / Sessions"]
+    summary: Read managed delivery state for one canonical message.
+    x-avernet-security:
+      user: required
+      app: required
+    x-avernet-raw-response: true
+    parameters:
+      - $ref: "#/MessageIdPath"
+      - $ref: "#/SessionIdQuery"
+    responses:
+      "200":
+        description: Delivery rows visible to the caller; an unmanaged message returns an empty array.
+        content:
+          application/json:
+            schema:
+              $ref: "#/DeliveryStatusList"
+      "400":
+        description: Invalid query scope.
+        x-error-codes: [invalid_request]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        description: Caller cannot read the Session or message.
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "404":
+        description: Session or parent Group is missing.
+        x-error-codes: [session_not_found, group_not_found]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "503":
+        description: Message delivery state is temporarily unavailable.
+        x-error-codes: [service_unavailable]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+
+SessionMessageDeliveriesQueryPath:
+  post:
+    operationId: query_session_message_deliveries
+    tags: ["Collaboration / Sessions"]
+    summary: Batch-query managed delivery state within one Session.
+    x-avernet-security:
+      user: required
+      app: required
+    x-avernet-raw-response: true
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/BatchDeliveryQueryRequest"
+    responses:
+      "200":
+        description: Delivery rows matched by message IDs or the caller's client message ID.
+        content:
+          application/json:
+            schema:
+              $ref: "#/DeliveryStatusList"
+      "400":
+        description: Selectors are empty, mixed, or exceed the batch limit.
+        x-error-codes: [invalid_request]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        description: Caller cannot read the Session or selected messages.
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "404":
+        description: Session or parent Group is missing.
+        x-error-codes: [session_not_found, group_not_found]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "503":
+        description: Message delivery state is temporarily unavailable.
+        x-error-codes: [service_unavailable]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+
+MessageDeliveryCancelPath:
+  post:
+    operationId: cancel_message_delivery
+    tags: ["Collaboration / Sessions"]
+    summary: Cancel one target delivery for a canonical message.
+    x-avernet-security:
+      user: required
+      app: required
+    x-avernet-raw-response: true
+    parameters:
+      - $ref: "#/MessageIdPath"
+      - $ref: "#/DeliveryIdPath"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/SessionScopeRequest"
+    responses:
+      "200":
+        description: Per-target cancellation result.
+        content:
+          application/json:
+            schema:
+              $ref: "#/CancelMessageDeliveryResultList"
+      "400":
+        description: Message or delivery scope is invalid.
+        x-error-codes: [invalid_request]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        description: Only the original sender may cancel this delivery.
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "404":
+        description: Session or parent Group is missing.
+        x-error-codes: [session_not_found, group_not_found]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "409":
+        description: Delivery state no longer permits cancellation.
+        x-error-codes: [conflict]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "503":
+        description: Message delivery state is temporarily unavailable.
+        x-error-codes: [service_unavailable]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+
+MessageDeliveriesCancelPath:
+  post:
+    operationId: cancel_message_deliveries
+    tags: ["Collaboration / Sessions"]
+    summary: Cancel every target delivery for a canonical message.
+    x-avernet-security:
+      user: required
+      app: required
+    x-avernet-raw-response: true
+    parameters:
+      - $ref: "#/MessageIdPath"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/SessionScopeRequest"
+    responses:
+      "200":
+        description: Per-target cancellation results; individual targets may report an error.
+        content:
+          application/json:
+            schema:
+              $ref: "#/CancelMessageDeliveryResultList"
+      "400":
+        description: Message scope is invalid.
+        x-error-codes: [invalid_request]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        description: Only the original sender may cancel these deliveries.
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "404":
+        description: Session or parent Group is missing.
+        x-error-codes: [session_not_found, group_not_found]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "409":
+        description: Delivery state no longer permits cancellation.
+        x-error-codes: [conflict]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "503":
+        description: Message delivery state is temporarily unavailable.
+        x-error-codes: [service_unavailable]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+
+MessageDeliveryResolvePath:
+  post:
+    operationId: resolve_message_delivery
+    tags: ["Collaboration / Sessions"]
+    summary: Record a Human resolution for an uncertain target delivery.
+    x-avernet-security:
+      user: required
+      app: required
+    x-avernet-raw-response: true
+    parameters:
+      - $ref: "#/MessageIdPath"
+      - $ref: "#/DeliveryIdPath"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/ResolveMessageDeliveryRequest"
+    responses:
+      "200":
+        description: Delivery state after the resolution is committed.
+        content:
+          application/json:
+            schema:
+              $ref: "#/DeliveryStatusView"
+      "400":
+        description: Resolution, reason, scope, or expected version is invalid.
+        x-error-codes: [invalid_request]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "403":
+        description: Caller is not allowed to resolve this delivery.
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "404":
+        description: Session or parent Group is missing.
+        x-error-codes: [session_not_found, group_not_found]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "409":
+        description: Delivery state or state version conflicts with the resolution.
+        x-error-codes: [conflict]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
+      "503":
+        description: Message delivery state is temporarily unavailable.
+        x-error-codes: [service_unavailable]
+        content:
+          application/json:
+            schema: { $ref: ../shared.yaml#/ErrorEnvelope }
