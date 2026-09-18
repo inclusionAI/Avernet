@@ -153,7 +153,7 @@ export function createRunsRouter(
       // Admin users bypass view permission — they see all data
       const queryBotOwnerId = _req.query.botOwnerId as string | undefined;
       const headerUserId = _req.headers["x-user-id"] as string | undefined;
-      const botOwnerId = _req.isAdmin ? undefined : (queryBotOwnerId?.trim() || headerUserId?.trim() || _req.cookies?.staff_id?.trim() || undefined);
+      const botOwnerId = _req.isAdmin ? undefined : (queryBotOwnerId?.trim() || headerUserId?.trim() || _req.cookies?.staff_id?.trim() || resolveWorkflowActorId(_req) || undefined);
       const botId = (_req.query.botId as string | undefined)?.trim() || undefined;
 
       const viewPerm = _req.isAdmin ? null : await resolveViewPerm(botPermRepo, botOwnerId, botId);
@@ -201,7 +201,7 @@ export function createRunsRouter(
       // Admin users bypass view permission — they see all data
       const queryBotOwnerId = _req.query.botOwnerId as string | undefined;
       const headerUserId = _req.headers["x-user-id"] as string | undefined;
-      const botOwnerId = _req.isAdmin ? undefined : (queryBotOwnerId?.trim() || headerUserId?.trim() || _req.cookies?.staff_id?.trim() || undefined);
+      const botOwnerId = _req.isAdmin ? undefined : (queryBotOwnerId?.trim() || headerUserId?.trim() || _req.cookies?.staff_id?.trim() || resolveWorkflowActorId(_req) || undefined);
       const botId = (_req.query.botId as string | undefined)?.trim() || undefined;
       const status = (_req.query.status as string | undefined)?.trim() || undefined;
 

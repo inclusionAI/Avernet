@@ -36,9 +36,9 @@ export type AdminAuthOptions = {
   devUserId?: string;
 };
 
-type IamTokenPayload = { sno?: string; name?: string; sub?: string };
+export type IamTokenPayload = { sno?: string; name?: string; sub?: string };
 
-function decodeJwtPayload(token: string): IamTokenPayload | null {
+export function decodeJwtPayload(token: string): IamTokenPayload | null {
   const payloadPart = token.split(".")[1];
   if (!payloadPart) return null;
   try {

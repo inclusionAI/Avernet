@@ -9,6 +9,7 @@
  */
 import { Router, type Request } from "express";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
+import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
 import type { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";
 
 type AuthRequest = Request & { isAdmin?: boolean };
@@ -54,7 +55,7 @@ export function createAccessibleWorkflowsRouter(deps: {
 
     // ── Horizontal authorization: non-admin can only query themselves ──
     if (userId && !req.isAdmin) {
-      const me = getRequestCookie(req, "staff_id") || req.headers["x-user-id"];
+      const me = resolveWorkflowActorId(req);
       if (me !== userId) {
         return res.status(403).json({
           error: "Forbidden",
@@ -96,18 +97,6 @@ export function createAccessibleWorkflowsRouter(deps: {
   }));
 
   return router;
-}
-
-function getRequestCookie(req: AuthRequest, name: string): string | undefined {
-  const cookies = req.cookies as Record<string, string> | undefined;
-  if (cookies?.[name]) return cookies[name];
-
-  const rawCookie = req.get("cookie") ?? "";
-  for (const part of rawCookie.split(";")) {
-    const [key, ...valueParts] = part.trim().split("=");
-    if (key === name) return valueParts.join("=");
-  }
-  return undefined;
 }
 
 function toEpochMs(value: Date | string | number | null | undefined): number {
