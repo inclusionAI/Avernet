@@ -533,7 +533,7 @@ class TaskModule(Module):
         available to the separate public Bot-discovery API and is not a task
         dispatch dependency.
         """
-        from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
+        from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
             CatalogKeywordBotDiscover,
         )
 
