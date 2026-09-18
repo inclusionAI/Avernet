@@ -371,15 +371,67 @@ def test_rule_success_task_failure_reason_none():
     assert ta.failure_reason is None
 
 
-def test_rule_no_terminal_transition_failure_reason_none():
-    # Task is not terminal (no transition event) → can't determine terminal
-    # non-SUCCESS → failure_reason=None (the spec gates on the terminal event).
+def test_rule_no_terminal_event_failure_reason_none():
+    # Case (a): NO event in the timeline has a terminal status_to (no
+    # transition AND no EXECUTE/VERIFY/RESET with a terminal status_to). The
+    # _terminal_status fallback returns None → failure_reason=None (the task is
+    # genuinely still open). This is the ONLY path to None after the fallback.
     timeline = [
         _ev(TrajectoryActionType.SUBMIT, action_result="success"),
         _ev(TrajectoryActionType.EXECUTE, action_result="success", ms=_MS + 5_000),
     ]
     ta = _analyze_rule(timeline)
     assert ta.failure_reason is None
+
+
+def test_terminal_status_fallback_from_non_transition_event():
+    # Case (b): the engine does NOT always log a terminal TRANSITION row (e.g.
+    # acceptance-FAIL routes HUNG via _escalate_hung, bypassing the transition
+    # gate). The _terminal_status FALLBACK derives the terminal status from the
+    # last event of any action_type whose status_to is terminal. A VERIFY with
+    # status_to=HUNG and NO transition → fallback returns HUNG (not None).
+    from agentclaw.community.core.task.task_trajectory.analyzer import (
+        _terminal_status,
+    )
+    verify = _ev(
+        TrajectoryActionType.VERIFY,
+        action_result="accept_fail",
+        ms=_MS + 9_000,
+        status_from=Status.RUNNING,
+        status_to=Status.HUNG,
+    )
+    timeline = [_ev(TrajectoryActionType.SUBMIT, action_result="success"), verify]
+    assert _terminal_status(timeline) is Status.HUNG
+
+
+def test_acceptance_fail_without_transition_row_derives_acceptance_failed():
+    # REAL acceptance-FAIL path: the engine routes acceptance-FAIL to HUNG via
+    # _escalate_hung (engine.py on_report L2069-2188), which BYPASSES the
+    # _hung_and_escalate transition gate → the trajectory has a VERIFY event
+    # with action_result="accept_fail" + status_to=HUNG but NO terminal
+    # TRANSITION row. Without the _terminal_status fallback, failure_reason
+    # would be None (bullet 6 never fires). WITH the fallback, _terminal_status
+    # returns HUNG (from the VERIFY event's status_to), _derive_failure_reason
+    # proceeds, and bullet 6 (accept_fail) fires → "acceptance_failed: accept_fail".
+    #
+    # The fixture mirrors the real path: NO error_type=HUNG event (the HUNG
+    # comes from _escalate_hung's status flip, not an error classification), so
+    # bullet 4 does NOT preempt bullet 6 here.
+    verify = _ev(
+        TrajectoryActionType.VERIFY,
+        action_result="accept_fail",
+        ms=_MS + 9_000,
+        status_from=Status.RUNNING,
+        status_to=Status.HUNG,
+        # error_type intentionally None — the real path's HUNG is a status flip,
+        # not an error_type=HUNG classification (so bullet 4 does not preempt
+        # bullet 6).
+    )
+    timeline = [_ev(TrajectoryActionType.SUBMIT, action_result="success"), verify]
+    ta = _analyze_rule(timeline)
+    assert ta.failure_reason is not None
+    assert ta.failure_reason.startswith("acceptance_failed:")
+    assert ta.failure_reason == "acceptance_failed: accept_fail"
 
 
 def test_rule_non_terminal_transition_failure_reason_none():

@@ -143,16 +143,46 @@ _TERMINAL_STATUSES: frozenset[Status] = frozenset({
 
 
 def _terminal_status(timeline: list[TrajectoryEvent]) -> Status | None:
-    """The last **terminal** ``action_type=transition`` event's ``status_to``
-    (None if no terminal transition). REQ-9: ``failure_reason`` is derived only
-    when the task is terminal non-SUCCESS, determined by this event.
+    """The last **terminal** ``action_type=transition`` event's ``status_to``,
+    with a FALLBACK to the last event of any action_type whose ``status_to`` is
+    terminal when no terminal TRANSITION row exists. REQ-9 (spec.md:147 +
+    fallback note): ``failure_reason`` is derived only when the task is terminal
+    non-SUCCESS, determined by this event.
 
-    Walks the TRANSITION events backward and returns the first ``status_to``
-    that is in ``_TERMINAL_STATUSES`` — intermediate transitions
-    (PENDING→RUNNING, …→DONE) are SKIPPED. Returns ``None`` when no terminal
-    transition exists (the task is still open → ``failure_reason`` is None)."""
+    Primary path (spec REQ-9 "末条 terminal TRANSITION 事件"): walk TRANSITION
+    events backward, return the first ``status_to`` in ``_TERMINAL_STATUSES``
+    — intermediate transitions (PENDING→RUNNING, …→DONE) are SKIPPED.
+
+    Fallback path (the engine does NOT always log a terminal TRANSITION row —
+    e.g. the acceptance-FAIL path routes HUNG via ``_escalate_hung``
+    (engine.py ``on_report`` L2069-2188), which BYPASSES the ``_hung_and_escalate``
+    transition gate site, so a real acceptance-FAIL task's trajectory has a
+    VERIFY event with ``action_result="accept_fail"`` + ``status_to=HUNG`` but
+    NO terminal TRANSITION row). When no terminal transition is found, derive
+    the terminal status from the last event whose ``status_to`` is terminal —
+    the trajectory's events carry ``status_to`` (EXECUTE/VERIFY/RESET record
+    the post-action status), so the timeline reflects the graph's terminal
+    status even without a dedicated transition row. This lets REQ-9 bullet 6
+    (``acceptance_failed:``) fire on the real acceptance-FAIL path (the VERIFY
+    event's ``action_result="accept_fail"`` matches bullet 6) instead of
+    silently returning ``None``.
+
+    Returns ``None`` ONLY when NO event has a terminal ``status_to`` (the task
+    is genuinely still open / not terminal). The 4 green e2e cases
+    (success/interface_error/timeout/hung) all have a real terminal TRANSITION
+    row, so the fallback NEVER engages for them — they stay on the primary
+    path."""
+    # 1. Prefer a terminal TRANSITION row (spec REQ-9 "末条 terminal TRANSITION 事件").
     for ev in reversed(timeline):
         if ev.action_type == TrajectoryActionType.TRANSITION and ev.status_to in _TERMINAL_STATUSES:
+            return ev.status_to
+    # 2. FALLBACK: the engine does not always log a terminal TRANSITION (e.g.
+    #    acceptance-FAIL routes HUNG via _escalate_hung, bypassing the
+    #    transition gate). Derive the terminal status from the last event whose
+    #    status_to is terminal — the trajectory reflects the graph's terminal
+    #    status even without a dedicated transition row.
+    for ev in reversed(timeline):
+        if ev.status_to in _TERMINAL_STATUSES:
             return ev.status_to
     return None
 
