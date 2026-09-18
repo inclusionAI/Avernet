@@ -293,6 +293,12 @@ _NO_USER_DIMENSION = {
     # Public Skill Center status and tag catalogues are tenant-wide reads.
     ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_code}}/publish/status"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/market/skill-center/tags"),
+    # The digital-employee platform reads a tenant-level registration catalogue.
+    # ``creatorNo`` is a caller-selected catalogue filter, while detail is
+    # addressed by the stable Bot metadata id; neither operation acts as an end
+    # user. Both still require a verified OpenAPI principal at the router level.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/metadata/digital-employees"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/metadata/digital-employees/{{agent_id}}"),
     # The load-test endpoint answers a constant. It reads nothing and writes
     # nothing, so there is no scope for a user id to name — and a synthetic
     # endpoint measuring the shared path must not be the one exception that
@@ -461,7 +467,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: sit beside, so ``path`` 156 → 159 and nothing else moves.
 #: Dormant lifecycle adds one new bot-path operation (recycle); activate and
 #: status keep their existing paths while gaining addressed-owner scope.
-_BOT_ID_PLACEMENT = {"path": 160, "query": 1, "none": 104}
+_BOT_ID_PLACEMENT = {"path": 160, "query": 1, "none": 106}
 
 
 def _schema() -> dict:

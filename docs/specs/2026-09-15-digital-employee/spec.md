@@ -80,5 +80,6 @@ Implementation in progress. No deployment or real platform verification yet.
 但整体类型检查仍未通过，不能视为完整前端验收。
 新增/修改 Python 文件 pre-push 同类 flake8 阻断规则检查通过（61 个文件）。
 扩大组合包含 1,863 项通过；MCP 旧测试绕过构造器导致新增依赖未初始化，已修正
-测试夹具并定向复测。架构 E3 的 execution_identity 缺少流程登记在未修改 HEAD
-也失败，已复现；本次未添加豁免或降低门禁。数字员工默认关闭应用流程已登记。
+测试夹具并定向复测。`execution_identity` 已登记真实 HTTP 边界流程，没有添加豁免
+或降低门禁。5 个新增 HTTP 端点均登记 happy/error endpoint case；数字员工默认关闭
+应用流程已登记。
