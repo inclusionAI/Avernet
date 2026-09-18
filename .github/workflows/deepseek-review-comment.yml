@@ -1,0 +1,133 @@
+# DeepSeek PR Review Bot
+#
+# Triggers when someone comments "@deepseekReviewer review" on a PR.
+# Fetches the PR diff, sends it to DeepSeek Chat API for code review,
+# and posts the result as a PR comment.
+#
+# Setup:
+#   1. Merge this file to the default branch.
+#   2. Add DEEPSEEK_API_KEY in repo Settings → Secrets and variables → Actions.
+#
+# To add other providers (GPT, Claude, etc.), create a similar workflow file
+# with its own trigger phrase and API key secret.
+name: DeepSeek Review Comment
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: deepseek-review-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Run DeepSeek review
+    if: |
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@deepseekReviewer review')
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Fetch PR diff
+        id: diff
+        run: |
+          PR_NUMBER="${{ github.event.issue.number }}"
+          PR_DIFF=$(gh pr diff "$PR_NUMBER" --patch 2>/dev/null || true)
+
+          if [ "$(echo "$PR_DIFF" | wc -c)" -gt 40000 ]; then
+              PR_DIFF=$(echo "$PR_DIFF" | head -c 40000)
+              TRUNCATED="(truncated)"
+          else
+              TRUNCATED=""
+          fi
+
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "diff<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$PR_DIFF" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "truncated=${TRUNCATED}" >> "$GITHUB_OUTPUT"
+
+          echo "Fetched diff: $(echo "$PR_DIFF" | wc -l) lines, $(echo "$PR_DIFF" | wc -c) bytes"
+
+      - name: Review with DeepSeek
+        id: review
+        run: |
+          PROMPT=$(cat <<'ENDPROMPT'
+          You are a code reviewer for a Rust/Python/TypeScript monorepo. Review the
+          following PR diff for code correctness, security issues, and adherence to
+          the repository's documented architecture rules (service/core/port
+          layering, no leaked HTTP concerns in core, no raw environment access
+          outside composition roots).
+
+          Focus on P1 (must-fix) issues first.  Format your review concisely in
+          Markdown.  Cite file paths and line numbers from the diff.  Do NOT
+          comment on formatting or style.
+
+          If there are no findings, respond with a single line: "No P1 or P2
+          issues found. 👍"
+          ENDPROMPT
+          )
+
+          SYSTEM_MSG=$(cat <<'ENDSYS'
+          You are a senior code reviewer. Be concise and actionable. Use English.
+          ENDSYS
+          )
+
+          RESPONSE=$(curl -s https://api.deepseek.com/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${DEEPSEEK_API_KEY}" \
+            -d "$(jq -n \
+              --arg system "$SYSTEM_MSG" \
+              --arg prompt "$PROMPT" \
+              --arg diff "${{ steps.diff.outputs.diff }}" \
+              --arg truncated "${{ steps.diff.outputs.truncated }}" \
+              '{
+                model: "deepseek-chat",
+                messages: [
+                  {role: "system", content: $system},
+                  {role: "user", content: "PR Diff \($truncated):\n\n\($diff)\n\n---\n\($prompt)"}
+                ],
+                max_tokens: 4096,
+                temperature: 0.3
+              }')")
+
+          echo "$RESPONSE" > /tmp/deepseek_response.json
+          REVIEW_BODY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "Error: failed to get review from DeepSeek. Check logs."')
+
+          echo "review<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$REVIEW_BODY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Post review as PR comment
+        if: always() && steps.review.outcome == 'success'
+        run: |
+          REVIEW="${{ steps.review.outputs.review }}"
+
+          HEADER="## 🤖 DeepSeek Review\n\n<sub>Triggered by @${{ github.event.comment.user.login }}</sub>\n\n---"
+          BODY="${HEADER}\n\n${REVIEW}"
+
+          gh pr comment "${{ steps.diff.outputs.pr_number }}" \
+            --body "$BODY"
+
+      - name: Report error on failure
+        if: failure()
+        run: |
+          gh pr comment "${{ steps.diff.outputs.pr_number }}" \
+            --body "## 🤖 DeepSeek Review
+
+          <sub>Triggered by @${{ github.event.comment.user.login }}</sub>
+
+          ---
+
+          **Error:** Review failed. Please check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
