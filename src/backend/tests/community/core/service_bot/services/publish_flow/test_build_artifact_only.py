@@ -113,6 +113,7 @@ async def test_build_artifact_only_returns_artifact() -> None:
     assert result.docker_image is None
     assert result.center_skill_uuids == ()
     assert result.artifact_ext == {"migration_path": "/snapshot/1"}
+    assert result.employee_snapshot is None  # 未启用数字员工
     # 不调用 commit_built_artifact——DRAFT 状态不变
     ext_state.commit_built_artifact.assert_not_called()
 
@@ -171,3 +172,70 @@ async def test_build_failure_still_sets_failed_status() -> None:
 
     assert result.status == PublishStatus.FAILED
     ext_state.update_status.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_build_artifact_only_captures_employee_snapshot_before_produce() -> None:
+    """数字员工快照在 produce_artifact 之前捕获，确保时序正确。"""
+    producer = _SimpleProducer()
+
+    ext_state = Mock()
+    ext_state.owner_id.return_value = "u1"
+    ext_state.get_latest_ext_snapshot.return_value = ({}, {})
+
+    bot_service = Mock()
+    bot_service.get_bot.return_value = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "active_engine": "openclaw",
+        "env": "dev",
+    }
+    baas_service = Mock()
+    baas_service.resolve_container_provider.return_value = "baas"
+    producer_router = Mock()
+    producer_router.resolve.return_value = producer
+    behavior = Mock()
+    behavior.stage_build_files = AsyncMock()
+    behaviors = Mock()
+    behaviors.resolve.return_value = behavior
+    projector = Mock()
+    projector.project = AsyncMock()
+    probe = Mock()
+    probe.probe_bot = AsyncMock()
+
+    # 模拟数字员工 provider，记录调用顺序
+    call_order = []
+    snapshot_obj = object()
+    employee_service = Mock()
+    employee_service.capture = Mock(return_value=snapshot_obj)
+    employee_provider = Mock(return_value=employee_service)
+
+    # 给 produce_artifact 添加副作用来记录调用顺序
+    original_produce = producer.produce_artifact
+    def _tracked_produce(request):
+        call_order.append("produce")
+        return original_produce(request)
+    producer.produce_artifact = _tracked_produce
+
+    original_capture = employee_service.capture
+    def _tracked_capture(bot):
+        call_order.append("capture")
+        return original_capture(bot)
+    employee_service.capture = _tracked_capture
+
+    runner = BuildStageRunner(
+        ext_state=ext_state,
+        bot_service=bot_service,
+        baas_service=baas_service,
+        producer_router=producer_router,
+        provider_behaviors=behaviors,
+        runtime_projector=projector,
+        runtime_layout_probe=probe,
+        employee_publication_provider=employee_provider,
+    )
+
+    result = await runner.build_artifact_only(_record())
+
+    # 快照在 produce 之前捕获
+    assert call_order == ["capture", "produce"]
+    assert result.employee_snapshot is snapshot_obj

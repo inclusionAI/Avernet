@@ -77,6 +77,8 @@ class BuildArtifactOnlyResult:
     由 ``build_artifact_only`` 返回，供调用方直接传给 eval_publish。
     ``artifact_ext`` 是完整的 producer 产出 ext dict，供 ``build()``
     做状态提交时合并写回 ac_bot_publish.ext。
+    ``employee_snapshot`` 在 ``produce_artifact`` 之前捕获（若启用数字员工），
+    供 ``build()`` 在构建后与当前状态比较，检测构建期间数字员工能力变化。
     """
 
     migration_path: str           # ARCA 路径或空串
@@ -84,6 +86,7 @@ class BuildArtifactOnlyResult:
     docker_image: str | None      # 解析的镜像 pin
     center_skill_uuids: tuple[str, ...]
     artifact_ext: dict            # 完整的 artifact.ext，供 build() 合并
+    employee_snapshot: object | None  # produce_artifact 前的数字员工快照
 
 
 class BuildStageRunner:
@@ -189,6 +192,14 @@ class BuildStageRunner:
                     resolved.center_root,
                 )
 
+        # 在 produce_artifact 之前捕获数字员工快照（若启用），
+        # 以便 build() 在构建后检测能力是否发生变化。
+        employee_snapshot = None
+        if self._employee_publication_provider is not None:
+            employee_snapshot = await asyncio.to_thread(
+                self._employee_publication_provider().capture, bot
+            )
+
         request = ArtifactBuildRequest.create(
             bot=bot,
             version=version,
@@ -240,6 +251,7 @@ class BuildStageRunner:
             docker_image=None,  # 由调用方通过 resolve_publish_image_pin 解析
             center_skill_uuids=center_skill_uuids,
             artifact_ext=artifact.ext,
+            employee_snapshot=employee_snapshot,
         )
 
     async def build(
@@ -263,17 +275,14 @@ class BuildStageRunner:
 
             # 阶段 B：提交 / 状态推进（BUILDING → BUILT）
             # 数字员工快照校验 — 如果构建期间数字员工能力发生变化，拒绝发布
-            if self._employee_publication_provider is not None:
+            if result.employee_snapshot is not None:
                 owner_id = self._ext_state.owner_id(publish_record)
                 bot = self._bot_service.get_bot(
                     bot_id=publish_record.source_bot_id, user_id=owner_id,
                 )
-                employee_snapshot = await asyncio.to_thread(
-                    self._employee_publication_provider().capture, bot
-                )
                 employee_service = self._employee_publication_provider()
                 current = await asyncio.to_thread(employee_service.capture, bot)
-                if current is None or capability_digest(current) != capability_digest(employee_snapshot):
+                if current is None or capability_digest(current) != capability_digest(result.employee_snapshot):
                     raise ValueError("数字员工能力在构建期间发生变化，请重新构建")
                 frozen = await asyncio.to_thread(employee_service.capture_artifact, bot, result.artifact_ext)
                 if runtime_capability_digest(frozen) != runtime_capability_digest(current):
