@@ -739,6 +739,105 @@ def test_baas_restart_terminal_does_not_revive_stopped_binding(
         )
 
 
+def test_prepare_baas_desktop_restart_updates_identity_and_status_atomically(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status="ACTIVE",
+            device_props={"callback_token": "keep"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status="ACTIVE",
+        ext=json.dumps({"keep": "value"}),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        prepared = repo.prepare_baas_desktop_restart(
+            binding_id=bid,
+            bot_id="bot-desktop",
+            owner_id="emp-1",
+            bot_ext_patch={"publish_id": "17", "pending_since": "now"},
+            binding_props_patch={"restart_publish_id": "17"},
+        )
+
+    assert prepared is True
+    binding = repo.get_by_id(bid)
+    assert binding.status == "PENDING"
+    assert binding.device_props == {
+        "callback_token": "keep",
+        "restart_publish_id": "17",
+    }
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-desktop").one()
+        assert bot.status == "PENDING"
+        assert json.loads(bot.ext) == {
+            "keep": "value",
+            "publish_id": "17",
+            "pending_since": "now",
+        }
+
+
+def test_prepare_baas_desktop_restart_rolls_back_both_rows_on_failure(
+    autocommit_db,
+):
+    db, engine = autocommit_db
+    repo = DeviceRepository(db)
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status="ACTIVE",
+            device_props={"callback_token": "keep"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status="ACTIVE",
+        ext=json.dumps({"keep": "value"}),
+    )
+
+    def fail_binding_update(
+        _conn, _cursor, statement, _parameters, _context, _executemany
+    ):
+        if statement.lstrip().lower().startswith(
+            "update ac_entity_device_binding"
+        ):
+            raise RuntimeError("binding write failed")
+
+    event.listen(engine, "before_cursor_execute", fail_binding_update)
+    try:
+        with (
+            patch(_ENV_MOD, return_value="dev"),
+            pytest.raises(RuntimeError, match="binding write failed"),
+        ):
+            repo.prepare_baas_desktop_restart(
+                binding_id=bid,
+                bot_id="bot-desktop",
+                owner_id="emp-1",
+                bot_ext_patch={"publish_id": "17"},
+                binding_props_patch={"restart_publish_id": "17"},
+            )
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_binding_update)
+
+    binding = repo.get_by_id(bid)
+    assert binding.status == "ACTIVE"
+    assert binding.device_props == {"callback_token": "keep"}
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-desktop").one()
+        assert bot.status == "ACTIVE"
+        assert json.loads(bot.ext) == {"keep": "value"}
+
+
 def test_transition_teclaw_publish_terminal_rolls_back_bot_on_binding_failure(
     autocommit_db,
 ):

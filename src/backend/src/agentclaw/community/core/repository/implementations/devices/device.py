@@ -89,6 +89,7 @@ from agentclaw.community.core.devices.repository.models import EntityDeviceBindi
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.repository.implementations.devices.guarded_lifecycle import (
+    BaasDesktopRestartRepositoryMixin,
     begin_guarded_transaction,
     load_device_props,
 )
@@ -140,6 +141,7 @@ def _to_record(m: EntityDeviceBinding | None) -> DeviceBindingRecord | None:
 
 
 class DeviceRepository(
+    BaasDesktopRestartRepositoryMixin,
     DeviceBindingRepository,
 ):
     """Unified ORM ``DeviceBindingRepository`` implementation."""

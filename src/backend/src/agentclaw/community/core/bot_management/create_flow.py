@@ -28,6 +28,9 @@ from agentclaw.community.core.bot_management.create_context import (
     BotCreateDeploymentMode as BotCreateDeploymentMode,
     BotCreateSpec as BotCreateSpec,
 )
+from agentclaw.community.core.bot_management.authorized_creation import (
+    create_authorized_bot,
+)
 from agentclaw.community.core.bot_management.engines.provisioning import (
     BotCreateTemplateValidationMode,
     PreparedBotCreate,
@@ -46,11 +49,9 @@ from agentclaw.community.core.bot_management.manifest_seam import (
 )
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
-    BotCreationRetainedError,
     BotTemplateInvalidError,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
-    BotNotFoundError,
     BotServiceError,
     validate_bot_name,
 )
@@ -59,7 +60,6 @@ from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipError
 from agentclaw.community.plugin_api.passport import PassportError
 
 if TYPE_CHECKING:
@@ -375,40 +375,6 @@ def _query_agent_code(
     )
 
 
-def _record_owner_relationship(
-    auth_rel_plugin: AuthRelationshipPlugin,
-    *,
-    user_id: str,
-    agent_code: str,
-    nick_name: str,
-    bot_id: str,
-) -> None:
-    """Create the owner→bot relationship or fail the completed-create contract."""
-    try:
-        auth_result = auth_rel_plugin.create_relationship(
-            work_no=user_id,
-            agent_code=agent_code,
-            description="Bot owner default authorization",
-            operator_work_no=user_id,
-            operator_name=nick_name,
-        )
-    except AuthRelationshipError:
-        raise
-    except Exception as exc:  # noqa: BLE001 — normalize plugin implementations
-        raise AuthRelationshipError(
-            f"authorization relationship write failed for bot {bot_id}: {exc}"
-        ) from exc
-    if auth_result is None:
-        raise AuthRelationshipError(
-            f"authorization relationship write failed for bot {bot_id}"
-        )
-    logger.info(
-        "[create_flow] Created owner auth relationship: bot_id=%s owner=%s "
-        "agent_code=%s auth_id=%s",
-        bot_id, user_id, agent_code, auth_result.get("auth_id"),
-    )
-
-
 def create_bot_with_authorization(
     *,
     user_id: str,
@@ -513,46 +479,31 @@ def create_bot_with_authorization(
     )
 
     # Token present → create the bot inline.
-    try:
-        result = bot_service.create_bot(
-            user_id=user_id,
-            nick_name=nick_name,
-            bot_name=bot_name,
-            bot_desc=spec.bot_desc,
-            entity_id=spec.entity_id,
-            entity_type=spec.entity_type,
-            share_policy=spec.share_policy,
-            engine_type=spec.engine_type,
-            ext=_build_ext(avatar_url=spec.avatar_url, agent_code=agent_code),
-            bot_id=bot_id,
-            bot_type=spec.bot_type,
-            template_type=spec.template_type,
-            template_config=spec.template_config,
-            cookie=cookie,
-            space_id=spec.space_id,
-            space_quota=context.space_quota,
-        )
-    except BotServiceError as exc:
-        try:
-            retained_bot = bot_service.get_bot(bot_id, user_id)
-        except BotNotFoundError:
-            raise exc
-        except BotServiceError:
-            raise exc
-        if (
-            not isinstance(retained_bot, dict)
-            or retained_bot.get("bot_id") != bot_id
-            or retained_bot.get("status") not in {"PENDING", "PROVISIONING"}
-        ):
-            raise exc
-        raise BotCreationRetainedError(
-            bot_id=bot_id,
-            message=str(exc),
-        ) from exc
-
-    _record_owner_relationship(
-        auth_rel_plugin, user_id=user_id, agent_code=agent_code,
-        nick_name=nick_name, bot_id=bot_id,
+    result = create_authorized_bot(
+        bot_service=bot_service,
+        auth_rel_plugin=auth_rel_plugin,
+        user_id=user_id,
+        nick_name=nick_name,
+        bot_id=bot_id,
+        agent_code=agent_code,
+        create_kwargs={
+            "user_id": user_id,
+            "nick_name": nick_name,
+            "bot_name": bot_name,
+            "bot_desc": spec.bot_desc,
+            "entity_id": spec.entity_id,
+            "entity_type": spec.entity_type,
+            "share_policy": spec.share_policy,
+            "engine_type": spec.engine_type,
+            "ext": _build_ext(avatar_url=spec.avatar_url, agent_code=agent_code),
+            "bot_id": bot_id,
+            "bot_type": spec.bot_type,
+            "template_type": spec.template_type,
+            "template_config": spec.template_config,
+            "cookie": cookie,
+            "space_id": spec.space_id,
+            "space_quota": context.space_quota,
+        },
     )
 
     return Created(
@@ -899,31 +850,34 @@ def complete_bot_authorization(
 
     agent_code = _query_agent_code(passport_plugin, bot_id=bot_id, user_id=user_id)
 
-    result = bot_service.create_bot(
+    result = create_authorized_bot(
+        bot_service=bot_service,
+        auth_rel_plugin=auth_rel_plugin,
         user_id=user_id,
         nick_name=nick_name,
         bot_id=bot_id,
-        bot_name=spec.bot_name,
-        bot_desc=spec.bot_desc,
-        entity_id=spec.entity_id,
-        entity_type=spec.entity_type,
-        share_policy=spec.share_policy,
-        engine_type=spec.engine_type,
-        ext=_build_ext(
-            avatar_url=spec.avatar_url, agent_code=agent_code, issued=True
-        ),
-        bot_type=spec.bot_type,
-        template_type=spec.template_type,
-        template_config=spec.template_config,
-        cookie=cookie,
-        space_id=spec.space_id,
-        provision=provision,
-        space_quota=context.space_quota,
-    )
-
-    _record_owner_relationship(
-        auth_rel_plugin, user_id=user_id, agent_code=agent_code,
-        nick_name=nick_name, bot_id=bot_id,
+        agent_code=agent_code,
+        create_kwargs={
+            "user_id": user_id,
+            "nick_name": nick_name,
+            "bot_id": bot_id,
+            "bot_name": spec.bot_name,
+            "bot_desc": spec.bot_desc,
+            "entity_id": spec.entity_id,
+            "entity_type": spec.entity_type,
+            "share_policy": spec.share_policy,
+            "engine_type": spec.engine_type,
+            "ext": _build_ext(
+                avatar_url=spec.avatar_url, agent_code=agent_code, issued=True
+            ),
+            "bot_type": spec.bot_type,
+            "template_type": spec.template_type,
+            "template_config": spec.template_config,
+            "cookie": cookie,
+            "space_id": spec.space_id,
+            "provision": provision,
+            "space_quota": context.space_quota,
+        },
     )
 
     return AuthStatusResult(status=AuthStatus.ISSUED, bot=result)

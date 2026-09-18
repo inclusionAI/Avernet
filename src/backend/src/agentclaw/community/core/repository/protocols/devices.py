@@ -179,6 +179,19 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def prepare_baas_desktop_restart(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        bot_ext_patch: dict[str, Any],
+        binding_props_patch: dict[str, Any],
+    ) -> bool:
+        """Atomically persist Desktop restart identity and PENDING state."""
+        ...
+
+    @abstractmethod
     def list_bindings(
         self,
         *,

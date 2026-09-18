@@ -1011,10 +1011,7 @@ class TestRestart:
         assert result["status"] == "PENDING"
         mocks["baas"].restart_bot.assert_called_once()
         mocks["baas"].approve_publish.assert_called_once()
-        mocks["binding_repo"].update_status.assert_called_once()
-        # update_by_owner 被调用两次:一次写 status=PENDING,一次经
-        # _merge_bot_ext 写 ext.pending_since(供扫描超时兜底)。
-        assert mocks["bot_repo"].update_by_owner.call_count >= 1
+        mocks["binding_repo"].prepare_baas_desktop_restart.assert_called_once()
 
     def test_restart_stamps_pending_since(self):
         """重启写 PENDING 时,必须往 ext 记 pending_since,供扫描超时兜底使用。
@@ -1029,14 +1026,8 @@ class TestRestart:
 
         service.restart(bot_id="desktop_bot_001", user_id="u001")
 
-        # 找到写入 ext 且含 pending_since 的那次 update_by_owner 调用
-        ext_writes = [
-            c for c in mocks["bot_repo"].update_by_owner.call_args_list
-            if "ext" in (c.kwargs.get("update_data") or {})
-        ]
-        assert ext_writes, "restart 应写一次含 ext 的 update"
-        merged_ext = ext_writes[-1].kwargs["update_data"]["ext"]
-        assert "pending_since" in merged_ext
+        prepared = mocks["binding_repo"].prepare_baas_desktop_restart.call_args
+        assert "pending_since" in prepared.kwargs["bot_ext_patch"]
 
     def test_pool_restart_updates_layout_wire_and_current_publish_identity(self):
         from agentclaw.community.core.skills_pool.types import SkillLayout
@@ -1070,25 +1061,19 @@ class TestRestart:
         assert credentials["agentclaw_skills_layout_contract_version"] == (
             "skills-pool-p3-v1"
         )
-        ext_writes = [
-            call.kwargs["update_data"]["ext"]
-            for call in mocks["bot_repo"].update_by_owner.call_args_list
-            if "ext" in (call.kwargs.get("update_data") or {})
-        ]
-        assert ext_writes[-1]["publish_id"] == "17"
-        mocks["binding_repo"].update_device_props.assert_called_once_with(
-            binding_id=1,
-            props={
-                "publish_id": "17",
-                "restart_publish_id": "17",
-                "envs": {
-                    "AGENTCLAW_SKILLS_LAYOUT": "pool",
-                    "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": (
-                        "skills-pool-p3-v1"
-                    ),
-                },
+        prepared = mocks["binding_repo"].prepare_baas_desktop_restart.call_args
+        assert prepared.kwargs["bot_ext_patch"]["publish_id"] == "17"
+        assert prepared.kwargs["binding_id"] == 1
+        assert prepared.kwargs["binding_props_patch"] == {
+            "publish_id": "17",
+            "restart_publish_id": "17",
+            "envs": {
+                "AGENTCLAW_SKILLS_LAYOUT": "pool",
+                "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": (
+                    "skills-pool-p3-v1"
+                ),
             },
-        )
+        }
 
     @patch(
         "agentclaw.community.core.desktop_bot.services.desktop_bot_service."
@@ -1101,15 +1086,15 @@ class TestRestart:
         _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")
         mocks["baas"].restart_bot.return_value = {"publish_id": 5}
         mocks["baas"].approve_publish.return_value = {"status": "SUCCESS"}
-        mocks["bot_repo"].update_by_owner.side_effect = RuntimeError("DB down")
+        mocks["binding_repo"].prepare_baas_desktop_restart.side_effect = RuntimeError(
+            "DB down"
+        )
 
         with pytest.raises(
             DesktopBotServiceError, match="重启发布身份持久化失败"
         ):
             service.restart(bot_id="desktop_bot_001", user_id="u001")
 
-        mocks["binding_repo"].update_device_props.assert_not_called()
-        mocks["binding_repo"].update_status.assert_not_called()
         mock_start_poll.assert_not_called()
 
     def test_restart_no_publish_id_skips_approve(self):
@@ -1844,6 +1829,7 @@ def _make_service_with_mocks():
     # _build_desktop_bot_payload calls _get_start_cmd and _get_destroy_cmd on baas
     mocks["baas"]._get_start_cmd.return_value = "echo start"
     mocks["baas"]._get_destroy_cmd.return_value = None
+    mocks["binding_repo"].prepare_baas_desktop_restart.return_value = True
     return service, mocks
 
 

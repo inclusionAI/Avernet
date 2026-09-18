@@ -178,7 +178,7 @@ def test_owner_relationship_failure_is_not_acknowledged_as_created():
     auth_relationship = MagicMock()
     auth_relationship.create_relationship.return_value = None
 
-    with pytest.raises(AuthRelationshipError):
+    with pytest.raises(BotCreationRetainedError) as error:
         create_bot_with_authorization(
             user_id="85020",
             nick_name="Alice",
@@ -190,6 +190,8 @@ def test_owner_relationship_failure_is_not_acknowledged_as_created():
             auth_rel_plugin=auth_relationship,
             skill_set_factory=skill_set_factory,
         )
+
+    assert error.value.bot_id == "20260805_ab12cd34"
 
 
 def test_issued_passport_without_agent_code_does_not_create_bot():
@@ -247,3 +249,39 @@ def test_immediate_create_failure_returns_retained_bot_retry_handle():
 
     assert error.value.bot_id == "20260805_ab12cd34"
     bot_service.get_bot.assert_called_once_with("20260805_ab12cd34", "85020")
+
+
+def test_immediate_relationship_failure_returns_retained_bot_retry_handle():
+    passport = MagicMock()
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac-1",
+    }
+    bot_service = MagicMock(spec=BotServiceProtocol)
+    bot_service.is_first_bot.return_value = True
+    bot_service.create_bot.return_value = {
+        "bot_id": "20260805_ab12cd34",
+        "status": "PENDING",
+    }
+    auth_relationship = MagicMock()
+    auth_relationship.create_relationship.side_effect = AuthRelationshipError(
+        "relationship write failed"
+    )
+    skill_set_factory = MagicMock()
+    skill_set_factory.create.return_value.get_bot_mcp_codes.return_value = []
+
+    with pytest.raises(BotCreationRetainedError) as error:
+        create_bot_with_authorization(
+            user_id="85020",
+            nick_name="Alice",
+            bot_id="20260805_ab12cd34",
+            spec=_spec(),
+            context=_CONTEXT,
+            bot_service=bot_service,
+            passport_plugin=passport,
+            auth_rel_plugin=auth_relationship,
+            skill_set_factory=skill_set_factory,
+        )
+
+    assert error.value.bot_id == "20260805_ab12cd34"
+    bot_service.get_bot.assert_not_called()

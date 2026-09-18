@@ -1147,20 +1147,28 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "agentclaw_skills_layout_contract_version", ""
             ),
         }
-        if not self._merge_bot_ext(bot_id, binding.entity_id, ext_updates):
+        try:
+            prepared = self._binding_repo.prepare_baas_desktop_restart(
+                binding_id=binding.id,
+                bot_id=bot_id,
+                owner_id=binding.entity_id,
+                bot_ext_patch=ext_updates,
+                binding_props_patch={
+                    "publish_id": str(publish_id) if publish_id else None,
+                    "restart_publish_id": str(publish_id) if publish_id else None,
+                    "envs": self._desktop_layout_env(layout_credentials),
+                },
+            )
+        except Exception as error:
+            raise DesktopBotServiceError(
+                "重启发布身份持久化失败，未启动状态轮询: "
+                f"bot_id={bot_id}, publish_id={publish_id}"
+            ) from error
+        if not prepared:
             raise DesktopBotServiceError(
                 "重启发布身份持久化失败，未启动状态轮询: "
                 f"bot_id={bot_id}, publish_id={publish_id}"
             )
-        self._update_local_status(binding.id, bot_id, binding.entity_id, "PENDING")
-        self._binding_repo.update_device_props(
-            binding_id=binding.id,
-            props={
-                "publish_id": str(publish_id) if publish_id else None,
-                "restart_publish_id": str(publish_id) if publish_id else None,
-                "envs": self._desktop_layout_env(layout_credentials),
-            },
-        )
 
         # 启动后台轮询 publish 进度
         if publish_id:
