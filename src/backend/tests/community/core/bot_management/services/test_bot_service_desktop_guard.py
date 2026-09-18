@@ -9,7 +9,6 @@ Guard points:
 """
 from __future__ import annotations
 
-import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -52,9 +51,14 @@ def _make_bot(
 def _make_service() -> BotService:
     """Construct a BotService with mock dependencies."""
     svc = BotService.__new__(BotService)
+    svc._skills_pool_native_creation_policy = MagicMock(
+        select=MagicMock(return_value=None)
+    )
+    svc._skill_layout_repository = MagicMock()
     svc._bot_storage_policy = None
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
+    svc._repository.claim_provisioning.return_value = True
     svc._passport_plugin = MagicMock()
     svc._bot_publish_provider = lambda: MagicMock()
     svc._device_service_provider = lambda: MagicMock()
@@ -135,7 +139,7 @@ class TestAllocateDeviceAsyncDesktopGuard:
 
         with patch(
             "agentclaw.community.core.bot_management.services.bot_service.DeviceService"
-        ) as mock_ds_cls:
+        ):
             svc._allocate_device_async(
                 bot_id="personal_1",
                 user_id="user001",
@@ -172,7 +176,7 @@ class TestStartBotDesktopGuard:
 
         # start_bot calls _allocate_device_async which checks bot_type
         with patch.object(svc, "_allocate_device_async") as mock_alloc:
-            result = svc.start_bot(bot_id="desktop_1", user_id="user001")
+            svc.start_bot(bot_id="desktop_1", user_id="user001")
 
         # _allocate_device_async IS called (start_bot doesn't filter),
         # but inside it will check bot_type and skip DeviceService.apply_device
@@ -196,14 +200,14 @@ class TestCreateBotDesktopGuard:
         inserted_bot = _make_bot(
             bot_id="desktop_new", bot_type="desktop", status="PENDING"
         )
-        svc._repository.insert.return_value = inserted_bot
+        svc._repository.insert_with_initial_skill_layout.return_value = inserted_bot
 
         mock_device_service = MagicMock()
         svc._device_service_provider = lambda: mock_device_service
 
         with patch(
             "agentclaw.community.core.bot_management.services.bot_service.DeviceService"
-        ) as mock_ds_cls:
+        ):
             with patch(
                 "agentclaw.community.core.bot_management.services.bot_service.generate_bot_id",
                 return_value="desktop_new",
@@ -224,7 +228,7 @@ class TestCreateBotDesktopGuard:
         svc = _make_service()
         svc._repository.get_by_id_and_owner.return_value = None
         svc._repository.exists_by_bot_name.return_value = False
-        svc._repository.insert.return_value = _make_bot(
+        svc._repository.insert_with_initial_skill_layout.return_value = _make_bot(
             bot_id="desktop_new", bot_type="desktop", status="PENDING"
         )
 
@@ -261,7 +265,8 @@ class TestCreateBotDesktopGuard:
         svc._repository.exists_by_bot_name.return_value = False
 
         inserted_bot = _make_bot(bot_id="personal_new", bot_type="personal", status="PENDING")
-        svc._repository.insert.return_value = inserted_bot
+        svc._repository.insert_with_initial_skill_layout.return_value = inserted_bot
+        svc._repository.get_by_id_and_owner.return_value = inserted_bot
 
         mock_device_result = MagicMock()
         mock_device_result.id = 100
@@ -275,7 +280,7 @@ class TestCreateBotDesktopGuard:
 
         with patch(
             "agentclaw.community.core.bot_management.services.bot_service.DeviceService"
-        ) as mock_ds_cls:
+        ):
             with patch(
                 "agentclaw.community.core.bot_management.services.bot_service.generate_bot_id",
                 return_value="personal_new",

@@ -31,8 +31,6 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 
@@ -76,6 +74,10 @@ def _make_aix_template_config(
 def _make_service() -> BotService:
     """构造一个绕过 __init__ 的 BotService，只装填本测试关心的依赖。"""
     svc = BotService.__new__(BotService)
+    svc._skills_pool_native_creation_policy = MagicMock(
+        select=MagicMock(return_value=None)
+    )
+    svc._skill_layout_repository = MagicMock()
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._restart_lock_repo = MagicMock()
