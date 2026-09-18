@@ -163,8 +163,9 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
         </div>
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-5 gap-y-3 border-t border-slate-100 pt-3 sm:grid-cols-3 lg:grid-cols-6">
+      <dl className="mt-4 grid grid-cols-2 gap-x-5 gap-y-3 border-t border-slate-100 pt-3 sm:grid-cols-3 lg:grid-cols-7">
         <Stat label="工作流" value={run.workflow_id} mono />
+        <Stat label="版本" value={run.workflow_version != null ? (run.workflow_version === -1 ? '未绑定发布版本' : String(run.workflow_version)) : '—'} mono={run.workflow_version != null && run.workflow_version !== -1} />
         <Stat label="创建者" value={run.user_id || run.triggered_by || '—'} mono={!!(run.user_id || run.triggered_by)} />
         <Stat label="发起 Bot" value={(run.origin_bot_id || '—') + (run.plugin_version ? ` / ${run.plugin_version}` : '')} mono={!!(run.origin_bot_id || run.plugin_version)} />
         <Stat label="运行引擎" value={run.engine || '—'} mono={!!run.engine} />

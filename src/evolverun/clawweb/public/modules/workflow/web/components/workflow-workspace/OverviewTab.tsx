@@ -149,6 +149,11 @@ function RunRow({ run, onAnalyze, onAutoHeal, dispatching, busy, onAnalysisFinis
         {run.origin_bot_id && <span className="mt-0.5 block max-w-52 truncate font-mono text-[10px] text-slate-400" title={run.origin_bot_id}>{run.plugin_version ? `${run.origin_bot_id}/${run.plugin_version}` : run.origin_bot_id}</span>}
       </td>
       <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">
+        {run.workflow_version != null ? (
+          <span className="font-mono text-xs">{run.workflow_version === -1 ? '未绑定发布版本' : run.workflow_version}</span>
+        ) : <span className="text-gray-300">—</span>}
+      </td>
+      <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">
         {run.engine ? <span className="font-mono">{run.engine}</span> : <span className="text-gray-300">—</span>}
       </td>
       <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">
@@ -559,6 +564,7 @@ function OverviewContent({ workflow }: OverviewTabProps) {
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">状态</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">节点</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">发起方</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">版本</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">环境</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">开始时间</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">耗时</th>
