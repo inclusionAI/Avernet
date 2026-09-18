@@ -328,6 +328,55 @@ async def test_executor_timeout_marks_timeout():
     repo.update_result.assert_not_called()
 
 
+async def test_executor_send_persistence_failure_marks_failed_and_reraises():
+    """S4: update_result 抛异常时 _do_send_persist 写 FAILED 终态（带具体消息）
+    并 raise。execute() 的外层 except 会再次 mark_failed（idempotent）。
+    关键是：业务进入 FAILED 终态 + 上层 worker 的 finally 路径能感知到处理结果。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-persist-fail",
+        bot_id="bot-1:ent",
+        metadata={
+            "app_id": "a",
+            "app_type": "T",
+            "tenant": "t",
+            "request_type": "chat",
+        },
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    bot_svc = MagicMock()
+    bot_svc.send_message = AsyncMock(
+        return_value=BotResponse(content="hello back", usage=None)
+    )
+    selector.select.return_value = bot_svc
+
+    # update_result 抛异常（如 OceanBase 1064），update_error 必须被调用为 FAILED 终态。
+    repo.update_result.side_effect = RuntimeError("simulated 1064")
+
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(), MagicMock()
+    )
+
+    # execute() 的外层 except 会捕获并 mark FAILED，对调用方（worker）表现为正常返回。
+    await executor.execute(
+        _queue_rec(run_id="r-persist-fail", bot_id="bot-1:ent", session_id="sess-1")
+    )
+
+    # S4: update_result 被尝试一次
+    repo.update_result.assert_called_once()
+    # S4: update_error 被显式调用，消息包含 "result persistence failed"
+    assert repo.update_error.called
+    s4_call_msgs = [
+        c[0][1] for c in repo.update_error.call_args_list if len(c[0]) >= 2
+    ]
+    assert any("result persistence failed" in msg for msg in s4_call_msgs)
+    assert any("simulated 1064" in msg for msg in s4_call_msgs)
+
+
 async def test_executor_inject_flow():
     repo = MagicMock()
     plugin = MagicMock()

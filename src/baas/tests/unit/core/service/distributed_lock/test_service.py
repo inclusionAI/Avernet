@@ -366,6 +366,52 @@ class TestReleaseLock:
 
         result = lock_service.release_lock("mylock", lock_holder="h1")
 
+        # S1 (Issue 2-A): DB 删除抛异常时本地簿记保留，便于上层重试或 watchdog 回收，
+        # 避免出现"本地簿记已删但 DB 锁行残留"的孤儿锁。
+        assert result is False
+        assert "mylock" in lock_service._lock_contexts
+
+    def test_release_lock_db_delete_success_removes_bookkeeping(
+        self, lock_service, repository
+    ):
+        """S1: DB 删除成功 → 本地簿记同步删除。"""
+        import datetime
+
+        ctx = LockContext(
+            lock_name="mylock",
+            lock_holder="h1",
+            expire_time=datetime.datetime.now(),
+            reentrant_count=1,
+        )
+        with lock_service._local_lock:
+            lock_service._lock_contexts["mylock"] = ctx
+
+        repository.delete_lock.return_value = True
+
+        result = lock_service.release_lock("mylock", lock_holder="h1")
+
+        assert result is True
+        assert "mylock" not in lock_service._lock_contexts
+
+    def test_release_lock_db_delete_false_removes_bookkeeping(
+        self, lock_service, repository
+    ):
+        """S1: DB 行不存在（delete_lock=False）→ 清理簿记避免误判持有。"""
+        import datetime
+
+        ctx = LockContext(
+            lock_name="mylock",
+            lock_holder="h1",
+            expire_time=datetime.datetime.now(),
+            reentrant_count=1,
+        )
+        with lock_service._local_lock:
+            lock_service._lock_contexts["mylock"] = ctx
+
+        repository.delete_lock.return_value = False
+
+        result = lock_service.release_lock("mylock", lock_holder="h1")
+
         assert result is False
         assert "mylock" not in lock_service._lock_contexts
 

@@ -520,6 +520,105 @@ async def test_run_one_requeued_path(repo, queue):
     )
 
 
+async def test_run_one_assured_callback_on_exception(repo, queue):
+    """S3: executor 抛异常（非 RequeuedToPendingError）时 finally 兜底发送 callback。
+
+    不包裹 ResultGuardExecutor：直接让异常冒泡到 _run_one 的 except BaseException
+    路径，验证 callback 在异常分支被尝试调用一次（且 run_id 正确）。
+    """
+    _insert(repo, queue, "bot-1")
+    callback_called = asyncio.Event()
+    callback_run_ids: list[str] = []
+
+    async def test_cb(rid: str) -> None:
+        callback_run_ids.append(rid)
+        callback_called.set()
+
+    worker = _worker(
+        queue,
+        repo,
+        _RaisingExecutor(),
+        post_run_callback_factories={"test_cb": test_cb},
+    )
+
+    mock_tracer = MagicMock()
+    mock_tracer.extract_context.return_value = None
+    with patch(
+        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
+        return_value=mock_tracer,
+    ):
+        # 在 queue meta 中放 callback_function 让 _resolve_callback 找到 factory。
+        record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+        queue.update_meta(record.run_id, {"callback_function": "test_cb"})
+        record = queue.get_by_run_id(record.run_id)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await worker._run_one(record)
+
+    assert callback_called.is_set()
+    assert callback_run_ids == [record.run_id]
+
+
+async def test_run_one_assured_callback_skipped_on_requeue(repo, queue):
+    """S3: RequeuedToPendingError 路径不触发兜底 callback（session busy 非失败）。"""
+    _insert(repo, queue, "bot-1")
+    callback_run_ids: list[str] = []
+
+    async def test_cb(rid: str) -> None:
+        callback_run_ids.append(rid)
+
+    worker = _worker(
+        queue,
+        repo,
+        _RequeuedExecutor(),
+        post_run_callback_factories={"test_cb": test_cb},
+    )
+
+    mock_tracer = MagicMock()
+    mock_tracer.extract_context.return_value = None
+    with patch(
+        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
+        return_value=mock_tracer,
+    ):
+        record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+        queue.update_meta(record.run_id, {"callback_function": "test_cb"})
+        record = queue.get_by_run_id(record.run_id)
+
+        await worker._run_one(record)
+
+    # requeue 路径不发送 callback
+    assert callback_run_ids == []
+
+
+async def test_run_one_assured_callback_failure_is_logged(repo, queue):
+    """S3: assured callback 自身抛异常时不应淹没原始异常。"""
+    _insert(repo, queue, "bot-1")
+
+    async def bad_cb(rid: str) -> None:
+        raise RuntimeError("callback boom")
+
+    worker = _worker(
+        queue,
+        repo,
+        _RaisingExecutor(),
+        post_run_callback_factories={"test_cb": bad_cb},
+    )
+
+    mock_tracer = MagicMock()
+    mock_tracer.extract_context.return_value = None
+    with patch(
+        "secbaas.community.core.service.bot_run._worker.get_tracer_plugin",
+        return_value=mock_tracer,
+    ):
+        record = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+        queue.update_meta(record.run_id, {"callback_function": "test_cb"})
+        record = queue.get_by_run_id(record.run_id)
+
+        # 原始 executor 异常仍透传，callback 的异常只记日志
+        with pytest.raises(RuntimeError, match="boom"):
+            await worker._run_one(record)
+
+
 async def test_run_one_mark_done_raises_warning(repo, queue):
     """mark_done raising Exception should log warning but not crash."""
     _insert(repo, queue, "bot-1")

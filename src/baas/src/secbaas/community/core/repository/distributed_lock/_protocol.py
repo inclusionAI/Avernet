@@ -42,3 +42,18 @@ class DistributedLockRepository(Protocol):
         OceanBase/MySQL 锁等待超时（1205）视为正常竞争，返回 False。
         """
         ...
+
+    def delete_expired_locks_by_prefix(self, prefix: str, *, now: datetime) -> int:
+        """批量删除 ``lock_name LIKE prefix%`` 且 ``expire_time <= now`` 的孤儿锁行。
+
+        参数化 ``LIKE`` 绑定，避免字符串拼接。用于 ``BotRunRecoveryTask``
+        对过期 ``botrun:session:`` 锁的对账清理（不依赖锁 TTL 自愈）。
+
+        Args:
+            prefix: 锁名前缀，例如 ``botrun:session:``。
+            now: 应用 wall-clock 时间；``expire_time <= now`` 视为已过期。
+
+        Returns:
+            被删除的行数。
+        """
+        ...
