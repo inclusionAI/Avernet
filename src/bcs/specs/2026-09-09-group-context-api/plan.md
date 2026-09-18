@@ -249,8 +249,8 @@ consistency:
   4. content 字节数 ≤ CONTENT_MAX_BYTES（默认 1 KB），超出返回 413 payload_too_large
 
 PDP 判定：
-  5. 提取当前 actor_id
-  6. 比对 collect_from → actor_id 是否匹配
+  5. 提取当前 环境参数 + actor_id
+  6. 比对 collect_from → 是否匹配
      → 不匹配则拒绝，返回 permission_denied
 
 幂等检查：
@@ -334,6 +334,7 @@ PDP 判定：
        - tenant_id 必须匹配
        - group_id 必须匹配（如果 collect_from 指定了 group_id）
        - session_id 必须匹配（如果 collect_from 指定了 session_id）
+       - run_id 必须匹配（如果 collect_from 指定了 run_id）
        - user_id 必须匹配（如果 collect_from 指定了 user_id）
      → 无可写条目 → permission_denied
 
@@ -530,7 +531,6 @@ services/bcs-group-context/     # application + core 实现
     model.rs                    # ContextEntry / Flow / Consistency / Lineage / Governance
     template.rs                 # PolicyTemplate 类型定义 + 参数实例化
     error.rs                    # GroupContextError
-    audit.rs                    # 审计日志写入
 
 services/bcs-group-context-store/  # repo 实现
   src/
