@@ -825,6 +825,24 @@ class TestReportDeviceAlive:
 
         repo.update_bot_status_on_device_active.assert_called_once_with(binding_id=1)
 
+    @pytest.mark.parametrize(
+        "status",
+        [DeviceBindingStatus.FAILED.value, DeviceBindingStatus.STOPPED.value],
+    )
+    def test_terminal_heartbeat_does_not_reconcile_bot_to_active(self, status):
+        record = _make_record(
+            status=status,
+            device_props={"callback_token": "tok123"},
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = record
+        svc = _make_service(repo=repo)
+
+        svc.report_device_alive(device_id="staff_u001_default", token="tok123")
+
+        repo.update_bot_status_on_device_active.assert_not_called()
+
     def test_invalid_token_raises(self):
         record = _make_record(device_props={"callback_token": "correct_token"})
         repo = MagicMock()

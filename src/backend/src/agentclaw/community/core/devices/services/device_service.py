@@ -1101,7 +1101,11 @@ class DeviceService:
         # lost; the repository guard only advances the same binding's
         # PENDING/PROVISIONING Bot, so retries cannot overwrite terminal state.
         _t_cb = _time.time()
-        self._update_bot_status_on_device_active(binding_id=record.id)
+        if record.status in {
+            DeviceBindingStatus.PENDING.value,
+            DeviceBindingStatus.ACTIVE.value,
+        }:
+            self._update_bot_status_on_device_active(binding_id=record.id)
 
         # If status changed from PENDING to ACTIVE, sync bot status and trigger callbacks
         if record.status == DeviceBindingStatus.PENDING.value:
