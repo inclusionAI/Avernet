@@ -31,7 +31,7 @@ import hashlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     DispatchCandidate,
     DispatchRationale,
     JoinDropped,

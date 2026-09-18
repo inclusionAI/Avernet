@@ -96,6 +96,9 @@ class _TrajRepo:
         return record
 
 
+from tests.community.core.task.task_trajectory._task_context_support import _tcs
+
+
 class _CaseTaskService(TaskService):
     """Test subclass isolating the SUBMIT gate from per-branch internals.
 
@@ -168,7 +171,7 @@ def _service(traj_repo, *, task_info_repo=None, task_id="submit-tid"):
         TaskGraphService(),
         task_info_repo=task_info_repo,
         task_id_provider=lambda: task_id,
-        trajectory_repo=traj_repo,
+        task_context_service=_tcs(traj_repo),
     )
 
 
@@ -521,7 +524,7 @@ class TestSubmitGateZeroIntrusion:
             graph,
             task_info_repo=None,
             task_id_provider=lambda: "naction-tid",
-            trajectory_repo=repo,
+            task_context_service=_tcs(repo),
         )
         _exec(svc, _request(task_id="naction-tid"))
 
@@ -551,7 +554,7 @@ class TestSubmitIsTrajectoryActionTypeNotNodeAction:
     enum is unchanged and has no ``submit`` member."""
 
     def test_submit_in_trajectory_action_type(self):
-        from agentclaw.community.core.task.task_trajectory.models import (
+        from agentclaw.community.core.task.task_context.task_trajectory.models import (
             TrajectoryActionType,
         )
         assert TrajectoryActionType.SUBMIT.value == "submit"

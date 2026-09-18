@@ -94,7 +94,7 @@ from agentclaw.community.core.repository.protocols.task import (
 )
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
     TaskTrajectory,
     TrajectoryActionType,

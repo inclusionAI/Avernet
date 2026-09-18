@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Protocol
 
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
     TrajectoryActionType,
 )

@@ -47,7 +47,7 @@ import pytest
 
 from agentclaw.community.core.task.domain.errors import TrajectoryAnalysisError
 from agentclaw.community.core.task.domain.models import Status
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     AnalysisType,
     DispatchCandidate,
     DispatchRationale,
@@ -60,7 +60,7 @@ from agentclaw.community.core.task.task_trajectory.models import (
 )
 
 # The analyzer module under test (RED: this import fails until implemented).
-from agentclaw.community.core.task.task_trajectory.analyzer import (
+from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
     TaskTrajectoryAnalyzer,
 )
 
@@ -390,7 +390,7 @@ def test_terminal_status_fallback_from_non_transition_event():
     # gate). The _terminal_status FALLBACK derives the terminal status from the
     # last event of any action_type whose status_to is terminal. A VERIFY with
     # status_to=HUNG and NO transition → fallback returns HUNG (not None).
-    from agentclaw.community.core.task.task_trajectory.analyzer import (
+    from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
         _terminal_status,
     )
     verify = _ev(
@@ -1197,7 +1197,7 @@ def test_analyzer_does_not_import_transport_or_node_action():
     ``task_action_log`` reference. The check walks the AST (imports + name
     references) — NOT raw string matching, which would false-positive on the
     module docstring that documents what the analyzer must NOT touch."""
-    import agentclaw.community.core.task.task_trajectory.analyzer as mod
+    import agentclaw.community.core.task.task_context.task_trajectory.analyzer as mod
     tree = ast.parse(open(mod.__file__, encoding="utf-8").read())
     forbidden_name_refs = {"NodeAction", "append_action_event", "task_action_log"}
     forbidden_import_modules = {

@@ -34,7 +34,7 @@ from agentclaw.community.core.task.repository.types import (
     TaskTrajectoryRecord,
     TrajectoryEventRecord,
 )
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     AnalysisType,
     ReasonCatalog,
     TaskTrajectory,
@@ -42,7 +42,7 @@ from agentclaw.community.core.task.task_trajectory.models import (
     TrajectoryActionType,
     TrajectoryEvent,
 )
-from agentclaw.community.core.task.task_trajectory.trajectory_service import (
+from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import (
     TaskTrajectoryService,
     _build_ext_info_lookup,
     _event_key,
@@ -494,7 +494,7 @@ def test_ext_info_lookup_key_stable_across_enum_and_string_action_type():
         _make_event(action_type=TrajectoryActionType.DISPATCH, node_id="n1", attempt=0, gmt_create=1000)
     )
     # the record-side signature uses the raw string "dispatch"
-    from agentclaw.community.core.task.task_trajectory.trajectory_service import _event_signature
+    from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import _event_signature
     rec = _make_record(node_id="n1", action_type="dispatch", attempt=0, gmt_create_ms=1000)
     key_from_record = _event_signature(rec)
     assert key_from_enum == key_from_record

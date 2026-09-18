@@ -52,6 +52,8 @@ extracted to a shared helper — keeping the diff contained at one new file.
 """
 from __future__ import annotations
 
+from tests.community.core.task.task_trajectory._task_context_support import _tcs
+
 import ast
 import asyncio
 import inspect
@@ -281,7 +283,7 @@ class _TrajectoryCaseEngine(ExecutionEngine):
         self._case_planner = planner
         self._case_dispatcher = dispatcher
         self._case_runner = runner
-        super().__init__(graph, trajectory_repo=trajectory_repo)
+        super().__init__(graph, task_context_service=_tcs(trajectory_repo))
 
     def _build_planner(self):
         return self._case_planner if self._case_planner is not None else super()._build_planner()
@@ -398,7 +400,7 @@ class TestTrajectoryIntrusionGuard:
                 graph_svc_submit,
                 task_info_repo=None,
                 task_id_provider=lambda: "guard-submit",
-                trajectory_repo=repo,
+                task_context_service=_tcs(repo),
             )
             result = _exec(svc, _request(task_id="guard-submit"))
             # SUBMIT gate's main logic (execute) completes + drives forward
@@ -588,7 +590,7 @@ class TestTrajectoryActionLogDecoupling:
         as a name + no code-level ``Name`` reference (re-routing through the
         action_log path would need to resolve the enum).
         """
-        from agentclaw.community.core.task.task_trajectory import models, payloads
+        from agentclaw.community.core.task.task_context.task_trajectory import models, payloads
 
         for mod in (models, payloads):
             src = self._module_source(mod)
@@ -630,7 +632,7 @@ class TestTrajectoryActionLogDecoupling:
         make no call to ``append_action_event`` (neither as a bare ``Name``
         call nor as a method ``Attribute`` call like ``self._graph.append_action_event``).
         """
-        from agentclaw.community.core.task.task_trajectory import payloads
+        from agentclaw.community.core.task.task_context.task_trajectory import payloads
 
         src = self._module_source(payloads)
         tree = ast.parse(src)
@@ -686,7 +688,7 @@ class TestTrajectoryActionLogDecoupling:
         guard file.
         """
         from agentclaw.community.core.task.domain.models import NodeAction
-        from agentclaw.community.core.task.task_trajectory.models import (
+        from agentclaw.community.core.task.task_context.task_trajectory.models import (
             TrajectoryActionType,
         )
 

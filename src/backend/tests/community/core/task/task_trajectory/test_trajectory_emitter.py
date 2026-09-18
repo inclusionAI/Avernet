@@ -26,11 +26,11 @@ from datetime import datetime, timezone
 
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
     TrajectoryActionType,
 )
-from agentclaw.community.core.task.task_trajectory.payloads import (
+from agentclaw.community.core.task.task_context.task_trajectory.payloads import (
     emit_trajectory_event,
     build_trajectory_event_record,
 )

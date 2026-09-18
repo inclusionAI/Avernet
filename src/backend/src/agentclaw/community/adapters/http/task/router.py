@@ -66,8 +66,8 @@ from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.api.task.task_trajectory_service import (
-    TaskTrajectoryServiceProtocol,
+from agentclaw.community.api.task.task_context_service import (
+    TaskContextServiceProtocol,
 )
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.utils.env_utils import get_current_env
@@ -125,7 +125,7 @@ async def get_task_trajectory_internal(
     do_analysis: Annotated[
         bool, Query(description="是否触发 bot 总体分析(默认关闭)")
     ] = False,
-    service: TaskTrajectoryServiceProtocol = Injected(TaskTrajectoryServiceProtocol),  # noqa: B008
+    service: TaskContextServiceProtocol = Injected(TaskContextServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskTrajectoryDTO]:
     """读取任务轨迹(内部副本;与公开面 ``adapters/http/openapi_v1/task/router.py`` 同一委托,逻辑一致,改其一须同步)。
 

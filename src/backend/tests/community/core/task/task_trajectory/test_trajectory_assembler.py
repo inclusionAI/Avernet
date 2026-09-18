@@ -67,7 +67,7 @@ from agentclaw.community.core.task.repository.types import (
     TrajectoryEventRecord,
 )
 import agentclaw.community.core.task.repository.models  # noqa: F401  registers ORM models
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
     TaskTrajectory,
     TrajectoryActionType,
@@ -75,7 +75,7 @@ from agentclaw.community.core.task.task_trajectory.models import (
 )
 
 # The assembler module under test (RED: this import fails until implemented).
-from agentclaw.community.core.task.task_trajectory.assembler import (
+from agentclaw.community.core.task.task_context.task_trajectory.assembler import (
     TaskTrajectoryAssembler,
 )
 
@@ -538,7 +538,7 @@ def test_assembler_module_does_not_import_or_reference_action_log_symbols():
     the assembler source must NOT import ``NodeAction`` / ``TaskActionLog*`` /
     ``task_action_log`` or invoke ``append_action_event``. A future PR that
     re-couples the read side to the action log surfaces here, not by silence."""
-    from agentclaw.community.core.task.task_trajectory import assembler
+    from agentclaw.community.core.task.task_context.task_trajectory import assembler
 
     src = inspect.getsource(assembler)
     tree = ast.parse(src)

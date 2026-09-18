@@ -65,19 +65,19 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskNodeRunInfoRepositoryProtocol,
     TaskTrajectoryRepositoryProtocol,
 )
-from agentclaw.community.core.task.task_trajectory.assembler import (
+from agentclaw.community.core.task.task_context.task_trajectory.assembler import (
     TaskTrajectoryAssembler,
 )
-from agentclaw.community.core.task.task_trajectory.analyzer import (
+from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
     TaskTrajectoryAnalyzer,
 )
-from agentclaw.community.core.task.task_trajectory.trajectory_service import (
+from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import (
     TaskTrajectoryService,
-)
-from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
-from agentclaw.community.api.task.task_trajectory_service import (
     TaskTrajectoryServiceProtocol,
 )
+from agentclaw.community.core.task.task_context.task_context_service import TaskContextService
+from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
+from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
 
 
@@ -199,4 +199,24 @@ class TaskPersistenceModule(Module):
             repo=injector.get(TaskTrajectoryRepositoryProtocol),
             analyzer=injector.get(TaskTrajectoryAnalyzer),
             config=config,
+        )
+
+    @singleton
+    @provider
+    def task_context_service(
+        self, injector: Injector
+    ) -> TaskContextServiceProtocol:
+        """Construct the ``task_context`` facade (spec 2026-09-18): the single对外
+        entry for trajectory read + write, relaying to the internal
+        ``TaskTrajectoryService`` (bound just above as
+        ``TaskTrajectoryServiceProtocol``). External callers Inject
+        ``TaskContextServiceProtocol`` (re-exported from
+        ``api/task/task_context_service.py``): the 2 HTTP routers go to
+        ``get_trajectory``; the engine / task_service / callback_adapter emission
+        gates go to ``emit_trajectory_event`` / ``emit_submit_trajectory``
+        (fire-and-forget, decision #14). The trajectory repo + emit helpers stay
+        internal to the ``task_context.task_trajectory`` sub-module.
+        """
+        return TaskContextService(
+            trajectory_service=injector.get(TaskTrajectoryServiceProtocol),
         )

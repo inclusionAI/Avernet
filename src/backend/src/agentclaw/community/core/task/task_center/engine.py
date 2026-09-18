@@ -57,8 +57,7 @@ from agentclaw.community.core.task.task_harness.harness import (
     effective_pending_timeout_ms,
     effective_sla_threshold_ms,
 )
-from agentclaw.community.core.task.task_trajectory.models import ReasonCatalog
-from agentclaw.community.core.task.task_trajectory.payloads import emit_trajectory_event
+from agentclaw.community.core.task.task_context.task_trajectory.models import ReasonCatalog
 from agentclaw.community.core.task.task_runner.callback_adapter import (
     EXEC_ERROR_ORIGIN_BOT_INTERFACE,
     EXEC_ERROR_ORIGIN_PARSE,
@@ -67,16 +66,17 @@ from agentclaw.community.core.task.task_runner.callback_adapter import (
 )
 
 if TYPE_CHECKING:
-    # Protocol + trajectory-enum imports are TYPE_CHECKING-only: the engine
-    # stores the optional repo + passes enum members through ``emit_trajectory_event``,
-    # and ``from __future__ import annotations`` stringises these hints so they
-    # are never evaluated at runtime — keeps the engine's runtime import surface
-    # minimal. ``ReasonCatalog`` is imported for real (used by the EXECUTE/VERIFY
-    # gate's ``_EXEC_ERROR_ORIGIN_TO_REASON`` origin→error_type mapping, REQ-5).
-    from agentclaw.community.core.repository.protocols.task import (
-        TaskTrajectoryRepositoryProtocol,
+    # Protocol + trajectory-enum imports are TYPE_CHECKING-only: the engine stores
+    # the optional task_context_service + passes enum members through the service's
+    # ``emit_trajectory_event``, and ``from __future__ import annotations``
+    # stringises these hints so they are never evaluated at runtime — keeps the
+    # engine's runtime import surface minimal. ``ReasonCatalog`` is imported for
+    # real (used by the EXECUTE/VERIFY gate's ``_EXEC_ERROR_ORIGIN_TO_REASON``
+    # origin→error_type mapping, REQ-5).
+    from agentclaw.community.core.task.task_context.task_context_service import (
+        TaskContextServiceProtocol,
     )
-    from agentclaw.community.core.task.task_trajectory.models import (
+    from agentclaw.community.core.task.task_context.task_trajectory.models import (
         TrajectoryActionType,
     )
 
@@ -443,7 +443,7 @@ class ExecutionEngine:
         bot_token_provider=None,
         notify_messages_provider=None,
         bot_bindings=None,
-        trajectory_repo: "TaskTrajectoryRepositoryProtocol | None" = None,
+        task_context_service: "TaskContextServiceProtocol | None" = None,
     ) -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
@@ -454,10 +454,11 @@ class ExecutionEngine:
         ``api_base_url``:任务后端 base url,经 _build_executor 透传给 TaskExecutor→bbs_runner.notify,
         拼成发给胜出 bot 的任务消息(spec §5:主动触发回投路径)。
 
-        ``trajectory_repo``(可选):任务轨迹旁路采集落库协议(REQ-11)。PIb DI 在 prod 注入真实实现
-        (``TaskTrajectoryRepository``);测试/轻量 DI 取不到 → ``None`` → ``_log_trajectory`` 静默 no-op,
-        与 ``task_action_log`` 完全解耦(本 spec 不读不写 action log)。``None`` 时引擎仍可正常运行,
-        轨迹事件不落库但正向驱动不受影响。"""
+        ``task_context_service``(可选):任务轨迹旁路采集的外部入口(REQ-11;spec 2026-09-18 重构)。
+        引擎不再直接持 trajectory repo,只持 ``TaskContextServiceProtocol``;经 ``emit_trajectory_event``
+        中转到内部 ``TaskTrajectoryService`` 落库。DI 在 prod 注入真实实现;测试/轻量 DI 取不到 → ``None``
+        → ``_log_trajectory`` 静默 no-op,与 ``task_action_log`` 完全解耦(本 spec 不读不写 action log)。
+        ``None`` 时引擎仍可正常运行,轨迹事件不落库但正向驱动不受影响。"""
         self._graph = graph
         self._bot = bot
         self._bcs = bcs
@@ -471,9 +472,9 @@ class ExecutionEngine:
         self._bot_token_provider = bot_token_provider
         self._notify_provider = notify_messages_provider
         self._bot_bindings = bot_bindings
-        # 轨迹旁路采集落库协议(可选):None 时 _log_trajectory 静默 no-op(emitter 独立 direct-INSERT,
-        # 不走 task_action_log/append_action_event 链路 — 见 task_trajectory/payloads.py)。
-        self._trajectory_repo = trajectory_repo
+        # 轨迹旁路采集外部入口(可选):task_context_service;None 时 _log_trajectory 静默 no-op(emitter
+        # 经内部 TaskTrajectoryService 独立 direct-INSERT,不走 task_action_log/append_action_event 链路)。
+        self._task_context_service = task_context_service
         self._bg_tasks: set[object] = set()
         self._bbs_loop: asyncio.AbstractEventLoop | None = None
         self._bbs_loop_thread: threading.Thread | None = None
@@ -972,12 +973,13 @@ class ExecutionEngine:
         """旁路发射一条任务轨迹事件(REQ-11 采集层)。零侵入驱动逻辑:
 
         - 与 ``_log_action`` 在同一闸门位置调用,但**完全独立**——经
-          ``emit_trajectory_event(self._trajectory_repo, ...)`` 直接 INSERT 到
-          ``task_trajectory_events``,**不**经 ``self._graph.append_action_event``
+          ``self._task_context_service.emit_trajectory_event(...)`` 中转到内部
+          ``TaskTrajectoryService`` 直接 INSERT 到 ``task_trajectory_events``,
+          **不**经 ``self._graph.append_action_event``
           (plan §"Spec clarifications" #2:The trajectory path is independent and
           direct-INSERT;mirrors only the swallow + no re-raise pattern)。
-        - ``self._trajectory_repo`` 为 ``None`` 时(测试/轻量 DI 取不到协议)→
-          emitter 静默 no-op,正向驱动不受影响。
+        - ``self._task_context_service`` 为 ``None`` 时(测试/轻量 DI 取不到协议)→
+          跳过发射静默 no-op,正向驱动不受影响(内部 repo-None 情形由 emitter 再兜底 no-op)。
         - 全程 ``try/except Exception`` 吞异常(**不**抛出),失败记 WARNING 日志
           (已确认决策 #14;AGENTS.md "propagate persistence write failures" 对此
           fire-and-forget 观测旁路**明示豁免**)——见 ``task_trajectory/payloads.py``。
@@ -986,22 +988,24 @@ class ExecutionEngine:
         ``action_input`` **不截断**(原文落库);``error_msg`` 由调用方(各 gate)截断后传入。
         ``now_ms`` 由 emitter 取当前 wall-clock(emitter 内有兜底),故本方法不暴露该参数。
         """
-        # No need to guard ``self._trajectory_repo is None`` here — the emitter
-        # handles that (no-op + no raise) so the gate stays a one-liner regardless.
-        emit_trajectory_event(
-            self._trajectory_repo,
-            task_id,
-            node_id,
-            action_type,
-            action_result=action_result,
-            action_input=action_input,
-            error_type=error_type,
-            error_msg=error_msg,
-            ext_info=ext_info,
-            status_from=status_from,
-            status_to=status_to,
-            attempt=attempt,
-        )
+        # ``task_context_service is None`` (lightweight DI: trajectory unbound) → no-op;
+        # when present, the service relays to the internal TaskTrajectoryService whose
+        # emitter no-ops + swallows on repo-None (decision #14). The guard keeps the
+        # gate concise regardless.
+        if self._task_context_service is not None:
+            self._task_context_service.emit_trajectory_event(
+                task_id,
+                node_id,
+                action_type,
+                action_result=action_result,
+                action_input=action_input,
+                error_type=error_type,
+                error_msg=error_msg,
+                ext_info=ext_info,
+                status_from=status_from,
+                status_to=status_to,
+                attempt=attempt,
+            )
 
     # ------------------------------------------------------------------
     # REQ-1 — TRANSITION trajectory gate helper (additive to _log_action)

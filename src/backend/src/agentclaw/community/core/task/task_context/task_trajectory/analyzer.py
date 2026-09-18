@@ -70,7 +70,7 @@ from typing import Any, Callable, Protocol, runtime_checkable
 
 from agentclaw.community.core.task.domain.errors import TrajectoryAnalysisError
 from agentclaw.community.core.task.domain.models import Status
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     AnalysisType,
     ReasonCatalog,
     TaskTrajectory,

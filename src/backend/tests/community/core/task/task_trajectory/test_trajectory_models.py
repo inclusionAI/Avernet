@@ -10,7 +10,7 @@ import dataclasses
 import typing
 
 from agentclaw.community.core.task.domain.models import NodeAction, Status
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     DispatchCandidate,
     DispatchRationale,
     JoinDropped,

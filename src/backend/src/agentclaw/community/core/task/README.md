@@ -25,8 +25,15 @@ core/task/
 ├── task_center/                   # TaskService facade + ExecutionEngine 编排核(非独立模块)
 │   ├── task_service.py            #   facade API(execute / get_task_dashboard / list_tasks)
 │   └── engine.py                  #   ExecutionEngine:on_* 事件驱动 + 状态条件(a/b/c)推进
-├── task_context/                    # TaskGraphService 图谱 SSOT(7+2 API,独立模块)
-│   └── task_graph_service.py      #   原子变更唯一网关 + relations 分解树派生查询
+├── task_context/                    # TaskGraphService 图谱 SSOT + task_context_service 轨迹读写门面(独立模块)
+│   ├── task_graph_service.py      #   7+2 API:原子变更唯一网关 + relations 分解树派生查询
+│   ├── task_context_service.py   #   轨迹读+写的单一对外入口(relay→task_trajectory 子模块;spec 2026-09-18)
+│   └── task_trajectory/          #   任务轨迹采集旁路子模块(零侵入正向驱动;spec 2026-09-16)
+│       ├── models.py             #   纯 dataclass/enum:TrajectoryEvent/TaskTrajectory/TrajectoryAnalysis/ReasonCatalog/DispatchRationale/TrajectoryActionType
+│       ├── payloads.py           #   emit_trajectory_event / emit_submit_trajectory 发射器
+│       ├── assembler.py          #   只读组装:事件表 → TaskTrajectory
+│       ├── analyzer.py           #   总体分析:rule/llm/tc_bot 多执行者
+│       └── trajectory_service.py #   TaskTrajectoryService 内部契约 + 实现(对外不暴露)
 ├── task_plan/                     # TaskPlanner 规划编排壳 + DecomposerPort seam(可插拔)
 │   └── planner.py                 #   plan(graph) → 委托 decompose(零 case 知识);protocols.py 延后
 ├── task_dispatch/                 # TaskDispatcher 搜推分发 + BotDiscoverPort seam(可插拔)
@@ -36,9 +43,7 @@ core/task/
 │   └── callback_adapter.py        #   TaskCallbackData → TaskNodePatch → engine.on_report
 ├── task_harness/                  # TaskHarness 旁路常驻巡检
 │   └── harness.py                 #   周期巡检超时/崩溃 → 复位 PENDING 重投(不抢正向)
-├── task_discovery/                # 占位(另一位同学的任务挖掘模块,本框架不实现)
-└── task_trajectory/               # 任务轨迹采集旁路 + 只读组装/分析(零侵入正向驱动;spec 2026-09-16)
-    └── models.py                 #   纯 dataclass/enum:TrajectoryEvent/TaskTrajectory/TrajectoryAnalysis/ReasonCatalog/DispatchRationale/TrajectoryActionType
+└── task_discovery/                # 占位(另一位同学的任务挖掘模块,本框架不实现)
 ```
 
 ## 节点状态机流转(6 节点态 + 图态;双机实现于 TaskGraphService)

@@ -3,7 +3,7 @@
 Covers both the public OpenAPI mirror (``/openapi/v1/collaboration/tasks/trajectory``)
 and the internal副本 (``/api/v1/collaboration/tasks/trajectory``) via the shared
 ``TestClient`` + ``attach_injector`` pattern (mirrors
-``test_dashboard_assignee_bot_info.py``). The ``TaskTrajectoryServiceProtocol``
+``test_dashboard_assignee_bot_info.py``). The ``TaskContextServiceProtocol``
 is stubbed at the injector level (a ``_StubModule``) so the assertions exercise
 the router → service → DTO translation, not the real assembler/analyzer/bot.
 
@@ -38,14 +38,14 @@ from agentclaw.community.adapters.http.openapi_v1.task.router import (
 from agentclaw.community.adapters.http.task.router import (
     router as task_internal_router,
 )
-from agentclaw.community.api.task.task_trajectory_service import (
-    TaskTrajectoryServiceProtocol,
+from agentclaw.community.api.task.task_context_service import (
+    TaskContextServiceProtocol,
 )
 from agentclaw.community.core.task.domain.errors import (
     TrajectoryAnalysisError,
     TrajectoryAnalysisNotConfiguredError,
 )
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     AnalysisType,
     TaskTrajectory,
     TrajectoryActionType,
@@ -60,7 +60,7 @@ from agentclaw.community.core.task.task_trajectory.models import (
 
 
 class _StubTrajectoryService:
-    """Stub ``TaskTrajectoryServiceProtocol`` capturing ``get_trajectory`` calls."""
+    """Stub ``TaskContextServiceProtocol`` capturing ``get_trajectory`` calls."""
 
     def __init__(
         self,
@@ -80,9 +80,18 @@ class _StubTrajectoryService:
             raise self._raise_exc
         return self._trajectory
 
+    # The endpoint exercises get_trajectory only; the protocol's emit_* (write
+    # path) are out-of-scope here — no-op stubs so the stub structurally
+    # satisfies TaskContextServiceProtocol for the injector binding.
+    def emit_trajectory_event(self, *args, **kwargs) -> None:
+        pass  # pragma: no cover
+
+    def emit_submit_trajectory(self, *args, **kwargs) -> None:
+        pass  # pragma: no cover
+
 
 class _StubModule(Module):
-    """Binds ``TaskTrajectoryServiceProtocol`` to a stub instance (injector-level
+    """Binds ``TaskContextServiceProtocol`` to a stub instance (injector-level
     override, mirroring ``test_dashboard_assignee_bot_info.py``'s ``_StubModule``)."""
 
     def __init__(self, service: _StubTrajectoryService) -> None:
@@ -91,7 +100,7 @@ class _StubModule(Module):
 
     @singleton
     @provider
-    def trajectory_service(self) -> TaskTrajectoryServiceProtocol:
+    def trajectory_service(self) -> TaskContextServiceProtocol:
         return self._service
 
 

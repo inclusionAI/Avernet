@@ -48,6 +48,8 @@ Invariants the tests pin (cross-cutting with the task constraints):
 """
 from __future__ import annotations
 
+from tests.community.core.task.task_trajectory._task_context_support import _tcs
+
 import asyncio
 import json
 import time
@@ -205,7 +207,7 @@ class _TrajectoryCaseEngine(ExecutionEngine):
         self._case_planner = planner
         self._case_dispatcher = dispatcher
         self._case_runner = runner
-        super().__init__(graph, trajectory_repo=trajectory_repo)
+        super().__init__(graph, task_context_service=_tcs(trajectory_repo))
 
     def _build_planner(self):
         return self._case_planner if self._case_planner is not None else super()._build_planner()

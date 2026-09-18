@@ -20,12 +20,14 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
 )
 from agentclaw.community.core.task.task_loop_callback_protocol import TaskLoopCallbackProtocol
-from agentclaw.community.core.task.task_trajectory.models import ReasonCatalog
-from agentclaw.community.core.task.task_trajectory.payloads import emit_trajectory_event
+from agentclaw.community.core.task.task_context.task_trajectory.models import ReasonCatalog
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.protocols.task import (
         TaskCallbackRepositoryProtocol,
+    )
+    from agentclaw.community.core.task.task_context.task_context_service import (
+        TaskContextServiceProtocol,
     )
 
 logger = logging.getLogger("task.callback")
@@ -368,18 +370,18 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         adapter: CallbackAdapter,
         engine,
         callback_repo: "TaskCallbackRepositoryProtocol | None" = None,
-        trajectory_repo=None,
+        task_context_service: "TaskContextServiceProtocol | None" = None,
     ) -> None:
         """adapter: CallbackAdapter;engine: ExecutionEngine(on_report async 入口)。
         callback_repo: 回投落库协议(DI 在 prod 注入真实实现;``None`` 时跳过落库,纯内核/单测路径用)。
-        trajectory_repo: 任务轨迹旁路采集落库协议(可选,REQ-5):prod 经 DI 注入,供
-        ``ingest_parse_error`` 旁路发射 ``parse_error`` 轨迹事件(不进 on_report 链路);
-        ``None`` 时 emitter 静默 no-op(与引擎内 ``_log_trajectory`` 同约定)。镜像 ``callback_repo``
-        的注入形态(可选、None no-op),不破坏既有构造调用。"""
+        task_context_service: 任务轨迹旁路采集的外部入口(可选,REQ-5;spec 2026-09-18 重构):prod 经
+        DI 注入,供 ``ingest_parse_error`` 旁路发射 ``parse_error`` 轨迹事件(经内部 TaskTrajectoryService
+        emit_trajectory_event,不进 on_report 链路);``None`` 时静默 no-op(与引擎内 ``_log_trajectory``
+        同约定)。镜像 ``callback_repo`` 的注入形态(可选、None no-op),不破坏既有构造调用。"""
         self._adapter = adapter
         self._engine = engine
         self._callback_repo = callback_repo
-        self._trajectory_repo = trajectory_repo
+        self._task_context_service = task_context_service
 
     def _is_already_processed(self, event_id: str | None) -> bool:
         """event-idempotency guard (spec §12): a callback whose ``event_id`` is
@@ -537,16 +539,15 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
 
         决策 #14:emitter 内 try/except + WARNING(吞而不抛);本方法在外层兜一层装配 try/except
         + WARNING,使 fetch flow_id / 截断 等装配异常也不掩盖 ingest 主逻辑(审计落库已先行)。
-        ``self._trajectory_repo is None`` → 静默 no-op(轻量 DI / 未注入轨迹协议)。
+        ``self._task_context_service is None`` → 静默 no-op(轻量 DI / 未注入轨迹服务)。
         """
-        if self._trajectory_repo is None:
+        if self._task_context_service is None:
             return
         try:
             flow_id = (raw.get("flow_id") or "") if isinstance(raw, dict) else ""
             err = error if isinstance(error, str) else str(error)
             err_msg = err if len(err) <= 500 else err[:497] + "..."
-            emit_trajectory_event(
-                self._trajectory_repo,
+            self._task_context_service.emit_trajectory_event(
                 flow_id,    # task_id = flow_id(callback routing,可能非框架 task)
                 "",         # node_id 未知(不可解析路由)
                 "execute",  # TrajectoryActionType.EXECUTE — 不可解析的 execute/verify 响应

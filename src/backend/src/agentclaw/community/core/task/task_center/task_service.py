@@ -23,7 +23,6 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskInfoRepositoryProtocol,
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
-    TaskTrajectoryRepositoryProtocol,
 )
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
@@ -60,7 +59,7 @@ from agentclaw.community.core.task.task_center.task_service_support import (
 from agentclaw.community.core.task.task_center.task_service_execution import (
     TaskServiceExecutionMixin,
 )
-from agentclaw.community.core.task.task_trajectory.payloads import emit_submit_trajectory
+from agentclaw.community.core.task.task_context.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.core.task.task_center.task_service_relay import TaskServiceRelayMixin
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import RELAY_EXECUTION
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
@@ -97,13 +96,13 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         bot_token_provider=None,
         notify_messages_provider=None,
         bot_bindings=None,
-        trajectory_repo: "TaskTrajectoryRepositoryProtocol | None" = None,
+        task_context_service: "TaskContextServiceProtocol | None" = None,
     ) -> None:
         """Build the facade from graph, execution ports and optional repositories.
 
         ``task_info_repo``/``callback_repo``/``task_node_repo``/``task_node_run_info_repo``(可选):持久化协议(DI prod 注入;
-        ``None`` 跳过持久化,纯内核/单测路径)。``task_id_provider``:task_id 生成器(默认 uuid4)。``trajectory_repo``(可选,REQ-11):轨迹
-        旁路采集落库协议;``None`` 时 ``_log_trajectory`` 静默 no-op(与 ``task_action_log`` 解耦,不读不写 action log)。"""
+        ``None`` 跳过持久化,纯内核/单测路径)。``task_id_provider``:task_id 生成器(默认 uuid4)。``task_context_service``(可选,REQ-11):轨迹
+        旁路采集的外部入口(spec 2026-09-18 重构);``None`` 时 ``_log_trajectory`` 静默 no-op(与 ``task_action_log`` 解耦,不读不写 action log)。"""
         self._graph = graph
         self._harness = harness
         self._bcn = bcn
@@ -122,8 +121,8 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         self._bot_token_provider = bot_token_provider
         self._notify_provider = notify_messages_provider
         self._bot_bindings = bot_bindings
-        # 任务轨迹旁路采集落库协议(可选,REQ-11);None → _log_trajectory 静默 no-op。经实例属性透传(不进 _build_engine 签名)。
-        self._trajectory_repo = trajectory_repo
+        # 任务轨迹旁路采集外部入口(可选,REQ-11);None → _log_trajectory 静默 no-op。经实例属性透传(不进 _build_engine 签名)。
+        self._task_context_service = task_context_service
         # claim_on JOIN 经 self._task_auth_gate 传入 dispatcher(不进签名,保持覆写 seam)。
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
         # fire-and-forget 后台推进任务跟踪(防 GC + 异常可见 + drain seam)
@@ -131,7 +130,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         # 回投适配层:执行实体 PUSH → 适配 → 编排核 on_report
         self._callback = TaskLoopCallback(
             CallbackAdapter(), self._engine, callback_repo=callback_repo,
-            trajectory_repo=self._trajectory_repo,
+            task_context_service=self._task_context_service,
         )
         # harness 复位重投入口回填(编排核已建,harness 才能拿到 on_harness)+ 启动旁路巡检 daemon 线程
         if self._harness is not None:
@@ -148,7 +147,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
     def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
         """构造编排核:ExecutionEngine(graph, bot=, bcs=, discover=),引擎内部 ``_build_*`` new 自带策略 + 接线
         TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 引擎(测试 seam)。``self._task_auth_gate``
-        与 ``self._trajectory_repo`` 经实例属性透传(不进签名,保持 seam 向后兼容);``None`` → no-op。"""
+        与 ``self._task_context_service`` 经实例属性透传(不进签名,保持 seam 向后兼容);``None`` → no-op。"""
         return ExecutionEngine(
             self._graph,
             bot=bot,
@@ -163,7 +162,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
             bot_token_provider=self._bot_token_provider,
             notify_messages_provider=self._notify_provider,
             bot_bindings=self._bot_bindings,
-            trajectory_repo=self._trajectory_repo,
+            task_context_service=self._task_context_service,
         )
 
     def _resolve_static_plan_template_id(self, request: "TaskInfoRequest") -> str | None:
@@ -346,9 +345,10 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
                 )
         # REQ-6 SUBMIT trajectory gate: fire once after task_info persists (above task_type branch).
         # Persist IntegrityError short-circuits above; trajectory assembly swallowed in helper (决策 #14).
-        emit_submit_trajectory(
-            self._trajectory_repo, task_id, task_info, submitted_at_ms=int(time.time() * 1000)
-        )
+        if self._task_context_service is not None:
+            self._task_context_service.emit_submit_trajectory(
+                task_id, task_info, submitted_at_ms=int(time.time() * 1000)
+            )
         graph = self._graph.initialize_graph(task_info)
         self._enrich_anniversary_trigger_bot_name(request, graph)
         logger.info(

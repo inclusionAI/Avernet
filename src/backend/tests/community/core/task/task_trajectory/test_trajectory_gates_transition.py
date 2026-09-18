@@ -48,6 +48,8 @@ Authoritative: spec REQ-1 / REQ-9 / 决策 #14.
 """
 from __future__ import annotations
 
+from tests.community.core.task.task_trajectory._task_context_support import _tcs
+
 import asyncio
 import json
 import time
@@ -74,11 +76,11 @@ from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
 )
-from agentclaw.community.core.task.task_trajectory.analyzer import (
+from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
     TaskTrajectoryAnalyzer,
     _terminal_status,
 )
-from agentclaw.community.core.task.task_trajectory.models import (
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
     AnalysisType,
     ReasonCatalog,
     TaskTrajectory,
@@ -201,7 +203,7 @@ class _TrajectoryCaseEngine(ExecutionEngine):
         self._case_planner = planner
         self._case_dispatcher = dispatcher
         self._case_runner = runner
-        super().__init__(graph, trajectory_repo=trajectory_repo)
+        super().__init__(graph, task_context_service=_tcs(trajectory_repo))
 
     def _build_planner(self):
         return self._case_planner if self._case_planner is not None else super()._build_planner()

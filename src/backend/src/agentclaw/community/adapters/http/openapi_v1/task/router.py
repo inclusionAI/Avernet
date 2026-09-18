@@ -51,8 +51,8 @@ from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.api.task.task_trajectory_service import (
-    TaskTrajectoryServiceProtocol,
+from agentclaw.community.api.task.task_context_service import (
+    TaskContextServiceProtocol,
 )
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
@@ -142,10 +142,10 @@ async def get_task_trajectory(
     do_analysis: Annotated[
         bool, Query(description="是否触发 bot 总体分析(默认关闭)")
     ] = False,
-    service: TaskTrajectoryServiceProtocol = Injected(TaskTrajectoryServiceProtocol),  # noqa: B008
+    service: TaskContextServiceProtocol = Injected(TaskContextServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskTrajectoryDTO]:
     """读取任务轨迹(与 adapters/http/task/router.py 内部副本同一
-    TaskTrajectoryServiceProtocol 委托,逻辑保持一致 —— 改其一须同步)。
+    TaskContextServiceProtocol 委托,逻辑保持一致 —— 改其一须同步)。
 
     do_analysis=false(默认,纯读):返回组装后的 TaskTrajectory,analysis 取已落库值或 None,
     不写库、不调 bot;do_analysis=true:调 DI 配置注入的 bot 做总体分析(analysis_type=tc_bot、

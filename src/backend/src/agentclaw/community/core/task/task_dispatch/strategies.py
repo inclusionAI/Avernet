@@ -25,7 +25,7 @@ from agentclaw.community.core.task.task_dispatch.rationale import (
     _claim_product,
     _extract_skill_response_content,
 )
-from agentclaw.community.core.task.task_trajectory.models import DispatchRationale
+from agentclaw.community.core.task.task_context.task_trajectory.models import DispatchRationale
 
 logger = logging.getLogger("task.dispatcher")
 

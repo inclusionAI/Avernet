@@ -47,6 +47,8 @@ Invariants the tests pin (cross-cutting with the task constraints):
 """
 from __future__ import annotations
 
+from tests.community.core.task.task_trajectory._task_context_support import _tcs
+
 import asyncio
 import json
 import logging
@@ -237,7 +239,7 @@ class _TrajectoryCaseEngine(ExecutionEngine):
         self._case_planner = planner
         self._case_dispatcher = dispatcher
         self._case_runner = runner
-        super().__init__(graph, trajectory_repo=trajectory_repo)
+        super().__init__(graph, task_context_service=_tcs(trajectory_repo))
 
     def _build_planner(self):
         return self._case_planner if self._case_planner is not None else super()._build_planner()
@@ -996,7 +998,7 @@ class TestIngestParseErrorEmitsParseTrajectory:
         cb_repo = _StubCallbackRepo()
         cb = TaskLoopCallback(
             CallbackAdapter(), engine=None, callback_repo=cb_repo,
-            trajectory_repo=repo,
+            task_context_service=_tcs(repo),
         )
         raw = {"flow_id": "flow-99",
                "ext_info": {"flow_runs": {"origin_session_id": "S-9"}}}
@@ -1028,7 +1030,7 @@ class TestIngestParseErrorEmitsParseTrajectory:
         repo = _CapturingTrajRepo()
         cb = TaskLoopCallback(
             CallbackAdapter(), engine=None, callback_repo=None,
-            trajectory_repo=repo,
+            task_context_service=_tcs(repo),
         )
         _run(cb.ingest_parse_error({"flow_id": "f1"}, "boom"))
         assert len(repo.records) == 1
@@ -1040,7 +1042,7 @@ class TestIngestParseErrorEmitsParseTrajectory:
         cb_repo = _StubCallbackRepo()
         cb = TaskLoopCallback(
             CallbackAdapter(), engine=None, callback_repo=cb_repo,
-            trajectory_repo=None,
+            task_context_service=None,
         )
         _run(cb.ingest_parse_error({"flow_id": "f1"}, "parse boom"))  # must NOT raise
         assert len(cb_repo.upserted) == 1  # audit still wrote
@@ -1051,7 +1053,7 @@ class TestIngestParseErrorEmitsParseTrajectory:
         repo = _CapturingTrajRepo()
         cb = TaskLoopCallback(
             CallbackAdapter(), engine=None, callback_repo=_StubCallbackRepo(),
-            trajectory_repo=repo,
+            task_context_service=_tcs(repo),
         )
         long_err = "E" * 2000
         _run(cb.ingest_parse_error({"flow_id": "f1"}, long_err))
