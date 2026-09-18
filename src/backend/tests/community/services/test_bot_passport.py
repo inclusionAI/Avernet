@@ -351,6 +351,51 @@ class TestCreateBotWithBotId(TestBotServicePassportIntegration):
         mock_bot_repository.get_by_id_and_owner.assert_called_once_with("default", "123456")
         mock_bot_repository.insert.assert_not_called()
 
+    def test_retry_provisions_pending_bot_without_redeciding_layout(
+        self,
+        bot_service,
+        mock_bot_repository,
+        mock_device_service,
+    ):
+        existing_bot = {
+            "bot_id": "retry-bot",
+            "owner_id": "123456",
+            "entity_id": "staff_123456",
+            "entity_type": "staff",
+            "status": "PENDING",
+            "binding_id": None,
+            "bot_name": "Retry Bot",
+            "active_engine": "moltis",
+            "bot_type": "personal",
+            "engine_types": ["moltis"],
+        }
+        mock_bot_repository.get_by_id_and_owner.return_value = existing_bot
+        mock_bot_repository.claim_provisioning.return_value = True
+        mock_bot_repository.update_by_owner.return_value = existing_bot
+        mock_device_service.apply_device.return_value = MagicMock(
+            id="binding-1",
+            device_id="device-1",
+            device_provider="local",
+            status="ACTIVE",
+        )
+        bot_service._device_service_provider = lambda: mock_device_service
+        bot_service._skills_pool_native_creation_policy.select.reset_mock()
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
+            return_value=["moltis"],
+        ):
+            bot_service.create_bot(
+                user_id="123456",
+                nick_name="Test User",
+                bot_id="retry-bot",
+                bot_type="personal",
+            )
+
+        bot_service._skills_pool_native_creation_policy.select.assert_not_called()
+        mock_bot_repository.insert_with_initial_skill_layout.assert_not_called()
+        mock_device_service.apply_device.assert_called_once()
+
     def test_create_bot_with_bot_id_new_bot(self, bot_service, mock_bot_repository, mock_device_service):
         """Test creating bot with new bot_id creates new bot."""
         # Setup: bot 不存在（第一次调用返回 None，第二次调用返回新创建的 bot）
@@ -395,6 +440,7 @@ class TestCreateBotWithBotId(TestBotServicePassportIntegration):
         mock_bot_repository.insert_with_initial_skill_layout.assert_called_once()
         call_args = mock_bot_repository.insert_with_initial_skill_layout.call_args[0][0]
         assert call_args["bot_id"] == "20260408_abc123"
+        bot_service._skill_layout_repository.get.assert_not_called()
 
 
 class TestUpdateBotExt(TestBotServicePassportIntegration):
@@ -893,8 +939,6 @@ class TestCreateServiceBotPublish:
                 bot_type="service",
             )
 
-        # Verify: 发布单创建被尝试调用，失败后 bot 行被软删
+        # Verify: 发布单创建失败可见，Bot/layout 选择保留供重试复用。
         mock_publish_service.create_publish.assert_called_once()
-        mock_bot_repository.soft_delete_failed_creation.assert_called_once_with(
-            bot_id="service_bot_002", owner_id="123456"
-        )
+        mock_bot_repository.soft_delete_by_owner.assert_not_called()

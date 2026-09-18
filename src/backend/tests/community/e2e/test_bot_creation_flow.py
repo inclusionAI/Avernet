@@ -97,8 +97,18 @@ class FakeBotRepository:
                 setattr(bot, k, v)
         return bot.__dict__
 
-    def soft_delete_failed_creation(self, *, bot_id: str, owner_id: str) -> bool:
-        return self._store.pop(self._key(owner_id, bot_id), None) is not None
+    def claim_provisioning(
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        reclaim_after_seconds: int | None = None,
+    ) -> bool:
+        bot = self._store.get(self._key(owner_id, bot_id))
+        if bot is None or bot.status != "PENDING":
+            return False
+        bot.status = "PROVISIONING"
+        return True
 
     def list_by_owner(self, owner_id: str, page: int = 1, page_size: int = 100) -> tuple:
         items = [bot.__dict__ for bot in self._store.values() if bot.owner_id == owner_id]

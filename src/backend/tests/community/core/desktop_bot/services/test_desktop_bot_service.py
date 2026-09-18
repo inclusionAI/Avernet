@@ -396,6 +396,77 @@ class TestCreate:
         mocks["baas"].post_bots_api.assert_not_called()
         mocks["passport"].query_agent_passport.assert_not_called()
 
+    def test_provisional_desktop_create_retry_reuses_persisted_choice(self):
+        service, mocks = _make_service_with_mocks()
+        existing = {
+            "bot_id": "desktop_bot_retry",
+            "owner_id": "u001",
+            "entity_id": "u001",
+            "entity_type": "staff",
+            "status": "PENDING",
+            "binding_id": None,
+            "device_id": None,
+            "active_engine": "openclaw",
+            "ext": {
+                "client_id": "persisted-client",
+                "callback_token": "persisted-token",
+                "passport": {"agent_code": "ac-existing"},
+            },
+        }
+        mocks["bot_repo"].get_by_id_and_owner.return_value = existing
+        mocks["bot_repo"].claim_provisioning.return_value = True
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-existing"
+        }
+        mocks["baas"].post_bots_api.return_value = {
+            "bot_uuid": "bu-resumed",
+            "publish_id": 91,
+        }
+        mocks["binding_repo"].insert_binding.return_value = 20
+
+        result = service.create_after_authorization(
+            bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+            user_id="u001",
+            machine_id="m-002",
+        )
+
+        assert result["bot_uuid"] == "bu-resumed"
+        mocks["native_creation_policy"].select.assert_not_called()
+        mocks["bot_repo"].insert_with_initial_skill_layout.assert_not_called()
+        credentials = mocks["baas"].post_bots_api.call_args.kwargs["payload"][
+            "config"
+        ]["deploy_config"]["credentials"]
+        assert credentials["client_id"] == "persisted-client"
+        assert credentials["token"] == "persisted-token"
+
+    def test_concurrent_provisional_desktop_create_returns_in_progress(self):
+        service, mocks = _make_service_with_mocks()
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop_bot_retry",
+            "owner_id": "u001",
+            "status": "PROVISIONING",
+            "binding_id": None,
+            "device_id": None,
+            "active_engine": "openclaw",
+            "ext": {
+                "client_id": "persisted-client",
+                "callback_token": "persisted-token",
+            },
+        }
+        mocks["bot_repo"].claim_provisioning.return_value = False
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-existing"
+        }
+
+        with pytest.raises(DesktopBotServiceError, match="already in progress"):
+            service.create_after_authorization(
+                bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+                user_id="u001",
+                machine_id="m-002",
+            )
+
+        mocks["baas"].post_bots_api.assert_not_called()
+
     def test_create_continue_with_custom_mount_path(self):
         service, mocks = _make_service_with_mocks()
         mocks["passport"].query_agent_passport.return_value = {
@@ -528,9 +599,10 @@ class TestCreate:
                 machine_id="m-001",
             )
 
-        mocks["bot_repo"].soft_delete_failed_creation.assert_called_once_with(
-            bot_id="desktop_bot_003",
-            owner_id="u001",
+        mocks["binding_repo"].release_binding.assert_called_once_with(
+            binding_id=1,
+            release_reason="Desktop bot creation did not persist",
+            released_by="u001",
         )
 
     def test_create_continue_missing_bot_id_raises(self):
@@ -603,6 +675,7 @@ class TestCreate:
             device_service=mocks["device_service"],
             skill_set_factory=skill_set_factory,
             skills_pool_native_creation_policy=MagicMock(),
+            skill_layout_repository=MagicMock(),
             layout_confirmation=MagicMock(),
         )
         service._fetch_machine_info = MagicMock(
@@ -654,6 +727,7 @@ class TestCredentialsInDeployConfig:
         from agentclaw.community.core.skills_pool.types import (
             InitialSkillLayoutSelection,
             RolloutEvidence,
+            SkillLayout,
         )
 
         service, mocks = _make_service_with_mocks()
@@ -669,6 +743,10 @@ class TestCredentialsInDeployConfig:
             ),
         )
         mocks["native_creation_policy"].select.return_value = selection
+        mocks["layout_repo"].get.return_value = MagicMock(
+            active_layout=SkillLayout.POOL,
+            layout_contract_version="skills-pool-p3-v1",
+        )
         mocks["passport"].query_agent_passport.return_value = {
             "agent_code": "ac-cred-001",
         }
@@ -959,6 +1037,58 @@ class TestRestart:
         assert ext_writes, "restart 应写一次含 ext 的 update"
         merged_ext = ext_writes[-1].kwargs["update_data"]["ext"]
         assert "pending_since" in merged_ext
+
+    def test_pool_restart_updates_layout_wire_and_current_publish_identity(self):
+        from agentclaw.community.core.skills_pool.types import SkillLayout
+
+        service, mocks = _make_service_with_mocks()
+        _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")
+        bot = mocks["bot_repo"].get_by_id_and_owner.return_value
+        bot["entity_id"] = "u001"
+        bot["entity_type"] = "staff"
+        bot["ext"] = {
+            "client_id": "client-1",
+            "callback_token": "token-1",
+            "machine_id": "machine-1",
+            "migration_path": "/data/desktop",
+            "passport": {"agent_code": "agent-1"},
+            "publish_id": "old-publish",
+        }
+        mocks["layout_repo"].get.return_value = MagicMock(
+            active_layout=SkillLayout.POOL,
+            layout_contract_version="skills-pool-p3-v1",
+        )
+        mocks["baas"].post_bots_api.return_value = {"publish_id": 17}
+
+        service.restart(bot_id="desktop_bot_001", user_id="u001")
+
+        mocks["baas"].restart_bot.assert_not_called()
+        credentials = mocks["baas"].post_bots_api.call_args.kwargs["payload"][
+            "config"
+        ]["deploy_config"]["credentials"]
+        assert credentials["agentclaw_skills_layout"] == "pool"
+        assert credentials["agentclaw_skills_layout_contract_version"] == (
+            "skills-pool-p3-v1"
+        )
+        ext_writes = [
+            call.kwargs["update_data"]["ext"]
+            for call in mocks["bot_repo"].update_by_owner.call_args_list
+            if "ext" in (call.kwargs.get("update_data") or {})
+        ]
+        assert ext_writes[-1]["publish_id"] == "17"
+        mocks["binding_repo"].update_device_props.assert_called_once_with(
+            binding_id=1,
+            props={
+                "publish_id": "17",
+                "restart_publish_id": "17",
+                "envs": {
+                    "AGENTCLAW_SKILLS_LAYOUT": "pool",
+                    "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": (
+                        "skills-pool-p3-v1"
+                    ),
+                },
+            },
+        )
 
     def test_restart_no_publish_id_skips_approve(self):
         service, mocks = _make_service_with_mocks()
@@ -1647,6 +1777,7 @@ def _make_service():
         skills_pool_native_creation_policy=MagicMock(
             select=MagicMock(return_value=None)
         ),
+        skill_layout_repository=MagicMock(),
         layout_confirmation=MagicMock(),
     )
 
@@ -1669,6 +1800,7 @@ def _make_service_with_mocks():
         "native_creation_policy": MagicMock(
             select=MagicMock(return_value=None)
         ),
+        "layout_repo": MagicMock(),
         "layout_confirmation": MagicMock(),
     }
     service = DesktopBotService(
@@ -1680,6 +1812,7 @@ def _make_service_with_mocks():
         device_service=mocks["device_service"],
         skill_set_factory=mocks["skill_set_factory"],
         skills_pool_native_creation_policy=mocks["native_creation_policy"],
+        skill_layout_repository=mocks["layout_repo"],
         layout_confirmation=mocks["layout_confirmation"],
     )
     # _fetch_machine_info makes a real HTTP call; mock it for all unit tests

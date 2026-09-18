@@ -44,6 +44,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.platform    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skills_pool    # persisted initial layout and restart selection
   - agentclaw.community.core.repository.protocols.capability_desired_state    # explicit Skill/MCP Installation purge during Bot deletion
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_app_grant.protocols    # sweep contract: deletion withdraws the bot's app authorizations
@@ -66,6 +67,8 @@ internal_dependencies:
   - agentclaw.community.core.spaces.models    # SpaceRecord/SpaceType used by Bot Space assignment
   - agentclaw.community.core.spaces.protocols    # Space lookup used by quota configuration
   - agentclaw.community.core.skill_center
+  - agentclaw.community.core.skills_pool.native_creation
+  - agentclaw.community.core.skills_pool.types
   - agentclaw.community.core.task_queue
   - agentclaw.community.core.workspace
   - agentclaw.community.di

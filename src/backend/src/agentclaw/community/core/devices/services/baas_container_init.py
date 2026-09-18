@@ -36,6 +36,13 @@ class BaasContainerInitializer:
         entity_type = device.device_props.get("entity_type")
         client_id = device.device_props.get("client_id", "")
         symbol = device.device_props.get("symbol")
+        envs = device.device_props.get("envs")
+        effective_startup_identity = (
+            startup_identity
+            if isinstance(envs, dict)
+            and envs.get("AGENTCLAW_SKILLS_LAYOUT") == "pool"
+            else None
+        )
 
         self._run_baas_bootstrap(bot_uuid)
         self._run_baas_install_engine(bot_uuid)
@@ -51,7 +58,7 @@ class BaasContainerInitializer:
             bot_id=bot_id,
             owner_id=owner_id,
             token=callback_token,
-            startup_identity=startup_identity,
+            startup_identity=effective_startup_identity,
             entity_id=entity_id,
             entity_type=entity_type,
             stage="draft",
@@ -144,7 +151,7 @@ class BaasContainerInitializer:
         entity_type: str | None = None,
         stage: str | None = None,
         admins: str | None = None,
-        startup_identity: str,
+        startup_identity: str | None,
     ) -> None:
         args = [
             "/home/admin/bin/start_service.sh",
@@ -154,9 +161,9 @@ class BaasContainerInitializer:
             client_id,
             "--engine",
             engine,
-            "--startup_identity",
-            startup_identity,
         ]
+        if startup_identity:
+            args.extend(("--startup_identity", startup_identity))
         if bot_type:
             args.extend(("--bot_type", bot_type))
         if bot_id:
@@ -192,19 +199,18 @@ class BaasContainerInitializer:
         bot_uuid: str,
         client_id: str,
         token: str,
-        startup_identity: str,
+        startup_identity: str | None,
     ) -> None:
-        watchdog_args = shlex.join(
-            [
-                "/home/admin/bin/starting_watchdog.sh",
-                "--token",
-                token,
-                "--client_id",
-                client_id,
-                "--startup_identity",
-                startup_identity,
-            ]
-        )
+        watchdog_values = [
+            "/home/admin/bin/starting_watchdog.sh",
+            "--token",
+            token,
+            "--client_id",
+            client_id,
+        ]
+        if startup_identity:
+            watchdog_values.extend(("--startup_identity", startup_identity))
+        watchdog_args = shlex.join(watchdog_values)
         watchdog_cmd = (
             f"nohup {watchdog_args} >> "
             "/home/admin/logs/starting_watchdog.log 2>&1 &"

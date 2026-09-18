@@ -11,6 +11,9 @@ from agentclaw.community.core.devices.protocols import (
     LayoutInitializationConfirmationProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skills_pool.native_creation import (
@@ -43,6 +46,7 @@ class DesktopBotModule(Module):
         device_service: DeviceService,
         skill_set_factory: SkillSetServiceFactory,
         skills_pool_native_creation_policy: SkillsPoolNativeCreationPolicy,
+        skill_layout_repository: SkillsPoolLayoutRepositoryProtocol,
         layout_confirmation: LayoutInitializationConfirmationProtocol,
     ) -> DesktopBotService:
         return DesktopBotService(
@@ -54,6 +58,7 @@ class DesktopBotModule(Module):
             device_service=device_service,
             skill_set_factory=skill_set_factory,
             skills_pool_native_creation_policy=skills_pool_native_creation_policy,
+            skill_layout_repository=skill_layout_repository,
             layout_confirmation=layout_confirmation,
         )
 

@@ -511,9 +511,7 @@ def test_workspace_creation_exception_is_fatal() -> None:
     )
     with pytest.raises(BotServiceError):
         _create(svc)
-    svc._repository.soft_delete_failed_creation.assert_called_once_with(
-        bot_id="b1", owner_id="u1"
-    )
+    svc._repository.soft_delete_by_owner.assert_not_called()
 
 
 def test_workspace_creation_falsy_return_is_fatal() -> None:
@@ -524,9 +522,7 @@ def test_workspace_creation_falsy_return_is_fatal() -> None:
     )
     with pytest.raises(BotServiceError):
         _create(svc)
-    svc._repository.soft_delete_failed_creation.assert_called_once_with(
-        bot_id="b1", owner_id="u1"
-    )
+    svc._repository.soft_delete_by_owner.assert_not_called()
 
 
 def test_template_creation_failure_is_fatal() -> None:
@@ -538,9 +534,7 @@ def test_template_creation_failure_is_fatal() -> None:
     svc._template_service.create_template = MagicMock(side_effect=RuntimeError("boom"))
     with pytest.raises(BotServiceError):
         _create(svc)
-    svc._repository.soft_delete_failed_creation.assert_called_once_with(
-        bot_id="b1", owner_id="u1"
-    )
+    svc._repository.soft_delete_by_owner.assert_not_called()
 
 
 def test_is_workspace_hosting_available() -> None:

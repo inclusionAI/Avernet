@@ -1581,6 +1581,30 @@ class TestInitStepEdgeCases:
         watchdog_cmd = baas.exec_command_on_bot.call_args_list[1].kwargs["cmd"]
         assert "--startup_identity publish-1001" in watchdog_cmd
 
+    def test_legacy_startup_preserves_old_watchdog_wire(self):
+        baas = MagicMock()
+        svc = _make_service(baas_service=baas)
+
+        svc._start_baas_sandbox_service(
+            bot_uuid="BOT-1",
+            client_id="c1",
+            engine="openclaw",
+            token="tok",
+            bot_type="personal",
+            bot_id="b123",
+            owner_id="u001",
+            entity_id="e001",
+            entity_type="staff",
+            stage="dev",
+            admins=None,
+            startup_identity=None,
+        )
+
+        assert all(
+            "--startup_identity" not in call.kwargs["cmd"]
+            for call in baas.exec_command_on_bot.call_args_list
+        )
+
     def test_pool_restart_dispatches_current_publish_identity(self):
         baas = MagicMock()
         svc = _make_service(baas_service=baas)

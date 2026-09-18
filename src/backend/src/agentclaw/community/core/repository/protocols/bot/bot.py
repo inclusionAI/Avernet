@@ -302,16 +302,6 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
-    def soft_delete_failed_creation(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-    ) -> bool:
-        """Soft delete a failed new Bot and remove only its Native init row."""
-        ...
-
-    @abstractmethod
     def count_by_owner(self, owner_id: str, exclude_bot_type: str | None = None) -> int:
         """Count bots by owner_id.
 

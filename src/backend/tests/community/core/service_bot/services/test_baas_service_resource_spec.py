@@ -288,6 +288,49 @@ def test_payload_maps_template_config_overrides_to_deploy_config():
     }
 
 
+def test_template_env_cannot_override_persisted_layout_selection():
+    svc = _make_service()
+    envs, _resource_spec, _image = svc._resolve_deploy_envs_spec_image(
+        engine="openclaw",
+        extra_envs={
+            "AGENTCLAW_SKILLS_LAYOUT": "pool",
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+        },
+        template_config={
+            "envs": {
+                "AGENTCLAW_SKILLS_LAYOUT": "legacy",
+                "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "stale-contract",
+                "USER_ENV": "yes",
+            }
+        },
+        resource_spec=None,
+    )
+
+    assert envs["AGENTCLAW_SKILLS_LAYOUT"] == "pool"
+    assert envs["AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION"] == (
+        "skills-pool-p3-v1"
+    )
+    assert envs["USER_ENV"] == "yes"
+
+
+def test_template_env_cannot_invent_pool_layout_selection():
+    svc = _make_service()
+    envs, _resource_spec, _image = svc._resolve_deploy_envs_spec_image(
+        engine="hermes",
+        extra_envs=None,
+        template_config={
+            "envs": {
+                "AGENTCLAW_SKILLS_LAYOUT": "pool",
+                "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+            }
+        },
+        resource_spec=None,
+    )
+
+    assert "AGENTCLAW_SKILLS_LAYOUT" not in envs
+    assert "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION" not in envs
+
+
 def test_payload_ignores_template_config_command_until_baas_has_field():
     svc = _make_service()
     svc._deploy_composer.build_start_command = MagicMock(return_value="echo start")

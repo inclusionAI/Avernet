@@ -156,10 +156,6 @@ def test_bot_and_pool_native_layout_are_inserted_atomically(monkeypatch) -> None
         "agentclaw.community.core.repository.implementations.bot.bot.get_current_env",
         lambda: "pre",
     )
-    monkeypatch.setattr(
-        "agentclaw.community.core.repository.implementations.bot.initial_layout.get_current_env",
-        lambda: "pre",
-    )
     bot = BotRepository(database).insert_with_initial_skill_layout(
         _bot_data(),
         layout=InitialSkillLayoutSelection(
@@ -206,39 +202,6 @@ def test_layout_insert_failure_rolls_back_the_bot_row(monkeypatch) -> None:
 
     with database.transactional_orm_session() as session:
         assert session.query(BotModel).filter(BotModel.bot_id == "bot-native").count() == 0
-
-
-def test_failed_creation_cleanup_removes_only_initializing_layout(monkeypatch) -> None:
-    database = InMemorySqliteDB()
-    monkeypatch.setattr(
-        "agentclaw.community.core.repository.implementations.bot.bot.get_current_env",
-        lambda: "pre",
-    )
-    monkeypatch.setattr(
-        "agentclaw.community.core.repository.implementations.bot.initial_layout.get_current_env",
-        lambda: "pre",
-    )
-    repository = BotRepository(database)
-    repository.insert_with_initial_skill_layout(
-        _bot_data(),
-        layout=InitialSkillLayoutSelection(
-            layout_contract_version="skills-pool-p3-v1",
-            rollout_evidence=rollout_evidence(),
-        ),
-    )
-
-    assert repository.soft_delete_failed_creation(
-        bot_id="bot-native",
-        owner_id="owner-1",
-    )
-
-    state = SkillsPoolLayoutRepository(database).get(
-        BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-native")
-    )
-    assert state.persisted is False
-    with database.transactional_orm_session() as session:
-        bot = session.query(BotModel).filter(BotModel.bot_id == "bot-native").one()
-        assert bot.is_delete == 1
 
 
 def test_confirm_pool_initializing_commits_native_pool_without_migration_identity() -> None:

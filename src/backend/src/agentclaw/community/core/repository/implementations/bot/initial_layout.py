@@ -6,8 +6,6 @@ import json
 from dataclasses import asdict
 from typing import Any
 
-from sqlalchemy import func
-
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
 )
@@ -16,7 +14,6 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
-from agentclaw.community.utils.env_utils import get_current_env
 
 
 class BotInitialLayoutRepositoryMixin:
@@ -57,40 +54,5 @@ class BotInitialLayoutRepositoryMixin:
                 )
                 db.flush()
             return bot.to_dict()
-
-    def soft_delete_failed_creation(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-    ) -> bool:
-        env = get_current_env()
-        with self._db.transactional_orm_session() as db:
-            bot = (
-                db.query(self.Model)
-                .filter(
-                    self.Model.bot_id == bot_id,
-                    self.Model.owner_id == owner_id,
-                    self.Model.is_delete == 0,
-                    self.Model.env == env,
-                )
-                .one_or_none()
-            )
-            if bot is None:
-                return False
-            bot.is_delete = 1
-            bot.gmt_modified = func.now()
-            db.query(BotSkillLayoutStateModel).filter(
-                BotSkillLayoutStateModel.env == env,
-                BotSkillLayoutStateModel.entity_id == bot.entity_id,
-                BotSkillLayoutStateModel.bot_id == bot_id,
-                BotSkillLayoutStateModel.phase
-                == SkillLayoutPhase.POOL_INITIALIZING.value,
-                BotSkillLayoutStateModel.migration_generation.is_(None),
-                BotSkillLayoutStateModel.preparation_id.is_(None),
-                BotSkillLayoutStateModel.data_plane_cutover_committed == 0,
-            ).delete(synchronize_session=False)
-            return True
-
 
 __all__ = ["BotInitialLayoutRepositoryMixin"]

@@ -25,6 +25,9 @@ from agentclaw.community.core.desktop_bot.errors import (
 )
 from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.devices.protocols import (
     LayoutInitializationConfirmationProtocol,
@@ -42,7 +45,11 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.core.skills_pool.native_creation import (
     SkillsPoolNativeCreationPolicy,
 )
-from agentclaw.community.core.skills_pool.types import InitialSkillLayoutSelection
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    InitialSkillLayoutSelection,
+    SkillLayout,
+)
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, SUPPORTED_ENGINE_TYPES
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.log import get_logger
@@ -60,6 +67,8 @@ if TYPE_CHECKING:
     from agentclaw.community.di import config as cfg
 
 logger = get_logger()
+
+_DESKTOP_PROVISIONING_CLAIM_STALE_SECONDS = 5 * 60
 
 
 def _generate_request_id(
@@ -111,6 +120,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
         device_service: "DeviceService",
         skill_set_factory: SkillSetServiceFactory,
         skills_pool_native_creation_policy: SkillsPoolNativeCreationPolicy,
+        skill_layout_repository: SkillsPoolLayoutRepositoryProtocol,
         layout_confirmation: LayoutInitializationConfirmationProtocol,
     ):
         self._baas = baas_service
@@ -120,6 +130,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
         self._device_service = device_service
         self._skill_set_factory = skill_set_factory
         self._skills_pool_native_creation_policy = skills_pool_native_creation_policy
+        self._skill_layout_repository = skill_layout_repository
         self._layout_confirmation = layout_confirmation
         self._baas_api_base = (
             baas_config.api_base_url_pre
@@ -617,6 +628,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
         mount_path: str | None,
         agent_code: str,
         engine_type: str | None = None,
+        existing_bot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """执行 BAAS 创建 Bot、审批、写数据库的完整流程。
 
@@ -651,62 +663,106 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "set baas.desktop_template_uuid in config"
             )
 
-        # Step 3: 生成 VM 凭证标识（持久化到 ext，传给 BaaS deploy_config）
-        client_id = f"staff_{user_id}_{bot_id}_{uuid.uuid4().hex}"
-        callback_token = secrets.token_urlsafe(32)
-
         env = get_current_env()
-        initial_layout = self._skills_pool_native_creation_policy.select(
+        if existing_bot is None:
+            client_id = f"staff_{user_id}_{bot_id}_{uuid.uuid4().hex}"
+            callback_token = secrets.token_urlsafe(32)
+            initial_layout = self._skills_pool_native_creation_policy.select(
+                env=env,
+                owner_id=user_id,
+                bot_id=str(bot_id),
+                engine_type=str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE),
+                bot_type="desktop",
+            )
+            initial_ext: dict[str, Any] = {
+                "passport": {"agent_code": agent_code, "status": "ISSUED"},
+                "start_status": "PENDING",
+                "start_message": "",
+                "machine_id": machine_id,
+                "mount_path": (mount_path or "").strip(),
+                "migration_path": migration_path,
+                "desktop_template_uuid": self._desktop_template_uuid or "",
+                "workspace_path": f"~/.teamclaw/boxes/{bot_id}",
+                "client_id": client_id,
+                "callback_token": callback_token,
+                "pending_since": datetime.now().isoformat(),
+                "skills_layout": "pool" if initial_layout is not None else "legacy",
+                "skills_layout_contract_version": (
+                    initial_layout.layout_contract_version
+                    if initial_layout is not None
+                    else ""
+                ),
+            }
+            avatar_url = bot.get("avatar_url")
+            if avatar_url:
+                initial_ext["avatar_url"] = avatar_url
+            self._bot_repo.insert_with_initial_skill_layout(
+                {
+                    "bot_id": bot_id,
+                    "bot_name": bot.get("bot_name", ""),
+                    "bot_desc": bot.get("bot_desc"),
+                    "entity_id": user_id,
+                    "entity_type": "staff",
+                    "creator_id": user_id,
+                    "owner_id": user_id,
+                    "owner_name": bot.get("owner_name", user_id),
+                    "engine_types": list(SUPPORTED_ENGINE_TYPES),
+                    "active_engine": bot.get("active_engine", DEFAULT_ENGINE_TYPE),
+                    "status": "PENDING",
+                    "binding_id": None,
+                    "device_id": None,
+                    "modifier_id": user_id,
+                    "is_delete": 0,
+                    "bot_type": "desktop",
+                    "ext": initial_ext,
+                },
+                layout=initial_layout,
+            )
+        else:
+            raw_ext = existing_bot.get("ext") or {}
+            if isinstance(raw_ext, str):
+                try:
+                    raw_ext = json.loads(raw_ext)
+                except json.JSONDecodeError as exc:
+                    raise DesktopBotServiceError(
+                        "persisted desktop creation context is invalid"
+                    ) from exc
+            if not isinstance(raw_ext, dict):
+                raise DesktopBotServiceError(
+                    "persisted desktop creation context is invalid"
+                )
+            initial_ext = dict(raw_ext)
+            client_id = str(initial_ext.get("client_id") or "")
+            callback_token = str(initial_ext.get("callback_token") or "")
+            if not client_id or not callback_token:
+                raise DesktopBotServiceError(
+                    "persisted desktop creation credentials are incomplete"
+                )
+
+        layout_credentials = self._desktop_layout_credentials_for_scope(
             env=env,
-            owner_id=user_id,
-            bot_id=str(bot_id),
-            engine_type=str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE),
-            bot_type="desktop",
+            entity_id=user_id,
+            bot_id=bot_id,
         )
-        initial_ext: dict[str, Any] = {
-            "passport": {"agent_code": agent_code, "status": "ISSUED"},
-            "start_status": "PENDING",
-            "start_message": "",
-            "machine_id": machine_id,
-            "mount_path": (mount_path or "").strip(),
-            "migration_path": migration_path,
-            "desktop_template_uuid": self._desktop_template_uuid or "",
-            "workspace_path": f"~/.teamclaw/boxes/{bot_id}",
-            "client_id": client_id,
-            "callback_token": callback_token,
-            "pending_since": datetime.now().isoformat(),
-            "skills_layout": "pool" if initial_layout is not None else "legacy",
-            "skills_layout_contract_version": (
-                initial_layout.layout_contract_version
-                if initial_layout is not None
-                else ""
-            ),
-        }
-        avatar_url = bot.get("avatar_url")
-        if avatar_url:
-            initial_ext["avatar_url"] = avatar_url
-        self._bot_repo.insert_with_initial_skill_layout(
-            {
+        if not self._bot_repo.claim_provisioning(
+            bot_id,
+            user_id,
+            reclaim_after_seconds=_DESKTOP_PROVISIONING_CLAIM_STALE_SECONDS,
+        ):
+            raise DesktopBotServiceError(
+                f"Desktop bot creation is already in progress: bot_id={bot_id}"
+            )
+        try:
+            installation_kwargs: dict[str, Any] = {
                 "bot_id": bot_id,
-                "bot_name": bot.get("bot_name", ""),
-                "bot_desc": bot.get("bot_desc"),
-                "entity_id": user_id,
-                "entity_type": "staff",
-                "creator_id": user_id,
                 "owner_id": user_id,
-                "owner_name": bot.get("owner_name", user_id),
-                "engine_types": list(SUPPORTED_ENGINE_TYPES),
-                "active_engine": bot.get("active_engine", DEFAULT_ENGINE_TYPE),
-                "status": "PENDING",
-                "binding_id": None,
-                "device_id": None,
-                "modifier_id": user_id,
-                "is_delete": 0,
-                "bot_type": "desktop",
-                "ext": initial_ext,
-            },
-            layout=initial_layout,
-        )
+            }
+            if existing_bot is not None:
+                installation_kwargs["bot"] = existing_bot
+            self._skill_set_factory.initialize_installations(**installation_kwargs)
+        except Exception:
+            self._release_desktop_creation_claim(bot_id=bot_id, owner_id=user_id)
+            raise
 
         # Step 4: 构建 BaaS 创建 Bot 的请求体
         payload = self._build_desktop_bot_payload(
@@ -720,7 +776,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
             client_id=client_id,
             callback_token=callback_token,
             engine_type=engine_type,
-            initial_layout=initial_layout,
+            layout_credentials=layout_credentials,
         )
 
         # Step 5: 调用 BaaS API 创建 Bot
@@ -731,10 +787,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 action="desktop_create_bot",
             )
         except Exception as e:
-            self._bot_repo.soft_delete_failed_creation(
-                bot_id=bot_id,
-                owner_id=user_id,
-            )
+            self._release_desktop_creation_claim(bot_id=bot_id, owner_id=user_id)
             logger.error(
                 "[DesktopBotService._execute_creation] BaaS create_bot failed: bot_id=%s error=%s",
                 bot_id, e,
@@ -751,6 +804,9 @@ class DesktopBotService(DesktopBotServiceProtocol):
 
         bot_uuid = baas_result.get("bot_uuid", "")
         publish_id = baas_result.get("publish_id")
+        if not bot_uuid:
+            self._release_desktop_creation_claim(bot_id=bot_id, owner_id=user_id)
+            raise DesktopBotServiceError("BaaS create_bot returned no bot_uuid")
 
         # Step 5: 自动审批 publish（若有 publish_id）
         if publish_id:
@@ -762,7 +818,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     comment="自动审批",
                 )
             except Exception as e:
-                self._bot_repo.soft_delete_failed_creation(
+                self._release_desktop_creation_claim(
                     bot_id=bot_id,
                     owner_id=user_id,
                 )
@@ -775,6 +831,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 )
 
         # Step 6: 写入本地数据库（binding + bot）
+        binding_id: int | None = None
         try:
             binding_id = self._binding_repo.insert_binding(
                 entity_id=user_id,
@@ -787,7 +844,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     "client_id": client_id,
                     "callback_token": callback_token,
                     "publish_id": str(publish_id) if publish_id else None,
-                    "envs": self._desktop_layout_env(initial_layout),
+                    "envs": self._desktop_layout_env(layout_credentials),
                 },
                 status="PENDING",
                 apply_reason=f"Create desktop bot: {bot.get('bot_name', '')}",
@@ -805,20 +862,13 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     "binding_id": binding_id,
                     "device_id": bot_uuid,
                     "ext": ext,
+                    "status": "PENDING",
                 },
             )
             if updated_bot is None:
                 raise DesktopBotServiceError(
                     f"Desktop bot binding update did not match: bot_id={bot_id}"
                 )
-
-            # The desktop flow has its own Bot insert and must establish the
-            # same DB-only Installation facts before it starts publish polling.
-            # This intentionally neither waits for the container nor projects
-            # Runtime state.
-            self._skill_set_factory.initialize_installations(
-                bot_id=bot_id, owner_id=user_id
-            )
 
             logger.info(
                 "[DesktopBotService._execute_creation] bot_id=%s binding_id=%s bot_uuid=%s",
@@ -844,10 +894,36 @@ class DesktopBotService(DesktopBotServiceProtocol):
             }
 
         except Exception as e:
-            self._bot_repo.soft_delete_failed_creation(
-                bot_id=bot_id,
-                owner_id=user_id,
-            )
+            if binding_id is not None:
+                try:
+                    self._binding_repo.release_binding(
+                        binding_id=binding_id,
+                        release_reason="Desktop bot creation did not persist",
+                        released_by=user_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "[DesktopBotService._execute_creation] failed to release "
+                        "orphan binding_id=%s",
+                        binding_id,
+                    )
+                try:
+                    self._bot_repo.update_by_owner(
+                        bot_id=bot_id,
+                        owner_id=user_id,
+                        update_data={
+                            "binding_id": None,
+                            "device_id": None,
+                            "status": "PENDING",
+                        },
+                    )
+                except Exception:
+                    logger.exception(
+                        "[DesktopBotService._execute_creation] failed to clear "
+                        "orphan binding from bot_id=%s",
+                        bot_id,
+                    )
+            self._release_desktop_creation_claim(bot_id=bot_id, owner_id=user_id)
             logger.error(
                 "[DesktopBotService._execute_creation] local DB write failed: %s", e,
             )
@@ -888,36 +964,34 @@ class DesktopBotService(DesktopBotServiceProtocol):
 
         existing = self._bot_repo.get_by_id_and_owner(bot_id=bot_id, owner_id=user_id)
         if isinstance(existing, dict):
-            # A previous attempt can have committed the local Bot/Binding and
-            # then failed at Installation initialization. Repair that DB-only
-            # step before returning the same create result; never issue a
-            # second BaaS create or overwrite the persisted Bot.
-            self._skill_set_factory.initialize_installations(
-                bot_id=bot_id, owner_id=user_id, bot=existing
-            )
-            ext = existing.get("ext") or {}
-            if isinstance(ext, str):
-                try:
-                    ext = json.loads(ext)
-                except json.JSONDecodeError:
-                    ext = {}
-            passport = ext.get("passport") if isinstance(ext, dict) else {}
-            agent_code = passport.get("agent_code", "") if isinstance(passport, dict) else ""
-            return {
-                "bot_uuid": existing.get("device_id", ""),
-                "binding_id": existing.get("binding_id"),
-                "bot_id": bot_id,
-                "agent_code": agent_code,
-            }
+            if existing.get("device_id") and existing.get("binding_id"):
+                self._skill_set_factory.initialize_installations(
+                    bot_id=bot_id, owner_id=user_id, bot=existing
+                )
+                ext = existing.get("ext") or {}
+                if isinstance(ext, str):
+                    try:
+                        ext = json.loads(ext)
+                    except json.JSONDecodeError:
+                        ext = {}
+                passport = ext.get("passport") if isinstance(ext, dict) else {}
+                agent_code = (
+                    passport.get("agent_code", "")
+                    if isinstance(passport, dict)
+                    else ""
+                )
+                return {
+                    "bot_uuid": existing.get("device_id", ""),
+                    "binding_id": existing.get("binding_id"),
+                    "bot_id": bot_id,
+                    "agent_code": agent_code,
+                }
 
         passport_info = self._passport.query_agent_passport(
-            bot_id=bot_id,
-            owner_workno=user_id,
+            bot_id=bot_id, owner_workno=user_id
         )
         if not passport_info:
-            raise DesktopBotServiceError(
-                f"Passport not found for bot {bot_id}"
-            )
+            raise DesktopBotServiceError(f"Passport not found for bot {bot_id}")
 
         agent_code = passport_info.get("agent_code", "")
 
@@ -925,6 +999,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
             "entity_id": f"staff_{user_id}",
             "entity_type": "staff",
             "active_engine": engine_type or DEFAULT_ENGINE_TYPE,
+            **(existing or {}),
             **bot,
             "bot_id": bot_id,
         }
@@ -940,6 +1015,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
             mount_path=mount_path,
             agent_code=agent_code,
             engine_type=engine_type,
+            existing_bot=existing if isinstance(existing, dict) else None,
         )
 
     # ── restart ─────────────────────────────────────────────────────────
@@ -975,12 +1051,61 @@ class DesktopBotService(DesktopBotServiceProtocol):
             action="restart",
         )
 
-        # BaaS restart — 失败则直接抛出，本地状态不变
-        baas_result = self._baas.restart_bot(
-            bot_uuid=device_id,
-            operator=user_id,
-            request_id=request_id,
+        layout_credentials = self._desktop_layout_credentials_for_scope(
+            env=env,
+            entity_id=binding.entity_id,
+            bot_id=bot_id,
         )
+        if layout_credentials["agentclaw_skills_layout"] == SkillLayout.POOL.value:
+            ext = bot.get("ext") or {}
+            if isinstance(ext, str):
+                try:
+                    ext = json.loads(ext)
+                except json.JSONDecodeError as exc:
+                    raise DesktopBotServiceError(
+                        "persisted desktop restart context is invalid"
+                    ) from exc
+            if not isinstance(ext, dict):
+                raise DesktopBotServiceError(
+                    "persisted desktop restart context is invalid"
+                )
+            passport = ext.get("passport") or {}
+            payload = self._build_desktop_bot_payload(
+                bot={
+                    **bot,
+                    "entity_id": binding.entity_id,
+                    "entity_type": binding.entity_type,
+                },
+                owner_id=user_id,
+                request_id=request_id,
+                migration_path=str(
+                    ext.get("migration_path")
+                    or f"/home/admin/nfs/bot-data/desktop/{bot_id}"
+                ),
+                mount_path=str(ext.get("mount_path") or ""),
+                machine_id=str(ext.get("machine_id") or ""),
+                agent_code=(
+                    str(passport.get("agent_code") or "")
+                    if isinstance(passport, dict)
+                    else ""
+                ),
+                client_id=str(ext.get("client_id") or ""),
+                callback_token=str(ext.get("callback_token") or ""),
+                engine_type=str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE),
+                layout_credentials=layout_credentials,
+            )
+            baas_result = self._baas.post_bots_api(
+                path=f"/api/v1/bots/{device_id}/update",
+                payload=payload,
+                action="desktop_restart_bot",
+            )
+        else:
+            # Preserve the old restart wire for Legacy/mixed-version images.
+            baas_result = self._baas.restart_bot(
+                bot_uuid=device_id,
+                operator=user_id,
+                request_id=request_id,
+            )
 
         logger.info(
             "[DesktopBotService.restart] BaaS restart_bot response: device_id=%s "
@@ -1014,9 +1139,23 @@ class DesktopBotService(DesktopBotServiceProtocol):
         # 记录本次进入 PENDING 的时刻,供周期扫描的过渡超时兜底使用。
         # 必须用这个独立时间戳而非 gmt_create:老 bot 的 gmt_create 早超
         # 超时窗,会让老 bot 一重启就被误判 OFFLINE。
-        self._merge_bot_ext(bot_id, binding.entity_id, {
+        ext_updates = {
             "pending_since": datetime.now().isoformat(),
-        })
+            "publish_id": str(publish_id) if publish_id else "",
+            "skills_layout": layout_credentials["agentclaw_skills_layout"],
+            "skills_layout_contract_version": layout_credentials.get(
+                "agentclaw_skills_layout_contract_version", ""
+            ),
+        }
+        self._merge_bot_ext(bot_id, binding.entity_id, ext_updates)
+        self._binding_repo.update_device_props(
+            binding_id=binding.id,
+            props={
+                "publish_id": str(publish_id) if publish_id else None,
+                "restart_publish_id": str(publish_id) if publish_id else None,
+                "envs": self._desktop_layout_env(layout_credentials),
+            },
+        )
 
         # 启动后台轮询 publish 进度
         if publish_id:
@@ -1210,7 +1349,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
         client_id: str = "",
         callback_token: str = "",
         engine_type: str | None = None,
-        initial_layout: InitialSkillLayoutSelection | None = None,
+        layout_credentials: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """构建桌面 Bot 专属的 BaaS 创建请求体。
 
@@ -1310,7 +1449,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "bot_type": "desktop",
                 "agent_code": agent_code or "",
                 "stage": "online",
-                **self._desktop_layout_credentials(initial_layout),
+                **(layout_credentials or self._desktop_layout_credentials(None)),
             }
             payload["config"]["deploy_config"]["credentials"] = credentials
             logger.info(
@@ -1346,10 +1485,53 @@ class DesktopBotService(DesktopBotServiceProtocol):
 
     @staticmethod
     def _desktop_layout_env(
-        layout: InitialSkillLayoutSelection | None,
+        credentials: dict[str, str],
     ) -> dict[str, str]:
-        credentials = DesktopBotService._desktop_layout_credentials(layout)
         return {key.upper(): value for key, value in credentials.items()}
+
+    def _desktop_layout_credentials_for_scope(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+    ) -> dict[str, str]:
+        state = self._skill_layout_repository.get(
+            BotSkillLayoutScope(env=env, entity_id=entity_id, bot_id=bot_id)
+        )
+        if state.active_layout is not SkillLayout.POOL:
+            return self._desktop_layout_credentials(None)
+        contract = state.layout_contract_version
+        if not isinstance(contract, str) or not contract:
+            raise DesktopBotServiceError("Pool layout has no contract version")
+        return {
+            "agentclaw_skills_layout": SkillLayout.POOL.value,
+            "agentclaw_skills_layout_contract_version": contract,
+        }
+
+    def _release_desktop_creation_claim(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+    ) -> None:
+        try:
+            current = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+            if (
+                current
+                and current.get("status") == "PROVISIONING"
+                and not current.get("binding_id")
+            ):
+                self._bot_repo.update_by_owner(
+                    bot_id,
+                    owner_id,
+                    {"status": "PENDING"},
+                )
+        except Exception:
+            logger.exception(
+                "[DesktopBotService] failed to release creation claim: bot_id=%s",
+                bot_id,
+            )
 
     def _apply_passport(
         self,
