@@ -215,13 +215,22 @@ class CollaboratorPermissionInterceptor:
 
         has_collaborators = lock_info.has_collaborators if lock_info else False
 
-        # 没有协作者时的逻辑
+        # 没有协作者行时的逻辑
+        if not has_collaborators and user_id != params.owner_id:
+            # 空间授予：Bot 挂在 Space 下时，空间成员与显式协作者行同权
+            # （"同一空间可见"的产品语义）——空行不能挡住他们。真获得了
+            # 授予，就按"有协作者"同流继续走：锁语义（无锁先取锁、他人
+            # 持锁 423）与其后换轨的权限检查，与显式 MEMBER 行一视同仁。
+            # 未获得授予的非 owner 维持 403。
+            if params.bot_id and self._space_granted_permission(ctx, params, user_id):
+                has_collaborators = True
+                ctx.metadata["space_granted"] = True
         if not has_collaborators:
             # owner 直接放行
             if user_id == params.owner_id:
                 ctx.metadata["permission_level"] = PermissionLevel.OWNER.name
                 return ctx
-            # 非 owner 没有权限
+            # 非 owner 且无空间授予：没有权限
             ctx.response = InterceptedResponse(
                 success=False,
                 message="权限不足：需要 OWNER 权限",
@@ -490,6 +499,36 @@ class CollaboratorPermissionInterceptor:
             return ctx.injector.get(CollaboratorService)
         except Exception:
             return None
+
+    def _space_granted_permission(
+        self,
+        ctx: InterceptorContext,
+        params: PermissionParams,
+        user_id: str,
+    ) -> bool:
+        """是否对本 Bot 持有空间授予（或行）级别的权限。
+
+        走换轨后的 ``check_collaborator_permission``（有效权限 = 协作者行
+        ⊕ 空间成员授予 ⊕ COSEC 复核）：解析失败（服务不可用/Bot 不存在/
+        低于所需级别）一律不给授予（fail-closed），尤其不能在异常时放行。
+        仅在"无协作者行"分支被调用，此时任何过线答案都只能来自空间授予。
+        """
+        if params.bot_id is None or params.owner_id is None:
+            return False
+        service = self._get_collaborator_service(ctx)
+        if service is None:
+            return False
+        try:
+            result = service.check_collaborator_permission(
+                bot_id=params.bot_id,
+                owner_id=params.owner_id,
+                user_id=user_id,
+                required_level=self.required_level,
+            )
+        except Exception:
+            # Bot 不存在等——按无权限处理，让业务层回答更具体的错误。
+            return False
+        return bool(result.get("has_permission"))
 
     def _is_coding_app(
         self, ctx: InterceptorContext, bot_id: str | None, owner_id: str | None

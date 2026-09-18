@@ -162,10 +162,12 @@ class _Collaborators:
         self._levels = levels or {}
         self.calls = []
 
-    def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+    def get_operable_permission_level(self, *, bot, user_id, env=None):
         # Recorded unconditionally — the owner short-circuit is the real
         # service's; skipping the record here made the owner assertions
-        # tautological.
+        # tautological. Effective-ladder shape: the record drives the answer.
+        bot_pk = int(bot.get("id") or 0)
+        owner_id = str(bot.get("owner_id") or "")
         self.calls.append((bot_pk, user_id, owner_id))
         if user_id == owner_id:
             return PermissionLevel.OWNER
@@ -706,7 +708,7 @@ def test_an_unreadable_collaborator_lookup_refuses_rather_than_publishes():
     """The gate fails closed: a database blip must not admit a stranger."""
 
     class _Broken:
-        def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+        def get_operable_permission_level(self, *, bot, user_id, env=None):
             raise RuntimeError("collaborator service unavailable")
 
     bindings = _Bindings(raises=AssertionError("must not be reached"))

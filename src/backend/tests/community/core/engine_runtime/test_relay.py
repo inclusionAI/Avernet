@@ -58,7 +58,14 @@ class _BotService:
         bot = self._bots.get((bot_id, user_id))
         if bot is None:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
-        return bot
+        # Returned rows look like real ones: the lookup key names the owner,
+        # and the effective-ladder policies (gate → get_operable_…) read
+        # ``owner_id`` — and for a space-granted caller, ``space_id`` — off
+        # the record, off the wire parameters. Copies, so fixture dicts stay
+        # as their tests wrote them.
+        row = dict(bot)
+        row.setdefault("owner_id", user_id)
+        return row
 
     def get_bot_pk(self, bot_id: str, user_id: str) -> int:
         """The narrow key read the published-stage path makes.
@@ -182,11 +189,15 @@ class _Collaborators:
         self._levels = levels or {}
         self.calls: list[tuple[int, str, str]] = []
 
-    def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+    def get_operable_permission_level(self, *, bot, user_id, env=None):
         # Recorded unconditionally — the owner's DB-free short-circuit lives
         # inside the real CollaboratorService, not at this boundary, and a
         # fake that skipped recording made "no lookup for the owner" a
-        # tautology no regression could fail.
+        # tautology no regression could fail. The effective-ladder shape:
+        # the gate hands the *record* (its id and owner drive the answer,
+        # and the space-derived grant reads space_id off the same row).
+        bot_pk = int(bot.get("id") or 0)
+        owner_id = str(bot.get("owner_id") or "")
         self.calls.append((bot_pk, user_id, owner_id))
         if user_id == owner_id:
             return PermissionLevel.OWNER
@@ -1012,7 +1023,7 @@ def test_a_collaborator_lookup_failure_refuses():
     does, and it must not admit a stranger."""
 
     class _Broken:
-        def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+        def get_operable_permission_level(self, *, bot, user_id, env=None):
             raise RuntimeError("collaborator service unavailable")
 
     with pytest.raises(BotNotFoundError):
