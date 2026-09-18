@@ -153,12 +153,41 @@ def test_active_marker_requires_direct_pool_mappings_and_absent_storage_entries(
     )
 
     assert result.status is RuntimeLayoutInspectionStatus.READY
+    assert result.preparation_id == "2a958f59-8cf4-4413-a267-7d56d3382f23"
     assert result.evidence["activation_state"] == "active"
     assert result.evidence["mapping_contract_version"] == (
         "skills-pool-mapping-v2"
     )
     assert result.evidence["resolved_layout"]["local_root"] == str(pool_local)
     assert result.evidence["checks"]["legacy_storage_entries_absent"] is True
+
+
+def test_minimal_steady_marker_does_not_require_migration_identity(tmp_path):
+    home, active_root, _, pool_repo = _ready_home(tmp_path)
+    (active_root / "skills-repo").unlink()
+    marker_path = _active_marker_path(home)
+    marker_path.write_text(
+        json.dumps(
+            {
+                "engine": "openclaw",
+                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                "activation_state": "active",
+            }
+        )
+    )
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.READY
+    assert result.preparation_id is None
+    assert result.evidence["mapping_contract_version"] == (
+        "skills-pool-mapping-v2"
+    )
 
 
 def test_active_marker_allows_normal_skill_deactivation(tmp_path):

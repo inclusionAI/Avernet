@@ -13,6 +13,20 @@ from pathlib import Path
 from typing import Any, Protocol
 
 
+class LayoutInitializationConfirmationProtocol(Protocol):
+    """Confirm authenticated root-level layout evidence for one Bot startup."""
+
+    def confirm(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        expected_engine: str,
+        evidence: dict[str, object],
+    ) -> None: ...
+
+
 class BotQueryProtocol(Protocol):
     """Bot 查询接口 — 供设备服务检查 Bot 可见性和查询绑定关系."""
 
@@ -270,4 +284,3 @@ class McpSyncProtocol(Protocol):
             ``{"success": bool, "error": str|None}``.
         """
         ...
-

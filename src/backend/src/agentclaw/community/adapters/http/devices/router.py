@@ -793,6 +793,12 @@ async def report_device_status(
             status=req.status,
             message=req.message,
             token=token,
+            startup_identity=req.startup_identity,
+            layout_initialization=(
+                req.layout_initialization.model_dump()
+                if req.layout_initialization is not None
+                else None
+            ),
         )
 
         # service 返回 DeviceBindingRecord，统一转换

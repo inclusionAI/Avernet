@@ -77,6 +77,26 @@ def active_marker_valid(
     return True
 
 
+def steady_active_marker_valid(
+    marker: object,
+    *,
+    engine: str,
+    expected_contract_version: str,
+) -> bool:
+    """Validate only the durable Pool steady-state identity.
+
+    Migration identity belongs to ``finalizing`` recovery and is deliberately
+    not part of the long-lived ``active`` contract.
+    """
+
+    return bool(
+        isinstance(marker, dict)
+        and marker.get("engine") == engine
+        and marker.get("layout_contract_version") == expected_contract_version
+        and marker.get("activation_state") == "active"
+    )
+
+
 def active_entries_failure_reason(
     layout: ActiveMarkerLayout,
     *,

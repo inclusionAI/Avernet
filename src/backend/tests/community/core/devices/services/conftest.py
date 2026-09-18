@@ -239,6 +239,7 @@ def device_service(world, fake_baas_service):
             resolve_template_uid=MagicMock(return_value="openclaw_personal_default"),
             resolve_template_uuid=MagicMock(return_value="TEMPLATE-test"),
         ),
+        layout_confirmation=MagicMock(),
     )
 
     # LocalDeviceService kept as router default so unrecognized providers
@@ -253,6 +254,7 @@ def device_service(world, fake_baas_service):
         bot_sync=cast(BotSyncProtocol, bot_service),
         oss_record_repo=oss_record_repo,
         mcp_sync=cast(McpSyncProtocol, mcp_sync),
+        layout_confirmation=MagicMock(),
     )
 
     from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient

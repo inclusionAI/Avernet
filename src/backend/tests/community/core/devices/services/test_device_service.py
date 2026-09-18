@@ -87,6 +87,7 @@ def _make_service(
     sandbox_client=None,
     task_queue_service=None,
     oss_record_repo=None,
+    layout_confirmation=None,
 ) -> DeviceService:
     repo = repo or MagicMock()
     bot_query = bot_query or MagicMock()
@@ -99,6 +100,7 @@ def _make_service(
         mcp_sync=MagicMock(),
         sandbox_client=sandbox_client or _make_sandbox_client(),
         task_queue_service=task_queue_service,
+        layout_confirmation=layout_confirmation or MagicMock(),
     )
 
 
@@ -1201,6 +1203,100 @@ class TestReportDeviceStatus:
                 device_id="x", status="STARTING", message=None, token="tok"
             )
 
+    def test_pool_layout_evidence_confirms_before_alive(self):
+        record = _make_record(
+            device_provider=ARCA_DEVICE_PROVIDER,
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={
+                "callback_token": "tok",
+                "sandbox_id": "sandbox-current",
+            },
+        )
+        updated = _make_record(status=DeviceBindingStatus.PENDING.value)
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = updated
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "bot-1",
+            "entity_id": "u001",
+            "active_engine": "openclaw",
+        }
+        confirmation = MagicMock()
+        svc = _make_service(
+            repo=repo,
+            bot_query=bot_query,
+            layout_confirmation=confirmation,
+        )
+
+        result = svc.report_device_status(
+            device_id="staff_u001_default",
+            status="SUCCEEDED",
+            message=None,
+            token="tok",
+            startup_identity="sandbox-current",
+            layout_initialization={
+                "actual_engine": "openclaw",
+                "actual_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "roots_initialized": True,
+            },
+        )
+
+        assert result is updated
+        confirmation.confirm.assert_called_once()
+
+    def test_pool_layout_evidence_rejects_stale_startup_identity(self):
+        record = _make_record(
+            device_provider=ARCA_DEVICE_PROVIDER,
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={
+                "callback_token": "tok",
+                "sandbox_id": "sandbox-current",
+            },
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        confirmation = MagicMock()
+        svc = _make_service(repo=repo, layout_confirmation=confirmation)
+
+        with pytest.raises(InvalidDeviceStatusError, match="stale startup identity"):
+            svc.report_device_status(
+                device_id="staff_u001_default",
+                status="SUCCEEDED",
+                message=None,
+                token="tok",
+                startup_identity="sandbox-old",
+                layout_initialization={
+                    "actual_engine": "openclaw",
+                    "actual_layout": "pool",
+                    "layout_contract_version": "skills-pool-p3-v1",
+                    "roots_initialized": True,
+                },
+            )
+        confirmation.confirm.assert_not_called()
+
+    def test_old_succeeded_callback_does_not_confirm_layout(self):
+        record = _make_record(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"callback_token": "tok"},
+        )
+        updated = _make_record(status=DeviceBindingStatus.PENDING.value)
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = updated
+        confirmation = MagicMock()
+        svc = _make_service(repo=repo, layout_confirmation=confirmation)
+
+        svc.report_device_status(
+            device_id="staff_u001_default",
+            status="SUCCEEDED",
+            message=None,
+            token="tok",
+        )
+
+        confirmation.confirm.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # exec_shell
@@ -1537,6 +1633,7 @@ class TestApplyDevice:
             bot_sync=MagicMock(),
             oss_record_repo=MagicMock(),
             mcp_sync=MagicMock(),
+            layout_confirmation=MagicMock(),
         )
         svc._setup_directory = MagicMock(return_value=[])
 
@@ -1580,6 +1677,7 @@ class TestApplyDevice:
             bot_sync=MagicMock(),
             oss_record_repo=MagicMock(),
             mcp_sync=MagicMock(),
+            layout_confirmation=MagicMock(),
         )
         svc._setup_directory = MagicMock(return_value=[])
 

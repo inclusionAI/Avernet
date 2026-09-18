@@ -53,6 +53,16 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def confirm_pool_initializing(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        layout_contract_version: str,
+    ) -> bool:
+        """Idempotently confirm a Pool-native layout without migration identity."""
+        ...
+
+    @abstractmethod
     def renew_lease(
         self,
         *,

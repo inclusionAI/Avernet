@@ -132,6 +132,69 @@ def test_layout_repository_satisfies_public_protocol_shape() -> None:
     assert isinstance(repository, SkillsPoolLayoutRepositoryProtocol)
 
 
+def test_confirm_pool_initializing_commits_native_pool_without_migration_identity() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    with database.transactional_orm_session() as session:
+        session.add(
+            BotSkillLayoutStateModel(
+                env=scope.env,
+                entity_id=scope.entity_id,
+                bot_id=scope.bot_id,
+                active_layout=SkillLayout.POOL.value,
+                target_layout=None,
+                phase=SkillLayoutPhase.POOL_INITIALIZING.value,
+                migration_generation=None,
+                preparation_id=None,
+                layout_contract_version="skills-pool-p3-v1",
+            )
+        )
+
+    assert repository.confirm_pool_initializing(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+    )
+    state = repository.get(scope)
+    assert state.active_layout is SkillLayout.POOL
+    assert state.phase is SkillLayoutPhase.POOL_ACTIVE
+    assert state.target_layout is None
+    assert state.migration_generation is None
+    assert state.preparation_id is None
+    assert state.pool_activated_at is not None
+
+    # A duplicate success callback is idempotent and does not invent migration state.
+    assert repository.confirm_pool_initializing(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+    )
+    repeated = repository.get(scope)
+    assert repeated.migration_generation is None
+    assert repeated.preparation_id is None
+
+
+def test_confirm_pool_initializing_does_not_bypass_migration_state() -> None:
+    database = InMemorySqliteDB()
+    repository = SkillsPoolLayoutRepository(database)
+    scope = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
+    repository.claim_pool_migration(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+        migration_generation="generation-1",
+        rollout_evidence=rollout_evidence(),
+        lease_owner="worker-1",
+        lease_seconds=60,
+    )
+
+    assert not repository.confirm_pool_initializing(
+        scope=scope,
+        layout_contract_version="skills-pool-p3-v1",
+    )
+    state = repository.get(scope)
+    assert state.phase is SkillLayoutPhase.POOL_PREPARING
+    assert state.migration_generation == "generation-1"
+
+
 def test_runtime_reconciliation_fails_closed_without_quarantine() -> None:
     database = InMemorySqliteDB()
     repository = SkillsPoolLayoutRepository(database)

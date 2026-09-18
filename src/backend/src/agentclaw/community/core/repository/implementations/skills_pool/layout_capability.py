@@ -21,6 +21,52 @@ class SkillsPoolCapabilityRepositoryMixin:
 
     _database: object
 
+    def confirm_pool_initializing(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        layout_contract_version: str,
+    ) -> bool:
+        """Commit only the Pool-native initializing state to ``POOL_ACTIVE``."""
+
+        with self._database.transactional_orm_session() as session:
+            current = (
+                session.query(BotSkillLayoutStateModel)
+                .filter(
+                    BotSkillLayoutStateModel.env == scope.env,
+                    BotSkillLayoutStateModel.entity_id == scope.entity_id,
+                    BotSkillLayoutStateModel.bot_id == scope.bot_id,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if current is None:
+                return False
+            if (
+                current.active_layout == SkillLayout.POOL.value
+                and current.target_layout is None
+                and current.phase == SkillLayoutPhase.POOL_ACTIVE.value
+                and current.migration_generation is None
+                and current.preparation_id is None
+                and current.layout_contract_version == layout_contract_version
+            ):
+                return True
+            if not (
+                current.active_layout == SkillLayout.POOL.value
+                and current.target_layout is None
+                and current.phase == SkillLayoutPhase.POOL_INITIALIZING.value
+                and current.migration_generation is None
+                and current.preparation_id is None
+                and current.layout_contract_version == layout_contract_version
+                and not bool(current.data_plane_cutover_committed)
+            ):
+                return False
+            current.phase = SkillLayoutPhase.POOL_ACTIVE.value
+            current.pool_activated_at = func.now()
+            current.lease_owner = None
+            current.lease_expires_at = None
+        return True
+
     def _release_pre_cutover_claim(
         self,
         *,
