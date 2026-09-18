@@ -62,6 +62,8 @@ def test_matching_native_evidence_uses_repository_cas() -> None:
     scope = BotSkillLayoutScope(env="pre", entity_id="staff_1", bot_id="bot-1")
 
     service.confirm(
+        binding_id=17,
+        startup_identity="startup-1",
         env=scope.env,
         entity_id=scope.entity_id,
         bot_id=scope.bot_id,
@@ -72,6 +74,8 @@ def test_matching_native_evidence_uses_repository_cas() -> None:
     repository.confirm_pool_initializing.assert_called_once_with(
         scope=scope,
         layout_contract_version="skills-pool-p3-v1",
+        binding_id=17,
+        startup_identity="startup-1",
     )
 
 
@@ -88,6 +92,8 @@ def test_migration_identity_cannot_use_native_confirmation() -> None:
         match="not confirmable Pool-native state",
     ):
         service.confirm(
+            binding_id=17,
+            startup_identity="startup-1",
             env=repository.get.return_value.scope.env,
             entity_id=repository.get.return_value.scope.entity_id,
             bot_id=repository.get.return_value.scope.bot_id,
@@ -108,6 +114,8 @@ def test_completed_migration_restart_is_accepted_without_native_cas() -> None:
     service = SkillsPoolNativeLayoutConfirmationService(repository)
 
     service.confirm(
+        binding_id=17,
+        startup_identity="startup-1",
         env=repository.get.return_value.scope.env,
         entity_id=repository.get.return_value.scope.entity_id,
         bot_id=repository.get.return_value.scope.bot_id,
@@ -135,6 +143,8 @@ def test_mismatched_evidence_fails_closed(field: str, value: object) -> None:
 
     with pytest.raises(PoolNativeLayoutConfirmationError):
         service.confirm(
+            binding_id=17,
+            startup_identity="startup-1",
             env="pre",
             entity_id="staff_1",
             bot_id="bot-1",

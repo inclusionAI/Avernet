@@ -19,6 +19,8 @@ class LayoutInitializationConfirmationProtocol(Protocol):
     def confirm(
         self,
         *,
+        binding_id: int,
+        startup_identity: str,
         env: str,
         entity_id: str,
         bot_id: str,

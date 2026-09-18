@@ -57,6 +57,8 @@ class SkillsPoolNativeLayoutConfirmationService:
     def confirm(
         self,
         *,
+        binding_id: int,
+        startup_identity: str,
         env: str,
         entity_id: str,
         bot_id: str,
@@ -99,6 +101,8 @@ class SkillsPoolNativeLayoutConfirmationService:
         if not self._layouts.confirm_pool_initializing(
             scope=scope,
             layout_contract_version=observed.layout_contract_version,
+            binding_id=binding_id,
+            startup_identity=startup_identity,
         ):
             raise PoolNativeLayoutConfirmationError(
                 "Pool-native layout confirmation CAS did not commit"

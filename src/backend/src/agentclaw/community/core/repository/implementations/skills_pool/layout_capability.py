@@ -6,6 +6,10 @@ import json
 
 from sqlalchemy import func
 
+from agentclaw.community.core.devices.startup_identity import (
+    resolve_startup_identity,
+)
+
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
 )
@@ -26,10 +30,41 @@ class SkillsPoolCapabilityRepositoryMixin:
         *,
         scope: BotSkillLayoutScope,
         layout_contract_version: str,
+        binding_id: int,
+        startup_identity: str,
     ) -> bool:
-        """Commit only the Pool-native initializing state to ``POOL_ACTIVE``."""
+        """Commit ``POOL_ACTIVE`` only for the still-current startup attempt."""
+
+        from agentclaw.community.core.devices.repository.models import (
+            EntityDeviceBinding,
+        )
 
         with self._database.transactional_orm_session() as session:
+            binding = (
+                session.query(EntityDeviceBinding)
+                .filter(
+                    EntityDeviceBinding.id == binding_id,
+                    EntityDeviceBinding.env == scope.env,
+                    EntityDeviceBinding.entity_id == scope.entity_id,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if binding is None:
+                return False
+            try:
+                props = (
+                    json.loads(binding.device_props)
+                    if isinstance(binding.device_props, str)
+                    else binding.device_props
+                )
+            except (json.JSONDecodeError, TypeError):
+                return False
+            if not isinstance(props, dict) or (
+                resolve_startup_identity(props) != startup_identity
+            ):
+                return False
+
             current = (
                 session.query(BotSkillLayoutStateModel)
                 .filter(

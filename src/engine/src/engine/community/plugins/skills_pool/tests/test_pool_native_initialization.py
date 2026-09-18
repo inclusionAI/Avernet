@@ -39,6 +39,37 @@ def test_empty_openclaw_home_initializes_minimal_active_layout(tmp_path: Path) -
     assert evidence.roots_initialized is True
 
 
+def test_concurrent_directory_creation_converges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    active_root = home / ".openclaw" / "workspace" / "skills"
+    original_mkdir = Path.mkdir
+    lost_once = False
+
+    def concurrent_mkdir(
+        path: Path,
+        mode: int = 0o777,
+        parents: bool = False,
+        exist_ok: bool = False,
+    ) -> None:
+        nonlocal lost_once
+        if path == active_root and not lost_once:
+            lost_once = True
+            original_mkdir(path, mode=mode, parents=parents, exist_ok=True)
+            raise FileExistsError(path)
+        original_mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", concurrent_mkdir)
+
+    evidence = initialize_pool_native(engine="openclaw", home=home)
+
+    assert lost_once
+    assert active_root.is_dir()
+    assert evidence.roots_initialized is True
+
+
 def test_restart_repairs_missing_marker_without_touching_pool_content(tmp_path: Path) -> None:
     home = tmp_path / "home" / "admin"
     pool_local = home / ".openclaw" / "workspace" / "skills-pool" / "skills-local"

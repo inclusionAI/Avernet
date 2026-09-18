@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
     DeviceBindingInfo,
@@ -1224,21 +1225,7 @@ class DeviceService:
             raise InvalidDeviceStatusError(
                 "layout initialization evidence requires SUCCEEDED status"
             )
-        props = record.device_props or {}
-        expected_identity = next(
-            (
-                str(props[key])
-                for key in (
-                    "startup_identity",
-                    "restart_publish_id",
-                    "restart_request_id",
-                    "publish_id",
-                    "sandbox_id",
-                )
-                if props.get(key) is not None and str(props[key])
-            ),
-            None,
-        )
+        expected_identity = resolve_startup_identity(record.device_props)
         if (
             expected_identity is None
             or startup_identity is None
@@ -1255,6 +1242,8 @@ class DeviceService:
             raise InvalidDeviceStatusError("invalid Bot identity for layout confirmation")
 
         self._layout_confirmation.confirm(
+            binding_id=record.id,
+            startup_identity=startup_identity,
             env=record.env,
             entity_id=record.entity_id,
             bot_id=bot_id,

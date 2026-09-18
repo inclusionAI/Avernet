@@ -1244,7 +1244,20 @@ class TestReportDeviceStatus:
         )
 
         assert result is updated
-        confirmation.confirm.assert_called_once()
+        confirmation.confirm.assert_called_once_with(
+            binding_id=record.id,
+            startup_identity="sandbox-current",
+            env=record.env,
+            entity_id=record.entity_id,
+            bot_id="bot-1",
+            expected_engine="openclaw",
+            evidence={
+                "actual_engine": "openclaw",
+                "actual_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "roots_initialized": True,
+            },
+        )
 
     def test_pool_layout_evidence_rejects_stale_startup_identity(self):
         record = _make_record(

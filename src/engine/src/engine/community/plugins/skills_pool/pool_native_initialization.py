@@ -47,8 +47,19 @@ def _require_directory(path: Path, *, create: bool) -> None:
     except FileNotFoundError:
         if not create:
             raise PoolNativeInitializationError(f"required root is absent: {path}")
-        path.mkdir(parents=True, exist_ok=False)
-        return
+        try:
+            path.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            # Another startup may have created this root after our lstat().
+            # Re-read the winner instead of treating a valid directory as a
+            # failed initialization.
+            pass
+        try:
+            path_stat = path.lstat()
+        except FileNotFoundError as error:
+            raise PoolNativeInitializationError(
+                f"required root disappeared during initialization: {path}"
+            ) from error
     if stat.S_ISLNK(path_stat.st_mode) or not stat.S_ISDIR(path_stat.st_mode):
         raise PoolNativeInitializationError(f"required root is not a directory: {path}")
 
