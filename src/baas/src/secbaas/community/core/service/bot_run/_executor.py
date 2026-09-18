@@ -189,7 +189,23 @@ class SerializingExecutor:
                     record.bot_id,
                 )
                 raise RequeuedToPendingError(record.run_id, session_id)
-            await self._inner.execute(record)
+            try:
+                await self._inner.execute(record)
+            except BaseException:
+                # 异常路径显式 force_unlock，避免 ``_release_lock_internal``
+                # 吞异常路径导致 ``ac_lock_table`` 孤儿 session 锁残留
+                # （仅在 ``lock.acquired=True`` 分支内执行，不动他人锁）。
+                try:
+                    self._lock_service.force_unlock(lock_name)
+                except Exception as unlock_err:
+                    logger.warning(
+                        "[SerializingExecutor] force_unlock failed "
+                        "run_id=%s lock_name=%s: %s",
+                        record.run_id,
+                        lock_name,
+                        unlock_err,
+                    )
+                raise
 
 
 # ---------------------------------------------------------------------------
@@ -433,11 +449,44 @@ class BotRunRequestExecutor:
                 "completion_tokens": response.usage.get("completion_tokens", 0),
             }
 
-        self._repo.update_result(
-            run_id=run.run_id,
-            content_long=response.content,
-            extra=extra,
-        )
+        await self._do_send_persist(run, response, extra)
+
+    async def _do_send_persist(
+        self,
+        run: Any,
+        response: Any,
+        extra: dict[str, Any],
+    ) -> None:
+        """持久化 ``_do_send`` 的结果，失败时写 FAILED 终态并向上抛。
+
+        业务层兜底（Issue 1）：确切 1064 根因由后续基于实际 SQL 错误日志确认，
+        此处仅保证持久化失败时 run 进入 FAILED 终态并由上层 finally 路径
+        触发 callback 与锁释放，不再长期阻塞会话。
+        """
+        try:
+            self._repo.update_result(
+                run_id=run.run_id,
+                content_long=response.content,
+                extra=extra,
+            )
+        except Exception as persist_err:
+            logger.exception(
+                "[BotRunExecutor] result persistence failed run_id=%s: %s",
+                run.run_id,
+                persist_err,
+            )
+            try:
+                self._repo.update_error(
+                    run.run_id,
+                    f"result persistence failed: {persist_err}",
+                )
+            except Exception as mark_err:
+                logger.exception(
+                    "[BotRunExecutor] update_error fallback failed run_id=%s: %s",
+                    run.run_id,
+                    mark_err,
+                )
+            raise
 
     async def _do_send_stream(
         self,

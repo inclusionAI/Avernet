@@ -430,8 +430,13 @@ class BotRequestWorker:
 
         ``finally`` 只做本地资源清理。``baas_bot_run`` 的业务终态由 executor
         链负责；Worker 只根据 executor 结果推进 ``baas_bot_run_queue``。
+
+        异常冒泡时若 callback 尚未发送，``except`` 路径兜底发送 failed 终态
+        回执（Issue 2-B）：避免只走成功分支的 callback 在异常时遗漏通知。
+        ``RequeuedToPendingError`` 在内层捕获后 ``return``，不会进入兜底分支。
         """
         post_run_callback = self._resolve_callback(record)
+        callback_sent = False
 
         current_task = asyncio.current_task()
         heartbeat = asyncio.create_task(
@@ -447,7 +452,29 @@ class BotRequestWorker:
                     return
 
                 await self._post_run(record, post_run_callback)
+                callback_sent = True
                 self._mark_queue_done(record)
+        except BaseException:
+            # 异常冒泡且 callback 未发送 → 兜底发送 failed 终态回执，
+            # 防止只走成功分支的 callback 路径在异常时遗漏通知。
+            # callback 自身需幂等（PostRunCallback 协议要求）。
+            if not callback_sent and post_run_callback is not None:
+                logger.info(
+                    "[BotRequestWorker] assured callback on exception path "
+                    "run_id=%s",
+                    record.run_id,
+                )
+                try:
+                    await post_run_callback(record.run_id)
+                except Exception as cb_err:
+                    logger.error(
+                        "[BotRequestWorker] assured post_run_callback failed "
+                        "run_id=%s: %s",
+                        record.run_id,
+                        cb_err,
+                        exc_info=True,
+                    )
+            raise
         finally:
             self._running_tasks.pop(record.run_id, None)
             heartbeat.cancel()

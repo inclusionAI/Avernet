@@ -51,6 +51,7 @@ class CoreTaskContainer(containers.DeclarativeContainer):
 
     # Provided by ApplicationContainer (cross-container wiring)
     distributed_lock_service = providers.Dependency()
+    distributed_lock_repository = providers.Dependency()
     device_repo = providers.Dependency()
     device_binding_repo = providers.Dependency()
     sandbox_device_router = providers.Dependency()
@@ -103,6 +104,7 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         config=bot_run_recovery_config,
         lock_service=distributed_lock_service,
         queue_repo=bot_run_queue_repository,
+        lock_repo=distributed_lock_repository,
     )
 
     # ── FileTransferPoller task ────────────────────────────────────────────────
