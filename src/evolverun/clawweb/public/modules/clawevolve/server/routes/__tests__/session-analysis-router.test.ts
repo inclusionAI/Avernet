@@ -113,7 +113,7 @@ describe("session analysis Router", () => {
   it("accepts one verified success callback for the current attempt", async () => {
     const artifacts = Object.fromEntries([
       "raw", "manifest", "report", "analysis", "result", "trajectory", "trajectoryPath",
-      "runtimeBundle", "openclawSessions",
+      "artifactBundle", "runtimeBundle", "openclawSessions",
     ].map(name => [name, { objectKey: `evolution/SA-1/${name}` }]));
     const task = {
       task_id: "SA-1",
@@ -153,7 +153,7 @@ describe("session analysis Router", () => {
     const contentType = (name: string) => ["raw", "trajectory"].includes(name)
       ? "application/x-ndjson"
       : name === "report" ? "text/markdown; charset=utf-8"
-        : ["runtimeBundle", "openclawSessions"].includes(name) ? "application/gzip" : "application/json";
+        : ["artifactBundle", "runtimeBundle", "openclawSessions"].includes(name) ? "application/gzip" : "application/json";
     const uploaded = Object.fromEntries(Object.entries(artifacts)
       .filter(([name]) => !optional.has(name))
       .map(([name, item]) => [name, {

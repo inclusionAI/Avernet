@@ -39,6 +39,7 @@ function safeSessionFilename(value: string | undefined): string {
 }
 export function runtimeArtifactDownloadFilename(name: string, stepId: string): string | null {
   const stem = stepId.replace(/[^A-Za-z0-9_.-]+/g, "_").replace(/^\.+/, "").slice(0, 200) || "session-analysis";
+  if (name === "artifactBundle") return `${stem}-task-artifacts.tar.gz`;
   if (name === "runtimeBundle") return `${stem}-clawevolve-results.tar.gz`;
   if (name === "openclawSessions") return `${stem}-openclaw-sessions.tar.gz`;
   return null;
@@ -96,7 +97,7 @@ function artifactContentType(name: string, mode: Config['mode']): string | undef
   if (name === "trajectory") return "application/x-ndjson";
   if (name === "report") return "text/markdown; charset=utf-8";
   if (["manifest", "analysis", "result", "trajectoryPath"].includes(name)) return "application/json";
-  if (["runtimeBundle", "openclawSessions"].includes(name)) return "application/gzip";
+  if (["artifactBundle", "runtimeBundle", "openclawSessions"].includes(name)) return "application/gzip";
   return undefined;
 }
 
@@ -386,10 +387,10 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
       return res.status(503).json({ code: aisOptions.configurationError, error: "会话 AIS 配置无效，请联系管理员" });
     const aisBase = mode === "ANALYZE_SINGLE" ? sessionAisBaseConfig(aisOptions) : undefined;
     const names = mode === "ANALYZE_SINGLE" ? ["raw", "manifest", "report", "analysis", "result"] : ["raw", "manifest", "result"];
-    if (aisBase) names.push("trajectory", "trajectoryPath", "runtimeBundle", "openclawSessions");
+    if (aisBase) names.push("trajectory", "trajectoryPath", "artifactBundle", "runtimeBundle", "openclawSessions");
     const suffix: Record<string, string> = {
       trajectory: "session.trajectory.jsonl", trajectoryPath: "session.trajectory-path.json",
-      runtimeBundle: "clawevolve-results.tar.gz", openclawSessions: "openclaw-sessions.tar.gz",
+      artifactBundle: "task-artifacts.tar.gz", runtimeBundle: "clawevolve-results.tar.gz", openclawSessions: "openclaw-sessions.tar.gz",
       raw: mode === "ANALYZE_SINGLE" ? safeSessionFilename(sessionIdentifier || sessionId || sessionKey) : "session.tar.gz",
       manifest: "session.manifest.json", report: "report.md", analysis: "analysis.json", result: "result.json",
     };
