@@ -238,6 +238,7 @@ class TrajectoryEventRecord:
     action_input: Optional[str] = None
     status_from: Optional[str] = None
     status_to: Optional[str] = None
+    boost_reason: Optional[str] = None
     error_type: Optional[str] = None
     error_msg: Optional[str] = None
     ext_info: Optional[str] = None

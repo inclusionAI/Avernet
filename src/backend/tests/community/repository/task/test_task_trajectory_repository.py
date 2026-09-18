@@ -47,6 +47,7 @@ def _event(task_id: str = "T-1", node_id: str = "N-1", action_type: str = "dispa
         action_result="hit_single",
         status_from="planning",
         status_to="running",
+        boost_reason=None,
         error_type=None,
         error_msg=None,
         ext_info='{"schema_v":1,"strategy":"direct"}',

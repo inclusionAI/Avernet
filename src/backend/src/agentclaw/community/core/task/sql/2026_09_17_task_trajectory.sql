@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS `task_trajectory_events` (
     `status_from`   varchar(64)  DEFAULT NULL                                    COMMENT '动作前节点状态',
     `status_to`     varchar(64)  DEFAULT NULL                                    COMMENT '动作后节点状态',
     `attempt`       int          NOT NULL DEFAULT 0                              COMMENT 'harness 重试序号快照',
+    `boost_reason`  text         DEFAULT NULL                                    COMMENT '任务推进理由(本事件驱动任务推进的缘由文本;无理由为 NULL)',
     `error_type`    varchar(64)  DEFAULT NULL                                    COMMENT 'ReasonCatalog 错误分类(成功为 NULL)',
     `error_msg`     text         DEFAULT NULL                                    COMMENT '截断后的错误消息(成功为 NULL)',
     `ext_info`      text         DEFAULT NULL                                    COMMENT '扩展信息 JSON(DispatchRationale/RESET计量/SUBMIT来源等(后续可扩展素材);带 schema_v;领域对象不映射,analyzer 按需读)',

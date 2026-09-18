@@ -370,8 +370,8 @@ class TaskTrajectoryEventModel(Base):
 
     Independent trajectory entity: NO foreign key / NO association column to
     ``task_action_log`` or ``task_callback`` (spec invariant). ``action_input``
-    / ``ext_info`` / ``analysis`` are TEXT (raw strings — ``action_input`` is a
-    digest/原文, ``ext_info`` is free JSON the domain does not map, ``analysis``
+    / ``boost_reason`` / ``ext_info`` / ``analysis`` are TEXT (raw strings — ``action_input`` is a
+    digest/原文, ``boost_reason`` is the free-text 任务推进理由, ``ext_info`` is free JSON the domain does not map, ``analysis``
     is an embedded JSON string). ``gmt_create`` = event emission time (timeline
     ordering key); the repo (P1b) ALWAYS supplies it from the domain int-ms
     timestamp and does NOT rely on the DB ``DEFAULT CURRENT_TIMESTAMP`` (kept
@@ -392,6 +392,7 @@ class TaskTrajectoryEventModel(Base):
     status_from = Column(String(64), nullable=True)
     status_to = Column(String(64), nullable=True)
     attempt = Column(Integer, nullable=False, default=0)
+    boost_reason = Column(Text, nullable=True)
     error_type = Column(String(64), nullable=True)
     error_msg = Column(Text, nullable=True)
     ext_info = Column(Text, nullable=True)
@@ -418,6 +419,7 @@ class TaskTrajectoryEventModel(Base):
             status_from=self.status_from,
             status_to=self.status_to,
             attempt=self.attempt,
+            boost_reason=self.boost_reason,
             error_type=self.error_type,
             error_msg=self.error_msg,
             ext_info=self.ext_info,

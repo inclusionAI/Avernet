@@ -80,6 +80,7 @@ class TaskTrajectoryRepository(TaskTrajectoryRepositoryProtocol):
             status_from=record.status_from,
             status_to=record.status_to,
             attempt=record.attempt,
+            boost_reason=record.boost_reason,
             error_type=record.error_type,
             error_msg=record.error_msg,
             ext_info=record.ext_info,

@@ -33,6 +33,7 @@ def _full_event(**overrides) -> TaskTrajectoryEventModel:
         status_from="planning",
         status_to="running",
         attempt=0,
+        boost_reason=None,
         error_type=None,
         error_msg=None,
         ext_info='{"schema_v":1,"strategy":"direct"}',
@@ -59,7 +60,7 @@ def test_three_trajectory_tables_build(engine):
 def test_event_model_roundtrip(db):
     """Insert a fully-populated event row, read it back, and to_record() matches."""
     with db.orm_session() as session:
-        session.add(_full_event())
+        session.add(_full_event(boost_reason="策略=direct 选中=N-1"))
 
     with db.orm_session() as session:
         row = session.execute(select(TaskTrajectoryEventModel)).scalar_one()
@@ -75,6 +76,7 @@ def test_event_model_roundtrip(db):
     assert record.status_from == "planning"
     assert record.status_to == "running"
     assert record.attempt == 0
+    assert record.boost_reason == "策略=direct 选中=N-1"
     assert record.error_type is None
     assert record.error_msg is None
     assert record.ext_info == '{"schema_v":1,"strategy":"direct"}'
