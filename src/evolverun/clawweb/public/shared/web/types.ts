@@ -1850,6 +1850,49 @@ export type HttpCallbackConfigUpdateInput = Partial<Omit<HttpCallbackConfigCreat
 
 // ── Run Archive ──
 
+export type RunArchiveDiagnosis = {
+  diagnosisId: string
+  flowIds: string[]
+  nodeId: string | null
+  failureSignature: string
+  failureMode: string
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  reasoning: string
+  evidenceEventIds: string[]
+  suggestedFixSpec: string | null
+  proposal: {
+    schemaVersion: string
+    workflowId: string
+    baseSpecDigest: string | null
+    summary: string
+    operations: Array<{
+      op: 'replace' | 'add' | 'remove'
+      path: string
+      value?: unknown
+    }>
+  } | null
+}
+
+export type RunArchiveAnalysis = {
+  source: 'reused' | 'preview' | 'failed'
+  status: 'completed' | 'failed' | 'skipped'
+  analysisId: string | null
+  error: string | null
+  diagnoses: RunArchiveDiagnosis[]
+  summary: string | null
+}
+
+export type RunArchiveSuggestedYaml = {
+  yamlContent: string
+  patchProposal: {
+    schemaVersion: string
+    workflowId: string
+    operations: Array<{ op: string; path: string; value?: unknown }>
+  } | null
+  summary: string
+  confidence: 'low' | 'medium' | 'high'
+}
+
 export type RunArchiveData = {
   archive: {
     flowId: string
@@ -1893,6 +1936,10 @@ export type RunArchiveData = {
       detail: string
     }>
   }
+  // Part 3: AI diagnosis (optional — present when analysis is available)
+  analysis?: RunArchiveAnalysis | null
+  // Part 4: Suggested YAML (optional — derived from analysis proposals)
+  suggestedYaml?: RunArchiveSuggestedYaml | null
 }
 
 
