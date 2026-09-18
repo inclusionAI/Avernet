@@ -184,12 +184,14 @@ real sqlite) and asserts the emitted row's `action_type`/`action_result`/`action
 
 ## P6 — Callback↔node correlation across restart (REQ-P1)
 
-- [ ] Persist `CallbackCorrelationRegistry` writes into `task_callback_correlation` on register
-      (callback_correlation.py → repo). `task_callback_correlation` DDL in place (P1).
-- [ ] `TaskTrajectoryAssembler` joins `task_callback_correlation` so a post-restart callback
-      correlates back to its (node, retry).
-- [ ] Test: register → simulate restart → callback arrives → assembler associates to the right
-      (node, retry).
+- [x] Persist `CallbackCorrelationRegistry` writes into `task_callback_correlation` on register
+      (callback_correlation.py → repo; commit `f64bbb178`). `task_callback_correlation` DDL in place (P1).
+      持久化层 + resolve 内存未命中→DB 回填的跨重启恢复机制已交付,单测覆盖(12 cases)。
+- [~] `TaskTrajectoryAssembler` joins `task_callback_correlation` so a post-restart callback
+      correlates back to its (node, retry). **DEFERRED** —— 待 `register()` 接入后该表非空再做(register 接入前 join 为死代码)。
+- [~] Test: register → simulate restart → callback arrives → assembler associates to the right
+      (node, retry). 已单测 register→restart→resolve 恢复机制(`test_callback_correlation_durable.py`,12 cases);assembler-join e2e 随 assembler-join 一并 deferred。
+- **外部依赖说明**:`registry.register()` 在生产代码无调用点(原由未落地的 runner-integration spec 负责,见 `2026-08-09-task-goal-driven-task-runner-callback/plan.md:1694`),故 `task_callback_correlation` 在 `register()` 接入前不被写入 —— 持久化与恢复为 latent infra(register 接入即激活)。本 trajectory spec 交付了"持久化"半边;`register()` 接入 + assembler-join 的 prod 激活取决于 runner-integration spec,超出本 spec 范围(详见 spec.md REQ-P1 状态)。
 
 ## P7 — Validation & rollout
 

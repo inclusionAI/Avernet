@@ -654,6 +654,14 @@ def test_rule_analysis_input_summarises_event_counts_and_ext_info_signals():
     # which events carry rationales / metrics
     assert "dispatch_with_rationale=1" in ta.analysis_input
     assert "reset_with_metrics=1" in ta.analysis_input
+    # I-1: the rule executor's analysis_input is ALSO enriched with the
+    # ext_info概要 (the same enrichment the LIVE tc_bot path now feeds the bot).
+    # The dispatch rationale 概要 + RESET SLA elapsed/threshold are in the
+    # record — the "为何" signals alongside the counts (REQ-9: analysis_input
+    # = "事件数 + ext_info 概要", uniform across the rule/tc_bot executors).
+    assert "ext_info概要=" in ta.analysis_input
+    assert "dispatch[last:策略=search/模式=skill/候选1/JOIN丢0]" in ta.analysis_input
+    assert "reset_sla[last:sla_timeout elapsed=600000ms threshold=600000ms]" in ta.analysis_input
 
 
 def test_rule_analysis_output_joins_boost_and_failure():
@@ -806,6 +814,252 @@ async def test_tc_bot_calls_bot_with_trajectory_summary_and_bot_id():
     assert bot.last_call["metadata"] is not None
     # the default-config timeout (180s) flows through to the bot call (M3).
     assert bot.last_call["timeout"] == 180.0
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_input_includes_ext_info_brief_when_lookup_supplies_it():
+    """REQ-9 + I-1: the LIVE tc_bot path must feed the bot the **ext_info 概要**
+    (dispatch rationale 概要 + RESET SLA elapsed/threshold + interface-error
+    events) so the bot can derive ``boost_reason`` / ``failure_reason`` — not
+    the COUNTS-ONLY summary pre-fix. Mirrors a real trajectory: a DISPATCH with
+    a rationale (search/skill + 3 candidates + 1 JOIN drop) and a RESET
+    ``sla_timeout`` (elapsed/threshold from ext_info)."""
+    dispatch = _ev(
+        TrajectoryActionType.DISPATCH,
+        action_result="hit_single",
+        action_input="bot-1",
+        ms=_MS + 4_000,
+    )
+    reset = _ev(
+        TrajectoryActionType.RESET,
+        action_result="sla_timeout",
+        ms=_MS + 9_000,
+    )
+    exe = _ev(
+        TrajectoryActionType.EXECUTE,
+        action_result="failed",
+        error_type=ReasonCatalog.UNDERLYING_INTERFACE_ERROR,
+        error_msg="boom",
+        ms=_MS + 7_000,
+    )
+    trajectory = _traj([
+        _ev(TrajectoryActionType.SUBMIT, action_result="success"),
+        _ev(TrajectoryActionType.PLAN, action_result="success", ms=_MS + 2_000),
+        dispatch,
+        exe,
+        reset,
+        _terminal_failed(),
+    ])
+    rationale = _dispatch_rationale(
+        strategy_name="search",
+        decision_mode="skill",
+        candidates=[
+            {"bot_id": "bot-1", "recommend_score": 0.9, "short_profile": "owns skill"},
+            {"bot_id": "bot-2", "recommend_score": 0.7, "short_profile": "backup"},
+            {"bot_id": "bot-3", "recommend_score": 0.5, "short_profile": "rookie"},
+        ],
+        join_dropped=[{"bot_id": "bot-9", "reason": "claim_mode_off"}],
+    )
+    lookup = _lookup([
+        (dispatch, {"_dispatch_rationale": rationale}),
+        (exe, {"interface_error_code": "E503"}),
+        (reset, {
+            "trigger": "sla_timeout",
+            "elapsed_ms": 600000,
+            "sla_threshold_ms": 600000,
+            "attempts_seen": 1,
+        }),
+    ])
+    bot = _FakeBot(content=_bot_analysis_content())
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    ta = await analyzer.analyze(
+        trajectory, lookup,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    # The analysis_input STRING carries the ext_info 概要 alongside the counts
+    # (REQ-9: analysis_input = "事件数 + ext_info 概要").
+    assert ta.analysis_input is not None
+    assert "ext_info概要=" in ta.analysis_input
+    assert "dispatch[last:策略=search/模式=skill/候选3/JOIN丢1]" in ta.analysis_input
+    assert "reset_sla[last:sla_timeout elapsed=600000ms threshold=600000ms]" in ta.analysis_input
+    assert "interface_err[1]" in ta.analysis_input
+    # The bot's message JSON carries the STRUCTURED ext_info_brief so the bot
+    # can read the "为何" signals programmatically (not just from the string).
+    assert bot.last_call is not None
+    msg = json.loads(bot.last_call["message"])
+    assert "ext_info_brief" in msg
+    brief = msg["ext_info_brief"]
+    assert isinstance(brief, dict)
+    # last_dispatch_rationale 概要 (boost_reason signal)
+    assert "last_dispatch_rationale" in brief
+    dr = brief["last_dispatch_rationale"]
+    assert dr["strategy_name"] == "search"
+    assert dr["decision_mode"] == "skill"
+    assert dr["candidate_count"] == 3
+    assert dr["top_candidate_scores"] == [0.9, 0.7, 0.5]
+    assert dr["join_dropped_summary"] == {"count": 1, "reasons": ["claim_mode_off"]}
+    # last_reset_sla (execution_timeout detail signal)
+    assert "last_reset_sla" in brief
+    rs = brief["last_reset_sla"]
+    assert rs["action_result"] == "sla_timeout"
+    assert rs["elapsed_ms"] == 600000
+    assert rs["sla_threshold_ms"] == 600000
+    # interface_error_events (底层接口报错 signal)
+    assert "interface_error_events" in brief
+    ie = brief["interface_error_events"]
+    assert len(ie) == 1
+    assert ie[0]["interface_error_code"] == "E503"
+    # The instruction field tells the bot about ext_info_brief's contract.
+    assert "ext_info_brief" in msg["instruction"]
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_input_degrades_to_counts_only_when_lookup_empty():
+    """I-1 graceful degradation: an EMPTY ext_info_lookup (no ext_info written
+    for any event — e.g. a broken P5b service closure) MUST NOT crash the
+    tc_bot path or feed the bot a malformed ``ext_info_brief``. The bot input
+    degrades to the pre-fix COUNTS-ONLY shape (``ext_info_brief={}``,
+    analysis_input has the counts but no ``ext_info概要=`` segment). The "no
+    KeyError on a missing key" contract for the bot's prompt is the load-bearing
+    assertion: a ``{}`` brief is a well-formed "signal absent" sentinel, NOT a
+    ``null`` placeholder the bot would have to parse around."""
+    dispatch = _ev(
+        TrajectoryActionType.DISPATCH,
+        action_result="hit_single",
+        action_input="bot-1",
+        ms=_MS + 4_000,
+    )
+    reset = _ev(
+        TrajectoryActionType.RESET,
+        action_result="sla_timeout",
+        ms=_MS + 9_000,
+    )
+    trajectory = _traj([
+        _ev(TrajectoryActionType.SUBMIT, action_result="success"),
+        dispatch,
+        reset,
+        _terminal_failed(),
+    ])
+    # Empty lookup → every ext_info_lookup returns None (no ext_info written).
+    bot = _FakeBot(content=_bot_analysis_content())
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    ta = await analyzer.analyze(
+        trajectory, _lookup([]),
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    # analysis_input keeps the counts-only shape (no ext_info概要 segment).
+    assert ta.analysis_input is not None
+    assert "events=4" in ta.analysis_input  # SUBMIT + DISPATCH + RESET + TRANSITION(terminal)
+    assert "dispatch_with_rationale=0" in ta.analysis_input
+    assert "reset_with_metrics=0" in ta.analysis_input
+    assert "ext_info概要=" not in ta.analysis_input  # degraded (no brief content)
+    # The bot's ext_info_brief is a well-formed empty dict (signal-absent sentinel).
+    msg = json.loads(bot.last_call["message"])
+    assert msg["ext_info_brief"] == {}
+    # No KeyError for any of the bot-prompt's expected brief keys.
+    assert "last_dispatch_rationale" not in msg["ext_info_brief"]
+    assert "last_reset_sla" not in msg["ext_info_brief"]
+    assert "interface_error_events" not in msg["ext_info_brief"]
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_input_degrades_when_lookup_raises_on_dispatch_event():
+    """I-1 graceful degradation against a BROKEN lookup (raises on the dispatch
+    event): ``_safe_lookup`` swallows + WARNING, the dispatch rationale 概要 is
+    skipped, but the bot still gets the rest of the brief (RESET SLA was
+    read OK) and the analysis_input carries the counts. The bot is not misled
+    with a partial dispatch-rationale entry (no half-curried key)."""
+    dispatch = _ev(
+        TrajectoryActionType.DISPATCH,
+        action_result="hit_single",
+        action_input="bot-1",
+        ms=_MS + 4_000,
+    )
+    reset = _ev(
+        TrajectoryActionType.RESET,
+        action_result="sla_timeout",
+        ms=_MS + 9_000,
+    )
+    trajectory = _traj([
+        _ev(TrajectoryActionType.SUBMIT, action_result="success"),
+        dispatch,
+        reset,
+        _terminal_failed(),
+    ])
+    rationale = _dispatch_rationale(strategy_name="search", decision_mode="skill")
+    reset_ext = {"trigger": "sla_timeout", "elapsed_ms": 540000, "sla_threshold_ms": 600000}
+    by_identity = {id(dispatch): {"_dispatch_rationale": rationale}, id(reset): reset_ext}
+
+    def broken_lookup(ev: TrajectoryEvent) -> dict | None:
+        if ev is dispatch:
+            raise RuntimeError("lookup boom on dispatch")
+        return by_identity.get(id(ev))
+
+    bot = _FakeBot(content=_bot_analysis_content())
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    ta = await analyzer.analyze(
+        trajectory, broken_lookup,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    # The bot still gets a callable result (no crash) + the RESET SLA brief
+    # survived; the dispatch rationale 概要 is absent (broken lookup swallowed).
+    msg = json.loads(bot.last_call["message"])
+    brief = msg["ext_info_brief"]
+    assert "last_reset_sla" in brief  # the RESET read was OK
+    assert brief["last_reset_sla"]["elapsed_ms"] == 540000
+    assert "last_dispatch_rationale" not in brief  # broken lookup → skipped
+    # analysis_input carries the counts but NO dispatch[last:...] segment
+    # (the dispatch _dispatch_rationale read failed → _safe_lookup returned None
+    # → the rationale 概要 is absent, NOT a half-populated entry).
+    assert ta.analysis_input is not None
+    assert "dispatch=1" in ta.analysis_input
+    assert "dispatch[last:" not in ta.analysis_input
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_input_brief_covers_pending_dispatch_stuck_reset():
+    """I-1: the RESET SLA brief also covers ``action_result=
+    pending_dispatch_stuck`` (REQ-9 bullet 3 — the 'dispatch_stuck: 停留 N ms'
+    signal the bot needs), not just ``sla_timeout``. Locking the bullet-3
+    coverage so a future change to the RESET ResultCatalog can't silently drop
+    it from the bot's brief."""
+    dispatch = _ev(
+        TrajectoryActionType.DISPATCH,
+        action_result="miss",
+        action_input=None,
+        ms=_MS + 4_000,
+    )
+    reset = _ev(
+        TrajectoryActionType.RESET,
+        action_result="pending_dispatch_stuck",
+        ms=_MS + 12_000,
+    )
+    trajectory = _traj([
+        _ev(TrajectoryActionType.SUBMIT, action_result="success"),
+        dispatch,
+        reset,
+        _terminal_failed(),
+    ])
+    reset_ext = {
+        "trigger": "pending_dispatch_stuck",
+        "elapsed_ms": 180000,
+        "sla_threshold_ms": None,
+        "attempts_seen": 0,
+    }
+    lookup = _lookup([(reset, reset_ext)])
+    bot = _FakeBot(content=_bot_analysis_content())
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    await analyzer.analyze(
+        trajectory, lookup,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    msg = json.loads(bot.last_call["message"])
+    brief = msg["ext_info_brief"]
+    assert "last_reset_sla" in brief
+    assert brief["last_reset_sla"]["action_result"] == "pending_dispatch_stuck"
+    assert brief["last_reset_sla"]["elapsed_ms"] == 180000
+    assert brief["last_reset_sla"]["sla_threshold_ms"] is None
+
 
 
 @pytest.mark.asyncio

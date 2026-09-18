@@ -2083,12 +2083,34 @@ class ExecutionEngine:
             if self._static_runtime(patch.task_id) is not None:
                 # Static plans use the same harness contract as dynamic tasks.
                 if patch.exec_error is not None:
+                    # Dead in practice — the line ~2050 guard already returned for
+                    # static-plan + exec_error (保留 RUNNING 不重派/不 HUNG,让 80s
+                    # 兜底 ``_static_auto_report`` 推进)。保留分支以备该守卫被收回;其
+                    # 轨迹发射属于 2050 守卫的职责范围,这里不补(避免与守卫路径重复)。
                     side: list[tuple] = []
                     await self._on_harness_collect(
                         patch.task_id, patch.node_id, patch.exec_error, side
                     )
                     await self._drain(patch.task_id, side)
                 elif patch.acceptance_result is not None:
+                    # I-2: 固定 plan 上报(真实 bot 回投 / ``_static_auto_report``
+                    # 80s 兜底 mock 同走此分支)与动态 plan 同一收口 — 在 early
+                    # return 之前补齐 EXECUTE/VERIFY 轨迹行(REQ-5),与下方动态分支
+                    # (L2096-2147)同构。决策 #14 emission-only:emitter 内部
+                    # ``try/except`` 吞而不抛 + WARNING,主流程不受影响。
+                    self._emit_execute_trajectory(
+                        patch, result, action_type="execute",
+                        action_result="success", is_exec_error=False,
+                    )
+                    self._emit_execute_trajectory(
+                        patch, result, action_type="verify",
+                        action_result=(
+                            "accept_pass"
+                            if patch.acceptance_result.verdict == AcceptanceVerdict.DONE
+                            else "accept_fail"
+                        ),
+                        is_exec_error=False,
+                    )
                     await self._on_static_report(patch.task_id, patch.node_id)
                 self._reconcile_root_hung_if_blocked(patch.task_id)
                 return result

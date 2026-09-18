@@ -76,7 +76,7 @@
   - `TaskDispatcher.dispatch`(dispatcher.py:62)把 `DispatchRationale` 线程注入节点 patch,供 `engine.py` 在 DISPATCH 闸门(engine.py:2964/2871/2113)旁路发射轨迹事件:定型字段按 REQ-1 填写,**rationale 整体写入事件行 `ext_info` 列**(JSON + `schema_v`)。**`task_action_log` 不做任何改动**。
 - **验收标准**:
   - DISPATCH 轨迹事件行的 `ext_info` 含完整 `DispatchRationale`;候选集与 `recommend.score` 来自 `_prefetch_candidates`(strategies.py:539)实际命中结果(非空);search-skill 模式记录 prompt/response digest;JOIN 滤掉的 bot 带 `reason`(扩展现有仅 `claim_mode_off` → 增加 `catalog_miss`/`score_below_threshold`,见 REQ-7)。
-  - rationale 组装全程 `try/except`,任一子字段缺失不影响 DISPATCH 轨迹事件正常发射落库,仅 `ext_info=None`(或缺失字段) + DEBUG 日志。
+  - rationale 组装全程 `try/except`,任一子字段缺失不影响 DISPATCH 轨迹事件正常发射落库,仅 `ext_info=None`(或缺失字段) + WARNING 日志(决策 #14)。
 - **改动文件**: `core/task/task_dispatch/strategies.py`、`task_dispatch/dispatcher.py`、`core/task/task_center/engine.py`(DISPATCH 三处闸门挂轨迹发射)、`core/task/task_trajectory/payloads.py`(发射 helper)
 - **状态**: 待实现
 
@@ -217,7 +217,7 @@
   - `action_input`/`analysis` 为 TEXT 可变长(原文不截断,见"风险与边界"之 digest 隐私例外);`error_msg` 为截断消息;`ext_info` 为带 `schema_v` 的自由 JSON。
 - **验收标准**:
   - 闸门触发后事件行**即时**出现在 `task_trajectory_events`(无需等待组装);按 `gmt_create` 升序可还原 timeline。
-  - 发射失败(如库异常)仅 DEBUG 日志,不阻塞正向驱动;重复发射可能产生重复事件行(无唯一约束,业务可接受)。
+  - 发射失败(如库异常)仅 WARNING 日志(决策 #14),不阻塞正向驱动;重复发射可能产生重复事件行(无唯一约束,业务可接受)。
   - 任务推进后再次组装,头行 UPSERT 保留已回填的 `analysis`。
   - 分析回填后两表 `analysis` 非空、`gmt_modified` 更新(REQ-9)。
   - 实例重启后轨迹/分析接口仍可读(数据在库)。
@@ -234,7 +234,7 @@
 - **描述**: `CallbackCorrelationRegistry`(callback_correlation.py)当前仅内存;新增小表 `task_callback_correlation(event_id, main_session_id, task_id, node_id, retry, gmt_create)`,在 `TaskLoopCallback` 注册时写、回调处理完按 `event_id` 幂等。Assembler 可据此把重启后到达的回调关联回节点。
 - **验收标准**: 重启后 in-flight 任务的回调仍能在 trajectory 中关联回正确 (node, retry);表 DDL 走 `core/task/sql/2026_09_16_task_callback_correlation.sql`;本地 SQLite 由 `create_all` 自动建表。
 - **改动文件**: `repository/models.py`、`core/repository/implementations/task/task_callback_correlation_repository.py`(新增)、`core/task/task_runner/callback_correlation.py`、`core/task/task_runner/callback_adapter.py`
-- **状态**: 待实现(首期,2026-09-17 确认纳入)
+- **状态**: 持久化层已交付(2026-09-18,commit `f64bbb178`):`InMemoryCallbackCorrelationRegistry` 可选注入 `TaskCallbackCorrelationRepository`,register→`upsert_on_register` 落库(幂等)、resolve 内存未命中→`find_by_event_id` 回填,全程 best-effort(WARNING,不阻塞路由)。**外部依赖(未落地)**:`registry.register()` 在生产代码中无任何调用点 —— 其 dispatch 期登记动作原计划由 `2026-08-09-task-goal-driven-task-runner-callback` 的 runner-integration 后续 spec 落地(见该 spec `plan.md:1694`/`tasks.md:31`),该后续 spec 尚未落地;故 `task_callback_correlation` 表在 `register()` 接入前不会被写入,resolve 的跨重启恢复为 latent infra(`register()` 接入后即自动生效)。`TaskTrajectoryAssembler joins task_callback_correlation`(本 REQ 描述的 step 2)随之 **deferred** —— `register()` 接入前该表为空,join 为死代码。结论:本 trajectory spec 交付了 REQ-P1 的"持久化"半边(旁路观测层的持久化与恢复机制,单测已证明 mechanics);`register()` 接入 + assembler-join 的 prod 激活取决于 runner-integration spec,超出本 spec 范围。生产侧 node-级回调的 (node) 关联回退已由 callback payload 内嵌的 `loop_task_id`(`task_id::node_id`,回调时 split)在跨重启下覆盖,不依赖本 registry。
 
 ## P2(已裁剪,不做)
 

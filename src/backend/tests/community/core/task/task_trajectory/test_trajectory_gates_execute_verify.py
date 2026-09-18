@@ -1059,3 +1059,183 @@ class TestIngestParseErrorEmitsParseTrajectory:
         assert rec.error_msg is not None
         assert len(rec.error_msg) <= 500
         assert "..." in rec.error_msg
+
+
+# ---------------------------------------------------------------------------
+# Part D — static-plan branch EXECUTE/VERIFY trajectory gate (I-2)
+# ---------------------------------------------------------------------------
+
+
+_STATIC_PLAN_YAML_TRAJ = """
+template_id: traj_static_test
+entry_bot_id: entry-bot
+nodes:
+  - id: worker
+    type: bot
+    bot_id: worker-bot
+    input: {task: $.input.task}
+    output: {result: $.result}
+"""
+
+
+def _static_task_info(task_id: str = "t1") -> TaskInfo:
+    """TaskInfo with a minimal static-plan yaml (single ``worker`` node) so the
+    engine's ``_static_runtime`` returns a non-None runtime and the static-plan
+    branch in ``on_report`` fires (mirrors the real dispatch + ``_static_auto_report``
+    fallback flow's entrypoint)."""
+    cfg = {
+        "MAX_DEPTH": 3, "BBS_MAX_DEPTH": 3,
+        "task_type": "static_plan",
+        "static_plan_yaml": _STATIC_PLAN_YAML_TRAJ,
+    }
+    return TaskInfo(
+        task_spec=TaskSpec(
+            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
+            context=Context(background="bg"),
+            goal=Goal(
+                objective="o",
+                acceptances=[AcceptanceCriteria(id="ac1", description="d")],
+            ),
+        ),
+        source_type="bot",
+        owner_bot_id="entry-bot",
+        execution_config=cfg,
+    )
+
+
+class TestStaticPlanExecuteVerifyTrajectoryGate:
+    """I-2: the static-plan branch in ``engine.on_report`` (which handles BOTH
+    real bot callbacks — static-plan dispatch uses the SAME harness contract
+    as dynamic tasks per the L2084 comment "Static plans use the same harness
+    contract as dynamic tasks" — AND the ``_static_auto_report`` 80s mock
+    fallback) must fire EXECUTE/IFY trajectory rows BEFORE its early return
+    (REQ-5 — additive, 决策 #14 emission-only swallow).
+
+    Pre-fix the branch returned before the EXECUTE/VERIFY trajectory emission
+    site (engine.py L~2106-2147) so static-plan nodes got NO EXECUTE/VERIFY
+    trajectory row — a real gap (static plans route real bot callbacks through
+    the same ``on_report`` entrypoint; the mock fallback also routes through
+    ``on_report``). The fix fires ``_emit_execute_trajectory`` for the
+    acceptance_result path (the path that reaches the static-plan branch in
+    practice — the static-plan + exec_error path is intercepted by the L~2050
+    guard before this branch). Verdict mapping mirrors the dynamic branch:
+    ``DONE`` → ``accept_pass``; ``FAILED`` → ``accept_fail``."""
+
+    def test_static_plan_accept_pass_emits_execute_and_verify_trajectory(self):
+        """Positive: a static-plan report with ``acceptance_result=DONE`` fires
+        ONE EXECUTE(success) + ONE VERIFY(accept_pass) trajectory row before the
+        early return. ``action_input`` is the request原文 (defensive read from
+        the node); ``error_type``/``error_msg`` are None (no exec_error origin
+        on the success path)."""
+        svc = TaskGraphService()
+        graph = svc.initialize_graph(_static_task_info("t1"))
+        # Manually materialize the "worker" node + set it RUNNING (mirrors what
+        # ``_static_execute`` does for wave-0 children, without going through the
+        # full dispatch flow on a unit test).
+        _set_running_node(svc, "t1", "worker", harness_retries=0,
+                          request_input="worker-request-payload")
+        repo = _TrajRepo()
+        eng = _TrajectoryCaseEngine(
+            svc, planner=_StubPlanner(), dispatcher=_StubDispatcher(),
+            runner=_StubRunner(), trajectory_repo=repo,
+        )
+        patch = _patch(
+            "t1", "worker",
+            acceptance_result=_accept(AcceptanceVerdict.DONE),
+            output_patch={"result": {"ok": True}},
+        )
+        _run(eng.on_report(patch))
+
+        # The static-plan branch fired BOTH EXECUTE + VERIFY trajectory rows.
+        exec_rows = _execute_records(repo)
+        verify_rows = _verify_records(repo)
+        assert len(exec_rows) == 1, [(r.action_type, r.action_result) for r in repo.records]
+        assert exec_rows[0].action_type == "execute"
+        assert exec_rows[0].action_result == "success"
+        assert exec_rows[0].error_type is None  # no exec_error → no error_type
+        assert exec_rows[0].error_msg is None   # EXECUTE ok row has no error_msg
+        assert exec_rows[0].action_input == "worker-request-payload"  # request原文
+        assert len(verify_rows) == 1
+        assert verify_rows[0].action_type == "verify"
+        assert verify_rows[0].action_result == "accept_pass"
+        assert verify_rows[0].error_type is None  # VERIFY has no origin mapping
+
+    def test_static_plan_accept_fail_emits_verify_accept_fail(self):
+        """acceptance FAIL on a static-plan report → VERIFY(accept_fail). The
+        EXECUTE(success) row STILL fires (the execution produced output even if
+        acceptance failed — mirrors the dynamic branch's accept_fail path
+        where EXECUTE(success) precedes VERIFY(accept_fail))."""
+        svc = TaskGraphService()
+        graph = svc.initialize_graph(_static_task_info("t1"))
+        _set_running_node(svc, "t1", "worker", harness_retries=0)
+        repo = _TrajRepo()
+        eng = _TrajectoryCaseEngine(
+            svc, planner=_StubPlanner(), dispatcher=_StubDispatcher(),
+            runner=_StubRunner(), trajectory_repo=repo,
+        )
+        patch = _patch(
+            "t1", "worker",
+            acceptance_result=_accept(AcceptanceVerdict.FAILED, gaps=["g1"]),
+            output_patch={"result": {"ok": False}},
+        )
+        _run(eng.on_report(patch))
+
+        exec_rows = _execute_records(repo)
+        verify_rows = _verify_records(repo)
+        assert len(exec_rows) == 1, [(r.action_type, r.action_result) for r in repo.records]
+        assert exec_rows[0].action_result == "success"
+        assert len(verify_rows) == 1
+        assert verify_rows[0].action_result == "accept_fail"
+
+    def test_static_plan_report_does_not_raise_when_traj_repo_is_none(self):
+        """决策 #14: the trajectory emission is additive + swallowed; a
+        ``None`` trajectory repo (or one that raises) is no-op for the emitter —
+        the static-plan report's main flow (``_on_static_report``) still runs
+        without the trajectory repo (the emission gate's defensive reads +
+        emitter; 决策 #14 fire-and-forget). Locks the behavior: a missing repo
+        must not raise from ``on_report`` — the gate is additive."""
+        svc = TaskGraphService()
+        graph = svc.initialize_graph(_static_task_info("t1"))
+        _set_running_node(svc, "t1", "worker", harness_retries=0)
+        eng = _TrajectoryCaseEngine(
+            svc, planner=_StubPlanner(), dispatcher=_StubDispatcher(),
+            runner=_StubRunner(), trajectory_repo=None,
+        )
+        patch = _patch(
+            "t1", "worker",
+            acceptance_result=_accept(AcceptanceVerdict.DONE),
+            output_patch={"result": {"ok": True}},
+        )
+        # Must NOT raise even with trajectory_repo=None — the gate's emitter
+        # is a no-op and the main ``_on_static_report`` flow completes.
+        _run(eng.on_report(patch))
+        # The main flow DID run: the worker node's status flipped away from
+        # RUNNING (the static-plan ``_on_static_report`` advances the node
+        # + terminal-checks the graph).
+        worker = svc._get_node(graph, "worker")
+        assert worker.status != Status.RUNNING
+
+    def test_static_plan_report_does_not_raise_when_repo_raises(self):
+        """决策 #14 emission-only swallow: a raising ``insert_event`` is
+        swallowed by the emitter (NOT the gate) + WARNING; the main
+        ``_on_static_report`` flow completes (root may flip to SUCCESS) and
+        the patch's acceptance result is reflected in the node."""
+        svc = TaskGraphService()
+        graph = svc.initialize_graph(_static_task_info("t1"))
+        _set_running_node(svc, "t1", "worker", harness_retries=0)
+        eng = _TrajectoryCaseEngine(
+            svc, planner=_StubPlanner(), dispatcher=_StubDispatcher(),
+            runner=_StubRunner(), trajectory_repo=_BoomRepo(),
+        )
+        patch = _patch(
+            "t1", "worker",
+            acceptance_result=_accept(AcceptanceVerdict.DONE),
+            output_patch={"result": {"ok": True}},
+        )
+        # Must NOT raise — the emitter swallows the raise + WARN; the gate's
+        # main driving logic (``_on_static_report``) is NOT masked.
+        _run(eng.on_report(patch))
+        # Main flow DID run: the worker node's status flipped.
+        worker = svc._get_node(graph, "worker")
+        assert worker.status != Status.RUNNING
+

@@ -15,6 +15,14 @@ First-iteration wiring (决策 #10/11):
   (决策 #10); a bot timeout / call failure / unparseable response RAISES
   ``TrajectoryAnalysisError`` — the P5b service maps that to HTTP 504 and does
   NOT backfill (决策 #14's swallow waiver is EMISSION-only, not analysis).
+  The bot's input message carries an **ext_info 概要** (REQ-9: analysis_input
+  = "事件数 + ext_info 概要") alongside the event counts — the "为何" signals
+  the bot needs to derive ``boost_reason`` (last dispatch rationale:
+  strategy/mode/candidates/join_dropped), ``failure_reason`` (last RESET
+  elapsed/threshold, interface_error events) — built by ``_build_ext_info_brief``
+  via the same ``_safe_lookup`` defensive read the rule executor uses (a broken
+  lookup degrades the brief to ``{}`` so the bot's input stays well-formed:
+  the counts-only shape pre-fix).
 * ``rule`` (DORMANT) — the deterministic 7-bullet ``failure_reason`` derivation
   (REQ-9 spec lines ~140-146) + ``boost_reason`` from the last DISPATCH event's
   ``ext_info["_dispatch_rationale"]``. PURE FUNCTION over
@@ -193,14 +201,19 @@ def _build_analysis_input(
 ) -> str:
     """A short, deterministic summary of the analysis input: event count +
     per-``action_type`` counts + which events carry a dispatch rationale / RESET
-    metrics (REQ-9 ``analysis_input``).
+    metrics (REQ-9 ``analysis_input``) + the **ext_info 概要** (REQ-9: the
+    analysis_input is the "事件数 + ext_info 概要" record) so the live
+    ``tc_bot`` path's input message carries the "为何" signals alongside the
+    counts (the rule executor also reads ext_info directly via ``_derive_*``).
 
     Deterministic order: events are counted in ``action_type`` value order so
     the same timeline always yields the same string (stable across runs / test
     assertions). The ``ext_info``概要 flags which events carry the specific
     ext_info payloads the rule executor reads (``_dispatch_rationale`` for
     DISPATCH, ``elapsed_ms`` for RESET) — the operator-facing summary of "what
-    enrichment is available".
+    enrichment is available" — followed by the structured brief's string form
+    (``_format_ext_info_brief``) so a single read of ``analysis_input`` tells
+    the operator AND the bot the "为何" without parsing the timeline.
     """
     counts: dict[str, int] = {}
     dispatch_with_rationale = 0
@@ -221,6 +234,15 @@ def _build_analysis_input(
         parts.append(f"{at}={counts[at]}")
     parts.append(f"dispatch_with_rationale={dispatch_with_rationale}")
     parts.append(f"reset_with_metrics={reset_with_metrics}")
+    # ext_info 概要 (REQ-9): the "为何" signals alongside the counts so the
+    # tc_bot input (and the rule executor's analysis_input record) carry the
+    # dispatch rationale / RESET SLA / interface-error summary in-line. The
+    # brief degrades to "" when the lookup is empty/broken (graceful — the
+    # counts-only shape is preserved, the bot is not misled with empty keys).
+    brief = _build_ext_info_brief(timeline, ext_info_lookup)
+    ext_summary = _format_ext_info_brief(brief)
+    if ext_summary:
+        parts.append(f"ext_info概要={ext_summary}")
     return "; ".join(parts)
 
 
@@ -415,6 +437,140 @@ def _safe_lookup(
         return None
 
 
+def _build_ext_info_brief(
+    timeline: list[TrajectoryEvent],
+    ext_info_lookup: Callable[[TrajectoryEvent], dict | None],
+) -> dict:
+    """Build the **ext_info 概要** (REQ-9: ``analysis_input`` = "事件数 +
+    ext_info 概要") the LIVE ``tc_bot`` path feeds to the bot alongside the
+    event counts — the "为何" signals the bot needs to derive
+    ``boost_reason``/``failure_reason`` (dispatch rationale, RESET SLA,
+    interface-error origin). Reuses the SAME ``_safe_lookup`` defensive read
+    the rule executor uses (broken lookup → degrade to empties, don't crash;
+    the bot's input then degrades to event counts only — the same shape the
+    ``tc_bot`` path produced before this fix).
+
+    Included keys (each OMITTED when the underlying ``ext_info`` is absent, so
+    the bot's prompt can branch on key presence without parsing around
+    ``null`` placeholders):
+    * ``last_dispatch_rationale`` — 概要 of the LAST ``action_type=dispatch``
+      event's ``ext_info["_dispatch_rationale"]`` (strategy_name,
+      decision_mode, candidate_count, top candidate scores, join_dropped
+      count + first few reasons). Gives the bot the "派发为何" signal to
+      derive ``boost_reason`` (decision #10 / REQ-9 ``boost_reason``).
+    * ``last_reset_sla`` — ``elapsed_ms`` / ``sla_threshold_ms`` from the LAST
+      ``action_type=reset`` event whose ``action_result ∈ {sla_timeout,
+      pending_dispatch_stuck}``. Gives the bot the "执行超时 / 派发卡死"
+      signal to derive the ``execution_timeout`` / ``dispatch_stuck`` detail
+      (REQ-4 / REQ-9 bullet 1/3).
+    * ``interface_error_events`` — indices whose ``ext_info`` surfaces an
+      ``interface_error_code`` (the bot_interface error origin, REQ-5).
+      Gives the bot the "底层接口报错" signal.
+
+    Returns an EMPTY dict when the lookup returns nothing usable (the
+    structured shape is stable, so a missing key = signal absent). The
+    associated string form (``_format_ext_info_brief``) then returns ``""``
+    and the bot's ``analysis_input`` keeps the pre-fix counts-only shape —
+    graceful degradation is the whole point of the ``_safe_lookup`` reuse.
+    """
+    brief: dict[str, Any] = {}
+    # Last DISPATCH event's _dispatch_rationale 概要 → boost_reason signal.
+    for ev in reversed(timeline):
+        if ev.action_type == TrajectoryActionType.DISPATCH:
+            ext = _safe_lookup(ext_info_lookup, ev) or {}
+            rationale = ext.get("_dispatch_rationale") if isinstance(ext, dict) else None
+            if isinstance(rationale, dict) and rationale:
+                candidates = rationale.get("candidates") or []
+                top_scores = [
+                    c.get("recommend_score")
+                    for c in candidates[:3]
+                    if isinstance(c, dict)
+                ]
+                join_dropped = rationale.get("join_dropped") or []
+                jd_reasons: list[str] = []
+                for d in join_dropped[:3]:
+                    if isinstance(d, dict):
+                        reason = d.get("reason")
+                        if reason is not None:
+                            jd_reasons.append(str(reason))
+                brief["last_dispatch_rationale"] = {
+                    "strategy_name": rationale.get("strategy_name"),
+                    "decision_mode": rationale.get("decision_mode"),
+                    "candidate_count": len(candidates),
+                    "top_candidate_scores": top_scores,
+                    "join_dropped_summary": {
+                        "count": len(join_dropped),
+                        "reasons": jd_reasons,
+                    },
+                }
+            break
+    # Last RESET with sla_timeout / pending_dispatch_stuck → elapsed/threshold
+    # (the "执行超时 / 派发卡死" detail the bot needs for failure_reason bullet
+    # 1/3 — the rule executor reads the same ext_info keys directly). Only
+    # added when the lookup returned a real ext_info dict (``None`` ⇒ the event
+    # has NO ext_info written at all ⇒ signal absent; degrade to "key not in
+    # brief" rather than a placeholder with ``None``-for-everything that would
+    # mislead the bot into thinking the RESET had a malformed metric).
+    for ev in reversed(timeline):
+        if (
+            ev.action_type == TrajectoryActionType.RESET
+            and ev.action_result in ("sla_timeout", "pending_dispatch_stuck")
+        ):
+            ext = _safe_lookup(ext_info_lookup, ev)
+            if isinstance(ext, dict):
+                brief["last_reset_sla"] = {
+                    "action_result": ev.action_result,
+                    "elapsed_ms": ext.get("elapsed_ms"),
+                    "sla_threshold_ms": ext.get("sla_threshold_ms"),
+                }
+            break
+    # Events whose ext_info surfaces an interface_error_code (the bot_interface
+    # error origin, REQ-5) — the "底层接口报错" signal.
+    iface_events: list[dict[str, Any]] = []
+    for idx, ev in enumerate(timeline):
+        ext = _safe_lookup(ext_info_lookup, ev)
+        if isinstance(ext, dict) and ext.get("interface_error_code") is not None:
+            iface_events.append({
+                "index": idx,
+                "action_type": (
+                    ev.action_type.value
+                    if isinstance(ev.action_type, TrajectoryActionType)
+                    else str(ev.action_type)
+                ),
+                "interface_error_code": ext.get("interface_error_code"),
+            })
+    if iface_events:
+        brief["interface_error_events"] = iface_events
+    return brief
+
+
+def _format_ext_info_brief(brief: dict[str, Any]) -> str:
+    """Format the ``ext_info`` 概要 dict as a compact summary string for the
+    ``analysis_input`` field (REQ-9 — the analysis_input carries "事件数 +
+    ext_info 概要" as a flat record). Mirrors the structured ``ext_info_brief``
+    field the bot message carries; both degrade together (empty dict → ``""``
+    so the analysis_input keeps the pre-fix counts-only shape when the lookup
+    is empty / broken)."""
+    pieces: list[str] = []
+    dr = brief.get("last_dispatch_rationale")
+    if isinstance(dr, dict):
+        jd = dr.get("join_dropped_summary") or {}
+        pieces.append(
+            f"dispatch[last:策略={dr.get('strategy_name')}/模式={dr.get('decision_mode')}"
+            f"/候选{dr.get('candidate_count', 0)}/JOIN丢{jd.get('count', 0)}]"
+        )
+    rs = brief.get("last_reset_sla")
+    if isinstance(rs, dict):
+        pieces.append(
+            f"reset_sla[last:{rs.get('action_result')} "
+            f"elapsed={rs.get('elapsed_ms')}ms threshold={rs.get('sla_threshold_ms')}ms]"
+        )
+    ie_count = len(brief.get("interface_error_events") or [])
+    if ie_count:
+        pieces.append(f"interface_err[{ie_count}]")
+    return "; ".join(pieces)
+
+
 # ---------------------------------------------------------------------------
 # Analyzer — the multi-executor dispatcher
 # ---------------------------------------------------------------------------
@@ -542,7 +698,7 @@ class TaskTrajectoryAnalyzer:
                 "to be wired in DI; got bot=None"
             )
         analysis_input = _build_analysis_input(trajectory.timeline, ext_info_lookup)
-        message = self._build_bot_message(trajectory, analysis_input)
+        message = self._build_bot_message(trajectory, analysis_input, ext_info_lookup)
         try:
             run = await self._bot.send_and_wait_async(
                 bot_id=analysis_executor,
@@ -558,11 +714,29 @@ class TaskTrajectoryAnalyzer:
             ) from ex
         return self._parse_bot_response(run, analysis_executor, analysis_input)
 
-    def _build_bot_message(self, trajectory: TaskTrajectory, analysis_input: str) -> str:
+    def _build_bot_message(
+        self,
+        trajectory: TaskTrajectory,
+        analysis_input: str,
+        ext_info_lookup: Callable[[TrajectoryEvent], dict | None],
+    ) -> str:
         """Build the structured JSON message fed to the bot (trajectory summary +
-        ``analysis_input``). The bot is asked to return a JSON response with
-        ``analysis_output`` (required) + optional ``boost_reason`` /
-        ``failure_reason`` (the contract documented in the module docstring)."""
+        ``analysis_input`` + **ext_info 概要**). The bot is asked to return a
+        JSON response with ``analysis_output`` (required) + optional
+        ``boost_reason`` / ``failure_reason`` (the contract documented in the
+        module docstring).
+
+        The ``ext_info_brief`` field (REQ-9 — analysis_input = "事件数 +
+        ext_info 概要") carries the structured "为何" signals the bot needs to
+        derive ``boost_reason`` (last dispatch rationale: strategy/mode/
+        candidates/join_dropped) and ``failure_reason`` (last RESET
+        elapsed/threshold, interface_error events) — the live ``tc_bot`` path
+        was counts-only before this fix, so the bot could not produce a
+        meaningful ``boost_reason`` or the ``execution_timeout`` detail. The
+        brief degrades to ``{}`` when the lookup is empty/broken
+        (``_safe_lookup`` swallows + WARNING), so the bot's input stays
+        well-formed (a missing key = signal absent, NOT a ``null`` placeholder
+        the bot would have to parse around)."""
         timeline_brief = [
             {
                 "action_type": (
@@ -577,15 +751,21 @@ class TaskTrajectoryAnalyzer:
             }
             for ev in trajectory.timeline
         ]
+        ext_info_brief = _build_ext_info_brief(trajectory.timeline, ext_info_lookup)
         return json.dumps(
             {
                 "task_id": trajectory.task_id,
                 "analysis_input": analysis_input,
+                "ext_info_brief": ext_info_brief,
                 "timeline": timeline_brief,
                 "instruction": (
                     "Analyse this task trajectory and return a JSON object with "
                     "'analysis_output' (required), and optional 'boost_reason' and "
-                    "'failure_reason' (flat strings)."
+                    "'failure_reason' (flat strings). The 'ext_info_brief' field "
+                    "carries the dispatch-rationale summary, RESET SLA metrics, and "
+                    "interface_error events ('为何' signals — use them to populate "
+                    "boost_reason/failure_reason). A missing key in ext_info_brief "
+                    "means the signal is absent (not a null placeholder)."
                 ),
             },
             ensure_ascii=False,
