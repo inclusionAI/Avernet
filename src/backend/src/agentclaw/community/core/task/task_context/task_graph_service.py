@@ -321,7 +321,8 @@ class TaskGraphService:
         b. 存在 FAILED 节点且 acceptance_result.gaps 非空的叶子(补救);
         c. 存在 PLANNING 节点 且 无 RUNNING(下一层规划)。
         登记分解树:每新子挂 ``parent_node_id`` 下写入 DEPENDENCY 边(src=parent,dst=新子,单入);
-        默认将 parent 置为 PLANNING(委托态)。BBS attach 可关闭该行为,待 scoped 节点
+        默认将 parent 置为 PLANNING(委托态)。Relay 串行接力可关闭该行为，
+        由调用方先将已交接节点置为 DONE；BBS attach 可关闭该行为,待 scoped 节点
         SUCCESS 回投后再由编排核将根节点置为 PLANNING。单层同构护栏:本批 node_id 不重复、不与已存重复、本批内不互父子。
         """
         if not tasks:
@@ -331,9 +332,15 @@ class TaskGraphService:
             raise GraphIntegrityError("add_task_nodes: 同批 task_id 不一致")
 
         def mutation(graph):
-            self._assert_add_trigger(graph)
             parent = self._require_node(graph, parent_node_id)
-            if parent.status not in _DELEGATABLE_PARENT:
+            self._assert_add_trigger(graph, parent_node_id=parent_node_id)
+            relay_parent_done = (
+                (graph.extend_props.get("execution_config", {}) or {}).get(
+                    "orchestration_mode"
+                ) == "relay"
+                and parent.status == Status.DONE
+            )
+            if parent.status not in _DELEGATABLE_PARENT and not relay_parent_done:
                 raise GraphIntegrityError(
                     f"add_task_nodes: parent={parent_node_id} 状态={parent.status} 不可委托"
                 )
@@ -402,7 +409,9 @@ class TaskGraphService:
 
         return self._mutate_with_version_retry(task_id, mutation)
 
-    def _assert_add_trigger(self, graph: TaskExecutionGraph) -> None:
+    def _assert_add_trigger(
+        self, graph: TaskExecutionGraph, *, parent_node_id: str | None = None
+    ) -> None:
         # 根节点由 graph.task_id 唯一标识，不能依赖 graph.tasks 的列表顺序。
         root = next((node for node in graph.tasks if node.node_id == graph.task_id), None)
         cond_a = (
@@ -428,9 +437,20 @@ class TaskGraphService:
         )
 
         cond_e = root is not None and root.status == Status.HUNG
+        relay_mode = (graph.extend_props.get("execution_config", {}) or {}).get(
+            "orchestration_mode"
+        ) == "relay"
+        relay_parent_done = (
+            relay_mode
+            and parent_node_id is not None
+            and any(
+                node.node_id == parent_node_id and node.status == Status.DONE
+                for node in graph.tasks
+            )
+        )
 
-        if not (cond_a or cond_b or cond_c or cond_d or cond_e):
-            raise GraphIntegrityError("add_task_nodes: 触发条件 a/b/c/d/e 均不满足")
+        if not (cond_a or cond_b or cond_c or cond_d or cond_e or relay_parent_done):
+            raise GraphIntegrityError("add_task_nodes: 触发条件 a/b/c/d/e/f 均不满足")
 
     def update_task_node_info(self, patch: TaskNodePatch) -> NodeOpResult:
         """节点级原子状态流转网关。双模式:

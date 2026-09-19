@@ -237,12 +237,14 @@ class TaskServiceRelayMixin:
             TaskNodePatch(
                 task_id=graph.task_id,
                 node_id=node.node_id,
-                status=Status.PLANNING,
-                progress_reason=progress_reason or "基于当前执行结果规划下一棒任务",
+                status=Status.DONE,
+                progress_reason=progress_reason or "当前接力节点已完成并交接下一棒任务",
                 failure_reason=failure_reason,
             )
         )
-        self._graph.add_task_nodes(children, parent_node_id=node.node_id)
+        self._graph.add_task_nodes(
+            children, parent_node_id=node.node_id, mark_parent_planning=False
+        )
         self._graph.update_task_graph_info(
             graph.task_id, TaskGraphPatch(loop_round_increment=1)
         )
@@ -257,21 +259,9 @@ class TaskServiceRelayMixin:
                 progress_reason=reason or "gap 已闭合，任务完成",
             )
         )
-        graph = self._graph.query_task_dashboard(task_id)
-        parents = {relation.dst_id: relation.src_id for relation in graph.relations}
-        ancestor_id = parents.get(node_id)
-        while ancestor_id is not None:
-            ancestor = next(item for item in graph.tasks if item.node_id == ancestor_id)
-            if ancestor.status == Status.PLANNING:
-                self._graph.update_task_node_info(
-                    TaskNodePatch(
-                        task_id=task_id,
-                        node_id=ancestor_id,
-                        status=Status.SUCCESS,
-                        progress_reason="下游接力已闭合剩余 gap",
-                    )
-                )
-            ancestor_id = parents.get(ancestor_id)
+        # Relay is a serial baton, not a parent/child aggregation workflow.
+        # Nodes that hand off a next step are already marked DONE in
+        # _apply_plan_result; terminal completion only closes the graph.
         self._graph.update_task_graph_info(task_id, TaskGraphPatch(status=Status.DONE))
 
     @staticmethod

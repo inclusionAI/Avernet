@@ -200,7 +200,7 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
         payload={"has_gap": False, "children": []},
     ))
     final = graph_service.query_task_dashboard("relay-task")
-    assert all(node.status == Status.SUCCESS for node in final.tasks)
+    assert [node.status for node in final.tasks] == [Status.DONE, Status.DONE, Status.SUCCESS]
     assert final.status == Status.DONE
 
 
@@ -233,7 +233,7 @@ def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_r
     graph = graph_service.query_task_dashboard("relay-task")
     root = next(node for node in graph.tasks if node.node_id == "relay-task")
     bbs = next(node for node in graph.tasks if node.node_id == "bbs-step")
-    assert root.status == Status.PLANNING
+    assert root.status == Status.DONE
     assert bbs.status == Status.RUNNING
     assert bbs.run_info.assignee == "bbs-bot"
     with pytest.raises(TaskStateError):
@@ -248,7 +248,7 @@ def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_r
     assert next(
         node for node in graph_service.query_task_dashboard("relay-task").tasks
         if node.node_id == "relay-task"
-    ).status == Status.PLANNING
+    ).status == Status.DONE
     _run(service.report_task_event(
         task_id="relay-task", node_id="bbs-step", event_type="PLAN_RESULT",
         event_id="bbs-plan", holder_id="bbs-bot", relay_turn=continued["relay_turn"],
