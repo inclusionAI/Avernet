@@ -114,6 +114,17 @@ class ConfirmDeviceAliveRequest(BaseModel):
     device_id: str = Field(..., description="Device ID")
 
 
+class PoolLayoutInitializationEvidence(BaseModel):
+    """Optional root-level layout evidence from a current startup instance."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    actual_engine: str = Field(..., description="Engine that initialized the roots")
+    actual_layout: str = Field(..., description="Logical runtime layout")
+    layout_contract_version: str = Field(..., description="Skills layout contract")
+    roots_initialized: bool = Field(..., description="Root initialization completed")
+
+
 class ReportDeviceStatusRequest(BaseModel):
     """Device status report request."""
     model_config = ConfigDict(extra="forbid")
@@ -121,6 +132,14 @@ class ReportDeviceStatusRequest(BaseModel):
     device_id: str = Field(..., description="Device ID")
     status: str = Field(..., description="Status (STARTING, SUCCEEDED, FAILED)")
     message: str | None = Field(None, description="Status message")
+    startup_identity: str | None = Field(
+        None,
+        description="Existing sandbox, publish, or restart identity for this startup",
+    )
+    layout_initialization: PoolLayoutInitializationEvidence | None = Field(
+        None,
+        description="Optional Pool root initialization evidence",
+    )
 
 
 class ExecShellRequest(BaseModel):

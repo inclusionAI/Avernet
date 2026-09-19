@@ -50,6 +50,9 @@ from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousErr
 from agentclaw.community.core.repository.implementations.bot.device_provider import (
     BotDeviceProviderQueries,
 )
+from agentclaw.community.core.repository.implementations.bot.initial_layout import (
+    BotInitialLayoutRepositoryMixin,
+)
 from agentclaw.community.core.repository.implementations.bot.reachability import (
     BotReachabilityQueries,
 )
@@ -93,6 +96,7 @@ def _as_naive(dt: datetime) -> datetime:
 
 
 class BotRepository(
+    BotInitialLayoutRepositoryMixin,
     BotDeviceProviderQueries,
     BotReachabilityQueries,
     BotQuotaQueries,
@@ -107,7 +111,7 @@ class BotRepository(
 
     # ── insert (plain INSERT — no unique key, never an upsert) ──
 
-    def insert(self, bot_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _new_bot_model(self, bot_data: Dict[str, Any]) -> BotModel:
         share_policy = bot_data.get("share_policy")
         if share_policy is not None:
             share_policy = json.dumps(share_policy)
@@ -123,31 +127,34 @@ class BotRepository(
             else json.dumps(list(SUPPORTED_ENGINE_TYPES))
         )
 
+        return self.Model(
+            bot_id=bot_data["bot_id"],
+            bot_name=bot_data.get("bot_name"),
+            bot_desc=bot_data.get("bot_desc"),
+            entity_id=bot_data["entity_id"],
+            entity_type=bot_data["entity_type"],
+            creator_id=bot_data["creator_id"],
+            owner_id=bot_data["owner_id"],
+            engine_types=engine_types,
+            status=bot_data.get("status", "PENDING"),
+            binding_id=bot_data.get("binding_id"),
+            modifier_id=bot_data.get("modifier_id"),
+            share_policy=share_policy,
+            is_delete=bot_data.get("is_delete", 0),
+            active_engine=bot_data.get("active_engine", "moltis"),
+            device_id=bot_data.get("device_id"),
+            env=get_current_env(),
+            owner_name=bot_data.get("owner_name"),
+            public=bot_data.get("public", "0"),
+            ext=ext,
+            bot_type=bot_data.get("bot_type", "personal"),
+            template_type=bot_data.get("template_type"),
+            space_id=bot_data.get("space_id"),
+        )
+
+    def insert(self, bot_data: Dict[str, Any]) -> Dict[str, Any]:
         with self._db.orm_session() as db:
-            bot = self.Model(
-                bot_id=bot_data["bot_id"],
-                bot_name=bot_data.get("bot_name"),
-                bot_desc=bot_data.get("bot_desc"),
-                entity_id=bot_data["entity_id"],
-                entity_type=bot_data["entity_type"],
-                creator_id=bot_data["creator_id"],
-                owner_id=bot_data["owner_id"],
-                engine_types=engine_types,
-                status=bot_data.get("status", "PENDING"),
-                binding_id=bot_data.get("binding_id"),
-                modifier_id=bot_data.get("modifier_id"),
-                share_policy=share_policy,
-                is_delete=bot_data.get("is_delete", 0),
-                active_engine=bot_data.get("active_engine", "moltis"),
-                device_id=bot_data.get("device_id"),
-                env=get_current_env(),
-                owner_name=bot_data.get("owner_name"),
-                public=bot_data.get("public", "0"),
-                ext=ext,
-                bot_type=bot_data.get("bot_type", "personal"),
-                template_type=bot_data.get("template_type"),
-                space_id=bot_data.get("space_id"),
-            )
+            bot = self._new_bot_model(bot_data)
             db.add(bot)
             db.flush()
             return bot.to_dict()

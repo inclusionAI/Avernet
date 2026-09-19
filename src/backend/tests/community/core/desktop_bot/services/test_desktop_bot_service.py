@@ -261,7 +261,7 @@ class TestCreate:
         mocks["baas"].post_bots_api.assert_not_called()
         mocks["baas"].approve_publish.assert_not_called()
         mocks["binding_repo"].insert_binding.assert_not_called()
-        mocks["bot_repo"].insert.assert_not_called()
+        mocks["bot_repo"].insert_with_initial_skill_layout.assert_not_called()
         # verify device_token passed to passport
         passport_call = mocks["passport"].apply_agent_passport.call_args.kwargs
         assert passport_call["device_token"] == "dev-tok-001"
@@ -337,7 +337,7 @@ class TestCreate:
             bot_id="desktop_bot_002", owner_workno="u001",
         )
         mocks["baas"].post_bots_api.assert_called_once()
-        bot_insert_call = mocks["bot_repo"].insert.call_args[0][0]
+        bot_insert_call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]
         assert bot_insert_call["ext"]["passport"]["agent_code"] == "ac-continue-001"
         # ext 中应包含创建时写入的不可变部署信息
         assert bot_insert_call["ext"]["machine_id"] == "m-002"
@@ -395,6 +395,77 @@ class TestCreate:
         mocks["baas"].post_bots_api.assert_not_called()
         mocks["passport"].query_agent_passport.assert_not_called()
 
+    def test_provisional_desktop_create_retry_reuses_persisted_choice(self):
+        service, mocks = _make_service_with_mocks()
+        existing = {
+            "bot_id": "desktop_bot_retry",
+            "owner_id": "u001",
+            "entity_id": "u001",
+            "entity_type": "staff",
+            "status": "PENDING",
+            "binding_id": None,
+            "device_id": None,
+            "active_engine": "openclaw",
+            "ext": {
+                "client_id": "persisted-client",
+                "callback_token": "persisted-token",
+                "passport": {"agent_code": "ac-existing"},
+            },
+        }
+        mocks["bot_repo"].get_by_id_and_owner.return_value = existing
+        mocks["bot_repo"].claim_provisioning.return_value = True
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-existing"
+        }
+        mocks["baas"].post_bots_api.return_value = {
+            "bot_uuid": "bu-resumed",
+            "publish_id": 91,
+        }
+        mocks["binding_repo"].insert_binding.return_value = 20
+
+        result = service.create_after_authorization(
+            bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+            user_id="u001",
+            machine_id="m-002",
+        )
+
+        assert result["bot_uuid"] == "bu-resumed"
+        mocks["native_creation_policy"].select.assert_not_called()
+        mocks["bot_repo"].insert_with_initial_skill_layout.assert_not_called()
+        credentials = mocks["baas"].post_bots_api.call_args.kwargs["payload"][
+            "config"
+        ]["deploy_config"]["credentials"]
+        assert credentials["client_id"] == "persisted-client"
+        assert credentials["token"] == "persisted-token"
+
+    def test_concurrent_provisional_desktop_create_returns_in_progress(self):
+        service, mocks = _make_service_with_mocks()
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop_bot_retry",
+            "owner_id": "u001",
+            "status": "PROVISIONING",
+            "binding_id": None,
+            "device_id": None,
+            "active_engine": "openclaw",
+            "ext": {
+                "client_id": "persisted-client",
+                "callback_token": "persisted-token",
+            },
+        }
+        mocks["bot_repo"].claim_provisioning.return_value = False
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-existing"
+        }
+
+        with pytest.raises(DesktopBotServiceError, match="already in progress"):
+            service.create_after_authorization(
+                bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+                user_id="u001",
+                machine_id="m-002",
+            )
+
+        mocks["baas"].post_bots_api.assert_not_called()
+
     def test_create_continue_with_custom_mount_path(self):
         service, mocks = _make_service_with_mocks()
         mocks["passport"].query_agent_passport.return_value = {
@@ -415,7 +486,7 @@ class TestCreate:
         payload = call_kwargs["payload"]
         assert payload["config"]["deploy_config"]["mount_path"] == "/custom/mount"
         # ext 中的 mount_path 应同步记录
-        bot_insert_call = mocks["bot_repo"].insert.call_args[0][0]
+        bot_insert_call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]
         assert bot_insert_call["ext"]["mount_path"] == "/custom/mount"
         assert bot_insert_call["ext"]["machine_id"] == "m-001"
 
@@ -458,7 +529,7 @@ class TestCreate:
         payload = call_kwargs["payload"]
         assert "mount_path" not in payload["config"]["deploy_config"]
         # 空白 mount_path 应存为空字符串
-        bot_insert_call = mocks["bot_repo"].insert.call_args[0][0]
+        bot_insert_call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]
         assert bot_insert_call["ext"]["mount_path"] == ""
 
     def test_create_continue_ext_stores_avatar_url(self):
@@ -481,7 +552,7 @@ class TestCreate:
             mount_path="/data/workspace",
         )
 
-        bot_insert_call = mocks["bot_repo"].insert.call_args[0][0]
+        bot_insert_call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]
         ext = bot_insert_call["ext"]
         assert ext["avatar_url"] == "https://img.example.com/bot.png"
         assert ext["machine_id"] == "m-avatar"
@@ -506,6 +577,32 @@ class TestCreate:
                 user_id="u001",
                 machine_id="m-001",
             )
+
+    def test_create_continue_binding_update_must_match_created_bot(self):
+        service, mocks = _make_service_with_mocks()
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-001",
+        }
+        mocks["baas"].post_bots_api.return_value = {
+            "bot_uuid": "bu-001",
+            "publish_id": 1,
+        }
+        mocks["baas"].approve_publish.return_value = {"status": "SUCCESS"}
+        mocks["binding_repo"].insert_binding.return_value = 1
+        mocks["bot_repo"].update_by_owner.return_value = None
+
+        with pytest.raises(DesktopBotServiceError, match="binding update did not match"):
+            service.create_after_authorization(
+                bot={"bot_id": "desktop_bot_003", "bot_name": "B"},
+                user_id="u001",
+                machine_id="m-001",
+            )
+
+        mocks["binding_repo"].release_binding.assert_called_once_with(
+            binding_id=1,
+            release_reason="Desktop bot creation did not persist",
+            released_by="u001",
+        )
 
     def test_create_continue_missing_bot_id_raises(self):
         service, mocks = _make_service_with_mocks()
@@ -576,6 +673,9 @@ class TestCreate:
             baas_config=BaasConfig(desktop_template_uuid=""),
             device_service=mocks["device_service"],
             skill_set_factory=skill_set_factory,
+            skills_pool_native_creation_policy=MagicMock(),
+            skill_layout_repository=MagicMock(),
+            layout_confirmation=MagicMock(),
         )
         service._fetch_machine_info = MagicMock(
             return_value={"device_token": "dev-tok-001"}
@@ -621,6 +721,62 @@ class TestCredentialsInDeployConfig:
         assert creds["agent_code"] == "ac-cred-001"
         assert creds["stage"] == "online"
         assert "version" not in creds
+
+    def test_pool_layout_is_persisted_before_external_desktop_allocation(self):
+        from agentclaw.community.core.skills_pool.types import (
+            InitialSkillLayoutSelection,
+            RolloutEvidence,
+            SkillLayout,
+        )
+
+        service, mocks = _make_service_with_mocks()
+        selection = InitialSkillLayoutSelection(
+            layout_contract_version="skills-pool-p3-v1",
+            rollout_evidence=RolloutEvidence(
+                env="dev",
+                config_id=7,
+                config_version="revision-1",
+                batch_id=None,
+                engine_type="openclaw",
+                decision_reason="owner_allowlist",
+            ),
+        )
+        mocks["native_creation_policy"].select.return_value = selection
+        mocks["layout_repo"].get.return_value = MagicMock(
+            active_layout=SkillLayout.POOL,
+            layout_contract_version="skills-pool-p3-v1",
+        )
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-cred-001",
+        }
+
+        def assert_persisted_before_baas(**_kwargs):
+            mocks["bot_repo"].insert_with_initial_skill_layout.assert_called_once()
+            return {"bot_uuid": "bu-001", "publish_id": 91}
+
+        mocks["baas"].post_bots_api.side_effect = assert_persisted_before_baas
+        mocks["binding_repo"].insert_binding.return_value = 1
+
+        service.create_after_authorization(
+            bot={
+                "bot_id": "desktop_pool",
+                "bot_name": "Pool",
+                "active_engine": "openclaw",
+            },
+            user_id="u001",
+            machine_id="m-001",
+        )
+
+        call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args
+        assert call.kwargs["layout"] is selection
+        credentials = mocks["baas"].post_bots_api.call_args.kwargs["payload"][
+            "config"
+        ]["deploy_config"]["credentials"]
+        assert credentials["agentclaw_skills_layout"] == "pool"
+        assert (
+            credentials["agentclaw_skills_layout_contract_version"]
+            == "skills-pool-p3-v1"
+        )
 
     def test_credentials_token_is_nonempty(self):
         """token field should be a non-empty string (secrets.token_urlsafe)."""
@@ -676,7 +832,7 @@ class TestCredentialsInDeployConfig:
             machine_id="m-001",
         )
 
-        bot_insert_call = mocks["bot_repo"].insert.call_args[0][0]
+        bot_insert_call = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]
         ext = bot_insert_call["ext"]
         assert "client_id" in ext
         assert "callback_token" in ext
@@ -699,7 +855,7 @@ class TestCredentialsInDeployConfig:
 
         payload = mocks["baas"].post_bots_api.call_args.kwargs["payload"]
         creds = payload["config"]["deploy_config"]["credentials"]
-        ext = mocks["bot_repo"].insert.call_args[0][0]["ext"]
+        ext = mocks["bot_repo"].insert_with_initial_skill_layout.call_args[0][0]["ext"]
 
         assert ext["client_id"] == creds["client_id"]
         assert ext["callback_token"] == creds["token"]
@@ -854,10 +1010,7 @@ class TestRestart:
         assert result["status"] == "PENDING"
         mocks["baas"].restart_bot.assert_called_once()
         mocks["baas"].approve_publish.assert_called_once()
-        mocks["binding_repo"].update_status.assert_called_once()
-        # update_by_owner 被调用两次:一次写 status=PENDING,一次经
-        # _merge_bot_ext 写 ext.pending_since(供扫描超时兜底)。
-        assert mocks["bot_repo"].update_by_owner.call_count >= 1
+        mocks["binding_repo"].prepare_baas_desktop_restart.assert_called_once()
 
     def test_restart_stamps_pending_since(self):
         """重启写 PENDING 时,必须往 ext 记 pending_since,供扫描超时兜底使用。
@@ -872,14 +1025,110 @@ class TestRestart:
 
         service.restart(bot_id="desktop_bot_001", user_id="u001")
 
-        # 找到写入 ext 且含 pending_since 的那次 update_by_owner 调用
-        ext_writes = [
-            c for c in mocks["bot_repo"].update_by_owner.call_args_list
-            if "ext" in (c.kwargs.get("update_data") or {})
+        prepared = mocks["binding_repo"].prepare_baas_desktop_restart.call_args
+        assert "pending_since" in prepared.kwargs["bot_ext_patch"]
+
+    def test_pool_restart_updates_layout_wire_and_current_publish_identity(self):
+        from agentclaw.community.core.skills_pool.types import SkillLayout
+
+        service, mocks = _make_service_with_mocks()
+        _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")
+        bot = mocks["bot_repo"].get_by_id_and_owner.return_value
+        bot["entity_id"] = "u001"
+        bot["entity_type"] = "staff"
+        bot["ext"] = {
+            "client_id": "client-1",
+            "callback_token": "token-1",
+            "machine_id": "machine-1",
+            "migration_path": "/data/desktop",
+            "passport": {"agent_code": "agent-1"},
+            "publish_id": "old-publish",
+        }
+        mocks["layout_repo"].get.return_value = MagicMock(
+            active_layout=SkillLayout.POOL,
+            layout_contract_version="skills-pool-p3-v1",
+        )
+        mocks["baas"].post_bots_api.return_value = {"publish_id": 17}
+
+        service.restart(bot_id="desktop_bot_001", user_id="u001")
+
+        mocks["baas"].restart_bot.assert_not_called()
+        credentials = mocks["baas"].post_bots_api.call_args.kwargs["payload"][
+            "config"
+        ]["deploy_config"]["credentials"]
+        assert credentials["agentclaw_skills_layout"] == "pool"
+        assert credentials["agentclaw_skills_layout_contract_version"] == (
+            "skills-pool-p3-v1"
+        )
+        prepared = mocks["binding_repo"].prepare_baas_desktop_restart.call_args
+        assert prepared.kwargs["bot_ext_patch"]["publish_id"] == "17"
+        assert prepared.kwargs["binding_id"] == 1
+        assert prepared.kwargs["expected_publish_id"] is None
+        assert prepared.kwargs["binding_props_patch"] == {
+            "publish_id": "17",
+            "restart_publish_id": "17",
+            "envs": {
+                "AGENTCLAW_SKILLS_LAYOUT": "pool",
+                "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": (
+                    "skills-pool-p3-v1"
+                ),
+            },
+            "layout_confirmed_startup_identity": None,
+        }
+
+    @patch(
+        "agentclaw.community.core.desktop_bot.services.desktop_bot_service."
+        "DesktopBotService._start_publish_polling"
+    )
+    def test_restart_keeps_tracking_when_atomic_identity_write_fails(
+        self, mock_start_poll
+    ):
+        service, mocks = _make_service_with_mocks()
+        _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")
+        mocks["baas"].restart_bot.return_value = {"publish_id": 5}
+        mocks["baas"].approve_publish.return_value = {"status": "SUCCESS"}
+        mocks["binding_repo"].prepare_baas_desktop_restart.side_effect = RuntimeError(
+            "DB down"
+        )
+
+        result = service.restart(bot_id="desktop_bot_001", user_id="u001")
+
+        assert result["status"] == "PENDING"
+        mocks["binding_repo"].update_device_props.assert_not_called()
+        poll_kwargs = mock_start_poll.call_args.kwargs
+        assert poll_kwargs["publish_id"] == "5"
+        assert poll_kwargs["binding_id"] == "1"
+        assert poll_kwargs["bot_id"] == "desktop_bot_001"
+        assert poll_kwargs["owner_id"] == "staff_u001"
+        assert poll_kwargs["device_id"] == "m-001"
+        assert poll_kwargs["engine_type"] == "openclaw"
+        assert poll_kwargs["restart_publish_id"] == "5"
+        bot_patch, binding_patch, expected_publish_id = poll_kwargs[
+            "restart_tracking"
         ]
-        assert ext_writes, "restart 应写一次含 ext 的 update"
-        merged_ext = ext_writes[-1].kwargs["update_data"]["ext"]
-        assert "pending_since" in merged_ext
+        assert bot_patch["publish_id"] == "5"
+        assert binding_patch["restart_publish_id"] == "5"
+        assert expected_publish_id is None
+
+    @patch(
+        "agentclaw.community.core.desktop_bot.services.desktop_bot_service."
+        "DesktopBotService._start_publish_polling"
+    )
+    def test_restart_guard_rejection_observes_without_resurrecting_binding(
+        self, mock_start_poll
+    ):
+        service, mocks = _make_service_with_mocks()
+        _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")
+        mocks["baas"].restart_bot.return_value = {"publish_id": 5}
+        mocks["baas"].approve_publish.return_value = {"status": "SUCCESS"}
+        mocks["binding_repo"].prepare_baas_desktop_restart.return_value = False
+
+        result = service.restart(bot_id="desktop_bot_001", user_id="u001")
+
+        assert result["status"] == "PENDING"
+        mocks["binding_repo"].update_device_props.assert_not_called()
+        mocks["binding_repo"].update_status.assert_not_called()
+        assert mock_start_poll.call_args.kwargs["observe_only"] is True
 
     def test_restart_no_publish_id_skips_approve(self):
         service, mocks = _make_service_with_mocks()
@@ -1043,6 +1292,159 @@ class TestPublishPolling:
         # _update_local_status 不再被调用（由 report_device_alive 内部处理）
         mocks["binding_repo"].update_status.assert_not_called()
 
+    def test_pool_publish_waits_for_authenticated_layout_callback(self, poll_service):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._trigger_device_alive = MagicMock(return_value=True)
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop-pool",
+            "owner_id": "u001",
+            "entity_id": "u001",
+            "ext": {
+                "skills_layout": "pool",
+                "publish_id": "pub-001",
+            },
+        }
+        pending_binding = MagicMock(
+            id=1,
+            status="PENDING",
+            device_props={
+                "callback_token": "callback-token",
+                "client_id": "runtime-client-001",
+                "publish_id": "pub-001",
+            },
+        )
+        confirmed_binding = MagicMock(
+            id=1,
+            status="PENDING",
+            device_props={
+                "callback_token": "callback-token",
+                "client_id": "runtime-client-001",
+                "publish_id": "pub-001",
+                "layout_confirmed_startup_identity": "pub-001",
+            },
+        )
+        mocks["binding_repo"].get_by_id.side_effect = [
+            pending_binding,
+            confirmed_binding,
+        ]
+
+        service._poll_publish_progress(
+            publish_id="pub-001",
+            binding_id="1",
+            bot_id="desktop-pool",
+            owner_id="u001",
+            device_id="BOT-pool",
+            engine_type="openclaw",
+        )
+
+        watchdog_call = mocks["baas"].exec_command_on_bot.call_args
+        assert watchdog_call.kwargs["bot_uuid"] == "BOT-pool"
+        watchdog_cmd = watchdog_call.kwargs["cmd"]
+        assert "starting_watchdog.sh" in watchdog_cmd
+        assert "--client_id BOT-pool" in watchdog_cmd
+        assert "runtime-client-001" not in watchdog_cmd
+        assert "pub-001" in watchdog_cmd
+        assert "cat /var/run/agentclaw" not in watchdog_cmd
+        mocks["layout_confirmation"].confirm.assert_not_called()
+        service._trigger_device_alive.assert_called_once_with("BOT-pool")
+
+    def test_poll_retries_unpersisted_restart_tracking(self, poll_service):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._trigger_device_alive = MagicMock(return_value=True)
+        mocks["binding_repo"].prepare_baas_desktop_restart.side_effect = [
+            RuntimeError("DB down"),
+            True,
+        ]
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop_bot_001",
+            "owner_id": "u001",
+            "ext": {},
+        }
+
+        service._poll_publish_progress(
+            publish_id="pub-001",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-pool",
+            restart_tracking=(
+                {"publish_id": "pub-001"},
+                {"restart_publish_id": "pub-001"},
+                None,
+            ),
+        )
+
+        assert mocks["binding_repo"].prepare_baas_desktop_restart.call_count == 2
+        service._trigger_device_alive.assert_called_once_with("BOT-pool")
+
+    def test_poll_does_not_overwrite_newer_restart_after_tracking_retry(
+        self, poll_service
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._trigger_device_alive = MagicMock(return_value=True)
+        mocks["binding_repo"].prepare_baas_desktop_restart.return_value = False
+        mocks["binding_repo"].get_by_id.return_value = MagicMock(
+            status="PENDING",
+            device_props={"restart_publish_id": "newer-publish"},
+        )
+
+        service._poll_publish_progress(
+            publish_id="older-publish",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-pool",
+            restart_tracking=(
+                {"publish_id": "older-publish"},
+                {"restart_publish_id": "older-publish"},
+                "baseline-publish",
+            ),
+        )
+
+        service._trigger_device_alive.assert_not_called()
+        mocks["binding_repo"].update_status.assert_not_called()
+
+    def test_pool_publish_surfaces_rejected_layout_callback_as_failed(
+        self, poll_service
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._trigger_device_alive = MagicMock(return_value=True)
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop-pool",
+            "owner_id": "u001",
+            "ext": {
+                "skills_layout": "pool",
+                "publish_id": "pub-001",
+            },
+        }
+        mocks["binding_repo"].get_by_id.return_value = MagicMock(
+            id=1,
+            status="FAILED",
+            device_props={
+                "callback_token": "callback-token",
+                "publish_id": "pub-001",
+            },
+        )
+
+        service._poll_publish_progress(
+            publish_id="pub-001",
+            binding_id="1",
+            bot_id="desktop-pool",
+            owner_id="u001",
+            device_id="BOT-pool",
+            engine_type="openclaw",
+        )
+
+        service._trigger_device_alive.assert_not_called()
+        mocks["binding_repo"].update_status.assert_called_once_with(
+            binding_id="1",
+            status="FAILED",
+        )
+
     def test_poll_failed_updates_status_to_failed(self, poll_service):
         service, mocks = poll_service()
 
@@ -1068,6 +1470,30 @@ class TestPublishPolling:
         mocks["binding_repo"].update_status.assert_called_once_with(
             binding_id="1", status="FAILED",
         )
+
+    def test_superseded_restart_failure_cannot_overwrite_new_publish(
+        self, poll_service
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="FAILED")
+        mocks["binding_repo"].transition_baas_restart_terminal.return_value = False
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop_bot_001",
+            "owner_id": "u001",
+            "ext": {"publish_id": "newer-publish"},
+        }
+
+        service._poll_publish_progress(
+            publish_id="older-publish",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-pool",
+            restart_publish_id="older-publish",
+        )
+
+        mocks["binding_repo"].transition_baas_restart_terminal.assert_called_once()
+        mocks["binding_repo"].update_status.assert_not_called()
 
     @patch("time.sleep", return_value=None)
     @patch("time.monotonic")
@@ -1307,6 +1733,7 @@ class TestPublishPolling:
             owner_id="staff_u001",
             device_id="m-001",
             engine_type="openclaw",
+            restart_publish_id="5",
         )
 
     @patch(
@@ -1340,6 +1767,7 @@ class TestPublishPolling:
             owner_id="staff_u001",
             device_id="m-001",
             engine_type="claude_code",
+            restart_publish_id="5",
         )
 
 
@@ -1517,6 +1945,11 @@ def _make_service():
         baas_config=BaasConfig(desktop_template_uuid=DESKTOP_TEMPLATE_UUID),
         device_service=MagicMock(spec=DeviceService),
         skill_set_factory=skill_set_factory,
+        skills_pool_native_creation_policy=MagicMock(
+            select=MagicMock(return_value=None)
+        ),
+        skill_layout_repository=MagicMock(),
+        layout_confirmation=MagicMock(),
     )
 
 
@@ -1535,6 +1968,11 @@ def _make_service_with_mocks():
         "bot_repo": MagicMock(),
         "device_service": MagicMock(spec=DeviceService),
         "skill_set_factory": skill_set_factory,
+        "native_creation_policy": MagicMock(
+            select=MagicMock(return_value=None)
+        ),
+        "layout_repo": MagicMock(),
+        "layout_confirmation": MagicMock(),
     }
     service = DesktopBotService(
         baas_service=mocks["baas"],
@@ -1544,6 +1982,9 @@ def _make_service_with_mocks():
         baas_config=BaasConfig(desktop_template_uuid=DESKTOP_TEMPLATE_UUID),
         device_service=mocks["device_service"],
         skill_set_factory=mocks["skill_set_factory"],
+        skills_pool_native_creation_policy=mocks["native_creation_policy"],
+        skill_layout_repository=mocks["layout_repo"],
+        layout_confirmation=mocks["layout_confirmation"],
     )
     # _fetch_machine_info makes a real HTTP call; mock it for all unit tests
     service._fetch_machine_info = MagicMock(
@@ -1552,6 +1993,7 @@ def _make_service_with_mocks():
     # _build_desktop_bot_payload calls _get_start_cmd and _get_destroy_cmd on baas
     mocks["baas"]._get_start_cmd.return_value = "echo start"
     mocks["baas"]._get_destroy_cmd.return_value = None
+    mocks["binding_repo"].prepare_baas_desktop_restart.return_value = True
     return service, mocks
 
 

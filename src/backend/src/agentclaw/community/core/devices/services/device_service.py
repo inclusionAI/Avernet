@@ -47,8 +47,12 @@ from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
+    LayoutInitializationConflictError,
+    LayoutInitializationEvidenceError,
+    LayoutInitializationConfirmationProtocol,
     McpSyncProtocol,
 )
+from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -99,6 +103,7 @@ class DeviceService:
         vault: "Optional[TokenVault]" = None,
         sandbox_client: "Optional[SandboxRuntimeClient]" = None,
         task_queue_service: "TaskQueueService | None" = None,
+        layout_confirmation: "LayoutInitializationConfirmationProtocol",
     ):
         """Initialize device service.
 
@@ -130,6 +135,7 @@ class DeviceService:
         # construction paths (unit tests) that never hit that branch.
         self._sandbox_client = sandbox_client
         self._task_queue_service = task_queue_service
+        self._layout_confirmation = layout_confirmation
         logger.info("[DeviceService] Initialized")
 
     # =========================================================================
@@ -1093,14 +1099,23 @@ class DeviceService:
 
         self._repo.update_status_and_alive_at(binding_id=record.id, status=new_status)
 
+        # Reconcile the Bot on every authenticated heartbeat. The Binding may
+        # already be ACTIVE when a previous best-effort Bot status write was
+        # lost; the repository guard only advances the same binding's
+        # PENDING/PROVISIONING Bot, so retries cannot overwrite terminal state.
+        _t_cb = _time.time()
+        if record.status in {
+            DeviceBindingStatus.PENDING.value,
+            DeviceBindingStatus.ACTIVE.value,
+        }:
+            self._update_bot_status_on_device_active(binding_id=record.id)
+
         # If status changed from PENDING to ACTIVE, sync bot status and trigger callbacks
         if record.status == DeviceBindingStatus.PENDING.value:
             logger.info(
                 f"[report_device_alive] device_id={device_id} PENDING→ACTIVE callbacks start: "
                 f"binding_id={record.id}"
             )
-            _t_cb = _time.time()
-            self._update_bot_status_on_device_active(binding_id=record.id)
             logger.info(
                 f"[report_device_alive] device_id={device_id} update_bot_status done: "
                 f"cost_ms={(_time.time() - _t_cb) * 1000:.0f}"
@@ -1151,7 +1166,14 @@ class DeviceService:
         return updated_record
 
     def report_device_status(
-        self, *, device_id: str, status: str, message: str | None, token: str
+        self,
+        *,
+        device_id: str,
+        status: str,
+        message: str | None,
+        token: str,
+        startup_identity: str | None = None,
+        layout_initialization: dict[str, object] | None = None,
     ) -> DeviceBindingRecord:
         """Report device startup status.
 
@@ -1172,14 +1194,49 @@ class DeviceService:
         if record.status == DeviceBindingStatus.RELEASED.value:
             raise InvalidDeviceStatusError("cannot report status for released device")
 
+        layout_confirmation_callback = (
+            status == "SUCCEEDED" and layout_initialization is not None
+        )
+        guarded_status_callback = (
+            startup_identity is not None and status in {"SUCCEEDED", "FAILED"}
+        )
+        if layout_confirmation_callback:
+            self._confirm_pool_layout_initialization(
+                record=record,
+                startup_identity=startup_identity,
+                evidence=layout_initialization,
+            )
+
         # Update ac_bots.ext field
-        self._update_bot_start_status(binding_id=record.id, status=status, message=message)
+        if guarded_status_callback:
+            assert startup_identity is not None
+            if not (
+                self._repo.transition_layout_startup_status_if_matches(
+                    binding_id=record.id,
+                    startup_identity=startup_identity,
+                    status=status,
+                    message=message,
+                )
+            ):
+                raise LayoutInitializationConflictError(
+                    "startup identity changed after layout confirmation"
+                )
+        else:
+            self._update_bot_start_status(
+                binding_id=record.id,
+                status=status,
+                message=message,
+            )
 
         # If FAILED, update both ac_bots and ac_entity_device_binding status
         if status == "FAILED":
             logger.info(f"[report_device_status] Status is FAILED, updating bot and device status: device_id={device_id}")
-            self._update_bot_status_on_device_failed(binding_id=record.id)
-            self._repo.update_status(binding_id=record.id, status=DeviceBindingStatus.FAILED.value)
+            if not guarded_status_callback:
+                self._update_bot_status_on_device_failed(binding_id=record.id)
+                self._repo.update_status(
+                    binding_id=record.id,
+                    status=DeviceBindingStatus.FAILED.value,
+                )
 
         elif status == "SUCCEEDED":
             # 设备自报启动成功，前置条件 bot_status=ACTIVE + start_status=SUCCEEDED 均已满足
@@ -1191,6 +1248,56 @@ class DeviceService:
             raise DeviceNotFoundError(f"binding {record.id} not found after update")
 
         return updated_record
+
+    def _confirm_pool_layout_initialization(
+        self,
+        *,
+        record: DeviceBindingRecord,
+        startup_identity: str | None,
+        evidence: dict[str, object],
+    ) -> None:
+        """Validate current startup identity before advancing layout state."""
+
+        expected_identity = resolve_startup_identity(record.device_props)
+        if (
+            expected_identity is None
+            or startup_identity is None
+            or startup_identity != expected_identity
+        ):
+            raise InvalidDeviceStatusError("stale startup identity")
+
+        bot = self._bot_query.get_by_binding_id(record.id)
+        if bot is None:
+            raise InvalidDeviceStatusError("Bot not found for layout confirmation")
+        bot_id = bot.get("bot_id")
+        engine = bot.get("active_engine")
+        if not isinstance(bot_id, str) or not bot_id or not isinstance(engine, str):
+            raise InvalidDeviceStatusError("invalid Bot identity for layout confirmation")
+
+        try:
+            self._layout_confirmation.confirm(
+                binding_id=record.id,
+                startup_identity=startup_identity,
+                env=record.env,
+                entity_id=record.entity_id,
+                bot_id=bot_id,
+                expected_engine=engine,
+                evidence=evidence,
+            )
+        except LayoutInitializationEvidenceError as error:
+            message = str(error)
+            if startup_identity is None or not (
+                self._repo.transition_layout_startup_status_if_matches(
+                    binding_id=record.id,
+                    startup_identity=startup_identity,
+                    status="FAILED",
+                    message=message,
+                )
+            ):
+                raise LayoutInitializationConflictError(
+                    "startup identity changed before failure persistence"
+                ) from error
+            raise
 
     def list_connectable_devices(
         self,

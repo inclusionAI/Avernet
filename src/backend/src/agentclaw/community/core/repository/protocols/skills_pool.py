@@ -53,6 +53,18 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def confirm_pool_initializing(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        layout_contract_version: str,
+        binding_id: int,
+        startup_identity: str,
+    ) -> bool:
+        """Confirm Pool layout and record only the still-current startup."""
+        ...
+
+    @abstractmethod
     def renew_lease(
         self,
         *,

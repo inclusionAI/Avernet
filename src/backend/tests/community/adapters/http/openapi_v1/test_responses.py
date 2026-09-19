@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 
 import pytest
 from fastapi import Request
@@ -189,6 +190,27 @@ async def test_mapped_5xx_is_logged_at_error_level(caplog):
 
     assert resp.status_code == 500
     assert caplog.records[-1].levelno == logging.ERROR
+
+
+@pytest.mark.asyncio
+async def test_retained_creation_error_exposes_retry_bot_id():
+    from agentclaw.community.core.bot_management.errors import (
+        BotCreationRetainedError,
+    )
+
+    @envelope_errors
+    async def handler(request: Request):
+        raise BotCreationRetainedError(
+            bot_id="bot-retry-1",
+            message="device allocation failed",
+        )
+
+    resp = await handler(request=_request())
+
+    assert resp.status_code == 500
+    payload = json.loads(resp.body)
+    assert payload["message"] == "Bot creation retained for retry"
+    assert payload["data"] == {"bot_id": "bot-retry-1", "retryable": True}
 
 
 @pytest.mark.asyncio

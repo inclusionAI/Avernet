@@ -35,6 +35,7 @@ from agentclaw.community.core.bot_management.services.data_init_service import D
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
+    LayoutInitializationConfirmationProtocol,
     McpSyncProtocol,
 )
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
@@ -138,6 +139,7 @@ class TestingDevicesModule(Module):
         passport_plugin: PassportPlugin,
         sandbox_client: SandboxRuntimeClient,
         caller_identity_repository: CallerIdentityRepositoryProtocol,
+        layout_confirmation: LayoutInitializationConfirmationProtocol,
     ) -> DeviceService:
         """Local-only ``DeviceServiceRouter`` build (singlebox via BaaS)."""
         from agentclaw.community.core.devices.services.local_device_service import (
@@ -158,6 +160,7 @@ class TestingDevicesModule(Module):
             oss_record_repo=oss_record_repo,
             mcp_sync=mcp_sync,
             vault=token_vault,
+            layout_confirmation=layout_confirmation,
         )
 
         # providers dict key 必须与 LocalDeviceService._do_allocate 写入

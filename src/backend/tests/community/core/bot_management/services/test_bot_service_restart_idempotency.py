@@ -185,6 +185,10 @@ def _make_service(
     svc._device_service_provider = (lambda: device_provider) if device_provider is not None else (lambda: MagicMock())
     svc._oss_record_repo = MagicMock()
     svc._skill_set_factory = MagicMock()
+    svc._skills_pool_native_creation_policy = MagicMock(
+        select=MagicMock(return_value=None)
+    )
+    svc._skill_layout_repository = MagicMock()
     svc._template_service = MagicMock()
     svc._baas_service_provider = baas_service_provider
     svc._device_binding_repo = device_binding_repo if device_binding_repo is not None else MagicMock()
@@ -1998,6 +2002,7 @@ class TestRestartBaasPendingAndQueue:
             "restart_workflow_baseline": 32272,
             "restart_publish_id": None,
             "restart_image_policy_on_success": None,
+            "envs": None,
         }
 
     @pytest.mark.parametrize("baseline", [0, 32272])
@@ -2091,6 +2096,7 @@ class TestRestartBaasPendingAndQueue:
             "restart_workflow_baseline": 0,
             "restart_publish_id": None,
             "restart_image_policy_on_success": None,
+            "envs": None,
         }
         assert bind_repo.update_device_props.call_args_list[1].kwargs["props"] == {
             "publish_id": "9377",

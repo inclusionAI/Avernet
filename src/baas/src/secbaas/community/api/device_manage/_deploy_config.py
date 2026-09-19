@@ -76,6 +76,14 @@ class DeviceCredentials(BaseModel):
     bot_type: str | None = Field(default=None, serialization_alias="BOT_TYPE")
     agent_code: str | None = Field(default=None, serialization_alias="AGENT_CODE")
     stage: str | None = Field(default=None, serialization_alias="STAGE")
+    agentclaw_skills_layout: str | None = Field(
+        default=None,
+        serialization_alias="AGENTCLAW_SKILLS_LAYOUT",
+    )
+    agentclaw_skills_layout_contract_version: str | None = Field(
+        default=None,
+        serialization_alias="AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION",
+    )
 
 
 class ArcaDeployConfig(BaseModel):

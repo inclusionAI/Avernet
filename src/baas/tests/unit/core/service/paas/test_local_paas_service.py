@@ -390,6 +390,44 @@ class TestCreateDeviceSameInstance:
         }
 
     @pytest.mark.asyncio
+    async def test_create_device_preserves_pool_layout_credentials(
+        self,
+        local_paas_service,
+        mock_repository,
+        mock_connection_manager,
+    ):
+        """Desktop Pool layout reaches MNG as the entrypoint env contract."""
+        mock_repository.get_by_machine_id.return_value = MagicMock(
+            connected_server_instance="test-instance"
+        )
+        mock_connection_manager.send_command.return_value = {
+            "status": "success",
+            "data": {"container_id": "abc123"},
+        }
+        config = LocalCreateConfig(
+            user_id="user-001",
+            machine_id="machine-001",
+            tc_bot_id="bot-001",
+            agent_code="agent-001",
+            name="test-device",
+            description="Test device",
+            credentials=DeviceCredentials(
+                token="tok",
+                agentclaw_skills_layout="pool",
+                agentclaw_skills_layout_contract_version="1",
+            ),
+        )
+
+        await local_paas_service.create_device(config)
+
+        command = mock_connection_manager.send_command.call_args.args[1]
+        assert command["params"]["credentials"] == {
+            "TOKEN": "tok",
+            "AGENTCLAW_SKILLS_LAYOUT": "pool",
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "1",
+        }
+
+    @pytest.mark.asyncio
     async def test_create_device_same_instance_credentials_all_none(
         self,
         local_paas_service,

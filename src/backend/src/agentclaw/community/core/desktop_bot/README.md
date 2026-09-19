@@ -17,6 +17,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skills_pool    # persisted layout selection for create/restart
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.devices
   - agentclaw.community.core.errors
@@ -24,6 +25,8 @@ internal_dependencies:
   - agentclaw.community.core.mcp
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.skill_center
+  - agentclaw.community.core.skills_pool.native_creation
+  - agentclaw.community.core.skills_pool.types
   - agentclaw.community.core.workspace
   - agentclaw.community.di
   - agentclaw.community.kernel.lifecycle

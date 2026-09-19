@@ -904,6 +904,15 @@ class BaasService:  # pragma: no cover
         envs = {"AGENTCLAW_ENGINE": engine}
         if extra_envs:
             envs.update(extra_envs)
+        layout_keys = {
+            "AGENTCLAW_SKILLS_LAYOUT",
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION",
+        }
+        layout_envs = {
+            key: value
+            for key, value in envs.items()
+            if key in layout_keys
+        }
 
         docker_image = None
         overrides = SandboxOverrides.from_template_config(template_config)
@@ -914,6 +923,11 @@ class BaasService:  # pragma: no cover
                 raise BaasServiceError(f"沙箱覆写参数校验失败: {e}") from e
 
             envs = overrides.merged_envs(envs)
+            # Layout selection is a persisted platform decision.  Template
+            # envs may extend the sandbox but cannot rewrite that authority.
+            for key in layout_keys:
+                envs.pop(key, None)
+            envs.update(layout_envs)
             if overrides.resource_spec is not None:
                 resource_spec = overrides.resource_spec
             if overrides.image is not None:

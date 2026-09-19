@@ -100,6 +100,7 @@ def test_report_device_alive_triggers_full_symlink_sync():
         bot_sync=bot_sync,
         oss_record_repo=MagicMock(),
         mcp_sync=MagicMock(),
+        layout_confirmation=MagicMock(),
     )
     svc.report_device_alive(device_id="staff_u001_default", token="tok")
 
@@ -181,6 +182,7 @@ def test_report_device_alive_skip_token_check_bypasses_token_validation():
         bot_sync=bot_sync,
         oss_record_repo=MagicMock(),
         mcp_sync=MagicMock(),
+        layout_confirmation=MagicMock(),
     )
 
     # Call with WRONG token but skip_token_check=True - should NOT raise

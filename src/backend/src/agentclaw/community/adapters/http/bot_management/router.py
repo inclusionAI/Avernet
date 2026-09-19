@@ -63,6 +63,7 @@ from agentclaw.community.core.execution_identity.contracts import (
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
     BotCombinationUnsupportedError,
+    BotCreationRetainedError,
     BotLookupAmbiguousError,
     BotTemplateInvalidError,
     CreateBotForOthersError,
@@ -1092,6 +1093,16 @@ async def create_bot(
             error_code=5400,
             data=None,
         )
+    except BotCreationRetainedError as e:
+        logger.error(
+            "[bot_router.create_bot] Bot creation retained for retry: %s", e
+        )
+        return ApiResponse(
+            success=False,
+            message=f"创建Bot失败，可使用 bot_id 重试: {str(e)}",
+            error_code=500,
+            data={"bot_id": e.bot_id, "retryable": True},
+        )
     except DeviceAllocationError as e:
         logger.error(f"[bot_router.create_bot] Device allocation error: {e}")
         return ApiResponse(
@@ -1254,6 +1265,16 @@ async def get_auth_status(
             message=f"授权状态查询异常: {e}",
             error_code=5400,
             data=None,
+        )
+    except BotCreationRetainedError as e:
+        logger.error(
+            "[bot_router.get_auth_status] Bot creation retained for retry: %s", e
+        )
+        return ApiResponse(
+            success=False,
+            message=f"创建Bot失败，可使用 bot_id 重试: {str(e)}",
+            error_code=500,
+            data={"bot_id": e.bot_id, "retryable": True},
         )
     except Exception as e:
         logger.error(f"[bot_router.get_auth_status] Error: {e}")

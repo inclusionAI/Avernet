@@ -113,6 +113,18 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def adopt_baas_restart_publish_if_matches(
+        self,
+        *,
+        binding_id: int,
+        request_id: str,
+        workflow_baseline: int,
+        publish_id: int,
+    ) -> bool:
+        """Persist an adopted workflow only for the unchanged restart intent."""
+        ...
+
+    @abstractmethod
     def transition_teclaw_publish_terminal(
         self,
         *,
@@ -131,6 +143,53 @@ class DeviceBindingRepository(Protocol):
         update that does not match exactly one row raises and rolls back the
         transaction.
         """
+        ...
+
+    @abstractmethod
+    def transition_baas_restart_terminal(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        publish_id: int | str | None,
+        request_id: str | None,
+        status: str,
+        expected_bot_ext: dict[str, Any] | None,
+        bot_ext: dict[str, Any],
+    ) -> bool:
+        """Atomically persist a guarded BaaS restart terminal transition.
+
+        Returns ``False`` without writes when the current Binding restart
+        identity or Bot ext snapshot no longer matches this task. On a match,
+        the Bot status/ext and Binding status advance in one transaction.
+        """
+        ...
+
+    @abstractmethod
+    def clear_baas_restart_intent_if_matches(
+        self,
+        *,
+        binding_id: int,
+        publish_id: int | None,
+        request_id: str | None,
+        keys: tuple[str, ...],
+    ) -> bool:
+        """Clear restart intent keys only while the task identity is current."""
+        ...
+
+    @abstractmethod
+    def prepare_baas_desktop_restart(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        expected_publish_id: str | None,
+        bot_ext_patch: dict[str, Any],
+        binding_props_patch: dict[str, Any],
+    ) -> bool:
+        """Persist Desktop restart only while its prior identity is current."""
         ...
 
     @abstractmethod
@@ -224,8 +283,20 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def transition_layout_startup_status_if_matches(
+        self,
+        *,
+        binding_id: int,
+        startup_identity: str,
+        status: str,
+        message: str | None,
+    ) -> bool:
+        """Persist a layout callback only while its startup is current."""
+        ...
+
+    @abstractmethod
     def update_bot_status_on_device_active(self, *, binding_id: int) -> None:
-        """设备变 ACTIVE 时更新关联 Bot 状态为 ACTIVE（仅当 Bot 当前状态为 PENDING 时）."""
+        """设备变 ACTIVE 时将 PENDING/PROVISIONING Bot 更新为 ACTIVE."""
         ...
 
     @abstractmethod

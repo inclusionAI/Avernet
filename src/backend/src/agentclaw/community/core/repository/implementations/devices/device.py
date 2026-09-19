@@ -88,6 +88,11 @@ from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.implementations.devices.guarded_lifecycle import (
+    BaasDesktopRestartRepositoryMixin,
+    begin_guarded_transaction,
+    load_device_props,
+)
 
 logger = get_logger()
 
@@ -99,13 +104,6 @@ class _DeviceBindingStatus:
     ACTIVE = "ACTIVE"
     FAILED = "FAILED"
     RELEASED = "RELEASED"
-
-
-def _normalize_isolation_level(value: str) -> str:
-    """Normalize dialect spelling before comparing isolation levels."""
-    return " ".join(
-        value.replace("_", " ").replace("-", " ").upper().split()
-    )
 
 
 def _to_record(m: EntityDeviceBinding | None) -> DeviceBindingRecord | None:
@@ -143,6 +141,7 @@ def _to_record(m: EntityDeviceBinding | None) -> DeviceBindingRecord | None:
 
 
 class DeviceRepository(
+    BaasDesktopRestartRepositoryMixin,
     DeviceBindingRepository,
 ):
     """Unified ORM ``DeviceBindingRepository`` implementation."""
@@ -484,6 +483,56 @@ class DeviceRepository(
                 synchronize_session=False,
             )
 
+    def adopt_baas_restart_publish_if_matches(
+        self,
+        *,
+        binding_id: int,
+        request_id: str,
+        workflow_baseline: int,
+        publish_id: int,
+    ) -> bool:
+        """Atomically bind an adopted publish to its original restart request."""
+        with self._db.orm_session() as db:
+            try:
+                begin_guarded_transaction(db, purpose="BaaS restart workflow adoption")
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == binding_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if binding is None:
+                    db.rollback()
+                    return False
+                props = load_device_props(binding.device_props)
+                if (
+                    binding.device_provider != "baas"
+                    or binding.status
+                    not in {
+                        _DeviceBindingStatus.PENDING,
+                        _DeviceBindingStatus.ACTIVE,
+                    }
+                    or not isinstance(props, dict)
+                    or props.get("restart_request_id") != request_id
+                    or props.get("restart_workflow_baseline") != workflow_baseline
+                    or props.get("restart_publish_id") is not None
+                ):
+                    db.rollback()
+                    return False
+                props.update(
+                    {
+                        "publish_id": str(publish_id),
+                        "restart_publish_id": str(publish_id),
+                    }
+                )
+                binding.device_props = json.dumps(props, ensure_ascii=False)
+                binding.gmt_modified = func.now()
+                db.commit()
+                return True
+            except Exception:
+                db.rollback()
+                raise
+
     def transition_teclaw_publish_terminal(
         self,
         *,
@@ -496,35 +545,7 @@ class DeviceRepository(
         """Guard and persist a Teclaw terminal result in one transaction."""
         with self._db.orm_session() as db:
             try:
-                if db.in_transaction():
-                    raise RuntimeError(
-                        "Teclaw terminal transition requires a fresh ORM "
-                        "Session before selecting transaction isolation"
-                    )
-                dialect_name = db.get_bind().dialect.name
-                isolation_level = (
-                    "SERIALIZABLE"
-                    if dialect_name == "sqlite"
-                    else "READ COMMITTED"
-                )
-                connection = db.connection(
-                    execution_options={"isolation_level": isolation_level}
-                )
-                actual_isolation = _normalize_isolation_level(
-                    connection.get_isolation_level()
-                )
-                expected_isolation = _normalize_isolation_level(
-                    isolation_level
-                )
-                if actual_isolation != expected_isolation:
-                    db.rollback()
-                    raise RuntimeError(
-                        "Teclaw terminal transaction isolation mismatch: "
-                        f"expected {expected_isolation}, got "
-                        f"{actual_isolation}"
-                    )
-                if dialect_name == "sqlite":
-                    connection.exec_driver_sql("BEGIN IMMEDIATE")
+                begin_guarded_transaction(db, purpose="Teclaw terminal transition")
 
                 binding = (
                     db.query(EntityDeviceBinding)
@@ -535,14 +556,7 @@ class DeviceRepository(
                 if binding is None:
                     db.rollback()
                     return False
-                try:
-                    props = (
-                        json.loads(binding.device_props)
-                        if isinstance(binding.device_props, str)
-                        else (binding.device_props or {})
-                    )
-                except (json.JSONDecodeError, TypeError):
-                    props = {}
+                props = load_device_props(binding.device_props)
                 current_publish_id = (
                     props.get("publish_id")
                     if isinstance(props, dict)
@@ -581,6 +595,153 @@ class DeviceRepository(
                     )
 
                 binding.status = status
+                binding.gmt_modified = func.now()
+                db.commit()
+                return True
+            except Exception:
+                db.rollback()
+                raise
+
+    def transition_baas_restart_terminal(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        publish_id: int | str | None,
+        request_id: str | None,
+        status: str,
+        expected_bot_ext: dict[str, Any] | None,
+        bot_ext: dict[str, Any],
+    ) -> bool:
+        """Guard BaaS restart identity and persist Bot + Binding atomically."""
+        with self._db.orm_session() as db:
+            try:
+                begin_guarded_transaction(
+                    db, purpose="BaaS restart terminal transition"
+                )
+
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == binding_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if binding is None:
+                    db.rollback()
+                    return False
+                props = load_device_props(binding.device_props)
+                identity_matches = (
+                    binding.device_provider == "baas"
+                    and binding.status
+                    in {
+                        _DeviceBindingStatus.PENDING,
+                        _DeviceBindingStatus.ACTIVE,
+                    }
+                    and isinstance(props, dict)
+                    and (
+                        publish_id is None
+                        or str(props.get("restart_publish_id") or "")
+                        == str(publish_id)
+                    )
+                    and (
+                        request_id is None
+                        or props.get("restart_request_id") == request_id
+                    )
+                )
+                if not identity_matches:
+                    db.rollback()
+                    return False
+
+                bot = (
+                    db.query(BotModel)
+                    .filter(
+                        BotModel.bot_id == bot_id,
+                        BotModel.owner_id == owner_id,
+                        BotModel.binding_id == binding_id,
+                        BotModel.is_delete == 0,
+                        self._bot_env(),
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if bot is None:
+                    raise RuntimeError(
+                        "BaaS restart terminal bot update expected exactly one record"
+                    )
+                current_ext = None
+                if bot.ext is not None:
+                    try:
+                        current_ext = (
+                            json.loads(bot.ext)
+                            if isinstance(bot.ext, str)
+                            else bot.ext
+                        )
+                    except (json.JSONDecodeError, TypeError):
+                        current_ext = {}
+                if current_ext != expected_bot_ext:
+                    db.rollback()
+                    return False
+
+                bot.status = status
+                bot.ext = json.dumps(bot_ext)
+                bot.gmt_modified = func.now()
+                binding.status = status
+                binding.gmt_modified = func.now()
+                db.commit()
+                return True
+            except Exception:
+                db.rollback()
+                raise
+
+    def clear_baas_restart_intent_if_matches(
+        self,
+        *,
+        binding_id: int,
+        publish_id: int | None,
+        request_id: str | None,
+        keys: tuple[str, ...],
+    ) -> bool:
+        """Clear intent without erasing a concurrently-started restart."""
+        with self._db.orm_session() as db:
+            try:
+                begin_guarded_transaction(db, purpose="BaaS restart intent clear")
+
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == binding_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if binding is None:
+                    db.rollback()
+                    return False
+                props = load_device_props(binding.device_props)
+                identity_matches = (
+                    binding.device_provider == "baas"
+                    and binding.status
+                    in {
+                        _DeviceBindingStatus.PENDING,
+                        _DeviceBindingStatus.ACTIVE,
+                        _DeviceBindingStatus.FAILED,
+                    }
+                    and isinstance(props, dict)
+                    and (
+                        publish_id is None
+                        or str(props.get("restart_publish_id") or "")
+                        == str(publish_id)
+                    )
+                    and (
+                        request_id is None
+                        or props.get("restart_request_id") == request_id
+                    )
+                )
+                if not identity_matches:
+                    db.rollback()
+                    return False
+                for key in keys:
+                    props[key] = None
+                binding.device_props = json.dumps(props, ensure_ascii=False)
                 binding.gmt_modified = func.now()
                 db.commit()
                 return True
@@ -720,12 +881,12 @@ class DeviceRepository(
     def update_bot_status_on_device_active(
         self, *, binding_id: int
     ) -> None:
-        """Flip BotModel.status PENDING → ACTIVE conditionally.
+        """Flip a pending/claimed Bot to ACTIVE conditionally.
         Single bulk UPDATE; exceptions propagate (prod parity)."""
         with self._db.orm_session() as db:
             db.query(BotModel).filter(
                 BotModel.binding_id == binding_id,
-                BotModel.status == "PENDING",
+                BotModel.status.in_(("PENDING", "PROVISIONING")),
                 self._bot_env(),
             ).update(
                 {

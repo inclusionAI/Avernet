@@ -9,6 +9,10 @@ from agentclaw.community.core.devices.repository.record import DeviceBindingReco
 from agentclaw.community.core.devices.services.baas_device_service import (
     BaasDeviceService,
 )
+from agentclaw.community.core.devices.services.baas_restart_support import (
+    read_restart_codefuse_token,
+    resolve_restart_image_policy,
+)
 from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
     BAAS_CREATE_INIT_TASK,
     BAAS_CREATE_PUBLISH_POLL_TASK,
@@ -68,6 +72,7 @@ def _make_baas_device_service(
         mcp_sync=MagicMock(),
         template_resolver=MagicMock(),
         vault=vault,
+        layout_confirmation=MagicMock(),
         template_service=template_service,
     )
 
@@ -83,6 +88,13 @@ def _make_restart_handler(
     common_config_service: MagicMock | None = None,
     clock=lambda: 200.0,
 ) -> tuple[BaasRestartPublishPollHandler, MagicMock]:
+    baas_device_service.dispatch_restart_layout_confirmation.return_value = (
+        True,
+        "layout confirmation not required",
+    )
+    repo.adopt_baas_restart_publish_if_matches.return_value = True
+    repo.transition_baas_restart_terminal.return_value = True
+    repo.clear_baas_restart_intent_if_matches.return_value = True
     if common_config_service is None:
         common_config_service = MagicMock()
         common_config_service.get_value.return_value = {
@@ -141,11 +153,54 @@ def test_restart_task_adopts_workflow_after_process_loses_publish_id():
     )
 
     assert outcome == Reschedule(10.0)
-    repo.update_device_props.assert_called_once_with(
+    repo.adopt_baas_restart_publish_if_matches.assert_called_once_with(
         binding_id=42,
-        props={"publish_id": "1001", "restart_publish_id": "1001"},
+        request_id=request_id,
+        workflow_baseline=1000,
+        publish_id=1001,
     )
     baas_device_service.poll_publish_once.assert_called_once_with(publish_id=1001)
+
+
+def test_restart_task_retries_when_workflow_adoption_loses_identity_cas():
+    repo = MagicMock()
+    request_id = "restart-request-old"
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.PENDING.value,
+        device_props={
+            "restart_request_id": request_id,
+            "restart_workflow_baseline": 1000,
+            "restart_publish_id": None,
+        },
+    )
+    baas_service = MagicMock()
+    baas_service.list_bot_publishes.return_value = [
+        {"id": 1001, "publish_type": "UPDATE"}
+    ]
+    baas_device_service = MagicMock()
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=MagicMock(),
+        baas_service=baas_service,
+        baas_device_service=baas_device_service,
+    )
+    repo.adopt_baas_restart_publish_if_matches.return_value = False
+
+    outcome = handler.handle(
+        build_restart_publish_poll_payload(
+            binding_id=42,
+            bot_id="bot-001",
+            owner_id="owner-001",
+            publish_id=None,
+            started_at_epoch_s=190.0,
+            bot_uuid="uuid-001",
+            request_id=request_id,
+            workflow_baseline=1000,
+        )
+    )
+
+    assert outcome == Retry("restart workflow adoption CAS conflict")
+    baas_device_service.poll_publish_once.assert_not_called()
 
 
 def test_restart_task_waits_for_binding_intent_commit():
@@ -184,14 +239,8 @@ def test_restart_task_waits_for_binding_intent_commit():
 def test_read_codefuse_token_supports_personal_coding():
     template_service = MagicMock()
     template_service.get_template_config.return_value = {"token": "enc:v1:token"}
-    handler, _ = _make_restart_handler(
-        repo=MagicMock(),
-        bot_repository=MagicMock(),
-        baas_device_service=MagicMock(),
-        template_service=template_service,
-    )
 
-    token = handler._read_codefuse_token(
+    token = read_restart_codefuse_token(
         bot_id="bot-001",
         bot={
             "owner_id": "owner-001",
@@ -199,6 +248,7 @@ def test_read_codefuse_token_supports_personal_coding():
             "bot_type": "service",
             "template_type": "personalCoding",
         },
+        template_service=template_service,
     )
 
     assert token == "enc:v1:token"
@@ -208,14 +258,8 @@ def test_read_codefuse_token_supports_personal_coding():
 def test_read_codefuse_token_uses_template_type_fallback_when_engine_missing():
     template_service = MagicMock()
     template_service.get_template_config.return_value = {"token": "enc:v1:token"}
-    handler, _ = _make_restart_handler(
-        repo=MagicMock(),
-        bot_repository=MagicMock(),
-        baas_device_service=MagicMock(),
-        template_service=template_service,
-    )
 
-    token = handler._read_codefuse_token(
+    token = read_restart_codefuse_token(
         bot_id="bot-001",
         bot={
             "owner_id": "owner-001",
@@ -223,6 +267,7 @@ def test_read_codefuse_token_uses_template_type_fallback_when_engine_missing():
             "bot_type": "service",
             "template_type": "personalCoding",
         },
+        template_service=template_service,
     )
 
     assert token == "enc:v1:token"
@@ -230,14 +275,8 @@ def test_read_codefuse_token_uses_template_type_fallback_when_engine_missing():
 
 def test_read_codefuse_token_skips_non_coding_template():
     template_service = MagicMock()
-    handler, _ = _make_restart_handler(
-        repo=MagicMock(),
-        bot_repository=MagicMock(),
-        baas_device_service=MagicMock(),
-        template_service=template_service,
-    )
 
-    token = handler._read_codefuse_token(
+    token = read_restart_codefuse_token(
         bot_id="bot-001",
         bot={
             "owner_id": "owner-001",
@@ -245,10 +284,25 @@ def test_read_codefuse_token_skips_non_coding_template():
             "bot_type": "personal",
             "template_type": "normalCC",
         },
+        template_service=template_service,
     )
 
     assert token is None
     template_service.get_template_config.assert_not_called()
+
+
+def test_restart_image_policy_falls_back_to_old_task_payload_when_prop_missing():
+    binding = _make_binding(
+        status=DeviceBindingStatus.PENDING.value,
+        device_props={"restart_publish_id": "1001"},
+    )
+
+    assert resolve_restart_image_policy(
+        binding=binding,
+        publish_id=1001,
+        payload_value="default",
+        request_id=None,
+    ) == "default"
 
 
 def test_create_poll_completes_when_binding_terminal():
@@ -790,24 +844,19 @@ def test_restart_poll_marks_active_and_clears_old_baas_failure_ext_on_success():
         bot_uuid="uuid-001",
         codefuse_token=encrypted_token,
     )
-    bot_repository.update_by_owner.assert_called_once_with(
-        "bot-001",
-        "owner-001",
-        {"status": DeviceBindingStatus.ACTIVE.value},
-    )
-    bot_repository.compare_and_set_ext.assert_called_once_with(
+    repo.transition_baas_restart_terminal.assert_called_once_with(
+        binding_id=42,
         bot_id="bot-001",
         owner_id="owner-001",
-        expected_ext={
+        publish_id=1001,
+        request_id=None,
+        status=DeviceBindingStatus.ACTIVE.value,
+        expected_bot_ext={
             "start_status": "FAILED",
             "start_message": "BaaS publish FAILED: publish_id=999",
             "keep": "value",
         },
-        ext={"keep": "value", "restart_publish_id": "1001"},
-    )
-    repo.update_status.assert_called_once_with(
-        binding_id=42,
-        status=DeviceBindingStatus.ACTIVE.value,
+        bot_ext={"keep": "value", "restart_publish_id": "1001"},
     )
 
 
@@ -847,25 +896,20 @@ def test_restart_poll_marks_failed_with_current_publish_id_on_failure():
     )
 
     assert outcome == Complete()
-    bot_repository.update_by_owner.assert_called_once_with(
-        "bot-001",
-        "owner-001",
-        {"status": DeviceBindingStatus.FAILED.value},
-    )
-    bot_repository.compare_and_set_ext.assert_called_once_with(
+    repo.transition_baas_restart_terminal.assert_called_once_with(
+        binding_id=42,
         bot_id="bot-001",
         owner_id="owner-001",
-        expected_ext={"keep": "value"},
-        ext={
+        publish_id=1001,
+        request_id=None,
+        status=DeviceBindingStatus.FAILED.value,
+        expected_bot_ext={"keep": "value"},
+        bot_ext={
             "keep": "value",
             "start_status": "FAILED",
             "start_message": "BaaS publish FAILED: publish_id=1001",
             "restart_publish_id": "1001",
         },
-    )
-    repo.update_status.assert_called_once_with(
-        binding_id=42,
-        status=DeviceBindingStatus.FAILED.value,
     )
 
 
@@ -877,28 +921,122 @@ def test_restart_status_cas_preserves_nullable_bot_ext_snapshot():
         bot_repository=bot_repository,
         baas_device_service=MagicMock(),
     )
-    bot_repository.update_by_owner.return_value = {"status": "FAILED", "ext": None}
     bot_repository.get_by_id_and_owner.return_value = {"ext": None}
-    bot_repository.compare_and_set_ext.return_value = {"ext": {"start_status": "FAILED"}}
 
-    handler._persist_restart_status(
+    assert handler._persist_restart_status(
         bot_id="bot-001",
         owner_id="owner-001",
         binding_id=42,
         status=DeviceBindingStatus.FAILED.value,
         publish_id=None,
+        request_id="restart-request-1",
         failure_message="workflow adoption failed",
-    )
+    ) is True
 
-    bot_repository.compare_and_set_ext.assert_called_once_with(
+    repo.transition_baas_restart_terminal.assert_called_once_with(
+        binding_id=42,
         bot_id="bot-001",
         owner_id="owner-001",
-        expected_ext=None,
-        ext={
+        publish_id=None,
+        request_id="restart-request-1",
+        status=DeviceBindingStatus.FAILED.value,
+        expected_bot_ext=None,
+        bot_ext={
             "start_status": "FAILED",
             "start_message": "workflow adoption failed",
         },
     )
+
+
+def test_restart_terminal_cas_conflict_preserves_new_restart_intent():
+    reset_event_bus()
+    completed: list[BaasPublishCompletedEvent] = []
+    get_event_bus().subscribe(BaasPublishCompletedEvent, completed.append)
+    try:
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"restart_publish_id": "1002"},
+        )
+        repo.transition_baas_restart_terminal.return_value = False
+        bot_repository = MagicMock()
+        bot_repository.get_by_binding_id.return_value = {
+            "bot_id": "bot-001",
+            "owner_id": "owner-001",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+        }
+        bot_repository.get_by_id_and_owner.return_value = {"ext": {}}
+        baas_device_service = MagicMock()
+        baas_device_service.poll_publish_once.return_value = (
+            DeviceBindingStatus.ACTIVE.value
+        )
+        baas_device_service.refresh_codefuse_token_on_publish_success.return_value = (
+            None
+        )
+        handler, _ = _make_restart_handler(
+            repo=repo,
+            bot_repository=bot_repository,
+            baas_device_service=baas_device_service,
+        )
+        repo.transition_baas_restart_terminal.return_value = False
+
+        outcome = handler.handle(
+            build_restart_publish_poll_payload(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1002,
+                started_at_epoch_s=190.0,
+                bot_uuid="baas-bot-1",
+            )
+        )
+
+        assert outcome == Retry("BaaS restart terminal CAS conflict")
+        assert repo.transition_baas_restart_terminal.call_count == 3
+        repo.clear_baas_restart_intent_if_matches.assert_not_called()
+        baas_device_service.dispatch_restart_layout_confirmation.assert_not_called()
+        assert completed == []
+    finally:
+        reset_event_bus()
+
+
+def test_restart_failed_terminal_cas_conflict_preserves_recovery_intent():
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.PENDING.value,
+        device_props={"restart_publish_id": "1002"},
+    )
+    bot_repository = MagicMock()
+    bot_repository.get_by_binding_id.return_value = {
+        "bot_id": "bot-001",
+        "owner_id": "owner-001",
+    }
+    bot_repository.get_by_id_and_owner.return_value = {"ext": {}}
+    baas_device_service = MagicMock()
+    baas_device_service.poll_publish_once.return_value = (
+        DeviceBindingStatus.FAILED.value
+    )
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=bot_repository,
+        baas_device_service=baas_device_service,
+    )
+    repo.transition_baas_restart_terminal.return_value = False
+
+    outcome = handler.handle(
+        build_restart_publish_poll_payload(
+            binding_id=42,
+            bot_id="bot-001",
+            owner_id="owner-001",
+            publish_id=1002,
+            started_at_epoch_s=190.0,
+            bot_uuid="baas-bot-1",
+        )
+    )
+
+    assert outcome == Retry("BaaS restart failure CAS conflict")
+    repo.clear_baas_restart_intent_if_matches.assert_not_called()
 
 
 def test_restart_poll_marks_failed_on_business_timeout():
@@ -936,25 +1074,20 @@ def test_restart_poll_marks_failed_on_business_timeout():
 
     assert outcome == Complete()
     baas_device_service.poll_publish_once.assert_not_called()
-    bot_repository.update_by_owner.assert_called_once_with(
-        "bot-001",
-        "owner-001",
-        {"status": DeviceBindingStatus.FAILED.value},
-    )
-    bot_repository.compare_and_set_ext.assert_called_once_with(
+    repo.transition_baas_restart_terminal.assert_called_once_with(
+        binding_id=42,
         bot_id="bot-001",
         owner_id="owner-001",
-        expected_ext={"keep": "value"},
-        ext={
+        publish_id=1001,
+        request_id=None,
+        status=DeviceBindingStatus.FAILED.value,
+        expected_bot_ext={"keep": "value"},
+        bot_ext={
             "keep": "value",
             "start_status": "FAILED",
             "start_message": "BaaS publish timeout after 600s (publish_id=1001)",
             "restart_publish_id": "1001",
         },
-    )
-    repo.update_status.assert_called_once_with(
-        binding_id=42,
-        status=DeviceBindingStatus.FAILED.value,
     )
 
 
@@ -1052,6 +1185,7 @@ def test_create_init_marks_active_after_init_and_alive():
         bot_id="bot-001",
         owner_id="owner-001",
         callback_token="tok-123",
+        startup_identity="1001",
         admins=["u1001", "u1002"],
         codefuse_token="plain-token",
     )
@@ -1378,7 +1512,17 @@ def test_restart_poll_fails_when_bot_uuid_has_wrong_type():
     repo.get_by_id.assert_not_called()
 
 
-def test_restart_poll_completes_when_binding_is_terminal_or_not_baas():
+@pytest.mark.parametrize(
+    "terminal_status",
+    [
+        DeviceBindingStatus.FAILED.value,
+        DeviceBindingStatus.STOPPED.value,
+        DeviceBindingStatus.RELEASED.value,
+    ],
+)
+def test_restart_poll_completes_when_binding_is_terminal_or_not_baas(
+    terminal_status,
+):
     repo = MagicMock()
     baas_device_service = MagicMock()
     handler = BaasRestartPublishPollHandler(
@@ -1394,7 +1538,7 @@ def test_restart_poll_completes_when_binding_is_terminal_or_not_baas():
         "bot_uuid": "uuid-001",
     }
     repo.get_by_id.return_value = _make_binding(
-        status=DeviceBindingStatus.ACTIVE.value,
+        status=terminal_status,
         device_props={"restart_publish_id": 1001},
     )
 
@@ -1409,6 +1553,7 @@ def test_restart_poll_completes_when_binding_is_terminal_or_not_baas():
 
     assert handler.handle(payload) == Complete()
     baas_device_service.poll_publish_once.assert_not_called()
+    baas_device_service.refresh_codefuse_token_on_publish_success.assert_not_called()
 
 
 def test_restart_poll_retries_when_baas_device_service_missing():
@@ -1470,9 +1615,9 @@ def test_restart_poll_retries_on_transient_status_and_direct_unexpected_status()
         owner_id="owner-001",
         binding_id=42,
         publish_id=1001,
+        request_id=None,
         bot_uuid="uuid-001",
         bot={},
-        binding=repo.get_by_id.return_value,
     ) == Retry("unexpected publish status: ODD")
 
 
@@ -1728,6 +1873,155 @@ def test_restart_success_requests_runtime_projection_and_baas_reconciliation():
         reset_event_bus()
 
 
+def test_restart_confirmation_dispatch_failure_retries_without_finalizing():
+    reset_event_bus()
+    completed: list[BaasPublishCompletedEvent] = []
+    projected: list[RuntimeProjectionRequestedEvent] = []
+    get_event_bus().subscribe(BaasPublishCompletedEvent, completed.append)
+    get_event_bus().subscribe(RuntimeProjectionRequestedEvent, projected.append)
+    try:
+        repo = MagicMock()
+        binding = _make_binding(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"restart_publish_id": 1002},
+        )
+        repo.get_by_id.return_value = binding
+        bot_repository = MagicMock()
+        bot_repository.get_by_binding_id.return_value = {
+            "bot_id": "bot-001",
+            "owner_id": "owner-001",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+        }
+        bot_repository.get_by_id_and_owner.return_value = {"ext": {}}
+        baas_device_service = MagicMock()
+        baas_device_service.poll_publish_once.return_value = (
+            DeviceBindingStatus.ACTIVE.value
+        )
+        baas_device_service.refresh_codefuse_token_on_publish_success.return_value = (
+            None
+        )
+        handler, _ = _make_restart_handler(
+            repo=repo,
+            bot_repository=bot_repository,
+            baas_device_service=baas_device_service,
+        )
+        baas_device_service.dispatch_restart_layout_confirmation.return_value = (
+            False,
+            "layout confirmation dispatch failed",
+        )
+
+        outcome = handler.handle(
+            build_restart_publish_poll_payload(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1002,
+                started_at_epoch_s=190.0,
+                bot_uuid="baas-bot-1",
+            )
+        )
+
+        assert outcome == Retry("layout confirmation dispatch failed")
+        baas_device_service.dispatch_restart_layout_confirmation.assert_called_once_with(
+            binding=binding,
+            publish_id=1002,
+        )
+        repo.update_device_props.assert_not_called()
+        assert completed == []
+        assert projected == []
+    finally:
+        reset_event_bus()
+
+
+def test_restart_confirmation_dispatch_uses_refreshed_binding():
+    repo = MagicMock()
+    stale_binding = _make_binding(
+        status=DeviceBindingStatus.PENDING.value,
+        device_props={
+            "restart_request_id": "restart-request-1",
+            "restart_publish_id": None,
+        },
+    )
+    refreshed_binding = _make_binding(
+        status=DeviceBindingStatus.ACTIVE.value,
+        device_props={"restart_publish_id": "1002"},
+    )
+    repo.get_by_id.side_effect = [stale_binding, refreshed_binding]
+    bot_repository = MagicMock()
+    bot_repository.get_by_binding_id.return_value = {
+        "bot_id": "bot-001",
+        "owner_id": "owner-001",
+        "active_engine": "openclaw",
+        "bot_type": "personal",
+    }
+    bot_repository.get_by_id_and_owner.return_value = {"ext": {}}
+    baas_service = MagicMock()
+    baas_service.list_bot_publishes.return_value = [
+        {"id": 1002, "publish_type": "UPDATE"}
+    ]
+    baas_device_service = MagicMock()
+    baas_device_service.poll_publish_once.return_value = (
+        DeviceBindingStatus.ACTIVE.value
+    )
+    baas_device_service.refresh_codefuse_token_on_publish_success.return_value = None
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=bot_repository,
+        baas_service=baas_service,
+        baas_device_service=baas_device_service,
+    )
+
+    outcome = handler.handle(
+        build_restart_publish_poll_payload(
+            binding_id=42,
+            bot_id="bot-001",
+            owner_id="owner-001",
+            publish_id=None,
+            started_at_epoch_s=190.0,
+            bot_uuid="baas-bot-1",
+            request_id="restart-request-1",
+            workflow_baseline=1001,
+        )
+    )
+
+    assert outcome == Complete()
+    baas_device_service.dispatch_restart_layout_confirmation.assert_called_once_with(
+        binding=refreshed_binding,
+        publish_id=1002,
+    )
+
+
+def test_restart_confirmation_retries_when_refreshed_binding_is_superseded():
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.ACTIVE.value,
+        device_props={"restart_publish_id": "1003"},
+    )
+    baas_device_service = MagicMock()
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=MagicMock(),
+        baas_device_service=baas_device_service,
+    )
+    baas_device_service.dispatch_restart_layout_confirmation.return_value = (
+        False,
+        "stale Skills Pool restart publish identity",
+    )
+
+    outcome = handler._finalize_success(
+        binding_id=42,
+        bot_id="bot-001",
+        owner_id="owner-001",
+        publish_id=1002,
+        request_id=None,
+        image_policy_on_success=None,
+    )
+
+    assert outcome == Retry("stale Skills Pool restart publish identity")
+    repo.update_device_props.assert_not_called()
+
+
 def test_restart_persist_failure_does_not_publish_completion() -> None:
     reset_event_bus()
     received: list[BaasPublishCompletedEvent] = []
@@ -1738,7 +2032,9 @@ def test_restart_persist_failure_does_not_publish_completion() -> None:
             status=DeviceBindingStatus.PENDING.value,
             device_props={"restart_publish_id": 1002},
         )
-        repo.update_status.side_effect = RuntimeError("database unavailable")
+        repo.transition_baas_restart_terminal.side_effect = RuntimeError(
+            "database unavailable"
+        )
         bot_repository = MagicMock()
         bot_repository.get_by_binding_id.return_value = {
             "bot_id": "bot-001",
@@ -1885,13 +2181,15 @@ def test_restart_default_policy_is_persisted_only_after_active():
             env="dev",
             common_config_service=handler._common_config_service,
         )
-        repo.update_device_props.assert_called_once_with(
+        repo.clear_baas_restart_intent_if_matches.assert_called_once_with(
             binding_id=42,
-            props={
-                "restart_request_id": None,
-                "restart_workflow_baseline": None,
-                "restart_image_policy_on_success": None,
-            },
+            publish_id=1002,
+            request_id=None,
+            keys=(
+                "restart_request_id",
+                "restart_workflow_baseline",
+                "restart_image_policy_on_success",
+            ),
         )
         assert len(received) == 1
         assert received[0].publish_kind == "restart"
@@ -1951,15 +2249,19 @@ def test_restart_success_does_not_persist_default_policy_when_switch_is_inactive
     )
 
     assert outcome == Complete()
-    bot_repository.compare_and_set_ext.assert_called_once_with(
+    repo.transition_baas_restart_terminal.assert_called_once_with(
+        binding_id=42,
         bot_id="bot-001",
         owner_id="owner-001",
-        expected_ext={
+        publish_id=1002,
+        request_id=None,
+        status=DeviceBindingStatus.ACTIVE.value,
+        expected_bot_ext={
             "sbot_use_default_image": True,
             "sbot_pin_image": True,
             "sbot_docker_image": "stale:v1",
         },
-        ext={
+        bot_ext={
             "sbot_use_default_image": True,
             "sbot_pin_image": True,
             "sbot_docker_image": "stale:v1",
@@ -1967,13 +2269,15 @@ def test_restart_success_does_not_persist_default_policy_when_switch_is_inactive
         },
     )
     publish_repository.compare_and_set_ext.assert_not_called()
-    repo.update_device_props.assert_called_once_with(
+    repo.clear_baas_restart_intent_if_matches.assert_called_once_with(
         binding_id=42,
-        props={
-            "restart_request_id": None,
-            "restart_workflow_baseline": None,
-            "restart_image_policy_on_success": None,
-        },
+        publish_id=1002,
+        request_id=None,
+        keys=(
+            "restart_request_id",
+            "restart_workflow_baseline",
+            "restart_image_policy_on_success",
+        ),
     )
 
 
@@ -2068,17 +2372,29 @@ def test_restart_codefuse_failure_clears_recovery_intent():
     )
 
     assert outcome == Complete()
-    repo.update_status.assert_called_once_with(
+    repo.transition_baas_restart_terminal.assert_called_once_with(
         binding_id=42,
+        bot_id="bot-001",
+        owner_id="owner-001",
+        publish_id=1002,
+        request_id=request_id,
         status=DeviceBindingStatus.FAILED.value,
-    )
-    repo.update_device_props.assert_called_once_with(
-        binding_id=42,
-        props={
-            "restart_request_id": None,
-            "restart_workflow_baseline": None,
-            "restart_image_policy_on_success": None,
+        expected_bot_ext={},
+        bot_ext={
+            "start_status": "FAILED",
+            "start_message": "BaaS publish FAILED: publish_id=1002",
+            "restart_publish_id": "1002",
         },
+    )
+    repo.clear_baas_restart_intent_if_matches.assert_called_once_with(
+        binding_id=42,
+        publish_id=1002,
+        request_id=request_id,
+        keys=(
+            "restart_request_id",
+            "restart_workflow_baseline",
+            "restart_image_policy_on_success",
+        ),
     )
 
 
@@ -2114,13 +2430,15 @@ def test_restart_failed_replay_retries_recovery_intent_cleanup():
     )
 
     assert outcome == Complete()
-    repo.update_device_props.assert_called_once_with(
+    repo.clear_baas_restart_intent_if_matches.assert_called_once_with(
         binding_id=42,
-        props={
-            "restart_request_id": None,
-            "restart_workflow_baseline": None,
-            "restart_image_policy_on_success": None,
-        },
+        publish_id=1002,
+        request_id=request_id,
+        keys=(
+            "restart_request_id",
+            "restart_workflow_baseline",
+            "restart_image_policy_on_success",
+        ),
     )
     baas_device_service.poll_publish_once.assert_not_called()
 
@@ -2213,13 +2531,15 @@ def test_restart_replay_after_active_finishes_default_policy_persistence():
 
     assert outcome == Complete()
     persist.assert_called_once()
-    repo.update_device_props.assert_called_once_with(
+    repo.clear_baas_restart_intent_if_matches.assert_called_once_with(
         binding_id=42,
-        props={
-            "restart_request_id": None,
-            "restart_workflow_baseline": None,
-            "restart_image_policy_on_success": None,
-        },
+        publish_id=1002,
+        request_id=None,
+        keys=(
+            "restart_request_id",
+            "restart_workflow_baseline",
+            "restart_image_policy_on_success",
+        ),
     )
 
 

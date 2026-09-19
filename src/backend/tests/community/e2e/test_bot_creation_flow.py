@@ -43,6 +43,7 @@ class FakeBotRepository:
 
     def __init__(self):
         self._store: dict[str, FakeBot] = {}
+        self.initial_layout = None
 
     def _key(self, owner_id: str, bot_id: str) -> str:
         return f"{owner_id}:{bot_id}"
@@ -71,6 +72,10 @@ class FakeBotRepository:
         self._store[self._key(owner_id, bot_id)] = bot
         return bot.__dict__
 
+    def insert_with_initial_skill_layout(self, bot_data: dict, *, layout) -> dict:
+        self.initial_layout = layout
+        return self.insert(bot_data)
+
     def update_by_owner(self, bot_id: str, owner_id: str, update_data: dict) -> dict:
         key = self._key(owner_id, bot_id)
         if key not in self._store:
@@ -91,6 +96,19 @@ class FakeBotRepository:
             else:
                 setattr(bot, k, v)
         return bot.__dict__
+
+    def claim_provisioning(
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        reclaim_after_seconds: int | None = None,
+    ) -> bool:
+        bot = self._store.get(self._key(owner_id, bot_id))
+        if bot is None or bot.status != "PENDING":
+            return False
+        bot.status = "PROVISIONING"
+        return True
 
     def list_by_owner(self, owner_id: str, page: int = 1, page_size: int = 100) -> tuple:
         items = [bot.__dict__ for bot in self._store.values() if bot.owner_id == owner_id]
@@ -157,6 +175,10 @@ class TestBotCreationFlow:
             teclaw_provision_service_provider=lambda: MagicMock(is_teclaw=MagicMock(return_value=False)),
             device_status_client=MagicMock(),
             cron_auto_setup_service_provider=lambda: MagicMock(),
+            skills_pool_native_creation_policy=MagicMock(
+                select=MagicMock(return_value=None)
+            ),
+            skill_layout_repository=MagicMock(),
         )
         return service
 
@@ -225,6 +247,81 @@ class TestBotCreationFlow:
 
         assert result["bot_id"] == "20260408_abc12345"
         assert result["owner_id"] == "user_001"
+
+    def test_create_persists_selected_layout_before_deferred_provisioning(
+        self, bot_service, fake_repo
+    ):
+        selection = object()
+        bot_service._skills_pool_native_creation_policy.select.return_value = selection
+
+        result = bot_service.create_bot(
+            user_id="user_001",
+            nick_name="Test User",
+            bot_name="Pool Native",
+            bot_id="native-bot",
+            bot_type="service",
+            engine_type="openclaw",
+            provision=False,
+        )
+
+        assert result["bot_id"] == "native-bot"
+        assert fake_repo.initial_layout is selection
+        bot_service._skills_pool_native_creation_policy.select.assert_called_once_with(
+            env="dev",
+            owner_id="user_001",
+            bot_id="native-bot",
+            engine_type="openclaw",
+            bot_type="service",
+        )
+
+    def test_creation_policy_failure_happens_before_bot_insert(
+        self, bot_service, fake_repo
+    ):
+        bot_service._skills_pool_native_creation_policy.select.side_effect = (
+            RuntimeError("policy unavailable")
+        )
+
+        with pytest.raises(Exception, match="policy unavailable"):
+            bot_service.create_bot(
+                user_id="user_001",
+                nick_name="Test User",
+                bot_name="Pool Native",
+                bot_id="native-bot",
+                bot_type="personal",
+                engine_type="openclaw",
+                provision=False,
+            )
+
+        assert fake_repo.get_by_id_and_owner("native-bot", "user_001") is None
+
+    def test_pool_selection_reaches_device_before_directory_setup(
+        self, bot_service, fake_repo, mock_device_service
+    ):
+        from agentclaw.community.core.skills_pool.types import SkillLayout
+
+        selection = object()
+        bot_service._skills_pool_native_creation_policy.select.return_value = selection
+        bot_service._skill_layout_repository.get.return_value = MagicMock(
+            active_layout=SkillLayout.POOL,
+            layout_contract_version="skills-pool-p3-v1",
+        )
+
+        bot_service.create_bot(
+            user_id="user_001",
+            nick_name="Test User",
+            bot_name="Pool Native",
+            bot_id="native-device-bot",
+            bot_type="personal",
+            engine_type="openclaw",
+        )
+
+        assert fake_repo.initial_layout is selection
+        extra_envs = mock_device_service.apply_device.call_args.kwargs["extra_envs"]
+        assert extra_envs["AGENTCLAW_SKILLS_LAYOUT"] == "pool"
+        assert (
+            extra_envs["AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION"]
+            == "skills-pool-p3-v1"
+        )
 
     # ==================== 场景 3: update_bot_ext ====================
 
@@ -393,6 +490,56 @@ class TestRouterLogic:
             space_quota=False,
         )
         mock_bot_service.create_bot.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_bot_router_returns_retained_bot_retry_handle(self):
+        from agentclaw.community.adapters.http.bot_management.router import create_bot
+        from agentclaw.community.adapters.http.dependencies import RequestContext
+        from agentclaw.community.core.bot_management.services.bot_service import (
+            BotServiceError,
+        )
+        from unittest.mock import AsyncMock as NewAsyncMock
+
+        bot_id = "20260731_retry001"
+        mock_ctx = MagicMock(spec=RequestContext)
+        mock_ctx.user_id = "user_001"
+        mock_ctx.nick_name = "Test User"
+        mock_passport_plugin = MagicMock()
+        mock_passport_plugin.apply_first_agent_passport.return_value = {
+            "token": "passport_token_123",
+            "agent_code": "agent-test",
+        }
+        mock_bot_service = MagicMock()
+        mock_bot_service.check_create_bot_preflight.return_value = None
+        mock_bot_service.is_first_bot.return_value = True
+        mock_bot_service.create_bot.side_effect = BotServiceError(
+            "device allocation failed"
+        )
+        mock_bot_service.get_bot.return_value = {
+            "bot_id": bot_id,
+            "status": "PENDING",
+        }
+        mock_request = MagicMock()
+        mock_request.json = NewAsyncMock(return_value={"bot_name": "Retry Bot"})
+        mock_factory = MagicMock()
+        mock_factory.create.return_value.get_bot_mcp_codes.return_value = []
+
+        with patch(
+            "agentclaw.community.adapters.http.bot_management.router.generate_bot_id",
+            return_value=bot_id,
+        ):
+            result = await create_bot(
+                mock_request,
+                mock_ctx,
+                bot_service=mock_bot_service,
+                passport_plugin=mock_passport_plugin,
+                auth_rel_plugin=MagicMock(),
+                skill_set_factory=mock_factory,
+            )
+
+        assert result.success is False
+        assert result.error_code == 500
+        assert result.data == {"bot_id": bot_id, "retryable": True}
 
     @pytest.mark.asyncio
     async def test_create_bot_router_need_authorization(self):

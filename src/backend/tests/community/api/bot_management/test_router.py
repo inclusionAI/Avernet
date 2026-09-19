@@ -28,7 +28,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
     DeviceLimitError,
 )
-from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+from agentclaw.community.core.bot_management.errors import (
+    BotCreationRetainedError,
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.core.errors import Unauthorized
 from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
 from agentclaw.community.plugin_api.auth import AuthPlugin
@@ -1859,6 +1862,31 @@ class TestGetAuthStatus:
         data = resp.json()
         assert data["success"] is False
         assert data["error_code"] == 429
+
+    def test_issued_retained_creation_returns_retry_handle(self, client):
+        tc, svc, passport = client
+        passport.query_auth_status.return_value = {
+            "status": "ISSUED",
+            "token": "tok",
+        }
+        svc.create_bot.side_effect = BotCreationRetainedError(
+            bot_id="bot1",
+            message="device allocation interrupted",
+        )
+
+        response = tc.post(
+            "/api/bots/auth-status",
+            json={"bot_id": "bot1", "bot_name": "NewBot"},
+        )
+
+        assert response.json() == {
+            "success": False,
+            "message": (
+                "创建Bot失败，可使用 bot_id 重试: device allocation interrupted"
+            ),
+            "error_code": 500,
+            "data": {"bot_id": "bot1", "retryable": True},
+        }
 
 
 # ---------------------------------------------------------------------------
