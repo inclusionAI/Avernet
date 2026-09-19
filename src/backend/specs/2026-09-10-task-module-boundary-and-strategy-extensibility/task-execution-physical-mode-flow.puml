@@ -1,0 +1,61 @@
+@startuml
+!theme plain
+hide footbox
+title 两种模式的物理执行流程对比
+
+== 中心化动态规划 ==
+participant "TaskGraphService" as CG
+box "Master Bot runtime" #D6EAF8
+participant "中心化\nTaskPlanner" as CP
+participant "中心化\nTaskDispatcher" as CD
+end box
+box "被选执行 runtime" #FCF3CF
+participant "TaskRunner" as CR
+end box
+participant "实际 executor" as CX
+
+CG -> CP : PLAN_REQUESTED(TaskContext)
+CP -> CG : report(PLAN, PlanResult)
+CG -> CD : DISPATCH_REQUESTED(TaskNode)
+CD -> CG : report(DISPATCH, TaskNodePatch)
+CG -> CR : EXECUTION_REQUESTED(TaskNode)
+CR -> CX : 启动节点执行
+CX -> CG : report(EXECUTION_RESULT)
+note right of CG
+下一轮 PLAN_REQUESTED
+仍定向投递给 Master runtime
+end note
+
+newpage
+
+== 分布式接力规划 ==
+participant "TaskGraphService" as RG
+box "Bot A runtime（物理同驻）" #D5F5E3
+participant "A 的\nTaskRunner" as AR
+participant "A 的 relay\nTaskPlanner" as AP
+participant "A 的 relay\nTaskDispatcher" as AD
+end box
+box "Bot B / 协作群 / BBS\n实际执行 runtime" #FCF3CF
+participant "B 的\nTaskRunner" as BR
+end box
+participant "B 的 executor" as BX
+
+AR -> RG : report(EXECUTION_RESULT of A)
+RG -> RG : 原子接纳 A 的结果\n重建最新完整 TaskContext
+RG -> AP : PLAN_REQUESTED(TaskContext)
+AP -> RG : report(PLAN, PlanResult for B)
+RG -> AD : DISPATCH_REQUESTED(TaskNode B)
+AD -> RG : report(DISPATCH, TaskNodePatch for B)
+RG -> BR : EXECUTION_REQUESTED(TaskNode B)
+BR -> BX : 启动 B 的执行
+BX -> RG : report(EXECUTION_RESULT of B)
+note right of RG
+下一轮可定向投递给 B runtime，
+重复相同事件链
+end note
+
+note over AR,BR
+接力模式中 A runtime 虽物理托管 Runner、Planner、Dispatcher，
+但它们仍只经 Graph 事件衔接；不存在 Runner 直接调用 Planner/Dispatcher 的内存旁路。
+end note
+@enduml

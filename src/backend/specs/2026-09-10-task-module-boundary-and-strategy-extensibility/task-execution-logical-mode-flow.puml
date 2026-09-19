@@ -1,0 +1,41 @@
+@startuml
+!theme plain
+hide footbox
+title 两种模式共享的逻辑执行流程
+
+participant "TaskService" as S
+participant "TaskGraphService" as G
+participant "TaskPlanner" as P
+participant "TaskDispatcher" as D
+participant "TaskRunner" as R
+participant "执行载体" as X
+
+S -> G : 初始化正式任务和根节点
+G -> P : PLAN_REQUESTED(TaskContext)
+P -> P : 基于完整上下文\n计算验收 GAP
+P -> G : report(PLAN, PlanResult)
+G -> D : DISPATCH_REQUESTED(TaskNode)
+D -> D : 选择 execution carrier\n单 Bot / 协作群 / BBS / 分布式
+D -> G : report(DISPATCH, TaskNodePatch)
+G -> R : EXECUTION_REQUESTED(TaskNode)
+R -> X : 启动执行
+R -> G : report(EXECUTION_STARTED / START_FAILED)
+X -> G : report(EXECUTION_RESULT)
+
+alt 验收 GAP 已闭合
+  G -> G : 写入终态
+  G -> S : TASK_TERMINATED
+else 仍有 GAP
+  G -> G : 依据最新图谱生成\n下一次 TaskContext
+  note over G,P
+  中心化：路由到 Master runtime 的 Planner
+  接力：路由到刚完成节点的 Bot runtime 的 Planner
+  end note
+  G -> P : 下一次 PLAN_REQUESTED(TaskContext)
+end
+
+note over G,R
+逻辑角色、接口和因果顺序不因模式改变：
+Graph → Planner → Graph → Dispatcher → Graph → Runner → Graph
+end note
+@enduml
