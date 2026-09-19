@@ -782,6 +782,36 @@ export function createRunsRouter(
         }
       }
 
+      // 5. Best-effort: notify taskguard engine to abort in-memory async execution.
+      //    taskguard runs in a separate process with its own AbortController map.
+      //    DB-level status update alone won't interrupt an active LLM call — we need
+      //    to trigger abortAsyncExecutionForFlow() via HTTP to actually cancel the
+      //    in-flight request.  Failure is non-fatal: executeLoop's cross-process
+      //    guard will still detect "cancelled" status on the next iteration.
+      const engineApiUrl = process.env.ENGINE_API_URL ?? "http://127.0.0.1:3210";
+      const engineApiKey = process.env.ENGINE_API_KEY ?? process.env.WORKFLOW_API_KEY ?? "";
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        const resp = await fetch(`${engineApiUrl}/api/runs/${encodeURIComponent(flowId)}/abort`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(engineApiKey ? { "x-api-key": engineApiKey } : {}),
+          },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (resp.ok) {
+          const body = await resp.json() as { aborted?: boolean };
+          console.log(`[runs] engine abort callback for flow ${flowId}: aborted=${body.aborted ?? false}`);
+        } else {
+          console.warn(`[runs] engine abort callback for flow ${flowId}: HTTP ${resp.status}`);
+        }
+      } catch (engineErr) {
+        console.warn(`[runs] engine abort callback for flow ${flowId} failed (non-fatal):`, engineErr instanceof Error ? engineErr.message : engineErr);
+      }
+
       console.log(`[runs] flow ${flowId} aborted by ${operatorName}(${operatorId}): previousStatus=${run.status}, reconciledNodes=${reconciledNodes}`);
 
       res.json({

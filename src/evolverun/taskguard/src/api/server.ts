@@ -16,6 +16,7 @@ import type { WebhookTriggerRepository } from "../db/repositories/webhook-trigge
 import type { WebhookEventRepository } from "../db/repositories/webhook-event-repository.js";
 import type { WorkflowLauncher } from "../webhook/trigger-adapter.js";
 import type { ControllerDeps } from "../controller.js";
+import { abortAsyncExecutionForFlow } from "../controller.js";
 import { createFlowsRouter } from "./routes/flows.js";
 import { createEventsRouter } from "./routes/events.js";
 import { createNodesRouter } from "./routes/nodes.js";
@@ -114,7 +115,7 @@ export function createApp(
   app.use("/api/alerts", createAlertsRouter(repos.alertRepository));
 
   // ── ClawWeb endpoints ──
-  app.use("/api/runs", createRunsRouter(repos.flowRunRepository, repos.nodeExecutionRepository));
+  app.use("/api/runs", createRunsRouter(repos.flowRunRepository, repos.nodeExecutionRepository, abortAsyncExecutionForFlow));
   app.use("/api/runs", createRunNodesRouter(repos.nodeExecutionRepository));
   app.use("/api/runs", createRunEventsRouter(repos.eventRepository));
 

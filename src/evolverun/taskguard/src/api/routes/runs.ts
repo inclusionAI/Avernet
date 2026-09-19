@@ -2,13 +2,18 @@
  * Runs API routes — ClawWeb-specific endpoints for flow run listing and detail.
  * GET /           — list flow runs with pagination and filters
  * GET /:flowId    — get single flow run with node executions
+ * POST /:flowId/abort — abort in-memory async execution for a flow (AbortController)
  */
 import { Router, type Request, type Response } from "express";
 import type { IFlowRunRepository, INodeExecutionRepository } from "../../db/repositories/types.js";
 
+/** Optional abort handler that terminates in-memory async execution via AbortController. */
+export type AbortHandler = (flowId: string) => boolean;
+
 export function createRunsRouter(
   flowRunRepo: IFlowRunRepository | null,
   nodeExecRepo: INodeExecutionRepository | null,
+  abortHandler?: AbortHandler,
 ): Router {
   const router = Router();
 
@@ -48,6 +53,28 @@ export function createRunsRouter(
       }
       const nodes = await nodeExecRepo.findLatestByFlowId(run.flow_id);
       res.json({ run, nodes });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: "Internal Server Error", message: msg });
+    }
+  });
+
+  /** POST /:flowId/abort — abort in-memory async execution for a flow.
+   *  Calls abortAsyncExecutionForFlow() to trigger the AbortController for any
+   *  active LLM/tool calls. This endpoint is called by evolvetrace/clawweb's
+   *  abort route after DB status has been updated to "cancelled".
+   *  Returns 200 with { aborted: boolean } indicating whether an in-memory
+   *  execution was found and aborted. 404 if no abortHandler is configured. */
+  router.post("/:flowId/abort", (req: Request, res: Response) => {
+    if (!abortHandler) {
+      res.status(404).json({ error: "Not Found", message: "Abort handler not configured" });
+      return;
+    }
+    try {
+      const flowId = String(req.params.flowId);
+      const aborted = abortHandler(flowId);
+      console.log(`[runs] POST /:flowId/abort flowId=${flowId} aborted=${aborted}`);
+      res.json({ ok: true, flowId, aborted });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: "Internal Server Error", message: msg });
