@@ -236,6 +236,7 @@ def test_modules_for_community_is_isolated():
         "CommunityEvalEnvModule",
         "CommunityNotifyModule",
         "CommunityStaffDeptModule",
+        "CommunityTaskDiscoveryPortsModule",
         "TaskRunnerIntegrationModule",
     }
 
