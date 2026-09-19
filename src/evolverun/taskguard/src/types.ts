@@ -1469,7 +1469,8 @@ export type FlowEventType =
   | "llm_evaluation"
   | "orchestrator_iteration"
   | "budget_warning"
-  | "budget_exhausted";
+  | "budget_exhausted"
+  | "flow_aborted";
 
 export type FlowEvent = {
   id: string;
@@ -1503,9 +1504,11 @@ export type LoopGroupRuntimeState = {
   maxIterations: number;
   iterationVar: string;
   iterations: Record<string, LoopIterationRuntimeState>;
-  exitReason?: "until-matched" | "until-workflow-data-matched" | "max-iterations-continue" | "max-iterations-fail";
+  exitReason?: "until-matched" | "until-workflow-data-matched" | "max-iterations-continue" | "max-iterations-fail" | "aborted";
   lastIteration?: number;
   error?: string;
+  /** Set by abortFlow to signal finalizeCompletedLoopIterations to stop iterating. */
+  abortRequested?: boolean;
 };
 
 export type LoopRuntimeNodeMeta = {

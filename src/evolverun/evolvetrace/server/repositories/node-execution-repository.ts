@@ -327,7 +327,7 @@ export class NodeExecutionRepository {
 
   /** Reconcile stale "running" node_executions when a flow reaches a terminal state.
    *  Any node still in "running" status after the flow has completed is marked
-   *  as "skipped" (if flow succeeded) or "failed" (if flow failed/aborted).
+   *  as "skipped" (if flow succeeded or was cancelled/aborted) or "failed" (if flow failed).
    *  When customErrorText is provided (e.g. for user-initiated abort), it
    *  overrides the default error message so the abort reason is recorded in
    *  the node_executions table. */
@@ -340,6 +340,11 @@ export class NodeExecutionRepository {
       if (flowStatus === "succeeded") {
         targetStatus = "skipped";
         errorText = "Node still running when workflow succeeded — reconciled to skipped";
+      } else if (flowStatus === "cancelled") {
+        // User-initiated abort: running nodes are victims, not failures.
+        // Mark as "skipped" so they don't inflate failed_count or trigger failure alerts.
+        targetStatus = "skipped";
+        errorText = customErrorText ?? "Node still running when workflow was aborted — reconciled to skipped";
       } else {
         targetStatus = "failed";
         errorText = customErrorText ?? "Node still running when workflow failed — reconciled to failed";

@@ -699,8 +699,8 @@ export function createRunsRouter(
   }));
 
   /** POST /:flowId/abort — abort a running workflow
-   *  Marks the flow run as "failed" (user-initiated abort) and reconciles all
-   *  still-running node_executions to "failed" with an abort reason.  The abort
+   *  Marks the flow run as "cancelled" (user-initiated abort) and reconciles all
+   *  still-running node_executions to "skipped" with an abort reason.  The abort
    *  action is recorded in both flow_events and node_executions tables.  Only
    *  flows in an active state (running, waiting, blocked, pending) can be aborted. */
   router.post("/:flowId/abort", asyncHandler(async (req: Request, res: Response) => {
@@ -732,7 +732,7 @@ export function createRunsRouter(
       const operatorName = (req.headers["x-user-name"] as string | undefined)?.trim() || operatorId;
       const reason = (req.body as { reason?: string })?.reason ?? `用户 ${operatorName} 手动中止工作流`;
 
-      // 1. Update flow_runs status to "failed" with abort info, set completed_at
+      // 1. Update flow_runs status to "cancelled" with abort info, set completed_at
       const completedAt = Math.floor(Date.now() / 1000);
       const updated = await flowRunRepo.abort(flowId, reason);
 
@@ -741,9 +741,9 @@ export function createRunsRouter(
         return;
       }
 
-      // 2. Reconcile all still-running node_executions to "failed" with abort reason
+      // 2. Reconcile all still-running node_executions to "skipped" with abort reason
       //    This writes the abort action into the node process table (node_executions)
-      const reconciledNodes = await nodeExecRepo.reconcileStaleRunning(flowId, "failed", `Workflow aborted by ${operatorName}(${operatorId}): ${reason}`);
+      const reconciledNodes = await nodeExecRepo.reconcileStaleRunning(flowId, "cancelled", `Workflow aborted by ${operatorName}(${operatorId}): ${reason}`);
 
       // 3. Release flow control slots if available
       if (flowControlRepo) {
@@ -787,7 +787,7 @@ export function createRunsRouter(
       res.json({
         ok: true,
         flowId,
-        status: "failed",
+        status: "cancelled",
         reconciledNodes,
       });
     } catch (error) {

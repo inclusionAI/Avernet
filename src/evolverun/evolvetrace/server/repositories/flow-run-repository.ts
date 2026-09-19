@@ -339,14 +339,14 @@ export class FlowRunRepository {
     }
   }
 
-  /** Abort a flow run: set status to "failed" (user-initiated abort) and record completed_at + result_json. */
+  /** Abort a flow run: set status to "cancelled" (user-initiated abort) and record completed_at + result_json. */
   async abort(flowId: string, reason?: string): Promise<boolean> {
     try {
       const now = this.db.dialect.now();
       const completedAt = Math.floor(Date.now() / 1000);
       const resultJson = JSON.stringify({ aborted: true, reason: reason ?? "用户手动中止", abortedAt: completedAt });
       const result = await this.db.exec(
-        "UPDATE flow_runs SET status = 'failed', completed_at = ?, result_json = ?, gmt_modified = ? WHERE flow_id = ?",
+        "UPDATE flow_runs SET status = 'cancelled', completed_at = ?, result_json = ?, gmt_modified = ? WHERE flow_id = ?",
         [completedAt, resultJson, now, flowId],
       );
       return result.affectedRows > 0;
