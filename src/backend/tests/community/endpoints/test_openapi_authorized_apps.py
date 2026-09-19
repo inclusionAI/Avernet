@@ -43,6 +43,9 @@ import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
+from agentclaw.community.api.user_app_grant_service import (
+    UserAppGrantServiceProtocol,
+)
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -62,6 +65,10 @@ _APP_ID = 4242
 _APP_NAME = "coverage-partner"
 _BASE_PATH = "/openapi/v1/bots/{bot_id}/authorized-apps"
 _APP_VIEW_PATH = "/openapi/v1/bots/authorized"
+#: The user-level delegation — the same resource one level up, covering the
+#: user and no bot. Its consent moment needs both parties like the bot-scoped
+#: grant; listing and withdrawing need only the user.
+_USER_LEVEL_PATH = "/openapi/v1/bots/authorized-apps"
 _PATH_PARAMS = {"bot_id": _BOT_ID}
 _APP_PATH_PARAMS = {**_PATH_PARAMS, "app_id": _APP_ID}
 
@@ -155,6 +162,21 @@ def _seed_granted(world) -> None:
     )
 
 
+def _seed_user_delegated(world) -> None:
+    """The verifier plus one live user-level delegation for the calling app."""
+    _seed_verifier(world)
+    world.get(UserAppGrantServiceProtocol).grant(
+        user_id=_OWNER, app_id=_APP_ID, app_name=_APP_NAME
+    )
+
+
+#: The user-level delegation as its own reads project it: no bot, by design.
+_USER_AUTHORIZED_APP = {
+    "app_id": _APP_ID,
+    "app_name": _APP_NAME,
+    "user_id": _OWNER,
+}
+
 #: The grant as both bot-scoped reads project it.
 _AUTHORIZED_APP = {
     "app_id": _APP_ID,
@@ -203,6 +225,34 @@ _HAPPY_CASES = (
         _seed_granted,
         200,
         {"data": {"total": 1, "items": [{"bot_id": _BOT_ID, "owner_id": _OWNER}]}},
+    ),
+    # The user-level delegation: granted with both parties on the wire, listed
+    # and withdrawn by the user alone, exactly as the bot-scoped group above.
+    (
+        "POST",
+        _USER_LEVEL_PATH,
+        CaseInput(query_params=_QUERY, headers=_APP_HEADERS),
+        _seed_verifier,
+        201,
+        {"data": _USER_AUTHORIZED_APP},
+    ),
+    (
+        "GET",
+        _USER_LEVEL_PATH,
+        CaseInput(query_params=_QUERY, headers=_HEADERS),
+        _seed_user_delegated,
+        200,
+        {"data": {"total": 1, "items": [_USER_AUTHORIZED_APP]}},
+    ),
+    (
+        "DELETE",
+        f"{_USER_LEVEL_PATH}/{{app_id}}",
+        CaseInput(
+            path_params={"app_id": _APP_ID}, query_params=_QUERY, headers=_HEADERS
+        ),
+        _seed_user_delegated,
+        200,
+        {"data": {"deleted": True}},
     ),
 )
 

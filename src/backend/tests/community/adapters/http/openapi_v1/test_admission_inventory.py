@@ -42,6 +42,7 @@ from agentclaw.community.adapters.http.openapi_v1.admission import (
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     refuse_app_only_caller,
+    require_delegated_user,
     require_granted_addressed_bot,
     require_granted_own_bot,
 )
@@ -57,6 +58,16 @@ _GRANT_DEPENDENCY_BY_MODE = {
 }
 
 _GRANT_CHECKED_MODES = frozenset(_GRANT_DEPENDENCY_BY_MODE)
+
+#: The user-level mode and its one dependency, held to each other the same
+#: way. Kept apart from the bot-grant map because its check is against a
+#: different record — a creation has no bot for a grant to name — and the
+#: self-checking assertion below is about bot grants specifically.
+_USER_DELEGATED_DEPENDENCY = {
+    AdmissionMode.USER_DELEGATED: require_delegated_user,
+}
+
+_DEPENDENCY_BY_MODE = {**_GRANT_DEPENDENCY_BY_MODE, **_USER_DELEGATED_DEPENDENCY}
 
 
 def _effective_routes():
@@ -162,7 +173,7 @@ def test_every_public_operation_still_requires_a_principal():
 
 
 @pytest.mark.parametrize(
-    "mode", sorted(_GRANT_DEPENDENCY_BY_MODE, key=lambda m: m.name)
+    "mode", sorted(_DEPENDENCY_BY_MODE, key=lambda m: m.name)
 )
 def test_every_grant_checked_operation_declares_its_modes_dependency(mode):
     """A grant-checked mode must mean *its* check runs, not just *a* check.
@@ -197,8 +208,12 @@ def test_every_grant_checked_operation_declares_its_modes_dependency(mode):
     before acting; the third set is empty the day the deprecated package goes.
     ``test_only_the_named_operations_check_their_own_grant`` is what stops any
     of them from growing quietly.
+
+    ``USER_DELEGATED`` is held the same way to ``require_delegated_user``: a
+    creation admitted without it would let an application create a bot as any
+    user it cared to name.
     """
-    dependency = _GRANT_DEPENDENCY_BY_MODE[mode]
+    dependency = _DEPENDENCY_BY_MODE[mode]
     expected = {
         key
         for key, table_mode in ADMISSION.items()

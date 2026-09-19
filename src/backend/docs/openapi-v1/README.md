@@ -1199,20 +1199,20 @@ literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-all  approvals  authorized  catalog  ceiling  check-name  connection  engine  identity
+all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  connection  engine  identity
 loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
 source-credentials  with-manifest  work-order-notifications  work-orders
 ```
 
-Eight of those twenty-five — `approvals`, `connection`, `engine`, `identity`,
+Eight of those twenty-six — `approvals`, `connection`, `engine`, `identity`,
 `models`, `resources`, `routines`, and `sessions` — are held **only by the
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
 of that segment. The tenant-level Skill Workbench status route now keeps
 `skills` current at this level, so once the deprecated addresses are removed the
-list is the seventeen that remain:
+list is the eighteen that remain:
 
 ```text
-all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  metadata  mcp  skills
+all  authorized  authorized-apps  catalog  ceiling  check-name  loadtest  local  logs  market  metadata  mcp  skills
 source-credentials  spaces  with-manifest  work-order-notifications  work-orders
 ```
 
@@ -2476,6 +2476,42 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   changed.
 
 ## Changelog
+
+- **2026-09-17 — User-level delegation: an application may create bots for a
+  user who authorized it.** A new admission mode, `USER_DELEGATED`, for the
+  operations that act for a user but address **no bot** — the three creations
+  (`POST /openapi/v1/bots`, `POST /openapi/v1/bots/with-manifest`,
+  `POST /openapi/v1/bots/local`), which were `REFUSED` to an application
+  because a bot grant had nothing to name before the bot existed. The consent
+  it checks is a new record, `ac_user_app_grant`, granted by the user on
+  `POST /openapi/v1/bots/authorized-apps` (both parties on the wire, like the
+  bot-scoped grant), listed and withdrawn there with the user alone. Three
+  things worth knowing:
+  1. **The creating application is granted the bot it creates, when the
+     creation starts.** An ordinary bot grant, written before the bot is live
+     (`BotAppGrantService.grant_for_creation`), because the polls that complete
+     a pending creation are bot-scoped: `POST …/{bot_id}/auth-status`,
+     `GET …/{bot_id}/with-manifest/status` and `GET …/{bot_id}/local/auth-status`
+     now all take `GRANT_CHECKED_OWN_BOT`, and an application finds its grant
+     already in place. The bot's owner sees it on the bot's authorized-apps
+     listing and withdraws it there like any other; deleting the bot sweeps
+     it; a creation that fails to start withdraws it, and the manifest
+     creation job withdraws it when it gives up before a bot exists.
+  2. **A user-level delegation reaches no existing bot.** It admits the
+     creations, and it counts as the "some live delegation" the `USER_GATED`
+     account-level reads ask for (the ceiling, device discovery, the owner's
+     routines aggregate, work orders, Space reads) — an application onboarded
+     to create bots needs those before it holds any bot grant. Everything
+     bot-scoped still needs a bot grant.
+  3. **Still human-only, deliberately:** the consent routes themselves, Space
+     creation and administration, MCP account configuration, bot logs, and
+     `GET /openapi/v1/org/user`. Each is refused for its own reason in
+     `admission.py`, unchanged.
+
+  Gateway: `POST /openapi/v1/bots` left the human-only list and inherits the
+  wide `/openapi/v1/bots/**` rule; `POST /openapi/v1/bots/authorized-apps`
+  requires user + app, its `GET`/`DELETE` a user. Migration:
+  `core/bot_app_grant/sql/2026_09_17_user_app_grant.sql` (two new tables).
 
 - **2026-08-20** — Added authenticated Bot catalog reads at
   `GET /openapi/v1/bots/catalog/search` and `/discover`. User and App

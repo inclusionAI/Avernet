@@ -16,7 +16,10 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
+from agentclaw.community.core.bot_app_grant.models import (
+    BotAppGrantRecord,
+    UserAppGrantRecord,
+)
 
 
 @runtime_checkable
@@ -43,6 +46,30 @@ class BotAppGrantServiceProtocol(Protocol):
         Idempotent: repeating a live authorization returns it unchanged rather
         than failing, so a partner retrying a timed-out request is not punished
         for one that succeeded.
+        """
+
+    def grant_for_creation(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        owner_id: str,
+        app_id: int,
+        app_name: str,
+    ) -> BotAppGrantRecord:
+        """Authorize ``app_id`` on a bot it is creating as ``user_id``, now.
+
+        The one grant written **before the bot is live**. An application
+        admitted to a creation under a user-level delegation is granted the bot
+        it creates at the moment the creation starts — so the poll that
+        completes a pending creation, and every operation after it, finds an
+        ordinary bot grant to check against. Written at start rather than at
+        completion because for most of a creation's life there is no bot record
+        yet, and the poll is bot-scoped.
+
+        Everything else about the row is an ordinary bot grant: the owner sees
+        it in the bot's listing and can withdraw it there, and the deletion
+        sweep removes it with the bot. Idempotent like :meth:`grant`.
         """
 
     def revoke(
@@ -104,4 +131,37 @@ class BotAppGrantServiceProtocol(Protocol):
         """
 
 
-__all__ = ["BotAppGrantServiceProtocol"]
+@runtime_checkable
+class UserAppGrantServiceProtocol(Protocol):
+    """Grant, withdraw and read user→app delegations.
+
+    The account-level record: *"app A may act as user U where no bot is
+    addressed"*. It is what admits an application to a ``USER_DELEGATED``
+    operation — one that acts for the named user before any bot exists — and
+    it reaches no existing bot on its own.
+    """
+
+    def grant(
+        self, *, user_id: str, app_id: int, app_name: str
+    ) -> UserAppGrantRecord:
+        """Authorize ``app_id`` to act as ``user_id`` where no bot is addressed.
+
+        ``user_id`` is the verified caller and ``app_id`` comes off the verified
+        App principal. Idempotent: repeating a live delegation returns it
+        unchanged.
+        """
+
+    def revoke(self, *, user_id: str, app_id: int) -> None:
+        """Withdraw ``user_id``'s delegation of ``app_id``.
+
+        Raises ``GrantNotFoundError`` when no live delegation matched.
+        """
+
+    def find(self, *, user_id: str, app_id: int) -> UserAppGrantRecord | None:
+        """The live delegation for this pair, or ``None`` when there is none."""
+
+    def list_for_user(self, *, user_id: str) -> list[UserAppGrantRecord]:
+        """The user's view — every application that may act as them."""
+
+
+__all__ = ["BotAppGrantServiceProtocol", "UserAppGrantServiceProtocol"]

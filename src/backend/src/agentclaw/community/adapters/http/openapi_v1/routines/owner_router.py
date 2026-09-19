@@ -69,10 +69,9 @@ async def list_owner_routines(
     # Names no bot, so there is no grant to check against one — but the
     # answer is still about a person's fleet, and a stranger application must
     # not read it by naming a user id. Gated like the ceiling: an application
-    # needs at least one live delegation from the named user; without one the
-    # user is answered as if they did not exist.
-    granted = caller.granted_bot_ids()
-    if granted is not None and not granted:
+    # needs some live delegation from the named user — a user-level one, or
+    # any bot grant; without one the user is answered as if they did not exist.
+    if not caller.holds_delegation():
         logger.warning(
             "[owner routines] app holds no delegation from user=%s; "
             "refusing the listing",

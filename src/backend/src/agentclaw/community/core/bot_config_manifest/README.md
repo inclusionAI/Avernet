@@ -715,6 +715,7 @@ consumed_by:
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.base
+  - agentclaw.community.core.bot_app_grant.protocols  # BotAppGrantSweepProtocol — the creation job withdraws the submitting application's creation grant when a creation gives up before a bot exists
   - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer (W8)
   - agentclaw.community.core.config_compose.protocols  # ManagedFilesReader + PlatformOwnershipReader — the two compose seams the managed-files reader inherits, rather than satisfying structurally (W8)
   - agentclaw.community.kernel.bot_config  # OwnershipCategory — the artifact's own category names the managed-files reader answers the composer in (W8)

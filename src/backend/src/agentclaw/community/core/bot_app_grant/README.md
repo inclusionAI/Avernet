@@ -1,7 +1,8 @@
 # `agentclaw.community.core.bot_app_grant`
 
 User-granted authorizations letting one third-party application reach one bot
-**as the user who granted it**.
+**as the user who granted it** — and, one level up, letting an application act
+as a user where **no bot is addressed** (see *The user-level delegation* below).
 
 A row means *"app A may act as user U on bot B, which O owns"*. The two people
 are separate columns because they are separate people whenever the bot is
@@ -45,24 +46,58 @@ consult it at all. A record coming back means the delegation exists; whether the
 delegating user may *still* operate that bot is asked separately and live, which
 is what makes the invariant above true rather than aspirational.
 
+## The user-level delegation
+
+A bot grant cannot cover an operation that has no bot yet: creating a bot,
+above all. The public API used to refuse an application there outright, because
+admitting one needed a check able to authorize an app→user pair *before* a bot
+exists, and the surface had none. `ac_user_app_grant` is that check.
+
+A row means *"app A may act as user U where no bot is addressed"*. It admits
+the application to the operations `adapters/http/openapi_v1/admission.py` marks
+`USER_DELEGATED` — the three creations and nothing else — and it counts as the
+"some live delegation" the `USER_GATED` account-level reads ask for (the bot
+ceiling, device discovery, the owner's routines aggregate, and so on), since it
+is a stronger proof of the relationship than any one bot grant.
+
+It reaches **no existing bot** on its own. That stays the bot grant's, per bot,
+where the bot's owner can see it and withdraw it. The two records compose at
+creation: an application admitted to a creation under a user-level delegation
+is granted the bot it creates as an ordinary bot grant (`grant_for_creation`),
+written when the creation *starts* — before the bot is live, because the poll
+that completes a pending creation is bot-scoped and needs a row to admit the
+application. That row is then indistinguishable from one the user consented to
+by hand: listed on the bot, withdrawable there, swept with the bot's deletion.
+A creation that never completes leaves it naming a bot that never existed,
+which is inert — the app's listing filters it against live bots, and the
+manifest creation job withdraws it when it gives up.
+
+Same two-table shape as the bot grant, for the same reason.
+
 ## Context Boundary
 
 ```yaml
-purpose: Own the record that says which application a user has authorized to act as them on which bot, and the rules for granting, withdrawing and reading it.
+purpose: Own the records that say which application a user has authorized to act as them — on which bot, or at the account level where no bot is addressed — and the rules for granting, withdrawing and reading them.
 provides:
   - BotAppGrantSweepProtocol
   - BotAppGrantModel
   - BotAppGrantLogModel
   - BotAppGrantRecord
+  - UserAppGrantModel
+  - UserAppGrantLogModel
+  - UserAppGrantRecord
   - GrantAction
   - BotAppGrantService
+  - UserAppGrantService
   - GrantNotFoundError
 consumes:
-  - "BotAppGrantRepositoryProtocol (core.repository) — persistence for both tables"
+  - "BotAppGrantRepositoryProtocol (core.repository) — persistence for the bot grant's two tables"
+  - "UserAppGrantRepositoryProtocol (core.repository) — persistence for the user-level delegation's two tables"
   - "BotRepository (core.repository) — live-bot ids, so a grant outliving its bot is not reported as access"
 consumed_by:
-  - "adapters/http/openapi_v1 — the public API's admission seam reads a grant on every request from an application acting alone"
+  - "adapters/http/openapi_v1 — the public API's admission seam reads a grant on every request from an application acting alone, and writes the creation grant"
   - "core/bot_management (delete_bot) — withdraws every authorization on a bot as part of deleting it"
+  - "core/bot_config_manifest (create_job) — withdraws the creation grant when a manifest creation gives up before a bot exists"
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.repository

@@ -85,4 +85,37 @@ class AuthorizedBot(BaseModel):
     )
 
 
-__all__ = ["AuthorizedApp", "AuthorizedBot"]
+class UserAuthorizedApp(BaseModel):
+    """An application authorized to act as the user where no bot is addressed.
+
+    The user-level delegation's own view. It names no bot because it covers
+    none: what it lends is the account-level operations — creating a bot for
+    the user, above all — and a bot the application then creates is granted
+    separately, as an `AuthorizedApp` on that bot.
+    """
+
+    app_id: int = Field(..., description="The authorized application's id.")
+    app_name: str = Field(
+        ...,
+        description=(
+            "The application's name as it stood when the delegation was "
+            "granted. A snapshot, not a live lookup."
+        ),
+    )
+    user_id: str = Field(
+        ...,
+        description=(
+            "The user who granted this delegation, and as whom the application "
+            "may act on operations that address no bot."
+        ),
+    )
+    granted_at: datetime = Field(
+        ...,
+        description=(
+            "When this delegation began. Unchanged by re-granting a delegation "
+            "that is already in force."
+        ),
+    )
+
+
+__all__ = ["AuthorizedApp", "AuthorizedBot", "UserAuthorizedApp"]

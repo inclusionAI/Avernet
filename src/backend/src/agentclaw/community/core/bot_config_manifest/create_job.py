@@ -28,6 +28,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from agentclaw.community.core.bot_app_grant.protocols import (
+    BotAppGrantSweepProtocol,
+)
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     CreationSequence,
 )
@@ -317,6 +320,13 @@ class BotCreateWithManifestHandler:
         bot_service_provider: Callable[[], Any],
         auth_relationship_provider: Callable[[], Any],
         creation_sequence: Callable[[Optional[str]], CreationSequence],
+        # The bot-grant sweep, so a creation that gives up before a bot exists
+        # also withdraws the grant the submitting application was given at
+        # submission (``BotAppGrantService.grant_for_creation``). Optional
+        # because every test that builds this handler by hand predates it and
+        # none of them submits as an application; the composition root always
+        # binds it. ``None`` leaves the row inert rather than live.
+        grant_sweep_provider: Optional[Callable[[], BotAppGrantSweepProtocol]] = None,
     ) -> None:
         self._seam_provider = manifest_seam_provider
         self._applies_provider = apply_service_provider
@@ -332,6 +342,7 @@ class BotCreateWithManifestHandler:
         # one, because falling back to ``CREATE_BETWEEN_PHASES`` would run a
         # platform-managed teclaw creation in the container family's order.
         self._creation_sequence = creation_sequence
+        self._grant_sweep_provider = grant_sweep_provider
 
     @property
     def task_type(self) -> str:
@@ -534,11 +545,46 @@ class BotCreateWithManifestHandler:
         ``CREATE_BETWEEN_PHASES`` creation must not depend on a table it never wrote.
         """
         record_first = self._sequence(payload) is CreationSequence.RECORD_APPLY_PROVISION
-        return self._seam_provider().discard(
+        landed = self._seam_provider().discard(
             entity_id=str(payload["entity_id"]),
             bot_id=str(payload["bot_id"]),
             owner_id=str(payload["user_id"]) if record_first else None,
         )
+        self._withdraw_creation_grants(payload)
+        return landed
+
+    def _withdraw_creation_grants(self, payload: dict) -> None:
+        """Sweep the grants on a bot that is never going to exist.
+
+        The creation grant is written at submission, before there is a bot,
+        so the bot-deletion sweep — which runs on ``delete_bot`` — never sees
+        it when a creation gives up. This is the only place that can. Best
+        effort: a sweep that cannot run leaves an inert row naming a bot with
+        no record, not a live authorization, and must not replace the job's
+        own outcome.
+        """
+        if self._grant_sweep_provider is None:
+            return
+        bot_id = str(payload["bot_id"])
+        owner_id = str(payload["user_id"])
+        try:
+            swept = self._grant_sweep_provider().revoke_all_for_bot(
+                bot_id=bot_id, owner_id=owner_id
+            )
+        except Exception:  # noqa: BLE001 — best effort, by contract
+            logger.warning(
+                "[manifest_create] bot_id=%s: could not withdraw the creation "
+                "grant(s); the rows are inert",
+                bot_id,
+                exc_info=True,
+            )
+            return
+        if swept:
+            logger.info(
+                "[manifest_create] bot_id=%s: withdrew %s creation grant(s)",
+                bot_id,
+                swept,
+            )
 
     # ── after there is a bot ────────────────────────────────────────────────
 

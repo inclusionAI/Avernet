@@ -12,5 +12,10 @@ class AdmissionMode(StrEnum):
     GRANT_CHECKED_ADDRESSED_BOT = "grant-checked-owner-addressed"
     GRANT_FILTERED = "grant-filtered"
     USER_GATED = "user-gated"
+    #: Acts for the named user and addresses **no bot** — a creation, above
+    #: all. Admitted on a live user-level delegation from that user, checked
+    #: by ``require_delegated_user`` before the handler runs; a bot grant
+    #: cannot serve here because there is no bot for it to name yet.
+    USER_DELEGATED = "user-delegated"
     OPEN = "open"
     REFUSED = "refused"

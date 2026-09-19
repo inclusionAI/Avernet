@@ -36,10 +36,15 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Envelope,
 )
+from agentclaw.community.adapters.http.openapi_v1.creation_grant import (
+    grant_the_creating_app,
+    withdraw_the_creation_grant,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import (
+    DelegatedUserDep,
     OwnerNameDep,
     UserIdDep,
-    refuse_app_only_caller,
+    require_granted_own_bot,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
@@ -130,12 +135,12 @@ router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicA
     "/with-manifest",
     status_code=202,
     response_model=Envelope[BotCreateWithManifestAccepted],
-    # Refused to an app-only caller, and the mechanism matters: this route's
-    # owner comes from ``UserIdDep``, which hands an application the ``user_id``
-    # it asked for and leaves the authorization to a grant dependency. There is
-    # no grant to check before the bot exists, so without this an application
-    # could create a bot as any user. See ``admission.py``.
-    dependencies=[Depends(refuse_app_only_caller)],
+    # USER_DELEGATED, and the mechanism matters: this route's owner comes from
+    # ``UserIdDep``, which hands an application the ``user_id`` it asked for and
+    # leaves the authorization to a dependency. There is no bot grant to check
+    # before the bot exists, so the ``caller`` parameter below checks the
+    # user-level delegation instead — without it an application could create
+    # a bot as any user. See ``admission.py``.
     responses={**USER_SCOPED_403, **BOT_QUOTA_CONFLICT_RESPONSES},
     operation_id="create_bot_with_manifest",
 )
@@ -145,6 +150,7 @@ async def create_bot_with_manifest(
     request: Request,
     owner_id: UserIdDep,
     owner_name: OwnerNameDep,
+    caller: DelegatedUserDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
@@ -187,6 +193,12 @@ async def create_bot_with_manifest(
     This endpoint is ARCA-only. A teclaw bot is configured by the artifact
     composed when its container is provisioned, which is a different mechanism
     from this pre/post-container delivery; it is refused, naming W8 (#1476).
+
+    An application calling with its own credential and no end user is
+    admitted only if the named user has authorized it at the account level
+    (`POST /openapi/v1/bots/authorized-apps`), and is then granted the bot it
+    creates, so the status poll and every later operation on the bot find an
+    ordinary bot grant in place.
     """
     _require_publicly_creatable_engine(body.engine)
     validate_engine_cluster(body.engine, body.cluster_name)
@@ -196,33 +208,44 @@ async def create_bot_with_manifest(
         header_space_id=body.space_id,
     )
     bot_id = generate_bot_id(owner_id, bot_repo)
-
-    submitted = submit_bot_creation_with_manifest(
-        user_id=owner_id,
-        nick_name=owner_name,
-        bot_id=bot_id,
-        document=body.config_manifest,
-        modifier=owner_id,
-        spec=BotCreateSpec(
-            entity_id=owner_id,
-            engine_type=body.engine,
-            bot_type=body.bot_type,
-            bot_name=body.bot_name,
-            bot_desc=body.bot_desc,
-            space_id=current_space.numeric_id,
-            template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
-            engine_properties=_engine_properties_from_body(body),
-        ),
-        context=BotCreateContext(
-            deployment_mode=BotCreateDeploymentMode.CLOUD,
-            space_kind=current_space.kind,
-            space_quota=True,
-        ),
-        bot_service=bot_service,
-        passport_plugin=passport_plugin,
-        skill_set_factory=skill_set_factory,
-        manifest_seam=manifest_seam,
-    )
+    # Granted before submission for the reason the ordinary create is: nothing
+    # is created until the user authorizes, and the poll is bot-scoped. A
+    # no-op for a human caller. See ``creation_grant.py``.
+    grant_the_creating_app(caller, bot_id=bot_id)
+    try:
+        submitted = submit_bot_creation_with_manifest(
+            user_id=owner_id,
+            nick_name=owner_name,
+            bot_id=bot_id,
+            document=body.config_manifest,
+            modifier=owner_id,
+            spec=BotCreateSpec(
+                entity_id=owner_id,
+                engine_type=body.engine,
+                bot_type=body.bot_type,
+                bot_name=body.bot_name,
+                bot_desc=body.bot_desc,
+                space_id=current_space.numeric_id,
+                template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+                engine_properties=_engine_properties_from_body(body),
+            ),
+            context=BotCreateContext(
+                deployment_mode=BotCreateDeploymentMode.CLOUD,
+                space_kind=current_space.kind,
+                space_quota=True,
+            ),
+            bot_service=bot_service,
+            passport_plugin=passport_plugin,
+            skill_set_factory=skill_set_factory,
+            manifest_seam=manifest_seam,
+        )
+    except Exception:
+        # Submission did not hand off — an invalid manifest, quota, Passport —
+        # so the grant names a bot that will never exist. Withdrawn
+        # best-effort; the caller's real error propagates. A creation that
+        # *does* hand off and later gives up is the job's to withdraw.
+        withdraw_the_creation_grant(caller, bot_id=bot_id)
+        raise
 
     # Starting the job is submission's last step, not the router's: it lives
     # inside the same boundary that discards the stored manifest when anything
@@ -244,7 +267,12 @@ async def create_bot_with_manifest(
 @router.get(
     "/{bot_id}/with-manifest/status",
     response_model=Envelope[BotCreateWithManifestStatus],
-    dependencies=[Depends(refuse_app_only_caller)],
+    # GRANT_CHECKED_OWN_BOT: the creation granted the submitting application
+    # the bot at submission, so the poll checks that grant like any own-bot
+    # operation. What scopes the read — every row keyed by the caller's
+    # ``entity_id`` — holds for an application because the grant dependency is
+    # what authorizes its ``user_id``; see ``authorization.py``'s row.
+    dependencies=[Depends(require_granted_own_bot)],
     responses=USER_SCOPED_403,
     operation_id="get_bot_create_with_manifest_status",
 )

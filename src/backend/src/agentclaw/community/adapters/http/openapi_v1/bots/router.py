@@ -48,10 +48,14 @@ from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     OwnerNameDep,
     ActingCallerDep,
+    DelegatedUserDep,
     UserIdDep,
-    refuse_app_only_caller,
     require_granted_addressed_bot,
     require_granted_own_bot,
+)
+from agentclaw.community.adapters.http.openapi_v1.creation_grant import (
+    grant_the_creating_app,
+    withdraw_the_creation_grant,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -166,19 +170,13 @@ logger = get_logger()
 #:
 #: Declared per route here, unlike the four groups that are wholly own-bot and get it
 #: at ``include_router``. This group is mixed: it also holds the bots listing
-#: (Mode B), the ceiling (C), the name check (OPEN) and bot creation (refused),
-#: none of which names a bot — and on those the check would refuse an
-#: application outright rather than authorize it. ``admission.py`` is the
-#: authority on which route is which; ``test_admission_inventory.py`` fails if
-#: a declaration and a mode disagree.
+#: (Mode B), the ceiling (C), the name check (OPEN) and bot creation
+#: (user-delegated), none of which names a bot — and on those the check would
+#: refuse an application outright rather than authorize it. ``admission.py``
+#: is the authority on which route is which; ``test_admission_inventory.py``
+#: fails if a declaration and a mode disagree.
 _GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
 _GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
-
-#: What a ``REFUSED`` operation declares: no caller without an end user. The
-#: refusal already happens centrally in ``require_principal`` — this makes the
-#: decision visible on the route that carries it, and holds even if the table
-#: entry were ever mislabelled. See ``refuse_app_only_caller``.
-_REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 BOT_QUOTA_CONFLICT_RESPONSES = {
     409: {
@@ -478,9 +476,10 @@ def _engine_properties_from_body(
     "",
     status_code=201,
     response_model=Envelope[Bot],
-    # REFUSED to a machine caller: no bot exists yet for a grant to cover, and
-    # creation spends the user's quota — see the mode's entry in `admission.py`.
-    dependencies=_REFUSES_APP_ONLY,
+    # USER_DELEGATED: no bot exists yet for a grant to cover, so an application
+    # is admitted on the user-level delegation instead — declared through the
+    # ``caller`` parameter below — and granted the bot it creates at the start
+    # of the creation. See the mode's entry in `admission.py`.
     responses={
         **USER_SCOPED_403,
         **BOT_QUOTA_CONFLICT_RESPONSES,
@@ -512,6 +511,7 @@ async def create_bot(
     request: Request,
     owner_id: UserIdDep,
     owner_name: OwnerNameDep,
+    caller: DelegatedUserDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
@@ -538,6 +538,13 @@ async def create_bot(
     service-shaped container, BCN registration, draft publish record) with no
     follow-up upgrade. Hand-written application-coding configs stay
     personal-only and answer 409 for bot_type="service".
+
+    An application calling with its own credential and no end user is
+    admitted only if the named user has authorized it at the account level
+    (`POST /openapi/v1/bots/authorized-apps`), and is then granted the bot it
+    creates: the same authorization a user grants by hand on
+    `POST /openapi/v1/bots/{bot_id}/authorized-apps`, visible on the bot and
+    withdrawable there. The 202 poll finds that grant already in place.
     """
     # Engine-owned creation input is passed through opaquely below; the
     # engine-selected Core strategy owns its semantics and validation, so this
@@ -555,30 +562,42 @@ async def create_bot(
         header_space_id=body.space_id,
     )
     bot_id = generate_bot_id(owner_id, bot_repo)
-    outcome = create_bot_with_authorization(
-        user_id=owner_id,
-        nick_name=owner_name,
-        bot_id=bot_id,
-        spec=BotCreateSpec(
-            entity_id=owner_id,
-            engine_type=body.engine,
-            bot_type=body.bot_type,
-            bot_name=body.bot_name,
-            bot_desc=body.bot_desc,
-            space_id=current_space.numeric_id,
-            template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
-            engine_properties=_engine_properties_from_body(body),
-        ),
-        context=BotCreateContext(
-            deployment_mode=BotCreateDeploymentMode.CLOUD,
-            space_kind=current_space.kind,
-            space_quota=True,
-        ),
-        bot_service=bot_service,
-        passport_plugin=passport_plugin,
-        auth_rel_plugin=auth_rel_plugin,
-        skill_set_factory=skill_set_factory,
-    )
+    # The creating application is granted the bot *before* the creation runs:
+    # on the 202 path nothing is created until the user authorizes, and the
+    # poll that completes it is bot-scoped, so the grant has to exist by then.
+    # A no-op for a human caller. See ``creation_grant.py``.
+    grant_the_creating_app(caller, bot_id=bot_id)
+    try:
+        outcome = create_bot_with_authorization(
+            user_id=owner_id,
+            nick_name=owner_name,
+            bot_id=bot_id,
+            spec=BotCreateSpec(
+                entity_id=owner_id,
+                engine_type=body.engine,
+                bot_type=body.bot_type,
+                bot_name=body.bot_name,
+                bot_desc=body.bot_desc,
+                space_id=current_space.numeric_id,
+                template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+                engine_properties=_engine_properties_from_body(body),
+            ),
+            context=BotCreateContext(
+                deployment_mode=BotCreateDeploymentMode.CLOUD,
+                space_kind=current_space.kind,
+                space_quota=True,
+            ),
+            bot_service=bot_service,
+            passport_plugin=passport_plugin,
+            auth_rel_plugin=auth_rel_plugin,
+            skill_set_factory=skill_set_factory,
+        )
+    except Exception:
+        # The creation did not start — quota, name, Passport — so the grant
+        # names a bot that will never exist. Withdrawn best-effort; the
+        # caller's real error is what propagates.
+        withdraw_the_creation_grant(caller, bot_id=bot_id)
+        raise
 
     if isinstance(outcome, AuthPending):
         # Forward BOTH handles — Passport may return either, and dropping one
@@ -775,12 +794,12 @@ async def get_bots_ceiling(
     # Names no bot, so there is no grant to check against one — but the answer
     # is still about a person's account, and a stranger application must not be
     # able to read it by naming a user id. So it is gated on the application
-    # holding at least one live delegation from that user: proof of a
-    # relationship, the closest thing this operation has to a scope. An
-    # application with no delegation learns nothing it did not already know.
+    # holding some live delegation from that user — a user-level one, or any
+    # bot grant: proof of a relationship, the closest thing this operation has
+    # to a scope. An application with no delegation learns nothing it did not
+    # already know.
     #
-    granted = caller.granted_bot_ids()
-    if granted is not None and not granted:
+    if not caller.holds_delegation():
         # The named user goes to the log bounded and escaped, never into the
         # exception message: that message reaches a log line verbatim, and
         # ``user_id`` is declared ``min_length=1`` with no upper bound, so raw

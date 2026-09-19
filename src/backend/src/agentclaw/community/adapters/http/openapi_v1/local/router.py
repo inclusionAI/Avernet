@@ -24,10 +24,13 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.adapters.http.openapi_v1.creation_grant import (
+    grant_the_creating_app,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
+    DelegatedUserDep,
     UserIdDep,
-    refuse_app_only_caller,
     require_granted_own_bot,
 )
 from agentclaw.community.api.local_bot_workflow_service import (
@@ -53,13 +56,16 @@ logger = get_logger()
 router = APIRouter(prefix="/openapi/v1/bots", tags=["local-bots"], route_class=PublicAPIRoute)
 
 _GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
-_REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 
 def _require_user_delegation(caller: ActingCaller) -> None:
-    """Require some live Bot delegation before exposing user-level device data."""
-    granted = caller.granted_bot_ids()
-    if granted is not None and not granted:
+    """Require some live delegation before exposing user-level device data.
+
+    A user-level delegation or any bot grant — see ``holds_delegation``. The
+    first matters here in particular: an application onboarded to create local
+    bots has to discover the user's devices before it holds any bot grant.
+    """
+    if not caller.holds_delegation():
         raise GrantNotResolvableError(
             "application holds no live delegation from the named user"
         )
@@ -196,19 +202,29 @@ async def list_local_device_files(
             "description": "Needs user authorization",
         }
     },
-    dependencies=_REFUSES_APP_ONLY,
+    # USER_DELEGATED: declared through the ``caller`` parameter. No bot exists
+    # for a grant to cover until the desktop service answers, so an application
+    # is admitted on the user-level delegation and granted the bot once its id
+    # is known. See ``admission.py``.
 )
 @envelope_errors
 async def create_local_bot(
     body: LocalBotCreate,
     owner_id: UserIdDep,
+    caller: DelegatedUserDep,
     request: Request,
     x_space_id: SpaceIdHeader = None,
     service: LocalBotWorkflowServiceProtocol = Injected(
         LocalBotWorkflowServiceProtocol
     ),
 ) -> Envelope[LocalBot] | JSONResponse:
-    """Start creating a personal local Bot."""
+    """Start creating a personal local Bot.
+
+    An application calling with its own credential and no end user is admitted
+    only if the named user has authorized it at the account level
+    (`POST /openapi/v1/bots/authorized-apps`), and is then granted the bot it
+    creates, so the auth-status poll finds an ordinary bot grant in place.
+    """
     result = service.start_create(
         owner_id=owner_id,
         header_space_id=x_space_id,
@@ -221,6 +237,13 @@ async def create_local_bot(
             engine=body.engine,
         ),
     )
+    # Unlike the cloud creations the id is the desktop service's to allocate,
+    # so the grant follows the answer rather than preceding the call — on both
+    # the created and the pending shape, since the pending poll is bot-scoped.
+    # A no-op for a human caller. See ``creation_grant.py``.
+    created_bot_id = str(result.get("bot_id") or "")
+    if created_bot_id:
+        grant_the_creating_app(caller, bot_id=created_bot_id)
     if result.get("need_authorization"):
         body_out = accepted(
             LocalBotAuthPending(
@@ -302,7 +325,10 @@ async def get_local_bot(
 @router.get(
     "/{bot_id}/local/auth-status",
     response_model=Envelope[LocalBotAuthStatus],
-    dependencies=_REFUSES_APP_ONLY,
+    # GRANT_CHECKED_OWN_BOT: the creation granted the submitting application
+    # the bot when its id was allocated, so the poll checks that grant like
+    # every other own-bot operation.
+    dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
 async def local_bot_auth_status(
