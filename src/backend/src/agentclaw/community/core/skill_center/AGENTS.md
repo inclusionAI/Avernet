@@ -161,6 +161,8 @@ Service Bot 的边界在 `community/core/service_bot/services/`：
 
 Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版本化合同、layout participation 和 Runtime probe 交付逻辑映射；既有路径兼容由 `path_factory.py`、factories/dispatcher 管理。新增引擎路径不得散落进 Router。Legacy/Pool 与 Center 来源正交；Center 不是切 Pool 的理由。
 
+Runtime probe 的 `READY` 通常必须携带迁移 `preparation_id`。唯一例外是 OpenClaw Pool-native 稳态 marker：`preparation_id=None` 时，响应必须同时证明 `activation_state=active`，且 checks 中 `active_marker_valid`、`active_root_valid`、`pool_local_valid`、`legacy_storage_entries_absent` 全为 true；否则 Backend 将响应归类为 `INVALID`。带完整 migration identity 的 active marker 仍走严格迁移 probe；只带 preparation/generation 之一的 partial identity 必须 fail closed，不能降级为 native steady 或 `NOT_CAPABLE`。合同测试见 `tests/community/core/skill_center/test_runtime_layout_probe.py` 及 Engine OpenClaw layout-probe tests。
+
 完整内容库与 active 发现入口分离。逐 Skill 入口可以指向 Repo/Local/Center，不能新增指向整库的 active 桥。受管链接、用户实体目录、悬空链接的降级处理以 Runtime mapping/apply contract 为准；操作结果应保留具体问题项。
 
 ### 7.1 Engine 目录与 Legacy/Pool 对照

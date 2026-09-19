@@ -12,6 +12,7 @@ provides:
   - "Engine health & readiness services"
   - "Device error types"
   - "Device event types"
+  - "LayoutInitializationConfirmationProtocol"
 consumes:
   - "BotManagement repo + service"
   - "EventBus"
@@ -20,6 +21,7 @@ consumes:
   - "BaasService"
   - "PassportPlugin"
   - "DeviceAccessor (models only)"
+  - "Layout initialization confirmation implementation"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module

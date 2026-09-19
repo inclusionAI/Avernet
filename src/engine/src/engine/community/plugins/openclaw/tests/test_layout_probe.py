@@ -153,12 +153,105 @@ def test_active_marker_requires_direct_pool_mappings_and_absent_storage_entries(
     )
 
     assert result.status is RuntimeLayoutInspectionStatus.READY
+    assert result.preparation_id == "2a958f59-8cf4-4413-a267-7d56d3382f23"
     assert result.evidence["activation_state"] == "active"
     assert result.evidence["mapping_contract_version"] == (
         "skills-pool-mapping-v2"
     )
     assert result.evidence["resolved_layout"]["local_root"] == str(pool_local)
     assert result.evidence["checks"]["legacy_storage_entries_absent"] is True
+
+
+def test_migrated_active_marker_still_requires_repo_mount(tmp_path):
+    home, active_root, _, _ = _ready_home(tmp_path)
+    (active_root / "skills-repo").unlink()
+    _write_active_marker(home, activation_state="active")
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda _path: False,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "pool_repo_not_mounted"
+
+
+def test_migrated_active_marker_rejects_broken_managed_entry(tmp_path):
+    home, active_root, pool_local, pool_repo = _ready_home(tmp_path)
+    (active_root / "skills-repo").unlink()
+    (active_root / "broken").symlink_to(
+        pool_local / "missing",
+        target_is_directory=True,
+    )
+    _write_active_marker(home, activation_state="active")
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "active_managed_entry_invalid"
+
+
+@pytest.mark.parametrize("activation_state", ["active", "finalizing"])
+@pytest.mark.parametrize(
+    "missing_key", ["preparation_id", "migration_generation"]
+)
+def test_partial_migration_identity_is_invalid_without_ready_marker(
+    tmp_path,
+    activation_state,
+    missing_key,
+):
+    home, _, pool_local, pool_repo = _ready_home(tmp_path)
+    _write_active_marker(home, activation_state=activation_state)
+    (pool_local.parent / ".pool-ready").unlink()
+    marker_path = pool_local.parent / ".pool-active"
+    marker = json.loads(marker_path.read_text())
+    marker.pop(missing_key)
+    marker_path.write_text(json.dumps(marker))
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "active_marker_contract_mismatch"
+
+
+def test_minimal_steady_marker_does_not_require_migration_identity(tmp_path):
+    home, active_root, _, pool_repo = _ready_home(tmp_path)
+    (active_root / "skills-repo").unlink()
+    marker_path = _active_marker_path(home)
+    marker_path.write_text(
+        json.dumps(
+            {
+                "engine": "openclaw",
+                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                "activation_state": "active",
+            }
+        )
+    )
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.READY
+    assert result.preparation_id is None
+    assert result.evidence["mapping_contract_version"] == (
+        "skills-pool-mapping-v2"
+    )
 
 
 def test_active_marker_allows_normal_skill_deactivation(tmp_path):

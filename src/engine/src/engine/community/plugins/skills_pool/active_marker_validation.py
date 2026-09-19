@@ -77,6 +77,60 @@ def active_marker_valid(
     return True
 
 
+def startup_active_marker_valid(
+    marker: object,
+    *,
+    engine: str,
+    expected_contract_version: str,
+) -> bool:
+    """Validate a durable native or completed-migration active identity."""
+
+    if not (
+        isinstance(marker, dict)
+        and marker.get("engine") == engine
+        and marker.get("layout_contract_version") == expected_contract_version
+        and marker.get("activation_state") == "active"
+    ):
+        return False
+    has_preparation = "preparation_id" in marker
+    has_generation = "migration_generation" in marker
+    if has_preparation != has_generation:
+        return False
+    if not has_preparation:
+        return True
+    return bool(
+        isinstance(marker.get("preparation_id"), str)
+        and marker["preparation_id"]
+        and isinstance(marker.get("migration_generation"), str)
+        and marker["migration_generation"]
+    )
+
+
+def steady_active_marker_valid(
+    marker: object,
+    *,
+    engine: str,
+    expected_contract_version: str,
+) -> bool:
+    """Validate only a native Pool steady-state identity.
+
+    Migration identity belongs to ``finalizing`` recovery and is deliberately
+    not part of the long-lived ``active`` contract.
+    """
+
+    if not isinstance(marker, dict):
+        return False
+    return (
+        startup_active_marker_valid(
+            marker,
+            engine=engine,
+            expected_contract_version=expected_contract_version,
+        )
+        and "preparation_id" not in marker
+        and "migration_generation" not in marker
+    )
+
+
 def active_entries_failure_reason(
     layout: ActiveMarkerLayout,
     *,

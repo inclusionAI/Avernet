@@ -34,6 +34,7 @@ from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutState,
     SkillLayout,
     SkillLayoutPhase,
+    is_pool_native_state,
 )
 from agentclaw.community.core.task_queue.services.registry import (
     HandlerRegistry,
@@ -143,7 +144,15 @@ class SkillsPoolReconcileTaskHandler:
         if claim.state.active_layout is SkillLayout.POOL:
             generation = claim.state.migration_generation
             if generation is None:
-                return Fail("pool-active layout has no migration generation")
+                if is_pool_native_state(
+                    claim.state,
+                    layout_contract_version=LAYOUT_CONTRACT_VERSION,
+                    engine_type="openclaw",
+                ):
+                    # Pool-native rows never have migration identity and are not
+                    # participants in reconciliation or quarantine cleanup.
+                    return Complete()
+                return Fail("pool layout state has no migration identity")
             if observed_at is None:
                 # Tasks written by the previous Backend cannot prove a
                 # post-activation runtime observation. They remain safe to
