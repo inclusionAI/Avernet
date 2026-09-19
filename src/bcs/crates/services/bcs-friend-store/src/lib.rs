@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
@@ -169,7 +169,24 @@ impl FriendRepoPort for DbFriendStore {
             .await?;
 
         if affected == 0 {
-            debug!(left_bot = %left, right_bot = %right, "Friendship already existed (DB)");
+            if !self.are_friends(bot_a, bot_b).await? {
+                error!(
+                    left_bot = %left,
+                    right_bot = %right,
+                    env = %env,
+                    "Friendship insert was ignored, but no matching row exists in the current environment"
+                );
+                return Err(ServiceError::InternalError(
+                    "添加好友失败，请稍后重试".to_string(),
+                ));
+            }
+
+            debug!(
+                left_bot = %left,
+                right_bot = %right,
+                env = %env,
+                "Friendship already existed (DB)"
+            );
             return Ok(());
         }
 
@@ -871,6 +888,49 @@ mod tests {
                 .await
                 .expect("are friends after remove")
         );
+    }
+
+    #[tokio::test]
+    async fn sqlite_ignored_insert_without_current_env_row_returns_error() {
+        let db = must_db(LocalSqliteDbPlugin::new());
+        must_db(
+            db.execute(DbStatement::new(
+                "CREATE TABLE bcs_friendships (
+                    left_bot TEXT NOT NULL,
+                    right_bot TEXT NOT NULL,
+                    env TEXT NOT NULL,
+                    gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (left_bot, right_bot)
+                )",
+            ))
+            .await,
+        );
+
+        let env = resolve_env();
+        let other_env = format!("{env}-other");
+        must_db(
+            db.execute(DbStatement::with_params(
+                "INSERT INTO bcs_friendships (left_bot, right_bot, env) VALUES (?, ?, ?)",
+                vec![
+                    DbValue::from("alice"),
+                    DbValue::from("bob"),
+                    DbValue::from(other_env),
+                ],
+            ))
+            .await,
+        );
+
+        let db_plugin: Arc<dyn DbPlugin> = Arc::new(db);
+        let friend_store = DbFriendStore::sqlite(db_plugin);
+        let result = friend_store.add_friendship("alice", "bob").await;
+
+        assert!(matches!(
+            result,
+            Err(ServiceError::InternalError(message))
+                if message == "添加好友失败，请稍后重试"
+        ));
+        assert!(!must_service(friend_store.are_friends("alice", "bob").await));
     }
 
     #[tokio::test]

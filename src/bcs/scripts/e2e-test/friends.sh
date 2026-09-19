@@ -6,9 +6,59 @@ E2E_TESTS_FRIENDS=(
     "test_friend_auto_accept_public"
     "test_friend_request_accept_protected"
     "test_friend_request_reject_protected"
+    "test_friendship_insert_ignore_failure_is_visible_and_retryable"
     "test_list_friends"
     "test_friend_flow_via_cli"
 )
+
+# ============================================================================
+# Local persistence fault fixture
+# ============================================================================
+
+_friendship_ignore_fixture() {
+    local mode="$1" db_path="$2" bot_a="$3" bot_b="$4"
+    python3 -c '
+import sqlite3
+import sys
+
+mode, db_path, bot_a, bot_b = sys.argv[1:]
+left_bot, right_bot = sorted((bot_a, bot_b))
+trigger_name = "e2e_ignore_friendship_insert"
+
+connection = sqlite3.connect(db_path, timeout=10)
+try:
+    connection.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
+    if mode == "reset":
+        connection.execute(
+            "DELETE FROM bcs_friendships WHERE left_bot = ? AND right_bot = ?",
+            (left_bot, right_bot),
+        )
+        connection.execute(
+            "DELETE FROM bcs_friend_requests "
+            "WHERE (from_bot = ? AND to_bot = ?) OR (from_bot = ? AND to_bot = ?)",
+            (bot_a, bot_b, bot_b, bot_a),
+        )
+        connection.execute(
+            "DELETE FROM bcs_actor_relations "
+            "WHERE is_creator = 0 AND "
+            "((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))",
+            (bot_a, bot_b, bot_b, bot_a),
+        )
+    elif mode == "arm":
+        quote = lambda value: "\x27" + value.replace("\x27", "\x27\x27") + "\x27"
+        connection.execute(
+            f"CREATE TRIGGER {trigger_name} "
+            "BEFORE INSERT ON bcs_friendships "
+            f"WHEN NEW.left_bot = {quote(left_bot)} AND NEW.right_bot = {quote(right_bot)} "
+            "BEGIN SELECT RAISE(IGNORE); END"
+        )
+    elif mode != "disarm":
+        raise ValueError(f"unsupported fixture mode: {mode}")
+    connection.commit()
+finally:
+    connection.close()
+' "$mode" "$db_path" "$bot_a" "$bot_b"
+}
 
 # ============================================================================
 # Tests
@@ -140,6 +190,118 @@ for r in data:
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     # Restore 客服 to public
     api_put "/bots/$BOT_CS_UUID/visibility" "{\"visibility\":\"public\"}"
+}
+
+# Persistence failure: accepting a pending request must not report success when
+# the friendship INSERT is ignored and no row exists. This case only runs
+# against the explicitly provided standalone SQLite database; it never mutates
+# a remote E2E target. The store unit test covers the real cross-env legacy-key
+# setup, while this story verifies the HTTP error and retry journey end to end.
+test_friendship_insert_ignore_failure_is_visible_and_retryable() {
+    info "Friends: ignored friendship insert is visible and retryable"
+
+    local db_path="${BCS_E2E_SQLITE_DB_PATH:-}"
+    if [[ -z "$db_path" || ! -f "$db_path" ]]; then
+        warn "SKIP: BCS_E2E_SQLITE_DB_PATH is not an available local database"
+        return 0
+    fi
+    case "$BCS_API_BASE_URL" in
+        http://127.0.0.1:*|http://localhost:*) ;;
+        *)
+            warn "SKIP: friendship persistence fault fixture requires a loopback BCS target"
+            return 0
+            ;;
+    esac
+
+    if ! _friendship_ignore_fixture reset "$db_path" "$BOT_QA_UUID" "$BOT_CS_UUID"; then
+        fail "reset ignored-insert friendship fixture"
+        TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return
+    fi
+
+    api_put "/bots/$BOT_CS_UUID/visibility" '{"visibility":"protected"}'
+    if [[ "$HTTP_STATUS" != "200" ]]; then
+        fail "set fault-fixture target to protected returns $HTTP_STATUS"
+        TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        _friendship_ignore_fixture reset "$db_path" "$BOT_QA_UUID" "$BOT_CS_UUID" || true
+        return
+    fi
+
+    api_post "/friends/request" \
+        "{\"from_bot\":\"$BOT_QA_UUID\",\"to_bot\":\"$BOT_CS_UUID\"}"
+    if [[ "$HTTP_STATUS" != "200" && "$HTTP_STATUS" != "201" ]]; then
+        fail "create fault-fixture friend request returns $HTTP_STATUS"
+        TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        _friendship_ignore_fixture reset "$db_path" "$BOT_QA_UUID" "$BOT_CS_UUID" || true
+        api_put "/bots/$BOT_CS_UUID/visibility" '{"visibility":"public"}'
+        return
+    fi
+
+    local request_id
+    request_id=$(json_path "$RESPONSE" "data.id")
+    if [[ -z "$request_id" ]]; then
+        fail "fault-fixture friend request returns an id"
+        TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        _friendship_ignore_fixture reset "$db_path" "$BOT_QA_UUID" "$BOT_CS_UUID" || true
+        api_put "/bots/$BOT_CS_UUID/visibility" '{"visibility":"public"}'
+        return
+    fi
+
+    if ! _friendship_ignore_fixture arm "$db_path" "$BOT_QA_UUID" "$BOT_CS_UUID"; then
+        fail "arm ignored-insert friendship fixture"
+        TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        _friendship_ignore_fixture reset "$db_path" "$BOT_QA_UUID" "$BOT_CS_UUID" || true
+        api_put "/bots/$BOT_CS_UUID/visibility" '{"visibility":"public"}'
+        return
+    fi
+
+    api_post "/friends/requests/$request_id/accept" '{}'
+    assert_eq "ignored friendship insert returns 500" "$HTTP_STATUS" "500"
+    assert_json_eq "ignored friendship insert reports failure" "$RESPONSE" "success" "false"
+    assert_contains "ignored friendship insert returns a user-readable error" \
+        "$RESPONSE" "添加好友失败，请稍后重试"
+
+    api_get "/friends/requests?bot_uuid=$BOT_CS_UUID&direction=received&status=pending"
+    assert_eq "failed acceptance keeps request queryable" "$HTTP_STATUS" "200"
+    local pending_status
+    pending_status=$(printf '%s' "$RESPONSE" | python3 -c '
+import json
+import sys
+
+request_id = sys.argv[1]
+data = json.load(sys.stdin).get("data", [])
+request = next((item for item in data if item.get("id") == request_id), {})
+print(request.get("status", ""))
+' "$request_id")
+    assert_eq "failed acceptance keeps request pending" "$pending_status" "pending"
+
+    api_get "/bots/$BOT_QA_UUID/friends"
+    assert_eq "friend list remains queryable after failed acceptance" "$HTTP_STATUS" "200"
+    if [[ "$RESPONSE" == *"$BOT_CS_UUID"* ]]; then
+        fail "failed acceptance must not expose a friendship"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    else
+        pass "failed acceptance does not expose a friendship"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    if ! _friendship_ignore_fixture disarm "$db_path" "$BOT_QA_UUID" "$BOT_CS_UUID"; then
+        fail "disarm ignored-insert friendship fixture"
+        TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    fi
+
+    api_post "/friends/requests/$request_id/accept" '{}'
+    assert_eq "friend request can be retried after persistence recovers" "$HTTP_STATUS" "200"
+    api_get "/bots/$BOT_QA_UUID/friends"
+    assert_eq "friend list is queryable after retry" "$HTTP_STATUS" "200"
+    assert_contains "successful retry establishes the friendship" "$RESPONSE" "$BOT_CS_UUID"
+
+    if ! _friendship_ignore_fixture reset "$db_path" "$BOT_QA_UUID" "$BOT_CS_UUID"; then
+        fail "clean ignored-insert friendship fixture"
+        TESTS_FAILED=$((TESTS_FAILED + 1)); TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    fi
+    api_put "/bots/$BOT_CS_UUID/visibility" '{"visibility":"public"}'
 }
 
 # List friends: verify known friendship exists.

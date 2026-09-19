@@ -76,6 +76,18 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+# The ignored-friendship-write user story uses a scoped SQLite trigger to
+# exercise the persistence failure through the real HTTP API. Expose the DB
+# path only for the controlled local stack; --skip-start callers without an
+# explicit standalone runtime remain black-box and skip the fault fixture.
+if [[ -z "${BCS_E2E_SQLITE_DB_PATH:-}" ]]; then
+  if [[ -n "${STANDALONE_RUNTIME_DIR:-}" ]]; then
+    export BCS_E2E_SQLITE_DB_PATH="${STANDALONE_RUNTIME_DIR}/bcs_data/bcs.db"
+  elif [[ "$skip_start" -eq 0 ]]; then
+    export BCS_E2E_SQLITE_DB_PATH="$repo_root/scripts/.dependencies/standalone/bcs_data/bcs.db"
+  fi
+fi
+
 # With --force-rebuild, rebuild the instrumented bcs even when a cached binary
 # exists. The pre-push gate uses this so an up-to-date binary reflecting the
 # pushed source is exercised; cargo build is incremental so a no-op rebuild
