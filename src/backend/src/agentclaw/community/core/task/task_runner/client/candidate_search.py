@@ -15,7 +15,7 @@ from agentclaw.community.core.task.domain.identity import compose_bot_identity
 logger = logging.getLogger("task.candidate.search")
 
 MAX_SEARCH_TOKENS = 5
-TOP_K_PER_TOKEN = 3
+PER_KEYWORD_LIMIT = 3
 MIN_SCORE = 0.01
 DEFAULT_FILTERS = {"runtime_state": ["online"]}
 
@@ -88,7 +88,7 @@ async def search_candidates(
     query: str,
     *,
     user_id: str = "",
-    top_k_per_token: int = TOP_K_PER_TOKEN,
+    per_keyword_limit: int = PER_KEYWORD_LIMIT,
     max_tokens: int = MAX_SEARCH_TOKENS,
     min_score: float = MIN_SCORE,
     filters: dict[str, Any] | None = None,
@@ -106,7 +106,7 @@ async def search_candidates(
                 discover.search_by_keyword,
                 keyword=keyword,
                 user_id=user_id,
-                top_k=top_k_per_token,
+                top_k=per_keyword_limit,
                 min_score=min_score,
                 filters=search_filters,
             )

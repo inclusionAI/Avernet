@@ -26,7 +26,7 @@ from agentclaw.community.core.task.task_dispatch.rationale import (
 from agentclaw.community.core.task.task_context.task_trajectory.models import DispatchRationale
 from agentclaw.community.core.task.task_runner.client.candidate_search import (
     MAX_SEARCH_TOKENS as _PREFETCH_MAX_TOKENS,
-    TOP_K_PER_TOKEN as _PREFETCH_TOP_K_PER_TOKEN,
+    PER_KEYWORD_LIMIT as _PREFETCH_PER_KEYWORD_LIMIT,
     search_candidates as _search_candidates,
     search_tokens as _prefetch_tokens,
     tokenize_query,
@@ -386,7 +386,7 @@ async def _prefetch_candidates(
         discover,
         query,
         user_id=user_id,
-        top_k_per_token=_PREFETCH_TOP_K_PER_TOKEN,
+        per_keyword_limit=_PREFETCH_PER_KEYWORD_LIMIT,
         max_tokens=_PREFETCH_MAX_TOKENS,
     )
     logger.info(
