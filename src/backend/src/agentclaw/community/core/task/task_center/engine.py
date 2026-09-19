@@ -675,7 +675,7 @@ class ExecutionEngine:
 
     def _is_external_managed_task(self, task_id: str) -> bool:
         """Whether a third party owns execution and next-node transitions."""
-        return self._task_type(task_id) in {"workflow", "yaml"}
+        return self._task_type(task_id) in {"workflow", "yaml"} or self._graph._execution_config(task_id).get("orchestration_mode") == "relay"
 
     def _is_graph_terminal(self, task_id: str) -> bool:
         """图级终态(DONE/SUCCESS/HUNG)判定。终态后自动驱动(plan/dispatch/harness/回投推进)一律冻结:

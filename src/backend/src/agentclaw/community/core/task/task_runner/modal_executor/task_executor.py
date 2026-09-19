@@ -178,6 +178,10 @@ class TaskExecutor(TaskExecutorBbsMixin):
         async with sem:
             from agentclaw.community.core.task.task_runner.modal_executor import bbs_modal_executor
 
+            relay_target_node_id = None
+            execution_config = execution_graph.extend_props.get("execution_config", {}) or {}
+            if execution_config.get("orchestration_mode") == "relay":
+                relay_target_node_id = node.node_id
             await bbs_modal_executor.notify(
                 execution_graph=execution_graph,
                 bcn=self._bcn,
@@ -187,6 +191,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
                 skill_name=bbs_modal_executor._BBS_SKILL_NAME,
                 on_bbs_report=self._on_bbs_report,
                 group_executor=self._bbs_execute_as_manager_worker_group,
+                target_node_id=relay_target_node_id,
             )
         return True
 

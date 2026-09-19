@@ -1,6 +1,7 @@
 """Skill-driven distributed relay operations for :class:`TaskService`."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -343,6 +344,20 @@ class TaskServiceRelayMixin:
             )
         return {"candidates": candidates, "total": len(candidates)}
 
+    def _schedule_relay_bbs_selection(self, task_id: str, node_id: str) -> None:
+        """Run the centralized BBS roster/bid selector on an existing Relay node."""
+        node = self._relay_node(task_id, node_id)[1]
+        task = asyncio.create_task(self._engine._runner.start_run([node]))
+        tasks = getattr(self, "_bg_tasks", None)
+        if isinstance(tasks, set):
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+        logger.info(
+            "[task][relay-bbs] scheduled centralized dynamic selection task=%s node=%s",
+            task_id,
+            node_id,
+        )
+
     async def _apply_search_result(
         self, graph, node, holder_id, payload, relay_turn, progress_reason, failure_reason
     ) -> dict[str, Any]:
@@ -428,6 +443,7 @@ class TaskServiceRelayMixin:
                 TaskGraphPatch(extend_props_patch={"bbs_mode": True, "bbs_node_id": node.node_id}),
             )
             self._relay().consume(graph.task_id, node.node_id, holder_id, relay_turn)
+            self._schedule_relay_bbs_selection(graph.task_id, node.node_id)
             return {"ok": True, "published_bbs": True, "node_id": node.node_id}
         else:
             raise TaskStateError(f"unsupported search outcome={outcome}")

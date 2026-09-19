@@ -7,13 +7,14 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import json
 import logging
 import time
 import uuid
 from typing import Any
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceResult, AcceptanceVerdict, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskNodePatch, TaskSpec,
+    Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskNodePatch, TaskSpec,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,8 @@ def _resolve_owner_user_id_from_graph(graph, task_id: str) -> str:
 
 async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                  skill_name: str = _BBS_SKILL_NAME,
-                 on_bbs_report=None, group_executor=None) -> None:
+                 on_bbs_report=None, group_executor=None,
+                 target_node_id: str | None = None) -> None:
     """查询开启 claim 的 provider Bot,再执行 bid→select→claim→dispatch。
 
     ``bcn``: :class:`BcnService`(由 DI 注入的任务模块普通消费依赖),复用 register/switch provider-bot 同源
@@ -120,35 +122,82 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     _group_enabled = _singlebot_2_group_switch(graph, task_id)
     actual_run_mode = "coop_group" if (_group_enabled and group_executor is not None) else "bbs"
 
-    # 先增加一个bbs节点,PENDING
-    bbs_task_node = TaskNode(
-        node_id=f"bbs-{uuid.uuid4().hex[:8]}",
-        task_id=task_id,
-        status=Status.PENDING,
-        task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title=winner.get("title"), instruction=""),
-            context=Context(background=""),
-            goal=Goal(objective=winner.get("goal"), acceptances=[]),
-        ),
-        run_info=RuntimeInfo(
-            run_mode=actual_run_mode,
-            assignee=winner_bot_id,
-            start_time=bbs_claim_at,
-            extend_props={"actual_run_mode": "bbs", "bbs_claim_at": bbs_claim_at},
-        ),
-        node_run_graph=None
-    )
-
-    # BBS is a recovery execution under a HUNG root. Creating the scoped node
-    # must not make the parent look actively planned before the relay completes;
-    # on_bbs_report is the single path that resumes parent planning.
-    graph.add_task_nodes([bbs_task_node], task_id, mark_parent_planning=False)
-    logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
-    edges = [
-        (task_id, bbs_task_node.node_id),
-    ]
-    graph.add_relations(task_id, edges)
-    logger.info("[task][bbs_mode] add_edge, task_id=%s, edges=%s", task_id, edges)
+    if target_node_id is not None:
+        # Relay already planned the BBS node. Reuse it so centralized dynamic
+        # selection does not create a second ``bbs-xxxx`` node.
+        bbs_task_node = next(
+            (item for item in execution_graph.tasks if item.node_id == target_node_id),
+            None,
+        )
+        if bbs_task_node is None or bbs_task_node.status != Status.PENDING:
+            logger.warning(
+                "[task][bbs_mode] relay target missing/not pending task=%s node=%s",
+                task_id,
+                target_node_id,
+            )
+            graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=task_id,
+                    extend_props_patch={"bbs_owner": None},
+                )
+            )
+            return
+        bbs_task_node = replace(
+            bbs_task_node,
+            run_info=replace(
+                bbs_task_node.run_info,
+                run_mode="bbs",
+                assignee=winner_bot_id,
+                start_time=bbs_claim_at,
+                extend_props={
+                    **dict(bbs_task_node.run_info.extend_props),
+                    "actual_run_mode": "bbs",
+                    "bbs_claim_at": bbs_claim_at,
+                },
+            ),
+        )
+        graph.update_task_node_info(
+            TaskNodePatch(
+                task_id=task_id,
+                node_id=target_node_id,
+                status=Status.RUNNING,
+                run_mode="bbs",
+                assignee=winner_bot_id,
+                start_time=bbs_claim_at,
+                progress_reason=f"BBS 动态选人完成，{winner_bot_id} 开始执行",
+                extend_props_patch={"actual_run_mode": "bbs", "bbs_claim_at": bbs_claim_at},
+            )
+        )
+        logger.info(
+            "[task][bbs_mode] relay target reused task=%s node=%s winner=%s",
+            task_id,
+            target_node_id,
+            winner_bot_id,
+        )
+    else:
+        # Centralized mode creates a new scoped BBS node.
+        bbs_task_node = TaskNode(
+            node_id=f"bbs-{uuid.uuid4().hex[:8]}",
+            task_id=task_id,
+            status=Status.PENDING,
+            task_spec=TaskSpec(
+                metadata=Metadata(task_id=task_id, title=winner.get("title"), instruction=""),
+                context=Context(background=""),
+                goal=Goal(objective=winner.get("goal"), acceptances=[]),
+            ),
+            run_info=RuntimeInfo(
+                run_mode=actual_run_mode,
+                assignee=winner_bot_id,
+                start_time=bbs_claim_at,
+                extend_props={"actual_run_mode": "bbs", "bbs_claim_at": bbs_claim_at},
+            ),
+            node_run_graph=None
+        )
+        graph.add_task_nodes([bbs_task_node], task_id, mark_parent_planning=False)
+        logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
+        graph.add_relations(task_id, [(task_id, bbs_task_node.node_id)])
+        logger.info("[task][bbs_mode] add_edge, task_id=%s, node=%s", task_id, bbs_task_node.node_id)
 
     # 任务msg
     msg = _task_msg(

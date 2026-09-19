@@ -252,6 +252,36 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert _GOAL in msg_text, "dispatch msg 未内联 snapshot"
 
 
+def test_notify_reuses_existing_relay_bbs_node_for_dynamic_selection():
+    """Relay BBS uses the centralized bid selector without creating bbs-xxxx duplicate nodes."""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-bbs-1",
+        task_id="t-relay",
+        status=Status.PENDING,
+        task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(run_mode="bbs"),
+        node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    bot = _FakeBot(rates={"A": 90})
+    bcn = _FakeBcn(_roster("A"))
+
+    _run(notify(
+        execution_graph,
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        target_node_id="relay-bbs-1",
+    ))
+
+    assert graph.added_nodes == []
+    assert graph.claimed == "A"
+    assert bot.sent_messages and bot.sent_messages[0][0] == "A"
+
+
 def test_notify_empty_roster_returns_silently():
     """空 roster → 静默返回(不 claim、不 send)。"""
     bot = _FakeBot(rates={})
