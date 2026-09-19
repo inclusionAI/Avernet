@@ -455,8 +455,10 @@ class TaskExecutor(TaskExecutorBbsMixin):
                 )
             # REQ-5: chat/manager_worker 群 context 在建群(form_coop_group)时已落群;此处 best-effort 落
             # ``_context.build`` 作请求原文代表(精确群 context 的落点在 form_coop_group,后续迭代可补)。
-            try: _req_ctx = self._context.build(node.task_id, node.node_id)
-            except Exception: _req_ctx = None  # noqa: BLE001  best-effort; 不阻断投递
+            try:
+                _req_ctx = self._context.build(node.task_id, node.node_id)
+            except Exception:  # noqa: BLE001  best-effort; 不阻断投递
+                _req_ctx = None
             self._persist_dispatch_ids(
                 node, group_id=group_id, session_id=session_id, run_id=None,
                 exec_request_input=_req_ctx,

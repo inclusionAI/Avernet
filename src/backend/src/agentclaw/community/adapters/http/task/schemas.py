@@ -7,9 +7,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.task.task_context.task_trajectory.models import TaskTrajectory
+
 
 # Success/error envelopes come from the unified /openapi/v1 contract
 # (``openapi_v1.contracts.Envelope`` / ``ErrorEnvelope``); this module keeps only
