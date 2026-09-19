@@ -293,6 +293,47 @@ def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_r
     assert graph_service.query_task_dashboard("relay-task").status == Status.DONE
 
 
+def test_relay_bbs_result_only_completes_claimed_baton_node() -> None:
+    service, graph_service = _service()
+    _run(service.execute(_request()))
+    turn = _run(service.report_task_event(
+        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
+        event_id="bbs-root-exec", holder_id="main-bot", progress_reason="首棒完成",
+        payload={"output": "done"},
+    ))["relay_turn"]
+    _run(service.report_task_event(
+        task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
+        event_id="bbs-plan", holder_id="main-bot", relay_turn=turn,
+        progress_reason="下一棒转 BBS 广场",
+        payload={"has_gap": True, "children": [{"node_id": "bbs-step", "task_spec": _child_spec()}]},
+    ))
+    _run(service.report_task_event(
+        task_id="relay-task", node_id="bbs-step", event_type="SEARCH_RESULT",
+        event_id="bbs-search", holder_id="main-bot", relay_turn=turn,
+        progress_reason="普通候选无法覆盖，发布 BBS",
+        failure_reason="无匹配候选",
+        payload={"outcome": "MISS", "miss_reason": "no_candidates"},
+    ))
+    service.claim_bbs_task("relay-task", "bbs-bot", "bbs-step")
+    before = graph_service.query_task_dashboard("relay-task")
+    root_before = next(node for node in before.tasks if node.node_id == "relay-task")
+    graph_status_before = before.status
+
+    result = _run(service.report_bbs_result(
+        "relay-task", "bbs-step", "bbs-bot", output_patch={"bbs_result": "done"}
+    ))
+
+    after = graph_service.query_task_dashboard("relay-task")
+    root_after = next(node for node in after.tasks if node.node_id == "relay-task")
+    bbs_after = next(node for node in after.tasks if node.node_id == "bbs-step")
+    assert result.new_status == Status.DONE
+    assert root_after.status == root_before.status
+    assert after.status == graph_status_before
+    assert root_after.run_info.extend_props.get("bbs_owner") is None
+    assert bbs_after.status == Status.DONE
+    assert bbs_after.run_info.output == {"bbs_result": "done"}
+
+
 def test_relay_search_is_independent_from_task_context() -> None:
     service, _ = _service()
     result = _run(service.search_task_candidates(query="补齐市场研究 gap"))

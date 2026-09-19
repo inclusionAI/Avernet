@@ -13,6 +13,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskGraphPatch,
     TaskNode,
     TaskNodePatch,
+    NodeOpResult,
     TaskOpResult,
 )
 from agentclaw.community.core.task.repository.serializers import task_spec_from_dict
@@ -510,4 +511,51 @@ class TaskServiceRelayMixin:
                 progress_reason=f"BBS Bot {bot_id} 主动认领任务",
             )
         )
+        return result
+
+    async def _report_relay_bbs_result(
+        self,
+        *,
+        task_id: str,
+        node_id: str,
+        bot_id: str,
+        output_patch: dict | None = None,
+        exec_error: str | None = None,
+    ) -> NodeOpResult:
+        """Fold a relay BBS result into the current baton node only.
+
+        Relay is serial: the claimed BBS node becomes DONE and the next turn is
+        granted, but no parent/root status reconciliation or planner callback is
+        run. The root ``bbs_owner`` field is only cleared to release the claim.
+        """
+        graph, node = self._relay_node(task_id, node_id)
+        if node.run_info.run_mode != "bbs" or node.status != Status.RUNNING:
+            raise TaskStateError(f"relay BBS node is not running node={node_id}")
+        root = next((item for item in graph.tasks if item.node_id == task_id), None)
+        if root is None or root.run_info.extend_props.get("bbs_owner") != bot_id:
+            raise TaskStateError(f"relay BBS reporter is not claim owner node={node_id}")
+
+        result = self._graph.update_task_node_info(
+            TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                status=Status.DONE,
+                assignee=bot_id,
+                output_patch=output_patch,
+                failure_reason=exec_error,
+                progress_reason="BBS 接力节点执行完成，等待下一棒规划",
+            )
+        )
+        # Release only the root-level BBS lease metadata. Do not change the
+        # root node status and do not invoke centralized _on_pass_collect.
+        self._graph.update_task_node_info(
+            TaskNodePatch(
+                task_id=task_id,
+                node_id=task_id,
+                extend_props_patch={"bbs_owner": None},
+            )
+        )
+        turn = self._relay().grant(task_id, node_id, bot_id)
+        if turn is None:
+            raise AssertionError("relay BBS result did not receive a turn")
         return result

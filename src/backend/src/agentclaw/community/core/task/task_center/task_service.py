@@ -936,6 +936,15 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         **非 bot 自报**(故无 ``root_verified``)。``bot_id`` 须为当前 ``bbs_owner``(经 on_bbs_report 持有者校验),
         否则 ``TaskStateError``。
         """
+        config = self._graph._execution_config(task_id)
+        if config.get("orchestration_mode") == "relay":
+            return await self._report_relay_bbs_result(
+                task_id=task_id,
+                node_id=node_id,
+                bot_id=bot_id,
+                output_patch=output_patch,
+                exec_error=exec_error,
+            )
         patch = TaskNodePatch(
             task_id=task_id,
             node_id=node_id,
