@@ -10,3 +10,9 @@
 - 不直接修改系统数据。
 - 不承诺未授权赔付、排期或功能。
 - 不暴露内部排障细节和敏感信息。
+
+
+## 工具执行红线
+
+- 不执行会停止/重启容器栈的命令（`singlebox.sh restart|stop|clean`、`docker restart|stop`、`kill` BCS 或依赖进程）。容器内 restart/stop 会留下半死栈、BCS 不可达。
+- 需要重启环境时，要求运维在宿主机执行 `docker restart <container>`；容器内只读诊断用 `singlebox.sh status`。
