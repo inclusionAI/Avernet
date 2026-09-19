@@ -1,6 +1,7 @@
 """Skill-driven distributed relay operations for :class:`TaskService`."""
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from typing import Any
@@ -17,6 +18,10 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.repository.serializers import task_spec_from_dict
 from agentclaw.community.core.task.task_center.relay import RelayCoordinator
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+from agentclaw.community.core.task.task_runner.client.candidate_search import search_candidates
+
+
+logger = logging.getLogger("task.relay.search")
 
 
 class TaskServiceRelayMixin:
@@ -280,32 +285,62 @@ class TaskServiceRelayMixin:
 
     async def search_task_candidates(self, *, query: str) -> dict[str, Any]:
         """Search candidates only; task graph decisions remain Skill-owned."""
-        import asyncio
-
+        started_at = time.monotonic()
         normalized_query = str(query or "").strip()
         if not normalized_query:
+            logger.debug("query_rejected reason=empty_query")
             raise TaskStateError("search query is required")
         discover = self._engine._discover
+        discover_name = type(discover).__name__ if discover is not None else "None"
+        logger.debug(
+            "search_start discover=%s query=%r query_length=%d filters=%s",
+            discover_name,
+            normalized_query[:500],
+            len(normalized_query),
+            {"runtime_state": ["online"]},
+        )
         if discover is None:
-            return {"candidates": [], "total": 0}
-        try:
-            result = await asyncio.to_thread(
-                discover.search_by_keyword,
-                keyword=normalized_query,
-                user_id="",
-                top_k=20,
-                min_score=0.01,
-                filters={"runtime_state": ["online"]},
+            logger.warning(
+                "search_empty reason=discover_unavailable discover=%s elapsed_ms=%.1f",
+                discover_name,
+                (time.monotonic() - started_at) * 1000,
             )
-        except Exception:  # noqa: BLE001 - search failure is an empty candidate result
             return {"candidates": [], "total": 0}
-        items = (result or {}).get("items") or []
+
+        result = await search_candidates(
+            discover,
+            normalized_query,
+            user_id="",
+        )
         candidates = [
             self._project_search_candidate(item)
-            for item in items
+            for item in result.candidates
             if isinstance(item, dict) and (item.get("bot_uuid") or item.get("bot_id"))
-        ]
-        return {"candidates": candidates[:20], "total": len(candidates[:20])}
+        ][:20]
+        logger.debug(
+            "search_complete discover=%s query=%r tokens=%s raw_item_count=%d projected=%d "
+            "failed_keywords=%s candidate_ids=%s elapsed_ms=%.1f",
+            discover_name,
+            normalized_query[:500],
+            result.tokens,
+            result.raw_item_count,
+            len(candidates),
+            result.failed_keywords,
+            [item.get("bot_uuid") for item in candidates],
+            (time.monotonic() - started_at) * 1000,
+        )
+        if not candidates:
+            logger.info(
+                "search_empty reason=no_matching_candidates discover=%s query=%r tokens=%s "
+                "raw_item_count=%d failed_keywords=%s elapsed_ms=%.1f",
+                discover_name,
+                normalized_query[:500],
+                result.tokens,
+                result.raw_item_count,
+                result.failed_keywords,
+                (time.monotonic() - started_at) * 1000,
+            )
+        return {"candidates": candidates, "total": len(candidates)}
 
     async def _apply_search_result(
         self, graph, node, holder_id, payload, relay_turn, progress_reason, failure_reason

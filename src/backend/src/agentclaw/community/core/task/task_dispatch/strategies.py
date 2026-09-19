@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -25,35 +24,24 @@ from agentclaw.community.core.task.task_dispatch.rationale import (
     _extract_skill_response_content,
 )
 from agentclaw.community.core.task.task_context.task_trajectory.models import DispatchRationale
+from agentclaw.community.core.task.task_runner.client.candidate_search import (
+    MAX_SEARCH_TOKENS as _PREFETCH_MAX_TOKENS,
+    TOP_K_PER_TOKEN as _PREFETCH_TOP_K_PER_TOKEN,
+    search_candidates as _search_candidates,
+    search_tokens as _prefetch_tokens,
+    tokenize_query,
+)
 
 logger = logging.getLogger("task.dispatcher")
 
-# ===== 候选预查常量 =====
+# Candidate retrieval is shared with distributed Relay `/search`; this module
+# only makes the centralized dispatch decision after retrieval.
 _RULE_TEST_MAX_GROUP_MEMBERS = 3
-_PREFETCH_MAX_TOKENS = 5
-_PREFETCH_TOP_K_PER_TOKEN = 3
-_STOPWORDS: frozenset[str] = frozenset({
-    # 2 字功能词/语气词(jieba 不带停用词,自建;≥2 字过滤已挡单字虚词 的/了/是/在…)。
-    "可以", "需要", "能够", "应该", "应当", "必须", "可能", "想要",
-    "以及", "并且", "或者", "但是", "然而", "如果", "由于", "虽然",
-    "而且", "不仅", "只要", "只有", "因此", "所以", "然后", "接着", "此外",
-    "这种", "这样", "那种", "那些", "这些", "我们", "他们", "你们", "它们",
-    "一个", "没有", "已经",
-    "进行", "通过", "对于", "关于", "根据", "按照", "基于", "同时",
-    "之前", "之后", "现在", "目前", "之间", "以上", "以下",
-    "一些", "某种", "只是", "还是", "就是", "不是", "不能", "不要",
-    "成为", "作为", "其中", "其它", "另外", "比如", "例如",
-    # 偏业务词保留不滤(覆盖率/构建工具/数据整合/综合平台/数据分析/技术调研/风险评估 等需可命中):
-    # 覆盖/构建/搭建/整合/综合/分析/研究/调研/评估/考察/论证 不入停用词。
-    # 泛义动词(产出/给予/具备类,无业务区分度;业务名词如 存储/架构/数据/市场 不滤):
-    "产出", "提供", "给出", "做出", "得到", "形成", "构成", "具备", "包含", "包括",
-    "涉及", "带来", "产生",
-    # 叙述/整理类动词:
-    "梳理", "整理", "归纳", "总结", "概述", "阐述", "说明", "描述", "列举",
-    "呈现", "展示", "列出", "写出", "拟定", "制定", "建立",
-    # 模糊量词/框架词:
-    "不少", "若干", "针对", "围绕", "结合",
-})
+
+
+def _tokenize(text: str) -> list[str]:
+    """Backward-compatible test/helper alias for the shared tokenizer."""
+    return tokenize_query(text)
 
 class SearchOutcome(StrEnum):
     """搜推 4 态结果。"""
@@ -388,96 +376,32 @@ def _search_result_summary(result: SearchResult) -> dict[str, Any]:
     }
 
 
-def _tokenize(text: str) -> list[str]:
-    """中文分词(jieba)取 ≥2 字语义词供 LIKE 预查;jieba 未装→退回整串(仍受 ≥2 字 + 停用词过滤)。
-    拆词避免整串 ``LIKE '%长句%'`` 命中 0 → fallback 塞全量噪音 bot 的问题(决策非查找)。
-    过滤:① ≥2 字(挡单字虚词 的/了/是…);② ``_STOPWORDS`` 2 字功能词(挡 可以/需要/进行/这种…)。"""
-    if not text:
-        return []
-    try:
-        import jieba  # type: ignore[import-untyped]
-    except ImportError:
-        words = [text]
-    else:
-        words = jieba.cut(text)
-    return [w for w in words if len(w.strip()) >= 2 and w not in _STOPWORDS]
-
-
-def _prefetch_tokens(text: str) -> list[str]:
-    """分词 + 去重保序 + 取 top ``_PREFETCH_MAX_TOKENS``。
-
-    ``_prefetch_candidates`` 与 ``DispatchRationale.prefetch_tokens`` 共用本函数,
-    保证两者 token 序列一致(REQ-2 审计可重放)。无 ``_STOPWORDS`` 重新展开,
-    直接复用 ``_tokenize``(jieba / fallback 双路径统一 + ≥2 字/停用词过滤)。"""
-    tokens: list[str] = []
-    seen: set[str] = set()
-    for t in _tokenize(text or ""):
-        if t not in seen:
-            seen.add(t)
-            tokens.append(t)
-    return tokens[:_PREFETCH_MAX_TOKENS]
-
-
-
 async def _prefetch_candidates(
     discover, node: TaskNode, graph: TaskExecutionGraph
 ) -> list[dict]:
-    """框架候选预查:仅对 node 的 ``goal.objective`` jieba 分词(字段裁剪降噪;title/background 不参与),
-    token 去重保序取 top ``_PREFETCH_MAX_TOKENS``,每 token 调 name/owner LIKE ``search_by_keyword``
-    (命中 0→空,不 fallback 全量),合并去重按 recommend.score 降序。discover.search_by_keyword 是同步
-    requests,经 asyncio.to_thread 包;多 token 用 asyncio.gather 并发。user_id 取 graph 派生
-    owner_bot_id;filters={"runtime_state":["online"]},top_k=_PREFETCH_TOP_K_PER_TOKEN,min_score=0.01。"""
-
+    """Retrieve the shared tokenized candidate catalog for centralized dispatch."""
+    query = node.task_spec.goal.objective or ""
     user_id = str(graph.extend_props.get("owner_bot_id") or "")
-    # 仅 goal.objective 分词 → token 去重保序,取 top _PREFETCH_MAX_TOKENS(字段裁剪 + token 上限降噪).
-    # _prefetch_tokens 与 DispatchRationale.prefetch_tokens 共用,见 REQ-2 审计可重放。
-    tokens = _prefetch_tokens(node.task_spec.goal.objective or "")
-    if not tokens:
-        return []
-    logger.info("[task][search] task=%s node=%s 分词 tokens=%s", node.task_id, node.node_id, tokens)
-
-    async def _q(kw: str) -> list[dict]:
-        try:
-            res = await asyncio.to_thread(
-                discover.search_by_keyword,
-                keyword=kw,
-                user_id=user_id,
-                top_k=_PREFETCH_TOP_K_PER_TOKEN,
-                min_score=0.01,
-                filters={"runtime_state": ["online"]},
-            )
-        except Exception:  # noqa: BLE001  端口异常→该 token 无候选,不阻断其它
-            return []
-        return (res or {}).get("items") or []
-
-    items_lists = await asyncio.gather(*[_q(t) for t in tokens])
-    seen: dict[str, dict] = {}
-    for items in items_lists:
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            identity = str(item.get("bot_uuid") or "").strip()
-            if not identity:
-                identity = compose_bot_identity(
-                    str(item.get("bot_id") or ""), item.get("owner_id")
-                )
-            if identity and identity not in seen:
-                seen[identity] = item
-    result = sorted(
-        seen.values(),
-        key=lambda x: (x.get("recommend") or {}).get("score", 0.0),
-        reverse=True,
+    result = await _search_candidates(
+        discover,
+        query,
+        user_id=user_id,
+        top_k_per_token=_PREFETCH_TOP_K_PER_TOKEN,
+        max_tokens=_PREFETCH_MAX_TOKENS,
     )
     logger.info(
-        "[task][search] task=%s node=%s prefetch_complete token_count=%d candidate_count=%d candidate_ids=%s",
+        "[task][search] task=%s node=%s prefetch_complete tokens=%s token_count=%d "
+        "raw_item_count=%d failed_keywords=%s candidate_count=%d candidate_ids=%s",
         node.task_id,
         node.node_id,
-        len(tokens),
-        len(result),
-        [c.get("bot_id") for c in result],
+        result.tokens,
+        len(result.tokens),
+        result.raw_item_count,
+        result.failed_keywords,
+        len(result.candidates),
+        [c.get("bot_uuid") or c.get("bot_id") for c in result.candidates],
     )
-    return result
-
+    return result.candidates
 
 async def prefetch_candidates(
     discover, node: TaskNode, graph: TaskExecutionGraph

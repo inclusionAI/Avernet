@@ -9,6 +9,7 @@ profile 无关:corp / prod / community / singlebox 各 profile 的 task 派发�
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -19,6 +20,8 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
 from agentclaw.community.core.task.task_runner.client.protocols import (
     BotPublicServiceProtocol,
 )
+
+logger = logging.getLogger("task.catalog.search")
 
 # 派发候选预查可见性判据:锁 ``visibility=public``(bot↔bot 协作走 agent 域,不用人类
 # user_visibility);``user_visibility`` 三值全匹配以中和 BCS None/Human 分支对该字段的默认
@@ -96,15 +99,40 @@ class CatalogKeywordBotDiscover:
         ``caller`` 占位(catalog service 顶部 ``del caller``)、``request_id`` 仅日志;
         ``filters=_DISPATCH_CATALOG_FILTERS`` 锁 ``visibility=public`` 并中和 ``user_visibility``。
         返回 item 自带 ``bot_uuid``(``{bot_id}:{entity_id}``)。"""
+        request_id = f"task-prefetch-{uuid.uuid4().hex[:12]}"
+        logger.debug(
+            "catalog_search_start request_id=%s search=%r top_k=%d filters=%s",
+            request_id,
+            (search or "")[:500],
+            top_k,
+            _DISPATCH_CATALOG_FILTERS,
+        )
         try:
             res = self._bps.search_catalog_public_bots_by_keyword(
                 search=search,
                 page=1,
                 page_size=top_k,
                 caller=BotCatalogCaller(tenant_id="", user_id=None, app_id=None),
-                request_id=f"task-prefetch-{uuid.uuid4().hex[:12]}",
+                request_id=request_id,
                 filters=_DISPATCH_CATALOG_FILTERS,
             )
-        except Exception:  # noqa: BLE001  端口/catalog 不可用→空候选
+        except Exception as exc:  # noqa: BLE001  端口/catalog 不可用→空候选
+            logger.warning(
+                "catalog_search_failed request_id=%s search=%r error_type=%s error=%s",
+                request_id,
+                (search or "")[:500],
+                type(exc).__name__,
+                str(exc)[:500],
+                exc_info=True,
+            )
             return []
-        return res.get("items") or []
+        items = res.get("items") or [] if isinstance(res, dict) else []
+        logger.debug(
+            "catalog_search_complete request_id=%s search=%r raw_total=%s item_count=%d candidate_ids=%s",
+            request_id,
+            (search or "")[:500],
+            res.get("total") if isinstance(res, dict) else None,
+            len(items),
+            [item.get("bot_uuid") or item.get("bot_id") for item in items if isinstance(item, dict)],
+        )
+        return items

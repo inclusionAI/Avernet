@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import replace
 
 import pytest
@@ -140,6 +141,40 @@ def _plan_and_select(
             "assignee": "research-bot",
         },
     ))
+
+
+def test_relay_search_logs_empty_result_diagnostics(caplog) -> None:
+    class _EmptyDiscover:
+        def search_by_keyword(self, **kwargs):
+            return {"total": 0, "items": []}
+
+    service, _ = _service(discover=_EmptyDiscover())
+    with caplog.at_level(logging.DEBUG, logger="task.relay.search"):
+        result = _run(service.search_task_candidates(query="存储行业尽调"))
+
+    assert result == {"candidates": [], "total": 0}
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("search_start" in message and "存储行业尽调" in message for message in messages)
+    assert any("search_complete" in message and "raw_item_count=0" in message for message in messages)
+    assert any("search_empty reason=no_matching_candidates" in message for message in messages)
+
+
+def test_relay_search_logs_discover_failure(caplog) -> None:
+    class _FailingDiscover:
+        def search_by_keyword(self, **kwargs):
+            raise RuntimeError("catalog unavailable")
+
+    service, _ = _service(discover=_FailingDiscover())
+    with caplog.at_level(logging.WARNING, logger="task.relay.search"):
+        result = _run(service.search_task_candidates(query="存储行业尽调"))
+
+    assert result == {"candidates": [], "total": 0}
+    assert any(
+        "search_failed" in record.getMessage()
+        and "RuntimeError" in record.getMessage()
+        and "catalog unavailable" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_relay_exec_plan_search_dispatch_and_complete() -> None:
