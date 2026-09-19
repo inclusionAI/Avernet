@@ -39,17 +39,6 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-class _ClaimBcn:
-    """Fake BcnService: 返回 task_claim_mode=true & visibility=public 的 product:owner 池,供 rule 派发。"""
-
-    def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any", visibility=None):
-        return [
-            {"bot_id": "rule-a:1"},
-            {"bot_id": "rule-b:2"},
-            {"bot_id": "rule-c:3"},
-            {"bot_id": "rule-d:4"},
-        ]
-
 
 def _task_info(task_id: str = "t1") -> TaskInfo:
     return TaskInfo(
@@ -159,7 +148,7 @@ class TestBbsDegradation:
 
 class TestExecRetryReplay:
     """exec_error/SLA-timeout 重试节点(harness_retries>0 + 已有 run_mode/assignee)原样重跑:
-    跳过搜推、不覆写模式/执行者,避免 mode_coverage/候选抖动在重试时翻转模态或换 bot。
+    跳过搜推、不覆写模式/执行者,避免候选抖动在重试时翻转模态或换 bot。
     harness_retries 达 MAX_HARNESS→HUNG→升 BBS 的兜底在编排核侧,不在此测。"""
 
     def test_single_bot_retry_preserves_mode_and_assignee(self, svc):
@@ -258,12 +247,15 @@ class TestSearchBasedDispatchStrategy:
         assert strategy._bot.calls == []
 
 
-def test_search_strategy_default_rule_single_for_one_or_two_joined():
-    """off-path(rule,task_settings=None):2 joined(候选∩池)→ HIT_SINGLE(joined[0]),无随机。"""
+def test_search_strategy_default_rule_single_for_one_or_two_candidates():
+    """off-path(rule):2 unrestricted candidates → HIT_SINGLE(candidate[0])."""
 
     class _Discover:
         def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}]}
+            return {"items": [
+            {"bot_id": "rule-a", "bot_uuid": "rule-a:1"},
+            {"bot_id": "rule-b", "bot_uuid": "rule-b:2"},
+        ]}
 
     class _Bot:
         def __init__(self):
@@ -282,7 +274,7 @@ def test_search_strategy_default_rule_single_for_one_or_two_joined():
         extend_props={"owner_bot_id": "owner"},
     )
     bot = _Bot()
-    result = _run(SearchBasedDispatchStrategy(bot, _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
+    result = _run(SearchBasedDispatchStrategy(bot, _Discover()).apply(_node("c1"), graph))
 
     assert result.outcome == SearchOutcome.HIT_SINGLE
     assert result.bot_id == "rule-a:1"
@@ -290,12 +282,16 @@ def test_search_strategy_default_rule_single_for_one_or_two_joined():
     assert bot.calls == []
 
 
-def test_search_strategy_default_rule_group_capped_at_three_for_more_than_two_joined():
-    """off-path(rule,task_settings=None):3 joined → HIT_MULTI_BOTS(前 3,manager_worker),确定性。"""
+def test_search_strategy_default_rule_group_capped_at_three_for_more_than_two_candidates():
+    """off-path(rule):3 unrestricted candidates → HIT_MULTI_BOTS(前 3)."""
 
     class _Discover:
         def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}, {"bot_id": "rule-c"}]}
+            return {"items": [
+            {"bot_id": "rule-a", "bot_uuid": "rule-a:1"},
+            {"bot_id": "rule-b", "bot_uuid": "rule-b:2"},
+            {"bot_id": "rule-c", "bot_uuid": "rule-c:3"},
+        ]}
 
     class _Bot:
         async def send_and_wait_async(self, **kwargs):
@@ -309,7 +305,7 @@ def test_search_strategy_default_rule_group_capped_at_three_for_more_than_two_jo
         status=Status.PENDING,
         extend_props={"owner_bot_id": "owner"},
     )
-    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
 
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert result.group_formation is not None
@@ -320,12 +316,12 @@ def test_search_strategy_default_rule_group_capped_at_three_for_more_than_two_jo
     ]
 
 
-def test_search_strategy_default_rule_no_intersection_misses_without_fallback():
-    """off-path:候选与 claim 池无交集 → MISS(no_candidates),不回退池。"""
+def test_search_strategy_default_rule_accepts_candidate_outside_bbs_claim_roster():
+    """Rule dispatch does not consult task_claim_mode; an unmatched BBS roster is irrelevant."""
 
     class _Discover:
         def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "stranger"}]}
+            return {"items": [{"bot_id": "stranger", "bot_uuid": "stranger:owner"}]}
 
     class _Bot:
         async def send_and_wait_async(self, **kwargs):
@@ -339,129 +335,10 @@ def test_search_strategy_default_rule_no_intersection_misses_without_fallback():
         status=Status.PENDING,
         extend_props={"owner_bot_id": "owner"},
     )
-    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
 
-    assert result.outcome == SearchOutcome.MISS
-    assert result.miss_reason == "no_candidates"
-
-
-class _ModeCoverageSettings:
-    """task_settings stub:仅 mode_coverage 可配(其余 False),供 on-path 覆盖路由测试。"""
-
-    def __init__(self, mode_coverage: bool) -> None:
-        self._mc = mode_coverage
-
-    def is_enabled(self, setting_type: str) -> bool:
-        return self._mc if setting_type == "mode_coverage" else False
-
-
-def test_search_strategy_rule_mode_coverage_forces_single_group_bbs_then_normal():
-    """on-path(mode_coverage ON):同 run 连续派发 → single→group→bbs；全覆盖后确定性回到正常派发。
-    engine 负责写 graph 标记;此处手动推进 extend_props["mode_coverage"] 模拟 engine 写回。"""
-
-    class _Discover:
-        def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}, {"bot_id": "rule-c"}]}
-
-    class _Bot:
-        async def send_and_wait_async(self, **kwargs):
-            raise AssertionError("rule path must not call search skill")
-
-    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
-
-    graph = TaskExecutionGraph(
-        run_id=1,
-        loop_round=0,
-        status=Status.PENDING,
-        extend_props={"owner_bot_id": "owner", "mode_coverage": []},
-    )
-    strat = SearchBasedDispatchStrategy(
-        _Bot(), _Discover(), bcn=_ClaimBcn(),
-        task_settings=_ModeCoverageSettings(True),
-    )
-    node = _node("c1")
-
-    r1 = _run(strat.apply(node, graph))
-    assert r1.outcome == SearchOutcome.HIT_SINGLE
-    assert r1.bot_id == "rule-a:1"
-    graph.extend_props["mode_coverage"] = ["single"]  # 模拟 engine 写回
-
-    r2 = _run(strat.apply(node, graph))
-    assert r2.outcome == SearchOutcome.HIT_MULTI_BOTS
-    assert r2.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
-    graph.extend_props["mode_coverage"] = ["group", "single"]
-
-    r3 = _run(strat.apply(node, graph))
-    assert r3.outcome == SearchOutcome.MISS
-    assert r3.miss_reason == "mode_coverage_bbs"
-    graph.extend_props["mode_coverage"] = ["bbs", "group", "single"]  # 全覆盖
-
-    # 全覆盖后：按正常候选数规则确定性派发，不随机切换 single/group。
-    r4 = _run(strat.apply(node, graph))
-    assert r4.outcome == SearchOutcome.HIT_MULTI_BOTS
-    assert r4.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
-    r5 = _run(strat.apply(node, graph))
-    assert r5.outcome == SearchOutcome.HIT_MULTI_BOTS
-    assert r5.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
-
-
-def test_search_strategy_rule_mode_coverage_pool_fallback_when_join_empty():
-    """on-path:关键词候选与 claim 池无交集(join 空)→ 覆盖路由用 claim 池兜底命中 single。"""
-
-    class _Discover:
-        def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "stranger"}]}  # 不在 claim 池 → join 空
-
-    class _Bot:
-        async def send_and_wait_async(self, **kwargs):
-            raise AssertionError("rule path must not call search skill")
-
-    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
-
-    graph = TaskExecutionGraph(
-        run_id=1, loop_round=0, status=Status.PENDING,
-        extend_props={"owner_bot_id": "owner", "mode_coverage": []},
-    )
-    strat = SearchBasedDispatchStrategy(
-        _Bot(), _Discover(), bcn=_ClaimBcn(),
-        task_settings=_ModeCoverageSettings(True),
-    )
-    result = _run(strat.apply(_node("c1"), graph))
-
-    # join 空 → claim 池兜底 single(_ClaimBcn 首条 rule-a:1)
     assert result.outcome == SearchOutcome.HIT_SINGLE
-    assert result.bot_id == "rule-a:1"
-
-
-def test_search_strategy_rule_mode_coverage_off_falls_back_to_offpath():
-    """mode_coverage OFF(task_settings False)→ 走 off-path 正常 join+candidate-count。"""
-
-    class _Discover:
-        def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}]}
-
-    class _Bot:
-        async def send_and_wait_async(self, **kwargs):
-            raise AssertionError("rule path must not call search skill")
-
-    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
-
-    graph = TaskExecutionGraph(
-        run_id=1,
-        loop_round=0,
-        status=Status.PENDING,
-        extend_props={"owner_bot_id": "owner", "mode_coverage": []},
-    )
-    strat = SearchBasedDispatchStrategy(
-        _Bot(), _Discover(), bcn=_ClaimBcn(),
-        task_settings=_ModeCoverageSettings(False),
-    )
-    result = _run(strat.apply(_node("c1"), graph))
-
-    # 2 joined → single(off-path),不由覆盖路由强制
-    assert result.outcome == SearchOutcome.HIT_SINGLE
-    assert result.bot_id == "rule-a:1"
-
+    assert result.bot_id == "stranger:owner"
 
 def test_search_strategy_composes_owner_identity_for_openapi_call():
     class _Discover:

@@ -27,8 +27,8 @@ def _is_exec_retry_replay(node: TaskNode) -> bool:
     且有效执行模态 ∈ {single_bot,coop_group} 且 ``assignee`` 非空(曾真实派发执行,非 MISS/stale PENDING)。
     命中后 dispatcher 不重搜推、不覆写 run_mode/assignee,交编排核 ``_prepare_into._handle_node`` 的
     "run_mode+assignee" 分支走 ``start_run`` 原样重投(single_bot 重发同一 bot;coop_group 向既有
-    group_id 重投,即首派 form_coop_group 之后的同条 start_run 路径)。避免重试被搜推/claim_join/
-    mode_coverage 翻转模态或换执行者;harness_retries 达 MAX_HARNESS→HUNG→升 BBS 的兜底不变。
+    group_id 重投,即首派 form_coop_group 之后的同条 start_run 路径)。避免重试被搜推
+    翻转模态或换执行者;harness_retries 达 MAX_HARNESS→HUNG→升 BBS 的兜底不变。
     首次派发(harness_retries=0)/MISS 无 assignee/PENDING-stale 无 assignee/bbs → 不命中,走正常搜推/退化。
     """
     if int(node.run_info.extend_props.get("harness_retries", 0) or 0) <= 0:
@@ -106,16 +106,11 @@ class TaskDispatcher:
                     node.run_info.extend_props["pending_group_formation"] = result.group_formation
                 else:  # MISS
                     node.run_info.extend_props["miss_events"] = [result.miss_reason or "no_bot"]
-                # JOIN 丢掉的候选透出到节点 unauthorized_bots(dashboard 暴露,引导 owner grant)
-                if getattr(result, "unauthorized_bots", None):
-                    node.run_info.extend_props["unauthorized_bots"] = result.unauthorized_bots
                 # REQ-2 DISPATCH rationale —— 策略 apply 填充,经 ``dataclasses.asdict``
                 # 写入 ``node.run_info.extend_props["_dispatch_rationale"]`` 透给引擎
                 # DISPATCH 闸门(此为唯一 carrier,无 contextvar)。``None``/异常 → 不写
-                # (引擎 gate 防御读取 → ``ext_info=None``)。NOTE: ``unauthorized_bots``
-                # 的 ``reason`` 仍保持 ``claim_mode_off``(dashboard 兼容),新微分类
-                # (catalog_miss / score_below_threshold / claim_filter_disabled)仅在
-                # ``_dispatch_rationale.join_dropped[].reason`` 出现。
+                # (引擎 gate 防御读取 → ``ext_info=None``)。派发策略不再执行 claim-join
+                # 后置过滤；这里仅透传仍保留的轨迹兼容字段。
                 if getattr(result, "rationale", None) is not None:
                     try:
                         node.run_info.extend_props["_dispatch_rationale"] = dataclasses.asdict(
@@ -130,7 +125,7 @@ class TaskDispatcher:
                 group = getattr(result, "group_formation", None)
                 logger.info(
                     "[task][dispatch] task=%s node=%s outcome=%s run_mode=%s assignee=%s "
-                    "group_mode=%s group_bot_ids=%s unauthorized=%s",
+                    "group_mode=%s group_bot_ids=%s",
                     node.task_id,
                     node.node_id,
                     result.outcome,
@@ -138,7 +133,6 @@ class TaskDispatcher:
                     node.run_info.assignee or "<group pending/miss>",
                     group.collab_mode if group is not None else None,
                     list(group.bot_ids) if group is not None else None,
-                    len(getattr(result, "unauthorized_bots", None) or []),
                 )
                 return node
             except Exception as ex:  # noqa: BLE001  搜推异常→吞掉,留 PENDING 交 harness 按超时重试

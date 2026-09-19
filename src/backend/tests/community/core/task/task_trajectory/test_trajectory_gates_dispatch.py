@@ -1,11 +1,10 @@
-"""TDD tests for the DISPATCH trajectory gate (REQ-2 + REQ-7).
+"""TDD tests for the DISPATCH trajectory gate (REQ-2).
 
 P3 item 1 of the task-trajectory spec. Covers four surfaces (per tasks.md P3):
     1. **Dispatcher writes rationale** — `TaskDispatcher.dispatch` with the real
        `SearchBasedDispatchStrategy` writes `dataclasses.asdict(DispatchRationale)`
        into `node.run_info.extend_props["_dispatch_rationale"]` carrying
-       `strategy_name`/`decision_mode`/`candidates`/`join_dropped` (with classified
-       reasons) for the engine DISPATCH gate to read.
+       `strategy_name`/`decision_mode`/`candidates` for the engine DISPATCH gate to read.
     2. **DISPATCH gate emits a trajectory event with the rationale** — with a
        capturing fake trajectory repo injected into `ExecutionEngine`, drive each
        of the three DISPATCH gates (`HIT_SINGLE` / `HIT_MULTI` / `MISS`) via
@@ -13,11 +12,6 @@ P3 item 1 of the task-trajectory spec. Covers four surfaces (per tasks.md P3):
        `task_trajectory_events` row has `action_type=dispatch`, matching
        `action_result`, and `ext_info` JSON carrying `_dispatch_rationale` with
        the full `DispatchRationale` shape.
-    3. **REQ-7 reason taxonomy** — for each constructed drop scenario
-       (`claim_mode_off` / `catalog_miss` / `score_below_threshold` /
-       `claim_filter_disabled`), assert `DispatchRationale.join_dropped[].reason`
-       matches. Driven at the strategy `apply` level (full flow through
-       `_apply_claim_join` + the rationale builder).
     4. **Defensive rationale assembly** — when a sub-field of the rationale would
        raise (a malformed `recommend.score`), the strategy `try/except`-swallows
        → `sr.rationale is None`, dispatch still completes normally, the
@@ -68,7 +62,6 @@ from agentclaw.community.core.task.task_dispatch.strategies import (
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     DispatchCandidate,
     DispatchRationale,
-    JoinDropped,
 )
 
 
@@ -109,15 +102,6 @@ def _node(node_id: str = "c1", task_id: str = "t1", run_mode: str | None = None,
         node_run_graph=None,  # type: ignore[arg-type]
     )
 
-
-class _Gate:
-    """JOIN gate stub — `is_enabled()` toggles the filter."""
-
-    def __init__(self, enabled: bool) -> None:
-        self._e = enabled
-
-    def is_enabled(self) -> bool:
-        return self._e
 
 
 class _Bcn:
@@ -189,17 +173,16 @@ class TestDispatcherWritesRationale:
     """REQ-2 #2: `TaskDispatcher.dispatch` writes the rationale dict into
     `node.run_info.extend_props["_dispatch_rationale"]` (the carrier to the engine
     gate; no contextvar exists). The dict carries `strategy_name`, `decision_mode`,
-    `candidates`, `join_dropped` with classified reasons.
+    and `candidates`.
     """
 
     def _dispatcher_with_skills(self, svc, discover_items, claim_on, bot_kwargs,
-                                 gate_enabled=True, use_skill=True):
+                                 use_skill=True):
         discover = _Discover(discover_items)
         bot = _Bot(**bot_kwargs)
         bcn = _Bcn(claim_on) if claim_on is not None else None
-        gate = _Gate(gate_enabled) if gate_enabled else None
         strat = SearchBasedDispatchStrategy(
-            bot, discover, bcn=bcn, join_gate=gate, use_search_skill=use_skill,
+            bot, discover, bcn=bcn, use_search_skill=use_skill,
         )
         d = TaskDispatcher(svc)
         d.set_strategies([strat])
@@ -228,8 +211,8 @@ class TestDispatcherWritesRationale:
         assert c0["short_profile"] == "pA"
         # prefetch_tokens populated from jieba-tokenized goal.objective
         assert isinstance(rat["prefetch_tokens"], list) and rat["prefetch_tokens"]
-        # filter ran, no drops (bot in claim_on)
-        assert rat["join_filter_applied"] is True
+        # claim-join post-filter is no longer part of dispatch.
+        assert rat["join_filter_applied"] is False
         assert rat["join_dropped"] == []
         # skill-mode prompt/response digests are SHA-256 hex strings
         assert isinstance(rat["skill_prompt_digest"], str) and len(rat["skill_prompt_digest"]) == 64
@@ -245,7 +228,7 @@ class TestDispatcherWritesRationale:
             bot_kwargs={"outcome": "HIT_SINGLE", "bot_id": "A"},
             use_skill=False,
         )
-        # Rule mode requires _load_rule_test_pool — bcn returns the pool
+        # Rule mode uses the unrestricted prefetch catalog directly.
         out = _run(d.dispatch([_node("c1")]))
         rat = out[0].run_info.extend_props.get("_dispatch_rationale")
         if rat is None:
@@ -391,8 +374,8 @@ _SAMPLE_RATIONALE: dict = dataclasses.asdict(
         decision_mode="skill",
         candidates=[DispatchCandidate(bot_id="A", recommend_score=0.9, short_profile="pA")],
         prefetch_tokens=["存储", "分析"],
-        join_filter_applied=True,
-        join_dropped=[JoinDropped(bot_id="X", reason="claim_mode_off")],
+        join_filter_applied=False,
+        join_dropped=[],
         skill_prompt_digest="a" * 64,
         skill_response_digest="b" * 64,
     )
@@ -446,7 +429,7 @@ class TestDispatchGateEmitsTrajectory:
         assert rat["strategy_name"] == "search"
         assert rat["decision_mode"] == "skill"
         assert rat["candidates"] == [{"bot_id": "A", "recommend_score": 0.9, "short_profile": "pA"}]
-        assert rat["join_dropped"] == [{"bot_id": "X", "reason": "claim_mode_off"}]
+        assert rat["join_dropped"] == []
 
     def test_hit_multi_gate_emits_trajectory_with_rationale(self, svc):
         from agentclaw.community.core.task.domain.models import TaskNode
@@ -544,116 +527,30 @@ class TestDispatchGateEmitsTrajectory:
         assert rec.ext_info is None
 
 
-# ---------------------------------------------------------------------------
-# 3. REQ-7 reason taxonomy (claim_mode_off / catalog_miss / score_below_threshold / claim_filter_disabled)
-# ---------------------------------------------------------------------------
-
-
-def _claim_on_with(*products: str) -> list[dict]:
-    """Construct a CLAIM_ON roster (bcs `{p}:{o}` form) for the given products."""
-    return [{"bot_id": f"{p}:owner_{p.lower()}"} for p in products]
-
-
 def _apply_skill_strategy(
     *,
     discover_items: list[dict],
     bot_outcome: str = "HIT_SINGLE",
     bot_kwargs: dict | None = None,
-    claim_on: list[dict] | None = None,
 ) -> "SearchResult":
-    """Run SearchBasedDispatchStrategy.apply end-to-end with skill mode and the
-    discover/bot/bcn/gate fakes; return the resulting SearchResult (with `rationale`).
-
-    Pass ``claim_on=None`` to drop the BcnService (filter OFF). A gate is always
-    constructed (enabled); the JOIN filter is OFF when bcn is None (existing
-    fail-open path, mirrors the production guard).
-    """
+    """Run the search strategy in skill mode without the removed claim-join gate."""
     from agentclaw.community.core.task.domain.models import TaskExecutionGraph
 
     discover = _Discover(discover_items)
     bot = _Bot(outcome=bot_outcome, **(bot_kwargs or {}))
-    bcn = _Bcn(claim_on) if claim_on is not None else None
-    gate = _Gate(True)
-    strat = SearchBasedDispatchStrategy(
-        bot, discover, bcn=bcn, join_gate=gate, use_search_skill=True,
+    strategy = SearchBasedDispatchStrategy(
+        bot, discover, use_search_skill=True,
     )
     graph = TaskExecutionGraph(
         run_id=1, loop_round=0, status=Status.PENDING,
         extend_props={"owner_bot_id": "owner:1", "owner_user_id": "u1"},
     )
-    return _run(strat.apply(_node("c1"), graph))
-
-
-class TestReq7ReasonTaxonomy:
-    """REQ-7: refined reason taxonomy flows into `DispatchRationale.join_dropped[].reason`:
-        - `claim_mode_off`: bot in catalog with recommend.score >= threshold, NOT in claim_on.
-        - `catalog_miss`: bot picked by LLM/rule but NOT in the prefetch catalog.
-        - `score_below_threshold`: bot in catalog with recommend.score < threshold.
-        - `claim_filter_disabled`: filter OFF and bot picked is NOT in the catalog
-          (would have been catalog_miss if the filter were on — tracked for visibility).
-    """
-
-    def test_claim_mode_off(self):
-        """Bot in catalog (score above threshold), but bot's product not in claim_on → `claim_mode_off`.
-        Existing `unauthorized_bots[].reason` stays `claim_mode_off` (backward compat)."""
-        r = _apply_skill_strategy(
-            discover_items=[{"bot_id": "X", "recommend": {"score": 0.9, "short_profile": "pX"}}],
-            bot_kwargs={"bot_id": "X"},
-            claim_on=_claim_on_with("A"),  # X not in claim_on → dropped
-        )
-        assert r.outcome == SearchOutcome.MISS
-        assert r.unauthorized_bots == [
-            {"bot_id": "X", "owner_user_id": "", "reason": "claim_mode_off"},
-        ]
-        assert r.rationale is not None
-        assert r.rationale.join_filter_applied is True
-        assert r.rationale.join_dropped == [JoinDropped(bot_id="X", reason="claim_mode_off")]
-
-    def test_catalog_miss(self):
-        """LLM picks `Phantom` but Phantom is NOT in the prefetch catalog → `catalog_miss`
-        (most specific signal at this drop point — not even in the catalog)."""
-        r = _apply_skill_strategy(
-            discover_items=[{"bot_id": "X", "recommend": {"score": 0.9, "short_profile": "pX"}}],
-            bot_kwargs={"bot_id": "Phantom"},
-            claim_on=_claim_on_with("X"),  # X in claim_on, Phantom not in catalog → Phantom is non-catalog
-        )
-        assert r.outcome == SearchOutcome.MISS
-        assert r.rationale is not None
-        assert r.rationale.join_dropped == [JoinDropped(bot_id="Phantom", reason="catalog_miss")]
-
-    def test_score_below_threshold(self):
-        """Bot in catalog with recommend.score < threshold (0.5) and not in claim_on
-        → `score_below_threshold` (more specific than claim_mode_off)."""
-        r = _apply_skill_strategy(
-            discover_items=[{"bot_id": "X", "recommend": {"score": 0.3, "short_profile": "pX"}}],
-            bot_kwargs={"bot_id": "X"},
-            claim_on=_claim_on_with("A"),  # X not in claim_on → dropped; score < threshold
-        )
-        assert r.outcome == SearchOutcome.MISS
-        assert r.rationale is not None
-        assert r.rationale.join_dropped == [JoinDropped(bot_id="X", reason="score_below_threshold")]
-
-    def test_claim_filter_disabled(self):
-        """JOIN filter OFF (gate None) and the LLM-picked bot is NOT in catalog →
-        the bot stays in sr (existing fail-open passthrough) BUT a `claim_filter_disabled`
-        entry is emitted in `join_dropped` for trajectory visibility (the bot would
-        have been `catalog_miss` if the filter were on)."""
-        r = _apply_skill_strategy(
-            discover_items=[{"bot_id": "X", "recommend": {"score": 0.9, "short_profile": "pX"}}],
-            bot_kwargs={"bot_id": "Phantom"},
-            claim_on=None,  # no Bcn → filter OFF (fallback path)
-        )
-        assert r.outcome == SearchOutcome.HIT_SINGLE
-        assert r.bot_id == "Phantom"  # passthrough (existing behavior preserved)
-        assert r.unauthorized_bots is None  # unchanged (backward compat)
-        # Rationale: filter didn't run, Phantom is tracked for visibility.
-        assert r.rationale is not None
-        assert r.rationale.join_filter_applied is False
-        assert JoinDropped(bot_id="Phantom", reason="claim_filter_disabled") in r.rationale.join_dropped
+    return _run(strategy.apply(_node("c1"), graph))
 
 
 # ---------------------------------------------------------------------------
-# 4. Defensive rationale assembly (try/except-safe; never breaks dispatch)
+# 3. Defensive rationale assembly (try/except-safe; never breaks dispatch)
+
 # ---------------------------------------------------------------------------
 
 
@@ -670,7 +567,6 @@ class TestDefensiveRationale:
         r = _apply_skill_strategy(
             discover_items=[{"bot_id": "X", "recommend": {"score": "bad", "short_profile": "p"}}],
             bot_kwargs={"bot_id": "X"},
-            claim_on=None,  # filter OFF — focus on the rationale build path
         )
         # Dispatch still completed with the LLM's HIT_SINGLE choice.
         assert r.outcome == SearchOutcome.HIT_SINGLE

@@ -1,4 +1,4 @@
-"""DISPATCH rationale builders + JOIN drop-reason micro-classes (REQ-2 + REQ-7).
+"""DISPATCH rationale builders + legacy JOIN drop-reason compatibility fields (REQ-2).
 
 A small leaf module — no import from ``strategies.py`` at module load time — so
 that ``strategies.py`` can ``from .rationale import _claim_product, _build_search_rationale``
@@ -7,20 +7,13 @@ belong here (factored out of ``strategies.py`` per AGENTS.md's ≤1000-lines-per
 constraint); the strategy just calls in with rule-mode/skill-mode inputs and receives
 either a ``DispatchRationale`` or ``None`` (assembly is ``try/except``-safe — REQ-2 验收).
 
-Why landscape:
-    * `claim_mode_off` — bot in catalog with recommend.score >= threshold (or no
-      score field) and not in claim_on roster (the existing default drop reason).
-    * `catalog_miss` — bot picked by LLM/rule but NOT in the prefetch catalog.
-    * `score_below_threshold` — bot in catalog with recommend.score below threshold.
-    * `claim_filter_disabled` — JOIN filter is OFF and a search-result bot is NOT
-      in the catalog (a would-be ``catalog_miss`` if the filter were on); emitted
-      into ``join_dropped`` for trajectory visibility only — the bot is **not**
-      actually dropped from ``sr`` (existing fail-open passthrough preserved).
+Compatibility note:
+    * ``join_dropped`` and its historical reason values remain in the trajectory
+      schema for readers of old events. Current dispatch never removes candidates
+      through claim-join post-filtering; the filter-disabled visibility marker may
+      still be emitted for trajectory compatibility, but it never affects routing.
 
-Invariants (mirrored from spec/tasks.md):
-    * Does NOT modify ``unauthorized_bots[].reason`` (``claim_mode_off`` retained
-      for dashboard backward compatibility). New reasons appear ONLY in
-      ``DispatchRationale.join_dropped[].reason``.
+Invariants:
     * ``_build_search_rationale`` is wrapped in ``try/except``: any sub-field
       raise (e.g. malformed ``recommend.score`` cannot ``float()``) → returns
       ``None`` + DEBUG log; never disables the dispatch forward-driving path.
@@ -45,11 +38,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("task.dispatcher")
 
-# REQ-7 micro-classification threshold: a prefetch candidate with
-# ``recommend.score < _JOIN_SCORE_THRESHOLD`` is "low-confidence" → falls into
-# ``score_below_threshold`` when dropped. ``_prefetch_candidates`` already
-# filters out scores below 0.01, so this threshold (0.5) sits above the search
-# filter floor and designates "below recommended confidence".
+# Legacy trajectory taxonomy threshold retained for reading old rationale data.
 _JOIN_SCORE_THRESHOLD = 0.5
 
 
