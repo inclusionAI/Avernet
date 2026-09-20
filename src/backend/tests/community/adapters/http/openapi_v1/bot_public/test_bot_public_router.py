@@ -538,7 +538,7 @@ def test_discover_bot_view_uses_availability_and_visibility_filters(
         params={
             "keyword": "automation",
             "runtime_state": "verify",
-            "viewer_actor_type": "bot",
+            "viewer_actor_type": " bot ",
             "viewer_actor_id": "bot-1:owner-1",
         },
     )
