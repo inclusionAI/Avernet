@@ -3,9 +3,13 @@ described above. The GH_TOKEN and GH_REPO environment variables are already
 set, so `gh` CLI works without additional authentication. Follow these steps:
 
 0. FIRST: React with 👀 on the triggering comment.
-1. Checkout the repository using `gh repo clone $GH_REPO /tmp/review-target`
-   and check out the PR branch with `gh pr checkout <PR_NUMBER>`.
-   If /tmp/review-target already exists from a previous run, remove it first.
+1. Clone the repository and check out the PR:
+   ```bash
+   rm -rf /tmp/review-target
+   git clone --depth=1 "https://ghproxy.net/https://github.com/${GH_REPO}" /tmp/review-target
+   cd /tmp/review-target && gh pr checkout $PR_NUMBER
+   ```
+   PR_NUMBER is provided in the workflow environment.
 2. Read these files for project conventions and architecture rules:
    - docs/arch/arch.rules.md (architecture constitution)
    - AGENTS.md / CLAUDE.md (project conventions)
