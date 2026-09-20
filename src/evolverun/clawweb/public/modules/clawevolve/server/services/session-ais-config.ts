@@ -7,6 +7,10 @@ export function sessionAisDeadline(seconds: number, now = Date.now()): number {
   return now + seconds * 1000;
 }
 
+export function sessionAisReleaseChannel(environment: string | undefined): "pre" | "prod" {
+  return environment === "prod" || environment === "gray" ? "prod" : "pre";
+}
+
 export function sessionAisBaseConfig(options: SessionAisOptions, now = Date.now()): SessionAisBaseConfig | undefined {
   if (!options.deployment) return undefined;
   return { ...options.deployment, deadlineAt: sessionAisDeadline(options.deadlineSeconds, now) };
@@ -14,10 +18,12 @@ export function sessionAisBaseConfig(options: SessionAisOptions, now = Date.now(
 
 export function sessionAisParams(config: {
   taskId: string; stepId: string; attempt: number; clawwebUrl: string;
+  releaseChannel: "pre" | "prod";
   aisBase: SessionAisBaseConfig;
 }, taskType: string, input: Record<string, unknown>): Record<string, string> {
   return { "${clawevolve_params}": JSON.stringify({
     taskType, taskId: config.taskId, stepId: config.stepId, attempt: config.attempt, input,
-    runtime: { clawwebUrl: config.clawwebUrl, package: { packageId: config.aisBase.packageId } },
+    runtime: { clawwebUrl: config.clawwebUrl, releaseChannel: config.releaseChannel,
+      package: { packageId: config.aisBase.packageId } },
   }) };
 }

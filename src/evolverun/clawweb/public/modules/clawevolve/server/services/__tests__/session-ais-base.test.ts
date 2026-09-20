@@ -3,9 +3,16 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { runMigrations, SqliteDatabase } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "../../repositories/evolve-repository.js";
-import { sessionAisBaseConfig, sessionAisDeadline, sessionAisParams } from "../session-ais-config.js";
+import { sessionAisBaseConfig, sessionAisDeadline, sessionAisParams, sessionAisReleaseChannel } from "../session-ais-config.js";
 
 describe("session analysis AIS base contract", () => {
+  it("maps ClawWeb deployment environments to isolated AIS release lanes", () => {
+    expect(sessionAisReleaseChannel("dev")).toBe("pre");
+    expect(sessionAisReleaseChannel("pre")).toBe("pre");
+    expect(sessionAisReleaseChannel("gray")).toBe("prod");
+    expect(sessionAisReleaseChannel("prod")).toBe("prod");
+  });
+
   it("freezes the selected Snapshot and explicit Skill in the compact envelope", () => {
     expect(sessionAisBaseConfig({ legacySnapshotId: 1, deadlineSeconds: 7200 })).toBeUndefined();
     expect(sessionAisDeadline(90, 500)).toBe(90_500);
@@ -13,9 +20,9 @@ describe("session analysis AIS base contract", () => {
       deployment: { snapshotId: 17, packageId: "clawevolve-ais-diagnose" } }, 0)!;
     const input = { sessionId: "s", question: "why", nested: { preserve: true } };
     const task = JSON.parse(sessionAisParams({ taskId: "t", stepId: "s", attempt: 1,
-      clawwebUrl: "https://example.com", aisBase }, "session_analysis", input)["${clawevolve_params}"]);
+      clawwebUrl: "https://example.com", releaseChannel: "pre", aisBase }, "session_analysis", input)["${clawevolve_params}"]);
     expect(task.input).toEqual(input);
-    expect(task.runtime).toEqual({ clawwebUrl: "https://example.com",
+    expect(task.runtime).toEqual({ clawwebUrl: "https://example.com", releaseChannel: "pre",
       package: { packageId: "clawevolve-ais-diagnose" } });
     expect(Object.keys(task).sort()).toEqual(["attempt", "input", "runtime", "stepId", "taskId", "taskType"]);
   });
