@@ -265,6 +265,10 @@ pub(super) struct RecordingMessageFlow {
     pub(super) web_sends: Mutex<Vec<WebSendCommand>>,
     pub(super) failed_dispatch_count: Mutex<usize>,
     pub(super) active_run_ids: Mutex<Vec<String>>,
+    pub(super) chat_aborts: Mutex<Vec<ChatAbortCommand>>,
+    pub(super) abort_success_bots: Mutex<std::collections::HashSet<String>>,
+    pub(super) queued_cancellations: Mutex<Vec<CancelLatestQueuedMessageCommand>>,
+    pub(super) queued_cancellation_succeeds: Mutex<bool>,
 }
 
 #[async_trait]
@@ -315,9 +319,48 @@ impl MessageFlowService for RecordingMessageFlow {
 
     async fn handle_chat_abort(
         &self,
-        _cmd: ChatAbortCommand,
+        cmd: ChatAbortCommand,
     ) -> ServiceResult<ChatAbortOutcome> {
-        Err(not_configured("chat abort"))
+        let succeeded = self.abort_success_bots.lock().await.contains(&cmd.bot_id);
+        self.chat_aborts.lock().await.push(cmd.clone());
+        let aborted_run_ids = succeeded
+            .then(|| vec![format!("run-{}", cmd.bot_id)])
+            .unwrap_or_default();
+        Ok(ChatAbortOutcome {
+            aborted: succeeded,
+            aborted_run_ids,
+            bot_deliveries: Vec::new(),
+            frontend_deliveries: Vec::new(),
+            failures: Vec::new(),
+        })
+    }
+
+    async fn cancel_latest_queued_message(
+        &self,
+        cmd: CancelLatestQueuedMessageCommand,
+    ) -> ServiceResult<CancelLatestQueuedMessageOutcome> {
+        self.queued_cancellations.lock().await.push(cmd);
+        let succeeds = *self.queued_cancellation_succeeds.lock().await;
+        Ok(CancelLatestQueuedMessageOutcome {
+            message_id: succeeds.then(|| "queued-message".to_string()),
+            cancelled: succeeds
+                .then(|| {
+                    vec![bcs_service_api::DeliveryStatusView {
+                        admission_error: None,
+                        delivery_id: "delivery-1".into(),
+                        message_id: "queued-message".into(),
+                        target_bot_id: "manager_bot".into(),
+                        flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
+                        kind: bcs_domain::DeliveryType::Send,
+                        status: bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled,
+                        state_version: 2,
+                        run_id: None,
+                        wait_reason: None,
+                        content_preview: None,
+                    }]
+                })
+                .unwrap_or_default(),
+        })
     }
 
     async fn register_task_run_alias(

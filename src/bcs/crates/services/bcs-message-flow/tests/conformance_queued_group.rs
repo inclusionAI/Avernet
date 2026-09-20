@@ -14,6 +14,106 @@ mod support;
 use session_support::{StaticSessionManagement, test_session};
 
 #[tokio::test]
+async fn cancel_latest_queued_selects_the_calling_humans_latest_im_message() {
+    use bcs_domain::{
+        DeliveryType, MessageVisibilityDomain, NewMessage, SenderType,
+        message_delivery::DeliveryFlowKind,
+    };
+    use bcs_service_api::{
+        CancelLatestQueuedMessageCommand, ManagedMessageDeliveryService,
+        port::repo::message_delivery::{AdmitMessageDeliveries, DeliveryAdmissionTarget},
+    };
+
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let group = support.group.get("group-1").await.unwrap();
+    let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+    let service = Arc::new(
+        bcs_message_flow::managed_delivery::ManagedMessageDelivery::new(repo.clone()),
+    );
+    let flow = BcsMessageFlow::new(
+        support.group,
+        support.routing,
+        support.registry,
+        support.bot_delivery,
+        support.frontend_delivery,
+    )
+    .with_message_repo(repo)
+    .with_managed_deliveries(service.clone())
+    .with_session_management(Arc::new(StaticSessionManagement::new(test_session(
+        "group-1:cancel-im",
+        "group-1",
+        group.participants,
+    ))));
+
+    for (id, sender, source_im_message_id) in [
+        ("own-old", "human_1", Some("im-old")),
+        ("own-im", "human_1", Some("im-current")),
+        ("other-new", "bot-observer", Some("im-other")),
+        ("own-workbench", "human_1", None),
+    ] {
+        service
+            .admit(AdmitMessageDeliveries {
+                display_message: None,
+                message_id: id.into(),
+                flow_kind: DeliveryFlowKind::Group,
+                now_ms: 100,
+                expire_at_ms: None,
+                event: None,
+                message: NewMessage {
+                    visibility_domain: MessageVisibilityDomain::Chat,
+                    audience: None,
+                    group_id: "group-1".into(),
+                    session_id: "group-1:cancel-im".into(),
+                    sender_id: sender.into(),
+                    sender_type: SenderType::Human,
+                    message_type: "chat".into(),
+                    content: json!({"text": id, "source_im_message_id": source_im_message_id}),
+                    client_msg_id: None,
+                    owner_bot_id: None,
+                    created_at: 100,
+                    run_id: String::new(),
+                },
+                targets: vec![DeliveryAdmissionTarget {
+                    rejection: None,
+                    target_bot_id: "bot-driver".into(),
+                    kind: DeliveryType::Send,
+                    max_queued: 10,
+                    semantic_projection_json: json!({"version": 1}),
+                }],
+            })
+            .await
+            .unwrap();
+    }
+
+    let outcome = flow
+        .cancel_latest_queued_message(CancelLatestQueuedMessageCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".into(),
+                staff_no: "1".into(),
+            }),
+            group_id: "group-1".into(),
+            session_id: "group-1:cancel-im".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(outcome.message_id.as_deref(), Some("own-im"));
+    assert_eq!(outcome.cancelled.len(), 1);
+    assert_eq!(
+        outcome.cancelled[0].status,
+        bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled
+    );
+    let rows = service.snapshot(Some("group-1:cancel-im")).await.unwrap();
+    assert!(rows.iter().any(|row| {
+        row.source_message_id == "own-old"
+            && row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Queued
+    }));
+    assert!(rows.iter().any(|row| {
+        row.source_message_id == "other-new"
+            && row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Queued
+    }));
+}
+
+#[tokio::test]
 async fn queued_relay_enforces_group_turn_limit() {
     use bcs_service_api::ManagedMessageDeliveryService;
     for all_managed in [false, true] {

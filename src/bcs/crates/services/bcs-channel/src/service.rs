@@ -6,7 +6,10 @@ impl ChannelService for BcsChannelService {
         msg.conversation_type = normalize_required(&msg.conversation_type, "conversation_type")
             .map_err(|error| invalid_inbound(error))?
             .to_string();
-        if msg.conversation_type == "2" && !msg.is_at_bot {
+        if msg.conversation_type == "2"
+            && !msg.is_at_bot
+            && commands::parse_channel_command(&msg.text).is_none()
+        {
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %msg.account_ref,

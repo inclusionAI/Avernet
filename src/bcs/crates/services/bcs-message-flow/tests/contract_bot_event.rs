@@ -179,13 +179,22 @@ async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
     let (shutdown, receiver) = tokio::sync::watch::channel(false);
     let notifications = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
     let now = chrono::Utc::now().timestamp_millis();
+    service.admit(AdmitMessageDeliveries {
+        display_message: None,
+        message_id: "im-young".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 3_000, expire_at_ms: None, event: None,
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
+        message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-original".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
+            message_type: "chat".into(), content: json!({"text":"young","source_im_message_id":"im-young-source"}), client_msg_id: None, owner_bot_id: None, created_at: (now - 3_000) as u64, run_id: String::new() },
+    }).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(channel.outbound().await.is_empty(), "queued hints wait ten seconds");
     let admitted = service.admit(AdmitMessageDeliveries {
         display_message: None,
-        message_id: "im-queue".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 3_000, expire_at_ms: None, event: None,
+        message_id: "im-queue".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: None, event: None,
         targets: [("bot-driver", DeliveryType::Send), ("bot-observer", DeliveryType::Send), ("context-only", DeliveryType::Inject)].into_iter()
             .map(|(bot, kind)| DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind, max_queued: 10, semantic_projection_json: json!({"version":1}) }).collect(),
         message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-original".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
-            message_type: "chat".into(), content: json!({"text":"hello","source_im_message_id":"im-original"}), client_msg_id: None, owner_bot_id: None, created_at: (now - 3_000) as u64, run_id: String::new() },
+            message_type: "chat".into(), content: json!({"text":"hello","source_im_message_id":"im-original"}), client_msg_id: None, owner_bot_id: None, created_at: (now - 11_000) as u64, run_id: String::new() },
     }).await.unwrap();
     timeout(Duration::from_secs(2), async {
         while channel.outbound().await.is_empty() { tokio::time::sleep(Duration::from_millis(10)).await; }
@@ -196,6 +205,7 @@ async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
     assert_eq!(messages[0].bcs_session_id, "group-1:im-original");
     let text = messages[0].text.as_ref().unwrap();
     assert!(text.contains("bot-driver") && text.contains("bot-observer") && text.contains("已排队"));
+    assert!(text.contains("/abort") && text.contains("/cacel"));
     assert!(!text.contains("context-only"));
     let row = &admitted.deliveries[0];
     service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,

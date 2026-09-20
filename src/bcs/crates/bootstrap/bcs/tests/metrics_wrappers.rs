@@ -73,6 +73,14 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
         .await
         .unwrap();
     let _ = flow.handle_chat_abort(chat_abort_cmd()).await.unwrap();
+    assert_eq!(
+        flow.cancel_latest_queued_message(cancel_latest_queued_message_cmd())
+            .await
+            .unwrap()
+            .message_id
+            .as_deref(),
+        Some("queued-message")
+    );
     let _ = flow
         .handle_task_dispatch(task_dispatch_cmd())
         .await
@@ -394,6 +402,16 @@ impl MessageFlowService for MessageFlowFake {
         })
     }
 
+    async fn cancel_latest_queued_message(
+        &self,
+        _cmd: CancelLatestQueuedMessageCommand,
+    ) -> ServiceResult<CancelLatestQueuedMessageOutcome> {
+        Ok(CancelLatestQueuedMessageOutcome {
+            message_id: Some("queued-message".to_string()),
+            cancelled: Vec::new(),
+        })
+    }
+
     async fn register_task_run_alias(
         &self,
         _task_id: &str,
@@ -692,6 +710,14 @@ fn chat_abort_cmd() -> ChatAbortCommand {
         session_id: "session-wrapper".to_string(),
         bot_id: "bot-wrapper".to_string(),
         run_id: Some("run-wrapper".to_string()),
+    }
+}
+
+fn cancel_latest_queued_message_cmd() -> CancelLatestQueuedMessageCommand {
+    CancelLatestQueuedMessageCommand {
+        caller: CallerContext::Public,
+        group_id: "group-wrapper".to_string(),
+        session_id: "session-wrapper".to_string(),
     }
 }
 

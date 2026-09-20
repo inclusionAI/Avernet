@@ -25,7 +25,8 @@ use bcs_service_api::{
     BotAbortDeliveryCommand, BotAbortDeliveryResult, BotDeliveryCommand, BotDeliveryKind,
     BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotEventOutcome,
     BotMetricCount, BotMetricsSnapshotPort,
-    ChatAbortCommand, ChatAbortOutcome, ChatRunCancelCommand, ChatRunMetricCount, ChatRunQueryCommand,
+    CancelLatestQueuedMessageCommand, CancelLatestQueuedMessageOutcome, ChatAbortCommand,
+    ChatAbortOutcome, ChatRunCancelCommand, ChatRunMetricCount, ChatRunQueryCommand,
     DeliveryBlockContext, DeliveryBlockReason, DeliveryMetricKind, DeliveryMetricTarget,
     DeliveryPolicyBlockInstrumentationHook, DirectChatClientKind,
     DirectChatRunEvent, DirectChatRunLifecycleHook, DirectChatRunReason,
@@ -860,6 +861,13 @@ impl MessageFlowService for InstrumentedMessageFlowService {
             result.is_ok(),
         );
         result
+    }
+
+    async fn cancel_latest_queued_message(
+        &self,
+        cmd: CancelLatestQueuedMessageCommand,
+    ) -> ServiceResult<CancelLatestQueuedMessageOutcome> {
+        self.inner.cancel_latest_queued_message(cmd).await
     }
 
     async fn rebind_channel_source_message(

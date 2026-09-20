@@ -3,9 +3,134 @@ use crate::BcsMessageFlow;
 use bcs_domain::{PersistedMessage, Session};
 use bcs_service_api::{CallerContext, ServiceError, ServiceResult};
 use bcs_service_api::{
+    CancelLatestQueuedMessageCommand, CancelLatestQueuedMessageOutcome,
     CancelMessageDeliveryCommand, CancelMessageDeliveryResult, DeliveryStatusQuery,
     DeliveryStatusView, DeliveryTransitionCommand, ManagedDeliveryError,
 };
+
+pub async fn cancel_latest_queued(
+    flow: &BcsMessageFlow,
+    command: CancelLatestQueuedMessageCommand,
+) -> ServiceResult<CancelLatestQueuedMessageOutcome> {
+    use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+    use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
+    use bcs_service_api::port::repo::message_delivery::{
+        DeliveryLookup, MessageDeliveryRepoError,
+    };
+
+    let (session, actor) = authorize_session(flow, &command.caller, &command.session_id).await?;
+    if session.group_id != command.group_id {
+        return Err(ServiceError::Forbidden(
+            "session does not belong to the requested group".into(),
+        ));
+    }
+    let Some(service) = &flow.managed_deliveries else {
+        return Ok(CancelLatestQueuedMessageOutcome {
+            message_id: None,
+            cancelled: Vec::new(),
+        });
+    };
+    let repository = flow
+        .message_repo
+        .as_ref()
+        .ok_or_else(|| ServiceError::InternalError("message store unavailable".into()))?;
+    // Reuse the indexed Bot/session lane lookup instead of scanning every
+    // queued delivery in the environment. Session membership bounds the
+    // number of reads and keeps removed/non-participant targets fail-closed.
+    let mut rows = Vec::new();
+    for bot_id in session
+        .participants
+        .iter()
+        .filter(|participant| participant.is_bot())
+        .map(|participant| participant.bot_uuid.clone())
+    {
+        rows.extend(
+            service
+                .lookup(DeliveryLookup::Lane {
+                    bot: bot_id,
+                    session: session.id.clone(),
+                })
+                .await
+                .map_err(|_| ServiceError::InternalError("queued delivery lookup failed".into()))?,
+        );
+    }
+    rows.sort_by(|a, b| {
+        (b.source_session_seq, &b.delivery_id).cmp(&(a.source_session_seq, &a.delivery_id))
+    });
+
+    let mut message_ids = Vec::new();
+    for row in &rows {
+        if row.group_id == session.group_id
+            && row.state.kind == bcs_domain::DeliveryType::Send
+            && row.state.status == Status::Queued
+            && !message_ids.contains(&row.source_message_id)
+        {
+            message_ids.push(row.source_message_id.clone());
+        }
+    }
+    let messages = repository
+        .get_messages_by_ids(&session.id, &message_ids)
+        .await
+        .map_err(|_| ServiceError::InternalError("queued message lookup failed".into()))?;
+    let by_id: std::collections::HashMap<_, _> = messages
+        .into_iter()
+        .map(|message| (message.message_id.clone(), message))
+        .collect();
+    let selected = message_ids.into_iter().find_map(|message_id| {
+        by_id.get(&message_id).filter(|message| {
+            message.sender_id == actor
+                && message
+                    .content
+                    .get("source_im_message_id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|id| !id.is_empty())
+        }).map(|message| (message_id, message))
+    });
+    let Some((message_id, message)) = selected else {
+        return Ok(CancelLatestQueuedMessageOutcome {
+            message_id: None,
+            cancelled: Vec::new(),
+        });
+    };
+    visible(flow, &command.caller, &session, &actor, message).await?;
+
+    let mut cancelled = Vec::new();
+    for row in rows.into_iter().filter(|row| {
+        row.source_message_id == message_id
+            && row.state.kind == bcs_domain::DeliveryType::Send
+            && row.state.status == Status::Queued
+    }) {
+        match service
+            .transition(DeliveryTransitionCommand {
+                delivery_id: row.delivery_id,
+                expected_state_version: row.state.state_version,
+                event: Event::CancelRequested,
+                now_ms: chrono::Utc::now().timestamp_millis(),
+                request_id: None,
+                actor_id: Some(actor.clone()),
+                reply: None,
+                transport_context_json: None,
+                deadline_at_ms: None,
+            })
+            .await
+        {
+            Ok(updated) if updated.state.status == Status::Cancelled => {
+                cancelled.push((&updated).into());
+            }
+            Ok(_) | Err(ManagedDeliveryError::Conflict | ManagedDeliveryError::NotFound) => {}
+            Err(ManagedDeliveryError::Repository(MessageDeliveryRepoError::Storage(_))) => {
+                return Err(ServiceError::InternalError(
+                    "queued cancellation persistence failed".into(),
+                ));
+            }
+            Err(_) => {}
+        }
+    }
+    Ok(CancelLatestQueuedMessageOutcome {
+        message_id: Some(message_id),
+        cancelled,
+    })
+}
 
 pub async fn resolve(
     flow: &BcsMessageFlow,

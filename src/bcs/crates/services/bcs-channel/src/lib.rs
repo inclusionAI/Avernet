@@ -1,6 +1,7 @@
 //! Channel(IM bridge) application service implementation.
 
 mod commands;
+mod queue_commands;
 mod runtime_inbound;
 mod human_input;
 mod service;

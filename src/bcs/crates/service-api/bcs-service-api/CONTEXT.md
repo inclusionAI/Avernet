@@ -2,6 +2,11 @@
 
 ## Provides
 
+MessageFlowService exposes a Human-scoped latest-queued cancellation command for
+IM adapters. It selects only the caller's newest canonical IM source in the
+requested Session and cancels only still-unsent Send deliveries; active work
+remains the separate scoped `chat.abort` contract.
+
 BotDeliveryResult distinguishes a complete downstream rejection
 (`delivered=false`) from an uncertain transport error (`Err`). A rejection is
 terminal and is never retryable by itself; safe retry still requires the
