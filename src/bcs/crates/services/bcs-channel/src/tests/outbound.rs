@@ -24,6 +24,7 @@ fn channel_meta_uses_inbound_channel_type_as_source() {
             context_projection: "group",
             state_machine_trigger: false,
             new_session_per_message: false,
+            group_context_delivery: None,
         },
         &msg,
     );

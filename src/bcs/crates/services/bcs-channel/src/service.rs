@@ -507,6 +507,7 @@ impl ChannelService for BcsChannelService {
             .validate_config(&cmd.config)
             .map_err(provider_error)?;
         validate_group_chat_session_config(&cmd.config)?;
+        validate_group_context_delivery_config(&cmd.config)?;
         validate_forward_sender_identity_config(&target, &cmd.config)?;
         let binding_id = (self.new_id)();
         if matches!(&target, BindingTarget::Bot { .. }) {
@@ -643,6 +644,7 @@ impl ChannelService for BcsChannelService {
         let provider = self.provider_for(&binding.channel_type)?;
         provider.validate_config(&config).map_err(provider_error)?;
         validate_group_chat_session_config(&config)?;
+        validate_group_context_delivery_config(&config)?;
         validate_forward_sender_identity_config(&binding.target, &config)?;
         self.bindings.set_config(id, config).await?;
         Ok(())

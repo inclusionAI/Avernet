@@ -1,4 +1,4 @@
-use super::GROUP_CHAT_NEW_SESSION_CONFIG;
+use super::{GROUP_CHAT_NEW_SESSION_CONFIG, GROUP_CONTEXT_DELIVERY_CONFIG};
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self, Write};
