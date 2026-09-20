@@ -95,7 +95,10 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.repository.implementations.task.task_trajectory_repository import (
     TaskTrajectoryRepository,
 )
-from agentclaw.community.core.task.domain.errors import TrajectoryAnalysisError
+from agentclaw.community.core.task.domain.errors import (
+    TrajectoryAnalysisError,
+    TrajectoryAnalysisNotConfiguredError,
+)
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     AcceptanceResult,
@@ -961,6 +964,52 @@ class TestDoAnalysisTrueServicePath:
         # the timeline is still assembled (read path works)
         actions = _timeline_action_types(result)
         assert "submit" in actions and "dispatch" in actions
+
+    def test_resolve_analysis_bot_id_is_env_aware(self, monkeypatch):
+        """``analysis_bot_id`` selection mirrors ``openapi_bot.base_url`` env handling
+        (``_env_select(prod, pre)``): pre env → ``analysis_bot_id_pre``, else →
+        ``analysis_bot_id``. The resolved id is passed as the bot_id to the bot
+        (asserted via ``_FakeBot.last_call``) and as ``analysis_executor`` into the
+        returned analysis. An env variant that's unset → None → 503 (strict —
+        mirrors ``base_url_pre`` empty → port None): pre env without ``_pre``, or
+        prod env without the prod id, BOTH decline ``do_analysis=true``."""
+        db = _make_db()
+        repo = TaskTrajectoryRepository(db)
+        task_id, child = "e2e-env", "cx"
+        graph_svc = TaskGraphService()
+        _drive_submit(repo, graph_svc, task_id=task_id)
+        _drive_plan(repo, graph_svc, task_id=task_id, child_node_id=child)
+        _drive_dispatch(repo, graph_svc, task_id=task_id, child_node_id=child)
+
+        bot = _FakeBot(content=json.dumps({"analysis_output": "x"}, ensure_ascii=False))
+        analyzer = TaskTrajectoryAnalyzer(bot=bot)
+
+        def _svc(cfg):
+            return TaskTrajectoryService(TaskTrajectoryAssembler(repo), repo, analyzer, cfg)
+
+        # prod env (default) → analysis_bot_id
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        _run(_svc(TrajectoryAnalysisConfig(analysis_bot_id="botA", analysis_bot_id_pre="botB"))
+             .get_trajectory(task_id, do_analysis=True))
+        assert bot.last_call["bot_id"] == "botA"
+
+        # pre env → analysis_bot_id_pre
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        _run(_svc(TrajectoryAnalysisConfig(analysis_bot_id="botA", analysis_bot_id_pre="botB"))
+             .get_trajectory(task_id, do_analysis=True))
+        assert bot.last_call["bot_id"] == "botB"
+
+        # pre env but _pre unset → None → 503 (strict, mirrors base_url_pre empty)
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        with pytest.raises(TrajectoryAnalysisNotConfiguredError):
+            _run(_svc(TrajectoryAnalysisConfig(analysis_bot_id="botA"))
+                 .get_trajectory(task_id, do_analysis=True))
+
+        # prod env but prod id unset → None → 503
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        with pytest.raises(TrajectoryAnalysisNotConfiguredError):
+            _run(_svc(TrajectoryAnalysisConfig(analysis_bot_id_pre="botB"))
+                 .get_trajectory(task_id, do_analysis=True))
 
 
 # ---------------------------------------------------------------------------

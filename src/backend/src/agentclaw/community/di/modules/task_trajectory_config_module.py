@@ -12,8 +12,9 @@ and the same ``_coerce`` helper ``ConfigModule`` uses, then returns a
 YAML shape under ``user_config.task_trajectory``::
 
     task_trajectory:
-      analysis_bot_id: "bot-traj-analyst"      # REQUIRED to enable do_analysis=true
-      tc_bot_timeout_seconds: 180              # synchronous round-trip cap (float seconds)
+      analysis_bot_id: "bot-traj-analyst"          # REQUIRED to enable do_analysis=true (prod)
+      analysis_bot_id_pre: "bot-traj-analyst-pre"  # pre env override (mirrors openapi_bot.base_url_pre)
+      tc_bot_timeout_seconds: 180                  # synchronous round-trip cap (float seconds)
 
 The bot_id is deployment-configured, not per-request (决策 #10): the P5b service
 reads ``analysis_bot_id`` and passes it as ``analysis_executor`` to
@@ -54,6 +55,16 @@ class TaskTrajectoryConfigModule(Module):
                     "task_trajectory",
                 )
                 or defaults.analysis_bot_id
+            ),
+            analysis_bot_id_pre=(
+                config_module._coerce(
+                    block,
+                    "analysis_bot_id_pre",
+                    str,
+                    defaults.analysis_bot_id_pre,
+                    "task_trajectory",
+                )
+                or defaults.analysis_bot_id_pre
             ),
             tc_bot_timeout_seconds=config_module._coerce(
                 block,

@@ -28,13 +28,19 @@ class TrajectoryAnalysisConfig:
     """Task trajectory analysis bot + timeout policy (REQ-9, 决策 #10).
 
     Sourced from the ``task_trajectory`` block of ``user_config`` by the
-    ``TaskTrajectoryConfigModule`` provider. Defaults: ``analysis_bot_id`` None
-    (no bot wired → the P5b service declines ``do_analysis=true``);
-    ``tc_bot_timeout_seconds`` 180s (matches ``OpenApiBotPort.send_and_wait_async``'s
-    own default so the analyzer is usable out-of-the-box).
+    ``TaskTrajectoryConfigModule`` provider. ``analysis_bot_id`` /
+    ``analysis_bot_id_pre`` form an env-aware pair mirroring
+    ``openapi_bot.base_url`` / ``base_url_pre`` (+ ``_env_select``): pre env →
+    ``analysis_bot_id_pre``, else → ``analysis_bot_id`` (resolved by
+    ``TaskTrajectoryService`` at use; ``get_current_env()`` normalizes
+    prepub→pre / gray→prod). Defaults: both ``None`` (no bot wired → the P5b
+    service declines ``do_analysis=true`` with 503); ``tc_bot_timeout_seconds``
+    180s (matches ``OpenApiBotPort.send_and_wait_async``'s own default so the
+    analyzer is usable out-of-the-box).
     """
 
     analysis_bot_id: str | None = None
+    analysis_bot_id_pre: str | None = None  # pre env override (mirrors openapi_bot.base_url_pre)
     tc_bot_timeout_seconds: float = 180.0
 
 
