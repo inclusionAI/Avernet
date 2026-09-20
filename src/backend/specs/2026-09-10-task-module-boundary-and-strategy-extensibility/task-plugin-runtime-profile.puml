@@ -1,0 +1,73 @@
+@startuml
+!theme plain
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultTextAlignment center
+
+title B 端插件注册、Profile 组合与任务运行时选择
+
+actor "B 端管理员" as admin
+actor "人 / Agent" as user
+
+rectangle "B 端控制面" #EAF2F8 {
+  component "TaskPluginRegistry\n发布、安装、契约校验" as registry
+  component "Tenant Activation\n租户插件授权" as activation
+  component "TaskRuntimeProfile\n声明式策略组合" as profile
+}
+
+component "TaskCli" as cli #EBDEF0
+component "TaskService" as service #EBDEF0
+database "TaskGraphService\n冻结运行配置 + report" as graph #D5F5E3
+queue "Outbox / Event Bus" as events #FCE4D6
+
+rectangle "稳定宿主模块" #FCF3CF {
+  component "TaskPlanner" as planner
+  component "TaskDispatcher" as dispatcher
+  component "TaskRunner" as runner
+}
+
+rectangle "插件 adapter" #FDEDEC {
+  component "TaskPlanningStrategy\n例如 master / relay" as planning_strategy
+  component "TaskDispatchStrategy\n例如 semantic / keyword" as dispatch_strategy
+  component "TaskRunnerStrategy\n例如 single-bot / BBS / distributed" as runner_strategy
+}
+
+admin --> registry : 发布 / 安装插件包
+registry --> activation : 可激活的插件版本
+admin --> activation : 授权 tenant
+admin --> profile : 应用 Profile
+profile --> registry : 校验插件版本、Schema、run mode
+profile --> activation : 校验 tenant 已激活
+
+user --> cli : task "一句话目标"
+cli --> service : intake / execute
+service --> profile : 按 tenant / Bot / 标签解析
+profile --> service : 冻结 Profile + plugin digest
+service --> graph : 创建任务及受控运行配置
+
+graph --> events : 语义事件
+events --> planner : PLAN_REQUESTED
+planner --> planning_strategy : plan(TaskContext)
+planning_strategy --> graph : report(PLAN)
+
+events --> dispatcher : DISPATCH_REQUESTED
+dispatcher --> dispatch_strategy : dispatch(TaskNode)\nNO_MATCH 可尝试下一策略
+dispatch_strategy --> graph : report(DISPATCH，最终 Patch)
+
+events --> runner : EXECUTION_REQUESTED
+runner --> runner_strategy : run(TaskNode)\n按 run mode 精确选择一个
+runner_strategy --> graph : report(执行事实)
+
+note bottom of profile
+Profile 只能选择、路由和配置策略；
+不能重排规划→派发→执行生命周期，
+也不能允许插件越过 GraphService 改状态。
+end note
+
+note bottom of runner_strategy
+启动外部副作用后不做通用 fallback；
+幂等重试由该 strategy 自身治理。
+end note
+
+@enduml

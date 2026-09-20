@@ -1,0 +1,30 @@
+@startuml
+!theme plain
+hide footbox
+title 中心化动态规划：物理执行流程
+
+participant "TaskGraphService" as G
+box "Master Bot runtime" #D6EAF8
+participant "中心化\nTaskPlanner" as P
+participant "中心化\nTaskDispatcher" as D
+end box
+box "被选执行 runtime" #FCF3CF
+participant "TaskRunner" as R
+end box
+participant "实际 executor" as X
+
+G -> P : PLAN_REQUESTED(TaskContext)
+P -> G : report(PLAN, PlanResult)
+G -> D : DISPATCH_REQUESTED(TaskNode)
+D -> G : report(DISPATCH, TaskNodePatch)
+G -> R : EXECUTION_REQUESTED(TaskNode)
+R -> X : 启动节点执行
+R -> G : report(EXECUTION_STARTED / START_FAILED)
+X -> G : report(EXECUTION_RESULT)
+G -> P : 下一轮 PLAN_REQUESTED\n始终路由至 Master runtime
+
+note over P,D
+Master runtime 物理承载规划与派发；
+执行 runtime 只承载被派发节点的 Runner。
+end note
+@enduml

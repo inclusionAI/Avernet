@@ -1,0 +1,47 @@
+@startuml
+!theme plain
+left to right direction
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+
+title 任务执行阶段：图谱状态驱动的模块交互
+
+actor "Task-Cli / 产品端" as caller
+
+rectangle "任务入口" #D6EAF8 {
+  component "TaskService\nexecute(TaskInfoRequest)\nget_task_dashboard(...)" as service
+}
+
+rectangle "图谱模块（唯一事实拥有者）" #D5F5E3 {
+  component "TaskGraphService\nreport(TaskCallbackData)\n校验：身份、版本、幂等、状态机\n持久化事实 + Outbox\nPLAN 原子登记节点和边" as graph
+  queue "语义事件\nPLAN_REQUESTED(TaskContext)\nDISPATCH_REQUESTED(TaskNode)\nEXECUTION_REQUESTED(TaskNode)\nTASK_TERMINATED" as bus
+}
+
+rectangle "策略宿主模块" #FCF3CF {
+  component "TaskPlanner\nplan(TaskContext) -> PlanResult\n不读取完整图谱" as planner
+  component "TaskDispatcher\ndispatch(TaskNode) -> TaskNodePatch\n一次只决策一个节点" as dispatcher
+  component "TaskRunner\nrun(TaskNode) -> bool\n不规划或派发下一节点" as runner
+}
+
+cloud "实际执行载体\n单 Bot / 协作群 / BBS / 分布式 executor" as executor #F5EEF8
+
+caller --> service : 提交 / 查询
+service --> graph : 初始化根图谱\n仅 TaskService 可调用
+graph --> bus : 原子写事实后发布
+
+bus --> planner : PLAN_REQUESTED\n完整 TaskContext
+planner --> graph : report(PLAN, PlanResult)
+
+bus --> dispatcher : DISPATCH_REQUESTED\n单个 TaskNode
+dispatcher --> graph : report(DISPATCH, TaskNodePatch)
+
+bus --> runner : EXECUTION_REQUESTED\n已派发 TaskNode
+runner --> executor : 启动执行
+runner --> graph : report(EXECUTION_STARTED / START_FAILED)
+executor --> graph : report(EXECUTION_RESULT)
+
+planner -[hidden]-> dispatcher
+dispatcher -[hidden]-> runner
+
+@enduml

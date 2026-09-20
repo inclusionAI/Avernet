@@ -1,0 +1,59 @@
+@startuml
+!theme plain
+autonumber
+hide footbox
+
+title 接力规划：统一逻辑链、Graph 定向投递与执行主体升级
+
+actor "执行主体 A\n上游节点" as carrier_a
+database "TaskGraphService" as graph
+queue "Outbox / Event Bus" as events
+participant "TaskPlanner\nRelayPlanningStrategy\n(Bot A runtime)" as planner_a
+participant "TaskDispatcher\nRelay Dispatch Strategy\n(Bot A runtime)" as dispatcher_a
+participant "TaskRunner" as runner
+actor "下一执行 carrier B\n单 Bot / 协作组 / BBS" as carrier_b
+
+== A 的结果先成为图谱事实 ==
+carrier_a -> graph : report(TaskCallbackData\nEXECUTION_RESULT(A), graph_version=18)
+graph -> graph : 校验版本、幂等、状态机\n原子持久化 A=SUCCESS 与输出
+graph -> graph : 生成 TaskContext v19\n目标 + 验收标准 + 全局节点/依赖状态\n相关产出（含 A，但不只 A）+ 当前 GAP + 授权边界
+graph -> events : PLAN_REQUESTED(TaskContext v19)\n内部定向投递至 Bot A runtime
+
+== 接力规划：A runtime 只承担 Planner 逻辑角色 ==
+events -> planner_a : 消费 PLAN_REQUESTED(context)
+note right of planner_a
+基于最新完整 TaskContext 与验收标准计算 GAP，
+而非仅基于 A 的本地结果。
+生成下一步工作 B 的 PlanResult。
+end note
+planner_a -> graph : report(TaskCallbackData\nPLAN, PlanResult, graph_version=19)
+graph -> graph : 校验报告身份、版本、父节点、深度与幂等
+graph -> events : DISPATCH_REQUESTED(node B)\n必要时内部定向投递至 Bot A runtime
+
+== 接力派发：A runtime 只承担 Dispatcher 逻辑角色 ==
+events -> dispatcher_a : 消费 DISPATCH_REQUESTED(node B)
+dispatcher_a -> dispatcher_a : 搜推并决定 execution carrier
+alt 匹配单 Bot
+  dispatcher_a -> graph : report(DISPATCH,\nPatch(run_mode=single_bot, assignee=Bot B))
+else 匹配协作组
+  dispatcher_a -> graph : report(DISPATCH,\nPatch(run_mode=coop_group, assignee=Group B))
+else 无单 Bot/协作组匹配
+  dispatcher_a -> graph : report(DISPATCH,\nPatch(run_mode=bbs, diagnosis=候选失败))
+end
+graph -> graph : 校验 Profile、状态机与派发字段
+graph -> events : EXECUTION_REQUESTED(node B)
+
+== B 的实际执行：Runner 逻辑角色在选中 carrier 侧执行 ==
+events -> runner : 消费 EXECUTION_REQUESTED(node B)
+runner -> carrier_b : 启动对应 Runner strategy\n(single-bot / coop-group / BBS)
+runner -> graph : report(EXECUTION_STARTED 或 START_FAILED)
+carrier_b -> graph : report(EXECUTION_RESULT(B), graph_version=current)
+
+note over graph,runner
+同一 Bot runtime 可物理挂载 Runner、Planner、Dispatcher，
+但只能按各自 Graph 事件执行，不可直接互调或直接修改图谱。
+每个 B 的完成结果再次由 Graph 生成完整最新 TaskContext，开始下一轮接力。
+BBS 的建群、招募、认领和内部协作属于 BBS Runner strategy；失败后的重试、重规划、挂起或终态由 Graph 状态策略决定。
+end note
+
+@enduml

@@ -1,0 +1,38 @@
+@startuml
+!theme plain
+hide footbox
+title 分布式接力规划：物理执行流程
+
+participant "TaskGraphService" as G
+box "Bot A runtime（物理同驻）" #D5F5E3
+participant "A 的\nTaskRunner" as AR
+participant "A 的 relay\nTaskPlanner" as AP
+participant "A 的 relay\nTaskDispatcher" as AD
+end box
+box "Bot B / 协作群 / BBS\n执行 runtime" #FCF3CF
+participant "B 的\nTaskRunner" as BR
+end box
+participant "B 的 executor" as BX
+
+AR -> G : report(EXECUTION_RESULT of A)
+G -> G : 原子接纳结果\n重建最新完整 TaskContext
+G -> AP : PLAN_REQUESTED(TaskContext)
+AP -> G : report(PLAN, PlanResult for B)
+G -> AD : DISPATCH_REQUESTED(TaskNode B)
+AD -> G : report(DISPATCH, TaskNodePatch for B)
+G -> BR : EXECUTION_REQUESTED(TaskNode B)
+BR -> BX : 启动 B 的执行
+BX -> G : report(EXECUTION_RESULT of B)
+
+note over AP,AD
+A runtime 中 Planner 与 Dispatcher 物理同驻，
+但只能分别消费 Graph 事件。
+end note
+
+G -> BR : 下一轮 PLAN_REQUESTED\n定向路由到刚完成 B 的 runtime
+
+note over G,BR
+不存在 A Runner 直接调用 A Planner/Dispatcher，
+也不存在 A 直接启动 B；所有续接均经过 Graph。
+end note
+@enduml
