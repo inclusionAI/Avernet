@@ -19,12 +19,11 @@
   saved startup/dispatch/progression (including HumanInput request recovery), terminal Session completion, terminal IM and terminal checkpoint cleanup pages with the existing leader
   election, each bounded to 32 candidates per tick with independent cursors.
   Demotion cancels all four active pages and resets their cursors; shutdown aborts
-  the task. Opening/dispatch checkpoints and Node failure/Judge state require MySQL 027 / SQLite 028 before the
-  new runtime starts, including when scanning is disabled. Session and terminal IM scans use the MySQL 027 / SQLite 028 cursor indexes.
-  SQLite 032 upgrades retained pre-consolidation/earlier combined Loop databases,
-  preserving their 028 record and completing checkpoint fields and indexes.
-  Only the exact historical execution-plan identity with its three nullable
-  TEXT columns is accepted; other mismatches still abort startup.
+  the task. Opening/dispatch checkpoints and Node failure/Judge state require MySQL 028 / SQLite 029 before the
+  new runtime starts, including when scanning is disabled. Session and terminal IM scans use the MySQL 028 / SQLite 029 cursor indexes.
+  SQLite 029 contains the complete Loop and checkpoint schema and is the final
+  migration in this PR. It supports fresh databases and upgrades from 028;
+  earlier Loop development drafts are not an automatic upgrade target.
   Completed Sessions remain eligible through their pending IM checkpoints. The
   deferred Channel port forwards preparation, preflight, delivery and cleanup to
   the same Channel service, including saved HumanInput recovery and its covered-node IDs. Terminal cleanup does not publish messages or delete results. This experimental

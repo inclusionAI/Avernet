@@ -27,7 +27,7 @@ async fn check_fixed_loop_migration(db: &dyn DbPlugin) -> Result<()> {
     let args = MigrateArgs {
         dialect: Some(MigrationDialect::Mysql), migrations_dir: Some(bcs_root().join("migrations/mysql")),
         sqlite_path: None, emit_sql: false, check_files: false, check_db: false, apply: true,
-        yes: true, only: vec![27], from: None, to: None,
+        yes: true, only: vec![28], from: None, to: None,
     };
     let migration = load_selected_migrations(&args)?.remove(0);
     let plan = mysql_migration_plan(&migration);
@@ -37,11 +37,11 @@ async fn check_fixed_loop_migration(db: &dyn DbPlugin) -> Result<()> {
         let rows = db.query(DbStatement::with_params("SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", vec![DbValue::from(table)])).await?;
         anyhow::ensure!(db_get_column::<i64>(&rows[0], "count")? == 0, "requires absent Loop table {table}");
     }
-    anyhow::ensure!(!load_applied_mysql_migrations(db).await?.iter().any(|row| row.version == 27), "migration 027 already exists; use a disposable test database");
+    anyhow::ensure!(!load_applied_mysql_migrations(db).await?.iter().any(|row| row.version == 28), "migration 028 already exists; use a disposable test database");
     // A failed DDL must never be recorded as a successfully applied migration.
     assert!(apply_mysql_migration(db, &migration, &plan).await.is_err());
-    assert!(!load_applied_mysql_migrations(db).await?.iter().any(|row| row.version == 27));
-    // The consolidated 027 alters four baseline tables and creates a checkpoint table. Use their original baseline
+    assert!(!load_applied_mysql_migrations(db).await?.iter().any(|row| row.version == 28));
+    // The consolidated 028 alters four baseline tables and creates a checkpoint table. Use their original baseline
     // CREATE statements through the production splitter for the focused test.
     let baseline = split_sql_statements(include_str!("../../../../migrations/mysql/001_init_schema.sql"));
     let mut creates = Vec::new();
@@ -119,7 +119,7 @@ async fn check_fixed_loop_migration(db: &dyn DbPlugin) -> Result<()> {
         assert_eq!(checkpoint_pk.iter().map(|row| db_get_column::<String>(row, "column_name")).collect::<bcs_db_api::DbResult<Vec<_>>>()?, ["env", "operation_key"]);
         changed_plan.checksum = "0".repeat(64);
         assert!(build_mysql_migration_report("bcs".into(), vec![changed_plan], load_applied_mysql_migrations(db).await?, false).is_err());
-        db.execute(DbStatement::with_params("DELETE FROM bcs_schema_migrations WHERE version = 27 AND checksum = ?", vec![DbValue::from(plan.checksum.clone())])).await?;
+        db.execute(DbStatement::with_params("DELETE FROM bcs_schema_migrations WHERE version = 28 AND checksum = ?", vec![DbValue::from(plan.checksum.clone())])).await?;
         for table in tables.into_iter().chain(["bcs_collaboration_delivery_checkpoints"]) { db.execute(DbStatement::new(format!("DROP TABLE `{table}`"))).await?; }
     }
     // A late failure must not record the whole bundle as complete, even when
@@ -129,7 +129,7 @@ async fn check_fixed_loop_migration(db: &dyn DbPlugin) -> Result<()> {
     }
     let error = apply_mysql_migration(db, &migration, &plan).await.expect_err("missing Session prerequisite must fail");
     assert!(error.to_string().contains("statement 4"), "{error}");
-    assert!(!load_applied_mysql_migrations(db).await?.iter().any(|row| row.version == 27));
+    assert!(!load_applied_mysql_migrations(db).await?.iter().any(|row| row.version == 28));
     let columns = db.query(DbStatement::new("SELECT failure_action FROM bcs_state_machine_node_runs")).await?;
     assert!(columns.is_empty());
     for table in tables {
@@ -140,7 +140,7 @@ async fn check_fixed_loop_migration(db: &dyn DbPlugin) -> Result<()> {
     db.execute(DbStatement::new("CREATE TABLE bcs_collaboration_delivery_checkpoints (placeholder INT)")).await?;
     let error = apply_mysql_migration(db, &migration, &plan).await.expect_err("conflicting checkpoint table must fail");
     assert!(error.to_string().contains("statement 5"), "{error}");
-    assert!(!load_applied_mysql_migrations(db).await?.iter().any(|row| row.version == 27));
+    assert!(!load_applied_mysql_migrations(db).await?.iter().any(|row| row.version == 28));
     for table in tables.into_iter().chain(["bcs_collaboration_delivery_checkpoints"]) {
         db.execute(DbStatement::new(format!("DROP TABLE `{table}`"))).await?;
     }

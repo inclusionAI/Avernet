@@ -92,7 +92,7 @@
   - 位置：`src/bcs/migrations/mysql/`、`src/bcs/crates/bootstrap/bcs/src/migrations.rs`；按实施时的迁移序列分配新编号，不修改已发布迁移。
   - 为 definition snapshots 增加 nullable `execution_plan_json`、`execution_plan_content_hash`、`execution_plan_compiler_version`；MySQL/SQLite 类型遵循 spec。
   - 验收：fresh DB、历史库升级、重复执行通过；历史 v1 rows 保持 NULL，不主动重写历史 snapshot；不新增通用 State/iteration 表。
-  - 当前进度：MySQL 027 / SQLite 028 已合并为 fixed_loop_runtime，统一包含 snapshot plan、failure_action 和两类恢复索引；已通过本项验收。SQLite fresh/legacy/重复启动/中途恢复通过；真实 MySQL 8.4.11 用原始 snapshot 建表语句和实际 027 executor 验证空表/历史 v1 行升级、字段类型与 NULL、DDL 失败不记成功、重复 apply 无 pending DDL、checksum 不匹配拒绝。本项验证范围为 snapshot 增量；016 已按后续要求合并并归档原文件；001/008 索引已修正并新增 028 保留旧记录升级；MySQL 语法已修正，真实 MySQL 8.4 的完整 001～028 链、重复 apply 和带旧 checksum 的 020→028 升级已通过；旧版拆分 016 的部署核对和实际生产升级继续由 FL-28～FL-29 跟踪。
+  - 当前进度：MySQL 028 / SQLite 029 已合并为 fixed_loop_runtime，统一包含 snapshot plan、failure_action 和两类恢复索引；已通过本项验收。SQLite fresh/legacy/重复启动/中途恢复通过；真实 MySQL 8.4.11 用原始 snapshot 建表语句和实际 027 executor 验证空表/历史 v1 行升级、字段类型与 NULL、DDL 失败不记成功、重复 apply 无 pending DDL、checksum 不匹配拒绝。本项验证范围为 snapshot 增量；016 已按后续要求合并并归档原文件；001/008 索引已修正并新增 028 保留旧记录升级；MySQL 语法已修正，真实 MySQL 8.4 的完整 001～028 链、重复 apply 和带旧 checksum 的 020→028 升级已通过；旧版拆分 016 的部署核对和实际生产升级继续由 FL-28～FL-29 跟踪。
 
 - [x] **FL-08 — 扩展 snapshot repo 与三类 Store 实现**
   - 依赖：FL-05、FL-07。对应 spec §12.2、§21.4、FO spec §6.3。
@@ -154,7 +154,7 @@
   - [x] **FL-15.5 — Opening 与初始 frontier**：保存原文和固定消息主键，历史屏障完成后才派发 initial nodes；并发历史幂等，无额外 opening 外部 lease。
   - [x] **FL-15.6 — Bot dispatch checkpoint**：保存原请求/目标引用/deadline；未发送可接管，发送结果未知不重投；ACK/expiry 竞争按原失败决策收敛。
   - [x] **FL-15.7 — Chat 最终结果 publication checkpoint**：冻结原文本/目标/时间/deadline，正常路径与 scanner 共用 Pending claim、发送标记和 ACK fencing。Delivered 只补 Run 收尾，Failed 沿用原失败；Delivering 不重发，到原 deadline 后明确 Failed（可能已送达）。固定消息主键仅保证历史幂等，不宣称整个 message-flow 路由幂等。Memory/SQLite/MySQL 合同、四窗口独立进程测试通过；复用现表，无新增 migration。FL-18 的 Node 输出消息持久化不替代本项。
-  - [x] **FL-15.8 — terminal IM notification checkpoint**：Session 完成前保存原收件人/文本/activation/期限，逐收件人进度 CAS、短 lease 和独立有界 checkpoint page 接入既有 scanner。仅明确未发送的预检失败可重试；Sending/结果未知不重发，部分成功不掩盖其他目标失败，IM 不改变终态 Run。Memory/SQLite/MySQL Text+Prepared、六窗口跨进程恢复及 scanner 专项通过；schema 合入未提交的 MySQL 027 / SQLite 028，无新增版本。
+  - [x] **FL-15.8 — terminal IM notification checkpoint**：Session 完成前保存原收件人/文本/activation/期限，逐收件人进度 CAS、短 lease 和独立有界 checkpoint page 接入既有 scanner。仅明确未发送的预检失败可重试；Sending/结果未知不重发，部分成功不掩盖其他目标失败，IM 不改变终态 Run。Memory/SQLite/MySQL Text+Prepared、六窗口跨进程恢复及 scanner 专项通过；schema 合入未提交的 MySQL 028 / SQLite 029，无新增版本。
   - [x] **FL-15.9 — 缺失原始事实的终态收敛**：创建者按原时间保留不可续期的准备宽限期，到期可撤销准备权限，不以缺记录判断进程死亡。缺 snapshot/opening 通过 Run CAS + 类型化失败事实局部提交，原 Session activation 独立恢复；缺 dispatch 使用原节点 deadline/重试策略，无 deadline 时按原启动时间加 90 秒 FailRun。已补齐事实、已有 Provider run ID、结果和取消阻止误收敛；不重造载荷、不重发未知 attempt。Memory/SQLite/MySQL Text+Prepared、七窗口独立进程与前台写失败/旧 activation 专项通过，无新增 schema 或 migration。
   - [x] **FL-15.10 — 终态遗留 checkpoint 清理**：独立 Run 游标每页最多 32 个，逐 Run 有界 supersede 未完成 dispatch/Chat checkpoint、清除 Judge phase/lease；每次写重查终态，保留原结果/payload/token 和已确认送达事实。不发送消息、不删历史。覆盖半途写失败、并发、SQLite 两进程恢复、真实 MySQL Text/Prepared 和 scanner 游标；无迁移变更。
   - [x] **FL-15.11 — 等待人工通知的主动恢复**：通用 scanner 恢复已有 HumanInputRequest，核对原节点、Session activation 与 deadline，清理失效槽位并提升 Queued；只有缺请求才从原 snapshot 构造相同 ready event。新增 notification_pending 字符串状态并在外部 IO 前 CAS 为 Notifying，只有赢家能发送；既有 Notifying（包括旧版本 attempts=0）保守视作结果未知，不重发。Active/DeliveryFailed/终态不重新创建请求，原文本/目标/deadline 不变。六窗口 SQLite 跨进程恢复、双实例竞争、真实 MySQL Text/Prepared 和取消/迟到确认测试通过。无新 schema/migration；FL-15 已完成 **11/11** 子项，完整产品 FO 仍由 FL-16.9/16.10 与 S5 验收。
@@ -328,8 +328,9 @@ git diff --check
 
 ## 9. 执行记录
 
-当前迁移以合并后的 MySQL `027_fixed_loop_runtime.sql` / SQLite
-`028_fixed_loop_runtime.sql` 为基础；SQLite `032_fixed_loop_legacy_upgrade` 保留并升级已执行的旧 028/早期合并草稿，029～031 作为历史草稿编号不再复用。HumanInput 索引修复保留 MySQL 028。下列历史记录中的拆分版本号及报告路径保留当时含义，不作为当前部署指令。
+当前迁移以 MySQL `028_fixed_loop_runtime.sql` / SQLite
+`029_fixed_loop_runtime.sql` 为准；rebase 后保留 dev 的 Provider webhook MySQL 027 / SQLite 028，Loop 顺延一个编号，SQL 内容不变。活动链分别为 MySQL 001～028、SQLite 001～029。自动重建索引及旧草稿补齐方案已撤回，索引超限按迁移 README 人工处理。下列历史记录中的旧编号、旧草稿升级方案及报告路径保留当时含义，不作为当前部署指令。
+
 
 每次开始、阻塞或完成任务时追加一行；同一任务最后一条记录表示当前状态。测试证据填写实际命令、日期、
 通过/失败/跳过数量及报告位置，必要时链接 PR。不要把敏感数据、运行时数据库或日志正文提交进本文。
@@ -516,7 +517,7 @@ MySQL 016 合并与 001 修复建议（后续增补）：
 MySQL HumanInput 索引修复（2026-09-15）：
 
 - 已修正活动 001/008 中 `idx_human_input_scope_status` 的 `reply_scope_key(700)` 前缀；字段仍为 VARCHAR(768)，完整 `active_slot_key` 唯一约束不变。两份原始 SQL 按字节归档到 `migrations/legacy/mysql/`，不删除历史证据。
-- 001 使用修正版 baseline body checksum，008 使用修正版完整文件 checksum；runner 只兼容文档列出的旧/新 checksum 对，版本/名称/dialect 必须匹配，未来改动和其他 checksum 不自动放行。旧库保留 001/008 原记录和 applied_at，由新增 MySQL 031 独立记录索引修复。见 [索引升级文档](../../../migrations/reconciliation/028-human-input-scope-index.md)。
+- 001 使用修正版 baseline body checksum，008 使用修正版完整文件 checksum；runner 只兼容文档列出的旧/新 checksum 对，版本/名称/dialect 必须匹配，未来改动和其他 checksum 不自动放行。旧库保留 001/008 原记录和 applied_at，由新增 MySQL 031 独立记录索引修复。见 [索引升级文档](../../../migrations/reconciliation/human-input-index-size.md)。
 - 真实 MySQL 8.4 验证完整修正版 001 建库、独立 008 建表、fresh/已有索引升级、031 DDL 成功但未记版本后的重试、DDL 失败不记成功、前 700 个 Unicode 字符相同的 scope 仍按完整值过滤、完整 slot 唯一性、字段元数据和旧迁移记录/时间戳不变。历史全长索引使用 utf8mb3 fixture 表达，因为 MySQL 无法建出原 utf8mb4 超长索引；本项未宣称 OceanBase 部署验证。
 - `bcs-admin` 24 项单测通过，4 项 MySQL ignored 已另行按 CI 顺序显式执行（Eventing → HumanInput index → 合并 016 → Loop migration）均通过，验证共享数据库清理和迁移记录隔离。workspace all-targets check、workflow 2 项测试及 `git diff --check` 通过。证据：`/tmp/bcs-mysql-031-admin.log`、`/tmp/bcs-mysql-031-shared-*.log`、`/tmp/bcs-mysql-031-workspace.log`、`/tmp/bcs-mysql-031-ci.log`。
 - 全量 `--check-files` 现在通过（001～031 共 31 个版本），没有弱化索引长度检查。空库通过生产 `bcs-admin --apply --yes` 执行完整链时，001 成功，002 第一条 ADD COLUMN IF NOT EXISTS 在 MySQL 8.4 报 1064；后续链未执行。该失败单独登记为 FL-28/29 的实际发布阻塞，不能用静态检查通过替代。证据：`/tmp/bcs-mysql-031-files.log`、`/tmp/bcs-mysql-031-full-chain.log`。
@@ -788,7 +789,7 @@ SQLite 028 已部署草稿兼容修复（2026-09-16）：
 - 新增 SQLite 032（029～031 曾用于拆分草稿，不复用）：只接受旧 028 的准确名称/dialect/checksum，且三列 execution plan 必须已经是 nullable TEXT；先复用冻结 028 的逐列 guarded DDL，再补早期 checkpoint 表缺失的列。所有步骤成功后记录 032，失败可重试；未知校验值和不符 schema 仍拒绝。当前完整库 / 新库不重复 ADD COLUMN。
 - 新增旧记录/快照保留、错误名称/dialect/checksum/字段拒绝、八个 checkpoint 补列边界重试、DDL 失败不记成功等回归；旧版本校验和 fresh/027→当前升级继续通过。迁移 34 项、admin/Store 131 项通过；6 项真实 MySQL 测试按默认 ignored，本轮仅改 SQLite，没有重跑真实 MySQL。报告：`/tmp/bcs-sqlite-028-upgrade-tests.log`、`/tmp/bcs-sqlite-032-admin-store.log`；bcs/admin 构建记录：`/tmp/bcs-sqlite-032-build.log`。
 - 本地 SQLite 使用 backup API 创建一致性备份，在副本通过 check/apply/check 和逐表原值比对后，应用到原库；原有 53 张表、484 行原值（包括所有旧迁移 metadata）一致，`PRAGMA integrity_check=ok`，版本 32、pending 0。未启动服务或触发工作流；运行时开关未修改。
-- 更新升级指南、README、bootstrap CONTEXT 和 AGENTS：保留数据库中已执行的迁移即使尚未 Git 提交也冻结；后续结构变化必须用新版本。此修复不推进 FL-15/16 计数，不替代发布门禁。部署步骤见 [SQLite 032 升级指南](../../../migrations/reconciliation/032-sqlite-fixed-loop-upgrade.md)。
+- 更新升级指南、README、bootstrap CONTEXT 和 AGENTS：保留数据库中已执行的迁移即使尚未 Git 提交也冻结；后续结构变化必须用新版本。此修复不推进 FL-15/16 计数，不替代发布门禁。当时的草稿升级方案现已撤回，当前迁移流程见 [迁移 README](../../../migrations/README.md#sqlite)。
 
 内置 Loop 自定义协作模板（2026-09-16）：
 
@@ -979,3 +980,33 @@ npm --prefix src/frontend test -- --runInBand
 - [x] rebase 后 OpenAPI/Event **161 passed**、Frontend Jest **74 passed / 15 suites**、Frontend CI 和 Panel 完整 `verify` 通过；port purity、Store boundaries、forbidden symbols 和差异空白检查通过。日志 `/tmp/bcs-loop-rebase-20260920-{contracts,frontend-tests,frontend-ci,panel,ports,stores,forbidden}.log`。
 - [ ] rebase 后消息存储、消息流、协作存储、协作运行时及模板目录的 Rust 定向回归未完成。`cargo nextest run --manifest-path src/bcs/Cargo.toml --profile ci --retries 0 -p bcs-message-store -p bcs-message-flow -p bcs-collaboration-store -p bcs-collaboration-runtime -p bcs-collaboration-template` 编译成功，但多个测试二进制停在 `--list` 枚举超过 5 分钟；单独执行枚举也未返回，尚未开始运行用例，已主动中断（exit 130）。需在合并前重跑，不记为通过。日志 `/tmp/bcs-loop-rebase-20260920-rust.log`。
 - 本次未重跑完整 workspace、真实 MySQL、浏览器或 Singlebox 验收。已有源码行数债务仍未关闭，消息存储 `memory.rs` 为 1,023 行；保留原有职责拆分待办。主清单维持 **24/30**，FL-16.9/16.10、FL-26～FL-30 不改变验收状态。PR 描述已区分当前回归、此前验收和剩余发布工作；未推送分支。
+
+### 2026-09-20：迁移整理与 PR #2339 覆盖回归
+
+- [x] 按用户明确要求移除 MySQL `028_human_input_scope_index` 自动删除/重建索引；新库使用 001/008 已有的 prefix 700。README 补充索引超限的检查和人工处理步骤，已有索引及迁移记录不自动改写。用户链接的 SQLite 028 实际是 Loop 运行时结构，保留其 SQL 原文。
+- [x] SQLite 的补全迁移从 032 调整到 029，SQL 原文不变；保留已部署 028/032 的记录和数据，旧 032 数据库执行 029 的列/索引存在性检查后只增加新记录。占用 029 的不兼容草案仍拒绝执行，处理方式见迁移指南。
+- [x] SQLite migration **37 passed**、bcs-admin migration **21 passed / 5 ignored**；临时 MySQL 8.4 的完整 001–027 链、历史升级及 HumanInput 索引专项 **2 passed**。日志 `/tmp/bcs-migration-cleanup-sqlite.log`、`/tmp/bcs-migration-cleanup-admin.log`、`/tmp/bcs-migration-mysql-{chain,index}.log`。
+- [x] 定位原 CI 的两项 E2E 失败：CLI pending 查询的 Human 未加入会话，以及 CLI 默认 20 条与 API 默认 10 条的群列表误比。测试补齐 Human 在场条件，并显式对齐分页；不放宽权限或覆盖阈值。
+- [x] 新增真实 HTTP/CLI Loop story：两次 HumanInput、judge revise/approved、旧 execution 回复拒绝、提前退出后未执行节点 Skipped、exhausted 进入 rewrite，以及一次性协作最终发布。联合检查 Run、Graph、节点详情和历史 metadata。
+- [x] 新 story 发现并修复普通 Chat 历史将持久化 Loop output 当作字符串读取的问题；现在保留正文、执行 metadata、消息 ID 及 Human/Bot 角色。bcs-message **36 passed**，日志 `/tmp/bcs-pr2339-test/message-tests.log`。按源码 1,000 行限制拆分消息投影、迁移实现和相关测试，既有 SQL 内容不变。
+- [x] 独立 SQLite / 5 Bot 测试栈跑完完整 BCS E2E：**666 passed / 0 failed**，行覆盖 **43.06% ≥ 40%**、方法覆盖 **37.63% ≥ 36%**、CLI **54/54**。日志 `/tmp/bcs-pr2339-test/coverage.log`。覆盖 runner 的 `--skip-start` 原先忽略 `BCS_LOG`，端点门禁误读默认路径而使该次汇总命令退出 1；已修正路径解析，并用同一轮实际服务日志重新计算端点门禁，**156/156**，日志 `/tmp/bcs-pr2339-test/endpoint-gate.log`。没有降低阈值、缩小统计分母或绕过检查。
+- 本轮未执行 Backend/BaaS 参与的完整 Singlebox、生产故障恢复或性能验收；FL-16.9/16.10、FL-26～FL-30 保持未勾选。改动未提交、未推送；远端 PR 检查需提交后重跑。
+
+
+### 2026-09-20：PR #2339 评审处理
+
+- [x] 按确认范围保留合并后的 MySQL 016；撤回旧库自动补齐 migration，最新 MySQL 链仍为 001–027。AGENTS 和迁移说明明确本次编号整理/016 合并的授权例外；旧 016 记录继续明确报错，不自动改写历史。
+- [x] 修复 HumanInput 队列处理 32 个无效请求后提前返回的问题：每批让出执行时间后继续推进，直到有效占位或队列为空；持久化错误仍向调用者返回，不依赖恢复扫描器。
+- [x] 新增连续 65 个已失效 Run 请求、连续 65 次发送失败且失败状态已持久化后的有效通知回归；验证旧请求关闭/失败状态、后续请求 Active、通知只发一次。Channel **98 单元测试 + 14 契约测试通过**，迁移单元测试 **21 passed / 5 ignored**。日志 `/tmp/bcs-pr2339-channel-tests.log`、`/tmp/bcs-pr2339-review-admin-tests.log`。
+- [x] 按职责拆分 Channel 超长文件，原测试无遗漏；本次工作区新增/修改源码均不超过 1,000 行，`git diff --check` 通过。
+- [x] 临时 MySQL 8.4：最新 001–027 完整迁移链、重复执行与历史记录检查通过；合并 016 建表及两种旧 016 身份拒绝且原记录不变的测试通过。日志 `/tmp/bcs-pr2339-review-mysql-chain.log`、`/tmp/bcs-pr2339-review-mysql-016.log`。验证容器和临时数据卷已清理。
+- 本次未提交、未推送、未发布或 resolve GitHub 评论；未重跑完整 workspace、Singlebox 或产品 E2E，主清单验收状态不变。
+
+
+### 2026-09-20：SQLite Loop 迁移收敛到 028
+
+- [x] 按本次 PR 尚未合并、只保证最新迁移链的确认范围，删除 `029_fixed_loop_legacy_upgrade.sql`、注册项、执行分支及旧草稿专用升级说明；不新增替代 migration。
+- [x] 028 的 checkpoint 建表语句已经包含 029 涉及的全部 8 个字段，SQL 无需追加或改写。SQLite 目标版本与迁移总数统一为 28；移除依赖 029 的旧 028 身份放行和草稿升级测试，保留正常名称/dialect/checksum 校验。
+- [x] 更新 README、bootstrap CONTEXT 和本文当前部署口径；历史执行记录中的 029/032 方案保留当时含义，已注明撤回。
+- [x] SQLite migration **31 passed**、bcs-admin 迁移测试 **21 passed / 5 ignored**（需 MySQL 的专项用例未在本次 SQLite 改动中重复执行）：新建库、027→028、13 个 DDL 步骤的中断重试、成功后记录版本、幂等执行与冲突记录检查通过。命令 `cargo test --manifest-path src/bcs/Cargo.toml -p bcs -p bcs-admin --lib --bin bcs-admin migrat`，日志 `/tmp/bcs-pr2339-sqlite-028-tests.log`。
+- 本次不改动运行中的数据库，不提交或推送；未重跑完整 workspace 或产品 E2E，主清单验收状态不变。

@@ -19,7 +19,7 @@ fn index_migration_args(only: Vec<u16>) -> MigrateArgs {
 fn human_input_index_revisions_preserve_archives_and_pass_static_gate() -> Result<()> {
     assert_eq!(sha256_hex(LEGACY_001.as_bytes()), "f2248c186b6d4260978d817a9654adfbee2f08dd12fa8cc3c1aa5a70d1bb9d3d");
     assert_eq!(sha256_hex(LEGACY_008.as_bytes()), "0e10c711afc436cf59d2393e3d5c88b9c24e73be72f4e984044840e6f798ebd5");
-    let migrations = load_selected_migrations(&index_migration_args(vec![1, 8, 28]))?;
+    let migrations = load_selected_migrations(&index_migration_args(vec![1, 8]))?;
     let baseline = &migrations[0];
     let plan = mysql_migration_plan(baseline);
     let body = baseline.sql.split_once("-- Record the open-source v1 baseline").context("baseline checksum boundary")?.0;
@@ -36,12 +36,16 @@ fn human_input_index_revisions_preserve_archives_and_pass_static_gate() -> Resul
     assert_eq!(baseline.sql, starting_schema.replace(old_key, new_key).replace(OLD_BASELINE_CHECKSUM, &plan.checksum));
     assert_eq!(migrations[1].sql, LEGACY_008.replace(old_key, new_key));
     assert!(check_mysql_migration_files(&index_migration_args(vec![]))?.contains("migration files check ok"));
+    let active = load_selected_migrations(&index_migration_args(vec![]))?;
+    assert_eq!(active.iter().map(|migration| migration.number).collect::<Vec<_>>(), (1..=28).collect::<Vec<_>>());
+    assert!(!active.iter().any(|migration| migration.sql.contains("DROP INDEX `idx_human_input_scope_status`")));
+
     Ok(())
 }
 
 #[test]
-fn human_input_index_compatibility_keeps_old_records_and_requires_new_increment() -> Result<()> {
-    let migrations = load_selected_migrations(&index_migration_args(vec![1, 8, 28]))?;
+fn human_input_index_compatibility_keeps_old_records_without_index_rebuild() -> Result<()> {
+    let migrations = load_selected_migrations(&index_migration_args(vec![1, 8]))?;
     let plans = migrations.iter().map(mysql_migration_plan).collect::<Vec<_>>();
     let old_checksums = [OLD_BASELINE_CHECKSUM.to_string(), sha256_hex(LEGACY_008.as_bytes())];
     let records = plans[..2].iter().zip(old_checksums).map(|(plan, checksum)| AppliedMysqlMigration {
@@ -49,7 +53,7 @@ fn human_input_index_compatibility_keeps_old_records_and_requires_new_increment(
     }).collect::<Vec<_>>();
     let report = build_mysql_migration_report("bcs".into(), plans.clone(), records.clone(), true)?;
     assert_eq!(report.applied_versions, records);
-    assert_eq!(report.pending_versions, vec![plans[2].clone()]);
+    assert!(report.pending_versions.is_empty());
     for (plan, record) in plans.iter().zip(&records) {
         let mut bad_record = record.clone();
         bad_record.checksum = "0".repeat(64);
@@ -88,7 +92,7 @@ async fn human_input_index_migrations_apply_to_real_mysql() -> Result<()> {
 }
 
 async fn check_human_input_index_migrations(db: &dyn DbPlugin) -> Result<()> {
-    let migrations = load_selected_migrations(&index_migration_args(vec![1, 8, 28]))?;
+    let migrations = load_selected_migrations(&index_migration_args(vec![1, 8]))?;
     let plans = migrations.iter().map(mysql_migration_plan).collect::<Vec<_>>();
     let tables = migrations[0].sql.lines().filter_map(parse_mysql_create_table_name).collect::<Vec<_>>();
     let schema_existed = mysql_schema_migrations_exists(db).await?;
@@ -98,7 +102,7 @@ async fn check_human_input_index_migrations(db: &dyn DbPlugin) -> Result<()> {
         anyhow::ensure!(db_get_column::<i64>(&rows[0], "count")? == 0, "test requires absent baseline table {table}; use a disposable database");
     }
     let original_records = load_applied_mysql_migrations(db).await?;
-    anyhow::ensure!(!original_records.iter().any(|row| [1, 8, 28].contains(&row.version)), "test migration versions already present");
+    anyhow::ensure!(!original_records.iter().any(|row| [1, 8].contains(&row.version)), "test migration versions already present");
     let result = async {
         // Execute the complete corrected 001, not just its HumanInput CREATE.
         apply_mysql_migration(db, &migrations[0], &plans[0]).await?;
@@ -112,18 +116,7 @@ async fn check_human_input_index_migrations(db: &dyn DbPlugin) -> Result<()> {
             insert_scope_request(db, suffix, suffix).await?;
         }
         assert_scope_rows_and_uniqueness(db).await?;
-        // Fresh installations also run 028. Simulate loss of the version
-        // record after its successful DDL and confirm a replay is safe.
-        apply_mysql_migration(db, &migrations[2], &plans[2]).await?;
-        db.execute(DbStatement::new("DELETE FROM bcs_schema_migrations WHERE version = 28")).await?;
-        apply_mysql_migration(db, &migrations[2], &plans[2]).await?;
-        assert_scope_rows_and_uniqueness(db).await?;
-        db.execute(DbStatement::new("DELETE FROM bcs_schema_migrations WHERE version = 28")).await?;
-        // MySQL cannot create the original utf8mb4 index. utf8mb3 permits its
-        // exact unprefixed shape, providing an existing-index upgrade fixture;
-        // this does not claim to reproduce an OceanBase deployment.
-        db.execute(DbStatement::new("ALTER TABLE bcs_human_input_requests CONVERT TO CHARACTER SET utf8mb3")).await?;
-        db.execute(DbStatement::new("ALTER TABLE bcs_human_input_requests DROP INDEX idx_human_input_scope_status, ADD INDEX idx_human_input_scope_status (reply_scope_key, status, deadline_ms, created_at)")).await?;
+        // Historical records are accepted without scheduling an index rebuild.
         let legacy_checksums = [OLD_BASELINE_CHECKSUM.to_string(), sha256_hex(LEGACY_008.as_bytes())];
         for (plan, checksum) in plans[..2].iter().zip(legacy_checksums) {
             db.execute(DbStatement::with_params("UPDATE bcs_schema_migrations SET checksum = ?, applied_at = '2026-01-01 00:00:00' WHERE version = ? AND checksum = ?", vec![DbValue::from(checksum), DbValue::from(i64::from(plan.version)), DbValue::from(plan.checksum.clone())])).await?;
@@ -131,19 +124,14 @@ async fn check_human_input_index_migrations(db: &dyn DbPlugin) -> Result<()> {
         let before = load_applied_mysql_migrations(db).await?;
         let column_before = human_input_column_metadata(db).await?;
         let report = build_mysql_migration_report("bcs".into(), plans.clone(), before.clone(), false)?;
-        assert_eq!(report.pending_versions, vec![plans[2].clone()]);
-        // A missing index is schema drift: propagate DDL failure without
-        // recording 028 or changing either historical migration row.
-        db.execute(DbStatement::new("ALTER TABLE bcs_human_input_requests DROP INDEX idx_human_input_scope_status")).await?;
-        assert!(apply_mysql_migration(db, &migrations[2], &plans[2]).await.is_err());
-        assert_eq!(load_applied_mysql_migrations(db).await?, before);
-        db.execute(DbStatement::new("ALTER TABLE bcs_human_input_requests ADD INDEX idx_human_input_scope_status (reply_scope_key, status, deadline_ms, created_at)")).await?;
-        apply_mysql_migration(db, &migrations[2], &plans[2]).await?;
+        assert!(report.pending_versions.is_empty());
+        let report = build_mysql_migration_report("bcs".into(), plans.clone(), before.clone(), true)?;
+        assert!(report.pending_versions.is_empty());
         assert_human_input_scope_index(db, 700).await?;
         assert_eq!(human_input_column_metadata(db).await?, column_before);
         assert_scope_rows_and_uniqueness(db).await?;
         let after = load_applied_mysql_migrations(db).await?;
-        assert_eq!(after.iter().filter(|row| row.version != 28).cloned().collect::<Vec<_>>(), before);
+        assert_eq!(after, before);
         let timestamps = db.query(DbStatement::new("SELECT DATE_FORMAT(applied_at, '%Y-%m-%d %H:%i:%s') AS applied_at FROM bcs_schema_migrations WHERE version IN (1, 8)")).await?;
         for row in timestamps { assert_eq!(db_get_column::<String>(&row, "applied_at")?, "2026-01-01 00:00:00"); }
         assert!(build_mysql_migration_report("bcs".into(), plans.clone(), after, false)?.pending_versions.is_empty());
@@ -156,7 +144,7 @@ async fn check_human_input_index_migrations(db: &dyn DbPlugin) -> Result<()> {
         db.execute(DbStatement::new(format!("DROP TABLE IF EXISTS `{table}`"))).await?;
     }
     if mysql_schema_migrations_exists(db).await? {
-        db.execute(DbStatement::new("DELETE FROM bcs_schema_migrations WHERE version IN (1, 8, 28)")).await?;
+        db.execute(DbStatement::new("DELETE FROM bcs_schema_migrations WHERE version IN (1, 8)")).await?;
         assert_eq!(load_applied_mysql_migrations(db).await?, original_records);
         if !schema_existed { db.execute(DbStatement::new("DROP TABLE bcs_schema_migrations")).await?; }
     }

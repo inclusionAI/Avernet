@@ -83,6 +83,7 @@ source "$SCRIPT_DIR/actor.sh"
 source "$SCRIPT_DIR/register.sh"
 source "$SCRIPT_DIR/stories.sh"
 source "$SCRIPT_DIR/cli-stories.sh"
+source "$SCRIPT_DIR/fixed_loop_story.sh"
 source "$SCRIPT_DIR/session_files.sh"
 source "$SCRIPT_DIR/edge_permission.sh"
 

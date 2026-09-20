@@ -1,5 +1,11 @@
 # MySQL 016 consolidation and existing deployments
 
+PR #2339 explicitly consolidates the duplicate 016 migrations before merge.
+The agreed release scope is a working latest migration chain; automatic upgrades
+from either split-016 lineage are outside this change. Subsequent changes to the
+merged chain use new migrations. The diagnostic below remains intentional for
+earlier deployments.
+
 The active migration is
 [`016_session_callback_lease_and_chat_runs.sql`](../mysql/016_session_callback_lease_and_chat_runs.sql).
 It adds the three Session callback lease columns and recovery index, then creates
@@ -93,6 +99,6 @@ no pending DDL, and confirms both old version records are rejected unchanged.
 Unit tests lock the two archive checksums and verify checksum mismatch handling.
 
 This addresses the duplicate 016 number. The HumanInput index in 001/008 is
-now corrected, with existing-table repair and historical record preservation
-documented in the [028 guide](028-human-input-scope-index.md). Full historical
+now corrected, with manual index-size handling and historical record preservation
+documented in the [index guide](human-input-index-size.md). Full historical
 chain deployment validation remains separate.

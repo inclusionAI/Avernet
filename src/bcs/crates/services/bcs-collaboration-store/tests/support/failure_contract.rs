@@ -101,11 +101,11 @@ async fn sqlite_failure_action_migration_preserves_legacy_rows_and_replays() {
     let db = LocalSqliteDbPlugin::new().unwrap();
     bootstrap_migrations::run_sqlite_migrations(&db).await.unwrap();
     db.execute(DbStatement::new("ALTER TABLE bcs_state_machine_node_runs DROP COLUMN failure_action")).await.unwrap();
-    db.execute(DbStatement::new("DELETE FROM bcs_schema_migrations WHERE version = 28")).await.unwrap();
+    db.execute(DbStatement::new("DELETE FROM bcs_schema_migrations WHERE version = 29")).await.unwrap();
     db.execute(DbStatement::new("INSERT INTO bcs_state_machine_node_runs (run_id, node_id, assignee_bot_id, status, error_message, env) VALUES ('legacy', 'node', 'bot', 'failed', 'old failure', 'test')")).await.unwrap();
     bootstrap_migrations::run_sqlite_migrations(&db).await.unwrap();
     // Column committed, migration marker not committed: safe to replay.
-    db.execute(DbStatement::new("DELETE FROM bcs_schema_migrations WHERE version = 28")).await.unwrap();
+    db.execute(DbStatement::new("DELETE FROM bcs_schema_migrations WHERE version = 29")).await.unwrap();
     bootstrap_migrations::run_sqlite_migrations(&db).await.unwrap();
     let row = db.query(DbStatement::new("SELECT failure_action, error_message FROM bcs_state_machine_node_runs WHERE run_id = 'legacy'")).await.unwrap().remove(0);
     assert_eq!(bcs_db_api::db_get_column_opt::<String>(&row, "failure_action").unwrap(), None);

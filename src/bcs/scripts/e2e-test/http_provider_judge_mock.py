@@ -18,11 +18,13 @@ class MockState:
         self.event_webhook_requests: list[dict[str, Any]] = []
         self.judge_started = threading.Event()
         self.judge_release = threading.Event()
+        self.judge_outcomes: list[str] | None = None
 
     def reset(self) -> None:
         with self.lock:
             self.provider_requests.clear()
             self.event_webhook_requests.clear()
+            self.judge_outcomes = None
         self.judge_started.clear()
         self.judge_release.clear()
 
@@ -93,6 +95,15 @@ class Handler(BaseHTTPRequestHandler):
             STATE.judge_release.set()
             self.send_json(200, {"ok": True})
             return
+        if self.path == "/control/judge/outcomes":
+            outcomes = self.read_json().get("outcomes")
+            if not isinstance(outcomes, list) or not all(isinstance(item, str) and item for item in outcomes):
+                self.send_json(400, {"error": "expected nonempty outcome strings"})
+                return
+            with STATE.lock:
+                STATE.judge_outcomes = list(outcomes)
+            self.send_json(200, {"ok": True})
+            return
         if self.path == "/provider/webhook":
             body = self.read_json()
             with STATE.lock:
@@ -119,11 +130,17 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/chat/completions":
             self.read_json()
             STATE.judge_started.set()
-            if not STATE.judge_release.wait(timeout=30):
+            with STATE.lock:
+                scripted = STATE.judge_outcomes is not None
+                outcome = STATE.judge_outcomes.pop(0) if STATE.judge_outcomes else None
+            if scripted and outcome is None:
+                self.send_json(500, {"error": "unexpected_judge_invocation"})
+                return
+            if not scripted and not STATE.judge_release.wait(timeout=30):
                 self.send_json(504, {"error": "judge_release_timeout"})
                 return
             decision = {
-                "outcome": "approved",
+                "outcome": outcome if scripted else "approved",
                 "reason": "candidate satisfies the E2E criteria",
                 "confidence": 0.99,
                 "checked_criteria": [],

@@ -53,7 +53,7 @@ async fn exercise(db: Arc<MysqlDbPlugin>) -> Result<(), Box<dyn std::error::Erro
          VALUES ('test', 'legacy', 'group-1', 'legacy-session', 1, 'legacy', 1, REPEAT('a', 64), JSON_OBJECT('version', 1))"
     )).await?;
     // The consolidated migration has five plain DDL statements.
-    for sql in include_str!("../../../../../migrations/mysql/027_fixed_loop_runtime.sql").split(';').map(str::trim).filter(|sql| !sql.is_empty()) {
+    for sql in include_str!("../../../../../migrations/mysql/028_fixed_loop_runtime.sql").split(';').map(str::trim).filter(|sql| !sql.is_empty()) {
         db.execute(DbStatement::new(sql)).await?;
     }
     let legacy = db.query(DbStatement::new("SELECT snapshot_json, execution_plan_json, execution_plan_content_hash, execution_plan_compiler_version FROM bcs_state_machine_definition_snapshots WHERE run_id = 'legacy'")).await?.remove(0);
