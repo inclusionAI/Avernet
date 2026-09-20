@@ -291,6 +291,23 @@ def test_the_upload_reaches_a_shared_bot_at_both_addresses(client) -> None:
         )
 
 
+def test_the_collection_is_reachable_by_entity_id(client) -> None:
+    """The renamed parameter reaches the grant check as well as the handler."""
+    response = client.get(
+        f"/openapi/v1/bots/{BOT}/skills?user_id={CALLER}&entity_id={OWNER}&source=LOCAL"
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_naming_the_wrong_owner_as_entity_id_on_the_collection_is_refused(
+    client,
+) -> None:
+    response = client.get(
+        f"/openapi/v1/bots/{BOT}/skills?user_id={CALLER}&entity_id=u-someone-else"
+    )
+    assert response.status_code == 404
+
+
 def test_naming_the_wrong_owner_on_the_collection_is_still_refused(client) -> None:
     """The parameter is adjudicated, not believed.
 

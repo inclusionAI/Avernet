@@ -7,7 +7,8 @@
 
 - Base URL: `/openapi/v1/bots`
 - `user_id`: 必填 Query，表示实际操作人。
-- `owner_id`: 可选 Query，访问协作 Bot 时传 Bot Owner。
+- `entity_id`: 可选 Query，访问协作 Bot 时传 Bot Owner。
+- `owner_id`: 已废弃，`entity_id` 的旧名字；仅在未传 `entity_id` 时读取，两者同时传且不一致时答 `422`。
 - 生命周期动作不接收 `publication_id`；后端在已授权 Bot 内选择当前可操作版本。
 - 成功与失败均使用 OpenAPI v1 Envelope。异步动作成功受理返回 HTTP `202`。
 

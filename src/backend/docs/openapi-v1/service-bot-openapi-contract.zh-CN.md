@@ -7,7 +7,8 @@
 
 - 所有接口均要求认证。
 - `user_id`：必填 Query，表示实际操作人。
-- `owner_id`：可选 Query，省略时为当前用户；访问协作 Bot 时传 Bot Owner。
+- `entity_id`：可选 Query，省略时为当前用户；访问协作 Bot 时传 Bot Owner。
+- `owner_id`：已废弃，`entity_id` 的旧名字；仅在未传 `entity_id` 时读取，两者同时传且不一致时答 `422`。迁移完成后移除。
 - 成功和失败统一使用 OpenAPI v1 Envelope。
 - 生命周期动作不接收 `publication_id`。后端按 `bot_id`、当前环境和目标状态选择最新可操作版本，避免调用方传错历史版本。
 
@@ -34,7 +35,7 @@
 完整示例：
 
 ```text
-GET /openapi/v1/bots/20260817_abcd1234/lifecycle?user_id=165137&owner_id=168944
+GET /openapi/v1/bots/20260817_abcd1234/lifecycle?user_id=165137&entity_id=168944
 ```
 
 ## 统一列表服务卡片

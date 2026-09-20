@@ -777,7 +777,7 @@ unchanged — so a route that breaks the rule fails there rather than in review.
 
 ---
 
-## Operating shared bots and published stages (`?owner_id=`, `?stage=`)
+## Operating shared bots and published stages (`?entity_id=`, `?stage=`)
 
 **The engine-runtime groups are an operator console, and who may hold it is
 one rule:** the bot's **owner**, or a **collaborator at member level or
@@ -798,23 +798,31 @@ message, connection, and runtime adapters. BCN is consulted on every request
 as the friendship authority; its failure is fail-closed, and Backend's legacy
 chat-list row is only a compatibility projection. All non-session
 engine-runtime groups keep the owner/collaborator rule above. Friend callers
-must name `owner_id` until BCN provides an exact Bot lookup that resolves the
+must name `entity_id` until BCN provides an exact Bot lookup that resolves the
 qualified `{bot_id}:{owner_id}` identity.
 
 Two optional query parameters name the target, following the same placement
 rule as `user_id` (query string, never a body field or a path segment):
 
 ```text
-GET /openapi/v1/bots/b-1/sessions?user_id=u-collab&owner_id=u-owner            collaborator, team bot
+GET /openapi/v1/bots/b-1/sessions?user_id=u-collab&entity_id=u-owner           collaborator, team bot
 GET /openapi/v1/bots/b-1/engine/status?user_id=u-owner&stage=online            owner, live runtime
-GET /openapi/v1/bots/b-1/connection?user_id=u-collab&owner_id=u-owner&stage=verify
+GET /openapi/v1/bots/b-1/connection?user_id=u-collab&entity_id=u-owner&stage=verify
 GET /openapi/v1/bots/b-1/engine/config?user_id=u-owner&stage=online            the release's own config
 GET /openapi/v1/bots/b-1/identity/RULES?user_id=u-owner&stage=verify           what verify received
 ```
 
-- **`owner_id`** — the owner of the bot the request addresses. Defaults to
+- **`entity_id`** — the owner of the bot the request addresses. Defaults to
   the caller, so operating one's own bot names nothing extra and **every
   request valid before this change behaves byte-for-byte the same**.
+- **`owner_id`** — **deprecated**: the former name of `entity_id`, published
+  as deprecated and read only while `entity_id` is absent. A request may send
+  both while a client migrates, so long as they agree; two different values
+  are refused with `422` before any grant or collaborator lookup. Every
+  reader on the surface — the grant check that runs before a handler and the
+  handler's own parameter — resolves the pair through the one function
+  `principal.addressed_owner`, so they cannot prefer different spellings.
+  The alias is removed once every client has migrated.
 - **`stage`** — which runtime the request addresses: `draft` (default — the
   bot's own workspace, the only runtime a personal bot has), `verify`, or
   `online`. A published stage is live per the rule in

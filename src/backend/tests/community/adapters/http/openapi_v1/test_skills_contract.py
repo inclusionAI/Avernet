@@ -59,7 +59,9 @@ def test_collection_and_upload_are_bot_addressed_contracts() -> None:
         for parameter in paths["/openapi/v1/bots/{bot_id}/skills"]["get"]["parameters"]
     }
     assert list_parameters["bot_id"]["in"] == "path"
+    assert list_parameters["entity_id"]["required"] is False
     assert list_parameters["owner_id"]["required"] is False
+    assert list_parameters["owner_id"]["deprecated"] is True
     assert list_parameters["active"]["required"] is False
     assert list_parameters["keyword"]["required"] is False
     assert list_parameters["source"]["required"] is False
@@ -73,7 +75,9 @@ def test_collection_and_upload_are_bot_addressed_contracts() -> None:
         parameter["name"]: parameter for parameter in upload["parameters"]
     }
     assert upload_parameters["bot_id"]["in"] == "path"
+    assert upload_parameters["entity_id"]["required"] is False
     assert upload_parameters["owner_id"]["required"] is False
+    assert upload_parameters["owner_id"]["deprecated"] is True
     assert set(upload["requestBody"]["content"]) == {"application/zip"}
 
     folder_upload = paths["/openapi/v1/bots/{bot_id}/skills/upload-folder"]["post"]

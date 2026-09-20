@@ -1495,10 +1495,11 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 | --- | --- | --- | --- |
 | `bot_id` | 路径 | ✅（`/bots/{bot_id}/…` 的端点） | 就是 `Bot.bot_id`（形如 `20260813_a7k2m9p1`），原样传，不做加工 |
 | `user_id` | 查询 | ✅ | 这次请求**代表哪个终端用户**。非空。它指向别人时答 `403`；**完全不传时答 `422`**。应用调用方传它所代表的那个用户 |
-| `owner_id` | 查询 | ❌ | 要操作的 bot**属于谁**。默认是调用方自己，**只有在操作别人分享给你的 bot 时才需要写**。写了它而你既不是属主也不是协作者 → 按 B.0 的规则答 `404`（与「没有这个 bot」不可区分）。清单本体、apply、CLI 工具这几组协作者可用的端点都接受它 |
+| `entity_id` | 查询 | ❌ | 要操作的 bot**属于谁**。默认是调用方自己，**只有在操作别人分享给你的 bot 时才需要写**。写了它而你既不是属主也不是协作者 → 按 B.0 的规则答 `404`（与「没有这个 bot」不可区分）。清单本体、apply、CLI 工具这几组协作者可用的端点都接受它 |
+| `owner_id` | 查询 | ❌ | **已废弃**：`entity_id` 的旧名字，仅在未传 `entity_id` 时读取。两者同时传且值不同 → `422`。请迁移到 `entity_id`；迁移完成后移除 |
 
-`user_id` 与 `owner_id` 的区别就是「**谁在调**」与「**调谁的 bot**」：在你自己的 bot 上
-两者相同、`owner_id` 可以不写；在别人分享给你的 bot 上，`user_id` 是你、`owner_id` 是
+`user_id` 与 `entity_id` 的区别就是「**谁在调**」与「**调谁的 bot**」：在你自己的 bot 上
+两者相同、`entity_id` 可以不写；在别人分享给你的 bot 上，`user_id` 是你、`entity_id` 是
 那个 bot 的属主。
 
 **权限位**：`MEMBER` / `ADMIN` / `OWNER` 是调用方在这个 bot 上的协作者等级，**OWNER
@@ -1552,7 +1553,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 
 读整份清单。**权限：MEMBER。**
 
-**请求**：除 B.0.1 的公共参数（`bot_id` + 必填 `user_id` + 可选 `owner_id`）外，没有 body、没有别的查询参数。
+**请求**：除 B.0.1 的公共参数（`bot_id` + 必填 `user_id` + 可选 `entity_id`）外，没有 body、没有别的查询参数。
 
 **响应 `data`**：
 

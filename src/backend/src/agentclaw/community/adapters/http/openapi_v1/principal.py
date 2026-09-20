@@ -84,6 +84,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends, Query, Request
+from fastapi.exceptions import RequestValidationError
 from starlette.requests import HTTPConnection
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
@@ -368,7 +369,68 @@ _BOT_ID_KEY = "bot_id"
 #: authorization operations — declares it as a query parameter, for the reason
 #: ``user_id`` is one: it says who the call is *for*, not what resource is being
 #: addressed in the path.
-_OWNER_ID_KEY = "owner_id"
+#:
+#: Two spellings of one parameter, for as long as the rename takes.
+#: ``entity_id`` is its name; ``owner_id`` is what it was called, kept so a
+#: client built against the earlier contract keeps working until it migrates,
+#: and dropped once every client has. A request may carry either, or both when
+#: they agree. Every reader on this surface goes through :func:`addressed_owner`
+#: so the two spellings are never preferred differently in two places — the
+#: grant check and the handler have to resolve the same owner (see
+#: :func:`require_granted_addressed_bot`).
+ENTITY_ID_QUERY = "entity_id"
+OWNER_ID_QUERY = "owner_id"
+
+#: What every operation publishes for ``entity_id``. A group whose adjudication
+#: adds to it (engine-runtime's masked 404) appends to this text rather than
+#: restating it.
+ENTITY_ID_DESCRIPTION = (
+    "The owner of the bot this request addresses. Defaults to the caller — "
+    "name it only to operate a bot shared with you."
+)
+
+#: What every operation publishes for the retiring ``owner_id``.
+OWNER_ID_DESCRIPTION = (
+    "Deprecated: the former name of entity_id, read only while entity_id is "
+    "absent, and refused (422) when both are sent with different values. "
+    "Migrate to entity_id; this parameter will be removed."
+)
+
+
+def addressed_owner(entity_id: str | None, owner_id: str | None) -> str | None:
+    """The owner a request names, under either spelling; ``None`` when it names none.
+
+    ``entity_id`` wins whenever it is present; ``owner_id`` answers only in its
+    absence. The one case that is neither is both present *and different*.
+    That is not a preference to resolve but a request that does not say which
+    bot it means: silently taking one side would act on a bot the caller may
+    not have intended, and hide the client's bug until the alias is gone.
+    Refused as a validation failure (422) — the answer a malformed value of
+    either parameter already gets — and before any grant or collaborator
+    lookup, so the refusal reveals nothing about either owner's bots.
+
+    Written once, for both the raw query read in
+    :func:`require_granted_addressed_bot` and the declared parameters of the
+    engine-runtime ``resolve_owner_id``: the two readers this surface's oldest
+    defect (see :func:`require_granted_own_bot`) says must agree.
+    """
+    if entity_id is not None and owner_id is not None and entity_id != owner_id:
+        # ``msg`` carries neither value: the validation handler logs ``loc``,
+        # ``type`` and ``msg`` verbatim, and both parameters are unbounded
+        # caller input.
+        raise RequestValidationError(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("query", ENTITY_ID_QUERY),
+                    "msg": (
+                        f"{ENTITY_ID_QUERY} and {OWNER_ID_QUERY} name different "
+                        "owners; send one of them, or both with the same value"
+                    ),
+                }
+            ]
+        )
+    return entity_id if entity_id is not None else owner_id
 
 
 async def require_granted_own_bot(
@@ -386,8 +448,9 @@ async def require_granted_own_bot(
     The owner is ``caller.user_id`` and nothing else, which is not shorthand —
     it is the security property. ``request.query_params`` is the raw parsed
     query string, not the parameters a route declares, so an operation that
-    never publishes ``owner_id`` would still be handed one if a client appended
-    it. An earlier revision read it wherever it appeared, and that let an
+    never publishes ``entity_id`` (or its retiring alias ``owner_id``) would
+    still be handed one if a client appended it. An earlier revision read it
+    wherever it appeared, and that let an
     application aim the *check* at a bot it held a grant on while the *handler*
     — reading only its own ``user_id`` — resolved and acted on the delegating
     user's own, different, ungranted bot of the same id. A grant on anyone's
@@ -408,19 +471,29 @@ async def require_granted_addressed_bot(
     the engine-runtime groups through :data:`AddressedBotGrantDep` (their
     ``resolve_owner_id`` consumes the returned owner), the skills collection
     operations per route. Declaring it is what entitles an operation to an
-    owner off the wire: these operations publish an ``owner_id`` query
-    parameter, defaulting to the caller, and this reads the same value the
-    handler acts on — so the check and the resolution mean the same bot here
-    for the same reason the own-bot dependency's constant does there.
+    owner off the wire: these operations publish an ``entity_id`` query
+    parameter (and, while clients migrate, its retiring alias ``owner_id``),
+    defaulting to the caller, and this reads the same value the handler acts
+    on — through the same :func:`addressed_owner` — so the check and the
+    resolution mean the same bot here for the same reason the own-bot
+    dependency's constant does there.
 
-    An operation that does *not* publish ``owner_id`` must declare
+    An operation that does *not* publish ``entity_id`` must declare
     :func:`require_granted_own_bot` instead; giving it this dependency would
     reintroduce the surface's oldest defect (see that function's docstring).
     ``test_admission_inventory.py`` holds each route to the dependency its
     admission mode calls for.
+
+    Read raw, an absent parameter and an empty one are both "unnamed" here:
+    the declared parameters refuse the empty string (``min_length=1``) once
+    this dependency has run, so treating it as absent costs nothing and keeps
+    the pre-rename behaviour of the grant check byte-for-byte.
     """
-    addressed_owner = request.query_params.get(_OWNER_ID_KEY) or caller.user_id
-    return _require_granted_bot(request, caller, owner_id=addressed_owner)
+    named = addressed_owner(
+        request.query_params.get(ENTITY_ID_QUERY) or None,
+        request.query_params.get(OWNER_ID_QUERY) or None,
+    )
+    return _require_granted_bot(request, caller, owner_id=named or caller.user_id)
 
 
 def _require_granted_bot(

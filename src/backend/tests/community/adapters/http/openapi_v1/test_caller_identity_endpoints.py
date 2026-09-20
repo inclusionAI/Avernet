@@ -52,13 +52,16 @@ def test_public_contract_replaces_legacy_ctoken_entity_and_lock_parameters():
     body_name = body_ref.rsplit("/", 1)[-1]
     body_fields = set(document["components"]["schemas"][body_name]["properties"])
 
-    assert {"bot_id", "user_id", "owner_id", "stage", "publish_id"} <= read_params
-    assert {"bot_id", "server_code", "user_id", "owner_id"} <= write_params
+    # ``entity_id`` here is the addressed owner (``OwnerIdDep``), with
+    # ``owner_id`` as its retiring alias — not the legacy internal API's
+    # ``entity_id``, which this contract replaced and whose ``ctoken`` and lock
+    # parameters stay out.
+    assert {"bot_id", "user_id", "entity_id", "owner_id", "stage", "publish_id"} <= read_params
+    assert {"bot_id", "server_code", "user_id", "entity_id", "owner_id"} <= write_params
     assert "ctoken" not in read_params | write_params
-    assert "entity_id" not in read_params | write_params
     assert body_fields == {"call_type"}
     assert "423" in write["responses"]
-    assert {"bot_id", "cli_code", "user_id", "owner_id"} <= {
+    assert {"bot_id", "cli_code", "user_id", "entity_id", "owner_id"} <= {
         item["name"] for item in cli_write["parameters"]
     }
     assert "423" in cli_write["responses"]

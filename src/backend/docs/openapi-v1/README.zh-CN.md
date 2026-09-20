@@ -579,7 +579,7 @@ Agent，也就是 `specs/2026-08-02-public-api-user-only-principal/` 记录的�
 
 ---
 
-## 操作共享 Bot 与已发布阶段（`?owner_id=`、`?stage=`）
+## 操作共享 Bot 与已发布阶段（`?entity_id=`、`?stage=`）
 
 **engine-runtime 各组是一个运维台（operator console），谁可以持有它只有一条规则：**
 Bot 的**拥有者**，或 **member 级及以上的协作者** —— 与内部设备连接采用同一门槛
@@ -594,19 +594,24 @@ Bot 的**拥有者**，或 **member 级及以上的协作者** —— 与内部�
 的会话，并继续复用 Expert Chat 现有的 Session、消息、连接和 Runtime 适配器。每次请求
 都以 BCN 为好友关系权威来源；BCN 查询失败时关闭访问，Backend 旧聊天列表记录仅作为兼容
 投影。其他 engine-runtime 分组仍只允许拥有者/协作者。由于 BCN 尚无按 Bot 精确查询并
-解析 `{bot_id}:{owner_id}` 的接口，好友调用者目前必须显式传 `owner_id`。
+解析 `{bot_id}:{owner_id}` 的接口，好友调用者目前必须显式传 `entity_id`。
 
 两个可选的 query 参数指定目标，遵循与 `user_id` 相同的放置规则（query string，从不
 放在 body 或路径段）：
 
 ```text
-GET /openapi/v1/bots/b-1/sessions?user_id=u-collab&owner_id=u-owner            协作者，团队 Bot
+GET /openapi/v1/bots/b-1/sessions?user_id=u-collab&entity_id=u-owner           协作者，团队 Bot
 GET /openapi/v1/bots/b-1/engine/status?user_id=u-owner&stage=online            拥有者，线上运行态
-GET /openapi/v1/bots/b-1/connection?user_id=u-collab&owner_id=u-owner&stage=verify
+GET /openapi/v1/bots/b-1/connection?user_id=u-collab&entity_id=u-owner&stage=verify
 ```
 
-- **`owner_id`** —— 请求所指向 Bot 的拥有者。默认是调用者本人，因此操作自己的 Bot
+- **`entity_id`** —— 请求所指向 Bot 的拥有者。默认是调用者本人，因此操作自己的 Bot
   无需额外指定，**此前有效的每个请求行为逐字节不变**。
+- **`owner_id`** —— **已废弃**：`entity_id` 的旧名字，在文档中标记为 deprecated，仅在
+  未传 `entity_id` 时才被读取。迁移期间允许两者同时传，但必须一致；两个值不同时在任何
+  授权/协作者查询之前就以 `422` 拒绝。本面上所有读取点 —— handler 之前运行的授权检查
+  与 handler 自己的参数 —— 都经由同一个函数 `principal.addressed_owner` 解析，因此不可能
+  各自偏好不同的拼写。所有调用方迁移完成后该别名将被移除。
 - **`stage`** —— 请求指向哪个运行态：`draft`（默认 —— Bot 自己的工作区，也是 personal
   bot 唯一的运行态）、`verify` 或 `online`。已发布阶段是否存活由
   `core/engine_runtime/stage.py` 的规则决定，与 cron 的运行态选取一致：`online` 在最新

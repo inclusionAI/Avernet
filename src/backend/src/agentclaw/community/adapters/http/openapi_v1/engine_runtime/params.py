@@ -26,6 +26,13 @@ whose adjudication *is* engine-runtime's, has not moved either.
 the caller. For a human it is the request's, defaulting to themselves; for an
 application it comes from the grant record, and a request that names a different
 owner is refused. See :func:`resolve_owner_id`.
+
+On the wire the parameter is now called ``entity_id``; ``owner_id`` is its
+retiring alias, published as deprecated and read only while ``entity_id`` is
+absent (``principal.addressed_owner`` holds the rule, once, for every reader).
+The handler-side name stays ``owner_id`` — it is what the value *is*, and every
+engine-runtime handler and core seam already spells it so — only the published
+spelling changes.
 """
 
 from __future__ import annotations
@@ -42,20 +49,24 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 )
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ENTITY_ID_QUERY,
+    OWNER_ID_DESCRIPTION,
+    OWNER_ID_QUERY,
     ActingCallerDep,
     AddressedBotGrantDep,
+    addressed_owner,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ENTITY_ID_DESCRIPTION as _ADDRESSED_OWNER_DESCRIPTION,
 )
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-#: The query parameter naming the bot owner a request addresses.
-OWNER_ID_QUERY = "owner_id"
-
-#: What every engine-runtime operation publishes for it.
-OWNER_ID_DESCRIPTION = (
-    "The owner of the bot this request addresses. Defaults to the caller — "
-    "name it only to operate a bot shared with you. The caller must be the "
+#: What every engine-runtime operation publishes for ``entity_id``: the text
+#: shared with every other group that takes it, plus this group's adjudication.
+ENTITY_ID_DESCRIPTION = (
+    _ADDRESSED_OWNER_DESCRIPTION + " The caller must be the "
     "bot's owner or a collaborator on it; anyone else is answered exactly as "
     "if the bot did not exist (404)."
 )
@@ -86,10 +97,10 @@ WRITE_STAGE_DESCRIPTION = (
 async def resolve_owner_id(
     caller: ActingCallerDep,
     granted_owner_id: AddressedBotGrantDep,
-    owner_id: Annotated[
+    entity_id: Annotated[
         str | None,
         Query(
-            alias=OWNER_ID_QUERY,
+            alias=ENTITY_ID_QUERY,
             # ``min_length`` only, matching ``user_id``'s deliberate choice in
             # ``principal.py``: owner ids come from the same unconstrained
             # gateway subject-id space, and a cap here would 422 a collaborator
@@ -97,6 +108,17 @@ async def resolve_owner_id(
             # ran — while the owner themselves (parameter omitted) sailed
             # through.
             min_length=1,
+            description=ENTITY_ID_DESCRIPTION,
+        ),
+    ] = None,
+    owner_id: Annotated[
+        str | None,
+        Query(
+            alias=OWNER_ID_QUERY,
+            min_length=1,
+            # Published as deprecated so generated clients and the rendered
+            # document carry the migration notice without a separate channel.
+            deprecated=True,
             description=OWNER_ID_DESCRIPTION,
         ),
     ] = None,
@@ -107,6 +129,13 @@ async def resolve_owner_id(
     meaning "my own bot", and it must stay distinguishable from an empty
     string (a 422). Downstream never sees the ``None`` — this dependency is
     where the default is applied, once.
+
+    Two spellings arrive — ``entity_id`` and its retiring alias ``owner_id`` —
+    and ``principal.addressed_owner`` collapses them to one value before any
+    of the below runs: ``entity_id`` when present, else ``owner_id``, and a
+    422 when both are present and disagree. The grant dependency this consumes
+    read the wire through the same function, so what it authorized and what
+    this returns cannot name different owners.
 
     Deliberately **no adjudication here**: whether the caller may operate the
     named owner's bot needs the resolved bot record (the collaborator table
@@ -132,23 +161,24 @@ async def resolve_owner_id(
     A human caller's use of the parameter is untouched: naming another owner
     still works and is still adjudicated against the collaborator table.
     """
+    named = addressed_owner(entity_id, owner_id)
     if caller.is_application:
-        if owner_id is not None and owner_id != granted_owner_id:
+        if named is not None and named != granted_owner_id:
             # The addressed owner goes to the log bounded, and stays out of the
             # exception message: that message reaches a log line verbatim, and
-            # ``owner_id`` is declared ``min_length=1`` with no upper bound, so
-            # raw it would let a refused caller pad every refusal to any size.
+            # both spellings are declared ``min_length=1`` with no upper bound,
+            # so raw it would let a refused caller pad every refusal to any size.
             logger.warning(
                 "[engine_runtime] app_id=%s addressed owner=%s, which its "
                 "grant does not cover",
                 caller.app_id,
-                for_log(owner_id),
+                for_log(named),
             )
             raise GrantNotResolvableError(
                 f"app {caller.app_id} addressed an owner its grant does not cover"
             )
         return granted_owner_id
-    return owner_id if owner_id is not None else caller.user_id
+    return named if named is not None else caller.user_id
 
 
 #: What an engine-runtime handler declares to receive the addressed owner.
@@ -164,6 +194,8 @@ StageQuery = Annotated[RuntimeStage, Query(description=STAGE_DESCRIPTION)]
 WriteStageQuery = Annotated[RuntimeStage, Query(description=WRITE_STAGE_DESCRIPTION)]
 
 __all__ = [
+    "ENTITY_ID_DESCRIPTION",
+    "ENTITY_ID_QUERY",
     "OWNER_ID_QUERY",
     "OwnerIdDep",
     "StageQuery",

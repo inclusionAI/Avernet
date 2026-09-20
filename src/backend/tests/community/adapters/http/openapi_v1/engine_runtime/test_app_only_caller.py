@@ -341,6 +341,89 @@ def test_naming_the_grants_own_owner_is_accepted(app_client, relay, grants):
     assert _sessions(app_client(), owner_id=OWNER).status_code == 200
 
 
+# ── ``entity_id``: the parameter's name; ``owner_id`` its retiring alias ────
+
+
+def test_naming_the_owner_as_entity_id_reaches_the_shared_bot(
+    app_client, relay, grants
+):
+    """The rename, on the application path.
+
+    The grant check reads the wire before the handler runs, so a reader that
+    learned ``entity_id`` in the handler alone would have looked the grant up
+    against the delegating user's own bot and then refused the handler's
+    owner for disagreeing with it. Both readers must move together.
+    """
+    grants.grant(app_id=APP_ID, bot_id=BOT, user_id=COLLAB, owner_id=OWNER)
+    relay.add_operator(COLLAB)
+
+    assert _sessions(app_client(), entity_id=OWNER).status_code == 200
+    assert relay.calls[0]["owner_id"] == OWNER
+
+
+def test_naming_a_different_owner_as_entity_id_is_refused(app_client, relay, grants):
+    """The new spelling is adjudicated exactly as the old one."""
+    grants.grant(app_id=APP_ID, bot_id=BOT, user_id=COLLAB, owner_id=OWNER)
+    relay.add_operator(COLLAB)
+
+    refused = _sessions(app_client(), entity_id="someone-else")
+
+    assert refused.status_code == 404
+    assert relay.attempts == [], "refused before any forward"
+
+
+def test_both_spellings_agreeing_are_accepted(app_client, relay, grants):
+    """A client mid-migration may send both, so long as they name one owner."""
+    grants.grant(app_id=APP_ID, bot_id=BOT, user_id=COLLAB, owner_id=OWNER)
+    relay.add_operator(COLLAB)
+
+    assert _sessions(app_client(), entity_id=OWNER, owner_id=OWNER).status_code == 200
+
+
+def test_both_spellings_disagreeing_are_invalid(app_client, relay, grants):
+    """Two different owners is a request that does not say which bot it means.
+
+    A 422, not the masked 404: it is answered before any grant lookup, from the
+    request's own parameters, so it reveals nothing about either owner's bots.
+    Silently preferring one spelling would have this application act on a bot
+    it did not intend and hide the client's bug until the alias is removed.
+    """
+    grants.grant(app_id=APP_ID, bot_id=BOT, user_id=COLLAB, owner_id=OWNER)
+    relay.add_operator(COLLAB)
+
+    refused = _sessions(app_client(), entity_id=OWNER, owner_id="someone-else")
+
+    assert refused.status_code == 422
+    assert relay.attempts == [], "refused before any forward"
+
+
+def test_a_human_caller_addresses_owners_by_entity_id(make_client, relay):
+    relay.add_operator(COLLAB)
+    client = make_client(sessions_router, caller=COLLAB)
+
+    response = client.get(
+        f"/openapi/v1/bots/{BOT}/sessions", params={"entity_id": OWNER}
+    )
+
+    assert response.status_code == 200
+    assert relay.calls[0]["owner_id"] == OWNER
+
+
+def test_a_human_caller_sending_both_spellings_disagreeing_is_refused(
+    make_client, relay
+):
+    relay.add_operator(COLLAB)
+    client = make_client(sessions_router, caller=COLLAB)
+
+    response = client.get(
+        f"/openapi/v1/bots/{BOT}/sessions",
+        params={"entity_id": OWNER, "owner_id": COLLAB},
+    )
+
+    assert response.status_code == 422
+    assert relay.attempts == []
+
+
 # ── the human path is untouched ──────────────────────────────────────────────
 
 
