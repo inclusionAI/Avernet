@@ -29,6 +29,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskNodeQueryCriteria,
     TaskSpec,
+    TaskCallbackData,
     TaskGraphPatch,
     effective_run_mode,
 )
@@ -64,6 +65,24 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
 
 
 
+
+
+def test_report_routes_node_and_graph_facts_through_single_gateway(svc: TaskGraphService):
+    graph = svc.initialize_graph(_task_info("report-task"))
+    node_result = svc.report(TaskCallbackData(data={
+        "report_type": "NODE_PATCH",
+        "payload": {"patch": _patch("report-task", "report-task", status=Status.RUNNING)},
+    }))
+    assert node_result.new_status == Status.RUNNING
+
+    svc.report(TaskCallbackData(data={
+        "report_type": "GRAPH_PATCH",
+        "payload": {
+            "task_id": "report-task",
+            "patch": TaskGraphPatch(extend_props_patch={"relay_mode": True}),
+        },
+    }))
+    assert graph.extend_props["relay_mode"] is True
 
 def test_effective_run_mode_prefers_non_empty_actual_override():
     node = _node("mode")

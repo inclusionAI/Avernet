@@ -33,7 +33,7 @@ class TaskExecutorRelayMixin:
             "不得重做业务执行、不得生成新的最终报告、不得修改任何前序节点。"
             "立即使用以下新的 relay_turn 从 PLAN_RESULT 开始：先依据当前节点已有 output "
             "和根目标计算 gap；无 gap 则 POST PLAN_RESULT(has_gap=false, children=[])；"
-            "有 gap 则 POST PLAN_RESULT，再 search → SEARCH_RESULT → dispatch/BBS。"
+            "有 gap 则 POST PLAN_RESULT，再 search → DISPATCH_RESULT → dispatch/BBS。"
             f"\ntask_id={node.task_id}\nnode_id={node.node_id}\nholder_id={holder_id}"
             f"\nrelay_turn={relay_turn}\nbackend={self._api_base_url}"
         )

@@ -187,6 +187,7 @@ class RuntimeInfo:
     assignee: str | None = None              # 执行者(bot_id / group_id)
     start_time: int | None = None         # 任务/节点开始时间(根在 init_graph;叶子 task_dispatch/BBS claim 时写)
     end_time: int | None = None           # 进终态时写(毫秒,int(time.time()*1000))
+    actual_goal: Goal | None = None          # 实际执行目标
     output: dict[str, Any] = field(default_factory=dict)
     acceptance_result: AcceptanceResult | None = None
     progress_reason: str | None = None  # why this node/assignee was advanced

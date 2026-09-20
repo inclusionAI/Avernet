@@ -827,7 +827,7 @@ async def _dispatch_impl(
         raise HTTPException(status_code=422, detail="callback body must be a JSON object")
 
     if _raw_obj.get("event_type") in {
-        "EXECUTION_RESULT", "PLAN_RESULT", "SEARCH_RESULT",
+        "EXECUTION_RESULT", "PLAN_RESULT", "DISPATCH_RESULT", "SEARCH_RESULT",
     }:
         try:
             event = RelayTaskEventDTO.model_validate(_raw_obj)

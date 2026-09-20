@@ -16,6 +16,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     NodeOpResult,
     TaskOpResult,
+    TaskCallbackData,
 )
 from agentclaw.community.core.task.repository.serializers import task_spec_from_dict
 from agentclaw.community.core.task.task_center.relay import RelayCoordinator
@@ -27,13 +28,48 @@ logger = logging.getLogger("task.relay.search")
 
 
 class TaskServiceRelayMixin:
-    """Relay flow: report execution/plan/search decisions, then dispatch once."""
+    """Relay flow: report execution/plan/dispatch decisions, then dispatch once."""
 
     def _relay(self) -> RelayCoordinator:
         return RelayCoordinator(self._graph)
 
+    def _report_fact(self, report_type: str, payload: dict[str, Any]) -> Any:
+        """Submit Relay graph facts through TaskGraphService.report only."""
+        return self._graph.report(
+            TaskCallbackData(data={"report_type": report_type, "payload": payload})
+        )
+
+    def _report_node_patch(self, patch: TaskNodePatch) -> Any:
+        return self._report_fact("NODE_PATCH", {"patch": patch})
+
+    def _report_relay_turn(self, report_type: str, **payload: Any) -> Any:
+        return self._report_fact(report_type, payload)
+
+    def _report_graph_patch(self, task_id: str, patch: TaskGraphPatch) -> Any:
+        return self._report_fact(
+            "GRAPH_PATCH", {"task_id": task_id, "patch": patch}
+        )
+
+    def _report_add_nodes(
+        self,
+        task_id: str,
+        nodes: list[TaskNode],
+        *,
+        parent_node_id: str | None,
+        mark_parent_planning: bool,
+    ) -> Any:
+        return self._report_fact(
+            "ADD_NODES",
+            {
+                "task_id": task_id,
+                "nodes": nodes,
+                "parent_node_id": parent_node_id,
+                "mark_parent_planning": mark_parent_planning,
+            },
+        )
+
     def _bootstrap_relay(self, task_id: str, owner_bot_id: str, run_id: int) -> TaskOpResult:
-        self._graph.update_task_node_info(
+        self._report_node_patch(
             TaskNodePatch(
                 task_id=task_id,
                 node_id=task_id,
@@ -82,7 +118,12 @@ class TaskServiceRelayMixin:
         progress_reason: str | None = None,
         failure_reason: str | None = None,
     ) -> dict[str, Any]:
-        if event_type not in {"EXECUTION_RESULT", "PLAN_RESULT", "SEARCH_RESULT"}:
+        # SEARCH_RESULT was the pre-standardization name for the Skill-owned
+        # carrier decision. Accept it as a compatibility alias, but persist and
+        # deduplicate the canonical DISPATCH_RESULT event name.
+        if event_type == "SEARCH_RESULT":
+            event_type = "DISPATCH_RESULT"
+        if event_type not in {"EXECUTION_RESULT", "PLAN_RESULT", "DISPATCH_RESULT"}:
             raise TaskStateError(f"unsupported relay event_type={event_type}")
         progress_reason = self._required_reason(
             progress_reason, "progress_reason is required for relay task events"
@@ -95,7 +136,7 @@ class TaskServiceRelayMixin:
             failure_reason = self._required_reason(
                 failure_reason, "failure_reason is required when a relay gap cannot be planned"
             )
-        if event_type == "SEARCH_RESULT" and str(payload.get("outcome") or "").upper() == "MISS":
+        if event_type == "DISPATCH_RESULT" and str(payload.get("outcome") or "").upper() == "MISS":
             failure_reason = self._required_reason(
                 failure_reason, "failure_reason is required for relay search MISS"
             )
@@ -104,8 +145,12 @@ class TaskServiceRelayMixin:
         event_key = f"{event_type}:{event_id}"
         if relay.seen_event(task_id, event_key):
             if event_type == "EXECUTION_RESULT":
-                turn = relay.grant(
-                    task_id, node_id, holder_id, retry_event=True
+                turn = self._report_relay_turn(
+                    "RELAY_TURN_GRANT",
+                    task_id=task_id,
+                    node_id=node_id,
+                    holder_id=holder_id,
+                    retry_event=True,
                 )
                 if turn is None:
                     return {"ok": True, "idempotent": True, "turn_consumed": True}
@@ -117,7 +162,7 @@ class TaskServiceRelayMixin:
                 raise TaskStateError(f"relay execution reporter is not assignee node={node_id}")
             output = payload.get("output")
             output_patch = output if isinstance(output, dict) else {"result": output}
-            self._graph.update_task_node_info(
+            self._report_node_patch(
                 TaskNodePatch(
                     task_id=task_id,
                     node_id=node_id,
@@ -131,17 +176,28 @@ class TaskServiceRelayMixin:
                 )
             )
             if node.run_info.run_mode == "bbs":
-                self._graph.update_task_node_info(
+                self._report_node_patch(
                     TaskNodePatch(
                         task_id=task_id,
                         node_id=task_id,
                         extend_props_patch={"bbs_owner": None},
                     )
                 )
-            turn = relay.grant(task_id, node_id, holder_id)
+            turn = self._report_relay_turn(
+                "RELAY_TURN_GRANT",
+                task_id=task_id,
+                node_id=node_id,
+                holder_id=holder_id,
+            )
             if turn is None:
                 raise AssertionError("new relay execution did not receive a turn")
-            relay.mark_event(task_id, event_key)
+            self._report_relay_turn(
+                "RELAY_TURN_MARK_EVENT",
+                task_id=task_id,
+                node_id=node_id,
+                holder_id=holder_id,
+                event_key=event_key,
+            )
             return self._turn_response(turn)
 
         if not relay_turn:
@@ -154,17 +210,29 @@ class TaskServiceRelayMixin:
                 graph, node, holder_id, payload, progress_reason, failure_reason
             )
             if result.get("completed") or result.get("hung"):
-                relay.consume(task_id, node_id, holder_id, relay_turn)
-        elif event_type == "SEARCH_RESULT":
+                self._report_relay_turn(
+                    "RELAY_TURN_CONSUME",
+                    task_id=task_id,
+                    node_id=node_id,
+                    holder_id=holder_id,
+                    token=relay_turn,
+                )
+        elif event_type == "DISPATCH_RESULT":
             if node.run_info.extend_props.get("relay_planned_by") != turn_node_id:
-                raise TaskStateError("relay search decision is outside the current turn plan")
+                raise TaskStateError("relay dispatch decision is outside the current turn plan")
             result = await self._apply_search_result(
                 graph, node, holder_id, payload, relay_turn,
                 progress_reason, failure_reason,
             )
         else:
             raise AssertionError("validated relay event type was not handled")
-        relay.mark_event(task_id, event_key)
+        self._report_relay_turn(
+                "RELAY_TURN_MARK_EVENT",
+                task_id=task_id,
+                node_id=node_id,
+                holder_id=holder_id,
+                event_key=event_key,
+            )
         return result
 
     async def resume_expired_relay_turn(self, task_id: str) -> bool:
@@ -193,7 +261,7 @@ class TaskServiceRelayMixin:
         max_resumes = int(config.get("RELAY_RESUME_MAX", 2))
         resumes = int(node.run_info.extend_props.get("relay_resume_count", 0))
         if resumes >= max_resumes:
-            self._graph.update_task_node_info(
+            self._report_node_patch(
                 TaskNodePatch(
                     task_id=task_id,
                     node_id=node_id,
@@ -207,14 +275,19 @@ class TaskServiceRelayMixin:
                 task_id, node_id, holder_id, resumes, max_resumes,
             )
             return False
-        turn = self._relay().renew_expired(task_id, node_id, holder_id)
+        turn = self._report_relay_turn(
+            "RELAY_TURN_RENEW_EXPIRED",
+            task_id=task_id,
+            node_id=node_id,
+            holder_id=holder_id,
+        )
         if turn is None:
             return False
         refreshed_node = self._relay_node(task_id, node_id)[1]
         delivered = await self._engine._runner.resume_relay_turn(
             refreshed_node, turn.token
         )
-        self._graph.update_task_node_info(
+        self._report_node_patch(
             TaskNodePatch(
                 task_id=task_id,
                 node_id=node_id,
@@ -261,7 +334,7 @@ class TaskServiceRelayMixin:
             reason = failure_reason or (
                 "达到分布式接力迭代轮次上限" if graph.loop_round >= max_rounds else "规划存在 gap 但未产出下一步任务"
             )
-            self._graph.update_task_node_info(
+            self._report_node_patch(
                 TaskNodePatch(
                     task_id=graph.task_id,
                     node_id=node.node_id,
@@ -269,7 +342,7 @@ class TaskServiceRelayMixin:
                     failure_reason=reason,
                 )
             )
-            self._graph.update_task_graph_info(
+            self._report_graph_patch(
                 graph.task_id,
                 TaskGraphPatch(status=Status.HUNG, extend_props_patch={"hung_reason": reason}),
             )
@@ -304,7 +377,7 @@ class TaskServiceRelayMixin:
                     node_run_graph=graph,
                 )
             )
-        self._graph.update_task_node_info(
+        self._report_node_patch(
             TaskNodePatch(
                 task_id=graph.task_id,
                 node_id=node.node_id,
@@ -313,16 +386,16 @@ class TaskServiceRelayMixin:
                 failure_reason=failure_reason,
             )
         )
-        self._graph.add_task_nodes(
-            children, parent_node_id=node.node_id, mark_parent_planning=False
+        self._report_add_nodes(
+            graph.task_id, children, parent_node_id=node.node_id, mark_parent_planning=False
         )
-        self._graph.update_task_graph_info(
+        self._report_graph_patch(
             graph.task_id, TaskGraphPatch(loop_round_increment=1)
         )
         return {"ok": True, "completed": False, "children": [item.node_id for item in children]}
 
     def _complete_relay_task(self, task_id: str, node_id: str, reason: str | None) -> None:
-        self._graph.update_task_node_info(
+        self._report_node_patch(
             TaskNodePatch(
                 task_id=task_id,
                 node_id=node_id,
@@ -333,7 +406,7 @@ class TaskServiceRelayMixin:
         # Relay is a serial baton, not a parent/child aggregation workflow.
         # Nodes that hand off a next step are already marked DONE in
         # _apply_plan_result; terminal completion only closes the graph.
-        self._graph.update_task_graph_info(task_id, TaskGraphPatch(status=Status.DONE))
+        self._report_graph_patch(task_id, TaskGraphPatch(status=Status.DONE))
 
     @staticmethod
     def _project_search_candidate(item: dict[str, Any]) -> dict[str, Any]:
@@ -426,7 +499,7 @@ class TaskServiceRelayMixin:
         self, graph, node, holder_id, payload, relay_turn, progress_reason, failure_reason
     ) -> dict[str, Any]:
         if node.status != Status.PENDING:
-            raise TaskStateError(f"relay search decision target must be PENDING node={node.node_id}")
+            raise TaskStateError(f"relay dispatch decision target must be PENDING node={node.node_id}")
         outcome = str(payload.get("outcome") or "").upper()
         if outcome == "HIT_SINGLE":
             assignee = str(payload.get("assignee") or "").strip()
@@ -493,7 +566,7 @@ class TaskServiceRelayMixin:
             )
         elif outcome == "MISS":
             reason = failure_reason or str(payload.get("miss_reason") or "搜推没有匹配结果")
-            self._graph.update_task_node_info(
+            self._report_node_patch(
                 TaskNodePatch(
                     task_id=graph.task_id,
                     node_id=node.node_id,
@@ -502,16 +575,22 @@ class TaskServiceRelayMixin:
                     failure_reason=reason,
                 )
             )
-            self._graph.update_task_graph_info(
+            self._report_graph_patch(
                 graph.task_id,
                 TaskGraphPatch(extend_props_patch={"bbs_mode": True, "bbs_node_id": node.node_id}),
             )
-            self._relay().consume(graph.task_id, node.node_id, holder_id, relay_turn)
+            self._report_relay_turn(
+                "RELAY_TURN_CONSUME",
+                task_id=graph.task_id,
+                node_id=node.node_id,
+                holder_id=holder_id,
+                token=relay_turn,
+            )
             self._schedule_relay_bbs_selection(graph.task_id, node.node_id)
             return {"ok": True, "published_bbs": True, "node_id": node.node_id}
         else:
             raise TaskStateError(f"unsupported search outcome={outcome}")
-        self._graph.update_task_node_info(patch)
+        self._report_node_patch(patch)
         return {"ok": True, "published_bbs": False, "node_id": node.node_id}
 
     async def dispatch_task(
@@ -533,14 +612,20 @@ class TaskServiceRelayMixin:
         if node.status != Status.PENDING:
             raise TaskStateError(f"relay dispatch target must be PENDING node={node_id}")
         if node.run_info.run_mode not in {"single_bot", "coop_group"}:
-            raise TaskStateError("relay dispatch requires a persisted search decision")
+            raise TaskStateError("relay dispatch requires a persisted dispatch decision")
         formation = None
         if node.run_info.run_mode == "coop_group":
             raw = node.run_info.extend_props.get("pending_group_formation") or {}
             formation = GroupFormation.from_dict(raw)
-        relay.consume(task_id, node_id, holder_id, relay_turn)
+        self._report_relay_turn(
+            "RELAY_TURN_CONSUME",
+            task_id=task_id,
+            node_id=node_id,
+            holder_id=holder_id,
+            token=relay_turn,
+        )
         try:
-            self._graph.update_task_node_info(
+            self._report_node_patch(
                 TaskNodePatch(
                     task_id=task_id,
                     node_id=node_id,
@@ -550,7 +635,7 @@ class TaskServiceRelayMixin:
             )
             if formation is not None:
                 group_id = await self._engine._runner.form_coop_group(formation)
-                self._graph.update_task_node_info(
+                self._report_node_patch(
                     TaskNodePatch(task_id=task_id, node_id=node_id, assignee=group_id)
                 )
             refreshed = self._relay_node(task_id, node_id)[1]
@@ -558,7 +643,7 @@ class TaskServiceRelayMixin:
         except Exception:
             delivered = False
         if not delivered:
-            self._graph.update_task_node_info(
+            self._report_node_patch(
                 TaskNodePatch(
                     task_id=task_id,
                     node_id=node_id,
@@ -567,7 +652,13 @@ class TaskServiceRelayMixin:
                     extend_props_patch={"relay_dispatch_id": None},
                 )
             )
-            relay.reopen(task_id, holder_id, relay_turn)
+            self._report_relay_turn(
+                "RELAY_TURN_REOPEN",
+                task_id=task_id,
+                node_id=node_id,
+                holder_id=holder_id,
+                token=relay_turn,
+            )
             raise TaskStateError(f"relay dispatch failed node={node_id}")
         refreshed = self._relay_node(task_id, node_id)[1]
         return {
@@ -581,8 +672,8 @@ class TaskServiceRelayMixin:
         _, node = self._relay_node(task_id, node_id)
         if node.run_info.run_mode != "bbs" or node.status != Status.PENDING:
             raise TaskStateError(f"relay BBS node is not claimable node={node_id}")
-        result = self._graph.claim_bbs_owner(task_id, bot_id)
-        self._graph.update_task_node_info(
+        result = self._report_fact("BBS_CLAIM", {"task_id": task_id, "bot_id": bot_id})
+        self._report_node_patch(
             TaskNodePatch(
                 task_id=task_id,
                 node_id=node_id,
@@ -615,7 +706,7 @@ class TaskServiceRelayMixin:
         if root is None or root.run_info.extend_props.get("bbs_owner") != bot_id:
             raise TaskStateError(f"relay BBS reporter is not claim owner node={node_id}")
 
-        result = self._graph.update_task_node_info(
+        result = self._report_node_patch(
             TaskNodePatch(
                 task_id=task_id,
                 node_id=node_id,
@@ -628,14 +719,19 @@ class TaskServiceRelayMixin:
         )
         # Release only the root-level BBS lease metadata. Do not change the
         # root node status and do not invoke centralized _on_pass_collect.
-        self._graph.update_task_node_info(
+        self._report_node_patch(
             TaskNodePatch(
                 task_id=task_id,
                 node_id=task_id,
                 extend_props_patch={"bbs_owner": None},
             )
         )
-        turn = self._relay().grant(task_id, node_id, bot_id)
+        turn = self._report_relay_turn(
+            "RELAY_TURN_GRANT",
+            task_id=task_id,
+            node_id=node_id,
+            holder_id=bot_id,
+        )
         if turn is None:
             raise AssertionError("relay BBS result did not receive a turn")
         return result

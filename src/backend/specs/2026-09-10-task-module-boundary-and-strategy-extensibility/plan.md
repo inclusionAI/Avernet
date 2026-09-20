@@ -158,6 +158,8 @@ class TaskRunner(Protocol):
 
 事件消费支持至少一次投递和幂等。批量并发属于事件消费层的吞吐能力，不进入 TaskDispatcher 或 TaskRunner 的领域入参。工作流是单 Bot executor 的实现，YAML 是协作组 executor/策略的实现，均不属于 TaskCli 命令。
 
+Relay 允许执行 Bot 通过受控 HTTP Skill 协议作为外部事件消费者/生产者：后端不替 Relay Bot 直接运行 Planner 或 Dispatcher，而是验证 `EXECUTION_RESULT`、签发 `relay_turn`，再接受同一 baton 上的 `PLAN_RESULT`、`DISPATCH_RESULT` 和 `DISPATCH`。该适配层必须把外部事件翻译为 Graph report，不得把 HTTP 调用语义扩散到核心策略接口。
+
 ## 6. 标准数据流
 
 1. TaskCli 将每轮输入交给 `TaskService.intake(TaskIntakeRequest)`；TaskService 创建/恢复澄清会话，并通过目标 Bot/group 已挂载的 `task-loop` 完成识别、四要素澄清和确认。
@@ -185,15 +187,20 @@ Master runtime 消费 `PLAN_REQUESTED(TaskContext)` 并以 `PLAN` 上报阶段�
 
 ### 7.2 接力规划：完整上下文驱动的续接
 
-以 A 完成、规划后续工作 B 为例：
+Relay 是 Skill 驱动的串行 baton，不是中心化父子聚合流程。以 A 完成、规划后续工作 B 为例：
 
-1. 承载 A 的 TaskRunner/执行实体通过 `report(EXECUTION_RESULT)` 上报 A 的事实。
-2. TaskGraphService 原子接纳 A 的结果，更新图谱，并生成包含全局最新信息的 `TaskContext(v+1)`；它不是 A 的结果快照。
-3. Graph 将 `PLAN_REQUESTED(TaskContext)` 定向投递给 A runtime；A runtime 的 TaskPlanner relay strategy 计算“最新任务上下文相对任务验收标准”的 GAP，并以 `report(PLAN, PlanResult)` 上报下一步工作 B。
-4. Graph 基于报告身份、`graph_version`、父节点关系、深度和既有回调幂等机制校验报告后，必要时将 `DISPATCH_REQUESTED(B)` 定向投递给 A runtime；A runtime 的 TaskDispatcher 策略只决定 B 的执行方式与执行主体，并以最终 `DISPATCH` patch 上报。
-5. Graph 接纳派发后发布 `EXECUTION_REQUESTED(B)` 给 B 的实际 carrier。B 完成后，再从第 1 步开始下一轮。
+1. 承载 A 的执行实体通过 Relay callback report 上报 `EXECUTION_RESULT`。Graph 只更新 A 的执行事实，并签发当前 holder 专属、带 TTL 的 `relay_turn`。
+2. A runtime 必须保存该 `relay_turn`，读取最新共享黑板/TaskContext，计算根目标 GAP；不能把 execution report 当作本棒结束。
+3. A runtime 上报 `PLAN_RESULT`：无 GAP 时结束任务；有 GAP 时必须且只能规划一个下一棒节点 B。Graph 将 A 标记为 `DONE`、追加 B，并递增 Relay 轮次；不把 B 当作 A 的结构子任务去做父节点聚合。
+4. A runtime 为 B 构造纯搜索 query，调用 `/search`。搜索接口只返回真实候选事实，不接收 task/node/holder/turn/catalog，也不负责 HIT/MISS 或执行模态。
+5. A runtime 基于候选事实完成 `HIT_SINGLE`、`HIT_MULTI_BOTS` 或 `MISS` 决策并上报 `DISPATCH_RESULT`。HIT 之后使用同一 `relay_turn` 调 `/dispatch`，MISS 由后端在已有 Relay BBS 节点上启动统一 BBS 动态选人。
+6. Graph 接纳派发后，下一棒 carrier 收到 `EXECUTION_REQUESTED`/等价 `[task-execute]` 上下文。B 完成后从第 1 步重新开始。
 
-接力策略只替换 TaskPlanner/TaskDispatcher/TaskRunner 的内部决策，不改变报告入口、事件类型或图谱状态机。接力 Bot 无权直接增删节点、直接启动下一执行者或直接修改图谱。
+Relay 的 `relay_turn` 采用单持有者 lease。重复 execution report 必须幂等；lease 过期时由 Relay 专属 watchdog 续租并向原 holder 发送 `[RESUME_RELAY]`，要求直接从 `PLAN_RESULT` 恢复，不重做业务执行、不走中心化 `exec_stuck/child_hung` 收口。恢复达到上限时，只能挂起当前 baton 节点或进入明确的 Relay 恢复策略，不能回写前序节点。
+
+Relay 节点隔离规则：当前棒的执行、失败、BBS 认领、BBS 结果和恢复只允许更新当前节点以及图级 Relay 控制元数据；前序节点一旦交接，不再被后续节点修改。中心化模式的父子状态聚合不得复用到 Relay。
+
+Relay 策略只替换 TaskPlanner/TaskDispatcher/TaskRunner 的内部决策，不改变报告入口、事件类型或 Graph 校验边界。接力 Bot 无权直接增删节点、直接启动下一执行者或直接修改图谱。
 
 ### 7.3 Execution carrier 与 BBS 升级
 
@@ -205,7 +212,9 @@ Dispatcher 的输出不是“必须找到 Bot B”，而是为单节点确定 ex
 | 匹配协作组 | `run_mode=coop_group`、group assignee | coop-group Runner strategy |
 | 单 Bot/协作组均无可用匹配 | `run_mode=bbs`、BBS carrier 与候选失败诊断 | BBS Runner strategy |
 
-三种情况均只上报一次最终 `DISPATCH` patch。BBS 的建群、招募、成员认领和内部协作是 BBS Runner strategy 的执行职责；Graph 只接收其指定协调者的启动/结果事实。BBS 执行失败后由 Graph 状态策略决定重试、重新规划、挂起或终态，Dispatcher 不直接写终态。
+三种情况均只上报一次最终 `DISPATCH` patch。BBS 的建群、招募、成员认领和内部协作是 BBS Runner strategy 的执行职责；Graph 只接收其指定协调者的启动/结果事实。
+
+中心化 BBS 可以由中心化 Graph 状态策略收口；Relay BBS 必须复用统一动态选人能力但绑定到已规划的当前 BBS 节点，认领/执行完成后重新签发 Relay turn，继续 `PLAN_RESULT`。Relay BBS 不修改根节点或任何前序节点状态，也不调用中心化 `_on_pass_collect`/父子聚合。
 
 ## 8. B 端策略插件与组合编排
 

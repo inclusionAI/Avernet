@@ -32,6 +32,7 @@ from agentclaw.community.core.task.domain.models import (
     RelationType,
     RuntimeInfo,
     Status,
+    TaskCallbackData,
     TaskExecutionGraph,
     TaskGraphPatch,
     TaskInfo,
@@ -451,6 +452,83 @@ class TaskGraphService:
 
         if not (cond_a or cond_b or cond_c or cond_d or cond_e or relay_parent_done):
             raise GraphIntegrityError("add_task_nodes: 触发条件 a/b/c/d/e/f 均不满足")
+
+    def report(self, data: TaskCallbackData) -> Any:
+        """Accept graph facts through the single report gateway.
+
+        Task modules submit typed internal facts in ``TaskCallbackData``; this
+        gateway owns the actual graph mutation methods so callers do not reach
+        into graph persistence directly. Transport adapters may use the same
+        envelope with serializable payloads, while in-process callers may pass
+        domain objects to avoid a second command model during migration.
+        """
+        envelope = data.data
+        if not isinstance(envelope, dict):
+            raise TaskStateError("graph report payload must be an object")
+        report_type = str(envelope.get("report_type") or "").upper()
+        payload = envelope.get("payload") or {}
+        if report_type == "NODE_PATCH":
+            patch = payload.get("patch")
+            if not isinstance(patch, TaskNodePatch):
+                raise TaskStateError("NODE_PATCH report requires TaskNodePatch")
+            return self.update_task_node_info(patch)
+        if report_type == "GRAPH_PATCH":
+            task_id = str(payload.get("task_id") or "")
+            patch = payload.get("patch")
+            if not task_id or not isinstance(patch, TaskGraphPatch):
+                raise TaskStateError("GRAPH_PATCH report requires task_id and TaskGraphPatch")
+            return self.update_task_graph_info(task_id, patch)
+        if report_type == "ADD_NODES":
+            task_id = str(payload.get("task_id") or "")
+            nodes = payload.get("nodes")
+            if not task_id or not isinstance(nodes, list) or not all(
+                isinstance(node, TaskNode) for node in nodes
+            ):
+                raise TaskStateError("ADD_NODES report requires task_id and TaskNode list")
+            return self.add_task_nodes(
+                nodes,
+                parent_node_id=payload.get("parent_node_id"),
+                mark_parent_planning=bool(payload.get("mark_parent_planning", True)),
+            )
+        if report_type == "BBS_CLAIM":
+            task_id = str(payload.get("task_id") or "")
+            bot_id = str(payload.get("bot_id") or "")
+            if not task_id or not bot_id:
+                raise TaskStateError("BBS_CLAIM report requires task_id and bot_id")
+            return self.claim_bbs_owner(task_id, bot_id)
+        if report_type.startswith("RELAY_TURN_"):
+            # Lease mutations remain Graph-owned facts. Keep RelayCoordinator
+            # behind this gateway so TaskServiceRelayMixin never mutates the
+            # graph or lease state directly.
+            from agentclaw.community.core.task.task_center.relay import RelayCoordinator
+
+            coordinator = RelayCoordinator(self)
+            task_id = str(payload.get("task_id") or "")
+            node_id = str(payload.get("node_id") or "")
+            holder_id = str(payload.get("holder_id") or "")
+            if not task_id or not node_id or not holder_id:
+                raise TaskStateError(
+                    f"{report_type} report requires task_id, node_id and holder_id"
+                )
+            if report_type == "RELAY_TURN_GRANT":
+                return coordinator.grant(
+                    task_id,
+                    node_id,
+                    holder_id,
+                    retry_event=bool(payload.get("retry_event", False)),
+                )
+            if report_type == "RELAY_TURN_CONSUME":
+                coordinator.consume(task_id, node_id, holder_id, str(payload.get("token") or ""))
+                return None
+            if report_type == "RELAY_TURN_REOPEN":
+                coordinator.reopen(task_id, holder_id, str(payload.get("token") or ""))
+                return None
+            if report_type == "RELAY_TURN_RENEW_EXPIRED":
+                return coordinator.renew_expired(task_id, node_id, holder_id)
+            if report_type == "RELAY_TURN_MARK_EVENT":
+                coordinator.mark_event(task_id, str(payload.get("event_key") or ""))
+                return None
+        raise TaskStateError(f"unsupported graph report_type={report_type}")
 
     def update_task_node_info(self, patch: TaskNodePatch) -> NodeOpResult:
         """节点级原子状态流转网关。双模式:

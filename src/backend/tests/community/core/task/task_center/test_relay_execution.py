@@ -135,7 +135,7 @@ def _plan_and_select(
     _run(service.search_task_candidates(query="补齐市场研究 gap"))
     _run(service.report_task_event(
         task_id="relay-task", node_id=child_node_id,
-        event_type="SEARCH_RESULT", event_id=f"search-{event_suffix}",
+        event_type="DISPATCH_RESULT", event_id=f"search-{event_suffix}",
         holder_id=holder_id, relay_turn=turn,
         progress_reason="候选 Bot 能力与下一节点目标匹配",
         payload={
@@ -257,7 +257,7 @@ def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_r
     ))
     _run(service.search_task_candidates(query="补齐市场研究 gap"))
     published = _run(service.report_task_event(
-        task_id="relay-task", node_id="bbs-step", event_type="SEARCH_RESULT",
+        task_id="relay-task", node_id="bbs-step", event_type="DISPATCH_RESULT",
         event_id="miss", holder_id="main-bot", relay_turn=turn,
         progress_reason="无直接候选，发布 BBS 广场",
         failure_reason="候选能力均不匹配", payload={
@@ -310,7 +310,7 @@ def test_relay_bbs_result_only_completes_claimed_baton_node() -> None:
         payload={"has_gap": True, "children": [{"node_id": "bbs-step", "task_spec": _child_spec()}]},
     ))
     _run(service.report_task_event(
-        task_id="relay-task", node_id="bbs-step", event_type="SEARCH_RESULT",
+        task_id="relay-task", node_id="bbs-step", event_type="DISPATCH_RESULT",
         event_id="bbs-search", holder_id="main-bot", relay_turn=turn,
         progress_reason="普通候选无法覆盖，发布 BBS",
         failure_reason="无匹配候选",
@@ -451,7 +451,7 @@ def test_only_group_manager_can_report_and_continue() -> None:
     ))
     _run(service.search_task_candidates(query="补齐市场研究 gap"))
     _run(service.report_task_event(
-        task_id="relay-task", node_id="group-step", event_type="SEARCH_RESULT",
+        task_id="relay-task", node_id="group-step", event_type="DISPATCH_RESULT",
         event_id="group-search", holder_id="main-bot", relay_turn=turn,
         progress_reason="两个 Bot 能力互补，由 manager 汇总",
         payload={

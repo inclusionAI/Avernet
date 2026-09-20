@@ -215,7 +215,12 @@ class RelayTaskEventDTO(BaseModel):
 
     task_id: str
     node_id: str
-    event_type: Literal["EXECUTION_RESULT", "PLAN_RESULT", "SEARCH_RESULT"]
+    event_type: Literal[
+        "EXECUTION_RESULT",
+        "PLAN_RESULT",
+        "DISPATCH_RESULT",
+        "SEARCH_RESULT",  # legacy alias; normalized by TaskServiceRelayMixin
+    ]
     event_id: str = Field(..., min_length=1)
     holder_id: str = Field(..., min_length=1)
     relay_turn: str | None = None

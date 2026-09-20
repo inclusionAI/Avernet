@@ -20,6 +20,17 @@
 
 验收：TaskPlanner、TaskDispatcher、TaskRunner 不读取/写入完整图谱、不互相调用；批量吞吐不改变其单节点领域接口。
 
+## 3A. 最新 Relay 接力闭环
+
+- [ ] Relay 执行结果接纳后签发带 TTL 的单持有者 `relay_turn`；Bot 必须继续 `PLAN_RESULT`，不能以 `EXECUTION_RESULT` 或 acceptance 结果提前结束。
+- [ ] Relay `PLAN_RESULT` 严格串行，一次最多创建一个下一棒节点；当前棒交接后置 `DONE`，不使用中心化父子状态聚合。
+- [ ] Relay `/search` 只接收 `query` 并返回真实候选；HIT/MISS、single/group/BBS 模态决策由 Relay Skill 产生并通过 `DISPATCH_RESULT` 上报。
+- [ ] Relay BBS 复用统一动态选人/Runner，但认领与结果只推进当前 BBS baton，后续通过新 `relay_turn` 回到规划闭环。
+- [ ] Relay lease 过期由专属恢复流程续租并发送 `[RESUME_RELAY]`；恢复不重做已上报业务，不触发中心化 `exec_stuck`、`child_hung` 或根节点 BBS 收口。
+- [ ] 当前 Relay baton 的执行、失败、BBS 认领、恢复只修改当前节点和图级 Relay 控制元数据，不修改任何前序节点。
+
+验收：覆盖普通单 Bot、协作群、BBS、执行失败、能力不匹配、搜索 MISS、重复上报、过期 turn 和恢复上限；后续节点不能改变前序节点状态/输出/assignee。
+
 ## 3. 策略扩展
 
 - [ ] 中心化动态规划策略通过 `TaskContext -> PlanResult` 驱动闭环。
