@@ -53,6 +53,11 @@ CREATE TABLE ac_user_app_grant_log (
   env VARCHAR(20) NOT NULL,
   avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw',
   gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- Never updated — rows here are appended, not edited — but present because
+  -- the platform's table convention requires a modified timestamp on every
+  -- table, the live table included. It carries the same value as gmt_create.
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   -- Deliberately NO unique key: this table accepts every event.
   KEY idx_user_app_grant_log_user

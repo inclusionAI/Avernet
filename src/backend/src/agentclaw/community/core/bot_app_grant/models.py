@@ -418,6 +418,11 @@ class UserAppGrantLogModel(Base):
     env = Column(String(20), nullable=False, default=get_current_env)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    # Never updated, but the platform's table convention requires a modified
+    # timestamp on every table; it holds the same instant as ``gmt_create``.
+    gmt_modified = Column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
     __table_args__ = (
         Index(
