@@ -457,3 +457,27 @@ def test_trajectory_display_default_and_json_stay_json(client):
     )
     assert r2.headers["content-type"].startswith("application/json")
     assert r2.json()["data"]["task_id"] == "t1"
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_renders_beijing_time():
+    """Times render in Beijing time (UTC+8), NOT UTC — ``gmt_*`` ms epoch is absolute;
+    the page must show the wall-clock the operator sees (北京时间, not 8h behind)."""
+    # 1_700_000_000_000 ms = 2023-11-14 22:13:20 UTC = 2023-11-15 06:13:20 北京时间
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type=TrajectoryActionType.SUBMIT,
+        action_result="success", attempt=0,
+        gmt_create=1_700_000_000_000, gmt_modified=1_700_000_000_000,
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1_700_000_000_000, gmt_modified=1_700_000_000_000,
+        timeline=[ev], analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    assert "2023-11-15 06:13:20 北京时间" in r.text
+    assert "22:13:20 北京时间" not in r.text   # not the UTC wall-clock

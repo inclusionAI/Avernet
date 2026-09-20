@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import html
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -40,12 +40,20 @@ _FAILURE_RESULTS: frozenset[str] = frozenset(
 )
 
 
+# 页面面向人类排障,展示北京时间(UTC+8,中国无夏令时)与可见现象/日志一致。
+# ``gmt_*`` 是绝对 ms epoch(``time.time()*1000``),时区仅影响展示,不改变存储。
+_BEIJING_TZ = timezone(timedelta(hours=8))  # Asia/Shanghai
+
+
 def _fmt_time(ms: int | None) -> str:
-    """ms epoch → ``YYYY-MM-DD HH:MM:SS UTC``(None → ``-``)。"""
+    """ms epoch → ``YYYY-MM-DD HH:MM:SS 北京时间``(UTC+8;None → ``-``)。"""
     if not ms:
         return "-"
     try:
-        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") + " UTC"
+        return (
+            datetime.fromtimestamp(ms / 1000, tz=_BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+            + " 北京时间"
+        )
     except (OverflowError, OSError, ValueError):
         return f"{ms}ms"
 
