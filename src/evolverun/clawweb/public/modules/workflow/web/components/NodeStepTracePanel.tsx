@@ -137,8 +137,10 @@ function ProgressStep({ step }: { step: NodeStepTraceStep }) {
 
 /** Renders cli-script @CLAWFLOW_PROGRESS@ lines as timeline entries. */
 function ScriptProgressStep({ step }: { step: NodeStepTraceStep }) {
+  const [expanded, setExpanded] = useState(false)
   const message = step.textContent ?? ''
   const isError = step.isError
+  const hasData = !!step.toolInputJson
 
   return (
     <div className="group relative flex gap-3 pb-2">
@@ -160,6 +162,21 @@ function ScriptProgressStep({ step }: { step: NodeStepTraceStep }) {
           <p className="mt-0.5 text-gray-500 text-xs leading-snug">
             {message}
           </p>
+        )}
+        {hasData && (
+          <div className="mt-1">
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="text-[10px] text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              {expanded ? '收起数据' : '查看数据'}
+            </button>
+            {expanded && (
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-cyan-50 p-2 font-mono text-[11px] text-gray-700 border border-cyan-100">
+                {formatJson(step.toolInputJson!)}
+              </pre>
+            )}
+          </div>
         )}
       </div>
     </div>
