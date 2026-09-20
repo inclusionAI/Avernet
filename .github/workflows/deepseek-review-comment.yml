@@ -1,16 +1,21 @@
-# DeepSeek PR Review Bot
+# DeepSeek PR Bot (DSH-powered)
 #
-# Triggers when someone comments "@deepseekReviewer review" on a PR.
-# Fetches the PR diff, sends it to DeepSeek Chat API for code review,
-# and posts the result as a PR comment.
+# Runs on a self-hosted runner with the "deepseek-runner" label.
+# Triggered by comments starting with "@deepseekReviewer" on a PR.
+# The comment body after "@deepseekReviewer" is passed as the task to DSH.
+# If empty, DSH performs a full code review by default.
+#
+# Examples:
+#   @deepseekReviewer review
+#   @deepseekReviewer Does this PR change deployment logic?
+#   @deepseekReviewer Does this break the ABAC design?
 #
 # Setup:
-#   1. Merge this file to the default branch.
-#   2. Add DEEPSEEK_API_KEY in repo Settings → Secrets and variables → Actions.
-#
-# To add other providers (GPT, Claude, etc.), create a similar workflow file
-# with its own trigger phrase and API key secret.
-name: DeepSeek Review Comment
+#   1. Deploy a self-hosted runner with the "deepseek-runner" label (see runner/setup.sh).
+#   2. Install DSH (dsh CLI) on the runner machine.
+#   3. Each developer adds DEEPSEEK_API_KEY_<username> in repo Settings → Secrets.
+#   4. Drop this file into the target repo's .github/workflows/ directory.
+name: DeepSeek PR Bot
 
 on:
   issue_comment:
@@ -22,112 +27,79 @@ permissions:
   issues: write
 
 concurrency:
-  group: deepseek-review-${{ github.event.issue.number }}
-  cancel-in-progress: true
+  group: dsh-review-${{ github.event.issue.number }}-${{ github.event.comment.id }}
+  cancel-in-progress: false
 
 jobs:
   review:
-    name: Run DeepSeek review
+    name: DSH task
     if: |
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '@deepseekReviewer review')
-    runs-on: ubuntu-latest
+      startsWith(github.event.comment.body, '@deepseekReviewer') &&
+      !contains(github.event.comment.body, '<!-- dsh-review -->') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: [self-hosted, deepseek-runner]
     env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Fetch PR diff
-        id: diff
+      - name: Run DSH task
         run: |
+          set -e
           PR_NUMBER="${{ github.event.issue.number }}"
-          PR_DIFF=$(gh pr diff "$PR_NUMBER" --patch 2>/dev/null || true)
+          TRIGGER_USER="${{ github.event.comment.user.login }}"
+          LOG_DIR="/home/avernet/review-config/logs"
+          mkdir -p "${LOG_DIR}"
+          LOG_FILE="${LOG_DIR}/pr-${PR_NUMBER}-$(date +%Y%m%d-%H%M%S).log"
 
-          if [ "$(echo "$PR_DIFF" | wc -c)" -gt 40000 ]; then
-              PR_DIFF=$(echo "$PR_DIFF" | head -c 40000)
-              TRUNCATED="(truncated)"
-          else
-              TRUNCATED=""
+          # Extract the task from the comment: everything after the trigger word
+          RAW_BODY="${{ github.event.comment.body }}"
+          # The trigger is "@deepseekReviewer" with optional leading spaces
+          TASK=$(echo "${RAW_BODY}" | sed 's/^[[:space:]]*@deepseekReviewer[[:space:]]*//')
+
+          # Default to "review" if nothing follows
+          if [ -z "${TASK}" ]; then
+            TASK="review"
           fi
 
-          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
-          echo "diff<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$PR_DIFF" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-          echo "truncated=${TRUNCATED}" >> "$GITHUB_OUTPUT"
+          cat > /tmp/task.txt <<'DSHTASK'
+          You are working on a pull request. The user asked:
+          
+          DSHTASK
+          echo "\"${TASK}\"" >> /tmp/task.txt
 
-          echo "Fetched diff: $(echo "$PR_DIFF" | wc -l) lines, $(echo "$PR_DIFF" | wc -c) bytes"
+          cat >> /tmp/task.txt <<'DSHTASK'
 
-      - name: Review with DeepSeek
-        id: review
-        run: |
-          PROMPT=$(cat <<'ENDPROMPT'
-          You are a code reviewer for a Rust/Python/TypeScript monorepo. Review the
-          following PR diff for code correctness, security issues, and adherence to
-          the repository's documented architecture rules (service/core/port
-          layering, no leaked HTTP concerns in core, no raw environment access
-          outside composition roots).
+          Steps:
+          0. FIRST: React with 👀 on the triggering comment.
+          1. Checkout the repository and the PR branch using gh CLI.
+          2. Read /home/avernet/review-config/review-rules.md for additional review requirements
+             and code conventions you MUST follow.
+          3. Read relevant files and diffs with full context.
+          4. Answer the user's question or perform the requested analysis.
+             If the task is "review", perform a full code review for
+             correctness, security, and architecture compliance.
+          5. Read AGENTS.md / CLAUDE.md for project conventions if relevant.
+          6. Post your response as a PR comment using 'gh pr comment'.
+             At the end, append '<!-- dsh-review -->' on its own line.
+          7. FINALLY: Remove the 👀 reaction AND add a ✅ reaction on the
+             triggering comment to signal completion.
+          DSHTASK
 
-          Focus on P1 (must-fix) issues first.  Format your review concisely in
-          Markdown.  Cite file paths and line numbers from the diff.  Do NOT
-          comment on formatting or style.
-
-          If there are no findings, respond with a single line: "No P1 or P2
-          issues found. 👍"
-          ENDPROMPT
-          )
-
-          SYSTEM_MSG=$(cat <<'ENDSYS'
-          You are a senior code reviewer. Be concise and actionable. Use English.
-          ENDSYS
-          )
-
-          RESPONSE=$(curl -s https://api.deepseek.com/chat/completions \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${DEEPSEEK_API_KEY}" \
-            -d "$(jq -n \
-              --arg system "$SYSTEM_MSG" \
-              --arg prompt "$PROMPT" \
-              --arg diff "${{ steps.diff.outputs.diff }}" \
-              --arg truncated "${{ steps.diff.outputs.truncated }}" \
-              '{
-                model: "deepseek-chat",
-                messages: [
-                  {role: "system", content: $system},
-                  {role: "user", content: "PR Diff \($truncated):\n\n\($diff)\n\n---\n\($prompt)"}
-                ],
-                max_tokens: 4096,
-                temperature: 0.3
-              }')")
-
-          echo "$RESPONSE" > /tmp/deepseek_response.json
-          REVIEW_BODY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "Error: failed to get review from DeepSeek. Check logs."')
-
-          echo "review<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$REVIEW_BODY" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Post review as PR comment
-        if: always() && steps.review.outcome == 'success'
-        run: |
-          REVIEW="${{ steps.review.outputs.review }}"
-
-          HEADER="## 🤖 DeepSeek Review\n\n<sub>Triggered by @${{ github.event.comment.user.login }}</sub>\n\n---"
-          BODY="${HEADER}\n\n${REVIEW}"
-
-          gh pr comment "${{ steps.diff.outputs.pr_number }}" \
-            --body "$BODY"
+          echo "Starting DSH task for PR #${PR_NUMBER}: ${TASK}"
+          dsh --profile headless --patch /home/avernet/review-config/dsh-patch.yml "$(cat /tmp/task.txt)" 2>&1 | tee "${LOG_FILE}"
+          echo "DSH task completed. Log saved to ${LOG_FILE}"
 
       - name: Report error on failure
         if: failure()
         run: |
-          gh pr comment "${{ steps.diff.outputs.pr_number }}" \
-            --body "## 🤖 DeepSeek Review
+          gh pr comment "${{ github.event.issue.number }}" \
+            -R "${GH_REPO}" \
+            --body "## 🤖 DeepSeek
 
           <sub>Triggered by @${{ github.event.comment.user.login }}</sub>
 
           ---
 
-          **Error:** Review failed. Please check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+          **Error:** Task failed. Check [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
