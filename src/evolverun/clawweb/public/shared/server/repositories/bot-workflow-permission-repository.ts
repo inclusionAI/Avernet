@@ -28,6 +28,12 @@ export type BotWorkflowPermissionUpsert = {
   can_edit: number;
 };
 
+/** View scope for a user on a specific workflow. */
+export type WorkflowViewScope =
+  | "all" // user can view all runs of this workflow
+  | "deny" // user has no view permission
+  | { botIds: string[] }; // user can only view runs from these specific bot_ids
+
 const SELECT_COLUMNS = "id, bot_id, bot_owner_id, workflow_id, env, can_view, can_execute, can_edit, gmt_create, gmt_modified" as const;
 
 export class BotWorkflowPermissionRepository {
@@ -148,6 +154,50 @@ export class BotWorkflowPermissionRepository {
   }
 
   /**
+   * Resolve view scope for a user on a specific workflow.
+   * A workflow may have multiple permission rows; this method merges them
+   * using the widest-rule-wins strategy.
+   *
+   * Returns:
+   *   - "all"              : user can view all runs of this workflow
+   *   - "deny"             : user has no view permission
+   *   - { botIds: string[] }: user can only view runs from these specific bot_ids
+   */
+  async resolveViewScope(workflowId: string, userId: string): Promise<WorkflowViewScope> {
+    // Rule 1: all users, all bots
+    const globalRows = await this.db.query<{ cnt: number }>(
+      `SELECT COUNT(*) AS cnt FROM bot_workflow_permissions
+       WHERE workflow_id = ? AND bot_id = '*' AND bot_owner_id = '*' AND can_view = 1`,
+      [workflowId],
+    );
+    if (globalRows[0].cnt > 0) return "all";
+
+    // Rule 2: this user, all bots (owner-level with NULL/empty bot_id or bot_id='*')
+    const userAllBotsRows = await this.db.query<{ cnt: number }>(
+      `SELECT COUNT(*) AS cnt FROM bot_workflow_permissions
+       WHERE workflow_id = ? AND bot_owner_id = ? AND can_view = 1
+         AND (bot_id = '*' OR bot_id IS NULL OR bot_id = '')`,
+      [workflowId, userId],
+    );
+    if (userAllBotsRows[0].cnt > 0) return "all";
+
+    // Rule 3 & 4: specific bot permissions
+    // - bot_owner_id='*' AND bot_id=<specific>  → all users, specific bot
+    // - bot_owner_id=userId AND bot_id=<specific> → specific user, specific bot
+    const botRows = await this.db.query<{ bot_id: string | null }>(
+      `SELECT DISTINCT bot_id FROM bot_workflow_permissions
+       WHERE workflow_id = ? AND can_view = 1
+         AND bot_id IS NOT NULL AND bot_id != '' AND bot_id != '*'
+         AND (bot_owner_id = ? OR bot_owner_id = '*')`,
+      [workflowId, userId],
+    );
+    const botIds = botRows.map((r) => r.bot_id!).filter(Boolean);
+    if (botIds.length > 0) return { botIds };
+
+    return "deny";
+  }
+
+  /**
    * Get view permission info for a given owner (and optional bot).
    * Two-level logic matching hasEditPermission:
    *   - Owner-level (bot_id IS NULL OR '') grants access to all bots under that owner
@@ -170,29 +220,36 @@ export class BotWorkflowPermissionRepository {
       [],
     );
     const restrictedIds = new Set(restrictedRows.map((r) => r.workflow_id));
+    if (restrictedIds.size === 0) return null;
 
+    // Viewable workflows for this owner, considering wildcards.
     // When botId is not provided (Web UI / owner-level query):
     //   Query ALL viewable or editable records under this owner, regardless of bot_id value.
-    //   Edit permission necessarily includes management-page visibility.
-    //   Also include workflows where bot_owner_id='*' grants access to everyone.
+    //   Also include global wildcard (bot_owner_id='*' AND bot_id='*') grants.
     // When botId is provided (engine runtime / bot-specific query):
-    //   Two-level check: owner-level (bot_id IS NULL OR '') first, then bot-level, union both.
-    //   Also include global wildcard (bot_owner_id='*') grants.
+    //   Two-level check: owner-level all-bots (bot_id IS NULL/''/'*') OR bot-level match, union both.
+    //   Also include global wildcard grants for the specific bot (bot_owner_id='*' AND bot_id matches).
     let viewRows: Pick<BotWorkflowPermissionRow, "workflow_id">[];
     if (botId) {
       viewRows = await this.db.query<Pick<BotWorkflowPermissionRow, "workflow_id">>(
         `SELECT DISTINCT workflow_id FROM bot_workflow_permissions
-         WHERE (bot_owner_id = ? AND can_view = 1
-           AND (bot_id IS NULL OR bot_id = '' OR bot_id = ?))
-         OR ((bot_id IS NULL OR bot_id = '') AND bot_owner_id = '*' AND can_view = 1)`,
-        [ownerId, botId],
+         WHERE can_view = 1
+           AND (
+             (bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*' OR bot_id = ?))
+             OR (bot_owner_id = '*' AND (bot_id = ? OR bot_id = '*'))
+           )`,
+        [ownerId, botId, botId],
       );
     } else {
       viewRows = await this.db.query<Pick<BotWorkflowPermissionRow, "workflow_id">>(
         `SELECT DISTINCT workflow_id FROM bot_workflow_permissions
-         WHERE (bot_owner_id = ? AND (can_view = 1 OR can_edit = 1))
-         OR ((bot_id IS NULL OR bot_id = '') AND bot_owner_id = '*' AND can_view = 1)`,
-        [ownerId],
+         WHERE (can_view = 1 OR can_edit = 1)
+           AND (
+             (bot_owner_id = ? AND (bot_id = '*' OR bot_id IS NULL OR bot_id = ''))
+             OR (bot_owner_id = ? AND bot_id IS NOT NULL AND bot_id != '')
+             OR (bot_id = '*' AND bot_owner_id = '*')
+           )`,
+        [ownerId, ownerId],
       );
     }
     const viewableIds = new Set(viewRows.map((r) => r.workflow_id));

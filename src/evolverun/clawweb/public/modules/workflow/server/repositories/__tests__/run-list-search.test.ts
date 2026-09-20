@@ -40,6 +40,7 @@ describe("run history keyword filtering", () => {
       let viewableIds = new Set(["wf"]);
       const permissions = {
         getViewByIdsForOwner: async () => ({ restrictedIds: new Set(["wf", "other"]), viewableIds }),
+        resolveViewScope: async () => "all" as const,
       } as unknown as BotWorkflowPermissionRepository;
       const app = express();
       app.use((req, _res, next) => { req.isAdmin = req.headers["x-test-admin"] === "true"; next(); });

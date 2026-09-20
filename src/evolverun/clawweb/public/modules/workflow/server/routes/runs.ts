@@ -161,11 +161,35 @@ export function createRunsRouter(
         ? undefined
         : [...viewPerm.viewableIds].filter((id) => viewPerm.restrictedIds.has(id));
 
-      // origin_bot_id filtering: botOwnerId/botId also filter runs by their origin bot
-      const originFilter = botOwnerId ? { originBotOwnerId: botOwnerId, originBotId: botId } : {};
+      // Resolve view scope for the requested workflow: which bot runs can this user see?
+      // undefined = no filtering (admin or no permission repo), [] = deny all, ['*'] = all bots.
+      let allowedBotIds: string[] | undefined = undefined;
+      if (!_req.isAdmin && botPermRepo && workflowId && botOwnerId) {
+        const scope = await botPermRepo.resolveViewScope(workflowId, botOwnerId);
+        if (scope === "deny") {
+          allowedBotIds = [];
+        } else if (scope === "all") {
+          allowedBotIds = undefined;
+        } else {
+          allowedBotIds = scope.botIds;
+        }
+      }
+
+      // If frontend explicitly requests a botId, intersect it with the resolved scope.
+      // This preserves the old UI filter behavior while enforcing the permission boundary.
+      if (botId) {
+        if (allowedBotIds === undefined || allowedBotIds.includes("*")) {
+          allowedBotIds = [botId];
+        } else if (!allowedBotIds.includes(botId)) {
+          allowedBotIds = [];
+        } else {
+          allowedBotIds = [botId];
+        }
+      }
 
       const countOptions = {
         allowedWorkflowIds,
+        allowedBotIds,
         status: statuses.length === 0 ? status : undefined,
         statuses: statuses.length > 0 ? statuses : undefined,
         workflowId,
@@ -173,7 +197,6 @@ export function createRunsRouter(
         to,
         inputQuery,
         query,
-        ...originFilter,
       };
       const total = await flowRunRepo.countRuns(countOptions);
 

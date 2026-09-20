@@ -93,10 +93,12 @@ export type FindFlowRunsOptions = {
   inputQuery?: string;
   /** Literal substring search across run ID, initiator, origin Bot ID and input JSON. */
   query?: string;
-  /** Filter by origin_bot_id owner part (format: botId:botOwnerId) */
-  originBotOwnerId?: string;
-  /** Filter by origin_bot_id bot part; requires originBotOwnerId */
-  originBotId?: string;
+  /**
+   * Filter by allowed bot_ids (origin_bot_id format: botId:botOwnerId).
+   * undefined = no filter; [] = deny all; ['*'] = all bots.
+   * NULL/empty origin_bot_id rows are always included when any bot is allowed.
+   */
+  allowedBotIds?: string[];
 };
 
 export type WorkflowTypeRow = {
@@ -203,15 +205,16 @@ export class FlowRunRepository {
       conds.push("(flow_id LIKE ? ESCAPE '!' OR triggered_by LIKE ? ESCAPE '!' OR origin_bot_id LIKE ? ESCAPE '!' OR input_json LIKE ? ESCAPE '!')");
       params.push(pattern, pattern, pattern, pattern);
     }
-    // origin_bot_id filtering: format is "botId:botOwnerId" (e.g. "default:461514")
-    // NULL/empty origin_bot_id rows are always included (no filtering on them)
-    if (options.originBotOwnerId) {
-      if (options.originBotId) {
-        conds.push("(origin_bot_id = ? OR origin_bot_id = ? OR origin_bot_id IS NULL OR origin_bot_id = '')");
-        params.push(`${options.originBotId}:${options.originBotOwnerId}`, options.originBotId);
-      } else {
-        conds.push("(origin_bot_id LIKE ? OR origin_bot_id = ? OR origin_bot_id IS NULL OR origin_bot_id = '')");
-        params.push(`%:${options.originBotOwnerId}`, options.originBotOwnerId);
+    // allowedBotIds filtering: origin_bot_id format is "botId:botOwnerId" (e.g. "default:461514")
+    // NULL/empty origin_bot_id rows are always included when any bot is allowed.
+    if (options.allowedBotIds !== undefined) {
+      if (options.allowedBotIds.length === 0) {
+        conds.push("1 = 0");
+      } else if (!options.allowedBotIds.includes("*")) {
+        const patterns = options.allowedBotIds.map((id) => `${id}:%`);
+        const placeholders = patterns.map(() => "?").join(",");
+        conds.push(`(origin_bot_id IN (${placeholders}) OR origin_bot_id IS NULL OR origin_bot_id = '')`);
+        params.push(...patterns);
       }
     }
     const sql = conds.length > 0 ? ` WHERE ${conds.join(" AND ")}` : "";

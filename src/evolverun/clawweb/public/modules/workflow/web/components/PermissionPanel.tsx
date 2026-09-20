@@ -86,7 +86,13 @@ export default function PermissionPanel({ workflowId }: PermissionPanelProps) {
   )
 
   const isGlobalWildcard = (perm: BotPermission) =>
+    perm.botOwnerId === '*' && perm.botId === '*'
+
+  const isOwnerWildcard = (perm: BotPermission) =>
     perm.botOwnerId === '*' && !perm.botId
+
+  const isBotWildcard = (perm: BotPermission) =>
+    perm.botId === '*'
 
   if (loading) {
     return (
@@ -149,7 +155,7 @@ export default function PermissionPanel({ workflowId }: PermissionPanelProps) {
                 type="text"
                 value={newBotId}
                 onChange={(e) => setNewBotId(e.target.value)}
-                placeholder="Bot ID（留空为 owner 级）"
+                placeholder="Bot ID（留空为 owner 级，* 表示所有 bot）"
                 className="mt-1 w-full rounded-md border border-gray-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
               />
             </div>
@@ -223,16 +229,19 @@ export default function PermissionPanel({ workflowId }: PermissionPanelProps) {
             </thead>
             <tbody className="divide-y divide-gray-100 bg-white">
               {permissions.map((perm, idx) => (
-                <tr key={`${perm.botOwnerId}-${perm.botId ?? 'owner'}-${idx}`} className={isGlobalWildcard(perm) ? 'bg-green-50' : ''}>
+                <tr key={`${perm.botOwnerId}-${perm.botId ?? 'owner'}-${idx}`} className={isGlobalWildcard(perm) || isOwnerWildcard(perm) ? 'bg-green-50' : ''}>
                   <td className="px-3 py-2 font-mono text-gray-700">
                     {perm.botOwnerId}
-                    {isGlobalWildcard(perm) && (
+                    {(isGlobalWildcard(perm) || isOwnerWildcard(perm)) && (
                       <span className="ml-1.5 rounded bg-green-100 px-1.5 py-0.5 text-xs font-medium text-green-800">所有人</span>
                     )}
                   </td>
                   <td className="px-3 py-2 font-mono text-gray-500">
                     {perm.botId ?? (
                       <span className="italic text-gray-400">（owner 级）</span>
+                    )}
+                    {isBotWildcard(perm) && (
+                      <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800">所有 bot</span>
                     )}
                   </td>
                   <td className="px-3 py-2 text-center">
