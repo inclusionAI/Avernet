@@ -29,7 +29,7 @@ impl CollaborationRuntime {
         let snapshot = self.definitions.get_run_snapshot(run_id).await?.ok_or_else(||
             CollaborationRuntimeError::InvalidRequest("terminal IM recovery requires original Run snapshot".into()))?;
         let loaded = crate::snapshot::load_state_machine_snapshot(snapshot)?;
-        if loaded.plan.is_some() && !self.experimental_fixed_loop_execution {
+        if loaded.plan.is_some() && !self.loop_execution_enabled {
             return Err(CollaborationRuntimeError::InvalidRequest("v2 terminal IM recovery is disabled".into()));
         }
         if self.runs.supersede_terminal_im(run_id).await? { return Ok(()); }

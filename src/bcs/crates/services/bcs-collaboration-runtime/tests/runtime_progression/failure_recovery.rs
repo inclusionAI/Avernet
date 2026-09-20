@@ -72,7 +72,7 @@ async fn rejected_dispatch_stays_fatal_even_with_remaining_attempts() {
     let rejecting = Arc::new(RejectingDelivery::default());
     h.runtime = test_runtime!(h.definitions.clone(), h.store.clone(), runs.clone(), h.store.clone(), group,
         h.sessions.clone(), rejecting.clone(), Arc::new(SequencedJudge::new(Vec::new())))
-        .with_experimental_fixed_loop_execution();
+        .with_loop_execution();
     runs.fail_run_failure.store(true, Ordering::SeqCst);
     assert!(h.runtime.start_state_machine_run(command(loop_yaml(2, false, false, 3), false)).await.is_err());
     let run = h.store.list_running_runs(None, 1).await.unwrap().remove(0);

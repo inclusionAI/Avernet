@@ -21,6 +21,16 @@ All notable BCS changes are documented here. Items follow
 
 ### Breaking
 
+- Rename `collaboration.experimental_fixed_loop_execution` to
+  `collaboration.loop_execution_enabled`. Update existing configuration files;
+  the old key is rejected rather than accepted as an alias. The default remains
+  `false`, and the switch controls both Loop execution and Loop recovery.
+
+- Remove `collaboration.experimental_progression_recovery`; delete this key
+  from existing configuration files. Workflow recovery now starts with the
+  service and retains leader election and bounded scanning. Ordinary workflow
+  recovery runs without an opt-in; Loop recovery requires `loop_execution_enabled`.
+
 - **Session listing no longer creates a legacy session for an empty group.**
   `GET /groups/{id}/sessions` (including `bcs session list`) now returns
   `200 OK` with `items: []` for sessionless groups without creating a

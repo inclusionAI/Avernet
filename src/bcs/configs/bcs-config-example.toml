@@ -335,12 +335,9 @@ group_link_url = "https://botchat.example.com/groups/{group_id}"
 session_link_url = "https://botchat.example.com/sessions/{session_id}"
 
 [collaboration]
-# Opt in to fixed Loop v2 validation, group creation and execution for testing.
-# Automatically enables progression recovery below. Full product FO/release validation is pending.
-experimental_fixed_loop_execution = false
-# Experimental State Machine recovery, including human notifications and terminal cleanup.
-# May be enabled independently for v1 recovery tests. Keep disabled in production.
-experimental_progression_recovery = false
+# Enable fixed Loop v2 group creation and execution; disabled by default.
+# Ordinary workflow recovery runs automatically; Loop recovery requires this switch.
+loop_execution_enabled = false
 
 [collaboration.fixed_loop_limits]
 # Compilation resource limits; these do not enable v2 execution.

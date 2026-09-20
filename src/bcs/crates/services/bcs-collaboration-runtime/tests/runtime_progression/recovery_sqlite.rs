@@ -51,7 +51,7 @@ async fn child(path: &str, case: &str, prepare: bool) {
     let runtime = CollaborationRuntime::new(store.clone(), store.clone(), runs.clone(), store.clone(),
         group, sessions.clone(), delivery.clone(), Arc::new(SequencedJudge::new(decisions)))
         .with_message_repo(Arc::new(MySqlMessageStore::sqlite(db.clone(), "test".into())))
-        .with_experimental_fixed_loop_execution();
+        .with_loop_execution();
     if prepare && matches!(case, "dispatch_pending" | "dispatch_unknown") {
         if case == "dispatch_pending" { runs.fail_dispatch_claim.store(true, Ordering::SeqCst); }
         else { runs.fail_dispatch_finish.store(true, Ordering::SeqCst); }

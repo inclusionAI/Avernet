@@ -22,7 +22,7 @@ async fn unsent_dispatch_recovers_original_request_once_without_recompile() {
         group.upsert(changed).await.unwrap();
         h.definitions.hide_definitions.store(true, Ordering::SeqCst);
         h.runtime = CollaborationRuntime::new(h.definitions.clone(), h.store.clone(), runs, h.store.clone(), group,
-            h.sessions.clone(), h.delivery.clone(), noop_judge()).with_experimental_fixed_loop_execution()
+            h.sessions.clone(), h.delivery.clone(), noop_judge()).with_loop_execution()
             .with_fixed_loop_limits(bcs_config_api::FixedLoopLimits { max_fixed_loop_iterations: 1, ..Default::default() });
         let (a, b) = tokio::join!(h.runtime.recover_state_machine_progression(None, 32), h.runtime.recover_state_machine_progression(None, 32));
         assert!(a.unwrap().failures.is_empty()); assert!(b.unwrap().failures.is_empty());
@@ -114,7 +114,7 @@ async fn saved_rejection_recovers_failure_without_retrying_bot() {
     let rejected = Arc::new(RejectingDelivery::default());
     let group = Arc::new(GroupStore::new()); group.upsert(test_group()).await.unwrap();
     h.runtime = CollaborationRuntime::new(h.definitions.clone(), h.store.clone(), runs.clone(), h.store.clone(), group,
-        h.sessions.clone(), rejected.clone(), noop_judge()).with_experimental_fixed_loop_execution()
+        h.sessions.clone(), rejected.clone(), noop_judge()).with_loop_execution()
         .with_message_repo(Arc::new(MemoryMessageRepo::new()));
     runs.fail_failure_write.store(true, Ordering::SeqCst);
     assert!(h.runtime.start_state_machine_run(command(loop_yaml(2, false, false, 3), false)).await.is_err());

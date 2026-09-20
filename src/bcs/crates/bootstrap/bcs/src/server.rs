@@ -2415,7 +2415,7 @@ impl Default for BcsServerState {
             .with_bot_run_context(bot_run_context.clone())
             .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
-            .with_experimental_fixed_loop_execution_enabled(config.collaboration.experimental_fixed_loop_execution)
+            .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
             .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
             .with_callback_url_guard(outbound_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
@@ -4007,7 +4007,7 @@ impl BcsServer {
             .with_bot_run_context(bot_run_context.clone())
             .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
-            .with_experimental_fixed_loop_execution_enabled(config.collaboration.experimental_fixed_loop_execution)
+            .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
             .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
             .with_callback_url_guard(callback_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
@@ -4869,7 +4869,7 @@ impl BcsServer {
                 .with_bot_run_context(bot_run_context.clone())
                 .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
                 .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
-                .with_experimental_fixed_loop_execution_enabled(config.collaboration.experimental_fixed_loop_execution)
+                .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
                 .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
                 .with_callback_url_guard(outbound_url_guard.clone())
                 .with_session_channel_outbound(session_channel_outbound)
@@ -5369,15 +5369,13 @@ impl BcsServer {
         )
     }
 
-    fn spawn_state_machine_progression_scanner(&self) -> Option<crate::state_machine_progression_scanner::ProgressionRecoveryTask> {
-        self.config.collaboration.progression_recovery_enabled().then(|| {
-            tracing::info!(fixed_loop_execution = self.config.collaboration.experimental_fixed_loop_execution,
-                "Experimental State Machine progression recovery enabled");
-            crate::state_machine_progression_scanner::spawn(
-                self.state.leader_election.clone(),
-                self.state.services.collaboration_runtime.clone(),
-            )
-        })
+    fn spawn_state_machine_progression_scanner(&self) -> crate::state_machine_progression_scanner::ProgressionRecoveryTask {
+        tracing::info!(loop_execution_enabled = self.config.collaboration.loop_execution_enabled,
+            "State Machine progression recovery started");
+        crate::state_machine_progression_scanner::spawn(
+            self.state.leader_election.clone(),
+            self.state.services.collaboration_runtime.clone(),
+        )
     }
 
     fn spawn_callback_recovery_scanner(&self) -> tokio::task::JoinHandle<()> {

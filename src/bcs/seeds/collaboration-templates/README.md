@@ -63,8 +63,8 @@ collaboration-templates/
 两条出口互斥，最终汇总消费实际执行分支的结果，保持其评审状态。
 模板需要可用的 LLM Judge；未配置时列表沿用“需要启用 LLM”提示，校验也会明确指出依赖。
 
-测试部署可在 `[collaboration]` 下设置 `experimental_fixed_loop_execution = true`，重启 BCS 后即可
-使用 v2 Loop 执行；运行本模板还需配置 LLM Judge。此开关同时启用通用恢复扫描。仓库的 `bcs-config-local.toml` 已为本地测试开启。
+测试部署可在 `[collaboration]` 下设置 `loop_execution_enabled = true`，重启 BCS 后即可
+使用 v2 Loop 执行；运行本模板还需配置 LLM Judge。此开关同时允许 Loop 恢复；普通工作流恢复随服务启动，无需独立开关。仓库的 `bcs-config-local.toml` 已为本地测试开启。
 其他部署默认关闭，关闭时校验仍返回 `VALIDATION_ONLY_FEATURE`，页面禁止创建。
 实验开放不代表完整 Singlebox、多实例强杀和生产 FO 发布验收已完成。
 模板不会改变运行时开关或替用户配置 LLM 凭证。

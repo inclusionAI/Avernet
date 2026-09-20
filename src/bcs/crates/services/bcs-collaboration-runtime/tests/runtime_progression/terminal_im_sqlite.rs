@@ -30,7 +30,7 @@ async fn terminal_child(path: &str, case: &str, prepare: bool) {
     let group = Arc::new(GroupStore::new()); group.upsert(test_group()).await.unwrap();
     let delivery = Arc::new(RecordingDelivery::default());
     let runtime = CollaborationRuntime::new(store.clone(), store.clone(), runs.clone(), store.clone(), group,
-        sessions.clone(), delivery.clone(), noop_judge()).with_experimental_fixed_loop_execution()
+        sessions.clone(), delivery.clone(), noop_judge()).with_loop_execution()
         .with_message_repo(Arc::new(MySqlMessageStore::sqlite(db.clone(), "test".into())))
         .with_session_channel_outbound(Arc::new(DurableTerminalChannel { db: db.clone(), preparing: prepare }));
     if prepare {

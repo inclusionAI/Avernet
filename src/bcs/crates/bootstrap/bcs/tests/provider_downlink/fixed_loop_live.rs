@@ -87,7 +87,7 @@ impl LiveStory {
         config.auth.chain = vec!["local".into()];
         config.auth.mock_user_id = Some(HUMAN.into());
         config.auth.allow_mock_headers = true;
-        config.collaboration.experimental_fixed_loop_execution = true;
+        config.collaboration.loop_execution_enabled = true;
         config.llm.provider_type = LlmProviderType::OpenAiCompatible;
         config.llm.base_url = format!("http://{receiver_addr}/v1");
         config.llm.api_key_env = None;

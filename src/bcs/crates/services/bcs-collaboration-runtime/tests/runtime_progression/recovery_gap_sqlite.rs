@@ -30,7 +30,7 @@ impl Fixture {
         let mut runtime = CollaborationRuntime::new(store.clone(), store.clone(), store.clone(), store.clone(), group,
             sessions.clone(), delivery.clone(), noop_judge()).with_message_repo(Arc::new(MySqlMessageStore::sqlite(db.clone(), "test".into())))
             .with_session_channel_outbound(channel.clone());
-        if enabled { runtime = runtime.with_experimental_fixed_loop_execution(); }
+        if enabled { runtime = runtime.with_loop_execution(); }
         Self { db, store, runtime, sessions, delivery, channel }
     }
     async fn original_run(&self) -> StateMachineRun {

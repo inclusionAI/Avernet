@@ -271,7 +271,7 @@ async fn install_runtime(h: &mut Harness, runs: Arc<dyn StateMachineRunRepoPort>
     }).collect()));
     h.runtime = test_runtime!(h.definitions.clone(), h.store.clone(), runs, h.store.clone(), group,
         h.sessions.clone(), h.delivery.clone(), judge)
-        .with_session_channel_outbound(h.channel.clone()).with_experimental_fixed_loop_execution();
+        .with_session_channel_outbound(h.channel.clone()).with_loop_execution();
 }
 
 async fn harness(outcomes: &[&str]) -> (Harness, Arc<FaultyRuns>) {
@@ -392,8 +392,9 @@ async fn recovery_returns_write_and_snapshot_failures_and_never_resends_a_runnin
 }
 
 #[tokio::test]
-async fn ordinary_dag_recovers_partial_skip_and_waits_for_parallel_join() {
-    let (h, runs) = harness(&["approved"]).await;
+async fn ordinary_dag_recovers_partial_skip_and_parallel_join_with_loop_disabled() {
+    let (mut h, runs) = harness(&["approved"]).await;
+    h.runtime = h.runtime.with_loop_execution_enabled(false);
     let started = h.start(judge_branch_yaml(), false).await;
     runs.fail_skip_after.store(2, Ordering::SeqCst);
     assert!(terminal(&h, 0, &started.view.run, "approved-result").await.is_err());
@@ -401,7 +402,8 @@ async fn ordinary_dag_recovers_partial_skip_and_waits_for_parallel_join() {
     assert!(h.prompt(1).await.contains("Publish final answer."));
     assert_eq!(h.finish(1, &started.view.run, "published").await.view.unwrap().run.status, StateMachineRunStatus::Completed);
 
-    let (h, runs) = harness(&[]).await;
+    let (mut h, runs) = harness(&[]).await;
+    h.runtime = h.runtime.with_loop_execution_enabled(false);
     let started = h.start(join_yaml(), false).await;
     runs.fail_dispatch.store(true, Ordering::SeqCst);
     assert!(terminal(&h, 0, &started.view.run, "start").await.is_err());

@@ -8,7 +8,7 @@ async fn install(h: &mut Harness, runs: Arc<FaultyRuns>, messages: Arc<MemoryMes
     group.upsert(value).await.unwrap();
     h.runtime = CollaborationRuntime::new(h.definitions.clone(), h.store.clone(), runs, h.store.clone(), group,
         h.sessions.clone(), h.delivery.clone(), noop_judge())
-        .with_message_repo(messages).with_session_channel_outbound(h.channel.clone()).with_experimental_fixed_loop_execution();
+        .with_message_repo(messages).with_session_channel_outbound(h.channel.clone()).with_loop_execution();
 }
 
 async fn interrupt_start(h: &Harness, runs: &FaultyRuns, human: bool) {

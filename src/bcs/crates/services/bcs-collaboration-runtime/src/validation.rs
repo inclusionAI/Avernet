@@ -32,7 +32,7 @@ pub(crate) fn validate_authoring_definition_yaml_with_instrumentation(
     cmd: ValidateCollaborationDefinitionYamlCommand,
     limits: &FixedLoopLimits,
     hook: Option<&dyn bcs_service_api::StateMachineLoopInstrumentationHook>,
-    fixed_loop_execution_enabled: bool,
+    loop_execution_enabled: bool,
 ) -> CollaborationDefinitionValidationOutcome {
     if cmd.definition_yaml.len() > MAX_COLLABORATION_DEFINITION_YAML_BYTES {
         return invalid_outcome(diagnostic(
@@ -129,7 +129,7 @@ pub(crate) fn validate_authoring_definition_yaml_with_instrumentation(
     let mut graph = graph_preview(projection);
     graph.loops = crate::loop_graph::loop_graph_descriptors(&compiled.definition);
     if let Some(plan) = &compiled.plan {
-        if !fixed_loop_execution_enabled {
+        if !loop_execution_enabled {
             outcome.warnings.push(diagnostic(
                 "VALIDATION_ONLY_FEATURE",
                 "$.runtime.state_machine.version",

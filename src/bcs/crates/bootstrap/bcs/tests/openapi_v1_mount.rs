@@ -378,7 +378,7 @@ async fn mounted_fixed_loop_validation_reflects_the_execution_opt_in() {
         let bots_dir = helpers::create_temp_bots_dir();
         let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
         config.metrics.enabled = false;
-        config.collaboration.experimental_fixed_loop_execution = enabled;
+        config.collaboration.loop_execution_enabled = enabled;
         // Validation checks Judge availability without invoking the model.
         config.llm.provider_type = bcs::LlmProviderType::OpenAiCompatible;
         config.llm.base_url = "http://127.0.0.1:9/v1".into();

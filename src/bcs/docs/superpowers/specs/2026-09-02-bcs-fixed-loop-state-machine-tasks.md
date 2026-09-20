@@ -413,7 +413,7 @@ uv run --offline --no-project --with pytest --with pyyaml --with jsonschema pyth
 cargo check --manifest-path src/bcs/Cargo.toml --workspace --all-targets
 ```
 
-- `with_experimental_fixed_loop_execution()` 仅作为明确的受控 assembly/test 入口；生产 bootstrap 没有调用或暴露配置。默认 start/configure/one-shot/rerun 的 v2 门禁继续生效。
+- `with_loop_execution()` 仅作为明确的受控 assembly/test 入口；生产 bootstrap 没有调用或暴露配置。默认 start/configure/one-shot/rerun 的 v2 门禁继续生效。
 - 启动保存 authoring Definition 与完整 plan；运行和 rerun 保留 snapshot 的执行元数据。Loop 不创建 Node Run；未扩大事务边界，继续使用现有单节点 CAS、独立 skip/barrier/dispatch。
 - Bot prompt、Human pending query/内部 ready event 共用 `loop_context.rs`；上一轮结果缺 outcome/artifact/completed_at、轮次/身份不符或未选中 continue 时返回错误。构造失败发生在节点 Running CAS/通知之前。
 - 回归覆盖空 break、提前 break、真实末轮 outcome、selected-edge 投影、并行 join、连续 Loop、人工跨轮回复/授权、retry/timeout/cancel/非法 Judge、snapshot/opening 写失败、损坏 snapshot、one-shot/配置启动和并发 rerun。上一轮 context 来自指定 result，未重复加入普通 upstream。
@@ -439,7 +439,7 @@ cargo check --manifest-path src/bcs/Cargo.toml --workspace --all-targets
 
 - 恢复以 immutable snapshot 和批量 Node Run 为输入，重算全图的 skip/readiness；已 Skipped 中间节点不会阻止修复后代，其他分支仍可到达的 join 保留。继续使用目标节点 CAS 和独立提交，不增加逐 edge checkpoint 或覆盖展开节点的大事务。
 - Repo 增加仅扫描 Running Run 的 keyset 分页；MySQL 028 / SQLite 029 为 `(env, status, record_status, run_id)` 增加索引。Memory/SQLite 共享合同、MySQL SQL 映射/写失败、SQLite 28→29 升级及幂等迁移通过；SQLite query plan 验证使用索引且不产生临时排序。MySQL 028 的 SQL 生成已通过，真实 MySQL DDL 尚未执行。
-- 通用 scanner 每秒处理最多 32 个 Run，受现有 Leader Election 控制；失去 leader 身份会取消进行中的 page，关闭时 abort worker。单个 Run 的失败进入 page 结果且不阻断后续游标。`collaboration.experimental_progression_recovery` 默认 `false`；配置开启该实验扫描也不会打开生产 v2 执行门禁。
+- 通用 scanner 每秒处理最多 32 个 Run，受现有 Leader Election 控制；失去 leader 身份会取消进行中的 page，关闭时 abort worker。单个 Run 的失败进入 page 结果且不阻断后续游标。2026-09-21 移除独立恢复开关，scanner 随服务启动；普通工作流恢复无需开关，v2 执行及恢复由 `collaboration.loop_execution_enabled` 控制。
 - 13 项定向恢复测试覆盖普通 DAG、Loop、并行 join、部分 skip、写失败、Human context、并发扫描、取消前后检查、已提交 retry 和损坏 snapshot。SQLite 四种窗口分别使用 prepare/recover 两个独立进程；恢复时删除当前 Definition、收紧当前编译上限，证明使用原 snapshot，Completed 结果不变且不重跑 Judge。这里验证的是写失败后重启，尚不等于真实服务强杀、多实例外部调用或完整 FO。
 - 未完成启动、Failed attempt 尚未提交 retry、Chat publication 缺 checkpoint 会明确报错；Running attempt 不重发。Run 已 Completed 后的 Session 状态写失败现在向调用方传播，但尚不在只扫描 Running Run 的恢复范围内。上述缺口继续作为 FL-15～FL-16 未完成项。
 - 核心 431 项、scanner 3 项、配置 gate 128 项通过；配置 gate 首次被本地端口沙箱权限阻断，授权后重跑通过。Port purity、forbidden symbols、Store boundaries 通过。依赖 gate 仍被未改动的基线依赖阻断（`bcs-protocol → bcs-domain`、`bcs-service-api → bcs-config-api/bcs-storage-api`）；`cargo-machete` 和 `cargo-public-api` 未安装，对应检查未执行。未将旧的架构失败算作通过。
@@ -843,7 +843,7 @@ SQLite 028 已部署草稿兼容修复（2026-09-16）：
 
 ### 2026-09-17：按用户要求开放 Loop 效果测试（已完成）
 
-- 增加 `collaboration.experimental_fixed_loop_execution`（默认 false），local 配置显式 true；三处 Runtime 装配、validation 与全部执行入口使用同一能力。开启后不再返回阻止页面创建的 `VALIDATION_ONLY_FEATURE`，同时开启通用恢复扫描。
+- 增加 `collaboration.loop_execution_enabled`（默认 false），local 配置显式 true；三处 Runtime 装配、validation 与全部执行入口使用同一能力。开启后不再返回阻止页面创建的 `VALIDATION_ONLY_FEATURE`，同时允许 Loop 恢复；通用恢复扫描已改为随服务启动。
 - 中英文“三轮写作评审（Loop）”模板说明、配置示例与 API 文档同步更新；不新增 migration，不改变历史数据库记录。
 - 本次是用户明确要求的实验开放，不提前勾选 FL-16.9/16.10 或 FL-24～30 的生产验收。
 - HTTP 集成验证默认关闭时保留 warning、拒绝创建；开启时用真实模板创建群，经两个本地模拟 Provider Bot 完成三轮与汇总共 7 个节点，确认下一轮包含上一轮评审产物，7 个 delivery ID 不重复，Run 最终 Completed，6 个 body 节点有执行 metadata。OpenAPI 挂载测试验证页面所用校验接口的相同开关行为。2 项均通过；报告 `/tmp/bcs-loop-enable-http.log`、`/tmp/bcs-loop-enable-openapi-http.log`。

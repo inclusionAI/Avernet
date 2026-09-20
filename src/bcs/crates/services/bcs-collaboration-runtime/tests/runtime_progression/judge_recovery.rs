@@ -6,7 +6,7 @@ async fn install_judge(h: &mut Harness, runs: Arc<dyn StateMachineRunRepoPort>, 
     group.upsert(test_group()).await.unwrap();
     h.runtime = test_runtime!(h.definitions.clone(), h.store.clone(), runs, h.store.clone(), group,
         h.sessions.clone(), h.delivery.clone(), judge)
-        .with_session_channel_outbound(h.channel.clone()).with_experimental_fixed_loop_execution();
+        .with_session_channel_outbound(h.channel.clone()).with_loop_execution();
 }
 
 #[tokio::test]

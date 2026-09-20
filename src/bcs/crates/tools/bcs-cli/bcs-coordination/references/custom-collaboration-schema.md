@@ -97,7 +97,7 @@ runtime:
 ## Fixed Loop
 
 `collaboration validate` also accepts `version: 2 + graph_mode: hierarchical` for fixed Loop compilation and preview.
-It returns `VALIDATION_ONLY_FEATURE` when this deployment has v2 execution disabled (the default). For testing, set `collaboration.experimental_fixed_loop_execution = true` and restart BCS: validation then omits this warning and create/run/rerun are enabled together with progression recovery. The local config template opts in; full failover and production release gates remain pending.
+It returns `VALIDATION_ONLY_FEATURE` when this deployment has v2 execution disabled (the default). For testing, set `collaboration.loop_execution_enabled = true` and restart BCS: validation then omits this warning and create/run/rerun are enabled together with Loop recovery. Ordinary workflow recovery starts with the service without a separate switch. The local config template opts in; full failover and production release gates remain pending.
 Do not use a successful preview as evidence that a deployment can execute Loop definitions.
 
 ```yaml

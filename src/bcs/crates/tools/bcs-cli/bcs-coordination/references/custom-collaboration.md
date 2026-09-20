@@ -149,7 +149,7 @@ HTTP 请求若同时带非空 `event_subscriptions` 和 `create_initial_session=
 ## 编写约束
 
 - 顶层只允许 `name`、可选 `metadata`、`participants` 和 `runtime`。
-- 保留 `runtime.kind: state_machine`。普通 DAG 使用 `version: 1`；固定 Loop 的 `version: 2` 需按 schema 校验，执行默认关闭，需服务端显式开启 `collaboration.experimental_fixed_loop_execution`；关闭时 preview 返回 `VALIDATION_ONLY_FEATURE`。
+- 保留 `runtime.kind: state_machine`。普通 DAG 使用 `version: 1`；固定 Loop 的 `version: 2` 需按 schema 校验，执行默认关闭，需服务端显式开启 `collaboration.loop_execution_enabled`；关闭时 preview 返回 `VALIDATION_ONLY_FEATURE`。
 - 不输出顶层 `api_version`、`id` 或 `version`；这些字段由 BCS 创建群时提供。
 - 不把真实 Bot UUID、token、私密地址或运行时 participant role 写进 YAML。
 - 真实 Bot UUID 只放在 `collaborate run --binding` 或 `collaboration create --binding` 参数中，不写入 YAML。

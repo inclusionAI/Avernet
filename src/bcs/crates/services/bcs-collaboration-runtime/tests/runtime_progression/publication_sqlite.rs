@@ -24,7 +24,7 @@ async fn publication_child(path: &str, case: &str, prepare: bool) {
     group.upsert(original).await.unwrap();
     let delivery = Arc::new(RecordingDelivery::default());
     let runtime = CollaborationRuntime::new(store.clone(), store.clone(), runs.clone(), store.clone(), group,
-        sessions.clone(), delivery.clone(), noop_judge()).with_experimental_fixed_loop_execution()
+        sessions.clone(), delivery.clone(), noop_judge()).with_loop_execution()
         .with_message_repo(Arc::new(MySqlMessageStore::sqlite(db.clone(), "test".into())))
         .with_result_publisher(Arc::new(PersistedPublisher { db: db.clone(), reject: case == "failed" }));
     if prepare {

@@ -1246,12 +1246,12 @@ state_machine_loop_compile_rejected_total{reason}
 - 不允许 v1 Definition 使用 `kind: loop`；
 - 不允许通过 unknown `extensions` 隐式开启 Loop。
 
-测试开放（2026-09-17，按用户明确要求）：`collaboration.experimental_fixed_loop_execution` 默认 `false`；
+测试开放（2026-09-17，按用户明确要求）：`collaboration.loop_execution_enabled` 默认 `false`；
 测试环境显式设为 `true` 后，validation、配置群、首次启动、one-shot、推进与 rerun 使用同一能力开关，
-不再返回 `VALIDATION_ONLY_FEATURE`。该开关同时开启通用 progression recovery scanner，无需再开第二个开关。
-独立 `experimental_progression_recovery` 仍可用于 v1 恢复测试，不单独开启 v2。
+不再返回 `VALIDATION_ONLY_FEATURE`。该开关同时允许 v2 Loop 恢复。
+通用 progression recovery scanner 随服务启动，普通工作流恢复无需配置独立开关；Loop 执行与恢复仍受上述开关控制。
 仓库 local 配置显式开启便于效果验证；example 与无配置部署保持默认关闭。关闭开关前应先结束 active v2 Runs，
-否则它们将无法继续推进。此实验入口不代表 §22 的生产 FO、性能或发布验收已通过。
+否则它们将无法继续推进。启用该开关不代表 §22 的生产 FO、性能或发布验收已通过。
 
 ### 18.2 Persistence migration
 

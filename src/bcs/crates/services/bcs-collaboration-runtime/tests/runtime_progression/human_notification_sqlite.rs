@@ -51,7 +51,7 @@ async fn child(path: &str, case: &str, prepare: bool) {
     let bot_delivery = Arc::new(RecordingDelivery::default());
     let make_runtime = || CollaborationRuntime::new(store.clone(), store.clone(), store.clone(), store.clone(),
         group.clone(), sessions.clone(), bot_delivery.clone(), noop_judge())
-        .with_message_repo(Arc::new(MySqlMessageStore::sqlite(db.clone(), "test".into()))).with_experimental_fixed_loop_execution();
+        .with_message_repo(Arc::new(MySqlMessageStore::sqlite(db.clone(), "test".into()))).with_loop_execution();
     let bindings = Arc::new(MemoryChannelBindingRepo::new("test"));
     bindings.create(ChannelBinding { id: "human-binding".into(), channel_type: "dingtalk".into(), account_ref: "test-account".into(),
         target: BindingTarget::Group { group_id: "group-1".into() }, group_chat_scope: None, outbound_visibility: Visibility::FullTranscript,

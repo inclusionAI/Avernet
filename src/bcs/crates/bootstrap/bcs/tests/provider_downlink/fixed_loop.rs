@@ -29,7 +29,7 @@ async fn fixed_loop_opt_in_controls_validation_creation_and_judged_exit() {
         let provider = start_provider_webhook().await;
         let bots_dir = create_temp_bots_dir();
         let mut config = create_test_config(&bots_dir.path().to_path_buf());
-        config.collaboration.experimental_fixed_loop_execution = enabled;
+        config.collaboration.loop_execution_enabled = enabled;
         config.metrics.enabled = false;
         config.llm.provider_type = LlmProviderType::OpenAiCompatible;
         config.llm.base_url = format!("http://{judge_addr}/v1");

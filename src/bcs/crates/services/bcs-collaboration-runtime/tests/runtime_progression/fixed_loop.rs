@@ -88,7 +88,7 @@ impl Harness {
         let runtime = test_runtime!(definitions.clone(), store.clone(), store.clone(), store.clone(),
             group, sessions.clone(), delivery.clone(), Arc::new(SequencedJudge::new(decisions)))
             .with_session_channel_outbound(channel.clone())
-            .with_experimental_fixed_loop_execution();
+            .with_loop_execution();
         Self { runtime, public_events, store, definitions, delivery, channel, sessions }
     }
 

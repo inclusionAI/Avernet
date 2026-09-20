@@ -135,7 +135,7 @@ enum JudgeEvaluationResult {
 pub struct CollaborationRuntime {
     loop_instrumentation: Option<Arc<dyn bcs_service_api::StateMachineLoopInstrumentationHook>>,
     fixed_loop_limits: bcs_config_api::FixedLoopLimits,
-    experimental_fixed_loop_execution: bool,
+    loop_execution_enabled: bool,
     definitions: Arc<dyn StateMachineDefinitionRepoPort>,
     bindings: Arc<dyn GroupRuntimeBindingRepoPort>,
     runs: Arc<dyn StateMachineRunRepoPort>,
@@ -180,7 +180,7 @@ impl CollaborationRuntime {
         Self {
             loop_instrumentation: None,
             fixed_loop_limits: bcs_config_api::FixedLoopLimits::default(),
-            experimental_fixed_loop_execution: false,
+            loop_execution_enabled: false,
             definitions,
             bindings,
             runs,
@@ -218,14 +218,14 @@ impl CollaborationRuntime {
         self
     }
 
-    /// Explicit opt-in for fixed Loop development and conformance tests.
-    pub fn with_experimental_fixed_loop_execution(self) -> Self {
-        self.with_experimental_fixed_loop_execution_enabled(true)
+    /// Explicitly enable fixed Loop execution.
+    pub fn with_loop_execution(self) -> Self {
+        self.with_loop_execution_enabled(true)
     }
 
     /// Bootstrap injects the same capability for validation and every execution entrypoint.
-    pub fn with_experimental_fixed_loop_execution_enabled(mut self, enabled: bool) -> Self {
-        self.experimental_fixed_loop_execution = enabled;
+    pub fn with_loop_execution_enabled(mut self, enabled: bool) -> Self {
+        self.loop_execution_enabled = enabled;
         self
     }
 
@@ -241,7 +241,7 @@ impl CollaborationRuntime {
                 definition: execution.definition.clone(), execution, plan: None,
             });
         }
-        if !self.experimental_fixed_loop_execution {
+        if !self.loop_execution_enabled {
             return Err(CollaborationRuntimeError::InvalidDefinition(
                 "v2 execution is disabled until runtime and recovery support is enabled".into(),
             ));
@@ -1312,7 +1312,7 @@ impl CollaborationRuntime {
         run: &StateMachineRun,
     ) -> Result<CompiledStateMachine, CollaborationRuntimeError> {
         let loaded = self.load_run_definition_for_view(run).await?;
-        if loaded.plan.is_some() && !self.experimental_fixed_loop_execution {
+        if loaded.plan.is_some() && !self.loop_execution_enabled {
             return Err(CollaborationRuntimeError::InvalidDefinition(
                 "v2 execution is disabled until runtime and recovery support is enabled".into(),
             ));
@@ -2283,7 +2283,7 @@ impl CollaborationRuntime {
             return Err(CollaborationRuntimeError::InvalidRequest("progression recovery requires an immutable snapshot; preparation grace has not expired or state changed".into()));
         };
         let loaded = crate::snapshot::load_state_machine_snapshot(snapshot)?;
-        if loaded.plan.is_some() && !self.experimental_fixed_loop_execution {
+        if loaded.plan.is_some() && !self.loop_execution_enabled {
             return Err(CollaborationRuntimeError::InvalidRequest("v2 progression recovery is disabled".into()));
         }
         let compiled = loaded.execution;
@@ -2424,7 +2424,7 @@ impl CollaborationRuntime {
             return self.complete_missing_snapshot_session(&run).await;
         };
         let loaded = crate::snapshot::load_state_machine_snapshot(snapshot)?;
-        if loaded.plan.is_some() && !self.experimental_fixed_loop_execution {
+        if loaded.plan.is_some() && !self.loop_execution_enabled {
             return Err(CollaborationRuntimeError::InvalidRequest("v2 Session recovery is disabled".into()));
         }
         let (output, error, notification_status) = match run.status {
@@ -2577,7 +2577,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         &self,
         cmd: ValidateCollaborationDefinitionYamlCommand,
     ) -> Result<CollaborationDefinitionValidationOutcome, CollaborationRuntimeError> {
-        Ok(validate_authoring_definition_yaml_with_instrumentation(cmd, &self.fixed_loop_limits, self.loop_instrumentation.as_deref(), self.experimental_fixed_loop_execution))
+        Ok(validate_authoring_definition_yaml_with_instrumentation(cmd, &self.fixed_loop_limits, self.loop_instrumentation.as_deref(), self.loop_execution_enabled))
     }
 
     async fn get_session_state_machine_permission(
@@ -2712,7 +2712,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             validate_authoring_definition_yaml_with_instrumentation(ValidateCollaborationDefinitionYamlCommand {
                 definition_yaml: cmd.definition_yaml.clone(),
                 judge_available: cmd.judge_available,
-            }, &self.fixed_loop_limits, self.loop_instrumentation.as_deref(), self.experimental_fixed_loop_execution);
+            }, &self.fixed_loop_limits, self.loop_instrumentation.as_deref(), self.loop_execution_enabled);
         if !validation.valid {
             let details = validation
                 .errors
@@ -3202,7 +3202,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 )
             })?;
         let loaded = crate::snapshot::load_state_machine_snapshot(definition)?;
-        if loaded.plan.is_some() && !self.experimental_fixed_loop_execution {
+        if loaded.plan.is_some() && !self.loop_execution_enabled {
             return Err(CollaborationRuntimeError::InvalidDefinition(
                 "v2 rerun execution is disabled until runtime and recovery support is enabled".into(),
             ));

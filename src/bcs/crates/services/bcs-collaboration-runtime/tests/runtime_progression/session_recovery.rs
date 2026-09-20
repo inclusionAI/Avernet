@@ -65,7 +65,7 @@ impl Fixture {
         let runtime = CollaborationRuntime::new(store.clone(), store.clone(), store.clone(), store.clone(),
             group, sessions.clone(), delivery.clone(), Arc::new(SequencedJudge::new(Vec::new())))
             .with_message_repo(Arc::new(MySqlMessageStore::sqlite(inner, "test".into())))
-            .with_session_channel_outbound(channel.clone()).with_experimental_fixed_loop_execution();
+            .with_session_channel_outbound(channel.clone()).with_loop_execution();
         Self { db, store, session_repo, sessions, runtime, delivery, channel }
     }
 
