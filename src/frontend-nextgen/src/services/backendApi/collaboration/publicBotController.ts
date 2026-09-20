@@ -45,6 +45,7 @@ export interface DiscoverPublicBotsParams extends Record<string, unknown> {
   keyword: string;
   top_k?: number;
   min_score?: number;
+  /** 仅 Human 视角使用；Bot 视角不应下发该参数。 */
   runtime_state?: 'online';
   /** 当前身份（viewer），与 Search 一致。 */
   viewer_actor_type?: 'human' | 'bot';

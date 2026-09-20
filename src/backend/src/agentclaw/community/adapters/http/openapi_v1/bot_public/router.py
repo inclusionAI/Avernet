@@ -266,7 +266,7 @@ async def discover_public_bots(
     keyword: str = Query(min_length=1, description="Keyword used for discovery."),
     top_k: int = Query(default=10, ge=1, le=20, description="Maximum recommendations."),
     min_score: float = Query(
-        default=0.1, ge=0, le=1, description="Minimum recommendation score."
+        default=0.01, ge=0, le=1, description="Minimum recommendation score."
     ),
     runtime_state: RuntimeState = Query(
         default="online", description="Runtime state filter."

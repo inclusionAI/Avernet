@@ -157,7 +157,7 @@ def test_discover_uses_bcs_visibility_and_not_legacy_backend_public(
             "catalog-bot:owner-1",
             {
                 "availability": ["public", "protected"],
-                "runtime_state": ["verify"],
+                "runtime_state": ["online", "offline"],
             },
             BotCatalogSearchFilters(
                 visibility=("public", "protected"),
@@ -169,10 +169,12 @@ def test_discover_uses_bcs_visibility_and_not_legacy_backend_public(
             "online",
             "human",
             "owner-1",
-            {"runtime_state": ["online"]},
+            {
+                "availability": ["public", "protected", "private"],
+                "runtime_state": ["online"],
+            },
             BotCatalogSearchFilters(
                 user_visibility=("public", "protected"),
-                status="online",
                 viewer_actor_type="human",
                 viewer_actor_id="owner-1",
             ),

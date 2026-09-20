@@ -492,7 +492,7 @@ def test_discover_uses_online_filter_by_default(
         {
             "keyword": "automation",
             "top_k": 10,
-            "min_score": 0.1,
+            "min_score": 0.01,
             "runtime_state": "online",
             "viewer_actor_type": None,
             "viewer_actor_id": None,

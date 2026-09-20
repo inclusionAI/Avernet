@@ -166,22 +166,27 @@ class BotDiscoverService(BotDiscoverServiceProtocol):
         if viewer_actor_type == "bot":
             recommendation_filters = {
                 "availability": ["public", "protected"],
-                "runtime_state": [runtime_state],
+                "runtime_state": ["online", "offline"],
             }
             catalog_filters = BotCatalogSearchFilters(
                 visibility=("public", "protected"),
                 viewer_actor_type=viewer_actor_type,
                 viewer_actor_id=viewer_actor_id,
             )
+        elif viewer_actor_type == "human":
+            recommendation_filters = {
+                "availability": ["public", "protected", "private"],
+                "runtime_state": [runtime_state],
+            }
+            catalog_filters = BotCatalogSearchFilters(
+                user_visibility=("public", "protected"),
+                viewer_actor_type=viewer_actor_type,
+                viewer_actor_id=viewer_actor_id,
+            )
         else:
             recommendation_filters = {"runtime_state": [runtime_state]}
             catalog_filters = BotCatalogSearchFilters(
-                user_visibility=("public", "protected")
-                if viewer_actor_type == "human"
-                else (),
                 status="online" if runtime_state == "online" else None,
-                viewer_actor_type=viewer_actor_type,
-                viewer_actor_id=viewer_actor_id,
             )
         return recommendation_filters, catalog_filters
 

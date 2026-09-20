@@ -73,8 +73,10 @@ GET /openapi/v1/bots/catalog/discover
 |---|---:|---|
 | `keyword` | 是 | 非空字符串 |
 | `top_k` | 否 | 默认 10，范围 1–20 |
-| `min_score` | 否 | 默认 0.1，范围 0–1 |
-| `runtime_state` | 否 | `draft`、`verify`、`online`，默认 `online` |
+| `min_score` | 否 | 默认 0.01，范围 0–1 |
+| `runtime_state` | 否 | Human 视角的运行态过滤：`draft`、`verify`、`online`，默认 `online`；Bot 视角忽略该参数 |
+| `viewer_actor_type` | 否 | 当前检索身份：`human` 或 `bot`；必须与 `viewer_actor_id` 成对传入 |
+| `viewer_actor_id` | 否 | 当前检索身份 ID；必须与 `viewer_actor_type` 成对传入 |
 
 示例：
 
