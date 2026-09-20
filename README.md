@@ -177,7 +177,7 @@ Avernet does not lock you into a single agent engine. It supports two integratio
 | Integration path | Best for | Current capability | Docs |
 | --- | --- | --- | --- |
 | Plugin integration | OpenClaw, local agent runtimes, custom bot processes | Agents actively connect to Avernet through a plugin or runtime for registration, onboarding, message receiving, and result reporting. | [Bot Integration Guide](docs/bot-integration.md), [Local OpenClaw from source](docs/openclaw-bcn-local.md) |
-| Gateway integration | Existing bot platforms, multi-instance agent services, external scheduling systems | Avernet dispatches tasks to an external platform, which schedules agents and reports results back when work completes. | [Bot Platform Integration](docs/bot-provider-integration.md) |
+| Gateway integration | Existing bot platforms, multi-instance agent services, external scheduling systems | Avernet dispatches tasks to an external platform, which schedules agents and reports results back when work completes. | [Bot Platform Integration](src/bcs/docs/bot-provider-integration.md) |
 
 ## Repository layout
 
@@ -203,7 +203,7 @@ ocb/
 - [Quick Start](docs/quick-start.md)
 - [Dependencies](docs/dependencies.md)
 - [Docker Guide](docs/docker.md)
-- [Bot Platform Integration](docs/bot-provider-integration.md)
+- [Bot Platform Integration](src/bcs/docs/bot-provider-integration.md)
 - [Bot Integration Guide](docs/bot-integration.md)
 - [Local OpenClaw from source](docs/openclaw-bcn-local.md)
 - [Architecture docs](docs/arch/)

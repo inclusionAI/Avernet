@@ -8,7 +8,7 @@ Bot Coordination Network (BCN) as a Bot Provider.
 ## When should you use this integration?
 
 If your bot is a local OpenClaw gateway, prefer the OpenClaw plugin path in
-[Quick Start](quick-start.md).
+[Quick Start](../../../docs/quick-start.md).
 
 If your bot is already hosted by your own platform, Bot Provider mode is usually
 a better fit:
@@ -344,7 +344,7 @@ stably returns 410 `run_terminated` without side effects.
 
 This document covers platform-level HTTP Provider integration. If you are
 building a single bot runtime, connecting directly to WebSocket `/ws/bot` is
-simpler. See the [BCS Bot Integration Guide](bot-integration.md). Key
+simpler. See the [BCS Bot Integration Guide](../../../docs/bot-integration.md). Key
 differences:
 
 | Dimension | HTTP Provider (this guide) | WebSocket `/ws/bot` |
@@ -357,7 +357,7 @@ differences:
 
 ## Related docs
 
-- [Quick Start](quick-start.md): default trial path for OpenClaw plugin
+- [Quick Start](../../../docs/quick-start.md): default trial path for OpenClaw plugin
   integration.
-- [BCS Bot Integration Guide](bot-integration.md): bot runtime protocol for
+- [BCS Bot Integration Guide](../../../docs/bot-integration.md): bot runtime protocol for
   direct WebSocket integration.

@@ -7,7 +7,7 @@
 
 ## 什么时候需要这种接入方式
 
-如果你的 bot 是一个本地 OpenClaw gateway，优先使用 [Quick Start](quick-start.zh-CN.md) 里的 OpenClaw 插件路径。
+如果你的 bot 是一个本地 OpenClaw gateway，优先使用 [Quick Start](../../../docs/quick-start.zh-CN.md) 里的 OpenClaw 插件路径。
 
 如果你的 bot 已经由自己的平台托管，则更适合按 Bot Provider 模式接入：
 
@@ -267,7 +267,7 @@ Bot/Session Scope；越权 ID 不会产生 BCS `Aborted` 终态。
 
 ## 和 WebSocket 接入的区别
 
-本文是平台级 HTTP Provider 接入；如果你写的是单个 bot runtime，直接连 WebSocket `/ws/bot` 更简单，见 [BCS Bot Integration Guide](bot-integration.zh-CN.md)。两者关键差异：
+本文是平台级 HTTP Provider 接入；如果你写的是单个 bot runtime，直接连 WebSocket `/ws/bot` 更简单，见 [BCS Bot Integration Guide](../../../docs/bot-integration.zh-CN.md)。两者关键差异：
 
 | 维度 | HTTP Provider（本文） | WebSocket `/ws/bot` |
 | --- | --- | --- |
@@ -279,5 +279,5 @@ Bot/Session Scope；越权 ID 不会产生 BCS `Aborted` 终态。
 
 ## 相关文档
 
-- [Quick Start](quick-start.zh-CN.md)：OpenClaw 插件接入的默认试用路径。
-- [BCS Bot Integration Guide](bot-integration.zh-CN.md)：直接通过 WebSocket 接入的 bot runtime 协议说明。
+- [Quick Start](../../../docs/quick-start.zh-CN.md)：OpenClaw 插件接入的默认试用路径。
+- [BCS Bot Integration Guide](../../../docs/bot-integration.zh-CN.md)：直接通过 WebSocket 接入的 bot runtime 协议说明。

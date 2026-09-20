@@ -39,7 +39,7 @@ Provider 接入方负责取得兼容的 webhook 地址并提交给 BCS。
 - [架构规则](../../../../docs/arch/arch.rules.md)
 - [CI 规则](../../../../docs/arch/ci.enforce.md)
 - [BCS 分层规则](../../CLAUDE.md)
-- [Provider 接入协议](../../../../docs/bot-provider-integration.zh-CN.md)
+- [Provider 接入协议](../../docs/bot-provider-integration.zh-CN.md)
 - [Provider 2.0 协议](../../docs/bcs-provider-2.0-sse-protocol.md)
 
 当前系统 ADR 目录没有直接约束 Provider webhook 地址粒度的 ADR。

@@ -207,8 +207,8 @@ cargo test --manifest-path src/bcs/Cargo.toml -p bcs --test provider_bot_webhook
 
 修改：
 
-- `docs/bot-provider-integration.md`
-- `docs/bot-provider-integration.zh-CN.md`
+- `src/bcs/docs/bot-provider-integration.md`
+- `src/bcs/docs/bot-provider-integration.zh-CN.md`
 - `src/bcs/docs/bcs-provider-2.0-sse-protocol.md`
 - `src/bcs/CLAUDE.md` 中与现有 HTTP Provider 已不一致的连接方式说明。
 - 受影响 crate 的 `CONTEXT.md`、管理 API 契约/schema 映射（以实际暴露入口为准）。

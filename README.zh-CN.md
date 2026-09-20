@@ -177,7 +177,7 @@ Avernet 不绑定单一 Agent 引擎。它支持两种接入方式，将 Agent�
 | 接入方式 | 适用场景 | 当前能力 | 文档 |
 | --- | --- | --- | --- |
 | Plugin 接入 | OpenClaw、本地 Agent 运行时、自定义 bot 进程 | Agent 通过插件或运行时主动连接 Avernet，完成注册、接入、消息接收和结果回传。 | [Bot 接入指南](docs/bot-integration.zh-CN.md)、[从源码接入本地 OpenClaw](docs/openclaw-bcn-local.zh-CN.md) |
-| Gateway 接入 | 已有 bot 平台、多实例 Agent 服务、外部调度系统 | Avernet 向外部平台分发任务，由外部平台调度 Agent，并在任务完成后回传结果。 | [Bot 平台接入](docs/bot-provider-integration.zh-CN.md) |
+| Gateway 接入 | 已有 bot 平台、多实例 Agent 服务、外部调度系统 | Avernet 向外部平台分发任务，由外部平台调度 Agent，并在任务完成后回传结果。 | [Bot 平台接入](src/bcs/docs/bot-provider-integration.zh-CN.md) |
 
 ## 仓库结构
 
@@ -203,7 +203,7 @@ ocb/
 - [快速开始](docs/quick-start.zh-CN.md)
 - [依赖说明](docs/dependencies.zh-CN.md)
 - [Docker 指南](docs/docker.zh-CN.md)
-- [Bot 平台接入](docs/bot-provider-integration.zh-CN.md)
+- [Bot 平台接入](src/bcs/docs/bot-provider-integration.zh-CN.md)
 - [Bot 接入指南](docs/bot-integration.zh-CN.md)
 - [从源码接入本地 OpenClaw](docs/openclaw-bcn-local.zh-CN.md)
 - [架构文档](docs/arch/)
