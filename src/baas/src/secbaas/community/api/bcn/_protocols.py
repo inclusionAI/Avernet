@@ -132,7 +132,7 @@ class BcnDownlinkService(Protocol):
 
         BCN 请求中止某 session 下运行中的 run。Provider 应：
         1. 按 session_id 定位 RUNNING/PENDING 的 run；
-        2. 取消本机正在执行的 task、标记 run 终态（FAILED）、终结队列工作项；
+        2. 取消本机正在执行的 task、标记 run 终态（ABORTED）、终结队列工作项；
         3. 出站通知 engine（best-effort）；
         4. 幂等：run 已终态时抛 ``BcnRunTerminatedError`` (410)，重复 abort 稳定 410；
            session 无任何 run 记录时返回 ``{aborted: False, aborted_run_ids: []}``。

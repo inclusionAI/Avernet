@@ -46,7 +46,9 @@ class RunResultResponseData(BaseModel):
     run_id: str = Field(..., description="Run ID")
     bot_id: str = Field(..., description="Bot ID")
     session_id: str = Field(..., description="Session ID")
-    status: str = Field(..., description="Run status: pending/running/completed/failed")
+    status: str = Field(
+        ..., description="Run status: pending/running/completed/failed/aborted"
+    )
     created_at: datetime = Field(..., description="Creation time")
     completed_at: datetime | None = Field(default=None, description="Completion time")
     result: RunResultData | None = Field(
@@ -214,7 +216,7 @@ class MessageResultResponseData(BaseModel):
     bot_id: str = Field(..., description="Bot ID")
     session_id: str = Field(..., description="Session ID")
     status: str = Field(
-        ..., description="Message status: pending/running/completed/failed"
+        ..., description="Message status: pending/running/completed/failed/aborted"
     )
     created_at: datetime = Field(..., description="Creation time")
     completed_at: datetime | None = Field(default=None, description="Completion time")

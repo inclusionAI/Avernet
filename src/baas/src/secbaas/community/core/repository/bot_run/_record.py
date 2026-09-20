@@ -17,6 +17,17 @@ class RunStatus(Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     TIME_OUT = "TIME_OUT"
+    ABORTED = "ABORTED"
+
+
+TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {
+        RunStatus.COMPLETED.value,
+        RunStatus.FAILED.value,
+        RunStatus.TIME_OUT.value,
+        RunStatus.ABORTED.value,
+    }
+)
 
 
 @dataclass(slots=True)

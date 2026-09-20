@@ -201,7 +201,7 @@ def _register_stream(method: str, req_model: type[BaseModel]):
         404: {"description": "Bot 或会话不存在"},
         409: {"description": "幂等键冲突"},
         410: {
-            "description": "run 已终态（chat.abort 重复或 run 已 COMPLETED/FAILED/TIME_OUT）"
+            "description": "run 已终态（chat.abort 重复或 run 已 COMPLETED/FAILED/TIME_OUT/ABORTED）"
         },
         412: {"description": "协议版本不兼容"},
         429: {"description": "流控"},

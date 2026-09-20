@@ -300,7 +300,7 @@ class BotRequestWorker:
         """按 (bot_id, session_id) 维度取消目标 bot 的 RUNNING run。
 
         复用 ``_terminate_local_timeout`` 的 cancel+force_done 模板，顺序：
-        1. ``run_repository.update_error(run_id, ...)`` 标 FAILED（幂等：已终态时 no-op）；
+        1. ``run_repository.update_aborted(run_id, ...)`` 标 ABORTED（幂等：已终态时 no-op）；
         2. ``queue.request_abort(run_id)`` 写跨实例信号（持有该 run 的 Worker 通过
            ``_abort_poll_loop`` 轮询感知后 cancel 本机 task）；
         3. ``queue.force_done(run_id)`` 终结队列工作项（幂等）；
@@ -328,12 +328,12 @@ class BotRequestWorker:
         aborted_run_ids: list[str] = []
         for record in records:
             run_id = record.run_id
-            # 1. 写终态（FAILED）—— update_error 仅在 PENDING/RUNNING 时生效，已终态 no-op
+            # 1. 写终态（ABORTED）—— update_aborted 仅在 PENDING/RUNNING 时生效，已终态 no-op
             try:
-                self._run_repository.update_error(run_id, "aborted by chat.abort")
+                self._run_repository.update_aborted(run_id, "aborted by chat.abort")
             except Exception as e:
                 logger.error(
-                    "[BotRequestWorker] abort update_error failed run_id=%s: %s",
+                    "[BotRequestWorker] abort update_aborted failed run_id=%s: %s",
                     run_id,
                     e,
                     exc_info=True,
@@ -356,7 +356,7 @@ class BotRequestWorker:
             aborted_run_ids.append(run_id)
             logger.info(
                 "[BotRequestWorker] abort run_id=%s session_id=%s bot_id=%s "
-                "status=%s worker=%s marked failed+force_done",
+                "status=%s worker=%s marked aborted+force_done",
                 run_id,
                 session_id,
                 bot_id,

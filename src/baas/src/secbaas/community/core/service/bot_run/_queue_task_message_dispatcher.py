@@ -222,7 +222,7 @@ class QueueTaskMessageDispatcher:
         遇到 final/error chunk 后停止迭代。
         finally 块清理 chunk 表记录。
         """
-        terminal_types = {"final", "error"}
+        terminal_types = {"final", "error", "aborted"}
         last_seq = 0
         cache_key = f"run:{run_id}:seq"
         deadline = asyncio.get_event_loop().time() + timeout if timeout else None
@@ -308,9 +308,12 @@ class QueueTaskMessageDispatcher:
 
                 # 4. 检查 run 是否已终结（Worker 可能已崩溃）
                 run = self._run_repository.get_by_run_id(run_id)
-                if run and run.status in ("FAILED", "TIME_OUT"):
+                if run and run.status in ("FAILED", "TIME_OUT", "ABORTED"):
+                    chunk_type = (
+                        "aborted" if run.status == "ABORTED" else "error"
+                    )
                     yield StreamChunk(
-                        type="error",
+                        type=chunk_type,
                         content=f"run terminated with status {run.status}",
                     )
                     return

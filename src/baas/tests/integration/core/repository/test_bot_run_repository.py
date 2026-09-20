@@ -247,6 +247,44 @@ class TestBotRunRepositoryProtocol:
             error="Some error",
         )
 
+    # ── 5b. update_aborted ──
+
+    def test_update_aborted(
+        self, bot_run_repository: BotRunRepository, db_transaction
+    ):
+        run_id = _generate_uuid()
+
+        bot_run_repository.insert_run(
+            run_id=run_id,
+            bot_id=_generate_uuid(),
+            api_key_prefix="sk-test_",
+            message_long="Will this be aborted?",
+            metadata=None,
+        )
+
+        bot_run_repository.update_aborted(
+            run_id=run_id,
+            reason="aborted by chat.abort",
+        )
+
+        record = bot_run_repository.get_by_run_id(run_id)
+        assert record is not None
+        assert record.status == "ABORTED"
+        assert record.error == "aborted by chat.abort"
+        assert record.result_content_long is None
+        assert record.result_extra is None
+        assert record.completed_at is not None
+        assert isinstance(record.completed_at, datetime)
+
+    def test_update_aborted_on_nonexistent_run(
+        self, bot_run_repository: BotRunRepository, db_transaction
+    ):
+        """update_aborted on a missing run_id should not raise — it's a no-op."""
+        bot_run_repository.update_aborted(
+            run_id="nonexistent-run-id",
+            reason="aborted by chat.abort",
+        )
+
     # ── 6. Full lifecycle: insert → status → result ──
 
     def test_full_lifecycle_insert_status_result(
