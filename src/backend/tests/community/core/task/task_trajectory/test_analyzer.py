@@ -1136,6 +1136,31 @@ async def test_tc_bot_parses_markdown_fenced_json_response():
 
 
 @pytest.mark.asyncio
+async def test_tc_bot_coerces_structured_analysis_output_to_string():
+    # Bot 把分析结论返回成结构化 dict(而非扁平字符串)—— 不再 504;coerce 成 JSON 字符串
+    # 保留 bot 的完整结构化分析。修订原 strict-string("must be a string" → raise)行为。
+    structured = {
+        "analysis_output": {
+            "final_status": "SUCCESS",
+            "event_breakdown": {"plan": 3, "dispatch": 3},
+            "anomalies": [{"type": "plan_parse_fail", "recovered": True}],
+        },
+    }
+    bot = _FakeBot(content=json.dumps(structured, ensure_ascii=False))
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    trajectory = _traj([_ev(TrajectoryActionType.SUBMIT, action_result="success"), _terminal_success()])
+    ta = await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    # analysis_output coerced to a JSON STRING preserving the structured analysis
+    assert isinstance(ta.analysis_output, str)
+    assert "final_status" in ta.analysis_output and "SUCCESS" in ta.analysis_output
+    assert "plan_parse_fail" in ta.analysis_output
+    assert ta.failure_reason is None  # success; bot omitted failure_reason
+
+
+@pytest.mark.asyncio
 async def test_tc_bot_raises_domain_error_when_analysis_output_missing():
     bot = _FakeBot(content=json.dumps({"boost_reason": "only boost, no output"}))
     analyzer = TaskTrajectoryAnalyzer(bot=bot)

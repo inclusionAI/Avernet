@@ -753,21 +753,23 @@ class TaskTrajectoryAnalyzer:
             for ev in trajectory.timeline
         ]
         ext_info_brief = _build_ext_info_brief(trajectory.timeline, ext_info_lookup)
+
+        instruction = """
+分析这个任务轨迹，并返回一个 JSON 对象，其中必须且仅包含以下三个扁平字符串字段（不要把任何对象/数组作为字段值进行嵌套）：
+
+analysis_output（必填，字符串）：整体的人类可读分析/结论文本（必须是扁平字符串，不是结构化对象）；
+boost_reason（可选，字符串或 null）：调度理由摘要（包括 strategy / decision_mode / candidates / JOIN drops，基于 ext_info_brief 提取）；
+failure_reason（可选，字符串或 null）：失败的根本原因；如果任务成功，则填 null。
+请将这三个字段保持为彼此独立的顶层扁平字符串；任何结构化拆解内容都应写进 analysis_output 的字符串正文中，不要写成嵌套 JSON。ext_info_brief 字段包含调度理由摘要、RESET SLA 指标，以及 interface_error 事件中的“为何”信号——请使用这些信息来填写 boost_reason / failure_reason。如果 ext_info_brief 中缺少某个键，表示该信号不存在，不是 null。        
+        """
+
         return json.dumps(
             {
                 "task_id": trajectory.task_id,
                 "analysis_input": analysis_input,
                 "ext_info_brief": ext_info_brief,
                 "timeline": timeline_brief,
-                "instruction": (
-                    "Analyse this task trajectory and return a JSON object with "
-                    "'analysis_output' (required), and optional 'boost_reason' and "
-                    "'failure_reason' (flat strings). The 'ext_info_brief' field "
-                    "carries the dispatch-rationale summary, RESET SLA metrics, and "
-                    "interface_error events ('为何' signals — use them to populate "
-                    "boost_reason/failure_reason). A missing key in ext_info_brief "
-                    "means the signal is absent (not a null placeholder)."
-                ),
+                "instruction": instruction,
             },
             ensure_ascii=False,
         )
@@ -812,11 +814,13 @@ class TaskTrajectoryAnalyzer:
                 f"tc_bot response missing required 'analysis_output' "
                 f"(bot_id={analysis_executor}): {content!r}"
             )
-        if not isinstance(analysis_output, str):  # contract: MUST be a string
-            raise TrajectoryAnalysisError(
-                f"tc_bot response 'analysis_output' must be a string, got "
-                f"{type(analysis_output).__name__} (bot_id={analysis_executor}): {content!r}"
-            )
+        if not isinstance(analysis_output, str):
+            # Bot 把分析结论以结构化(dict/list)形式放在 ``analysis_output`` 下,而非扁平字符串。
+            # 不 504(那会丢掉 bot 的大段有用分析):序列化成 JSON 字符串,保留完整结构化内容写进
+            # 持久化 ``analysis``(HTML 渲染成字符串即可读)。修订:原 strict-string 旨在 surface
+            # 合同 bug(让 bot 把 boost/failure 拆成独立字段),但 bot 自然倾向结构化输出 —— coerce
+            # 既不丢内容、又不回 504。仍要求 analysis_output 非空(missing → 上面 raise)。
+            analysis_output = json.dumps(analysis_output, ensure_ascii=False)
         boost_reason = parsed.get("boost_reason")
         if boost_reason is not None and not isinstance(boost_reason, str):
             boost_reason = str(boost_reason)
