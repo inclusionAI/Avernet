@@ -29,6 +29,7 @@ import type {
   PendingRouteIntent,
   RouteSelectorWire,
   AgentEventPayload,
+  AgentStream,
   GroupContext,
   ResolvedBcsAccount,
   SessionDeleteParams,
@@ -199,6 +200,7 @@ const activeStreams = new Map<string, AbortController>();
 
 type RunContext = {
   groupId: string;
+  bcsSessionId: string;
   client: BcsWsClient;
   abortSessionKey: string;
   sessionKey?: string;
@@ -206,6 +208,7 @@ type RunContext = {
   finalSent?: boolean;
   terminalState?: 'final' | 'aborted' | 'error';
   sawToolEvent: boolean;
+  toolNames: Map<string, string>;
   preparedAttachments?: PreparedAttachment[];
   terminalTimer?: ReturnType<typeof setTimeout>;
 };
@@ -340,8 +343,10 @@ export function rememberTaskToolSession(
     sessionKeyToRouteScope.set(sessionKey, routeScope);
     groupIdToSessionKey.set(routeScope.groupId, sessionKey);
   }
-  if (sessionContext?.session_id) {
-    sessionKeyToBcsSessionId.set(sessionKey, sessionContext.session_id);
+  const canonicalSessionId = nonEmptyString(explicitBcsSessionId)
+    ?? nonEmptyString(sessionContext?.session_id);
+  if (canonicalSessionId) {
+    sessionKeyToBcsSessionId.set(sessionKey, canonicalSessionId);
   }
   if (sessionContext?.group_type) {
     sessionTaskGroupInfo.set(sessionKey, {
@@ -359,6 +364,10 @@ export function resolveGroupIdFromSessionKey(sessionKey: string): string | undef
   return sessionKeyToGroupId.get(sessionKey);
 }
 
+export function resolveBcsSessionIdFromSessionKey(sessionKey: string): string | undefined {
+  return sessionKeyToBcsSessionId.get(sessionKey);
+}
+
 /** Look up the session key for a given BCS group ID (used by chat.history). */
 export function resolveSessionKeyFromGroupId(groupId: string): string | undefined {
   return groupIdToSessionKey.get(groupId);
@@ -367,18 +376,6 @@ export function resolveSessionKeyFromGroupId(groupId: string): string | undefine
 export function combineDeliveredReplyParts(deliveredParts: string[]): string | undefined {
   const combinedText = deliveredParts.join('\n\n').trim();
   return combinedText ? combinedText : undefined;
-}
-
-/** Per-client sequence counter for event frames. */
-const seqCounters = new WeakMap<BcsWsClient, { value: number }>();
-
-function nextSeq(client: BcsWsClient): number {
-  let counter = seqCounters.get(client);
-  if (!counter) {
-    counter = { value: 0 };
-    seqCounters.set(client, counter);
-  }
-  return ++counter.value;
 }
 
 /** Extract text from BCS message content blocks. */
@@ -943,23 +940,18 @@ async function buildInboundMediaFields(prepared: PreparedAttachment[]): Promise<
 
 function buildChatEventPayload(
   runId: string,
-  bcsGroupId: string,
+  sessionId: string,
   state: ChatEventPayload['state'],
   text?: string,
   routeIntent?: PendingRouteIntent,
   errorCode?: string,
 ): ChatEventPayload {
   return {
-    run_id: runId,
-    bcs_group_id: bcsGroupId,
+    runId,
+    sessionId,
+    ts: Date.now(),
     state,
-    ...(text !== undefined ? {
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text }],
-        timestamp: Date.now(),
-      },
-    } : {}),
+    ...(text !== undefined ? { content: text } : {}),
     ...(routeIntent ? {
       routing: {
         responders: routeIntent.responders,
@@ -1077,13 +1069,12 @@ function sendVisibleReplyDelta(
   if (!deltaText.trim()) return;
 
   context.client.sendEvent(
-    'chat.event',
-    buildChatEventPayload(runId, context.groupId, 'delta', deltaText) as unknown as Record<string, unknown>,
-    nextSeq(context.client),
+    'chat',
+    buildChatEventPayload(runId, context.bcsSessionId, 'delta', deltaText) as unknown as Record<string, unknown>,
   );
   state.flushedOffset = state.text.length;
   state.deltaCount += 1;
-  log?.info?.(`[BCS] Sent chat.event delta from agent event (part ${state.deltaCount}) for run_id=${runId}, len=${deltaText.length}`);
+  log?.info?.(`[BCS] Sent V3 chat delta from agent event (part ${state.deltaCount}) for run_id=${runId}, len=${deltaText.length}`);
 }
 
 function finishVisibleReply(runId: string, log?: { info: (...args: unknown[]) => void }): string | undefined {
@@ -1146,20 +1137,20 @@ function sendFinalVisibleReplyOnce(
   const routeIntent = consumeRouteIntent(runId, context.sessionKey);
   const chatPayload = buildChatEventPayload(
     runId,
-    context.groupId,
+    context.bcsSessionId,
     'final',
     combinedText,
     routeIntent,
   );
-  context.client.sendEvent('chat.event', chatPayload as unknown as Record<string, unknown>, nextSeq(context.client));
+  context.client.sendEvent('chat', chatPayload as unknown as Record<string, unknown>);
   context.finalSent = true;
   context.terminalState = 'final';
 
   const source = options?.source ? ` (source=${options.source})` : '';
   if (routeIntent) {
-    log?.info?.(`[BCS] Sent chat.event final with routing intent for run_id=${runId}${source}`);
+    log?.info?.(`[BCS] Sent V3 chat final with routing intent for run_id=${runId}${source}`);
   } else {
-    log?.info?.(`[BCS] Sent chat.event final for run_id=${runId}${source}`);
+    log?.info?.(`[BCS] Sent V3 chat final for run_id=${runId}${source}`);
   }
 
   return true;
@@ -1175,15 +1166,14 @@ function sendRunErrorOnce(
   const context = runContexts.get(runId);
   if (!context || context.finalSent) return false;
 
-  const errorPayload = buildChatEventPayload(runId, context.groupId, 'error', userMessage, undefined, errorCode);
+  const errorPayload = buildChatEventPayload(runId, context.bcsSessionId, 'error', userMessage, undefined, errorCode);
   context.client.sendEvent(
-    'chat.event',
+    'chat',
     errorPayload as unknown as Record<string, unknown>,
-    nextSeq(context.client),
   );
   context.finalSent = true;
   context.terminalState = 'error';
-  log?.warn?.(`[BCS] Sent chat.event error for run_id=${runId}${detail ? ` (${detail})` : ''}`);
+  log?.warn?.(`[BCS] Sent V3 chat error for run_id=${runId}${detail ? ` (${detail})` : ''}`);
   return true;
 }
 
@@ -1273,9 +1263,8 @@ export async function handleChatAbort(
   context.terminalState = 'aborted';
   controller.abort();
   context.client.sendEvent(
-    'chat.event',
-    buildChatEventPayload(runId, context.groupId, 'aborted') as unknown as Record<string, unknown>,
-    nextSeq(context.client),
+    'chat',
+    buildChatEventPayload(runId, context.bcsSessionId, 'aborted') as unknown as Record<string, unknown>,
   );
   client.sendResponse(request.id, true, {
     aborted: true,
@@ -1312,7 +1301,8 @@ export function resolveChatRunId(requestId: unknown, idempotencyKey: unknown): s
  * frames keep their existing group-based histories.
  */
 export function resolveEngineSessionPeerId(
-  params: Pick<ChatSendParams, 'session_key' | 'bcs_group_id' | 'bcs_session_id'>,
+  params: Pick<ChatSendParams, 'session_key' | 'bcs_group_id'>
+  & Partial<Pick<ChatSendParams, 'bcs_session_id'>>,
   onboardingPeerId: string,
 ): string {
   const canonicalSessionId = params.bcs_session_id?.trim();
@@ -1334,6 +1324,15 @@ export async function handleChatSend(
   const bcsGroupId = params.bcs_group_id;
   const channel = params.channel;
   const sessionContext = params.session_context;
+  const bcsSessionId = nonEmptyString(params.bcs_session_id);
+  if (!bcsSessionId) {
+    client.sendResponse(request.id, false, undefined, {
+      code: 'INVALID_REQUEST',
+      message: 'BCN V3 chat.send requires bcs_session_id',
+      retryable: false,
+    });
+    return;
+  }
 
   // Extract text from message content
   const imageAttachments = extractImageAttachments(params.attachments);
@@ -1374,9 +1373,11 @@ export async function handleChatSend(
     || bcsGroupId;
   runContexts.set(runId, {
     groupId: bcsGroupId,
+    bcsSessionId,
     client,
     abortSessionKey,
     sawToolEvent: false,
+    toolNames: new Map(),
   });
   ensureVisibleReplyState(runId);
   armRunTerminalTimeout(runId, log);
@@ -1427,7 +1428,7 @@ export async function handleChatSend(
     }
 
     // Track client reference and manager-worker context for task group tools
-    rememberTaskToolSession(route.sessionKey, client, bcsGroupId, sessionContext, params.bcs_session_id);
+    rememberTaskToolSession(route.sessionKey, client, bcsGroupId, sessionContext, bcsSessionId);
 
     // Cache routing_mode so tool factory can hide bcs_route when mode=mention
     if (sessionContext?.routing_mode) {
@@ -1781,6 +1782,15 @@ export async function handleChatInject(
   const bcsGroupId = params.bcs_group_id;
   const channel = params.channel;
   const sessionContext = params.session_context;
+  const bcsSessionId = nonEmptyString(params.bcs_session_id);
+  if (!bcsSessionId) {
+    client.sendResponse(request.id, false, undefined, {
+      code: 'INVALID_REQUEST',
+      message: 'BCN V3 chat.inject requires bcs_session_id',
+      retryable: false,
+    });
+    return;
+  }
 
   // Extract text from message content
   const imageAttachments = extractImageAttachments(params.attachments);
@@ -1829,7 +1839,7 @@ export async function handleChatInject(
     }
 
     // Track client reference and manager-worker context for task group tools
-    rememberTaskToolSession(route.sessionKey, client, bcsGroupId, sessionContext, params.bcs_session_id);
+    rememberTaskToolSession(route.sessionKey, client, bcsGroupId, sessionContext, bcsSessionId);
 
     // Cache routing_mode so tool factory can hide bcs_route when mode=mention
     if (sessionContext?.routing_mode) {
@@ -2610,6 +2620,83 @@ function terminalLifecycleOutcome(evt: SdkAgentEventPayload): 'final' | 'error' 
   return undefined;
 }
 
+function firstPresent(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) return record[key];
+  }
+  return undefined;
+}
+
+/** Normalize an OpenClaw SDK event into the strict Provider-compatible V3 shape. */
+function buildV3AgentEventPayload(
+  evt: SdkAgentEventPayload,
+  runId: string,
+  sessionId: string,
+  toolNames: Map<string, string>,
+): AgentEventPayload | undefined {
+  if (!evt.data || typeof evt.data !== 'object' || Array.isArray(evt.data)) return undefined;
+  const stream = evt.stream as AgentStream;
+  if (!Number.isInteger(evt.ts) || evt.ts < 0) return undefined;
+  const common = { runId, sessionId, stream, ts: evt.ts };
+
+  if (stream === 'tool') {
+    const phase = stringField(evt.data, 'phase');
+    const toolCallId = nonEmptyString(evt.data.toolCallId);
+    if (!toolCallId || !phase || ![ 'start', 'update', 'result' ].includes(phase)) return undefined;
+
+    const eventName = nonEmptyString(evt.data.name) ?? nonEmptyString(evt.data.toolName);
+    if (eventName) toolNames.set(toolCallId, eventName);
+    const name = eventName ?? toolNames.get(toolCallId);
+    if (!name) return undefined;
+
+    const payload: AgentEventPayload = {
+      ...common,
+      phase,
+      name,
+      toolCallId,
+    };
+    if (phase === 'start') {
+      const args = firstPresent(evt.data, [ 'args', 'arguments', 'input' ]);
+      if (args !== undefined) payload.args = args;
+    } else if (phase === 'update') {
+      const partialResult = firstPresent(evt.data, [ 'partialResult', 'partialArgs', 'partialInput' ]);
+      if (partialResult !== undefined) payload.partialResult = partialResult;
+    } else {
+      const result = firstPresent(evt.data, [ 'result', 'output' ]);
+      payload.result = result ?? null;
+      payload.isError = typeof evt.data.isError === 'boolean'
+        ? evt.data.isError
+        : evt.data.error !== undefined;
+      toolNames.delete(toolCallId);
+    }
+    for (const key of [ 'exitCode', 'durationMs', 'cwd' ]) {
+      const value = evt.data[key];
+      if (value !== undefined) payload[key] = value;
+    }
+    return payload;
+  }
+
+  if (stream === 'thinking') {
+    const deltaText = stringField(evt.data, 'deltaText') ?? stringField(evt.data, 'delta');
+    const text = stringField(evt.data, 'text');
+    return {
+      ...common,
+      ...(deltaText !== undefined ? { deltaText } : {}),
+      ...(text !== undefined ? { text } : {}),
+    };
+  }
+
+  if (![ 'lifecycle', 'assistant', 'error', 'approval', 'phase' ].includes(stream)) {
+    return undefined;
+  }
+  if (stream === 'lifecycle' && !nonEmptyString(evt.data.phase)) return undefined;
+  if (
+    stream === 'approval'
+    && ![ 'requested', 'resolved' ].includes(nonEmptyString(evt.data.phase) ?? '')
+  ) return undefined;
+  return { ...evt.data, ...common };
+}
+
 /** Unsubscribe function for agent events */
 let agentEventUnsubscribe: (() => boolean) | null = null;
 
@@ -2649,7 +2736,7 @@ export function initAgentEventsSubscription(log?: {
       return true;
     }
 
-    const { groupId, client } = context;
+    const { client } = context;
     const terminalOutcome = terminalLifecycleOutcome(evt);
     if (evt.stream === 'tool') {
       context.sawToolEvent = true;
@@ -2677,19 +2764,25 @@ export function initAgentEventsSubscription(log?: {
 
     // Build the agent event payload for BCS — always use the original runId
     // so that all events for one user message share the same run_id
-    const agentPayload: AgentEventPayload = {
-      run_id: resolvedRunId,
-      bcs_group_id: groupId,
-      stream: evt.stream as any,
-      ts: evt.ts,
-      data: evt.data,
-    };
+    const agentPayload = buildV3AgentEventPayload(
+      evt,
+      resolvedRunId,
+      context.bcsSessionId,
+      context.toolNames,
+    );
+    if (!agentPayload) {
+      log?.warn?.(
+        `[BCS] Dropped non-conformant V3 agent event: runId=${evt.runId}, stream=${evt.stream}`,
+      );
+      if (terminalOutcome) void cleanupRunContext(resolvedRunId, log);
+      return true;
+    }
 
     // Forward to BCS
-    client.sendEvent('agent', agentPayload as unknown as Record<string, unknown>, nextSeq(client));
+    client.sendEvent('agent', agentPayload as unknown as Record<string, unknown>);
 
     log?.info?.(
-      `[BCS] Forwarded agent event: runId=${evt.runId}, stream=${evt.stream}, groupId=${groupId}`,
+      `[BCS] Forwarded agent event: runId=${evt.runId}, stream=${evt.stream}, groupId=${context.groupId}`,
     );
     if (terminalOutcome) {
       void cleanupRunContext(resolvedRunId, log);

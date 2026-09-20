@@ -13,6 +13,7 @@ async function startBcsStub(responseBotUuid?: string) {
   let cookieHeader: string | undefined;
   let requestUrl: string | undefined;
   let connectParams: Record<string, unknown> | undefined;
+  const eventFrames: Array<Record<string, any>> = [];
   const sockets = new Set<any>();
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening');
@@ -35,9 +36,16 @@ async function startBcsStub(responseBotUuid?: string) {
             is_new: false,
             bot_uuid: responseBotUuid ?? frame.params?.bot_id ?? 'bot-1',
             token: 'next-token',
-            protocol_version: 2,
+            protocol_version: 3,
+            capabilities: {
+              unified_run_events: true,
+              tool_result_task_intent: false,
+              canonical_session_id: true,
+            },
           },
         }));
+      } else if (frame.type === 'event') {
+        eventFrames.push(frame);
       }
     });
   });
@@ -56,6 +64,9 @@ async function startBcsStub(responseBotUuid?: string) {
     },
     get connectParams() {
       return connectParams;
+    },
+    get eventFrames() {
+      return eventFrames;
     },
     sendToClients(data: string | Buffer) {
       for (const socket of sockets) {
@@ -148,6 +159,32 @@ describe('BcsWsClient security behavior', () => {
     try {
       await client.connect(session);
       assert.equal(bcs.cookieHeader, undefined);
+      assert.equal(bcs.connectParams?.protocol_version, 3);
+      assert.equal(bcs.connectParams?.client_kind, 'openclaw-channel-bcn');
+      client.sendEvent('chat', {
+        runId: 'run-v3',
+        sessionId: 'group-1:session-1',
+        ts: 123,
+        state: 'final',
+        content: 'done',
+      });
+      for (let attempt = 0; attempt < 50 && bcs.eventFrames.length === 0; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      assert.equal(bcs.eventFrames.length, 1);
+      assert.deepEqual(bcs.eventFrames[0], {
+        type: 'event',
+        event: 'chat',
+        seq: 1,
+        payload: {
+          runId: 'run-v3',
+          sessionId: 'group-1:session-1',
+          seq: 1,
+          ts: 123,
+          state: 'final',
+          content: 'done',
+        },
+      });
       assert.equal(logs.some(line => line.includes(token)), false);
       assert.equal(logs.some(line => line.includes(cookie)), false);
     } finally {

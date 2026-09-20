@@ -55,6 +55,8 @@ export interface BotConnectParams {
   token?: string;
   /** Optional preconfigured bot_id. */
   bot_id?: string;
+  protocol_version?: number;
+  client_kind?: string;
 }
 
 /** Response from bot.connect. */
@@ -62,6 +64,12 @@ export interface BotConnectResponse {
   is_new: boolean;
   bot_uuid: string;
   token: string;
+  protocol_version: number;
+  capabilities?: {
+    unified_run_events: boolean;
+    tool_result_task_intent: boolean;
+    canonical_session_id: boolean;
+  };
 }
 
 /** Legacy alias for backwards compatibility. */
@@ -195,7 +203,7 @@ export interface SessionContext {
 export interface ChatSendParams {
   session_key: string;
   bcs_group_id: string;
-  bcs_session_id?: string;
+  bcs_session_id: string;
   message: MessageContent;
   channel: ChannelInfo;
   session_context: GroupContext;
@@ -223,7 +231,7 @@ export interface ChatAbortResult {
 export interface ChatInjectParams {
   session_key: string;
   bcs_group_id: string;
-  bcs_session_id?: string;
+  bcs_session_id: string;
   message: MessageContent;
   channel: ChannelInfo;
   session_context: GroupContext;
@@ -262,14 +270,21 @@ export interface ChatHistoryResponse {
 // Streaming events (Bot → BCS)
 // ---------------------------------------------------------------------------
 
-export type AgentStream = 'lifecycle' | 'assistant' | 'tool' | 'error';
+export type AgentStream =
+  | 'lifecycle'
+  | 'assistant'
+  | 'tool'
+  | 'thinking'
+  | 'error'
+  | 'approval'
+  | 'phase';
 
 export interface AgentEventPayload {
-  run_id: string;
-  bcs_group_id: string;
+  runId: string;
+  sessionId: string;
   stream: AgentStream;
   ts: number;
-  data: unknown;
+  [key: string]: unknown;
 }
 
 export type ChatEventState = 'delta' | 'final' | 'aborted' | 'error';
@@ -304,12 +319,13 @@ export interface PendingRouteIntent {
 }
 
 export interface ChatEventPayload {
-  run_id: string;
-  bcs_group_id: string;
+  runId: string;
+  sessionId: string;
+  ts: number;
   state: ChatEventState;
-  message?: MessageContent;
+  content?: string;
   usage?: UsageInfo;
-  stop_reason?: string;
+  stopReason?: string;
   errorCode?: string;
   /** Structured routing metadata (only on state=final). */
   routing?: ChatEventRouting;

@@ -6,14 +6,13 @@ Collaboration Network (BCN).
 ## Compatibility
 
 - DeepSeek Harness baseline: `@deepseek-ai/dsh 0.1.1-rc.2`
-- BCN Bot WebSocket protocol: V2
+- BCN Bot WebSocket protocol: V3
 - Node.js: `>=22.19.0`
 
-This release deliberately negotiates BCN V2. Because V2 `session_key` can be
-shared by every conversation in a group, the adapter uses the session-scoped
-V2 `bcs_group_id` as the DSH identity when present and falls back to
-`session_key` only for legacy group frames. A future V3 `bcs_session_id` takes
-precedence without changing the rest of the bridge.
+This release requires BCN V3. Every `chat.send` must carry the canonical
+`bcs_session_id`; uplink events use the shared Run Event envelope with
+`runId`, `sessionId`, `seq`, and `ts`. The adapter still keeps the historical
+session-key mapping helper for persisted sessions created by older releases.
 
 ## Capabilities
 
@@ -21,7 +20,7 @@ precedence without changing the rest of the bridge.
 - Persistent Bot Session storage through the official `ctx.credentials` seam
 - `chat.send` and `chat.inject` downlink handling
 - Isolated DSH Agent/Session reuse for each BCN conversation, including
-  multiple V2 sessions that share one group-level `session_key`
+  multiple sessions that share one group-level `session_key`
 - DSH Agent preset composition matching Web sessions; new BCN sessions use the
   configured default preset and resumed sessions restore their recorded preset
 - Assistant delta, final, error, and aborted uplink events
@@ -224,14 +223,14 @@ sends:
 - assistant-visible text and final routing metadata.
 
 Calls to `bcs_assign_task`, `bcs_send_task_message`, and `bcs_task_complete`
-use the existing BCN V2 `task.dispatch`, `task.message`, and `task.complete`
+use the existing BCN `task.dispatch`, `task.message`, and `task.complete`
 requests. Their arguments and model-visible results also appear through the
 same canonical `agent/tool` telemetry as other DSH tools.
 
 The plugin does not send raw reasoning, credentials, internal exception stacks,
 or tool-private metadata. Tool arguments and results are not copied into normal
 plugin logs. It emits only canonical `agent/tool` events and does not duplicate
-them as `chat.event tool_call_start/tool_call_end` events.
+them as legacy `chat.event tool_call_start/tool_call_end` events.
 
 ## Verify
 

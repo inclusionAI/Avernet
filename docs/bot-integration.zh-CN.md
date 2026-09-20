@@ -36,7 +36,10 @@ Bot 通过 WebSocket 连接到 BCN，接收消息并回复。BCN 负责消息路
 最小可运行 bot（伪代码）：
 
 ```python
-import websocket, json
+import json, os, time
+from uuid import uuid4
+
+import websocket
 
 ws = websocket.connect("ws://localhost:${BCS_PORT}/ws/bot")
 
@@ -45,11 +48,17 @@ ws.send(json.dumps({
     "type": "req",
     "id": "1",
     "method": "bot.connect",
-    "params": {"protocol_version": 1}
+    "params": {
+        "protocol_version": 3,
+        "client_kind": "custom-engine"
+    }
 }))
 res = json.loads(ws.recv())
 token = res["payload"]["token"]
 bot_uuid = res["payload"]["bot_uuid"]
+assert res["payload"]["protocol_version"] == 3
+assert res["payload"]["capabilities"]["unified_run_events"] is True
+assert res["payload"]["capabilities"]["canonical_session_id"] is True
 
 # 2. 设置环境变量 (用于 bcs-cli)
 for key, value in res["payload"].get("env", {}).items():
@@ -72,16 +81,14 @@ while True:
         # 回复
         ws.send(json.dumps({
             "type": "event",
-            "event": "chat.event",
+            "event": "chat",
             "payload": {
-                "run_id": run_id,
-                "bcs_group_id": frame["params"]["bcs_group_id"],
+                "runId": run_id,
+                "sessionId": frame["params"]["bcs_session_id"],
+                "seq": 1,
+                "ts": int(time.time() * 1000),
                 "state": "final",
-                "message": {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": "Hello!"}],
-                    "timestamp": int(time.time() * 1000)
-                }
+                "content": "Hello!"
             },
             "seq": 1
         }))
@@ -174,7 +181,7 @@ while True:
 #### 新 bot（首次连接）
 ```json
 // → BCN
-{"type": "req", "id": "1", "method": "bot.connect", "params": {"protocol_version": 1}}
+{"type": "req", "id": "1", "method": "bot.connect", "params": {"protocol_version": 3, "client_kind": "custom-engine"}}
 
 // ← BCN
 {
@@ -183,8 +190,13 @@ while True:
     "is_new": true,
     "token": "tok-abc123",
     "bot_uuid": "bot-xyz789",
-    "protocol_version": 1,
+    "protocol_version": 3,
     "min_supported_version": 1,
+    "capabilities": {
+      "unified_run_events": true,
+      "tool_result_task_intent": false,
+      "canonical_session_id": true
+    },
     "env": { ... }
   }
 }
@@ -193,7 +205,7 @@ while True:
 #### 重连（已有 token）
 ```json
 // → BCN
-{"type": "req", "id": "1", "method": "bot.connect", "params": {"token": "tok-abc123", "protocol_version": 1}}
+{"type": "req", "id": "1", "method": "bot.connect", "params": {"token": "tok-abc123", "protocol_version": 3, "client_kind": "custom-engine"}}
 
 // ← BCN
 {
@@ -202,8 +214,13 @@ while True:
     "is_new": false,
     "token": "tok-abc123",
     "bot_uuid": "bot-xyz789",
-    "protocol_version": 1,
+    "protocol_version": 3,
     "min_supported_version": 1,
+    "capabilities": {
+      "unified_run_events": true,
+      "tool_result_task_intent": false,
+      "canonical_session_id": true
+    },
     "env": { ... }
   }
 }
@@ -216,7 +233,14 @@ while True:
 | `protocol_version`（请求） | 引擎 → BCN | 引擎期望的协议版本（可选，缺省默认当前版本） |
 | `protocol_version`（响应） | BCN → 引擎 | 本次连接协商后的协议版本 |
 | `min_supported_version` | BCN → 引擎 | BCN 支持的最低协议版本 |
+| `capabilities` | BCN → 引擎 | 本连接启用的能力。V3 客户端必须检查 `unified_run_events` 与 `canonical_session_id` |
 | `deprecation` | BCN → 引擎 | 版本废弃通知（可选，仅当协商版本即将下线时出现） |
+
+`client_kind` 用于选择服务端已识别的客户端 profile，不是客户端自行声明权限
+的入口。只有确实实现可信 native MCP 协作合约的接入方才能使用
+`native_mcp`。BCN 仅在 V3 与该可信 profile 同时协商成功时启用
+`tool_result_task_intent`；普通或未知 client kind 仍可使用其他 V3 Run Event，
+但该能力返回 `false`。
 
 版本升级策略：
 + 新增可选字段或可选方法 → 不递增版本号（JSON 天然忽略未知字段）
@@ -225,12 +249,13 @@ while True:
 引擎收到 `deprecation` 时应打日志提醒开发者升级：
 ```json
 "deprecation": {
-  "message": "Protocol v1 will be removed after 2026-06-01. Please upgrade to v2.",
-  "sunset_date": "2026-06-01"
+  "message": "Protocol v2 will be removed after 2027-06-01. Please upgrade to v3.",
+  "sunset_date": "2027-06-01"
 }
 ```
 
-不发送 `protocol_version` 的老引擎照常工作，BCN 默认按 v1 处理。
+省略 `protocol_version` 时，BCN 会选择服务端当前最大版本，也就是 V3。
+V1/V2 老引擎必须显式请求对应版本，否则 BCN 会按 V3 严格解析其上行事件。
 
 #### 版本历史
 
@@ -238,6 +263,10 @@ while True:
 | --- | --- |
 | v1 | 初始版本。`session_context` 作为结构化字段下发，引擎自行决定如何呈现给 agent |
 | v2 | BCN 在 `message.content` 中自动拼接 Group Context 可读文本头，引擎无需自行格式化 |
+| v3 | 使用 canonical `sessionId`，并统一采用 `chat` / `agent` Run Event；仅在协商能力允许时，tool result 才可能成为 task intent 候选 |
+
+新接入推荐使用 V3。V1/V2 继续用于兼容，但不支持 V3 canonical Run Event，
+也不支持基于 tool result 的 task intent。
 
 引擎应持久化 `token`，断线重连时传入以恢复身份。
 
@@ -272,7 +301,7 @@ while True:
 `ok: false`、错误码 `already_connected` 和原请求 `id`，随后关闭新 socket。
 拒绝不会替换原连接或删除其路由状态。客户端应保留 token，在旧连接完成断开清理后
 退避重试，无需重新 onboard。此前依赖覆盖活跃连接的客户端需要等待原连接关闭。
-此行为适用于协议版本 1 和 2，无需修改请求结构、配置或迁移数据。
+此行为适用于协议版本 1、2 和 3，无需修改请求结构、配置或迁移数据。
 
 ---
 
@@ -333,8 +362,9 @@ BCN 通过 `chat.send` 请求向 bot 发送需要回复的消息：
   "id": "inject-001",
   "method": "chat.inject",
   "params": {
-    "session_key": "sess-123",
+    "session_key": "grp-456:channel_dingtalk_abcdef12",
     "bcs_group_id": "grp-456",
+    "bcs_session_id": "grp-456:channel_dingtalk_abcdef12",
     "message": { ... },
     "channel": { ... },
     "session_context": {
@@ -351,6 +381,11 @@ BCN 通过 `chat.send` 请求向 bot 发送需要回复的消息：
 ```json
 {"type": "res", "id": "inject-001", "ok": true, "payload": {}}
 ```
+
+V3 的 `chat.send` 和 `chat.inject` 都必须携带非空 `bcs_session_id`，且
+`session_key` 使用同一个 canonical 值。V3 客户端收到缺失该字段的请求时应
+直接拒绝，不应根据 `bcs_group_id` 自行重建 session；后者只属于 V1/V2
+兼容行为。
 
 ### 5.3 接收 `chat.abort`（取消处理）
 ```json
@@ -431,132 +466,127 @@ BCN 本身不存储聊天消息，当需要获取会话历史时，BCN 会向 bo
 
 ---
 
-## 6. 消息回复
-### 6.1 `chat.event` 帧格式
-Bot 通过 `chat.event` 事件帧回复消息：
+## 6. V3 上行 Run Event
 
-```json
-{
-  "type": "event",
-  "event": "chat.event",
-  "payload": {
-    "run_id": "run-unique-001",
-    "bcs_group_id": "grp-456",
-    "state": "final",
-    "message": {
-      "role": "assistant",
-      "content": [{"type": "text", "text": "分析结果：..."}],
-      "timestamp": 1710960001000
-    }
-  },
-  "seq": 1
-}
-```
+V3 与 Provider 流式链路复用同一套 canonical Run Event。WebSocket EventFrame
+只负责传输封套；每个 run event payload 都必须包含以下 camelCase 字段：
 
-### 6.2 流式回复（delta → final）
-```json
-// delta（部分内容）
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "delta",
-  "message": {"role": "assistant", "content": [{"type": "text", "text": "分析"}], "timestamp": 1710960001000}
-}, "seq": 1}
-
-// delta
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "delta",
-  "message": {"role": "assistant", "content": [{"type": "text", "text": "结果："}], "timestamp": 1710960001100}
-}, "seq": 2}
-
-// final（完整内容）
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "final",
-  "message": {"role": "assistant", "content": [{"type": "text", "text": "分析结果：死锁根因是..."}], "timestamp": 1710960001200},
-  "usage": {"input": 100, "output": 250},
-  "stop_reason": "complete"
-}, "seq": 3}
-```
-
-### 6.3 非流式回复（直接 final）
-不需要流式输出时，直接发送一个 `state: "final"` 的事件即可。
-
-### 6.4 错误/中止上报
-```json
-// 错误
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "error",
-  "message": {"role": "assistant", "content": [{"type": "text", "text": "处理失败"}], "timestamp": 1710960002000}
-}, "seq": 1}
-
-// 中止
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "aborted",
-  "stop_reason": "aborted"
-}, "seq": 1}
-```
-
-### 6.5 工具调用上报（可选）
-如果引擎支持 tool use 可视化，可以上报工具调用状态：
-
-```json
-// tool_call_start
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "tool_call_start",
-  "tool_call_id": "tc-001", "tool_name": "search", "args": {"query": "deadlock"}
-}, "seq": 2}
-
-// tool_call_end
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "tool_call_end",
-  "tool_call_id": "tc-001", "tool_name": "search",
-  "result": {"results": [...]}, "success": true
-}, "seq": 3}
-```
-
-### 6.6 `chat.event` 状态机
-```plain
-delta ──► delta ──► ... ──► final
-                              │
-delta ──► ... ──► aborted     │
-                              │
-error ◄───────────────────────┘
-```
-
-| State | 含义 | 后续 |
+| 字段 | 类型 | 约束 |
 | --- | --- | --- |
-| `delta` | 部分内容 | 可继续 delta 或 final |
-| `final` | 完整回复 | 终态 |
-| `aborted` | 被取消 | 终态 |
-| `error` | 处理失败 | 终态 |
-| `tool_call_start` | 工具调用开始 | 可选 |
-| `tool_call_end` | 工具调用结束 | 可选 |
+| `runId` | string | `chat.send` ACK 返回的 run ID |
+| `sessionId` | string | 回显请求中的 `bcs_session_id` |
+| `seq` | integer | 同一 run 内严格递增 |
+| `ts` | integer | Unix epoch 毫秒时间戳 |
+
+如果 WebSocket `EventFrame` 同时携带外层 `seq`，其值必须与 payload 中的
+`seq` 一致。Bot WebSocket 当前接收 canonical `chat` 和 `agent` 事件；
+canonical `interaction` payload 可以被解析，但在该传输尚未接入 interaction
+处理前会被明确拒绝。
+
+BCN 从可信的服务端 run context 恢复 group。V3 事件不得提交
+`bcsGroupId`、`bcs_group_id` 或其他替代 session key。
+
+### 6.1 Chat delta 与 final
+
+```json
+{"type":"event","event":"chat","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":1,
+  "ts":1710960001000,"state":"delta","content":"正在分析"
+},"seq":1}
+```
+
+```json
+{"type":"event","event":"chat","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":2,
+  "ts":1710960001200,"state":"final",
+  "content":"分析结果：死锁根因是……",
+  "stopReason":"complete","usage":{"input":100,"output":250}
+},"seq":2}
+```
+
+不需要流式输出时，只发送 final 即可。每个 run 只接受一个有效终态 chat
+事件；迟到或重复的终态由 run 状态机忽略或拒绝。
+
+### 6.2 Error 与 aborted
+
+```json
+{"type":"event","event":"chat","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":3,
+  "ts":1710960002000,"state":"error",
+  "errorCode":"MODEL_ERROR","errorMessage":"处理失败"
+},"seq":3}
+```
+
+```json
+{"type":"event","event":"chat","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":3,
+  "ts":1710960002000,"state":"aborted","stopReason":"aborted"
+},"seq":3}
+```
+
+### 6.3 Thinking 事件
+
+Thinking 只用于运行过程可观测，不参与 task intent 解析：
+
+```json
+{"type":"event","event":"agent","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":2,
+  "ts":1710960001100,"stream":"thinking","deltaText":"正在检查锁依赖"
+},"seq":2}
+```
+
+### 6.4 Tool 事件与 MCP task intent
+
+工具活动统一使用 `event: "agent"`、`stream: "tool"`，phase 为 `start`、
+`update` 或 `result`，不得再编码成 chat state。
+
+```json
+{"type":"event","event":"agent","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":3,
+  "ts":1710960001150,"stream":"tool","phase":"start",
+  "toolCallId":"tc-001","name":"search","args":{"query":"deadlock"}
+},"seq":3}
+```
+
+```json
+{"type":"event","event":"agent","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":4,
+  "ts":1710960001180,"stream":"tool","phase":"result",
+  "toolCallId":"tc-001","name":"search","isError":false,
+  "result":{"content":[{"type":"text","text":"未发现死锁"}]}
+},"seq":4}
+```
+
+只有与 start 成功配对、来自服务端配置的 coordination tool、且
+`bot.connect.capabilities.tool_result_task_intent=true` 的成功 result，才有
+资格进入 MCP tool-result task-intent 解析。tool start 参数、失败 result、普通
+工具以及所有 V1/V2 事件都不能触发 task intent。
+
+### 6.5 V1/V2 兼容
+
+V1/V2 继续使用旧的 `event: "chat.event"`，payload 字段为 `run_id`、
+`bcs_group_id`、`state` 和 `message`。它们不接受 V3 canonical Run Event，
+也不能通过添加类似 V3 的字段自行开启 task intent。解析器必须只根据
+`bot.connect` 协商出的版本选择，不能根据 payload 字段猜测协议版本。
 
 
 ---
 
 ## 7. 结构化路由（可选）
-默认情况下，BCN 通过解析消息文本中的 @mention 来决定路由。引擎也可以在 `chat.event(state=final)` 中附加 `routing` 字段，实现更精确的结构化路由。
+默认情况下，BCN 通过解析消息文本中的 @mention 来决定路由。引擎也可以在 V3 `chat(state=final)` 事件中附加 `routing` 字段，实现更精确的结构化路由。
 
 ### 7.1 `routing` 字段格式
 ```json
 {
   "type": "event",
-  "event": "chat.event",
+  "event": "chat",
   "payload": {
-    "run_id": "run-001",
-    "bcs_group_id": "grp-456",
+    "runId": "run-001",
+    "sessionId": "grp-456:abcd1234",
+    "seq": 5,
+    "ts": 1710960001000,
     "state": "final",
-    "message": {
-      "role": "assistant",
-      "content": [{"type": "text", "text": "这个问题需要 DBA 来分析"}],
-      "timestamp": 1710960001000
-    },
+    "content": "这个问题需要 DBA 来分析",
     "routing": {
       "responders": [
         {"type": "name", "value": "DBA"}
@@ -566,7 +596,7 @@ error ◄───────────────────────�
       "include_self": false
     }
   },
-  "seq": 1
+  "seq": 5
 }
 ```
 
@@ -599,8 +629,8 @@ BCN 按以下优先级决定路由方式：
 对于 LLM-based 引擎，可以注册一个 `bcs_route` 工具让 LLM 自主决定路由。参考实现思路：
 
 1. 注册一个名为 `bcs_route` 的 function calling 工具给 LLM
-2. LLM 调用时，引擎捕获参数并缓存（per run_id）
-3. 构建 `chat.event(state=final)` 时，将缓存的参数作为 `routing` 字段附加
+2. LLM 调用时，引擎捕获参数并缓存（per `runId`）
+3. 构建 V3 `chat(state=final)` 事件时，将缓存的参数作为 `routing` 字段附加
 
 工具 schema 参考：
 

@@ -26,6 +26,15 @@ struct BotConnection {
     tx: mpsc::Sender<String>,
     identity: String,
     token_expires_at: Option<u64>,
+    protocol_version: u32,
+    client_kind: Option<String>,
+    run_sequences: HashMap<String, u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BotConnectionProtocol {
+    pub protocol_version: u32,
+    pub client_kind: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -41,14 +50,53 @@ impl BotConnectionRegistry {
     }
 
     pub async fn connect(&self, bot_id: String, tx: mpsc::Sender<String>) {
+        self.connect_with_protocol(bot_id, tx, 1, None).await;
+    }
+
+    pub async fn connect_with_protocol(
+        &self,
+        bot_id: String,
+        tx: mpsc::Sender<String>,
+        protocol_version: u32,
+        client_kind: Option<String>,
+    ) {
         self.connections.write().await.insert(
             bot_id,
             BotConnection {
                 tx,
                 identity: uuid::Uuid::new_v4().to_string(),
                 token_expires_at: None,
+                protocol_version,
+                client_kind,
+                run_sequences: HashMap::new(),
             },
         );
+    }
+
+    pub async fn protocol(&self, bot_id: &str) -> Option<BotConnectionProtocol> {
+        self.connections.read().await.get(bot_id).map(|connection| {
+            BotConnectionProtocol {
+                protocol_version: connection.protocol_version,
+                client_kind: connection.client_kind.clone(),
+            }
+        })
+    }
+
+    /// Accept a strictly increasing V3 sequence number for one run.
+    pub async fn accept_run_event_seq(&self, bot_id: &str, run_id: &str, seq: u64) -> bool {
+        let mut connections = self.connections.write().await;
+        let Some(connection) = connections.get_mut(bot_id) else {
+            return false;
+        };
+        if connection
+            .run_sequences
+            .get(run_id)
+            .is_some_and(|previous| seq <= *previous)
+        {
+            return false;
+        }
+        connection.run_sequences.insert(run_id.to_string(), seq);
+        true
     }
 
     pub async fn disconnect(&self, bot_id: &str) {

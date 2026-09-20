@@ -22,9 +22,19 @@ or internal endpoint defaults.
 `AbortController` before acknowledging each `chat.send`, then cancels only the
 exact `(session_key, run_id)` requested by BCS. Repeated aborts of an already
 terminal run succeed with an empty `aborted_run_ids`; unknown or cross-session
-run IDs are rejected. The key is the exact value from the original
-`chat.send`: group-derived for protocol v2 and the canonical BCS Session ID
-for protocol v3.
+run IDs are rejected. The plugin requires protocol V3, so the key is the
+canonical BCS Session ID from the original `chat.send`.
+
+## Bot WebSocket Protocol
+
+Version `1.0.24` requires Bot WebSocket protocol V3. After `bot.connect`
+negotiates `unified_run_events` and `canonical_session_id`, every run event is
+sent with the canonical `runId`, `sessionId`, `seq`, and `ts` fields. Assistant
+output uses `event: "chat"` with `state` and `content`; tool, thinking,
+lifecycle, assistant, and error streams use a flat `event: "agent"` payload.
+The plugin does not emit the legacy `chat.event`, `run_id`, `bcs_group_id`,
+or `message` run-event fields on a V3 connection, and chat text is never sent
+through the legacy `deltaText` compatibility field.
 
 ## Install From npm
 
@@ -56,7 +66,7 @@ Select with the flag or env var (flag wins):
 BCN_PLUGIN_SOURCE=npm ./scripts/singlebox.sh
 
 # pin a version in npm mode (default: latest)
-BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.18 ./scripts/singlebox.sh
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.24 ./scripts/singlebox.sh
 ```
 
 ## Configure

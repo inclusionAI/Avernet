@@ -71,7 +71,7 @@ interface RunContext {
   runId: string;
   sessionId: SessionId;
   groupId: string;
-  bcsSessionId?: string;
+  bcsSessionId: string;
   turn?: number;
   text: string;
   stepText: Map<number, string>;
@@ -284,9 +284,18 @@ export class BcnBridge {
       this.client.sendResponse(frame.id, false, undefined, invalidRequest(error));
       return;
     }
+    const bcsSessionId = params.bcs_session_id?.trim();
+    if (!bcsSessionId) {
+      this.client.sendResponse(frame.id, false, undefined, invalidRequest('BCN V3 chat.send requires bcs_session_id'));
+      return;
+    }
     const runId = params.idempotency_key ?? frame.id;
     const existing = this.runs.get(runId);
     if (existing) {
+      if (existing.bcsSessionId !== bcsSessionId) {
+        this.client.sendResponse(frame.id, false, undefined, invalidRequest('run_id belongs to another bcs_session_id'));
+        return;
+      }
       this.client.sendResponse(frame.id, true, { run_id: existing.runId });
       return;
     }
@@ -294,7 +303,7 @@ export class BcnBridge {
     const sessionIdentity = resolveBcnSessionIdentity({
       sessionKey: params.session_key,
       groupId: params.bcs_group_id,
-      ...(params.bcs_session_id ? { bcsSessionId: params.bcs_session_id } : {}),
+      bcsSessionId,
     });
     const sessionId = dshSessionIdForV2(sessionIdentity);
     const toolProfile = resolveToolProfile(params.session_context);
@@ -302,7 +311,7 @@ export class BcnBridge {
       runId,
       sessionId,
       groupId: params.bcs_group_id,
-      ...(params.bcs_session_id ? { bcsSessionId: params.bcs_session_id } : {}),
+      bcsSessionId,
       text: '',
       stepText: new Map(),
       terminal: false,
@@ -429,11 +438,12 @@ export class BcnBridge {
   private appendDelta(run: RunContext, step: number, text: string): void {
     run.text += text;
     run.stepText.set(step, `${run.stepText.get(step) ?? ''}${text}`);
-    this.client.sendEvent('chat.event', {
-      run_id: run.runId,
-      bcs_group_id: run.groupId,
+    this.client.sendEvent('chat', {
+      runId: run.runId,
+      sessionId: run.bcsSessionId,
+      ts: Date.now(),
       state: 'delta',
-      delta_text: text,
+      content: text,
     });
   }
 
@@ -467,11 +477,14 @@ export class BcnBridge {
       // Preserve the provider's raw argument string when it is not complete JSON.
     }
     this.client.sendEvent('agent', {
-      run_id: run.runId,
-      bcs_group_id: run.groupId,
+      runId: run.runId,
+      sessionId: run.bcsSessionId,
       stream: 'tool',
       ts: Date.now(),
-      data: { phase: 'start', toolCallId: callId, name, args },
+      phase: 'start',
+      toolCallId: callId,
+      name,
+      args,
     });
     run.toolStarts.add(callId);
     const pending = run.pendingToolResults.get(callId);
@@ -493,17 +506,15 @@ export class BcnBridge {
   private sendToolResult(run: RunContext, result: ToolResultSnapshot): void {
     if (run.toolResults.has(result.callId)) return;
     this.client.sendEvent('agent', {
-      run_id: run.runId,
-      bcs_group_id: run.groupId,
+      runId: run.runId,
+      sessionId: run.bcsSessionId,
       stream: 'tool',
       ts: Date.now(),
-      data: {
-        phase: 'result',
-        toolCallId: result.callId,
-        name: run.toolNames.get(result.callId) ?? 'unknown',
-        result: { content: result.content },
-        isError: result.isError,
-      },
+      phase: 'result',
+      toolCallId: result.callId,
+      name: run.toolNames.get(result.callId) ?? 'unknown',
+      result: { content: result.content },
+      isError: result.isError,
     });
     run.toolResults.add(result.callId);
   }
@@ -519,23 +530,24 @@ export class BcnBridge {
     run.pendingToolResults.clear();
 
     const payload: Record<string, unknown> = {
-      run_id: run.runId,
-      bcs_group_id: run.groupId,
+      runId: run.runId,
+      sessionId: run.bcsSessionId,
+      ts: Date.now(),
       state,
     };
     if (state === 'final') {
-      if (run.text) payload.message = assistantMessage(run.text);
+      if (run.text) payload.content = run.text;
       if (run.usage.input || run.usage.output) payload.usage = run.usage;
-      if (stopReason) payload.stop_reason = stopReason;
+      if (stopReason) payload.stopReason = stopReason;
       if (run.route) payload.routing = routeWire(run.route);
     } else if (state === 'error') {
       payload.errorMessage = 'DeepSeek Harness run failed';
       payload.errorKind = 'dsh_turn';
       payload.errorCode = errorCode ?? 'UNKNOWN';
     } else {
-      payload.stop_reason = 'aborted';
+      payload.stopReason = 'aborted';
     }
-    this.client.sendEvent('chat.event', payload);
+    this.client.sendEvent('chat', payload);
     run.terminal = true;
     this.activeRunBySessionId.delete(String(run.sessionId));
     if (run.turn !== undefined) this.runIdByTurn.delete(turnKey(run.sessionId, run.turn));
@@ -696,7 +708,7 @@ function resolveToolProfile(sessionContext: Record<string, unknown>): BcnToolPro
 function formatInboundMessage(params: ChatSendParams | ChatInjectParams): string {
   const text = extractMessageText(params.message);
   const metadata = {
-    protocol_version: 2,
+    protocol_version: 3,
     bcs_group_id: params.bcs_group_id,
     ...(params.bcs_session_id ? { bcs_session_id: params.bcs_session_id } : {}),
     channel: params.channel,
@@ -705,10 +717,6 @@ function formatInboundMessage(params: ChatSendParams | ChatInjectParams): string
     ...(params.attachments?.length ? { attachments: params.attachments } : {}),
   };
   return `<bcn_context>\n${JSON.stringify(metadata)}\n</bcn_context>\n\n${text}`;
-}
-
-function assistantMessage(text: string): Record<string, unknown> {
-  return { role: 'assistant', content: [{ type: 'text', text }], timestamp: Date.now() };
 }
 
 function visibleText(content: ContentBlock[]): string {

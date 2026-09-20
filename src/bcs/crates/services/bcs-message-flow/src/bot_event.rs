@@ -26,6 +26,7 @@ use bcs_protocol::{
     RequestSource, ResponseDirective, ResponseMode as WireResponseMode, TOOL_ASSIGN_TASK,
     TOOL_SEND_TASK_MESSAGE, TOOL_TASK_COMPLETE, build_recipient_group_context, build_session_key,
 };
+use bcs_protocol::stream::TASK_INTENT_ELIGIBLE_KEY;
 use bcs_service_api::application::channel::OutboundMessage;
 use bcs_service_api::{
     ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryResult, BotDeliveryTarget,
@@ -56,6 +57,12 @@ pub async fn handle_bot_event(
     cmd: BotEventCommand,
 ) -> ServiceResult<BotEventOutcome> {
     let mut cmd = cmd;
+    let task_intent_eligible = cmd
+        .event_payload
+        .as_object_mut()
+        .and_then(|payload| payload.remove(TASK_INTENT_ELIGIBLE_KEY))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
     let admission_timing = crate::reply_timing::Timer::new("event.lookup_and_lock");
     let managed = crate::queued_admission::find_managed_run(flow, &cmd).await?;
     let task_lock_id = flow.task_store.resolve_task_id(&cmd.run_id).await;
@@ -253,8 +260,16 @@ pub async fn handle_bot_event(
         match phase {
             "start" => cache_tool_start(flow, &cmd, data).await,
             "result" => {
+                let task_intent_eligible = task_intent_eligible
+                    && tool_result_matches_start(flow, &cmd, data).await;
                 persist_tool_result(flow, &cmd, data).await?;
-                let coordination = maybe_handle_coordination_echo(flow, &cmd, data).await;
+                let coordination = maybe_handle_coordination_echo(
+                    flow,
+                    &cmd,
+                    data,
+                    task_intent_eligible,
+                )
+                .await;
                 if let Err(error) = &coordination {
                     warn!(bot_id = %cmd.bot_id, run_id = %cmd.run_id, error = %error,
                         "Coordination event could not be confirmed");

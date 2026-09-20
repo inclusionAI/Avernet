@@ -13,6 +13,95 @@ use super::event::{
     InteractionPhase, StreamEvent,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunEventV3Error {
+    UnsupportedEvent(String),
+    MissingField(&'static str),
+    InvalidField(&'static str),
+    InvalidEvent(String),
+}
+
+impl std::fmt::Display for RunEventV3Error {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedEvent(event) => write!(formatter, "unsupported V3 run event '{event}'"),
+            Self::MissingField(field) => write!(formatter, "V3 run event missing {field}"),
+            Self::InvalidField(field) => write!(formatter, "V3 run event has invalid {field}"),
+            Self::InvalidEvent(event) => write!(formatter, "invalid V3 {event} event"),
+        }
+    }
+}
+
+impl std::error::Error for RunEventV3Error {}
+
+/// Parse the strict Bot WebSocket V3 Run Event contract.
+///
+/// Provider 2.0 keeps using [`parse_stream_event`] because it accepts the
+/// legacy `sessionKey` alias and optional common fields. V3 is deliberately
+/// fail-closed: identity and ordering fields are required and malformed known
+/// events never fall back to a legacy shape.
+pub fn parse_run_event_v3(event: &str, data: Value) -> Result<StreamEvent, RunEventV3Error> {
+    if !matches!(event, "agent" | "chat" | "interaction") {
+        return Err(RunEventV3Error::UnsupportedEvent(event.to_string()));
+    }
+    require_non_empty_string(&data, "runId")?;
+    require_non_empty_string(&data, "sessionId")?;
+    require_u64(&data, "seq")?;
+    require_u64(&data, "ts")?;
+
+    let parsed = parse_stream_event(event, data);
+    match &parsed {
+        StreamEvent::Agent(agent) => {
+            if matches!(agent.data, AgentData::Unknown { .. }) {
+                return Err(RunEventV3Error::InvalidEvent("agent".to_string()));
+            }
+            if let AgentData::Tool(tool) = &agent.data {
+                let name = tool.name.as_deref().map(str::trim).filter(|value| !value.is_empty());
+                let call_id = tool
+                    .tool_call_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty());
+                if name.is_none() {
+                    return Err(RunEventV3Error::MissingField("toolName/name"));
+                }
+                if call_id.is_none() {
+                    return Err(RunEventV3Error::MissingField("toolCallId"));
+                }
+                if matches!(tool.phase, super::agent::ToolPhase::Result) {
+                    if tool.result.is_none() {
+                        return Err(RunEventV3Error::MissingField("result"));
+                    }
+                    if tool.is_error.is_none() {
+                        return Err(RunEventV3Error::MissingField("isError"));
+                    }
+                }
+            }
+        }
+        StreamEvent::Chat(_) | StreamEvent::Interaction(_) => {}
+        StreamEvent::Ping { .. } | StreamEvent::Unknown { .. } => {
+            return Err(RunEventV3Error::InvalidEvent(event.to_string()));
+        }
+    }
+    Ok(parsed)
+}
+
+fn require_non_empty_string(data: &Value, field: &'static str) -> Result<(), RunEventV3Error> {
+    match data.get(field) {
+        None => Err(RunEventV3Error::MissingField(field)),
+        Some(value) if value.as_str().is_some_and(|value| !value.trim().is_empty()) => Ok(()),
+        Some(_) => Err(RunEventV3Error::InvalidField(field)),
+    }
+}
+
+fn require_u64(data: &Value, field: &'static str) -> Result<(), RunEventV3Error> {
+    match data.get(field) {
+        None => Err(RunEventV3Error::MissingField(field)),
+        Some(value) if value.as_u64().is_some() => Ok(()),
+        Some(_) => Err(RunEventV3Error::InvalidField(field)),
+    }
+}
+
 /// Bounded metadata for a frame: byte size + top-level key names. No content.
 fn frame_meta(raw: &Value) -> (usize, Vec<String>) {
     let bytes = serde_json::to_string(raw).map(|s| s.len()).unwrap_or(0);
@@ -71,7 +160,7 @@ fn parse_interaction(data: Value) -> StreamEvent {
                 run_id,
                 seq: Some(seq),
                 ts: data.get("ts").and_then(Value::as_u64),
-                session_key: str_field(&data, "sessionKey"),
+                session_id: session_id(&data),
                 phase,
                 interaction_id,
                 kind,
@@ -126,7 +215,7 @@ fn parse_agent(data: Value) -> StreamEvent {
     };
     let seq = data.get("seq").and_then(Value::as_u64);
     let ts = data.get("ts").and_then(Value::as_u64);
-    let session_key = str_field(&data, "sessionKey");
+    let session_id = session_id(&data);
 
     // The stream-specific data is the frame itself (flat layout in captures).
     let agent_data = parse_agent_data(&stream, &data);
@@ -134,7 +223,7 @@ fn parse_agent(data: Value) -> StreamEvent {
         run_id,
         seq,
         ts,
-        session_key,
+        session_id,
         data: agent_data,
         raw: data,
     })
@@ -160,6 +249,8 @@ fn parse_agent_data(stream: &str, data: &Value) -> AgentData {
     match stream {
         "tool" => typed!(ToolData, AgentData::Tool),
         "thinking" => typed!(ThinkingData, AgentData::Thinking),
+        "assistant" => AgentData::Assistant { raw: data.clone() },
+        "error" => AgentData::Error { raw: data.clone() },
         "approval" => typed!(ApprovalData, AgentData::Approval),
         "lifecycle" => typed!(LifecycleData, AgentData::Lifecycle),
         "phase" => typed!(PhaseData, AgentData::Phase),
@@ -195,8 +286,10 @@ fn parse_chat(data: Value) -> StreamEvent {
     StreamEvent::Chat(ChatEvent {
         run_id,
         seq: data.get("seq").and_then(Value::as_u64),
+        ts: data.get("ts").and_then(Value::as_u64),
         state,
-        session_key: str_field(&data, "sessionKey"),
+        session_id: session_id(&data),
+        content: str_field(&data, "content"),
         delta_text: str_field(&data, "deltaText"),
         stop_reason: str_field(&data, "stopReason"),
         error_message: str_field(&data, "errorMessage"),
@@ -205,6 +298,10 @@ fn parse_chat(data: Value) -> StreamEvent {
         message: data.get("message").cloned(),
         raw: data,
     })
+}
+
+fn session_id(data: &Value) -> Option<String> {
+    str_field(data, "sessionId").or_else(|| str_field(data, "sessionKey"))
 }
 
 #[cfg(test)]
@@ -253,7 +350,7 @@ mod tests {
                 assert_eq!(interaction.run_id, "provider-run-1");
                 assert_eq!(interaction.seq, Some(7));
                 assert_eq!(interaction.ts, Some(1786300000000));
-                assert_eq!(interaction.session_key.as_deref(), Some("provider-session-1"));
+                assert_eq!(interaction.session_id.as_deref(), Some("provider-session-1"));
                 assert_eq!(interaction.interaction_id, "interaction-1");
                 assert_eq!(interaction.phase, InteractionPhase::Requested);
                 assert_eq!(interaction.kind, InteractionKind::Exec);
@@ -421,5 +518,45 @@ mod tests {
     #[test]
     fn ping_parses() {
         assert!(matches!(parse_stream_event("ping", json!({ "ts": 99 })), StreamEvent::Ping { ts: Some(99) }));
+    }
+
+    #[test]
+    fn v3_parses_canonical_tool_result() {
+        let data = json!({
+            "runId": "run-1",
+            "sessionId": "group-1:session-1",
+            "seq": 2,
+            "ts": 1789600000000_u64,
+            "stream": "tool",
+            "phase": "result",
+            "name": "mcp__bcs__bcs_assign_task",
+            "toolCallId": "call-1",
+            "result": {"content": [{"type": "text", "text": "ok"}]},
+            "isError": false
+        });
+
+        match parse_run_event_v3("agent", data).unwrap() {
+            StreamEvent::Agent(agent) => {
+                assert_eq!(agent.session_id.as_deref(), Some("group-1:session-1"));
+                assert!(matches!(agent.data, AgentData::Tool(_)));
+            }
+            other => panic!("expected agent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn v3_rejects_legacy_session_key_and_missing_timestamp() {
+        let data = json!({
+            "runId": "run-1",
+            "sessionKey": "legacy-session",
+            "seq": 1,
+            "stream": "thinking",
+            "delta": "working"
+        });
+
+        assert!(matches!(
+            parse_run_event_v3("agent", data),
+            Err(RunEventV3Error::MissingField("sessionId"))
+        ));
     }
 }

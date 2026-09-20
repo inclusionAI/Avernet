@@ -7,7 +7,8 @@ pub use coordination::{
 };
 pub use protocol::{
     AgentEventPayload, AgentStream, BCS_MIN_SUPPORTED_VERSION, BCS_PROTOCOL_VERSION, BcsFrame,
-    BotConnectParams, BotConnectResponse, BotStatus, BotStatusParams, ChannelInfo, ChannelSource,
+    BotConnectCapabilities, BotConnectParams, BotConnectResponse, BotStatus, BotStatusParams,
+    ChannelInfo, ChannelSource,
     ChatAbortParams, ChatAbortResult, ChatEventPayload, ChatEventRouting, ChatEventState,
     ChatInjectParams, ChatSendParams, ChatSendResponse, ContentBlock, DirectiveAction, ErrorShape,
     EventFrame, GROUP_ID_PREFIX, GatewayFrame, GroupContext, GroupContextDeliveryType,

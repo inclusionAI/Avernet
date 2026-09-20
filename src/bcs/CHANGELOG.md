@@ -8,6 +8,18 @@ All notable BCS changes are documented here. Items follow
 
 ### Added
 
+- **Bot WebSocket V3 canonical uplink events.** V3 Bot connections now use
+  the Provider Run Event envelope for `agent` and `chat` events, with required
+  `runId`, `sessionId`, `seq`, and `ts`. BCS validates the event against its
+  server-owned run context and rejects unknown runs, bot/session mismatches,
+  terminal or expired runs, and duplicate or regressed sequence numbers.
+  `bot.connect` returns explicit capability flags. Only V3 connections with
+  `client_kind=native_mcp` may turn an exactly mapped, start/result-paired MCP
+  tool result into task intent; V1/V2 events cannot opt into that path. The
+  bundled OpenClaw and DeepSeek Harness clients now negotiate V3 and emit the
+  canonical `agent`, `chat`, thinking, final, and session identity fields. The
+  OpenClaw channel package version is bumped to `1.0.24` for this upgrade.
+
 - `bcs-cli create-group --no-session` creates a Chat or ManagerWorker group
   without an initial Session, GroupContext delivery, or bootstrap run.
   `bcs-cli collaboration create --no-session` also supports StateMachine groups,

@@ -327,6 +327,36 @@ async fn connect_or_promote_streaming_creates_bot_when_absent() {
 }
 
 #[tokio::test]
+async fn persistent_repo_keeps_v3_protocol_version_across_streaming_onboard() {
+    let db = sqlite_db().await;
+    let repo = PersistentBotRepo::new(db);
+    let bot_id = "plugin-v3-bot:alice";
+
+    repo.connect_or_promote_streaming(bot_id.to_string())
+        .await
+        .expect("connect streaming bot");
+    assert_eq!(repo.get_protocol_version(bot_id).await, 1);
+
+    repo.set_protocol_version(bot_id, 3).await;
+    repo.register(
+        bot_id.to_string(),
+        BotCapabilities {
+            name: Some("V3 Plugin Bot".to_string()),
+            visibility: "protected".to_string(),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("onboard streaming bot");
+
+    assert_eq!(
+        repo.get_protocol_version(bot_id).await,
+        3,
+        "the negotiated V3 version must survive the bot.register/onboard merge"
+    );
+}
+
+#[tokio::test]
 async fn connect_or_promote_streaming_promotes_mock_to_real() {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let repo = MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf());

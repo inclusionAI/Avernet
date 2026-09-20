@@ -1399,6 +1399,27 @@ pub async fn bot_repo_contract_tests<T: BotRepoPort + ?Sized>(repo: &T) {
         Some(bot_id)
     );
 
+    // Negotiated transport protocol is live connection state. Repositories
+    // must retain it across the subsequent bot.register/onboard merge so
+    // delivery adapters keep framing messages with the negotiated version.
+    assert_eq!(repo.get_protocol_version(bot_id).await, 1);
+    repo.set_protocol_version(bot_id, 3).await;
+    assert_eq!(repo.get_protocol_version(bot_id).await, 3);
+    repo.register(
+        bot_id.to_string(),
+        BotCapabilities {
+            summary: Some("registered after V3 negotiation".to_string()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("register after protocol negotiation");
+    assert_eq!(
+        repo.get_protocol_version(bot_id).await,
+        3,
+        "bot.register must preserve the protocol version negotiated by bot.connect"
+    );
+
     repo.update_visibility(bot_id, "protected")
         .await
         .expect("update visibility");

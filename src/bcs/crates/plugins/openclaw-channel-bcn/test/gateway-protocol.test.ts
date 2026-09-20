@@ -287,8 +287,9 @@ describe('OpenClaw gateway protocol compatibility', () => {
           id: 'inject-1',
           method: 'chat.inject',
           params: {
-            session_key: 'group-1',
+            session_key: 'group-1:session-1',
             bcs_group_id: 'group-1',
+            bcs_session_id: 'group-1:session-1',
             message: { content: [] },
             attachments: [{
               attachment_id: 'att-1',

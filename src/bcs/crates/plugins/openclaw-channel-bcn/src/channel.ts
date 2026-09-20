@@ -14,7 +14,7 @@ import { DEFAULT_ACCOUNT_ID } from './api.js';
 import { listAccountIds, resolveAccount } from './accounts.js';
 import { resolveBotDataDir } from './bot-data-dir.js';
 import { BcsWsClient, sanitizeBcsUrlForLog } from './bcs-ws-client.js';
-import { handleChatAbort, handleChatSend, handleChatInject, handleChatHistory, handleSessionDelete, abortAllStreams, initAgentEventsSubscription, cleanupAgentEventsSubscription, resolveGroupIdFromSessionKey } from './inbound-handler.js';
+import { handleChatAbort, handleChatSend, handleChatInject, handleChatHistory, handleSessionDelete, abortAllStreams, initAgentEventsSubscription, cleanupAgentEventsSubscription, resolveActiveRunId, resolveBcsSessionIdFromSessionKey } from './inbound-handler.js';
 import { getBcsRuntime } from './runtime.js';
 import {
   ensureServiceBotSession,
@@ -177,19 +177,18 @@ export function createBcsPlugin(options: BcsChannelPluginOptions = {}) {
         if (!client?.connected) {
           throw new Error('BCS WebSocket not connected');
         }
-        // `to` is the OpenClaw session key (e.g. "bcs:BotName"); resolve to actual BCS group UUID
-        const bcsGroupId = resolveGroupIdFromSessionKey(to) ?? to;
-        // Send as a chat.event frame
-        client.sendEvent('chat.event', {
-          run_id: `outbound-${Date.now()}`,
-          bcs_group_id: bcsGroupId,
+        const runId = resolveActiveRunId(to);
+        const sessionId = resolveBcsSessionIdFromSessionKey(to);
+        if (!runId || !sessionId) {
+          throw new Error('BCS V3 outbound reply has no active run/session context');
+        }
+        client.sendEvent('chat', {
+          runId,
+          sessionId,
+          ts: Date.now(),
           state: 'final',
-          message: {
-            role: 'assistant',
-            content: [{ type: 'text', text }],
-            timestamp: Date.now(),
-          },
-        }, 0);
+          content: text,
+        });
         return { channel: CHANNEL_ID, messageId: `bcs-${Date.now()}`, chatId: to };
       },
     },

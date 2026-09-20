@@ -150,6 +150,7 @@ mod tests {
             .cache_tool_call_start(
                 "tool-1".to_string(),
                 crate::message_tracker::ToolCallStartInfo {
+                    bot_id: "bot-1".to_string(),
                     run_id: "match".to_string(),
                     session_id: "session-1".to_string(),
                     name: "search".to_string(),

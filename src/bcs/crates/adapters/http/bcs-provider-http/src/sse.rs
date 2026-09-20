@@ -126,9 +126,16 @@ pub(crate) fn classify(event: &StreamEvent) -> IngestKind {
                 };
                 IngestKind::Pipeline { event_type: "agent".to_string(), state }
             }
-            AgentData::Thinking(_) | AgentData::Lifecycle(_) | AgentData::Phase(_) => {
+            AgentData::Assistant { .. }
+            | AgentData::Thinking(_)
+            | AgentData::Lifecycle(_)
+            | AgentData::Phase(_) => {
                 IngestKind::Pipeline { event_type: "agent".to_string(), state: AppState::Delta }
             }
+            AgentData::Error { .. } => IngestKind::Terminal {
+                event_type: "agent".to_string(),
+                state: AppState::Error,
+            },
             AgentData::Unknown { stream, .. } => {
                 tracing::warn!(stream, "drop unknown agent stream");
                 IngestKind::Drop

@@ -10,8 +10,9 @@ pub(super) async fn maybe_handle_coordination_echo(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
     data: &Value,
+    task_intent_eligible: bool,
 ) -> ServiceResult<Option<CoordinationEchoDispatch>> {
-    if cmd.event_type != "agent" || cmd.group_id.is_empty() {
+    if !task_intent_eligible || cmd.event_type != "agent" || cmd.group_id.is_empty() {
         return Ok(None);
     }
     if data.get("isError").and_then(|value| value.as_bool()) == Some(true) {
@@ -304,14 +305,16 @@ pub(super) async fn coordination_tool_name_allowed(
 ) -> bool {
     let surface = coordination_surface_for_run(flow, cmd).await;
     if let Some(surface) = surface {
-        if surface.mode == CoordinationMode::NativeMcp {
-            return native_mcp_tool_name_allowed(&surface, data, call);
-        }
+        return match surface.mode {
+            CoordinationMode::NativeMcp => native_mcp_tool_name_allowed(&surface, data, call),
+            CoordinationMode::McporterMcp | CoordinationMode::LegacyUpstream => {
+                legacy_coordination_tool_name_allowed(data)
+            }
+            CoordinationMode::NativeTool | CoordinationMode::Disabled => false,
+        };
     } else {
         return false;
     }
-
-    legacy_coordination_tool_name_allowed(data)
 }
 
 pub(super) async fn coordination_surface_for_run(

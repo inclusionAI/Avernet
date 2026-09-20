@@ -100,6 +100,7 @@ describe('openclaw-channel-bcn', () => {
         method: 'chat.send',
         params: {
           bcs_group_id: 'group-1',
+          bcs_session_id: 'group-1:session-1',
           channel: { source: 'dingtalk', user_id: 'user-1' },
           session_context: {},
           message: { role: 'user', content: [], timestamp: Date.now() },
@@ -214,6 +215,7 @@ describe('openclaw-channel-bcn', () => {
 
     const params = {
       bcs_group_id: 'group-1',
+      bcs_session_id: 'group-1:session-1',
       channel: {
         source: 'api',
         user_id: 'legacy-channel-name',
@@ -937,6 +939,12 @@ describe('openclaw-channel-bcn', () => {
             const runId = replyOptions.runId;
             agentEventHandler?.({
               runId,
+              stream: 'thinking',
+              ts: 0,
+              data: { delta: 'planning' },
+            });
+            agentEventHandler?.({
+              runId,
               stream: 'assistant',
               ts: 1,
               data: { text: 'snapshot: before tool', delta: 'before tool' },
@@ -945,7 +953,7 @@ describe('openclaw-channel-bcn', () => {
               runId,
               stream: 'tool',
               ts: 2,
-              data: { phase: 'start', toolCallId: 'tool-1' },
+              data: { phase: 'start', toolCallId: 'tool-1', name: 'read', args: { path: '/tmp/a' } },
             });
             agentEventHandler?.({
               runId,
@@ -963,7 +971,13 @@ describe('openclaw-channel-bcn', () => {
               runId,
               stream: 'tool',
               ts: 5,
-              data: { phase: 'result', toolCallId: 'tool-1' },
+              data: {
+                phase: 'result',
+                toolCallId: 'tool-1',
+                name: 'read',
+                result: { content: [{ type: 'text', text: 'ok' }] },
+                isError: false,
+              },
             });
             agentEventHandler?.({
               runId,
@@ -1013,6 +1027,7 @@ describe('openclaw-channel-bcn', () => {
       params: {
         idempotency_key: 'upstream-run-1',
         bcs_group_id: 'group-1',
+        bcs_session_id: 'group-1:session-1',
         channel: { source: 'api', user_id: 'user-1' },
         session_context: {},
         message: {
@@ -1060,11 +1075,23 @@ describe('openclaw-channel-bcn', () => {
         'diagram.png',
       ]);
       assert.equal(existsSync(savedImagePath), false);
-      assert.equal(events.filter(item => item.event === 'agent').length, 9);
-      const chatEvents = events.filter(item => item.event === 'chat.event');
+      const agentEvents = events.filter(item => item.event === 'agent');
+      assert.equal(agentEvents.length, 10);
+      const thinkingEvent = agentEvents.find(item => item.payload.stream === 'thinking');
+      assert.equal(thinkingEvent?.payload.deltaText, 'planning');
+      assert.equal(thinkingEvent?.payload.delta, undefined);
+      const toolEvents = agentEvents.filter(item => item.payload.stream === 'tool');
+      assert.deepEqual(toolEvents.map(item => item.payload.phase), [ 'start', 'result' ]);
+      assert.deepEqual(toolEvents.map(item => item.payload.name), [ 'read', 'read' ]);
+      assert.deepEqual(toolEvents.map(item => item.payload.toolCallId), [ 'tool-1', 'tool-1' ]);
+      assert.deepEqual(toolEvents[0].payload.args, { path: '/tmp/a' });
+      assert.deepEqual(toolEvents[1].payload.result, { content: [{ type: 'text', text: 'ok' }] });
+      assert.equal(toolEvents[1].payload.isError, false);
+      assert.equal(toolEvents.some(item => 'data' in item.payload), false);
+      const chatEvents = events.filter(item => item.event === 'chat');
       assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'delta', 'delta', 'delta', 'final' ]);
       assert.deepEqual(
-        chatEvents.map(item => (item.payload.message as any).content[0].text),
+        chatEvents.map(item => item.payload.content),
         [
           'before tool',
           '\nafter first tool',
@@ -1072,7 +1099,17 @@ describe('openclaw-channel-bcn', () => {
           'before tool\nafter first tool\nfinal answer',
         ],
       );
-      assert.deepEqual(chatEvents.map(item => item.payload.run_id), [ runId, runId, runId, runId ]);
+      assert.deepEqual(chatEvents.map(item => item.payload.runId), [ runId, runId, runId, runId ]);
+      assert.deepEqual(
+        chatEvents.map(item => item.payload.sessionId),
+        [
+          'group-1:session-1',
+          'group-1:session-1',
+          'group-1:session-1',
+          'group-1:session-1',
+        ],
+      );
+      assert.equal(chatEvents.some(item => 'message' in item.payload || 'deltaText' in item.payload), false);
     } finally {
       cleanupAgentEventsSubscription();
       abortAllStreams();
@@ -1133,6 +1170,7 @@ describe('openclaw-channel-bcn', () => {
         method: 'chat.send',
         params: {
           bcs_group_id: 'group-1',
+          bcs_session_id: 'group-1:session-1',
           channel: { source: 'api', user_id: 'user-1' },
           session_context: {},
           message: {
@@ -1159,10 +1197,10 @@ describe('openclaw-channel-bcn', () => {
       assert.equal(replyDispatched, false);
       assert.equal(mediaSaved, false);
       assert.equal(events.length, 1);
-      assert.equal(events[0].event, 'chat.event');
+      assert.equal(events[0].event, 'chat');
       assert.equal(events[0].payload.state, 'error');
       assert.equal(
-        (events[0].payload.message as any).content[0].text,
+        events[0].payload.content,
         'The attached image exceeds the 20 MB limit.',
       );
     } finally {
@@ -1209,6 +1247,7 @@ describe('openclaw-channel-bcn', () => {
         method: 'chat.send',
         params: {
           bcs_group_id: 'group-1',
+          bcs_session_id: 'group-1:session-1',
           channel: { source: 'api', user_id: 'user-1' },
           session_context: {},
           message: { role: 'user', content: [], timestamp: Date.now() },
@@ -1226,7 +1265,7 @@ describe('openclaw-channel-bcn', () => {
       assert.equal(events.length, 1);
       assert.equal(events[0].payload.state, 'error');
       assert.equal(
-        (events[0].payload.message as any).content[0].text,
+        events[0].payload.content,
         'Unsupported image format. Supported formats are JPEG, PNG, GIF, and WebP.',
       );
     } finally {
@@ -1331,6 +1370,7 @@ describe('openclaw-channel-bcn', () => {
       method: 'chat.send',
       params: {
         bcs_group_id: 'group-1',
+        bcs_session_id: 'group-1:session-1',
         channel: { source: 'api', user_id: 'user-1' },
         session_context: {},
         message: {
@@ -1347,23 +1387,23 @@ describe('openclaw-channel-bcn', () => {
 
       assert.equal(responses.length, 1);
       const runId = responses[0].payload?.run_id;
-      const chatEventsBeforeDispatchSettles = events.filter(item => item.event === 'chat.event');
+      const chatEventsBeforeDispatchSettles = events.filter(item => item.event === 'chat');
       assert.deepEqual(
         chatEventsBeforeDispatchSettles.map(item => item.payload.state),
         [ 'delta', 'final' ],
       );
       assert.deepEqual(
-        chatEventsBeforeDispatchSettles.map(item => (item.payload.message as any).content[0].text),
+        chatEventsBeforeDispatchSettles.map(item => item.payload.content),
         [ 'reply before dispatcher completion', 'reply before dispatcher completion' ],
       );
-      assert.deepEqual(chatEventsBeforeDispatchSettles.map(item => item.payload.run_id), [ runId, runId ]);
+      assert.deepEqual(chatEventsBeforeDispatchSettles.map(item => item.payload.runId), [ runId, runId ]);
 
       assert.ok(releaseDispatch, 'dispatcher should still be waiting when lifecycle final is sent');
       releaseDispatch();
       await pending;
 
       const finalEvents = events
-        .filter(item => item.event === 'chat.event')
+        .filter(item => item.event === 'chat')
         .filter(item => item.payload.state === 'final');
       assert.equal(finalEvents.length, 1, 'dispatcher completion must not send a duplicate final');
     } finally {
@@ -1436,7 +1476,7 @@ describe('openclaw-channel-bcn', () => {
                 sessionKey: 'bcs:group-1',
                 stream: 'tool',
                 ts: 2,
-                data: { phase: 'start', name: 'noop' },
+                data: { phase: 'start', name: 'noop', toolCallId: `tool-${dispatchCount}` },
               });
             }
             if (dispatchCount === 3) {
@@ -1477,6 +1517,7 @@ describe('openclaw-channel-bcn', () => {
         method: 'chat.send',
         params: {
           bcs_group_id: 'group-1',
+          bcs_session_id: 'group-1:session-1',
           channel: { source: 'api', user_id: 'user-1' },
           session_context: {},
           message: {
@@ -1495,16 +1536,16 @@ describe('openclaw-channel-bcn', () => {
 
       assert.equal(responses.length, 3);
       const runIds = responses.map(response => response.payload?.run_id);
-      const chatEvents = events.filter(item => item.event === 'chat.event');
+      const chatEvents = events.filter(item => item.event === 'chat');
       assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'final', 'final', 'delta', 'final' ]);
-      assert.equal(chatEvents[0].payload.message, undefined);
-      assert.equal(chatEvents[0].payload.stop_reason, undefined);
-      assert.equal((chatEvents[1].payload.message as any).content[0].text, 'NO_REPLY');
+      assert.equal(chatEvents[0].payload.content, undefined);
+      assert.equal(chatEvents[0].payload.stopReason, undefined);
+      assert.equal(chatEvents[1].payload.content, 'NO_REPLY');
       assert.deepEqual(
-        chatEvents.slice(2).map(item => (item.payload.message as any).content[0].text),
+        chatEvents.slice(2).map(item => item.payload.content),
         [ 'NO_REPLY', 'NO_REPLY' ],
       );
-      assert.deepEqual(chatEvents.map(item => item.payload.run_id), [
+      assert.deepEqual(chatEvents.map(item => item.payload.runId), [
         runIds[0],
         runIds[1],
         runIds[2],
@@ -1597,6 +1638,7 @@ describe('openclaw-channel-bcn', () => {
         method: 'chat.send',
         params: {
           bcs_group_id: 'queued-group',
+          bcs_session_id: 'queued-group:session-1',
           channel: { source: 'api', user_id: 'user-1' },
           session_context: {},
           message: {
@@ -1609,7 +1651,7 @@ describe('openclaw-channel-bcn', () => {
 
       const bcsRunId = responses[0].payload?.run_id;
       assert.equal(typeof bcsRunId, 'string');
-      assert.equal(events.filter(item => item.event === 'chat.event').length, 0);
+      assert.equal(events.filter(item => item.event === 'chat').length, 0);
 
       agentEventHandler?.({
         runId: 'unrelated-active-run',
@@ -1618,7 +1660,7 @@ describe('openclaw-channel-bcn', () => {
         ts: 1,
         data: { delta: 'must not be claimed by the queued BCS run' },
       });
-      assert.equal(events.filter(item => item.event === 'chat.event').length, 0);
+      assert.equal(events.filter(item => item.event === 'chat').length, 0);
 
       assert.ok(notifyAgentRunStart, 'dispatcher should expose onAgentRunStart');
       notifyAgentRunStart('actual-queued-agent-run');
@@ -1637,17 +1679,17 @@ describe('openclaw-channel-bcn', () => {
         data: { phase: 'end' },
       });
 
-      const chatEvents = events.filter(item => item.event === 'chat.event');
+      const chatEvents = events.filter(item => item.event === 'chat');
       assert.deepEqual(chatEvents.map(item => item.payload.state), [ 'delta', 'final' ]);
       assert.deepEqual(
-        chatEvents.map(item => (item.payload.message as any).content[0].text),
+        chatEvents.map(item => item.payload.content),
         [ 'queued answer', 'queued answer' ],
       );
-      assert.deepEqual(chatEvents.map(item => item.payload.run_id), [ bcsRunId, bcsRunId ]);
+      assert.deepEqual(chatEvents.map(item => item.payload.runId), [ bcsRunId, bcsRunId ]);
       assert.deepEqual(
         events
           .filter(item => item.event === 'agent')
-          .map(item => item.payload.run_id),
+          .map(item => item.payload.runId),
         [ bcsRunId, bcsRunId ],
       );
     } finally {
@@ -1930,6 +1972,7 @@ describe('openclaw-channel-bcn', () => {
         method: 'chat.send',
         params: {
           bcs_group_id: 'group-route-limit',
+          bcs_session_id: 'group-route-limit:session-1',
           channel: { source: 'api', user_id: 'user-1' },
           session_context: {},
           message: {

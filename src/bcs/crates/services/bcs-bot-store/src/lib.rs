@@ -151,6 +151,11 @@ struct RegisteredBotInner {
     capabilities: BotCapabilities,
     /// Active streaming connection (if connected).
     ws_connection: Option<BotConnection>,
+    /// Protocol version negotiated for the active streaming connection.
+    ///
+    /// This is process-local connection state and is intentionally not
+    /// persisted with the bot registration.
+    protocol_version: u32,
     /// Session token (persisted in database).
     session_token: Option<String>,
     /// Server environment (prod, gray, pre, dev).
@@ -1206,6 +1211,7 @@ impl BotRepoPort for PersistentBotRepo {
                     last_heartbeat: Instant::now(),
                     capabilities: caps,
                     ws_connection: None,
+                    protocol_version: 1,
                     session_token: None,
                     env: Some(resolve_env()),
                     hidden: false,
@@ -1328,6 +1334,7 @@ impl BotRepoPort for PersistentBotRepo {
                         last_heartbeat: Instant::now(),
                         capabilities: caps,
                         ws_connection: None,
+                        protocol_version: 1,
                         session_token: Some(token.to_string()),
                         env: Some(resolve_env()),
                         hidden: false,
@@ -2391,6 +2398,7 @@ impl BotRepoPort for PersistentBotRepo {
                             session_token: session_token.clone(),
                             connected_at: Instant::now(),
                         }),
+                        protocol_version: 1,
                         session_token: Some(session_token.clone()),
                         env: Some(resolve_env()),
                         hidden: false,
@@ -2451,6 +2459,7 @@ impl BotRepoPort for PersistentBotRepo {
                                 session_token: session_token.clone(),
                                 connected_at: Instant::now(),
                             }),
+                            protocol_version: 1,
                             session_token: Some(session_token.clone()),
                             env: Some(resolve_env()),
                             hidden: false,
@@ -2534,6 +2543,7 @@ impl BotRepoPort for PersistentBotRepo {
                         session_token: session_token.clone(),
                         connected_at: Instant::now(),
                     }),
+                    protocol_version: 1,
                     session_token: Some(session_token.clone()),
                     env: Some(resolve_env()),
                     hidden: false,
@@ -2613,6 +2623,7 @@ impl BotRepoPort for PersistentBotRepo {
                         session_token: existing_token.clone(),
                         connected_at: Instant::now(),
                     }),
+                    protocol_version: 1,
                     session_token: Some(existing_token.clone()),
                     env,
                     hidden: false,
@@ -2677,6 +2688,20 @@ impl BotRepoPort for PersistentBotRepo {
         debug!(bot_id = %bot_id, token = %token, "Token mapping stored");
     }
 
+    async fn get_protocol_version(&self, bot_id: &str) -> u32 {
+        let bots = self.bots.read().await;
+        bots.get(bot_id)
+            .map(|bot| bot.protocol_version)
+            .unwrap_or(1)
+    }
+
+    async fn set_protocol_version(&self, bot_id: &str, version: u32) {
+        let mut bots = self.bots.write().await;
+        if let Some(bot) = bots.get_mut(bot_id) {
+            bot.protocol_version = version;
+        }
+    }
+
     async fn register_http_connection(&self, bot_id: String, token: String) -> String {
         // Create a minimal bot entry if it doesn't exist
         {
@@ -2689,6 +2714,7 @@ impl BotRepoPort for PersistentBotRepo {
                         last_heartbeat: Instant::now(),
                         capabilities: BotCapabilities::default(),
                         ws_connection: None,
+                        protocol_version: 1,
                         session_token: Some(token.clone()),
                         env: Some(resolve_env()),
                         hidden: false,
@@ -3493,6 +3519,7 @@ mod tests {
             last_heartbeat: Instant::now(),
             capabilities: BotCapabilities::default(),
             ws_connection: None,
+            protocol_version: 1,
             session_token: None,
             env: None,
             hidden: false,
@@ -3517,6 +3544,7 @@ mod tests {
                 ..Default::default()
             },
             ws_connection: None,
+            protocol_version: 1,
             session_token: None,
             env: None,
             hidden: false,
@@ -3541,6 +3569,7 @@ mod tests {
                 ..Default::default()
             },
             ws_connection: None,
+            protocol_version: 1,
             session_token: None,
             env: None,
             hidden: false,
@@ -3564,6 +3593,7 @@ mod tests {
                 ..Default::default()
             },
             ws_connection: None,
+            protocol_version: 1,
             session_token: None,
             env: None,
             hidden: false,
@@ -3587,6 +3617,7 @@ mod tests {
                 ..Default::default()
             },
             ws_connection: None,
+            protocol_version: 1,
             session_token: None,
             env: Some("prod".to_string()),
             hidden: false,
@@ -3654,6 +3685,7 @@ mod tests {
                 ..Default::default()
             },
             ws_connection: None,
+            protocol_version: 1,
             session_token: None,
             env: None,
             hidden: false,
@@ -3681,6 +3713,7 @@ mod tests {
                 ..Default::default()
             },
             ws_connection: None,
+            protocol_version: 1,
             session_token: None,
             env: None,
             hidden: false,
@@ -3701,6 +3734,7 @@ mod tests {
             last_heartbeat: Instant::now(),
             capabilities: BotCapabilities::default(),
             ws_connection: None,
+            protocol_version: 1,
             session_token: None,
             env: None,
             hidden: false,

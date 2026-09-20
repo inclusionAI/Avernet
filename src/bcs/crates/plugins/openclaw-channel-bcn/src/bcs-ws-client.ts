@@ -84,6 +84,7 @@ export class BcsWsClient {
 
   private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private _requestIdCounter = 0;
+  private _eventSequence = 0;
 
   private readonly _account: ResolvedBcsAccount;
   private readonly _log: BcsWsClientOptions['log'];
@@ -200,11 +201,12 @@ export class BcsWsClient {
   }
 
   /** Send an EventFrame to BCS. */
-  sendEvent(event: string, payload: Record<string, unknown>, seq: number): void {
+  sendEvent(event: string, payload: Record<string, unknown>): void {
+    const seq = ++this._eventSequence;
     const frame: EventFrame = {
       type: 'event',
       event,
-      payload,
+      payload: { ...payload, seq },
       seq,
     };
     this._send(frame);
@@ -344,7 +346,8 @@ export class BcsWsClient {
       params: {
         ...(botId ? { bot_id: botId } : {}),
         ...(token ? { token } : {}),
-        protocol_version: 2,
+        protocol_version: 3,
+        client_kind: 'openclaw-channel-bcn',
       },
     };
 
@@ -373,6 +376,16 @@ export class BcsWsClient {
     this._sessionToken = payload?.token ?? null;
     const isNew = payload?.is_new ?? true;
     const protocolVersion = payload?.protocol_version ?? 1;
+    const capabilities = payload?.capabilities;
+
+    if (
+      protocolVersion !== 3
+      || capabilities?.unified_run_events !== true
+      || capabilities?.canonical_session_id !== true
+      || typeof capabilities?.tool_result_task_intent !== 'boolean'
+    ) {
+      throw new Error('BCS did not negotiate the required Bot WebSocket V3 capabilities');
+    }
 
     if (explicitConnectBotId && this._botUuid && this._botUuid !== explicitConnectBotId) {
       throw new Error(

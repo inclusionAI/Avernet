@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use bcs_protocol::{
-    BCS_PROTOCOL_VERSION, BcsFrame, BotConnectParams, BotConnectResponse, BotStatus,
+    BcsFrame, BotConnectParams, BotConnectResponse, BotStatus,
     BotStatusParams, ChatAbortParams, ChatInjectParams, ChatSendParams, ChatSendResponse,
     RequestFrame, ResponseFrame,
 };
@@ -135,7 +135,9 @@ async fn run_connection(
             bot_id: saved_session
                 .as_ref()
                 .and_then(|session| session.bot_uuid.clone()),
-            protocol_version: Some(BCS_PROTOCOL_VERSION),
+            // Rule Bot still emits the legacy `chat.event` uplink. Keep it on
+            // V2 until its event producer is migrated to canonical Run Events.
+            protocol_version: Some(2),
             client_kind: None,
         })?),
     ));

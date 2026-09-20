@@ -14,7 +14,8 @@ pub use bcs_domain::GROUP_ID_PREFIX;
 /// Current protocol version supported by this build.
 /// v1: Initial protocol. session_context as structured field, engine formats context header.
 /// v2: BCS prepends Group Context header to message content automatically.
-pub const BCS_PROTOCOL_VERSION: u32 = 2;
+/// v3: Bot uplink uses the canonical Provider Run Event contract.
+pub const BCS_PROTOCOL_VERSION: u32 = 3;
 /// Minimum protocol version still accepted.
 pub const BCS_MIN_SUPPORTED_VERSION: u32 = 1;
 
@@ -258,6 +259,28 @@ pub struct ProtocolDeprecation {
     pub sunset_date: Option<String>,
 }
 
+/// Capabilities negotiated for one Bot WebSocket connection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BotConnectCapabilities {
+    pub unified_run_events: bool,
+    pub tool_result_task_intent: bool,
+    pub canonical_session_id: bool,
+}
+
+impl BotConnectCapabilities {
+    pub fn for_connection(protocol_version: u32, client_kind: Option<&str>) -> Self {
+        let unified_run_events = protocol_version >= 3;
+        let native_mcp = client_kind
+            .map(str::trim)
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("native_mcp"));
+        Self {
+            unified_run_events,
+            tool_result_task_intent: unified_run_events && native_mcp,
+            canonical_session_id: unified_run_events,
+        }
+    }
+}
+
 fn default_protocol_version() -> u32 {
     BCS_PROTOCOL_VERSION
 }
@@ -280,6 +303,9 @@ pub struct BotConnectResponse {
     /// Deprecation notice when the negotiated version is scheduled for removal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deprecation: Option<ProtocolDeprecation>,
+    /// Features enabled for this negotiated connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<BotConnectCapabilities>,
     /// Environment variables the engine should set for child processes (e.g., bcs-cli).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, String>>,

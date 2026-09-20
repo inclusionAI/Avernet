@@ -53,8 +53,13 @@ function defaultFrameHandler(socket: WebSocket, frame: Record<string, unknown>):
         is_new: false,
         bot_uuid: 'bot-123',
         token: 'bot-secret',
-        protocol_version: 2,
-        min_supported_version: 2,
+        protocol_version: 3,
+        min_supported_version: 1,
+        capabilities: {
+          unified_run_events: true,
+          tool_result_task_intent: false,
+          canonical_session_id: true,
+        },
       },
     }));
   } else if (frame.method === 'bot.status') {
@@ -72,7 +77,7 @@ function botSession(endpoint: string): BotSession {
   return { version: 1, endpoint, botUuid: 'bot-123', botToken: 'bot-secret', botName: 'DSH Bot' };
 }
 
-test('negotiates BCN Bot WebSocket V2, dispatches requests, and sends canonical events', async t => {
+test('negotiates BCN Bot WebSocket V3, dispatches requests, and sends canonical events', async t => {
   const server = await localBcnServer();
   t.after(() => closeServer(server));
   const endpoint = await resolveEndpoint(server.endpoint);
@@ -90,7 +95,8 @@ test('negotiates BCN Bot WebSocket V2, dispatches requests, and sends canonical 
   await waitFor(() => client.connected, 'client did not negotiate bot.connect');
 
   const connect = server.frames.find(frame => frame.method === 'bot.connect') as RequestFrame | undefined;
-  assert.equal(connect?.params.protocol_version, 2);
+  assert.equal(connect?.params.protocol_version, 3);
+  assert.equal(connect?.params.client_kind, 'deepseek-harness-channel-bcn');
   assert.equal(connect?.params.bot_id, 'bot-123');
   assert.equal(connect?.params.token, 'bot-secret');
 
@@ -124,13 +130,18 @@ test('negotiates BCN Bot WebSocket V2, dispatches requests, and sends canonical 
   assert.equal(unsupported?.error?.code, 'NOT_FOUND');
 
   client.sendEvent('agent', {
-    run_id: 'run-1',
-    bcs_group_id: 'group-1',
+    runId: 'run-1',
+    sessionId: 'group-1:session-1',
     stream: 'tool',
     ts: Date.now(),
-    data: { phase: 'start', toolCallId: 'call-1', name: 'read', args: {} },
+    phase: 'start',
+    toolCallId: 'call-1',
+    name: 'read',
+    args: {},
   });
   await waitFor(() => server.frames.some(frame => frame.type === 'event' && frame.event === 'agent'), 'event not sent');
+  const event = server.frames.find(frame => frame.type === 'event' && frame.event === 'agent');
+  assert.equal((event?.payload as Record<string, unknown>)?.seq, event?.seq);
 });
 
 test('reconnects with exponential backoff and stops reconnecting after disposal', async t => {
@@ -147,7 +158,14 @@ test('reconnects with exponential backoff and stops reconnecting after disposal'
           is_new: false,
           bot_uuid: 'bot-123',
           token: 'bot-secret',
-          protocol_version: connects === 1 ? 1 : 2,
+          protocol_version: connects === 1 ? 1 : 3,
+          ...(connects === 1 ? {} : {
+            capabilities: {
+              unified_run_events: true,
+              tool_result_task_intent: false,
+              canonical_session_id: true,
+            },
+          }),
         },
       }));
     } else {
@@ -181,7 +199,12 @@ test('persists a rotated bot.connect token before marking the connection ready',
         is_new: false,
         bot_uuid: 'bot-123',
         token: 'rotated-secret',
-        protocol_version: 2,
+        protocol_version: 3,
+        capabilities: {
+          unified_run_events: true,
+          tool_result_task_intent: false,
+          canonical_session_id: true,
+        },
       },
     }));
   });

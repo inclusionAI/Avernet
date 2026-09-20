@@ -307,7 +307,7 @@ test('restores the latest DSH agent preset recorded by a persisted BCN session',
   await bridge.dispose();
 });
 
-test('isolates V2 sessions that share a group-level session_key and reuses each session for inject', async () => {
+test('isolates V3 sessions that share a legacy group-level session_key and reuses each session for inject', async () => {
   const harness = new FakeHarness();
   const client = new FakeClient();
   const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
@@ -316,13 +316,15 @@ test('isolates V2 sessions that share a group-level session_key and reuses each 
   const firstSessionId = 'bcs_grp_59a251ab729a49cfbf8b7a183d80392d:9e1f90a1';
   const secondSessionId = 'bcs_grp_59a251ab729a49cfbf8b7a183d80392d:28ab9c04';
   const first = chatParams(sharedSessionKey, 'run-first');
-  first.bcs_group_id = firstSessionId;
+  first.bcs_group_id = 'bcs_grp_59a251ab729a49cfbf8b7a183d80392d';
+  first.bcs_session_id = firstSessionId;
   first.session_context = {
     ...(first.session_context as Record<string, unknown>),
     session_id: firstSessionId,
   };
   const second = chatParams(sharedSessionKey, 'run-second');
-  second.bcs_group_id = secondSessionId;
+  second.bcs_group_id = 'bcs_grp_59a251ab729a49cfbf8b7a183d80392d';
+  second.bcs_session_id = secondSessionId;
   second.session_context = {
     ...(second.session_context as Record<string, unknown>),
     session_id: secondSessionId,
@@ -359,6 +361,7 @@ test('does not register chat.abort or chat.history in the initial release', asyn
 function chatParams(sessionKey = 'bcn-v2-session', idempotencyKey = 'run-1'): Record<string, unknown> {
   return {
     session_key: sessionKey,
+    bcs_session_id: sessionKey,
     bcs_group_id: 'group-1',
     idempotency_key: idempotencyKey,
     message: { role: 'user', content: [{ type: 'text', text: 'Please investigate.' }], timestamp: 1 },
@@ -381,8 +384,9 @@ function taskGroupParams(
   idempotencyKey: string,
   recipientRole: 'manager' | 'worker' | undefined,
 ): Record<string, unknown> {
-  const params = chatParams(sessionKey, idempotencyKey);
-  params.bcs_group_id = 'bcs_grp_test:session-1';
+  const bcsSessionId = `bcs_grp_test:${sessionKey}`;
+  const params = chatParams(bcsSessionId, idempotencyKey);
+  params.bcs_group_id = 'bcs_grp_test';
   params.session_context = {
     ...(params.session_context as Record<string, unknown>),
     group_type: 'manager_worker',
@@ -412,7 +416,7 @@ function emitSession(harness: FakeHarness, state: FakeAgentState, value: Session
 }
 
 function chatEvents(client: FakeClient): Array<Record<string, unknown>> {
-  return client.events.filter(item => item.event === 'chat.event').map(item => item.payload);
+  return client.events.filter(item => item.event === 'chat').map(item => item.payload);
 }
 
 function toolEvents(client: FakeClient): Array<Record<string, unknown>> {
@@ -489,17 +493,17 @@ test('maps live DSH text and durable tool events to BCN with one terminal event'
 
   const tools = toolEvents(client);
   assert.equal(tools.length, 2);
-  assert.deepEqual((tools[0]?.data as Record<string, unknown>).args, { path: '/tmp/a' });
-  assert.equal((tools[1]?.data as Record<string, unknown>).name, 'read_file');
-  assert.deepEqual((tools[1]?.data as Record<string, unknown>).result, { content: [{ type: 'text', text: 'ok' }] });
+  assert.deepEqual(tools[0]?.args, { path: '/tmp/a' });
+  assert.equal(tools[1]?.name, 'read_file');
+  assert.deepEqual(tools[1]?.result, { content: [{ type: 'text', text: 'ok' }] });
 
   const chats = chatEvents(client);
-  assert.deepEqual(chats.filter(item => item.state === 'delta').map(item => item.delta_text), ['Hello ', 'world']);
+  assert.deepEqual(chats.filter(item => item.state === 'delta').map(item => item.content), ['Hello ', 'world']);
   assert.equal(chats.some(item => JSON.stringify(item).includes('private reasoning')), false);
   const finals = chats.filter(item => item.state === 'final');
   assert.equal(finals.length, 1);
   assert.deepEqual(finals[0]?.usage, { input: 12, output: 3 });
-  assert.equal((((finals[0]?.message as Record<string, unknown>).content as Array<{ text: string }>)[0]?.text), 'Hello world');
+  assert.equal(finals[0]?.content, 'Hello world');
   assert.equal(chats.some(item => item.state === 'tool_call_start' || item.state === 'tool_call_end'), false);
   await bridge.dispose();
 });
@@ -535,11 +539,11 @@ test('preserves raw tool arguments, parallel call identity, error results, and c
   }
   const tools = toolEvents(client);
   assert.equal(tools.length, 4);
-  assert.deepEqual(tools.filter(item => (item.data as Record<string, unknown>).phase === 'start')
-    .map(item => (item.data as Record<string, unknown>).args), ['{unfinished', '{unfinished']);
-  assert.deepEqual(tools.filter(item => (item.data as Record<string, unknown>).phase === 'result')
-    .map(item => (item.data as Record<string, unknown>).isError), [true, true]);
-  assert.deepEqual(new Set(tools.map(item => item.run_id)), new Set(['run-a', 'run-b']));
+  assert.deepEqual(tools.filter(item => item.phase === 'start')
+    .map(item => item.args), ['{unfinished', '{unfinished']);
+  assert.deepEqual(tools.filter(item => item.phase === 'result')
+    .map(item => item.isError), [true, true]);
+  assert.deepEqual(new Set(tools.map(item => item.runId)), new Set(['run-a', 'run-b']));
   await bridge.dispose();
 });
 
@@ -619,7 +623,7 @@ test('registers manager task tools instead of bcs_route and forwards task reques
     'request-manager',
     taskGroupParams('manager-session', 'manager-run', 'manager'),
   );
-  const state = harness.state('bcs_grp_test:session-1');
+  const state = harness.state('bcs_grp_test:manager-session');
   assert.deepEqual(state.tools.map(tool => tool.name), ['bcs_assign_task', 'bcs_task_complete']);
   emitClaim(harness, state, state.followups[0] as UserMessage);
 
@@ -643,7 +647,7 @@ test('registers manager task tools instead of bcs_route and forwards task reques
     {
       method: 'task.dispatch',
       params: {
-        group_id: 'bcs_grp_test:session-1',
+        group_id: 'bcs_grp_test',
         target_bot: 'Worker',
         message: 'Investigate the database',
         response_mode: 'after-last-tool-call',
@@ -651,7 +655,7 @@ test('registers manager task tools instead of bcs_route and forwards task reques
     },
     {
       method: 'task.complete',
-      params: { group_id: 'bcs_grp_test:session-1', summary: 'All work is done.' },
+      params: { group_id: 'bcs_grp_test', summary: 'All work is done.' },
     },
   ]);
   await bridge.dispose();
@@ -667,7 +671,7 @@ test('registers only the worker task-message tool for a manager-worker worker', 
     'request-worker',
     taskGroupParams('worker-session', 'worker-run', 'worker'),
   );
-  const state = harness.state('bcs_grp_test:session-1');
+  const state = harness.state('bcs_grp_test:worker-session');
   assert.deepEqual(state.tools.map(tool => tool.name), ['bcs_send_task_message']);
   emitClaim(harness, state, state.followups[0] as UserMessage);
 
@@ -679,7 +683,7 @@ test('registers only the worker task-message tool for a manager-worker worker', 
   });
   assert.deepEqual(client.requests, [{
     method: 'task.message',
-    params: { group_id: 'bcs_grp_test:session-1', message: 'Blocked on credentials.' },
+    params: { group_id: 'bcs_grp_test', message: 'Blocked on credentials.' },
   }]);
   await bridge.dispose();
 });
@@ -694,7 +698,7 @@ test('fails closed when manager-worker recipient_role is absent and hides route 
     'request-no-role',
     taskGroupParams('missing-role-session', 'missing-role-run', undefined),
   );
-  assert.deepEqual(harness.state('bcs_grp_test:session-1').tools, []);
+  assert.deepEqual(harness.state('bcs_grp_test:missing-role-session').tools, []);
 
   const mentionParams = chatParams('mention-session', 'mention-run');
   mentionParams.session_context = {
@@ -734,7 +738,7 @@ test('deduplicates inbound runs and emits exactly one DSH aborted or error termi
     type: 'turn/end', seq: 1, time: 1,
     data: { turn: 1, reason: { kind: 'error', error: { message: 'private stack', code: 'E_SAFE' } } },
   }));
-  const error = chatEvents(client).find(item => item.run_id === 'error-run' && item.state === 'error');
+  const error = chatEvents(client).find(item => item.runId === 'error-run' && item.state === 'error');
   assert.equal(error?.errorMessage, 'DeepSeek Harness run failed');
   assert.equal(error?.errorCode, 'E_SAFE');
   assert.equal(JSON.stringify(error).includes('private stack'), false);

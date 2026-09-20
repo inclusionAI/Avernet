@@ -352,8 +352,12 @@ impl BotRegistryCoreService for BotCore {
             .get_bot_info(bot_id, "client_kind")
             .await
             .map(|value| value.trim().to_ascii_lowercase());
-        if client_kind.as_deref() == Some("plugin") {
-            return Ok(CoordinationSurface::native_tool());
+        match client_kind.as_deref() {
+            Some("native_mcp") => return Ok(CoordinationSurface::native_mcp_bcs()),
+            Some("plugin" | "openclaw-channel-bcn" | "deepseek-harness-channel-bcn") => {
+                return Ok(CoordinationSurface::native_tool());
+            }
+            _ => {}
         }
 
         Ok(CoordinationSurface::legacy_upstream())

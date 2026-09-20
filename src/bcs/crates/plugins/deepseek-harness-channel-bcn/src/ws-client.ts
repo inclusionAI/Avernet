@@ -145,7 +145,8 @@ export class BcnWsClient {
   }
 
   sendEvent(event: string, payload: Record<string, unknown>): void {
-    const frame: EventFrame = { type: 'event', event, payload, seq: ++this.eventSequence };
+    const seq = ++this.eventSequence;
+    const frame: EventFrame = { type: 'event', event, payload: { ...payload, seq }, seq };
     if (this.connected) {
       this.sendFrameNow(frame);
       return;
@@ -224,6 +225,7 @@ export class BcnWsClient {
         bot_id: this.session.botUuid,
         token: this.session.botToken,
         protocol_version: BCN_PROTOCOL_VERSION,
+        client_kind: 'deepseek-harness-channel-bcn',
       });
       const connected = parseConnectResponse(response, this.session.botUuid);
       if (connected.token !== this.session.botToken) {
@@ -445,6 +447,14 @@ function parseConnectResponse(response: ResponseFrame, expectedBotUuid: string):
   if (protocolVersion !== BCN_PROTOCOL_VERSION) {
     throw new Error(`BCN selected unsupported Bot WebSocket protocol version ${String(protocolVersion)}`);
   }
+  const capabilities = asRecord(payload.capabilities);
+  if (
+    capabilities?.unified_run_events !== true
+    || capabilities.canonical_session_id !== true
+    || typeof capabilities.tool_result_task_intent !== 'boolean'
+  ) {
+    throw new Error('BCN bot.connect did not negotiate the required V3 capabilities');
+  }
   const envRecord = payload.env === undefined ? undefined : asRecord(payload.env);
   if (payload.env !== undefined && !envRecord) throw new Error('BCN bot.connect returned an invalid env map');
   const env = envRecord ? normalizeStringMap(envRecord) : undefined;
@@ -453,6 +463,11 @@ function parseConnectResponse(response: ResponseFrame, expectedBotUuid: string):
     token,
     bot_uuid: botUuid,
     protocol_version: protocolVersion,
+    capabilities: {
+      unified_run_events: true,
+      tool_result_task_intent: capabilities.tool_result_task_intent,
+      canonical_session_id: true,
+    },
     ...(typeof payload.min_supported_version === 'number'
       ? { min_supported_version: payload.min_supported_version }
       : {}),

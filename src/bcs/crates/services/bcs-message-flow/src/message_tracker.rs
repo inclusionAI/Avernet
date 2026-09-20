@@ -8,6 +8,7 @@ const TOOL_CALL_START_TTL_MS: u64 = 6 * 60 * 60 * 1000;
 
 #[derive(Clone)]
 pub struct ToolCallStartInfo {
+    pub bot_id: String,
     pub run_id: String,
     pub session_id: String,
     pub name: String,
@@ -399,6 +400,7 @@ mod tests {
             .cache_tool_call_start(
                 "tool-1".to_string(),
                 ToolCallStartInfo {
+                    bot_id: "bot-1".to_string(),
                     run_id: "run-1".to_string(),
                     session_id: "session-1".to_string(),
                     name: "Bash".to_string(),
@@ -421,6 +423,7 @@ mod tests {
             .cache_tool_call_start(
                 "tool-1".to_string(),
                 ToolCallStartInfo {
+                    bot_id: "bot-1".to_string(),
                     run_id: "run-1".to_string(),
                     session_id: "session-1".to_string(),
                     name: "search".to_string(),

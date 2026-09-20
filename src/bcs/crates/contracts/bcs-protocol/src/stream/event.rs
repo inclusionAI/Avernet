@@ -39,7 +39,9 @@ pub struct InteractionEvent {
     pub run_id: String,
     pub seq: Option<u64>,
     pub ts: Option<u64>,
-    pub session_key: Option<String>,
+    /// Canonical BCS session id. Legacy Provider `sessionKey` input is
+    /// normalized to this field by the boundary parser.
+    pub session_id: Option<String>,
     pub phase: InteractionPhase,
     pub interaction_id: String,
     pub kind: InteractionKind,
@@ -52,7 +54,9 @@ pub struct AgentEvent {
     pub run_id: String,
     pub seq: Option<u64>,
     pub ts: Option<u64>,
-    pub session_key: Option<String>,
+    /// Canonical BCS session id. Legacy Provider `sessionKey` input is
+    /// normalized to this field by the boundary parser.
+    pub session_id: Option<String>,
     pub data: AgentData,
     pub raw: Value,
 }
@@ -61,6 +65,8 @@ pub struct AgentEvent {
 pub enum AgentData {
     Tool(ToolData),
     Thinking(ThinkingData),
+    Assistant { raw: Value },
+    Error { raw: Value },
     Approval(ApprovalData),
     Lifecycle(LifecycleData),
     Phase(PhaseData),
@@ -80,8 +86,12 @@ pub enum ChatState {
 pub struct ChatEvent {
     pub run_id: String,
     pub seq: Option<u64>,
+    pub ts: Option<u64>,
     pub state: ChatState,
-    pub session_key: Option<String>,
+    /// Canonical BCS session id. Legacy Provider `sessionKey` input is
+    /// normalized to this field by the boundary parser.
+    pub session_id: Option<String>,
+    pub content: Option<String>,
     pub delta_text: Option<String>,
     pub stop_reason: Option<String>,
     pub error_message: Option<String>,

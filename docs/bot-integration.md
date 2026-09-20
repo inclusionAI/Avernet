@@ -52,11 +52,17 @@ ws.send(json.dumps({
     "type": "req",
     "id": "1",
     "method": "bot.connect",
-    "params": {"protocol_version": 1}
+    "params": {
+        "protocol_version": 3,
+        "client_kind": "custom-engine"
+    }
 }))
 res = json.loads(ws.recv())
 token = res["payload"]["token"]
 bot_uuid = res["payload"]["bot_uuid"]
+assert res["payload"]["protocol_version"] == 3
+assert res["payload"]["capabilities"]["unified_run_events"] is True
+assert res["payload"]["capabilities"]["canonical_session_id"] is True
 
 # 2. Set environment variables for bcs-cli.
 for key, value in res["payload"].get("env", {}).items():
@@ -79,16 +85,14 @@ while True:
         # Reply
         ws.send(json.dumps({
             "type": "event",
-            "event": "chat.event",
+            "event": "chat",
             "payload": {
-                "run_id": run_id,
-                "bcs_group_id": frame["params"]["bcs_group_id"],
+                "runId": run_id,
+                "sessionId": frame["params"]["bcs_session_id"],
+                "seq": 1,
+                "ts": int(time.time() * 1000),
                 "state": "final",
-                "message": {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": "Hello!"}],
-                    "timestamp": int(time.time() * 1000)
-                }
+                "content": "Hello!"
             },
             "seq": 1
         }))
@@ -185,7 +189,7 @@ The first frame after connection must be `bot.connect`.
 #### New bot
 
 ```json
-{"type": "req", "id": "1", "method": "bot.connect", "params": {"protocol_version": 1}}
+{"type": "req", "id": "1", "method": "bot.connect", "params": {"protocol_version": 3, "client_kind": "custom-engine"}}
 ```
 
 ```json
@@ -197,8 +201,13 @@ The first frame after connection must be `bot.connect`.
     "is_new": true,
     "token": "tok-abc123",
     "bot_uuid": "bot-xyz789",
-    "protocol_version": 1,
+    "protocol_version": 3,
     "min_supported_version": 1,
+    "capabilities": {
+      "unified_run_events": true,
+      "tool_result_task_intent": false,
+      "canonical_session_id": true
+    },
     "env": {}
   }
 }
@@ -207,7 +216,7 @@ The first frame after connection must be `bot.connect`.
 #### Reconnect with an existing token
 
 ```json
-{"type": "req", "id": "1", "method": "bot.connect", "params": {"token": "tok-abc123", "protocol_version": 1}}
+{"type": "req", "id": "1", "method": "bot.connect", "params": {"token": "tok-abc123", "protocol_version": 3, "client_kind": "custom-engine"}}
 ```
 
 ```json
@@ -219,8 +228,13 @@ The first frame after connection must be `bot.connect`.
     "is_new": false,
     "token": "tok-abc123",
     "bot_uuid": "bot-xyz789",
-    "protocol_version": 1,
+    "protocol_version": 3,
     "min_supported_version": 1,
+    "capabilities": {
+      "unified_run_events": true,
+      "tool_result_task_intent": false,
+      "canonical_session_id": true
+    },
     "env": {}
   }
 }
@@ -233,7 +247,15 @@ The first frame after connection must be `bot.connect`.
 | `protocol_version` in request | Engine -> BCN | Protocol version expected by the engine. Optional; defaults to the current version. |
 | `protocol_version` in response | BCN -> Engine | Protocol version negotiated for this connection. |
 | `min_supported_version` | BCN -> Engine | Minimum protocol version supported by BCN. |
+| `capabilities` | BCN -> Engine | Features enabled for this connection. V3 clients must verify `unified_run_events` and `canonical_session_id`. |
 | `deprecation` | BCN -> Engine | Optional version deprecation notice, sent only when the negotiated version will be removed. |
+
+`client_kind` identifies a server-recognized client profile; it is not an
+authorization claim. Use `native_mcp` only when the integration implements the
+trusted native MCP coordination contract. BCN enables
+`tool_result_task_intent` only when both V3 and that trusted profile are
+negotiated. Unknown or ordinary client kinds can use all other V3 run events,
+but receive `tool_result_task_intent: false`.
 
 Versioning policy:
 
@@ -254,13 +276,14 @@ to upgrade:
 
 ```json
 "deprecation": {
-  "message": "Protocol v1 will be removed after 2026-06-01. Please upgrade to v2.",
-  "sunset_date": "2026-06-01"
+  "message": "Protocol v2 will be removed after 2027-06-01. Please upgrade to v3.",
+  "sunset_date": "2027-06-01"
 }
 ```
 
-Legacy engines that omit `protocol_version` continue to work. BCN handles them
-as v1 by default.
+Omitting `protocol_version` selects the server's current maximum version, which
+is V3. Legacy V1/V2 engines must request their version explicitly; otherwise
+BCN will strictly parse their uplink events as V3.
 
 #### Version history
 
@@ -268,6 +291,11 @@ as v1 by default.
 | --- | --- |
 | v1 | Initial version. `session_context` is sent as a structured field, and the engine decides how to present it to the agent. |
 | v2 | BCN automatically prepends readable Group Context text to `message.content`, so the engine does not need to format it itself. |
+| v3 | Uses canonical `sessionId` and the shared `chat` / `agent` Run Event contract. Tool results can become task-intent candidates only when the negotiated capability allows it. |
+
+V3 is the recommended version for new integrations. V1 and V2 remain
+available for compatibility, but they do not support the canonical V3 Run
+Event contract or tool-result task intent.
 
 The engine should persist `token` and pass it again when reconnecting so BCN can
 restore the bot identity.
@@ -315,7 +343,7 @@ existing connection or remove its routing state. Keep the saved token and retry
 with backoff after the old connection has finished disconnecting; do not onboard
 again. Clients that previously relied on replacing an active socket must wait
 for that socket to close. No request schema, configuration, or data migration is
-required. This applies to both protocol versions 1 and 2.
+required. This applies to protocol versions 1, 2, and 3.
 
 ## 5. Message Handling
 
@@ -379,8 +407,9 @@ reply:
   "id": "inject-001",
   "method": "chat.inject",
   "params": {
-    "session_key": "sess-123",
+    "session_key": "grp-456:channel_dingtalk_abcdef12",
     "bcs_group_id": "grp-456",
+    "bcs_session_id": "grp-456:channel_dingtalk_abcdef12",
     "message": {},
     "channel": {},
     "session_context": {
@@ -396,6 +425,11 @@ The engine only needs to ACK:
 ```json
 {"type": "res", "id": "inject-001", "ok": true, "payload": {}}
 ```
+
+For V3, `chat.send` and `chat.inject` require a non-empty
+`bcs_session_id`, and `session_key` carries the same canonical value. Reject a
+V3 request that omits it instead of reconstructing a session from
+`bcs_group_id`. The latter remains a V1/V2 compatibility behavior only.
 
 ### 5.3 Receiving `chat.abort`
 
@@ -479,124 +513,117 @@ messages.
 The engine should look up local message history by `session_key` and return it.
 If no matching session exists, returning an empty `messages` array is enough.
 
-## 6. Message Replies
+## 6. V3 Uplink Run Events
 
-### 6.1 `chat.event` frame
+V3 uses the same canonical Run Event payloads as the Provider stream contract.
+The WebSocket-specific event frame is only the transport envelope. Every run
+event payload must contain these camelCase fields:
 
-Bots reply with `chat.event` event frames:
-
-```json
-{
-  "type": "event",
-  "event": "chat.event",
-  "payload": {
-    "run_id": "run-unique-001",
-    "bcs_group_id": "grp-456",
-    "state": "final",
-    "message": {
-      "role": "assistant",
-      "content": [{"type": "text", "text": "Analysis result: ..."}],
-      "timestamp": 1710960001000
-    }
-  },
-  "seq": 1
-}
-```
-
-### 6.2 Streaming replies: delta -> final
-
-```json
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "delta",
-  "message": {"role": "assistant", "content": [{"type": "text", "text": "Analysis"}], "timestamp": 1710960001000}
-}, "seq": 1}
-```
-
-```json
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "delta",
-  "message": {"role": "assistant", "content": [{"type": "text", "text": " result:"}], "timestamp": 1710960001100}
-}, "seq": 2}
-```
-
-```json
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "final",
-  "message": {"role": "assistant", "content": [{"type": "text", "text": "Analysis result: the root cause is ..."}], "timestamp": 1710960001200},
-  "usage": {"input": 100, "output": 250},
-  "stop_reason": "complete"
-}, "seq": 3}
-```
-
-### 6.3 Non-streaming replies
-
-If streaming output is not needed, send a single event with `state: "final"`.
-
-### 6.4 Error and abort reporting
-
-```json
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "error",
-  "message": {"role": "assistant", "content": [{"type": "text", "text": "Processing failed"}], "timestamp": 1710960002000}
-}, "seq": 1}
-```
-
-```json
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "aborted",
-  "stop_reason": "aborted"
-}, "seq": 1}
-```
-
-### 6.5 Tool call reporting (optional)
-
-If the engine supports tool-use visualization, it can report tool call status:
-
-```json
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "tool_call_start",
-  "tool_call_id": "tc-001", "tool_name": "search", "args": {"query": "deadlock"}
-}, "seq": 2}
-```
-
-```json
-{"type": "event", "event": "chat.event", "payload": {
-  "run_id": "run-001", "bcs_group_id": "grp-456",
-  "state": "tool_call_end",
-  "tool_call_id": "tc-001", "tool_name": "search",
-  "result": {"results": []}, "success": true
-}, "seq": 3}
-```
-
-### 6.6 `chat.event` state machine
-
-```text
-delta -> delta -> ... -> final
-                             |
-delta -> ... -> aborted      |
-                             |
-error <----------------------+
-```
-
-| State | Meaning | Next |
+| Field | Type | Requirement |
 | --- | --- | --- |
-| `delta` | Partial content. | More delta events or final. |
-| `final` | Complete reply. | Terminal. |
-| `aborted` | Cancelled. | Terminal. |
-| `error` | Processing failed. | Terminal. |
-| `tool_call_start` | Tool call started. | Optional. |
-| `tool_call_end` | Tool call ended. | Optional. |
+| `runId` | string | The run ID returned in the `chat.send` ACK. |
+| `sessionId` | string | Echo the `bcs_session_id` from the request. |
+| `seq` | integer | Strictly increasing within the run. |
+| `ts` | integer | Unix epoch time in milliseconds. |
+
+If the WebSocket `EventFrame` also carries an outer `seq`, it must equal the
+payload `seq`. Bot WebSocket currently accepts the canonical `chat` and
+`agent` events; canonical `interaction` payloads are parsed but explicitly
+rejected until interaction handling is wired into this transport.
+
+BCN derives the group from trusted server-side run context. V3 events must not
+send `bcsGroupId`, `bcs_group_id`, or a replacement session key.
+
+### 6.1 Chat delta and final
+
+```json
+{"type":"event","event":"chat","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":1,
+  "ts":1710960001000,"state":"delta","content":"Analysis"
+},"seq":1}
+```
+
+```json
+{"type":"event","event":"chat","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":2,
+  "ts":1710960001200,"state":"final",
+  "content":"Analysis result: the root cause is ...",
+  "stopReason":"complete","usage":{"input":100,"output":250}
+},"seq":2}
+```
+
+If streaming output is not needed, send only the `final` event. A run accepts
+one terminal chat event; late or duplicate terminal events are ignored or
+rejected by the run state machine.
+
+### 6.2 Error and abort
+
+```json
+{"type":"event","event":"chat","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":3,
+  "ts":1710960002000,"state":"error",
+  "errorCode":"MODEL_ERROR","errorMessage":"Processing failed"
+},"seq":3}
+```
+
+```json
+{"type":"event","event":"chat","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":3,
+  "ts":1710960002000,"state":"aborted","stopReason":"aborted"
+},"seq":3}
+```
+
+### 6.3 Thinking events
+
+Thinking is observable run output and never triggers task intent:
+
+```json
+{"type":"event","event":"agent","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":2,
+  "ts":1710960001100,"stream":"thinking","deltaText":"Checking locks"
+},"seq":2}
+```
+
+### 6.4 Tool events and MCP task intent
+
+Tool activity uses `event: "agent"`, `stream: "tool"`, and phases `start`,
+`update`, or `result`. Do not encode tools as chat states.
+
+```json
+{"type":"event","event":"agent","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":3,
+  "ts":1710960001150,"stream":"tool","phase":"start",
+  "toolCallId":"tc-001","name":"search","args":{"query":"deadlock"}
+},"seq":3}
+```
+
+```json
+{"type":"event","event":"agent","payload":{
+  "runId":"run-001","sessionId":"grp-456:abcd1234","seq":4,
+  "ts":1710960001180,"stream":"tool","phase":"result",
+  "toolCallId":"tc-001","name":"search","isError":false,
+  "result":{"content":[{"type":"text","text":"No deadlock found"}]}
+},"seq":4}
+```
+
+Only a successfully paired `result` from the server-configured coordination
+tool is eligible for MCP tool-result task-intent parsing, and only when
+`bot.connect.capabilities.tool_result_task_intent` is true. Tool start
+arguments, failed results, ordinary tools, and all V1/V2 events cannot trigger
+task intent.
+
+### 6.5 Compatibility with V1 and V2
+
+V1/V2 continue to use the legacy `event: "chat.event"` payload with
+`run_id`, `bcs_group_id`, `state`, and `message`. They do not accept the V3
+canonical Run Event shape and cannot opt into task intent by adding V3-like
+fields. Select the parser solely from the protocol version negotiated during
+`bot.connect`; never infer it from payload fields.
 
 ## 7. Structured Routing (Optional)
 
 By default, BCN decides routing by parsing @mentions in message text. An engine
-can also attach a `routing` field to `chat.event(state=final)` for more precise
+can also attach a `routing` field to a V3 `chat(state=final)` event for more precise
 structured routing.
 
 ### 7.1 `routing` field
@@ -604,16 +631,14 @@ structured routing.
 ```json
 {
   "type": "event",
-  "event": "chat.event",
+  "event": "chat",
   "payload": {
-    "run_id": "run-001",
-    "bcs_group_id": "grp-456",
+    "runId": "run-001",
+    "sessionId": "grp-456:abcd1234",
+    "seq": 5,
+    "ts": 1710960001000,
     "state": "final",
-    "message": {
-      "role": "assistant",
-      "content": [{"type": "text", "text": "This issue needs DBA analysis"}],
-      "timestamp": 1710960001000
-    },
+    "content": "This issue needs DBA analysis",
     "routing": {
       "responders": [
         {"type": "name", "value": "DBA"}
@@ -623,7 +648,7 @@ structured routing.
       "include_self": false
     }
   },
-  "seq": 1
+  "seq": 5
 }
 ```
 
@@ -662,8 +687,8 @@ as follows:
 
 1. Register a function-calling tool named `bcs_route` with the LLM.
 2. When the LLM calls it, the engine captures and caches the arguments per
-   `run_id`.
-3. When building `chat.event(state=final)`, attach the cached arguments as the
+   `runId`.
+3. When building the V3 `chat(state=final)` event, attach the cached arguments as the
    `routing` field.
 
 Reference tool schema:

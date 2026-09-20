@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use bcs_domain::BotDeliveryTarget;
 use bcs_protocol::stream::{
     ChatState, InteractionKind as WireInteractionKind, InteractionPhase, StreamEvent,
-    parse_stream_event,
+    TASK_INTENT_ELIGIBLE_KEY, parse_stream_event,
 };
 use bcs_protocol::{
     AgentEventPayload, AgentStream, Attachment, BCN_MESSAGE_ID_HEADER, BCN_PROTOCOL_VERSION_HEADER,
@@ -2100,8 +2100,7 @@ fn stream_event_seq(event: &StreamEvent) -> Option<u64> {
 fn stream_event_ts(event: &StreamEvent) -> Option<u64> {
     match event {
         StreamEvent::Agent(agent) => agent.ts,
-        // ChatEvent has no typed `ts`; read it from the retained raw frame.
-        StreamEvent::Chat(chat) => chat.raw.get("ts").and_then(Value::as_u64),
+        StreamEvent::Chat(chat) => chat.ts,
         StreamEvent::Interaction(interaction) => interaction.ts,
         StreamEvent::Ping { ts } => *ts,
         _ => None,
@@ -2173,7 +2172,15 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str, recv_m
                 ts: agent.ts.unwrap_or(0),
                 data,
             };
-            serde_json::to_value(payload).unwrap_or(Value::Null)
+            let mut payload = serde_json::to_value(payload).unwrap_or(Value::Null);
+            if matches!(
+                &agent.data,
+                bcs_protocol::stream::AgentData::Tool(tool)
+                    if matches!(tool.phase, bcs_protocol::stream::ToolPhase::Result)
+            ) {
+                payload[TASK_INTENT_ELIGIBLE_KEY] = Value::Bool(true);
+            }
+            payload
         }
         StreamEvent::Chat(chat) => {
             let state = match chat.state {

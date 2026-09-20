@@ -163,6 +163,32 @@ impl CoordinationSurface {
             tool_name_mapping: BTreeMap::new(),
         }
     }
+
+    /// Built-in, server-owned profile for Bot WebSocket V3 runtimes that mount
+    /// the canonical `bcs` MCP server. Exact names are intentionally fixed;
+    /// clients cannot expand this allowlist during `bot.connect`.
+    pub fn native_mcp_bcs() -> Self {
+        Self {
+            mode: CoordinationMode::NativeMcp,
+            worker_send_task_message_enabled: true,
+            mcp_server: Some("bcs".to_string()),
+            mcporter_command: None,
+            tool_name_mapping: BTreeMap::from([
+                (
+                    "mcp__bcs__bcs_assign_task".to_string(),
+                    "bcs_assign_task".to_string(),
+                ),
+                (
+                    "mcp__bcs__bcs_send_task_message".to_string(),
+                    "bcs_send_task_message".to_string(),
+                ),
+                (
+                    "mcp__bcs__bcs_task_complete".to_string(),
+                    "bcs_task_complete".to_string(),
+                ),
+            ]),
+        }
+    }
 }
 
 impl From<ProviderCoordinationConfig> for CoordinationSurface {

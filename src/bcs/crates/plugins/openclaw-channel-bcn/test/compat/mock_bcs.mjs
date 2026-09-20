@@ -36,12 +36,7 @@ function responseFrame(id, payload = {}) {
 }
 
 function textFromChatEvent(frame) {
-  const blocks = frame?.payload?.message?.content;
-  if (!Array.isArray(blocks)) return '';
-  return blocks
-    .filter(block => block?.type === 'text' && typeof block.text === 'string')
-    .map(block => block.text)
-    .join('\n');
+  return typeof frame?.payload?.content === 'string' ? frame.payload.content : '';
 }
 
 async function ensureParent(path) {
@@ -116,7 +111,12 @@ async function main() {
             is_new: false,
             bot_uuid: frame.params?.bot_id || 'openclaw-compat-bot',
             token: 'openclaw-compat-token',
-            protocol_version: 2,
+            protocol_version: 3,
+            capabilities: {
+              unified_run_events: true,
+              tool_result_task_intent: false,
+              canonical_session_id: true,
+            },
           })));
           if (!chatSent) {
             chatSent = true;
@@ -188,17 +188,26 @@ async function main() {
       }
 
       if (frame.type !== 'event') return;
+      if (
+        frame.payload?.sessionId !== 'compat-group:session-1'
+        || !Number.isInteger(frame.payload?.seq)
+        || frame.payload?.seq !== frame.seq
+        || !Number.isInteger(frame.payload?.ts)
+      ) {
+        void finish(false, 'run event did not conform to the V3 common envelope');
+        return;
+      }
       if (frame.event === 'agent') {
-        if (frame.payload?.run_id !== 'compat-run-1') {
-          void finish(false, 'agent event had an unexpected run_id');
+        if (frame.payload?.runId !== 'compat-run-1') {
+          void finish(false, 'agent event had an unexpected runId');
           return;
         }
         observations.agentEvents += 1;
       }
-      if (frame.event !== 'chat.event') return;
+      if (frame.event !== 'chat') return;
 
-      if (frame.payload?.run_id !== 'compat-run-1') {
-        void finish(false, 'chat.event had an unexpected run_id');
+      if (frame.payload?.runId !== 'compat-run-1') {
+        void finish(false, 'chat event had an unexpected runId');
         return;
       }
 

@@ -6,11 +6,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_protocol::stream::TASK_INTENT_ELIGIBLE_KEY;
 use bcs_protocol::{
     AgentEventPayload, AgentStream, BCS_MIN_SUPPORTED_VERSION, BCS_PROTOCOL_VERSION, BcsFrame,
-    BotConnectParams as WireBotConnectParams, BotConnectResponse, BotStatus as WsBotStatus,
-    BotStatusParams, ChatEventPayload, ChatEventState, ErrorShape, EventFrame, RequestFrame,
-    ResponseFrame, RouteSelectorWire,
+    BotConnectCapabilities, BotConnectParams as WireBotConnectParams, BotConnectResponse,
+    BotStatus as WsBotStatus, BotStatusParams, ChatEventPayload, ChatEventState, ErrorShape,
+    EventFrame, RequestFrame, ResponseFrame, RouteSelectorWire,
 };
 use bcs_service_api::{
     BotEventCommand, BotRunContextPort, BotRuntimeConnectCommand, BotRuntimeConnectionService,
@@ -30,6 +31,7 @@ use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, Span, debug, info, info_span, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use super::run_event_v3::{NormalizedBotEvent, normalize_v3_event};
 use crate::bot::BotConnectionRegistry;
 use crate::shared::RunChannelManager;
 
@@ -368,6 +370,7 @@ async fn handle_bot_connect(
         }
     }
 
+    let client_kind = params.client_kind.clone();
     let result = state
         .bot_runtime
         .connect_streaming(BotRuntimeConnectCommand {
@@ -375,7 +378,7 @@ async fn handle_bot_connect(
             token: params.token,
             bot_id: params.bot_id,
             protocol_version: Some(requested_version),
-            client_kind: params.client_kind,
+            client_kind: client_kind.clone(),
         })
         .await
         .map_err(map_bot_use_case_error)?;
@@ -396,7 +399,12 @@ async fn handle_bot_connect(
 
     state
         .bot_connections
-        .connect(result.bot_uuid.clone(), tx.clone())
+        .connect_with_protocol(
+            result.bot_uuid.clone(),
+            tx.clone(),
+            requested_version,
+            client_kind.clone(),
+        )
         .await;
 
     // Send response with env for child processes
@@ -411,6 +419,10 @@ async fn handle_bot_connect(
         protocol_version: requested_version,
         min_supported_version: BCS_MIN_SUPPORTED_VERSION,
         deprecation: None,
+        capabilities: Some(BotConnectCapabilities::for_connection(
+            requested_version,
+            client_kind.as_deref(),
+        )),
         env: Some(env_map),
     };
     send_ok(tx, req_id, serde_json::to_value(response)?).await?;
@@ -870,51 +882,108 @@ async fn handle_event_frame(
 
     log_bot_event(&bot_id, event);
 
-    // Extract run_id and determine event type
-    let (run_id, bcs_group_id, is_final) = match event.event.as_str() {
-        "agent" => match parse_agent_event(&event.payload) {
-            Some((run_id, group_id, stream)) => {
-                let is_final = matches!(stream, AgentStream::Error);
-                (run_id, group_id, is_final)
+    let connection = state
+        .bot_connections
+        .protocol(&bot_id)
+        .await
+        .unwrap_or(crate::bot::BotConnectionProtocol {
+            protocol_version: 1,
+            client_kind: None,
+        });
+    let is_v3 = connection.protocol_version >= 3;
+    let (
+        run_id,
+        bcs_group_id,
+        event_type,
+        mut event_payload,
+        event_state,
+        is_final,
+        v3_session_id,
+        v3_seq,
+    ) = if is_v3 {
+        normalize_v3_event(event)?
+    } else {
+        let Some(normalized) = normalize_legacy_event(event) else {
+            match event.event.as_str() {
+                "agent" => warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    bot_id = %bot_id,
+                    "Failed to parse agent event payload"
+                ),
+                "chat.event" => warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    bot_id = %bot_id,
+                    "Failed to parse chat event payload"
+                ),
+                _ => warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
+                    bot_id = %bot_id,
+                    event = %event.event,
+                    "Unknown event type"
+                ),
             }
-            None => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Failed to parse agent event payload");
-                return Ok(());
-            }
-        },
-        "chat.event" => match parse_chat_event(&event.payload) {
-            Some((run_id, group_id, state)) => {
-                let is_final = matches!(
-                    state,
-                    ChatEventState::Final | ChatEventState::Aborted | ChatEventState::Error
-                );
-                (run_id, group_id, is_final)
-            }
-            None => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Failed to parse chat event payload");
-                return Ok(());
-            }
-        },
-        _ => {
-            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, event = %event.event, "Unknown event type");
             return Ok(());
+        };
+        normalized
+    };
+
+    // This key is internal-only. Legacy clients cannot opt themselves into
+    // task intent by smuggling it in their event payload.
+    let task_intent_enabled = is_v3 && connection.client_kind.as_deref() == Some("native_mcp");
+    if !task_intent_enabled {
+        if let Some(object) = event_payload.as_object_mut() {
+            object.remove(TASK_INTENT_ELIGIBLE_KEY);
         }
-    };
+    }
 
-    let chat_event_state = match event.event.as_str() {
-        "chat.event" => match parse_chat_event(&event.payload) {
-            Some((_, _, state)) => Some(state),
-            None => None,
-        },
-        _ => None,
+    let (real_group_id, mut bcs_session_id) = if is_v3 {
+        let session_id = v3_session_id
+            .as_deref()
+            .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 event missing sessionId".into()))?;
+        let seq = v3_seq
+            .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 event missing seq".into()))?;
+        if event.seq.is_some_and(|outer| outer != seq) {
+            return Err(BotWsDispatchError::InvalidFrameFormat(
+                "V3 frame seq does not match payload seq".into(),
+            ));
+        }
+        let context = state
+            .bot_run_context
+            .get_context(&run_id)
+            .await
+            .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 event runId is unknown".into()))?;
+        if context.bot_id != bot_id || context.bcs_session_id.as_deref() != Some(session_id) {
+            return Err(BotWsDispatchError::InvalidFrameFormat(
+                "V3 event run/session identity mismatch".into(),
+            ));
+        }
+        if context.terminal || context.deadline_ms <= bcs_protocol::now_ms() {
+            return Err(BotWsDispatchError::InvalidFrameFormat(
+                "V3 event run is terminal or expired".into(),
+            ));
+        }
+        if !state
+            .bot_connections
+            .accept_run_event_seq(&bot_id, &run_id, seq)
+            .await
+        {
+            return Err(BotWsDispatchError::InvalidFrameFormat(
+                "V3 event seq is duplicate or regressed".into(),
+            ));
+        }
+        (context.group_id, Some(session_id.to_string()))
+    } else {
+        let explicit_session_id = event_payload.get("bcs_session_id").and_then(|v| v.as_str());
+        resolve_bot_event_scope(
+            state,
+            &bot_id,
+            &run_id,
+            &bcs_group_id,
+            explicit_session_id,
+        )
+        .await
     };
-
-    let event_payload = event.payload.clone().unwrap_or(Value::Null);
-    let event_state = chat_event_state.unwrap_or(ChatEventState::Delta);
-    let explicit_session_id = event_payload.get("bcs_session_id").and_then(|v| v.as_str());
-    let (real_group_id, mut bcs_session_id) =
-        resolve_bot_event_scope(state, &bot_id, &run_id, &bcs_group_id, explicit_session_id).await;
-    if bcs_session_id.is_none() {
+    if !is_v3 && bcs_session_id.is_none() {
         if let Some(mapped_session_id) = state.run_channels.session_for_run(&run_id).await {
             let restored_session_id = if mapped_session_id.contains(':') {
                 Some(mapped_session_id)
@@ -934,7 +1003,7 @@ async fn handle_event_frame(
             }
         }
     }
-    if bcs_session_id.is_none() {
+    if !is_v3 && bcs_session_id.is_none() {
         if let Some(fallback_session_id) = legacy_default_session_id(&real_group_id) {
             info!(
                 bot_id = %bot_id,
@@ -960,11 +1029,11 @@ async fn handle_event_frame(
         let terminal = matches!(
             event_state,
             ChatEventState::Final | ChatEventState::Aborted | ChatEventState::Error
-        ) || matches!(event.event.as_str(), "agent") && is_final;
+        ) || event_type == "agent" && is_final;
         info!(
             bot_id = %bot_id,
             run_id = %run_id,
-            event_type = %event.event,
+            event_type = %event_type,
             response_span_created = false,
             response_span_skip_reason = "collaboration_runtime",
             "Bot response tracing skipped"
@@ -974,7 +1043,7 @@ async fn handle_event_frame(
             .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
                 bot_id,
                 run_id: run_id.clone(),
-                event_type: event.event.clone(),
+                event_type: event_type.clone(),
                 event_payload: event_payload.clone(),
                 state: to_app_chat_event_state(&event_state),
                 bcs_session_id: bcs_session_id.clone(),
@@ -989,7 +1058,7 @@ async fn handle_event_frame(
         return Ok(());
     }
 
-    let trace_parent = if event.event == "chat.event" {
+    let trace_parent = if event_type == "chat.event" {
         state.run_channels.trace_parent(&run_id).await
     } else {
         None
@@ -998,7 +1067,7 @@ async fn handle_event_frame(
         info!(
             bot_id = %bot_id,
             run_id = %run_id,
-            event_type = %event.event,
+            event_type = %event_type,
             parent_trace_id = %trace_parent.trace_id(),
             parent_span_id = %trace_parent.span_id(),
             response_span_created = true,
@@ -1017,7 +1086,7 @@ async fn handle_event_frame(
                 &run_id,
                 &real_group_id,
                 bcs_session_id.as_deref(),
-                event,
+                &event_type,
                 &event_payload,
                 &event_state,
                 is_final,
@@ -1029,11 +1098,11 @@ async fn handle_event_frame(
         .instrument(span)
         .await?;
     } else {
-        if event.event == "chat.event" {
+        if event_type == "chat.event" {
             info!(
                 bot_id = %bot_id,
                 run_id = %run_id,
-                event_type = %event.event,
+                event_type = %event_type,
                 response_span_created = false,
                 response_span_skip_reason = "missing_run_trace_context",
                 "Bot response tracing skipped"
@@ -1045,7 +1114,7 @@ async fn handle_event_frame(
             &run_id,
             &real_group_id,
             bcs_session_id.as_deref(),
-            event,
+            &event_type,
             &event_payload,
             &event_state,
             is_final,
@@ -1197,7 +1266,7 @@ async fn handle_default_group_event(
     run_id: &str,
     bcs_group_id: &str,
     bcs_session_id: Option<&str>,
-    event: &EventFrame,
+    event_type: &str,
     event_payload: &Value,
     event_state: &ChatEventState,
     is_final: bool,
@@ -1207,7 +1276,7 @@ async fn handle_default_group_event(
         run_id = %run_id,
         bcs_group_id = %bcs_group_id,
         bcs_session_id = ?bcs_session_id,
-        event_type = %event.event,
+        event_type = %event_type,
         event_state = ?event_state,
         is_final = is_final,
         ">>> dispatch_bot_event entry: bot reply received"
@@ -1219,7 +1288,7 @@ async fn handle_default_group_event(
             bot_id: bot_id.to_string(),
             run_id: run_id.to_string(),
             group_id: bcs_group_id.to_string(),
-            event_type: event.event.clone(),
+            event_type: event_type.to_string(),
             event_payload: event_payload.clone(),
             state: to_app_chat_event_state(event_state),
             bcs_session_id: bcs_session_id.map(str::to_string),
@@ -1232,7 +1301,7 @@ async fn handle_default_group_event(
             bot_id = %bot_id,
             run_id = %run_id,
             bcs_group_id = %bcs_group_id,
-            event = %event.event,
+            event = %event_type,
             "Run completed, channel unregistered"
         );
     }
@@ -1580,6 +1649,43 @@ fn parse_chat_event(payload: &Option<Value>) -> Option<(String, String, ChatEven
     let payload = payload.as_ref()?;
     let chat_event: ChatEventPayload = serde_json::from_value(payload.clone()).ok()?;
     Some((chat_event.run_id, chat_event.bcs_group_id, chat_event.state))
+}
+
+fn normalize_legacy_event(event: &EventFrame) -> Option<NormalizedBotEvent> {
+    match event.event.as_str() {
+        "agent" => {
+            let (run_id, group_id, stream) = parse_agent_event(&event.payload)?;
+            let is_final = matches!(stream, AgentStream::Error);
+            Some((
+                run_id,
+                group_id,
+                "agent".to_string(),
+                event.payload.clone().unwrap_or(Value::Null),
+                ChatEventState::Delta,
+                is_final,
+                None,
+                None,
+            ))
+        }
+        "chat.event" => {
+            let (run_id, group_id, state) = parse_chat_event(&event.payload)?;
+            let is_final = matches!(
+                state,
+                ChatEventState::Final | ChatEventState::Aborted | ChatEventState::Error
+            );
+            Some((
+                run_id,
+                group_id,
+                "chat.event".to_string(),
+                event.payload.clone().unwrap_or(Value::Null),
+                state,
+                is_final,
+                None,
+                None,
+            ))
+        }
+        _ => None,
+    }
 }
 
 /// Send a success response frame.

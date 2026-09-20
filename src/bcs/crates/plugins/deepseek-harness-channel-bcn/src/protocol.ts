@@ -1,4 +1,4 @@
-export const BCN_PROTOCOL_VERSION = 2;
+export const BCN_PROTOCOL_VERSION = 3;
 export const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 
 export interface RequestFrame {
@@ -51,6 +51,11 @@ export interface BotConnectResponse {
   bot_uuid: string;
   protocol_version: number;
   min_supported_version?: number;
+  capabilities?: {
+    unified_run_events: boolean;
+    tool_result_task_intent: boolean;
+    canonical_session_id: boolean;
+  };
   env?: Record<string, string>;
 }
 

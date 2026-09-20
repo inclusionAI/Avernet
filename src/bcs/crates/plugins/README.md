@@ -19,7 +19,7 @@ adapters that connect external Bot runtimes to BCS over the BCN protocol.
 - `openclaw-channel-bcn`: OpenClaw channel plugin package for connecting
   OpenClaw bot runtimes to BCS.
 - `deepseek-harness-channel-bcn`: DeepSeek Harness Cordis bundle for connecting
-  DSH agents to BCS with Bot WebSocket V2.
+  DSH agents to BCS with Bot WebSocket V3 canonical Run Events.
 
 ## Dependency Rule
 

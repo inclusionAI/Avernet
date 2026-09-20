@@ -18,7 +18,7 @@ pub enum ToolPhase {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolData {
     pub phase: ToolPhase,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "toolName", skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(rename = "toolCallId", default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
@@ -31,7 +31,7 @@ pub struct ToolData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     // content fields kept as Value (zero-loss, forward-compatible)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "arguments", skip_serializing_if = "Option::is_none")]
     pub args: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
@@ -41,7 +41,11 @@ pub struct ToolData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThinkingData {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "deltaText",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub delta: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,

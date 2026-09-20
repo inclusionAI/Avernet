@@ -15,7 +15,8 @@ use bcs_service_api::{
     DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
 };
 use bcs_protocol::stream::{
-    ProviderTextEventState, ProviderTextResponseMode, apply_provider_event_text,
+    ProviderTextEventState, ProviderTextResponseMode, TASK_INTENT_ELIGIBLE_KEY,
+    apply_provider_event_text,
 };
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
@@ -371,6 +372,7 @@ impl ProviderBotEventService for ProviderBotEvents {
         if ingest_event_type == "chat.event" {
             normalize_chat_error_payload(&mut ingest_payload);
         }
+        stamp_provider_task_intent_candidate(&ingest_event_type, &mut ingest_payload);
 
         if let Some(runtime) = self.collaboration_runtime.as_ref()
             && runtime.lookup_delivery_correlation(&command.run_id).await
@@ -681,6 +683,23 @@ impl ProviderBotEventService for ProviderBotEvents {
     async fn cleanup_expired(&self, now_ms: u64) -> usize {
         let mut runs = self.state_machine_visible_text.lock().await;
         cleanup_expired_visible_text_entries(&mut runs, now_ms)
+    }
+}
+
+fn stamp_provider_task_intent_candidate(event_type: &str, payload: &mut Value) {
+    let Some(object) = payload.as_object_mut() else {
+        return;
+    };
+    object.remove(TASK_INTENT_ELIGIBLE_KEY);
+    let eligible = event_type == "agent"
+        && object.get("stream").and_then(Value::as_str) == Some("tool")
+        && object
+            .get("data")
+            .and_then(|data| data.get("phase"))
+            .and_then(Value::as_str)
+            == Some("result");
+    if eligible {
+        object.insert(TASK_INTENT_ELIGIBLE_KEY.to_string(), Value::Bool(true));
     }
 }
 
