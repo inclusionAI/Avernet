@@ -25674,7 +25674,7 @@
             "name": "min_score",
             "required": false,
             "schema": {
-              "default": 0.1,
+              "default": 0.01,
               "description": "Minimum recommendation score.",
               "maximum": 1,
               "minimum": 0,
@@ -25697,6 +25697,42 @@
               ],
               "title": "Runtime State",
               "type": "string"
+            }
+          },
+          {
+            "description": "Explicit BCS viewer actor type: human or bot.",
+            "in": "query",
+            "name": "viewer_actor_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Explicit BCS viewer actor type: human or bot.",
+              "title": "Viewer Actor Type"
+            }
+          },
+          {
+            "description": "Explicit BCS viewer actor id; requires viewer_actor_type.",
+            "in": "query",
+            "name": "viewer_actor_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Explicit BCS viewer actor id; requires viewer_actor_type.",
+              "title": "Viewer Actor Id"
             }
           }
         ],
