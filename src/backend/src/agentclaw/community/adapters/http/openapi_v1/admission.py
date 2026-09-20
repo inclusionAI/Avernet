@@ -140,6 +140,17 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/bots/{bot_id}/config-manifest/last-apply",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # BBS content writes may act on a shared bot. The Bot in the path is the
+    # forum author, while the caller may be a collaborator or an authorized
+    # application; the addressed-owner grant therefore governs machine callers.
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/bbs/topics",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/bbs/topics/{topic_id}/replies",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # W9's CLI tools sit beside the config manifest and for the same reason:
     # collaborator-scoped (MEMBER to read, ADMIN to write), so the owner arrives
     # on the wire and the grant is checked against that addressed owner.

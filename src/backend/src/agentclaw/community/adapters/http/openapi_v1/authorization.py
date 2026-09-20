@@ -265,6 +265,10 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
     ("GET", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/topics"):
+        Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/bbs/topics/{topic_id}/replies"):
+        Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/connection"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.engine_runtime.connection"),
     ("GET", "/openapi/v1/bots/{bot_id}/containers"): Check(PermissionLevel.MEMBER),

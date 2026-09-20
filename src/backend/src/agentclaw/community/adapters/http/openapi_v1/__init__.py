@@ -220,6 +220,7 @@ from .mcp import router as mcp_router
 from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
+from .bbs import router as bbs_router
 from .bot_public import router as bot_public_router
 from .resources import router as resources_router
 from .render_screens import router as render_screens_router
@@ -356,6 +357,10 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
+    # BBS content writes are authored by the addressed bot. A collaborator or
+    # authorized application may act on that bot, but it is the bot, not the
+    # human principal, that is recorded as the forum author.
+    bbs_router,
     # The config manifest is collaborator-scoped (MEMBER to read, ADMIN to
     # write), so it may address a shared bot and takes the addressed-owner
     # grant rather than the own-bot one.
