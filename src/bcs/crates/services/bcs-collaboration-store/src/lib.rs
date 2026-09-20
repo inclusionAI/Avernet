@@ -3637,24 +3637,28 @@ fn build_guarded_node_runs_inserts(
     run_id: &str,
     nodes: &[StateMachineNodeRun],
 ) -> Vec<DbTransactionStep> {
-    nodes
-        .iter()
-        .map(|node| {
-            let sql = "INSERT INTO bcs_state_machine_node_runs \
-                       (env, run_id, node_id, status, attempt, node_timeout_ms, \
-                        timeout_deadline_ms, max_attempts, assignee_bot_id, outcome, responded_by, \
-                        delivery_request_id, bot_delivery_run_id, artifact_text, error_message, \
-                        started_at_ms, completed_at_ms, record_status) \
-                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active' \
-                       WHERE EXISTS ( \
-                         SELECT 1 FROM bcs_state_machine_runs \
-                         WHERE env = ? AND run_id = ? AND record_status = 'active' \
-                       )";
-            let mut params = node_insert_params(env, run_id, node);
-            params.extend([DbValue::from(env), DbValue::from(run_id)]);
-            DbTransactionStep::Execute(DbStatement::with_params(sql, params))
-        })
-        .collect()
+    // 48 * 17 + 2 bind parameters stays below SQLite's legacy 999 limit.
+    // Both dialects accept this derived UNION ALL table; the outer guard is
+    // evaluated once per chunk inside the existing Session-locked transaction.
+    const COLUMNS: &str = "env, run_id, node_id, status, attempt, node_timeout_ms, \
+        timeout_deadline_ms, max_attempts, assignee_bot_id, outcome, responded_by, \
+        delivery_request_id, bot_delivery_run_id, artifact_text, error_message, \
+        started_at_ms, completed_at_ms, record_status";
+    let first_row = COLUMNS.split(", ").enumerate().map(|(index, column)| {
+        format!("{} AS {}", if index == 17 { "'active'" } else { "?" }, column)
+    }).collect::<Vec<_>>().join(", ");
+    nodes.chunks(48).map(|chunk| {
+        let mut rows = vec![format!("SELECT {first_row}")];
+        rows.extend((1..chunk.len()).map(|_| "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active'".into()));
+        let sql = format!("INSERT INTO bcs_state_machine_node_runs ({COLUMNS}) \
+            SELECT batch.* FROM ({}) AS batch WHERE EXISTS ( \
+                SELECT 1 FROM bcs_state_machine_runs \
+                WHERE env = ? AND run_id = ? AND record_status = 'active')", rows.join(" UNION ALL "));
+        let mut params = Vec::with_capacity(chunk.len() * 17 + 2);
+        for node in chunk { params.extend(node_insert_params(env, run_id, node)); }
+        params.extend([DbValue::from(env), DbValue::from(run_id)]);
+        DbTransactionStep::Execute(DbStatement::with_params(sql, params))
+    }).collect()
 }
 
 fn build_node_runs_insert(

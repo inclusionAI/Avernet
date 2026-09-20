@@ -1,13 +1,14 @@
 //! State-machine node timeout scanner.
 //!
 //! The runtime owns timeout semantics and CAS protection; this module only
-//! schedules periodic scans and drains full batches to avoid backlog growth.
+//! schedules bounded batches with fault backoff.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use bcs_service_api::{CollaborationRuntimeService, LeaderElectionPort};
 use tracing::{debug, info, warn};
+use crate::recovery_backoff::RecoveryBackoff;
 
 pub const DEFAULT_SCAN_INTERVAL: Duration = Duration::from_millis(1_000);
 pub const DEFAULT_BATCH_SIZE: usize = 100;
@@ -41,33 +42,10 @@ pub async fn scan_once(
     runtime: &Arc<dyn CollaborationRuntimeService>,
     batch_size: usize,
     timeout_grace_ms: u64,
-) -> usize {
-    if batch_size == 0 {
-        return 0;
-    }
-    let mut total = 0usize;
-    loop {
-        match runtime
-            .process_expired_node_timeouts(batch_size, timeout_grace_ms)
-            .await
-        {
-            Ok(processed) => {
-                total += processed;
-                if processed < batch_size {
-                    break;
-                }
-            }
-            Err(error) => {
-                warn!(
-                    target: "state_machine_timeout_scanner",
-                    event = "scanner.scan_failed",
-                    error = %error,
-                );
-                break;
-            }
-        }
-    }
-    total
+) -> Result<usize, bcs_service_api::CollaborationRuntimeError> {
+    // One batch per tick: a backlog must not monopolize the shared DB pool.
+    if batch_size == 0 { return Ok(0); }
+    runtime.process_expired_node_timeouts(batch_size, timeout_grace_ms).await
 }
 
 pub fn spawn(
@@ -85,14 +63,23 @@ pub fn spawn(
             batch_size = batch_size,
             timeout_grace_ms = timeout_grace_ms,
         );
+        let mut backoff = RecoveryBackoff::new(interval);
         let mut ticker = tokio::time::interval(interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            if !is_leader_for_tick(leader_election.as_ref()).await {
+            if !backoff.ready() || !is_leader_for_tick(leader_election.as_ref()).await {
                 continue;
             }
-            let processed = scan_once(&runtime, batch_size, timeout_grace_ms).await;
+            let result = scan_once(&runtime, batch_size, timeout_grace_ms).await;
+            backoff.record(result.is_err());
+            let processed = match result {
+                Ok(processed) => processed,
+                Err(error) => {
+                    warn!(target: "state_machine_timeout_scanner", error = %error, "timeout recovery batch failed");
+                    continue;
+                }
+            };
             if processed > 0 {
                 debug!(
                     target: "state_machine_timeout_scanner",

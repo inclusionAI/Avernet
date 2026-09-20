@@ -4508,6 +4508,13 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 first_error = %error,
                 "state-machine timeout scanner skipped unprocessable candidates"
             );
+            if processed == 0 {
+                // An entirely failed batch is not an idle scan. Let the
+                // scheduler back off, while partial progress stays available.
+                return Err(CollaborationRuntimeError::Internal(ServiceError::InternalError(
+                    format!("timeout recovery made no progress; {skipped} candidates failed: {error}"),
+                )));
+            }
         }
         Ok(processed)
     }

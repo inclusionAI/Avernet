@@ -308,6 +308,26 @@ same task more than once.
 | `chat.abort` | Body `id` |
 | `/bot/events` | `X-BCN-Event-Id`, which should remain unchanged when the Provider retries the same event |
 
+For state-machine nodes, body `id` is the saved `delivery_request_id` for one
+execution node attempt. BCS persists a send marker before calling the Provider.
+If the process stops before persisting the delivery result and the checkpoint
+remains `Delivering`, recovery treats that attempt as unknown. It does not resend
+the attempt, even when its lease expires; it waits for a callback or the saved
+node timeout policy. A request proven unsent can be resumed with its original ID.
+A configured node retry after timeout creates a new attempt and a new ID.
+
+If the running process receives a delivery error or rejection, it records the
+failed delivery and fails the node and Run, provided the attempt is still active.
+This includes a transport error caused by a lost acknowledgement: the Provider
+may already have accepted the request, but BCS does not wait for the node timeout
+on this path. A failed Run is therefore not proof that no external action took
+place. These behaviors do not provide an external exactly-once guarantee.
+
+Provider deduplication by `id` protects the same request, not a new node attempt,
+Loop iteration or rerun. For payments, publishing or other side effects, the Bot
+and Provider must also enforce a stable business operation key at the side-effect
+boundary. Configure node retries only when repeating that operation is safe.
+
 The Provider should maintain session context by `(provider_bot_ref,
 session_id)`. `chat.inject` must write context but must not trigger bot
 reasoning.

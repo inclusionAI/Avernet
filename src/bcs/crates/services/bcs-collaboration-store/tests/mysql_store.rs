@@ -37,6 +37,9 @@ mod bootstrap_migrations;
 #[path = "support/real_mysql_fixed_loop.rs"]
 mod real_mysql_fixed_loop;
 
+#[path = "support/batched_nodes.rs"]
+mod batched_nodes;
+
 #[path = "support/failure_contract.rs"]
 mod failure_contract;
 

@@ -89,6 +89,7 @@ async fn exercise(db: Arc<MysqlDbPlugin>) -> Result<(), Box<dyn std::error::Erro
     service_rerun_reactivates_once(&store, db.as_ref()).await?;
     snapshot_write_failure_is_visible(&store, db.as_ref()).await?;
     rerun_snapshot_failure_rolls_back_activation(&store, db.as_ref()).await?;
+    batched_nodes::contract(db.as_ref(), &store).await?;
     Ok(())
 }
 

@@ -19,7 +19,9 @@
   saved startup/dispatch/progression (including HumanInput request recovery), terminal Session completion, terminal IM and terminal checkpoint cleanup pages with the existing leader
   election, each bounded to 32 candidates per tick with independent cursors.
   Demotion cancels all four active pages and resets their cursors; shutdown aborts
-  the task. Opening/dispatch checkpoints and Node failure/Judge state require MySQL 028 / SQLite 029 before the
+  the task and waits for its exit before managed delivery and service lifecycles
+  shut down. The final server cleanup uses the same idempotent stop operation.
+  Opening/dispatch checkpoints and Node failure/Judge state require MySQL 028 / SQLite 029 before the
   new runtime starts. Session and terminal IM scans use the MySQL 028 / SQLite 029 cursor indexes.
   SQLite 029 contains the complete Loop and checkpoint schema and is the final
   migration in this PR. It supports fresh databases and upgrades from 028;

@@ -891,6 +891,9 @@ pub trait CollaborationRuntimeService: Send + Sync {
         ))
     }
 
+    /// Process one bounded candidate batch. Partial progress returns its count;
+    /// a batch with candidate errors and no progress returns an error so the
+    /// scheduler can back off instead of treating a failure as an idle scan.
     async fn process_expired_node_timeouts(
         &self,
         limit: usize,

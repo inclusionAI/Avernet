@@ -2618,6 +2618,9 @@ async fn timeout_scanner_skips_invalid_candidate_and_processes_later_run() {
         .expect("read invalid run")
         .expect("invalid run");
     assert_eq!(poison.status, StateMachineRunStatus::Running);
+    assert!(runtime.process_expired_node_timeouts(10, 0).await
+        .expect_err("remaining poison candidate must trigger scanner backoff")
+        .to_string().contains("timeout recovery made no progress"));
     let valid = StateMachineRunRepoPort::get_run(&*store, &valid.view.run.run_id)
         .await
         .expect("read valid run")

@@ -42,13 +42,23 @@ async fn assert_queue_continues(skipped_status: HumanInputRequestStatus) -> Test
         &head.run_id, &head.node_id, HumanInputRequestStatus::Cancelled,
     ).await?;
 
-    // Re-delivery of a queued event is a normal entry point. No recovery scan
-    // or subsequent inbound message is required to reach the valid request.
+    // A foreground call is bounded even when every preceding request fails.
     let outcome = SessionChannelOutboundPort::publish_human_input_ready(
         &harness.service,
         human_input_ready_event(&format!("queued-{SKIPPED}"), HumanInputNotificationMode::DirectAssignee),
     ).await?;
     assert_eq!(outcome, SessionChannelDeliveryOutcome::Delivered);
+    assert!(harness.human_input_requests.count_queued(&head.reply_scope_key).await? >= 34);
+    assert!(harness.human_input_requests.find_active_by_scope(&head.reply_scope_key).await?.is_none());
+    assert!(harness.delivery.events.lock().await.len() <= 32);
+    // The normal recovery entry point must eventually reach the valid request
+    // without another user message, including across more than two batches.
+    for _ in 0..SKIPPED + 1 {
+        SessionChannelOutboundPort::recover_human_input_requests(
+            &harness.service, &format!("run-queued-{SKIPPED}"), &format!("session-queued-{SKIPPED}"),
+        ).await?;
+        if harness.human_input_requests.find_active_by_scope(&head.reply_scope_key).await?.is_some() { break; }
+    }
     let active = harness.human_input_requests.find_active_by_scope(&head.reply_scope_key).await?.unwrap();
     assert_eq!(active.request_id, format!("queued-{SKIPPED}"));
     assert_eq!(active.delivery_attempts, 1);

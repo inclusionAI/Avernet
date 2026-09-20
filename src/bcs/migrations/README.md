@@ -135,6 +135,35 @@ configured datasource after an interactive `y/N` confirmation. Pass `-y` or
 The baseline SQL creates `bcs_schema_migrations` and records version `1` after
 all schema objects are created.
 
+### Interrupted MySQL DDL
+
+MySQL 8 InnoDB atomic DDL applies to one supported statement, not a whole
+migration file. DDL implicitly commits, so wrapping multiple ALTER/CREATE
+statements in a transaction cannot make the migration all-or-nothing. See the
+[MySQL atomic DDL documentation](https://dev.mysql.com/doc/refman/8.0/en/atomic-ddl.html).
+For example, 028 has five DDL statements: earlier statements can remain applied
+when a later statement fails. The runner reports the failing statement number
+and records the migration only after every statement succeeds. It does not
+automatically resume a partially applied MySQL migration. `--check-db` compares
+migration records, not the physical schema.
+
+Before applying DDL to retained data, take a recoverable backup and rehearse on
+a representative database. Index creation and ALTER may require metadata locks
+and substantial time or disk space; online DDL does not eliminate those costs.
+Complete the migration before deploying code that requires the new schema.
+
+If an apply is interrupted, stop the rollout and inspect `SHOW CREATE TABLE`,
+`SHOW INDEX` and `bcs_schema_migrations` against the unchanged migration file.
+Include the failing statement in this inspection: a lost connection does not
+prove that the server rolled it back. Do not blindly replay the file or ignore
+duplicate-column/index errors. Use the reviewed DBA/deployment process to apply
+only the missing changes, checking column definitions and index order as well
+as object names. Only after the entire target schema is verified may that
+process insert a missing success record using the original version, name,
+dialect and checksum reported by `--check-db`, then rerun `--check-db`.
+Do not rewrite existing records or drop applied objects merely to make replay
+pass. If completion is unsafe, use the planned backup recovery procedure.
+
 ## Baseline column ownership
 
 The explicitly requested 001 cleanup removes these duplicate definitions from

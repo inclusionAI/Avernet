@@ -5402,7 +5402,7 @@ impl BcsServer {
 
         self.initialize_lifecycle().await?;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
-        let _state_machine_progression_handle = self.spawn_state_machine_progression_scanner();
+        let state_machine_progression_handle = Arc::new(Mutex::new(self.spawn_state_machine_progression_scanner()));
         let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         // Spawn async chat-run TTL cleanup loop.
@@ -5472,6 +5472,9 @@ impl BcsServer {
         let final_metrics = self.state.metrics.clone();
         let shutdown_message_flow = self.state.services.message_flow.clone();
         let final_message_flow = self.state.services.message_flow.clone();
+        // Axum spawns the signal future; it must not keep recovery alive if
+        // the server future itself is cancelled before receiving a signal.
+        let shutdown_progression = Arc::downgrade(&state_machine_progression_handle);
 
         let serve_result = axum::serve(
             listener,
@@ -5492,6 +5495,10 @@ impl BcsServer {
 
                 info!("Shutdown signal received, gracefully shutting down...");
 
+                if let Some(progression) = shutdown_progression.upgrade() {
+                    progression.lock().await.shutdown().await;
+                }
+
                 if let Err(error) = shutdown_message_flow.shutdown_managed_delivery().await {
                     warn!(%error, "message delivery shutdown failed");
                 }
@@ -5506,6 +5513,7 @@ impl BcsServer {
             .await
             .map_err(|e| crate::BcsError::InvalidConfig(e.to_string()));
 
+        state_machine_progression_handle.lock().await.shutdown().await;
         if let Err(error) = final_message_flow.shutdown_managed_delivery().await {
             warn!(%error, "message delivery final shutdown failed");
         }
@@ -5547,13 +5555,14 @@ impl BcsServer {
 
         let handle = tokio::spawn(async move {
             // Keep recovery alive for the server lifetime, including random-port tests.
-            let _state_machine_progression_handle = state_machine_progression_handle;
+            let mut state_machine_progression_handle = state_machine_progression_handle;
             let result = axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
             )
             .await
             .map_err(|e| crate::BcsError::InvalidConfig(e.to_string()));
+            state_machine_progression_handle.shutdown().await;
             if let Err(error) = lifecycle.lock().await.shutdown_all().await {
                 warn!(error = %error, "service lifecycle shutdown failed");
             }

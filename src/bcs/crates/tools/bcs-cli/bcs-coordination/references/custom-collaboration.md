@@ -173,6 +173,11 @@ bcs-cli --no-json collaborate query --run "$run_id" --node "$execution_node_id"
 iteration 从 1 开始，retry attempt 从 0 开始；相同 logical node 的不同 iteration 是不同节点。
 Graph 的 break/exhausted 说明不表示已经选路，实际选择以 source Node 的 outcome 为准。
 
+服务重启后的恢复不承诺外部 Bot 操作 exactly-once：checkpoint 仍为 `Delivering` 的 attempt 不会
+自动重发，而是等待回调或保存的超时策略；节点 retry 会使用新的 attempt 和 delivery request ID。
+Loop 下次执行及 rerun 也不是同一投递。涉及发布、付款等副作用时，必须在 Bot/Provider 中按业务
+操作键保证幂等，不能只依赖 BCS 的 request ID。详见 [Provider 投递语义](../../../../../docs/bot-provider-integration.zh-CN.md#幂等和-session)。
+
 人工用户使用现有认证/网关身份查询 `--pending`，阅读 LoopContext 后向其中的节点回复：
 
 ```bash
