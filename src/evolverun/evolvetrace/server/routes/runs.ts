@@ -642,12 +642,30 @@ export function createRunsRouter(
       // Build BaaS message — send the original command to the original bot
       const message = `🔄 [重跑] ${operatorName}(${operatorId}) 重新触发工作流\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📁 工作流: ${run.workflow_id}${run.workflow_title ? ` (${run.workflow_title})` : ""}\n📎 原始运行: ${flowId}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n执行命令:\n${command}`;
 
+      // Extract lifecycle_stage from credentials_json (STAGE field) so rerun
+      // targets the same bot lifecycle stage (draft / verify / online) as the
+      // original run. Without this, BaaS defaults to "online" and may fail with
+      // "Bot binding not found" for draft/verify bots.
+      let lifecycleStage: "draft" | "verify" | "online" | undefined;
+      if (run.credentials_json) {
+        try {
+          const creds = JSON.parse(run.credentials_json) as Record<string, unknown>;
+          const stage = (creds.STAGE as string | undefined)?.trim();
+          if (stage === "draft" || stage === "verify" || stage === "online") {
+            lifecycleStage = stage;
+          }
+        } catch {
+          // credentials_json is not valid JSON — fall through, keep undefined
+        }
+      }
+
       // Send via BaaS — use a fresh session key since this is a new invocation
       const result = await sendIntervention({
         botId: run.origin_bot_id,
         sessionKey: `rerun:${run.workflow_id}:${Date.now()}`,
         sessionId: null,
         message,
+        lifecycleStage,
       });
 
       if (!result.ok) {
@@ -677,6 +695,7 @@ export function createRunsRouter(
               originalFlowId: flowId,
               command,
               originBotId: run.origin_bot_id,
+              lifecycleStage: lifecycleStage ?? null,
               baasMessageId: result.messageId,
               baasSessionId: result.sessionId,
             },
