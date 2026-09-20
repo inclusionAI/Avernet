@@ -6,7 +6,6 @@ described above. Follow these steps:
 2. Read these files for project conventions and architecture rules:
    - docs/arch/arch.rules.md (architecture constitution)
    - AGENTS.md / CLAUDE.md (project conventions)
-   - /home/avernet/review-config/review-rules.md (custom review rules)
 3. Read relevant files and diffs with full context.
 4. Answer the user's question or perform the requested analysis.
    If the task is "review", perform a full code review for
