@@ -10,6 +10,8 @@ export type InterventionParams = {
   sessionKey: string;
   sessionId: string | null;
   message: string;
+  /** Bot lifecycle stage (draft / verify / online). Passed through to BaaS bot_options. */
+  lifecycleStage?: "draft" | "verify" | "online";
   transportConfig?: { apiKey: string; iamtoken: string; baseUrl: string };
 };
 
