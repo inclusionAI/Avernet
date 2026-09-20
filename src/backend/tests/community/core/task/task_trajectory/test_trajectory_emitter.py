@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
@@ -34,17 +34,20 @@ from agentclaw.community.core.task.task_context.task_trajectory.payloads import 
     emit_trajectory_event,
     build_trajectory_event_record,
 )
+from agentclaw.community.core.task.task_context.task_trajectory.time_utils import (
+    epoch_ms_to_storage_datetime,
+)
 
 
 NOW_MS = 1_700_000_000_123  # arbitrary fixed epoch ms for deterministic asserts
 
 
 def _now_from_ms(now_ms: int = NOW_MS) -> datetime:
-    """Mirror of the emitter's int-ms→datetime conversion (naive UTC, matching
-    the existing trajectory repository's ``datetime.utcnow()`` convention +
-    the naive ``DateTime`` ORM columns). Used wherever a test asserts
+    """Mirror the emitter's int-ms→naive-Beijing storage conversion.
+
+    Used wherever a test asserts
     ``gmt_create``/``gmt_modified`` produced from ``now_ms``."""
-    return datetime.fromtimestamp(now_ms / 1000.0, tz=timezone.utc).replace(tzinfo=None)
+    return epoch_ms_to_storage_datetime(now_ms)
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from datetime import datetime, timezone
 
 import pytest
 
@@ -41,6 +40,10 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
     TrajectoryAnalysis,
     TrajectoryActionType,
     TrajectoryEvent,
+)
+from agentclaw.community.core.task.task_context.task_trajectory.time_utils import (
+    epoch_ms_to_storage_datetime,
+    storage_now,
 )
 from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import (
     TaskTrajectoryService,
@@ -127,7 +130,7 @@ class _FakeRepo:
 
     def upsert_head(self, task_id: str, *, analysis: str | None = None) -> TaskTrajectoryRecord:
         if self._head is None:
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = storage_now()
             self._head = TaskTrajectoryRecord(
                 id=1, task_id=task_id, analysis=analysis,
                 gmt_create=now, gmt_modified=now,
@@ -382,8 +385,7 @@ def _make_record(
     ext_info: str | None = None,
     rec_id: int = 1,
 ) -> TrajectoryEventRecord:
-    from datetime import timezone
-    dt = datetime.fromtimestamp(gmt_create_ms / 1000, tz=timezone.utc).replace(tzinfo=None)
+    dt = epoch_ms_to_storage_datetime(gmt_create_ms)
     return TrajectoryEventRecord(
         id=rec_id,
         task_id=task_id,

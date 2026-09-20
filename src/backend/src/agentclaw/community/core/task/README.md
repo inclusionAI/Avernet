@@ -31,6 +31,7 @@ core/task/
 │   └── task_trajectory/          #   任务轨迹采集旁路子模块(零侵入正向驱动;spec 2026-09-16)
 │       ├── models.py             #   纯 dataclass/enum:TrajectoryEvent/TaskTrajectory/TrajectoryAnalysis/ReasonCatalog/DispatchRationale/TrajectoryActionType
 │       ├── payloads.py           #   emit_trajectory_event / emit_submit_trajectory 发射器
+│       ├── time_utils.py         #   gmt_* 北京时间存储值 ↔ epoch-ms 转换
 │       ├── assembler.py          #   只读组装:事件表 → TaskTrajectory
 │       ├── analyzer.py           #   总体分析:rule/llm/tc_bot 多执行者
 │       └── trajectory_service.py #   TaskTrajectoryService 内部契约 + 实现(对外不暴露)

@@ -18,10 +18,10 @@ Test categories (mirrors the P4 task plan):
 1. Ordering: timeline respects (gmt_create, id) ASC; SUBMIT first, terminal
    TRANSITION last; same-second events ordered by id (repo → assembler passes
    the order through).
-2. Field round-trip: int-ms inverse of the P2 emitter's naive-UTC datetime,
-   enum round-trips (action_type/error_type LOWERCASE, status_from/status_to
-   UPPERCASE — the case-mismatch gotcha), ``ext_info``/``analysis`` passed
-   through as raw JSON strings (NOT parsed).
+2. Field round-trip: int-ms inverse of the P2 emitter's timezone-less
+   Asia/Shanghai datetime; enum round-trips (action_type/error_type LOWERCASE,
+   status_from/status_to UPPERCASE — the case-mismatch gotcha),
+   ``ext_info``/``analysis`` passed through as raw JSON strings (NOT parsed).
 3. Pre-trajectory old task: empty timeline + analysis=None; NO action_log read.
 4. UPSERT head preserves analysis: a backfilled ``analysis`` survives assemble
    (the assembler must NOT overwrite — P1b's ``upsert_head`` preserves it; the
@@ -46,7 +46,7 @@ import dataclasses
 import inspect
 import logging
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 from injector import Injector
@@ -78,6 +78,10 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
 from agentclaw.community.core.task.task_context.task_trajectory.assembler import (
     TaskTrajectoryAssembler,
 )
+from agentclaw.community.core.task.task_context.task_trajectory.time_utils import (
+    epoch_ms_to_storage_datetime,
+    storage_now,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -87,11 +91,11 @@ from agentclaw.community.core.task.task_context.task_trajectory.assembler import
 _MS_BASE = 1_700_000_000_000  # arbitrary epoch-ms anchor for round-trip tests
 
 
-def _naive_utc_dt(ms: int) -> datetime:
-    """Inverse of the P2 emitter's ``_now_datetime``: build the naive-UTC
+def _storage_dt(ms: int) -> datetime:
+    """Inverse of the P2 emitter's ``_now_datetime``: build the naive-Beijing
     ``datetime`` the record would carry for the given int-ms epoch. The
     assembler must invert this exactly to round-trip back to ``ms``."""
-    return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).replace(tzinfo=None)
+    return epoch_ms_to_storage_datetime(ms)
 
 
 def _event_record(
@@ -111,10 +115,10 @@ def _event_record(
     error_type: str | None = None,
     error_msg: str | None = None,
 ) -> TrajectoryEventRecord:
-    """Build a TrajectoryEventRecord with naive-UTC gmt_* derived from int-ms
+    """Build a TrajectoryEventRecord with naive-Beijing gmt_* derived from int-ms
     (mirrors the P2 emitter's ``_now_datetime`` so round-trip tests use the
     actual stored convention rather than a parallel formula)."""
-    dt = _naive_utc_dt(ms)
+    dt = _storage_dt(ms)
     return TrajectoryEventRecord(
         id=id,
         task_id=task_id,
@@ -188,9 +192,8 @@ class _FakeRepo:
         if self.raise_upsert:
             raise RuntimeError("upsert_head boom")
         if self._head is None:
-            # Mirror the P1b insert path — fresh gmt_* from now (naive UTC,
-            # matching the emitter's convention to keep int-ms round-trip clean).
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            # Mirror the P1b insert path — fresh naive-Beijing gmt_*.
+            now = storage_now()
             self._head = TaskTrajectoryRecord(
                 id=1,
                 task_id=task_id,
@@ -208,7 +211,7 @@ class _FakeRepo:
         return record
 
     def backfill_analysis(self, task_id, analysis_json, *, now=None):
-        ts = now or datetime.utcnow()
+        ts = now or storage_now()
         if self._head is not None:
             self._head = replace(self._head, analysis=analysis_json, gmt_modified=ts)
         self._events = [
@@ -287,14 +290,14 @@ def test_assemble_orders_timeline_by_gmt_create_then_id():
 
 
 # ---------------------------------------------------------------------------
-# 2. Field round-trip — int-ms inverse of naive-UTC + enum round-trip + raw
+# 2. Field round-trip — int-ms inverse of naive-Beijing + enum round-trip + raw
 #    JSON pass-through (NOT parsed)
 # ---------------------------------------------------------------------------
 
 
 def test_assemble_maps_record_fields_round_trip():
     """Each TrajectoryEvent field comes from the record correctly:
-    - int-ms gmt_create is the EXACT inverse of the P2 emitter's naive-UTC
+    - int-ms gmt_create is the EXACT inverse of the P2 emitter's naive-Beijing
       datetime (so this test FAILS on a non-UTC host if the assembler uses the
       bare ``int(dt.timestamp()*1000)`` that interprets naive as local time);
     - action_type (lowercase) → TrajectoryActionType;
@@ -320,7 +323,7 @@ def test_assemble_maps_record_fields_round_trip():
     tj = _build_assembler(repo).assemble("T-1")
     assert len(tj.timeline) == 1
     ev = tj.timeline[0]
-    # int-ms is the exact round-trip of the emitter's naive-UTC datetime.
+    # int-ms is the exact round-trip of the emitter's naive-Beijing datetime.
     assert ev.gmt_create == ms, (
         f"gmt_create round-trip failed: expected {ms}, got {ev.gmt_create} "
         f"(assembler may be treating naive dt as local time on a non-UTC host)"

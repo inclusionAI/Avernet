@@ -47,6 +47,7 @@
 2. **组装层(`TaskTrajectoryAssembler`)**: 给定 `task_id`,读 `task_trajectory_events` 按 `gmt_create` 升序组装 `TaskTrajectory{task_id, timeline, analysis, gmt_create, gmt_modified}`(**无** `phases` / `graph_snapshot`;字段在发射时已定型,组装层仅排序/拼装),并 UPSERT `task_trajectory` 头行;查询端点读持久化表呈现(跨重启可用)。
 3. **分析层(`TaskTrajectoryAnalyzer`)**: 取 `TaskTrajectory` → 产出扁平 `TrajectoryAnalysis{analysis_type, analysis_executor, analysis_input, analysis_output, boost_reason: str?, failure_reason: str?, gmt_create}`(无 verdict 对象、不含事件列表);`failure_reason` 由决定性终端事件 `error_type`/`error_msg` 派生,`boost_reason` 由末条 DISPATCH 事件的 `ext_info` 派生;分析结果序列化为 JSON 字符串回填 `TaskTrajectory.analysis` 与各 `TrajectoryEvent.analysis`。分析执行者为多源框架:`rule`(规则引擎)/`llm`(大模型)/`tc_bot`(bot),`analysis_type`/`analysis_executor` 记录实际执行者。
 4. **持久化层(REQ-11,2026-09-17 确认)**: 事件在闸门发射时即时 INSERT 落库;头行 `task_trajectory` 组装时 UPSERT;分析结果 UPDATE 回填两表 `analysis` 列与 `gmt_modified`。
+5. **时间约定**: 两表持久化的 `gmt_create`/`gmt_modified` 统一使用无时区的 `Asia/Shanghai` 墙上时间;领域对象继续使用 epoch 毫秒。事件发射、头行创建、分析回填及读取反序列化必须使用同一约定,不得混用 naive UTC 或宿主机本地时区。
 
 ### 与状态机的关系
 

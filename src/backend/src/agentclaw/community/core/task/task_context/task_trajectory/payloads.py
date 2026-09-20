@@ -6,9 +6,10 @@ the gates; this phase delivers the helper only). The emitter:
 * Builds a table-faithful ``TrajectoryEventRecord`` from gate-call fields —
   domain enums (``TrajectoryActionType`` / ``ReasonCatalog`` / ``Status``) are
   serialized to their ``.value`` strings, ``now_ms`` (int epoch ms) is converted
-  to a naive UTC ``datetime`` for ``gmt_create``/``gmt_modified``, and
-  ``ext_info: dict | None`` is JSON-serialized as ``{"schema_v": 1, **ext_info}``
-  (or ``None`` when no ``ext_info``).
+  to a timezone-less Asia/Shanghai wall-clock ``datetime`` for
+  ``gmt_create``/``gmt_modified``, and ``ext_info: dict | None`` is
+  JSON-serialized as ``{"schema_v": 1, **ext_info}`` (or ``None`` when no
+  ``ext_info``).
 * Calls ``repo.insert_event(record)`` directly — **no** thread through the
   in-memory graph ``append_action_event`` path (spec invariant: the trajectory
   side is fully decoupled from ``task_action_log``; see plan §"Spec
@@ -35,13 +36,16 @@ import hashlib
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
     TrajectoryActionType,
+)
+from agentclaw.community.core.task.task_context.task_trajectory.time_utils import (
+    epoch_ms_to_storage_datetime,
 )
 
 if TYPE_CHECKING:
@@ -104,16 +108,13 @@ def _enum_to_str(value: Any) -> str | None:
 
 
 def _now_datetime(now_ms: int | None) -> datetime:
-    """Convert the int-ms epoch the domain uses to a naive UTC ``datetime``
-    (the column type on the record). When ``now_ms`` is omitted, default to
-    the current wall clock so the event still carries an emit-time stamp
-    (spec: "gmt_create = 事件发射时间")."""
+    """Convert domain epoch-ms to the naive Beijing ``gmt_*`` convention.
+
+    When ``now_ms`` is omitted, default to the current instant so the event
+    still carries an emit-time stamp (spec: "gmt_create = 事件发射时间").
+    """
     ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    # Naive UTC datetime (matches the existing trajectory repository's
-    # ``datetime.utcnow()`` convention + the naive ``DateTime`` ORM columns;
-    # ``utcfromtimestamp`` is deprecated in 3.12, so build timezone-aware then
-    # strip the tzinfo).
-    return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc).replace(tzinfo=None)
+    return epoch_ms_to_storage_datetime(ms)
 
 
 def _serialize_ext_info(ext_info: dict[str, Any] | None) -> str | None:
@@ -161,8 +162,9 @@ def build_trajectory_event_record(
     Pure function: no IO, no logging, no side effects. Domain enums
     (``action_type``/``error_type``/``status_from``/``status_to``) are
     serialized to their ``.value`` strings; ``now_ms`` (int epoch ms) becomes
-    a naive UTC ``datetime``; ``ext_info`` dict is JSON-encoded wrapped in
-    ``{"schema_v": 1, **ext_info}``; ``analysis`` is always ``None`` at emit
+    a timezone-less Asia/Shanghai ``datetime``; ``ext_info`` dict is
+    JSON-encoded and wrapped in ``{"schema_v": 1, **ext_info}``; ``analysis`` is
+    always ``None`` at emit
     time. ``id=0`` is a placeholder the repository ignores (autoincrement
     assigns the real id, see ``TaskTrajectoryRepository._to_event_row``).
 

@@ -13,13 +13,11 @@ the head's persisted ``analysis``):
    guarding against a future repository regression).
 2. Each ``TrajectoryEventRecord`` → ``TrajectoryEvent`` (domain):
    * ``gmt_create``/``gmt_modified``: ``datetime`` (record) → ``int`` ms (domain)
-     via ``_datetime_to_int_ms`` — the EXACT inverse of the P2 emitter's
-     naive-UTC convention (the emitter writes ``datetime.fromtimestamp(ms/1000,
-     tz=utc).replace(tzinfo=None)`` — naive UTC). The inverse MUST treat a
-     naive datetime AS UTC (the bare ``int(dt.timestamp()*1000)`` formula a
-     casual reader might reach for instead treats naive dt as LOCAL time —
-     on a non-UTC host that is off by the local tz offset and breaks the
-     round-trip). ``None`` → 0 (matches ``TaskActionLogRecord.to_event``).
+     via ``_datetime_to_int_ms`` — the exact inverse of the P2 emitter's
+     timezone-less Asia/Shanghai storage convention. The inverse attaches the
+     explicit storage timezone rather than allowing the host timezone to
+     interpret a naive value. ``None`` → 0 (matches
+     ``TaskActionLogRecord.to_event``).
    * ``action_type`` (lowercase string) → ``TrajectoryActionType(value)``.
    * ``status_from``/``status_to`` (UPPERCASE string, the ``Status`` enum's
      ``.value``) → ``Status(value)`` or ``None``.
@@ -84,7 +82,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from injector import inject
@@ -100,12 +98,15 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
     TrajectoryActionType,
     TrajectoryEvent,
 )
+from agentclaw.community.core.task.task_context.task_trajectory.time_utils import (
+    storage_datetime_to_epoch_ms,
+)
 
 logger = logging.getLogger("task.trajectory")
 
 
 # ---------------------------------------------------------------------------
-# datetime → int-ms inverse of the P2 emitter's naive-UTC convention
+# datetime → int-ms inverse of the P2 emitter's Beijing storage convention
 # ---------------------------------------------------------------------------
 
 
@@ -113,21 +114,13 @@ def _datetime_to_int_ms(dt: Optional[datetime]) -> int:
     """Convert a record ``datetime`` back to the domain int-ms epoch (the
     inverse of the P2 emitter's ``_now_datetime``).
 
-    The emitter writes naive-UTC datetimes (``datetime.fromtimestamp(ms/1000,
-    tz=timezone.utc).replace(tzinfo=None)`` — naive, value-wise UTC). The
-    inverse MUST treat a naive datetime AS UTC: a bare ``int(dt.timestamp() *
-    1000)`` would instead interpret naive dt as LOCAL time, so on a non-UTC
-    host the result is off by the local tz offset (CST-8 cuts -28800000 ms)
-    and the round-trip breaks. For tz-aware datetimes the value is already
-    unambiguous. ``None`` falls back to ``0`` (mirrors the existing
+    The emitter and database-generated head timestamps use timezone-less
+    Asia/Shanghai wall-clock values.  The inverse therefore attaches that
+    timezone rather than interpreting naive values according to the host
+    timezone. ``None`` falls back to ``0`` (mirrors the existing
     ``TaskActionLogRecord.to_event`` ``ts=0`` fallback).
     """
-    if dt is None:
-        return 0
-    if dt.tzinfo is None:
-        # Naive dt: treat as UTC (preserves the emitter's naive-UTC convention).
-        return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
-    return int(dt.timestamp() * 1000)
+    return storage_datetime_to_epoch_ms(dt)
 
 
 # ---------------------------------------------------------------------------

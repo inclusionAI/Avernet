@@ -110,8 +110,8 @@ def _event_signature(rec: TrajectoryEventRecord) -> tuple:
     uniquely identify an event in practice:
 
     * ``gmt_create_ms`` — int-ms epoch (the record's ``gmt_create`` datetime
-      converted via the assembler's naive-UTC convention; matches the domain
-      event's ``gmt_create`` int by construction). Timestamp-second precision
+      converted via the assembler's Asia/Shanghai storage convention; matches
+      the domain event's ``gmt_create`` int by construction). Timestamp-second
       means same-second ties are accepted by spec (the table has no unique
       constraint; ``id`` is the deterministic tiebreaker for ORDER, not here).
     * ``node_id`` — the node the event is about.

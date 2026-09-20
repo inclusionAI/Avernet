@@ -28,6 +28,9 @@ from agentclaw.community.core.task.repository.types import (
     TaskTrajectoryRecord,
     TrajectoryEventRecord,
 )
+from agentclaw.community.core.task.task_context.task_trajectory.time_utils import (
+    storage_now,
+)
 
 
 def _event(task_id: str = "T-1", node_id: str = "N-1", action_type: str = "dispatch",
@@ -115,23 +118,20 @@ def test_insert_event_writes_gmt_from_record_and_ext_info_as_is(db):
     assert stored.analysis == '{"analysis_type":"tc_bot"}'
 
 
-def test_insert_event_falls_back_to_db_default_when_record_gmt_is_none(db):
-    """When the record carries gmt_create=None / gmt_modified=None (the caller
-    did not derive a datetime from the domain int-ms), ``_to_event_row`` omits
-    them so the ORM ``func.now()`` default fires — the stored row gets real
-    timestamps (the NOT NULL columns are satisfied) rather than NULL. This is
-    the documented fallback path for the event insert."""
+def test_insert_event_uses_beijing_now_when_record_gmt_is_none(db):
+    """Missing event timestamps use one explicit Beijing storage clock."""
     repo = TaskTrajectoryRepository(db)
+    before = storage_now()
     rec = repo.insert_event(_event(gmt_create=None, gmt_modified=None))
+    after = storage_now()
     assert rec.id > 0
-    # func.now() default fired for both columns (NOT NULL satisfied)
-    assert rec.gmt_create is not None
-    assert rec.gmt_modified is not None
-    # read back from a fresh session and confirm the timestamps persisted
+    assert before <= rec.gmt_create <= after
+    assert rec.gmt_modified == rec.gmt_create
+    # Read back from a fresh session and confirm the timestamps persisted.
     [stored] = repo.list_events_by_task("T-1")
     assert stored.id == rec.id
-    assert stored.gmt_create is not None
-    assert stored.gmt_modified is not None
+    assert stored.gmt_create == rec.gmt_create
+    assert stored.gmt_modified == rec.gmt_modified
 
 
 # ---------------------------------------------------------------------------
@@ -236,19 +236,19 @@ def test_backfill_analysis_explicit_gmt_modified_not_relying_on_onupdate(db):
     assert event.gmt_modified == backfill_ts
 
 
-def test_backfill_analysis_falls_back_to_utcnow_when_now_omitted(db):
-    """When ``now=None``, gmt_modified is set to ~utcnow inside the repo (still
-    explicitly — NOT via onupdate)."""
+def test_backfill_analysis_uses_beijing_now_when_now_omitted(db):
+    """The default backfill clock follows the persisted Beijing convention."""
     repo = TaskTrajectoryRepository(db)
-    repo.upsert_head("T-1")
-    before = datetime.utcnow()
+    created = repo.upsert_head("T-1")
+    before = storage_now()
     affected = repo.backfill_analysis("T-1", '{"a":1}')
-    after = datetime.utcnow()
+    after = storage_now()
     assert affected == 1  # only the head row
     head = repo.list_head("T-1")
     assert head.analysis == '{"a":1}'
     assert head.gmt_modified is not None
     assert before <= head.gmt_modified <= after
+    assert head.gmt_modified >= created.gmt_create
 
 
 def test_backfill_analysis_unknown_task_affects_zero_rows(db):
