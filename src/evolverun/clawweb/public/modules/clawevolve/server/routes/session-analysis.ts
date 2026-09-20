@@ -4,7 +4,7 @@ import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-ha
 import type { EvolveRepository, EvolveTaskRow } from "../repositories/evolve-repository.js";
 import type { ObjectStore } from "../services/object-storage/oss-object-store.js";
 import type { AisExecutor, SessionAisOptions } from "../contracts/ais-executor.js";
-import { sessionAisBaseConfig, sessionAisDeadline, sessionAisParams, type SessionAisBaseConfig } from "../services/session-ais-config.js";
+import { sessionAisBaseConfig, sessionAisDeadline, sessionAisParams, sessionAisReleaseChannel, type SessionAisBaseConfig } from "../services/session-ais-config.js";
 import { AisTaskRunner, type AisTaskDefinition } from "../services/ais/ais-task-runner.js";
 
 type Config = {
@@ -14,6 +14,7 @@ type Config = {
   sessionLookbackDays?: number | null;
   llmAnalysis?: boolean; llmUseDefault?: boolean; llmModel?: string; llmApiKey?: string;
   clawwebUrl?: string; callbackUrl?: string;
+  releaseChannel?: "pre" | "prod";
   shared?: boolean;
   artifactUploadMode?: "broker" | "none";
   artifacts: Record<string, { objectKey: string; uploadUrl?: string }>;
@@ -200,7 +201,8 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
         } };
       if (config.aisBase) return sessionAisParams({
         taskId: taskParams.taskId, stepId: config.stepId!, attempt: config.attempt,
-        clawwebUrl: config.clawwebUrl!, aisBase: config.aisBase,
+        clawwebUrl: config.clawwebUrl!, releaseChannel: config.releaseChannel ?? sessionAisReleaseChannel(options.environmentLabel),
+        aisBase: config.aisBase,
       }, taskParams.taskType, taskParams.input);
       return { "${clawevolve_params}": JSON.stringify(taskParams) };
     },
@@ -398,7 +400,7 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
     const artifacts = Object.fromEntries(names.map((name) => [name, {
       objectKey: `${prefix}/${suffix[name]}`,
     }]));
-    const config = { ...(aisBase ? { aisBase } : {}), mode, stage, engineType: "openclaw", userId, botId, botEnv, taskId, stepId, clawwebUrl,
+    const config = { ...(aisBase ? { aisBase, releaseChannel: sessionAisReleaseChannel(options.environmentLabel) } : {}), mode, stage, engineType: "openclaw", userId, botId, botEnv, taskId, stepId, clawwebUrl,
       ...(sessionIdentifier ? { sessionIdentifier } : {}), ...(sessionId ? { sessionId } : {}),
       ...(sessionKey ? { sessionKey } : {}), ...(question ? { question } : {}),
       llmAnalysis, llmUseDefault, ...(mode === "ANALYZE_SINGLE" ? { sessionLookbackDays } : {}),
@@ -459,7 +461,10 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
       if (name === "manifest") objectKey = objectKey.replace(/\/raw\.manifest\.json$/, "/session.manifest.json");
       return [name, { objectKey }];
     }));
-    const next = { ...previous, ...(previous.aisBase ? { aisBase: { ...previous.aisBase, deadlineAt: sessionAisDeadline(aisOptions.deadlineSeconds) } } : {}), attempt, stepId, clawwebUrl, callbackUrl: undefined, artifacts }; await repo.prepareTaskRetry(task.task_id, next);
+    const next = { ...previous, ...(previous.aisBase ? {
+      aisBase: { ...previous.aisBase, deadlineAt: sessionAisDeadline(aisOptions.deadlineSeconds) },
+      releaseChannel: previous.releaseChannel ?? sessionAisReleaseChannel(options.environmentLabel),
+    } : {}), attempt, stepId, clawwebUrl, callbackUrl: undefined, artifacts }; await repo.prepareTaskRetry(task.task_id, next);
     await repo.createStep({ stepId, taskId: task.task_id, stepType: "session_ais", stepNo, command: previous.mode === "ANALYZE_SINGLE" ? "analysis" : "package" });
     try { const jobId = await runner!.dispatch((await repo.findTask(task.task_id))!, stepId, userId); res.status(202).json({ analysisId: task.task_id, attempt, aisJobId: jobId }); }
     catch (error) { await repo.markDispatchFailed(stepId, error instanceof Error ? error.message : String(error)); throw error; }
