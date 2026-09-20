@@ -346,8 +346,16 @@ class TaskTrajectoryModel(Base):
     analysis = Column(Text, nullable=True)
     # gmt_create 由 repo 从 domain int(ms) 转换写入,不依赖 DB DEFAULT。
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    # SQLAlchemy bridge: real DB column is `gmt_modify` (NOT gmt_modified).
+    # task_trajectory was provisioned from an earlier DDL where the audit
+    # column was named `gmt_modify`; a later rename to the repo-wide
+    # `gmt_modified` convention touched ORM + DDL, but CREATE TABLE IF NOT
+    # EXISTS never ALTERs an existing table, so the deployed column stayed
+    # `gmt_modify`. The Python attribute name stays `gmt_modified` to keep
+    # record/to_record/caller code convention-aligned; only the SQL column
+    # name is overridden here. Drop this override once ALTER rename lands.
     gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+        "gmt_modify", DateTime, default=func.now(), onupdate=func.now(), nullable=False
     )
 
     __table_args__ = (
@@ -399,8 +407,16 @@ class TaskTrajectoryEventModel(Base):
     analysis = Column(Text, nullable=True)
     # gmt_create 由 repo 从 domain int(ms) 转换写入,不依赖 DB DEFAULT。
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    # SQLAlchemy bridge: real DB column is `gmt_modify` (NOT gmt_modified).
+    # task_trajectory_events was provisioned under `gmt_modify` (pre-rename
+    # DDL); the ORM/DDL were later renamed to `gmt_modified` but CREATE TABLE
+    # IF NOT EXISTS never altered the deployed table, so its column is still
+    # `gmt_modify` and SELECT/UPDATE of `gmt_modified` raised MySQL 1054.
+    # Attribute name stays `gmt_modified` (keeps record/to_record/callers
+    # aligned); only the SQL column name is overridden. Drop the override
+    # once `ALTER TABLE ... CHANGE COLUMN gmt_modify gmt_modified ...` lands.
     gmt_modified = Column(
-        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+        "gmt_modify", DateTime, default=func.now(), onupdate=func.now(), nullable=False
     )
 
     __table_args__ = (

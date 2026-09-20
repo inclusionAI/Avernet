@@ -5,12 +5,22 @@
 -- Events are append-only (no unique constraint, duplicates accepted); the repo
 -- (P1b) ALWAYS supplies gmt_create from the domain int-ms timestamp and does
 -- NOT rely on the DB DEFAULT CURRENT_TIMESTAMP (kept only as a fallback).
+-- NOTE: the audit-timestamp column is named `gmt_modify` (NOT gmt_modified).
+-- These tables were provisioned under `gmt_modify`; ORM + DDL were later
+-- renamed to the repo-wide `gmt_modified` convention, but CREATE TABLE IF
+-- NOT EXISTS never ALTERs an existing table, so the deployed column stayed
+-- `gmt_modify`. The ORM keeps the Python attribute `gmt_modified` and maps it
+-- onto this `gmt_modify` column via a SQLAlchemy Column name override (see
+-- repository/models.py). Do NOT rename this column back to `gmt_modified`
+-- here without first running `ALTER TABLE ... CHANGE COLUMN gmt_modify
+-- gmt_modified ...` on every dev/pre/prod MySQL — the ORM override in
+-- models.py must track this file's column name.
 CREATE TABLE IF NOT EXISTS `task_trajectory` (
     `id`         bigint(20)   NOT NULL AUTO_INCREMENT                            COMMENT '主键ID',
     `task_id`    varchar(128) NOT NULL                                           COMMENT '任务 ID(一任务一行)',
     `analysis`   text         DEFAULT NULL                                       COMMENT '内嵌 TrajectoryAnalysis JSON 字符串(未分析为 NULL,分析回填时写入)',
     `gmt_create` timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP                 COMMENT '组装产出时间',
-    `gmt_modified` timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(分析回填时间)',
+    `gmt_modify` timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(分析回填时间)',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_task_trajectory_task` (`task_id`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT='任务轨迹头行(组装时 UPSERT,分析回填 analysis)';
@@ -31,7 +41,7 @@ CREATE TABLE IF NOT EXISTS `task_trajectory_events` (
     `ext_info`      text         DEFAULT NULL                                    COMMENT '扩展信息 JSON(DispatchRationale/RESET计量/SUBMIT来源等(后续可扩展素材);带 schema_v;领域对象不映射,analyzer 按需读)',
     `analysis`      text         DEFAULT NULL                                    COMMENT '内嵌 TrajectoryAnalysis JSON 字符串(未回填为 NULL,分析回填时写入)',
     `gmt_create`    timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP              COMMENT '事件发生时间(timeline 排序依据)',
-    `gmt_modified`    timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(分析回填时间)',
+    `gmt_modify`    timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(分析回填时间)',
     PRIMARY KEY (`id`),
     KEY `idx_task_trajectory_events_task` (`task_id`, `gmt_create`),
     KEY `idx_task_trajectory_events_node` (`task_id`, `node_id`, `gmt_create`)
