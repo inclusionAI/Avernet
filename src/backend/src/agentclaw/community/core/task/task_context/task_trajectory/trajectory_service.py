@@ -334,6 +334,8 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         #    NOT per-request). None → 503 (service capability not ready, fix
         #    config — distinct from 504 bot failure/timeout).
         analysis_bot_id = self._resolve_analysis_bot_id()
+        logger.info(f"[task][task_trajectory] analysis_bot_id={analysis_bot_id}")
+
         if analysis_bot_id is None:
             raise TrajectoryAnalysisNotConfiguredError(
                 "trajectory analysis bot is not configured "
