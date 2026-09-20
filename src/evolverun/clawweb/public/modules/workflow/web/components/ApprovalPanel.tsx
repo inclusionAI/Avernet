@@ -48,25 +48,6 @@ function ApprovalCard({ card }: { card: ApprovalCardSummary }) {
 
       {/* Body */}
       <div className="px-4 py-3 space-y-2">
-        {card.message && (
-          <div className="text-sm text-slate-700 font-medium leading-relaxed">{card.message}</div>
-        )}
-
-        {/* Card fields (legacy mode) */}
-        {Array.isArray(card.cardFields) && card.cardFields.length > 0 && (
-          <div className="space-y-1.5">
-            {card.cardFields.slice(0, 4).map((f, i) => (
-              <div key={i} className="flex items-start gap-2 text-xs">
-                <span className="text-slate-400 shrink-0">{f.label}:</span>
-                <span className="text-slate-600 break-words">{f.value}</span>
-              </div>
-            ))}
-            {card.cardFields.length > 4 && (
-              <div className="text-xs text-slate-400">+{card.cardFields.length - 4} 项更多...</div>
-            )}
-          </div>
-        )}
-
         {/* Approvers */}
         <div className="flex items-center gap-2 pt-1">
           <span className="text-xs text-slate-400">审批人:</span>
