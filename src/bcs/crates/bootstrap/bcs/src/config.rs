@@ -324,6 +324,10 @@ pub struct CollaborationConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpenApiV1Config {
+    /// Explicitly approved Providers accepting registration by any authenticated
+    /// Human. Empty means only the Provider creator/owners may issue tokens.
+    #[serde(default)]
+    pub registration_self_service_provider_ids: Vec<String>,
     #[serde(default = "default_openapi_v1_public_collaboration_base_url")]
     pub public_collaboration_base_url: String,
     /// Base URL for internal-collaboration endpoints that live under a
@@ -337,6 +341,7 @@ pub struct OpenApiV1Config {
 impl Default for OpenApiV1Config {
     fn default() -> Self {
         Self {
+            registration_self_service_provider_ids: Vec::new(),
             public_collaboration_base_url: default_openapi_v1_public_collaboration_base_url(),
             internal_collaboration_base_url: None,
         }

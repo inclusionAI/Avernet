@@ -375,3 +375,16 @@ consumers must rebuild against 0.2.0. Bootstrap maps into the separate
 required.
 
 Provider management supports optional shared endpoints and saved Bot overrides. BotWebhookChange represents unchanged/inherit/set independently of HTTP; resolved BotDeliveryTarget still requires a concrete URL. Repository endpoint updates return persisted bindings or errors.
+
+OpenAPI RegisterService adds optional Provider selection at issuance and mode/ref/
+webhook at redemption. Optional metadata is omitted for legacy v1 responses.
+ProviderRegistrationCoreService owns scoped authorization and resumable admission;
+ProviderRegistrationRepoPort owns first-writer reservation/completion only. Shared
+record DTOs live in types (no repo-to-core dependency). Both new traits have shared
+conformance harnesses, with Memory/SQLite implementations for the repo. No Plugin
+API changes. Token v2 purpose and mode claims cannot be widened during redemption.
+
+BotRegistryCoreService/BotRepoPort add fail-closed `create_registration_if_absent`
+for this flow. It is atomic, preserves existing active/deleted identities and
+never uses upsert semantics; existing registration methods remain unchanged.
+Memory and persistent stores implement it, with race, tombstone and failure tests.

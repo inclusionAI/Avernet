@@ -133,6 +133,9 @@ reverse order; disabled Eventing injects a capability-disabled application
 service and registers no worker lifecycle.
 It selects concrete V1 application facades and injects their Gateway Principal
 verifier, but does not own request-time business policy.
+Provider-scoped registration receives the shared Provider credential repository
+alongside its Provider, binding and registration repositories; gateway readiness
+policy and credential read error propagation stay in ProviderRegistrationCore.
 
 ## Tests
 

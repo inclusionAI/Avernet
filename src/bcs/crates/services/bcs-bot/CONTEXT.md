@@ -51,3 +51,13 @@ delivery state machine or resume nonterminal streams from durable metadata.
 - `cargo check --package bcs-bot --all-targets --manifest-path src/bcs/Cargo.toml`
 
 BotCore resolves binding webhook overrides before the optional Provider default. Gateway registration validates an effective endpoint before writes; address-only PATCH validates Provider ownership and preserves capabilities. Explicit receiver failures do not select a fallback endpoint.
+
+ProviderRegistrationCore consumes typed owner/self-service policy and the independent
+ProviderRegistrationRepoPort. It reauthorizes token-scoped registration, validates
+mode/endpoint before reservation, and reads the injected ProviderCredentialRepoPort
+for gateway readiness: the downlink credential must exist, be enabled and have a
+nonblank secret. Credential read failures propagate; issuance and upstream never
+read or require that credential. It resumes Bot/owner-edge/binding writes before
+marking completion. Upstream memberships never create delivery bindings or MOCK
+credentials. Shared conformance and failure/retry tests cover this new core;
+legacy Provider-admin registration remains unchanged.

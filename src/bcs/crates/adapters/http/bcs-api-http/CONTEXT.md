@@ -78,5 +78,11 @@ selection, and business policy.
 
 ## Tests
 
+Register endpoints accept additive Provider/mode/ref/webhook queries. GET remains
+Human-authenticated and POST remains token-only; responses with credentials use
+no-store. The application selects v1/v2 tokens and authorizes scope; this adapter
+only parses query DTOs and maps application errors. Legacy response shape and
+bot-name/bot_name compatibility are covered by route and facade contract tests.
+
 - `cargo test --package bcs-api-http --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-api-http --all-targets --manifest-path src/bcs/Cargo.toml`

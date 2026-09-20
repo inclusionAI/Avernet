@@ -3,6 +3,7 @@ pub mod bot_control_plane_core;
 pub mod candidate_search_core;
 mod ids;
 pub mod provider_core;
+pub mod provider_registration;
 
 pub use bcs_bot_store::{BotInfo, PersistentBotRepo, MemoryBotRepo};
 pub use bot_core::BotCore;

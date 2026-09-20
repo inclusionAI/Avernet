@@ -2,6 +2,23 @@
 
 This directory contains BCS database schema migrations.
 
+Provider-scoped OpenAPI registration adds MySQL/OceanBase
+`029_provider_registrations.sql` and SQLite `030_provider_registrations.sql`.
+The independent journal binds `(env, provider_id, provider_bot_ref)` to one Bot
+identity and resumable registration state; it is not an HTTP delivery binding.
+Apply remote DDL before new server code; SQLite bootstrap migrates automatically.
+No historical backfill is required. Rollback may retain the additive table.
+The internal JSON includes a Bot runtime credential: restrict access and backups
+as for `bcs_bots.session_token` and do not export it in management responses.
+
+The user-approved rebase of unreleased PR #2358 on 2026-09-21 moves only its
+registration migrations from MySQL 028 / SQLite 029 to MySQL 029 / SQLite 030.
+Upstream's Fixed Loop migrations and all earlier migration bodies/identifiers
+remain unchanged. A database that applied the earlier registration draft is
+not an automatic upgrade target: use a fresh disposable database, or plan an
+explicit reviewed reconciliation for retained data. Never delete or rewrite
+migration history to silence a name/checksum conflict.
+
 MySQL/OceanBase queue tables (021/022) follow the existing `bcs_chat_runs`
 convention: auto-increment `id` primary key and database-managed `gmt_create` /
 `gmt_modified`. Business identity remains unique on `(env, delivery_id)` and
@@ -55,6 +72,7 @@ must apply the subsequent numbered migrations in order as well.
 | 026 | `mysql/026_run_reply_segments.sql` | Run reply reconstruction index (SQLite version 027) |
 | 027 | `mysql/027_provider_bot_webhook.sql` | Per-Bot Provider webhook endpoint (SQLite version 028) |
 | 028 | `mysql/028_fixed_loop_runtime.sql` | Fixed Loop snapshot plan, failure/Judge state, opening/dispatch checkpoints and recovery indexes (SQLite version 029) |
+| 029 | `mysql/029_provider_registrations.sql` | Provider-scoped registration identity and retry journal (SQLite version 030) |
 
 The consolidated Fixed Loop schema is MySQL 028 and SQLite
 `029_fixed_loop_runtime.sql`. Each includes three nullable snapshot plan columns,
@@ -74,7 +92,7 @@ automatic upgrades from earlier Loop development drafts are outside this release
 Use a fresh disposable test database for such drafts; retained data requires a
 separately planned migration. This change does not rewrite database records.
 The same version number can still represent different changes per dialect.
-HumanInput index-size handling is manual; the MySQL chain ends at 028 and never
+HumanInput index-size handling is manual; the MySQL chain ends at 029 and never
 drops/rebuilds an existing HumanInput index automatically.
 
 The Draft queue branch originally used MySQL 019–024 and SQLite 020–025.
@@ -191,8 +209,8 @@ refuse existing owned tables and clean up only tables they create.
 Both commands are wired into the MySQL service steps in `unit-tests.yml`.
 
 The duplicate 016 files have been consolidated into one active migration as an
-explicitly authorized exception for PR #2339. This release validates the latest
-001–028 chain; it does not add an automatic upgrade for either earlier split-016
+explicitly authorized exception for PR #2339. That release validated the
+001–028 chain; it did not add an automatic upgrade for either earlier split-016
 lineage. Once merged, subsequent schema changes follow the migration freeze rules
 in `src/bcs/AGENTS.md`.
 Both original files are preserved byte-for-byte under `legacy/mysql/`, outside
@@ -211,7 +229,7 @@ The unsupported `ADD COLUMN IF NOT EXISTS` syntax in 002/007/011/013/015/017/018
 has been corrected to `ADD COLUMN`. Original files are archived and only the
 documented exact checksum pairs are accepted without rewriting old records.
 See the [syntax compatibility guide](reconciliation/mysql-syntax-compatibility.md).
-The disposable MySQL 8.4 full-chain test covers 001–028, repeated apply and
+The disposable MySQL 8.4 full-chain test covers 001–029, repeated apply and
 an upgrade from 020 with archived checksum records. It runs before the other
 MySQL CI contracts and leaves the test database empty:
 
@@ -241,7 +259,7 @@ KEY `idx_human_input_scope_status`
 
 Both `VARCHAR(768)` columns and full `UNIQUE(active_slot_key)` are unchanged.
 No numbered migration drops or rebuilds an existing HumanInput index. Fresh
-MySQL installations use the latest 001–028 chain; 001 and standalone 008 already
+MySQL installations use the latest 001–029 chain; 001 and standalone 008 already
 create the prefix index. Historical 001/008 checksums remain recognized without
 rewriting their records, but accepting history does not inspect the live index.
 
@@ -275,7 +293,7 @@ If deployment reports `ERROR 1071: Specified key was too long`:
    checksums or mark failed migrations successful.
 
 The automatic index replacement drafted as MySQL 028 in this PR was removed.
-The latest MySQL chain ends at 028. A retained database that recorded that draft
+The latest MySQL chain ends at 029. A retained database that recorded that draft
 keeps its record and index; `--to 27 --check-db` can inspect the selected chain,
 while an unrestricted history check rejects its conflicting migration identity. Do not delete or
 rewrite the record to silence that diagnostic.
@@ -287,7 +305,7 @@ cargo test -p bcs-admin human_input_index_migrations_apply_to_real_mysql -- --ig
 
 The test uses a disposable `BCS_TEST_MYSQL_URL`, executes corrected 001 and
 standalone 008, and checks prefix collisions, full slot uniqueness and retained
-historical records. The full-chain test validates all 28 active migrations.
+historical records. The full-chain test validates all 29 active migrations.
 
 
 ## SQLite
@@ -307,7 +325,7 @@ Each migration is recorded only after all of its steps succeed. Re-running
 startup must be idempotent, and checksum mismatches fail startup.
 
 The current SQLite migration chain records consecutive versions `001` through
-`029` (29 versions total).
+`030` (30 versions total).
 Versions whose schema is already created by the startup bootstrap record
 progress as no-ops; version `007` repairs the HumanInput output metadata on
 existing databases, versions `008` and `009` add their tables through the
@@ -326,6 +344,7 @@ Versions `022`–`027` add delivery queues, policy and query indexes; `028` adds
 the per-Bot Provider webhook endpoint, and `029` adds
 the fixed Loop snapshot plan, progression/session recovery indexes, saved
 failure/Judge state and opening/dispatch checkpoints in one migration.
+Version `030` adds the independent Provider registration journal.
 
 Versions `001`–`021` are defined in Rust. Independent SQL files were introduced
 for `022`–`027` by the message congestion-control change; the runner loads them
@@ -393,6 +412,7 @@ available number in their own dialect and document the corresponding change.
 | Delivery queues, policy and query indexes | 021–026 | 022–027 |
 | Per-Bot Provider webhook endpoint | 027 | 028 |
 | Fixed Loop plan, recovery indexes, failure/Judge state and opening/dispatch checkpoints | 028 | 029 |
+| Provider-scoped registration journal | 029 | 030 |
 | HumanInput index prefix | 001/008 for fresh databases; manual repair if required | no equivalent MySQL index-size limit |
 
 The committed-migration freeze also applies to historical migration bodies in

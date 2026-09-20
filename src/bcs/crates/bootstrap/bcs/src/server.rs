@@ -1178,6 +1178,7 @@ pub struct BcsServerExtensions {
 
 #[derive(Clone)]
 struct ProviderRepoBundle {
+    registrations: Arc<dyn bcs_service_api::port::repo::provider_registration::ProviderRegistrationRepoPort>,
     provider_repo: Arc<dyn ProviderRepoPort>,
     provider_credentials: Arc<dyn ProviderCredentialRepoPort>,
     provider_bindings: Arc<dyn ProviderBotBindingRepoPort>,
@@ -1187,6 +1188,7 @@ struct ProviderRepoBundle {
 fn memory_provider_repos() -> ProviderRepoBundle {
     let store = Arc::new(MemoryProviderStore::new());
     ProviderRepoBundle {
+        registrations: Arc::new(bcs_bot_store::provider_registration::MemoryProviderRegistrationStore::new()),
         provider_repo: store.clone(),
         provider_credentials: store.clone(),
         provider_bindings: store.clone(),
@@ -1211,6 +1213,9 @@ fn db_provider_repos(
     db_plugin: Arc<dyn bcs_db_api::DbPlugin>,
     db_kind: &DbPluginKind,
 ) -> ProviderRepoBundle {
+    let registrations = Arc::new(bcs_bot_store::provider_registration::DbProviderRegistrationStore::new(
+        db_plugin.clone(), db_sql_flavor(db_kind), crate::env::resolve_env(),
+    ));
     let store = match db_kind {
         DbPluginKind::LocalSqlite => Arc::new(DbProviderStore::sqlite(db_plugin)),
         DbPluginKind::Mysql => Arc::new(DbProviderStore::mysql(db_plugin)),
@@ -1222,6 +1227,7 @@ fn db_provider_repos(
         }
     };
     ProviderRepoBundle {
+        registrations,
         provider_repo: store.clone(),
         provider_credentials: store.clone(),
         provider_bindings: store.clone(),
@@ -1623,6 +1629,15 @@ fn build_openapi_v1_state(
     Arc<dyn bcs_service_api::InternalBotAttributesService>,
 ) {
     let relation_env = crate::env::resolve_env();
+    let provider_registration = Arc::new(bcs_bot::core::provider_registration::ProviderRegistrationCore::new(
+        provider_repos.provider_repo.clone(),
+        provider_repos.provider_credentials.clone(),
+        provider_repos.provider_bindings.clone(),
+        provider_repos.registrations.clone(),
+        registry.clone(), relation.clone(), relation_env.clone(),
+        config.openapi_v1.registration_self_service_provider_ids.clone(),
+        outbound_url_guard_from_config(config),
+    ));
     let control_plane = Arc::new(BotControlPlaneCore::new(
         control_plane_repo,
         provider_repos.provider_repo.clone(),
@@ -1727,7 +1742,7 @@ fn build_openapi_v1_state(
             bot_management,
             bot_onboarding,
             invite_token_secret.clone(),
-        ));
+        ).with_provider_registration(provider_registration));
     let collaboration_template_service: Arc<
         dyn bcs_service_api::application::v1::CollaborationTemplateService,
     > = Arc::new(V1CollaborationTemplateServiceImpl::new(

@@ -156,6 +156,12 @@ impl ServiceLifecycle for BotCore {
 
 #[async_trait]
 impl BotRegistryCoreService for BotCore {
+    async fn create_registration_if_absent(
+        &self, bot_id: String, capabilities: BotCapabilities, created_by: &str, token: &str,
+    ) -> ServiceResult<bool> {
+        self.repo.create_registration_if_absent(bot_id, capabilities, created_by, token).await
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         self.repo.register(bot_id, capabilities).await
     }
@@ -497,6 +503,10 @@ impl BotRegistryCoreService for BotCore {
 
     async fn load_token(&self, bot_id: &str) -> Option<String> {
         self.repo.load_token(bot_id).await
+    }
+
+    async fn try_load_token(&self, bot_id: &str) -> ServiceResult<Option<String>> {
+        self.repo.try_load_token(bot_id).await
     }
 
     async fn find_bot_by_token(&self, token: &str) -> Option<String> {

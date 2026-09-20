@@ -11,6 +11,7 @@ pub mod message_delivery;
 pub mod organization;
 pub mod proposal;
 pub mod provider;
+pub mod provider_registration;
 pub mod registry;
 pub mod routing;
 pub mod session;

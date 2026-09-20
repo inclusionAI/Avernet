@@ -25,6 +25,7 @@ pub mod organization;
 pub mod opening_message;
 pub mod proposal;
 pub mod provider;
+pub mod provider_registration_token;
 pub mod register;
 pub mod registry;
 pub mod routing;

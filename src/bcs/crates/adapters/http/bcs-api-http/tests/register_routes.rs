@@ -1,304 +1,17 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use axum::body::{Body, to_bytes};
-use axum::http::{HeaderMap, Request, StatusCode};
-use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
-    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, BotRegistration,
-    CompleteSession, CreateBotFriendRequest, CreateGroup, CreateGroupInvitation,
-    CreateSession, CreateSessionInvitation, CreateSessionOutcome, DeleteGroup,
-    DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
-    Friendship, FriendshipService, FriendRequest, GetGroup, GetSession, GroupDetail, GroupService,
-    GroupSummary, Invitation, InvitationAcceptResult, InvitationService, IssueRegisterToken,
-    ListGroups, ListBotFriendRequests, ListBotFriendships, ListSessionMessages, ListSessions, Page,
-    RegisterBot, RegisterService, RegisterTokenView, RejectFriendRequest, DeleteBotFriendship,
-    SessionCompletionResult,
-    SessionDetail, SessionMessageService, SessionParticipant, SessionService,
-    SessionSummary, UpdateGroup, UpdateGroupParticipant, UpdateSession,
-    UpdateSessionParticipant,
+    ApplicationError, BotRegistration, IssueRegisterToken,
+    RegisterBot, RegisterService, RegisterTokenView,
 };
-use serde_json::{Value, json};
+use serde_json::json;
 use tower::ServiceExt;
 
-// ---------------------------------------------------------------------------
-// Shared test helpers (duplicated from invitation_routes.rs to keep each
-// test target self-contained).
-// ---------------------------------------------------------------------------
-
-struct HeaderVerifier {
-    caller: AuthenticatedCaller,
-}
-
-#[async_trait]
-impl PrincipalVerifier for HeaderVerifier {
-    async fn verify(
-        &self,
-        headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
-        if headers
-            .get("x-test-auth")
-            .and_then(|value| value.to_str().ok())
-            == Some("yes")
-        {
-            Ok(self.caller.clone())
-        } else {
-            Err(PrincipalVerificationError::Missing)
-        }
-    }
-}
-
-fn caller() -> AuthenticatedCaller {
-    AuthenticatedCaller {
-        tenant: Some("tenant-a".into()),
-        user: Some(AuthenticatedUserIdentity {
-            id: "staff-1".into(),
-            username: "alice".into(),
-            display_name: None,
-            full_name: None,
-        }),
-        bot: None,
-        app: None,
-        access_key: None,
-    }
-}
-
-fn authenticated_request(method: &str, uri: &str, body: Value) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("content-type", "application/json")
-        .header("x-test-auth", "yes")
-        .header("x-request-id", "request-123")
-        .body(Body::from(body.to_string()))
-        .expect("request")
-}
-
-fn bare_request(method: &str, uri: &str) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("x-request-id", "request-123")
-        .body(Body::empty())
-        .expect("request")
-}
-
-async fn response_json(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read response body");
-    serde_json::from_slice(&bytes).expect("JSON response")
-}
-
-// ---------------------------------------------------------------------------
-// Noop services for group / session / message / invitation / friendship
-// (register tests never hit those routes). Copied from invitation_routes.rs.
-// ---------------------------------------------------------------------------
-
-struct NoopGroupService;
-
-#[async_trait]
-impl GroupService for NoopGroupService {
-    async fn list_groups(
-        &self,
-        _command: ListGroups,
-    ) -> Result<Page<GroupSummary>, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn create(&self, _command: CreateGroup) -> Result<GroupDetail, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn get(&self, _query: GetGroup) -> Result<GroupDetail, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn update(&self, _command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn delete(&self, _command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn add_participant(
-        &self,
-        _command: AddGroupParticipant,
-    ) -> Result<bcs_service_api::application::v1::Participant, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn update_participant(
-        &self,
-        _command: UpdateGroupParticipant,
-    ) -> Result<bcs_service_api::application::v1::Participant, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn delete_participant(
-        &self,
-        _command: DeleteGroupParticipant,
-    ) -> Result<DeleteResult, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-}
-
-struct NoopSessionService;
-
-#[async_trait]
-impl SessionService for NoopSessionService {
-    async fn create(
-        &self,
-        _command: CreateSession,
-    ) -> Result<CreateSessionOutcome, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn list(&self, _command: ListSessions) -> Result<Page<SessionSummary>, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn get(&self, _query: GetSession) -> Result<SessionDetail, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn update(&self, _command: UpdateSession) -> Result<SessionDetail, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn delete(&self, _command: DeleteSession) -> Result<DeleteResult, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn complete(
-        &self,
-        _command: CompleteSession,
-    ) -> Result<SessionCompletionResult, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn collect(
-        &self,
-        _: bcs_service_api::application::v1::CollectSession,
-    ) -> Result<bcs_service_api::application::v1::SessionCollectionResult, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn uncollect(
-        &self,
-        _: bcs_service_api::application::v1::UncollectSession,
-    ) -> Result<bcs_service_api::application::v1::SessionCollectionResult, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn add_participant(
-        &self,
-        _command: AddSessionParticipant,
-    ) -> Result<SessionParticipant, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn update_participant(
-        &self,
-        _command: UpdateSessionParticipant,
-    ) -> Result<SessionParticipant, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn delete_participant(
-        &self,
-        _command: DeleteSessionParticipant,
-    ) -> Result<DeleteResult, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-}
-
-struct NoopSessionMessageService;
-
-#[async_trait]
-impl SessionMessageService for NoopSessionMessageService {
-    async fn list(
-        &self,
-        _query: ListSessionMessages,
-    ) -> Result<Vec<bcs_service_api::GroupMessage>, ApplicationError> {
-        Err(ApplicationError::internal("session messages not configured"))
-    }
-}
-
-struct NoopInvitationService;
-
-#[async_trait]
-impl InvitationService for NoopInvitationService {
-    async fn create_group_invitation(
-        &self,
-        _command: CreateGroupInvitation,
-    ) -> Result<Invitation, ApplicationError> {
-        Err(ApplicationError::internal("invitation not configured"))
-    }
-
-    async fn create_session_invitation(
-        &self,
-        _command: CreateSessionInvitation,
-    ) -> Result<Invitation, ApplicationError> {
-        Err(ApplicationError::internal("invitation not configured"))
-    }
-
-    async fn accept_invitation(
-        &self,
-        _command: AcceptInvitation,
-    ) -> Result<InvitationAcceptResult, ApplicationError> {
-        Err(ApplicationError::internal("invitation not configured"))
-    }
-}
-
-struct NoopFriendshipService;
-
-#[async_trait]
-impl FriendshipService for NoopFriendshipService {
-    async fn list_bot_friendships(
-        &self,
-        _command: ListBotFriendships,
-    ) -> Result<Page<Friendship>, ApplicationError> {
-        Err(ApplicationError::internal("friendship not configured"))
-    }
-
-    async fn delete_bot_friendship(
-        &self,
-        _command: DeleteBotFriendship,
-    ) -> Result<DeleteResult, ApplicationError> {
-        Err(ApplicationError::internal("friendship not configured"))
-    }
-
-    async fn create_bot_friend_request(
-        &self,
-        _command: CreateBotFriendRequest,
-    ) -> Result<FriendRequest, ApplicationError> {
-        Err(ApplicationError::internal("friendship not configured"))
-    }
-
-    async fn list_bot_friend_requests(
-        &self,
-        _command: ListBotFriendRequests,
-    ) -> Result<Page<FriendRequest>, ApplicationError> {
-        Err(ApplicationError::internal("friendship not configured"))
-    }
-
-    async fn accept_friend_request(
-        &self,
-        _command: AcceptFriendRequest,
-    ) -> Result<FriendRequest, ApplicationError> {
-        Err(ApplicationError::internal("friendship not configured"))
-    }
-
-    async fn reject_friend_request(
-        &self,
-        _command: RejectFriendRequest,
-    ) -> Result<FriendRequest, ApplicationError> {
-        Err(ApplicationError::internal("friendship not configured"))
-    }
-}
+mod register_support;
+use register_support::*;
 
 // ---------------------------------------------------------------------------
 // Fake register service.
@@ -325,6 +38,7 @@ impl RegisterService for FakeRegisterService {
             token: "reg-token-1".to_string(),
             expires_at: 123456,
             note: "Use this token for bot registration within 6 hours".to_string(),
+            registration: None,
         })
     }
 
@@ -340,20 +54,9 @@ impl RegisterService for FakeRegisterService {
             bot_name: command.bot_name,
             bot_uuid: "bot-new-1".to_string(),
             bot_token: "bot-token-new-1".to_string(),
+            registration: None,
         })
     }
-}
-
-fn test_router(service: Arc<FakeRegisterService>) -> axum::Router {
-    router(ApiState::new(
-        Arc::new(NoopGroupService),
-        Arc::new(NoopSessionService),
-        Arc::new(NoopSessionMessageService),
-        Arc::new(NoopInvitationService),
-        service,                          // register slot (5th service)
-        Arc::new(NoopFriendshipService),  // friendship slot
-        Arc::new(HeaderVerifier { caller: caller() }),
-    ))
 }
 
 fn fake_service(reject: bool) -> Arc<FakeRegisterService> {
@@ -377,12 +80,14 @@ async fn get_register_token_returns_envelope_with_token_data() {
         .await
         .expect("token issue response");
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("cache-control").and_then(|v| v.to_str().ok()), Some("no-store"));
     let body = response_json(response).await;
     assert_eq!(body["code"], 20_000);
     assert_eq!(body["message"], "OK");
     assert_eq!(body["request_id"], "request-123");
     assert_eq!(body["data"]["token"], "reg-token-1");
     assert_eq!(body["data"]["expires_at"], 123456);
+    assert_eq!(body["data"].as_object().unwrap().len(), 3);
     let issued = service.issued.lock().expect("issued lock");
     assert_eq!(issued[0].caller.user.as_ref().expect("human").id, "staff-1");
 }
@@ -424,6 +129,8 @@ async fn post_register_is_anonymous_and_returns_created_envelope() {
     assert_eq!(body["data"]["bot_name"], "测试机器人");
     assert_eq!(body["data"]["bot_uuid"], "bot-new-1");
     assert_eq!(body["data"]["bot_token"], "bot-token-new-1");
+    assert_eq!(body["data"].as_object().unwrap().len(), 3);
+    assert!(body["data"].get("registration").is_none());
     let registered = service.registered.lock().expect("registered lock");
     assert_eq!(registered[0].token, "abc123");
     assert_eq!(registered[0].bot_name, "测试机器人");
@@ -460,4 +167,48 @@ async fn post_register_maps_unauthenticated_token_failures() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let body = response_json(response).await;
     assert_eq!(body["code"], 40_100);
+}
+
+#[tokio::test]
+async fn provider_query_is_forwarded_at_issuance() {
+    let service = fake_service(false);
+    let response = test_router(service.clone()).oneshot(authenticated_request(
+        "GET", "/openapi/v1/collaboration/register/token?provider_id=provider-a", json!({}),
+    )).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(service.issued.lock().unwrap()[0].provider_id.as_deref(), Some("provider-a"));
+}
+
+#[tokio::test]
+async fn gateway_query_accepts_optional_webhook_and_preserves_name_aliases() {
+    use bcs_domain::provider_registration_token::ProviderRegistrationMode;
+    for name_key in ["bot-name", "bot_name"] {
+        for webhook in ["", "&webhook_url=https%3A%2F%2Fexample.test%2Fhook"] {
+            let service = fake_service(false);
+            let response = test_router(service.clone()).oneshot(bare_request("POST", &format!(
+                "/openapi/v1/collaboration/register?token=capability&{name_key}=Test%20Bot&mode=gateway&provider_bot_ref=ref-1{webhook}&owner=attacker&provider_id=other"
+            ))).await.unwrap();
+            assert_eq!(response.status(), StatusCode::CREATED);
+            assert_eq!(response.headers().get("cache-control").and_then(|v| v.to_str().ok()), Some("no-store"));
+            let commands = service.registered.lock().unwrap();
+            assert_eq!(commands[0].mode, Some(ProviderRegistrationMode::Gateway));
+            assert_eq!(commands[0].provider_bot_ref.as_deref(), Some("ref-1"));
+            assert_eq!(commands[0].webhook_url.as_deref(), if webhook.is_empty() { None } else { Some("https://example.test/hook") });
+        }
+    }
+}
+
+#[tokio::test]
+async fn unknown_and_empty_modes_are_bad_requests_without_echoing_capabilities() {
+    for mode in ["", "unknown", "Gateway", "secret-capability-value"] {
+        let service = fake_service(false);
+        let response = test_router(service.clone()).oneshot(bare_request("POST", &format!(
+            "/openapi/v1/collaboration/register?token=secret-register-token&bot_name=Test&mode={mode}"
+        ))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(response).await;
+        assert_eq!(body["code"], 40_000);
+        assert!(!body.to_string().contains("secret"));
+        assert!(service.registered.lock().unwrap().is_empty());
+    }
 }

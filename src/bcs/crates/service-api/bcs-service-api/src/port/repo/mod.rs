@@ -27,6 +27,7 @@ pub mod organization;
 pub mod permission_profile;
 pub mod permission_request;
 pub mod provider;
+pub mod provider_registration;
 pub mod relation;
 pub mod session;
 pub mod session_file;

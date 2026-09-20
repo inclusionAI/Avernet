@@ -2,6 +2,9 @@
 //!
 //! Provides local bot persistence, discovery, and streaming connection state.
 
+#[path = "memory_registration_create.rs"]
+mod registration_create;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -449,6 +452,16 @@ impl BotMetricsSnapshotPort for MemoryBotRepo {
 
 #[async_trait]
 impl BotRepoPort for MemoryBotRepo {
+    async fn try_load_token(&self, bot_id: &str) -> ServiceResult<Option<String>> {
+        self.load_registration_token(bot_id).await
+    }
+
+    async fn create_registration_if_absent(
+        &self, bot_id: String, capabilities: BotCapabilities, created_by: &str, token: &str,
+    ) -> ServiceResult<bool> {
+        self.create_registration_once(bot_id, capabilities, created_by, token).await
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         self.deleted_bot_ids.write().await.remove(&bot_id);
 

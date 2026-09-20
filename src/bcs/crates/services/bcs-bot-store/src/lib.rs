@@ -44,6 +44,8 @@ fn log_bot_cache_source(source: &'static str) {
 pub mod memory;
 pub mod provider;
 pub mod provider_cache;
+pub mod provider_registration;
+mod registration_create;
 
 #[cfg(test)]
 #[path = "../tests/unit/heartbeat.rs"]
@@ -52,6 +54,7 @@ mod heartbeat_tests;
 pub use bcs_service_api::port::repo::BotRepoPort;
 pub use memory::MemoryBotRepo;
 pub use provider::{DbProviderStore, MemoryProviderStore};
+pub use provider_registration::{DbProviderRegistrationStore, MemoryProviderRegistrationStore};
 
 /// Maximum time before a bot registration expires (5 minutes).
 const BOT_EXPIRY: Duration = Duration::from_secs(300);
@@ -1140,6 +1143,16 @@ impl BotMetricsSnapshotPort for PersistentBotRepo {
 
 #[async_trait]
 impl BotRepoPort for PersistentBotRepo {
+    async fn try_load_token(&self, bot_id: &str) -> ServiceResult<Option<String>> {
+        self.load_registration_token(bot_id).await
+    }
+
+    async fn create_registration_if_absent(
+        &self, bot_id: String, capabilities: BotCapabilities, created_by: &str, token: &str,
+    ) -> ServiceResult<bool> {
+        self.create_registration_once(bot_id, capabilities, created_by, token).await
+    }
+
     // ===== Registration & Discovery =====
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {

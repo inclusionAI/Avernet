@@ -15,6 +15,7 @@ bcs-db-api = { workspace = true }
 bcs-service-api = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
@@ -22,7 +23,6 @@ uuid = { workspace = true }
 [dev-dependencies]
 bcs-db-local = { workspace = true }
 bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }
-tempfile = { workspace = true }
 tokio-test = "0.4"
 
 [lints]

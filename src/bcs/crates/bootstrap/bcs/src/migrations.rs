@@ -119,6 +119,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 27, name: "run_reply_segments" },
     SqliteMigration { version: 28, name: "provider_bot_webhook" },
     SqliteMigration { version: 29, name: "fixed_loop_runtime" },
+    SqliteMigration { version: 30, name: "provider_registrations" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -349,6 +350,10 @@ async fn apply_sqlite_migration_body(
             Ok(())
         }
         29 => add_sqlite_fixed_loop_runtime_schema(db).await,
+        30 => {
+            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/030_provider_registrations.sql"))).await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
