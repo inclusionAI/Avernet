@@ -8,11 +8,10 @@ Two inputs:
   1. The full registered endpoint set — parsed from router.rs. Verified by
      inspection (build_api_routes is the single, unconditional, no-nest
      registration site; there is no OpenAPI/utoipa spec to read instead).
-  2. The set of endpoints actually hit — the instrumented bcs logs every
-     request as `[→BCS] METHOD PATH` (see debug_middleware in
-     crates/bootstrap/bcs/src/server.rs, gated on BCS_DEBUG=true; e2e_coverage.sh
-     exports it). Path params in hits are concrete (a real bot uuid), registered
-     templates have `{param}` placeholders, so hits are matched to templates.
+  2. The set of endpoints actually hit — preferably read from the structured
+     `bcs_http_access` request-start log. Older logs fall back to the
+     `[→BCS] METHOD PATH` marker emitted by debug_middleware. Concrete paths and
+     structured route templates are both matched to the registered templates.
 
 Self-checks (so the parsed set is verified, not trusted):
   - over-count: a parsed (method, template) is only counted if it is NOT axum's
@@ -41,6 +40,12 @@ METHODS = ("get", "post", "put", "patch", "delete")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # Line-start `[→BCS]` after optional ANSI escapes.
 HIT_RE = re.compile(r"(?:\x1b\[[0-9;]*[A-Za-z])*\[→BCS\]\s+(\S+)\s+(\S+)")
+# The access middleware writes one structured start record per request. Unlike
+# the debug marker, this record carries the router template and stays intact
+# when concurrent stderr writers interleave around the marker's two fields.
+ACCESS_HIT_RE = re.compile(
+    r"\bbcs_http_access:\s+http\.request\.started\b.*?\broute=(\S+)\s+method=(\S+)"
+)
 
 
 @dataclass(frozen=True)
@@ -157,25 +162,34 @@ def _matching_paren(s, open_idx):
 
 
 def parse_hits(log_path: str):
-    """Yield (method_upper, raw_path_no_query) for every [→BCS] line in bcs.log.
+    """Return request hits from structured access logs or legacy debug markers.
 
-    Anchored to line-start `[→BCS]` (after stripping ANSI) so the bcs_ws
-    dispatcher lines `📥 [BCS] 收到 Bot 事件 ...` are NOT mis-parsed as hits.
+    Structured access records are preferred because concurrent stderr output
+    can split a legacy marker between `[→BCS]` and `METHOD PATH`. The legacy
+    parser remains for older logs without access records and is anchored to
+    line-start `[→BCS]` so bcs_ws dispatcher lines are not mis-parsed as hits.
     """
-    hits = []
+    access_hits = []
+    legacy_hits = []
     try:
         with open(log_path, encoding="utf-8", errors="replace") as f:
             for raw in f:
                 clean = ANSI_RE.sub("", raw)
+                access_match = ACCESS_HIT_RE.search(clean)
+                if access_match:
+                    route = access_match.group(1).split("?", 1)[0]
+                    method = access_match.group(2).upper()
+                    access_hits.append((method, route))
+                    continue
                 m = HIT_RE.match(clean)
                 if not m:
                     continue
                 method = m.group(1).upper()
                 path = m.group(2).split("?", 1)[0]  # strip query
-                hits.append((method, path))
+                legacy_hits.append((method, path))
     except FileNotFoundError:
         pass
-    return hits
+    return access_hits or legacy_hits
 
 
 def path_segments(path):

@@ -29,6 +29,14 @@ CreateChannelBindingRequest:
             for Bot and Group targets and either group_chat_scope. Direct chats ignore this
             setting. Commands and pending HumanInput replies retain their existing behavior;
             duplicate message IDs do not create another session. Previous runs are not cancelled.
+        group_context_delivery:
+          type: string
+          enum: [send, inject]
+          default: send
+          description: >-
+            Select how the initial GroupContext reaches the session driver. `send` asks the
+            driver to respond; `inject` adds the context without requesting a response. Only
+            Chat groups honor this override; ManagerWorker groups continue to use `send`.
 
 # Exactly one of `active` or `config` is accepted (the server XOR-checks).
 UpdateChannelBindingRequest:
@@ -51,6 +59,14 @@ UpdateChannelBindingRequest:
             for Bot and Group targets and either group_chat_scope. Direct chats ignore this
             setting. Commands and pending HumanInput replies retain their existing behavior;
             duplicate message IDs do not create another session. Previous runs are not cancelled.
+        group_context_delivery:
+          type: string
+          enum: [send, inject]
+          default: send
+          description: >-
+            Select how the initial GroupContext reaches the session driver. `send` asks the
+            driver to respond; `inject` adds the context without requesting a response. Only
+            Chat groups honor this override; ManagerWorker groups continue to use `send`.
   description: "Exactly one of `active` (boolean) or `config`; both or neither is a 400."
 
 BindingTarget:
@@ -126,6 +142,14 @@ ChannelBinding:
             for Bot and Group targets and either group_chat_scope. Direct chats ignore this
             setting. Commands and pending HumanInput replies retain their existing behavior;
             duplicate message IDs do not create another session. Previous runs are not cancelled.
+        group_context_delivery:
+          type: string
+          enum: [send, inject]
+          default: send
+          description: >-
+            Select how the initial GroupContext reaches the session driver. `send` asks the
+            driver to respond; `inject` adds the context without requesting a response. Only
+            Chat groups honor this override; ManagerWorker groups continue to use `send`.
 
 ChannelBindingPage:
   type: object
