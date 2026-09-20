@@ -409,14 +409,14 @@ async def test_restart_in_place_success_failure_and_no_secret_log(caplog):
     assert any("response publish_id=1" in message and "in_place=true success=False" in message
                for message in caplog.messages)
     caplog.clear()
-    flow.restart_bot.side_effect = RuntimeError("token=private-value")
+    flow.restart_bot.side_effect = RuntimeError("token=test-token")
     resp = await router_publish.restart_publish_in_place(1, user=_USER, flow_service=flow)
     assert resp.error_code == 500
     failure = next(message for message in caplog.messages if "failure publish_id=1" in message)
     assert "in_place=true error_type=RuntimeError error_code=500" in failure
     assert float(failure.rsplit("elapsed_ms=", 1)[1]) >= 0
-    assert "private-value" not in caplog.text
-    assert "private-value" not in resp.message
+    assert "test-token" not in caplog.text
+    assert "test-token" not in resp.message
     caplog.clear()
     flow.restart_bot.reset_mock()
     resp = await router_publish.restart_publish_in_place(1, user=_ANON, flow_service=flow)

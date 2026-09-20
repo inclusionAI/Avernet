@@ -173,15 +173,15 @@ async def test_query_upstream_failure_has_no_fake_empty_paths(setup, provider, f
     runtime, binding, _ = setup
     binding.device_provider = provider
     if failure == "rejected":
-        runtime.transport.invoke.return_value = {"success": False, "token": "credential-canary"}
+        runtime.transport.invoke.return_value = {"success": False, "token": "test-token"}
         runtime.http.get.return_value = Mock(json=Mock(return_value={"success": False}))
     else:
-        error = TimeoutError("credential-canary") if failure == "timeout" else ValueError("credential-canary")
+        error = TimeoutError("test-token") if failure == "timeout" else ValueError("test-token")
         runtime.transport.invoke.side_effect = error
         runtime.http.get.side_effect = error
     result = await runtime.query(binding, "a", PublishIgnoreQuery("bot", "entity", "online", "q"), "actor")
     assert result["status"] == status and "paths" not in result
-    assert "credential-canary" not in caplog.text + str(result)
+    assert "test-token" not in caplog.text + str(result)
     event = next(record for record in caplog.records if "backend.publish_ignore.engine_query_failure" in record.msg)
     assert event.args["request_id"] == "q" and event.args["provider"] == provider
     assert event.args["status"] == status and event.args["elapsed_ms"] >= 0
