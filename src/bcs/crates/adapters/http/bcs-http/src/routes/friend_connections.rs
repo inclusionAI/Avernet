@@ -97,7 +97,10 @@ pub async fn accept_friend_request(
     Path(id): Path<String>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
-    let edge_ids = state.connect.approve(&id, &caller).await?;
+    let edge_ids = state
+        .connect
+        .approve(&id, &caller, Some(request_auth_headers(&headers)))
+        .await?;
     Ok(Json(envelope(&AcceptFriendRequestResponse { edge_ids })))
 }
 

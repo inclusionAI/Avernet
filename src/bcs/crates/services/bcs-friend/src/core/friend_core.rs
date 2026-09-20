@@ -3,8 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_friend_store::MemoryFriendRepo;
 use bcs_service_api::{
-    EdgePermissionFriendSyncService, FriendAuthSyncPort, FriendCoreService, FriendRepoPort,
-    RelationCoreService, ServiceError, ServiceResult, Friendship,
+    EdgePermissionFriendSyncService, FriendAuthSyncAction, FriendAuthSyncCommand,
+    FriendAuthSyncPort, FriendCoreService, FriendRepoPort, RelationCoreService, ServiceError,
+    ServiceResult, Friendship,
 };
 use tracing::{error, info, warn};
 
@@ -229,6 +230,44 @@ impl FriendCoreService for FriendCore {
                         error = %err,
                         "edge_permission_sync.remove_friendship failed; friendship repo already removed"
                     );
+                }
+            }
+
+            // 11d: best-effort BCS→backend friend-auth-sync revoke (human→bot).
+            // NOTE: revoke has no inbound principal; backend gates with
+            // require_user_caller → 401, tolerated as best-effort. The existing
+            // _rebuild_auth_relationships (backend, on visibility change)
+            // remains the authoritative AceAgent teardown.
+            if let Some(ref sync) = self.friend_auth_sync {
+                let (is_human_pair, human_id, bot_id) = if bot_a.starts_with("human_") {
+                    (true, bot_a, bot_b)
+                } else if bot_b.starts_with("human_") {
+                    (true, bot_b, bot_a)
+                } else {
+                    (false, bot_a, bot_b)
+                };
+                if is_human_pair {
+                    let env = bcs_config::resolve_env_str();
+                    let command = FriendAuthSyncCommand {
+                        env: env.to_string(),
+                        bot_id: bot_id.to_string(),
+                        owner_work_no: String::new(),
+                        human_work_no: human_id
+                            .strip_prefix("human_")
+                            .unwrap_or(human_id)
+                            .to_string(),
+                        action: FriendAuthSyncAction::Revoke,
+                        request_id: None,
+                        request_auth: None,
+                    };
+                    if let Err(err) = sync.sync(command).await {
+                        warn!(
+                            human_id = %human_id,
+                            bot_id = %bot_id,
+                            error = %err,
+                            "friend-auth-sync revoke failed (best-effort)"
+                        );
+                    }
                 }
             }
         }

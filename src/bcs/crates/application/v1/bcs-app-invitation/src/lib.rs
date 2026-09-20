@@ -936,7 +936,7 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
             .map_err(map_service_error)?;
         let decider = self.resolve_request_decider(&command.caller, &request).await?;
         connect
-            .approve(&command.request_id, &decider)
+            .approve(&command.request_id, &decider, command.request_auth.clone())
             .await
             .map_err(map_service_error)?;
         let updated = connect

@@ -67,7 +67,15 @@ pub trait ConnectService: Send + Sync {
 
     /// Owner (or auto) approves; same-tx builds edge(s) + back-fills request.edge_id.
     /// Returns created edge_ids. Idempotent on already-approved.
-    async fn approve(&self, request_id: &str, decider: &str) -> ServiceResult<Vec<u64>>;
+    ///
+    /// `request_auth` carries the inbound HTTP principal headers so the
+    /// friend-auth-sync trigger (Task 11b) can forward them to the backend.
+    async fn approve(
+        &self,
+        request_id: &str,
+        decider: &str,
+        request_auth: Option<RequestAuthHeaders>,
+    ) -> ServiceResult<Vec<u64>>;
 
     async fn reject(
         &self,
