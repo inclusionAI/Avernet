@@ -269,11 +269,30 @@ async def discover_public_bots(
     ),
     service: BotDiscoverServiceProtocol = Injected(BotDiscoverServiceProtocol),
 ) -> Envelope[Page[DiscoveredPublicBot]]:
+    if viewer_actor_type == "bot":
+        # BCSFuse injects runtime_state=online when it is omitted. Passing both
+        # supported states keeps Bot-view recall governed by availability only;
+        # BCS remains the authoritative visibility filter below.
+        recommendation_filters = {
+            "availability": ["public", "protected"],
+            "runtime_state": ["online", "offline"],
+        }
+        catalog_visibility = ("public", "protected")
+        catalog_user_visibility = None
+        catalog_status = None
+    else:
+        recommendation_filters = {"runtime_state": [runtime_state]}
+        catalog_visibility = None
+        catalog_user_visibility = (
+            ("public", "protected") if viewer_actor_type == "human" else None
+        )
+        catalog_status = "online" if runtime_state == "online" else None
+
     try:
         catalog_filters = _catalog_search_filters(
-            visibility=None,
-            user_visibility=None,
-            status="online" if runtime_state == "online" else None,
+            visibility=catalog_visibility,
+            user_visibility=catalog_user_visibility,
+            status=catalog_status,
             viewer_actor_type=viewer_actor_type,
             viewer_actor_id=viewer_actor_id,
             friendship=None,
@@ -286,7 +305,7 @@ async def discover_public_bots(
             keyword=keyword,
             top_k=top_k,
             min_score=min_score,
-            filters={"runtime_state": [runtime_state]},
+            filters=recommendation_filters,
             catalog_filters=catalog_filters,
             caller=BotCatalogCaller(
                 tenant_id=principal.tenant,
