@@ -1064,3 +1064,142 @@ class TestCrossRestartReadability:
         )
         actions = _timeline_action_types(result)
         assert "submit" in actions and "dispatch" in actions
+
+
+# ---------------------------------------------------------------------------
+# REQ-P1 dispatch-failure visibility (Step 1 + Step 2)
+# ---------------------------------------------------------------------------
+
+
+class _FailDispatcher:
+    """Mirrors the REAL ``TaskDispatcher`` top-level ``except`` carrier write on a
+    search/recommend blow-up: sets ``dispatch_error`` + ``_dispatch_failure`` (with the
+    exception message) and leaves run_mode/assignee empty so ``_handle_node`` routes to
+    ``dispatch_fail`` and ``_drain`` emits the failed ``dispatch`` trajectory row."""
+
+    async def dispatch(self, nodes):
+        for n in nodes:
+            n.run_info.extend_props["dispatch_error"] = "dispatch_exception:RuntimeError"
+            n.run_info.extend_props["_dispatch_failure"] = {
+                "error_type": "dispatch_exception",
+                "error_msg": "RuntimeError: search/recommend blew up",
+            }
+        return nodes
+
+
+class _DegradedHitDispatcher:
+    """Mirrors a dispatch that DECIDED hit_single but whose rationale ASSEMBLY failed:
+    writes ``_dispatch_rationale`` + ``_dispatch_failure`` (degradation note) alongside the
+    hit. The engine hit_single gate folds ``_dispatch_failure`` into the event's ``ext_info``
+    as a visibility note — WITHOUT ``error_type`` (analyzer-safe: the 7-bullet
+    ``failure_reason`` derivation keys on ``error_type``, not ``ext_info``)."""
+
+    def __init__(self, *, rationale: dict | None = None) -> None:
+        self._rationale = rationale
+
+    async def dispatch(self, nodes):
+        for n in nodes:
+            if self._rationale is not None:
+                n.run_info.extend_props["_dispatch_rationale"] = dict(self._rationale)
+            n.run_info.extend_props["_dispatch_failure"] = {
+                "error_type": "rationale_assembly_failed",
+                "error_msg": "rationale_assembly_failed:TypeError",
+            }
+            n.run_info.run_mode = "single_bot"
+            n.run_info.assignee = "bot1"
+        return nodes
+
+
+class TestDispatchFailureTrajectory:
+    """REQ-P1 dispatch-failure visibility: dispatch exceptions / rationale-assembly
+    degradation must land in the trajectory. Previously the top-level search exception
+    was swallowed to a coarse ``dispatch_error`` flag that never reached ANY trajectory
+    event (only a much-later RESET ``pending_dispatch_stuck`` row fired — and it dropped
+    the cause)."""
+
+    def test_dispatch_exception_emits_failed_trajectory_row(self):
+        """Step 1 — a search/recommend blow-up routes a node to ``dispatch_fail`` and the
+        engine emits a ``dispatch`` row carrying ``error_type=DISPATCH_STUCK`` + the
+        exception message (analyzer-safe: ``DISPATCH_STUCK`` on a DISPATCH event is not
+        keyed by any ``failure_reason`` derivation bullet — only RESET
+        ``action_result="pending_dispatch_stuck"`` is, on a RESET event)."""
+        db = _make_db()
+        repo = TaskTrajectoryRepository(db)
+        task_id, child = "e2e-disp-fail", "c1"
+        graph_svc = TaskGraphService()
+
+        _drive_submit(repo, graph_svc, task_id=task_id)
+        _drive_plan(repo, graph_svc, task_id=task_id, child_node_id=child)
+        graph_svc.add_task_nodes([_child(child, task_id)], parent_node_id=task_id)
+        eng = _TrajectoryCaseEngine(
+            graph_svc, planner=_StubPlanner(),
+            dispatcher=_FailDispatcher(), runner=_StubRunner(), trajectory_repo=repo,
+        )
+        side: list[tuple] = []
+        _run(eng._prepare_into(task_id, side))
+        _run(eng._drain(task_id, side))
+
+        # node stuck PENDING with the dispatch_error flag (harness will retry by timeout)
+        node = graph_svc._get_node(graph_svc._graphs[task_id], child)
+        assert node.status == Status.PENDING
+        assert node.run_info.extend_props.get("dispatch_error")
+
+        # the engine landed a failed dispatch row carrying the cause
+        trajectory, _analysis = _assemble_and_analyze(repo, task_id=task_id)
+        failed = [
+            ev for ev in trajectory.timeline
+            if ev.action_type == TrajectoryActionType.DISPATCH and ev.action_result == "dispatch_exception"
+        ]
+        assert failed, (
+            f"no dispatch(dispatch_exception) row; got "
+            f"{[(e.action_type.value, e.action_result) for e in trajectory.timeline]}"
+        )
+        ev = failed[0]
+        assert ev.error_type == ReasonCatalog.DISPATCH_STUCK
+        assert "RuntimeError" in (ev.error_msg or "")
+        assert ev.status_from == Status.PENDING and ev.status_to == Status.PENDING
+
+    def test_rationale_assembly_failure_attaches_visibility_note_to_hit_event(self):
+        """Step 2 — a hit_single dispatch whose rationale ASSEMBLY failed still fires a
+        ``dispatch(hit_single)`` row; ``_dispatch_failure`` rides in ``ext_info`` as a
+        visibility note (NOT ``error_type``) so the analyzer's ``boost_reason`` still
+        derives from the rationale and ``failure_reason`` stays None (analyzer-safe)."""
+        db = _make_db()
+        repo = TaskTrajectoryRepository(db)
+        task_id, child = "e2e-degraded", "c1"
+        graph_svc = TaskGraphService()
+
+        _drive_submit(repo, graph_svc, task_id=task_id)
+        _drive_plan(repo, graph_svc, task_id=task_id, child_node_id=child)
+        graph_svc.add_task_nodes([_child(child, task_id)], parent_node_id=task_id)
+        eng = _TrajectoryCaseEngine(
+            graph_svc, planner=_StubPlanner(),
+            dispatcher=_DegradedHitDispatcher(rationale=_SAMPLE_RATIONALE),
+            runner=_StubRunner(), trajectory_repo=repo,
+        )
+        side: list[tuple] = []
+        _run(eng._prepare_into(task_id, side))
+        _run(eng._drain(task_id, side))
+
+        # the dispatch DECISION succeeded (hit_single → RUNNING); only rationale degraded
+        node = graph_svc._get_node(graph_svc._graphs[task_id], child)
+        assert node.status == Status.RUNNING
+
+        # the degradation note folded into the persisted ext_info (visibility, NOT an error)
+        records = repo.list_events_by_task(task_id)
+        hit = next(
+            (r for r in records
+             if r.action_type == TrajectoryActionType.DISPATCH.value and r.action_result == "hit_single"),
+            None,
+        )
+        assert hit is not None, f"no hit_single dispatch row: {[r.action_result for r in records]}"
+        assert hit.error_type is None, "degradation must NOT set error_type (analyzer-safe)"
+        ext = json.loads(hit.ext_info) if hit.ext_info else {}
+        assert "_dispatch_failure" in ext, f"_dispatch_failure note missing from ext_info: {ext}"
+        assert ext["_dispatch_failure"]["error_type"] == "rationale_assembly_failed"
+        assert "_dispatch_rationale" in ext, "rationale must still ride alongside the note"
+
+        # analyzer-safety: boost_reason still derives from the (present) rationale
+        _trajectory, analysis = _assemble_and_analyze(repo, task_id=task_id)
+        assert analysis.boost_reason is not None
+        assert "选中=bot1(hit_single)" in analysis.boost_reason

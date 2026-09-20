@@ -228,4 +228,12 @@ def _build_search_rationale(
             getattr(node, "node_id", "?"),
             ex,
         )
+        # 降级原因回填到 ``sr``(派生决策未失败,仅 rationale 丢):dispatcher 透传到节点
+        # ``_dispatch_failure`` carrier,引擎 DISPATCH hit/miss 闸门据此在事件 ``ext_info``
+        # 追加可见性备注。返回值仍 None(→ ``sr.rationale=None``,派发照常;仅多一条诊断留痕)。
+        # SearchResult 非 frozen → 普通属性赋值不抛(若 sr 非 SearchResult 实例则被外层吞,无副作用)。
+        try:
+            sr.assembly_error = f"rationale_assembly_failed:{type(ex).__name__}"
+        except Exception:  # noqa: BLE001  sr 不可写(非预期类型)→ 放弃备注,仅返回 None
+            pass
         return None

@@ -388,11 +388,35 @@ def _read_dispatch_side_data(graph, task_id: str, node_id: str) -> tuple[dict | 
         if node is None:
             return None, 0
         rat = node.run_info.extend_props.get("_dispatch_rationale")
-        ext_info = {"_dispatch_rationale": rat} if isinstance(rat, dict) else None
+        fail = node.run_info.extend_props.get("_dispatch_failure")
+        ext_info: dict[str, Any] | None = None
+        if isinstance(rat, dict) or isinstance(fail, dict):
+            ext_info = {}
+            if isinstance(rat, dict):
+                ext_info["_dispatch_rationale"] = rat
+            if isinstance(fail, dict):
+                # 降级备注(rationale 装配失败 / 序列化失败):随 DISPATCH hit/miss 事件落 ext_info
+                # 可见性备注 —— 非 error_type,analyzer failure_reason 不据此派生(decision #14 兼容)。
+                ext_info["_dispatch_failure"] = fail
         attempt = int(node.run_info.extend_props.get("harness_retries", 0) or 0)
         return ext_info, attempt
     except Exception:  # noqa: BLE001  trajectory 旁路读取,失败 → (None, 0),不阻塞闸门
         return None, 0
+
+
+def _dispatch_fail_action_result(derr: str | None) -> str:
+    """Map a ``dispatch_error`` state-flag value to a trajectory ``action_result``
+    for the DISPATCH-failed gate. The short ``dispatch_error`` string is a harness
+    routing flag (e.g. ``dispatch_exception:TimeoutError`` / ``no_result``); this
+    normalizes it to an open-ended ``action_result`` token for the trajectory row
+    (the precise value still rides in ``error_msg``). Unknown → ``"failed"``.
+    """
+    d = (derr or "").strip()
+    if d.startswith("dispatch_exception"):
+        return "dispatch_exception"
+    if d == "no_result":
+        return "no_result"
+    return "failed"
 
 
 def _is_stale_dispatching(node: "object") -> bool:
@@ -3374,13 +3398,19 @@ class ExecutionEngine:
                 node.node_id,
                 derr,
             )
+            _df = node.run_info.extend_props.get("_dispatch_failure")
+            _fail_patch: dict[str, Any] = {"dispatch_error": derr}
+            if isinstance(_df, dict):
+                # 透传失败 carrier(dispatcher 顶层 except 写入,含异常消息)到 dispatch_fail
+                # patch,供 _drain dispatch_fail 闸门发射带 error_msg 的 DISPATCH 轨迹事件。
+                _fail_patch["_dispatch_failure"] = _df
             side.append(
                 (
                     "dispatch_fail",
                     TaskNodePatch(
                         task_id=task_id,
                         node_id=node.node_id,
-                        extend_props_patch={"dispatch_error": derr},
+                        extend_props_patch=_fail_patch,
                     ),
                 )
             )
@@ -3472,6 +3502,21 @@ class ExecutionEngine:
                                 },
                             )
                         )
+                    # 轨迹旁路:DISPATCH(form_group_failed) —— 拉群失败,节点清执行者留 PENDING 交
+                    # harness 重试。error_type=DISPATCH_STUCK(analyzer failure_reason 不派生自此 — 仅
+                    # RESET pending_dispatch_stuck bullet 触及);error_msg 含异常类型便于排查。
+                    self._log_trajectory(
+                        task_id,
+                        node.node_id,
+                        "dispatch",
+                        action_result="form_group_failed",
+                        action_input=None,
+                        error_type=ReasonCatalog.DISPATCH_STUCK,
+                        error_msg=f"form_group_failed: {type(ex).__name__}",
+                        status_from=Status.PENDING,
+                        status_to=Status.PENDING,
+                        attempt=int(node.run_info.extend_props.get("harness_retries", 0) or 0),
+                    )
                     continue
                 node.run_info.assignee = gid
                 with self._lock_for(task_id):
@@ -3506,17 +3551,19 @@ class ExecutionEngine:
                 # 与 MISS 闸门走 _read_dispatch_side_data 的路径对称:那里 patch 是 TaskNodePatch
                 # 必须查图;这里节点已在手上,无需查)。
                 _hit_multi_rat = node.run_info.extend_props.get("_dispatch_rationale")
+                _hit_multi_fail = node.run_info.extend_props.get("_dispatch_failure")
+                _hit_multi_ext: dict[str, Any] = {}
+                if isinstance(_hit_multi_rat, dict):
+                    _hit_multi_ext["_dispatch_rationale"] = _hit_multi_rat
+                if isinstance(_hit_multi_fail, dict):
+                    _hit_multi_ext["_dispatch_failure"] = _hit_multi_fail
                 self._log_trajectory(
                     task_id,
                     node.node_id,
                     "dispatch",
                     action_result="hit_multi",
                     action_input=gid,
-                    ext_info=(
-                        {"_dispatch_rationale": _hit_multi_rat}
-                        if isinstance(_hit_multi_rat, dict)
-                        else None
-                    ),
+                    ext_info=_hit_multi_ext or None,
                     status_from=Status.PENDING,
                     status_to=Status.RUNNING,
                     attempt=int(node.run_info.extend_props.get("harness_retries", 0) or 0),
@@ -3588,6 +3635,21 @@ class ExecutionEngine:
                                 },
                             )
                         )
+                        # 轨迹旁路:DISPATCH(start_run_failed) —— 投递失败,节点清执行者留 PENDING
+                        # 交 harness 重试。error_type=DISPATCH_STUCK;start_run 整批 except →
+                        # results=[False]*n 不暴露单节点异常,故 error_msg 仅标类别。
+                        self._log_trajectory(
+                            task_id,
+                            node.node_id,
+                            "dispatch",
+                            action_result="start_run_failed",
+                            action_input=None,
+                            error_type=ReasonCatalog.DISPATCH_STUCK,
+                            error_msg="start_run_failed",
+                            status_from=Status.PENDING,
+                            status_to=Status.PENDING,
+                            attempt=int(node.run_info.extend_props.get("harness_retries", 0) or 0),
+                        )
                         continue
                     cur = cur_map.get(node.node_id)
                     if cur is not None and cur.status == Status.PENDING:
@@ -3618,17 +3680,19 @@ class ExecutionEngine:
                         # 与 MISS 闸门走 _read_dispatch_side_data 的路径对称:那里 patch 是
                         # TaskNodePatch 必须查图;这里节点已在手上,无需查)。
                         _hit_single_rat = cur.run_info.extend_props.get("_dispatch_rationale")
+                        _hit_single_fail = cur.run_info.extend_props.get("_dispatch_failure")
+                        _hit_single_ext: dict[str, Any] = {}
+                        if isinstance(_hit_single_rat, dict):
+                            _hit_single_ext["_dispatch_rationale"] = _hit_single_rat
+                        if isinstance(_hit_single_fail, dict):
+                            _hit_single_ext["_dispatch_failure"] = _hit_single_fail
                         self._log_trajectory(
                             task_id,
                             node.node_id,
                             "dispatch",
                             action_result="hit_single",
                             action_input=cur.run_info.assignee,
-                            ext_info=(
-                                {"_dispatch_rationale": _hit_single_rat}
-                                if isinstance(_hit_single_rat, dict)
-                                else None
-                            ),
+                            ext_info=_hit_single_ext or None,
                             status_from=Status.PENDING,
                             status_to=Status.RUNNING,
                             attempt=int(cur.run_info.extend_props.get("harness_retries", 0) or 0),
@@ -3652,6 +3716,24 @@ class ExecutionEngine:
         # ② dispatch_fail:落 dispatch_error(留 PENDING,harness 按超时重试搜推)
         for patch in dispatch_fail_patches:
             self._graph.update_task_node_info(patch)
+            # 轨迹旁路:DISPATCH(failed) —— 派发未产出执行者(搜推异常 / 无结果),节点留 PENDING 交
+            # harness。error_type=DISPATCH_STUCK;error_msg 优先取 ``_dispatch_failure`` carrier(含异常
+            # 消息,dispatcher 顶层 except 写入并经 _handle_node 透传),回退到短 dispatch_error 状态串。
+            _derr = (patch.extend_props_patch or {}).get("dispatch_error") or "no_result"
+            _df = (patch.extend_props_patch or {}).get("_dispatch_failure")
+            _emsg = (_df.get("error_msg") if isinstance(_df, dict) else None) or str(_derr)
+            self._log_trajectory(
+                patch.task_id,
+                patch.node_id,
+                "dispatch",
+                action_result=_dispatch_fail_action_result(_derr),
+                action_input=None,
+                error_type=ReasonCatalog.DISPATCH_STUCK,
+                error_msg=_emsg[:500] if _emsg else None,
+                status_from=Status.PENDING,
+                status_to=Status.PENDING,
+                attempt=0,
+            )
         # ③ miss 推进(递归 collect+drain)
         for m in miss_tasks:
             await self.on_miss(m)

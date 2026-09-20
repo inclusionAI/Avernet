@@ -46,10 +46,9 @@ from agentclaw.community.core.task.domain.errors import (
     TrajectoryAnalysisNotConfiguredError,
 )
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
-    AnalysisType,
+    ReasonCatalog,
     TaskTrajectory,
     TrajectoryActionType,
-    TrajectoryAnalysis,
     TrajectoryEvent,
 )
 
@@ -363,3 +362,122 @@ def test_trajectory_dto_has_flat_event_fields_no_ext_info(client):
     assert "ext_info" not in ev
     # action_type is the string value, not the enum object
     assert ev["action_type"] == "submit"
+
+
+# ---------------------------------------------------------------------------
+# display=html — human-readable HTML page (default still JSON envelope)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_returns_html_page():
+    """?display=html → 200 text/html, self-contained page rendering the timeline +
+    the persisted analysis (boost_reason surfaced). Default JSON shape unchanged elsewhere."""
+    svc = _StubTrajectoryService(trajectory=_make_trajectory(analysis=_analysis_json()))
+    c = _build_client(svc)
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    body = r.text
+    assert "<html" in body.lower() and "</html>" in body.lower()
+    assert "t1" in body                          # task_id
+    assert "submit" in body and "dispatch" in body  # action_types rendered
+    assert "hit_single" in body                  # action_result chip
+    # the persisted analysis content is surfaced (boost_reason from _analysis_json)
+    assert "策略=search 选中=botA(hit_single)" in body
+    assert "推进理由" in body                     # analysis section label
+    # the service still received do_analysis=False (display does not toggle analysis)
+    assert svc.calls == [("t1", False)]
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_internal_router_mirror():
+    """Internal /api/v1 copy mirrors display=html(改其一须同步);no analysis → empty hint."""
+    svc = _StubTrajectoryService(trajectory=_make_trajectory(analysis=None))
+    c = _build_client(svc)
+    r = c.get(
+        "/api/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    assert "<html" in r.text.lower()
+    assert "t1" in r.text
+    assert "未分析" in r.text                     # empty-analysis hint (do_analysis=false)
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_escapes_dynamic_content():
+    """HTML must escape action_input / error_msg from external bots/requests (XSS).
+    Raw ``<script>`` / ``onerror=`` must not survive into the rendered body."""
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1",
+        action_type=TrajectoryActionType.EXECUTE, action_result="failed",
+        attempt=1, gmt_create=3000, gmt_modified=3000,
+        error_type=ReasonCatalog.UNDERLYING_INTERFACE_ERROR,
+        error_msg='boom <script>alert(1)</script> "x"',
+        action_input='payload <img src=x onerror=alert(1)>',
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=3000, gmt_modified=3000, timeline=[ev], analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    body = r.text
+    after_style = body.split("</style>", 1)[-1]   # body excluding inline CSS
+    assert "<script>" not in after_style
+    assert "<img" not in after_style              # the tag is escaped → no <img> element forms
+    # escaped forms ARE present (proves the content rendered, just safely).
+    # NOTE: html.escape does not touch =/() so ``onerror=alert(1)`` survives as
+    # harmless literal text inside the escaped span — the XSS vector is the TAG,
+    # neutralized by escaping ``<``/``>``.
+    assert "&lt;script&gt;" in body
+    assert "&lt;img" in body
+
+
+@pytest.mark.unit
+def test_trajectory_display_default_and_json_stay_json(client):
+    """Omitting display, or display=json, returns the default JSON envelope (not HTML)."""
+    r = client.get(
+        "/openapi/v1/collaboration/tasks/trajectory", params={"task_id": "t1"}
+    )
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json()["data"]["task_id"] == "t1"
+
+    r2 = client.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "json"},
+    )
+    assert r2.headers["content-type"].startswith("application/json")
+    assert r2.json()["data"]["task_id"] == "t1"
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_renders_beijing_time():
+    """Times render in Beijing time (UTC+8), NOT UTC — ``gmt_*`` ms epoch is absolute;
+    the page must show the wall-clock the operator sees (北京时间, not 8h behind)."""
+    # 1_700_000_000_000 ms = 2023-11-14 22:13:20 UTC = 2023-11-15 06:13:20 北京时间
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type=TrajectoryActionType.SUBMIT,
+        action_result="success", attempt=0,
+        gmt_create=1_700_000_000_000, gmt_modified=1_700_000_000_000,
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1_700_000_000_000, gmt_modified=1_700_000_000_000,
+        timeline=[ev], analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    assert "2023-11-15 06:13:20 北京时间" in r.text
+    assert "22:13:20 北京时间" not in r.text   # not the UTC wall-clock

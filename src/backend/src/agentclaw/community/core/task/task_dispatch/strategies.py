@@ -109,6 +109,11 @@ class SearchResult:
     # ``None`` 表示策略未填(直驱/重投/装配失败 —— 装配全程 try/except 见
     # ``_build_search_rationale``)。候选/分/join_dropped 一并由此字段传递,
     rationale: DispatchRationale | None = None
+    # rationale 装配抛错时由 ``_build_search_rationale`` 在本 ``sr`` 上回填的降级原因
+    # (dispatcher 透传到节点 ``_dispatch_failure`` carrier,引擎 hit/miss DISPATCH 闸门据此
+    # 在事件 ``ext_info`` 追加可见性备注 —— 非 ``error_type``,不冲击 analyzer failure_reason
+    # 派生)。``None`` = 装配成功 / 无降级。派发决策本身不受影响(仅丢 rationale + 留诊断)。
+    assembly_error: str | None = None
 
 
 class DispatchStrategy(Protocol):

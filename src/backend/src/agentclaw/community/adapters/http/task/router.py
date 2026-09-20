@@ -9,6 +9,7 @@ import time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -16,6 +17,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
 )
 from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
+from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
 from agentclaw.community.adapters.http.task.schemas import (
     TaskCallbackDataDTO,
     TaskCallbackRequest,
@@ -35,7 +37,6 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskRevokeResultDTO,
     TaskTrajectoryDTO,
     task_info_request_from_dto,
-    task_spec_from_dto,
     trajectory_to_dto,
 )
 from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
@@ -125,15 +126,25 @@ async def get_task_trajectory_internal(
     do_analysis: Annotated[
         bool, Query(description="是否触发 bot 总体分析(默认关闭)")
     ] = False,
+    display: Annotated[
+        str | None,
+        Query(description="展示形式:html=返回人类可读的 HTML 轨迹页;省略或其它值=默认 JSON envelope"),
+    ] = None,
     service: TaskContextServiceProtocol = Injected(TaskContextServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskTrajectoryDTO]:
     """读取任务轨迹(内部副本;与公开面 ``adapters/http/openapi_v1/task/router.py`` 同一委托,逻辑一致,改其一须同步)。
 
     do_analysis=false(默认,纯读):返回 TaskTrajectory,analysis 取已落库值或 None,不写库不调 bot;
     do_analysis=true:调 DI 注入 bot 做总体分析→ 覆盖回填 analysis+gmt_modified→ 返回同形态 TaskTrajectory。
-    bot 未配置→503;bot 失败/超时→504 且不回填(决策 #10/#14)。原 /analysis 端点已并入此入口(决策 #10)。"""
+    bot 未配置→503;bot 失败/超时→504 且不回填(决策 #10/#14)。原 /analysis 端点已并入此入口(决策 #10)。
+
+    display=html:返回自包含 HTML 轨迹页(FastAPI 对 ``HTMLResponse`` 返回值跳过 ``response_model``
+    序列化,与默认 ``Envelope[TaskTrajectoryDTO]`` JSON 形态并存;错误仍走 ``envelope_errors`` 的 JSON)。"""
     trajectory = await service.get_trajectory(task_id, do_analysis=do_analysis)
-    return envelope(trajectory_to_dto(trajectory), request)
+    dto = trajectory_to_dto(trajectory)
+    if display == "html":
+        return HTMLResponse(render_trajectory_html(dto, do_analysis=do_analysis))
+    return envelope(dto, request)
 
 
 # ===== 任务认领 Bot 授权(grant/revoke,无状态中继) =====

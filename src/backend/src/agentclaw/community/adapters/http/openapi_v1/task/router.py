@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
@@ -29,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
 from agentclaw.community.adapters.http.task.schemas import (
     BbsTaskItemDTO,
     TaskExecutionGraphDTO,
@@ -142,6 +144,10 @@ async def get_task_trajectory(
     do_analysis: Annotated[
         bool, Query(description="是否触发 bot 总体分析(默认关闭)")
     ] = False,
+    display: Annotated[
+        str | None,
+        Query(description="展示形式:html=返回人类可读的 HTML 轨迹页;省略或其它值=默认 JSON envelope"),
+    ] = None,
     service: TaskContextServiceProtocol = Injected(TaskContextServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskTrajectoryDTO]:
     """读取任务轨迹(与 adapters/http/task/router.py 内部副本同一
@@ -153,10 +159,16 @@ async def get_task_trajectory(
     携新 analysis 的同形态 TaskTrajectory。bot 未配置 → 503;bot 失败/超时 → 504 且不回填
     (决策 #10/#14,analysis-trigger 失败必须可见)。原独立 /analysis 端点已并入此入口(决策 #10);
     ?narrative=true 不恢复(随 REQ-P2 裁剪)。task_action_log / NodeAction 完全不触碰(独立旁路)。
+
+    display=html:返回自包含 HTML 轨迹页(FastAPI 对 ``HTMLResponse`` 返回值跳过 ``response_model``
+    序列化,与默认 ``Envelope[TaskTrajectoryDTO]`` JSON 形态并存;错误仍走 ``envelope_errors`` 的 JSON)。
     """
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     trajectory = await service.get_trajectory(task_id, do_analysis=do_analysis)
-    return envelope(trajectory_to_dto(trajectory), request)
+    dto = trajectory_to_dto(trajectory)
+    if display == "html":
+        return HTMLResponse(render_trajectory_html(dto, do_analysis=do_analysis))
+    return envelope(dto, request)
 
 
 @router.get(
