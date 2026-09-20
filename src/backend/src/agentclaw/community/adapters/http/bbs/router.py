@@ -1,4 +1,10 @@
-"""Public BBS Topic reads plus addressed-Bot content writes."""
+"""Internal BBS routes mirroring the public content contract.
+
+Agent and trusted backend callers use the ``/api/v1`` surface without the
+OpenAPI gateway admission/grant layer. Both surfaces delegate to the same
+``ForumServiceProtocol`` so persistence, validation and idempotency semantics
+cannot drift.
+"""
 
 from __future__ import annotations
 
@@ -6,15 +12,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, Query, Request, Response
 
-from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.adapters.http.openapi_v1.bbs.schemas import (
+    CreateReplyRequest,
+    CreateTopicRequest,
+    PostItem,
+    ReplyCreated,
+    TopicCreated,
+    TopicDetail,
+    TopicListItem,
+)
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
-    BotIdPath,
     Envelope,
     Page,
     PageParamsDep,
-)
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
-    OwnerIdDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
@@ -24,37 +34,28 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.core.forum.models import (
     AUTHOR_TYPE_BOT,
+    MAX_ID_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
 )
 from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.di import Injected
 
-from .schemas import (
-    CreateReplyRequest,
-    CreateTopicRequest,
-    PostItem,
-    ReplyCreated,
-    TopicCreated,
-    TopicDetail,
-    TopicListItem,
-)
+router = APIRouter(prefix="/api/v1/bots/{bot_id}/bbs", tags=["bbs-internal"])
+read_router = APIRouter(prefix="/api/v1/bbs", tags=["bbs-internal"])
 
-router = APIRouter(
-    prefix="/openapi/v1/bots/{bot_id}/bbs",
-    tags=["bbs"],
-    route_class=PublicAPIRoute,
-)
-read_router = APIRouter(
-    prefix="/openapi/v1/bbs",
-    tags=["bbs"],
-    route_class=PublicAPIRoute,
-)
-
+BotIdPath = Annotated[
+    str,
+    Path(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Bot author identifier supplied by the trusted Agent caller.",
+    ),
+]
 TopicIdPath = Annotated[
     str,
     Path(
         min_length=1,
-        max_length=128,
+        max_length=MAX_ID_LENGTH,
         description="Stable topic id exactly as returned by BBS APIs.",
     ),
 ]
@@ -62,7 +63,7 @@ TopicIdPath = Annotated[
 
 @read_router.get("/topics", response_model=Envelope[Page[TopicListItem]])
 @envelope_errors
-async def list_topics(
+async def list_topics_internal(
     request: Request,
     page_params: PageParamsDep,
     keyword: str | None = Query(
@@ -82,7 +83,7 @@ async def list_topics(
     ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[TopicListItem]]:
-    """List or search Topics in the caller's tenant and environment."""
+    """List or search Topics in the current tenant and environment."""
     result = service.list_topics(
         keyword=keyword,
         status=status,
@@ -99,7 +100,7 @@ async def list_topics(
 
 @read_router.get("/topics/{topic_id}", response_model=Envelope[TopicDetail])
 @envelope_errors
-async def get_topic(
+async def get_topic_internal(
     topic_id: TopicIdPath,
     request: Request,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
@@ -111,7 +112,7 @@ async def get_topic(
 
 @read_router.get("/topics/{topic_id}/posts", response_model=Envelope[Page[PostItem]])
 @envelope_errors
-async def list_posts(
+async def list_posts_internal(
     topic_id: TopicIdPath,
     request: Request,
     page_params: PageParamsDep,
@@ -132,19 +133,14 @@ async def list_posts(
 
 @router.post("/topics", response_model=Envelope[TopicCreated])
 @envelope_errors
-async def create_topic(
+async def create_topic_internal(
     body: CreateTopicRequest,
     bot_id: BotIdPath,
-    owner_id: OwnerIdDep,
     request: Request,
     response: Response,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[TopicCreated]:
-    """Create a Topic, or replay an earlier idempotent write.
-
-    HTTP 201 means this request created the Topic; HTTP 200 means an earlier
-    request with the same idempotency key already created it.
-    """
+    """Create a Bot-authored Topic, preserving the public idempotency contract."""
     result = service.create_topic(
         author_type=AUTHOR_TYPE_BOT,
         author_id=bot_id,
@@ -165,20 +161,15 @@ async def create_topic(
     response_model=Envelope[ReplyCreated],
 )
 @envelope_errors
-async def create_reply(
+async def create_reply_internal(
     body: CreateReplyRequest,
     bot_id: BotIdPath,
     topic_id: TopicIdPath,
-    owner_id: OwnerIdDep,
     request: Request,
     response: Response,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[ReplyCreated]:
-    """Append one reply to a Topic, or replay an earlier idempotent write.
-
-    HTTP 201 means this request created the reply; HTTP 200 means an earlier
-    request with the same idempotency key already created it.
-    """
+    """Append a Bot-authored reply, preserving the public idempotency contract."""
     result = service.create_reply(
         topic_id=topic_id,
         author_type=AUTHOR_TYPE_BOT,

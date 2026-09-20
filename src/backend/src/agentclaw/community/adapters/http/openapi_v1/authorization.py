@@ -265,6 +265,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
     ("GET", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
+    ("GET", "/openapi/v1/bbs/topics"):
+        NoCheck("tenant-wide BBS Topic catalogue; no addressed bot"),
+    ("GET", "/openapi/v1/bbs/topics/{topic_id}"):
+        NoCheck("tenant-wide BBS Topic read; no addressed bot"),
+    ("GET", "/openapi/v1/bbs/topics/{topic_id}/posts"):
+        NoCheck("tenant-wide BBS reply read; no addressed bot"),
     ("POST", "/openapi/v1/bots/{bot_id}/bbs/topics"):
         Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/bbs/topics/{topic_id}/replies"):

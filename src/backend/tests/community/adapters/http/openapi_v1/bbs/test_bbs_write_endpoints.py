@@ -103,7 +103,10 @@ async def test_create_topic_response_contract_and_path_author():
     assert response.status_code == 201
     assert payload.code == 201000
     assert payload.data is not None
-    assert payload.data.model_dump() == {"topic_id": "topic_1"}
+    assert payload.data.model_dump() == {
+        "topic_id": "topic_1",
+        "topic_type": "DISCUSSION",
+    }
     assert service.calls == [
         {
             "author_type": "BOT",
@@ -111,6 +114,7 @@ async def test_create_topic_response_contract_and_path_author():
             "client_request_id": "req-topic",
             "title": " Topic title ",
             "body": " Topic description ",
+            "topic_type": "DISCUSSION",
         }
     ]
 

@@ -5,9 +5,10 @@ from typing import Any
 
 import pytest
 
-from agentclaw.community.core.errors import ValidationError
+from agentclaw.community.core.errors import NotFound, ValidationError
 from agentclaw.community.core.forum.models import (
     ForumPostRecord,
+    ForumTopicPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicRecord,
@@ -75,8 +76,24 @@ def test_create_topic_normalizes_input_and_author_identity():
             "client_request_id": "req-1",
             "title": "Topic title",
             "body": "Topic description",
+            "topic_type": "DISCUSSION",
         }
     ]
+
+
+def test_create_topic_normalizes_explicit_topic_type():
+    repo = FakeForumRepository()
+
+    ForumService(repo).create_topic(
+        author_type="BOT",
+        author_id="bot-a",
+        client_request_id="req-poll",
+        title="Poll",
+        body="Choose",
+        topic_type=" poll ",
+    )
+
+    assert repo.calls[0]["topic_type"] == "POLL"
 
 
 def test_create_reply_supports_human_author():
@@ -164,4 +181,73 @@ def test_create_topic_rejects_invalid_fields(kwargs, field):
         ForumService(repo).create_topic(**kwargs)
 
     assert field in excinfo.value.detail
+    assert repo.calls == []
+
+
+def test_list_topics_normalizes_filters_and_converts_page_to_offset():
+    repo = FakeForumRepository()
+    repo.list_topics = lambda **kwargs: (
+        repo.calls.append({"operation": "list_topics", **kwargs})
+        or ForumTopicPage(total=0, items=())
+    )
+
+    ForumService(repo).list_topics(
+        keyword="  query  ", status=" closed ", page=3, page_size=10
+    )
+
+    assert repo.calls == [
+        {
+            "operation": "list_topics",
+            "keyword": "query",
+            "status": "CLOSED",
+            "topic_type": None,
+            "offset": 20,
+            "limit": 10,
+        }
+    ]
+
+
+def test_list_topics_normalizes_optional_topic_type_filter():
+    repo = FakeForumRepository()
+    repo.list_topics = lambda **kwargs: (
+        repo.calls.append({"operation": "list_topics", **kwargs})
+        or ForumTopicPage(total=0, items=())
+    )
+
+    ForumService(repo).list_topics(
+        keyword=None, status=None, topic_type=" notice ", page=1, page_size=20
+    )
+
+    assert repo.calls[0]["topic_type"] == "NOTICE"
+
+
+@pytest.mark.parametrize("topic_type", ["event", "POLL_OPTIONS"])
+def test_rejects_unknown_topic_type(topic_type):
+    repo = FakeForumRepository()
+
+    with pytest.raises(ValidationError, match="topic_type"):
+        ForumService(repo).create_topic(
+            author_type="BOT",
+            author_id="bot-a",
+            client_request_id="req",
+            title="Topic",
+            body="Description",
+            topic_type=topic_type,
+        )
+
+
+def test_get_topic_raises_not_found_for_invisible_topic():
+    repo = FakeForumRepository()
+    repo.get_topic = lambda topic_id: None
+
+    with pytest.raises(NotFound, match="topic not found"):
+        ForumService(repo).get_topic(topic_id=" missing ")
+
+
+def test_list_posts_validates_pagination_before_repository_call():
+    repo = FakeForumRepository()
+
+    with pytest.raises(ValidationError, match="page_size"):
+        ForumService(repo).list_posts(topic_id="topic-1", page=1, page_size=101)
+
     assert repo.calls == []

@@ -112,6 +112,7 @@ from agentclaw.community.adapters.http.common_config.router import router as com
 from agentclaw.community.adapters.http.bot_common_config.router import router as bot_common_config_router  # noqa: E402
 from agentclaw.community.adapters.http.skills_pool import router as skills_pool_ops_router  # noqa: E402
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
+from agentclaw.community.adapters.http.bbs import read_router as bbs_internal_read_router, router as bbs_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
 # The task surface is internal: execute/dashboard/list, the report and bbs
@@ -900,6 +901,8 @@ app.include_router(common_config_router)
 app.include_router(bot_common_config_router)
 app.include_router(skills_pool_ops_router)
 app.include_router(beta_quota_router)
+app.include_router(bbs_internal_read_router)
+app.include_router(bbs_internal_router)
 app.include_router(channel_router)
 app.include_router(quality_router)
 app.include_router(task_internal_router)

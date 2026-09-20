@@ -220,6 +220,7 @@ from .mcp import router as mcp_router
 from .mcp.router import bot_mcp_router
 from .bot_logs import router as logs_router
 from .bot_chats import router as chats_router
+from .bbs import read_router as bbs_read_router
 from .bbs import router as bbs_router
 from .bot_public import router as bot_public_router
 from .resources import router as resources_router
@@ -296,6 +297,8 @@ _MIXED_GROUPS = [
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
 _OPEN_SUBGROUPS = [
+    # BBS Topics are tenant-wide content, not scoped to one addressed bot.
+    bbs_read_router,
     # Skill Workbench status is tenant-identical and app-admissible.
     skill_publish_status_router,
 ]

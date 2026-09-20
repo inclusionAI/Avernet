@@ -282,6 +282,11 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
+    # BBS Topics and replies are tenant-wide content. The authenticated
+    # principal may be a person, Bot, or application; no end-user axis exists.
+    ("get", f"{PUBLIC_API_PREFIX}/bbs/topics"),
+    ("get", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}"),
+    ("get", f"{PUBLIC_API_PREFIX}/bbs/topics/{{topic_id}}/posts"),
     # The department directory is a tenant-wide catalogue — not the caller's.
     ("get", f"{PUBLIC_API_PREFIX}/org/dept"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/catalog/search"),
@@ -470,7 +475,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: sit beside, so ``path`` 156 → 159 and nothing else moves.
 #: Dormant lifecycle adds one new bot-path operation (recycle); activate and
 #: status keep their existing paths while gaining addressed-owner scope.
-_BOT_ID_PLACEMENT = {"path": 160, "query": 1, "none": 106}
+#:
+#: Task trajectory (GET /collaboration/tasks/trajectory) is a task_id-keyed read
+#: with no bot_id dimension — adds one to ``none`` (104→105).
+_BOT_ID_PLACEMENT = {"path": 162, "query": 1, "none": 108}
 
 
 def _schema() -> dict:
@@ -622,8 +630,10 @@ def test_the_pinned_number_of_operations_take_it():
     # config-manifest group beside them is: they may address a *shared* bot, so
     # the owner arrives on the wire while the caller stays the acting user —
     # which is what ``installed_by`` records: 230 → 233. Dormant recycle adds
-    # one more user-scoped operation: 233 → 234.
-    assert len(taking) == 234
+    # one more user-scoped operation: 233 → 234. The two addressed-Bot BBS
+    # write routes add two more user-scoped operations; the three tenant-wide
+    # BBS reads deliberately have no user dimension: 234 → 236.
+    assert len(taking) == 236
 
 
 def test_the_exempt_operations_take_none():

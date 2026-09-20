@@ -7,6 +7,8 @@ from agentclaw.community.core.errors import Conflict, NotFound
 from agentclaw.community.core.forum.models import (
     TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
+    TOPIC_TYPE_NOTICE,
+    TOPIC_TYPE_POLL,
 )
 from agentclaw.community.core.forum.repository.models import (
     ForumPostModel,
@@ -25,6 +27,7 @@ def _create_topic(
     author_type="BOT",
     author_id="bot-a",
     request_id="req-topic",
+    topic_type="DISCUSSION",
 ):
     return repo.create_topic(
         author_type=author_type,
@@ -32,6 +35,7 @@ def _create_topic(
         client_request_id=request_id,
         title="Topic title",
         body="Topic description",
+        topic_type=topic_type,
     )
 
 
@@ -156,6 +160,37 @@ def test_same_content_can_be_replied_more_than_once_with_different_request_ids(d
     second = _create_reply(repo, topic.topic_id, request_id="reply-2", body="same")
 
     assert first.post.post_id != second.post.post_id
+
+
+@pytest.mark.parametrize("topic_type", [TOPIC_TYPE_POLL, TOPIC_TYPE_NOTICE])
+def test_poll_and_notice_allow_only_one_reply_per_author(db, topic_type):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo, topic_type=topic_type).topic
+
+    first = _create_reply(repo, topic.topic_id, request_id="reply-1")
+
+    with pytest.raises(Conflict, match="already replied"):
+        _create_reply(repo, topic.topic_id, request_id="reply-2")
+
+    replay = _create_reply(repo, topic.topic_id, request_id="reply-1", body="ignored")
+    assert replay.created is False
+    assert replay.post.post_id == first.post.post_id
+
+
+def test_poll_allows_different_authors_to_reply_once(db):
+    repo = ForumRepository(db)
+    topic = _create_topic(repo, topic_type=TOPIC_TYPE_POLL).topic
+
+    bot_reply = _create_reply(repo, topic.topic_id, author_id="bot-b")
+    human_reply = _create_reply(
+        repo,
+        topic.topic_id,
+        author_type="HUMAN",
+        author_id="user-b",
+        request_id="human-reply",
+    )
+
+    assert bot_reply.post.post_id != human_reply.post.post_id
 
 
 def test_create_reply_rejects_unknown_topic(db):

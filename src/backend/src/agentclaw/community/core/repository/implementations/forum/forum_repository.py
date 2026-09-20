@@ -1,4 +1,4 @@
-"""Transactional persistence for forum Topic and Post writes."""
+"""Persistence for forum Topic and Post reads and writes."""
 
 from __future__ import annotations
 
@@ -6,13 +6,19 @@ import uuid
 from datetime import datetime, timezone
 
 from injector import inject
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.errors import Conflict, NotFound
 from agentclaw.community.core.forum.models import (
     TOPIC_STATUS_OPEN,
+    TOPIC_TYPE_DISCUSSION,
+    TOPIC_TYPE_NOTICE,
+    TOPIC_TYPE_POLL,
+    ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
+    ForumTopicPage,
     ForumTopicRecord,
 )
 from agentclaw.community.core.forum.repository.models import (
@@ -82,6 +88,70 @@ class ForumRepository(ForumRepositoryProtocol):
         transactional = getattr(self._db, "transactional_orm_session", None)
         return transactional() if transactional is not None else self._db.orm_session()
 
+    def list_topics(
+        self,
+        *,
+        keyword: str | None,
+        status: str | None,
+        offset: int,
+        limit: int,
+        topic_type: str | None = None,
+    ) -> ForumTopicPage:
+        with self._db.orm_session() as db:
+            query = db.query(ForumTopicModel).filter(
+                ForumTopicModel.env == get_current_env(),
+                ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+            )
+            if status is not None:
+                query = query.filter(ForumTopicModel.status == status)
+            if topic_type is not None:
+                query = query.filter(ForumTopicModel.topic_type == topic_type)
+            if keyword is not None:
+                query = query.filter(
+                    or_(
+                        ForumTopicModel.title.contains(keyword, autoescape=True),
+                        ForumTopicModel.body.contains(keyword, autoescape=True),
+                    )
+                )
+            total = query.count()
+            rows = (
+                query.order_by(
+                    ForumTopicModel.gmt_create.desc(), ForumTopicModel.id.desc()
+                )
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return ForumTopicPage(
+                total=total, items=tuple(row.to_record() for row in rows)
+            )
+
+    def list_posts(self, *, topic_id: str, offset: int, limit: int) -> ForumPostPage:
+        with self._db.orm_session() as db:
+            topic = (
+                db.query(ForumTopicModel.id)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                raise NotFound("topic not found")
+
+            query = db.query(ForumPostModel).filter(ForumPostModel.topic_id == topic_id)
+            total = query.count()
+            rows = (
+                query.order_by(ForumPostModel.gmt_create.asc(), ForumPostModel.id.asc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return ForumPostPage(
+                total=total, items=tuple(row.to_record() for row in rows)
+            )
+
     def create_topic(
         self,
         *,
@@ -90,6 +160,7 @@ class ForumRepository(ForumRepositoryProtocol):
         client_request_id: str,
         title: str,
         body: str,
+        topic_type: str = TOPIC_TYPE_DISCUSSION,
     ) -> ForumTopicCreateResult:
         existing = self._find_request_topic(author_type, author_id, client_request_id)
         if existing is not None:
@@ -104,6 +175,7 @@ class ForumRepository(ForumRepositoryProtocol):
                     author_id=author_id,
                     title=title,
                     body=body,
+                    topic_type=topic_type,
                     client_request_id=client_request_id,
                     status=TOPIC_STATUS_OPEN,
                     env=get_current_env(),
@@ -140,6 +212,7 @@ class ForumRepository(ForumRepositoryProtocol):
                         ForumTopicModel.env == get_current_env(),
                         ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
                     )
+                    .with_for_update()
                     .one_or_none()
                 )
                 if topic is None:
@@ -162,6 +235,19 @@ class ForumRepository(ForumRepositoryProtocol):
 
                 if topic.status != TOPIC_STATUS_OPEN:
                     raise Conflict(f"topic is {topic.status.lower()}")
+
+                if topic.topic_type in {TOPIC_TYPE_POLL, TOPIC_TYPE_NOTICE}:
+                    already_replied = (
+                        db.query(ForumPostModel.post_id)
+                        .filter(
+                            ForumPostModel.topic_id == topic_id,
+                            ForumPostModel.author_type == author_type,
+                            ForumPostModel.author_id == author_id,
+                        )
+                        .first()
+                    )
+                    if already_replied is not None:
+                        raise Conflict("author has already replied to this topic")
 
                 now = datetime.now(timezone.utc)
                 post = ForumPostModel(

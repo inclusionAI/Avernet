@@ -140,6 +140,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/bots/{bot_id}/config-manifest/last-apply",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # BBS reads are tenant-wide and available to every authenticated principal.
+    ("GET", "/openapi/v1/bbs/topics"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bbs/topics/{topic_id}"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bbs/topics/{topic_id}/posts"): AdmissionMode.OPEN,
     # BBS content writes may act on a shared bot. The Bot in the path is the
     # forum author, while the caller may be a collaborator or an authorized
     # application; the addressed-owner grant therefore governs machine callers.

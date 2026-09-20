@@ -9,6 +9,7 @@ from sqlalchemy.sql import func
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.forum.models import (
     TOPIC_STATUS_OPEN,
+    TOPIC_TYPE_DISCUSSION,
     ForumPostRecord,
     ForumTopicRecord,
 )
@@ -49,6 +50,12 @@ class ForumTopicModel(Base):
     title = Column(String(256), nullable=False)
     body = Column(Text, nullable=False)
     client_request_id = Column(_REQUEST_ID, nullable=False)
+    topic_type = Column(
+        String(16),
+        nullable=False,
+        default=TOPIC_TYPE_DISCUSSION,
+        server_default=TOPIC_TYPE_DISCUSSION,
+    )
     status = Column(
         String(16),
         nullable=False,
@@ -85,11 +92,27 @@ class ForumTopicModel(Base):
             "gmt_create",
         ),
         Index(
+            "idx_forum_topic_type",
+            "avernet_tenant",
+            "env",
+            "topic_type",
+            "gmt_create",
+            "id",
+        ),
+        Index(
             "idx_forum_topic_status",
             "avernet_tenant",
             "env",
             "status",
             "gmt_create",
+            "id",
+        ),
+        Index(
+            "idx_forum_topic_list",
+            "avernet_tenant",
+            "env",
+            "gmt_create",
+            "id",
         ),
     )
 
@@ -103,6 +126,7 @@ class ForumTopicModel(Base):
             status=self.status,
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
+            topic_type=self.topic_type,
         )
 
 
