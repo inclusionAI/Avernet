@@ -301,9 +301,9 @@ def test_common_config_service_delete_by_id_and_requires_identifier():
 
 
 @pytest.mark.parametrize("value,expected", [
-    (None, "1G"), (True, "1G"), (0, "1G"),
-    (-1, "1G"), (1.5, "1G"), ("2Gi", "2Gi"),
-    (9223372036854775808, "1G"), ("1G", "1G"), ("2G", "2G"), ("", "1G"),
+    (None, "1Gi"), (True, "1Gi"), (0, "1Gi"),
+    (-1, "1Gi"), (1.5, "1Gi"), ("2Gi", "2Gi"),
+    (9223372036854775808, "1Gi"), ("1G", "1G"), ("2G", "2G"), ("", "1Gi"),
 ])
 def test_storage_quota_is_backend_config_independent_of_rollout(value, expected):
     from unittest.mock import MagicMock
@@ -318,4 +318,4 @@ def test_storage_quota_is_backend_config_independent_of_rollout(value, expected)
         business_code="bot_storage", param_code="storage", env="pre"
     )
     common.get_config.side_effect = RuntimeError("unavailable")
-    assert service.get_storage_quota("pre") == "1G"
+    assert service.get_storage_quota("pre") == "1Gi"

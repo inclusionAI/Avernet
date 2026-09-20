@@ -369,7 +369,12 @@ def test_personal_create_payload_and_saved_storage_identity(storage, quota, enab
     storage[3].get_config.return_value["param_value"]["quota"] = quota
     allocate(baas)
     sent = latest_storage(baas)
-    assert sent["quota"] == (quota or "1G")
+    if enabled:
+        # UPFS reads its quota from the common-config storage item (default 1Gi).
+        assert sent["quota"] == (quota or "1Gi")
+    else:
+        # NAS keeps the builder quota (1Gi) and ignores the shared config quota.
+        assert sent["quota"] == "1Gi"
     assert sent["type"] == ("upfs" if enabled else "nas")
     if enabled:
         assert sent["path"] == "/home/admin"

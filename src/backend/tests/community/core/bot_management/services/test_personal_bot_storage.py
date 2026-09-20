@@ -79,7 +79,7 @@ def test_real_create_stops_before_allocation_if_policy_preparation_fails():
 
 
 @pytest.mark.parametrize("with_table", [True, False])
-def test_switch_off_payload_only_changes_shared_quota_without_writing_policy(
+def test_switch_off_payload_keeps_nas_builder_quota_without_writing_policy(
     storage, with_table
 ):
     db, repo, _, common, _ = storage
@@ -97,10 +97,10 @@ def test_switch_off_payload_only_changes_shared_quota_without_writing_policy(
     baas._deploy_composer._storage_policy = NoopStoragePolicy()
     allocate(baas, new_bot=False)
     legacy = baas.post_bots_api.call_args.kwargs["payload"]
+    # NAS keeps the builder quota (1Gi); the noop legacy path yields the identical
+    # storage layout — every field, including quota, is unchanged.
     assert legacy["config"]["deploy_config"]["storage"]["quota"] == "1Gi"
-    assert actual["config"]["deploy_config"]["storage"]["quota"] == "1G"
-    # Shared quota is intentional for NAS too; every other field stays unchanged.
-    legacy["config"]["deploy_config"]["storage"]["quota"] = "1G"
+    assert actual["config"]["deploy_config"]["storage"]["quota"] == "1Gi"
     assert actual == legacy
 
 
@@ -174,7 +174,8 @@ def test_service_draft_restart_reads_policy_without_rollout(storage, policy):
     )
     allocate(baas, bot_type="service", new_bot=False)
     assert latest_storage(baas)["type"] == (policy["storage_type"] if policy else "nas")
-    assert latest_storage(baas)["quota"] == "1G"
+    # UPFS reads the configured quota ("1G"); NAS keeps the builder quota ("1Gi").
+    assert latest_storage(baas)["quota"] == ("1G" if policy else "1Gi")
     baas._get_bots_api.assert_not_called()
     storage[-1].initialize_for_template.assert_not_called()
 

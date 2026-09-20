@@ -353,11 +353,16 @@ class BotStoragePolicyService(BotStoragePolicyProtocol):
         )
 
     def apply_to_storage(self, storage: Storage, ctx: BotDeployContext) -> Storage:
-        """Apply the resolved choice and shared quota, without changing identity."""
+        """Apply the resolved choice; override quota only for UPFS storage.
+
+        NAS keeps the builder's quota (1Gi, consistent with the original layout);
+        UPFS reads its quota from the common-config storage item.
+        """
         env = ctx.env or self._env
         if ctx.storage_type is not None:
             storage.type = ctx.storage_type
-        storage.quota = self.get_storage_quota(env)
+        if storage.type == StorageType.UPFS:
+            storage.quota = self.get_storage_quota(env)
         logger.info(
             "[storage_policy] event=storage_composed bot_id=%s entity_id=%s env=%s storage_type=%s quota=%s",
             ctx.bot_id,
@@ -369,8 +374,12 @@ class BotStoragePolicyService(BotStoragePolicyProtocol):
         return storage
 
     def get_storage_quota(self, env: str) -> str:
-        """Shared NAS/UPFS quota travels through the original Storage.quota string field."""
-        default = "1G"
+        """UPFS storage quota, read from the common-config storage item.
+
+        NAS no longer reads a quota from config; it keeps the builder-provided
+        quota (1Gi). Only the UPFS branch calls this method.
+        """
+        default = "1Gi"
         try:
             config = self._common_config.get_config(
                 business_code="bot_storage", param_code="storage", env=env
