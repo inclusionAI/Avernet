@@ -322,7 +322,8 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         调用方经 ``get_task_dashboard`` 轮询观察推进。后台任务异常经 done_callback 记 log
         (不向调用方抛;图停在中间态由 harness 旁路巡检兜底复位)。"""
         request = self._normalize_owner_bot_id(request)
-        request = self._apply_orchestration_mode(request)
+        if not request.execution_config or not request.execution_config.get("orchestration_mode"):
+            request = self._apply_orchestration_mode(request)
         if request.execution_config.get("orchestration_mode") != "relay":
             request = self._materialize_static_plan_if_needed(request)
         task_id = self._task_id_provider()
