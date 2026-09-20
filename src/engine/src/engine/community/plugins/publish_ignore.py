@@ -1,14 +1,12 @@
 """Fixed-file publish exclusions; no request can select a filesystem destination.
 
-Backend authorizes Bot managers and signs the exact mutation with its private
-key. Engine holds only the public verification key, never signing authority.
+Backend authorizes Bot managers; transport authentication uses the existing
+runtime ingress. Engine checks the target identity before changing the file.
 """
 from __future__ import annotations
 
 import fcntl
 import hashlib
-import base64
-import binascii
 import json
 import os
 import stat
@@ -16,32 +14,11 @@ import tempfile
 import time
 from pathlib import Path
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
 from engine.community.shared.credentials import get_credentials_service
-from engine.community.core.publish_ignore.models import ExpectedTarget, PublishIgnoreRequest, PublishIgnoreError
+from engine.community.core.publish_ignore.models import ExpectedTarget, PublishIgnoreQuery, PublishIgnoreRequest, PublishIgnoreError
 
 IGNORE_FILE = Path("/home/admin/.service_bot_publish_ignore")
 MAX_BYTES = 1024 * 1024
-
-
-def authorize(request: PublishIgnoreRequest, public_key: str) -> None:
-    """Verify a time-bounded Backend signature, never a user-supplied role."""
-    payload = request.model_dump(exclude={"authorization"})
-    payload["timestamp"] = request.authorization.timestamp
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-    # COSEC: Engine holds only a public key, never Backend signing authority.
-    if not public_key or abs(time.time() - request.authorization.timestamp) > 300:
-        raise PublishIgnoreError(403, "MANAGEMENT_AUTH_REQUIRED")
-    try:
-        key = load_pem_public_key(public_key.encode())
-        if not isinstance(key, Ed25519PublicKey):
-            raise ValueError("wrong key type")
-        key.verify(base64.b64decode(request.authorization.signature, validate=True), encoded)
-    except (ValueError, InvalidSignature, binascii.Error) as exc:
-        raise PublishIgnoreError(403, "MANAGEMENT_AUTH_REQUIRED") from exc
 
 
 def normalize_path(value: str) -> str:
@@ -105,7 +82,7 @@ def _replace(path: Path, data: bytes) -> None:
 
 
 def _consume_request(request: PublishIgnoreRequest) -> None:
-    """Persist replay protection under the mutation lock before any file write."""
+    """Deduplicate requests for 300 seconds under the mutation lock."""
     path = IGNORE_FILE.with_name(IGNORE_FILE.name + ".requests")
     try:
         journal = json.loads(_read(path) or b"{}")
@@ -119,11 +96,11 @@ def _consume_request(request: PublishIgnoreRequest) -> None:
         raise PublishIgnoreError(409, "REQUEST_ALREADY_CONSUMED")
     if len(journal) >= 4096:
         raise PublishIgnoreError(409, "REQUEST_JOURNAL_FULL")
-    journal[request.request_id] = request.authorization.timestamp + 300
+    journal[request.request_id] = now + 300
     _replace(path, json.dumps(journal, sort_keys=True).encode())
 
 
-def change(request: PublishIgnoreRequest, public_key: str) -> dict:
+def change(request: PublishIgnoreRequest) -> dict:
     """Serialize updates, preserve unrelated bytes, atomically install new rules.
 
     The fixed sibling lock survives replacements. Lock acquisition is bounded;
@@ -166,8 +143,7 @@ def change(request: PublishIgnoreRequest, public_key: str) -> dict:
             entries -= len(matches)
         if len(updated) > MAX_BYTES:
             raise PublishIgnoreError(409, "IGNORE_FILE_TOO_LARGE")
-        # Revalidate authorization after waiting for the lock and consume once.
-        authorize(request, public_key)
+        # Consume once under the lock; runtime identity was checked after acquisition.
         _consume_request(request)
         if updated != original:
             verify_identity(request.expected_target)
@@ -179,10 +155,19 @@ def change(request: PublishIgnoreRequest, public_key: str) -> dict:
 
 
 class FilePublishIgnoreService:
-    """Production implementation of the fixed-file mutation protocol."""
-    def __init__(self, public_key: str):
-        self.public_key = public_key
-
+    """Production implementation of fixed-file mutations and snapshots."""
     def change(self, request: PublishIgnoreRequest) -> dict:
-        authorize(request, self.public_key)
-        return change(request, self.public_key)
+        return change(request)
+
+    def query(self, request: PublishIgnoreQuery) -> dict:
+        # COSEC: validate the actual runtime before accessing its fixed file.
+        verify_identity(request.expected_target)
+        original = _read(IGNORE_FILE)
+        paths = []
+        # Match mutation and shell LF-only splitting, including CRLF handling.
+        for line in original.decode("utf-8").split("\n"):
+            rule = line.rstrip("\r\n")
+            if rule and not rule.startswith("#"):
+                paths.append(normalize_path(rule))
+        return {"paths": paths, "entry_count": len(paths),
+                "revision": hashlib.sha256(original).hexdigest()}

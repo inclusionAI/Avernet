@@ -28,10 +28,10 @@ API/router保持薄适配，领域服务不引入HTTP框架。命令/绑定值�
 
 ## Engine校验与文件变更
 
-Engine：POST `/api/bot/publish-ignore`。expected_target仅包含bot_id/entity_id/stage，另有operation/path/request_id和Backend签名。不再传递或校验version，也不再为此扩展Credentials.version。
+Engine：POST `/api/bot/publish-ignore`。expected_target仅包含bot_id/entity_id/stage，另有operation/path/request_id，不携带authorization签名。不再传递或校验version，也不再为此扩展Credentials.version。
 
-- Backend独占Ed25519私钥 `SERVICE_BOT_PUBLISH_IGNORE_SIGNING_KEY`；Engine只持公钥 `SERVICE_BOT_PUBLISH_IGNORE_VERIFY_KEY`。签名在完成Bot管理授权后生成，不以普通聊天token代替管理授权。
-- Engine加载真实凭证核对bot/entity/stage；缺失或错配拒绝。每次请求有独立request_id和签名时间窗；固定锁内持久化已消费request_id，阻止重放。
+- 按用户最新要求移除独立签名和密钥配置，复用现有BaaS/ARCA运行时连接认证。Backend仍执行Bot管理授权；Engine身份校验不等于调用方鉴权，接口不得绕过既有运行时入口保护。
+- Engine加载真实凭证核对bot/entity/stage；缺失或错配拒绝。每次请求有独立request_id；固定锁内记录已消费request_id，自消费起保留300秒，仅在该窗口内防止重复消费，不再具有签名过期语义。
 - 固定操作 `/home/admin/.service_bot_publish_ignore`，不接受自定义目标文件。使用有界flock、nofollow、普通文件/大小检查、同目录临时文件及原子replace；保留其他规则、注释与空行。add已存在或remove不存在为幂等成功；失败不宣称changed。
 - 保留结构化请求/响应/失败日志：stage、Bot/entity、真实operator、request_id、binding_id/target_id、耗时和错误类别；不记录签名密钥、token、认证头或整份凭据。
 
@@ -45,7 +45,7 @@ ignore消费者位于独立agentclaw-daas-scripts仓库，是后续安装生效�
 
 ## 验证计划
 
-- 无version请求可调用，携带version被明确拒绝；Backend签名→Engine真实HTTP/DI/文件测试覆盖三阶段、BaaS/ARCA、增删幂等、身份错配和重放。
+- 无version请求可调用，携带version被明确拒绝；无密钥Backend→Engine真实HTTP/DI/文件测试覆盖三阶段、BaaS/ARCA、增删幂等、身份错配和窗口内重复请求。
 - 真实DB：draft仅有Bot主绑定、无发布单仍成功；verify/online的发布绑定与Bot主绑定不同，必须选中正确当前阶段。
 - 真实共享解析器：Caller Bot显式选择服务阶段而非Caller实例；协作者与管理员使用Bot真实owner查找、保留actor审计；未授权/阶段不存在/无有效绑定拒绝。
 - 运行Backend/Engine定向与全量CI，变更行覆盖≥90%；检查架构依赖、未使用import/变量、安全扫描及git diff --check。

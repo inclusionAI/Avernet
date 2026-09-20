@@ -15,6 +15,14 @@ class PublishIgnoreCommand:
 
 
 @dataclass(frozen=True)
+class PublishIgnoreQuery:
+    bot_id: str
+    entity_id: str
+    stage: Literal["draft", "verify", "online"]
+    request_id: str
+
+
+@dataclass(frozen=True)
 class PublishIgnoreBinding:
     id: int
     device_provider: str

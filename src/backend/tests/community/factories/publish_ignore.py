@@ -1,12 +1,6 @@
-"""Real release state and signed transport with local external HTTP seams."""
+"""Real release state and runtime transport with local external HTTP seams."""
 
 from typing import Annotated
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import (
-    Encoding,
-    PrivateFormat,
-    NoEncryption,
-)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
@@ -88,13 +82,8 @@ def seed_publish_ignore(world, *, engine_success=True, stage="online"):
         },
     )
     original = world.get(PublishIgnoreRuntime)
-    key = (
-        Ed25519PrivateKey.generate()
-        .private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
-        .decode()
-    )
     runtime = HttpPublishIgnoreRuntime(
-        original.baas, original.resolver, original.transport, original.http, key
+        original.baas, original.resolver, original.transport, original.http
     )
     world.injector.binder.bind(PublishIgnoreRuntime, to=runtime)
 
@@ -106,4 +95,21 @@ def assert_ignore_engine_called(response, world):
     assert calls[0].args[0]["bot_uuid"] == "ignore-runtime"
     assert calls[0].args[2] == "/api/bot/publish-ignore"
     assert "version" not in calls[0].kwargs["body"]["expected_target"]
-    assert len(calls[0].kwargs["body"]["authorization"]["signature"]) == 88
+    assert "authorization" not in calls[0].kwargs["body"]
+
+
+def seed_publish_ignore_query(world, *, stage="online", engine_success=True):
+    seed_publish_ignore(world, stage=stage)
+    world.get(DeviceAdapterTransport).set_response("invoke", {
+        "success": engine_success,
+        "data": {"paths": ["workspace/bin"], "entry_count": 1, "revision": "a" * 64},
+    })
+
+
+def assert_ignore_query_called(response, world):
+    calls = world.get(DeviceAdapterTransport).calls_to("invoke")
+    assert len(calls) == 1
+    assert calls[0].args[0]["device_uuid"] == "replica-a"
+    assert calls[0].args[1:3] == ("GET", "/api/bot/publish-ignore")
+    assert calls[0].kwargs["params"]["bot_id"] == "ignore-bot"
+    assert "body" not in calls[0].kwargs

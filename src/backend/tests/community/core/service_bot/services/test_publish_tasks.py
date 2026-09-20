@@ -341,8 +341,9 @@ class _FakeRestartFlow:
     def has_unreconciled_restart(self, publish_id, stage):
         return self._unreconciled
 
-    async def execute_restart(self, *, publish_id, stage, operator):
+    async def execute_restart(self, *, publish_id, stage, operator, in_place=False):
         self.calls.append("execute_restart")
+        self.in_place = in_place
         if not self._restart_succeeds:
             return {"success": False, "message": "restart boom"}
         return {"success": True, "message": "Restart submitted", "stage": stage}
@@ -395,6 +396,17 @@ def test_restart_poll_enqueue_failure_propagates():
     with pytest.raises(RuntimeError):
         restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
     assert flow.calls == ["execute_restart"]
+
+
+@pytest.mark.parametrize("mode", [None, False, True])
+def test_restart_task_preserves_in_place_mode(mode):
+    flow = _FakeRestartFlow()
+    restart, _poll, _tq = _restart_handlers(flow)
+    payload = {"publish_id": 1, "stage": "online", "operator": "op"}
+    if mode is not None:
+        payload["in_place"] = mode
+    assert isinstance(restart.handle(payload), Complete)
+    assert flow.in_place is (mode is True)
 
 
 def test_restart_redelivery_enqueues_poll_without_reissuing():

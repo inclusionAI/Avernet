@@ -3,6 +3,8 @@
 from tests.community.factories.publish_ignore import (
     seed_publish_ignore,
     assert_ignore_engine_called,
+    seed_publish_ignore_query,
+    assert_ignore_query_called,
 )
 from tests.community.framework import (
     CaseInput,
@@ -67,3 +69,29 @@ def publish_ignore_engine_rejected():
 )
 def publish_ignore_draft_workspace():
     """Owner updates the draft source binding without ext.binding.draft."""
+
+
+@endpoint_test(
+    method="GET", path=_PATH, scenario="happy",
+    input=CaseInput(headers={"x-user-id": "ignore_owner"}, query_params={
+        "bot_id": "ignore-bot", "entity_id": "ignore_owner", "stage": "draft",
+    }),
+    seed=lambda world: seed_publish_ignore_query(world, stage="draft"),
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(assert_ignore_query_called,),
+)
+def publish_ignore_query_happy():
+    """Read draft rules using real authorization and current binding resolution."""
+
+
+@endpoint_test(
+    method="GET", path=_PATH, scenario="engine_rejected",
+    input=CaseInput(headers={"x-user-id": "ignore_owner"}, query_params={
+        "bot_id": "ignore-bot", "entity_id": "ignore_owner", "stage": "online",
+    }),
+    seed=lambda world: seed_publish_ignore_query(world, engine_success=False),
+    expect=ExpectError(status=200, json_contains={"success": False}),
+    extra_assertions=(assert_ignore_query_called,),
+)
+def publish_ignore_query_engine_rejected():
+    """A failed read is not presented as an empty successful list."""

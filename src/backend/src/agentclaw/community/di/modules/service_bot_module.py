@@ -191,14 +191,12 @@ class ServiceBotModule(Module):
     @singleton
     @provider
     def publish_ignore_runtime(self, injector: Injector) -> PublishIgnoreRuntime:
-        import os
         from agentclaw.community.plugins.community.publish_ignore_runtime import HttpPublishIgnoreRuntime
         from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 
         return HttpPublishIgnoreRuntime(
             injector.get(BaasService), injector.get(DeviceContextResolver),
             injector.get(DeviceAdapterTransport), injector.get(Annotated[HttpClient, QUALIFIER_GENERAL]),
-            os.environ.get("SERVICE_BOT_PUBLISH_IGNORE_SIGNING_KEY", ""),
         )
 
     @singleton

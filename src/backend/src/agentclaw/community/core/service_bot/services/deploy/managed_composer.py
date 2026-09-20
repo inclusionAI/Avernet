@@ -112,6 +112,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             ctx.version,
             ctx.mount_home_dir_storage,
             ctx.ext_info,
+            ctx.in_place,
         )
 
         # 4、 Start watchdog
@@ -194,6 +195,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         version: str | None = "1",
         mount_home_dir_storage: bool = False,
         ext_info: Optional[Dict[str, Any]] = None,
+        in_place: bool = False,
     ):
         """启动沙箱服务。"""
         # 保留 {token} 和 {client_id} 占位符，供后续替换
@@ -226,6 +228,8 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
 
         # 命中 home 目录挂载白名单时，通知容器内启动脚本使用 NAS home 目录。
         start_service_cmd += f" --useNas {str(mount_home_dir_storage).lower()}"
+        if in_place:
+            start_service_cmd += " --in_place_restart true"
 
         read_only_rules = self._get_set_read_only_rule(
             bot_id=bot_id, owner_id=owner_id,

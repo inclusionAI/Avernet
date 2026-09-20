@@ -670,6 +670,7 @@ class BaasService:  # pragma: no cover
         ext_info: Optional[Dict[str, Any]] = None,
         startup_script: str | None = None,
         storage_type: StorageType | None = None,
+        in_place: bool = False,
     ) -> Dict[str, Any]:
         """构建创建 Bot 的请求体。
 
@@ -746,6 +747,7 @@ class BaasService:  # pragma: no cover
 
         # 一次成形，三个 composer 方法共用：同一个容器的同一份描述。
         deploy_ctx = BotDeployContext(
+            in_place=in_place,
             bot_id=bot_id,
             owner_id=owner_id,
             entity_id=entity_id,
@@ -938,6 +940,7 @@ class BaasService:  # pragma: no cover
         ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         template_config: Optional[Dict[str, Any]] = None,
+        in_place: bool = False,
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 创建 Bot。
 
@@ -1008,6 +1011,7 @@ class BaasService:  # pragma: no cover
             ext_info=ext_info,
             extra_envs=extra_envs,
             template_config=template_config,
+            in_place=in_place,
         )
 
         logger.info(
@@ -2930,6 +2934,7 @@ class BaasService:  # pragma: no cover
         ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         template_config: Optional[Dict[str, Any]] = None,
+        in_place: bool = False,
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 升级 Bot。
 
@@ -2992,6 +2997,7 @@ class BaasService:  # pragma: no cover
             ext_info=ext_info,
             extra_envs=extra_envs,
             template_config=template_config,
+            in_place=in_place,
         )
 
         logger.info(

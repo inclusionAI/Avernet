@@ -65,3 +65,21 @@ def test_request_validation(field, value):
     data[field] = value
     with pytest.raises(ValidationError):
         PublishIgnoreRequest(**data)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error,code", [(None, 200), ("permission_denied", 403),
+                                      ("stage_not_bound", 409), ("unexpected", 500)])
+async def test_query_router_mapping(error, code, caplog):
+    from agentclaw.community.adapters.http.service_bot.router_publish import query_publish_ignore
+    service = AsyncMock()
+    service.query.return_value = {"success": True, "results": []}
+    if error:
+        service.query.side_effect = (ValueError("secret-value") if error == "unexpected"
+                                     else PublishIgnoreError(error))
+    result = await query_publish_ignore(
+        "bot", "entity", "draft", AuthenticatedUser("id", "actor", "name"), service,
+    )
+    assert result.error_code == code
+    assert service.query.call_args.args[0].stage == "draft"
+    assert "secret-value" not in result.model_dump_json() + caplog.text

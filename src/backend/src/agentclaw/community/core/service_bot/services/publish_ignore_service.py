@@ -9,6 +9,7 @@ from agentclaw.community.kernel.publish_ignore import (
     PublishIgnoreCommand,
     PublishIgnoreError,
     PublishIgnoreBinding,
+    PublishIgnoreQuery,
 )
 from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import (
     CollaboratorServiceProtocol,
@@ -79,6 +80,62 @@ class PublishIgnoreService:
             raise
 
     async def _change(self, command, operator_id, is_admin):
+        runtime_binding, targets = await self._resolve_targets(command, operator_id, is_admin)
+        results = []
+        for target in targets:
+            results.append(
+                await self.runtime.change(runtime_binding, target, command, operator_id)
+            )
+        return {
+            "success": all(r["status"] in {"changed", "unchanged"} for r in results),
+            "scope": "current_instances",
+            "results": results,
+            "request_id": command.request_id,
+        }
+
+    async def query(
+        self, query: PublishIgnoreQuery, operator_id: str, *, is_admin: bool,
+    ) -> dict[str, Any]:
+        started = monotonic()
+        fields = {
+            **asdict(query), "operator_id": operator_id, "system": "backend",
+            "direction": "inbound", "method": "GET",
+            "route": "/api/service-bot/publish/ops/publish-ignore", "elapsed_ms": 0,
+        }
+        logger.info("backend.publish_ignore.query_request %s", fields)
+        try:
+            binding, targets = await self._resolve_targets(query, operator_id, is_admin)
+            results = [
+                await self.runtime.query(binding, target, query, operator_id)
+                for target in targets
+            ]
+            result = {
+                "success": all(r["status"] == "success" for r in results),
+                "scope": "current_instances", "results": results,
+                "request_id": query.request_id,
+            }
+            log_results = []
+            for snapshot in results:
+                log_snapshot = dict(snapshot)
+                if sum(len(path.encode("utf-8")) for path in snapshot.get("paths", [])) > 4096:
+                    log_snapshot.pop("paths")
+                    log_snapshot["paths_omitted"] = True
+                log_results.append(log_snapshot)
+            logger.info("backend.publish_ignore.query_response %s", {
+                **fields, **result, "results": log_results,
+                "elapsed_ms": int((monotonic() - started) * 1000),
+            })
+            return result
+        except Exception as exc:
+            # COSEC: upstream exception messages may contain connection credentials.
+            logger.warning("backend.publish_ignore.query_failure %s", {
+                **fields, "error_type": type(exc).__name__,
+                "code": exc.code if isinstance(exc, PublishIgnoreError) else "operation_failed",
+                "elapsed_ms": int((monotonic() - started) * 1000),
+            })
+            raise
+
+    async def _resolve_targets(self, command, operator_id, is_admin):
         if not operator_id or operator_id == "anonymous":
             raise PublishIgnoreError("permission_denied")
         bot = await asyncio.to_thread(
@@ -120,14 +177,4 @@ class PublishIgnoreService:
         targets = await self.runtime.targets(runtime_binding)
         if not targets:
             raise PublishIgnoreError("no_current_instances")
-        results = []
-        for target in targets:
-            results.append(
-                await self.runtime.change(runtime_binding, target, command, operator_id)
-            )
-        return {
-            "success": all(r["status"] in {"changed", "unchanged"} for r in results),
-            "scope": "current_instances",
-            "results": results,
-            "request_id": command.request_id,
-        }
+        return runtime_binding, targets

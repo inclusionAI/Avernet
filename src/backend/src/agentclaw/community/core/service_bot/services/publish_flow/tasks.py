@@ -194,16 +194,24 @@ def enqueue_draft_restore(
     )
 
 
-def build_restart_payload(*, publish_id: int, stage: str, operator: str) -> dict:
-    return {"publish_id": publish_id, "stage": stage, "operator": operator}
+def build_restart_payload(
+    *, publish_id: int, stage: str, operator: str, in_place: bool = False
+) -> dict:
+    payload = {"publish_id": publish_id, "stage": stage, "operator": operator}
+    if in_place:
+        payload["in_place"] = True
+    return payload
 
 
 def enqueue_restart(
-    task_queue_service: TaskQueueService, *, publish_id: int, stage: str, operator: str
+    task_queue_service: TaskQueueService, *, publish_id: int, stage: str, operator: str,
+    in_place: bool = False,
 ) -> None:
     task_queue_service.enqueue(
         RESTART_TASK,
-        build_restart_payload(publish_id=publish_id, stage=stage, operator=operator),
+        build_restart_payload(
+            publish_id=publish_id, stage=stage, operator=operator, in_place=in_place
+        ),
         deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
     )
 
@@ -410,9 +418,13 @@ class PublishRestartHandler(_PublishTaskBase):
         publish_id = _require_int(payload, "publish_id")
         stage = _require_str(payload, "stage")
         operator = _require_str(payload, "operator")
-        return asyncio.run(self._run(publish_id, stage, operator))
+        return asyncio.run(self._run(
+            publish_id, stage, operator, in_place=(payload or {}).get("in_place", False)
+        ))
 
-    async def _run(self, publish_id: int, stage: str, operator: str) -> TaskOutcome:
+    async def _run(
+        self, publish_id: int, stage: str, operator: str, in_place: bool = False
+    ) -> TaskOutcome:
         # Redelivery guard. The queue is at-least-once and ``execute_restart``
         # COMPLETEs its ledger op before returning, so past that point a second
         # delivery would open the next attempt and issue a second BaaS restart.
@@ -425,7 +437,8 @@ class PublishRestartHandler(_PublishTaskBase):
             return Complete()
 
         result = await self._flow.execute_restart(
-            publish_id=publish_id, stage=stage, operator=operator
+            publish_id=publish_id, stage=stage, operator=operator,
+            **({"in_place": True} if in_place else {}),
         )
         if not result or not result.get("success"):
             message = (result or {}).get("message", "unknown error")

@@ -79,7 +79,8 @@ async def test_current_stage_collaborator_and_admin(setup, caplog):
         ("empty", "no_current_instances"),
     ],
 )
-async def test_reject_before_mutation(setup, case, code):
+@pytest.mark.parametrize("operation", ["change", "query"])
+async def test_reject_before_mutation(setup, case, code, operation):
     service, command, pub, binding = setup
     actor = "actor"
     if case == "anonymous":
@@ -101,8 +102,41 @@ async def test_reject_before_mutation(setup, case, code):
     if case == "empty":
         service.runtime.targets.return_value = []
     with pytest.raises(PublishIgnoreError, match=code):
-        await service.change(command, actor, is_admin=False)
+        await getattr(service, operation)(command, actor, is_admin=False)
     service.runtime.change.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_query_service_logs_success_failure_and_denies_credentials(setup, caplog):
+    from agentclaw.community.kernel.publish_ignore import PublishIgnoreQuery
+    service, _, _, _ = setup
+    query = PublishIgnoreQuery("bot", "entity", "online", "trace-query")
+    service.runtime.query = AsyncMock(return_value={"status": "success", "paths": []})
+    with caplog.at_level("INFO"):
+        result = await service.query(query, "admin", is_admin=True)
+        service.bots.get_by_id_and_entity.side_effect = ValueError("credential-canary")
+        with pytest.raises(ValueError):
+            await service.query(query, "admin", is_admin=True)
+    assert result["success"] and result["scope"] == "current_instances"
+    service.permissions.get_operable_permission_level.assert_not_called()
+    for event in ("query_request", "query_response", "query_failure"):
+        assert "backend.publish_ignore." + event in caplog.text
+    assert "trace-query" in caplog.text and "elapsed_ms" in caplog.text
+    assert "credential-canary" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_query_aggregate_large_paths_logging_does_not_change_response(setup, caplog):
+    from agentclaw.community.kernel.publish_ignore import PublishIgnoreQuery
+    service, _, _, _ = setup
+    paths = ["large-rule-" + "x" * 4096]
+    service.runtime.query = AsyncMock(return_value={
+        "status": "success", "paths": paths, "entry_count": 1, "revision": "a" * 64,
+    })
+    with caplog.at_level("INFO"):
+        result = await service.query(PublishIgnoreQuery("bot", "entity", "draft", "q"), "actor", is_admin=True)
+    assert result["results"][0]["paths"] == paths
+    assert paths[0] not in caplog.text and "paths_omitted" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -171,4 +205,28 @@ async def test_draft_rejects_invalid_target(setup, case, code):
         service.bindings.get_by_id.side_effect = [binding, None]
     with pytest.raises(PublishIgnoreError, match=code):
         await service.change(replace(command, stage="draft"), "owner", is_admin=False)
+    service.runtime.change.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["draft", "verify", "online"])
+@pytest.mark.parametrize("provider", ["baas", "arca"])
+async def test_query_current_stage_preserves_individual_results(setup, stage, provider):
+    from agentclaw.community.kernel.publish_ignore import PublishIgnoreQuery
+
+    service, _, publication, binding = setup
+    publication.status = "validating" if stage == "verify" else "success"
+    publication.ext = {"binding": {stage: 44}}
+    binding.device_provider = provider
+    service.runtime.query = AsyncMock(side_effect=[
+        {"status": "success", "paths": ["workspace/bin", "workspace/bin"]},
+        {"status": "unknown", "error_code": "engine_call_failed"},
+    ])
+    result = await service.query(PublishIgnoreQuery("bot", "entity", stage, "query"),
+                                 "actor", is_admin=False)
+    assert not result["success"]
+    assert result["results"][0]["paths"] == ["workspace/bin", "workspace/bin"]
+    assert "paths" not in result["results"][1]
+    assert result["request_id"] == "query"
+    assert [call.args[1] for call in service.runtime.query.call_args_list] == ["a", "b"]
     service.runtime.change.assert_not_called()

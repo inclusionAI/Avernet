@@ -1,5 +1,7 @@
 # Publish-ignore management implementation
 
+> Historical implementation report. The signing and key requirements below are superseded by `010-remove-signing.md` and the current `001-spec-output.md`. Current transport reuses existing runtime authentication; no endpoint-specific keys or signatures are required. Historical test counts are not evidence for the new change.
+
 ## Scope and existing call chain
 
 The existing publish HTTP router authenticates a caller and calls a service. The service resolves the source Bot and its exact publication/stage binding. A runtime plugin routes to a pinned BaaS replica or resolves the ARCA binding and calls the Engine Bot HTTP router. The Engine writes only its fixed local ignore file.

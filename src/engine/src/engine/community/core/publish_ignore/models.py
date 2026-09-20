@@ -10,19 +10,12 @@ class ExpectedTarget(BaseModel):
     stage: Literal["draft", "verify", "online"]
 
 
-class Authorization(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    timestamp: int
-    signature: str = Field(min_length=88, max_length=88)
-
-
 class PublishIgnoreRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_target: ExpectedTarget
     operation: Literal["add", "remove"]
     path: str = Field(min_length=1, max_length=4096)
     request_id: str = Field(min_length=1, max_length=128)
-    authorization: Authorization
 
 
 class PublishIgnoreError(Exception):
@@ -30,3 +23,9 @@ class PublishIgnoreError(Exception):
         super().__init__(code)
         self.status = status
         self.code = code
+
+
+class PublishIgnoreQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_target: ExpectedTarget
+    request_id: str = Field(min_length=1, max_length=128)

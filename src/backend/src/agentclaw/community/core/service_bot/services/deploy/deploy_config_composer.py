@@ -84,6 +84,7 @@ class BotDeployContext:
     ext_info: Optional[Dict[str, Any]] = None
     storage_type: StorageType | None = None
     env: str = ""
+    in_place: bool = False
 
 
 class DeployConfigComposer(abc.ABC):
