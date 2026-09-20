@@ -227,6 +227,18 @@ impl ProviderCredentialRepoPort for MemoryProviderStore {
 
 #[async_trait]
 impl ProviderBotBindingRepoPort for MemoryProviderStore {
+    async fn update_binding_webhook_url(
+        &self, provider_id: &str, bot_uuid: &str, webhook_url: Option<&str>, updated_at: u64,
+    ) -> ServiceResult<Option<ProviderBotBinding>> {
+        let mut bindings = self.bindings_by_bot.write().await;
+        let Some(binding) = bindings.get_mut(bot_uuid).filter(|b| b.provider_id == provider_id) else {
+            return Ok(None);
+        };
+        binding.webhook_url = webhook_url.map(str::to_string);
+        binding.updated_at = updated_at;
+        Ok(Some(binding.clone()))
+    }
+
     async fn insert_binding(&self, binding: ProviderBotBinding) -> ServiceResult<()> {
         let mut bindings = self.bindings_by_bot.write().await;
         if bindings.contains_key(&binding.bot_uuid) {
@@ -389,8 +401,8 @@ impl DbProviderStore {
 
     fn insert_binding_sql() -> &'static str {
         "INSERT INTO bcs_provider_bot_bindings \
-         (bot_uuid, provider_id, provider_bot_ref, env, disabled) \
-         VALUES (?, ?, ?, ?, ?)"
+         (bot_uuid, provider_id, provider_bot_ref, env, disabled, webhook_url) \
+         VALUES (?, ?, ?, ?, ?, ?)"
     }
 
     /// Per-flavor SELECT fragment for `gmt_create` / `gmt_modified` columns.
@@ -820,6 +832,24 @@ impl ProviderCredentialRepoPort for DbProviderStore {
 
 #[async_trait]
 impl ProviderBotBindingRepoPort for DbProviderStore {
+    async fn update_binding_webhook_url(
+        &self, provider_id: &str, bot_uuid: &str, webhook_url: Option<&str>, _updated_at: u64,
+    ) -> ServiceResult<Option<ProviderBotBinding>> {
+        let env = resolve_env();
+        let sql = format!(
+            "UPDATE bcs_provider_bot_bindings SET webhook_url = ?, {now_clause} \
+             WHERE provider_id = ? AND bot_uuid = ? AND env = ?",
+            now_clause = self.now_modified_clause(),
+        );
+        self.execute("update_provider_binding_webhook", DbStatement::with_params(sql, vec![
+            webhook_url.map(DbValue::from).unwrap_or(DbValue::Null),
+            DbValue::from(provider_id), DbValue::from(bot_uuid), DbValue::from(env.as_str()),
+        ])).await?;
+        self.bindings.invalidate(&format!("{env}:{bot_uuid}"));
+        let binding = self.get_binding_by_bot_uuid(bot_uuid).await?;
+        Ok(binding.filter(|b| b.provider_id == provider_id))
+    }
+
     async fn insert_binding(&self, binding: ProviderBotBinding) -> ServiceResult<()> {
         let env = resolve_env();
         self.execute_insert(
@@ -832,6 +862,7 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
                     DbValue::from(binding.provider_bot_ref.as_str()),
                     DbValue::from(env.as_str()),
                     DbValue::from(binding.disabled),
+                    binding.webhook_url.as_deref().map(DbValue::from).unwrap_or(DbValue::Null),
                 ],
             ),
         )
@@ -847,7 +878,7 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
         let env = resolve_env();
         self.bindings.get(&format!("{env}:{bot_uuid}"), || async {
         let sql = format!(
-            "SELECT bot_uuid, provider_id, provider_bot_ref, disabled, {ts} \
+            "SELECT bot_uuid, provider_id, provider_bot_ref, webhook_url, disabled, {ts} \
              FROM bcs_provider_bot_bindings \
              WHERE bot_uuid = ? AND env = ? LIMIT 1",
             ts = self.select_timestamp_columns(),
@@ -876,7 +907,7 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
         let env = resolve_env();
         let placeholders = bot_uuids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let sql = format!(
-            "SELECT bot_uuid, provider_id, provider_bot_ref, disabled, {ts} \
+            "SELECT bot_uuid, provider_id, provider_bot_ref, webhook_url, disabled, {ts} \
              FROM bcs_provider_bot_bindings \
              WHERE bot_uuid IN ({placeholders}) AND env = ? ORDER BY bot_uuid",
             ts = self.select_timestamp_columns(),
@@ -902,7 +933,7 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
     ) -> ServiceResult<Option<ProviderBotBinding>> {
         let env = resolve_env();
         let sql = format!(
-            "SELECT bot_uuid, provider_id, provider_bot_ref, disabled, {ts} \
+            "SELECT bot_uuid, provider_id, provider_bot_ref, webhook_url, disabled, {ts} \
              FROM bcs_provider_bot_bindings \
              WHERE provider_id = ? AND provider_bot_ref = ? AND env = ? LIMIT 1",
             ts = self.select_timestamp_columns(),
@@ -929,7 +960,7 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
     ) -> ServiceResult<Vec<ProviderBotBinding>> {
         let env = resolve_env();
         let sql = format!(
-            "SELECT bot_uuid, provider_id, provider_bot_ref, disabled, {ts} \
+            "SELECT bot_uuid, provider_id, provider_bot_ref, webhook_url, disabled, {ts} \
              FROM bcs_provider_bot_bindings \
              WHERE provider_id = ? AND env = ? ORDER BY bot_uuid",
             ts = self.select_timestamp_columns(),
@@ -1136,6 +1167,7 @@ fn parse_credential(row: &DbRow) -> Option<ProviderCredential> {
 
 fn parse_binding(row: &DbRow) -> Option<ProviderBotBinding> {
     Some(ProviderBotBinding {
+        webhook_url: optional_string(row, "webhook_url"),
         bot_uuid: optional_string(row, "bot_uuid")?,
         provider_id: optional_string(row, "provider_id")?,
         provider_bot_ref: optional_string(row, "provider_bot_ref").unwrap_or_default(),
@@ -1373,6 +1405,7 @@ mod tests {
         .expect("create bcs_provider_credentials");
         db.execute(DbStatement::new(
             "CREATE TABLE bcs_provider_bot_bindings (
+                webhook_url TEXT,
                 bot_uuid TEXT NOT NULL,
                 provider_id TEXT NOT NULL,
                 provider_bot_ref TEXT NOT NULL DEFAULT '',
@@ -1505,6 +1538,7 @@ mod tests {
             .expect("insert credential");
         store
             .insert_binding(ProviderBotBinding {
+                webhook_url: None,
                 bot_uuid: "bot-1".to_string(),
                 provider_id: "provider-cb".to_string(),
                 provider_bot_ref: "ref-1".to_string(),
@@ -1571,6 +1605,7 @@ mod tests {
             .expect("insert bot row");
             store
                 .insert_binding(ProviderBotBinding {
+                    webhook_url: None,
                     bot_uuid: bot_uuid.to_string(),
                     provider_id: provider_id.to_string(),
                     provider_bot_ref: format!("ref-{bot_uuid}"),
@@ -1646,6 +1681,7 @@ mod tests {
             .expect("insert bot row");
             store
                 .insert_binding(ProviderBotBinding {
+                    webhook_url: None,
                     bot_uuid: bot_uuid.to_string(),
                     provider_id: "provider-search".to_string(),
                     provider_bot_ref: format!("ref-{bot_uuid}"),
@@ -1713,6 +1749,7 @@ mod tests {
             .expect("insert bot");
             store
                 .insert_binding(ProviderBotBinding {
+                    webhook_url: None,
                     bot_uuid: bot_uuid.to_string(),
                     provider_id: "provider-candidate".to_string(),
                     provider_bot_ref: format!("ref-{bot_uuid}"),

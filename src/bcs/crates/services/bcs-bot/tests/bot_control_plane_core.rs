@@ -70,6 +70,7 @@ impl Fixture {
             .expect("insert provider");
         self.providers
             .insert_binding(ProviderBotBinding {
+                webhook_url: None,
                 bot_uuid: bot_id.to_string(),
                 provider_id: "provider-1".to_string(),
                 provider_bot_ref: "provider-ref".to_string(),

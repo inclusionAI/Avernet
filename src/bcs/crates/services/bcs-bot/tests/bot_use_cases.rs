@@ -92,7 +92,7 @@ impl ProviderRegistryFixture {
             .provider
             .register_provider(
                 "Provider".to_string(),
-                "https://provider.example.com/bcs/webhook".to_string(),
+                Some("https://provider.example.com/bcs/webhook".to_string()),
                 ProviderAuthMode::StaticBearer,
                 owner.to_string(),
                 None,
@@ -131,7 +131,7 @@ async fn register_organization_provider(
     let registered = provider
         .register_provider(
             name.to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "11111111".to_string(),
             None,
@@ -931,7 +931,7 @@ async fn discover_provider_bots_returns_provider_metadata_and_agent_code() {
         .provider
         .register_provider(
             "Provider Directory".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::AgentPass,
             "alice".to_string(),
             None,

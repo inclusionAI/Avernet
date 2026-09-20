@@ -175,3 +175,5 @@ and the bootstrap adapter. All struct literals need the two fields; external
 consumers must rebuild against 0.2.0. Bootstrap maps into the separate
 `bcs-human-notify-api` schema. No persistent schema or HTTP/WS API changes are
 required.
+
+Provider management supports optional shared endpoints and saved Bot overrides. BotWebhookChange represents unchanged/inherit/set independently of HTTP; resolved BotDeliveryTarget still requires a concrete URL. Repository endpoint updates return persisted bindings or errors.

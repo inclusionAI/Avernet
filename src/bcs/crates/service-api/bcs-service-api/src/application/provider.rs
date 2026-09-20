@@ -46,7 +46,7 @@ impl std::fmt::Debug for ProviderBotEventCredential {
 #[derive(Debug, Clone)]
 pub struct RegisterProviderCommand {
     pub name: String,
-    pub webhook_url: String,
+    pub webhook_url: Option<String>,
     pub admin_callback_url: Option<String>,
     pub auth_mode: ProviderAuthMode,
     pub created_by: String,
@@ -77,6 +77,7 @@ pub struct UpdateProviderCommand {
 
 #[derive(Debug, Clone)]
 pub struct RegisterProviderBotCommand {
+    pub webhook_url: Option<String>,
     pub provider_id: String,
     pub provider_admin_token: String,
     pub name: String,
@@ -93,6 +94,7 @@ pub struct RegisterProviderBotCommand {
 
 #[derive(Debug, Clone)]
 pub struct RegisterProviderBotOutcome {
+    pub webhook_url: Option<String>,
     pub bot_uuid: String,
     pub provider_id: String,
     pub provider_bot_ref: String,
@@ -130,6 +132,7 @@ pub struct DeleteProviderBotOutcome {
 /// `bot_uuid` are identifiers and are not changed by this command.
 #[derive(Debug, Clone)]
 pub struct UpdateProviderBotCommand {
+    pub webhook_url: crate::core::provider::BotWebhookChange,
     pub provider_id: String,
     pub provider_admin_token: String,
     pub provider_bot_ref: String,
@@ -145,6 +148,7 @@ pub struct UpdateProviderBotCommand {
 /// projected onto the unchanged binding identifiers.
 #[derive(Debug, Clone)]
 pub struct UpdateProviderBotOutcome {
+    pub webhook_url: Option<String>,
     pub bot_uuid: String,
     pub provider_id: String,
     pub provider_bot_ref: String,

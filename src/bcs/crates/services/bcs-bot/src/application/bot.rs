@@ -709,7 +709,16 @@ impl BotManagementService for Bot {
             ))
         })?;
 
-        match bot_core.assert_provider_ready_for_downlink(&provider_id).await {
+        let bindings = bot_core.provider_bindings_repo().ok_or_else(|| {
+            BotUseCaseError::Service(ServiceError::InternalError(
+                "provider_bindings repo not configured".to_string(),
+            ))
+        })?;
+        let existing = bindings.get_binding_by_bot_uuid(&bot_id).await?;
+        let webhook_url = existing.as_ref()
+            .filter(|b| b.provider_id == provider_id && b.provider_bot_ref == provider_bot_ref)
+            .and_then(|b| b.webhook_url.as_deref());
+        match bot_core.assert_provider_ready_for_downlink(&provider_id, webhook_url).await {
             Ok(()) => {}
             Err(ServiceError::ProviderNotFound(p)) => {
                 return Err(BotUseCaseError::ProviderNotFound(p));
@@ -723,12 +732,6 @@ impl BotManagementService for Bot {
             Err(other) => return Err(BotUseCaseError::Service(other)),
         }
 
-        let bindings = bot_core.provider_bindings_repo().ok_or_else(|| {
-            BotUseCaseError::Service(ServiceError::InternalError(
-                "provider_bindings repo not configured".to_string(),
-            ))
-        })?;
-        let existing = bindings.get_binding_by_bot_uuid(&bot_id).await?;
         if existing.is_none() {
             if let Some(binding) = bindings
                 .get_binding_by_provider_ref(&provider_id, &provider_bot_ref)
@@ -779,6 +782,7 @@ impl BotManagementService for Bot {
                     .await?;
                 let now = now_ms();
                 let binding = ProviderBotBinding {
+                    webhook_url: None,
                     bot_uuid: bot_id.clone(),
                     provider_id: provider_id.clone(),
                     provider_bot_ref: provider_bot_ref.clone(),

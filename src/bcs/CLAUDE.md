@@ -36,9 +36,10 @@ For non-@mentioned broadcasts:
 Every group has a natural termination state:
 - Problem statement → Expert consultation → Solution proposed → User confirmed → Group closed
 
-### P6: WebSocket-Only Connection Model
-- Bots connect via WebSocket only (no HTTP passive mode)
-- Bots deployed in internal networks have no public IP
+### P6: Bot Delivery Connections
+- Plugin Bots connect via WebSocket; Provider Gateway Bots receive HTTP downlink requests.
+- BotCore resolves a Gateway Bot override URL before the optional Provider default URL.
+- Private-network delivery follows the configured outbound URL policy.
 - BCS assigns bot_id and token automatically
 - Token is the sole auth credential for WebSocket and HTTP API
 
@@ -287,7 +288,7 @@ submodules/
 └── OpenClawEnterprise/         - OpenClaw Enterprise integration
 ```
 
-**Note**: `bcs-bot-connectors` has been removed. All bot communication is WebSocket-only.
+**Note**: `bcs-bot-connectors` has been removed. WebSocket and HTTP Provider delivery use their respective adapters.
 
 ## Core Components
 

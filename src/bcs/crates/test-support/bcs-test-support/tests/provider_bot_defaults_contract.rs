@@ -61,6 +61,7 @@ async fn noop_provider_management_update_provider_bot_disables_the_service() {
     let service = NoopProviderManagementService;
     let result = service
         .update_provider_bot(UpdateProviderBotCommand {
+            webhook_url: Default::default(),
             provider_id: "provider-1".to_string(),
             provider_admin_token: "admin-token".to_string(),
             provider_bot_ref: "ref-1".to_string(),

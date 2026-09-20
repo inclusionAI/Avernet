@@ -555,6 +555,7 @@ async fn search_candidates_calls_core_once_and_preserves_ranked_enrichment() {
         .expect("insert search provider");
     providers
         .insert_binding(ProviderBotBinding {
+            webhook_url: None,
             bot_uuid: "recommended-b".to_string(),
             provider_id: "provider-search".to_string(),
             provider_bot_ref: "private-provider-reference".to_string(),
@@ -1194,6 +1195,7 @@ async fn query_preserves_first_occurrence_and_projects_both_kinds_provider_and_r
     fixture
         .providers
         .insert_binding(ProviderBotBinding {
+            webhook_url: None,
             bot_uuid: "physical".to_string(),
             provider_id: "provider-1".to_string(),
             provider_bot_ref: "secret-internal-ref".to_string(),

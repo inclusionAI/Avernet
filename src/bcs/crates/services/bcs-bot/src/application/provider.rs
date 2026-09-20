@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_service_api::core::provider::BotWebhookChange;
 use bcs_service_api::{
     ActorKind, BotControlPlaneCoreService, BotRegistryCoreService, BotTaskModesQuery,
     ChannelBindingCleanupPort, DeleteProviderBotCommand, DeleteProviderBotOutcome,
@@ -271,6 +272,7 @@ impl ProviderManagementService for ProviderManagement {
                 &command.provider_id,
                 &command.provider_admin_token,
                 RegisterProviderBotParams {
+                    webhook_url: command.webhook_url,
                     bot_name: command.name,
                     summary: command.summary,
                     owners: command.owners,
@@ -305,6 +307,7 @@ impl ProviderManagementService for ProviderManagement {
             None
         };
         Ok(RegisterProviderBotOutcome {
+            webhook_url: binding.webhook_url,
             bot_uuid: binding.bot_uuid,
             provider_id: binding.provider_id,
             provider_bot_ref: binding.provider_bot_ref,
@@ -446,7 +449,8 @@ impl ProviderManagementService for ProviderManagement {
         &self,
         command: UpdateProviderBotCommand,
     ) -> ServiceResult<UpdateProviderBotOutcome> {
-        let result = self
+        let result = if matches!(command.webhook_url, BotWebhookChange::Unchanged) {
+            self
             .provider_bot_core
             .update_provider_bot(
                 &command.provider_id,
@@ -459,9 +463,27 @@ impl ProviderManagementService for ProviderManagement {
                 command.scopes,
                 command.visibility,
             )
-            .await?;
+            .await?
+        } else {
+            if command.name.is_some() || command.summary.is_some() || command.domains.is_some()
+                || command.skills.is_some() || command.scopes.is_some() || command.visibility.is_some()
+            {
+                return Err(ServiceError::InvalidOperation {
+                    message: "webhook_url must be updated separately from Bot capabilities".to_string(),
+                    request_id: None,
+                });
+            }
+            let endpoint = match command.webhook_url {
+                BotWebhookChange::Set(url) => Some(url),
+                BotWebhookChange::Inherit => None,
+                BotWebhookChange::Unchanged => unreachable!("handled above"),
+            };
+            self.provider_bot_core.update_provider_bot_webhook(&command.provider_id,
+                &command.provider_admin_token, &command.provider_bot_ref, endpoint).await?
+        };
         let capabilities = result.capabilities;
         Ok(UpdateProviderBotOutcome {
+            webhook_url: result.binding.webhook_url,
             bot_uuid: result.binding.bot_uuid,
             provider_id: result.binding.provider_id,
             provider_bot_ref: result.binding.provider_bot_ref,

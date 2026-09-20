@@ -125,6 +125,7 @@ impl ProviderCore {
         params: RegisterProviderBotParams,
     ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
         let RegisterProviderBotParams {
+            webhook_url,
             bot_name,
             summary,
             owners,
@@ -146,6 +147,15 @@ impl ProviderCore {
                 request_id: None,
             });
         }
+        if let Some(url) = webhook_url.as_deref() {
+            if matches!(connection_mode, ProviderBotConnectionMode::Plugin) {
+                return Err(ServiceError::InvalidOperation {
+                    message: "plugin bots cannot configure a webhook_url".to_string(),
+                    request_id: None,
+                });
+            }
+            validate_outbound_url(&self.webhook_url_guard, "webhook_url", url)?;
+        }
         // Gateway mode short-circuits on an existing binding (idempotent replay).
         // Plugin mode never writes a binding, so this short-circuit never applies.
         if !matches!(connection_mode, ProviderBotConnectionMode::Plugin) {
@@ -154,6 +164,11 @@ impl ProviderCore {
                 .get_binding_by_provider_ref(&provider.provider_id, &provider_bot_ref)
                 .await?
             {
+                if webhook_url.is_some() && webhook_url != existing_binding.webhook_url {
+                    return Err(ServiceError::Conflict(
+                        "webhook_url differs from the registered Bot; use PATCH to update it".to_string(),
+                    ));
+                }
                 info!(
                     provider_id = %provider.provider_id,
                     bot_uuid = %existing_binding.bot_uuid,
@@ -164,7 +179,16 @@ impl ProviderCore {
             }
         }
 
-        let provider_auth_mode = parse_downlink_config(&provider.config)?.auth_mode;
+        let downlink = parse_downlink_config(&provider.config)?;
+        if matches!(connection_mode, ProviderBotConnectionMode::Gateway)
+            && webhook_url.is_none() && downlink.webhook_url.is_none()
+        {
+            return Err(ServiceError::InvalidOperation {
+                message: "missing_delivery_endpoint: configure a Bot or Provider webhook_url".to_string(),
+                request_id: None,
+            });
+        }
+        let provider_auth_mode = downlink.auth_mode;
         let capabilities = BotCapabilities {
             name: Some(bot_name),
             summary,
@@ -215,6 +239,7 @@ impl ProviderCore {
 
                 let now = now_ms();
                 let binding = ProviderBotBinding {
+                    webhook_url,
                     bot_uuid: bot_uuid.clone(),
                     provider_id: provider.provider_id.clone(),
                     provider_bot_ref: provider_bot_ref.clone(),
@@ -282,6 +307,7 @@ impl ProviderCore {
                 // phantom is never listed.
                 let now = now_ms();
                 let binding = ProviderBotBinding {
+                    webhook_url: None,
                     bot_uuid: bot_uuid.clone(),
                     provider_id: provider.provider_id.clone(),
                     provider_bot_ref: provider_bot_ref.clone(),
@@ -309,7 +335,7 @@ impl ProviderCore {
 #[derive(Debug, Clone)]
 pub(crate) struct DownlinkConfig {
     pub enabled: bool,
-    pub webhook_url: String,
+    pub webhook_url: Option<String>,
     pub auth_mode: ProviderAuthMode,
     pub protocol_version: String,
 }
@@ -323,15 +349,14 @@ pub(crate) fn parse_downlink_config(config: &str) -> ServiceResult<DownlinkConfi
             message: "provider downlink config is missing".to_string(),
             request_id: None,
         })?;
-    let webhook_url = downlink
-        .get("webhook_url")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| ServiceError::InvalidOperation {
-            message: "provider downlink webhook_url is missing".to_string(),
+    let webhook_url = match downlink.get("webhook_url") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(url)) if !url.trim().is_empty() => Some(url.clone()),
+        _ => return Err(ServiceError::InvalidOperation {
+            message: "provider downlink webhook_url must be a non-empty URL or null".to_string(),
             request_id: None,
-        })?
-        .to_string();
+        }),
+    };
     let auth_mode = match downlink.get("auth_mode").and_then(Value::as_str) {
         Some("static_bearer") => ProviderAuthMode::StaticBearer,
         Some("agentpass") => ProviderAuthMode::AgentPass,
@@ -514,7 +539,7 @@ fn validate_provider_coordination_config(
 }
 
 fn provider_config(
-    webhook_url: &str,
+    webhook_url: Option<&str>,
     auth_mode: ProviderAuthMode,
     protocol_version: &str,
     coordination: Option<ProviderCoordinationConfig>,
@@ -639,7 +664,7 @@ impl ProviderCoreService for ProviderCore {
     async fn register_provider(
         &self,
         name: String,
-        webhook_url: String,
+        webhook_url: Option<String>,
         auth_mode: ProviderAuthMode,
         created_by: String,
         protocol_version: Option<String>,
@@ -647,7 +672,9 @@ impl ProviderCoreService for ProviderCore {
     ) -> ServiceResult<RegisteredProvider> {
         let provider_id = new_provider_id();
         validate_external_id("provider_id", &provider_id)?;
-        validate_outbound_url(&self.webhook_url_guard, "webhook_url", &webhook_url)?;
+        if let Some(url) = webhook_url.as_deref() {
+            validate_outbound_url(&self.webhook_url_guard, "webhook_url", url)?;
+        }
         let protocol_version = match protocol_version.as_deref().map(str::trim) {
             None | Some("") | Some("1.0") => "1.0",
             Some("2.0") => "2.0",
@@ -672,7 +699,7 @@ impl ProviderCoreService for ProviderCore {
         let provider = ProviderRecord {
             provider_id: provider_id.clone(),
             name,
-            config: provider_config(&webhook_url, auth_mode, protocol_version, coordination)?,
+            config: provider_config(webhook_url.as_deref(), auth_mode, protocol_version, coordination)?,
             created_by,
             owners,
             disabled: false,
@@ -918,6 +945,33 @@ impl ProviderCoreService for ProviderCore {
 
 #[async_trait]
 impl ProviderBotCoreService for ProviderCore {
+    async fn update_provider_bot_webhook(
+        &self, provider_id: &str, provider_admin_token: &str,
+        provider_bot_ref: &str, webhook_url: Option<String>,
+    ) -> ServiceResult<UpdateProviderBotCoreResult> {
+        let provider = self.authenticated_provider(provider_id, provider_admin_token).await?;
+        validate_external_id("provider_bot_ref", provider_bot_ref)?;
+        let binding = self.bindings.get_binding_by_provider_ref(provider_id, provider_bot_ref)
+            .await?.ok_or_else(|| ServiceError::BotNotFound(provider_bot_ref.to_string()))?;
+        if binding.provider_id != provider.provider_id {
+            return Err(ServiceError::Forbidden("provider_id_mismatch".to_string()));
+        }
+        let bot = self.registry.try_get(&binding.bot_uuid).await?
+            .ok_or_else(|| ServiceError::BotNotFound(binding.bot_uuid.clone()))?;
+        if let Some(url) = webhook_url.as_deref() {
+            validate_outbound_url(&self.webhook_url_guard, "webhook_url", url)?;
+        } else if parse_downlink_config(&provider.config)?.webhook_url.is_none() {
+            return Err(ServiceError::InvalidOperation {
+                message: "missing_delivery_endpoint: cannot inherit an absent Provider webhook_url".to_string(),
+                request_id: None,
+            });
+        }
+        let updated = self.bindings.update_binding_webhook_url(provider_id, &binding.bot_uuid,
+            webhook_url.as_deref(), now_ms()).await?
+            .ok_or_else(|| ServiceError::BotNotFound(binding.bot_uuid.clone()))?;
+        Ok(UpdateProviderBotCoreResult { binding: updated, capabilities: bot.capabilities })
+    }
+
     async fn register_provider_bot_with_bot_uuid(
         &self,
         provider_id: &str,

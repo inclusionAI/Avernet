@@ -2372,7 +2372,7 @@ async fn register_provider_bot_with_coordination(
     let provider = provider_core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             auth_mode,
             "11111111".to_string(),
             None,
@@ -2417,7 +2417,7 @@ async fn register_provider_bot_with_admin_token(
     let provider = provider_core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             auth_mode,
             "11111111".to_string(),
             None,

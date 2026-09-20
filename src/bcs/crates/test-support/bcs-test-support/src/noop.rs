@@ -326,7 +326,7 @@ impl ProviderCoreService for NoopProviderCoreService {
     async fn register_provider(
         &self,
         _name: String,
-        _webhook_url: String,
+        _webhook_url: Option<String>,
         _auth_mode: ProviderAuthMode,
         _created_by: String,
         _protocol_version: Option<String>,

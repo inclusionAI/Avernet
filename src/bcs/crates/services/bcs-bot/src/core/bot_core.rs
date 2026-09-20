@@ -87,6 +87,7 @@ impl BotCore {
     pub(crate) async fn assert_provider_ready_for_downlink(
         &self,
         provider_id: &str,
+        webhook_url: Option<&str>,
     ) -> ServiceResult<()> {
         let providers = self.provider_repo.as_ref().ok_or_else(|| {
             ServiceError::InternalError("provider repo not configured".to_string())
@@ -102,6 +103,12 @@ impl BotCore {
             });
         }
         let downlink = parse_downlink_config(&provider.config)?;
+        if webhook_url.or(downlink.webhook_url.as_deref()).is_none() {
+            return Err(ServiceError::ProviderNotReadyForDownlink {
+                provider_id: provider.provider_id,
+                reason: "missing_delivery_endpoint".to_string(),
+            });
+        }
         if !downlink.enabled {
             return Err(ServiceError::ProviderNotReadyForDownlink {
                 provider_id: provider.provider_id,
@@ -280,11 +287,15 @@ impl BotRegistryCoreService for BotCore {
             });
         }
 
+        let webhook_url = binding.webhook_url.as_ref().or(downlink.webhook_url.as_ref())
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: "missing_delivery_endpoint: configure a Bot or Provider webhook_url".to_string(),
+                request_id: None,
+            })?.clone();
         info!(
             bot_id = %bot_id,
             provider_id = %provider.provider_id,
             provider_bot_ref = %binding.provider_bot_ref,
-            webhook_url = %downlink.webhook_url,
             protocol_version = %downlink.protocol_version,
             "resolve_delivery_target: resolved http provider target"
         );
@@ -292,7 +303,7 @@ impl BotRegistryCoreService for BotCore {
             bot_id: bot.bot_uuid,
             provider_id: provider.provider_id,
             provider_bot_ref: binding.provider_bot_ref,
-            webhook_url: downlink.webhook_url,
+            webhook_url,
             bcs_to_provider_token: RedactedToken::new(credential.secret_value),
             protocol_version: downlink.protocol_version,
         })
@@ -614,7 +625,9 @@ impl BotRegistryCoreService for BotCore {
             let Ok(downlink) = parse_downlink_config(&provider.config) else {
                 continue;
             };
-            if !downlink.enabled {
+            if !downlink.enabled
+                || binding.webhook_url.as_ref().or(downlink.webhook_url.as_ref()).is_none()
+            {
                 continue;
             }
             let Some(credential) = credentials.get(&binding.provider_id) else {

@@ -151,7 +151,7 @@ impl Fixture {
             .provider
             .register_provider(
                 "TestProvider".to_string(),
-                "https://provider.example.com/webhook".to_string(),
+                Some("https://provider.example.com/webhook".to_string()),
                 bcs_service_api::ProviderAuthMode::StaticBearer,
                 owner.to_string(),
                 None,

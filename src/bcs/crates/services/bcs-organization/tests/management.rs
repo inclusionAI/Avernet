@@ -107,7 +107,7 @@ async fn register_provider_with_auth(
         .provider_core
         .register_provider(
             name.to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             auth_mode,
             "11111111".to_string(),
             None,
@@ -223,6 +223,7 @@ async fn register_bot(ctx: &TestContext, provider: &ProviderFixture, bot_uuid: &
             &provider.provider_id,
             &provider.admin_token,
             RegisterProviderBotParams {
+                webhook_url: None,
                 bot_name: format!("{bot_uuid} name"),
                 summary: Some(format!("{bot_uuid} summary")),
                 owners: vec!["11111111".to_string()],

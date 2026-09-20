@@ -48,3 +48,5 @@ authorization. Absence preserves the legacy sender resolver.
 
 - `cargo test --package bcs-protocol --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-protocol --all-targets --manifest-path src/bcs/Cargo.toml`
+
+Provider defaults and Bot webhook overrides are optional HTTP fields. Bot PATCH preserves the distinction between omitted, null (inherit), and a URL (replace). This management contract extension leaves the downstream 1.0/2.0 wire formats unchanged.

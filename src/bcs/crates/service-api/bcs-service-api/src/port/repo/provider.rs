@@ -102,6 +102,13 @@ pub trait ProviderCredentialRepoPort: Send + Sync {
 
 #[async_trait]
 pub trait ProviderBotBindingRepoPort: Send + Sync {
+    async fn update_binding_webhook_url(
+        &self,
+        provider_id: &str,
+        bot_uuid: &str,
+        webhook_url: Option<&str>,
+        updated_at: u64,
+    ) -> ServiceResult<Option<ProviderBotBinding>>;
     async fn insert_binding(&self, binding: ProviderBotBinding) -> ServiceResult<()>;
     async fn get_binding_by_bot_uuid(
         &self,

@@ -42,9 +42,42 @@ Provider 接入至少会产生 Provider 管理 token 和 BCS 到 Provider 的下
 
 这些 token 只应保存在 Bot Provider 自己的安全存储中，不要写入仓库、镜像或公开配置示例。实际部署也可以启用自有 bot 身份体系；这属于部署侧扩展，不影响本文描述的 HTTP Provider 基线协议。
 
+## 每个 Bot 使用独立 webhook
+
+由 Provider 接入程序直接向 BCS 注册 Bot。Poolab 可以使用一个 Provider 身份，为每个 Bot 配置创建后基本固定的地址；这条接入链路不需要改造 Backend。
+
+`POST /providers` 的 `webhook_url` 可省略或为 `null`，表示没有公共默认地址；查询 Provider 时也返回 `null`。旧 Provider 和未配置覆盖地址的 Bot 继续使用公共地址。
+
+使用 Provider Admin Bearer token 调用 `POST /providers/{provider_id}/bots`：
+
+```json
+{
+  "name": "Poolab Bot A",
+  "owners": ["<owner-staff-id>"],
+  "provider_bot_ref": "poolab-bot-a",
+  "webhook_url": "https://bot-a.example.com/bcn/webhook"
+}
+```
+
+Gateway Bot 和 Provider 都未配置地址时，在创建 Bot 前返回 HTTP 400。Plugin/WebSocket Bot 拒绝显式 webhook 地址。URL 复用现有出站地址校验策略，认证和协议版本继续由 Provider 管理。
+
+重复注册时，省略地址保留原值；显式传入不同地址返回 HTTP 409，需要使用 PATCH 修改。`PATCH /providers/{provider_id}/bots/{provider_bot_ref}` 的语义如下：
+
+| 请求字段 | 结果 |
+| --- | --- |
+| 不传 `webhook_url` | 保留原值，兼容原能力更新接口。 |
+| `"webhook_url": "https://bot-a.example.com/new-hook"` | 替换 Bot 独立地址。 |
+| `"webhook_url": null` | 恢复继承 Provider 默认地址；没有默认地址时返回 HTTP 400。 |
+
+地址更新单独提交；与 `name`、`summary`、`domains`、`skills`、`scopes`、`visibility` 能力字段混用时，在写入前返回 HTTP 400。Bot 注册、PATCH 和列表响应返回保存的覆盖值，`null` 表示继承。独立接收端失败后，不回退到 Provider 公共地址或 WebSocket。
+
+地址修改按维护操作处理：暂停新流量、排空活动运行、PATCH，等待其他实例现有的 30 秒缓存 TTL 过期后恢复。写入实例立即失效本地缓存，不迁移活动运行。现有 WS 转 Provider 接口不新增 URL 参数：新建绑定要求 Provider 有默认地址，已有绑定的重放可使用其独立地址。
+
+发布顺序为新增绑定表可空列 → 升级全部 BCS 实例 → 接入方启用独立地址。SQLite 启动自动执行迁移 028，MySQL 部署先执行迁移 027。回滚旧 BCS 前应停用相关流量或提供兼容路由，因为旧实现忽略 Bot 覆盖地址。下行报文版本和 token 不变。
+
 ## Provider webhook 需要支持什么
 
-Provider 注册时提供一个 `webhook_url`。BCS 会向这个 URL 发送 `POST` 请求，并通过 body 里的 `method` 区分具体动作。
+Provider 注册时可提供默认 `webhook_url`，Gateway Bot 注册时可提供自己的 `webhook_url`。BCS 优先向 Bot 地址发送 `POST`，未配置时使用 Provider 默认地址，通过 body 里的 `method` 区分动作。
 
 | Method | 最小要求 | 说明 |
 | --- | --- | --- |

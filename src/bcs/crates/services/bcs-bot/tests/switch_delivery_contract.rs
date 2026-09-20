@@ -213,7 +213,7 @@ impl Fixture {
             .provider
             .register_provider(
                 "TestProvider".to_string(),
-                "https://provider.example.com/webhook".to_string(),
+                Some("https://provider.example.com/webhook".to_string()),
                 ProviderAuthMode::StaticBearer,
                 owner.to_string(),
                 None,
@@ -285,6 +285,7 @@ async fn switch_idempotent_same_binding_auto_onboards_missing_bot() {
 
     f.provider_bindings
         .insert_binding(ProviderBotBinding {
+            webhook_url: None,
             bot_uuid: bot_id.clone(),
             provider_id: provider_id.clone(),
             provider_bot_ref: bot_id.clone(),
@@ -679,7 +680,7 @@ async fn switch_passes_through_when_kick_port_absent() {
     let prov = provider
         .register_provider(
             "P".to_string(),
-            "https://example.com/webhook".to_string(),
+            Some("https://example.com/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "bob".to_string(),
             None,
@@ -699,4 +700,27 @@ async fn switch_passes_through_when_kick_port_absent() {
         .await
         .expect("switch ok");
     assert!(!result.websocket_kicked);
+}
+
+#[tokio::test]
+async fn switch_without_default_rejects_before_writes_or_kick_but_replays_bot_override() {
+    let f = Fixture::new().await;
+    let p = f.provider.register_provider("Independent".into(), None,
+        ProviderAuthMode::StaticBearer, "alice".into(), None, None).await.unwrap();
+    let command = SwitchDeliveryToProviderCommand {
+        bot_id: "independent:alice".into(), provider_id: p.provider.provider_id.clone(),
+        provider_bot_ref: "independent:alice".into(), name: None, summary: None,
+    };
+    assert!(matches!(f.bot.switch_delivery_to_provider(command.clone()).await,
+        Err(BotUseCaseError::ProviderNotReadyForDownlink { .. })));
+    assert!(f.core.get(&command.bot_id).await.is_none());
+    assert!(f.provider_bindings.get_binding_by_bot_uuid(&command.bot_id).await.unwrap().is_none());
+    assert!(f.kick.calls.lock().await.is_empty());
+    f.provider_bindings.insert_binding(ProviderBotBinding {
+        bot_uuid: command.bot_id.clone(), provider_id: command.provider_id.clone(),
+        provider_bot_ref: command.provider_bot_ref.clone(),
+        webhook_url: Some("https://bot.example.com/webhook".into()),
+        disabled: false, created_at: 1, updated_at: 1,
+    }).await.unwrap();
+    assert!(f.bot.switch_delivery_to_provider(command).await.unwrap().idempotent_replay);
 }

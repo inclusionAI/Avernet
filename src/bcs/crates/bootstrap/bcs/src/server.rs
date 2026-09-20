@@ -5818,7 +5818,7 @@ mod tests {
         let registered = provider_management
             .register_provider(RegisterProviderCommand {
                 name: "Provider".to_string(),
-                webhook_url: "https://provider.example.com/bcs/webhook".to_string(),
+                webhook_url: Some("https://provider.example.com/bcs/webhook".to_string()),
                 admin_callback_url: None,
                 auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
                 created_by: "11111111".to_string(),
@@ -5829,6 +5829,7 @@ mod tests {
             .expect("register provider");
         let bot = provider_management
             .register_provider_bot(bcs_service_api::RegisterProviderBotCommand {
+                webhook_url: None,
                 provider_id: registered.provider_id.clone(),
                 provider_admin_token: registered.provider_admin_token.clone(),
                 name: "Bot".to_string(),
@@ -6344,7 +6345,7 @@ mod tests {
             .provider_management
             .register_provider(RegisterProviderCommand {
                 name: "Admin Provider".to_string(),
-                webhook_url: callback_url.clone(),
+                webhook_url: Some(callback_url.clone()),
                 admin_callback_url: Some(callback_url),
                 auth_mode: bcs_domain::ProviderAuthMode::StaticBearer,
                 created_by: "admin-owner".to_string(),

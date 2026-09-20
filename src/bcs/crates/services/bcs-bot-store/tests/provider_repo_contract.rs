@@ -49,6 +49,7 @@ async fn memory_provider_store_round_trips_binding_indexes() {
     let store = MemoryProviderStore::new();
     store
         .insert_binding(ProviderBotBinding {
+            webhook_url: None,
             bot_uuid: "bot-1".to_string(),
             provider_id: "provider-1".to_string(),
             provider_bot_ref: "reviewer-v2".to_string(),
@@ -100,6 +101,7 @@ async fn memory_provider_store_batch_queries_by_ids() {
     for (bot_uuid, provider_id) in [("bot-1", "provider-1"), ("bot-2", "provider-2")] {
         store
             .insert_binding(ProviderBotBinding {
+                webhook_url: None,
                 bot_uuid: bot_uuid.to_string(),
                 provider_id: provider_id.to_string(),
                 provider_bot_ref: format!("ref-{bot_uuid}"),
@@ -151,6 +153,7 @@ async fn memory_provider_store_lists_discoverable_provider_bot_records() {
     ] {
         store
             .insert_binding(ProviderBotBinding {
+                webhook_url: None,
                 bot_uuid: bot_uuid.to_string(),
                 provider_id: provider_id.to_string(),
                 provider_bot_ref: format!("ref-{bot_uuid}"),

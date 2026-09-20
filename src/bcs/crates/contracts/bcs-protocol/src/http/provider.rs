@@ -89,7 +89,9 @@ pub struct ProviderOrganizationManagementConfigDto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderRequest {
     pub name: String,
-    pub webhook_url: String,
+    /// Default downlink URL; absent when every Gateway Bot supplies its own.
+    #[serde(default)]
+    pub webhook_url: Option<String>,
     /// Optional provider-level endpoint for terminal organization-admin run
     /// notifications. This is intentionally separate from the bot downlink
     /// webhook URL.
@@ -117,7 +119,7 @@ pub struct RegisterProviderResponse {
 pub struct ProviderInfoResponse {
     pub provider_id: String,
     pub name: String,
-    pub webhook_url: String,
+    pub webhook_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admin_callback_url: Option<String>,
     pub auth_mode: ProviderAuthModeDto,
@@ -151,6 +153,9 @@ pub struct PatchProviderRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderBotRequest {
     pub name: String,
+    /// Overrides the Provider's default downlink URL for this Bot.
+    #[serde(default)]
+    pub webhook_url: Option<String>,
     #[serde(default)]
     pub summary: Option<String>,
     #[serde(default)]
@@ -175,6 +180,7 @@ pub struct RegisterProviderBotRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderBotResponse {
     pub bot_uuid: String,
+    pub webhook_url: Option<String>,
     pub provider_id: String,
     pub provider_bot_ref: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -185,6 +191,8 @@ pub struct RegisterProviderBotResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PatchProviderBotRequest {
+    #[serde(default, skip_serializing_if = "WebhookUrlPatch::is_unchanged")]
+    pub webhook_url: WebhookUrlPatch,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -202,6 +210,37 @@ pub struct PatchProviderBotRequest {
     pub scopes: Option<Vec<String>>,
     #[serde(default)]
     pub visibility: Option<String>,
+}
+
+/// Presence-aware PATCH field: omission keeps the URL, null restores inheritance.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum WebhookUrlPatch {
+    #[default]
+    Unchanged,
+    Inherit,
+    Set(String),
+}
+
+impl WebhookUrlPatch {
+    pub fn is_unchanged(&self) -> bool {
+        matches!(self, Self::Unchanged)
+    }
+}
+
+impl<'de> Deserialize<'de> for WebhookUrlPatch {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Option::<String>::deserialize(deserializer)
+            .map(|value| value.map(Self::Set).unwrap_or(Self::Inherit))
+    }
+}
+
+impl Serialize for WebhookUrlPatch {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Set(value) => serializer.serialize_str(value),
+            Self::Unchanged | Self::Inherit => serializer.serialize_none(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

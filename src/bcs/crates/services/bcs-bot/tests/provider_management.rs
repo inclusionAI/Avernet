@@ -83,7 +83,7 @@ async fn register_provider(ctx: &TestContext) -> (String, String) {
         .management
         .register_provider(RegisterProviderCommand {
             name: "Provider".to_string(),
-            webhook_url: "https://provider.example.com/bcs/webhook".to_string(),
+            webhook_url: Some("https://provider.example.com/bcs/webhook".to_string()),
             admin_callback_url: None,
             auth_mode: ProviderAuthMode::StaticBearer,
             created_by: "11111111".to_string(),
@@ -104,6 +104,7 @@ async fn register_provider_bot(
     let outcome = ctx
         .management
         .register_provider_bot(RegisterProviderBotCommand {
+            webhook_url: None,
             provider_id: provider_id.to_string(),
             provider_admin_token: admin_token.to_string(),
             name: "Bot".to_string(),

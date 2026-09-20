@@ -123,7 +123,7 @@ async fn list_actors_marks_provider_downlink_bots() {
     let provider = provider_core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "197262".to_string(),
             None,
@@ -136,6 +136,7 @@ async fn list_actors_marks_provider_downlink_bots() {
             &provider.provider.provider_id,
             &provider.provider_admin_token,
             RegisterProviderBotParams {
+                webhook_url: None,
                 bot_name: "Provider Bot".to_string(),
                 summary: Some("Provider-managed bot".to_string()),
                 owners: vec!["197262".to_string()],
@@ -260,7 +261,7 @@ async fn search_actors_projects_semantic_order_enrichment_context_status_and_dow
     let provider = provider_core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "197262".to_string(),
             None,
@@ -273,6 +274,7 @@ async fn search_actors_projects_semantic_order_enrichment_context_status_and_dow
             &provider.provider.provider_id,
             &provider.provider_admin_token,
             RegisterProviderBotParams {
+                webhook_url: None,
                 bot_name: "Provider Bot".to_string(),
                 summary: Some("downlink candidate".to_string()),
                 owners: vec!["197262".to_string()],

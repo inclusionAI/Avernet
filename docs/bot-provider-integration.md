@@ -58,10 +58,66 @@ them into the repository, image, or public configuration examples. A deployment
 may also use its own bot identity system; that is a deployment-side extension
 and does not change the HTTP Provider baseline protocol described here.
 
+## Per-Bot webhook addresses
+
+The Provider integration program registers Bots directly with BCS. A platform
+such as Poolab can keep one Provider identity and assign a fixed URL to each Bot;
+this flow does not require Backend changes.
+
+Register a Provider with `POST /providers`. Its `webhook_url` may be omitted or
+`null` when every Gateway Bot supplies its own endpoint. Existing Providers and
+Bots continue using the shared URL without changes. Provider queries return
+`webhook_url: null` when no default is configured.
+
+With the Provider Admin Bearer token, register a Bot using
+`POST /providers/{provider_id}/bots`:
+
+```json
+{
+  "name": "Poolab Bot A",
+  "owners": ["<owner-staff-id>"],
+  "provider_bot_ref": "poolab-bot-a",
+  "webhook_url": "https://bot-a.example.com/bcn/webhook"
+}
+```
+
+Gateway registration fails with HTTP 400 before Bot creation if neither address
+is configured. Plugin/WebSocket Bots reject an explicit webhook URL. URLs use the
+existing outbound URL validation policy. Registration replay preserves the saved
+URL when omitted; an explicitly different URL returns HTTP 409. Use PATCH to
+change it. Authentication and protocol version remain Provider settings.
+
+`PATCH /providers/{provider_id}/bots/{provider_bot_ref}` has these semantics:
+
+| Request field | Result |
+| --- | --- |
+| Omitted | Preserve the saved URL; existing capability updates work as before. |
+| `"webhook_url": "https://bot-a.example.com/new-hook"` | Replace the Bot override. |
+| `"webhook_url": null` | Inherit the Provider default; reject with HTTP 400 if it is absent. |
+
+Send endpoint changes separately from capability changes (`name`, `summary`,
+`domains`, `skills`, `scopes`, `visibility`); mixing them returns HTTP 400 before
+writes. Registration, PATCH and Bot list responses expose the saved override,
+with `null` meaning inheritance. An explicit endpoint failure never retries at
+the Provider default or switches to WebSocket.
+
+Treat a URL change as maintenance: pause new traffic, drain active runs, PATCH,
+and allow other instances' existing 30-second cache TTL to expire before resuming.
+The writer invalidates its local cache immediately. Active runs are not migrated.
+The existing WS-to-Provider switch API accepts no URL: a new binding requires a
+Provider default, while replay of a matching binding can use its saved override.
+
+Deploy the nullable binding column before upgrading every BCS instance, then
+allow integration programs to send per-Bot URLs. SQLite startup applies migration
+028; MySQL deployments must apply migration 027. Before rolling back to an older
+BCS version, stop affected traffic or provide compatible routing: old code ignores
+Bot overrides. No downstream wire version or token changes are required.
+
 ## What must the Provider webhook support?
 
-When registering a Provider, you provide a `webhook_url`. BCS sends `POST`
-requests to that URL and uses the body `method` to identify the action.
+A Provider may supply a default `webhook_url`. A Gateway Bot may supply its own
+`webhook_url` when registering. BCS sends `POST` requests to the Bot override when
+present, otherwise to the Provider default, using the body `method` for the action.
 
 | Method | Minimal requirement | Description |
 | --- | --- | --- |

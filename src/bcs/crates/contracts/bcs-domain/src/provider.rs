@@ -57,6 +57,9 @@ pub struct ProviderCredential {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderBotBinding {
     pub bot_uuid: String,
+    /// None inherits the Provider default; this is routing configuration, not a capability.
+    #[serde(default)]
+    pub webhook_url: Option<String>,
     pub provider_id: String,
     pub provider_bot_ref: String,
     pub disabled: bool,

@@ -56,8 +56,10 @@ sequenceDiagram
 
 ### 1.1 BCS 到 Provider 的起始请求
 
+下行地址先取 Bot 绑定的 `webhook_url`，未配置时继承 Provider 默认地址。接收端失败不触发地址回退；地址选择不改变 1.0/2.0 报文和 Provider 认证语义。
+
 ```http
-POST <provider.webhook_url> HTTP/2
+POST <resolved_bot_webhook_url> HTTP/2
 Authorization: Bearer <bcs_to_provider_token>
 Content-Type: application/json; charset=utf-8
 Accept: text/event-stream, application/json
@@ -716,7 +718,7 @@ group-level socket 不重放。live 与 snapshot 竞态可能产生重复，Fron
 独立有限 JSON 请求，不请求第二条 SSE：
 
 ```http
-POST <same provider.webhook_url>
+POST <same resolved_bot_webhook_url>
 Accept: application/json
 X-BCN-Protocol-Version: 2.0
 X-BCN-Transport: callback

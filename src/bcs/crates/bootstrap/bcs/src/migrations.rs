@@ -1037,6 +1037,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 25, name: "delivery_context_selection" },
     SqliteMigration { version: 26, name: "delivery_pending_abort" },
     SqliteMigration { version: 27, name: "run_reply_segments" },
+    SqliteMigration { version: 28, name: "provider_bot_webhook" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1447,6 +1448,10 @@ async fn apply_sqlite_migration_body(
         }
         27 => {
             db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/027_run_reply_segments.sql"))).await?;
+            Ok(())
+        }
+        28 => {
+            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/028_provider_bot_webhook.sql"))).await?;
             Ok(())
         }
         _ => Ok(()),
@@ -2177,7 +2182,8 @@ mod tests {
                 (24, "delivery_worker_queries".to_string(), "sqlite".to_string()),
                 (25, "delivery_context_selection".to_string(), "sqlite".to_string()),
                 (26, "delivery_pending_abort".to_string(), "sqlite".to_string()),
-                (27, "run_reply_segments".to_string(), "sqlite".to_string())
+                (27, "run_reply_segments".to_string(), "sqlite".to_string()),
+                (28, "provider_bot_webhook".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())
@@ -2189,7 +2195,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 27);
+        assert_eq!(report.pending_versions.len(), 28);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -2602,7 +2608,8 @@ mod tests {
                 (24, "delivery_worker_queries".to_string(), "sqlite".to_string()),
                 (25, "delivery_context_selection".to_string(), "sqlite".to_string()),
                 (26, "delivery_pending_abort".to_string(), "sqlite".to_string()),
-                (27, "run_reply_segments".to_string(), "sqlite".to_string())
+                (27, "run_reply_segments".to_string(), "sqlite".to_string()),
+                (28, "provider_bot_webhook".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())

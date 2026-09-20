@@ -199,6 +199,7 @@ pub async fn register_provider_bot(
         .services
         .provider_management
         .register_provider_bot(RegisterProviderBotCommand {
+            webhook_url: req.webhook_url,
             provider_id,
             provider_admin_token,
             name: req.name,
@@ -242,6 +243,7 @@ pub async fn register_provider_bot(
     }
 
     Ok(Json(RegisterProviderBotResponse {
+        webhook_url: outcome.webhook_url,
         bot_uuid: outcome.bot_uuid,
         provider_id: outcome.provider_id,
         provider_bot_ref: outcome.provider_bot_ref,
@@ -472,6 +474,11 @@ pub async fn patch_provider_bot(
         .services
         .provider_management
         .update_provider_bot(UpdateProviderBotCommand {
+            webhook_url: match req.webhook_url {
+                bcs_protocol::http::provider::WebhookUrlPatch::Unchanged => bcs_service_api::core::provider::BotWebhookChange::Unchanged,
+                bcs_protocol::http::provider::WebhookUrlPatch::Inherit => bcs_service_api::core::provider::BotWebhookChange::Inherit,
+                bcs_protocol::http::provider::WebhookUrlPatch::Set(url) => bcs_service_api::core::provider::BotWebhookChange::Set(url),
+            },
             provider_id,
             provider_admin_token,
             provider_bot_ref,
@@ -497,6 +504,7 @@ pub async fn patch_provider_bot(
         "skills": outcome.skills.into_iter().map(to_wire_skill).collect::<Vec<_>>(),
         "scopes": outcome.scopes,
         "visibility": outcome.visibility,
+        "webhook_url": outcome.webhook_url,
     })))
 }
 
@@ -814,8 +822,7 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
     let webhook_url = downlink
         .get("webhook_url")
         .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
+        .map(str::to_string);
     let admin_callback_url = config
         .get("admin_callback_url")
         .and_then(Value::as_str)
@@ -850,6 +857,7 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
 
 fn binding_to_json(binding: ProviderBotBinding) -> Value {
     json!({
+        "webhook_url": binding.webhook_url,
         "bot_uuid": binding.bot_uuid,
         "provider_id": binding.provider_id,
         "provider_bot_ref": binding.provider_bot_ref,

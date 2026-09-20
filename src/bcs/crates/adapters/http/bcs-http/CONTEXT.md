@@ -54,3 +54,5 @@ encode caller identity; route policy declares allowed principals explicitly.
 
 - `cargo test --package bcs-http --manifest-path src/bcs/Cargo.toml`
 - `cargo check --workspace --all-targets --manifest-path src/bcs/Cargo.toml`
+
+Provider Bot registration and list responses expose the saved optional webhook_url. PATCH maps omitted/null/string to the application endpoint change contract; the application rejects mixing URL and capability writes. URL inheritance is decided in BotCore, not the HTTP adapter.

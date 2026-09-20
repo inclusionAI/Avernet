@@ -56,7 +56,7 @@ async fn register_provider(
         .core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             auth_mode,
             "11111111".to_string(),
             None,
@@ -79,7 +79,7 @@ async fn register_provider_with_coordination(
         .core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             auth_mode,
             "197262".to_string(),
             None,
@@ -100,7 +100,7 @@ async fn register_provider_persists_mcporter_coordination_config() {
         .core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "197262".to_string(),
             None,
@@ -149,7 +149,7 @@ async fn register_provider_persists_native_mcp_tool_name_mapping() {
         .core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "197262".to_string(),
             None,
@@ -200,7 +200,7 @@ async fn register_provider_rejects_non_native_mcp_tool_name_mapping() {
         .core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "197262".to_string(),
             None,
@@ -233,7 +233,7 @@ async fn register_provider_rejects_too_many_tool_name_mappings() {
         .core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "197262".to_string(),
             None,
@@ -258,7 +258,7 @@ async fn register_provider_rejects_invalid_provider_tool_name() {
         .core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "197262".to_string(),
             None,
@@ -285,7 +285,7 @@ async fn register_provider_rejects_unsupported_canonical_tool_name() {
         .core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "197262".to_string(),
             None,
@@ -312,7 +312,7 @@ async fn register_provider_rejects_native_tool_with_mcp_fields() {
         .core
         .register_provider(
             "Provider".to_string(),
-            "https://provider.example.com/bcs/webhook".to_string(),
+            Some("https://provider.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "197262".to_string(),
             None,
@@ -426,7 +426,7 @@ async fn register_provider_rejects_private_webhook_urls() {
             .core
             .register_provider(
                 "Provider".to_string(),
-                webhook_url.to_string(),
+                Some(webhook_url.to_string()),
                 ProviderAuthMode::StaticBearer,
                 "11111111".to_string(),
                 None,
@@ -859,7 +859,7 @@ async fn set_provider_disabled_requires_matching_admin_token() {
         .core
         .register_provider(
             "Provider 2".to_string(),
-            "https://provider2.example.com/bcs/webhook".to_string(),
+            Some("https://provider2.example.com/bcs/webhook".to_string()),
             ProviderAuthMode::StaticBearer,
             "11111111".to_string(),
             None,

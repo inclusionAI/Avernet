@@ -27,3 +27,5 @@ Provider administration and Bot resolution share the same cached store; disable,
 insert and metadata update invalidate after successful DB writes. Provider repo
 contracts and SQLite tests verify mutation visibility; cache tests cover negative
 hits, errors, bounds, singleflight and invalidation during an old load.
+
+ProviderBotBinding stores a nullable webhook_url. Endpoint writes are scoped by environment, Provider and Bot; failures propagate, successful writes invalidate local binding cache. Other instances observe updates within the existing 30-second TTL. SQLite migration 028 and MySQL migration 027 add the nullable column.

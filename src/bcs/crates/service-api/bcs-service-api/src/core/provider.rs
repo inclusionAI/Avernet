@@ -38,6 +38,7 @@ pub struct RegisteredProvider {
 /// `POST /bots/onboard` flow.
 #[derive(Debug, Clone, Default)]
 pub struct RegisterProviderBotParams {
+    pub webhook_url: Option<String>,
     pub bot_name: String,
     pub summary: Option<String>,
     pub owners: Vec<String>,
@@ -54,7 +55,7 @@ pub trait ProviderCoreService: Send + Sync {
     async fn register_provider(
         &self,
         name: String,
-        webhook_url: String,
+        webhook_url: Option<String>,
         auth_mode: ProviderAuthMode,
         created_by: String,
         protocol_version: Option<String>,
@@ -110,6 +111,20 @@ pub trait ProviderCoreService: Send + Sync {
 
 #[async_trait]
 pub trait ProviderBotCoreService: Send + Sync {
+    /// Update only the routing override; identities and capabilities remain unchanged.
+    async fn update_provider_bot_webhook(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+        provider_bot_ref: &str,
+        webhook_url: Option<String>,
+    ) -> ServiceResult<UpdateProviderBotCoreResult> {
+        let _ = (provider_id, provider_admin_token, provider_bot_ref, webhook_url);
+        Err(ServiceError::InvalidOperation {
+            message: "provider bot endpoint updates are not configured".to_string(),
+            request_id: None,
+        })
+    }
     async fn register_provider_bot_with_bot_uuid(
         &self,
         provider_id: &str,
@@ -220,4 +235,13 @@ pub trait ProviderBotCoreService: Send + Sync {
             request_id: None,
         })
     }
+}
+
+/// Library-level command, independent of JSON PATCH representation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum BotWebhookChange {
+    #[default]
+    Unchanged,
+    Inherit,
+    Set(String),
 }
