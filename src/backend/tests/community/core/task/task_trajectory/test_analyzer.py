@@ -40,7 +40,6 @@ from __future__ import annotations
 import ast
 import json
 import time
-from collections import Counter
 from typing import Any
 
 import pytest
@@ -49,9 +48,6 @@ from agentclaw.community.core.task.domain.errors import TrajectoryAnalysisError
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     AnalysisType,
-    DispatchCandidate,
-    DispatchRationale,
-    JoinDropped,
     ReasonCatalog,
     TaskTrajectory,
     TrajectoryAnalysis,
@@ -1116,6 +1112,27 @@ async def test_tc_bot_raises_domain_error_on_unparseable_response():
             trajectory, lambda ev: None,
             analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
         )
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_parses_markdown_fenced_json_response():
+    # Bot 常把 JSON 包在 ```json 代码块(同 plan/search skill 回投)。_parse_bot_response
+    # 经 extract_json 鲁棒抽出,忽略 ``` 包裹 —— 否则裸 json.loads 报
+    # "Expecting value: line 1 column 1 (char 0)" → 误判 504。
+    fenced = (
+        "```json\n"
+        + _bot_analysis_content(analysis_output="fenced ok", boost_reason="b")
+        + "\n```"
+    )
+    bot = _FakeBot(content=fenced)
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    trajectory = _traj([_ev(TrajectoryActionType.SUBMIT, action_result="success"), _terminal_success()])
+    ta = await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    assert ta.analysis_output == "fenced ok"
+    assert ta.boost_reason == "b"
 
 
 @pytest.mark.asyncio

@@ -69,6 +69,7 @@ import time
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from agentclaw.community.core.task.domain.errors import TrajectoryAnalysisError
+from agentclaw.community.core.task.domain.json_extract import extract_json
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     AnalysisType,
@@ -793,8 +794,11 @@ class TaskTrajectoryAnalyzer:
         """
         content = _extract_response_content(run)
         try:
-            parsed = json.loads(content)
-        except (json.JSONDecodeError, TypeError) as ex:
+            # bot 常把 JSON 包在 ```json 代码块 / 散文里(同 plan/search skill 回投);用
+            # extract_json 鲁棒抽出而非裸 json.loads — 否则首字符为 ``` 时 json.loads 报
+            # "Expecting value: line 1 column 1 (char 0)" → 误判 504。extract_json 抛 ValueError。
+            parsed = extract_json(content)
+        except (json.JSONDecodeError, ValueError, TypeError) as ex:
             raise TrajectoryAnalysisError(
                 f"tc_bot returned an unparseable response (bot_id={analysis_executor}): {ex}"
             ) from ex
