@@ -29,6 +29,8 @@ def _make_service() -> BotBuildService:
     """
     service = BotBuildService.__new__(BotBuildService)
     service._device_service = MagicMock()
+    service._build_ignore_repository = MagicMock(get=MagicMock(return_value=None))
+    service._env = "test"
     return service
 
 
@@ -583,6 +585,8 @@ class TestBotBuildServiceBotParamForwarding:
         mock_provider.get_build_plan.return_value = mock_build_plan
         service = BotBuildService.__new__(BotBuildService)
         service._device_service = MagicMock()
+        service._build_ignore_repository = MagicMock(get=MagicMock(return_value=None))
+        service._env = "test"
         service._migrate_bot_instance = MagicMock(return_value=True)
         service._generate_mcp_config = MagicMock(return_value=True)
         service._generate_openclaw_stage_configs = MagicMock(return_value=True)

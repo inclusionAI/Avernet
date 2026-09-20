@@ -82,6 +82,8 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
             ext["migration_path"] = result.get("migration_path")
         if "build_target_path" in result:
             ext["build_target_path"] = result.get("build_target_path")
+        if success and "publish_ignore" in result:
+            ext["publish_ignore"] = result["publish_ignore"]
         if success and result.get("active_skill_snapshot_path"):
             ext["active_skill_snapshot_path"] = result["active_skill_snapshot_path"]
         if success and captured_layout is not None:

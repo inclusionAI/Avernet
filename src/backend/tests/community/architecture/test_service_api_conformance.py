@@ -46,6 +46,8 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from agentclaw.community.api.build_ignore_service import BuildIgnoreServiceProtocol
+from agentclaw.community.core.service_bot.services.build_ignore_service import BuildIgnoreService
 
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
@@ -306,6 +308,7 @@ from agentclaw.community.core.spaces.services import (
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (BuildIgnoreServiceProtocol, BuildIgnoreService),
     (BotCommonConfigServiceProtocol, BotCommonConfigService),
     (ExpertChatInstanceServiceProtocol, ExpertChatInstanceService),
     (BotAppGrantServiceProtocol, BotAppGrantService),
