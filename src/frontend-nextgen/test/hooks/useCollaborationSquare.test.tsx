@@ -405,7 +405,7 @@ describe('useCollaborationSquare Bot Search', () => {
     });
 
     expect(discoverBots).toHaveBeenLastCalledWith(
-      { keyword: '代码', topK: 20, minScore: 0.01, runtimeState: 'online', ...viewerFields },
+      { keyword: '代码', topK: 20, minScore: 0.1, runtimeState: 'online', ...viewerFields },
       humanContext,
       expect.any(AbortSignal),
     );

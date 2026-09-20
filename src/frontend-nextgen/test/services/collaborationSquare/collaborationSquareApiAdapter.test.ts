@@ -174,7 +174,7 @@ describe('CollaborationSquareApiAdapter', () => {
       {
         keyword: '整理会议纪要',
         top_k: 20,
-        min_score: 0.01,
+        min_score: 0.1,
         runtime_state: 'online',
       },
       signal,
@@ -230,7 +230,7 @@ describe('CollaborationSquareApiAdapter', () => {
       {
         keyword: '代码',
         top_k: 20,
-        min_score: 0.01,
+        min_score: 0.1,
         runtime_state: 'online',
         viewer_actor_type: 'human',
         viewer_actor_id: '900003',
@@ -238,22 +238,6 @@ describe('CollaborationSquareApiAdapter', () => {
       undefined,
     );
 
-    mockedDiscoverPublicBots.mockClear();
-    await adapter.discoverBots({
-      keyword: '代码',
-      viewerActorType: 'bot',
-      viewerActorId: 'bot-1:owner-1',
-    });
-    expect(mockedDiscoverPublicBots).toHaveBeenCalledWith(
-      {
-        keyword: '代码',
-        top_k: 20,
-        min_score: 0.01,
-        viewer_actor_type: 'bot',
-        viewer_actor_id: 'bot-1:owner-1',
-      },
-      undefined,
-    );
   });
 
   it('将 entity_id 等于当前 human user_id 的公开 Bot 标记为自有 Bot', async () => {

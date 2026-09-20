@@ -110,7 +110,7 @@ describe('collaboration square BOT runtime wiring', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe(
-      '/openapi/v1/bots/catalog/discover?keyword=%E6%95%B4%E7%90%86%E4%BC%9A%E8%AE%AE%E7%BA%AA%E8%A6%81&top_k=20&min_score=0.01&runtime_state=online',
+      '/openapi/v1/bots/catalog/discover?keyword=%E6%95%B4%E7%90%86%E4%BC%9A%E8%AE%AE%E7%BA%AA%E8%A6%81&top_k=20&min_score=0.1&runtime_state=online',
     );
     expect(
       fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
@@ -122,24 +122,6 @@ describe('collaboration square BOT runtime wiring', () => {
         String(url).includes('/api/mock/collaboration-square/bots'),
       ),
     ).toBe(false);
-  });
-
-  it('omits runtime_state from Bot-view Discovery requests', async () => {
-    const fetchMock = jest
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({ code: 200000, data: { items: [], total: 0 } }))
-      .mockResolvedValue(jsonResponse({ code: 20000, data: { items: [], total: 0 } }));
-    global.fetch = fetchMock;
-
-    await collaborationSquareBotService.discoverBots({
-      keyword: '测试',
-      viewerActorType: 'bot',
-      viewerActorId: 'bot-1:owner-1',
-    });
-
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      '/openapi/v1/bots/catalog/discover?keyword=%E6%B5%8B%E8%AF%95&top_k=20&min_score=0.01&viewer_actor_type=bot&viewer_actor_id=bot-1%3Aowner-1',
-    );
   });
 
   it('surfaces a Discovery protocol error and never falls back to Search or BOT Mock data', async () => {

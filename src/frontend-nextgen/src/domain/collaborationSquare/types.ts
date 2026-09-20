@@ -100,7 +100,6 @@ export interface PublicBotDiscoveryQuery {
   keyword: string;
   topK?: number;
   minScore?: number;
-  /** 仅 Human 视角使用；Bot 视角由 Gateway 省略。 */
   runtimeState?: 'online';
   /** 智能发现同样以当前身份作为 viewer 过滤可见 Bot。 */
   viewerActorType?: BotCatalogViewer['viewerActorType'];

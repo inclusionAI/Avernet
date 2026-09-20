@@ -96,7 +96,7 @@ export function useCollaborationSquareList({
           const page = isSmartSearch
             ? {
                 items: await collaborationSquareBotService.discoverBots(
-                  { keyword, topK: 20, minScore: 0.01, runtimeState: 'online', ...viewerFields },
+                  { keyword, topK: 20, minScore: 0.1, runtimeState: 'online', ...viewerFields },
                   humanBotContext ?? undefined,
                   signal,
                 ),
