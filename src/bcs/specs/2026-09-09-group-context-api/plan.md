@@ -314,6 +314,7 @@ PDP 判定：
 | `domain` | string | 是 | — | 要更新的 domain |
 | `granularity` | string | 否 | — | 可选。当同一 domain 名下有多条可写条目时需显式消歧，否则系统自动匹配 |
 | `content` | string | 是 | — | 新内容 |
+| `change_reason` | string | 否 | — | 本次取代的原因，写入新条目 `superseded_reason`，用于事后审计追溯。与 LLM 的“推理/reasoning”无关，单纯描述“为什么用新内容取代旧内容” |
 
 **服务端行为：**
 
@@ -357,13 +358,12 @@ PDP 判定：
   7. 最终 content size 校验：
     - 最终总字节数  ≤ CONTENT_MAX_BYTES（默认 1 KB），超出返回 413 payload_too_large
   8. 回填旧条目 valid_to = tx_time（生命周期字段维护）
-  9. 回填旧条目 lineage.superseded_by = 新 context_id，lineage.superseded_at = tx_time
-     （明确"谁取代了我、什么时候取代的"，旧条目数据面 content/origin/provenance 不变）
-  10. 写入新条目，lineage.supersedes 指向旧条目
-  11. 返回新 context_id
+  9. 写入新条目，lineage.supersedes 指向旧条目 row id；将请求中的 `change_reason`（若提供）
+     写入新条目的 `superseded_reason`，记录“为何取代旧版本”
+  10. 返回新 context_id
 ```
 
-> **"不修改旧条目"澄清：** supersede 不修改旧条目的数据面（content / origin / provenance），但生命周期字段（`time.valid_to`、`lineage.superseded_by`、`lineage.superseded_at`）由系统在 step 7-8 维护，这是 lineage 链可遍历的前提。
+> **"不修改旧条目"澄清：** supersede 不修改旧条目的数据面（content / origin / provenance），但生命周期字段（`time.valid_to`、`lineage.supersedes`）由系统在 step 8-9 维护，这是 lineage 链可遍历的前提。
 
 **响应：**
 
@@ -387,6 +387,7 @@ PDP 判定：
 | `granularity` | string \| null | 实际 granularity |
 | `content` | string \| null | 写入的 content |
 | `superseded_id` | string \| null | 被取代的旧条目 ID |
+| `change_reason` | string \| null | 本次取代原因（回显请求中的 `change_reason`，便于调用方确认留痕） |
 
 ---
 
