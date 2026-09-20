@@ -504,7 +504,8 @@ function NodeDetailPanel({
 
       {(node.executor_type === 'embedded-agent' ||
         node.executor_type === 'subagent' ||
-        node.executor_type === 'collaboration') && (
+        node.executor_type === 'collaboration' ||
+        node.executor_type === 'cli-script') && (
         <div className="border-t border-gray-100 pt-3">
           <NodeStepTracePanel flowId={flowId} nodeId={node.node_id} attempt={node.attempt} />
         </div>

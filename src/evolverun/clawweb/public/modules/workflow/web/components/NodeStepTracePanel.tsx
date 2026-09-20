@@ -48,7 +48,9 @@ export default function NodeStepTracePanel({ flowId, nodeId, attempt = 1 }: Node
           </span>
         )}
         <span>{data.totalSteps} 步</span>
-        <span className="text-blue-600">{data.toolCallCount} 次工具调用</span>
+        {data.toolCallCount > 0 && (
+          <span className="text-blue-600">{data.toolCallCount} 次工具调用</span>
+        )}
         {data.toolErrorCount > 0 && (
           <span className="text-red-600">{data.toolErrorCount} 次错误</span>
         )}
@@ -77,6 +79,7 @@ export default function NodeStepTracePanel({ flowId, nodeId, attempt = 1 }: Node
 
 function StepItem({ step }: { step: NodeStepTraceStep }) {
   if (step.stepType === 'progress') return <ProgressStep step={step} />
+  if (step.stepType === 'script_progress') return <ScriptProgressStep step={step} />
   if (step.stepType === 'tool_call') return <ToolCallStep step={step} />
   if (step.stepType === 'tool_result') return <ToolResultStep step={step} />
   return <AssistantTextStep step={step} />
@@ -117,6 +120,39 @@ function ProgressStep({ step }: { step: NodeStepTraceStep }) {
         <div className="flex items-center gap-2">
           <span className={`text-[10px] font-medium ${textClass}`}>
             {label}
+          </span>
+          <span className="font-mono text-gray-200 text-[9px]">#{step.stepSeq}</span>
+        </div>
+        {message && (
+          <p className="mt-0.5 text-gray-500 text-xs leading-snug">
+            {message}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Script Progress Step ─────────────────────────────────────────────
+
+/** Renders cli-script @CLAWFLOW_PROGRESS@ lines as timeline entries. */
+function ScriptProgressStep({ step }: { step: NodeStepTraceStep }) {
+  const message = step.textContent ?? ''
+  const isError = step.isError
+
+  return (
+    <div className="group relative flex gap-3 pb-2">
+      {/* Timeline dot — same size as progress dots */}
+      <div className="flex flex-col items-center">
+        <div className={`mt-2 h-3 w-3 shrink-0 rounded-full ${isError ? 'bg-red-200' : 'bg-cyan-100'}`} />
+        <div className="w-px flex-1 bg-gray-100" />
+      </div>
+
+      {/* Content — compact inline style, same as ProgressStep */}
+      <div className="min-w-0 flex-1 pb-0.5">
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-medium ${isError ? 'text-red-700' : 'text-cyan-700'}`}>
+            {isError ? '脚本错误' : '脚本进度'}
           </span>
           <span className="font-mono text-gray-200 text-[9px]">#{step.stepSeq}</span>
         </div>

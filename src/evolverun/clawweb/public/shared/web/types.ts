@@ -1592,7 +1592,7 @@ export interface ChatMessage {
 
 export interface NodeStepTraceStep {
   stepSeq: number
-  stepType: 'tool_call' | 'tool_result' | 'assistant_text' | 'progress'
+  stepType: 'tool_call' | 'tool_result' | 'assistant_text' | 'progress' | 'script_progress'
   toolName: string | null
   toolUseId: string | null
   toolInputJson: string | null
