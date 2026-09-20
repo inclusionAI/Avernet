@@ -39,7 +39,7 @@ use bcs_service_api::application::connect::{
     ConnectResult, ConnectService, ConnectStatus, FriendEntriesPage, FriendListQuery, RequestDirection, RequestsPage,
 };
 use bcs_service_api::port::{
-    FriendConnectNotificationCommand, FriendConnectNotificationKind,
+    FriendAuthSyncPort, FriendConnectNotificationCommand, FriendConnectNotificationKind,
     FriendConnectNotificationPort,
 };
 use bcs_service_api::RequestAuthHeaders;
@@ -71,6 +71,8 @@ pub struct DbConnectService {
     bot_config: Arc<dyn BotActorConfigRepoPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
+    /// BCS→backend friend-auth-sync; used by Task 11 triggers (grant/revoke).
+    friend_auth_sync: Arc<dyn FriendAuthSyncPort>,
     env: String,
 }
 
@@ -82,6 +84,7 @@ impl DbConnectService {
         bot_config: Arc<dyn BotActorConfigRepoPort>,
         user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
         friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
+        friend_auth_sync: Arc<dyn FriendAuthSyncPort>,
         env: String,
     ) -> Self {
         Self {
@@ -91,6 +94,7 @@ impl DbConnectService {
             bot_config,
             user_directory,
             friend_connect_notification,
+            friend_auth_sync,
             env,
         }
     }
@@ -1668,6 +1672,7 @@ mod tests {
             bot_config.clone(),
             None,
             Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+            Arc::new(bcs_service_api::NoopFriendAuthSyncPort),
             env.to_string(),
         )
     }
@@ -1737,6 +1742,7 @@ mod tests {
             bot_config.clone(),
             Some(departments),
             Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+            Arc::new(bcs_service_api::NoopFriendAuthSyncPort),
             "dev".to_string(),
         )
     }
@@ -1834,6 +1840,7 @@ mod tests {
             bot_config.clone(),
             None,
             notification,
+            Arc::new(bcs_service_api::NoopFriendAuthSyncPort),
             "dev".to_string(),
         )
     }
@@ -2704,6 +2711,7 @@ mod tests {
             bc.clone(),
             Some(user_directory),
             Arc::new(recorder),
+            Arc::new(bcs_service_api::NoopFriendAuthSyncPort),
             "dev".to_string(),
         );
         // Human applicant (nick 李四) → bot "本地代码专家" (owner 85020); APPROVAL → pending.

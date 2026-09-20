@@ -31,6 +31,7 @@ use crate::config::{
     LlmConfig, LlmProviderType,
 };
 use crate::friend_connect_notification::HttpFriendConnectNotificationPort;
+use crate::HttpFriendAuthSyncPort;
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
     CachePluginKind, DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
@@ -4546,6 +4547,14 @@ impl BcsServer {
                 ),
                 None => Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
             };
+        let friend_auth_sync: Arc<dyn bcs_service_api::port::FriendAuthSyncPort> =
+            match config.friend_work_order_base_url.as_deref() {
+                Some(base_url) => Arc::new(
+                    HttpFriendAuthSyncPort::new(base_url)
+                        .expect("friend_work_order_base_url must be a valid HTTP(S) URL"),
+                ),
+                None => Arc::new(bcs_service_api::port::NoopFriendAuthSyncPort),
+            };
         let connect_service_impl = Arc::new(bcs_edge_permission::DbConnectService::new(
             edge_grant_store.clone(),
             profile_store.clone(),
@@ -4553,6 +4562,7 @@ impl BcsServer {
             bot_config_store.clone(),
             user_directory.clone(),
             friend_connect_notification,
+            friend_auth_sync.clone(),
             edge_permission_env,
         ));
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
@@ -4566,7 +4576,8 @@ impl BcsServer {
         let friend_svc: Arc<dyn bcs_service_api::FriendCoreService> = Arc::new(
             FriendCore::with_repo(friend_repo)
                 .with_relation(relation_svc.clone())
-                .with_edge_permission_sync(edge_permission_friend_sync),
+                .with_edge_permission_sync(edge_permission_friend_sync)
+                .with_friend_auth_sync(friend_auth_sync.clone()),
         );
         let friend_request_svc: Arc<dyn bcs_service_api::FriendRequestCoreService> =
             Arc::new(FriendRequestCore::with_repo(

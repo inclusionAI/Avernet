@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_friend_store::MemoryFriendRepo;
 use bcs_service_api::{
-    EdgePermissionFriendSyncService, FriendCoreService, FriendRepoPort, RelationCoreService,
-    ServiceError, ServiceResult, Friendship,
+    EdgePermissionFriendSyncService, FriendAuthSyncPort, FriendCoreService, FriendRepoPort,
+    RelationCoreService, ServiceError, ServiceResult, Friendship,
 };
 use tracing::{error, info, warn};
 
@@ -17,6 +17,8 @@ pub struct FriendCore {
     repo: Arc<dyn FriendRepoPort>,
     relation: Option<Arc<dyn RelationCoreService>>,
     edge_permission_sync: Option<Arc<dyn EdgePermissionFriendSyncService>>,
+    /// BCS→backend friend-auth-sync; used by Task 11 triggers (grant/revoke).
+    friend_auth_sync: Option<Arc<dyn FriendAuthSyncPort>>,
 }
 
 impl FriendCore {
@@ -29,6 +31,7 @@ impl FriendCore {
             repo,
             relation: None,
             edge_permission_sync: None,
+            friend_auth_sync: None,
         }
     }
 
@@ -49,6 +52,16 @@ impl FriendCore {
         sync: Arc<dyn EdgePermissionFriendSyncService>,
     ) -> Self {
         self.edge_permission_sync = Some(sync);
+        self
+    }
+
+    /// Inject the BCS→backend friend-auth-sync port. Triggers fire in Task 11
+    /// (grant on approve/create_connect, revoke on remove_friendship).
+    pub fn with_friend_auth_sync(
+        mut self,
+        sync: Arc<dyn FriendAuthSyncPort>,
+    ) -> Self {
+        self.friend_auth_sync = Some(sync);
         self
     }
 }
