@@ -337,7 +337,8 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         if analysis_bot_id is None:
             raise TrajectoryAnalysisNotConfiguredError(
                 "trajectory analysis bot is not configured "
-                "(task_trajectory.analysis_bot_id missing in user_config); "
+                "(task_trajectory.analysis_bot_id — or analysis_bot_id_pre for the "
+                "pre env — missing in user_config); "
                 "do_analysis=true requires a deployment-configured bot_id"
             )
 
@@ -374,15 +375,23 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
     # ------------------------------------------------------------------
 
     def _resolve_analysis_bot_id(self) -> "str | None":
-        """Read the deployment-configured ``analysis_bot_id`` (decision #10).
+        """Read the deployment-configured, env-aware ``analysis_bot_id`` (decision #10).
 
-        A ``None`` config (lightweight DI injector that did not bind
-        ``TrajectoryAnalysisConfig``) is treated as not-configured — the
-        ``do_analysis=true`` call raises ``TrajectoryAnalysisNotConfiguredError``
-        (503). The default read path (``do_analysis=false``) never calls this.
+        Mirrors ``openapi_bot.base_url`` env selection (``_env_select(prod,
+        pre)``): pre env → ``analysis_bot_id_pre``, else → ``analysis_bot_id``.
+        The pair is deployment-configured; ``get_current_env()`` normalizes
+        prepub→pre / gray→prod (lazy import to avoid a module-load cycle, same
+        idiom as ``_env_select``). A ``None`` config (lightweight DI that did not
+        bind ``TrajectoryAnalysisConfig``) — or the env-relevant variant being
+        unset — is treated as not-configured: the ``do_analysis=true`` call
+        raises ``TrajectoryAnalysisNotConfiguredError`` (503). The default read
+        path (``do_analysis=false``) never calls this.
         """
         if self._config is None:
             return None
+        from agentclaw.community.utils.env_utils import get_current_env
+        if get_current_env() == "pre":
+            return self._config.analysis_bot_id_pre
         return self._config.analysis_bot_id
 
     # ------------------------------------------------------------------
