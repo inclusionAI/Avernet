@@ -33,6 +33,7 @@ from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModul
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
 from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
+from agentclaw.community.di.modules.bot_friend_auth_module import BotFriendAuthModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
 from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchModule
@@ -168,6 +169,7 @@ def build_injector(
         TcFileUploadIntegrationModule(local=profile is not DeployProfile.CORP),
         SpacesModule(),
         WorkOrdersModule(),
+        BotFriendAuthModule(),
         HarnessModule(),
         BotCollaboratorModule(),
         BotAppGrantModule(),
