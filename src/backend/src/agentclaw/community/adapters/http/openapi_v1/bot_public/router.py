@@ -106,14 +106,9 @@ def _catalog_search_filters(
     friendship: str | None,
 ) -> BotCatalogSearchFilters:
     """Validate frontend filters before sending the fixed BCS query."""
-    normalized_viewer_type = _optional_catalog_value(
-        viewer_actor_type, allowed=_CATALOG_VIEWER_TYPES
+    normalized_viewer_type, normalized_viewer_id = _catalog_viewer(
+        viewer_actor_type, viewer_actor_id
     )
-    normalized_viewer_id = viewer_actor_id.strip() if viewer_actor_id else None
-    if viewer_actor_id is not None and not normalized_viewer_id:
-        raise ValueError("invalid catalog viewer")
-    if (normalized_viewer_type is None) != (normalized_viewer_id is None):
-        raise ValueError("catalog viewer must be supplied as a pair")
 
     normalized_friendship = _optional_catalog_value(
         friendship, allowed=_CATALOG_FRIENDSHIPS
@@ -133,6 +128,21 @@ def _catalog_search_filters(
         viewer_actor_id=normalized_viewer_id,
         friendship=normalized_friendship,
     )
+
+
+def _catalog_viewer(
+    viewer_actor_type: str | None, viewer_actor_id: str | None
+) -> tuple[str | None, str | None]:
+    """Validate and normalize the optional BCS viewer identity."""
+    normalized_viewer_type = _optional_catalog_value(
+        viewer_actor_type, allowed=_CATALOG_VIEWER_TYPES
+    )
+    normalized_viewer_id = viewer_actor_id.strip() if viewer_actor_id else None
+    if viewer_actor_id is not None and not normalized_viewer_id:
+        raise ValueError("invalid catalog viewer")
+    if (normalized_viewer_type is None) != (normalized_viewer_id is None):
+        raise ValueError("catalog viewer must be supplied as a pair")
+    return normalized_viewer_type, normalized_viewer_id
 
 
 def _public_bot(record: Mapping[str, Any]) -> PublicBot:
@@ -269,33 +279,9 @@ async def discover_public_bots(
     ),
     service: BotDiscoverServiceProtocol = Injected(BotDiscoverServiceProtocol),
 ) -> Envelope[Page[DiscoveredPublicBot]]:
-    if viewer_actor_type == "bot":
-        # BCSFuse injects runtime_state=online when it is omitted. Passing both
-        # supported states keeps Bot-view recall governed by availability only;
-        # BCS remains the authoritative visibility filter below.
-        recommendation_filters = {
-            "availability": ["public", "protected"],
-            "runtime_state": ["online", "offline"],
-        }
-        catalog_visibility = ("public", "protected")
-        catalog_user_visibility = None
-        catalog_status = None
-    else:
-        recommendation_filters = {"runtime_state": [runtime_state]}
-        catalog_visibility = None
-        catalog_user_visibility = (
-            ("public", "protected") if viewer_actor_type == "human" else None
-        )
-        catalog_status = "online" if runtime_state == "online" else None
-
     try:
-        catalog_filters = _catalog_search_filters(
-            visibility=catalog_visibility,
-            user_visibility=catalog_user_visibility,
-            status=catalog_status,
-            viewer_actor_type=viewer_actor_type,
-            viewer_actor_id=viewer_actor_id,
-            friendship=None,
+        normalized_viewer_type, normalized_viewer_id = _catalog_viewer(
+            viewer_actor_type, viewer_actor_id
         )
     except ValueError:
         _log_failure("discover", request, "invalid_filters")
@@ -305,8 +291,9 @@ async def discover_public_bots(
             keyword=keyword,
             top_k=top_k,
             min_score=min_score,
-            filters=recommendation_filters,
-            catalog_filters=catalog_filters,
+            runtime_state=runtime_state,
+            viewer_actor_type=normalized_viewer_type,
+            viewer_actor_id=normalized_viewer_id,
             caller=BotCatalogCaller(
                 tenant_id=principal.tenant,
                 user_id=principal.user_id or None,
