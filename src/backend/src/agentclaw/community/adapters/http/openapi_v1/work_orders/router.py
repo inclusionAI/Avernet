@@ -250,8 +250,10 @@ async def create_bot_editor_request(
 ) -> Envelope[BotEditorRequestCreated]:
     actor_id = _require_user_delegation(caller)
     # Same rule as every other reader of the addressed owner: ``entity_id``,
-    # else its retiring alias, else the caller.
-    named_owner = addressed_owner(entity_id, owner_id)
+    # else its retiring alias, else the caller. Empty is absent here as it is
+    # for the grant dependency's raw read, so ``?entity_id=&owner_id=x``
+    # falls back to ``owner_id`` rather than tripping the disagreement 422.
+    named_owner = addressed_owner(entity_id or None, owner_id or None)
     record = service.create_bot_editor_request(
         bot_id=bot_id,
         owner_id=named_owner or actor_id,

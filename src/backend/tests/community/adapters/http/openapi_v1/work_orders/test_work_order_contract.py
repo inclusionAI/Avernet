@@ -297,6 +297,30 @@ def test_create_bot_editor_request_takes_the_owner_as_entity_id(
     )
 
 
+def test_create_bot_editor_request_treats_an_empty_entity_id_as_absent(
+    client, work_order_service
+):
+    """``?entity_id=&owner_id=x`` names one owner, not two disagreeing ones."""
+    record = _work_order()
+    record.biz_type = WorkOrderBizType.BOT_COLLABORATOR
+    record.biz_id = "bot-7"
+    work_order_service.create_bot_editor_request.return_value = record
+
+    response = client.post(
+        "/openapi/v1/bots/bot-7/editor-requests",
+        params={"entity_id": "", "owner_id": "bot-owner"},
+        json={"reason": "joint editing"},
+    )
+
+    assert response.status_code == 201
+    work_order_service.create_bot_editor_request.assert_called_once_with(
+        bot_id="bot-7",
+        owner_id="bot-owner",
+        applicant_user_id="owner-1",
+        reason="joint editing",
+    )
+
+
 def test_create_bot_editor_request_refuses_disagreeing_owner_spellings(
     client, work_order_service
 ):
