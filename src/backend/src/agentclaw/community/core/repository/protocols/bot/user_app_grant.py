@@ -11,7 +11,7 @@ history write: a grant and its ``granted`` event land together or not at all.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING
+from typing import List, Optional, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_app_grant.models import UserAppGrantRecord
@@ -27,12 +27,14 @@ class UserAppGrantRepositoryProtocol(Protocol):
     """
 
     @abstractmethod
-    def grant(self, data: Dict[str, Any]) -> "UserAppGrantRecord":
+    def grant(
+        self, *, app_id: int, app_name: str, user_id: str
+    ) -> UserAppGrantRecord:
         """Record a delegation, appending a ``granted`` event.
 
-        ``data`` carries ``app_id``, ``app_name`` and ``user_id``. Idempotent:
-        a delegation that is already live is returned unchanged rather than
-        duplicated or failed, under concurrency as well as in sequence.
+        Idempotent: a delegation that is already live is returned unchanged
+        rather than duplicated or failed, under concurrency as well as in
+        sequence.
         """
 
     @abstractmethod
@@ -44,9 +46,9 @@ class UserAppGrantRepositoryProtocol(Protocol):
         """
 
     @abstractmethod
-    def find(self, user_id: str, app_id: int) -> Optional["UserAppGrantRecord"]:
+    def find(self, user_id: str, app_id: int) -> Optional[UserAppGrantRecord]:
         """The live delegation for this pair, or ``None``."""
 
     @abstractmethod
-    def list_for_user(self, user_id: str) -> List["UserAppGrantRecord"]:
+    def list_for_user(self, user_id: str) -> List[UserAppGrantRecord]:
         """The user's view — every application that may act as them."""

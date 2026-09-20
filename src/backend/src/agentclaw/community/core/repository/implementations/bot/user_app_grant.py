@@ -12,7 +12,7 @@ collision to refuse. A second grant of a live pair is the same delegation.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from injector import inject
 from sqlalchemy.exc import IntegrityError
@@ -49,7 +49,9 @@ class UserAppGrantRepository(
     # Mutations
     # ========================================================================
 
-    def grant(self, data: Dict[str, Any]) -> UserAppGrantRecord:
+    def grant(
+        self, *, app_id: int, app_name: str, user_id: str
+    ) -> UserAppGrantRecord:
         """Record a delegation, appending a ``granted`` event.
 
         Idempotent under concurrency the way the bot grant is: the loser of an
@@ -57,9 +59,6 @@ class UserAppGrantRepository(
         it — the state the caller asked for now holds. If the winner revoked
         in between, the insert is retried exactly once.
         """
-        app_id = data["app_id"]
-        user_id = data["user_id"]
-        app_name = data["app_name"]
         env = get_current_env()
         try:
             return self._insert(app_id, app_name, user_id, env)

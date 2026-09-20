@@ -63,11 +63,9 @@ class UserAppGrantService(UserAppGrantServiceProtocol):
                 "delegation cannot store or later resolve"
             )
         return self._repository.grant(
-            {
-                "app_id": app_id,
-                "app_name": app_name[:APP_NAME_MAX_LENGTH],
-                "user_id": user_id,
-            }
+            app_id=app_id,
+            app_name=app_name[:APP_NAME_MAX_LENGTH],
+            user_id=user_id,
         )
 
     def revoke(self, *, user_id: str, app_id: int) -> None:

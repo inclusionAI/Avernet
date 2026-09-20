@@ -209,14 +209,19 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
     # The user-level delegation: the caller's own account, no bot addressed.
-    # The user is the verified principal (require_user_id binds them to
-    # themselves), and the application is read off the same principal.
+    # NoCheck here means there is no bot whose collaborator level could be
+    # checked — not that the operations are open. They are the most closed
+    # rows on the surface: admission.py REFUSES every app-only caller, the
+    # gateway requires a verified user principal (POST: user and app both),
+    # and require_user_id binds user_id to that principal, so the only caller
+    # who can reach a delegation is the user it belongs to. Same sentinel as
+    # GET /openapi/v1/org/user, for the same reason.
     ("POST", "/openapi/v1/bots/authorized-apps"):
-        NoCheck("the caller's own account-level delegation, not a bot"),
+        NoCheck("the caller's own account-level delegation, not a bot; app-only callers are REFUSED (admission.py)"),
     ("GET", "/openapi/v1/bots/authorized-apps"):
-        NoCheck("the caller's own account-level delegations, not a bot"),
+        NoCheck("the caller's own account-level delegations, not a bot; app-only callers are REFUSED (admission.py)"),
     ("DELETE", "/openapi/v1/bots/authorized-apps/{app_id}"):
-        NoCheck("the caller's own account-level delegation, not a bot"),
+        NoCheck("the caller's own account-level delegation, not a bot; app-only callers are REFUSED (admission.py)"),
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): OWNER_SCOPED,
     # Config manifest. Read at MEMBER, write at ADMIN — the same split the
     # channels rows above make, and for the same reason: reading how a bot is

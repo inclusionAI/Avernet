@@ -14,6 +14,7 @@ through one implementation it happens to import.
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.bot_app_grant.models import (
@@ -26,6 +27,7 @@ from agentclaw.community.core.bot_app_grant.models import (
 class BotAppGrantServiceProtocol(Protocol):
     """Grant, withdraw and read bot→app authorizations."""
 
+    @abstractmethod
     def grant(
         self,
         *,
@@ -48,6 +50,7 @@ class BotAppGrantServiceProtocol(Protocol):
         for one that succeeded.
         """
 
+    @abstractmethod
     def grant_for_creation(
         self,
         *,
@@ -72,6 +75,7 @@ class BotAppGrantServiceProtocol(Protocol):
         sweep removes it with the bot. Idempotent like :meth:`grant`.
         """
 
+    @abstractmethod
     def revoke(
         self, *, bot_id: str, user_id: str, owner_id: str, app_id: int
     ) -> None:
@@ -86,6 +90,7 @@ class BotAppGrantServiceProtocol(Protocol):
         adapter can answer 404 distinctly from a successful withdrawal.
         """
 
+    @abstractmethod
     def revoke_app(self, *, bot_id: str, owner_id: str, app_id: int) -> None:
         """Withdraw **every** delegation of ``app_id`` on ``bot_id``.
 
@@ -94,6 +99,7 @@ class BotAppGrantServiceProtocol(Protocol):
         Raises ``GrantNotFoundError`` when nothing was live to withdraw.
         """
 
+    @abstractmethod
     def revoke_all_for_bot(self, *, bot_id: str, owner_id: str) -> int:
         """Withdraw every authorization against ``bot_id``. Returns the count.
 
@@ -101,6 +107,7 @@ class BotAppGrantServiceProtocol(Protocol):
         no application could reach is an ordinary deletion.
         """
 
+    @abstractmethod
     def list_for_bot(self, *, bot_id: str, owner_id: str) -> list[BotAppGrantRecord]:
         """The bot's view — every app that may reach it, and who let each in.
 
@@ -109,6 +116,7 @@ class BotAppGrantServiceProtocol(Protocol):
         not which caller — ``bot_id`` is not unique across owners.
         """
 
+    @abstractmethod
     def find(
         self, *, bot_id: str, owner_id: str, user_id: str, app_id: int
     ) -> BotAppGrantRecord | None:
@@ -122,6 +130,7 @@ class BotAppGrantServiceProtocol(Protocol):
         separately and live.
         """
 
+    @abstractmethod
     def list_for_app(self, *, app_id: int, user_id: str) -> list[BotAppGrantRecord]:
         """The app's view — which bots may this app reach as ``user_id``.
 
@@ -141,6 +150,7 @@ class UserAppGrantServiceProtocol(Protocol):
     it reaches no existing bot on its own.
     """
 
+    @abstractmethod
     def grant(
         self, *, user_id: str, app_id: int, app_name: str
     ) -> UserAppGrantRecord:
@@ -151,15 +161,18 @@ class UserAppGrantServiceProtocol(Protocol):
         unchanged.
         """
 
+    @abstractmethod
     def revoke(self, *, user_id: str, app_id: int) -> None:
         """Withdraw ``user_id``'s delegation of ``app_id``.
 
         Raises ``GrantNotFoundError`` when no live delegation matched.
         """
 
+    @abstractmethod
     def find(self, *, user_id: str, app_id: int) -> UserAppGrantRecord | None:
         """The live delegation for this pair, or ``None`` when there is none."""
 
+    @abstractmethod
     def list_for_user(self, *, user_id: str) -> list[UserAppGrantRecord]:
         """The user's view — every application that may act as them."""
 
