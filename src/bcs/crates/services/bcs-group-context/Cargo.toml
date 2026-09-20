@@ -1,0 +1,28 @@
+[package]
+name = "bcs-group-context"
+description = "Group context service implementation for BCS"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = "0.4"
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-domain = { workspace = true }
+bcs-group-context-store = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+tokio-test = "0.4"
+
+[lints]
+workspace = true

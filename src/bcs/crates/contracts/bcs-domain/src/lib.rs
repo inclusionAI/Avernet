@@ -17,6 +17,7 @@ pub mod edge_permission;
 pub mod friend;
 pub mod fusion;
 pub mod group;
+pub mod group_context;
 pub mod group_id;
 pub mod invite;
 pub mod message;
@@ -64,6 +65,11 @@ pub use group::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, MessageViewScope, Participant,
     ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy,
     SenderRoutesValidationError, Workspace,
+};
+pub use group_context::{
+    CollectFrom, Consistency, ContextEntry, ContextTime, ContextView, Flow, FreshnessClass,
+    Granularity, Lineage, Origin, Permission, PolicySnapshot, PolicyTemplate, RetrievalItem,
+    TemplateParam, TemplateView, VisibleTo,
 };
 pub use group_id::{
     GENERATED_SESSION_ID_SUFFIX_CHARS, GROUP_ID_PREFIX, GroupIdBuildError,

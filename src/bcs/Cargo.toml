@@ -24,6 +24,8 @@ members = [
     "crates/application/v1/bcs-app-bot",
     "crates/application/v1/bcs-app-invite-code",
     "crates/services/bcs-group-store",
+    "crates/services/bcs-group-context",
+    "crates/services/bcs-group-context-store",
     "crates/services/bcs-interaction",
     "crates/services/bcs-message",
     "crates/services/bcs-message-flow",
@@ -259,6 +261,8 @@ bcs-group      = { path = "crates/services/bcs-group" }
 bcs-app-bot   = { path = "crates/application/v1/bcs-app-bot" }
 bcs-app-group   = { path = "crates/application/v1/bcs-app-group" }
 bcs-group-store = { path = "crates/services/bcs-group-store" }
+bcs-group-context = { path = "crates/services/bcs-group-context" }
+bcs-group-context-store = { path = "crates/services/bcs-group-context-store" }
 bcs-message = { path = "crates/services/bcs-message" }
 bcs-message-flow = { path = "crates/services/bcs-message-flow" }
 bcs-interaction = { path = "crates/services/bcs-interaction" }
