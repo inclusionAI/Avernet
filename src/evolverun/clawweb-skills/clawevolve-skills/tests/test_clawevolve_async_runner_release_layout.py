@@ -114,17 +114,46 @@ def test_gateway_restart_is_deferred_until_after_dispatch_ack_boundary() -> None
     assert "ensure_task_runtime_maintenance" not in source
 
 
+def test_skill_release_sync_is_deferred_until_after_dispatch_ack_boundary() -> None:
+    source = _runner_source()
+
+    bootstrap_launch = source.index(
+        "setsid nohup env CLAWEVOLVE_DETACHED_BOOTSTRAP=true"
+    )
+    bootstrap_started = source.index('status":"started', bootstrap_launch)
+    sync_block = source.index('if [[ "$STAGE" == "runtime-cleanup" ]]', bootstrap_started)
+    sync = source.index("    sync_skills", sync_block)
+
+    assert bootstrap_launch < bootstrap_started < sync
+    assert 'DETACHED_BOOTSTRAP="${CLAWEVOLVE_DETACHED_BOOTSTRAP:-false}"' in source
+    assert '[[ "$BOOTSTRAP_STEP_ID" == "$STEP_ID" ]]' in source
+
+
 def test_launcher_is_validated_before_started_and_dead_launch_is_not_reused() -> None:
     source = _runner_source()
 
+    bootstrap_launcher = source.index(
+        'TASK_LAUNCHER="${SCRIPT_DIR}/clawevolve_task_launcher.sh"'
+    )
+    bootstrap_syntax_check = source.index(
+        'bash -n "$TASK_LAUNCHER"', bootstrap_launcher
+    )
+    bootstrap_launch = source.index(
+        "setsid nohup env CLAWEVOLVE_DETACHED_BOOTSTRAP=true",
+        bootstrap_syntax_check,
+    )
+    bootstrap_started = source.index('status":"started', bootstrap_launch)
     stale_check = source.index('code":"RUNNER_LAUNCH_STALE')
-    launcher = source.index('TASK_LAUNCHER="${SCRIPT_DIR}/clawevolve_task_launcher.sh"')
+    launcher = source.index(
+        'TASK_LAUNCHER="${SCRIPT_DIR}/clawevolve_task_launcher.sh"', stale_check
+    )
     syntax_check = source.index('bash -n "$TASK_LAUNCHER"', launcher)
     launch = source.index('setsid nohup "${LAUNCH_COMMAND[@]}"', syntax_check)
     launched_marker = source.index('touch "$LAUNCHED_FILE"', launch)
     started = source.index('status":"started', launched_marker)
 
     assert 'status":"already_started' not in source
+    assert bootstrap_launcher < bootstrap_syntax_check < bootstrap_launch < bootstrap_started
     assert stale_check < launcher < syntax_check < launch < launched_marker < started
     assert 'code":"TASK_LAUNCHER_INVALID' in source[syntax_check:launch]
 
