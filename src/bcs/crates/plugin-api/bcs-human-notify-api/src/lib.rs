@@ -36,6 +36,10 @@ pub struct MentionNotification {
     /// Session id; empty string for group-level messages without a session.
     pub session_id: String,
     pub group_id: String,
+    /// Group display name; absent when the group is unnamed.
+    pub group_name: Option<String>,
+    /// Session title; absent for group-level messages or unnamed/unavailable sessions.
+    pub session_name: Option<String>,
     /// Sender actor id (`bot_x` or `human_y`).
     pub sender_actor_id: String,
     /// Sender display name.

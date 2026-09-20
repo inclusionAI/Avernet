@@ -6,11 +6,13 @@ use std::sync::Arc;
 use bcs_domain::routing::RouteParticipantOverlay;
 use bcs_domain::{ActorKind, ActorStatus};
 use bcs_service_api::port::{HumanMentionNotifyPort, MentionNotification, MentionedHuman};
+use bcs_service_api::SessionManagementService;
 
 /// Context needed to assemble a [`MentionNotification`].
 pub(crate) struct MentionNotifyContext {
     pub session_id: String,
     pub group_id: String,
+    pub group_name: Option<String>,
     pub sender_actor_id: String,
     pub sender_label: String,
     pub message_text: String,
@@ -62,6 +64,7 @@ pub(crate) fn build_mention_trigger(
 /// one human and the port is available. Errors are logged by the port adapter.
 pub(crate) fn spawn_human_mention_notify(
     port: &Option<Arc<dyn HumanMentionNotifyPort>>,
+    sessions: &Option<Arc<dyn SessionManagementService>>,
     mention_actor_ids: Option<&[String]>,
     overlay: &[RouteParticipantOverlay],
     context: MentionNotifyContext,
@@ -76,9 +79,11 @@ pub(crate) fn spawn_human_mention_notify(
     else {
         return;
     };
-    let notification = MentionNotification {
+    let mut notification = MentionNotification {
         session_id: context.session_id,
         group_id: context.group_id,
+        group_name: context.group_name,
+        session_name: None,
         sender_actor_id: context.sender_actor_id,
         sender_label: context.sender_label,
         mentioned: humans,
@@ -86,7 +91,25 @@ pub(crate) fn spawn_human_mention_notify(
         timestamp_ms: context.timestamp_ms,
     };
     let port = port.clone();
+    let sessions = sessions.clone();
     tokio::spawn(async move {
+        // Resolve optional display metadata off the message's critical path and
+        // only for an actual notification. Never borrow a title from another group.
+        if let Some(sessions) = sessions.filter(|_| !notification.session_id.is_empty()) {
+            match sessions.get(&notification.session_id).await {
+                Ok(Some(session)) if session.group_id == notification.group_id => {
+                    notification.session_name = session.session_title;
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        session_id = %notification.session_id,
+                        %error,
+                        "failed to load session title for human mention notification"
+                    );
+                }
+            }
+        }
         let _ = port.notify_mentioned_humans(notification).await;
     });
 }

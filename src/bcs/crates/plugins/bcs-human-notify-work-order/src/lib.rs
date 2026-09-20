@@ -25,6 +25,7 @@ const PRINCIPAL_TTL_SECS: u64 = 60;
 const PRINCIPAL_ISSUER: &str = "bcs";
 const PRINCIPAL_AUDIENCE: &str = "backend";
 const PRINCIPAL_KEY_ID: &str = "bare";
+/// Sender/message summary budget; group and session metadata stay intact.
 const MAX_CONTENT_CHARS: usize = 200;
 /// Per-request budget so one slow backend response cannot consume the shared
 /// 10s adapter timeout before the remaining recipients are attempted.
@@ -181,10 +182,19 @@ fn build_notice_event(
     notification: &MentionNotification,
     staff_no: &str,
 ) -> WorkOrderNoticeEventRequest {
-    let text = truncate_chars(
+    let summary = truncate_chars(
         &format!("{}: {}", notification.sender_label, notification.message_text),
         MAX_CONTENT_CHARS,
     );
+    let group_name = notification.group_name.as_deref()
+        .filter(|name| !name.trim().is_empty()).unwrap_or("未命名群");
+    let mut text = format!("群：{}（ID：{}）\n", group_name, notification.group_id);
+    if !notification.session_id.is_empty() {
+        let session_name = notification.session_name.as_deref()
+            .filter(|name| !name.trim().is_empty()).unwrap_or("未命名会话");
+        text.push_str(&format!("会话：{}（ID：{}）\n", session_name, notification.session_id));
+    }
+    text.push_str(&summary);
     let biz_id = if notification.session_id.is_empty() {
         notification.group_id.clone()
     } else {
@@ -365,6 +375,8 @@ mod tests {
         MentionNotification {
             session_id: "group-1:s1".to_string(),
             group_id: "group-1".to_string(),
+            group_name: None,
+            session_name: None,
             sender_actor_id: "bot-driver".to_string(),
             sender_label: "张三".to_string(),
             mentioned: vec![
@@ -497,7 +509,7 @@ mod tests {
         assert_eq!(payload.title, "你被 @ 了");
         assert_eq!(
             payload.content,
-            serde_json::json!({ "text": "张三: 你好" })
+            serde_json::json!({ "text": "群：未命名群（ID：group-1）\n会话：未命名会话（ID：group-1:s1）\n张三: 你好" })
         );
         assert_eq!(
             payload.biz_data,
@@ -510,11 +522,40 @@ mod tests {
     }
 
     #[test]
+    fn notice_text_identifies_group_and_session_even_without_names() {
+        let payload = build_notice_event(&sample_notification(), "447147");
+        assert_eq!(payload.content["text"],
+            "群：未命名群（ID：group-1）\n会话：未命名会话（ID：group-1:s1）\n张三: 你好");
+    }
+
+    #[test]
+    fn notice_text_includes_display_names_and_full_ids() {
+        let mut notification = sample_notification();
+        notification.group_name = Some("研发协作群".to_string());
+        notification.session_name = Some("发布问题排查".to_string());
+        let payload = build_notice_event(&notification, "447147");
+        assert_eq!(payload.content["text"],
+            "群：研发协作群（ID：group-1）\n会话：发布问题排查（ID：group-1:s1）\n张三: 你好");
+    }
+
+    #[test]
+    fn notice_text_treats_blank_names_as_unnamed() {
+        let mut notification = sample_notification();
+        notification.group_name = Some("  ".to_string());
+        notification.session_name = Some("\t".to_string());
+        let payload = build_notice_event(&notification, "447147");
+        assert_eq!(payload.content["text"],
+            "群：未命名群（ID：group-1）\n会话：未命名会话（ID：group-1:s1）\n张三: 你好");
+    }
+
+    #[test]
     fn group_only_message_uses_group_id_as_biz_id() {
         let mut notification = sample_notification();
         notification.session_id = String::new();
+        notification.session_name = Some("stale session title".to_string());
         let payload = build_notice_event(&notification, "447147");
         assert_eq!(payload.biz_id, "group-1");
+        assert_eq!(payload.content["text"], "群：未命名群（ID：group-1）\n张三: 你好");
     }
 
     #[test]
@@ -528,7 +569,11 @@ mod tests {
             .and_then(|v| v.as_str())
             .expect("text content");
         // 截断函数在边界字符数上附加省略号，所以上限是 MAX_CONTENT_CHARS + 1。
-        assert!(text.chars().count() <= MAX_CONTENT_CHARS + 1);
+        let summary = text.strip_prefix(
+            "群：未命名群（ID：group-1）\n会话：未命名会话（ID：group-1:s1）\n"
+        ).expect("context must be preserved outside the summary budget");
+        assert_eq!(summary.chars().count(), MAX_CONTENT_CHARS + 1);
+        assert!(summary.ends_with('…'));
         // 中间字节截断会造成 UTF-8 panic；断言能安全取 chars 即证明边界安全。
         let _ = text.chars().last();
     }
@@ -618,6 +663,8 @@ mod tests {
         });
         let port = notifier(format!("http://{addr}"));
         let mut notification = sample_notification();
+        notification.group_name = Some("研发协作群".to_string());
+        notification.session_name = Some("发布问题排查".to_string());
         notification.mentioned = vec![
             bcs_human_notify_api::MentionedHuman {
                 actor_id: "human_447147".to_string(),
@@ -639,6 +686,10 @@ mod tests {
         assert!(request.contains("HUMAN_GROUP_MENTIONED"));
         assert!(request.contains("GROUP_MENTION"));
         assert!(request.contains("447147"));
+        let (_, body) = request.split_once("\r\n\r\n").expect("HTTP request body");
+        let event: serde_json::Value = serde_json::from_str(body).expect("notice event JSON");
+        assert_eq!(event["content"]["text"],
+            "群：研发协作群（ID：group-1）\n会话：发布问题排查（ID：group-1:s1）\n张三: 你好");
         // Authorization / Cookie 头绝不能出现
         assert!(!request.to_ascii_lowercase().contains("authorization:"));
         assert!(!request.to_ascii_lowercase().contains("cookie:"));

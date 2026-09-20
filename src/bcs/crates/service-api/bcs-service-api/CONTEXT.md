@@ -159,3 +159,19 @@ pages, bounds and errors. Facade tests prohibit full-list calls and verify paged
 results/errors/count conversion. HTTP contract and legacy route/search tests
 cover compatibility. MySQL SQL construction tests do not substitute for a live
 MySQL conformance run.
+
+## Human mention notification metadata (0.2.0)
+
+The outbound `HumanMentionNotifyPort` DTO carries optional `group_name` and
+`session_name` display metadata alongside the existing authoritative IDs. The
+message-flow application supplies the Group label and resolves the Session title
+only for a real notification, off the main send path. Missing/read-failed sessions
+retain the notification's ID without a title; a Session from a different Group
+must not contribute a title. Group-level messages have an empty Session ID and no
+Session name. The names do not affect routing, recipients or authorization.
+
+This source-contract addition affects message-flow producers, no-op/test fixtures,
+and the bootstrap adapter. All struct literals need the two fields; external
+consumers must rebuild against 0.2.0. Bootstrap maps into the separate
+`bcs-human-notify-api` schema. No persistent schema or HTTP/WS API changes are
+required.

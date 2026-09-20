@@ -76,6 +76,8 @@ mod tests {
         let notification = MentionNotification {
             session_id: String::new(),
             group_id: "group-1".to_string(),
+            group_name: None,
+            session_name: None,
             sender_actor_id: "bot-driver".to_string(),
             sender_label: "Driver".to_string(),
             mentioned: vec![bcs_human_notify_api::MentionedHuman {

@@ -254,11 +254,13 @@ pub(super) async fn relay_final_chat_event(
         {
             crate::human_notify_hook::spawn_human_mention_notify(
                 &flow.human_mention_notify,
+                &flow.session_management,
                 Some(decision.mentions.as_slice()),
                 &overlay,
                 crate::human_notify_hook::MentionNotifyContext {
                     session_id: cmd.bcs_session_id.clone().unwrap_or_default(),
                     group_id: cmd.group_id.clone(),
+                    group_name: group.label.clone(),
                     sender_actor_id: cmd.bot_id.clone(),
                     sender_label: sender_display_name.clone(),
                     message_text: notify_text,
