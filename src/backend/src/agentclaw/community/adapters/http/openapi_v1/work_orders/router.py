@@ -228,6 +228,13 @@ async def create_bot_editor_request(
     body: CreateBotEditorRequest,
     request: Request,
     caller: ActingCallerDep,
+    # Declared here rather than through ``OwnerIdDep``: that dependency carries
+    # the addressed-bot grant check, and this operation is ``USER_GATED`` with
+    # the work-order service adjudicating (the applicant is, by definition, not
+    # yet a collaborator, so the grant check's masked 404 would be the wrong
+    # answer). The admission inventory holds each route to its mode's
+    # dependency, so the pair is spelled out and resolved through the same
+    # ``addressed_owner`` rule every other reader uses.
     entity_id: Annotated[
         str | None,
         Query(

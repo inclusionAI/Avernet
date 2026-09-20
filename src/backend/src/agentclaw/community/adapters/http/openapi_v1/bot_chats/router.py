@@ -11,8 +11,10 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Envelope,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import (
-    OWNER_ID_DESCRIPTION,
     UserIdDep,
     require_granted_addressed_bot,
 )
@@ -51,18 +53,7 @@ async def list_bot_chats(
     request: Request,
     bot_id: BotIdPath,
     user_id: UserIdDep,
-    entity_id: str | None = Query(
-        default=None,
-        min_length=1,
-        description="Owner of the addressed bot; defaults to user_id. Name it "
-        "only when the bot is shared with the acting user.",
-    ),
-    owner_id: str | None = Query(
-        default=None,
-        min_length=1,
-        deprecated=True,
-        description=OWNER_ID_DESCRIPTION,
-    ),
+    owner_id: OwnerIdDep,
     trace_id: str | None = Query(default=None, description="Filter by trace id."),
     session_id: str | None = Query(
         default=None, description="Filter by the engine session id."
@@ -108,11 +99,14 @@ async def list_bot_chats(
     service: BotChatServiceProtocol = Injected(BotChatServiceProtocol),
 ) -> Envelope[SessionListResponse]:
     """List one addressed Bot's product chat records for the acting user."""
-    # ``entity_id`` (and its retiring alias ``owner_id``) is consumed by the
-    # addressed-bot grant dependency. Product chat visibility remains scoped to
-    # the acting user and is re-adjudicated by BotChatService (owner or
-    # collaborator), exactly like the product API.
-    del entity_id, owner_id
+    # The addressed owner (``entity_id``, or its retiring alias ``owner_id``)
+    # is declared through ``OwnerIdDep`` so this operation publishes the same
+    # parameter pair as every other addressed-bot operation and the grant
+    # dependency reads the same value. It is consumed by that dependency and
+    # then discarded: product chat visibility remains scoped to the acting
+    # user and is re-adjudicated by BotChatService (owner or collaborator),
+    # exactly like the product API.
+    del owner_id
     try:
         result = await service.list_sessions(
             owner_id=user_id,
@@ -155,18 +149,7 @@ async def get_bot_chat(
         ),
     ],
     user_id: UserIdDep,
-    entity_id: str | None = Query(
-        default=None,
-        min_length=1,
-        description="Owner of the addressed bot; defaults to user_id. Name it "
-        "only when the bot is shared with the acting user.",
-    ),
-    owner_id: str | None = Query(
-        default=None,
-        min_length=1,
-        deprecated=True,
-        description=OWNER_ID_DESCRIPTION,
-    ),
+    owner_id: OwnerIdDep,
     # The other accepted value selects the legacy trace store; its vendor name
     # is internal and deliberately kept out of the published document.
     log_source: str | None = Query(
@@ -177,7 +160,7 @@ async def get_bot_chat(
     service: BotChatServiceProtocol = Injected(BotChatServiceProtocol),
 ) -> Envelope[ConversationDetail]:
     """Return one product chat Trace and its observation tree."""
-    del entity_id, owner_id
+    del owner_id
     result = await service.get_session(
         trace_id=trace_id,
         owner_id=user_id,
