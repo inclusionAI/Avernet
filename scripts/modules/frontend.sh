@@ -323,8 +323,17 @@ install_frontend_deps() {
     # the call now stalls for ~7m before giving up, a fixed cost per
     # invocation regardless of tree size (see install_bcs_panel_asset_deps in
     # bcs.sh for the measurement). Neither flag changes what is installed.
+    # --legacy-peer-deps: the committed lockfile can still carry the internal
+    # graph's sibling peer ranges (the @tc-chat/ui 5/6 split rides through
+    # tc-chat extensions as peerOptional), and npm ci revalidates the peer tree
+    # on top of the locked resolution — an in-sync lockfile then ERESOLVEs and
+    # dead-ends every setup/start of a locked internal checkout. The flag keeps
+    # ci's exact-lockfile reproducibility and only skips that revalidation,
+    # mirroring the leniency the un-locked arm below already applies (teammates'
+    # tnpm resolves peer ranges leniently). A package.json/lockfile desync still
+    # fails loudly with npm's own sync error.
     if [ -f package-lock.json ]; then
-        if ! HUSKY=0 npm ci --include=dev --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
+        if ! HUSKY=0 npm ci --include=dev --legacy-peer-deps --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
             log_error "Failed to install frontend dependencies (npm ci)."
             log_error "若刚改过 package.json,请先本地 'npm install' 更新 package-lock.json 再提交。"
             return 1

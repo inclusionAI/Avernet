@@ -262,3 +262,60 @@ if grep -q "pulled to" <<<"$out"; then
 fi
 [ "$(git -C "$PULL_TC" rev-parse HEAD)" = "$before" ] || { echo 'at-tip pull moved HEAD' >&2; exit 1; }
 printf 'PASS: frontend-pull refusals, ff-only advance and at-tip no-op\n'
+
+# ---------------------------------------------------------------------------
+# install_frontend_deps: the locked (npm ci) arm must tolerate the internal
+# dependency graph's sibling peer ranges — the same leniency the un-locked arm
+# already applies. A committed lockfile can carry peer ranges that strict
+# npm ci rejects (the @tc-chat/ui 5/6 split across tc-chat extensions), so ci
+# ERESOLVEs even though the lockfile is in sync, dead-ending every setup/start
+# of a locked internal checkout. --legacy-peer-deps keeps ci's exact-lockfile
+# reproducibility and only skips the peer-tree revalidation; the
+# lockfile-out-of-sync failure mode stays loud. Probes run against a stub
+# `npm` that records its argv (offline by construction — no registry, no real
+# install), in the style of the app.sh stub in test_singlebox_variant_gate.sh.
+# ---------------------------------------------------------------------------
+install_stub="$TEMP/npm-stub-bin"
+install_args="$TEMP/npm-recorded-args"
+install_fixture="$TEMP/install-fixture"
+mkdir -p "$install_stub" "$install_fixture"
+cat >"$install_stub/npm" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${NPM_STUB_ARGS_FILE:?}"
+exit 0
+EOF
+chmod +x "$install_stub/npm"
+
+# Locked checkout: the ci arm runs and carries --legacy-peer-deps.
+: >"$install_fixture/package-lock.json"
+: >"$install_args"
+(
+    FRONTEND_DIR="$install_fixture"
+    export NPM_STUB_ARGS_FILE="$install_args"
+    NPM_REGISTRY_URL="https://registry.test.invalid"
+    PATH="$install_stub:$PATH"
+    install_frontend_deps
+) >/dev/null
+ci_args="$(cat "$install_args")"
+[[ "$ci_args" == "ci "* ]] ||
+    { echo "locked checkout must install via npm ci first; got: $ci_args" >&2; exit 1; }
+[[ "$ci_args" == *"--legacy-peer-deps"* ]] ||
+    { echo "npm ci must pass --legacy-peer-deps (internal graph peer ranges); got: $ci_args" >&2; exit 1; }
+
+# Un-locked checkout: the install arm keeps its existing lenient invocation.
+rm -f "$install_fixture/package-lock.json"
+: >"$install_args"
+(
+    FRONTEND_DIR="$install_fixture"
+    export NPM_STUB_ARGS_FILE="$install_args"
+    NPM_REGISTRY_URL="https://registry.test.invalid"
+    PATH="$install_stub:$PATH"
+    install_frontend_deps
+) >/dev/null
+install_args_recorded="$(cat "$install_args")"
+[[ "$install_args_recorded" == "install "* ]] ||
+    { echo "un-locked checkout must install via npm install; got: $install_args_recorded" >&2; exit 1; }
+[[ "$install_args_recorded" == *"--legacy-peer-deps"* ]] ||
+    { echo "npm install must keep --legacy-peer-deps; got: $install_args_recorded" >&2; exit 1; }
+rm -f "$install_fixture/package-lock.json"
+printf 'PASS: install_frontend_deps keeps the locked arm ci-exact yet peer-lenient\n'
