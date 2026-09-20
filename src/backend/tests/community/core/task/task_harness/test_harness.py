@@ -305,3 +305,31 @@ class TestRunPollLoop:
         h.run_poll_loop(stop)
         assert stop.is_set()
         assert calls["n"] >= 3
+
+
+class TestRelayTurnExpiry:
+    def test_expired_relay_turn_uses_relay_resume_not_generic_timeout(self, svc, graph):
+        _dispatch_running(svc, graph, "c1", run_mode="coop_group", assignee="group1")
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        graph.extend_props["relay_turn"] = {
+            "node_id": "c1",
+            "holder_id": "bot1",
+            "status": "GRANTED",
+            "expires_at_ms": 10,
+        }
+        resumed: list[str] = []
+        rec = Recorder()
+        h = TaskHarness(
+            svc,
+            rec,
+            clock=_Clock(0.0),
+            default_sla_timeout=1.0,
+            wall_clock_ms=lambda: 11,
+        )
+        h.set_on_relay_turn_expired(resumed.append)
+        h.register("t1")
+
+        assert h._poll_once() == []
+        assert resumed == ["t1"]
+        assert rec.patches == []
+        assert svc._get_node(graph, "c1").status == Status.RUNNING

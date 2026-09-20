@@ -10,6 +10,7 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     Status,
     TaskGraphPatch,
+    TaskNodePatch,
     TaskNodeQueryCriteria,
     TaskSourceType,
 )
@@ -21,6 +22,7 @@ from agentclaw.community.core.task.domain.requests import (
     RequestTaskSpec,
     TaskInfoRequest,
 )
+from agentclaw.community.core.task.task_center.relay import RelayCoordinator
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import RELAY_EXECUTION
@@ -569,3 +571,76 @@ def test_failed_dispatch_reopens_same_turn_for_retry() -> None:
     assert graph_service.query_task_nodes(
         "relay-task", TaskNodeQueryCriteria(node_ids=["retry-step"]),
     )[0].status == Status.RUNNING
+
+
+def test_relay_coordinator_renews_only_expired_current_turn() -> None:
+    service, graph_service = _service()
+    _run(service.execute(_request()))
+    coordinator = RelayCoordinator(graph_service, ttl_seconds=0)
+    first = coordinator.grant("relay-task", "relay-task", "main-bot")
+    assert first is not None
+
+    renewed = coordinator.renew_expired("relay-task", "relay-task", "main-bot")
+
+    assert renewed is not None
+    assert renewed.token != first.token
+    graph = graph_service.query_task_dashboard("relay-task")
+    assert graph.extend_props["relay_turn"]["node_id"] == "relay-task"
+    assert graph.extend_props["relay_turn"]["holder_id"] == "main-bot"
+    assert graph.extend_props["relay_turn"]["status"] == "GRANTED"
+
+
+def test_expired_relay_resume_only_mutates_current_baton_node() -> None:
+    service, graph_service = _service()
+    _run(service.execute(_request()))
+    first_turn = _run(service.report_task_event(
+        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
+        event_id="resume-root-exec", holder_id="main-bot", progress_reason="首棒完成",
+        payload={"success": True, "output": {"scope": "first"}},
+    ))["relay_turn"]
+    _plan_and_select(
+        service,
+        origin_node_id="relay-task",
+        holder_id="main-bot",
+        turn=first_turn,
+        child_node_id="resume-step",
+        event_suffix="resume",
+    )
+    RelayCoordinator(graph_service).consume(
+        "relay-task", "resume-step", "main-bot", first_turn
+    )
+    graph_service.update_task_node_info(
+        TaskNodePatch(
+            task_id="relay-task",
+            node_id="resume-step",
+            status=Status.RUNNING,
+            extend_props_patch={"relay_holder_id": "research-bot"},
+        )
+    )
+    coordinator = RelayCoordinator(graph_service, ttl_seconds=0)
+    assert coordinator.grant("relay-task", "resume-step", "research-bot") is not None
+
+    resumed: list[tuple[str, str]] = []
+
+    async def _resume(node, turn):
+        resumed.append((node.node_id, turn))
+        return True
+
+    service._engine._runner.resume_relay_turn = _resume  # type: ignore[method-assign]
+    parent_before = next(
+        node for node in graph_service.query_task_dashboard("relay-task").tasks
+        if node.node_id == "relay-task"
+    )
+    parent_status_before = parent_before.status
+    parent_output_before = dict(parent_before.run_info.output)
+
+    assert _run(service.resume_expired_relay_turn("relay-task")) is True
+
+    graph = graph_service.query_task_dashboard("relay-task")
+    parent_after = next(node for node in graph.tasks if node.node_id == "relay-task")
+    baton_after = next(node for node in graph.tasks if node.node_id == "resume-step")
+    assert resumed and resumed[0][0] == "resume-step"
+    assert parent_after.status == parent_status_before
+    assert parent_after.run_info.output == parent_output_before
+    assert baton_after.run_info.extend_props["relay_resume_count"] == 1
+    assert graph.extend_props["relay_turn"]["node_id"] == "resume-step"

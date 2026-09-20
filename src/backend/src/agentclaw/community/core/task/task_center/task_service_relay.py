@@ -167,6 +167,70 @@ class TaskServiceRelayMixin:
         relay.mark_event(task_id, event_key)
         return result
 
+    async def resume_expired_relay_turn(self, task_id: str) -> bool:
+        """Renew and resume an expired Relay planning lease for its current holder.
+
+        The recovery targets only the baton node and graph-level lease metadata.
+        It never invokes centralized parent/root reconciliation or re-executes
+        the already reported business work.
+        """
+        graph = self._graph.query_task_dashboard(task_id)
+        config = graph.extend_props.get("execution_config", {}) or {}
+        if config.get("orchestration_mode") != "relay":
+            return False
+        current = graph.extend_props.get("relay_turn") or {}
+        node_id = str(current.get("node_id") or "")
+        holder_id = str(current.get("holder_id") or "")
+        if not node_id or not holder_id:
+            return False
+        node = next((item for item in graph.tasks if item.node_id == node_id), None)
+        if node is None:
+            logger.warning(
+                "[task][relay] resume rejected: baton node missing task=%s node=%s",
+                task_id, node_id,
+            )
+            return False
+        max_resumes = int(config.get("RELAY_RESUME_MAX", 2))
+        resumes = int(node.run_info.extend_props.get("relay_resume_count", 0))
+        if resumes >= max_resumes:
+            self._graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=node_id,
+                    status=Status.HUNG,
+                    failure_reason="relay planning timeout exceeded resume limit",
+                    extend_props_patch={"relay_resume_exhausted": True},
+                )
+            )
+            logger.warning(
+                "[task][relay] resume exhausted task=%s node=%s holder=%s resumes=%s max=%s",
+                task_id, node_id, holder_id, resumes, max_resumes,
+            )
+            return False
+        turn = self._relay().renew_expired(task_id, node_id, holder_id)
+        if turn is None:
+            return False
+        refreshed_node = self._relay_node(task_id, node_id)[1]
+        delivered = await self._engine._runner.resume_relay_turn(
+            refreshed_node, turn.token
+        )
+        self._graph.update_task_node_info(
+            TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                extend_props_patch={
+                    "relay_resume_count": resumes + 1,
+                    "relay_resume_delivered": delivered,
+                    "relay_resume_at_ms": int(time.time() * 1000),
+                },
+            )
+        )
+        logger.info(
+            "[task][relay] expired planning turn resumed task=%s node=%s holder=%s delivered=%s",
+            task_id, node_id, holder_id, delivered,
+        )
+        return delivered
+
     @staticmethod
     def _required_reason(value: str | None, message: str) -> str:
         reason = str(value or "").strip()

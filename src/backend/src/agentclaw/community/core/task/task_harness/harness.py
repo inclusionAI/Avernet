@@ -45,6 +45,7 @@ class TaskHarness:
         default_coop_group_sla_timeout: float = _DEFAULT_COOP_GROUP_SLA_TIMEOUT,
         default_pending_timeout: float = _DEFAULT_PENDING_TIMEOUT,
         interval: float = _DEFAULT_INTERVAL,
+        wall_clock_ms: Callable[[], int] | None = None,
     ) -> None:
         """graph: TaskGraphService(只读查询 RUNNING + execution_config);on_harness_fn: 编排核复位入口。
         sla_timeout:RUNNING 卡死 backstop(>poller execute SLA);pending_timeout:PENDING 派发异常重搜推。"""
@@ -56,6 +57,8 @@ class TaskHarness:
         self._default_coop_group_sla = default_coop_group_sla_timeout
         self._default_pending = default_pending_timeout
         self._interval = interval
+        self._wall_clock_ms = wall_clock_ms or (lambda: int(time.time() * 1000))
+        self._on_relay_turn_expired_fn: Callable[[str], object] | None = None
         self._registered: set[str] = set()
         self._dispatched_at: dict[tuple[str, str], float] = {}  # (task_id,node_id) -> 首见 RUNNING 时钟
         self._pending_seen_at: dict[tuple[str, str], float] = {}  # (task_id,node_id) -> 首见 PENDING(未派发)时钟
@@ -69,6 +72,35 @@ class TaskHarness:
     def set_on_harness(self, fn: Callable[[TaskNodePatch], object]) -> None:
         """组合根(facade)在构造完编排核后回填复位重投入口(编排核 ``on_harness``)。"""
         self._on_harness_fn = fn
+
+    def set_on_relay_turn_expired(self, fn: Callable[[str], object]) -> None:
+        """Set the Relay-specific continuation callback for expired planning turns."""
+        self._on_relay_turn_expired_fn = fn
+
+    def _resume_expired_relay_turn(self, task_id: str) -> bool:
+        """Resume a stale Relay turn before generic SLA logic can touch its node."""
+        if self._on_relay_turn_expired_fn is None:
+            return False
+        try:
+            graph = self._graph.query_task_dashboard(task_id)
+        except Exception:  # noqa: BLE001
+            return False
+        config = graph.extend_props.get("execution_config", {}) or {}
+        turn = graph.extend_props.get("relay_turn") or {}
+        expired = (
+            config.get("orchestration_mode") == "relay"
+            and turn.get("status") == "GRANTED"
+            and int(turn.get("expires_at_ms", 0)) <= self._wall_clock_ms()
+        )
+        if not expired:
+            return False
+        result = self._on_relay_turn_expired_fn(task_id)
+        if asyncio.iscoroutine(result):
+            asyncio.run(result)
+        # The Relay-specific path owns this expired turn even when wake-up
+        # delivery fails. Generic timeout recovery must not mutate or escalate
+        # the current baton through centralized parent/root semantics.
+        return True
 
     def _sla_timeout(self, task_id: str, node=None) -> float:
         """读节点 RUNNING SLA。
@@ -108,6 +140,10 @@ class TaskHarness:
         with self._lock:
             task_ids = list(self._registered)
         for task_id in task_ids:
+            if self._resume_expired_relay_turn(task_id):
+                # Relay planning is a Skill-owned continuation. Do not fall
+                # through into generic timeout/HUNG/BBS recovery for this turn.
+                continue
             try:
                 nodes = self._graph.query_task_nodes(
                     task_id,

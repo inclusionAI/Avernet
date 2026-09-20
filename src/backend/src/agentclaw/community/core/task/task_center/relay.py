@@ -139,6 +139,38 @@ class RelayCoordinator:
 
         self._graph._mutate_with_version_retry(task_id, mutation)
 
+    def renew_expired(self, task_id: str, node_id: str, holder_id: str) -> RelayTurn | None:
+        """Renew an expired current-baton lease for a resume prompt.
+
+        This only updates graph-level relay control metadata. It never changes a
+        node, so a stalled baton cannot mutate any predecessor while recovering.
+        """
+        opaque_turn_value = secrets.token_urlsafe(32)
+        expires_at = int(time.time() * 1000) + self._ttl_ms
+
+        def mutation(graph):
+            self._require_relay(graph)
+            current = graph.extend_props.get("relay_turn") or {}
+            expired_current_turn = (
+                current.get("status") == "GRANTED"
+                and current.get("node_id") == node_id
+                and current.get("holder_id") == holder_id
+                and int(current.get("expires_at_ms", 0)) <= int(time.time() * 1000)
+            )
+            if not expired_current_turn:
+                return False, None, False
+            current["token_digests"] = [self._digest(opaque_turn_value)]
+            current["status"] = "GRANTED"
+            current["expires_at_ms"] = expires_at
+            current["resumed_at_ms"] = int(time.time() * 1000)
+            graph.extend_props["relay_turn"] = current
+            return True, None, True
+
+        renewed = self._graph._mutate_with_version_retry(task_id, mutation)
+        if not renewed:
+            return None
+        return RelayTurn(task_id, node_id, holder_id, opaque_turn_value, expires_at)
+
     def reopen(self, task_id: str, holder_id: str, token: str) -> None:
         """Restore the same lease after a reserved dispatch fails to deliver."""
         digest = self._digest(token)

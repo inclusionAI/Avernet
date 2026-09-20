@@ -135,6 +135,7 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         # harness 复位重投入口回填(编排核已建,harness 才能拿到 on_harness)+ 启动旁路巡检 daemon 线程
         if self._harness is not None:
             self._harness.set_on_harness(self._engine.on_harness)
+            self._harness.set_on_relay_turn_expired(self.resume_expired_relay_turn)
             import threading as _t
 
             _t.Thread(

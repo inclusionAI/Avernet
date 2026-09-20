@@ -108,6 +108,18 @@ class TaskRunner:
             gid)
         return gid
 
+    async def resume_relay_turn(self, node: TaskNode, relay_turn: str) -> bool:
+        """Resume the current Relay holder at PLAN_RESULT without re-executing work."""
+        backend = self._execution_backend
+        resume = getattr(backend, "resume_relay_turn", None)
+        if not callable(resume):
+            logger.warning(
+                "[task][task_runner] relay resume unavailable node=%s execution_backend=%s",
+                node.node_id, type(backend).__name__ if backend is not None else "None",
+            )
+            return False
+        return bool(await resume(node, relay_turn))
+
     async def get_group_session(self, group_id: str) -> str | None:
         """Fetch the initial session_id for a coop group; create one if absent."""
         if self._execution_backend is not None:

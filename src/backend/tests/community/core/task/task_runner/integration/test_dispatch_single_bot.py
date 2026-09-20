@@ -597,3 +597,26 @@ def test_dispatch_single_bot_2_group_no_task_human_owner_falls_back_to_send():
     assert bot.sent  # 老链路
     assert bcs.created == []
     assert poller.registered == []  # 默认 Push，不注册 poller
+
+
+def test_resume_relay_turn_sends_plan_only_prompt_to_current_holder():
+    bot = _Bot()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=_Poller(),
+        api_base_url="https://backend.example",
+    )
+    node = _node("group-1", {"relay_holder_id": "relay-driver:owner-1"})
+
+    assert _run(exe.resume_relay_turn(node, "renewed-turn")) is True
+    assert len(bot.sent) == 1
+    bot_id, message, metadata = bot.sent[0]
+    assert bot_id == "relay-driver:owner-1"
+    assert "[RESUME_RELAY]" in message
+    assert "不得重做业务执行" in message
+    assert "relay_turn=renewed-turn" in message
+    assert metadata == {"biz_task_id": "t1", "relay_resume": True}
