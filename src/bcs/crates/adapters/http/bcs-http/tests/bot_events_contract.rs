@@ -1693,7 +1693,7 @@ async fn agentpass_resolve_reports_bounded_error_for_malformed_jwt() {
                 .method("POST")
                 .uri("/providers/agentpass/resolve")
                 .header("X-BCN-Provider-Id", "prv_missing")
-                .header("authorization", "Bearer not-base64.e30.signature")
+                .header("authorization", "Bearer ***.e30.c2ln")
                 .body(Body::empty())
                 .unwrap(),
         )
