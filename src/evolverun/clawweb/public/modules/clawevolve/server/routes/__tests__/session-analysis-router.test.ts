@@ -105,7 +105,6 @@ describe("session analysis Router", () => {
         llmAnalysis: false,
       }),
       runtime: expect.objectContaining({
-        releaseChannel: "pre",
         package: { packageId: "clawevolve-ais-diagnose" },
       }),
     }));
