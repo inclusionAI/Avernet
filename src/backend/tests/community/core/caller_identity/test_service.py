@@ -143,7 +143,7 @@ async def test_cli_caller_updates_full_scope_and_returns_bot_aggregate() -> None
     assert result.bot_call_type is McpCallType.CALLER
     deps.repository.replace_draft_call_type.assert_not_called()
     deps.cli_scope_reconciler.reconcile.assert_called_once_with(
-        bot=bot, force_update=True,
+        bot=bot, force_update=True, requested_cli_identity_modes={"dataphin": "caller"},
     )
     logged = " ".join(str(call) for call in logger.method_calls)
     assert "cli_call_type_update_requested" in logged
