@@ -125,8 +125,9 @@ async fn check_human_input_index_migrations(db: &dyn DbPlugin) -> Result<()> {
         let column_before = human_input_column_metadata(db).await?;
         let report = build_mysql_migration_report("bcs".into(), plans.clone(), before.clone(), false)?;
         assert!(report.pending_versions.is_empty());
-        let report = build_mysql_migration_report("bcs".into(), plans.clone(), before.clone(), true)?;
-        assert!(report.pending_versions.is_empty());
+        // Only 001/008 are selected; shared CI may already contain Eventing 009.
+        assert_eq!(report.ignored_extra_versions,
+            original_records.iter().map(|record| record.version).collect::<Vec<_>>());
         assert_human_input_scope_index(db, 700).await?;
         assert_eq!(human_input_column_metadata(db).await?, column_before);
         assert_scope_rows_and_uniqueness(db).await?;
