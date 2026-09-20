@@ -22,6 +22,7 @@ from agentclaw.community.core.task.repository.serializers import task_spec_from_
 from agentclaw.community.core.task.task_center.relay import RelayCoordinator
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_runner.client.candidate_search import search_candidates
+from agentclaw.community.core.task.task_context.task_trajectory.models import ReasonCatalog
 
 
 logger = logging.getLogger("task.relay.search")
@@ -32,6 +33,42 @@ class TaskServiceRelayMixin:
 
     def _relay(self) -> RelayCoordinator:
         return RelayCoordinator(self._graph)
+
+    def _emit_relay(
+        self, *,
+        task_id: str,
+        node_id: str,
+        action_result: str,
+        error_type: ReasonCatalog | None = None,
+        error_msg: str | None = None,
+        ext_info: dict[str, Any] | None = None,
+        status_from: Status | None = None,
+        status_to: Status | None = None,
+        attempt: int = 0,
+    ) -> None:
+        """旁路发射一条接力(``RELAY``)轨迹事件(决策 #14 fire-and-forget:吞 + WARNING,不阻塞接力流程、
+        不改接力/图状态)。与 ``engine._log_trajectory`` 同义;``_task_context_service`` 缺失(轻量 DI /
+        未注入轨迹服务,如单测)→ no-op。``error_type=ReasonCatalog.RELAY`` 时记接力失败(派发失败 /
+        turn 失效 / resume 耗尽 / BBS 执行错误等)——非 analyzer ``failure_reason`` 派生点(analyzer
+        bullets 不 key 在 RELAY),故接力事件是 timeline 可见性留痕 + 排障 payload(ext_info),不改变
+        根因派生。``attempt`` 用接力 ``loop_round`` 串起同一任务的逐棒进度。
+        """
+        svc = getattr(self, "_task_context_service", None)
+        if svc is None:
+            return
+        try:
+            svc.emit_trajectory_event(
+                task_id, node_id, "relay",
+                action_result=action_result, action_input=None,
+                error_type=error_type, error_msg=error_msg,
+                ext_info=ext_info, status_from=status_from,
+                status_to=status_to, attempt=attempt,
+            )
+        except Exception as ex:  # noqa: BLE001  fire-and-forget:轨迹旁路异常不抛
+            logger.warning(
+                "[task][relay][trajectory] task=%s node=%s action_result=%s 发射失败: %s",
+                task_id, node_id, action_result, ex,
+            )
 
     def _report_fact(self, report_type: str, payload: dict[str, Any]) -> Any:
         """Submit Relay graph facts through TaskGraphService.report only."""
@@ -79,6 +116,13 @@ class TaskServiceRelayMixin:
                 progress_reason="主 Bot 已确认任务，直接执行首棒",
                 extend_props_patch={"relay_root": True},
             )
+        )
+        self._emit_relay(
+            task_id=task_id,
+            node_id=task_id,
+            action_result="bootstrap",
+            status_to=Status.RUNNING,
+            ext_info={"assignee": owner_bot_id, "relay_root": True, "run_id": run_id},
         )
         return TaskOpResult(
             task_id=task_id, success=True, run_id=run_id,
@@ -198,11 +242,40 @@ class TaskServiceRelayMixin:
                 holder_id=holder_id,
                 event_key=event_key,
             )
+            _success = bool(payload.get("success", True))
+            self._emit_relay(
+                task_id=task_id,
+                node_id=node_id,
+                action_result="execution_result" if _success else "execution_failed",
+                error_type=None if _success else ReasonCatalog.RELAY,
+                error_msg=None if _success else str(failure_reason or payload.get("exec_error") or ""),
+                status_to=Status.RUNNING,
+                attempt=int(getattr(graph, "loop_round", 0) or 0),
+                ext_info={
+                    "holder_id": holder_id,
+                    "relay_turn_granted": True,
+                    "expires_at_ms": getattr(turn, "expires_at_ms", None),
+                    "retry_event": bool(payload.get("retry_event", False)),
+                    "bbs_owner_cleared": node.run_info.run_mode == "bbs",
+                },
+            )
             return self._turn_response(turn)
 
         if not relay_turn:
             raise TaskStateError("relay_turn is required after execution report")
-        turn_node_id = relay.require(task_id, node_id, holder_id, relay_turn)
+        try:
+            turn_node_id = relay.require(task_id, node_id, holder_id, relay_turn)
+        except TaskStateError as _relay_exc:
+            self._emit_relay(
+                task_id=task_id,
+                node_id=node_id,
+                action_result="turn_invalid",
+                error_type=ReasonCatalog.RELAY,
+                error_msg=str(_relay_exc),
+                attempt=int(getattr(graph, "loop_round", 0) or 0),
+                ext_info={"holder_id": holder_id, "relay_turn_prefix": str(relay_turn)[:8]},
+            )
+            raise
         if event_type == "PLAN_RESULT":
             if node_id != turn_node_id:
                 raise TaskStateError("relay plan must target the turn origin node")
@@ -274,6 +347,16 @@ class TaskServiceRelayMixin:
                 "[task][relay] resume exhausted task=%s node=%s holder=%s resumes=%s max=%s",
                 task_id, node_id, holder_id, resumes, max_resumes,
             )
+            self._emit_relay(
+                task_id=task_id,
+                node_id=node_id,
+                action_result="resume_exhausted_hung",
+                error_type=ReasonCatalog.RELAY,
+                error_msg="relay planning timeout exceeded resume limit",
+                status_to=Status.HUNG,
+                attempt=resumes,
+                ext_info={"holder_id": holder_id, "resume_count": resumes, "max_resumes": max_resumes},
+            )
             return False
         turn = self._report_relay_turn(
             "RELAY_TURN_RENEW_EXPIRED",
@@ -302,6 +385,20 @@ class TaskServiceRelayMixin:
             "[task][relay] expired planning turn resumed task=%s node=%s holder=%s delivered=%s",
             task_id, node_id, holder_id, delivered,
         )
+        self._emit_relay(
+            task_id=task_id,
+            node_id=node_id,
+            action_result="turn_resume",
+            error_type=None if delivered else ReasonCatalog.RELAY,
+            error_msg=None if delivered else "relay resume delivery failed",
+            attempt=resumes + 1,
+            ext_info={
+                "holder_id": holder_id,
+                "resume_count": resumes + 1,
+                "delivered": delivered,
+                "max_resumes": max_resumes,
+            },
+        )
         return delivered
 
     @staticmethod
@@ -328,6 +425,14 @@ class TaskServiceRelayMixin:
         children_data = payload.get("children") or []
         if not has_gap:
             self._complete_relay_task(graph.task_id, node.node_id, progress_reason)
+            self._emit_relay(
+                task_id=graph.task_id,
+                node_id=node.node_id,
+                action_result="plan_result",
+                status_to=Status.SUCCESS,
+                attempt=int(getattr(graph, "loop_round", 0) or 0),
+                ext_info={"has_gap": False, "completed": True, "planned_by": node.node_id},
+            )
             return {"ok": True, "completed": True, "children": []}
         max_rounds = int(self._graph._execution_config(graph.task_id).get("MAX_LOOP", 3))
         if graph.loop_round >= max_rounds or not children_data:
@@ -345,6 +450,22 @@ class TaskServiceRelayMixin:
             self._report_graph_patch(
                 graph.task_id,
                 TaskGraphPatch(status=Status.HUNG, extend_props_patch={"hung_reason": reason}),
+            )
+            self._emit_relay(
+                task_id=graph.task_id,
+                node_id=node.node_id,
+                action_result="max_loop_hung" if graph.loop_round >= max_rounds else "gap_hung",
+                error_type=ReasonCatalog.RELAY,
+                error_msg=str(reason),
+                status_to=Status.HUNG,
+                attempt=int(getattr(graph, "loop_round", 0) or 0),
+                ext_info={
+                    "has_gap": has_gap,
+                    "loop_round": graph.loop_round,
+                    "max_loop": max_rounds,
+                    "children_count": len(children_data),
+                    "planned_by": node.node_id,
+                },
             )
             return {"ok": True, "completed": False, "hung": True, "failure_reason": reason}
         if len(children_data) != 1:
@@ -391,6 +512,21 @@ class TaskServiceRelayMixin:
         )
         self._report_graph_patch(
             graph.task_id, TaskGraphPatch(loop_round_increment=1)
+        )
+        self._emit_relay(
+            task_id=graph.task_id,
+            node_id=node.node_id,
+            action_result="plan_result",
+            status_from=Status.RUNNING,
+            status_to=Status.DONE,
+            attempt=int(getattr(graph, "loop_round", 0) or 0),
+            ext_info={
+                "has_gap": True,
+                "child_node_id": children[0].node_id if children else None,
+                "loop_round": graph.loop_round,
+                "planned_by": node.node_id,
+                "planner": holder_id,
+            },
         )
         return {"ok": True, "completed": False, "children": [item.node_id for item in children]}
 
@@ -514,6 +650,18 @@ class TaskServiceRelayMixin:
                 failure_reason=failure_reason,
                 extend_props_patch={"relay_holder_id": assignee},
             )
+            self._emit_relay(
+                task_id=graph.task_id,
+                node_id=node.node_id,
+                action_result="hit_single",
+                attempt=int(getattr(graph, "loop_round", 0) or 0),
+                ext_info={
+                    "run_mode": "single_bot",
+                    "assignee": assignee,
+                    "holder_id": holder_id,
+                    "planned_by": node.run_info.extend_props.get("relay_planned_by"),
+                },
+            )
         elif outcome == "HIT_MULTI_BOTS":
             bot_ids = [str(item).strip() for item in payload.get("bot_ids") or []]
             if not bot_ids or any(not item for item in bot_ids):
@@ -564,6 +712,20 @@ class TaskServiceRelayMixin:
                     "relay_holder_id": bot_ids[0],
                 },
             )
+            self._emit_relay(
+                task_id=graph.task_id,
+                node_id=node.node_id,
+                action_result="hit_multi",
+                attempt=int(getattr(graph, "loop_round", 0) or 0),
+                ext_info={
+                    "run_mode": "coop_group",
+                    "bot_ids": list(bot_ids),
+                    "manager": bot_ids[0] if bot_ids else None,
+                    "collab_mode": str(payload.get("collab_mode") or "manager_worker"),
+                    "holder_id": holder_id,
+                    "planned_by": node.run_info.extend_props.get("relay_planned_by"),
+                },
+            )
         elif outcome == "MISS":
             reason = failure_reason or str(payload.get("miss_reason") or "搜推没有匹配结果")
             self._report_node_patch(
@@ -587,6 +749,19 @@ class TaskServiceRelayMixin:
                 token=relay_turn,
             )
             self._schedule_relay_bbs_selection(graph.task_id, node.node_id)
+            self._emit_relay(
+                task_id=graph.task_id,
+                node_id=node.node_id,
+                action_result="miss",
+                attempt=int(getattr(graph, "loop_round", 0) or 0),
+                ext_info={
+                    "published_bbs": True,
+                    "bbs_node_id": node.node_id,
+                    "bbs_scheduled": True,
+                    "miss_reason": str(failure_reason or reason),
+                    "holder_id": holder_id,
+                },
+            )
             return {"ok": True, "published_bbs": True, "node_id": node.node_id}
         else:
             raise TaskStateError(f"unsupported search outcome={outcome}")
@@ -603,10 +778,22 @@ class TaskServiceRelayMixin:
         dispatch_id: str,
     ) -> dict[str, Any]:
         relay = self._relay()
-        _, node = self._relay_node(task_id, node_id)
+        graph, node = self._relay_node(task_id, node_id)
         if node.run_info.extend_props.get("relay_dispatch_id") == dispatch_id:
             return {"ok": True, "idempotent": True, "node_id": node_id}
-        turn_node_id = relay.require(task_id, node_id, holder_id, relay_turn)
+        try:
+            turn_node_id = relay.require(task_id, node_id, holder_id, relay_turn)
+        except TaskStateError as _relay_exc:
+            self._emit_relay(
+                task_id=task_id,
+                node_id=node_id,
+                action_result="turn_invalid",
+                error_type=ReasonCatalog.RELAY,
+                error_msg=str(_relay_exc),
+                attempt=int(getattr(graph, "loop_round", 0) or 0),
+                ext_info={"holder_id": holder_id, "relay_turn_prefix": str(relay_turn)[:8]},
+            )
+            raise
         if node.run_info.extend_props.get("relay_planned_by") != turn_node_id:
             raise TaskStateError("relay dispatch target was not planned by the current turn")
         if node.status != Status.PENDING:
@@ -659,8 +846,39 @@ class TaskServiceRelayMixin:
                 holder_id=holder_id,
                 token=relay_turn,
             )
+            self._emit_relay(
+                task_id=task_id,
+                node_id=node_id,
+                action_result="dispatch_failed_reopen",
+                error_type=ReasonCatalog.RELAY,
+                error_msg=f"relay dispatch failed node={node_id}",
+                status_from=Status.PENDING,
+                status_to=Status.PENDING,
+                attempt=int(getattr(graph, "loop_round", 0) or 0),
+                ext_info={
+                    "target_node": node_id,
+                    "holder_id": holder_id,
+                    "dispatch_id": dispatch_id,
+                    "run_mode": node.run_info.run_mode,
+                },
+            )
             raise TaskStateError(f"relay dispatch failed node={node_id}")
         refreshed = self._relay_node(task_id, node_id)[1]
+        self._emit_relay(
+            task_id=task_id,
+            node_id=node_id,
+            action_result="dispatch",
+            status_from=Status.PENDING,
+            status_to=Status.RUNNING,
+            attempt=int(getattr(graph, "loop_round", 0) or 0),
+            ext_info={
+                "target_node": node_id,
+                "holder_id": holder_id,
+                "dispatch_id": dispatch_id,
+                "run_mode": refreshed.run_info.run_mode,
+                "assignee": refreshed.run_info.assignee,
+            },
+        )
         return {
             "ok": True,
             "node_id": node_id,
@@ -669,7 +887,7 @@ class TaskServiceRelayMixin:
         }
 
     def _claim_relay_bbs(self, task_id: str, node_id: str, bot_id: str):
-        _, node = self._relay_node(task_id, node_id)
+        graph, node = self._relay_node(task_id, node_id)
         if node.run_info.run_mode != "bbs" or node.status != Status.PENDING:
             raise TaskStateError(f"relay BBS node is not claimable node={node_id}")
         result = self._report_fact("BBS_CLAIM", {"task_id": task_id, "bot_id": bot_id})
@@ -681,6 +899,15 @@ class TaskServiceRelayMixin:
                 assignee=bot_id,
                 progress_reason=f"BBS Bot {bot_id} 主动认领任务",
             )
+        )
+        self._emit_relay(
+            task_id=task_id,
+            node_id=node_id,
+            action_result="bbs_claim",
+            status_from=Status.PENDING,
+            status_to=Status.RUNNING,
+            attempt=int(getattr(graph, "loop_round", 0) or 0),
+            ext_info={"bbs_bot_id": bot_id},
         )
         return result
 
@@ -734,4 +961,20 @@ class TaskServiceRelayMixin:
         )
         if turn is None:
             raise AssertionError("relay BBS result did not receive a turn")
+        self._emit_relay(
+            task_id=task_id,
+            node_id=node_id,
+            action_result="bbs_result",
+            status_from=Status.RUNNING,
+            status_to=Status.DONE,
+            attempt=int(getattr(graph, "loop_round", 0) or 0),
+            error_type=None if not exec_error else ReasonCatalog.RELAY,
+            error_msg=str(exec_error) if exec_error else None,
+            ext_info={
+                "bbs_bot_id": bot_id,
+                "next_grant_holder": bot_id,
+                "has_exec_error": bool(exec_error),
+                "expires_at_ms": getattr(turn, "expires_at_ms", None),
+            },
+        )
         return result

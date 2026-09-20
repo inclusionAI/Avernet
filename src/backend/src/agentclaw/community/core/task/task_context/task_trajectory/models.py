@@ -34,6 +34,7 @@ class TrajectoryActionType(StrEnum):
     VERIFY = "verify"           # 验收
     RESET = "reset"             # harness 复位重投
     TRANSITION = "transition"   # 框架直驱翻态 / 终态翻转
+    RELAY = "relay"             # 分布式接力(orchestration_mode==relay):bootstrap/report/plan/dispatch/bbs/resume
 
 
 class AnalysisType(StrEnum):
@@ -71,6 +72,7 @@ class ReasonCatalog(StrEnum):
     TRANSPORT_ERROR = "transport_error"
     TERMINAL_INVALID = "terminal_invalid"
     UNCLASSIFIED = "unclassified"
+    RELAY = "relay"             # 接力失败(派发失败 / turn 失效 / resume 耗尽等;非 analyzer failure_reason 派生点)
     # 派发侧 JOIN 丢因 / 无候选(置于 DispatchRationale.join_dropped / DISPATCH ext_info)
     JOIN_DROPPED = "join_dropped"
     NO_CANDIDATES = "no_candidates"

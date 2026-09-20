@@ -25,7 +25,7 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
 # --- ReasonCatalog ----------------------------------------------------------
 
 def test_reason_catalog_members_cover_spec_signals():
-    # 通用失败分类 (10) + 派发侧 JOIN 丢因 (5) = 15
+    # 通用失败分类 (11) + 派发侧 JOIN 丢因 (5) = 16(relay 是接力模块新增的失败分类)
     expected = {
         # 通用失败信号 (§概述 + REQ-5 exec_error_origin)
         "execution_timeout",
@@ -38,6 +38,7 @@ def test_reason_catalog_members_cover_spec_signals():
         "transport_error",
         "terminal_invalid",
         "unclassified",
+        "relay",  # 接力失败(派发失败 / turn 失效 / resume 耗尽 / BBS 执行错误)
         # 派发侧 JOIN 丢因 (REQ-2/REQ-7)
         "join_dropped",
         "no_candidates",
@@ -50,9 +51,10 @@ def test_reason_catalog_members_cover_spec_signals():
 
 # --- TrajectoryActionType --------------------------------------------------
 
-def test_trajectory_action_type_has_exactly_seven_members():
+def test_trajectory_action_type_has_exactly_eight_members():
     assert {e.value for e in TrajectoryActionType} == {
         "submit", "plan", "dispatch", "execute", "verify", "reset", "transition",
+        "relay",  # 分布式接力(orchestration_mode==relay)新增,不在原 7 闸门内
     }
 
 

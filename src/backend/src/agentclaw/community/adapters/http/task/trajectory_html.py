@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from agentclaw.community.adapters.http.task.schemas import TaskTrajectoryDTO
 
 
-# action_type → 主题色(左侧色条 + 徽章底色)。7 个轨迹动作类型各一色。
+# action_type → 主题色(左侧色条 + 徽章底色)。轨迹动作类型各一色。
 _ACTION_THEME: dict[str, str] = {
     "submit": "#2563eb",      # 蓝
     "plan": "#7c3aed",        # 紫
@@ -30,13 +30,17 @@ _ACTION_THEME: dict[str, str] = {
     "verify": "#0d9488",      # 蓝绿
     "reset": "#ea580c",       # 橙
     "transition": "#64748b",  # 灰
+    "relay": "#db2777",       # 品红 — 分布式接力(orchestration_mode==relay)
 }
 
 # 被视为"失败/异常"的 action_result —— 徽章标红(仅视觉,不影响语义)。
 _FAILURE_RESULTS: frozenset[str] = frozenset(
     {"failed", "miss", "dispatch_exception", "no_result", "form_group_failed",
      "start_run_failed", "sla_timeout", "pending_dispatch_stuck", "call_fail",
-     "parse_fail", "exec_failed_retry", "accept_fail"}
+     "parse_fail", "exec_failed_retry", "accept_fail",
+     # relay(RELAY)失败子态:执行失败 / 派发失败回退 / gap 或超轮 HUNG / resume 耗尽 / turn 失效
+     "execution_failed", "dispatch_failed_reopen", "gap_hung", "max_loop_hung",
+     "resume_exhausted_hung", "turn_invalid"}
 )
 
 

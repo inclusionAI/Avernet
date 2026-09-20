@@ -27,6 +27,51 @@ from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import RELAY_EXECUTION
 
+from contextlib import contextmanager
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from agentclaw.community.core.base import Base
+from agentclaw.community.core.repository.implementations.task.task_trajectory_repository import (
+    TaskTrajectoryRepository,
+)
+from agentclaw.community.core.task.task_context.task_trajectory.models import ReasonCatalog
+import agentclaw.community.core.task.repository.models  # noqa: F401  register trajectory ORM tables
+from tests.community.core.task.task_trajectory._task_context_support import _tcs
+
+
+class _InMemorySqliteDB:
+    """In-memory SQLite DatabasePlugin stand-in offering ``orm_session()`` (mirrors
+    ``test_trajectory_e2e_acceptance`` so the REAL ``TaskTrajectoryRepository`` persists
+    relay REACH trajectory events)."""
+
+    def __init__(self, engine) -> None:
+        self._factory = sessionmaker(bind=engine, autoflush=False)
+
+    @contextmanager
+    def orm_session(self):
+        db = self._factory()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+
+def _make_db():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return _InMemorySqliteDB(engine)
+
 
 class _Settings:
     def __init__(self, enabled: bool = True) -> None:
@@ -104,14 +149,33 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _service(*, discover=None, relay_enabled: bool = True):
+def _service(*, discover=None, relay_enabled: bool = True, task_context_service=None):
     graph = TaskGraphService()
     return TaskService(
         graph,
         discover=discover or _Discover(),
         task_settings=_Settings(relay_enabled),
         task_id_provider=lambda: "relay-task",
+        task_context_service=task_context_service,
     ), graph
+
+
+def _service_with_traj():
+    """Service wired with a REAL in-memory ``TaskTrajectoryRepository`` so relay
+    ``REACH`` trajectory events persist into the trajectory table. Returns
+    ``(service, graph, repo)``."""
+    repo = TaskTrajectoryRepository(_make_db())
+    service, graph = _service(task_context_service=_tcs(repo))
+    return service, graph, repo
+
+
+def _relay_records(repo) -> list:
+    """The persisted RELAY trajectory rows for the relay task, in ``gmt_create`` ASC
+    order (emission order). Other action types (e.g. submit) filtered out."""
+    return [
+        rec for rec in repo.list_events_by_task("relay-task")
+        if str(rec.action_type) == "relay"
+    ]
 
 
 def _plan_and_select(
@@ -644,3 +708,193 @@ def test_expired_relay_resume_only_mutates_current_baton_node() -> None:
     assert parent_after.run_info.output == parent_output_before
     assert baton_after.run_info.extend_props["relay_resume_count"] == 1
     assert graph.extend_props["relay_turn"]["node_id"] == "resume-step"
+
+
+class TestRelayTrajectory:
+    """Relay (``orchestration_mode == "relay"``) 完整 timeline + 错误落在
+    ``task_trajectory_events``:每个接力阶段(``bootstrap/execution_result/plan_result/
+    dispatch_result/dispatch/bbs_claim/bbs_result/turn_resume``)发一条 ``RELAY`` 事件,
+    失败态(execution_failed/gap_hung/max_loop_hung/dispatch_failed_reopen/turn_invalid/
+    resume_exhausted_hung)带 ``error_type=ReasonCatalog.RELAY``. 复用真实 in-memory
+    ``TaskTrajectoryRepository``(经 ``_tcs`` 包成 ``TaskContextService``)持久化,
+    其余 relay 测试 ``task_context_service=None`` → ``_emit_relay`` no-op,不受影响。
+    """
+
+    def test_full_cycle_emits_relay_timeline_in_order(self):
+        service, _graph, repo = _service_with_traj()
+        _run(service.execute(_request()))
+        exec1 = _run(service.report_task_event(
+            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
+            event_id="exec-1", holder_id="main-bot", progress_reason="首棒形成分析",
+            payload={"success": True, "output": {"summary": "首轮"}},
+        ))
+        _plan_and_select(service, origin_node_id="relay-task", holder_id="main-bot",
+                         turn=exec1["relay_turn"], child_node_id="research-step", event_suffix="1")
+        _run(service.dispatch_task(
+            task_id="relay-task", node_id="research-step", holder_id="main-bot",
+            relay_turn=exec1["relay_turn"], dispatch_id="dispatch-1",
+        ))
+        exec2 = _run(service.report_task_event(
+            task_id="relay-task", node_id="research-step", event_type="EXECUTION_RESULT",
+            event_id="exec-2", holder_id="research-bot", progress_reason="第二棒产出",
+            payload={"success": True, "output": {"recommendation": "进入市场"}},
+        ))
+        _plan_and_select(service, origin_node_id="research-step", holder_id="research-bot",
+                         turn=exec2["relay_turn"], child_node_id="final-step", event_suffix="2")
+        _run(service.dispatch_task(
+            task_id="relay-task", node_id="final-step", holder_id="research-bot",
+            relay_turn=exec2["relay_turn"], dispatch_id="dispatch-2",
+        ))
+        exec3 = _run(service.report_task_event(
+            task_id="relay-task", node_id="final-step", event_type="EXECUTION_RESULT",
+            event_id="exec-3", holder_id="research-bot", progress_reason="最终一棒产出",
+            payload={"success": True, "output": {"final": "complete"}},
+        ))
+        _run(service.report_task_event(
+            task_id="relay-task", node_id="final-step", event_type="PLAN_RESULT",
+            event_id="plan-final", holder_id="research-bot", relay_turn=exec3["relay_turn"],
+            progress_reason="根目标已全部满足", payload={"has_gap": False, "children": []},
+        ))
+
+        recs = _relay_records(repo)
+        assert [(r.node_id, r.action_result) for r in recs] == [
+            ("relay-task", "bootstrap"),
+            ("relay-task", "execution_result"),
+            ("relay-task", "plan_result"),
+            ("research-step", "hit_single"),
+            ("research-step", "dispatch"),
+            ("research-step", "execution_result"),
+            ("research-step", "plan_result"),
+            ("final-step", "hit_single"),
+            ("final-step", "dispatch"),
+            ("final-step", "execution_result"),
+            ("final-step", "plan_result"),
+        ]
+        # happy path: no relay errors recorded
+        assert all(r.error_type is None for r in recs)
+
+    def test_miss_emits_miss_and_bbs_claim_without_error(self):
+        service, _graph, repo = _service_with_traj()
+        _run(service.execute(_request()))
+        turn = _run(service.report_task_event(
+            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
+            event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
+            payload={"output": "done"},
+        ))["relay_turn"]
+        _run(service.report_task_event(
+            task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
+            event_id="plan", holder_id="main-bot", relay_turn=turn,
+            progress_reason="需要 BBS 承接下一棒",
+            payload={"has_gap": True, "children": [{"node_id": "bbs-step", "task_spec": _child_spec()}]},
+        ))
+        _run(service.search_task_candidates(query="补齐市场研究 gap"))
+        _run(service.report_task_event(
+            task_id="relay-task", node_id="bbs-step", event_type="DISPATCH_RESULT",
+            event_id="miss", holder_id="main-bot", relay_turn=turn,
+            progress_reason="无直接候选，发布 BBS", failure_reason="候选能力均不匹配",
+            payload={"outcome": "MISS", "miss_reason": "no capability"},
+        ))
+        service.claim_bbs_task("relay-task", "bbs-bot", "bbs-step")
+        recs = _relay_records(repo)
+        pairs = [(r.node_id, r.action_result) for r in recs]
+        assert ("bbs-step", "miss") in pairs
+        assert ("bbs-step", "bbs_claim") in pairs
+        miss = next(r for r in recs if r.action_result == "miss")
+        # MISS is an expected relay sub-outcome (→ BBS), not an error classification.
+        assert miss.error_type is None
+
+    def test_bbs_result_emits_bbs_result_event_without_error(self):
+        service, _graph, repo = _service_with_traj()
+        _run(service.execute(_request()))
+        turn = _run(service.report_task_event(
+            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
+            event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
+            payload={"output": "done"},
+        ))["relay_turn"]
+        _run(service.report_task_event(
+            task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
+            event_id="plan", holder_id="main-bot", relay_turn=turn, progress_reason="下一棒转 BBS",
+            payload={"has_gap": True, "children": [{"node_id": "bbs-step", "task_spec": _child_spec()}]},
+        ))
+        _run(service.report_task_event(
+            task_id="relay-task", node_id="bbs-step", event_type="DISPATCH_RESULT",
+            event_id="miss", holder_id="main-bot", relay_turn=turn, progress_reason="发布 BBS",
+            failure_reason="无匹配", payload={"outcome": "MISS", "miss_reason": "no_candidates"},
+        ))
+        service.claim_bbs_task("relay-task", "bbs-bot", "bbs-step")
+        _run(service.report_bbs_result(
+            "relay-task", "bbs-step", "bbs-bot", output_patch={"bbs_result": "done"}
+        ))
+        recs = _relay_records(repo)
+        br = next(r for r in recs if r.action_result == "bbs_result")
+        assert br.node_id == "bbs-step"
+        assert br.error_type is None  # no exec_error on this BBS run
+
+    def test_dispatch_failure_emits_relay_error_with_message(self):
+        service, _graph, repo = _service_with_traj()
+        delivery = _ToggleDelivery()  # succeeds=False → Runner 投递失败
+        service._engine._runner.set_delivery("single_bot", delivery)
+        _run(service.execute(_request()))
+        turn = _run(service.report_task_event(
+            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
+            event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
+            payload={"output": "done"},
+        ))["relay_turn"]
+        _plan_and_select(service, origin_node_id="relay-task", holder_id="main-bot",
+                         turn=turn, child_node_id="retry-step", event_suffix="retry")
+        with pytest.raises(TaskStateError, match="dispatch failed"):
+            _run(service.dispatch_task(
+                task_id="relay-task", node_id="retry-step", holder_id="main-bot",
+                relay_turn=turn, dispatch_id="dispatch-failed",
+            ))
+        recs = _relay_records(repo)
+        fail = next(r for r in recs if r.action_result == "dispatch_failed_reopen")
+        assert fail.error_type == ReasonCatalog.RELAY.value
+        assert "dispatch failed" in (fail.error_msg or "")
+
+    def test_turn_invalid_emits_relay_error_before_raise(self):
+        service, graph_service, repo = _service_with_traj()
+        _run(service.execute(_request()))
+        first = _run(service.report_task_event(
+            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
+            event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
+            payload={"output": "done"},
+        ))["relay_turn"]
+        graph = graph_service.query_task_dashboard("relay-task")
+        expired = dict(graph.extend_props["relay_turn"])
+        expired["expires_at_ms"] = 0
+        graph_service.update_task_graph_info(
+            "relay-task", TaskGraphPatch(extend_props_patch={"relay_turn": expired})
+        )
+        with pytest.raises(TaskStateError, match="invalid"):
+            _run(service.report_task_event(
+                task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
+                event_id="stale-plan", holder_id="main-bot", relay_turn=first,
+                progress_reason="尝试用过期 turn 规划",
+                payload={"has_gap": False, "children": []},
+            ))
+        recs = _relay_records(repo)
+        inv = next(r for r in recs if r.action_result == "turn_invalid")
+        assert inv.error_type == ReasonCatalog.RELAY.value
+        assert "invalid" in (inv.error_msg or "")
+
+    def test_resume_exhaustion_emits_hung_relay_error(self):
+        service, graph_service, repo = _service_with_traj()
+        _run(service.execute(_request()))
+        _run(service.report_task_event(
+            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
+            event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
+            payload={"output": "done"},
+        ))
+        g = graph_service.query_task_dashboard("relay-task")
+        node_id = str((g.extend_props.get("relay_turn") or {}).get("node_id") or "relay-task")
+        # mark the baton node as already at the resume limit (RELAY_RESUME_MAX default 2)
+        graph_service.update_task_node_info(TaskNodePatch(
+            task_id="relay-task", node_id=node_id,
+            extend_props_patch={"relay_resume_count": 2},
+        ))
+        assert _run(service.resume_expired_relay_turn("relay-task")) is False
+        recs = _relay_records(repo)
+        exh = next(r for r in recs if r.action_result == "resume_exhausted_hung")
+        assert exh.error_type == ReasonCatalog.RELAY.value
+        assert "resume" in (exh.error_msg or "")
