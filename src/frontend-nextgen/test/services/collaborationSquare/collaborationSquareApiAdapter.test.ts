@@ -237,7 +237,6 @@ describe('CollaborationSquareApiAdapter', () => {
       },
       undefined,
     );
-
   });
 
   it('将 entity_id 等于当前 human user_id 的公开 Bot 标记为自有 Bot', async () => {
