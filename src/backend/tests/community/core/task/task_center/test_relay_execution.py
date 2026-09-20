@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import replace
 
@@ -772,6 +773,61 @@ class TestRelayTrajectory:
         ]
         # happy path: no relay errors recorded
         assert all(r.error_type is None for r in recs)
+
+    def test_callback_success_emits_correlated_progress_event(self):
+        service, _graph, repo = _service_with_traj()
+        _run(service.execute(_request()))
+
+        service.record_relay_callback_success(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="exec-http-1",
+            holder_id="main-bot",
+            relay_turn=None,
+            payload={"success": True, "output": {"summary": "done"}},
+            result={"ok": True, "relay_turn": "secret-turn-token"},
+        )
+
+        progress = _relay_records(repo)[-1]
+        assert progress.action_result == "callback_reported"
+        assert progress.error_type is None
+        ext_info = json.loads(progress.ext_info)
+        assert ext_info["event_type"] == "EXECUTION_RESULT"
+        assert ext_info["event_id"] == "exec-http-1"
+        assert ext_info["relay_turn_granted"] is True
+        assert ext_info["payload_keys"] == ["output", "success"]
+        assert "secret-turn-token" not in progress.ext_info
+
+    def test_callback_failure_emits_correlated_diagnostic_event(self):
+        service, _graph, repo = _service_with_traj()
+        _run(service.execute(_request()))
+
+        service.record_relay_callback_error(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id="plan-invalid",
+            holder_id="main-bot",
+            relay_turn="secret-turn-token",
+            progress_reason="继续规划",
+            failure_reason=None,
+            payload={"has_gap": True, "children": []},
+            error_phase="processing",
+            exception_type="TaskStateError",
+            error_msg="relay plan must produce exactly one next node",
+        )
+
+        failure = _relay_records(repo)[-1]
+        assert failure.action_result == "callback_report_failed"
+        assert failure.error_type == ReasonCatalog.RELAY.value
+        assert failure.error_msg == "relay plan must produce exactly one next node"
+        ext_info = json.loads(failure.ext_info)
+        assert ext_info["error_phase"] == "processing"
+        assert ext_info["exception_type"] == "TaskStateError"
+        assert ext_info["relay_turn_prefix"] == "secret-t"
+        assert "secret-turn-token" not in failure.ext_info
+        assert ext_info["payload_keys"] == ["children", "has_gap"]
 
     def test_miss_emits_miss_and_bbs_claim_without_error(self):
         service, _graph, repo = _service_with_traj()

@@ -65,6 +65,7 @@ class _StubService:
     def __init__(self) -> None:
         self.callback = _StubCallback()
         self._node_status: dict[tuple[str, str], Status] = {}
+        self.relay_exception: Exception | None = None
 
     def set_node_status(self, task_id, node_id, status) -> None:
         self._node_status[(task_id, node_id)] = status
@@ -82,7 +83,15 @@ class _StubService:
 
     async def report_task_event(self, **kwargs):
         self.callback.calls.append(("relay", kwargs))
+        if self.relay_exception is not None:
+            raise self.relay_exception
         return {"ok": True, "relay_turn": "turn-1"}
+
+    def record_relay_callback_success(self, **kwargs):
+        self.callback.calls.append(("relay_success", kwargs))
+
+    def record_relay_callback_error(self, **kwargs):
+        self.callback.calls.append(("relay_error", kwargs))
 
     async def search_task_candidates(self, **kwargs):
         self.callback.calls.append(("search", kwargs))
@@ -169,7 +178,52 @@ class TestRouter:
         )
         assert response.status_code == 200, response.text
         assert response.json()["data"]["relay_turn"] == "turn-1"
-        assert svc.callback.calls[0][0] == "relay"
+        assert [call[0] for call in svc.callback.calls] == ["relay", "relay_success"]
+        success = svc.callback.calls[1][1]
+        assert success["event_type"] == "EXECUTION_RESULT"
+        assert success["event_id"] == "event-report-1"
+
+    def test_relay_callback_validation_error_records_diagnostic_trajectory(self, task_client):
+        client, svc = task_client
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json={
+                "task_id": "t1",
+                "node_id": "t1",
+                "event_type": "EXECUTION_RESULT",
+                "event_id": "invalid-1",
+                "progress_reason": "execution complete",
+                "payload": {"success": True},
+            },
+        )
+        assert response.status_code == 422, response.text
+        kind, details = svc.callback.calls[0]
+        assert kind == "relay_error"
+        assert details["error_phase"] == "validation"
+        assert details["exception_type"] == "ValidationError"
+        assert details["task_id"] == "t1"
+
+    def test_relay_callback_processing_error_records_diagnostic_trajectory(self, task_client):
+        client, svc = task_client
+        svc.relay_exception = TaskStateError("relay node not found")
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json={
+                "task_id": "t1",
+                "node_id": "missing",
+                "event_type": "EXECUTION_RESULT",
+                "event_id": "event-failed-1",
+                "holder_id": "bot-1",
+                "progress_reason": "execution complete",
+                "payload": {"success": True},
+            },
+        )
+        assert response.status_code == 409, response.text
+        assert [call[0] for call in svc.callback.calls] == ["relay", "relay_error"]
+        details = svc.callback.calls[1][1]
+        assert details["error_phase"] == "processing"
+        assert details["exception_type"] == "TaskStateError"
+        assert details["error_msg"] == "relay node not found"
 
     def test_generic_search_returns_catalog_without_deciding(self, task_client):
         client, svc = task_client

@@ -1,6 +1,4 @@
-"""Internal task HTTP adapter: execute, callbacks, settings and discovery.
-
-Domain work is delegated to ``TaskServiceProtocol``; this module only adapts transport DTOs and maps errors to the shared response envelope."""
+"""Internal task HTTP adapter; domain work is delegated to TaskServiceProtocol."""
 
 from __future__ import annotations
 
@@ -12,31 +10,16 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.responses import (
-    envelope,
-    envelope_errors,
-)
+from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
 from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
 from agentclaw.community.adapters.http.task.schemas import (
-    TaskCallbackDataDTO,
-    TaskCallbackRequest,
-    TaskInfoRequestDTO,
-    TaskNodeUpdateDTO,
-    RelayTaskEventDTO,
-    TaskNodeCallbackRequest,
-    TaskOpResultDTO,
-    acceptance_result_from_dto,
-    callback_from_dto,
-    op_result_to_dto,
-    TaskSettingRequestDTO,
-    TaskSettingStateDTO,
-    TaskGrantRequestDTO,
-    TaskGrantResultDTO,
-    TaskRevokeRequestDTO,
-    TaskRevokeResultDTO,
-    TaskTrajectoryDTO,
-    task_info_request_from_dto,
+    RelayTaskEventDTO, TaskCallbackDataDTO, TaskCallbackRequest,
+    TaskGrantRequestDTO, TaskGrantResultDTO, TaskInfoRequestDTO,
+    TaskNodeCallbackRequest, TaskNodeUpdateDTO, TaskOpResultDTO,
+    TaskRevokeRequestDTO, TaskRevokeResultDTO, TaskSettingRequestDTO,
+    TaskSettingStateDTO, TaskTrajectoryDTO, acceptance_result_from_dto,
+    callback_from_dto, op_result_to_dto, task_info_request_from_dto,
     trajectory_to_dto,
 )
 from agentclaw.community.adapters.http.task.relay_routes import router as relay_api_router
@@ -50,50 +33,56 @@ from agentclaw.community.adapters.http.task.translator import (
     translate_claw_mind,
     translate_common_task_callback
 )
-from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
-    CallbackDataEnricher,
-)
+from agentclaw.community.core.task.task_runner.client.callback_data_enricher import CallbackDataEnricher
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
-    CLAIM_JOIN_FILTER,
-    HARNESS_POLLER,
-    SEARCH_SKILL,
-    SKILL_REPORT,
-    RELAY_EXECUTION,
+    CLAIM_JOIN_FILTER, HARNESS_POLLER, RELAY_EXECUTION, SEARCH_SKILL, SKILL_REPORT,
     TaskSettingsServiceProtocol,
 )
-from agentclaw.community.api.task.task_grant_service import (
-    TaskClaimGrantServiceProtocol,
-)
+from agentclaw.community.api.task.task_grant_service import TaskClaimGrantServiceProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.api.task.task_context_service import (
-    TaskContextServiceProtocol,
-)
+from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import Status
-from agentclaw.community.core.task.task_discovery.discovery_service import (
-    DiscoveryService,
-)
-from agentclaw.community.core.task.task_discovery.scheduler import (
-    TaskDiscoveryScheduler,
-)
+from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
+from agentclaw.community.core.task.task_discovery.scheduler import TaskDiscoveryScheduler
 
 from agentclaw.community.core.task.task_discovery.task_reader import (
-    TaskReader,
-    clear_discovered_tasks,
-    upsert_discovered_tasks,
+    TaskReader, clear_discovered_tasks, upsert_discovered_tasks,
 )
-from agentclaw.community.core.task.task_runner.callback_correlation import (
-    CallbackCorrelationRegistry,
-)
+from agentclaw.community.core.task.task_runner.callback_correlation import CallbackCorrelationRegistry
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
+
+
+def _record_relay_callback_error(
+    svc: TaskServiceProtocol, raw_obj: dict[str, Any], phase: str, exc: Exception,
+) -> None:
+    def value(key: str) -> str:
+        return str(raw_obj.get(key) or "")
+
+    payload = raw_obj.get("payload")
+    try:
+        svc.record_relay_callback_error(
+            task_id=value("task_id"), node_id=value("node_id"),
+            event_type=value("event_type"), event_id=value("event_id"),
+            holder_id=value("holder_id"), relay_turn=value("relay_turn") or None,
+            progress_reason=value("progress_reason") or None,
+            failure_reason=value("failure_reason") or None,
+            payload=payload if isinstance(payload, dict) else None, error_phase=phase,
+            exception_type=type(exc).__name__, error_msg=str(exc),
+        )
+    except Exception as emit_exc:  # noqa: BLE001 trajectory must not mask callback
+        logger.warning(
+            "[task][relay][callback] failure trajectory failed phase=%s: %s",
+            phase, emit_exc, exc_info=True,
+        )
 
 
 router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
@@ -832,25 +821,39 @@ async def _dispatch_impl(
         try:
             event = RelayTaskEventDTO.model_validate(_raw_obj)
         except Exception as exc:
+            auth.verify(
+                source="task_loop", headers=request.headers, raw_body=raw,
+                method=request.method, path=request.url.path,
+            )
+            _record_relay_callback_error(svc, _raw_obj, "validation", exc)
             raise HTTPException(status_code=422, detail="invalid relay task event") from exc
         auth.verify(
-            source="task_loop",
-            headers=request.headers,
-            raw_body=raw,
-            method=request.method,
-            path=request.url.path,
+            source="task_loop", headers=request.headers, raw_body=raw,
+            method=request.method, path=request.url.path,
         )
-        result = await svc.report_task_event(
-            task_id=event.task_id,
-            node_id=event.node_id,
-            event_type=event.event_type,
-            event_id=event.event_id,
-            holder_id=event.holder_id,
-            relay_turn=event.relay_turn,
-            progress_reason=event.progress_reason,
-            failure_reason=event.failure_reason,
-            payload=event.payload,
-        )
+        try:
+            result = await svc.report_task_event(
+                task_id=event.task_id, node_id=event.node_id,
+                event_type=event.event_type, event_id=event.event_id,
+                holder_id=event.holder_id, relay_turn=event.relay_turn,
+                progress_reason=event.progress_reason,
+                failure_reason=event.failure_reason, payload=event.payload,
+            )
+        except Exception as exc:
+            _record_relay_callback_error(svc, _raw_obj, "processing", exc)
+            raise
+        try:
+            svc.record_relay_callback_success(
+                task_id=event.task_id, node_id=event.node_id,
+                event_type=event.event_type, event_id=event.event_id,
+                holder_id=event.holder_id, relay_turn=event.relay_turn,
+                payload=event.payload, result=result,
+            )
+        except Exception as exc:  # noqa: BLE001 trajectory must not affect callback
+            logger.warning(
+                "[task][relay][callback] success trajectory failed: %s",
+                exc, exc_info=True,
+            )
         return envelope(result, request)
 
     if is_common_task_payload(_raw_obj):

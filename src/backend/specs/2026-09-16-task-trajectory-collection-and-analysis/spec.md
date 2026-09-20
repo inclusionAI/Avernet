@@ -23,6 +23,7 @@
 - **RESET 计量**: `elapsed_ms` 与 SLA 阈值 → RESET 轨迹事件(REQ-4)。→ 直接归因"执行超时"。
 - **EXECUTE/VERIFY 错误分类**: 区分**底层接口报错**(bot 侧 200 但 `exec_error` 非空)与执行侧逻辑失败/解析失败 → 事件 `error_type`(REQ-5)。→ 直接归因"底层接口有报错"。
 - **提交段**: 提交时点的来源/task_spec 摘要 → SUBMIT 轨迹事件(REQ-6)。
+- **Relay 回投段(2026-09-20 补充)**: `/api/v1/collaboration/tasks/callback/report` 的 `EXECUTION_RESULT | PLAN_RESULT | DISPATCH_RESULT | SEARCH_RESULT` 分支在鉴权后记录 `callback_reported` 正常推进证据；DTO 校验或业务处理异常记录 `callback_report_failed`，包含阶段、异常类、错误消息、事件标识及脱敏后的 relay turn 前缀。轨迹发射仍遵循决策 #14，不改变原 HTTP/领域异常语义；鉴权失败只写服务日志，不接受未认证输入污染任务轨迹。
 - **回调↔节点关联**: `CallbackCorrelationRegistry` 仅内存态,实例重启后无法把在途回调重新关联回节点 → REQ-P1 持久化。
 
 ## 关联文档

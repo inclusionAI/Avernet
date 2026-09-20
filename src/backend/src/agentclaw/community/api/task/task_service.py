@@ -87,6 +87,22 @@ class TaskServiceProtocol(Protocol):
         """Apply a signed, idempotent skill event to a relay task."""
         ...
 
+    def record_relay_callback_success(
+        self, *, task_id: str, node_id: str, event_type: str, event_id: str,
+        holder_id: str, relay_turn: str | None, payload: dict, result: dict,
+    ) -> None:
+        """Best-effort trajectory record for a successfully applied relay callback."""
+        ...
+
+    def record_relay_callback_error(
+        self, *, task_id: str, node_id: str, event_type: str, event_id: str,
+        holder_id: str, relay_turn: str | None, progress_reason: str | None,
+        failure_reason: str | None, payload: dict | None, error_phase: str,
+        exception_type: str, error_msg: str,
+    ) -> None:
+        """Best-effort trajectory record for authenticated callback validation/process errors."""
+        ...
+
     async def search_task_candidates(
         self, *, task_id: str, node_id: str, holder_id: str, relay_turn: str,
     ) -> dict:

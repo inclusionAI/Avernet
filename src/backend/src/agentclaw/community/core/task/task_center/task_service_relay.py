@@ -19,7 +19,11 @@ from agentclaw.community.core.task.domain.models import (
     TaskCallbackData,
 )
 from agentclaw.community.core.task.repository.serializers import task_spec_from_dict
-from agentclaw.community.core.task.task_center.relay import RelayCoordinator
+from agentclaw.community.core.task.task_center.relay import (
+    RelayCoordinator,
+    emit_relay_callback_error,
+    emit_relay_callback_success,
+)
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_runner.client.candidate_search import search_candidates
 from agentclaw.community.core.task.task_context.task_trajectory.models import ReasonCatalog
@@ -69,6 +73,14 @@ class TaskServiceRelayMixin:
                 "[task][relay][trajectory] task=%s node=%s action_result=%s 发射失败: %s",
                 task_id, node_id, action_result, ex,
             )
+
+    def record_relay_callback_success(self, **details: Any) -> None:
+        """Record successful callback application as a relay trajectory."""
+        emit_relay_callback_success(self, **details)
+
+    def record_relay_callback_error(self, **details: Any) -> None:
+        """Record a callback rejection/failure as a fire-and-forget relay trajectory."""
+        emit_relay_callback_error(self, **details)
 
     def _report_fact(self, report_type: str, payload: dict[str, Any]) -> Any:
         """Submit Relay graph facts through TaskGraphService.report only."""

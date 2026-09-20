@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import secrets
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
+    ReasonCatalog,
+)
 
 
 @dataclass(frozen=True)
@@ -206,3 +211,126 @@ class RelayCoordinator:
             return None, None, True
 
         self._graph._mutate_with_version_retry(task_id, mutation)
+
+
+logger = logging.getLogger("task.relay.callback")
+_MAX_DIAGNOSTIC_TEXT = 2000
+
+
+def _diagnostic_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) <= _MAX_DIAGNOSTIC_TEXT:
+        return text
+    return f"{text[:_MAX_DIAGNOSTIC_TEXT]}...(truncated)"
+
+
+def emit_relay_callback_success(
+    service: Any,
+    *,
+    task_id: str,
+    node_id: str,
+    event_type: str,
+    event_id: str,
+    holder_id: str,
+    relay_turn: str | None,
+    payload: dict[str, Any],
+    result: dict[str, Any],
+) -> None:
+    """Append transport-level evidence that a relay callback was applied."""
+    attempt = 0
+    try:
+        graph = service._graph.query_task_dashboard(task_id)
+        attempt = int(getattr(graph, "loop_round", 0) or 0)
+    except Exception:  # noqa: BLE001 diagnostics must not affect the callback
+        pass
+    service._emit_relay(
+        task_id=task_id,
+        node_id=node_id,
+        action_result="callback_reported",
+        attempt=attempt,
+        ext_info={
+            "event_type": event_type,
+            "event_id": event_id,
+            "holder_id": holder_id,
+            "relay_turn_prefix": str(relay_turn or "")[:8],
+            "payload_keys": sorted(str(key) for key in payload.keys()),
+            "idempotent": bool(result.get("idempotent", False)),
+            "completed": bool(result.get("completed", False)),
+            "hung": bool(result.get("hung", False)),
+            "published_bbs": bool(result.get("published_bbs", False)),
+            "turn_consumed": bool(result.get("turn_consumed", False)),
+            "relay_turn_granted": bool(result.get("relay_turn")),
+        },
+    )
+
+
+def emit_relay_callback_error(
+    service: Any,
+    *,
+    task_id: str,
+    node_id: str,
+    event_type: str,
+    event_id: str,
+    holder_id: str,
+    relay_turn: str | None,
+    progress_reason: str | None,
+    failure_reason: str | None,
+    payload: dict[str, Any] | None,
+    error_phase: str,
+    exception_type: str,
+    error_msg: str,
+) -> None:
+    """Append a correlated relay callback failure without changing callback semantics."""
+    correlated_task_id = str(task_id or "").strip()
+    correlated_node_id = str(node_id or correlated_task_id).strip()
+    if not correlated_task_id or not correlated_node_id:
+        logger.warning(
+            "[task][relay][callback] 无法关联异常轨迹 phase=%s event_type=%s "
+            "event_id=%s exception=%s error=%s",
+            error_phase,
+            event_type,
+            event_id,
+            exception_type,
+            _diagnostic_text(error_msg),
+        )
+        return
+
+    attempt = 0
+    try:
+        graph = service._graph.query_task_dashboard(correlated_task_id)
+        attempt = int(getattr(graph, "loop_round", 0) or 0)
+    except Exception:  # noqa: BLE001 diagnostics must not mask the callback error
+        pass
+
+    try:
+        service._emit_relay(
+            task_id=correlated_task_id,
+            node_id=correlated_node_id,
+            action_result="callback_report_failed",
+            error_type=ReasonCatalog.RELAY,
+            error_msg=_diagnostic_text(error_msg),
+            attempt=attempt,
+            ext_info={
+                "error_phase": error_phase,
+                "exception_type": exception_type,
+                "event_type": str(event_type or ""),
+                "event_id": str(event_id or ""),
+                "holder_id": str(holder_id or ""),
+                "reported_node_id": str(node_id or ""),
+                "relay_turn_prefix": str(relay_turn or "")[:8],
+                "progress_reason": _diagnostic_text(progress_reason),
+                "failure_reason": _diagnostic_text(failure_reason),
+                "payload_keys": sorted(str(key) for key in (payload or {}).keys()),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 fire-and-forget diagnostic path
+        logger.warning(
+            "[task][relay][callback] 异常轨迹发射失败 task=%s node=%s phase=%s: %s",
+            correlated_task_id,
+            correlated_node_id,
+            error_phase,
+            exc,
+            exc_info=True,
+        )
