@@ -178,9 +178,7 @@ user_config:
 
   # Event-driven Desktop Skill recovery retry budget.
   desktop_skill_recovery:
-    enabled: false
-    sweep_interval_seconds: 600
-    sweep_page_size: 100
+    task_deadline_seconds: 600
 
   # In-process durable task-queue worker (one per pod). Enabled by default so the
   # publish flow's stage advances (build/release/progress-poll) run as persisted,
