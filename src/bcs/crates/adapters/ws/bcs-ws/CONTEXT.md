@@ -58,6 +58,11 @@ Successful send ACKs are passed to the message-flow application before alias
 projection. The application owns durable delivery/run identity correlation;
 the adapter does not update delivery tables.
 
+Rejected responses with an authenticated active Group run use its canonical
+scope to invoke MessageFlow chat/error. Scope lookup failures retain the run and
+propagate an error; absent scope keeps direct handling. State-machine correlation
+and pending abort/one-shot responses retain their existing handling.
+
 ## Tests
 
 - `cargo test --package bcs-ws --manifest-path src/bcs/Cargo.toml`

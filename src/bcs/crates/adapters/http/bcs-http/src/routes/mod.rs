@@ -1,3 +1,4 @@
+mod agentpass_jwt;
 pub mod actors;
 pub mod admin_invocations;
 pub mod admission;

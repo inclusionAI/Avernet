@@ -249,7 +249,7 @@ export interface ISubsystemSummary {
 
 export type IDashboardSubsystemSummary = ISubsystemSummary
 
-export type TimeRangeKey = 'today' | '7d' | '30d'
+export type TimeRangeKey = 'today' | 'yesterday' | '7d' | '30d'
 
 export interface DrilldownFilter {
   title: string

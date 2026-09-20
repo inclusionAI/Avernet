@@ -531,10 +531,20 @@ export class NodeExecutionRepository implements INodeExecutionRepository {
       if (flowStatus === "completed") {
         console.warn(`[db] NodeExecutionRepository.reconcileStaleRunning: flowStatus is legacy "completed", treating as "succeeded" for flowId=${flowId}`);
       }
-      const targetStatus = normalizedFlowStatus === "succeeded" ? "skipped" : "failed";
-      const errorText = normalizedFlowStatus === "succeeded"
-        ? "Node still running when workflow succeeded — reconciled to skipped"
-        : "Node still running when workflow failed — reconciled to failed";
+      let targetStatus: string;
+      let errorText: string;
+      if (normalizedFlowStatus === "succeeded") {
+        targetStatus = "skipped";
+        errorText = "Node still running when workflow succeeded — reconciled to skipped";
+      } else if (normalizedFlowStatus === "cancelled") {
+        // User-initiated abort: running nodes are victims, not failures.
+        // Mark as "skipped" so they don't inflate failed_count or trigger failure alerts.
+        targetStatus = "skipped";
+        errorText = "Node still running when workflow was aborted — reconciled to skipped";
+      } else {
+        targetStatus = "failed";
+        errorText = "Node still running when workflow failed — reconciled to failed";
+      }
       const result = await this.db.exec(
         `UPDATE node_executions SET status = ?, error_text = ?, completed_at = ?, gmt_modified = ? WHERE flow_id = ? AND status = 'running'`,
         [targetStatus, errorText, completedAt, now, flowId],

@@ -15,6 +15,26 @@ class ExpertChatInstanceServiceProtocol(Protocol):
     caller.
     """
 
+    async def get_application_caller_connection(
+        self,
+        *,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        force_upgrade: bool = False,
+    ) -> Dict[str, Any]:
+        """Allow authenticated BaaS to create or operate a caller instance.
+
+        The HTTP caller must authenticate BaaS and establish the server default
+        tenant before repository access. Require a Bot in that tenant. No grant or owner/public/member access is required:
+        BaaS may target another user's instance even on a private Bot.
+        The usual lifecycle includes first-time provisioning, reuse, upgrade
+        and polling. Raise ChatPermissionError when the Bot does not exist;
+        otherwise return the same instance/connection/need_poll dictionary as
+        get_caller_connection. Existing lifecycle errors propagate unchanged.
+        """
+        ...
+
     async def get_authorized_caller_connection(
         self,
         *,

@@ -49,18 +49,23 @@ async fn terminal_storage_faults_preserve_reply_and_publish_after_commit_even_if
         (ChatEventState::Final, "completed", Status::Completed, false),
         (ChatEventState::Final, "completed_after_commit", Status::Completed, false),
         (ChatEventState::Error, "failed", Status::Failed, false),
+        (ChatEventState::Error, "failed_after_commit", Status::Failed, false),
+        (ChatEventState::Error, "failed", Status::Failed, true),
         (ChatEventState::Aborted, "aborted", Status::Cancelled, false),
         (ChatEventState::Final, "completed", Status::Completed, true),
     ] {
         let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
         let frontend = support.frontend_delivery.clone();
         let bots = support.bot_delivery.clone();
-        let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+        let event_store = Arc::new(bcs_event_store::MemoryEventStore::new());
+        let factory = Arc::new(RecordingEventFactory::default());
+        let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new().with_environment("local".into()).with_event_store(event_store));
         let history = Arc::new(FailingHistory { inner: repo.clone(), failures: Default::default() });
         let service = Arc::new(ManagedMessageDelivery::new(repo.clone()));
         let faults = Arc::new(failing_delivery::FailingDelivery::new(service.clone()));
         let group = support.group.get("group-1").await.unwrap();
         let flow = Arc::new(BcsMessageFlow::new(support.group, support.routing, support.registry, support.bot_delivery, support.frontend_delivery)
+            .with_event_record_factory(factory.clone())
             .with_message_repo(history.clone()).with_managed_deliveries(faults.clone())
             .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".into(), 100), ("bot-observer".into(), 100)]))
             .with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1:retry", "group-1", group.participants)))));
@@ -100,6 +105,14 @@ async fn terminal_storage_faults_preserve_reply_and_publish_after_commit_even_if
         assert_eq!(faults.remaining(), 0);
         assert_eq!(history.failures.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert!(bots.frames().await.is_empty(), "persistence retries must not invoke Bot transport");
+        if state == ChatEventState::Error {
+            assert!(factory.0.lock().unwrap().iter().all(|event| event.data.get("message_type") != Some(&json!("chat_error"))));
+            let history = repo.list_session_history("group-1:retry", MessageOwnerFilter::Any, None, None, None, 100).await.unwrap();
+            let errors: Vec<_> = history.messages.iter().filter(|m| m.message_type == "chat_error").collect();
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].content, json!("保留的正文"));
+            assert!(history.messages.iter().any(|m| m.message_type == "chat" && m.run_id == terminal.run_id));
+        }
         if state == ChatEventState::Final {
             let reply = rows.iter().find(|r| r.source_message_id != "input").unwrap();
             let message = repo.get_message_by_id("group-1:retry", &reply.source_message_id).await.unwrap().unwrap();

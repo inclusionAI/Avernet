@@ -108,8 +108,23 @@ master 在运行期间每 5 秒读取一次 DB 策略记录并校验版本，仅
 末条历史记录。末段非空时另写普通 `chat`，同时创建其既有 `message.created` 事件。
 展示段、汇总消息、目标准入、原输入 delivery 终态在同一事务提交，CAS/写入失败全部回滚。
 幂等键受 env/session/sender 约束，run 作为键的一部分，重复 final 不重复入队。
-全 run 无正文只结束输入运行，不生成空白下行；error/abort 保持既有部分正文保存策略，
-不会当成功回复广播。普通非受管 Group 仍只写展示历史；task/A2A 专有回复语义不在此轮改造。
+全 run 无正文只结束输入运行，不生成空白下行。Group error 将独立 `chat_error` 字符串
+投影、可选前序 `chat` 部分正文及输入 delivery 的 Failed 状态原子提交；普通 Group
+error 不产生下游 delivery，Task error 仅允许一个 `leg=result` 的 manager Send delivery，
+其语义投影是任务结果而不是把 `chat_error` 当作 Bot 会话输入。两者均不产生
+`message.created`，也不进入 `run_reply` 重建。内部 display companion 契约
+显式支持这组前序 chat + 主错误投影，不把错误塞进成功汇总。abort 只保留已有部分正文。
+普通非受管 Group 仍只写展示历史；task/A2A 专有回复语义不在队列回复归一化改造内。
+
+`chat_error` 是会话事实的展示投影，不是 Bot 可消费领域事件。human 历史映射为
+assistant、metadata.terminal_state=error、is_error=true；正常消息不设置 terminal_state，
+工具 is_error 不代表 run 失败。Bot 历史在响应转换前过滤此投影。新 MessageRepoPort
+路径提供刷新回放，不改已废弃的 legacy Bot-history fallback。
+非受管 append 以 env/group/session/sender/run 的 SHA-256 作为错误记录 message_id，
+沿用数据库主键处理并发冲突及提交结果丢失；业务 client_msg_id 为 chat-error:<run_id>。
+受管提交由原 delivery 的 state_version CAS 兜底。无需新增迁移，不保证跨进程崩溃的
+端到端 exactly-once。manager 任务错误保留先交付结果后写历史的边界；内存交付标记
+避免历史失败后的重试再次发送 task result，进程重启不保留该标记。
 
 history 的两种分页查询均在 LIMIT 前排除 `run_reply`，内部按 ID 读取保留原始正文。
 汇总不发 `message.created`，因此不会进入会话预览或实时/IM 消息广播。会话序号允许间隙。
@@ -253,15 +268,17 @@ TTL / safe_retry 可为 null，分别表示不自动过期、不自动安全重�
 - 降低 max_running 不 abort 现有请求，等 active 降至新限额后再发送。
 - 降低 max_queued 不清理旧队列，只限制新准入。
 - 发送间隔基于保留的上次 send-start 单调时间重算，不重置历史。
-- TTL 只用于新准入的 expire_at，不追溯改写已有记录。
+- TTL 用于新准入；delivery 此后新进入 unknown/cancel_unknown 时，以当时策略重新计算
+  expire_at。已经处于这些状态的截止时间不因策略更新追溯改写。
 - pause_dispatch 仅暂停新 send；状态、终态、取消、过期处理继续。
 - 关闭类型或 Bot 后，已准入消息及其回复继续受管 drain；存在未完成 Send 时，
   **同一目标 Bot/session** 的新请求返回 queue_draining，其他 session 不受此 drain 检查阻塞。
   检查只取一条未完成 Send，不加载整个 lane；孤立 pending_context 不阻塞 drain，
   当前 lane 的 Send 排空后保留这些 context，下一条 Send 作为受管载体消费，不清理其他 session。
   确实没有 canonical session 的旧入口仍保守检查整个 Bot，不能猜测 session 后放行。
-  Unknown 不自动到期，需要可信结束事件或下述人工处置。受管调度的 Bot 级 max_running
-  仍统计 unknown 的占用；收窄 drain 不代表取消 Bot 并发限制，也不代表 legacy 受共同限流。
+  Unknown 在重新计算的 TTL 内仍可由可信结束事件或下述人工接口提前处置；到期后自动
+  expired。受管调度的 Bot 级 max_running 在到期前仍统计 unknown 的占用；收窄 drain
+  不代表取消 Bot 并发限制，也不代表 legacy 受共同限流。
 - 开启前仍应确认原 legacy 运行已结束；新策略不接管旧 ChatRun、不补发历史消息。
   未接入类型与受管类型之间不承诺共同限流或有序。
 
@@ -333,8 +350,23 @@ Header 值不进入消息正文、模型、History、状态响应或日志。无
 Provider 的请求帧/参数/run ID 校验、URL 安全校验、HTTP 请求构建失败均发生在提交前：
 永久性失败直接 `failed`，仅 DNS 解析等明确暂时性未发送失败允许使用配置的安全重试预算。
 永久性失败不会被 safe_retry 配置改为重试。重复的 Provider run 注册不是“未发送”的证明，
-仍保守处理。网络 execute 开始后的未分类错误/超时保持 Unknown，禁止自动重发。
-TTL 到期不触发运行中请求或 Unknown 的强制释放。
+仍保守处理。Provider 已返回完整 HTTP 非 2xx，或 2xx ACK 明确返回 `ok=false` 时，表示
+Provider 拒绝本次调用：delivery 直接进入 `failed`、释放 lane 且不自动重试；非 2xx 响应
+正文不写日志，也不参与错误分类。只有 Provider 另行明确证明 `not_sent + retryable` 并映射为
+`DeliveryNotSent`，才允许安全重试。网络 execute 开始后没有取得完整响应的连接错误、响应头
+超时、成功响应体中断/无法解码等仍保持 Unknown，禁止自动重发。终态后的迟到 callback
+不会重新打开 delivery。
+
+离线不是队列的长期等待能力。每次进程启动或 master 接管后，调度器提供固定 10 秒的启动恢复
+窗口，允许 WebSocket Bot 重新连接；窗口内尚未连接的可调度 lane 头保持 `queued`，等待原因是
+`bot_offline`。窗口结束后，只有已满足前序、容量、暂停和限速条件、即将尝试发送的离线 lane 头
+进入 `failed`，未发生网络 I/O，绑定 context 按未发送语义释放。后续 lane 头在成为可调度头时
+执行同样判断，因此不会把离线等待重新做成长时间队列。消息若在准备后、真正写 WebSocket 前
+断线，适配器返回完整 `delivered=false + BotNotConnected`，该 attempt 同样直接 `failed`、不重试；
+只有没有完整结果的传输异常才进入 Unknown。启动恢复窗口是部署竞态保护，不是可配置的业务 TTL。
+
+进入 Unknown/CancelUnknown 时复用当前 queue_ttl_ms 重新计时；到期后转为 expired 并释放
+lane/容量，保留 may_have_been_sent=true 和 last_error_code=unknown_ttl_expired。
 
 ## 查询与取消
 
@@ -345,9 +377,9 @@ TTL 到期不触发运行中请求或 Unknown 的强制释放。
 | --- | --- | --- |
 | `GET /openapi/v1/collaboration/messages/{message_id}/deliveries` | query `session_id` | `DeliveryStatusView[]` |
 | `POST /openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query` | `{"message_ids":["..."]}` 或 `{"client_msg_id":"..."}` | `DeliveryStatusView[]` |
-| `POST /messages/{message_id}/deliveries/{delivery_id}/cancel` | `{"session_id":"..."}` | 每个目标的 `delivery` 和可选 `error` |
-| `POST /messages/{message_id}/deliveries/cancel` | `{"session_id":"..."}` | 同上，覆盖该消息的全部目标 |
-| `POST /messages/{message_id}/deliveries/{delivery_id}/resolve` | 见下文 | 单条 `DeliveryStatusView` |
+| `POST /openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/cancel` | `{"session_id":"..."}` | 每个目标的 `delivery` 和可选 `error` |
+| `POST /openapi/v1/collaboration/messages/{message_id}/deliveries/cancel` | `{"session_id":"..."}` | 同上，覆盖该消息的全部目标 |
+| `POST /openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/resolve` | 见下文 | 单条 `DeliveryStatusView` |
 
 批量查询最多 100 个 ID，两种选择器不能混用。client ID 查询仅匹配调用者自己的原消息。
 这些查询/取消接口使用 401、403、404、400、503 表达认证、权限、Session 不存在、无效参数和
@@ -392,7 +424,8 @@ active Provider 的精确 delivery 取消返回 `exact_abort_not_supported`，�
 - 操作只终结旧投递，不自动重试、不创建新 run，不替用户执行 abort，也不证明引擎实际采用了内容。
   未确认停止时不能用此接口强制放行。迟到生命周期事件不能重新打开终态 delivery。
   响应丢失后查询状态，不使用更新版本盲目重复处置。
-- 本版不新增告警、自动过期或自动处置；部署前遗留的 Unknown 不会因升级自动变更状态。
+- 本版不新增告警；人工接口用于 TTL 前提前处置。旧 Unknown 若其持久化 expire_at 已经过期，
+  升级后的过期扫描会将其转为 expired。迟到回调不能重新打开终态或产生用户回复。
 
 ## 状态与通知
 
@@ -406,6 +439,22 @@ active Provider 的精确 delivery 取消返回 `exact_abort_not_supported`，�
 只向应用层选出的当前可见 Session 成员发送，无匿名、整群或 run fallback 扩大投递。
 这是提交后 best-effort 事件，不是持久化事件流；客户端按版本去重并通过查询校准。
 Private owner 的 Human 代理读取仍以授权查询为准，不扩大私有消息实时广播范围。
+
+### DeliveryStatusView 字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `delivery_id` | `String` | 投递唯一标识 |
+| `message_id` | `String` | 源消息 ID（`bcs_messages.message_id`） |
+| `target_bot_id` | `String` | 目标 Bot ID |
+| `flow_kind` | `DeliveryFlowKind` | 投递流类型：`group` / `direct_a2a` / `task` / `system` / `state_machine` |
+| `kind` | `DeliveryType` | 投递类型：`send` / `inject` |
+| `status` | `MessageDeliveryStatus` | 投递状态（见上方状态机） |
+| `state_version` | `u64` | 单调递增版本号，客户端按版本去重 |
+| `run_id` | `Option<String>` | 关联的运行 ID |
+| `wait_reason` | `Option<DeliveryWaitReason>` | 排队等待原因 |
+| `admission_error` | `Option<&'static str>` | 准入错误码（仅 `delivery_provider_headers_unsupported`） |
+| `content_preview` | `Option<String>` | 消息正文预览（UTF-8 安全截断至前 200 字节，超出以 `…` 结尾），供前端排队列表展示 |
 
 IM 使用原消息来源和原 canonical Session：排队超过 2 秒提示，离线尽快提示，同一消息
 多目标聚合；取消、失败和不确定状态提供简短说明。inject 和普通成功不额外提示。
@@ -473,8 +522,8 @@ IM 聚合、scope abort、原连接绑定和关闭配置后的 SQLite 恢复。�
 专用队列监控日志见下一节；不新增 Workbench 运维面板。
 
 真实 MySQL/OceanBase、Bot 引擎和 IM 账号需在部署环境执行验收；单元测试不能替代这些。
-没有提供无证据强制释放 Unknown 的接口，必须取得可信终态、明确 abort 结果或完成隔离，
-不能直接改表清除占用。Workbench UI、分布式部署、inject 压缩及 URL 刷新不在本版范围内。
+没有提供无证据立即强制释放 Unknown 的接口；可等待其重新计算的 TTL 自动过期，不能直接
+改表清除占用。Workbench UI、分布式部署、inject 压缩及 URL 刷新不在本版范围内。
 
 ## 单实例 worker 与监控（2026-09-08）
 

@@ -344,6 +344,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             self._cli_scope_reconciler.reconcile(
                 bot=bot,
                 force_update=True,
+                requested_cli_identity_modes={cli_code: normalized_call_type.value},
             )
         except Exception as exc:
             self._compensate_cli_after_sync_failure(

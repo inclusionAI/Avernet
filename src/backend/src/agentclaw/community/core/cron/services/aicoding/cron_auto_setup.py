@@ -18,6 +18,10 @@ DEFAULT_CRON_TIMEZONE = "Asia/Shanghai"
 DEFAULT_CRON_TIMEOUT_SECS = 3600  # 1小时
 DEFAULT_CRON_MODEL = None  # 使用引擎默认模型
 DEFAULT_MAX_TASK_NUM = 3  # 单次触发最多发起任务数，写死默认值 3
+# 无 devflow_workflow 时的固定 custom_message 提示语；${url} 为引擎运行时占位符
+DEFAULT_NO_WORKFLOW_CUSTOM_MESSAGE = (
+    "使用mcporter技能调用dimamcpserver工具读取${url}需求后，进行代码开发完成需求"
+)
 
 
 def _build_cron_command(
@@ -28,35 +32,49 @@ def _build_cron_command(
     kind: str = "autoInitiate",
     workflow: str = "",
     append_message: str = "",
+    custom_message: str = "",
 ) -> str:
     """根据 dima_space_id 等参数构建定时任务命令。
+
+    - 有 workflow：workflow / message / append_message 拼在 maxTaskNum 之前。
+    - 无 workflow：maxTaskNum 拼在 custom_message 之前，custom_message 缺省用
+      :data:`DEFAULT_NO_WORKFLOW_CUSTOM_MESSAGE`（``${url}`` 为运行时占位符），
+      此时不拼 message / append_message。
 
     Args:
         dima_space_id: DIMA 空间 ID
         user_id: 用户 ID
         agent_id: Agent ID (Bot ID)
-        message: 附加消息
+        message: 附加消息（仅在配置 workflow 时使用）
         kind: 任务类型 (autoInitiate 或 agentTurn)
         workflow: Devflow 工作流名称
-        append_message: 补充说明，拼接在发起消息末尾
+        append_message: 补充说明，拼接在发起消息末尾（仅在配置 workflow 时使用）
+        custom_message: 自定义提示语（仅在无 workflow 时使用，缺省走固定提示语）
 
-    注：命令末尾固定带 |maxTaskNum:3（单次触发最多发起 3 个任务）。
+    注：每条命令都带 ``maxTaskNum:3``（单次触发最多发起 3 个任务）。
     """
     prefix = f"查询dima空间{dima_space_id}的待开发需求，开启7*24小时自动研发"
-    parts = [
+    base_parts = [
         f"space:{dima_space_id}",
         f"user:{user_id}",
         f"agent:{agent_id}",
         f"kind:{kind}",  # 嵌入 kind 字段，避免依赖 relay 存储
     ]
     if workflow:
-        parts.append(f"workflow:{workflow}")
-    if message:
-        parts.append(f"message:{message}")
-    if append_message:
-        parts.append(f"append_message:{append_message}")
-    # maxTaskNum 写死默认 3：创建任务时显式嵌入，使引擎 cap 限制可见、可追溯。
-    parts.append(f"maxTaskNum:{DEFAULT_MAX_TASK_NUM}")
+        # 有 workflow：workflow / message / append_message 在 maxTaskNum 之前。
+        parts = [*base_parts, f"workflow:{workflow}"]
+        if message:
+            parts.append(f"message:{message}")
+        if append_message:
+            parts.append(f"append_message:{append_message}")
+        parts.append(f"maxTaskNum:{DEFAULT_MAX_TASK_NUM}")
+    else:
+        # 无 workflow：maxTaskNum 置于 custom_message 之前；custom_message 缺省用固定提示语。
+        parts = [*base_parts, f"maxTaskNum:{DEFAULT_MAX_TASK_NUM}"]
+        effective_custom_message = (
+            custom_message if custom_message else DEFAULT_NO_WORKFLOW_CUSTOM_MESSAGE
+        )
+        parts.append(f"custom_message:{effective_custom_message}")
     return f"{prefix}|{'|'.join(parts)}"
 
 

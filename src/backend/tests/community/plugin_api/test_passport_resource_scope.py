@@ -156,3 +156,17 @@ def test_query_extractor_rejects_malformed_cli_metadata(passport):
     """Query compatibility may default identity, but it never coerces metadata."""
     with pytest.raises(ValueError, match="CLI"):
         extract_cli_items(passport)
+
+
+def test_skill_scope_distinguishes_omitted_and_empty():
+    from agentclaw.community.plugin_api.passport import unpack_skill_scope
+    assert unpack_skill_scope(None) is None
+    assert unpack_skill_scope({"mcp_codes": [], "cli_items": []}) is None
+    assert unpack_skill_scope({"skill_items": []}) == []
+
+
+def test_skill_scope_rejects_duplicate_codes_before_overwrite():
+    from agentclaw.community.plugin_api.passport import unpack_skill_scope
+    item = {"skill_code": "skill-1", "skill_name": "Skill", "skill_desc": ""}
+    with pytest.raises(ValueError, match="duplicated"):
+        unpack_skill_scope({"skill_items": [item, item]})

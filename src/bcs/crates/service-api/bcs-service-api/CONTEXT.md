@@ -2,6 +2,22 @@
 
 ## Provides
 
+BotDeliveryResult distinguishes a complete downstream rejection
+(`delivered=false`) from an uncertain transport error (`Err`). A rejection is
+terminal and is never retryable by itself; safe retry still requires the
+explicit DeliveryNotSent contract. HTTP Provider non-success responses and
+decoded `ok=false` acknowledgements use the rejection result, while missing or
+incomplete responses remain errors for Unknown handling.
+
+TaskDispatchOutcome/TaskMessageOutcome may return `queued`: the canonical source
+and target delivery have committed, but no Bot delivery result exists yet.
+Managed tasks require an explicit canonical running Session. Task completion
+includes durable queued/uncertain task work; an active Manager result may complete
+its own Session, while other queued return legs still block closure. Worker final,
+error and abort settle the assignment and admit a separate Manager result together.
+No new Plugin API or database schema is required. Task lifecycle event projections
+are not part of this atomic guarantee; no durable notification outbox is added.
+
 SystemMessageQueueService atomically admits one producer event before any direct
 delivery; admitted recipients expose delivery_id separately from delivered.
 Group/Session initialization can return queued instead of running. The managed
@@ -25,6 +41,11 @@ and lifecycle CAS. Public history excludes internal summaries before pagination;
 canonical ID reads remain unfiltered. Memory/SQL implementations and caller/test
 construction propagate this internal contract change together.
 
+Failed Group terminals admit a primary chat_error string projection and an
+optional preceding chat display companion, atomically with Failed lifecycle CAS.
+The error has no delivery targets or message.created event and never enters
+run_reply reconstruction. Bot history filters the projection before conversion.
+
 Control work_batch ignores the legacy ID cursor and reserves per-action shares
 under one total limit; timeout classes use deadline order. This internal contract
 change propagates to the runtime and both SQL/Memory repositories, with shared
@@ -43,6 +64,10 @@ events without prescribing a metrics implementation or exposing payload labels.
 MessageFlowService exposes Human-only environment-wide delivery-policy read/replace operations; policy values use the leaf bcs-config-api contract, and the delivery repository owns durable version CAS. Application validation rejects non-Human callers independently of HTTP.
 
 - Application, core, and port trait contracts for BCS.
+- `GroupCreateCommand` requires an explicit `create_initial_session` boolean.
+  Existing callers use true; false supports non-provisional normal groups, including StateMachine,
+  creation without initial Session writes or bootstrap delivery. It is not a
+  persistent prohibition on subsequent Session creation.
 - Shared contract-level DTOs, error types, and service container types.
 - Default `Noop*` implementations used to keep contract boundaries explicit in tests and local wiring.
 - Current-session state-machine permission/start contracts and the outbound
@@ -97,3 +122,56 @@ Actor-selection semantics, and the crate does not own concrete runtime behavior.
 
 - `cargo test --package bcs-service-api --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-service-api --all-targets --manifest-path src/bcs/Cargo.toml`
+
+## Friend connection list contract
+
+V1 FriendConnectionService accepts optional target_type (Human/Bot) and required
+one-based page/page_size (1..100). The HTTP adapter defaults these to 1/20.
+The invitation facade authenticates the actor, validates pagination and translates
+page/page_size to offset/limit. ConnectService::list_friends_paginated accepts
+FriendListQuery and returns FriendEntriesPage; EdgeGrantRepoPort exposes the same
+query with FriendIdsPage. The store owns active-default-profile matching, exact
+Human-prefix filtering, deduplication, case-sensitive UTF-8 ordering, count and
+pagination. A single SQL read returns the page and total together, including the
+total for an empty page. Query/decoding errors propagate through ServiceResult;
+the facade checks the conversion of the u64 count into the V1 u32 response.
+Human-to-Bot authorization remains one directed grant; listing from either side
+does not grant reverse access.
+
+Propagation: the invitation facade, DbConnectService, DbEdgeGrantStore, Noop
+implementations and recording test doubles implement the required paged method.
+Legacy list_friends consumers (legacy HTTP routes and Bot search) keep their
+unpaginated interface and behavior; there is no default full-list fallback for
+the paged interface. No HTTP/Plugin API, configuration or schema change is needed
+for the pushdown. V1 consumers still default to 1/20 and must page for all friends.
+
+Storage portability: SQLite and MySQL use store-owned SQL flavor expressions for
+binary identity and literal human_ prefix matching (not LIKE wildcard matching).
+MySQL uses the existing CTE-capable deployment baseline. Existing edge indexes
+(from_id, env, status) and (to_id, env, status) support the two candidate scans;
+profiles join by primary ID. COUNT/UNION still process the matching set in the
+DB, and deep OFFSET pages are not constant-time. Validate production plans with
+EXPLAIN against representative data before adding workload-specific indexes.
+
+Validation: store conformance tests exercise mixed actors, single Human grants,
+double Bot grants, default-profile eligibility, exact prefixes, ordering, empty
+pages, bounds and errors. Facade tests prohibit full-list calls and verify paged
+results/errors/count conversion. HTTP contract and legacy route/search tests
+cover compatibility. MySQL SQL construction tests do not substitute for a live
+MySQL conformance run.
+
+## Human mention notification metadata (0.2.0)
+
+The outbound `HumanMentionNotifyPort` DTO carries optional `group_name` and
+`session_name` display metadata alongside the existing authoritative IDs. The
+message-flow application supplies the Group label and resolves the Session title
+only for a real notification, off the main send path. Missing/read-failed sessions
+retain the notification's ID without a title; a Session from a different Group
+must not contribute a title. Group-level messages have an empty Session ID and no
+Session name. The names do not affect routing, recipients or authorization.
+
+This source-contract addition affects message-flow producers, no-op/test fixtures,
+and the bootstrap adapter. All struct literals need the two fields; external
+consumers must rebuild against 0.2.0. Bootstrap maps into the separate
+`bcs-human-notify-api` schema. No persistent schema or HTTP/WS API changes are
+required.

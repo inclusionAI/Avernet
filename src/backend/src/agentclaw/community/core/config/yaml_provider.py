@@ -29,6 +29,7 @@ _OVERLAY_BY_PROFILE = {
     "test": "application-test.yaml",
     "corp_test": "application-test.yaml",
     "singlebox": "application-singlebox.yaml",
+    "local-k8s": "application-local-k8s.yaml",
 }
 
 # Placeholder syntax: ${NAME} or ${NAME:-default} (shell / k8s / envsubst style),

@@ -11,6 +11,7 @@ export type DiagnosisItem = {
 };
 export type DiagnosisPage = {
   botId: string; page: number; pageSize: number; total: number; totalPages: number;
+  problemTypes: { category: string; subtypes: string[] }[];
   counts: { all: number; alert: number; pass: number; unresolved: number };
   items: DiagnosisItem[];
 };
@@ -19,6 +20,6 @@ export type BotStatus = {
   lastSuccessfulCheckAt: string | null; diagnosisCount: number;
 };
 export type MonitoringQuery = {
-  startDate: string; endDate: string; decision: Decision | 'ALL'; keyword: string;
+  startDate: string; endDate: string; decision: Decision | 'ALL'; keyword: string; businessProblemCategory?: string; businessProblemSubtype?: string;
   page: number; pageSize: number;
 };

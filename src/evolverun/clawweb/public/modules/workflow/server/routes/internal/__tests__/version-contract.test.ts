@@ -62,7 +62,18 @@ describe("ClawMind workflow version wire contract", () => {
     expect(raw.prepare("SELECT workflow_version, workflow_deploy_number FROM flow_runs WHERE flow_id = 'legacy'").get()).toEqual({ workflow_version: null, workflow_deploy_number: null });
   });
 
-  it.each([0, -1, 1.5, "2", 9007199254740992])("rejects invalid version metadata %s before persistence", async value => {
+  it("preserves an unbound snapshot version even when the workflow has a release", async () => {
+    const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "snapshot-run", workflow_id: "demo", status: "running", workflow_version: -1 }) });
+    expect(response.status).toBe(201);
+    expect(raw.prepare("SELECT workflow_version, workflow_deploy_number FROM flow_runs WHERE flow_id = 'snapshot-run'").get()).toEqual({ workflow_version: -1, workflow_deploy_number: null });
+  });
+
+  it("rejects the draft sentinel as a deployment number", async () => {
+    const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "invalid-deploy", workflow_id: "demo", status: "running", workflow_deploy_number: -1 }) });
+    expect(response.status).toBe(400);
+  });
+
+  it.each([0, -2, 1.5, "2", 2147483648, 9007199254740992])("rejects invalid version metadata %s before persistence", async value => {
     for (const field of ["workflow_version", "workflow_deploy_number"]) {
       const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: `invalid-${field}-${value}`, workflow_id: "demo", status: "running", [field]: value }) });
       expect(response.status).toBe(400);

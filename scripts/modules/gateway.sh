@@ -84,12 +84,19 @@ gateway_start() {
 }
 
 
+# No unconditional delegation to ${GATEWAY_APP_SCRIPT} stop: app.sh do_stop —
+# when tmp/app.port is absent (the steady state after any clean stop, since
+# do_stop itself removes it) — resolves whatever PID holds the app port
+# (APP_PORT / GATEWAY_PORT) and kills it blindly (kill, 1s wait, kill -9) with
+# no ownership check. A singlebox stop chain (stop gateway / stop all /
+# clean all) must never kill a foreign process that merely occupies
+# GATEWAY_PORT, so every kill stays inside the owned-process contract:
+# pidfile, then port, then the command pattern, each verified against
+# GATEWAY_DIR by cwd before terminate_process's graceful TERM → wait → KILL.
+# (Running src/gateway/scripts/app.sh stop directly stays blind; this module-
+# level guard is what protects the singlebox paths.)
 gateway_stop() {
     log_info "Stopping Gateway..."
-
-    if [ -x "${GATEWAY_APP_SCRIPT}" ]; then
-        (cd "${GATEWAY_DIR}" && SERVER_ENV="${SERVER_ENV:-local}" GATEWAY_PORT="${GATEWAY_PORT}" APP_PORT="${GATEWAY_PORT}" "${GATEWAY_APP_SCRIPT}" stop) >> "${GATEWAY_LOG}" 2>&1 || true
-    fi
 
     if [ -f "${GATEWAY_PID_FILE}" ]; then
         local gateway_pid
@@ -102,6 +109,27 @@ gateway_stop() {
 
     stop_port_processes_if_owned "${GATEWAY_PORT}" "${GATEWAY_DIR}" "gateway"
     stop_matching_processes_if_owned "gateway/community/main.py" "${GATEWAY_DIR}" "gateway process"
+
+    # Clean app.sh's own residual state files when their named PID is dead:
+    # do_start's is_running check is kill-0 based, so a recycled PID behind a
+    # stale tmp/app.pid would make the next start refuse with a bogus
+    # "already running". The dropped app.sh delegation used to remove these —
+    # the module now owns that cleanup.
+    local app_pid_file="${GATEWAY_DIR}/tmp/app.pid"
+    if [ -f "${app_pid_file}" ]; then
+        local app_pid
+        app_pid="$(cat "${app_pid_file}" 2>/dev/null || true)"
+        if [ -z "${app_pid}" ] || ! kill -0 "${app_pid}" 2>/dev/null; then
+            rm -f "${app_pid_file}" "${GATEWAY_DIR}/tmp/app.port"
+        fi
+    fi
+
+    # A port still held after the owned chain belongs to a process outside
+    # this checkout (or with an unverifiable cwd): name it and refuse to kill
+    # it — the operator stops it or reassigns GATEWAY_PORT.
+    if port_is_listening "${GATEWAY_PORT}"; then
+        log_warn "Port ${GATEWAY_PORT} is still held by a process outside this checkout (or with an unverifiable cwd); refusing to kill it: $(port_listener_summary "${GATEWAY_PORT}") — stop it manually or set GATEWAY_PORT in .env.local"
+    fi
     log_info "Gateway stopped"
 }
 

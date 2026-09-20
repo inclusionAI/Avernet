@@ -58,6 +58,7 @@ async fn create_group_with_manager_sends_manager_worker_roles() {
     let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
     assert_eq!(body["driver_bot"], "manager-bot");
     assert_eq!(body["group_strategy"], "manager_worker");
+    assert_eq!(body["create_initial_session"], true);
     assert_eq!(
         body["participants"],
         serde_json::json!([
@@ -120,6 +121,7 @@ async fn create_group_with_driver_preserves_chat_request() {
     let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
     assert_eq!(body["driver_bot"], "driver-bot");
     assert!(body.get("group_strategy").is_none());
+    assert_eq!(body["create_initial_session"], true);
     assert_eq!(
         body["participants"],
         serde_json::json!([
@@ -174,4 +176,76 @@ async fn create_group_rejects_participant_tag_for_unknown_bot_before_request() {
     assert_output_contains(&output, "other-bot");
     assert_output_contains(&output, "not a group participant");
     assert!(ctx.mock_server.received_requests().await.unwrap().is_empty());
+}
+
+async fn assert_no_session_request(lead_arg: &str) {
+    let ctx = TestContext::new().await.unwrap();
+    Mock::given(method("POST"))
+        .and(path("/groups"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "empty-group",
+            "driver_bot": "lead-bot",
+            "participants": ["lead-bot", "participant-1"],
+            "session_id": null,
+            "initial_session_id": null,
+            "initial_run": null,
+            "context_injected": 0
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx.cmd()
+        .args(["create-group", lead_arg, "lead-bot", "--participants", "participant-1",
+            "--context", "Prepare the review", "--topic", "Review", "--no-session"])
+        .output().unwrap();
+
+    assert_success(&output);
+    assert_output_contains(&output, "empty-group");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Session:"));
+    let requests = ctx.mock_server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1, "no-session must not perform a fallback Session lookup");
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(body["create_initial_session"], false);
+    assert_eq!(body["context"], "Prepare the review");
+    assert_eq!(body["topic"], "Review");
+    if lead_arg == "--manager" {
+        assert_eq!(body["group_strategy"], "manager_worker");
+    } else {
+        assert!(body.get("group_strategy").is_none());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_group_no_session_keeps_chat_group_empty() {
+    assert_no_session_request("--driver").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_group_no_session_keeps_manager_worker_group_empty() {
+    assert_no_session_request("--manager").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_group_no_session_reports_server_that_created_a_session() {
+    let ctx = TestContext::new().await.unwrap();
+    Mock::given(method("POST"))
+        .and(path("/groups"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "already-created-group",
+            "driver_bot": "driver-bot",
+            "participants": ["driver-bot"],
+            "session_id": "already-created-group:12345678"
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx.cmd()
+        .args(["create-group", "--driver", "driver-bot", "--participants", "driver-bot",
+            "--no-session"])
+        .output().unwrap();
+
+    assert_failure(&output, Some(1));
+    assert_output_contains(&output, "already-created-group");
+    assert_output_contains(&output, "did not honor --no-session");
+    assert_eq!(ctx.mock_server.received_requests().await.unwrap().len(), 1);
 }

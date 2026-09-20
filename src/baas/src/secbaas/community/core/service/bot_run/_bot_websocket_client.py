@@ -13,7 +13,6 @@ import asyncio
 import dataclasses
 import ipaddress
 import json
-import os
 import ssl
 import uuid
 from collections.abc import Callable
@@ -24,7 +23,7 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from secbaas.community.api.bot_interaction import InteractionResolution
-from secbaas.community.core.utils.env_utils import is_dev
+from secbaas.community.http_header import get_http_header_plugin
 from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
@@ -151,11 +150,7 @@ class BotWebSocketClient:
 
         headers = self._get_default_headers()
         logger.info(f"Connecting to: {self.uri}")
-
-        if is_dev():
-            iam_token = os.getenv("IAM_TOKEN")
-            headers["Cookie"] = f"iam_token={iam_token}"
-            logger.info("local dev, add iam token for connection")
+        get_http_header_plugin().inject_header(headers)
 
         # SSL 配置
         ssl_context: ssl.SSLContext | None = None
@@ -252,7 +247,12 @@ class BotWebSocketClient:
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
     ) -> dict[str, Any]:
-        """发送聊天消息"""
+        """发送聊天消息。
+
+        纯数据边界：只返回服务端原始响应 dict，不做 ok 判断、不抛异常、不打日志。
+        调用方（``_send_chat_request``）统一负责判断 ``ok`` 字段、打印 result、
+        构造 ``ChatRequestError`` 并抛出。
+        """
         params: dict[str, Any] = {
             "sessionKey": session_key,
             "message": message,
@@ -272,22 +272,11 @@ class BotWebSocketClient:
         params["x-iam-token"] = auth_token or "OPEN_API:NOT_PROVIDED"
         params["traceId"] = get_tracer_plugin().get_trace_id()
 
-        result = await self._send_request(
+        return await self._send_request(
             "chat.send",
             params,
             timeout=min(timeout_ms / 1000, 120) if timeout_ms else 120,
         )
-
-        if not result.get("ok"):
-            error = result.get("error", {})
-            raise ChatRequestError(
-                message=f"chat.send failed: {error.get('code')} - {error.get('message')}",
-                error_code=error.get("code"),
-                error_message=error.get("message"),
-                retryable=error.get("retryable"),
-            )
-
-        return result
 
     async def chat_inject(
         self,
@@ -298,7 +287,10 @@ class BotWebSocketClient:
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
     ) -> dict[str, Any]:
-        """注入聊天消息"""
+        """注入聊天消息。
+
+        纯数据边界，语义同 ``chat_send``。
+        """
         params: dict[str, Any] = {
             "sessionKey": session_key,
             "message": message,
@@ -315,22 +307,11 @@ class BotWebSocketClient:
         params["x-iam-token"] = auth_token or "OPEN_API:NOT_PROVIDED"
         params["traceId"] = get_tracer_plugin().get_trace_id()
 
-        result = await self._send_request(
+        return await self._send_request(
             "chat.inject",
             params,
             timeout=min(timeout_ms / 1000, 120) if timeout_ms else 120,
         )
-
-        if not result.get("ok"):
-            error = result.get("error", {})
-            raise ChatRequestError(
-                message=f"chat.inject failed: {error.get('code')} - {error.get('message')}",
-                error_code=error.get("code"),
-                error_message=error.get("message"),
-                retryable=error.get("retryable"),
-            )
-
-        return result
 
     async def interaction_resolve(
         self,

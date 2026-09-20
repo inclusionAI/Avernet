@@ -24,3 +24,18 @@ class CommonConfigRecord:
     env: str
     gmt_create: datetime | None
     gmt_modified: datetime | None
+
+
+@dataclass(slots=True)
+class BotCommonConfigRecord:
+    """Record from ``ac_bot_common_config``."""
+
+    id: int
+    bot_id: str
+    entity_id: str
+    env: str
+    config_key: str
+    config_value: str
+    is_delete: int
+    gmt_create: datetime | None
+    gmt_modified: datetime | None

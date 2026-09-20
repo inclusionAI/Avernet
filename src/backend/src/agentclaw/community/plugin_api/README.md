@@ -7,13 +7,14 @@ Plugin Protocol declarations (the kernel's outbound interface to swappable capab
 ```yaml
 purpose: "Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities)."
 provides:
-  - "Plugin Protocol classes, including the independent SkillCenterGateway"
+  - "Plugin Protocol classes, including the independent SkillCenterGateway and TcResourceReadyPublisherPlugin"
   - "Plugin marker"
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"
 consumes:
   []
 internal_dependencies:
+  - agentclaw.community.kernel.publish_ignore
   - agentclaw.community.core.base
   - agentclaw.community.core.service_bot.services.baas_service  # BAAS dataclass (BotWsConnectionInfoResponse) typed in BaasServiceProtocol
   - agentclaw.community.core.service_bot.types                  # PublishStage enum, default value in BaasServiceProtocol signatures
@@ -27,10 +28,22 @@ internal_dependencies:
 
 Changing a Plugin Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration; Team catalogue and publish-submission operations require a request-level Team ID, while publish-status lookup follows SC's globally unique `skill_code` contract. Its adapters do not own publication retries or domain state. Version/download reads require an explicit `PUBLIC` or `TEAM` consumer trust scope; the scope and Team ID are preflight context and are not invented SC wire arguments. Public Reference reads omit Team only after the consumer verifies public visibility. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
 
+`PassportPlugin.reissue_agent_credentials` separates the stable AgentPass
+address (`entity_id`) from the principal that receives ALC/AAC/AEC authority
+(`execution_workno`). The legacy `owner_workno` remains present for backward
+compatibility and is not changed by this operation. Reissue implementations
+must preserve the current Passport resource manifest; a pending authorization
+returns without changing a running container, and only an issued AEC may be
+injected by the caller.
+
 `DeviceAdapterTransport` keeps a standard unmatched FastAPI 404 distinguishable
 from application-level and proxy 404 responses. Skill logical delivery uses that
 structured fact only together with a same-target `/health` Engine match before
 selecting an older write protocol; other errors retain unknown-result semantics.
+Its multipart operation carries one replayable in-memory package plus logical
+form fields and optional provider headers. Standard Local Skill package apply and
+Teclaw's provider wire share this transport without exposing HTTP or physical
+paths to the Skill Center domain service.
 
 `ImmutableObjectStorageCapability` is an optional structural capability beside
 `ObjectStoragePlugin`, rather than a breaking expansion of its corp-facing

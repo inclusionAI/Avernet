@@ -140,3 +140,78 @@ def test_discover_uses_bcs_visibility_and_not_legacy_backend_public(
             "request_id": "trace-discover",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    (
+        "runtime_state",
+        "viewer_actor_type",
+        "viewer_actor_id",
+        "expected_recommend_filters",
+        "expected_catalog_filters",
+    ),
+    [
+        (
+            "verify",
+            "bot",
+            "catalog-bot:owner-1",
+            {
+                "availability": ["public", "protected"],
+                "runtime_state": ["verify"],
+            },
+            BotCatalogSearchFilters(
+                visibility=("public", "protected"),
+                viewer_actor_type="bot",
+                viewer_actor_id="catalog-bot:owner-1",
+            ),
+        ),
+        (
+            "online",
+            "human",
+            "owner-1",
+            {"runtime_state": ["online"]},
+            BotCatalogSearchFilters(
+                user_visibility=("public", "protected"),
+                status="online",
+                viewer_actor_type="human",
+                viewer_actor_id="owner-1",
+            ),
+        ),
+    ],
+)
+def test_discover_derives_viewer_policy_inside_service(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_state: str,
+    viewer_actor_type: str,
+    viewer_actor_id: str,
+    expected_recommend_filters: dict[str, Any],
+    expected_catalog_filters: BotCatalogSearchFilters,
+) -> None:
+    repo = _Repo()
+    metadata = _Metadata()
+    service = BotDiscoverService(
+        bot_repository=repo,
+        bcsfuse_config=SimpleNamespace(
+            base_url="http://bcsfuse.test", base_url_pre=None
+        ),
+        catalog_metadata_service=metadata,
+    )
+    recommend_calls: list[dict[str, Any]] = []
+
+    def _recommend(**kwargs: Any) -> dict[str, Any]:
+        recommend_calls.append(kwargs)
+        return {"recommendations": [{"worker_id": "catalog-bot:owner-1", "score": 0.9}]}
+
+    monkeypatch.setattr(service, "_call_bcsfuse_recommend", _recommend)
+
+    result = service.search_by_keyword(
+        keyword="研发",
+        runtime_state=runtime_state,
+        viewer_actor_type=viewer_actor_type,
+        viewer_actor_id=viewer_actor_id,
+        caller=BotCatalogCaller("teamclaw", "owner-1", None),
+    )
+
+    assert result["total"] == 1
+    assert recommend_calls[0]["filters"] == expected_recommend_filters
+    assert metadata.calls[0]["filters"] == expected_catalog_filters

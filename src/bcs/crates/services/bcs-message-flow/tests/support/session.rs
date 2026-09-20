@@ -9,6 +9,9 @@ pub struct StaticSessionManagement {
 }
 
 impl StaticSessionManagement {
+    // Compiled into several test binaries that share this support module but
+    // only contract_bot_event exercises the failure injection.
+    #[allow(dead_code)]
     pub fn with_get_failure(mut self) -> Self {
         self.fail_get = true;
         self

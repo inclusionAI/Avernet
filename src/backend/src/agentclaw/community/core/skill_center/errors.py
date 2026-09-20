@@ -93,6 +93,10 @@ class LocalSkillStorageError(Exception):
     """A package persistence or compensating cleanup operation failed."""
 
 
+class LocalSkillRuntimeUnavailableError(LocalSkillStorageError):
+    """Runtime delivery failed before its outcome could be confirmed."""
+
+
 class SkillParameterValidationError(Exception):
     """The full Bot-level parameter object violates SKILL.md config."""
 
@@ -298,3 +302,13 @@ class McpPermissionDeniedError(DomainError):
 
     def __init__(self, detail: str = "MCP permission denied") -> None:
         super().__init__(detail)
+
+
+class McpEndpointUnavailableError(DomainError):
+    """No endpoint can be safely delivered to the addressed Bot runtime."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "MCP_NO_COMPATIBLE_SECURE_ENDPOINT: 当前 MCP 没有可安全下发到该 Bot "
+            "的端点，请检查 MCP Center 的网络和端点配置"
+        )

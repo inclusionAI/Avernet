@@ -71,9 +71,11 @@ interface NodeExecutionListProps {
   selectedNodeId?: string
   workflowSpec?: WorkflowSpec
   onAnalyze: (node: NodeExecution) => void
+  onApproval?: (node: NodeExecution) => void
+  approvalNodeIds?: Set<string>
 }
 
-export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId, workflowSpec, onAnalyze }: NodeExecutionListProps) {
+export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId, workflowSpec, onAnalyze, onApproval, approvalNodeIds }: NodeExecutionListProps) {
   if (nodes.length === 0) {
     return <p className="py-8 text-center text-gray-400 text-sm">暂无节点执行记录</p>
   }
@@ -121,6 +123,8 @@ export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId,
               onSelect={() => onSelectNode(node.node_id)}
               workflowSpec={workflowSpec}
               onAnalyze={onAnalyze}
+              onApproval={onApproval}
+              hasApproval={approvalNodeIds?.has(node.node_id) ?? false}
               nodes={nodes}
               flowId={node.flow_id}
             />
@@ -137,6 +141,8 @@ function NodeRow({
   onSelect,
   workflowSpec,
   onAnalyze,
+  onApproval,
+  hasApproval,
   nodes,
   flowId,
 }: {
@@ -145,6 +151,8 @@ function NodeRow({
   onSelect: () => void
   workflowSpec?: WorkflowSpec
   onAnalyze: (node: NodeExecution) => void
+  onApproval?: (node: NodeExecution) => void
+  hasApproval: boolean
   nodes: NodeExecution[]
   flowId: string
 }) {
@@ -224,6 +232,15 @@ function NodeRow({
                     查询中
                   </>
                 ) : '刷新状态'}
+              </button>
+            )}
+            {hasApproval && onApproval && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onApproval(node) }}
+                className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100"
+                title="审批"
+              >
+                📋 审批
               </button>
             )}
           </div>
@@ -487,7 +504,8 @@ function NodeDetailPanel({
 
       {(node.executor_type === 'embedded-agent' ||
         node.executor_type === 'subagent' ||
-        node.executor_type === 'collaboration') && (
+        node.executor_type === 'collaboration' ||
+        node.executor_type === 'cli-script') && (
         <div className="border-t border-gray-100 pt-3">
           <NodeStepTracePanel flowId={flowId} nodeId={node.node_id} attempt={node.attempt} />
         </div>

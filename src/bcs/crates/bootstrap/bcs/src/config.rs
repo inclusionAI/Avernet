@@ -3283,15 +3283,14 @@ base_url = "https://directory.example.com"
             r#"
 bots_base_dir = "/tmp/bots"
 
-[human_notify]
-provider = "dummy"
-
-[human_notify.providers.dummy]
+[[human_notify.providers]]
+name = "dummy"
 enabled = true
 "#,
         )
         .expect("config parses");
-        assert_eq!(config.human_notify.provider.as_deref(), Some("dummy"));
-        assert!(config.human_notify.enabled_provider("dummy"));
+        assert_eq!(config.human_notify.providers.len(), 1);
+        assert_eq!(config.human_notify.providers[0].name, "dummy");
+        assert!(config.human_notify.providers[0].enabled);
     }
 }

@@ -246,6 +246,28 @@ class BotPublishRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def get_draft_by_source_bot_id(
+        self,
+        source_bot_id: str,
+        env: str,
+    ) -> Optional[BotPublishRecord]:
+        """Get the latest DRAFT publish record by source_bot_id (owner-agnostic).
+
+        Used by the Eval build path to find a DRAFT record for a bot so that
+        the build artifact can be produced without advancing the publish state
+        machine. Deliberately NOT filtered by owner_id for the same reason as
+        ``get_latest_success_by_source_bot_id``.
+
+        Args:
+            source_bot_id: source bot_id
+            env: environment
+
+        Returns:
+            The latest DRAFT publish record, or None if not found.
+        """
+        ...
+
+    @abstractmethod
     def get_latest_built_by_source_bot_id(
         self,
         source_bot_id: str,

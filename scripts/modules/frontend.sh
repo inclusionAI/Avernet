@@ -3,6 +3,228 @@
 [[ -n "${_FRONTEND_SH_LOADED:-}" ]] && return 0
 _FRONTEND_SH_LOADED=1
 
+# All network git in this file runs through the same bounds: git/curl has no
+# default low-speed abort, so a silently stalling remote would otherwise park
+# the start/pull path in a TCP connect timeout on every invocation.
+bounded_git() {
+    GIT_SSH_COMMAND="ssh -o ConnectTimeout=10" \
+        git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 "$@"
+}
+
+# Explicit composition-root choice; never accept an arbitrary source path.
+frontend_select_variant() {
+    case "${FRONTEND_VARIANT:-legacy}" in
+        legacy)
+            FRONTEND_DIR="${PROJECT_ROOT}/src/frontend"
+            FRONTEND_DEFAULT_SCRIPT="devs:local:oss"
+            FRONTEND_ROOT_ID="root-master"
+            ;;
+        nextgen)
+            FRONTEND_DIR="${PROJECT_ROOT}/src/frontend-nextgen"
+            FRONTEND_DEFAULT_SCRIPT="dev:local"
+            FRONTEND_ROOT_ID="root"
+            ;;
+        teamclaw)
+            # The internal product UI lives in an external checkout; the dir is
+            # an operator input (.env.local), and demanding it here fail-fasts
+            # a misconfigured start before anything is built.
+            if [ -z "${TEAMCLAW_DIR:-}" ]; then
+                printf '%s\n' 'FRONTEND_VARIANT=teamclaw requires TEAMCLAW_DIR (path to the teamclaw checkout, best set in .env.local)' >&2
+                return 1
+            fi
+            if [ ! -d "${TEAMCLAW_DIR}" ]; then
+                printf '%s\n' "TEAMCLAW_DIR does not exist: ${TEAMCLAW_DIR}" >&2
+                return 1
+            fi
+            FRONTEND_DIR="${TEAMCLAW_DIR}"
+            FRONTEND_DEFAULT_SCRIPT="devs:local"
+            FRONTEND_ROOT_ID="root"
+            ;;
+        *) printf '%s\n' 'FRONTEND_VARIANT must be legacy, nextgen or teamclaw' >&2; return 1 ;;
+    esac
+}
+
+# teamclaw frontend auto-update: fetch + fast-forward the checkout's current
+# branch toward its upstream before the dev server compiles it. Never blocks
+# startup: on a dirty or detached checkout it warns and keeps the tree as-is,
+# because ff-only protects the operator's uncommitted work, and a pull that
+# hides in the start path must never be the thing that ate someone's WIP.
+# Set TEAMCLAW_FRONTEND_AUTOUPDATE=0 to fetch-and-report only.
+frontend_teamclaw_sync_latest() {
+    local dir="${TEAMCLAW_DIR}" branch upstream behind
+    [ -n "$dir" ] && [ -d "$dir" ] || return 0
+    command -v git >/dev/null 2>&1 || return 0
+    git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+        log_warn "TEAMCLAW_DIR is not a git checkout; skipping frontend auto-update"
+        return 0
+    }
+    # Bounded fetch (bounds live in bounded_git). --no-tags trims the default
+    # refspec to what the upstream/behind checks below need. Any failure stays
+    # warn-and-continue: auto-update must never block startup.
+    if ! bounded_git -C "$dir" fetch --quiet --no-tags origin 2>/dev/null; then
+        log_warn "teamclaw frontend: git fetch failed; continuing with current tree"
+        return 0
+    fi
+    branch="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    upstream="$(git -C "$dir" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)"
+    if [ -z "${upstream:-}" ] || [ "$upstream" = "HEAD" ]; then
+        log_warn "teamclaw frontend: branch '${branch:-unknown}' has no upstream; skipping auto-update"
+        return 0
+    fi
+    if ! behind="$(git -C "$dir" rev-list --count "HEAD..@{upstream}" 2>/dev/null)"; then
+        # A failed behind-count must not masquerade as "up to date": the tree
+        # is untouched, but this branch's relation to its upstream is unknown.
+        log_warn "teamclaw frontend: could not determine how far behind ${upstream} the checkout is; continuing with ${branch}@$(git -C "$dir" rev-parse --short HEAD)"
+        return 0
+    fi
+    if [ "$behind" -eq 0 ]; then
+        log_info "teamclaw frontend up to date: ${branch}@$(git -C "$dir" rev-parse --short HEAD)"
+        return 0
+    fi
+    if [ "${TEAMCLAW_FRONTEND_AUTOUPDATE:-1}" != "1" ]; then
+        log_info "teamclaw frontend is ${behind} commit(s) behind ${upstream} (auto-update disabled); continuing with ${branch}@$(git -C "$dir" rev-parse --short HEAD)"
+        return 0
+    fi
+    if [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]; then
+        log_warn "teamclaw frontend is ${behind} commit(s) behind ${upstream}, but the checkout is dirty; not updating. Commit/stash, then run: git -C \"$dir\" merge --ff-only ${upstream}"
+        return 0
+    fi
+    if git -C "$dir" merge --ff-only '@{upstream}' >/dev/null 2>&1; then
+        log_info "teamclaw frontend updated to ${branch}@$(git -C "$dir" rev-parse --short HEAD) (was ${behind} behind)"
+    else
+        log_warn "teamclaw frontend ff-merge failed (diverged?); continuing with ${branch}@$(git -C "$dir" rev-parse --short HEAD)"
+    fi
+    return 0
+}
+
+# Explicit pull-to-latest for the teamclaw frontend checkout
+# (singlebox.sh frontend-pull). The sync that rides frontend_setup is
+# best-effort; this is the on-demand, operator-facing version of that update
+# and refuses loudly where sync only warns. A dirty tree is never stashed or
+# overwritten (user work is untouchable), a detached HEAD is refused
+# (advancing a detached checkout would disarm the upstream-based auto-update
+# sync depends on), and the merge is ff-only toward the checkout's own
+# upstream — Avernet has no submodule declaring a tracking branch (the
+# external TEAMCLAW_DIR owns its branch state), so the checkout's upstream is
+# the only pull authority, and a missing one is a hard refusal: never guess a
+# ref like master, a wrong ff target would move the checkout onto an
+# unrelated branch. After the advance the dependency install is re-run with
+# the same contract as the frontend setup path (install_frontend_deps;
+# OCB_SKIP_FRONTEND_INSTALL=1 skips); a failed install warns but never
+# repaints an already-successful pull as a failure.
+frontend_pull() {
+    case "${1:-}" in
+        "") ;;
+        *) log_error "unknown argument: ${1} (usage: singlebox.sh frontend-pull)"; return 1 ;;
+    esac
+
+    # The pull target is the teamclaw external checkout and nothing else —
+    # Avernet has no submodule, so an unset TEAMCLAW_DIR has nowhere to pull
+    # (src/frontend-nextgen is the in-repo nextgen export, not teamclaw).
+    local dir="${TEAMCLAW_DIR:-}"
+    if [ -z "${dir}" ]; then
+        log_error "frontend-pull updates the teamclaw checkout; TEAMCLAW_DIR is not set (set FRONTEND_VARIANT=teamclaw and TEAMCLAW_DIR in .env.local)"
+        return 1
+    fi
+    if [ ! -d "${dir}" ]; then
+        log_error "frontend dir missing: ${dir}"
+        return 1
+    fi
+    # A non-repo dir must fail here, not vacuously pass the porcelain guard.
+    if ! git -C "${dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        log_error "frontend dir is not a git checkout: ${dir}"
+        return 1
+    fi
+    if [ -n "$(git -C "${dir}" status --porcelain 2>/dev/null)" ]; then
+        log_error "working tree dirty; commit or stash first (frontend-pull refuses to touch user work)"
+        return 1
+    fi
+    if [ "$(git -C "${dir}" rev-parse --abbrev-ref HEAD)" = "HEAD" ]; then
+        log_error "checkout is detached at $(git -C "${dir}" rev-parse --short HEAD); frontend-pull only advances an on-branch checkout — attach one first (git -C \"${dir}\" checkout <branch>)"
+        return 1
+    fi
+
+    # Pull target: the checkout's own upstream. Never guess a ref: a wrong ff
+    # target moves the checkout onto an unrelated branch, which is exactly the
+    # damage this command refuses to do.
+    local remote branch=""
+    local upstream
+    upstream="$(git -C "${dir}" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)"
+    if [ -z "${upstream}" ] || [ "${upstream}" = "HEAD" ]; then
+        log_error "no pull target: the current branch has no upstream; refusing to guess in ${dir}"
+        return 1
+    fi
+    remote="${upstream%%/*}"
+    branch="${upstream#*/}"
+
+    # Transport bounds live in bounded_git. Errors surface: pull is an
+    # explicit command, so the real cause (auth, network, removed sprint
+    # branch) must not be eaten.
+    log_info "Pulling ${dir} toward ${remote}/${branch}..."
+    if ! bounded_git -C "${dir}" \
+        fetch --quiet --no-tags "${remote}" "${branch}"; then
+        log_error "fetch failed (${remote}/${branch})"
+        return 1
+    fi
+
+    local before after
+    before="$(git -C "${dir}" rev-parse HEAD)"
+    if ! git -C "${dir}" merge --ff-only FETCH_HEAD >/dev/null 2>&1; then
+        log_error "not fast-forwardable onto ${branch} (diverged or a different branch); resolve manually in ${dir}"
+        return 1
+    fi
+    after="$(git -C "${dir}" rev-parse HEAD)"
+    if [ "${before}" = "${after}" ]; then
+        log_info "frontend already up to date: ${branch}@$(git -C "${dir}" rev-parse --short HEAD)"
+    else
+        log_info "frontend pulled to ${branch}@$(git -C "${dir}" rev-parse --short HEAD) (was $(git -C "${dir}" rev-parse --short "${before}"))"
+    fi
+
+    # Re-run the dependency install scoped to the pull target — the same
+    # install_frontend_deps contract setup runs (npm ci against a committed
+    # lockfile, npm install --legacy-peer-deps for the internal graph's
+    # sibling peer ranges; HUSKY=0 installs no hooks). The subshell keeps the
+    # mapping local; install failure degrades to a warn: the git state is
+    # already at tip and that is what this command promises.
+    if [ "${OCB_SKIP_FRONTEND_INSTALL:-0}" != "1" ]; then
+        (
+            FRONTEND_DIR="${dir}"
+            install_frontend_deps
+        ) || log_warn "frontend dependency install failed; deps may be stale — re-run: ./scripts/singlebox.sh setup frontend"
+    fi
+    return 0
+}
+
+# Bind the public frontend to the Singlebox Gateway, not the exported
+# localhost:8888 placeholder (which is Backend, not Gateway). Other optional
+# upstreams remain explicit operator settings; never invent proxy services.
+frontend_configure_upstreams() {
+    case "${FRONTEND_VARIANT:-legacy}" in
+        nextgen|teamclaw) ;;
+        *) return 0 ;;
+    esac
+    export TEAMCLAW_GW_BASE="${TEAMCLAW_GW_BASE:-http://127.0.0.1:${GATEWAY_PORT:-8889}}"
+    export TEAMCLAW_ADMIN_BASE="${TEAMCLAW_ADMIN_BASE:-${TEAMCLAW_GW_BASE}}"
+    export TASK_ENGINE_UPSTREAM="${TASK_ENGINE_UPSTREAM:-${TEAMCLAW_GW_BASE}}"
+    export BCS_ENDPOINT_PRE="${BCS_ENDPOINT_PRE:-http://127.0.0.1:${BCS_PORT:-21000}}"
+    export BCS_ENDPOINT_PROD="${BCS_ENDPOINT_PROD:-http://127.0.0.1:${BCS_PORT:-21000}}"
+    if [ "${FRONTEND_VARIANT:-legacy}" = teamclaw ]; then
+        # Internal-only planes singlebox has no service for (private chat,
+        # clawweb, aix harness). Defaulting them to the Gateway makes their
+        # panels fail fast (404/502) inside the stack instead of silently
+        # targeting an unrelated 8888 placeholder; explicit env always wins.
+        export TEAMCLAW_PRIVATE_CHAT_MANAGEMENT_BASE="${TEAMCLAW_PRIVATE_CHAT_MANAGEMENT_BASE:-${TEAMCLAW_GW_BASE}}"
+        export TEAMCLAW_PRIVATE_CHAT_SESSION_BASE="${TEAMCLAW_PRIVATE_CHAT_SESSION_BASE:-${TEAMCLAW_GW_BASE}}"
+        export TEAMCLAW_LEGACY_AGENTCLAW_BASE="${TEAMCLAW_LEGACY_AGENTCLAW_BASE:-${TEAMCLAW_GW_BASE}}"
+        export TEAMCLAW_AIXHARNESS_BASE="${TEAMCLAW_AIXHARNESS_BASE:-${TEAMCLAW_GW_BASE}}"
+        export TEAMCLAW_CLAWWEB_BASE="${TEAMCLAW_CLAWWEB_BASE:-${TEAMCLAW_GW_BASE}}"
+        # Same local identity the gateway dev_cookie strategy resolves; aligned
+        # with /_dev/login's default cookie so header and cookie strategies
+        # agree on one user.
+        export TEAMCLAW_DEV_USER="${TEAMCLAW_DEV_USER:-001}"
+    fi
+}
+
 # Service-specific constants
 FRONTEND_LOG="${LOG_DIR}/frontend.log"
 # 前端 dev server 端口（umi 读 PORT 环境变量）。默认 8000，可用 FRONTEND_PORT 覆盖；
@@ -25,6 +247,12 @@ frontend_setup() {
     if ! check_command npm; then
         log_error "npm not found. Install Node.js with npm first."
         return 1
+    fi
+
+    # teamclaw is an external checkout that owns its own branch state: pull it
+    # to (or report on) the latest before anything compiles it.
+    if [ "${FRONTEND_VARIANT:-legacy}" = teamclaw ]; then
+        frontend_teamclaw_sync_latest || true
     fi
 
     cd "${FRONTEND_DIR}"
@@ -58,19 +286,26 @@ frontend_deps_ready() {
     fi
     # The local dev command is provided by devDependencies. A production-only
     # install can still contain all runtime packages while being unable to run
-    # `cross-env ... max dev`.
+    # the dev command. The internal teamclaw repo drives umi through bigfish,
+    # the in-repo frontends through @umijs/max directly.
+    local dev_bin="max"
+    if [ "${FRONTEND_VARIANT:-legacy}" = teamclaw ]; then
+        dev_bin="bigfish"
+    fi
     if [ ! -x "${FRONTEND_DIR}/node_modules/.bin/cross-env" ] ||
-       [ ! -x "${FRONTEND_DIR}/node_modules/.bin/max" ]; then
+       [ ! -x "${FRONTEND_DIR}/node_modules/.bin/${dev_bin}" ]; then
         return 1
     fi
 
     (
         cd "${FRONTEND_DIR}" &&
             node -e '
-                for (const pkg of ["@aix-chat/adapters", "@aix-chat/core", "@aix-chat/ui"]) {
+                const variant = process.argv[1];
+                const scope = variant === "nextgen" || variant === "teamclaw" ? "@tc-chat" : "@aix-chat";
+                for (const pkg of ["adapters", "core", "ui"].map(name => `${scope}/${name}`)) {
                     require.resolve(`${pkg}/package.json`);
                 }
-            '
+            ' "${FRONTEND_VARIANT:-legacy}"
     ) >/dev/null 2>&1
 }
 
@@ -88,15 +323,28 @@ install_frontend_deps() {
     # the call now stalls for ~7m before giving up, a fixed cost per
     # invocation regardless of tree size (see install_bcs_panel_asset_deps in
     # bcs.sh for the measurement). Neither flag changes what is installed.
+    # --legacy-peer-deps: the committed lockfile can still carry the internal
+    # graph's sibling peer ranges (the @tc-chat/ui 5/6 split rides through
+    # tc-chat extensions as peerOptional), and npm ci revalidates the peer tree
+    # on top of the locked resolution — an in-sync lockfile then ERESOLVEs and
+    # dead-ends every setup/start of a locked internal checkout. The flag keeps
+    # ci's exact-lockfile reproducibility and only skips that revalidation,
+    # mirroring the leniency the un-locked arm below already applies (teammates'
+    # tnpm resolves peer ranges leniently). A package.json/lockfile desync still
+    # fails loudly with npm's own sync error.
     if [ -f package-lock.json ]; then
-        if ! HUSKY=0 npm ci --include=dev --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
+        if ! HUSKY=0 npm ci --include=dev --legacy-peer-deps --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
             log_error "Failed to install frontend dependencies (npm ci)."
             log_error "若刚改过 package.json,请先本地 'npm install' 更新 package-lock.json 再提交。"
             return 1
         fi
     else
         log_warn "No package-lock.json; falling back to 'npm install' (will generate a lockfile)."
-        if ! HUSKY=0 npm install --include=dev --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
+        # --legacy-peer-deps: an un-locked internal dependency graph routinely
+        # carries sibling peer ranges (styled-components 5 vs 6 across umi
+        # plugins and private extensions) that ERESOLVE on a plain install;
+        # teammates' tnpm resolves them leniently and npm must too.
+        if ! HUSKY=0 npm install --include=dev --legacy-peer-deps --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
             log_error "Failed to install frontend dependencies"
             return 1
         fi
@@ -114,7 +362,8 @@ frontend_start() {
     frontend_setup || return 1
 
     cd "${FRONTEND_DIR}"
-    local frontend_script="${FRONTEND_DEV_SCRIPT:-devs:local:oss}"
+    frontend_configure_upstreams
+    local frontend_script="${FRONTEND_DEV_SCRIPT:-${FRONTEND_DEFAULT_SCRIPT:-devs:local:oss}}"
 
     stop_port_processes_if_owned "${FRONTEND_PORT}" "${FRONTEND_DIR}" "existing frontend"
     if port_is_listening "${FRONTEND_PORT}"; then
@@ -171,7 +420,7 @@ frontend_start() {
 frontend_http_ready() {
     local html
     html="$(curl --noproxy '*' --connect-timeout 1 --max-time 2 -fsS "http://127.0.0.1:${FRONTEND_PORT}/" 2>/dev/null)" || return 1
-    printf '%s' "$html" | grep -q 'id="root-master"' || return 1
+    printf '%s' "$html" | grep -Fq "id=\"${FRONTEND_ROOT_ID:-root-master}\"" || return 1
     printf '%s' "$html" | grep -q 'src="/umi.js"' || return 1
     if printf '%s' "$html" | grep -qi 'Bundling'; then
         return 1
@@ -249,5 +498,5 @@ frontend_prereqs() {
 }
 
 frontend_help() {
-    echo "frontend - Web UI workbench (port ${FRONTEND_PORT})"
+    echo "frontend - Web UI workbench (port ${FRONTEND_PORT}; FRONTEND_VARIANT=legacy|nextgen|teamclaw)"
 }

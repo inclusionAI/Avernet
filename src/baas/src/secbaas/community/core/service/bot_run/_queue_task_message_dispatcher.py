@@ -33,6 +33,11 @@ from secbaas.community.core.service.config import SystemConfigKey
 from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
+from ._bot_run_utils import (
+    CALLER_DEVICE_PROVIDER,
+    CALLER_SANDBOX_META_KEY,
+)
+
 if TYPE_CHECKING:
     from secbaas.community.api.config_manage import SystemConfigManageService
     from secbaas.community.core.repository.bot_run_queue import BotRunQueueRepository
@@ -90,6 +95,7 @@ class QueueTaskMessageDispatcher:
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """队列化消息发送：只入库（PENDING），Worker 异步执行。
 
@@ -107,6 +113,9 @@ class QueueTaskMessageDispatcher:
             meta["timeout"] = timeout
         if attachments:
             meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
+        if session_pending:
+            meta["session_pending"] = True
+        self._stamp_caller_sandbox(meta, binding_info)
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
             "[queue_dispatcher.dispatch_send] run_id=%s bot_id=%s session_id=%s",
@@ -126,6 +135,7 @@ class QueueTaskMessageDispatcher:
         context: BotChatContext | None = None,
         bot_id: str = "",
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """队列化消息注入：只入库（PENDING），Worker 异步执行。
 
@@ -133,9 +143,15 @@ class QueueTaskMessageDispatcher:
         串行由 Worker 端 DistributedLockService 的 session 锁保证。
         """
         self._check_backpressure(bot_id)
-        meta: dict[str, Any] = {"request_type": "inject"}
+        meta: dict[str, Any] = {
+            "request_type": "inject",
+            "timeout": 300.0,
+        }
         if attachments:
             meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
+        if session_pending:
+            meta["session_pending"] = True
+        self._stamp_caller_sandbox(meta, binding_info)
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
             "[queue_dispatcher.dispatch_inject] run_id=%s bot_id=%s session_id=%s",
@@ -157,7 +173,9 @@ class QueueTaskMessageDispatcher:
         context: BotChatContext | None = None,
         timeout: float | None = None,
         bot_id: str = "",
+        chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """队列化流式发送：入队 + 轮询 chunk 表。
 
@@ -175,6 +193,9 @@ class QueueTaskMessageDispatcher:
             meta["timeout"] = timeout
         if attachments:
             meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
+        if session_pending:
+            meta["session_pending"] = True
+        self._stamp_caller_sandbox(meta, binding_info)
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
 
         logger.info(
@@ -356,6 +377,21 @@ class QueueTaskMessageDispatcher:
                 bot_id=bot_id, active=depth, limit=self._max_queue_depth
             )
 
+    @staticmethod
+    def _stamp_caller_sandbox(
+        meta: dict[str, Any], binding_info: BotBindingInfo | None
+    ) -> None:
+        """caller 模式：把入队时已建容器的 sandbox_id 带进 queue meta，供 worker 复用。
+
+        否则 worker 侧会再调一次 caller-connection，建出第二个容器。
+        """
+        if (
+            binding_info is not None
+            and binding_info.device_provider == CALLER_DEVICE_PROVIDER
+            and binding_info.sandbox_id
+        ):
+            meta[CALLER_SANDBOX_META_KEY] = binding_info.sandbox_id
+
     def _enqueue_work(
         self,
         run_id: str,
@@ -374,27 +410,3 @@ class QueueTaskMessageDispatcher:
         self._queue_repository.insert_queue(
             run_id=run_id, bot_id=bot_id, session_id=session_id, meta=meta
         )
-
-    @staticmethod
-    def _build_metadata(
-        context: BotChatContext | None,
-        *,
-        session_id: str | None = None,
-        request_type: str = "chat",
-    ) -> dict[str, Any]:
-        """构建 Worker 重建上下文所需的 metadata。
-
-        以下字段由 Worker 端 ``BotRunRequestExecutor`` 读取来重建 ``BotChatContext``：
-        - ``app_id`` / ``app_type`` / ``tenant``：来自 BotChatContext
-        - ``session_id``：会话 ID
-        - ``request_type``：chat / inject
-        """
-        metadata: dict[str, Any] = {}
-        if session_id:
-            metadata["session_id"] = session_id
-        if context:
-            metadata["app_id"] = context.app_id
-            metadata["app_type"] = context.app_type
-            metadata["tenant"] = context.tenant
-        metadata["request_type"] = request_type
-        return metadata

@@ -367,6 +367,11 @@ class DistributedLockService:
 
         注意：此方法应该在已持有 _local_lock 的情况下调用。
 
+        DB 真值优先：先删 DB 锁行，DB 成功后再清本地簿记。若 DB 删除抛异常
+        或返回 False（行已不存在），本地 ``LockContext`` 保留，便于上层重试或
+        由 watchdog（``BotRunRecoveryTask`` 的过期 session 锁对账）回收，
+        避免出现"本地簿记已删但 DB 锁行残留"导致的孤儿锁。
+
         Args:
             lock_name: 锁名称
             lock_holder: 锁持有者
@@ -376,20 +381,25 @@ class DistributedLockService:
         """
         try:
             # 注意：调用者已经持有 _local_lock，这里不需要再获取
-            if lock_name in self._lock_contexts:
-                context = self._lock_contexts[lock_name]
-                # 停止续期线程
+            context = self._lock_contexts.get(lock_name)
+            # 续期线程无关 DB 删除成败都应停止，避免继续打 DB；
+            # 但本地 LockContext 在 DB 确认删除前保留。
+            if context is not None:
                 self._stop_renew_thread(context)
-                # 移除上下文
-                del self._lock_contexts[lock_name]
 
-            # 删除数据库中的锁记录
+            # 先删除数据库中的锁记录：DB 是真值，删除成功才认为锁被释放。
             deleted = self._repository.delete_lock(lock_name)
             if deleted:
+                # DB 删除成功后再清理本地簿记，避免提前清除导致重试失据。
+                if context is not None:
+                    del self._lock_contexts[lock_name]
                 logger.info(
                     f"[_release_lock_internal] Lock '{lock_name}' released by '{lock_holder}'"
                 )
             else:
+                # DB 行不存在：本地簿记已与 DB 不一致，清理簿记避免重试时误判持有。
+                if context is not None:
+                    del self._lock_contexts[lock_name]
                 logger.warning(
                     f"[_release_lock_internal] Lock '{lock_name}' not found in database"
                 )
@@ -397,6 +407,8 @@ class DistributedLockService:
             return deleted
 
         except Exception as e:
+            # DB 删除抛异常：保留本地 LockContext，便于上层重试或 watchdog 回收，
+            # 避免出现"本地簿记已删但 DB 锁行残留"的孤儿锁（Issue 2-A 修复）。
             logger.error(
                 f"[_release_lock_internal] Error releasing lock '{lock_name}': {e}"
             )

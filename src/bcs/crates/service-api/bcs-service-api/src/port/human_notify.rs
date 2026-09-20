@@ -17,6 +17,10 @@ pub struct MentionNotification {
     /// 会话 id；群级消息（无 session）时为空字符串。
     pub session_id: String,
     pub group_id: String,
+    /// Group display name; absent when the group is unnamed.
+    pub group_name: Option<String>,
+    /// Session title; absent for group-level messages or unnamed/unavailable sessions.
+    pub session_name: Option<String>,
     /// 发送者 actor id（`bot_x` 或 `human_y`，群回调为 `system`）。
     pub sender_actor_id: String,
     /// 发送者展示名。
@@ -70,6 +74,8 @@ mod tests {
         MentionNotification {
             session_id: "group-1:abcdef12".to_string(),
             group_id: "group-1".to_string(),
+            group_name: None,
+            session_name: None,
             sender_actor_id: "bot-driver".to_string(),
             sender_label: "Driver".to_string(),
             mentioned: vec![MentionedHuman {

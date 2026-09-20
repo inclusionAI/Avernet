@@ -16,6 +16,8 @@ provides:
   - "CurrentRuntimeLayoutProbeService"
   - "SkillQueryService"
   - "LocalSkillUploadService"
+  - "LocalSkillPackageRuntime"
+  - "LocalSkillPackageRuntimeResult"
   - "SkillPackageValidator"
   - "SkillPackageManifestParserProtocol"
   - "ValidatedSkillPackage"
@@ -61,17 +63,16 @@ provides:
   - "RecoveringBotRuntimeProjector"
   - "SkillRuntimeDelivery"
   - "RuntimeServiceFactoryBoundary"
-  - "LocalSkillCleanupWorkModel"
   - "DesktopSkillRecoveryServiceProtocol"
   - "DesktopSkillRecoveryService"
   - "DesktopSkillRecoveryTaskHandler"
-  - "DesktopSkillRecoverySweeper"
   - "SkillParser"
   - "SkillMetadata"
   - "SkillManifestError"
   - "SkillManifestErrorCode"
   - "SkillManifestValidationIssue"
   - "SkillManifestValidationResult"
+  - "SkillUploadErrorCode"
   - "SkillCenterGatewayService"
   - "SkillCenterReferenceService"
   - "SkillCenterReferenceProcessor"
@@ -108,7 +109,6 @@ consumes:
   - "SpaceSkillSourcePlugin"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
-  - "LocalSkillCleanupRepository"
   - "BotRuntimeProjectorProtocol"
   - "SpaceAccessServiceProtocol"
   - "SpaceSkillRepository"
@@ -124,6 +124,7 @@ consumes:
   - "DesktopSkillRecoveryConfig"
   - "ServiceArtifactLineageReaderProtocol"
 internal_dependencies:
+  - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.core.bot_config_surface    # BotConfigCoords, the shared config-category address type
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
@@ -171,7 +172,6 @@ internal_dependencies:
   - agentclaw.community.log
   - agentclaw.community.plugin_api.cache
   - agentclaw.community.plugin_api.http_client
-  - agentclaw.community.plugin_api.local_skill_cleanup
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.devices
@@ -415,15 +415,14 @@ deletion and Pool cutover/rollback paths. Phase 1 intentionally has no
 cache-backed cross-command Bot mutation fence; durable serialization is
 deferred to the task-queue design.
 
-`desktop_skill_recovery.py` owns the durable level-triggered follow-up:
+`desktop_skill_recovery.py` owns the durable event-triggered follow-up:
 `skill_center.desktop_skill_recovery`, one task type deduped by
 `(env, app, owner_id, bot_id)`. Its payload contains only `owner_id + bot_id`;
 it never freezes an action, Version, mapping, or signed URL. Set/Direct
 mutation completion (including Reference final-add), Track Latest Center
 waiting, and current-binding startup/reconnect events all call the same
-`DesktopSkillRecoveryService.ensure` seam. A low-frequency paged sweeper calls
-that same seam for live bound Desktop Bots and performs no download or Runtime
-projection itself.
+`DesktopSkillRecoveryService.ensure` seam. There is no periodic full-fleet
+sweeper; elapsed time alone never creates a new recovery task.
 
 Ordinary `project` and direct `apply_plan` calls pass through
 `RecoveringBotRuntimeProjector`, so callers such as active Local replacement
@@ -438,8 +437,8 @@ the only Runtime write. Healthy package/download/capacity waiting uses a
 five-second `Reschedule`; transient storage/network/device failures use queue
 `Retry`; permanent exact-package preparation issues replace any derived
 package-pending observation for that same current mapping, while other
-recoverable mappings continue. Permanent degraded items do not pin the live key. The task deadline
-is 30 minutes, and terminal Queue transitions release the Bot-level key.
+recoverable mappings continue. Permanent degraded items do not pin the live key. The configured task deadline
+is 10 minutes, and terminal Queue transitions release the Bot-level key.
 Skill recovery never declares MCP scope or updates Passport. Pool migration
 retains its independent `skills_pool.reconcile` task and exclusive mapping
 ownership during transition.
@@ -449,35 +448,28 @@ SkillSet/Direct commands continue to maintain Installation synchronously; the
 lazy flush reconciles the rows that pre-date the new command path, treating a
 Default-Set exclusion as that Set's per-Bot deactivation of the member.
 
-Local Skill replacement is defined only for an existing complete package at the
-stable layout-owned `skills-local/<skill-name>` locator. It stages and verifies
-the new package, backs up the old package, and publishes the replacement back to
-that same locator; the Skill ID, `git_path`, desired active state, membership,
-and Installation identity do not change. Staging and rollback directories are
-temporary implementation details and are removed before success is returned.
-If publication, metadata persistence, audit persistence, or temporary-package
-cleanup fails, the old canonical package and metadata are restored before the
-request fails. A Runtime projection failure is instead returned as `PENDING` /
-`DEGRADED` with the new package and metadata retained. A non-canonical locator or a metadata row
-whose authoritative package is missing fails closed and is repaired outside the
-upload path.
+Local Skill create/replace prefers the package-level Runtime contract when the
+active standard Engine declares `skills.local_package.apply.v1`; Teclaw calls
+its package endpoint directly. Backend sends one canonical ZIP plus logical
+`LEGACY|POOL`, verifies the returned digest, then writes metadata. Engine owns
+staging, exact replacement, rollback, and cleanup. A capability-absent old
+standard Engine keeps the Legacy per-file adapter, but no fallback is allowed
+after a new apply request may have written.
 
-Public Local Skill deletion first persists a non-purgeable `preparing` record,
-then promotes it to `repair_required` before copying and verifying package
-bytes in a unique Bot-scoped quarantine. Its one transaction rechecks active
-custom SkillSet references, removes the default-set exclusion, all SkillSet
-associations, and the Skill row, and makes the retained cleanup work
-purgeable. Bot-scoped SkillSet activation takes the same edit lease, so it
-cannot publish a stale association while deletion is in flight. If the
-transaction fails, the package is restored from quarantine before the request
-fails. A post-commit purge failure retains the same durable cleanup work; it
-never recreates the deleted Skill.
+Create continues to persist the existing Backend compatibility locator and
+replace preserves the historical `git_path` byte-for-byte; Engine
+`target_path` is diagnostic only. Engine success followed by DB/audit failure
+returns a storage error without reverse file deletion or Runtime Projection;
+retrying the same complete package converges. Engine storage action and public
+`created|updated` operation are intentionally independent so orphan or missing
+canonical content can self-heal.
 
-If a device reports source deletion failure after a partial delete and the
-authoritative package cannot be verified repaired, the complete quarantine is
-retained as `repair_required` cleanup work. It is deliberately excluded from
-ordinary obsolete-byte purge retries until package repair is resolved.
-Before a later deletion of that same Local Skill starts, it reacquires the
-serialized edit lease and restores any such quarantine to the authoritative
-locator; only after that succeeds can the deletion retry. If restoration leaves
-a redundant quarantine, ordinary pending cleanup may purge that duplicate.
+Public Local Skill deletion keeps authorization, readiness checks, the edit
+lease, reference prechecks, and metadata deletion in Backend. It delegates the
+complete package root to one runtime deletion operation before deleting the
+metadata; Backend does not list, copy, quarantine, restore, or individually
+remove package files. Only a positively reported runtime success permits the
+metadata transaction. A later metadata failure is returned as a storage error
+without restoring runtime files, so this flow is not a cross-storage atomic
+transaction. The exact trade-off and Teclaw adapter semantics are recorded in
+`docs/adr/0014-engine-owned-package-deletion.md`.

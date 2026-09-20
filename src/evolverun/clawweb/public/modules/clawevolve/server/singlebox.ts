@@ -81,6 +81,7 @@ export async function startSinglebox(config: SingleboxConfig) {
   }, resolveBot);
   const module = createClawevolveModule({
     version: "openversion", artifactBucket: "clawevolve-artifacts", db, botDb, artifactStore, publicBaseUrl, dispatch: execution.dispatch, cancelExecution: execution.cancel,
+    modelConfig: { defaultModel: config.model, models: config.models },
   });
   await module.start();
 
@@ -374,7 +375,7 @@ export async function startSinglebox(config: SingleboxConfig) {
     })) });
   });
   app.get("/api/singlebox/info", (_request, response) => {
-    response.json({ model: config.model });
+    response.json({ model: config.model, models: config.models });
   });
   app.use("/api/evolve", module.publicRouter);
   app.use("/api/bench", module.benchRouter);

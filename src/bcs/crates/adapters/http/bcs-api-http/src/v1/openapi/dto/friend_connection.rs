@@ -96,12 +96,21 @@ impl RejectFriendConnectionRequestBody {
 pub struct ListFriendConnectionsQuery {
     pub actor_type: bcs_service_api::application::v1::FriendConnectionActorType,
     pub actor_id: String,
+    #[serde(default)]
+    pub target_type: Option<bcs_service_api::application::v1::FriendConnectionActorType>,
+    #[serde(default = "default_page")]
+    pub page: u32,
+    #[serde(default = "default_page_size")]
+    pub page_size: u32,
 }
 
 impl ListFriendConnectionsQuery {
     pub fn into_command(self, caller: AuthenticatedCaller) -> ListFriendConnections {
         ListFriendConnections {
             caller,
+            target_type: self.target_type,
+            page: self.page,
+            page_size: self.page_size,
             actor: FriendConnectionActor {
                 actor_type: self.actor_type,
                 id: self.actor_id,

@@ -22,6 +22,8 @@ methods (callers always pass explicit ``entity_id`` / ``bot_id`` /
 """
 from __future__ import annotations
 
+from agentclaw.community.api.digital_employee_service import DigitalEmployeeServiceProtocol
+
 from typing import Callable
 
 from injector import Binder, Injector, Module, inject, provider, singleton
@@ -139,6 +141,7 @@ class McpModule(Module):
             caller_identity_repository=caller_identity_repository,
             resolver_provider=lambda: injector.get(DeviceContextResolver),
             device_sync_dispatcher_provider=lambda: injector.get(DeviceSyncDispatcher),
+            employee_service_provider=lambda: injector.get(DigitalEmployeeServiceProtocol),
         )
 
     @singleton

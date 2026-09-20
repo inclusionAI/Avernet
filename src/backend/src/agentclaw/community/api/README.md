@@ -115,10 +115,13 @@ provides:
   - ServiceEditLockServiceProtocol
   - BotQuotaServiceProtocol
   - SpaceSkillOfflineServiceProtocol
+  - TcResourceReadyObserverProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.kernel.publish_ignore
+  - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.core.devices.repository.record  # DeviceBindingRecord input for provider-aware token target resolution
   - agentclaw.community.core.bot_collaborator.models # Collaborator records, roles and permission levels — typed in collaborator_service.py
   - agentclaw.community.core.access.models            # UserInfoRecord — typed in user_service.py
@@ -133,6 +136,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_config_manifest.credentials.errors  # error family raised by the re-exported Protocol's implementations
   - agentclaw.community.core.caller_identity.contracts  # Caller identity API DTOs and stable errors
   - agentclaw.community.core.caller_identity.credential  # CallerToken — typed in caller_credential.py
+  - agentclaw.community.core.execution_identity.protocols  # execution identity service contract
   - agentclaw.community.core.caller_identity.protocols  # Caller collaborators — typed in caller_identity_service.py
   - agentclaw.community.core.channel.models          # ChannelRecord — typed in channel_service.py
   - agentclaw.community.core.economy.governance.domain.enums     # GovernanceStatus — typed in governance_service.py LifecycleServiceProtocol
@@ -169,6 +173,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
   - agentclaw.community.plugin_api.skill_center_gateway # Public catalogue request/result DTOs typed in skill_center_gateway_service.py
   - agentclaw.community.core.task.task_runner.integration.ports  # OpenApiBotPort — typed in task_grant_service.py (stateless secbaas grant/revoke relay)
+  - agentclaw.community.core.tc_file_upload_integrations.service_protocol  # READY observation Service API re-exported for HTTP adapters
   - agentclaw.community.log                          # get_logger used by task_grant_service.py grant/revoke relay logging
   - agentclaw.community.core.access.policy_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.access.user_service_protocol  # Protocol defined in its owning core module, re-exported here
@@ -203,6 +208,7 @@ internal_dependencies:
   - agentclaw.community.core.channel.channel_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.common_config.beta_quota_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.common_config.common_config_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.common_config.bot_config_protocol  # Protocol + BotCommonConfigEntry defined in their owning core module, re-exported here
   - agentclaw.community.core.cron.cron_relay_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.desktop_bot.desktop_bot_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.devices.device_service_protocol  # Protocol defined in its owning core module, re-exported here

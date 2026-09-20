@@ -30,6 +30,9 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
     ManagedDeployConfigComposer,
 )
+from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
+    NoopStoragePolicy,
+)
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 from agentclaw.community.plugins.local.outbound_rules import NoopOutboundRuleProvider
@@ -153,6 +156,7 @@ class TestTheContract:
                 storage_path=MagicMock(),
                 sandbox_registry=MagicMock(),
                 bot_repo=MagicMock(),
+                storage_policy=NoopStoragePolicy(),
             ).name
             is DeployRuntime.MANAGED
         )

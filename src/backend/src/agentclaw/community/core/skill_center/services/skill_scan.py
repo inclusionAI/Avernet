@@ -20,7 +20,6 @@ from agentclaw.community.core.skill_center.skill_scan_service_protocol import Sk
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-    from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
 
 
 logger = get_logger()
@@ -49,12 +48,11 @@ class SkillScanService(LifecycleBase, SkillScanServiceProtocol):
     """Skill Scan Service - 提供技能扫描和定时任务管理能力."""
 
     async def startup(self) -> None:
-        """Lifecycle hook — start the scanner + both daily-task schedulers.
+        """Lifecycle hook — start the scanner and optional Git safety scan.
 
         Body lifted from the pre-R11 ``startup_skill_scan_service`` hook
-        in ``api/lifecycle.py``. The hardcoded git archive URL stays
-        inline to preserve existing behavior; cleaning that up is a
-        separate task.
+        in ``api/lifecycle.py``. Center reconciliation has its own periodic
+        lifecycle and is intentionally not scheduled here.
         """
         if not self._config.get("enabled", True):
             logger.info("SkillScanService is disabled by configuration")
@@ -68,14 +66,12 @@ class SkillScanService(LifecycleBase, SkillScanServiceProtocol):
                 "SkillScanService: skill_scan.git_archive_url not set, "
                 "skipping git daily-scan scheduler"
             )
-        self.start_center_daily_task()
         logger.info("SkillScanService started via Lifecycle.startup()")
 
     def __init__(
         self,
         cache_plugin: CachePlugin,
         skill_repository: "SkillRepository",
-        skill_center_sync_service: "SkillCenterSyncService",
         scanner: SkillScannerPlugin,
         config: dict[str, Any] | None = None,
     ) -> None:
@@ -86,11 +82,8 @@ class SkillScanService(LifecycleBase, SkillScanServiceProtocol):
         self._scheduler_started = False
         self._daily_task_thread: threading.Thread | None = None
         self._daily_task_stop_event = threading.Event()
-        self._center_daily_task_thread: threading.Thread | None = None
-        self._center_daily_task_stop_event = threading.Event()
         self._cache_plugin = cache_plugin
         self._skill_repository = skill_repository
-        self._skill_center_sync_service = skill_center_sync_service
         self._scanner = scanner
 
     def _load_config(self, override_config: dict[str, Any] | None) -> dict[str, Any]:
@@ -387,109 +380,6 @@ class SkillScanService(LifecycleBase, SkillScanServiceProtocol):
         logger.info("Daily scheduled task stopped")
         return True
 
-    # =========================================================================
-    # Center Skill 每日定时任务（与 git daily task 完全对称）
-    # =========================================================================
-    def exec_center_task(self) -> dict[str, Any]:
-        """Run the canonical materialized-SC-Public reconciliation once.
-
-        This legacy scheduler delegates to the G4 Sync Service rather than
-        enumerating ``center://`` rows itself.  The service owns the exact
-        materialized-public filter and the environment-wide stable lock.
-        """
-        from agentclaw.community.utils.env_utils import get_current_env
-
-        env = get_current_env()
-        cache = self._cache_plugin
-        lock_key = f"skill_center_scan_exec_task_{env}" if env != "dev" else "skill_center_scan_exec_task"
-        lock_value = cache.acquire_lock(lock_key, ttl=600)
-        if not lock_value:
-            logger.info("[SkillScanService] exec_center_task: lock held, skipping")
-            return {"success": False, "error": "Lock held by another instance"}
-
-        try:
-            sync_svc = self._skill_center_sync_service
-            summary = sync_svc.sync()
-
-            logger.info(
-                "[SkillScanService] exec_center_task done: total=%d success=%d failed=%d",
-                summary.scanned,
-                summary.updated + summary.unchanged,
-                summary.failed,
-            )
-            return {
-                "success": True,
-                "total": summary.scanned,
-                "success_count": summary.updated + summary.unchanged,
-                "failed_count": summary.failed,
-            }
-
-        except Exception as e:
-            logger.error("[SkillScanService] exec_center_task error: %s", e)
-            return {"success": False, "error": str(e)}
-        finally:
-            cache.release_lock(lock_key, lock_value)
-            logger.info("[SkillScanService] exec_center_task: released lock key=%s", lock_key)
-
-    def _center_daily_task_loop(self) -> None:
-        """Center skill 每日定时扫描 loop（与 _daily_task_loop 完全对称）。"""
-        actual_hour, actual_minute = self._get_actual_task_time()
-        logger.info(
-            "[SkillScanService] center daily task started, scheduled at %02d:%02d daily",
-            actual_hour, actual_minute,
-        )
-        while not self._center_daily_task_stop_event.is_set():
-            try:
-                wait_seconds = self._calculate_seconds_until_target_time()
-                logger.info("[SkillScanService] center next scan in %.0f seconds", wait_seconds)
-                if self._center_daily_task_stop_event.wait(timeout=wait_seconds):
-                    break
-                logger.info("[SkillScanService] starting center daily scan task")
-                self.exec_center_task()
-            except Exception as e:
-                logger.error("[SkillScanService] center daily task loop error: %s", e)
-                self._center_daily_task_stop_event.wait(timeout=60)
-        logger.info("[SkillScanService] center daily task thread ended")
-
-    def start_center_daily_task(self) -> bool:
-        """启动 center skill 每日定时扫描（仅 pre/prod 环境）。
-
-        与 start_daily_task 完全对称。
-        """
-        from agentclaw.community.utils.env_utils import get_current_env_with_gray
-        current_env = get_current_env_with_gray()
-        if current_env not in ["pre", "prod"]:
-            logger.info(
-                "[SkillScanService] env='%s', skipping center daily task (only pre/prod)",
-                current_env,
-            )
-            return False
-
-        self._ensure_started()
-
-        if self._center_daily_task_thread and self._center_daily_task_thread.is_alive():
-            logger.info("[SkillScanService] center daily task already running, skipping duplicate start")
-            return True
-
-        self._center_daily_task_stop_event.clear()
-        self._center_daily_task_thread = threading.Thread(
-            target=self._center_daily_task_loop,
-            name="SkillScanCenterDailyTask",
-            daemon=True,
-        )
-        self._center_daily_task_thread.start()
-        logger.info("[SkillScanService] center daily task started")
-        return True
-
-    def stop_center_daily_task(self) -> bool:
-        """停止 center skill 每日定时扫描。"""
-        if not self._center_daily_task_thread or not self._center_daily_task_thread.is_alive():
-            return True
-        self._center_daily_task_stop_event.set()
-        self._center_daily_task_thread.join(timeout=5)
-        logger.info("[SkillScanService] center daily task stopped")
-        return True
-
     def scan_skill(self, skill_path: str) -> Any:
         """Scan a single skill file.
 
@@ -742,7 +632,7 @@ class SkillScanService(LifecycleBase, SkillScanServiceProtocol):
     ) -> dict[str, Any] | None:
         from agentclaw.community.utils import env_utils
 
-        if not env_utils.get_current_env() in ["pre","dev"]:
+        if env_utils.get_current_env() not in ["pre", "dev"]:
             risk_tags = []
 
         """根据 git_path 更新技能的 risk_tags 和 mcp_dependencies。

@@ -7,6 +7,9 @@ import pytest
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
     ManagedDeployConfigComposer,
 )
+from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
+    NoopStoragePolicy,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService, BaasServiceError
 
 
@@ -17,6 +20,7 @@ def _make_service(http_client=None) -> tuple[BaasService, MagicMock]:
             storage_path=MagicMock(),
             sandbox_registry=MagicMock(),
             bot_repo=MagicMock(),
+            storage_policy=NoopStoragePolicy(),
         ),
         startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas-test:8080",

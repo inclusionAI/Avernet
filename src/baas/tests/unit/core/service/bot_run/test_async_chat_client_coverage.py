@@ -56,8 +56,8 @@ def mock_bot_ws_instance(mock_bot_ws):
         return_value={"server": {"host": "srv"}, "features": {}}
     )
     instance.close = AsyncMock()
-    instance.chat_send = AsyncMock()
-    instance.chat_inject = AsyncMock()
+    instance.chat_send = AsyncMock(return_value={"ok": True})
+    instance.chat_inject = AsyncMock(return_value={"ok": True})
     instance.connected = True
     return instance
 
@@ -867,14 +867,33 @@ class TestOnDisconnect:
         state2.stream_queue = asyncio.Queue()
 
         # State without queue should not cause error
-        _setup_session_state(client, "s3")
+        state3 = _setup_session_state(client, "s3")
 
         client._on_disconnect("disconnect", {"reason": "closed"})
 
         chunk1 = state1.stream_queue.get_nowait()
         assert chunk1.type == "error"
+        assert chunk1.content == "connection lost"
         chunk2 = state2.stream_queue.get_nowait()
         assert chunk2.type == "error"
+        # 断连时所有在途会话被包装成终态 error（无 queue 的会话仅置状态）
+        for state in (state1, state2, state3):
+            assert state.state == "error"
+            assert state.chat_complete.is_set()
+
+    def test_on_disconnect_skips_completed_sessions(self, mock_bot_ws):
+        client = AsyncChatClient(uri="ws://host/ws")
+        done = _setup_session_state(client, "done")
+        done.state = "final"
+        done.content = "ok"
+        done.chat_complete.set()
+        done.stream_queue = asyncio.Queue()
+
+        client._on_disconnect("disconnect", {})
+
+        # 已完成的会话不被覆盖成 error，也不追加 error chunk
+        assert done.state == "final"
+        assert done.stream_queue.empty()
 
     def test_on_disconnect_sets_disconnect_event(self, mock_bot_ws):
         client = AsyncChatClient(uri="ws://host/ws")
@@ -906,6 +925,7 @@ class TestSendMessageStream:
                     StreamChunk(type="delta", content="chunk1")
                 )
                 state.stream_queue.put_nowait(StreamChunk(type="final", content="done"))
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = push_chunks
 
@@ -936,6 +956,7 @@ class TestSendMessageStream:
             state = client._sessions.get(sk)
             if state and state.stream_queue:
                 state.stream_queue.put_nowait(StreamChunk(type="error", content="bad"))
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = push_error
 
@@ -957,6 +978,7 @@ class TestSendMessageStream:
             if state and state.stream_queue:
                 state.stream_queue.put_nowait(StreamChunk(type="delta", content="d1"))
                 state.stream_queue.put_nowait(StreamChunk(type="final", content="end"))
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = push_chunks
 
@@ -974,7 +996,7 @@ class TestSendMessageStream:
         await client.connect()
 
         async def never_push(*args, **kwargs):
-            pass  # Don't push any chunks
+            return {"ok": True}  # Don't push any chunks
 
         mock_bot_ws_instance.chat_send.side_effect = never_push
 
@@ -1000,6 +1022,7 @@ class TestSendMessageStream:
             state = client._sessions.get(sk)
             if state and state.stream_queue:
                 state.stream_queue.put_nowait(StreamChunk(type="final", content="ok"))
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = push_final
 
@@ -1021,6 +1044,7 @@ class TestSendMessageStream:
 
         async def never_push(*args, **kwargs):
             await asyncio.sleep(10)
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = never_push
 
@@ -1167,6 +1191,7 @@ class TestSendMessageAdditional:
             state = client._sessions.get(sk)
             if state:
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = fire_complete
 
@@ -1194,6 +1219,7 @@ class TestSendMessageAdditional:
             state = client._sessions.get(sk)
             if state:
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = fire_complete
 

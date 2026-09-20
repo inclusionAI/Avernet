@@ -116,7 +116,7 @@ class DeviceActivation(_DelegatingActivation):
     """ARCA: write the rows, then project onto the live container.
 
     Bound as ``MaterialiserPorts.activation_service`` for the ARCA family, and
-    for teclaw while the platform-managed switch is off.
+    for the device-backed teclaw shape (``TeclawDeviceDelivery``).
     """
 
     _PROJECT = True

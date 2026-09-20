@@ -23,6 +23,10 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.api_gateway import APIKeyRecord
 from secbaas.community.core.repository.bot_run import BotRunRecord
 from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
+from secbaas.community.core.service.bot_run import BotBindingResolver
+from secbaas.community.core.service.bot_run._bot_run_utils import (
+    CALLER_SANDBOX_META_KEY,
+)
 from secbaas.community.core.service.bot_run._executor import (
     BotRunRequestExecutor,
     _rebuild_context,
@@ -286,7 +290,13 @@ async def test_executor_send_flow():
     selector.select.return_value = bot_svc
 
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="r1", bot_id="bot-1:ent", session_id="sess-1")
@@ -297,6 +307,57 @@ async def test_executor_send_flow():
     bot_svc.send_message.assert_awaited_once()
     repo.update_result.assert_called_once()
     assert repo.update_result.call_args[1]["content_long"] == "hello back"
+
+
+async def test_executor_caller_meta_sandbox_builds_caller_binding():
+    """caller 模式：queue meta 带 sandbox 直接组 binding，不走正常解析。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-caller",
+        bot_id="bot-1:ent",
+        metadata={
+            "app_id": "a",
+            "app_type": "T",
+            "tenant": "t",
+            "request_type": "chat",
+        },
+    )
+    plugin.get_binding = AsyncMock()
+    plugin.get_caller_connection = AsyncMock()
+
+    bot_svc = MagicMock()
+    bot_svc.create_session = AsyncMock(return_value=MagicMock(session_id="sess-new"))
+    bot_svc.send_message = AsyncMock(return_value=BotResponse(content="ok", usage=None))
+    selector.select.return_value = bot_svc
+
+    executor = BotRunRequestExecutor(
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
+    )
+    await executor.execute(
+        _queue_rec(
+            run_id="r-caller",
+            bot_id="bot-1:ent",
+            session_id="sess-1",
+            meta={CALLER_SANDBOX_META_KEY: "sbx-caller-9"},
+        )
+    )
+
+    plugin.get_binding.assert_not_called()
+    plugin.get_caller_connection.assert_not_called()
+    selected = selector.select.call_args[0][0]
+    assert selected.device_provider == "caller"
+    assert selected.sandbox_id == "sbx-caller-9"
+    bot_svc.send_message.assert_awaited_once()
+    repo.update_status.assert_called_once_with("r-caller", "RUNNING")
 
 
 async def test_executor_timeout_marks_timeout():
@@ -317,7 +378,13 @@ async def test_executor_timeout_marks_timeout():
     selector.select.return_value = bot_svc
 
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="r-timeout", bot_id="bot-1:ent", session_id="sess-1")
@@ -326,6 +393,61 @@ async def test_executor_timeout_marks_timeout():
     repo.update_timeout.assert_called_once()
     assert repo.update_timeout.call_args[0][0] == "r-timeout"
     repo.update_result.assert_not_called()
+
+
+async def test_executor_send_persistence_failure_marks_failed_and_reraises():
+    """S4: update_result 抛异常时 _do_send_persist 写 FAILED 终态（带具体消息）
+    并 raise。execute() 的外层 except 会再次 mark_failed（idempotent）。
+    关键是：业务进入 FAILED 终态 + 上层 worker 的 finally 路径能感知到处理结果。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-persist-fail",
+        bot_id="bot-1:ent",
+        metadata={
+            "app_id": "a",
+            "app_type": "T",
+            "tenant": "t",
+            "request_type": "chat",
+        },
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    bot_svc = MagicMock()
+    bot_svc.send_message = AsyncMock(
+        return_value=BotResponse(content="hello back", usage=None)
+    )
+    selector.select.return_value = bot_svc
+
+    # update_result 抛异常（如 OceanBase 1064），update_error 必须被调用为 FAILED 终态。
+    repo.update_result.side_effect = RuntimeError("simulated 1064")
+
+    executor = BotRunRequestExecutor(
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
+    )
+
+    # execute() 的外层 except 会捕获并 mark FAILED，对调用方（worker）表现为正常返回。
+    await executor.execute(
+        _queue_rec(run_id="r-persist-fail", bot_id="bot-1:ent", session_id="sess-1")
+    )
+
+    # S4: update_result 被尝试一次
+    repo.update_result.assert_called_once()
+    # S4: update_error 被显式调用，消息包含 "result persistence failed"
+    assert repo.update_error.called
+    s4_call_msgs = [
+        c[0][1] for c in repo.update_error.call_args_list if len(c[0]) >= 2
+    ]
+    assert any("result persistence failed" in msg for msg in s4_call_msgs)
+    assert any("simulated 1064" in msg for msg in s4_call_msgs)
 
 
 async def test_executor_inject_flow():
@@ -344,7 +466,13 @@ async def test_executor_inject_flow():
     selector.select.return_value = bot_svc
 
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(
@@ -370,7 +498,13 @@ async def test_executor_binding_not_found():
     )
 
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, MagicMock(), MagicMock(), MagicMock(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="r3", bot_id="bad-bot", session_id="sess-3")
@@ -385,7 +519,13 @@ async def test_executor_run_row_missing_is_noop():
     plugin = MagicMock()
     repo.get_by_run_id.return_value = None
     executor = BotRunRequestExecutor(
-        repo, plugin, MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
+        MagicMock(),
     )
     await executor.execute(_queue_rec(run_id="gone", bot_id="b", session_id="sess-x"))
     repo.update_error.assert_not_called()
@@ -439,7 +579,13 @@ async def test_executor_stream_agent_merge():
 
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="rs", bot_id="bot-1:ent", session_id="sess-s")
@@ -498,7 +644,13 @@ async def test_executor_stream_error_flushes_agent_buffer():
 
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="re", bot_id="bot-1:ent", session_id="sess-e")
@@ -544,7 +696,13 @@ async def test_executor_stream_error_chunk_marks_failed():
 
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="r-err-chunk", bot_id="bot-1:ent", session_id="sess-e")
@@ -595,7 +753,13 @@ async def test_executor_stream_engine_type_in_delta():
 
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="r-et-d", bot_id="bot-1:ent", session_id="sess-d")
@@ -644,7 +808,13 @@ async def test_executor_stream_engine_type_in_agent():
 
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="r-et-a", bot_id="bot-1:ent", session_id="sess-a")
@@ -692,7 +862,13 @@ async def test_executor_stream_engine_type_in_final_with_metadata():
 
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="r-et-f", bot_id="bot-1:ent", session_id="sess-f")
@@ -741,7 +917,13 @@ async def test_executor_stream_engine_type_in_error_with_metadata():
 
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="r-et-e", bot_id="bot-1:ent", session_id="sess-e")
@@ -796,7 +978,7 @@ async def test_executor_stream_agent_byte_threshold_splits_chunks():
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
         repo,
-        plugin,
+        BotBindingResolver(plugin),
         selector,
         chunk_repo,
         MagicMock(),
@@ -863,7 +1045,7 @@ async def test_executor_stream_delta_byte_threshold_splits_chunks():
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
         repo,
-        plugin,
+        BotBindingResolver(plugin),
         selector,
         chunk_repo,
         MagicMock(),
@@ -929,7 +1111,7 @@ async def test_executor_stream_byte_threshold_not_triggered_preserves_merge():
     # 阈值足够大，这批小 payload 不会触发字节 flush
     executor = BotRunRequestExecutor(
         repo,
-        plugin,
+        BotBindingResolver(plugin),
         selector,
         chunk_repo,
         MagicMock(),
@@ -1213,7 +1395,13 @@ async def test_executor_rebuilds_attachments_from_meta():
     selector.select.return_value = bot_svc
 
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(
@@ -1283,7 +1471,13 @@ async def test_executor_handles_missing_attachments_in_meta():
     selector.select.return_value = bot_svc
 
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="r1", bot_id="bot-1:ent", session_id="sess-1")
@@ -1339,7 +1533,7 @@ async def test_executor_eval_session_log_enriches_chat_metadata():
 
     executor = BotRunRequestExecutor(
         repo,
-        plugin,
+        BotBindingResolver(plugin),
         selector,
         MagicMock(),
         MagicMock(),
@@ -1398,7 +1592,7 @@ async def test_executor_without_eval_id_does_not_write_eval_session_log():
 
     executor = BotRunRequestExecutor(
         repo,
-        plugin,
+        BotBindingResolver(plugin),
         selector,
         MagicMock(),
         MagicMock(),
@@ -1450,7 +1644,7 @@ async def test_executor_stream_flushes_periodically_when_upstream_stalls():
     cache = MagicMock()
     executor = BotRunRequestExecutor(
         repo,
-        plugin,
+        BotBindingResolver(plugin),
         selector,
         chunk_repo,
         cache,
@@ -1525,7 +1719,7 @@ async def test_executor_stream_stall_then_normal_end_flushes_residual():
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
         repo,
-        plugin,
+        BotBindingResolver(plugin),
         selector,
         chunk_repo,
         MagicMock(),
@@ -1590,7 +1784,13 @@ async def test_executor_stream_interaction_and_error_chunks_written_inline():
 
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
     await executor.execute(
         _queue_rec(run_id="r-int-err", bot_id="bot-1:ent", session_id="sess-ie")

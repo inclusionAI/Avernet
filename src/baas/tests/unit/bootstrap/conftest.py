@@ -37,6 +37,7 @@ import secbaas.community.core.repository.system_config._orm_model  # noqa: F401
 import secbaas.community.core.repository.tenant._orm_model  # noqa: F401
 from secbaas.community.core.database import db_manager as _global_db_manager
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
+from tests.utils.external_schema import create_external_tables
 
 
 @pytest.fixture(autouse=True)
@@ -70,11 +71,13 @@ def _inject_db_config() -> None:
 def sqlite_backend() -> Generator[SqliteOrmPlugin, None, None]:
     """Create and seed an in-memory SQLite database.
 
-    Discovers all ORM table definitions via the imports above and
+    Discovers all ORM table definitions via the imports above, creates the
+    BAAS-owned tables, then the AgentClaw-owned tables BAAS reads, and
     inserts required seed data (tenant, template).
     """
     plugin = SqliteOrmPlugin("sqlite:///:memory:")
     plugin.create_all()
+    create_external_tables(plugin._sync_engine)
     yield plugin
     plugin._sync_engine.dispose()
 

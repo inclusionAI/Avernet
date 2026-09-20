@@ -92,9 +92,6 @@ user_config:
     aicoding_root: "~/.aicoding"
     hermes_root: "~/.hermes"
 
-  openclaw:
-    skills_repo_url: "git@code.teamclaw.com:security_release/aiworkbench.git"
-
   local_git_repo_dir: "/tmp/aiworkbench-singlebox"
 
   daas_device_config:
@@ -272,8 +269,9 @@ user_config:
     operator_names: []
 
   # Secret-registry key names. dormant token left unset -> local fallback token.
-  # The aiworkbench name matches LocalSecretResolver's key so git-sync resolves
-  # the skills repo URL from this file's openclaw.skills_repo_url.
+  # The shipped Singlebox profile leaves the aiworkbench repo URL empty in the
+  # neutral base config. LocalSecretResolver therefore returns None and
+  # GitSyncService seeds the market only from an existing host-side skills-repo.
   #
   # No gateway principal signing key here on purpose: singlebox has no secret
   # store, and a yaml stand-in would be a committed-credential shape shipped

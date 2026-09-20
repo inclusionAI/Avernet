@@ -31,6 +31,7 @@ from secbaas.community.core.repository.device_binding._orm_model import (
     DeviceBindingModel,
 )
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
+from tests.utils.external_schema import create_external_tables
 
 TABLE = "baas_bot_ttl_renewal_schedule"
 HOT_DEVICE_TABLE = "baas_device"
@@ -52,6 +53,7 @@ def plugin():
     plugin = SqliteOrmPlugin()
     db_manager.init_plugin(plugin)
     plugin.create_all()
+    create_external_tables(plugin._sync_engine)
     return plugin
 
 

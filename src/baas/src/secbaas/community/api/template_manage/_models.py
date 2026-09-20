@@ -55,6 +55,24 @@ class ArcaTemplateConfig(BaseModel):
     arca_template_id_prod: str | None = Field(
         None, description="ARCA 模板 ID (正式环境)"
     )
+    upfs_volume_id: str | None = Field(
+        default=None, description="UPFS Volume ID (默认兜底)"
+    )
+    upfs_volume_id_pre: str | None = Field(
+        default=None, description="UPFS Volume ID (pre)"
+    )
+    upfs_volume_id_prod: str | None = Field(
+        default=None, description="UPFS Volume ID (prod)"
+    )
+
+    def get_effective_upfs_volume_id(self, env: str) -> str | None:
+        """Select template context only; the SDK plugin owns storage validation."""
+        env_volume_id = {
+            "pre": self.upfs_volume_id_pre,
+            "prod": self.upfs_volume_id_prod,
+        }.get((env or "").lower())
+        return env_volume_id or self.upfs_volume_id
+
     oss_mount_id: str | None = Field(None, description="OSS 挂载 ID")
     default_ttl_minutes: int = Field(default=1440, description="默认 TTL（分钟）")
     timeout: float = Field(default=30.0, description="请求超时（秒）")

@@ -64,7 +64,7 @@ pub async fn resolve(
     }
     tracing::info!(actor_id = %actor, delivery_id = %updated.delivery_id, session_id = %updated.session_id,
         resolution = ?command.resolution, state_version = updated.state.state_version, "delivery manually resolved");
-    Ok((&updated).into())
+    Ok(DeliveryStatusView::from(&updated).with_content_preview(Some(&message.content)))
 }
 
 async fn authorize_session(
@@ -206,10 +206,11 @@ pub async fn query(
             if selected {
                 visible(flow, &query.caller, &session, &actor, &message).await?;
             }
-            checked.insert(row.source_message_id.clone(), selected);
+            checked.insert(row.source_message_id.clone(), (selected, message.content.clone()));
         }
-        if checked[&row.source_message_id] {
-            result.push(row.into());
+        let (visible, ref content) = checked[&row.source_message_id];
+        if visible {
+            result.push(DeliveryStatusView::from(row).with_content_preview(Some(content)));
         }
     }
     Ok(result)
@@ -267,7 +268,7 @@ pub async fn cancel(
                 == Some("http_provider")
         {
             results.push(CancelMessageDeliveryResult {
-                delivery: (&row).into(),
+                delivery: DeliveryStatusView::from(&row).with_content_preview(Some(&message.content)),
                 error: Some("exact_abort_not_supported".into()),
             });
             continue;
@@ -277,12 +278,12 @@ pub async fn cancel(
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested, now_ms,
             request_id: None, actor_id: Some(actor.clone()), reply: None, transport_context_json: None,
             deadline_at_ms: Some(now_ms.saturating_add(30_000)) }).await {
-            Ok(updated) => results.push(CancelMessageDeliveryResult { delivery: (&updated).into(), error: None }),
+            Ok(updated) => results.push(CancelMessageDeliveryResult { delivery: DeliveryStatusView::from(&updated).with_content_preview(Some(&message.content)), error: None }),
             Err(error) => {
                 if matches!(error, ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage(_))) {
                     return Err(ServiceError::InternalError("delivery cancellation persistence failed".into()));
                 }
-                results.push(CancelMessageDeliveryResult { delivery: (&row).into(), error: Some("delivery_state_changed".into()) });
+                results.push(CancelMessageDeliveryResult { delivery: DeliveryStatusView::from(&row).with_content_preview(Some(&message.content)), error: Some("delivery_state_changed".into()) });
             }
         }
     }

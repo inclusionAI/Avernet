@@ -719,6 +719,22 @@ export function createInsightRouter(service: InsightService | null, options: Ins
     res.json({ ...snapshot.document, source: snapshot.source, etag: snapshot.etag });
   }));
 
+  // 全部已驳回（用户驳回 + 管理员驳回，跨 owner 与来源类型）。与治理动作一致走内部只读、
+  // 不做机器鉴权，便于离线评估链路直接取数；只返回存在真实驳回事件的归档项。
+  router.get("/internal/governance/rejections/all", asyncHandler(async (req, res) => {
+    const result = await requireService(service).listAllRejections({
+      days: parsePositiveInteger(req.query.days, "days", 30, 90),
+      ownerUserId: normalizeString(req.query.ownerUserId, "ownerUserId", { max: 128 }) ?? undefined,
+      botId: normalizeString(req.query.botId, "botId", { max: 128 }) ?? undefined,
+      sourceRuleId: normalizeString(req.query.sourceRuleId, "sourceRuleId", { max: 64 }) ?? undefined,
+      rejectedBy: stringValue(req.query.rejectedBy),
+      limit: parsePositiveInteger(req.query.limit, "limit", 50, 200),
+      offset: parseNonNegativeInteger(req.query.offset, "offset", 0, 1_000_000),
+    });
+    res.set("Cache-Control", "no-store");
+    res.json(result);
+  }));
+
   router.get("/internal/governance/rejections", asyncHandler(async (req, res) => {
     authorizeAgent(req, options, "rejection.read");
     const items = await requireService(service).listRecentRejections({

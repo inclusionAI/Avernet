@@ -3806,6 +3806,7 @@ async fn chat_abort_provider_sends_one_scope_request_for_parallel_runs() {
                 .await
                 .unwrap()
                 .unwrap();
+            context.downstream_session_key = Some("group:legacy-provider-wire-key".to_string());
             context.provider_bypass_headers = vec![(
                 "x-sandbox-bypass".to_string(),
                 "sandbox-route-1".to_string(),

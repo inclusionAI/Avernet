@@ -2,10 +2,11 @@
 
 Public handlers that delegate to the existing internal bot services and wrap the
 result in the standard :class:`Envelope` / :class:`Page` contracts. Identity is
-the end user the request names in ``?user_id=`` (owner-scoping, via
-``UserIdDep``) — on 12 of the 13 operations here; ``check-name`` asks a
-tenant-wide question and takes none. The request tenant is bound by
-``AvernetTenantMiddleware``
+the end user the request names in ``?user_id=`` (validated to the verified
+caller via ``UserIdDep``); the bot owner a read or write addresses comes from
+``OwnerIdDep`` — the caller by default, a shared bot's owner when the request
+names one. ``check-name`` asks a tenant-wide question and takes neither. The
+request tenant is bound by ``AvernetTenantMiddleware``
 before the handler runs, so every service read/write is already tenant-scoped by
 the Track A guard. Services are obtained with ``Injected`` exactly as the
 internal router does.
@@ -199,7 +200,12 @@ def _require_service_capable_engine(bot_type: str, engine: str) -> None:
         )
 
 
-def _to_bot(d: dict[str, Any], *, space: dict[str, Any] | None = None) -> Bot:
+def _to_bot(
+    d: dict[str, Any],
+    *,
+    space: dict[str, Any] | None = None,
+    include_template: bool = True,
+) -> Bot:
     """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema.
 
     ``template_config`` on the row is the stored engine snapshot, returned
@@ -210,6 +216,15 @@ def _to_bot(d: dict[str, Any], *, space: dict[str, Any] | None = None) -> Bot:
     template" contract the listings publish. ``space`` is the owner-view
     summary the listing endpoints resolve and pass in; other callers leave it
     null.
+
+    ``include_template=False`` is what the 2026-09-01 decision demands once
+    the collaborator-access migration broke its premise: the passthrough was
+    justified by "the query faces are owner-scoped", so a face that is not —
+    a collaborator reading a shared bot's base record or its restart result —
+    must not receive the snapshot, whose ``token`` and ``thetaKey`` would
+    then be somebody else's secret rather than the caller's own input. Those
+    callers pass the owner the comparison resolved, and the field stays null
+    for them rather than growing a parallel redaction model here.
     """
     engine = d.get("active_engine") or ""
     has_template = d.get("template_type") not in (None, "")
@@ -225,7 +240,7 @@ def _to_bot(d: dict[str, Any], *, space: dict[str, Any] | None = None) -> Bot:
         template_type=str(d["template_type"]) if has_template else None,
         template_config=(
             template_config_for_public(d.get("template_config"))
-            if has_template
+            if has_template and include_template
             else None
         ),
         space=space,
@@ -865,18 +880,23 @@ async def list_inventory(
     "/{bot_id}",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def get_bot(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Bot]:
     """Get a bot's details."""
     bot = bot_service.get_bot(bot_id, owner_id)
-    return envelope(_to_bot(bot), request)
+    # A collaborator reading a shared bot gets the record without the owner's
+    # template snapshot — see `_to_bot` for why the passthrough ends here.
+    return envelope(
+        _to_bot(bot, include_template=(user_id == owner_id)), request
+    )
 
 
 @router.put(
@@ -1000,13 +1020,14 @@ async def delete_bot(
     "/{bot_id}/restart",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def restart_bot(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Bot]:
     """Restart a bot's container.
@@ -1017,7 +1038,11 @@ async def restart_bot(
     """
     _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id))
     bot = bot_service.restart_bot(bot_id, owner_id)
-    return envelope(_to_bot(bot), request)
+    # The result carries the base record, so a collaborator restarting a
+    # shared bot gets it without the owner's template snapshot (`_to_bot`).
+    return envelope(
+        _to_bot(bot, include_template=(user_id == owner_id)), request
+    )
 
 
 #: Response table shared by the auth-status poll and its retiring GET spelling
@@ -1301,13 +1326,14 @@ def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
     "/{bot_id}/startup-script",
     response_model=Envelope[StartupScript],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def get_bot_startup_script(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     startup_script_service: BotStartupScriptServiceProtocol = Injected(
         BotStartupScriptServiceProtocol
@@ -1329,14 +1355,15 @@ async def get_bot_startup_script(
     "/{bot_id}/startup-script",
     response_model=Envelope[StartupScript],
     responses=STARTUP_SCRIPT_WRITE_RESPONSES,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def update_bot_startup_script(
     bot_id: BotIdPath,
     body: StartupScriptWrite,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     startup_script_service: BotStartupScriptServiceProtocol = Injected(
@@ -1367,8 +1394,10 @@ async def update_bot_startup_script(
         bot_id=bot_id,
         script=body.script,
         # From the verified caller, never the body — and naming the application
-        # when one is acting, not the user it acted for.
-        modifier=_audit_actor(caller, owner_id),
+        # when one is acting, not the user it acted for. The caller, not the
+        # addressed owner: an audit column attributing a collaborator's edit
+        # to the bot's owner is the one thing an audit column must not do.
+        modifier=_audit_actor(caller, user_id),
     )
     _withdraw_the_write_if_the_bot_was_deleted(
         bot_id, entity_id, owner_id, bot_service, startup_script_service
@@ -1380,13 +1409,14 @@ async def update_bot_startup_script(
     "/{bot_id}/startup-script",
     response_model=Envelope[Deleted],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def delete_bot_startup_script(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     startup_script_service: BotStartupScriptServiceProtocol = Injected(
         BotStartupScriptServiceProtocol
@@ -1439,13 +1469,14 @@ def _observe_data_init_task(task: asyncio.Task[dict[str, str]]) -> None:
     "/{bot_id}/data-init",
     response_model=Envelope[DataInitResult],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def get_bot_data_init_status(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     data_init_service: DataInitServiceProtocol = Injected(DataInitServiceProtocol),
 ) -> Envelope[DataInitResult]:
@@ -1460,14 +1491,15 @@ async def get_bot_data_init_status(
     "/{bot_id}/data-init",
     response_model=Envelope[DataInitResult],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def trigger_bot_data_init(
     bot_id: BotIdPath,
     body: DataInitRequest,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     data_init_service: DataInitServiceProtocol = Injected(DataInitServiceProtocol),
 ) -> Envelope[DataInitResult]:

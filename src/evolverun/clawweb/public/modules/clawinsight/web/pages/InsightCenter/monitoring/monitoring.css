@@ -94,7 +94,13 @@
   margin:0 auto;
   display:grid;
   grid-template-columns:208px minmax(0,1fr);
-  min-height:calc(100vh - 64px)
+  width:100%;
+  box-sizing:border-box;
+  height:calc(100vh - var(--insight-viewport-offset, 64px));
+  height:calc(100dvh - var(--insight-viewport-offset, 64px));
+  min-height:0;
+  grid-template-rows:minmax(0,1fr);
+  overflow:hidden
 }
 .insight-sidebar {
   border-right:1px solid var(--line);
@@ -102,8 +108,7 @@
   background:#fcfcfd
 }
 .insight-sidebar-inner {
-  position:sticky;
-  top:94px
+  position:static
 }
 .insight-workspace-title {
   display:flex;
@@ -595,9 +600,9 @@
 
 .insight-monitoring .list-columns,.insight-monitoring .record-summary {
   display:grid;
-  grid-template-columns:minmax(210px,1fr) 144px 84px 20px;
+  grid-template-columns:minmax(160px,1fr) 145px 170px 20px;
   align-items:center;
-  gap:18px
+  gap:16px
 }
 .insight-monitoring .list-columns {
   padding:11px 22px;
@@ -605,11 +610,6 @@
   color:#738096;
   font-size:12px;
   border-bottom:1px solid var(--line)
-}
-.insight-monitoring .list-columns .human-heading {
-  display:flex;
-  gap:4px;
-  align-items:center
 }
 .insight-monitoring .list-columns .icon {
   width:12px;
@@ -667,7 +667,8 @@
   background:#fcf5e8
 }
 .insight-monitoring .record-text {
-  min-width:0
+  min-width:0;
+  flex:1
 }
 .insight-monitoring .record-title-line {
   display:flex;
@@ -683,14 +684,8 @@
   white-space:nowrap;
   color:#364258
 }
-.insight-monitoring .decision-word {
-  font-size:12px;
-  white-space:nowrap;
-  padding-left:9px;
-  border-left:1px solid #e1e6ee;
-  color:#738096
-}
 .insight-monitoring .record-session {
+  display:block;
   font-size:12px;
   color:#738096;
   letter-spacing:0;
@@ -709,20 +704,6 @@
   color:#738096;
   font-size:12px;
   margin-right:7px
-}
-.insight-monitoring .intervention {
-  font-size:12px;
-  color:#738096
-}
-.insight-monitoring .intervention.yes {
-  color:#64789d;
-  display:flex;
-  align-items:center;
-  gap:5px
-}
-.insight-monitoring .intervention .icon {
-  width:13px;
-  height:13px
 }
 .insight-monitoring .expand-icon {
   width:14px;
@@ -971,14 +952,13 @@ to {
   font-size:12px
 }
 .insight-monitoring .record-summary,.insight-monitoring .list-columns {
-  grid-template-columns:minmax(160px,1fr) 110px 65px 15px;
+  grid-template-columns:minmax(120px,1fr) 110px 140px 15px;
   gap:12px;
   padding-left:18px;
   padding-right:18px
 }
-.insight-monitoring .record-time .day {
-  display:block;
-  margin:0 0 2px
+.insight-monitoring .record-time,.insight-monitoring .record-time .day {
+  font-size:11px
 }
 .insight-monitoring .record-detail {
   padding-left:59px;
@@ -996,9 +976,6 @@ to {
 }
 .insight-monitoring .detail-grid {
   grid-template-columns:repeat(3,minmax(0,1fr))
-}
-.insight-monitoring .decision-word {
-  display:none
 }
 
 }
@@ -1076,7 +1053,7 @@ to {
   padding-bottom:8px
 }
 .insight-monitoring .list-columns,.insight-monitoring .record-summary {
-  grid-template-columns:minmax(130px,1fr) 85px 65px 13px;
+  grid-template-columns:minmax(120px,1fr) 110px 140px 15px;
   gap:8px
 }
 .insight-monitoring .record-detail {
@@ -1113,6 +1090,7 @@ to {
   border-radius:7px
 }
 .insight-monitoring .record-session {
+  display:block;
   font-size:11px
 }
 
@@ -1120,7 +1098,8 @@ to {
 
 @media(max-width:650px) {
   .insight-shell {
-  display:block
+  grid-template-columns:minmax(0,1fr);
+  grid-template-rows:auto minmax(0,1fr)
 }
 .insight-sidebar {
   padding:12px 16px;
@@ -1197,7 +1176,7 @@ to {
 }
 .insight-monitoring .record-summary>.record-time {
   grid-column:1;
-  grid-row:2;
+  grid-row:3;
   padding-left:35px;
   font-size:10px
 }
@@ -1205,17 +1184,17 @@ to {
   display:inline;
   margin-right:6px
 }
-.insight-monitoring .record-summary>.intervention {
+.insight-monitoring .record-summary>.summary-tc {
   grid-column:1;
-  grid-row:3;
+  grid-row:2;
   margin-left:35px;
   font-size:10px
 }
-.insight-monitoring .record-summary>.intervention:before {
-  content:"人工干预："
+.insight-monitoring .record-summary>.summary-tc:before {
+  content:"TC 故障标签："
 }
-.insight-monitoring .record-summary>.intervention .icon {
-  display:none
+.insight-monitoring .record-summary>.record-time:before {
+  content:"会话时间："
 }
 .insight-monitoring .record-summary>.expand-icon {
   grid-column:2;
@@ -1225,6 +1204,7 @@ to {
   font-size:12px
 }
 .insight-monitoring .record-session {
+  display:block;
   font-size:10px
 }
 .insight-monitoring .record-detail {
@@ -1269,8 +1249,15 @@ to {
 
 
 .insight-shell { background: #f7f8fa; color: #202938; }
-.insight-content { min-width: 0; }
-.insight-sidebar { box-sizing: border-box; }
+.insight-content {
+  min-width:0;
+  min-height:0;
+  overflow-y:auto;
+  overscroll-behavior-y:contain;
+  scrollbar-gutter:stable;
+}
+.insight-content:focus-visible { outline:2px solid #8eb1ff; outline-offset:-2px; }
+.insight-sidebar { box-sizing: border-box; min-height:0; }
 .insight-workspace-icon .monitoring-icon, .insight-side-nav .monitoring-icon { width: 18px; height: 18px; flex-shrink: 0; }
 .insight-side-nav button { cursor: pointer; border: 0; }
 .insight-side-nav button:focus-visible { outline: 3px solid #8eb1ff; outline-offset: 2px; }
@@ -1290,3 +1277,35 @@ to {
 .insight-monitoring .monitoring-empty { padding: 36px 20px; text-align: center; color: #647084; }
 @media (max-width: 650px) { .insight-monitoring .result-tabs { gap: 14px; } .insight-monitoring .record-title { font-size: 13px; } }
 .insight-monitoring .next-arrow { transform: rotate(180deg); }
+
+.insight-monitoring .summary-tc {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:12px;
+  color:#536176;
+}
+
+/* Problem-type filter: scoped toolbar entry and non-modal popover. */
+.insight-monitoring .records-toolbar{gap:12px;flex-wrap:wrap;}
+.insight-monitoring .result-tabs{margin-right:auto;}
+.insight-monitoring .business-filter-anchor{position:relative;min-width:0;}
+.insight-monitoring .business-filter-trigger{display:flex;align-items:center;gap:7px;height:34px;padding:0 10px;border:1px solid #e3e8ef;border-radius:7px;background:#fff;font-size:12px;color:#526176;}
+.insight-monitoring .business-filter-trigger>span{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.insight-monitoring .business-filter-trigger.selected{background:#f0f5ff;color:#2463eb;border-color:#cddcff;}
+.insight-monitoring .business-filter-trigger b{font-size:10px;border-radius:4px;background:#dce8ff;padding:0 4px;}
+.insight-monitoring .business-filter-trigger .icon{width:13px;height:13px;}
+.insight-monitoring .business-filter-popover{position:absolute;right:0;top:43px;width:310px;max-width:calc(100vw - 48px);z-index:50;background:white;border:1px solid #e7ebf1;box-shadow:0 12px 36px #20324e24;border-radius:12px;padding:20px;}
+.insight-monitoring .filter-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;}
+.insight-monitoring .filter-heading strong{font-size:14px;}
+.insight-monitoring .filter-heading button{padding:0;color:#8390a1;}
+.insight-monitoring .business-filter-popover label{display:flex;flex-direction:column;gap:8px;font-size:12px;color:#526176;margin-bottom:16px;}
+.insight-monitoring .business-filter-popover select{width:100%;height:38px;padding:0 10px;border:1px solid #dfe5ed;border-radius:7px;background:white;color:#202938;}
+.insight-monitoring .business-filter-popover select:disabled{background:#f6f7fa;color:#99a1af;}
+.insight-monitoring .filter-actions{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #edf0f5;padding-top:16px;margin-top:20px;}
+.insight-monitoring .filter-actions button{font-size:12px;color:#647084;padding:8px 12px;border-radius:6px;}
+.insight-monitoring .filter-actions .apply{background:#2463eb;color:white;}
+@media(max-width:650px){.insight-monitoring .business-filter-popover{left:0;right:auto;}}
+
+.insight-monitoring .records-panel:has(.business-filter-popover){overflow:visible;}

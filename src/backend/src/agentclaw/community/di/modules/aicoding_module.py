@@ -9,7 +9,16 @@ from the injector — no module-specific construction logic, so a
 """
 from __future__ import annotations
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import (
+    Binder,
+    CallError,
+    Injector,
+    Module,
+    UnsatisfiedRequirement,
+    inject,
+    provider,
+    singleton,
+)
 
 from agentclaw.community.api.data_proxy_service import DataProxyServiceProtocol
 from agentclaw.community.api.workitem_service import WorkItemServiceProtocol
@@ -24,6 +33,7 @@ from agentclaw.community.core.aicoding.services.workspace_hosting_workitem_servi
 from agentclaw.community.core.aicoding.services.workspace_service import WorkspaceService
 from agentclaw.community.core.aicoding.protocols import (
     AicodingBotResolutionServiceProtocol,
+    AicodingHostedWorkspaceServiceProtocol,
 )
 from agentclaw.community.core.aicoding.services.bot_resolution_service import (
     AicodingBotResolutionService,
@@ -31,6 +41,17 @@ from agentclaw.community.core.aicoding.services.bot_resolution_service import (
 from agentclaw.community.core.aicoding.services.architect_rebind_service import (
     ArchitectRebindService,
 )
+from agentclaw.community.core.aicoding.services.hosted_workspace_service import (
+    AicodingHostedWorkspaceService,
+)
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import (
+    WorkspaceHostingService,
+)
+from agentclaw.community.core.bot_management.services.template_service import (
+    TemplateService,
+)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+
 
 
 class AICodingModule(Module):
@@ -83,4 +104,32 @@ class AICodingModule(Module):
     def _architect_rebind_service_protocol(
         self, svc: ArchitectRebindService
     ) -> ArchitectRebindServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _hosted_workspace_service(
+        self,
+        bot_repo: BotRepository,
+        template_service: TemplateService,
+        injector: Injector,
+    ) -> AicodingHostedWorkspaceService:
+        # 托管工作空间（workspace hosting）是 corp 才安装的依赖：社区列为构造期未提供，
+        # 解析失败返回 None，由服务自身的 ``_require_workspace_hosting`` 守卫报错（B8）。
+        try:
+            workspace_hosting_service = injector.get(WorkspaceHostingService)
+        except (UnsatisfiedRequirement, CallError):
+            workspace_hosting_service = None
+        return AicodingHostedWorkspaceService(
+            bot_repo=bot_repo,
+            template_service=template_service,
+            workspace_hosting_service=workspace_hosting_service,
+        )
+
+    @singleton
+    @provider
+    def _hosted_workspace_service_protocol(
+        self, svc: AicodingHostedWorkspaceService
+    ) -> AicodingHostedWorkspaceServiceProtocol:
         return svc

@@ -84,8 +84,13 @@ class CliPassportScopeReconciler:
         *,
         bot: Mapping[str, Any],
         force_update: bool = False,
+        requested_cli_identity_modes: Mapping[str, str] | None = None,
     ) -> CliScopeReconcileResult:
-        """Merge history/defaults/overrides and update complete scope only if changed."""
+        """Merge complete scope, applying authorized request-local CLI intent last.
+
+        Bootstrap omits intent and retains historical identities. A mutation
+        supplies its normalized target because owner deletes the sparse row.
+        """
         started = time.monotonic()
         bot_id = _required_text(bot, "bot_id")
         owner_id = _required_text(bot, "owner_id")
@@ -95,19 +100,23 @@ class CliPassportScopeReconciler:
             raise ValueError("Bot template_type is invalid")
         profile_items = self._manifest_resolver.required_cli_items(engine_type, template_type)
         logger.info(
-            "cli_passport_reconcile_requested bot_id=%s engine_type=%s template_type=%s required_cli_codes=%s",
+            "cli_passport_reconcile_requested bot_id=%s engine_type=%s template_type=%s "
+            "required_cli_codes=%s requested_cli_identity_modes=%s",
             bot_id, engine_type, template_type, [item["cli_code"] for item in profile_items],
+            requested_cli_identity_modes or {},
         )
         try:
-            snapshot = self._build_snapshot(bot)
+            snapshot = self._build_snapshot(bot, requested_cli_identity_modes)
             updated = snapshot.changed or force_update
             if updated:
                 logger.info(
-                    "agentpass_cli_scope_update_requested bot_id=%s engine_type=%s mcp_codes=%s cli_codes=%s",
+                    "agentpass_cli_scope_update_requested bot_id=%s engine_type=%s "
+                    "mcp_codes=%s cli_codes=%s cli_identity_modes=%s",
                     bot_id,
                     engine_type,
                     [item["mcp_code"] for item in snapshot.mcp_items],
                     [item["cli_code"] for item in snapshot.cli_items],
+                    {item["cli_code"]: item["identity_mode"] for item in snapshot.cli_items},
                 )
                 update_started = time.monotonic()
                 try:
@@ -157,7 +166,11 @@ class CliPassportScopeReconciler:
             updated=updated,
         )
 
-    def _build_snapshot(self, bot: Mapping[str, Any]) -> _CliScopeSnapshot:
+    def _build_snapshot(
+        self,
+        bot: Mapping[str, Any],
+        requested_cli_identity_modes: Mapping[str, str] | None = None,
+    ) -> _CliScopeSnapshot:
         """Build the one full MCP+CLI snapshot shared by Bootstrap and CLI edits."""
         bot_id = _required_text(bot, "bot_id")
         owner_id = _required_text(bot, "owner_id")
@@ -167,13 +180,15 @@ class CliPassportScopeReconciler:
             raise ValueError("Bot template_type is invalid")
         passport = self._passport_plugin.query_agent_passport(bot_id, owner_id)
         historical_cli_items = extract_cli_items(passport)
-        historical_mcp_items = _extract_mcp_items(passport)
+        historical_mcp_items = extract_passport_mcp_items(passport)
         mcp_identity_modes = self._identity_repository.list_draft_call_types(
             int(bot["id"]), engine_type
         )
-        cli_identity_modes = self._identity_repository.list_draft_cli_call_types(
+        cli_identity_modes: dict[str, object] = dict(self._identity_repository.list_draft_cli_call_types(
             int(bot["id"]), engine_type
-        )
+        ))
+        # An explicit owner intent must survive deletion of its sparse caller row.
+        cli_identity_modes.update(requested_cli_identity_modes or {})
         resource_scope = build_passport_resource_scope(
             passport,
             desired_mcp_items=historical_mcp_items,
@@ -192,7 +207,7 @@ class CliPassportScopeReconciler:
         )
 
 
-def _extract_mcp_items(passport: Mapping[str, Any] | None) -> list[McpScopeItem]:
+def extract_passport_mcp_items(passport: Mapping[str, Any] | None) -> list[McpScopeItem]:
     if not isinstance(passport, Mapping):
         raise ValueError("Passport scope is unavailable")
     result: list[McpScopeItem] = []
@@ -234,7 +249,7 @@ def build_passport_resource_scope(
     local sparse row take precedence. CLI history is retained and merged with
     caller-provided defaults or desired additions in the same snapshot.
     """
-    historical_mcp_items = _extract_mcp_items(passport)
+    historical_mcp_items = extract_passport_mcp_items(passport)
     historical_cli_items = extract_cli_items(passport)
     mcp_items = _merge_desired_mcp_identity_modes(
         desired_mcp_items,
@@ -314,4 +329,5 @@ __all__ = [
     "CliPassportScopeReconciler",
     "CliScopeReconcileResult",
     "build_passport_resource_scope",
+    "extract_passport_mcp_items",
 ]

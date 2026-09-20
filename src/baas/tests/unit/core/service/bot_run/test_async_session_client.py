@@ -324,15 +324,11 @@ class TestRequest:
         )
         client._session = mock_session
 
-        with patch(
-            "secbaas.community.core.service.bot_run._async_session_client.is_dev",
-            return_value=False,
-        ):
-            result = await client._request("GET", "/api/test")
+        result = await client._request("GET", "/api/test")
 
         assert result == {"success": True, "data": {"key": "value"}}
         mock_session.request.assert_called_once_with(
-            "GET", "https://api.example.com/api/test", json=None, headers=None
+            "GET", "https://api.example.com/api/test", json=None, headers={}
         )
 
     @pytest.mark.asyncio
@@ -343,15 +339,36 @@ class TestRequest:
         client._session = mock_session
 
         body = {"title": "New Session"}
-        with patch(
-            "secbaas.community.core.service.bot_run._async_session_client.is_dev",
-            return_value=False,
-        ):
-            result = await client._request("POST", "/api/sessions", json=body)
+        result = await client._request("POST", "/api/sessions", json=body)
 
         assert result == {"success": True}
         mock_session.request.assert_called_once_with(
-            "POST", "https://api.example.com/api/sessions", json=body, headers=None
+            "POST", "https://api.example.com/api/sessions", json=body, headers={}
+        )
+
+    @pytest.mark.asyncio
+    async def test_header_plugin_headers_reach_request(self):
+        """_request passes headers injected by the active HttpHeaderPlugin."""
+        client = AsyncSessionClient(base_url="https://api.example.com")
+        mock_session = _make_mock_session(status=200, json_body={"success": True})
+        client._session = mock_session
+
+        class _StubHeaderPlugin:
+            def inject_header(self, headers: dict) -> None:
+                headers["Cookie"] = "iam_token=stub"
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_session_client.get_http_header_plugin",
+            return_value=_StubHeaderPlugin(),
+        ):
+            result = await client._request("GET", "/api/test")
+
+        assert result == {"success": True}
+        mock_session.request.assert_called_once_with(
+            "GET",
+            "https://api.example.com/api/test",
+            json=None,
+            headers={"Cookie": "iam_token=stub"},
         )
 
     @pytest.mark.asyncio

@@ -28,6 +28,9 @@ from agentclaw.community.core.service_bot.services.baas_service import BaasServi
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
     ManagedDeployConfigComposer,
 )
+from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
+    NoopStoragePolicy,
+)
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
 from agentclaw.community.di import config as cfg
@@ -58,6 +61,7 @@ def _make_service(
             storage_path=storage_path,
             sandbox_registry=registry,
             bot_repo=bot_repo,
+            storage_policy=NoopStoragePolicy(),
         ),
         baas_api_base="http://test",
         tenant="test",

@@ -12,7 +12,20 @@ _ALL_SH_LOADED=1
 # onboarding remains an explicit product action.
 SETUP_ORDER=(baas backend bcs bcsfuse bots frontend)
 START_ORDER=(baas backend bcsfuse bcs bots demo_bot frontend)
-STOP_ORDER=(frontend demo_bot bots bcsfuse bcs backend baas)
+# STOP (and clean) run over the legacy list PLUS gateway, unconditionally:
+# a stack started under one FRONTEND_VARIANT is routinely stopped from a
+# shell without it (one-off env prefix, reverted .env.local), and gateway_stop
+# is a no-op when the gateway is not running — an order that omits the
+# gateway strands it with port 8889 bound and no status line (status follows
+# START_ORDER below).
+STOP_ORDER=(frontend gateway demo_bot bots bcsfuse bcs backend baas)
+# Nextgen and the external teamclaw checkout consume Gateway OpenAPI/auth
+# routes; the legacy UI keeps its existing direct-service topology and
+# startup order unchanged. Stop keeps the unconditional union above.
+if [ "${FRONTEND_VARIANT:-legacy}" != legacy ]; then
+    SETUP_ORDER=(baas backend bcs bcsfuse bots gateway frontend)
+    START_ORDER=(baas backend bcsfuse bcs bots demo_bot gateway frontend)
+fi
 
 all_setup() {
     for svc in "${SETUP_ORDER[@]}"; do

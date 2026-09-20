@@ -86,6 +86,31 @@ def to_internal_template_config(
     return deepcopy(value)
 
 
+class HostedWorkspaceNotEligibleError(Exception):
+    """Engine signals a bot is not eligible for a hosted workspace.
+
+    Engine-agnostic by definition (the default engine raises it on any ensure ask
+    since it owns no hosted-workspace story). BotService translates it to its own
+    ``BotServiceError`` so the layering stays: engines never raise service errors.
+    """
+
+
+class HostedWorkspaceProvisioningError(Exception):
+    """Engine signals a needed hosted-workspace create yielded no id.
+
+    Stepping into the provision path signals this distinct from a raised
+    underlying API error (which propagates untouched), so BotService can keep the
+    historical rollback + "returned no id" error wording.
+    """
+
+
+def hosted_workspace_not_eligible_error(ctx: "BotProvisioningContext") -> HostedWorkspaceNotEligibleError:
+    return HostedWorkspaceNotEligibleError(
+        f"Bot {ctx.bot_id} 未开启 workspace 托管能力，无法创建托管工作空间"
+        f"（template_type={ctx.template_type}, active_engine={ctx.active_engine or None}）"
+    )
+
+
 @dataclass(frozen=True)
 class BotProvisioningContext:
     """Common inputs used by engine provisioning strategies.
@@ -258,3 +283,42 @@ class EngineProvisioningStrategy(ABC):
         self, ctx: BotProvisioningContext, *, token_changed: bool
     ) -> None:
         """Post-template-update hook. Default strategies should no-op."""
+        """Post-template-update hook. Default strategies should no-op."""
+
+    # ── Hosted workspace ─────────────────────────────────────────────
+    # Concrete coding engines override these via their hosted-workspace mixin;
+    # the default no-op / not-eligible keeps public services from
+    # ``getattr``-probing whether a strategy supports hosting — they call
+    # directly and the default engine signals "not eligible" / "no
+    # provision".  Non-coding engines thus never see a hosted-workspace
+    # concept beyond these neutral base hooks.
+
+    def provision_hosted_workspace(
+        self,
+        ctx: "BotProvisioningContext",
+        *,
+        bot_name: str,
+        workspace_hosting_provider: Any,
+    ) -> Optional[str]:
+        """Create-time hosted-workspace provisioning hook.
+
+        Default engines own no hosted workspace, so this no-ops (returns
+        ``None``); coding engines override to return a workspace id.
+        """
+        return None
+
+    def ensure_hosted_workspace(
+        self,
+        ctx: "BotProvisioningContext",
+        *,
+        bot_name: str,
+        template_config: Any,
+        template_service: Any,
+        workspace_hosting_provider: Any,
+    ) -> Optional[str]:
+        """Idempotent hosted-workspace provisioning used by the ensure endpoint.
+
+        Default engines raise ``HostedWorkspaceNotEligibleError`` so the
+        service layer translates it uniformly (coding engines override).
+        """
+        raise hosted_workspace_not_eligible_error(ctx)

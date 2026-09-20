@@ -95,6 +95,7 @@ class RestartMixin:
         self,
         publish_id: int,
         operator: str = "system",
+        in_place: bool = False,
     ) -> dict:
         """Submit a Bot restart (durable, crash-safe).
 
@@ -119,7 +120,7 @@ class RestartMixin:
                 - stage: Publish stage (returned on success)
         """
         logger.info(
-            f"[PublishFlowService.restart_bot] called: publish_id={publish_id}, operator={operator}"
+            f"[PublishFlowService.restart_bot] called: publish_id={publish_id}, operator={operator}, in_place={in_place}"
         )
 
         # Resolve + validate the restart target (record → stage → binding → bot →
@@ -140,6 +141,7 @@ class RestartMixin:
             publish_id=publish_id,
             stage=stage.value,
             operator=operator,
+            in_place=in_place,
         )
 
         logger.info(
@@ -171,6 +173,9 @@ class RestartMixin:
                 "success": False,
                 "message": f"Publish record not found: publish_id={publish_id}",
             }, None, None
+
+        if ((publish_record.ext or {}).get("digital_employee_approval") or {}).get("status") in {"SUBMITTING", "APPROVING"}:
+            return {"success": False, "message": "数字员工审批中，暂不能重启发布"}, None, None
 
         current_status = PublishStatus(publish_record.status)
         stage = self._determine_restart_stage(current_status)
@@ -252,6 +257,7 @@ class RestartMixin:
         publish_id: int,
         stage: str,
         operator: str,
+        in_place: bool = False,
     ) -> dict:
         """Durable Bot restart work (#197): re-deploy the existing bot via the
         upgrade interface, through the operation runner so a crash-resume adopts
@@ -264,10 +270,17 @@ class RestartMixin:
         with a new bot + binding), dual-writes ``ext.restart.<stage>`` for the
         status read, refreshes the teclaw read handle, and completes the op.
         Returns ``{success, message}``."""
+        logger.info(
+            "[PublishFlowService.execute_restart] request: publish_id=%s stage=%s in_place=%s",
+            publish_id, stage, in_place,
+        )
         stage_enum = PublishStage(stage)
         publish_record = self._publish_service.get_publish_by_id(publish_id)
         if not publish_record:
             return {"success": False, "message": f"Publish record not found: {publish_id}"}
+
+        if ((publish_record.ext or {}).get("digital_employee_approval") or {}).get("status") in {"SUBMITTING", "APPROVING"}:
+            return {"success": False, "message": "数字员工审批中，暂不能重启发布"}
 
         ext = self._get_latest_ext(publish_id)
         binding_id = (ext.get("binding") or {}).get(stage_enum.value)
@@ -390,6 +403,7 @@ class RestartMixin:
                     skills_env=skills_env,
                     docker_image=image_pin.docker_image,
                     operator=operator,
+                    in_place=in_place,
                 )
 
         async def _issue():
@@ -408,6 +422,7 @@ class RestartMixin:
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
                 template_config=service_publish_template_config(bot),
+                in_place=in_place,
             )
         # NOTE: transient errors out of the atom are NOT caught + failed here. A
         # genuine crash leaves the op non-terminal so the durable task retry
@@ -461,6 +476,7 @@ class RestartMixin:
                 skills_env=skills_env,
                 docker_image=image_pin.docker_image,
                 operator=operator,
+                in_place=in_place,
             )
         restart_publish_id = op.baas_publish_id
 
@@ -553,6 +569,7 @@ class RestartMixin:
         skills_env: dict[str, str] | None,
         docker_image: str | None,
         operator: str,
+        in_place: bool = False,
     ) -> dict:
         """Recreate a restart's gone target bot — crash-safe (closes the former
         known limitation).
@@ -591,6 +608,7 @@ class RestartMixin:
                 extra_envs=skills_env,
                 docker_image=docker_image,
                 template_config=service_publish_template_config(bot),
+                in_place=in_place,
             )
 
         op = await acquire_deploy_workflow(

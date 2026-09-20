@@ -18,6 +18,9 @@ check_no_private_domains() {
     "${ROOT}/scripts/ci/singlebox_coverage.sh"
     "${ROOT}/scripts/singlebox.sh"
     "${ROOT}/scripts/modules/demo_bot.sh"
+    "${ROOT}/scripts/modules/frontend.sh"
+    "${ROOT}/scripts/modules/gateway.sh"
+    "${ROOT}/scripts/frontend_sprint_branch.sh"
   )
 
   if grep -nE "$private_domain_pattern" "${files[@]}"; then

@@ -5,9 +5,11 @@ local SQLite plugin and the community plugin both run it, so a community
 deployment gets the same tables a singlebox boot does — and, on MySQL, a schema
 that InnoDB will actually accept.
 """
+
 from __future__ import annotations
 
 import sqlalchemy as sa
+import pytest
 from sqlalchemy.dialects import mysql
 from sqlalchemy.schema import CreateIndex, CreateTable
 
@@ -111,7 +113,10 @@ class TestPrepareForMysql:
         ], "the oversized UniqueConstraint should have been replaced"
         index = next(i for i in table.indexes if i.name == "uk_uniq_a_b")
         assert index.unique is True
-        assert _key_bytes(list(index.columns), index.dialect_options["mysql"]["length"]) <= MAX_KEY_BYTES
+        assert (
+            _key_bytes(list(index.columns), index.dialect_options["mysql"]["length"])
+            <= MAX_KEY_BYTES
+        )
 
     def test_is_idempotent(self):
         metadata = sa.MetaData()
@@ -190,4 +195,131 @@ class TestRealSchema:
         # happened to pull in, and that the core tables are present.
         assert len(tables) > 50
         assert "ac_bots" in tables
-        assert "aw_langfuse_traces" in tables, "the private bot_chat Base must be emitted too"
+        assert "aw_langfuse_traces" in tables, (
+            "the private bot_chat Base must be emitted too"
+        )
+
+
+class _FakeLockConnection:
+    def __init__(self, acquire_result=1):
+        self.statements = []
+        self.closed = False
+        self._acquire_result = acquire_result
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        self.statements.append(sql)
+        value = self._acquire_result if "GET_LOCK" in sql else None
+        return _FakeResult(value)
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar(self):
+        return self._value
+
+
+class _FakeEngine:
+    def __init__(self, acquire_result=1, create_error=None):
+        self.connection = _FakeLockConnection(acquire_result)
+        self._create_error = create_error
+
+    def connect(self):
+        return self.connection
+
+
+class TestCreateAllNamedLock:
+    """Create_all serializes workers behind a MySQL named lock."""
+
+    def test_without_mysql_no_lock_is_taken(self, monkeypatch):
+        engine = _FakeEngine()
+
+        monkeypatch.setattr(schema, "_metadatas", lambda: [])
+        monkeypatch.setattr(schema, "import_all_models", lambda: None)
+
+        schema.create_all(engine, mysql=False)
+
+        assert engine.connection.statements == []
+
+    def test_mysql_acquires_and_releases_the_named_lock(self, monkeypatch):
+        engine = _FakeEngine()
+        monkeypatch.setattr(schema, "_metadatas", lambda: [])
+        monkeypatch.setattr(schema, "import_all_models", lambda: None)
+
+        schema.create_all(engine, mysql=True)
+
+        assert any("GET_LOCK" in s for s in engine.connection.statements)
+        assert any("RELEASE_LOCK" in s for s in engine.connection.statements)
+        assert engine.connection.closed is True
+
+    def test_mysql_raises_when_the_lock_times_out(self, monkeypatch):
+        engine = _FakeEngine(acquire_result=0)
+        monkeypatch.setattr(schema, "_metadatas", lambda: [])
+        monkeypatch.setattr(schema, "import_all_models", lambda: None)
+
+        with pytest.raises(RuntimeError, match="could not acquire named lock"):
+            schema.create_all(engine, mysql=True)
+
+        assert not any("RELEASE_LOCK" in s for s in engine.connection.statements)
+        assert engine.connection.closed is True
+
+    def test_mysql_prepares_each_metadata_and_caps_index_keys(self, monkeypatch):
+        engine = _FakeEngine()
+        prepared = []
+        created = []
+
+        class FakeMetadata:
+            def __init__(self, name):
+                self.name = name
+
+            def create_all(self, engine):
+                created.append(self.name)
+
+        monkeypatch.setattr(schema, "_metadatas", lambda: [FakeMetadata("m1")])
+        monkeypatch.setattr(schema, "import_all_models", lambda: None)
+        monkeypatch.setattr(
+            schema, "prepare_for_mysql", lambda md: prepared.append(md.name) or []
+        )
+
+        schema.create_all(engine, mysql=True)
+
+        assert prepared == ["m1"]
+        assert created == ["m1"]
+
+    def test_already_exists_is_treated_as_success(self, monkeypatch):
+        engine = _FakeEngine()
+
+        class FakeMetadata:
+            sorted_tables = []
+
+            def create_all(self, engine):
+                raise RuntimeError("(1050, \"Table 'ac_bots' already exists\")")
+
+        monkeypatch.setattr(schema, "_metadatas", lambda: [FakeMetadata()])
+        monkeypatch.setattr(schema, "import_all_models", lambda: None)
+
+        schema.create_all(engine, mysql=True)
+
+        assert any("RELEASE_LOCK" in s for s in engine.connection.statements)
+
+    def test_unrelated_errors_still_propagate(self, monkeypatch):
+        engine = _FakeEngine()
+
+        class FakeMetadata:
+            sorted_tables = []
+
+            def create_all(self, engine):
+                raise RuntimeError("Access denied for user 'backend'@'%'")
+
+        monkeypatch.setattr(schema, "_metadatas", lambda: [FakeMetadata()])
+        monkeypatch.setattr(schema, "import_all_models", lambda: None)
+
+        with pytest.raises(RuntimeError, match="Access denied"):
+            schema.create_all(engine, mysql=True)
+
+        assert engine.connection.closed is True

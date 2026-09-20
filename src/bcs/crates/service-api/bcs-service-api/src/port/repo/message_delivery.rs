@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use bcs_domain::message_delivery::{DeliveryFlowKind, PersistedMessageDelivery};
 use bcs_domain::{DeliveryType, NewMessage, PersistedMessage};
 
-/// Bounded operational scans. Context expiry is independent of send dispatch.
+/// Bounded operational scans. Context and uncertain-attempt expiry are
+/// independent of send dispatch.
 #[derive(Debug, Clone, Copy)]
 pub enum DeliveryWorkBatch { Expired, Control, Recovery }
 
@@ -72,7 +73,11 @@ pub struct DeliveryDisplayMessage {
 #[derive(Debug, Clone)]
 pub struct AdmitMessageDeliveries {
     /// Optional final visible chat segment, written immediately before an
-    /// internal run_reply in the same transaction. Never admits targets.
+    /// internal run_reply or a chat_error projection in the same transaction.
+    /// For chat_error this is the partial reply, not the error text; the primary
+    /// error has no event. Ordinary Group errors never admit targets; a Task
+    /// result error may carry one Send target whose semantic projection is the
+    /// manager result, not the `chat_error` history row as Bot conversation input.
     pub display_message: Option<DeliveryDisplayMessage>,
     pub message_id: String,
     pub message: NewMessage,

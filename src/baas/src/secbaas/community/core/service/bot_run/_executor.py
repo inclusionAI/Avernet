@@ -31,20 +31,18 @@ from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotChatContext,
 )
-from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.api_gateway import APIKeyRepository
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.bot_service import BotServicePlugin
 from secbaas.community.spi.eval_env import EvalSessionLog
 
+from ._binding_resolver import BotBindingResolver
 from ._bot_run_utils import (
-    binding_data_to_info,
+    CALLER_SANDBOX_META_KEY,
+    build_caller_binding,
     build_chat_metadata,
-    extract_lifecycle_stage,
-    parse_bot_id,
     resolve_bot_id,
 )
 from ._bot_service_selector import BotServiceSelector
@@ -189,7 +187,23 @@ class SerializingExecutor:
                     record.bot_id,
                 )
                 raise RequeuedToPendingError(record.run_id, session_id)
-            await self._inner.execute(record)
+            try:
+                await self._inner.execute(record)
+            except BaseException:
+                # 异常路径显式 force_unlock，避免 ``_release_lock_internal``
+                # 吞异常路径导致 ``ac_lock_table`` 孤儿 session 锁残留
+                # （仅在 ``lock.acquired=True`` 分支内执行，不动他人锁）。
+                try:
+                    self._lock_service.force_unlock(lock_name)
+                except Exception as unlock_err:
+                    logger.warning(
+                        "[SerializingExecutor] force_unlock failed "
+                        "run_id=%s lock_name=%s: %s",
+                        record.run_id,
+                        lock_name,
+                        unlock_err,
+                    )
+                raise
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +223,7 @@ def _rebuild_context(
     若 metadata 缺失，则 fallback 到 api_key_repository.get_by_prefix 反查。
     """
     metadata = metadata or {}
-    app_id = metadata.get("app_id")
+    app_id: str | None = metadata.get("app_id")
     app_type = metadata.get("app_type")
     tenant = metadata.get("tenant")
 
@@ -251,7 +265,7 @@ class BotRunRequestExecutor:
     def __init__(
         self,
         run_repository: BotRunRepository,
-        bot_service_plugin: BotServicePlugin,
+        binding_resolver: BotBindingResolver,
         bot_service_selector: BotServiceSelector,
         chunk_repository: BotRunQueueChunkRepository,
         cache_plugin: CachePlugin,
@@ -261,7 +275,7 @@ class BotRunRequestExecutor:
         stream_flush_max_content_bytes: int = 65536,
     ) -> None:
         self._repo = run_repository
-        self._bot_service_plugin = bot_service_plugin
+        self._binding_resolver = binding_resolver
         self._bot_service_selector = bot_service_selector
         self._chunk_repository = chunk_repository
         self._cache_plugin = cache_plugin
@@ -300,8 +314,17 @@ class BotRunRequestExecutor:
         context = _rebuild_context(
             run.api_key_prefix, self._api_key_repository, metadata
         )
-        lifecycle_stage = extract_lifecycle_stage(metadata)
-        binding_info = await self._resolve_binding(run.bot_id, lifecycle_stage)
+        caller_sandbox_id = queue_meta.get(CALLER_SANDBOX_META_KEY)
+        if caller_sandbox_id:
+            # caller 模式：容器在入队前已由 runner 后台拉起——直接用 queue meta
+            # 的 sandbox 组 binding，不再二次调 caller-connection（run metadata
+            # 已脱敏无 iam_token，caller 判定以 meta 的 sandbox 存在为准）
+            binding_info = build_caller_binding(run.bot_id, caller_sandbox_id)
+        else:
+            binding_info = await self._binding_resolver.resolve_binding(
+                bot_id=run.bot_id,
+                metadata=metadata,
+            )
 
         if binding_info is None:
             self._repo.update_error(run.run_id, f"binding not found: {run.bot_id}")
@@ -347,6 +370,8 @@ class BotRunRequestExecutor:
                 method="execute",
             )
 
+        session_pending: bool = bool(queue_meta.get("session_pending", False))
+
         try:
             if request_type == "inject":
                 await self._do_inject(
@@ -356,6 +381,7 @@ class BotRunRequestExecutor:
                     binding_info,
                     context,
                     attachments=attachments,
+                    session_pending=session_pending,
                 )
             elif stream:
                 await self._do_send_stream(
@@ -366,6 +392,8 @@ class BotRunRequestExecutor:
                     binding_info,
                     context,
                     attachments=attachments,
+                    session_pending=session_pending,
+                    chat_metadata=chat_metadata,
                 )
             else:
                 await self._do_send(
@@ -378,6 +406,7 @@ class BotRunRequestExecutor:
                     context,
                     chat_metadata,
                     attachments=attachments,
+                    session_pending=session_pending,
                 )
 
         except TimeoutError:
@@ -397,6 +426,7 @@ class BotRunRequestExecutor:
         context: BotChatContext,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         wait_result = True
         if "ignore_result" in metadata:
@@ -422,6 +452,7 @@ class BotRunRequestExecutor:
             timeout=timeout_sec,
             chat_metadata=chat_metadata,
             attachments=attachments,
+            session_pending=session_pending,
         )
 
         extra: dict[str, Any] = {"session_id": session_id}
@@ -433,11 +464,44 @@ class BotRunRequestExecutor:
                 "completion_tokens": response.usage.get("completion_tokens", 0),
             }
 
-        self._repo.update_result(
-            run_id=run.run_id,
-            content_long=response.content,
-            extra=extra,
-        )
+        await self._do_send_persist(run, response, extra)
+
+    async def _do_send_persist(
+        self,
+        run: Any,
+        response: Any,
+        extra: dict[str, Any],
+    ) -> None:
+        """持久化 ``_do_send`` 的结果，失败时写 FAILED 终态并向上抛。
+
+        业务层兜底（Issue 1）：确切 1064 根因由后续基于实际 SQL 错误日志确认，
+        此处仅保证持久化失败时 run 进入 FAILED 终态并由上层 finally 路径
+        触发 callback 与锁释放，不再长期阻塞会话。
+        """
+        try:
+            self._repo.update_result(
+                run_id=run.run_id,
+                content_long=response.content,
+                extra=extra,
+            )
+        except Exception as persist_err:
+            logger.exception(
+                "[BotRunExecutor] result persistence failed run_id=%s: %s",
+                run.run_id,
+                persist_err,
+            )
+            try:
+                self._repo.update_error(
+                    run.run_id,
+                    f"result persistence failed: {persist_err}",
+                )
+            except Exception as mark_err:
+                logger.exception(
+                    "[BotRunExecutor] update_error fallback failed run_id=%s: %s",
+                    run.run_id,
+                    mark_err,
+                )
+            raise
 
     async def _do_send_stream(
         self,
@@ -448,6 +512,8 @@ class BotRunRequestExecutor:
         binding_info: BotBindingInfo,
         context: BotChatContext,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
+        chat_metadata: dict[str, str] | None = None,
     ) -> None:
         """流式发送：消费 bot_service.send_message_stream，逐 chunk 写 chunk 表 + ZCache watermark。
 
@@ -569,7 +635,9 @@ class BotRunRequestExecutor:
             binding_info=binding_info,
             context=context,
             timeout=timeout_sec,
+            chat_metadata=chat_metadata,
             attachments=attachments,
+            session_pending=session_pending,
         )
         # 常驻 next 任务：用 asyncio.wait 加 flush 间隔超时等待，
         # 超时只是返回而不取消 __anext__（wait_for 会 cancel 并关闭
@@ -632,6 +700,7 @@ class BotRunRequestExecutor:
         binding_info: BotBindingInfo,
         context: BotChatContext,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         await bot_service.inject_message(
             session_id=session_id,
@@ -639,34 +708,10 @@ class BotRunRequestExecutor:
             binding_info=binding_info,
             context=context,
             attachments=attachments,
+            session_pending=session_pending,
         )
         self._repo.update_result(
             run_id=run.run_id,
             content_long="",
             extra={"session_id": session_id, "injected": "true"},
         )
-
-    async def _resolve_binding(
-        self, bot_id: str, lifecycle_stage: str
-    ) -> BotBindingInfo | None:
-        real_bot_id, entity_id = parse_bot_id(bot_id)
-        if not real_bot_id:
-            return None
-        try:
-            data = await self._bot_service_plugin.get_binding(
-                bot_id=real_bot_id,
-                owner_id=entity_id or "",
-                stage=lifecycle_stage,
-            )
-        except PaasError as e:
-            if e.code == ErrorCode.NOT_FOUND:
-                logger.warning(
-                    "[BotRunExecutor] Bot binding unavailable: bot_id=%s, "
-                    "lifecycle_stage=%s, error=%s",
-                    bot_id,
-                    lifecycle_stage,
-                    e,
-                )
-                return None
-            raise
-        return binding_data_to_info(data)

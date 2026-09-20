@@ -119,3 +119,54 @@ class TestRealEvalSessionLog:
         )
         assert result["bot_options"]["existing_key"] == "value"
         assert result["bot_options"]["lifecycle_stage"] == "staging"
+
+    # ── default_tag lifecycle_stage 映射 ──
+
+    def test_extract_eval_headers_default_tag_maps_to_eval_stage(self):
+        """x_default_tag="default" 应映射为 lifecycle_stage="eval"，
+        而 default_tag 保持 "default" 不变。"""
+        log = RealEvalSessionLog()
+        metadata = {}
+        result = log.extract_eval_headers(
+            metadata=metadata,
+            x_eval_id=None,
+            x_default_tag="default",
+        )
+        assert result["default_tag"] == "default"
+        assert result["bot_options"]["lifecycle_stage"] == "eval"
+
+    def test_extract_eval_headers_default_tag_eval_stays_eval(self):
+        """x_default_tag="eval" 时 lifecycle_stage 仍为 "eval"，行为不变。"""
+        log = RealEvalSessionLog()
+        metadata = {}
+        result = log.extract_eval_headers(
+            metadata=metadata,
+            x_eval_id=None,
+            x_default_tag="eval",
+        )
+        assert result["default_tag"] == "eval"
+        assert result["bot_options"]["lifecycle_stage"] == "eval"
+
+    def test_extract_eval_headers_default_tag_verify_stays_verify(self):
+        """x_default_tag="verify" 时 lifecycle_stage 保持 "verify" 不映射。"""
+        log = RealEvalSessionLog()
+        metadata = {}
+        result = log.extract_eval_headers(
+            metadata=metadata,
+            x_eval_id=None,
+            x_default_tag="verify",
+        )
+        assert result["default_tag"] == "verify"
+        assert result["bot_options"]["lifecycle_stage"] == "verify"
+
+    def test_extract_eval_headers_default_tag_preserves_existing_bot_options(self):
+        """default_tag 映射时保留已存在的 bot_options 键。"""
+        log = RealEvalSessionLog()
+        metadata = {"bot_options": {"existing_key": "value"}}
+        result = log.extract_eval_headers(
+            metadata=metadata,
+            x_eval_id=None,
+            x_default_tag="default",
+        )
+        assert result["bot_options"]["existing_key"] == "value"
+        assert result["bot_options"]["lifecycle_stage"] == "eval"

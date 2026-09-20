@@ -168,6 +168,29 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     collection = paths["/openapi/v1/collaboration/sessions/{session_id}/collect"]
     assert set(collection) == {"delete", "post"}
     assert "get" in paths["/openapi/v1/collaboration/messages/ws"]
+    assert "get" in paths["/openapi/v1/collaboration/messages/{message_id}/deliveries"]
+    assert (
+        "post"
+        in paths[
+            "/openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query"
+        ]
+    )
+    assert (
+        "post"
+        in paths[
+            "/openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/cancel"
+        ]
+    )
+    assert (
+        "post"
+        in paths["/openapi/v1/collaboration/messages/{message_id}/deliveries/cancel"]
+    )
+    assert (
+        "post"
+        in paths[
+            "/openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/resolve"
+        ]
+    )
     assert "post" in paths["/openapi/v1/collaboration/friend-connections/requests"]
     assert "get" in paths["/openapi/v1/collaboration/friend-connections/requests"]
     assert "delete" in paths["/openapi/v1/collaboration/friend-connections"]
@@ -223,6 +246,7 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
         "Collaboration / Sessions",
         "Collaboration / Register",
         "Collaboration / Invitations",
+        "Collaboration / Invite Codes",
         "Collaboration / Channels",
         "Collaboration / Event Subscriptions",
     ]

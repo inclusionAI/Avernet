@@ -503,38 +503,43 @@ pub async fn patch_provider_bot(
 pub async fn resolve_agentpass_bot(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
-) -> Result<Json<Value>, ProviderRouteError> {
+) -> Result<Response, ProviderRouteError> {
     let provider_id = header_required(&headers, BCN_PROVIDER_ID_HEADER)?;
     let token = bearer_token_with_message(&headers, "valid agentpass token is required")?;
-    let Some(agent_code) = state
+    let agent_code = state
         .bot_runtime_token_resolver
         .resolve_agentpass_agent_code(&token)
-        .await
-    else {
-        return Ok(Json(json!({
-            "agent_code": Value::Null,
-            "provider_bot_binding": Value::Null,
-            "bot": Value::Null,
-        })));
-    };
-
-    let binding = state
-        .services
-        .provider_bot_core
-        .get_provider_bot_binding_by_ref(&provider_id, &agent_code)
-        .await
-        .map_err(provider_error)?;
-    let bot = if let Some(binding) = binding.as_ref() {
-        state.services.registry.get(&binding.bot_uuid).await
+        .await;
+    let agentpass_resolved = agent_code.is_some();
+    let (binding, bot) = if let Some(agent_code) = agent_code.as_deref() {
+        let binding = state
+            .services
+            .provider_bot_core
+            .get_provider_bot_binding_by_ref(&provider_id, agent_code)
+            .await
+            .map_err(provider_error)?;
+        let bot = if let Some(binding) = binding.as_ref() {
+            state.services.registry.get(&binding.bot_uuid).await
+        } else {
+            None
+        };
+        (binding, bot)
     } else {
-        None
+        (None, None)
     };
 
-    Ok(Json(json!({
+    let mut response = Json(json!({
         "agent_code": agent_code,
         "provider_bot_binding": binding.map(binding_to_json).unwrap_or(Value::Null),
         "bot": bot.map(|bot| json!(bot)).unwrap_or(Value::Null),
-    })))
+        "jwt": super::agentpass_jwt::format_jwt(&token, agentpass_resolved),
+    }))
+    .into_response();
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    Ok(response)
 }
 
 pub async fn disable_provider(

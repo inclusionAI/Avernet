@@ -209,13 +209,17 @@ def bots():
 def collaborators():
     """The role table: ``OWNER`` owns ``BOT``, ``COLLAB`` is a member on it.
 
-    Mirrors ``CollaboratorService.get_permission_level``, including its owner
+    Mirrors ``CollaboratorService.get_operable_permission_level``, including its owner
     short-circuit — which is what makes the owner reach the bot without a row.
     Anyone else is ``NONE`` and is refused by ``require_bot_operator``.
     """
 
     class _Collaborators:
-        def get_permission_level(self, bot_pk: int, user_id: str, owner_id: str):
+        # The effective-ladder shape the gate calls: the row (its ``id`` and
+        # ``owner_id``) drives the answer now, rather than the wire pair.
+        def get_operable_permission_level(self, *, bot, user_id, env=None):
+            bot_pk = int(bot.get("id") or 0)
+            owner_id = str(bot.get("owner_id") or "")
             if user_id == owner_id:
                 return PermissionLevel.OWNER
             if bot_pk == BOT_PK and user_id == COLLAB:

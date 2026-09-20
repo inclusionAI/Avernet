@@ -137,6 +137,11 @@ most common error scenarios:
 The coverage gate (`ENDPOINT_COVERAGE_GATE=strict`) enforces this once
 backfill is underway.
 
+A route deliberately retained only to return HTTP 410 has no honest happy
+path. Declare its single terminal case with `ExpectRetired()`; the runner still
+asserts 410, while the coverage gate treats the explicit retirement contract as
+complete. Do not use `ExpectRetired` for ordinary domain errors.
+
 ### Why declare instead of writing the invocation yourself?
 
 The framework can guarantee that the declared `(method, path)` is what

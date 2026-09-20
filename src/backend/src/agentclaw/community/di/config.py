@@ -1,11 +1,9 @@
 """Typed configuration dataclasses.
-
 Each dataclass corresponds to one cluster of ``user_config.get(...)``
 calls in the legacy codebase. ``ConfigModule`` (Task 5) provides one
 ``@singleton`` ``@provider`` per type; downstream services receive the
 typed object via constructor injection rather than reaching into
 ``sofa.sofa_config`` themselves.
-
 The ``raw`` dict on some types is an escape hatch — there are config
 clusters with sub-blocks (e.g. ``arca_sandbox.alt``) that aren't yet
 worth fully typing. The hatch lets us pull the typed extraction work
@@ -17,6 +15,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentclaw.community.core.bot_config_manifest.delivery_mode import (
+    TeclawDeliveryMode,
+)
 from agentclaw.community.core.task_queue.types import DEFAULT_APP
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
@@ -31,7 +32,6 @@ from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 @dataclass(frozen=True)
 class WhitelistConfig:
     """Operator whitelist — frozen set of operator names allowed in.
-
     Sourced from the ``whitelist`` block of ``user_config``.
     """
 
@@ -41,7 +41,6 @@ class WhitelistConfig:
 @dataclass(frozen=True)
 class BotChatConfig:
     """Bot-chat trace-store (Langfuse) config (the ``bot_chat`` user_config block).
-
     Neutral empty defaults — the community build embeds no trace-store endpoint
     or credentials. Corp env overlays set them; empty ⇒ the Langfuse-backed
     bot-chat features report unconfigured (the DB-backed path is unaffected).
@@ -55,7 +54,6 @@ class BotChatConfig:
 @dataclass(frozen=True)
 class YuqueConfig:
     """Yuque binding-verify endpoint config (the ``yuque`` user_config block).
-
     Neutral empty default — the community build embeds no Yuque endpoint; each
     corp env overlay sets ``user_api``. Empty ⇒ the verify endpoint returns an
     "unconfigured" response.
@@ -68,7 +66,6 @@ class YuqueConfig:
 class BcnConfig:
     """BCN (Bot Coordination Network) host + provider credentials (the ``bcn``
     user_config block).
-
     ``base_url`` is the prod BCN host and ``base_url_pre`` overrides it when
     env=='pre'. The ``provider_*`` pairs are the claude_code down-link Provider
     credentials, keyed by env (prod / pre); only those two envs register to a real BCN.
@@ -100,10 +97,8 @@ class BcnConfig:
 @dataclass(frozen=True)
 class OpenApiBotConfig:
     """``openapi_bot`` block — BaaS Open API single-bot dispatch (task ``single_bot``).
-
     Drives the community ``OpenApiBotAdapter`` (Bearer ``api_key`` against
     ``/openapi/v1/messages`` + ``/api/v1/api-keys/<prefix>/allowed-bots``).
-
     ``base_url`` / ``base_url_pre`` are env-aware hosts (non-secret), selected
     per ``get_current_env()`` — mirrors the ``bcn`` block convention
     (``base_url``=prod, ``base_url_pre``=pre). ``api_key_secret`` is the LITERAL
@@ -122,10 +117,8 @@ class OpenApiBotConfig:
 @dataclass(frozen=True)
 class BcsClientConfig:
     """``bcs_client`` block — BCS coordinator HMAC client (task ``coop_group``).
-
     Drives the community ``BcsHttpAdapter`` (HMAC ``X-ECB-Token`` /
     ``X-ECB-Signature`` against ``/groups`` + ``/sessions``).
-
     Distinct from the ``bcn`` block: that block feeds the BCN management plane
     (Bearer ``provider_admin_token``); this block feeds the coordination plane
     (HMAC, group/session lifecycle) consumed by the coop-group task runner. The
@@ -278,6 +271,7 @@ class SecretNamesConfig:
 
     dormant_internal_token: str = ""
     skill_center_internal_token: str = ""
+    tc_file_service_token: str = ""
     aiworkbench_repo_url: str = ""
     gateway_principal_signing_key: str = "gateway_principal_signing_key"
     aicoding_theta_master_key: str = ""
@@ -487,6 +481,12 @@ class EcbConfig:
 
     base_url: str = ""
     base_url_pre: str = ""
+    resource_ready_base_url: str = ""
+    resource_ready_timeout_seconds: float = 10.0
+    resource_ready_worker_threads: int = 2
+    resource_ready_max_in_flight: int = 8
+    resource_ready_dedupe_ttl_seconds: float = 3600.0
+    resource_ready_dedupe_max_entries: int = 10_000
 
 
 @dataclass(frozen=True)
@@ -557,17 +557,13 @@ class DesktopBotPeriodicScanConfig:
 
 @dataclass(frozen=True)
 class DesktopSkillRecoveryConfig:
-    """Low-frequency safety net for missed Desktop Skill recovery wakes."""
+    """Retry budget for one event-driven Desktop Skill recovery task."""
 
-    enabled: bool = True
-    sweep_interval_seconds: float = 10 * 60
-    sweep_page_size: int = 100
+    task_deadline_seconds: int = 10 * 60
 
     def __post_init__(self) -> None:
-        if self.sweep_interval_seconds <= 0:
-            raise ValueError("sweep_interval_seconds must be positive")
-        if self.sweep_page_size <= 0:
-            raise ValueError("sweep_page_size must be positive")
+        if self.task_deadline_seconds <= 0:
+            raise ValueError("task_deadline_seconds must be positive")
 
 
 @dataclass(frozen=True)
@@ -781,6 +777,13 @@ class DormantInternalToken:
 
 
 @dataclass(frozen=True)
+class TcFileServiceToken:
+    """Resolved shared Bearer token for the OCB ↔ ECB TC integration."""
+
+    value: str = ""
+
+
+@dataclass(frozen=True)
 class SkillCenterInternalToken:
     """Resolved bearer token for ``/api/internal/skill-center/*`` endpoints.
 
@@ -977,14 +980,19 @@ class BotConfigManifestConfig:
             fetch road's; the value now serves the endpoint guard alone.
         content_store_dir: The content store's blob root — relative paths
             resolve against the process working directory, ``~`` expands.
-        teclaw_platform_managed: The W8 switch (see the field comment).
+        teclaw_delivery_mode: The W8 delivery shape (see the field comment).
     """
 
     fetch_transport_allowlist: tuple[str, ...] = ()
     content_store_dir: str = "./data/manifest_content"
-    #: W8: whether teclaw bots take the platform-managed delivery path
+    #: W8: which teclaw delivery this deployment runs — ``PLATFORM``
     #: (materialise into the bot-data store + index, deliver by artifact with
-    #: the ``ownership`` map). Off until the teclaw engine supports the map;
-    #: off means the pre-W8 per-file shape. Read only by the delivery
-    #: strategy factory.
-    teclaw_platform_managed: bool = False
+    #: the ``ownership`` map) or ``DEVICE``, the pre-W8 per-file shape.
+    #: ``DEVICE`` until the teclaw engine supports the map.
+    #:
+    #: A mode rather than the boolean the yaml key still spells, because it
+    #: names *which implementation is bound* — the composition root turns it
+    #: into one built strategy and one compose-side reader, and nothing
+    #: downstream sees it. The yaml key is unchanged
+    #: (``teclaw_platform_managed``); this is what it parses to.
+    teclaw_delivery_mode: TeclawDeliveryMode = TeclawDeliveryMode.DEVICE

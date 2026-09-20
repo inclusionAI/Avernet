@@ -547,3 +547,80 @@ def test_caller_connection_force_upgrade_true():
 )
 def test_caller_connection_force_upgrade_false():
     """force_upgrade=false (default) uses fast path when version is current."""
+
+
+# BaaS requests use signed service authentication, not x-user-id.
+_APP_KEY = "app-caller-framework-signing-key-32bytes"
+
+
+def _app_principal():
+    import time
+    import jwt
+    now = int(time.time())
+    return jwt.encode({
+        "iss": "baas", "iat": now, "exp": now + 3600,
+    }, _APP_KEY, algorithm="HS256")
+
+
+def _seed_application_connection(world):
+    from types import SimpleNamespace
+    from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
+    resolver = SimpleNamespace(get_secret=lambda _: SimpleNamespace(secret_value=_APP_KEY, secret_user="test"))
+    init_principal_verifier_config(resolver, "test-key", strict=False)
+    _seed_happy(world)
+    world.get(ExpertChatInstanceRepository).upsert_instance(
+        user_id=_USER_ID, bot_id=_BOT_ID, owner_id=_OWNER_ID,
+        status="success", ext={"bot_uuid": _BOT_UUID, "version": 1},
+    )
+
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/expert-chats/app-caller-connection",
+    scenario="app_only_existing_caller_connection",
+    input=CaseInput(
+        query_params={"bot_id": _BOT_ID, "owner_id": _OWNER_ID, "user_id": _USER_ID},
+        headers={"X-Avernet-Principal": _app_principal()},
+    ),
+    seed=_seed_application_connection,
+    expect=ExpectSuccess(status=200, json_contains={
+        "success": True, "error_code": 0, "data": {"need_poll": False},
+    }),
+)
+def test_application_caller_connection_happy():
+    """Real DI and instance repositories allow a private nonmember caller without grants."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/expert-chats/app-caller-connection",
+    scenario="app_connection_requires_signed_identity",
+    input=CaseInput(query_params={"bot_id": _BOT_ID, "owner_id": _OWNER_ID, "user_id": _USER_ID}),
+    seed=_seed_application_connection,
+    expect=ExpectError(status=401, json_contains={"detail": "Unauthorized"}),
+)
+def test_application_caller_connection_unauthenticated():
+    """An existing instance does not authorize a request without its Principal."""
+
+
+def _seed_foreign_application_connection(world):
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+    with avernet_tenant_scope("foreign-baas-test"):
+        _seed_application_connection(world)
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/expert-chats/app-caller-connection",
+    scenario="baas_cannot_read_foreign_tenant_instance",
+    input=CaseInput(
+        query_params={"bot_id": _BOT_ID, "owner_id": _OWNER_ID, "user_id": _USER_ID,
+                      "tenant": "foreign-baas-test"},
+        headers={"X-Avernet-Principal": _app_principal()},
+    ),
+    seed=_seed_foreign_application_connection,
+    expect=ExpectSuccess(status=200, json_contains={"success": False, "error_code": 403}),
+)
+def test_baas_cannot_read_foreign_tenant_instance():
+    """A valid service signature grants no cross-tenant repository access."""

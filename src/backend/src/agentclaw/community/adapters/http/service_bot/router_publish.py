@@ -7,8 +7,16 @@
 """
 import copy
 import json
+import time
+from uuid import uuid4
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
+from agentclaw.community.api.publish_ignore_service import (
+    PublishIgnoreCommand, PublishIgnoreError, PublishIgnoreServiceProtocol,
+    PublishIgnoreQuery,
+)
+from agentclaw.community.adapters.http.service_bot.schemas_publish import PublishIgnoreRequest
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -67,6 +75,48 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 router = APIRouter(prefix="/api/service-bot/publish", tags=["service-bot-publish"])
+
+
+@router.get("/ops/publish-ignore", response_model=ApiResponse)
+async def query_publish_ignore(
+    bot_id: str = Query(..., min_length=1, max_length=255),
+    entity_id: str = Query(..., min_length=1, max_length=255),
+    stage: Literal["draft", "verify", "online"] = Query(...),
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: PublishIgnoreServiceProtocol = Injected(PublishIgnoreServiceProtocol),
+) -> ApiResponse:
+    """Read each current runtime instance's ignore rules without modifying them."""
+    query = PublishIgnoreQuery(bot_id, entity_id, stage, str(uuid4()))
+    try:
+        result = await service.query(query, user.staffId, is_admin=user.staffId in super_admin())
+        return ApiResponse(success=result["success"], data=result)
+    except PublishIgnoreError as exc:
+        return ApiResponse(success=False, message=exc.code,
+                           error_code=403 if exc.code == "permission_denied" else 409)
+    except Exception as exc:
+        logger.warning("backend.publish_ignore.http_query_failure request_id=%s error_type=%s",
+                       query.request_id, type(exc).__name__)
+        return ApiResponse(success=False, message="publish_ignore_failed", error_code=500)
+
+
+@router.post("/ops/publish-ignore", response_model=ApiResponse)
+async def change_publish_ignore(
+    request: PublishIgnoreRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: PublishIgnoreServiceProtocol = Injected(PublishIgnoreServiceProtocol),
+) -> ApiResponse:
+    """Update a rule on the selected stage's current runtime instances."""
+    command = PublishIgnoreCommand(**request.model_dump(), request_id=str(uuid4()))
+    try:
+        result = await service.change(command, user.staffId, is_admin=user.staffId in super_admin())
+        return ApiResponse(success=result["success"], data=result)
+    except PublishIgnoreError as exc:
+        return ApiResponse(success=False, message=exc.code,
+                           error_code=403 if exc.code == "permission_denied" else 409)
+    except Exception as exc:
+        logger.warning("backend.publish_ignore.http_failure request_id=%s error_type=%s",
+                       command.request_id, type(exc).__name__)
+        return ApiResponse(success=False, message="publish_ignore_failed", error_code=500)
 
 
 # ============================================================================
@@ -181,21 +231,25 @@ async def get_bot_stage_binding_info(
     bot_id: str,
     owner_id: str,
     stage: str,
+    default_tag: str | None = None,
     publish_service: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
 ) -> ApiResponse:
     """查询 bot 在指定阶段对应的 binding / BaaS 信息.
 
     GET /api/service-bot/publish/{bot_id}/binding?owner_id=u1&stage=online
+    GET /api/service-bot/publish/{bot_id}/binding?owner_id=u1&stage=eval&default_tag=default
     """
     try:
         logger.info(
-            f"[get_bot_stage_binding_info] Query: bot_id={bot_id}, stage={stage}, owner_id={owner_id}"
+            f"[get_bot_stage_binding_info] Query: bot_id={bot_id}, stage={stage}, "
+            f"owner_id={owner_id}, default_tag={default_tag}"
         )
 
         result = publish_service.get_bot_stage_binding_info(
             bot_id=bot_id,
             owner_id=owner_id,
             stage=stage,
+            default_tag=default_tag,
         )
 
         return ApiResponse(
@@ -832,6 +886,68 @@ async def restart_publish(
     except Exception as e:
         logger.error(f"[restart_publish] Unexpected error: {e}")
         return ApiResponse(success=False, message=f"重启发布单失败: {str(e)}", error_code=500, data=None)
+
+
+@router.post(
+    "/{publish_id}/restart-in-place",
+    response_model=ApiResponse,
+    summary="原地重启发布单",
+)
+@with_interceptors(CollaboratorPermissionInterceptor(
+    params_extractor=extract_from_publish_id,
+    extractor_params={"publish_id": "$publish_id"},
+))
+async def restart_publish_in_place(
+    publish_id: int,
+    user: AuthenticatedUser = Depends(get_current_user),
+    flow_service: PublishFlowServiceProtocol = Injected(PublishFlowServiceProtocol),
+) -> ApiResponse:
+    """复用发布重启流程，仅跳过容器内的制品迁移。"""
+    started = time.monotonic()
+    logger.info(
+        "[restart_publish_in_place] system=backend direction=inbound method=POST "
+        "route=/{publish_id}/restart-in-place request publish_id=%s operator=%s in_place=true",
+        publish_id, user.staffId,
+    )
+    try:
+        if not user.staffId or user.staffId == "anonymous":
+            logger.info(
+                "[restart_publish_in_place] response publish_id=%s in_place=true "
+                "success=false error_code=400 elapsed_ms=%.1f",
+                publish_id, (time.monotonic() - started) * 1000,
+            )
+            return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
+        result = flow_service.restart_bot(
+            publish_id=publish_id, operator=user.staffId, in_place=True,
+        )
+        logger.info(
+            "[restart_publish_in_place] response publish_id=%s stage=%s "
+            "in_place=true success=%s bot_uuid=%s elapsed_ms=%.1f",
+            publish_id, result.get("stage"), result.get("success", False),
+            result.get("bot_uuid"),
+            (time.monotonic() - started) * 1000,
+        )
+        return ApiResponse(
+            success=result.get("success", False), data=result,
+            message=result.get("message", "重启任务已提交"),
+        )
+    except Exception as exc:
+        code = 500
+        message = "重启发布单失败"
+        if isinstance(exc, PublishNotFoundError):
+            code = 404
+            message = str(exc)
+        elif isinstance(exc, PublishStatusInvalidError):
+            code = 400
+            message = str(exc)
+        # COSEC: upstream exceptions may contain credentials; log only their type.
+        logger.warning(
+            "[restart_publish_in_place] failure publish_id=%s in_place=true "
+            "error_type=%s error_code=%s elapsed_ms=%.1f",
+            publish_id, type(exc).__name__, code,
+            (time.monotonic() - started) * 1000,
+        )
+        return ApiResponse(success=False, message=message, error_code=code, data=None)
 
 
 @router.get(

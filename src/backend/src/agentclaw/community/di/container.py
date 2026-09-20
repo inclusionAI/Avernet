@@ -4,7 +4,7 @@
 per-business-module ``Module`` is added here as it migrates onto DI.
 
 ``eager_check_critical_bindings`` is a startup integrity check that
-``api/app.py`` runs when ``SERVER_ENV`` resolves to ``pre`` or
+``adapters/http/boot.py`` runs when ``SERVER_ENV`` resolves to ``pre`` or
 ``prod``. It crashes loudly on boot if a critical binding is missing
 instead of deferring the failure to first request. ``dev`` / local
 boots skip it to keep startup snappy and to tolerate the prod-only
@@ -53,6 +53,8 @@ from agentclaw.community.di.modules.economy_governance_module import EconomyGove
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
 from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
+from agentclaw.community.di.modules.execution_identity_module import ExecutionIdentityModule
+from agentclaw.community.di.modules.digital_employee_module import DigitalEmployeeModule
 from agentclaw.community.di.modules.grt_chat_module import GrtChatModule
 from agentclaw.community.di.modules.harness_module import HarnessModule
 from agentclaw.community.di.modules.http_client_module import HttpClientModule
@@ -71,6 +73,9 @@ from agentclaw.community.di.modules.runtime_projection_recovery_module import (
 from agentclaw.community.di.modules.resources_module import ResourcesModule
 from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
 from agentclaw.community.di.modules.session_resources_module import SessionResourcesModule
+from agentclaw.community.di.modules.tc_file_upload_integration_module import (
+    TcFileUploadIntegrationModule,
+)
 from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
 from agentclaw.community.di.modules.skill_center_group4_module import SkillCenterGroup4Module
 from agentclaw.community.di.modules.skill_version_module import SkillVersionModule
@@ -147,6 +152,8 @@ def build_injector(
         SystemConfigModule(),
         CommonConfigModule(),
         BotManagementModule(),
+        ExecutionIdentityModule(),
+        DigitalEmployeeModule(),
         BotQuotaModule(),
         ManifestFetchModule(),
         BotInventoryModule(),
@@ -166,6 +173,7 @@ def build_injector(
         AccessModule(),
         ResourcesModule(),
         SessionResourcesModule(),
+        TcFileUploadIntegrationModule(local=profile is not DeployProfile.CORP),
         SpacesModule(),
         WorkOrdersModule(),
         HarnessModule(),
@@ -198,7 +206,7 @@ def build_injector(
     #
     # `http_client` rejects unknown keys by raising, and that raise has to land
     # somewhere that stops a boot. `eager_check_critical_bindings` only runs on
-    # pre/prod (adapters/http/app.py), and on a dev / singlebox / community boot
+    # pre/prod (adapters/http/boot.py), and on a dev / singlebox / community boot
     # the raise would instead surface inside `discover_lifecycle_participants`,
     # which swallows provider exceptions — so the app would start with no real
     # HttpClient bindings at all and defer the failure to the first outbound
@@ -233,8 +241,8 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     here forces their providers to run; any unbound dep raises
     ``UnsatisfiedRequirement`` immediately.
 
-    Call site: ``api/app.py`` runs this when ``SERVER_ENV`` resolves
-    to ``pre`` or ``prod``. ``dev`` / local boots skip it because
+    Call site: ``finalize_worker_runtime`` (``adapters/http/boot.py``) runs
+    this when ``SERVER_ENV`` resolves to ``pre`` or ``prod``. ``dev`` / local boots skip it because
     some prod-only deps (e.g. the ZDAS handle + the corp-registered critical
     config bindings) aren't expected to resolve cleanly under SQLite.
     """

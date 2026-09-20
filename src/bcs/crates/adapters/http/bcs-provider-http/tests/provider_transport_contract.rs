@@ -625,6 +625,58 @@ async fn provider_delivery_posts_bearer_token_and_chat_send_body() {
 }
 
 #[tokio::test]
+async fn provider_delivery_non_success_response_is_an_explicit_rejection() {
+    let app = Router::new().route("/webhook", post(reject_delivery_http_500));
+    let (webhook_url, server) = spawn_server(app).await;
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+
+    for protocol_version in ["1.0", "2.0"] {
+        let run_id = format!("run-http-rejection-{protocol_version}");
+        let result = transport
+            .deliver(provider_send_command(
+                provider_target_with_protocol(webhook_url.clone(), protocol_version),
+                &run_id,
+            ))
+            .await
+            .expect("a complete HTTP rejection is a delivery result, not a transport error");
+
+        assert!(!result.delivered);
+        let error = result.error.expect("rejection includes a bounded diagnostic");
+        assert!(error.to_string().contains("HTTP 500"));
+        assert!(!error.to_string().contains("provider-private-detail"));
+    }
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_delivery_ok_false_is_an_explicit_rejection() {
+    let app = Router::new().route("/webhook", post(reject_delivery_ack));
+    let (webhook_url, server) = spawn_server(app).await;
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+
+    for protocol_version in ["1.0", "2.0"] {
+        let run_id = format!("run-ack-rejection-{protocol_version}");
+        let result = transport
+            .deliver(provider_send_command(
+                provider_target_with_protocol(webhook_url.clone(), protocol_version),
+                &run_id,
+            ))
+            .await
+            .expect("a decoded ok=false ack is an explicit delivery rejection");
+
+        assert!(!result.delivered);
+        assert!(
+            result
+                .error
+                .is_some_and(|error| error.to_string().contains("provider rejected"))
+        );
+    }
+
+    server.abort();
+}
+
+#[tokio::test]
 async fn provider_delivery_forwards_extensions_when_present() {
     let captured: CapturedState = Arc::new(Mutex::new(None));
     let app = Router::new()
@@ -822,6 +874,8 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
     assert_eq!(events[2].event_type, "chat.event");
     assert_eq!(events[2].state, ChatEventState::Final);
     assert_eq!(events[2].event_payload["state"], "final");
+    assert_eq!(events[2].event_payload["message"]["content"][0]["text"], "streaming done");
+    assert_eq!(events[2].event_payload["message"]["timestamp"], 1786260001000_u64);
     drop(events);
     assert!(
         message_flow
@@ -1357,7 +1411,7 @@ async fn capture_sse() -> Response {
         "data: {\"runId\":\"engine-run-sse\",\"seq\":2,\"state\":\"delta\",\"deltaText\":\"streaming \"}\n",
         "\n",
         "event: chat\n",
-        "data: {\"runId\":\"engine-run-sse\",\"seq\":3,\"state\":\"final\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"streaming done\"}]}}\n",
+        "data: {\"runId\":\"engine-run-sse\",\"seq\":3,\"ts\":1786260001000,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"streaming done\"}]}}\n",
         "\n",
     );
     Response::builder()
@@ -1376,6 +1430,24 @@ async fn capture_invalid_ack(State(request_count): State<Arc<AtomicUsize>>) -> R
         .header("content-type", "application/json")
         .body(Body::from("not-json"))
         .unwrap()
+}
+
+async fn reject_delivery_http_500() -> Response {
+    Response::builder()
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            r#"{"ok":false,"error":"provider-private-detail"}"#,
+        ))
+        .unwrap()
+}
+
+async fn reject_delivery_ack() -> Json<Value> {
+    Json(json!({
+        "ok": false,
+        "retryable": true,
+        "error": "provider rejected"
+    }))
 }
 
 async fn capture(captured: CapturedState, headers: HeaderMap, body: Value) {
@@ -1450,6 +1522,25 @@ async fn spawn_server(app: Router) -> (String, tokio::task::JoinHandle<()>) {
 
 fn provider_target(webhook_url: String) -> BotDeliveryTarget {
     provider_target_with_protocol(webhook_url, "1.0")
+}
+
+fn provider_send_command(target: BotDeliveryTarget, run_id: &str) -> BotDeliveryCommand {
+    BotDeliveryCommand {
+        target,
+        run_id: run_id.to_string(),
+        frame: BcsFrame::Request(RequestFrame::new(
+            format!("attempt-{run_id}"),
+            "chat.send",
+            Some(json!({
+                "bcs_session_id": "group-1:feedbeef",
+                "bcs_group_id": "group-1",
+                "message": { "text": "hello" }
+            })),
+        )),
+        delivery_kind: BotDeliveryKind::Send,
+        provider_transport: Default::default(),
+        provider_bypass_headers: Vec::new(),
+    }
 }
 
 fn provider_target_with_protocol(webhook_url: String, protocol_version: &str) -> BotDeliveryTarget {

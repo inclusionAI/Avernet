@@ -663,6 +663,7 @@ class BotBuildService:
         runtime_kind: str | None = None,
         template_config: Optional[Dict[str, Any]] = None,
         template_uuid: str | None = None,
+        in_place: bool = False,
     ) -> Dict[str, Any]:
         """发布 Bot 到 BaaS 层。
 
@@ -701,7 +702,7 @@ class BotBuildService:
 
         logger.info(
             f"[BotBuildService.release] Starting release: "
-            f"bot_id={bot_id}, user_id={user_id}, publish_stage={publish_stage.value}, request_id={request_id}"
+            f"bot_id={bot_id}, user_id={user_id}, publish_stage={publish_stage.value}, request_id={request_id}, in_place={in_place}"
         )
 
         # 查询 passport token（非阻塞，失败不影响发布）
@@ -746,6 +747,7 @@ class BotBuildService:
                 )
             else:
                 create_kwargs: dict[str, Any] = {
+                    "in_place": in_place,
                     "bot": bot,
                     "owner_id": user_id,
                     "request_id": request_id,
@@ -807,6 +809,7 @@ class BotBuildService:
         runtime_kind: str | None = None,
         template_config: Optional[Dict[str, Any]] = None,
         template_uuid: str | None = None,
+        in_place: bool = False,
     ) -> Dict[str, Any]:
         """异步发布 Bot 到 BaaS 层。
 
@@ -849,6 +852,7 @@ class BotBuildService:
             runtime_kind=runtime_kind,
             template_config=template_config,
             template_uuid=template_uuid,
+            in_place=in_place,
         )
 
     def _run_local_command(
@@ -1529,6 +1533,7 @@ class BotBuildService:
             docker_image: str | None = None,
             runtime_kind: str | None = None,
             template_config: Optional[Dict[str, Any]] = None,
+            in_place: bool = False,
     ) -> Dict[str, Any]:
         """升级 Bot 到 BaaS 层（复用现有 Bot）。
 
@@ -1558,7 +1563,7 @@ class BotBuildService:
 
         logger.info(
             f"[BotBuildService.upgrade] Starting upgrade: "
-            f"bot_id={bot_id}, bot_uuid={bot_uuid}, user_id={user_id}"
+            f"bot_id={bot_id}, bot_uuid={bot_uuid}, user_id={user_id}, in_place={in_place}"
         )
 
         try:
@@ -1589,6 +1594,7 @@ class BotBuildService:
                 )
             else:
                 upgrade_kwargs: dict[str, Any] = {
+                    "in_place": in_place,
                     "bot_uuid": bot_uuid,
                     "bot": bot,
                     "owner_id": user_id,
@@ -2049,6 +2055,7 @@ class BotBuildService:
         docker_image: str | None = None,
         runtime_kind: str | None = None,
         template_config: Optional[Dict[str, Any]] = None,
+        in_place: bool = False,
     ) -> Dict[str, Any]:
         """异步升级 Bot 到 BaaS 层。
 
@@ -2075,4 +2082,5 @@ class BotBuildService:
             docker_image=docker_image,
             runtime_kind=runtime_kind,
             template_config=template_config,
+            in_place=in_place,
         )

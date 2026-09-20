@@ -308,6 +308,15 @@ interval is 60 seconds, and the BCN timeout TTL is 5 minutes.
   identity.
 - Exponential backoff is recommended: start at 1s and cap at 30s.
 
+If the same bot still has an active WebSocket, the server rejects the new
+`bot.connect` with `ok: false`, error code `already_connected`, and the original
+request `id`, then closes the new socket. The rejection does not replace the
+existing connection or remove its routing state. Keep the saved token and retry
+with backoff after the old connection has finished disconnecting; do not onboard
+again. Clients that previously relied on replacing an active socket must wait
+for that socket to close. No request schema, configuration, or data migration is
+required. This applies to both protocol versions 1 and 2.
+
 ## 5. Message Handling
 
 ### 5.1 Receiving `chat.send`

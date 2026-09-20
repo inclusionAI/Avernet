@@ -5,11 +5,12 @@ lease reclaim, holder-guarded transitions, and deadline timeout are all
 exercised against a real database here. Timing is DB-owned (no injected
 ``now``), so the few time-sensitive cases use short real sleeps.
 """
+
 import time
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, event, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -17,13 +18,28 @@ from sqlalchemy.pool import StaticPool
 # Side-effect import: registers TaskQueueModel on Base.metadata so
 # create_all() builds the ac_task_queue table.
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel  # noqa: F401
-from agentclaw.community.core.task_queue.types import DEFAULT_APP, MAX_APP_LEN, TaskStatus
+from agentclaw.community.core.task_queue.types import (
+    DEFAULT_APP,
+    MAX_APP_LEN,
+    TaskStatus,
+)
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.core.task_queue.services.task_queue_service import (
+    TaskQueueService,
+)
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.di.config import TaskQueueConfig
-from agentclaw.community.core.repository.implementations.platform.task_queue import _ACTIVE_IDEM_INDEXES, _KEYED_INSERT_ATTEMPTS, _MAX_IDEMPOTENCY_KEY_LEN, _MAX_TASK_TYPE_LEN
-from agentclaw.community.core.repository.implementations.platform.task_queue import TaskQueueRepository, _is_active_idem_conflict
+from agentclaw.community.core.repository.implementations.platform.task_queue import (
+    _ACTIVE_IDEM_INDEXES,
+    _KEYED_INSERT_ATTEMPTS,
+    _MAX_IDEMPOTENCY_KEY_LEN,
+    _MAX_TASK_TYPE_LEN,
+)
+from agentclaw.community.core.repository.implementations.platform.task_queue import (
+    TaskQueueRepository,
+    _is_active_idem_conflict,
+)
+from agentclaw.community.plugins.local.tracer import NoopTracer
 
 pytestmark = pytest.mark.integration
 
@@ -106,6 +122,7 @@ def _claim(repo, worker, *, limit=10, lease=60, env=ENV, app=APP):
 
 # ── enqueue ─────────────────────────────────────────────────────────────────
 
+
 def test_enqueue_persists_pending_with_required_fields(repo):
     rec = _enqueue(repo)
     assert rec.id is not None
@@ -122,6 +139,7 @@ def test_enqueue_payload_round_trips_as_json(repo):
 
 
 # ── claim: due / not-due / scoping ──────────────────────────────────────────
+
 
 def test_claim_skips_tasks_not_yet_due(repo):
     _enqueue(repo, delay_seconds=60)  # run_at = now()+60 → not eligible now
@@ -218,6 +236,7 @@ def test_claim_increments_attempts_and_sets_holder(repo):
 
 # ── claim exclusivity (the core idempotency guarantee) ──────────────────────
 
+
 def test_two_workers_claiming_get_disjoint_tasks(repo):
     # NOTE: single-threaded SQLite runs A's claim to commit before B starts, so
     # this asserts the observable property (no task won twice). The real race
@@ -241,6 +260,7 @@ def test_second_worker_gets_nothing_while_leases_live(repo):
 
 # ── lease reclaim (real time) ───────────────────────────────────────────────
 
+
 def test_lease_reclaim_before_and_after_expiry(repo):
     rec = _enqueue(repo)
     _claim(repo, "A", lease=60)
@@ -263,7 +283,206 @@ def test_lease_reclaim_before_and_after_expiry(repo):
     assert stored.attempts == 2  # claimed twice
 
 
+# ── the claim scan: one statement, two index-aligned arms, reclaim first ────
+
+
+def _expire_lease(repo, task_id):
+    """Backdate a live lease so the reclaim arm sees it. Mirrors
+    ``test_lease_reclaim_before_and_after_expiry``: do not sleep across
+    SQLite's second-granular DB clock, make the stored lease stale instead."""
+    with repo._db.orm_session() as db:
+        db.query(TaskQueueModel).filter(TaskQueueModel.id == task_id).update(
+            {TaskQueueModel.lease_expires_at: func.datetime("now", "-1 minute")},
+            synchronize_session=False,
+        )
+
+
+def _abandoned(repo, worker="DEAD"):
+    """A task held by a worker that died: RUNNING with a lapsed lease."""
+    rec = _enqueue(repo)
+    _claim(repo, worker, lease=60)
+    _expire_lease(repo, rec.id)
+    return rec
+
+
+def _capture_scan(repo):
+    """The SELECTs the claim scan actually issues, with SQLite's plan for each.
+
+    Captured off the engine rather than rebuilt from the predicates, so these
+    tests cannot drift from the statement ``_read_candidates`` really runs."""
+    seen = []
+
+    with repo._db.orm_session() as db:
+        engine = db.bind
+
+        def _record(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith("SELECT"):
+                seen.append((statement, parameters))
+
+        event.listen(engine, "before_cursor_execute", _record)
+        try:
+            repo._read_candidates(db, ENV, APP, 10)
+        finally:
+            event.remove(engine, "before_cursor_execute", _record)
+
+    raw = engine.raw_connection()
+    try:
+        plans = []
+        for statement, parameters in seen:
+            cursor = raw.cursor()
+            cursor.execute("EXPLAIN QUERY PLAN " + statement, parameters)
+            plans.append(" / ".join(str(row[-1]) for row in cursor.fetchall()))
+    finally:
+        raw.close()
+    return seen, plans
+
+
+def test_the_claim_scan_is_a_single_statement(repo):
+    """One round trip per poll, not one per eligibility branch.
+
+    ``TaskWorker`` polls on a sub-second interval and re-polls with no delay on
+    a full batch, so a per-branch statement would be a second remote round trip
+    on every idle tick -- a cost on the very path this scan exists to cheapen.
+    The branches are arms of a UNION ALL for exactly this reason."""
+    _abandoned(repo)
+    for _ in range(3):
+        _enqueue(repo)
+    for _ in range(3):  # parked in the future: eligible for neither arm
+        _enqueue(repo, delay_seconds=3600)
+
+    seen, _ = _capture_scan(repo)
+
+    assert len(seen) == 1, [statement for statement, _ in seen]
+
+
+def test_the_claim_scan_rides_both_app_scoped_indexes(repo):
+    """Each arm must reach its own index: the due arm the status/run_at one,
+    the reclaim arm the lease one. The reclaim arm is the half a combined
+    ``OR`` served worst -- see the contrast test below."""
+    _, plans = _capture_scan(repo)
+    plan = plans[0]
+
+    assert "idx_env_app_status_run_at" in plan
+    assert "idx_env_app_lease_expires_at" in plan
+    # No arm may fall back to reading the table itself.
+    assert "SCAN ac_task_queue" not in plan
+
+
+def test_the_claim_scan_sorts_only_its_own_bounded_output(repo):
+    """The outer ORDER BY does sort -- over at most ``2 * limit`` rows, since
+    each arm carries its own LIMIT. That bound is the property worth pinning:
+    it does not grow with the table, the backlog, or the number of in-flight
+    tasks."""
+    _, plans = _capture_scan(repo)
+    plan = plans[0]
+
+    # Exactly one sort, and it sits above the union rather than inside an arm.
+    assert plan.count("TEMP B-TREE") == 1
+    arms, _, outer = plan.rpartition("TEMP B-TREE")
+    assert (
+        "idx_env_app_status_run_at" in arms and "idx_env_app_lease_expires_at" in arms
+    )
+
+
+def test_the_combined_or_is_why_the_arms_are_read_separately(repo):
+    """The contrast that gives the tests above their meaning.
+
+    Issued as one ``OR``, both halves land on ``idx_env_app_status_run_at``:
+    the lapsed-lease half never reaches ``idx_env_app_lease_expires_at``,
+    because that column is not in the predicate's usable prefix. It degrades to
+    ``status = 'RUNNING' AND run_at <= now()``, which every in-flight row
+    passes, so all of them are read and ``lease_expires_at`` is tested off the
+    row. Two status ranges also leave ``ORDER BY run_at`` satisfiable by
+    neither index, so ``LIMIT`` cannot end the scan and the sort input is every
+    due row plus every RUNNING row.
+
+    What the ``OR`` did *not* do is read the future backlog: ``run_at <=
+    now()`` sat outside it and bounded both ranges. That is visible below as
+    the ``run_at<?`` bound on both arms, and it is why a pile of not-yet-due
+    PENDING rows is not what this change is about.
+
+    Should an engine learn to merge two ordered ranges and reach the lease
+    index here, this fails loudly and the split can be revisited."""
+    M = TaskQueueModel
+    with repo._db.orm_session() as db:
+        query = (
+            db.query(M.id)
+            .filter(repo._eligible(ENV, APP))
+            .order_by(M.run_at.asc())
+            .limit(10)
+        )
+        sql = query.statement.compile(db.bind, compile_kwargs={"literal_binds": True})
+        plan = " / ".join(
+            str(tuple(row)[-1])
+            for row in db.execute(text(f"EXPLAIN QUERY PLAN {sql}")).fetchall()
+        )
+
+    assert "TEMP B-TREE" in plan
+    assert "idx_env_app_lease_expires_at" not in plan
+    assert plan.count("idx_env_app_status_run_at") == 2
+    assert "run_at<" in plan  # the future backlog was already excluded
+
+
+def test_expired_leases_are_not_starved_by_a_saturated_pending_backlog(repo):
+    """Reclaim is the first arm, and this is why. The worker loop re-polls with
+    no delay whenever a tick fills its batch, so a scan that spent the whole
+    budget on due PENDING rows would never reach the reclaim arm for as long as
+    work keeps arriving -- and the rows starved that way are the ones a crashed
+    worker abandoned, which no other path recovers."""
+    dead = _abandoned(repo)
+    for _ in range(5):  # more due work than the batch can hold
+        _enqueue(repo)
+
+    won = {task.id for task in _claim(repo, "W", limit=3)}
+
+    assert dead.id in won
+    assert repo.get_by_id(dead.id).claimed_by == "W"
+
+
+def test_reclaim_and_pending_draw_on_one_shared_budget(repo):
+    """Reading two arms must not quietly double the batch: ``limit`` still
+    bounds what one call claims, as the protocol says it does."""
+    _abandoned(repo)
+    for _ in range(5):
+        _enqueue(repo)
+
+    assert len(_claim(repo, "W", limit=3)) == 3
+
+
+def test_reclaim_takes_the_longest_lapsed_lease_first(repo):
+    """The reclaim arm orders by ``lease_expires_at`` -- the index's own order,
+    and oldest-abandoned-first on its own merits."""
+    older = _enqueue(repo)
+    newer = _enqueue(repo)
+    _claim(repo, "DEAD", lease=60)
+    with repo._db.orm_session() as db:
+        for rec, offset in ((older, "-9 minutes"), (newer, "-1 minute")):
+            db.query(TaskQueueModel).filter(TaskQueueModel.id == rec.id).update(
+                {TaskQueueModel.lease_expires_at: func.datetime("now", offset)},
+                synchronize_session=False,
+            )
+
+    won = _claim(repo, "W", limit=1)
+
+    assert [task.id for task in won] == [older.id]
+
+
+def test_a_pending_row_not_yet_due_is_still_never_claimed(repo):
+    """The split rewrote the predicate; the range bound it rests on has to
+    survive. ``test_claim_skips_tasks_not_yet_due`` covers the single-row case
+    -- this one pins it with reclaimable work in the same batch, where the two
+    arms share a budget."""
+    dead = _abandoned(repo)
+    future = _enqueue(repo, delay_seconds=3600)
+
+    won = {task.id for task in _claim(repo, "W", limit=10)}
+
+    assert won == {dead.id}
+    assert repo.get_by_id(future.id).status == TaskStatus.PENDING
+
+
 # ── holder-guarded transitions (CAS) ────────────────────────────────────────
+
 
 def test_complete_succeeds_for_holder(repo):
     rec = _enqueue(repo)
@@ -287,9 +506,12 @@ def test_stale_worker_cannot_mutate(repo):
 def test_reschedule_returns_to_pending_and_records_error(repo):
     rec = _enqueue(repo, deadline_seconds=3600)
     _claim(repo, "W")
-    assert repo.reschedule(
-        task_id=rec.id, worker_id="W", delay_seconds=0, error="transient"
-    ) is True
+    assert (
+        repo.reschedule(
+            task_id=rec.id, worker_id="W", delay_seconds=0, error="transient"
+        )
+        is True
+    )
     stored = repo.get_by_id(rec.id)
     assert stored.status == TaskStatus.PENDING
     assert stored.claimed_by is None and stored.lease_expires_at is None
@@ -327,6 +549,7 @@ def test_renew_lease_false_for_stale_worker(repo):
 
 # ── deadline / timeout (DB-side) ────────────────────────────────────────────
 
+
 def test_claim_times_out_past_deadline_task_without_returning_it(repo):
     rec = _enqueue(repo, deadline_seconds=0)  # deadline == now()
     won = _claim(repo, "W")
@@ -338,13 +561,16 @@ def test_reschedule_overshooting_deadline_times_out(repo):
     rec = _enqueue(repo, deadline_seconds=5)
     _claim(repo, "W")
     # A 100s retry would land well past the 1s deadline → TIMED_OUT, not PENDING.
-    assert repo.reschedule(
-        task_id=rec.id, worker_id="W", delay_seconds=100, error="boom"
-    ) is True
+    assert (
+        repo.reschedule(task_id=rec.id, worker_id="W", delay_seconds=100, error="boom")
+        is True
+    )
     assert repo.get_by_id(rec.id).status == TaskStatus.TIMED_OUT
 
 
-@pytest.mark.parametrize("terminal", [TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.TIMED_OUT])
+@pytest.mark.parametrize(
+    "terminal", [TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.TIMED_OUT]
+)
 def test_terminal_task_is_never_reclaimed(repo, terminal):
     rec = _enqueue(repo)
     _claim(repo, "W")
@@ -572,18 +798,23 @@ def test_past_deadline_task_not_yet_scanned_still_holds_its_key(repo):
 def test_is_active_idem_conflict_recognises_both_engine_message_forms():
     """The one genuinely engine-specific line in an otherwise unified body, so
     it is a pure function over the exception and testable without MySQL."""
+
     def err(message):
         return IntegrityError("INSERT INTO ac_task_queue ...", {}, Exception(message))
 
     # MySQL / OceanBase name the index.
     assert _is_active_idem_conflict(
-        err("(1062, \"Duplicate entry 'dev-demo-k1' for key "
-            "'uk_env_task_type_active_idempotency_key'\")")
+        err(
+            "(1062, \"Duplicate entry 'dev-demo-k1' for key "
+            "'uk_env_task_type_active_idempotency_key'\")"
+        )
     )
     # SQLite names the columns.
     assert _is_active_idem_conflict(
-        err("UNIQUE constraint failed: ac_task_queue.env, ac_task_queue.task_type, "
-            "ac_task_queue.active_idempotency_key")
+        err(
+            "UNIQUE constraint failed: ac_task_queue.env, ac_task_queue.task_type, "
+            "ac_task_queue.active_idempotency_key"
+        )
     )
     # Anything else must not be read as a duplicate enqueue.
     assert not _is_active_idem_conflict(
@@ -595,6 +826,7 @@ def test_is_active_idem_conflict_recognises_both_engine_message_forms():
 def test_unrelated_integrity_error_propagates(repo, monkeypatch):
     """A blanket except would turn someone else's constraint violation into a
     bogus duplicate and hand back the wrong row."""
+
     def boom(**_kwargs):
         raise IntegrityError(
             "INSERT ...", {}, Exception("UNIQUE constraint failed: ac_task_queue.other")
@@ -699,7 +931,10 @@ def test_the_attempt_bound_leaves_room_for_repeated_benign_races():
 
 def test_max_key_length_tracks_the_column_width():
     """The constant is read off the column, so schema and check cannot drift."""
-    assert _MAX_IDEMPOTENCY_KEY_LEN == TaskQueueModel.__table__.c.idempotency_key.type.length
+    assert (
+        _MAX_IDEMPOTENCY_KEY_LEN
+        == TaskQueueModel.__table__.c.idempotency_key.type.length
+    )
     assert (
         TaskQueueModel.__table__.c.active_idempotency_key.type.length
         == _MAX_IDEMPOTENCY_KEY_LEN
@@ -759,7 +994,7 @@ def test_validation_also_applies_through_the_service_facade(repo):
     """Adopters call TaskQueueService, so the guard must hold on that path too;
     it delegates to the repository, which is where the check lives."""
     service = TaskQueueService(
-        repo, HandlerRegistry(), WorkerWakeup(), TaskQueueConfig(app=APP)
+        repo, HandlerRegistry(), WorkerWakeup(), TaskQueueConfig(app=APP), NoopTracer()
     )
     with pytest.raises(ValueError, match="exceeds"):
         service.enqueue(
@@ -792,7 +1027,9 @@ def test_key_columns_pin_binary_collation_on_mysql():
     # over, with 'Job' and 'job' as a single dedup slot.
     for column in ("idempotency_key", "active_idempotency_key", "task_type"):
         line = next(ln for ln in ddl.splitlines() if ln.strip().startswith(column))
-        assert "COLLATE utf8mb4_bin" in line, f"{column} lost its binary collation: {line}"
+        assert "COLLATE utf8mb4_bin" in line, (
+            f"{column} lost its binary collation: {line}"
+        )
 
 
 def test_app_column_mirrors_the_deployed_ddl():
@@ -817,7 +1054,10 @@ def test_app_scoped_indexes_lead_with_the_columns_every_query_filters_on():
     indexes have to lead with it — otherwise the busiest statement the component
     runs degrades to a scan. Asserted as column order, which is the part that
     matters and the part an edit can silently break."""
-    by_name = {index.name: [c.name for c in index.columns] for index in TaskQueueModel.__table__.indexes}
+    by_name = {
+        index.name: [c.name for c in index.columns]
+        for index in TaskQueueModel.__table__.indexes
+    }
     assert by_name["idx_env_app_status_run_at"] == ["env", "app", "status", "run_at"]
     assert by_name["idx_env_app_lease_expires_at"] == ["env", "app", "lease_expires_at"]
     assert by_name["uk_env_app_task_type_active_idempotency_key"] == [
@@ -980,7 +1220,7 @@ def test_unkeyed_enqueue_still_accepts_any_task_type(repo, task_type):
 def test_padded_task_type_is_rejected_through_the_service_facade(repo):
     """Adopters call the service, so the guard has to hold on that path too."""
     service = TaskQueueService(
-        repo, HandlerRegistry(), WorkerWakeup(), TaskQueueConfig(app=APP)
+        repo, HandlerRegistry(), WorkerWakeup(), TaskQueueConfig(app=APP), NoopTracer()
     )
     with pytest.raises(ValueError, match="leading or trailing whitespace"):
         service.enqueue("job ", {}, 3600, idempotency_key="k1")

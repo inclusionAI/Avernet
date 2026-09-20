@@ -153,6 +153,34 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
             "agent_code": f"local_{bot_id}",
         }
 
+    def reissue_agent_credentials(
+        self,
+        *,
+        bot_id: str,
+        owner_workno: str,
+        entity_id: str,
+        execution_workno: str,
+        bot_name: str | None = None,
+        bot_desc: str | None = None,
+        engine_type: str | None = None,
+        target_env: str | None = None,
+    ) -> dict[str, Any] | None:
+        validate_passport_target_env(target_env)
+        logger.info(
+            "[LocalPassportUpdate] reissue_agent_credentials: bot_id=%s, "
+            "owner_workno=%s, entity_id=%s, execution_workno=%s",
+            bot_id,
+            owner_workno,
+            entity_id,
+            execution_workno,
+        )
+        return {
+            "status": "ISSUED",
+            "agent_id": f"local|{entity_id}|{bot_id}",
+            "agent_code": f"local_{bot_id}",
+            "token": f"mock_token_reissued_{bot_id}",
+        }
+
     def destroy_passport(self, bot_id: str, owner_workno: str) -> None:
         logger.info(
             "[LocalPassportUpdate] destroy_passport: bot_id=%s, owner_workno=%s",
@@ -166,6 +194,7 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         owner_workno: str,
         *,
         target_env: str | None = None,
+        entity_id: str | None = None,
     ) -> dict[str, Any] | None:
         validate_passport_target_env(target_env)
         logger.info(
@@ -184,6 +213,7 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         owner_workno: str,
         *,
         target_env: str | None = None,
+        entity_id: str | None = None,
     ) -> str | None:
         validate_passport_target_env(target_env)
         logger.info(
@@ -199,6 +229,7 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         owner_workno: str,
         *,
         target_env: str | None = None,
+        entity_id: str | None = None,
     ) -> dict[str, Any] | None:
         validate_passport_target_env(target_env)
         logger.info(

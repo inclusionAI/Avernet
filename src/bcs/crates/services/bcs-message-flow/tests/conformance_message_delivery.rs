@@ -122,6 +122,22 @@ fn uncertain_states_hold_lane_until_proven_terminal() -> Result<(), DeliveryLife
 }
 
 #[test]
+fn uncertain_states_expire_without_erasing_possible_send_evidence()
+-> Result<(), DeliveryLifecycleError> {
+    for status in [Status::Unknown, Status::CancelUnknown] {
+        let expired = step(send(status), Event::QueueExpired)?;
+        assert_eq!(expired.state.status, Status::Expired);
+        assert!(expired.state.may_have_been_sent);
+        assert!(expired.release_active);
+        assert_eq!(expired.context_action, Context::Consume);
+        for late in [Event::Completed, Event::Failed, Event::Aborted, Event::Accepted] {
+            assert!(!step(expired.state, late)?.changed);
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn safe_retry_retains_binding_but_unsent_terminal_releases_it() -> Result<(), DeliveryLifecycleError>
 {
     let retry = step(
@@ -185,7 +201,11 @@ fn trusted_final_can_win_during_cancellation() -> Result<(), DeliveryLifecycleEr
             assert!(ended.release_active);
             assert_eq!(ended.context_action, Context::Consume);
         }
-        assert!(step(send(status), Event::QueueExpired).is_err());
+        if matches!(status, Status::Unknown | Status::CancelUnknown) {
+            assert_eq!(step(send(status), Event::QueueExpired)?.state.status, Status::Expired);
+        } else {
+            assert!(step(send(status), Event::QueueExpired).is_err());
+        }
     }
     Ok(())
 }

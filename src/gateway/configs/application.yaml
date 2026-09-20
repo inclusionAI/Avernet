@@ -329,6 +329,14 @@ user_config:
     "/openapi/v1/harnessflow/**":
       user: required
 
+    # ClawWeb machine-facing APIs use dedicated gateway namespaces instead of
+    # borrowing the HarnessFlow route.  An App identity is mandatory across
+    # each namespace; downstream services retain resource-level authorization.
+    "/openapi/v1/tclog/**":
+      app: required
+    "/openapi/v1/clawevolve/**":
+      app: required
+
     # bcsfuse public surface (fusion + fusable worker-config queries). These
     # are human-driven management operations, so a user is required — same
     # posture as the community gateway.
@@ -546,6 +554,31 @@ user_config:
         rewrite:
           from: /openapi/v1/harnessflow
           to: /
+
+      # Dedicated machine-facing ClawWeb APIs.  The bench domain is more
+      # specific than the general ClawEvolve domain and therefore rewrites to
+      # /api/bench instead of /api/evolve/bench.
+      tclog:
+        match: /openapi/v1/tclog/**
+        server: clawweb
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/tclog
+          to: /api/tclog
+      clawevolve:
+        match: /openapi/v1/clawevolve/**
+        server: clawweb
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/clawevolve
+          to: /api/evolve
+      clawevolve-bench:
+        match: /openapi/v1/clawevolve/bench/**
+        server: clawweb
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/clawevolve/bench
+          to: /api/bench
 
     servers:
       backend:

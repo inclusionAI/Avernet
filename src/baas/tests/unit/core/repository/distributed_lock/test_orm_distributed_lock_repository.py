@@ -341,6 +341,62 @@ class TestDeleteLock:
         assert isinstance(result, bool)
 
 
+# ==================== delete_expired_locks_by_prefix Tests ====================
+
+
+class TestDeleteExpiredLocksByPrefix:
+    """Tests for OrmDistributedLockRepository.delete_expired_locks_by_prefix().
+
+    S5 (Issue 2-C): parameterized ``LIKE prefix%`` + ``expire_time <= now`` used
+    by ``BotRunRecoveryTask`` to reap orphan ``botrun:session:`` session locks
+    instead of waiting for the ~3h TTL self-heal.
+    """
+
+    def test_deletes_matching_expired_rows_and_returns_count(
+        self, repository, mock_session
+    ):
+        mock_session.query.return_value.filter.return_value.delete.return_value = 2
+
+        result = repository.delete_expired_locks_by_prefix(
+            "botrun:session:", now=NOW
+        )
+
+        assert result == 2
+        mock_session.query.assert_called_once_with(DistributedLockModel)
+
+    def test_returns_zero_when_no_rows_match(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.delete.return_value = 0
+
+        result = repository.delete_expired_locks_by_prefix(
+            "botrun:session:", now=NOW
+        )
+
+        assert result == 0
+
+    def test_returns_int_when_rowcount_is_large(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.delete.return_value = 1000
+
+        result = repository.delete_expired_locks_by_prefix(
+            "botrun:session:", now=NOW
+        )
+
+        assert result == 1000
+        assert isinstance(result, int)
+
+    def test_uses_parameterized_filter_chain(self, repository, mock_session):
+        """Ensure the call goes through query().filter(...).delete() chain."""
+        chain = mock_session.query.return_value.filter.return_value
+        chain.delete.return_value = 5
+
+        result = repository.delete_expired_locks_by_prefix(
+            "botrun:session:", now=NOW
+        )
+
+        assert result == 5
+        mock_session.query.return_value.filter.assert_called_once()
+        chain.delete.assert_called_once_with(synchronize_session=False)
+
+
 # ==================== try_acquire_lock Tests ====================
 
 
@@ -570,12 +626,8 @@ class TestTryAcquireLock:
         repo, mock_session = _make_repo("mysql")
         mock_session.execute.side_effect = [
             _make_exec_result(None),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
         ]
 
         result = repo.try_acquire_lock(
@@ -597,12 +649,8 @@ class TestTryAcquireLock:
         repo, mock_session = _make_repo("mysql")
         mock_session.execute.side_effect = [
             _make_exec_result(_make_model(lock_holder="holder-B", expire_time=PAST)),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
         ]
 
         result = repo.try_acquire_lock(
@@ -617,15 +665,9 @@ class TestTryAcquireLock:
         # → upsert renews → confirm shows self.
         repo, mock_session = _make_repo("mysql")
         mock_session.execute.side_effect = [
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
         ]
 
         result = repo.try_acquire_lock(
@@ -645,12 +687,8 @@ class TestTryAcquireLock:
         repo, mock_session = _make_repo("mysql")
         mock_session.execute.side_effect = [
             _make_exec_result(None),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-B", expire_time=FUTURE)
-            ),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-B", expire_time=FUTURE)),
         ]
 
         result = repo.try_acquire_lock(
@@ -668,12 +706,8 @@ class TestTryAcquireLock:
         repo, mock_session = _make_repo("mysql")
         mock_session.execute.side_effect = [
             _make_exec_result(_make_model(lock_holder="holder-B", expire_time=None)),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
         ]
 
         result = repo.try_acquire_lock(
@@ -699,6 +733,7 @@ class TestDistributedLockRepositoryProtocol:
         assert hasattr(repository, "update_expire_time")
         assert hasattr(repository, "delete_lock")
         assert hasattr(repository, "try_acquire_lock")
+        assert hasattr(repository, "delete_expired_locks_by_prefix")
 
 
 # ==================== @with_orm_session Integration Tests ====================

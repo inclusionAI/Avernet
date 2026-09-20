@@ -12,6 +12,8 @@ fn sample_notification() -> MentionNotification {
     MentionNotification {
         session_id: "group-1:abcdef12".to_string(),
         group_id: "group-1".to_string(),
+        group_name: Some("研发协作群".to_string()),
+        session_name: Some("发布问题排查".to_string()),
         sender_actor_id: "bot-driver".to_string(),
         sender_label: "Driver".to_string(),
         mentioned: vec![MentionedHuman {

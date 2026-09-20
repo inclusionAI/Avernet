@@ -313,6 +313,7 @@ dependencies = [
  "bcs-http",
  "bcs-human-notify-api",
  "bcs-human-notify-dummy",
+ "bcs-human-notify-work-order",
  "bcs-interaction",
  "bcs-invite-code-store",
  "bcs-judge",
@@ -1249,6 +1250,8 @@ dependencies = [
  "bcs-callback",
  "bcs-channel-api",
  "bcs-cli",
+ "bcs-collaboration-runtime",
+ "bcs-collaboration-store",
  "bcs-config",
  "bcs-config-api",
  "bcs-domain",
@@ -1256,6 +1259,7 @@ dependencies = [
  "bcs-group",
  "bcs-group-store",
  "bcs-jwt",
+ "bcs-message-store",
  "bcs-observability",
  "bcs-protocol",
  "bcs-route-security",
@@ -1296,7 +1300,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-human-notify-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",
@@ -1315,6 +1319,24 @@ dependencies = [
  "bcs-test-support",
  "futures",
  "inventory",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "bcs-human-notify-work-order"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-config-api",
+ "bcs-human-notify-api",
+ "futures",
+ "inventory",
+ "jsonwebtoken",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -1464,6 +1486,8 @@ dependencies = [
  "bcs-cache-local",
  "bcs-chat-run-store",
  "bcs-config-api",
+ "bcs-db-api",
+ "bcs-db-local",
  "bcs-domain",
  "bcs-event-store",
  "bcs-message-store",
@@ -1474,9 +1498,11 @@ dependencies = [
  "bcs-test-support",
  "chrono",
  "futures",
+ "hex",
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1742,7 +1768,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",

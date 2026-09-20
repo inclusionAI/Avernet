@@ -21,6 +21,9 @@ import pytest
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
     ManagedDeployConfigComposer,
 )
+from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
+    NoopStoragePolicy,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
@@ -71,6 +74,7 @@ def baas_service(fake_binding_repo, baas_http, general_http):
             storage_path=MagicMock(),
             sandbox_registry=MagicMock(),
             bot_repo=MagicMock(),
+            storage_policy=NoopStoragePolicy(),
         ),
         startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base=BASE_URL,

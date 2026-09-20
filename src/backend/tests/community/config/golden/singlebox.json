@@ -118,9 +118,7 @@
       "global_dry_run": false
     },
     "desktop_skill_recovery": {
-      "enabled": true,
-      "sweep_interval_seconds": 600,
-      "sweep_page_size": 100
+      "task_deadline_seconds": 600
     },
     "device_allocation": {
       "max_devices_per_entity": 5,
@@ -182,7 +180,7 @@
     "mock_tcauth": true,
     "nas_mount_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
     "openclaw": {
-      "skills_repo_url": "git@code.teamclaw.com:security_release/aiworkbench.git"
+      "skills_repo_url": ""
     },
     "oss_mount_root": "/aidesktop",
     "secret_names": {
@@ -318,7 +316,13 @@
     },
     "ecb": {
       "base_url": "https://ecb-pre.teamclaw.com",
-      "base_url_pre": ""
+      "base_url_pre": "",
+      "resource_ready_base_url": "",
+      "resource_ready_dedupe_max_entries": 10000,
+      "resource_ready_dedupe_ttl_seconds": 3600.0,
+      "resource_ready_max_in_flight": 8,
+      "resource_ready_timeout_seconds": 10.0,
+      "resource_ready_worker_threads": 2
     },
     "gateway": {
       "base_url": "http://127.0.0.1:9999",
@@ -357,6 +361,7 @@
       "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
       "dormant_internal_token": "",
       "gateway_principal_signing_key": "gateway_principal_signing_key",
+      "tc_file_service_token": "",
       "skill_center_internal_token": "other_manual_agentclaw_skill_center_internal_token"
     },
     "skill_scan": {

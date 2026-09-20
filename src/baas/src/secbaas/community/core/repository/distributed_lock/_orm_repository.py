@@ -107,6 +107,43 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
         log.info("[distributed-lock:delete_lock] result: %s", result)
         return result
 
+    @with_orm_session
+    def delete_expired_locks_by_prefix(self, prefix: str, *, now: datetime) -> int:
+        """批量删除 ``lock_name LIKE prefix%`` 且 ``expire_time <= now`` 的孤儿锁行。
+
+        参数化 ``LIKE`` 绑定，避免字符串拼接。用于 ``BotRunRecoveryTask``
+        对过期 ``botrun:session:`` 锁的对账清理（Issue 2-C），不依赖锁 TTL 自愈。
+
+        Args:
+            prefix: 锁名前缀，例如 ``botrun:session:``。
+            now: 应用 wall-clock 时间；``expire_time <= now`` 视为已过期。
+
+        Returns:
+            被删除的行数。
+        """
+        like_pattern = f"{prefix}%"
+        log.info(
+            "delete_expired_locks_by_prefix: prefix=%s now=%s",
+            prefix,
+            now,
+        )
+        result = (
+            self._session.query(DistributedLockModel)
+            .filter(
+                DistributedLockModel.lock_name.like(like_pattern),
+                DistributedLockModel.expire_time <= now,
+            )
+            .delete(synchronize_session=False)
+        )
+        result = int(result)
+        log.info(
+            "[distributed-lock:delete_expired_locks_by_prefix] "
+            "prefix=%s deleted=%s rows",
+            prefix,
+            result,
+        )
+        return result
+
     def _build_acquire_upsert(self, lock_name, lock_holder, expire_time, env, now):
         """Build the dialect-specific atomic acquire upsert for ``ac_lock_table``.
 
@@ -243,8 +280,7 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
             if existing is not None:
                 held_by_other = existing.lock_holder != lock_holder
                 unexpired = (
-                    existing.expire_time is not None
-                    and existing.expire_time > now
+                    existing.expire_time is not None and existing.expire_time > now
                 )
                 if held_by_other and unexpired:
                     log.info(

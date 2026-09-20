@@ -244,15 +244,15 @@ tower_http = "warn"
 # [user_directory.providers.<provider>].
 enabled = false
 
-# Human mention notification: notify human participants when a message
-# @-mentions them. Select a linked backend; omit `provider` to disable.
-[human_notify]
-provider = "dummy"
-
-[human_notify.providers.dummy]
+# Human mention notification: notify @-mentioned human participants.
+# Every enabled entry receives each notification (fan-out); an empty list
+# disables the feature.
+[[human_notify.providers]]
+name = "dummy"
 enabled = true
 # A linked notification backend can provide its own options, for example:
-# [human_notify.providers.example]
+# [[human_notify.providers]]
+# name = "example"
 # enabled = true
 # endpoint = "https://notify.example.com"
 # api_key = "${NOTIFY_API_KEY}"

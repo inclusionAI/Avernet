@@ -1793,6 +1793,9 @@ def _finalize_post_cutover(
             source_root=temporary,
             pool_local=pool_local,
             baseline=effective_baseline,
+            publish_root=(
+                pool_local.parent / f".post-sync-{quarantine.parent.name}"
+            ),
         )
     except (OSError, ValueError) as error:
         return _PostCutoverFinalization(
@@ -1861,6 +1864,9 @@ def _capture_recreated_legacy_local(
             source_root=residue,
             pool_local=layout.pool_local,
             baseline={},
+            publish_root=(
+                layout.pool_root / f".post-sync-{quarantine.parent.name}"
+            ),
         )
         captured.append(
             {
@@ -1921,6 +1927,9 @@ def _capture_recreated_legacy_local(
             source_root=residue,
             pool_local=layout.pool_local,
             baseline={},
+            publish_root=(
+                layout.pool_root / f".post-sync-{quarantine.parent.name}"
+            ),
         )
         captured.append(
             {

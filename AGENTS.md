@@ -118,6 +118,7 @@ docs(arch): document plugin protocol conformance shape
 | `test` | Tests |
 | `ci` | CI/CD |
 | `build` | Build system or dependencies |
+| `perf` | Performance improvements |
 | `chore` | Other maintenance |
 
 The required scope is the module or area you touched, such as `backend`,

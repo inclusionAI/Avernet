@@ -27,12 +27,13 @@ if TYPE_CHECKING:
 
 logger = get_logger("core-service")
 
-# Callback server mapping based on environment.
-# Production callback URL is read from config; non-prod environments
-# fall back to the pre config value so that the callback URL is
-# determined by the config overlay, not hardcoded here.
+# Callback server mapping by env (dev/pre/prod).
+# Each environment reads its own config path so that the callback URL is
+# determined by the config overlay, not hardcoded here. Unknown envs fall
+# back to the dev path, matching get_current_env()'s default-to-dev rule.
 _PRODUCTION_CALLBACK_PATH = ConfigPath.SECBAAS_CALLBACK_HOST_PROD
 _PRE_CALLBACK_PATH = ConfigPath.SECBAAS_CALLBACK_HOST_PRE
+_DEV_CALLBACK_PATH = ConfigPath.SECBAAS_CALLBACK_HOST_DEV
 
 # Jinja2 template for the wrapper script
 # NOTE: Variables are pre-escaped with shlex.quote() before rendering
@@ -286,7 +287,14 @@ def _get_callback_server() -> str:
         Callback server URL read from config, keyed by environment.
     """
     env = get_current_env()
-    path = _PRODUCTION_CALLBACK_PATH if env == "prod" else _PRE_CALLBACK_PATH
+    if env == "prod":
+        path = _PRODUCTION_CALLBACK_PATH
+    elif env == "pre":
+        path = _PRE_CALLBACK_PATH
+    else:
+        # dev and any unknown env fall back to the dev callback host,
+        # consistent with get_current_env()'s default-to-dev behavior.
+        path = _DEV_CALLBACK_PATH
     return get_config_by_path(get_config(), path)
 
 

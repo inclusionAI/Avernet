@@ -52,6 +52,9 @@ reqwest         = { workspace = true }
 bcs-test-support = { workspace = true }
 
 [dev-dependencies]
+bcs-collaboration-runtime = { workspace = true }
+bcs-collaboration-store = { workspace = true }
+bcs-message-store = { workspace = true }
 bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }
 futures = { workspace = true }
 bcs-app-session = { workspace = true }

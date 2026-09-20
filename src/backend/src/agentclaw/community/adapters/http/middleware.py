@@ -3,9 +3,9 @@
 Extracted from ``api/app.py`` to keep the composition root focused on
 wiring rather than middleware bodies (Rule 9 — single-purpose files).
 
-Public entry point: :func:`install_middleware`. Callers (the
-composition root in ``app.py``) pass in the resolved ``AuthPlugin``
-and ``TracerPlugin``; this module owns the order in which middleware
+Public entry point: :func:`install_middleware`. Callers (the composition
+root's worker-runtime phase, ``boot.finalize_worker_runtime``) pass in the
+resolved ``AuthPlugin`` and ``TracerPlugin``; this module owns the order in which middleware
 are attached and the CORS origin list. Tracing lives behind the
 ``TracerPlugin`` capability — this module imports no tracer SDK.
 """
@@ -121,8 +121,8 @@ class AvernetTenantMiddleware:
     """Bind each request's data-isolation tenant for the request's lifetime.
 
     Public-API requests (``/openapi/v1/*``) resolve their tenant through the
-    single seam ``resolve_avernet_tenant``; every other path — the internal API
-    and anything non-public — is the default tenant. ``avernet_tenant_scope``
+    single seam ``resolve_avernet_tenant``. Every other path, including the BaaS
+    Caller connection entrance, uses the server default tenant. ``avernet_tenant_scope``
     resets on the way out (including on error), so a tenant never survives its
     request or leaks into the next one that reuses the worker.
 

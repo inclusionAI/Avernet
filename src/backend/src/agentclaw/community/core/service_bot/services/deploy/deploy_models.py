@@ -29,15 +29,14 @@ from typing import Any, Dict
 class StorageType(StrEnum):
     """Backing store for a bot's own volume (:attr:`Storage.type`).
 
-    One member today because NAS is the only store this platform provisions a
-    bot volume on. It is an enum rather than a bare ``str`` so the answer to
-    "what may I put here?" is in the type instead of in someone's memory; a
-    deployment on a different substrate adds a member here.
+    NAS remains the compatibility default. UPFS uses the same storage identity
+    as its subpath; BaaS resolves the actual volume from its template.
     """
 
     #: Network-attached storage. BaaS resolves the share from
     #: :attr:`Storage.storage_id` and mounts it at :attr:`Storage.path`.
     NAS = "nas"
+    UPFS = "upfs"
 
 
 class MountPermission(StrEnum):

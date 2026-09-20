@@ -99,6 +99,7 @@ _SESSION_RESOURCES_EXEMPT_REASON = (
     "covers the module with core and HTTP API tests."
 )
 
+
 _RUNTIME_BINDING_EXEMPT_REASON = (
     "Read-only binding selection used only by the Session File OpenAPI upload "
     "intent. A real flow requires a signed OpenAPI principal and the same "

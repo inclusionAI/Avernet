@@ -12827,6 +12827,34 @@ function finalizeCompletedLoopIterations(
     }
 
     if (loopState.currentIteration < loopState.maxIterations) {
+      // Abort check: if the loop has been flagged as abortRequested (set by
+      // abortFlow / cross-process guard), or if the flow_runs status has been
+      // externally set to a terminal state (e.g. "cancelled" by POST /abort),
+      // do NOT advance to the next iteration.  Instead, mark the loop as
+      // succeeded with exitReason "aborted" so the loop exits cleanly and the
+      // executeLoop cross-process guard can finish the flow.
+      if (loopState.abortRequested) {
+        console.log(`[finalizeLoop] loop=${node.id} abortRequested — stopping iteration advancement at iteration ${loopState.currentIteration}`);
+        setLoopParentResult({
+          state,
+          loopNode: node,
+          loopState,
+          status: "succeeded",
+          untilMatched: false,
+          exitReason: "aborted",
+          lastIterationOutputs: collectLoopIterationOutputs(node, state, loopState, loopState.currentIteration),
+        });
+        appendFlowEvent(state, {
+          type: "loop_completed",
+          flowId,
+          workflowId: state.workflowId,
+          nodeId: node.id,
+          data: { ...state.nodeStates[node.id].result, abortRequested: true },
+        });
+        changed = true;
+        continue;
+      }
+
       loopState.currentIteration += 1;
       loopState.status = "running";
       state.nodeStates[node.id] = {
@@ -13058,6 +13086,13 @@ async function executeLoop(
           deps.flowControl?.releaseAllForFlow(flowId);
           if (_flowRow.status === "succeeded") {
             return { status: "finished", message: `流程已被外部标记为 succeeded` };
+          }
+          if (_flowRow.status === "cancelled") {
+            // User-initiated abort via POST /api/runs/:flowId/abort.
+            // The abort route already reconciled node_executions and wrote
+            // flow_events, so we only need to exit the loop cleanly.
+            console.log(`[controller] executeLoop: flowId=${flowId} cancelled by user — exiting loop`);
+            return { status: "failed", nodeIds: [], message: `流程已被用户中止` };
           }
           return { status: "failed", nodeIds: [], message: `流程已被外部标记为 ${_flowRow.status}` };
         }

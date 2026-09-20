@@ -86,10 +86,9 @@ async def refresh_bot_symlinks(
 async def trigger_bootstrap(
     svc: SkillCenterSyncServiceProtocol = Injected(SkillCenterSyncServiceProtocol),
 ):
-    """手动触发 bootstrap — 启动时批量同步所有 center:// 已发布 skill。
+    """手动触发兼容 bootstrap — 立即对账已物化的 Public Center Skill。
 
-    等价于服务启动时的 startup_skill_center_sync_service() 逻辑。
-    用于测试：避免每次重启服务来触发 bootstrap。
+    Lifecycle 启动不再执行该操作；保留此接口供旧调用方显式触发。
     """
     logger.info("[SkillCenterSyncService] API /bootstrap called")
     try:

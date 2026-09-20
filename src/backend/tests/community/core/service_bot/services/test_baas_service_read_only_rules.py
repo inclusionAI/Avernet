@@ -3,6 +3,9 @@ from unittest.mock import MagicMock
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
     ManagedDeployConfigComposer,
 )
+from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
+    NoopStoragePolicy,
+)
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
@@ -28,6 +31,7 @@ def _make_composer(bot_repo=None) -> ManagedDeployConfigComposer:
         storage_path=MagicMock(),
         sandbox_registry=_make_registry(),
         bot_repo=bot_repo or MagicMock(),
+        storage_policy=NoopStoragePolicy(),
     )
 
 

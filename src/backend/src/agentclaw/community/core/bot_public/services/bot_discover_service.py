@@ -72,6 +72,9 @@ class BotDiscoverService(BotDiscoverServiceProtocol):
         catalog_filters: BotCatalogSearchFilters | None = None,
         caller: BotCatalogCaller | None = None,
         request_id: str = "internal-discover",
+        runtime_state: str | None = None,
+        viewer_actor_type: str | None = None,
+        viewer_actor_id: str | None = None,
     ) -> dict[str, Any]:
         """根据关键词搜索公开的 Bot.
 
@@ -93,6 +96,13 @@ class BotDiscoverService(BotDiscoverServiceProtocol):
                 "items": list[dict],  # 完整的 bot 信息列表，每个 item 包含 recommend 字段
             }
         """
+        if runtime_state is not None:
+            filters, catalog_filters = self._viewer_search_filters(
+                runtime_state=runtime_state,
+                viewer_actor_type=viewer_actor_type,
+                viewer_actor_id=viewer_actor_id,
+            )
+
         logger.info(f"[BotDiscover] 搜索关键词: {keyword}, top_k={top_k}, filters={filters}")
 
         # 1. 调用 BCSFuse recommend 接口
@@ -144,6 +154,36 @@ class BotDiscoverService(BotDiscoverServiceProtocol):
 
         result["context"] = {"recommend_response": bcsfuse_results}
         return result
+
+    @staticmethod
+    def _viewer_search_filters(
+        *,
+        runtime_state: str,
+        viewer_actor_type: str | None,
+        viewer_actor_id: str | None,
+    ) -> tuple[dict[str, Any], BotCatalogSearchFilters]:
+        """Derive recommendation and authoritative catalog filters for a viewer."""
+        if viewer_actor_type == "bot":
+            recommendation_filters = {
+                "availability": ["public", "protected"],
+                "runtime_state": [runtime_state],
+            }
+            catalog_filters = BotCatalogSearchFilters(
+                visibility=("public", "protected"),
+                viewer_actor_type=viewer_actor_type,
+                viewer_actor_id=viewer_actor_id,
+            )
+        else:
+            recommendation_filters = {"runtime_state": [runtime_state]}
+            catalog_filters = BotCatalogSearchFilters(
+                user_visibility=("public", "protected")
+                if viewer_actor_type == "human"
+                else (),
+                status="online" if runtime_state == "online" else None,
+                viewer_actor_type=viewer_actor_type,
+                viewer_actor_id=viewer_actor_id,
+            )
+        return recommendation_filters, catalog_filters
 
     def _call_bcsfuse_recommend(
         self,

@@ -989,33 +989,151 @@ class FakeResourceFileService:
         return path in self._exists
 
 
-# ── the delivery seam's required collaborators (W8) ──────────────────────
+# ── the delivery seam (W8) ───────────────────────────────────────────────
 #
-# ``BotConfigManifestApplyService`` takes ``is_teclaw``, the platform ports and
-# the closing redeliver as **required** arguments: the composition root binds
-# every one of them, so an optional default would describe a value that is
-# never absent. A rig that only exercises the ARCA family still has to say so,
-# and these three say it — the two that belong to the teclaw path raise if the
-# suite ever reaches them, which is the thing worth catching.
+# ``BotConfigManifestApplyService`` takes one **required** argument for the
+# whole seam: a ``DeliveryStrategyFactory`` carrying one built strategy per
+# engine family. The composition root assembles it, so a rig has to assemble
+# one too — and assembling it the same way is the point, which is what these
+# helpers are for. A rig that only exercises ARCA binds a teclaw row that
+# raises if it is ever reached, which is the thing worth catching.
 
 
 def arca_only_engine_test(_engine: str | None) -> bool:
-    """Every bot is ARCA. What ``is_teclaw=None`` used to fall back to."""
+    """Every bot is ARCA."""
     return False
 
 
-def unreachable_platform_ports():
-    raise AssertionError(
-        "this rig is ARCA-only: the teclaw platform ports are never built"
-    )
-
-
-async def unreachable_redeliver(ctx) -> None:
-    raise AssertionError(
-        "this rig is ARCA-only: the closing redeliver is never reached"
-    )
+def teclaw_engine_test(engine: str | None) -> bool:
+    """The engine authority's answer, spelled the way production spells it."""
+    return (engine or "").lower() == "teclaw"
 
 
 async def no_redeliver(ctx) -> None:
     """The closing step, doing nothing — for a teclaw rig that is not about it."""
     return None
+
+
+async def unreachable_redeliver(ctx) -> None:
+    raise AssertionError("this rig never reaches the closing redeliver")
+
+
+def device_port_bundle(
+    *,
+    script_service=None,
+    activation_service=None,
+    mcp_auth_service=None,
+    identity_service=None,
+    upload_service=None,
+    capability_reader=None,
+    package_validator=None,
+    entry_fetcher=None,
+    resource_service=None,
+    cli_tool_service=None,
+):
+    """The device-backed bundle, over fakes, wrapped as the root wraps it.
+
+    The composition root builds this bundle from ten lazy providers and wraps
+    four of them in the delegates that narrow a service to its port. A rig that
+    built the bundle by hand would be testing the ports it chose rather than
+    the ones an apply is handed, so the wrapping is reproduced here — and only
+    here, rather than in each suite.
+
+    Answers a thunk, not a bundle, because that is what a strategy takes: it is
+    called once per apply, so a fake handed in is the one every apply sees.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
+        DeviceActivation,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+        MaterialiserPorts,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.identity_files import (
+        DeviceIdentity,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.resource_files import (
+        DeviceResource,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
+        DeviceSkillPackageUpload,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+        DeclaredSourceResolver,
+    )
+
+    bundle = MaterialiserPorts(
+        script_service=script_service or FakeStartupScriptService(),
+        activation_service=DeviceActivation(
+            activation_service or FakeActivationService()
+        ),
+        mcp_auth_service=mcp_auth_service or FakeMcpAuth(),
+        identity_service=DeviceIdentity(identity_service or FakeIdentityService()),
+        upload_service=DeviceSkillPackageUpload(
+            upload_service or FakeSkillUploadService()
+        ),
+        capability_reader=capability_reader or FakeCapabilityReader(),
+        package_validator=package_validator or real_validator(),
+        entry_fetcher=entry_fetcher
+        or DeclaredSourceResolver(
+            FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+        ),
+        resource_service=DeviceResource(resource_service or FakeResourceFileService()),
+        cli_tool_service=cli_tool_service,
+    )
+    return lambda: bundle
+
+
+class UnreachableDelivery:
+    """A family's row in a rig that must never route to it.
+
+    Bound rather than omitted because ``DeliveryStrategyFactory`` refuses a
+    mapping that does not name every family — the exhaustiveness that makes a
+    missing family a boot error instead of a mid-apply ``KeyError``. A rig
+    states "ARCA only" by binding this, and learns immediately if it was wrong.
+    """
+
+    family = "unreachable"
+
+    def _raise(self, *_args, **_kwargs):
+        raise AssertionError("this rig never routes to this engine family")
+
+    creation_sequence = property(_raise)
+    phase_of = _raise
+    steps_for = _raise
+    needs_container = _raise
+    ports = _raise
+
+    async def finish(self, ctx, report):
+        raise AssertionError("this rig never routes to this engine family")
+
+
+def delivery_strategies(*, arca=None, teclaw=None, is_teclaw=None):
+    """A ``DeliveryStrategyFactory`` over the rows a rig actually exercises.
+
+    The same construction the composition root performs: strategies built
+    first, then a lookup over them. An omitted row is :class:`UnreachableDelivery`
+    — not a silent ARCA fallback, which is the bug the required arguments on
+    this seam exist to prevent.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+        DeliveryStrategyFactory,
+        EngineFamily,
+        family_from_engine_test,
+    )
+
+    return DeliveryStrategyFactory(
+        family_of=family_from_engine_test(is_teclaw or arca_only_engine_test),
+        strategies={
+            EngineFamily.ARCA: arca or UnreachableDelivery(),
+            EngineFamily.TECLAW: teclaw or UnreachableDelivery(),
+        },
+    )
+
+
+def arca_only_delivery(ports):
+    """The seam for a rig that exercises ARCA and nothing else."""
+    from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+        ArcaDelivery,
+    )
+
+    return delivery_strategies(arca=ArcaDelivery(ports))

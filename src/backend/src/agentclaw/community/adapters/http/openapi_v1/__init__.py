@@ -192,6 +192,7 @@ from .diagnostics import router as diagnostics_router
 from .dormant import router as dormant_router
 from .editors import router as editors_router
 from .deprecated import (
+    ADDRESSED_GROUPS as _LEGACY_ADDRESSED,
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
     GRANT_CHECKED_GROUPS as _LEGACY_GRANT_CHECKED,
     SELF_CHECKED_GROUPS as _LEGACY_SELF_CHECKED,
@@ -246,6 +247,7 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
     assert_every_route_authorized,
 )
 from .token import token_router
+from .digital_employee import router as digital_employee_router
 
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
@@ -272,6 +274,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (  # noqa: E4
 # Bringing it under this rule would remove a capability that route exists to
 # provide. See the note in the spec's Out of Scope.
 _GROUPS_WITHOUT_CALLER_SCOPE = [
+    digital_employee_router,
     logs_router,
     loadtest_router,
 ]
@@ -358,6 +361,13 @@ _ADDRESSED_BOT_SUBGROUPS = [
     # grant rather than the own-bot one.
     config_manifest_router,
     config_manifest_apply_router,
+    # The startup script, data-init state, identity persona files and the
+    # workspace resources/routines are collaborator-scoped on the manifest's
+    # bars (MEMBER to read, ADMIN behind the lock to write), so they take the
+    # addressed-owner grant like the manifest beside them.
+    identity_router,
+    resources_router,
+    routines_router,
     # W9's CLI tools: the same area a manifest's ``cli_tools`` category
     # converges, reached directly. Same bars, same admission.
     cli_tools_router,
@@ -400,9 +410,6 @@ _GRANT_CHECKED_SUBGROUPS = [
     # rather than the engine-runtime one, and mounting it here is what gives it
     # both. See ``bots/engine_config.py``.
     engine_config_router,
-    identity_router,
-    resources_router,
-    routines_router,
 ]
 
 # Track C — the engine-runtime groups. Mounted separately because they document
@@ -588,6 +595,19 @@ def build_public_router() -> APIRouter:
             router,
             responses=USER_SCOPED_ERROR_RESPONSES,
             dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_OWN_BOT,
+        )
+    # The retiring identity addresses moved off the own-bot list with their
+    # replacement: their path still carries ``{bot_id}``, so their rows carry
+    # the replacement's ``Check`` bars and their mount must declare the same
+    # addressed-owner grant the check adjudicates against. The other retiring
+    # groups stay own-bot — their shims pin the owner to the caller
+    # (``deprecated._requery.pin_owner_to_user``), so name-and-grant
+    # congruence is what the own-bot dependency alone provides there.
+    for router in _LEGACY_ADDRESSED:
+        public.include_router(
+            router,
+            responses=USER_SCOPED_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
         )
     for router in _LEGACY_SELF_CHECKED:
         public.include_router(

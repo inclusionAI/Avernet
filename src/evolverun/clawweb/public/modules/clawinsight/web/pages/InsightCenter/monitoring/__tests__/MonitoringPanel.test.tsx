@@ -12,7 +12,8 @@ const item: DiagnosisItem = {
   businessProblemCategory: '外部服务异常', businessProblemSubtype: '数据获取失败',
   systemDiagnosis: '<script>alert(1)</script>', businessDiagnosis: '未获取到结果', handlerName: null, humanIntervention: true,
 };
-const page = (botId = 'bot-te'): DiagnosisPage => ({ botId, page: 1, pageSize: 10, total: 30, totalPages: 3,
+const page = (botId = 'bot-te'): DiagnosisPage => ({ botId, page: 1, pageSize: 20, total: 30, totalPages: 2,
+  problemTypes: [{ category: '外部服务异常', subtypes: ['数据获取失败', '请求超时'] }, { category: '任务执行异常', subtypes: ['执行路径缺失'] }],
   counts: { all: 30, alert: 10, pass: 10, unresolved: 10 }, items: [{ ...item, botId }] });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 beforeEach(() => {
@@ -25,7 +26,51 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('MonitoringPanel', () => {
-  it('loads fixed IDs, expands diagnosis safely, and omits unsupported actions', async () => {
+  it('applies type filters atomically, resets page, cancels drafts and resets filters', async () => {
+    render(<MonitoringPanel />);
+    await screen.findByText('监控正常');
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(api.diagnoses.mock.lastCall?.[1].page).toBe(2));
+    await screen.findByRole('button', { name: /外部服务异常/ });
+    fireEvent.click(screen.getByRole('button', { name: '筛选问题类型' }));
+    expect(screen.getByLabelText('业务问题子类型')).toBeDisabled();
+    const calls = api.diagnoses.mock.calls.length;
+    fireEvent.change(screen.getByLabelText('业务问题类型'), { target: { value: '外部服务异常' } });
+    fireEvent.change(screen.getByLabelText('业务问题子类型'), { target: { value: '数据获取失败' } });
+    expect(api.diagnoses).toHaveBeenCalledTimes(calls);
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }));
+    await waitFor(() => expect(api.diagnoses.mock.lastCall?.[1]).toMatchObject({ businessProblemCategory: '外部服务异常', businessProblemSubtype: '数据获取失败', page: 1 }));
+    const trigger = screen.getByRole('button', { name: /筛选问题类型/ });
+    expect(trigger).toHaveTextContent('2');
+    fireEvent.click(trigger);
+    fireEvent.change(screen.getByLabelText('业务问题类型'), { target: { value: '任务执行异常' } });
+    expect(screen.getByLabelText('业务问题子类型')).toHaveValue('');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(trigger).toHaveFocus();
+    fireEvent.click(trigger);
+    expect(screen.getByLabelText('业务问题类型')).toHaveValue('外部服务异常');
+    fireEvent.click(screen.getByRole('button', { name: '重置' }));
+    await waitFor(() => expect(api.diagnoses.mock.lastCall?.[1]).toMatchObject({ businessProblemCategory: '', businessProblemSubtype: '', page: 1, ...beijingDateRange(1) }));
+  });
+
+  it('initializes each mount with the current Beijing day and 20 rows, including across midnight', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T15:59:59Z'));
+    const first = render(<MonitoringPanel />);
+    await act(async () => {});
+    expect(api.diagnoses.mock.lastCall?.[1]).toMatchObject({ startDate: '2026-08-31', endDate: '2026-08-31', page: 1, pageSize: 20 });
+    expect(screen.getByLabelText('每页条数')).toHaveValue('20');
+    first.unmount();
+    vi.setSystemTime(new Date('2026-08-31T16:00:01Z'));
+    render(<MonitoringPanel />);
+    await act(async () => {});
+    expect(api.diagnoses.mock.lastCall?.[1]).toMatchObject({ startDate: '2026-09-01', endDate: '2026-09-01', pageSize: 20 });
+    fireEvent.click(screen.getByRole('button', { name: '选择会话时间范围' }));
+    fireEvent.click(screen.getByRole('button', { name: '全部时间' }));
+    await act(async () => {});
+    expect(api.diagnoses.mock.lastCall?.[1]).toMatchObject({ startDate: '', endDate: '', pageSize: 20 });
+  });
+  it('loads discovered IDs, expands diagnosis safely, and omits unsupported actions', async () => {
     const { container } = render(<MonitoringPanel />);
     fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
     expect(screen.getByText('是否人工干预').nextElementSibling).toHaveTextContent('是');
@@ -63,7 +108,7 @@ describe('MonitoringPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(api.diagnoses).toHaveBeenCalledTimes(calls);
     fireEvent.click(screen.getByRole('button', { name: '选择会话时间范围' }));
-    expect(screen.getByLabelText('开始日期')).toHaveValue('');
+    expect(screen.getByLabelText('开始日期')).toHaveValue(beijingDateRange(1).startDate);
     fireEvent.input(screen.getByLabelText('开始日期'), { target: { value: '2026-09-01' } });
     fireEvent.input(screen.getByLabelText('结束日期'), { target: { value: '2026-09-10' } });
     fireEvent.click(screen.getByRole('button', { name: '应用' }));
@@ -97,11 +142,41 @@ describe('MonitoringPanel', () => {
     api.bots.mockRejectedValueOnce({ status: 503 });
     render(<MonitoringPanel />);
     await screen.findByText('监控服务暂不可用，请稍后重试。');
-    expect(screen.queryByText('暂无已配置的监控 Bot。')).not.toBeInTheDocument();
+    expect(screen.queryByText('暂无已上报的监控 Bot。')).not.toBeInTheDocument();
     api.bots.mockResolvedValue({ items: [] });
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
-    await screen.findByText('暂无已配置的监控 Bot。');
+    await screen.findByText('暂无已上报的监控 Bot。');
     expect(api.diagnoses).not.toHaveBeenCalled();
+  });
+  it('discovers new bots by polling and manual refresh without losing selection', async () => {
+    vi.useFakeTimers();
+    render(<MonitoringPanel />);
+    await act(async () => {});
+    api.bots.mockResolvedValue({ items: [{ botId: 'bot-new' }, { botId: 'bot-te' }, { botId: 'bot-oc' }] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(api.bots).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: '监控 Bot bot-te' }));
+    expect(screen.getByRole('button', { name: 'bot-new', exact: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'bot-new', exact: true }));
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+    await act(async () => {});
+    expect(api.bots).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole('button', { name: '监控 Bot bot-new' })).toBeInTheDocument();
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    fireEvent(document, new Event('visibilitychange'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    expect(api.bots).toHaveBeenCalledTimes(3);
+  });
+  it('discovers the first bot when an initially empty list is polled', async () => {
+    vi.useFakeTimers();
+    api.bots.mockResolvedValueOnce({ items: [] });
+    render(<MonitoringPanel />);
+    await act(async () => {});
+    expect(screen.getByText('暂无已上报的监控 Bot。')).toBeInTheDocument();
+    expect(api.status).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(api.status.mock.lastCall?.[0]).toBe('bot-te');
   });
   it('polls only while visible and stops after unmount; keyword is debounced', async () => {
     vi.useFakeTimers();
@@ -133,12 +208,12 @@ describe('MonitoringPanel', () => {
   it('supports quick ranges and clearing an empty filtered result', async () => {
     api.diagnoses.mockResolvedValue({ ...page(), items: [], total: 0, totalPages: 0 });
     render(<MonitoringPanel />);
-    await screen.findByText('暂无诊断记录');
+    await screen.findByText('没有符合当前条件的诊断记录。');
     fireEvent.click(screen.getByRole('button', { name: '选择会话时间范围' }));
     fireEvent.click(screen.getByRole('button', { name: '近 7 天' }));
     await waitFor(() => expect(api.diagnoses.mock.lastCall?.[1]).toMatchObject(beijingDateRange(7)));
     fireEvent.click(await screen.findByRole('button', { name: '清空筛选条件' }));
-    await waitFor(() => expect(api.diagnoses.mock.lastCall?.[1]).toMatchObject({ startDate: '', endDate: '', keyword: '', decision: 'ALL' }));
+    await waitFor(() => expect(api.diagnoses.mock.lastCall?.[1]).toMatchObject({ ...beijingDateRange(1), keyword: '', decision: 'ALL', page: 1 }));
   });
   it('closes menus with Escape and restores trigger focus', async () => {
     render(<MonitoringPanel />);
@@ -150,11 +225,14 @@ describe('MonitoringPanel', () => {
     expect(screen.queryByRole('button', { name: 'bot-oc', exact: true })).not.toBeInTheDocument();
     expect(button).toHaveFocus();
   });
-  it('shows intervention in the collapsed row and handles clipboard failure explicitly', async () => {
+  it('keeps the collapsed row concise and handles clipboard failure explicitly', async () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } });
     render(<MonitoringPanel />);
     const record = await screen.findByRole('button', { name: /外部服务异常/ });
-    expect(record).toHaveAccessibleName(/人工干预：是/);
+    expect(record).toHaveTextContent('TC.MCP.DATA');
+    expect(record).toHaveTextContent('2026-09-09');
+    expect(record).not.toHaveTextContent('人工干预：是');
+    expect(record).not.toHaveTextContent('告警');
     fireEvent.click(record);
     fireEvent.click(screen.getByRole('button', { name: '复制Trace ID' }));
     await screen.findByText('未能访问剪贴板，请选择并复制上方标识。');

@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAnalyzeRun, useAnalysisProgress, useFlowRuns, useWorkflowHealth } from '../../api/hooks'
+import { useDeleteFlowRun, useRerunFlowRun, useFlowApprovals } from '@avernet/clawweb-shared/web/api/hooks'
 import AnalyzeRunBotModal from '../AnalyzeRunBotModal'
+import AutoHealPanel from '../AutoHealPanel'
+import ApprovalSlidePanel from '../ApprovalSlidePanel'
 import { SuccessTrendCard } from '../SuccessTrendCard'
+import { RunCountTrendCard } from '../RunCountTrendCard'
 import { NodeAnalysisPanel } from '../NodeAnalysisPanel'
 import StatusBadge from '../StatusBadge'
 import EmptyState from '../EmptyState'
@@ -10,6 +14,49 @@ import ErrorState from '../ErrorState'
 import { formatTimeShort, formatDuration } from '../../utils/time'
 import type { FlowRun, WorkflowTypeRow } from '@avernet/clawweb-shared/web/types'
 import TimeRangeFilter, { toTimeRange } from '../TimeRangeFilter'
+
+function TrendTabs({
+  workflowId,
+  currentSuccessRate,
+  currentDetail,
+  currentTotalRuns,
+  days,
+}: {
+  workflowId: string
+  currentSuccessRate: string
+  currentDetail: string
+  currentTotalRuns: string
+  days: 1 | 'yesterday' | 7 | 30
+}) {
+  const [tab, setTab] = useState<'success' | 'count'>('success')
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white">
+      <div className="flex items-center gap-1 border-b border-slate-100 px-3 pt-2">
+        <button
+          type="button"
+          onClick={() => setTab('success')}
+          className={`px-3 py-1.5 text-xs font-medium transition-colors border-b-2 ${tab === 'success' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          成功率趋势
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('count')}
+          className={`px-3 py-1.5 text-xs font-medium transition-colors border-b-2 ${tab === 'count' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          运行实例趋势
+        </button>
+      </div>
+      <div className="px-4 py-3">
+        {tab === 'success' ? (
+          <SuccessTrendCard workflowId={workflowId} currentSuccessRate={currentSuccessRate} currentDetail={currentDetail} compact days={days} showRangeSelector={false} embedded />
+        ) : (
+          <RunCountTrendCard workflowId={workflowId} currentTotalRuns={currentTotalRuns} days={days} embedded />
+        )}
+      </div>
+    </div>
+  )
+}
 
 function MetricCell({
   label,
@@ -31,11 +78,14 @@ function MetricCell({
   )
 }
 
-function RunRow({ run, onAnalyze, dispatching, busy, onAnalysisFinished }: { run: FlowRun; onAnalyze: (run: FlowRun) => void; dispatching: boolean; busy: boolean; onAnalysisFinished: () => unknown }) {
+function RunRow({ run, onAnalyze, onAutoHeal, onApproval, dispatching, busy, onAnalysisFinished }: { run: FlowRun; onAnalyze: (run: FlowRun) => void; onAutoHeal: (run: FlowRun) => void; onApproval: (run: FlowRun) => void; dispatching: boolean; busy: boolean; onAnalysisFinished: () => unknown }) {
   const navigate = useNavigate()
   const status = run.evolution_analysis_status ?? null
   const progressQuery = useAnalysisProgress(run.flow_id, status === 'analyzing')
   const progress = progressQuery.data?.progress ?? null
+  const deleteMutation = useDeleteFlowRun()
+  const rerunMutation = useRerunFlowRun()
+  const [confirming, setConfirming] = useState(false)
   useEffect(() => {
     if (status === 'analyzing' && ['completed', 'failed', 'insufficient_evidence'].includes(progressQuery.data?.status ?? '')) {
       void onAnalysisFinished()
@@ -47,6 +97,44 @@ function RunRow({ run, onAnalyze, dispatching, busy, onAnalysisFinished }: { run
   if (succeeded_count > 0) parts.push(`${succeeded_count} 成功`)
   if (failed_count > 0) parts.push(`${failed_count} 失败`)
   if (other > 0) parts.push(`${other} 其他`)
+
+  const handleDelete = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirming) {
+      setConfirming(true)
+      return
+    }
+    deleteMutation.mutate(run.flow_id)
+    setConfirming(false)
+  }, [confirming, deleteMutation, run.flow_id])
+
+  const handleCancelDelete = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    setConfirming(false)
+  }, [])
+
+  const handleRerun = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    rerunMutation.mutate(run.flow_id)
+  }, [rerunMutation, run.flow_id])
+
+  const handleAutoHeal = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    onAutoHeal(run)
+  }, [onAutoHeal, run])
+
+  const handleApproval = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    onApproval(run)
+  }, [onApproval, run])
+
+  const handleAnalyze = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    onAnalyze(run)
+  }, [onAnalyze, run])
+
+  const isAutoHealable = ['failed', 'blocked', 'waiting'].includes(run.status)
+  const canRerun = !!run.origin_bot_id
 
   return (
     <tr
@@ -67,6 +155,11 @@ function RunRow({ run, onAnalyze, dispatching, busy, onAnalysisFinished }: { run
         {run.origin_bot_id && <span className="mt-0.5 block max-w-52 truncate font-mono text-[10px] text-slate-400" title={run.origin_bot_id}>{run.plugin_version ? `${run.origin_bot_id}/${run.plugin_version}` : run.origin_bot_id}</span>}
       </td>
       <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">
+        {run.workflow_version != null ? (
+          <span className="font-mono text-xs">{run.workflow_version === -1 ? '未绑定发布版本' : run.workflow_version}</span>
+        ) : <span className="text-gray-300">—</span>}
+      </td>
+      <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">
         {run.engine ? <span className="font-mono">{run.engine}</span> : <span className="text-gray-300">—</span>}
       </td>
       <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">
@@ -76,34 +169,92 @@ function RunRow({ run, onAnalyze, dispatching, busy, onAnalysisFinished }: { run
         {formatDuration(run.total_duration_ms)}
       </td>
       <td className="whitespace-nowrap px-4 py-2 text-xs">
-        {status === 'analyzing' ? (
-          <div className="min-w-56">
-            <div className="flex items-center gap-2 text-blue-600">
+        <div className="flex items-center gap-1.5">
+          {/* 分析状态 */}
+          {status === 'analyzing' ? (
+            <span className="inline-flex items-center gap-1 text-blue-600" title="分析中">
               <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent" />
-              <span className="font-medium">{progress?.message ?? '分析中'}</span>
-              {progress && <span className="text-[10px] tabular-nums text-slate-400">已用时 {formatAnalysisElapsed(progress.elapsedMs)}</span>}
-            </div>
-            {progress?.inputSummary && <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
-              <span>{`证据 ${progress.inputSummary.evidenceIncluded}/${progress.inputSummary.evidenceTotal} · 节点 ${progress.inputSummary.nodeCount}（失败 ${progress.inputSummary.failedNodeCount}）· Trace ${progress.inputSummary.traceCount}`}</span>
-              {progress.inputSummary.truncated && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-600">输入已截断</span>}
-            </div>}
-            {!progress && progressQuery.isError && <p className="mt-1 text-[10px] text-slate-400">进度暂不可用，分析仍在后台运行</p>}
-          </div>
-        ) : status === 'completed' ? (
-          <span className="text-emerald-600">已分析</span>
-        ) : status === 'failed' ? (
-          <span className="text-red-500">待分析</span>
-        ) : (
-          <span className="text-gray-300">—</span>
-        )}
-        <button
-          type="button"
-          disabled={status === 'analyzing' || busy}
-          onClick={(event) => { event.stopPropagation(); onAnalyze(run) }}
-          className="ml-2 rounded border border-blue-200 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {dispatching ? '派发中' : status === 'analyzing' ? '分析中' : status === 'completed' || status === 'failed' ? '重新分析' : '分析'}
-        </button>
+            </span>
+          ) : status === 'completed' ? (
+            <span className="text-emerald-600" title="已分析">✓</span>
+          ) : status === 'failed' ? (
+            <span className="text-red-500" title="分析失败">✗</span>
+          ) : (
+            <span className="text-gray-300">—</span>
+          )}
+          <button
+            type="button"
+            disabled={status === 'analyzing' || busy}
+            onClick={handleAnalyze}
+            className="rounded border border-blue-200 px-1.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+            title={status === 'completed' || status === 'failed' ? '重新分析' : '分析'}
+          >
+            {dispatching ? '⏳' : '🔍'}
+          </button>
+          {/* 重跑 */}
+          {canRerun && (
+            <button
+              type="button"
+              onClick={handleRerun}
+              disabled={rerunMutation.isPending}
+              className="rounded border border-green-200 px-1.5 py-1 text-xs text-green-600 hover:border-green-400 hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title="重跑：重新发送原始命令到 Bot"
+            >
+              {rerunMutation.isPending ? '⏳' : '🔄'}
+            </button>
+          )}
+          {/* 自动修复（中止） */}
+          {isAutoHealable && (
+            <button
+              type="button"
+              onClick={handleAutoHeal}
+              className="rounded border border-blue-200 px-1.5 py-1 text-xs text-blue-600 hover:border-blue-400 hover:bg-blue-50"
+              title="AI 自动诊断与修复"
+            >
+              🩹
+            </button>
+          )}
+          {/* 审批 */}
+          {run.status === 'waiting' && (
+            <button
+              type="button"
+              onClick={handleApproval}
+              className="rounded border border-amber-300 bg-amber-50 px-1.5 py-1 text-xs font-medium text-amber-700 hover:border-amber-400 hover:bg-amber-100"
+              title="审批"
+            >
+              📋
+            </button>
+          )}
+          {/* 删除 */}
+          {confirming ? (
+            <span className="inline-flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleteMutation.isPending}
+                className="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? '删除中…' : '确认'}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelDelete}
+                className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
+              >
+                取消
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="rounded border border-gray-200 px-1.5 py-1 text-xs text-gray-500 hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+              title="删除此运行实例"
+            >
+              🗑
+            </button>
+          )}
+        </div>
       </td>
     </tr>
   )
@@ -141,7 +292,7 @@ function readListState(workflowId: string) {
 function OverviewContent({ workflow }: OverviewTabProps) {
   const workflowId = workflow.workflow_id
   const [saved] = useState(() => readListState(workflowId))
-  const [days, setDays] = useState<1 | 7 | 30>(7)
+  const [days, setDays] = useState<1 | 'yesterday' | 7 | 30>(7)
   const [page, setPage] = useState(saved.page)
   const [statusFilter, setStatusFilter] = useState(saved.statusFilter)
   const [searchInput, setSearchInput] = useState(saved.searchInput)
@@ -149,6 +300,8 @@ function OverviewContent({ workflow }: OverviewTabProps) {
   const [timeRange, setTimeRange] = useState(saved.timeRange)
   const timeParams = useMemo(() => toTimeRange(timeRange), [timeRange])
   const [analyzeRun, setAnalyzeRun] = useState<FlowRun | null>(null)
+  const [autoHealRun, setAutoHealRun] = useState<FlowRun | null>(null)
+  const [approvalRun, setApprovalRun] = useState<FlowRun | null>(null)
   const analyzeMutation = useAnalyzeRun()
   const dispatchError = analyzeMutation.isError
     ? analyzeMutation.error instanceof Error ? analyzeMutation.error.message : String(analyzeMutation.error)
@@ -159,17 +312,25 @@ function OverviewContent({ workflow }: OverviewTabProps) {
     } catch { /* Filtering still works when browser storage is disabled. */ }
   }, [workflowId, page, statusFilter, searchInput, query, timeRange])
   const hasFilters = Boolean(statusFilter || query || timeRange !== '7d')
-  const [windowEnd] = useState(() => Math.floor(Date.now() / 1000))
+  const [nowSec] = useState(() => Math.floor(Date.now() / 1000))
+  const startOfToday = useMemo(() => {
+    const d = new Date(nowSec * 1000)
+    d.setHours(0, 0, 0, 0)
+    return Math.floor(d.getTime() / 1000)
+  }, [nowSec])
+  const windowEnd = days === 'yesterday' ? startOfToday - 1 : nowSec
   const [activeSubTab, setActiveSubTab] = useState<'runs' | 'nodes'>('runs')
   const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null)
   const {
     data: health,
     isError: isHealthError,
-  } = useWorkflowHealth(workflowId, days)
+  } = useWorkflowHealth(workflowId, days === 'yesterday' ? 1 : days)
   const pageSize = 20
   const windowStart = days === 1
-    ? Math.floor(new Date(new Date().setHours(0, 0, 0, 0)).getTime() / 1000)
-    : windowEnd - days * 86400
+    ? startOfToday
+    : days === 'yesterday'
+      ? startOfToday - 86400
+      : windowEnd - days * 86400
   const {
     data: metricsData,
     isPending: isMetricsPending,
@@ -202,24 +363,37 @@ function OverviewContent({ workflow }: OverviewTabProps) {
   const runs = useMemo(() => data?.runs ?? [], [data?.runs])
   const totalCount = data?.total ?? 0
 
+  // Fetch approval cards for the selected run when approval panel is opened
+  const approvalsQuery = useFlowApprovals(approvalRun?.flow_id ?? '', !!approvalRun)
+  const pendingApprovals = (approvalsQuery.data?.items ?? []).filter((c) => c.status === 'pending')
+  const approvalsLoading = approvalRun && approvalsQuery.isLoading
+  const noPendingApprovals = approvalRun && !approvalsQuery.isLoading && pendingApprovals.length === 0
+
   const stats = useMemo(() => {
     const counts = metricsData?.statusCounts ?? {}
     const succeededRuns = counts.succeeded ?? 0
     const abnormalRuns = (counts.failed ?? 0) + (counts.aborted ?? 0) + (counts.cancelled ?? 0) + (counts.canceled ?? 0)
     const terminalRuns = succeededRuns + abnormalRuns
+    const runningRuns = counts.running ?? 0
+    const waitingRuns = counts.waiting ?? 0
+    const blockedRuns = counts.blocked ?? 0
+    const queuedRuns = counts.queued ?? 0
+    const totalRuns = terminalRuns + runningRuns + waitingRuns + blockedRuns + queuedRuns
     return {
       succeededRuns,
       abnormalRuns,
       terminalRuns,
       successRate: terminalRuns > 0 ? Math.round((succeededRuns / terminalRuns) * 100) : 0,
-      runningRuns: counts.running ?? 0,
-      waitingRuns: counts.waiting ?? 0,
-      blockedRuns: counts.blocked ?? 0,
-      queuedRuns: counts.queued ?? 0,
+      runningRuns,
+      waitingRuns,
+      blockedRuns,
+      queuedRuns,
+      totalRuns,
     }
   }, [metricsData?.statusCounts])
 
   const hasMetrics = !isMetricsPending && !isMetricsError && metricsData?.statusCounts != null
+  const rangeLabel = days === 'yesterday' ? '昨天' : `近 ${days} 天`
   const currentSuccessRate = hasMetrics && stats.terminalRuns > 0 ? `${stats.successRate}%` : '—'
   const currentDetail = hasMetrics
     ? `${stats.succeededRuns} / ${stats.terminalRuns} 个终态运行`
@@ -233,7 +407,7 @@ function OverviewContent({ workflow }: OverviewTabProps) {
   const currentPage = Math.min(page + 1, totalPages)
   const isRefreshing = isFetching || isMetricsFetching
 
-  const changeDays = (nextDays: 1 | 7 | 30) => {
+  const changeDays = (nextDays: 1 | 'yesterday' | 7 | 30) => {
     setDays(nextDays)
   }
 
@@ -251,21 +425,65 @@ function OverviewContent({ workflow }: OverviewTabProps) {
         isOpen
         onClose={() => setAnalyzeRun(null)}
       />}
+      {autoHealRun && (
+        <AutoHealPanel
+          run={autoHealRun}
+          onClose={() => setAutoHealRun(null)}
+          onRerunComplete={() => void refetch()}
+        />
+      )}
+      {approvalRun && pendingApprovals.length > 0 && (
+        <ApprovalSlidePanel
+          card={pendingApprovals[0]}
+          run={approvalRun}
+          onClose={() => setApprovalRun(null)}
+          onResolved={() => void approvalsQuery.refetch()}
+        />
+      )}
+      {approvalsLoading && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => setApprovalRun(null)}>
+          <div className="flex h-full w-full max-w-2xl flex-col items-center justify-center bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+            <p className="mt-3 text-sm text-gray-500">加载审批信息...</p>
+          </div>
+        </div>
+      )}
+      {noPendingApprovals && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => setApprovalRun(null)}>
+          <div className="flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-gray-200 bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-4">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">📋</span>
+                <h2 className="font-bold text-white text-lg">审批</h2>
+              </div>
+              <button onClick={() => setApprovalRun(null)} className="rounded-md p-1.5 text-white/70 transition-colors hover:bg-white/10 hover:text-white" title="关闭">
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex flex-1 items-center justify-center">
+              <p className="text-sm text-gray-500">该运行没有待处理的审批</p>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-end gap-1" aria-label="概览时间范围">
-        {([1, 7, 30] as const).map((value) => (
+        {([1, 'yesterday', 7, 30] as const).map((value) => (
           <button
             key={value}
             type="button"
             onClick={() => changeDays(value)}
             className={`rounded-md px-3 py-1 text-xs font-medium transition ${days === value ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50'}`}
-          >{value === 1 ? '今天' : `${value}天`}</button>
+          >{value === 1 ? '今天' : value === 'yesterday' ? '昨天' : `${value}天`}</button>
         ))}
       </div>
-      <section aria-label="工作流关键指标" className="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white lg:grid-cols-4 lg:divide-y-0">
+      <section aria-label="工作流关键指标" className="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white lg:grid-cols-5 lg:divide-y-0">
         <MetricCell label="健康度" value={health ? String(health.overallScore) : '—'} detail={health ? (health.overallScore >= 80 ? '运行稳定' : health.overallScore >= 60 ? '需要关注' : '建议优先处理') : '等待健康数据'} emphasis={health && health.overallScore < 60 ? 'danger' : 'default'} />
-        <MetricCell label="运行成功率" value={currentSuccessRate} detail={`近 ${days} 天 · 成功 / 终态`} />
+        <MetricCell label="运行成功率" value={currentSuccessRate} detail={`${rangeLabel} · 成功 / 终态`} />
         <MetricCell label="异常结束" value={hasMetrics ? String(stats.abnormalRuns) : '—'} detail="失败、终止或取消" emphasis={hasMetrics && stats.abnormalRuns > 0 ? 'danger' : 'default'} />
         <MetricCell label="节点耗时 P95" value={health ? formatDuration(health.p95DurationMs) : '—'} detail="最慢节点 P95 口径" />
+        <MetricCell label="总运行实例" value={hasMetrics ? String(stats.totalRuns) : '—'} detail={`${rangeLabel} · 全部状态`} />
       </section>
 
       <section aria-label="当前运行状态" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -291,7 +509,15 @@ function OverviewContent({ workflow }: OverviewTabProps) {
       {isHealthError && <div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-2 text-xs text-rose-600">健康指标加载失败；运行列表仍可继续查看。</div>}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-        {workflowId && <SuccessTrendCard workflowId={workflowId} currentSuccessRate={currentSuccessRate} currentDetail={currentDetail} compact days={days} showRangeSelector={false} />}
+        {workflowId && (
+          <TrendTabs
+            workflowId={workflowId}
+            currentSuccessRate={currentSuccessRate}
+            currentDetail={currentDetail}
+            currentTotalRuns={hasMetrics ? String(stats.totalRuns) : '—'}
+            days={days}
+          />
+        )}
         <section className="rounded-xl border border-slate-200 bg-white p-4" aria-label="运行风险摘要">
           <div className="flex items-center justify-between">
             <div><h3 className="text-sm font-semibold text-slate-900">运行风险</h3><p className="mt-0.5 text-[11px] text-slate-400">优先关注影响成功率与耗时的节点</p></div>
@@ -398,10 +624,11 @@ function OverviewContent({ workflow }: OverviewTabProps) {
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">状态</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">节点</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">发起方</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">版本</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">环境</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">开始时间</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">耗时</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">自进化</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
@@ -410,7 +637,9 @@ function OverviewContent({ workflow }: OverviewTabProps) {
                     busy={analyzeMutation.isPending}
                     onAnalysisFinished={refetch}
                     dispatching={analyzeMutation.isPending && analyzeMutation.variables?.flowId === run.flow_id}
-                    onAnalyze={(selected) => { if (!analyzeMutation.isPending) { analyzeMutation.reset(); setAnalyzeRun(selected) } }} />
+                    onAnalyze={(selected) => { if (!analyzeMutation.isPending) { analyzeMutation.reset(); setAnalyzeRun(selected) } }}
+                    onAutoHeal={(selected) => setAutoHealRun(selected)}
+                    onApproval={(selected) => setApprovalRun(selected)} />
                 ))}
               </tbody>
             </table>

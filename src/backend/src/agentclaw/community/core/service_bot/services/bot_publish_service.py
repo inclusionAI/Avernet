@@ -508,6 +508,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         bot_id: str,
         owner_id: str,
         stage: str,
+        default_tag: Optional[str] = None,
     ) -> Dict[str, Any]:
         """查询 bot 在指定阶段对应的 BaaS/binding 侧信息。"""
         biz_id: Optional[str] = None
@@ -531,6 +532,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 owner_id=owner_id,
                 stage=stage,
                 task_uuid=biz_id,
+                default_tag=default_tag,
                 active_runtime_engine_type=active_runtime_engine_type,
             )
         return self._get_personal_bot_binding_info(
@@ -622,6 +624,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         owner_id: str,
         stage: str,
         task_uuid: Optional[str] = None,
+        default_tag: Optional[str] = None,
         active_runtime_engine_type: str = "",
     ) -> Dict[str, Any]:
         if stage == PublishStage.EVAL.value:
@@ -657,10 +660,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
 
             # 路径二：评测沙箱绑定驱动（stage 格式 "eval"，或 Quality Task 降级）
             # 从 ac_entity_device_binding 中按 default_tag 查询
-            # 当 task_uuid 是 Quality Task UUID（非 "eval" 字面量）时，
-            # 降级查询用 "eval" 而非 task_uuid——因为 binding 表中不存在
-            # default_tag=task_uuid 的记录（Phase 2 后才会补写）
-            fallback_tag = PublishStage.EVAL.value
+            # 优先使用显式传入的 default_tag（如 "default"），降级到 "eval"
+            fallback_tag = default_tag or PublishStage.EVAL.value
             eval_binding = self._find_eval_binding_by_default_tag(
                 bot_id=bot_id,
                 owner_id=owner_id,
@@ -1142,6 +1143,9 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         publish_record = self._repo.get_by_id(publish_id)
         if not publish_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
+
+        if ((publish_record.ext or {}).get("digital_employee_approval") or {}).get("status") in {"SUBMITTING", "APPROVING"}:
+            raise BotPublishServiceError("数字员工审批中，暂不能下线或退回草稿")
 
         # Step 2: 根据状态判断 stage
         current_status = publish_record.status

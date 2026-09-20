@@ -31,6 +31,7 @@ pub enum DeliveryLifecycleEvent {
     Failed,
     Aborted,
     PreparationFailed,
+    /// The admission queue or bounded uncertain-attempt TTL elapsed.
     QueueExpired,
     Recover,
     BindContext,

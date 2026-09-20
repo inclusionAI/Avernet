@@ -86,6 +86,12 @@ class MappingProjectionStatus(StrEnum):
     DEGRADED = "DEGRADED"
 
 
+class MappingResultReason(StrEnum):
+    """Stable reason for an operation-level Mapping result."""
+
+    ENGINE_SKILL_MAPPING_UNSUPPORTED = "ENGINE_SKILL_MAPPING_UNSUPPORTED"
+
+
 @dataclass(frozen=True, slots=True)
 class MappingItemResult:
     """Engine evidence for one logical mapping target.
@@ -118,6 +124,7 @@ class MappingApplyResult:
 class MappingPublishResult:
     published: bool
     status: MappingProjectionStatus
+    reason: MappingResultReason | None = None
     items: tuple[MappingItemResult, ...] = ()
     evidence: dict[str, object] = field(default_factory=dict)
 
@@ -131,6 +138,7 @@ class MappingPublishResult:
 class MappingVerificationResult:
     valid: bool
     status: MappingProjectionStatus
+    reason: MappingResultReason | None = None
     items: tuple[MappingItemResult, ...] = ()
     evidence: dict[str, object] = field(default_factory=dict)
 
@@ -183,6 +191,7 @@ __all__ = [
     "MappingApplyResult",
     "MappingItemResult",
     "MappingProjectionStatus",
+    "MappingResultReason",
     "MappingPublishResult",
     "MappingVerificationResult",
     "PoolSkillMapping",

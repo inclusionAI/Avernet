@@ -575,6 +575,7 @@ fn participant_view(bot_uuid: &str) -> GroupParticipantView {
 
 fn group_create_cmd() -> GroupCreateCommand {
     GroupCreateCommand {
+        create_initial_session: true,
         group_id: Some("group-wrapper".to_string()),
         caller_actor_id: None,
         driver_bot_id: "bot-driver".to_string(),

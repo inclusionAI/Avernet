@@ -27,6 +27,9 @@ from collections.abc import Sequence
 from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.engine.exceptions import CapabilityNotSupportedError
+from engine.community.core.skills.local_package_application import (
+    LocalSkillPackageApplication,
+)
 from engine.community.core.skills.models import (
     CenterEnsureFailure,
     CenterEnsureItem,
@@ -34,6 +37,8 @@ from engine.community.core.skills.models import (
     CenterEnsureResult,
     CleanSymlinksRequest,
     CleanSymlinksResult,
+    LocalSkillPackageApplyRequest,
+    LocalSkillPackageApplyResult,
     PoolLayoutActivateRequest,
     PoolLayoutActivationResult,
     PoolLayoutActivationStatus,
@@ -93,6 +98,14 @@ class OpenClawSkillsAdapter(SkillsService):
 
     def __init__(self, port: OpenClawSkillsPort) -> None:
         self._port = port
+        self._local_packages = LocalSkillPackageApplication("openclaw")
+
+    async def apply_local_package(
+        self,
+        request: LocalSkillPackageApplyRequest,
+        auth: AuthContext | None = None,
+    ) -> LocalSkillPackageApplyResult:
+        return await self._local_packages.apply(request)
 
     # ── Bulk symlink / center-ensure (port-backed) ────────────────────────────
 

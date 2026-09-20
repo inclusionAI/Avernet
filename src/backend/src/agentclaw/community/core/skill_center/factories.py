@@ -15,6 +15,7 @@ needs the dispatcher *types* under ``TYPE_CHECKING``.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, TYPE_CHECKING
 
@@ -80,10 +81,6 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
-class LocalSkillQuarantineRepairError(OSError):
-    """A partial authoritative-package delete could not be verified repaired."""
-
-
 # Every package file is one device round trip. Issuing them sequentially made a
 # package cost ``file_count × round_trip``, which dominates upload time for the many
 # small files a skill package is made of. Fan them out instead — but bounded: device
@@ -92,6 +89,14 @@ class LocalSkillQuarantineRepairError(OSError):
 # caller in the process, so an unbounded ``gather`` over a large package would starve
 # unrelated work.
 _PACKAGE_IO_CONCURRENCY = 8
+
+
+@dataclass(frozen=True, slots=True)
+class LocalSkillPackageLocation:
+    """DB-compatible locator plus the logical layout sent to Engine Runtime."""
+
+    directory: str
+    layout: str
 
 
 async def _gather_package_io(coroutines: list) -> list:
@@ -181,7 +186,7 @@ class LocalSkillPackageStorage:
 
     async def prepare(self) -> None:
         """Remove an orphaned failed upload before writing a first package."""
-        if not await self._filesystem.exists(self._device_directory):
+        if not await self.exists():
             return
         if not await self._filesystem.delete_tree(self._device_directory):
             raise OSError("unable to clear prior Local Skill upload")
@@ -189,9 +194,14 @@ class LocalSkillPackageStorage:
     async def cleanup(self) -> bool:
         return await self._filesystem.delete_tree(self._device_directory)
 
+    async def delete(self) -> bool:
+        """Delete the complete package through one runtime operation."""
+        return await self._filesystem.delete_tree(self._device_directory)
+
     async def exists(self) -> bool:
         """Whether this storage currently has an authoritative package."""
-        return await self._filesystem.exists(self._device_directory)
+        entries = await self._filesystem.list_dir(self._device_directory)
+        return entries is not None
 
     async def read_file(self, relative_path: str) -> bytes | None:
         """Read one validated package-relative file without exposing its locator."""
@@ -233,82 +243,13 @@ class LocalSkillPackageStorage:
         explicitly cleans it up.
         """
         files = await self._read_package_files()
-        if await target._filesystem.exists(target.directory):
+        if await target.exists():
             if not replace:
                 raise OSError("Local Skill copy target already exists")
             if not await target.cleanup():
                 raise OSError("unable to clear Local Skill copy target")
         if not await target._restore_contents(files):
             raise OSError("Local Skill copy verification failed")
-
-    async def quarantine_to(self, quarantine: "LocalSkillPackageStorage") -> None:
-        """Copy, verify, then remove this authoritative package.
-
-        Device backends have no shared directory-rename operation.  This
-        portable sequence deliberately retains the authoritative source until
-        every copied file has been read back byte-for-byte from quarantine.
-        """
-        files = await self._read_package_files()
-        if await quarantine._filesystem.exists(quarantine.directory):
-            raise OSError("Local Skill quarantine already exists")
-        await _gather_package_io(
-            [
-                quarantine._filesystem.write_file(
-                    f"{quarantine.directory}/{relative_path}", content
-                )
-                for relative_path, content in files
-            ]
-        )
-        copied = await _gather_package_io(
-            [
-                quarantine._filesystem.read_file(
-                    f"{quarantine.directory}/{relative_path}"
-                )
-                for relative_path, _ in files
-            ]
-        )
-        if any(
-            actual != expected
-            for actual, (_, expected) in zip(copied, files)
-        ):
-            raise OSError("Local Skill quarantine verification failed")
-        try:
-            source_cleaned = await self.cleanup()
-        except Exception:
-            # A device backend can raise after partially deleting source
-            # bytes. Treat that exactly like a failed cleanup so the verified
-            # quarantine copy is used to restore the authoritative package.
-            source_cleaned = False
-        if not source_cleaned:
-            try:
-                restored = await self._restore_contents(files)
-            except Exception as exc:
-                raise LocalSkillQuarantineRepairError(
-                    "Local Skill package repair failed"
-                ) from exc
-            if not restored:
-                raise LocalSkillQuarantineRepairError(
-                    "Local Skill package repair verification failed"
-                )
-            raise OSError("Local Skill package quarantine failed")
-
-    async def restore_from(
-        self, quarantine: "LocalSkillPackageStorage"
-    ) -> tuple[bool, bool]:
-        """Verify or restore the package before purging its quarantine copy."""
-        files = await quarantine._read_package_files()
-        if await self._filesystem.exists(self.directory):
-            try:
-                source_files = await self._read_package_files()
-            except OSError:
-                source_files = []
-            if source_files == files:
-                return True, await quarantine.cleanup()
-            if not await self.cleanup():
-                return False, False
-        if not await self._restore_contents(files):
-            return False, False
-        return True, await quarantine.cleanup()
 
     async def _restore_contents(self, files: list[tuple[str, bytes]]) -> bool:
         await _gather_package_io(
@@ -508,6 +449,46 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
         to the stable ``name`` directory.  Metadata never points at the
         internal directory.
         """
+        location = self.local_skill_package_location(
+            entity_id=entity_id,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            entity_type=entity_type,
+            is_desktop=is_desktop,
+            is_teclaw=is_teclaw,
+            name=name,
+            directory_name=directory_name,
+        )
+        service = self.create(
+            entity_id=entity_id,
+            bot_owner_id=owner_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+        )
+        local_skill_path_adapter = service._local_skill_path_adapter
+        if is_teclaw and not service.runtime_uses_pool_paths:
+            local_skill_path_adapter = to_local_skill_engine_path
+        return location.directory, LocalSkillPackageStorage(
+            service._device_fs_factory(bot_id, owner_id),
+            local_skill_path_adapter(location.directory),
+        )
+
+    def local_skill_package_location(
+        self,
+        *,
+        entity_id: str,
+        owner_id: str,
+        bot_id: str,
+        engine_type: str | None,
+        entity_type: str,
+        is_desktop: bool,
+        is_teclaw: bool,
+        name: str,
+        directory_name: str | None = None,
+    ) -> LocalSkillPackageLocation:
+        """Resolve layout and the existing DB locator policy without device I/O."""
+
         service = self.create(
             entity_id=entity_id,
             bot_owner_id=owner_id,
@@ -530,14 +511,12 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
                 is_desktop=is_desktop,
                 is_teclaw=is_teclaw,
             )
-            local_dir = self.resolve_local_skill_root(runtime_engine or "openclaw", local_dir)
-        directory = str(local_dir / (directory_name or name))
-        local_skill_path_adapter = service._local_skill_path_adapter
-        if is_teclaw and not service.runtime_uses_pool_paths:
-            local_skill_path_adapter = to_local_skill_engine_path
-        return directory, LocalSkillPackageStorage(
-            service._device_fs_factory(bot_id, owner_id),
-            local_skill_path_adapter(directory),
+            local_dir = self.resolve_local_skill_root(
+                runtime_engine or "openclaw", local_dir
+            )
+        return LocalSkillPackageLocation(
+            directory=str(local_dir / (directory_name or name)),
+            layout="POOL" if service.runtime_uses_pool_paths else "LEGACY",
         )
 
     def local_skill_package_storage_for_locator(

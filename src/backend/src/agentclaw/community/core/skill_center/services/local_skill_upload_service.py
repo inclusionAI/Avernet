@@ -43,6 +43,10 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     RuntimeProjectionResult,
 )
+from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
+    LocalSkillPackageRuntime,
+    LocalSkillPackageRuntimeResult,
+)
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,
     SkillPackageTooLargeError,
@@ -57,6 +61,7 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.log import get_logger
 from injector import inject
 from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import LocalSkillUploadServiceProtocol
 
@@ -64,6 +69,8 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
+
+logger = get_logger()
 
 
 class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
@@ -81,6 +88,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
         runtime_reconciler: BotRuntimeProjectorProtocol,
         package_validator: SkillPackageValidator,
+        package_runtime: LocalSkillPackageRuntime,
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
@@ -91,6 +99,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         self._device_context_resolver_provider = device_context_resolver_provider
         self._runtime_reconciler = runtime_reconciler
         self._package_validator = package_validator
+        self._package_runtime = package_runtime
 
     async def installed_package_digest(
         self,
@@ -145,6 +154,22 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             return None
         return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
+    async def export_installed_package(
+        self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str, name: str
+    ) -> bytes:
+        _, storage = self._skill_service_factory.local_skill_package_storage(
+            entity_id=str(bot["entity_id"]), owner_id=owner_id, bot_id=bot_id,
+            engine_type=bot["active_engine"], entity_type=str(bot["entity_type"]),
+            is_desktop=bot.get("bot_type") == "desktop",
+            is_teclaw=self._is_teclaw(bot_id=bot_id, owner_id=owner_id), name=name,
+        )
+        if not await storage.exists():
+            raise LocalSkillStorageError("Installed Skill package is missing")
+        files = await storage.read_package_files()
+        package = self._package_validator.pack_directory(list(files))
+        self._package_validator.validate_legacy_local_zip(package)
+        return package
+
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
     ) -> dict[str, Any]:
@@ -181,6 +206,42 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             )
             if len(matches) > 1:
                 raise LocalSkillDuplicateError()
+            location = self._skill_service_factory.local_skill_package_location(
+                entity_id=str(bot["entity_id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=is_teclaw,
+                name=validated.name,
+            )
+            runtime_result = await self._package_runtime.apply(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                skill_name=validated.name,
+                layout=location.layout,
+                package=validated.canonical_zip,
+            )
+            if runtime_result is not None:
+                if matches:
+                    return await self._commit_runtime_replace(
+                        skill=matches[0],
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                        actor_id=actor_id,
+                        description=validated.description,
+                        runtime_result=runtime_result,
+                    )
+                return self._commit_runtime_create(
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    actor_id=actor_id,
+                    name=validated.name,
+                    description=validated.description,
+                    directory=location.directory,
+                    runtime_result=runtime_result,
+                )
             if matches:
                 return await self._replace(
                     skill=matches[0],
@@ -205,6 +266,118 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             )
         finally:
             self._edit_guard.release(lease)
+
+    def _commit_runtime_create(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        actor_id: str,
+        name: str,
+        description: str,
+        directory: str,
+        runtime_result: LocalSkillPackageRuntimeResult,
+    ) -> dict[str, Any]:
+        """Persist metadata after Engine success without compensating file I/O."""
+
+        try:
+            skill = self._skill_repo.create(
+                {
+                    "name": name,
+                    "description": description,
+                    "git_path": f"local://{directory}",
+                    "category": "general",
+                    "tags": "[]",
+                    "is_public": False,
+                    "user_id": owner_id,
+                    "bolt_id": bot_id,
+                    "source_type": "upload",
+                }
+            )
+            self._audit_log_repo.insert(
+                {
+                    "bot_id": bot_id,
+                    "owner_id": owner_id,
+                    "operator_id": actor_id,
+                    "detail": json.dumps(
+                        {"action": "local_skill_upload", "skill_id": skill["id"]}
+                    ),
+                }
+            )
+        except Exception as exc:
+            logger.error(
+                "[LocalSkillUploadService] post-apply persistence failed "
+                "bot_id=%s skill_name=%s action=%s digest=%s target_path=%s",
+                bot_id,
+                name,
+                runtime_result.action,
+                runtime_result.content_digest,
+                runtime_result.target_path,
+            )
+            raise LocalSkillStorageError() from exc
+        return {
+            "operation": "created",
+            "skill": {**skill, "active": False},
+            "actor_id": actor_id,
+        }
+
+    async def _commit_runtime_replace(
+        self,
+        *,
+        skill: dict[str, Any],
+        owner_id: str,
+        bot_id: str,
+        actor_id: str,
+        description: str,
+        runtime_result: LocalSkillPackageRuntimeResult,
+    ) -> dict[str, Any]:
+        """Persist replace metadata while preserving the historical locator."""
+
+        old_locator = str(skill["git_path"])[len("local://") :]
+        try:
+            replaced = self._skill_repo.replace_bot_local_skill(
+                skill_id=str(skill["id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                old_locator=old_locator,
+                new_locator=old_locator,
+                description=description,
+            )
+            if replaced is None:
+                raise RuntimeError("Local Skill metadata switch failed")
+            self._audit_log_repo.insert(
+                {
+                    "bot_id": bot_id,
+                    "owner_id": owner_id,
+                    "operator_id": actor_id,
+                    "detail": json.dumps(
+                        {"action": "local_skill_replace", "skill_id": skill["id"]}
+                    ),
+                }
+            )
+            runtime_projection = await self._sync_runtime(owner_id, bot_id)
+        except Exception as exc:
+            logger.error(
+                "[LocalSkillUploadService] post-apply persistence failed "
+                "bot_id=%s skill_name=%s action=%s digest=%s target_path=%s",
+                bot_id,
+                skill["name"],
+                runtime_result.action,
+                runtime_result.content_digest,
+                runtime_result.target_path,
+            )
+            raise LocalSkillStorageError() from exc
+        return {
+            "operation": "updated",
+            "skill": {
+                **skill,
+                "description": description,
+                "git_path": skill["git_path"],
+                "user_id": owner_id,
+            },
+            "actor_id": actor_id,
+            "runtime_projection": runtime_projection.to_dict(),
+        }
 
     async def upload_local_skill_files(
         self,

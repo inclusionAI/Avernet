@@ -67,7 +67,10 @@ class DeviceFileSystem(Protocol):
             dir_path: Absolute path of the directory to delete.
 
         Returns:
-            True if deletion succeeded (or dir did not exist), False on error.
+            True when the provider positively reports deletion success, False on
+            error. An implementation may also treat an absent directory as success
+            only when its provider reports absence unambiguously; ambiguous 404
+            responses must fail closed.
         """
         ...
 

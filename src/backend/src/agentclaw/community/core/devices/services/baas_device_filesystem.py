@@ -228,9 +228,19 @@ class BaasDeviceFileSystem(DeviceFileSystem):
             result = resp.json()
             return result.get("data", {}).get("files", [])
         except httpx.HTTPStatusError as e:
-            # Same rationale as ``read_file``: don't swallow. A swallowed listing
-            # error returned None, which the teclaw/promotion gather treats as an
-            # empty namespace — shipping an artifact missing files. Surface it.
+            # Match the ``DeviceFileSystem`` contract: a device-level 404 means
+            # the directory is absent. This is common for first-use staging and
+            # rollback paths, and callers already distinguish ``None`` from an
+            # empty directory. Keep proxy routing 404s observable: they mean the
+            # request never reached the device, so treating them as absence would
+            # hide an unavailable Bot/device.
+            if e.response.status_code == 404 and not _is_proxy_routing_failure(
+                e.response
+            ):
+                logger.debug(
+                    "[%s.list_dir] not found: %s", type(self).__name__, dir_path
+                )
+                return None
             logger.error(
                 "[%s.list_dir] HTTP %d: %s",
                 type(self).__name__, e.response.status_code, dir_path,

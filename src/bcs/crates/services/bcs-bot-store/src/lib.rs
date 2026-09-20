@@ -29,10 +29,12 @@ use bcs_service_api::{
     BotSearchCandidateQuery, BotSearchFriendshipFilter,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
-    BotDynamicStatus, BotMetricCount,
+    BotMetricCount,
     BotMetricsSnapshotPort, ConnectStreamError, RegisteredBot, ServiceError, ServiceResult, Skill,
     is_mock_token,
 };
+#[cfg(test)]
+use bcs_service_api::BotDynamicStatus;
 
 fn log_bot_cache_source(source: &'static str) {
     bcs_observability::count("bot.memory", source);

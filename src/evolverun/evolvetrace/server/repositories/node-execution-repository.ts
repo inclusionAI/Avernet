@@ -327,15 +327,28 @@ export class NodeExecutionRepository {
 
   /** Reconcile stale "running" node_executions when a flow reaches a terminal state.
    *  Any node still in "running" status after the flow has completed is marked
-   *  as "skipped" (if flow succeeded) or "failed" (if flow failed). */
-  async reconcileStaleRunning(flowId: string, flowStatus: string): Promise<number> {
+   *  as "skipped" (if flow succeeded or was cancelled/aborted) or "failed" (if flow failed).
+   *  When customErrorText is provided (e.g. for user-initiated abort), it
+   *  overrides the default error message so the abort reason is recorded in
+   *  the node_executions table. */
+  async reconcileStaleRunning(flowId: string, flowStatus: string, customErrorText?: string): Promise<number> {
     try {
       const now = this.db.dialect.now();
       const completedAt = Math.floor(Date.now() / 1000);
-      const targetStatus = flowStatus === "succeeded" ? "skipped" : "failed";
-      const errorText = flowStatus === "succeeded"
-        ? "Node still running when workflow succeeded — reconciled to skipped"
-        : "Node still running when workflow failed — reconciled to failed";
+      let targetStatus: string;
+      let errorText: string;
+      if (flowStatus === "succeeded") {
+        targetStatus = "skipped";
+        errorText = "Node still running when workflow succeeded — reconciled to skipped";
+      } else if (flowStatus === "cancelled") {
+        // User-initiated abort: running nodes are victims, not failures.
+        // Mark as "skipped" so they don't inflate failed_count or trigger failure alerts.
+        targetStatus = "skipped";
+        errorText = customErrorText ?? "Node still running when workflow was aborted — reconciled to skipped";
+      } else {
+        targetStatus = "failed";
+        errorText = customErrorText ?? "Node still running when workflow failed — reconciled to failed";
+      }
       const result = await this.db.exec(
         `UPDATE node_executions SET status = ?, error_text = ?, completed_at = ?, gmt_modified = ? WHERE flow_id = ? AND status = 'running'`,
         [targetStatus, errorText, completedAt, now, flowId],

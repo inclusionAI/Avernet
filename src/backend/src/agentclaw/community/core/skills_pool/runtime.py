@@ -28,6 +28,7 @@ from agentclaw.community.core.skills_pool.models import (
     MappingItemResult,
     MappingProjectionStatus,
     MappingPublishResult,
+    MappingResultReason,
     MappingVerificationResult,
     PoolCutoverResult,
     PoolCutoverStatus,
@@ -127,6 +128,8 @@ class SkillsPoolRuntime:
             # signed URL. Preserve only structured non-secret diagnostics.
             if center_content is not None and self._rejects_center_content(error):
                 raise CenterContentContractUnsupported() from error
+            if self._rejects_logical_mapping_apply(error):
+                raise LegacyMappingApplyRequired() from error
             return self._unavailable_apply_result(
                 "runtime_mapping_apply_http_rejected",
                 error_type=f"HTTP_{error.status_code}",
@@ -141,6 +144,22 @@ class SkillsPoolRuntime:
                 error_type=type(error).__name__,
             )
         return self._mapping_apply_result(response)
+
+    @staticmethod
+    def _rejects_logical_mapping_apply(
+        error: DeviceAdapterHTTPStatusError,
+    ) -> bool:
+        if error.status_code != 501:
+            return False
+        try:
+            payload = json.loads(error.response_text)
+            detail = payload.get("detail")
+        except (AttributeError, json.JSONDecodeError, TypeError):
+            return False
+        return (
+            isinstance(detail, dict)
+            and detail.get("code") == "SKILL_MAPPINGS_APPLY_UNSUPPORTED"
+        )
 
     @staticmethod
     def _rejects_center_content(error: DeviceAdapterHTTPStatusError) -> bool:
@@ -413,16 +432,31 @@ class SkillsPoolRuntime:
                     "apply_mode": apply_mode.value,
                 },
             )
+        except DeviceAdapterEndpointNotFoundError as error:
+            if error.standard_route_missing:
+                return self._unsupported_mapping_publish_result()
+            logger.exception(
+                "[skills_pool.runtime] mapping publish returned non-route 404 "
+                "bot_id=%s",
+                bot_id,
+            )
+            return self._unavailable_mapping_publish_result()
+        except DeviceAdapterHTTPStatusError as error:
+            if error.status_code == 501:
+                return self._unsupported_mapping_publish_result()
+            logger.exception(
+                "[skills_pool.runtime] mapping publish HTTP failure bot_id=%s "
+                "status=%s",
+                bot_id,
+                error.status_code,
+            )
+            return self._unavailable_mapping_publish_result()
         except Exception:
             logger.exception(
                 "[skills_pool.runtime] mapping publish failed bot_id=%s",
                 bot_id,
             )
-            return MappingPublishResult(
-                published=False,
-                status=MappingProjectionStatus.PENDING,
-                evidence={"reason": "runtime_mapping_publish_unavailable"},
-            )
+            return self._unavailable_mapping_publish_result()
         data = response.get("data")
         result = self._mapping_publish_result(response=response, data=data)
         if not result.published:
@@ -445,6 +479,23 @@ class SkillsPoolRuntime:
                 sorted(response.keys()),
             )
         return result
+
+    @staticmethod
+    def _unsupported_mapping_publish_result() -> MappingPublishResult:
+        return MappingPublishResult(
+            published=False,
+            status=MappingProjectionStatus.DEGRADED,
+            reason=MappingResultReason.ENGINE_SKILL_MAPPING_UNSUPPORTED,
+            evidence={"reason": "engine_skill_mapping_unsupported"},
+        )
+
+    @staticmethod
+    def _unavailable_mapping_publish_result() -> MappingPublishResult:
+        return MappingPublishResult(
+            published=False,
+            status=MappingProjectionStatus.PENDING,
+            evidence={"reason": "runtime_mapping_publish_unavailable"},
+        )
 
     async def rollback_to_legacy(
         self,
@@ -585,16 +636,31 @@ class SkillsPoolRuntime:
                     "apply_mode": apply_mode.value,
                 },
             )
+        except DeviceAdapterEndpointNotFoundError as error:
+            if error.standard_route_missing:
+                return self._unsupported_mapping_verification_result()
+            logger.exception(
+                "[skills_pool.runtime] mapping verify returned non-route 404 "
+                "bot_id=%s",
+                bot_id,
+            )
+            return self._unavailable_mapping_verification_result()
+        except DeviceAdapterHTTPStatusError as error:
+            if error.status_code == 501:
+                return self._unsupported_mapping_verification_result()
+            logger.exception(
+                "[skills_pool.runtime] mapping verify HTTP failure bot_id=%s "
+                "status=%s",
+                bot_id,
+                error.status_code,
+            )
+            return self._unavailable_mapping_verification_result()
         except Exception:
             logger.exception(
                 "[skills_pool.runtime] mapping verify failed bot_id=%s",
                 bot_id,
             )
-            return MappingVerificationResult(
-                valid=False,
-                status=MappingProjectionStatus.PENDING,
-                evidence={"reason": "runtime_mapping_verify_unavailable"},
-            )
+            return self._unavailable_mapping_verification_result()
         data = response.get("data")
         result = self._mapping_verification_result(response=response, data=data)
         if not result.valid:
@@ -618,6 +684,23 @@ class SkillsPoolRuntime:
                 sorted(response.keys()),
             )
         return result
+
+    @staticmethod
+    def _unsupported_mapping_verification_result() -> MappingVerificationResult:
+        return MappingVerificationResult(
+            valid=False,
+            status=MappingProjectionStatus.DEGRADED,
+            reason=MappingResultReason.ENGINE_SKILL_MAPPING_UNSUPPORTED,
+            evidence={"reason": "engine_skill_mapping_unsupported"},
+        )
+
+    @staticmethod
+    def _unavailable_mapping_verification_result() -> MappingVerificationResult:
+        return MappingVerificationResult(
+            valid=False,
+            status=MappingProjectionStatus.PENDING,
+            evidence={"reason": "runtime_mapping_verify_unavailable"},
+        )
 
     @staticmethod
     def _mapping_status(value: object, *, fallback: MappingProjectionStatus) -> MappingProjectionStatus:

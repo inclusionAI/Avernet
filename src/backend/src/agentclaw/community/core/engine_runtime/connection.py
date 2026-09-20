@@ -205,7 +205,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         # caller of ``build`` is covered without repeating the check.
         require_bot_operator(
             self._collaborators,
-            bot_pk=bot_pk,
+            bot=bot,
             bot_id=resolved_id,
             caller_id=caller_id,
             owner_id=resolved_owner,

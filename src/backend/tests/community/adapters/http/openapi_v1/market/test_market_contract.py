@@ -367,7 +367,6 @@ def test_skill_center_market_forces_public_scope_and_hides_team_id():
         "latestVersionNumber": "2.0.0",
         "isOfficial": True,
     }
-
     request_schema = client.app.openapi()["components"]["schemas"][
         "SkillCenterMarketSearchRequest"
     ]
@@ -375,6 +374,32 @@ def test_skill_center_market_forces_public_scope_and_hides_team_id():
     assert "teamId" not in properties
     assert "appKey" not in properties
     assert "source" not in properties
+
+
+def test_skill_center_market_defaults_to_hottest_order():
+    client, _, _, sc, _ = _client()
+
+    response = client.post(
+        "/openapi/v1/bots/market/skill-center/skills",
+        params={"user_id": "user-1"},
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert sc.request.sort_by is SkillCenterSortOrder.HOTTEST
+
+
+def test_skill_center_market_preserves_explicit_latest_order():
+    client, _, _, sc, _ = _client()
+
+    response = client.post(
+        "/openapi/v1/bots/market/skill-center/skills",
+        params={"user_id": "user-1"},
+        json={"sortBy": "latest"},
+    )
+
+    assert response.status_code == 200
+    assert sc.request.sort_by is SkillCenterSortOrder.LATEST
 
 
 def test_skill_center_market_rejects_caller_supplied_team_id():

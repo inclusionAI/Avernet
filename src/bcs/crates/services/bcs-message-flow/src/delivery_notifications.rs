@@ -19,7 +19,7 @@ fn hint(row: &PersistedMessageDelivery, now: i64) -> Option<(&'static str, &'sta
     use bcs_domain::message_delivery::DeliveryWaitReason;
     match row.state.status {
         Status::Queued if row.wait_reason == Some(DeliveryWaitReason::BotOffline) => {
-            Some(("offline", "Bot 暂时离线，消息已排队"))
+            Some(("offline", "服务正在恢复，短暂等待 Bot 重新连接"))
         }
         Status::Queued if now.saturating_sub(row.created_at_ms) >= 2_000 => {
             Some(("queued", "消息已排队，正在等待该 Bot 的处理名额"))
@@ -113,6 +113,7 @@ async fn publish_status(
     flow: &BcsMessageFlow,
     row: &PersistedMessageDelivery,
 ) -> bcs_service_api::ServiceResult<()> {
+    crate::queued_task::restore(flow, row).await?;
     use bcs_service_api::{
         FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryTarget, ServiceError,
     };
@@ -154,7 +155,7 @@ async fn publish_status(
         target: FrontendDeliveryTarget::SessionActors { session_id: row.session_id.clone(), actor_ids },
         event_json: serde_json::to_string(&serde_json::json!({
             "type":"event", "event":"message.delivery.updated", "group_id":row.group_id,
-            "session_id":row.session_id, "payload":bcs_service_api::application::message_delivery::DeliveryStatusView::from(row),
+            "session_id":row.session_id, "payload":bcs_service_api::application::message_delivery::DeliveryStatusView::from(row).with_content_preview(Some(&message.content)),
         }))?, delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
         run_fallback: None, exclude_conn_id: None,
         visibility_domain: message.visibility_domain.unwrap_or(bcs_domain::MessageVisibilityDomain::ManagerWorker),

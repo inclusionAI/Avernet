@@ -57,7 +57,7 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
   }, [])
 
   // 页面 timeRange 的大白话口径文案(全页所有 KPI 数字都跟它走)
-  const rangeLabel = timeRange === 'today' ? '今天' : timeRange === '7d' ? '近 7 天' : '近 30 天'
+  const rangeLabel = timeRange === 'today' ? '今天' : timeRange === 'yesterday' ? '昨天' : timeRange === '7d' ? '近 7 天' : '近 30 天'
 
   const { from, to } = useMemo(() => {
     const daySec = 86400
@@ -67,6 +67,12 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
         localStart.setHours(0, 0, 0, 0)
         const startOfDay = Math.floor(localStart.getTime() / 1000)
         return { from: startOfDay, to: nowSec }
+      }
+      case 'yesterday': {
+        const localStart = new Date(nowSec * 1000)
+        localStart.setHours(0, 0, 0, 0)
+        const startOfToday = Math.floor(localStart.getTime() / 1000)
+        return { from: startOfToday - daySec, to: startOfToday - 1 }
       }
       case '7d': return { from: nowSec - 7 * daySec, to: nowSec }
       case '30d': return { from: nowSec - 30 * daySec, to: nowSec }

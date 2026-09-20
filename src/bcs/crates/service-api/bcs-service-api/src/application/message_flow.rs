@@ -219,6 +219,8 @@ pub struct TaskDispatchCommand {
 #[derive(Debug)]
 pub struct TaskDispatchOutcome {
     pub task_id: String,
+    /// `queued` means canonical message and target delivery are durable, not
+    /// that the Worker has received it. Legacy direct dispatch uses `dispatched`.
     pub status: String,
     pub bot_deliveries: Vec<BotDeliveryResult>,
     pub frontend_deliveries: Vec<FrontendDeliveryResult>,
@@ -240,6 +242,7 @@ pub struct TaskMessageCommand {
 
 #[derive(Debug)]
 pub struct TaskMessageOutcome {
+    /// `queued` is durable acceptance; an empty bot_deliveries is expected then.
     pub status: String,
     pub bot_deliveries: Vec<BotDeliveryResult>,
     pub frontend_deliveries: Vec<FrontendDeliveryResult>,

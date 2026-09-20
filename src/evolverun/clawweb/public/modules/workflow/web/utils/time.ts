@@ -37,7 +37,7 @@ export function formatTimeShort(value: string | number | null): string {
 
 /**
  * Format a duration in milliseconds as a human-readable string.
- * Supports hours, minutes, and seconds. Returns '—' for null/zero.
+ * Supports hours, minutes, and seconds. Returns '—' when duration is unknown or invalid.
  *
  * Examples:
  *   500        → '500ms'
@@ -47,7 +47,7 @@ export function formatTimeShort(value: string | number | null): string {
  *   86400000   → '1d 0h'
  */
 export function formatDuration(ms: number | null): string {
-  if (ms === null || ms === 0) return '—'
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—'
   if (ms < 1000) return `${ms}ms`
 
   const totalSeconds = Math.floor(ms / 1000)

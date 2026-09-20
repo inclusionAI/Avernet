@@ -27,6 +27,22 @@ afterEach(async () => { await db?.close(); if (dir) rmSync(dir, { recursive: tru
 const insert = (event = alert) => repo.insertDiagnosis(parseDiagnosis(event, event.eventId), now);
 const list = (query = {}, bot = "mock-bot-te") => repo.listDiagnoses(bot, parseQuery(query));
 describe("monitoring real SQL persistence (no HTTP listener)", () => {
+  it("filters before pagination and derives choices independently of selected filters", async () => {
+    for (let i = 0; i < 25; i++) await insert({ ...alert, eventId: `filter-${i}`, diagnosisId: `filter-${i}`, businessProblemCategory: "外部服务异常", businessProblemSubtype: i % 2 ? "请求超时" : "数据获取失败" });
+    await insert({ ...alert, eventId: "other", diagnosisId: "other", businessProblemCategory: "任务执行异常", businessProblemSubtype: "执行路径缺失" });
+    await insert({ ...pass, businessProblemCategory: null, businessProblemSubtype: null });
+    const filtered = await list({ businessProblemCategory: "外部服务异常", businessProblemSubtype: "数据获取失败", pageSize: "10", page: "2" });
+    expect(filtered).toMatchObject({ total: 13, totalPages: 2, counts: { all: 13, alert: 13, pass: 0 } });
+    expect(filtered.items).toHaveLength(3);
+    expect(filtered.items.every(row => row.businessProblemSubtype === "数据获取失败")).toBe(true);
+    expect(filtered.problemTypes).toHaveLength(2);
+    expect(filtered.problemTypes).toContainEqual({ category: "任务执行异常", subtypes: ["执行路径缺失"] });
+    const empty = await list({ businessProblemCategory: "' OR 1=1 --" });
+    expect(empty.total).toBe(0);
+    expect(empty.problemTypes).toHaveLength(2);
+    expect((await list({ startDate: "2030-01-01" })).problemTypes).toEqual([]);
+    expect((await list({}, "another-bot")).problemTypes).toEqual([]);
+  });
   it("initializes only module tables, is repeatable and preserves existing records", async () => {
     await insert();
     await initializeMonitoringSqlite(db);
@@ -46,6 +62,24 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
     expect((await list({}, "mock-bot-oc")).items[0].occurredAt).toBeNull();
     await db.close(); db = database(join(dir, "db.sqlite3")); repo = new MonitoringRepository(db);
     expect((await list()).total).toBe(2);
+  });
+  it("discovers persisted checks and diagnoses across connections without caching the roster", async () => {
+    expect(await repo.listBots()).toEqual([]);
+    await insert({ ...alert, botId: "diagnosis-only" });
+    const check = parseCheck({ schemaVersion: "claw-monitoring/bot-check/v1", botId: "check-only", engine: "OC",
+      checkedAt: new Date(now).toISOString(), lastSuccessfulCheckAt: null, status: "HEALTHY" }, now);
+    await repo.applyCheck(check, now);
+    const otherDb = database(join(dir, "db.sqlite3"));
+    try {
+      const other = new MonitoringRepository(otherDb);
+      expect(await other.listBots()).toEqual([{ botId: "check-only" }, { botId: "diagnosis-only" }]);
+      // The second connection writes both a duplicate identity and new case-sensitive identities.
+      await other.applyCheck({ ...check, botId: "diagnosis-only" }, now);
+      for (const botId of ["Case", "case"]) await other.applyCheck({ ...check, botId }, now);
+      const expected = ["Case", "case", "check-only", "diagnosis-only"].map(botId => ({ botId }));
+      expect(await repo.listBots()).toEqual(expected);
+      expect(await other.listBots()).toEqual(expected);
+    } finally { await otherDb.close(); }
   });
   it("deduplicates concurrent writes, normalizes timezones and rejects conflicts", async () => {
     const results = await Promise.all(Array.from({ length: 20 }, () => insert()));

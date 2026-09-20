@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.community._flows.digital_employee.api_lifecycle import DIGITAL_EMPLOYEE_FLOWS
 from tests.community._flows.access.api_lifecycle import ACCESS_LIFECYCLE_FLOWS
 from tests.community._flows.bot_chat.api_lifecycle import BOT_CHAT_LIFECYCLE_FLOWS
 from tests.community._flows.bot_collaborator.api_lifecycle import BOT_COLLABORATOR_LIFECYCLE_FLOWS
@@ -23,6 +24,9 @@ from tests.community._flows.mcp.api_lifecycle import MCP_FLOWS
 from tests.community._flows.quality.api_lifecycle import QUALITY_FLOWS
 from tests.community._flows.resources.api_lifecycle import RESOURCES_LIFECYCLE_FLOWS
 from tests.community._flows.skill_center.api_lifecycle import API_LIFECYCLE_FLOWS
+from tests.community._flows.tc_file_upload_integrations.api_lifecycle import (
+    TC_FILE_UPLOAD_INTEGRATION_FLOWS,
+)
 from tests.community._flows.user_list.api_lifecycle import USER_LIST_FLOWS
 from tests.community.framework.flow_coverage import (
     SINGLEBOX_E2E_EXEMPT,
@@ -34,6 +38,7 @@ from tests.community.framework.flow_coverage import (
 # Plan C appends real flows here (or swaps for a registry). 新模块的流 import
 # 进来 extend 此列表。
 REGISTERED_FLOWS: list = [
+    *DIGITAL_EMPLOYEE_FLOWS,
     *API_LIFECYCLE_FLOWS,
     *ACCESS_LIFECYCLE_FLOWS,
     *BOT_CHAT_LIFECYCLE_FLOWS,
@@ -47,6 +52,7 @@ REGISTERED_FLOWS: list = [
     *CRON_FLOWS,
     *QUALITY_FLOWS,
     *USER_LIST_FLOWS,
+    *TC_FILE_UPLOAD_INTEGRATION_FLOWS,
 ]
 
 

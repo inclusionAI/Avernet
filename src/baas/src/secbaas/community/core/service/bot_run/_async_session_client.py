@@ -7,13 +7,12 @@ following the same API design as adapter session_router.py endpoints.
 from __future__ import annotations
 
 import base64
-import os
 from dataclasses import dataclass
 from typing import Any, cast
 
 import aiohttp
 
-from secbaas.community.core.utils.env_utils import is_dev
+from secbaas.community.http_header import get_http_header_plugin
 from secbaas.community.logger import get_logger
 
 logger = get_logger("core-bot-run")
@@ -268,13 +267,8 @@ class AsyncSessionClient:
         url = self._build_url(path, params)
         logger.debug(f"[SessionClient] {method} {url}")
 
-        # dev 环境下设置额外 header
-        headers: dict[str, str] | None = None
-        if is_dev():
-            iam_token = os.getenv("IAM_TOKEN") or ""
-            headers = {
-                "Cookie": f"iam_token={iam_token}",
-            }
+        headers: dict[str, str] = {}
+        get_http_header_plugin().inject_header(headers)
 
         try:
             async with session.request(method, url, json=json, headers=headers) as resp:

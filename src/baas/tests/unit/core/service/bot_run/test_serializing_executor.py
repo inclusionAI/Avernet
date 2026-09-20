@@ -65,9 +65,16 @@ class _FakeLockService:
     def __init__(self):
         self._held: set[str] = set()
         self.acquire_calls: list[str] = []
+        self.force_unlock_calls: list[str] = []
 
     def force_hold(self, lock_name: str) -> None:
         self._held.add(lock_name)
+
+    def force_unlock(self, lock_name: str) -> bool:
+        """S2: 显式释放 DB 锁行，记录调用以供断言。"""
+        self.force_unlock_calls.append(lock_name)
+        self._held.discard(lock_name)
+        return True
 
     @contextmanager
     def try_lock(
@@ -183,5 +190,37 @@ async def test_inner_exception_releases_lock_and_propagates(queue):
     with pytest.raises(RuntimeError, match="inner boom"):
         await ex.execute(rec)
 
+    # S2: 异常路径显式调用 force_unlock，避免 DB 锁行残留。
+    assert lock.force_unlock_calls == ["botrun:session:bot-1:dev:s1"]
     # 锁已释放：同 session 下一个能拿到
     assert "botrun:session:bot-1:dev:s1" not in lock._held
+
+
+async def test_inner_exception_force_unlock_before_propagation(queue):
+    """S2: 内层异常时 force_unlock 必须先于异常上抛执行，且异常仍透传。"""
+    lock = _FakeLockService()
+    inner = _RecordingInner(queue, raise_exc=True)
+    ex = SerializingExecutor(inner, lock)
+
+    rec = _claimed(queue, session_id="s1")
+    with pytest.raises(RuntimeError, match="inner boom"):
+        await ex.execute(rec)
+
+    # force_unlock 被调用一次且锁名正确
+    assert len(lock.force_unlock_calls) == 1
+    assert lock.force_unlock_calls[0] == "botrun:session:bot-1:dev:s1"
+    # 内层执行过一次
+    assert inner.executed == [rec.run_id]
+
+
+async def test_inner_exception_force_unlock_failure_is_swallowed(queue):
+    """S2: force_unlock 自身抛异常时不应淹没内层原始异常。"""
+    lock = _FakeLockService()
+    lock.force_unlock = lambda name: (_ for _ in ()).throw(RuntimeError("unlock boom"))
+    inner = _RecordingInner(queue, raise_exc=True)
+    ex = SerializingExecutor(inner, lock)
+
+    rec = _claimed(queue, session_id="s1")
+    # 内层异常应透传，force_unlock 的异常只记日志不替换原始异常
+    with pytest.raises(RuntimeError, match="inner boom"):
+        await ex.execute(rec)

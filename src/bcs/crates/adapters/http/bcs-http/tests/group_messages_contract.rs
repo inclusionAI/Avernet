@@ -749,14 +749,14 @@ async fn build_group_app() -> (
 }
 
 #[tokio::test]
-async fn delivery_status_and_cancel_require_authenticated_caller() {
+async fn collaboration_delivery_routes_require_authenticated_caller() {
     let (app, ..) = build_group_app_with_identity(Arc::new(NoUserIdentity)).await;
     for (method, path, body) in [
         ("GET", "/openapi/v1/collaboration/messages/m/deliveries?session_id=group-1:abcdef12", ""),
         ("POST", "/openapi/v1/collaboration/sessions/group-1:abcdef12/message-deliveries/query", r#"{"message_ids":["m"]}"#),
-        ("POST", "/messages/m/deliveries/d/cancel", r#"{"session_id":"group-1:abcdef12"}"#),
-        ("POST", "/messages/m/deliveries/cancel", r#"{"session_id":"group-1:abcdef12"}"#),
-        ("POST", "/messages/m/deliveries/d/resolve", r#"{"session_id":"group-1:abcdef12","expected_state_version":3,"resolution":"confirmed_not_sent","reason":"verified"}"#),
+        ("POST", "/openapi/v1/collaboration/messages/m/deliveries/d/cancel", r#"{"session_id":"group-1:abcdef12"}"#),
+        ("POST", "/openapi/v1/collaboration/messages/m/deliveries/cancel", r#"{"session_id":"group-1:abcdef12"}"#),
+        ("POST", "/openapi/v1/collaboration/messages/m/deliveries/d/resolve", r#"{"session_id":"group-1:abcdef12","expected_state_version":3,"resolution":"confirmed_not_sent","reason":"verified"}"#),
     ] {
         let response = app.clone().oneshot(Request::builder().method(method).uri(path)
             .header("content-type", "application/json").body(Body::from(body)).unwrap()).await.unwrap();

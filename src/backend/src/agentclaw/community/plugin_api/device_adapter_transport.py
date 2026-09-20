@@ -119,3 +119,16 @@ class DeviceAdapterTransport(Plugin, Protocol):
         credentials in the response headers.
         """
         ...
+
+    async def invoke_multipart(
+        self,
+        conn_info: dict[str, Any],
+        path: str,
+        *,
+        files: Mapping[str, tuple[str, bytes, str]],
+        data: Mapping[str, str],
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """POST one replayable multipart request to the adapter."""
+        ...

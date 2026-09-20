@@ -356,6 +356,25 @@ class BotPublishRepository(
             record = row.to_record() if row else None
         return self._resolve_record(record)
 
+    def get_draft_by_source_bot_id(
+        self,
+        source_bot_id: str,
+        env: str,
+    ) -> Optional[BotPublishRecord]:
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.source_bot_id == source_bot_id,
+                    self.Model.status == PublishStatus.DRAFT,
+                    self.Model.env == env,
+                )
+                .order_by(self.Model.id.desc())
+                .first()
+            )
+            record = row.to_record() if row else None
+        return self._resolve_record(record)
+
     def get_latest_built_by_source_bot_id(
         self,
         source_bot_id: str,

@@ -7,6 +7,7 @@ from secbaas.community.core.repository.bot_run_queue import (
     BotRunQueueRecord,
     QueueStatus,
 )
+from secbaas.community.spi.bot.engine_adapter import extract_session_key_from_planned_id
 
 from ._async_chat_client import (
     AsyncChatClient,
@@ -17,7 +18,8 @@ from ._async_chat_client import (
 from ._async_chat_client_pool import AsyncChatClientPool
 from ._async_session_client import AsyncSessionClient
 from ._baas_service import BaasBotService, BaasBotServiceConfig
-from ._bot_concurrency import BotConcurrencyManager, FixedMachineCountProvider
+from ._binding_resolver import BotBindingResolver
+from ._bot_concurrency import BotConcurrencyManager
 from ._bot_run_utils import (
     binding_data_to_info,
     extract_lifecycle_stage,
@@ -29,6 +31,7 @@ from ._bot_run_utils import (
 )
 from ._bot_service_selector import BotServiceSelector
 from ._bot_websocket_client import BotWebSocketClient, ChatRequestError
+from ._caller_service import CallerBotService
 from ._claw_service import BotServiceConfig, ClawBotService
 from ._engine_adapter_registry import BotEngineAdapterRegistry
 from ._executor import BotRunRequestExecutor, ResultGuardExecutor, SerializingExecutor
@@ -54,10 +57,12 @@ __all__ = [
     "BaasBotService",
     "BaasBotServiceConfig",
     "BotBindingNotFoundError",
+    "BotBindingResolver",
     "BotServiceConfig",
     "BotWebSocketClient",
     "ChatRequestError",
     "ClawBotService",
+    "CallerBotService",
     "BotSessionError",
     "ConcurrentSessionError",
     "NotConnectedError",
@@ -82,7 +87,6 @@ __all__ = [
     "BotRequestWorker",
     "BotRequestWorkerConfig",
     "BotConcurrencyManager",
-    "FixedMachineCountProvider",
     "BotRunRequestExecutor",
     "BotRunQueueRecord",
     "PostRunCallback",
@@ -91,4 +95,5 @@ __all__ = [
     "SerializingExecutor",
     "AbortOutcome",
     "BotRunAbortSurface",
+    "extract_session_key_from_planned_id",
 ]

@@ -166,9 +166,6 @@ from agentclaw.community.core.skill_center.services.skill_batch_sync_service imp
     SkillBatchSyncService,
 )
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
-from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-    SkillCenterSyncService,
-)
 from agentclaw.community.core.skill_center.services.skill_market_service import (
     SkillMarketService,
 )
@@ -355,11 +352,6 @@ class SkillCenterModule(
             scope=singleton,
         )
         binder.bind(
-            BotRuntimeProjector,
-            to=BotRuntimeProjector,
-            scope=singleton,
-        )
-        binder.bind(
             DirectActivationServiceProtocol,
             to=DirectActivationService,
             scope=singleton,
@@ -384,6 +376,14 @@ class SkillCenterModule(
             to=SkillPublishService,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    def employee_guarded_runtime_projector(self, injector: Injector) -> BotRuntimeProjector:
+        from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeServiceProtocol
+        return injector.create_object(BotRuntimeProjector, additional_kwargs={
+            "employee_service_provider": lambda: injector.get(DigitalEmployeeServiceProtocol),
+        })
 
     @singleton
     @provider
@@ -494,6 +494,7 @@ class SkillCenterModule(
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_auth: MCPAuthPlugin,
+        mcp_config: MCPConfigService,
         recovery: DesktopSkillRecoveryServiceProtocol,
         injector: Injector,
     ) -> SkillSetManagementServiceProtocol:
@@ -513,6 +514,7 @@ class SkillCenterModule(
             audit_log_repo,
             mcp_center,
             mcp_auth,
+            mcp_config,
             ext_info_provider=_build__ext_info_provider(injector),
             recovery=recovery,
         )
@@ -691,7 +693,6 @@ class SkillCenterModule(
         self,
         cache_plugin: CachePlugin,
         skill_repo: SkillRepository,
-        sync_service: SkillCenterSyncService,
         scanner: SkillScannerPlugin,
         skill_scan_cfg: cfg.SkillScanConfig,
     ) -> SkillScanService:
@@ -701,7 +702,6 @@ class SkillCenterModule(
         svc = SkillScanService(
             cache_plugin=cache_plugin,
             skill_repository=skill_repo,
-            skill_center_sync_service=sync_service,
             scanner=scanner,
             config=dataclasses.asdict(skill_scan_cfg),
         )

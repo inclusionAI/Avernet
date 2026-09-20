@@ -24,12 +24,14 @@ const check = { schemaVersion: "claw-monitoring/bot-check/v1", botId: "mock-bot-
 let db: IDatabase, dir: string, url: string;
 let server: ReturnType<express.Application["listen"]> | undefined;
 let clock: number;
-const bots = [{ botId: "mock-bot-te", engine: "TE" }, { botId: "mock-bot-oc", engine: "OC" }, { botId: "empty-bot", engine: "TE" }];
 let env: Record<string, string | undefined>;
-async function start(parent = true, defaultFactory = false, getDb = () => db) {
+let clawInsightAdmin: boolean | undefined = true;
+async function start(parent = true, defaultFactory = false, getDb = () => db, unassembled = false) {
   const app = express();
+  app.use((req, _res, next) => { req.isClawInsightAdmin = clawInsightAdmin; next(); });
   if (parent) app.use(express.json({ limit: "10mb" }));
-  const runtime = createMonitoringRuntime(getDb, env, () => clock);
+  for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+  const runtime = unassembled ? { service: null } : createMonitoringRuntime(getDb, () => clock);
   app.use("/api/insight/v1", defaultFactory ? createInsightRouter(null) : createInsightRouter(null, { monitoring: runtime }));
   server = await new Promise<ReturnType<express.Application["listen"]>>((resolve, reject) => {
     const s = app.listen(0, "127.0.0.1", (error?: Error) => error ? reject(error) : resolve(s));
@@ -53,7 +55,8 @@ async function post(event: Record<string, unknown>, path = "diagnosis-events", h
 async function get(bot = "mock-bot-te", query = "") { return call(`/monitoring/bots/${bot}/diagnoses${query}`); }
 beforeEach(async () => {
   clock = now;
-  env = { CLAWWEB_MONITORING_ENABLED: "true", CLAWWEB_MONITORING_BOTS_JSON: JSON.stringify(bots) };
+  clawInsightAdmin = true;
+  env = {};
   dir = mkdtempSync(join(tmpdir(), "monitoring-contract-"));
   db = database(join(dir, "runtime.sqlite3"));
   await initializeMonitoringSqlite(db);
@@ -67,6 +70,89 @@ afterEach(async () => {
 });
 
 describe("monitoring HTTP -> module schema -> repository -> GET", () => {
+  it("accepts type filters and returns database-derived choices over HTTP", async () => {
+    await post(alert); await post(pass);
+    const params = new URLSearchParams({ businessProblemCategory: alert.businessProblemCategory, businessProblemSubtype: alert.businessProblemSubtype });
+    const result = await get("mock-bot-te", `?${params}`);
+    expect(result.status).toBe(200);
+    expect(result.body.total).toBe(1);
+    expect(result.body.problemTypes).toContainEqual({ category: alert.businessProblemCategory, subtypes: [alert.businessProblemSubtype] });
+    expect((await get("mock-bot-te", "?businessProblemSubtype=orphan")).status).toBe(400);
+  });
+  it.each([{}, { CLAWWEB_MONITORING_ENABLED: "false", CLAWWEB_MONITORING_BOTS_JSON: "invalid-json" },
+    { CLAWWEB_MONITORING_ENABLED: "true", CLAWWEB_MONITORING_BOTS_JSON: '[{"botId":"old-only","engine":"TE"}]' },
+  ])("discovers 26 bots from real writes without a restart or configuration: %j", async (legacy) => {
+    await stop(); env = legacy; await start();
+    expect((await call("/monitoring/bots")).body).toEqual({ items: [] });
+    const expected: { botId: string }[] = [];
+    for (let i = 0; i < 26; i++) {
+      const botId = `bot-${String(i).padStart(2, "0")}`, engine = i < 17 ? "OC" : "TE";
+      expected.push({ botId });
+      expect((await post({ ...check, botId, engine }, "bot-checks")).status).toBe(200);
+      const eventId = `event-${i}`;
+      expect((await post({ ...alert, botId, engine, eventId, diagnosisId: eventId })).status).toBe(201);
+    }
+    expect((await call("/monitoring/bots")).body).toEqual({ items: expected });
+    expect((await get("bot-25")).body.total).toBe(1);
+    await stop(); await db.close(); db = database(join(dir, "runtime.sqlite3")); await start();
+    expect((await call("/monitoring/bots")).body).toEqual({ items: expected });
+  });
+  it.each([undefined, "", "0", "-1", "invalid", "1.5", " 300 ", "1", "600", "9007199254740992"])(
+    "keeps GET/POST available and uses fixed freshness despite stale env %s", async (seconds) => {
+      await stop(); env.CLAWWEB_MONITORING_STALE_SECONDS = seconds; await start();
+      expect(await call("/monitoring/bots")).toMatchObject({ status: 200, body: { items: [] } });
+      expect((await post(check, "bot-checks")).status).toBe(200);
+      expect((await post(alert)).status).toBe(201);
+      clock = now + 300000;
+      expect((await call("/monitoring/bots/mock-bot-te/status")).body.status).toBe("HEALTHY");
+      clock++;
+      expect(await call("/monitoring/bots/mock-bot-te/status")).toMatchObject({ status: 200,
+        body: { status: "UNKNOWN", lastSuccessfulCheckAt: check.lastSuccessfulCheckAt } });
+      // Freshness uses checkedAt, not the last successful check. A fresh ERROR stays visible.
+      expect((await post({ ...check, checkedAt: new Date(clock).toISOString(), status: "ERROR" }, "bot-checks")).status).toBe(200);
+      expect((await call("/monitoring/bots/mock-bot-te/status")).body.status).toBe("ERROR");
+      clock++;
+      expect((await post({ ...check, checkedAt: new Date(clock).toISOString(), status: "PAUSED" }, "bot-checks")).status).toBe(200);
+      clock += 300001;
+      expect((await call("/monitoring/bots/mock-bot-te/status")).body.status).toBe("PAUSED");
+      expect((await call("/monitoring/bots")).body.items).toEqual([{ botId: check.botId }]);
+    },
+  );
+  it("discovers historical diagnosis-only bots and keeps case-sensitive identities", async () => {
+    await post({ ...alert, botId: "Case" });
+    expect((await post({ ...check, botId: "case" }, "bot-checks")).status).toBe(200);
+    expect((await call("/monitoring/bots")).body.items).toEqual([{ botId: "Case" }, { botId: "case" }]);
+    expect((await call("/monitoring/bots/Case/status")).body).toMatchObject({ status: "UNKNOWN", diagnosisCount: 1 });
+    expect((await get("never-reported")).status).toBe(404);
+  });
+  it("does not discover rejected or failed writes and propagates list storage errors", async () => {
+    expect((await post({ ...alert, engine: "OTHER" })).status).toBe(400);
+    const exec = vi.spyOn(db, "exec").mockRejectedValue(new Error("write denied"));
+    expect((await post(alert)).status).toBe(503);
+    expect((await post(check, "bot-checks")).status).toBe(503);
+    exec.mockRestore();
+    expect((await call("/monitoring/bots")).body).toEqual({ items: [] });
+    const query = vi.spyOn(db, "query").mockRejectedValue(new Error("read denied"));
+    expect((await call("/monitoring/bots")).status).toBe(503);
+    query.mockRestore();
+    expect((await call("/monitoring/bots")).body).toEqual({ items: [] });
+  });
+  it.each([false, undefined])("protects all browser reads for flag %s but allows both internal reports", async (flag) => {
+    clawInsightAdmin = flag;
+    expect((await post(alert)).status).toBe(201);
+    expect((await post(check, "bot-checks")).status).toBe(200);
+    for (const path of ["/monitoring/bots", "/monitoring/bots/mock-bot-te/status", "/monitoring/bots/mock-bot-te/diagnoses"]) {
+      const denied = await call(path);
+      expect(denied.status).toBe(403);
+      expect(denied.cache).toBe("no-store");
+    }
+    // Governance keeps its existing readiness behavior, not the monitoring role guard.
+    expect((await call("/overview")).status).toBe(503);
+    clawInsightAdmin = true;
+    for (const path of ["/monitoring/bots", "/monitoring/bots/mock-bot-te/status", "/monitoring/bots/mock-bot-te/diagnoses"]) {
+      expect((await call(path)).status).toBe(200);
+    }
+  });
   it("persists all decisions and both intervention values, including same Session/different Trace", async () => {
     for (const event of [alert, pass, unresolved]) expect((await post(event)).status).toBe(201);
     const { body, cache } = await get();
@@ -148,9 +234,10 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     db = database(join(dir, "runtime.sqlite3")); await start();
     expect((await get()).body.total).toBe(1);
   });
-  it("keeps bots with no records and separates their data", async () => {
+  it("discovers checks-only bots and separates their data", async () => {
     await post(alert); await post(check, "bot-checks");
-    expect((await call("/monitoring/bots")).body.items).toHaveLength(3);
+    await post({ ...check, botId: "empty-bot", status: "UNKNOWN", lastSuccessfulCheckAt: null }, "bot-checks");
+    expect((await call("/monitoring/bots")).body.items).toHaveLength(2);
     expect((await get("empty-bot")).body).toMatchObject({ total: 0, totalPages: 0, items: [] });
     expect((await call("/monitoring/bots/empty-bot/status")).body.status).toBe("UNKNOWN");
     expect((await get("MOCK-BOT-TE")).status).toBe(404);
@@ -158,7 +245,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
   it("rejects missing idempotency header, unknown fields and invalid queries", async () => {
     expect((await post(alert, "diagnosis-events", { "Idempotency-Key": "wrong" })).status).toBe(400);
     expect((await post({ ...alert, notificationStatus: "SENT" })).status).toBe(400);
-    expect((await post({ ...alert, botId: "unknown" })).status).toBe(403);
+    expect((await post({ ...alert, botId: "bad/id" })).status).toBe(400);
     for (const query of ["?page=1&page=2", "?pageSize=100", "?startDate=2026-02-30", "?extra=x"]) {
       expect((await get("mock-bot-te", query)).status).toBe(400);
     }
@@ -185,6 +272,13 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     await db.exec("DROP TABLE insight_monitoring_diagnoses");
     expect((await get()).status).toBe(503);
   });
+  it("still rejects explicitly unassembled monitoring without blaming removed configuration", async () => {
+    await stop(); await start(true, false, () => db, true);
+    expect(await call("/monitoring/bots")).toMatchObject({ status: 503,
+      body: { error: { code: "MONITORING_NOT_READY", message: "监控模块未装配。" } } });
+    expect((await post(check, "bot-checks")).status).toBe(503);
+    expect((await post(alert)).status).toBe(503);
+  });
   it("does not ACK a noop database", async () => {
     await stop();
     await start(true, false, () => ({ ...db, dbType: "noop" } as IDatabase));
@@ -197,7 +291,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     // host rejects it, but cannot promise our JSON envelope without a host error adapter.
     const bad = await fetch(url + "/internal/monitoring/diagnosis-events", { method: "POST", headers, body: "{" });
     expect(bad.status).toBe(400);
-    expect((await get()).body.total).toBe(0);
+    expect((await call("/monitoring/bots")).body).toEqual({ items: [] });
     const huge = " ".repeat(128 * 1024) + JSON.stringify(alert);
     expect((await call("/internal/monitoring/diagnosis-events", { method: "POST", headers, body: huge })).status).toBe(413);
     await stop(); await start(false);
@@ -221,7 +315,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     await stop();
     for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
     await start(true, true);
-    expect((await call("/monitoring/bots")).body.items).toHaveLength(3);
+    expect((await call("/monitoring/bots")).status).toBe(503);
     // The default factory uses getRepositories(); no initialized shared DB must never fake an ACK.
     expect((await post(alert)).status).toBe(503);
     expect((await call("/overview")).status).toBe(503);

@@ -36,7 +36,7 @@ use bcs_domain::edge_permission::{
 };
 use bcs_service_api::application::admission::AdmissionService;
 use bcs_service_api::application::connect::{
-    ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage,
+    ConnectResult, ConnectService, ConnectStatus, FriendEntriesPage, FriendListQuery, RequestDirection, RequestsPage,
 };
 use bcs_service_api::port::{
     FriendConnectNotificationCommand, FriendConnectNotificationKind,
@@ -136,21 +136,6 @@ fn actor_kind_of(id: &str) -> ActorKind {
 fn is_lock_wait_timeout(err: &ServiceError) -> bool {
     let message = err.to_string();
     message.contains("1205") || message.to_ascii_lowercase().contains("lock wait timeout")
-}
-
-fn normalize_friend_sync_pair<'a>(
-    a: &'a str,
-    b: &'a str,
-) -> ServiceResult<Option<(&'a str, &'a str, ActorKind, ActorKind)>> {
-    if a == b {
-        return Err(ServiceError::CannotAddSelf);
-    }
-    match (actor_kind_of(a), actor_kind_of(b)) {
-        (ActorKind::Human, ActorKind::Bot) => Ok(Some((a, b, ActorKind::Human, ActorKind::Bot))),
-        (ActorKind::Bot, ActorKind::Human) => Ok(Some((b, a, ActorKind::Human, ActorKind::Bot))),
-        (ActorKind::Bot, ActorKind::Bot) => Ok(Some((a, b, ActorKind::Bot, ActorKind::Bot))),
-        (ActorKind::Human, ActorKind::Human) => Ok(None),
-    }
 }
 
 fn normalize_policy_value(value: &str) -> String {
@@ -676,6 +661,22 @@ impl ConnectService for DbConnectService {
         Ok(entries)
     }
 
+    async fn list_friends_paginated(
+        &self,
+        actor: &str,
+        query: FriendListQuery,
+    ) -> ServiceResult<FriendEntriesPage> {
+        let page = self.edge_grants.list_friends_paginated(actor, &self.env, query).await?;
+        let items = page.items.into_iter().map(|id| FriendListEntry {
+            kind: actor_kind_of(&id),
+            actor_id: id,
+            name: None,
+            summary: None,
+            is_online: false,
+        }).collect();
+        Ok(FriendEntriesPage { items, total: page.total })
+    }
+
     async fn list_requests(
         &self,
         actor: &str,
@@ -746,28 +747,6 @@ impl ConnectService for DbConnectService {
 // ---- private helpers ------------------------------------------------------
 
 impl DbConnectService {
-    /// Verify `caller` owns `bot_id` (spec §3.2 ownership gate for config
-    /// writes).
-    ///
-    /// Rules (mirrors `docs/CLAUDE.md` "Bot Ownership Verification"):
-    /// - `created_by` present AND matches `caller` → allow.
-    /// - `created_by` present AND differs from `caller` → `Forbidden`.
-    /// - `created_by` absent (legacy bot) → allow (auto-claim; CLAUDE.md).
-    /// - bot not found in this env → `BotNotFound` (so `PUT` on a missing bot
-    ///   surfaces as 404 rather than a misleading 403).
-    async fn verify_ownership(&self, bot_id: &str, caller: &str) -> ServiceResult<()> {
-        match self.bot_config.get(bot_id, &self.env).await {
-            Some(cfg) => match &cfg.created_by {
-                Some(owner) if owner == caller => Ok(()),
-                Some(_) => Err(ServiceError::Forbidden(format!(
-                    "caller '{caller}' does not own bot '{bot_id}'"
-                ))),
-                None => Ok(()), // legacy bot (no created_by) → auto-claim
-            },
-            None => Err(ServiceError::BotNotFound(bot_id.to_string())),
-        }
-    }
-
     async fn resolve_user_department_code(
         &self,
         actor_id: &str,
@@ -2945,6 +2924,46 @@ mod tests {
         assert_eq!(r.status, RequestStatus::Approved);
         assert_eq!(r.edge_id, Some(edge_ids[0]));
         assert!(eg.has_friend_edge("human_1", "x:appr", "dev").await);
+        assert!(eg.list_active_grants("x:appr", "human_1", "dev").await.is_empty());
+        let bot_friends = svc.list_friends("x:appr").await.expect("bot friends");
+        assert_eq!(bot_friends.len(), 1);
+        assert_eq!(bot_friends[0].actor_id, "human_1");
+        assert_eq!(bot_friends[0].kind, ActorKind::Human);
+        let human_friends = svc.list_friends("human_1").await.expect("human friends");
+        assert_eq!(human_friends.len(), 1);
+        assert_eq!(human_friends[0].actor_id, "x:appr");
+        svc.revoke_friend("x:appr", "human_1").await.expect("bot removes friend");
+        assert!(svc.list_friends("x:appr").await.expect("bot friends").is_empty());
+        assert!(svc.list_friends("human_1").await.expect("human friends").is_empty());
+    }
+
+    #[tokio::test]
+    async fn friend_page_service_preserves_single_edge_and_propagates_store_errors() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:paged", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        for human in ["human_2", "human_1"] {
+            svc.create_connect(human, "x:paged", None, None).await.unwrap();
+        }
+        let query = FriendListQuery { target_type: Some(ActorKind::Human), offset: 1, limit: 1 };
+        let page = svc.list_friends_paginated("x:paged", query).await.unwrap();
+        assert_eq!(page.total, 2);
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].actor_id, "human_2");
+        assert_eq!(page.items[0].kind, ActorKind::Human);
+        assert!(eg.list_active_grants("x:paged", "human_2", "dev").await.is_empty());
+        let bots = svc.list_friends_paginated("x:paged", FriendListQuery {
+            target_type: Some(ActorKind::Bot), offset: 0, limit: 20,
+        }).await.unwrap();
+        assert_eq!(bots.total, 0);
+        assert!(bots.items.is_empty());
+        svc.revoke_friend("x:paged", "human_1").await.unwrap();
+        let empty = svc.list_friends_paginated("x:paged", query).await.unwrap();
+        assert_eq!(empty.total, 1);
+        assert!(empty.items.is_empty());
+        db.execute(DbStatement::new("DROP TABLE edge_grants")).await.unwrap();
+        assert!(matches!(svc.list_friends_paginated("x:paged", query).await,
+            Err(ServiceError::InternalError(_))));
     }
 
     #[tokio::test]

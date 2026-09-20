@@ -493,8 +493,9 @@ def test_discover_uses_online_filter_by_default(
             "keyword": "automation",
             "top_k": 10,
             "min_score": 0.1,
-            "filters": {"runtime_state": ["online"]},
-            "catalog_filters": BotCatalogSearchFilters(status="online"),
+            "runtime_state": "online",
+            "viewer_actor_type": None,
+            "viewer_actor_id": None,
             "caller": BotCatalogCaller(
                 tenant_id="teamclaw", user_id="caller-1", app_id=None
             ),
@@ -506,7 +507,7 @@ def test_discover_uses_online_filter_by_default(
     assert item["recommendation"]["score"] == 0.92
 
 
-def test_discover_forwards_verified_viewer_to_bcs_catalog(
+def test_discover_human_view_uses_runtime_and_user_visibility_filters(
     client: TestClient, services: tuple[_PublicService, _DiscoverService]
 ) -> None:
     response = client.get(
@@ -520,11 +521,33 @@ def test_discover_forwards_verified_viewer_to_bcs_catalog(
 
     assert response.status_code == 200, response.text
     call = services[1].calls[0]
-    assert call["catalog_filters"] == BotCatalogSearchFilters(
-        status="online",
-        viewer_actor_type="human",
-        viewer_actor_id="caller-1",
+    assert call["runtime_state"] == "online"
+    assert call["viewer_actor_type"] == "human"
+    assert call["viewer_actor_id"] == "caller-1"
+    assert call["caller"] == BotCatalogCaller(
+        tenant_id="teamclaw", user_id="caller-1", app_id=None
     )
+    assert call["request_id"] == ""
+
+
+def test_discover_bot_view_uses_availability_and_visibility_filters(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    response = client.get(
+        _DISCOVER_PATH,
+        params={
+            "keyword": "automation",
+            "runtime_state": "verify",
+            "viewer_actor_type": " bot ",
+            "viewer_actor_id": "bot-1:owner-1",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    call = services[1].calls[0]
+    assert call["runtime_state"] == "verify"
+    assert call["viewer_actor_type"] == "bot"
+    assert call["viewer_actor_id"] == "bot-1:owner-1"
     assert call["caller"] == BotCatalogCaller(
         tenant_id="teamclaw", user_id="caller-1", app_id=None
     )
@@ -541,8 +564,9 @@ def test_discover_keeps_non_bcs_runtime_state_in_bcsfuse_only(
 
     assert response.status_code == 200, response.text
     call = services[1].calls[0]
-    assert call["filters"] == {"runtime_state": ["verify"]}
-    assert call["catalog_filters"] == BotCatalogSearchFilters()
+    assert call["runtime_state"] == "verify"
+    assert call["viewer_actor_type"] is None
+    assert call["viewer_actor_id"] is None
 
 
 def test_discover_preserves_allowlisted_legacy_json_values(
@@ -593,7 +617,6 @@ def test_discover_openapi_allows_legacy_json_values(app: FastAPI) -> None:
     assert "type" not in public_bot["owner_name"]
     assert "type" not in recommendation["reasons"]
     assert "type" not in recommendation["short_profile"]
-
 
 
 @pytest.mark.parametrize("path", [_SEARCH_PATH, f"{_DISCOVER_PATH}?keyword=automation"])

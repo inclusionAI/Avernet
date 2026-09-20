@@ -2988,7 +2988,78 @@ class TestGetBotStageBindingInfo:
 
         assert result["device_id"] == "correct-bot-uuid"
         assert result["binding_id"] == 3005
+
+    def test_service_bot_eval_binding_with_default_tag_default(self):
+        """stage=eval + default_tag="default" 时，fallback_tag 应为 "default"，
+        从 binding 表按 default_tag="default" 找到 Default 区 binding。"""
         mock_repo = Mock()
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "bot_001",
+            "bot_type": "service",
+            "active_engine": "baas",
+        }
+        quality_task_service = Mock()
+        quality_task_service.get_task_by_uuid.return_value = None
+        default_binding = Mock(
+            spec=DeviceBindingRecord,
+            id=4001,
+            device_id="default-zone-bot-uuid",
+            device_provider="baas",
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={"AGENTCLAW_DEFAULT_TAG": "default", "bot_id": "bot_001"},
+        )
+        device_binding_repo = Mock()
+        device_binding_repo.list_bindings.return_value = (1, [default_binding])
+        service = _make_service(
+            bot_publish_repo=mock_repo,
+            bot_repo=bot_repo,
+            quality_task_service=quality_task_service,
+            device_binding_repo=device_binding_repo,
+        )
+
+        result = service.get_bot_stage_binding_info(
+            "bot_001", "user_001", "eval", default_tag="default"
+        )
+
+        assert result["device_id"] == "default-zone-bot-uuid"
+        assert result["binding_id"] == 4001
+        assert result["device_provider"] == "baas"
+
+    def test_service_bot_eval_binding_without_default_tag_falls_back_to_eval(self):
+        """stage=eval 不传 default_tag 时，fallback_tag 应为 "eval"（向后兼容）。"""
+        mock_repo = Mock()
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "bot_001",
+            "bot_type": "service",
+            "active_engine": "baas",
+        }
+        quality_task_service = Mock()
+        quality_task_service.get_task_by_uuid.return_value = None
+        eval_binding = Mock(
+            spec=DeviceBindingRecord,
+            id=3001,
+            device_id="eval-zone-bot-uuid",
+            device_provider="baas",
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": "bot_001"},
+        )
+        device_binding_repo = Mock()
+        device_binding_repo.list_bindings.return_value = (1, [eval_binding])
+        service = _make_service(
+            bot_publish_repo=mock_repo,
+            bot_repo=bot_repo,
+            quality_task_service=quality_task_service,
+            device_binding_repo=device_binding_repo,
+        )
+
+        result = service.get_bot_stage_binding_info(
+            "bot_001", "user_001", "eval", default_tag=None
+        )
+
+        assert result["device_id"] == "eval-zone-bot-uuid"
+        assert result["binding_id"] == 3001
         mock_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = _create_mock_record(
             record_id=17,
             status=PublishStatus.VALIDATING,

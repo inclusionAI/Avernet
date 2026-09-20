@@ -91,7 +91,12 @@ def _bind_deps(world, *, default_set: bool = True) -> PassportPlugin:
     ]
     passport.set_response("query_passport_clis", cli_items)
     passport.set_response("query_agent_passport", {
-        "mcps": [{"mcp_code": "web-search", "identity_mode": "caller"}],
+        "mcps": [{
+            "mcp_code": "web-search",
+            "mcp_name": "网页搜索",
+            "mcp_desc": "通过网页检索获取最新信息",
+            "identity_mode": "caller",
+        }],
         "clis": [
             {**item, "identity_mode": "owner"}
             for item in cli_items
@@ -115,7 +120,7 @@ def _seed_global_default_list(world) -> None:
 
 def _seed_resources_cli_query_failure(world) -> None:
     passport = _bind_deps(world)
-    passport.set_override("query_passport_clis", _tcauth_down)
+    passport.set_override("query_agent_passport", _tcauth_down)
 
 
 def _seed_delete_cli_happy(world) -> None:
@@ -174,7 +179,11 @@ def _assert_delete_updates_remaining_cli(response, world) -> None:
             "data": [
                 {
                     "id": _SKILL_SET_ID,
-                    "mcps": [{"server_code": "web-search"}],
+                    "mcps": [{
+                        "server_code": "web-search",
+                        "name": "网页搜索",
+                        "description": "通过网页检索获取最新信息",
+                    }],
                     "clis": [{"cli_code": "cli.keep"}],
                 }
             ],

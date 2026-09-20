@@ -137,9 +137,11 @@ function eventValue(event: string | null, label: string): string | null {
 
 export function parseGovernanceGuidance(text: string | null) {
   const adminEvent = lastEvent(text, "Admin审核");
-  const adminRejectEvent = lastEvent(text, "Admin驳回");
-  const ownerRejectEvent = lastEvent(text, "用户驳回");
-  const rejectionEvent = ownerRejectEvent ?? adminRejectEvent;
+  const rejectionEvents = ["用户驳回", "管理员驳回", "Admin驳回"]
+    .map((title) => ({ title, index: text?.lastIndexOf(`[${title}]`) ?? -1, event: lastEvent(text, title) }))
+    .filter((item): item is { title: string; index: number; event: string } => item.index >= 0 && item.event !== null)
+    .sort((left, right) => right.index - left.index);
+  const rejectionEvent = rejectionEvents[0]?.event ?? null;
   const verificationEvents = ["自动验证", "强制验收"]
     .map((title) => ({ title, index: text?.lastIndexOf(`[${title}]`) ?? -1, event: lastEvent(text, title) }))
     .filter((item): item is { title: string; index: number; event: string } => item.index >= 0 && item.event !== null)
@@ -150,6 +152,8 @@ export function parseGovernanceGuidance(text: string | null) {
     .filter((item): item is { title: string; index: number; event: string } => item.index >= 0 && item.event !== null)
     .sort((left, right) => right.index - left.index);
   const handledEvent = handledEvents[0]?.event ?? null;
+  // 驳回来源必须可区分：用户驳回（我的待办）与管理员驳回写的是同一批 reasonCode。
+  const rejectedBy: "OWNER" | "ADMIN" | null = rejectionEvents.length ? (rejectionEvents[0].title === "用户驳回" ? "OWNER" : "ADMIN") : null;
   return {
     assignmentReason: labeledValue(text, "指派原因"),
     rootCauseSummary: labeledValue(text, "根因"),
@@ -158,7 +162,7 @@ export function parseGovernanceGuidance(text: string | null) {
     adminReviewedBy: eventValue(adminEvent, "审核人"),
     adminReviewedAt: eventValue(adminEvent, "审核时间"),
     adminReviewComment: eventValue(adminEvent, "说明"),
-    rejectedBy: ownerRejectEvent ? "OWNER" : adminRejectEvent ? "ADMIN" : null,
+    rejectedBy,
     rejectReasonCode: eventValue(rejectionEvent, "原因"),
     rejectComment: eventValue(rejectionEvent, "说明"),
     rejectedAt: eventValue(rejectionEvent, "时间"),

@@ -214,6 +214,65 @@ def test_finalizing_marker_allows_concurrent_skill_deactivation(tmp_path):
     assert result.status is RuntimeLayoutInspectionStatus.READY
 
 
+def test_finalizing_marker_accepts_managed_center_source(tmp_path):
+    home, active_root, pool_local, pool_repo = _ready_home(tmp_path)
+    pool_center = pool_local.parent / "skill-center"
+    center_source = (
+        pool_center
+        / "e5ae3b3a-e94d-4100-af03-5c5a659db7e7"
+        / "v1.5.11"
+    )
+    center_source.mkdir(parents=True)
+    target = active_root / "mdata-skills"
+    target.symlink_to(center_source, target_is_directory=True)
+    (active_root / "skills-repo").unlink()
+    _write_active_marker(
+        home,
+        activation_state="finalizing",
+        mappings=[{"source": str(center_source), "target": str(target)}],
+    )
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        center_is_mounted=lambda path: path == pool_center,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.READY
+
+
+def test_finalizing_marker_rejects_dangling_managed_center_source(tmp_path):
+    home, active_root, pool_local, pool_repo = _ready_home(tmp_path)
+    pool_center = pool_local.parent / "skill-center"
+    pool_center.mkdir()
+    center_source = (
+        pool_center
+        / "e5ae3b3a-e94d-4100-af03-5c5a659db7e7"
+        / "v1.5.11"
+    )
+    target = active_root / "mdata-skills"
+    target.symlink_to(center_source, target_is_directory=True)
+    (active_root / "skills-repo").unlink()
+    _write_active_marker(
+        home,
+        activation_state="finalizing",
+        mappings=[{"source": str(center_source), "target": str(target)}],
+    )
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        center_is_mounted=lambda path: path == pool_center,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.INVALID
+    assert result.evidence["reason"] == "active_managed_entry_invalid"
+
+
 def test_finalizing_marker_rejects_unreadable_active_entries(
     tmp_path, monkeypatch
 ):

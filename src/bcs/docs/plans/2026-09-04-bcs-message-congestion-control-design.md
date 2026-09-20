@@ -1,7 +1,7 @@
 # BCS 消息拥塞控制设计
 
 - **日期：** 2026-09-04
-- **修订日期：** 2026-09-14
+- **修订日期：** 2026-09-17
 - **状态：** 待评审（Draft for Review）
 - **范围：** 单实例 BCS 的消息准入、Bot 限流、有序投递、上下文暂存、后端状态/取消能力与 IM 提示；Workbench UI 后置
 
@@ -10,7 +10,7 @@
 本次修订补充：System 原子批量准入、Group/System 联合启停、必要初始化上下文保护，
 以及关闭后的上下文载体发送；保留发送前错误分类、Bot/session drain 和人工处置。
 具体 API、错误边界与示例以 [消息投递 Service API](../message-delivery-service-api.md) 为准；
-本版不新增告警，不使 Unknown 自动过期或自动重发。
+本版不新增告警，不自动重发 Unknown；Unknown/CancelUnknown 复用队列 TTL 获得有界生命周期。
 
 - 本版只面向一个 BCS 进程、一个调度循环；允许多个异步发送任务，不允许两个调度进程同时运行。
 - 纳入队列的逻辑消息只在 `bcs_messages` 中保存一次；每个受管“消息 × 目标 Bot”对应一条
@@ -318,12 +318,14 @@ queued -> dispatching -> running -> completed | failed
 dispatching -> queued                （仅确认未发出且允许重试）
 dispatching | running -> unknown
 unknown -> running | completed | failed
+unknown -> expired                    （进入 Unknown 后重新计算队列 TTL）
 
 queued -> failed | cancelled | expired | rejected_capacity
 
 dispatching | running | unknown -> cancelling
 cancelling -> cancelled | completed | failed | cancel_unknown
 cancel_unknown -> cancelled | completed | failed
+cancel_unknown -> expired             （进入 CancelUnknown 后重新计算队列 TTL）
 ~~~
 
 图中 `unknown -> running` 只接受能关联原运行的可信接收证据，不会触发重新发送。
@@ -341,7 +343,7 @@ completed。调度器不要求所有中间阶段按顺序观察到。
 | `completed` | 已可信完成 | 否 |
 | `failed` | 明确失败或已确认隔离结束 | 否 |
 | `cancelled` | 发送前已撤销，或发送后已确认取消 | 否 |
-| `expired` | 尚未发送的请求超过队列 TTL | 否 |
+| `expired` | 尚未发送的请求超过队列 TTL，或不确定请求进入 Unknown 后再次超过该 TTL | 否 |
 | `rejected_capacity` | 准入时该目标 Bot 的 send 排队数量已达上限 | 否 |
 
 取消中的请求若被证明根本没发出，可以直接 cancelled；不需要下游 Abort。
@@ -593,7 +595,8 @@ Bot queue cap 统计尚未发送的 queued send；active 数独立限制。准�
 
 每次授权发送都会推进 Bot 的 next_send_at；确认未发出也不返还该次速率额度。
 ACK 不释放 active 容量，只有 terminal 或确认未发出回到 queued 才释放。
-Unknown 和取消未确认状态继续计入 active，因此可能占满 Bot 全局容量，这是明确的可用性代价。
+Unknown 和取消未确认状态在重新计算的 TTL 内继续计入 active，因此可能临时占满 Bot 全局容量；
+TTL 到期后自动释放，这是当前版本以严格顺序安全换取有界可用性的明确取舍。
 
 速率计时使用进程内单调时钟；重启后保守等待一个 min_send_interval 再允许首发。
 不持久化 GCRA/TAT，不承诺跨重启保留突发额度。
@@ -601,7 +604,10 @@ Unknown 和取消未确认状态继续计入 active，因此可能占满 Bot 全
 ### 8.3 离线、退避和过期
 
 - 尚未发送时 Bot 离线：保持 queued，reason=bot_offline，不创建发送调用、不占 active 容量。
-- queued 到期：原子变为 expired；不能把已发送请求的 queue TTL 当作执行已结束。
+- queued 到期：原子变为 expired。
+- unknown/cancel_unknown：进入该状态时以当时生效的 queue_ttl_ms 重新计算 expire_at；到期后
+  原子变为 expired、释放 lane/容量，保留 may_have_been_sent=true，并写入
+  last_error_code=unknown_ttl_expired。迟到 terminal 只记录，不重新打开终态或产生回复。
 - 确认未发出的瞬时失败：回到 queued，设置固定的有界退避时间和次数上限，不增加 retry_wait 状态。
 - running 超时走取消/Unknown 处理，不能变成 queued 自动重跑。
 - 人工 pause 只停止新 dispatch；查询、terminal ingestion 和 Abort 继续工作。
@@ -928,23 +934,24 @@ queued 数据可恢复；外部执行结果可能需要迟到事件、已有状�
 
 ### 11.3 Unknown、断连和运行截止时间
 
-- 已发送请求遇到断连/超时：保留 lane/容量，展示结果不明。
+- 已发送请求遇到断连/超时：在重新计算的队列 TTL 内保留 lane/容量，展示结果不明。
 - 只有原运行的可信 ACK/事件，才能把 unknown 恢复为 running 或终态。
 - run deadline 到达：持久化取消意图，再通过后台任务尝试现有 Abort。
-- Abort 无法确认：cancel_unknown，不自动释放，也不无限循环 Abort。
+- Abort 无法确认：cancel_unknown，不无限循环 Abort；重新计算的队列 TTL 到期后自动 expired。
 - 同 Bot 其他 lane 在剩余 active 容量内可继续；如果容量已被 Unknown 占满，则整个 Bot 等待。
-- 人工恢复提供普通 Human API `POST /messages/{message_id}/deliveries/{delivery_id}/resolve`。
+- 人工恢复提供普通 Human API
+  `POST /openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/resolve`。
   只接受 `unknown / cancel_unknown` Send，要求 session 成员及消息可见性，且调用者为
   原发送者或目标 Bot 所有者；携带 expected_state_version 和非空 reason。
   `confirmed_not_sent` 确认未发送后终结旧 delivery 并释放 context；`confirmed_stopped`
   确认下游停止后标记 cancelled、按原选择消费/舍弃 context。两者均不自动重发。
   actor、reason、处置方式及原版本与终态同事务记录在现有 transport_context_json，
   保留原运行别名用于关联与拒绝迟到事件；不得把删除记录作为恢复手段。
-- 本地暂停、修改数据库标志、重连或 timeout 都不构成旧执行已终止的证据。
-  首版不提供“忽略风险直接 force release”按钮，也不自动重启/隔离外部 Bot。
+- 本地暂停、修改数据库标志或重连都不构成旧执行已终止的证据。自动 TTL 释放明确接受
+  下游仍可能运行的风险；不会自动重启或隔离外部 Bot。
 
 已验证 runtime 隔离只说明旧执行不能继续影响该 session，不会撤销它此前已经产生的副作用。
-无法取得证据时保持暂停，并明确告诉用户需要运维处理；这是首版已接受的边界。
+人工接口允许在 TTL 前凭证据提前处置；无法取得证据时最多等待本次 Unknown TTL。
 
 ### 11.4 排队取消和 active 取消
 
@@ -954,7 +961,7 @@ queued 数据可恢复；外部执行结果可能需要迟到事件、已有状�
 | dispatching | 记录取消意图，进入 cancelling；等待本进程 send 调用收敛 |
 | running / unknown | 进入 cancelling，按原 transport/run 尝试 Abort |
 | cancelling | 合并正在进行的取消，不并发发出相同作用域的 Abort |
-| cancel_unknown | 返回结果不明，保留 lane；不自动反复发送 |
+| cancel_unknown | 返回结果不明，在重新计算的队列 TTL 内保留 lane；不自动反复发送 |
 | terminal | 已取消幂等返回；已完成/失败返回 too_late |
 
 queued 取消事务同时处理 context 解绑；提交后更新排队计数、对齐 ChatRun 并尽力发布状态提示。
@@ -1219,8 +1226,8 @@ HTTP 计划增加：
 ~~~text
 GET  /openapi/v1/collaboration/messages/{message_id}/deliveries
 POST /openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query
-POST /messages/{message_id}/deliveries/{delivery_id}/cancel
-POST /messages/{message_id}/deliveries/cancel
+POST /openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/cancel
+POST /openapi/v1/collaboration/messages/{message_id}/deliveries/cancel
 ~~~
 
 路径按现有 route 分组落地，不重构无关 API。批量查询最多 100 个 message ID，逐项检查权限。
@@ -1293,7 +1300,8 @@ policy_json 包含 flow_enabled、defaults、bots、queue_ttl_ms、safe_retry、
 - 只有对应类型开启且有效 Bot mode=enforce 才受管，类型由服务端业务入口分类。
 - Group（自由聊天、主从群）与 System 联合就绪；Direct A2A/task/state-machine 当前未全部接入，
   设置为 true 返回 queue_flow_not_ready。default enforce 不会绕过就绪检查。
-- queue_ttl_ms 省略/null 表示未发送消息不自动过期；safe_retry 省略/null 表示不自动重试。
+- queue_ttl_ms 省略/null 表示 queued 及 unknown/cancel_unknown 不自动过期；safe_retry
+  省略/null 表示不自动重试。
 - 本地不再需要队列配置；旧 lock_path 字段删除，残留时按 deny_unknown_fields 报错，升级前必须删除。
   运行超时、tick、全局准备/发送上限、Abort 并发和优雅停机时间
   保留既有宿主机/运行时边界，不新增 lease、heartbeat、GCRA 或分布式配置。
@@ -1351,7 +1359,8 @@ SQLite/MySQL/OceanBase 持久化模式下，默认 off 也启动空闲调度器�
 - 降低并发只影响后续调度，不主动 abort 已有 active；超过新上限时等待自然完成。
 - 降低队列容量只影响新准入，不删除/拒绝已经排队的记录。
 - 修改发送间隔使用原 last-send 单调时间重算，不重置历史，也不沿用旧策略计算的未来截止点。
-- 修改 TTL 仅作用于新准入，已有 expire_at 不追溯改变。
+- 修改 TTL 作用于新准入，以及此后新进入 unknown/cancel_unknown 的 delivery；已经处于这些
+  状态的 expire_at 不追溯改变。
 - pause_dispatch 停止新的 send-start；查询、终态、过期和 Abort 继续。
 - 类型/Bot 关闭更新可落库成功，但仅代表不再接受新受管请求，不代表旧工作已经排空。
   旧 queued/active Send 及其产生的正常回复仍走受管路径；同 Bot/session 有未完成 Send 时新请求
@@ -1360,8 +1369,8 @@ SQLite/MySQL/OceanBase 持久化模式下，默认 off 也启动空闲调度器�
   的旧入口保留 Bot 级保守检查。受管 worker 的 Bot active 容量限制保持不变。
 - 已绑定 Inject 随原 Send 消费或释放。旧 Send 排空后保留未绑定 Inject，下一条 Group/System
   Send 作为受管载体消费；准入重新校验当前策略版本与该 lane 的有效上下文，不删除正文。
-  仅有 Inject 不再构成无限等待条件。Unknown/cancel_unknown Send 仍必须取得可信终止证据，
-  不能因关闭配置释放。
+  仅有 Inject 不再构成无限等待条件。Unknown/cancel_unknown Send 可由可信证据提前终止，
+  否则等待其已持久化的 Unknown TTL；不能仅因关闭配置提前释放。
 - bot_relay_turn_limit 对队列与 legacy 均生效：一次回复有新接受的受管目标或成功的
   legacy 投递时计一次；多目标、混合投递不重复计数，重复终态与全目标容量拒绝不计数。
   受管路径以持久化准入为计数点，不等 Worker 发出，因此后续取消也不退回轮数。

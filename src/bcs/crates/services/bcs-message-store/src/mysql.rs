@@ -271,10 +271,27 @@ impl MessageRepoPort for MySqlMessageStore {
     ) -> Result<PersistedMessage, MessageRepoError> {
         let (visibility_domain, audience_kind, audience_actor_ids_json) =
             serialize_visibility(&msg)?;
-        let message_id = uuid::Uuid::new_v4().to_string();
+        // Error projections have a scoped deterministic primary key. The DB PK,
+        // not the read-before-write optimization below, arbitrates concurrent
+        // retries (including a lost commit acknowledgement).
+        let error_projection = msg.message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE;
+        let message_id = if error_projection {
+            use sha2::{Digest, Sha256};
+            if msg.run_id.is_empty() {
+                return Err(MessageRepoError::StorageError("chat_error requires run_id".into()));
+            }
+            let key = serde_json::json!(["chat_error", self.env, msg.group_id,
+                msg.session_id, msg.sender_id, msg.run_id]).to_string();
+            format!("{:x}", Sha256::digest(key.as_bytes()))
+        } else { uuid::Uuid::new_v4().to_string() };
 
-        // Step 1: Idempotency check
-        if let Some(ref client_msg_id) = msg.client_msg_id {
+        if error_projection {
+            if let Some(existing) = self.get_message_by_id(&msg.session_id, &message_id).await? {
+                return Ok(existing);
+            }
+        }
+        // Step 1: Idempotency check for ordinary messages.
+        if let Some(client_msg_id) = msg.client_msg_id.as_ref().filter(|_| !error_projection) {
             let check_sql = "SELECT message_id, session_seq FROM bcs_messages \
                 WHERE group_id = ? AND session_id = ? AND sender_id = ? AND client_msg_id = ?";
             let check_stmt = DbStatement::with_params(
@@ -369,11 +386,17 @@ impl MessageRepoPort for MySqlMessageStore {
             DbTransactionStep::Execute(insert_stmt),
         ];
 
-        let tx_results = self
-            .db
-            .transaction(steps)
-            .await
-            .map_err(|e| MessageRepoError::StorageError(format!("transaction: {}", e)))?;
+        let tx_results = match self.db.transaction(steps).await {
+            Ok(results) => results,
+            Err(error) => {
+                if error_projection {
+                    if let Some(existing) = self.get_message_by_id(&msg.session_id, &message_id).await? {
+                        return Ok(existing);
+                    }
+                }
+                return Err(MessageRepoError::StorageError(format!("transaction: {}", error)));
+            }
+        };
 
         let session_seq: i64 = match &tx_results[1] {
             bcs_db_api::DbTransactionStepResult::Rows(rows) => {

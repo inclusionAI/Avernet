@@ -1395,7 +1395,8 @@ async def test_restart_sets_restarting_flag_in_ext():
 
 
 @pytest.mark.asyncio
-async def test_restart_recreate_threads_config_artifact():
+@pytest.mark.parametrize("in_place", [False, True])
+async def test_restart_recreate_threads_config_artifact(in_place):
     # On BOT_NOT_FOUND, restart recreates via release_async (the crash-safe
     # recreate leg) — which for a teclaw bot must carry the frozen artifact
     # (from ext), not an empty config. The creation must return bot_uuid (the
@@ -1426,8 +1427,9 @@ async def test_restart_recreate_threads_config_artifact():
     )
     _setup_restart(svc, record)
 
-    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op", in_place=in_place)
     assert result["success"] is True
+    assert build_service.release_async.await_args.kwargs["in_place"] is in_place
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
     assert build_service.release_async.await_args.kwargs["docker_image"] == "registry/arca:v2"
     # The recreate minted a fresh binding for the new bot.
@@ -1466,7 +1468,8 @@ async def test_restart_teclaw_not_live_target_retires_then_recreates():
 
 
 @pytest.mark.asyncio
-async def test_restart_first_release_target_releases_stale_binding_no_retire():
+@pytest.mark.parametrize("in_place", [False, True])
+async def test_restart_first_release_target_releases_stale_binding_no_retire(in_place):
     # A restart whose target is already RELEASED/DESTROYING (e.g. an external BaaS
     # deletion) → FIRST_RELEASE → recreate. No bot to destroy, but the old ACTIVE
     # binding must still be released (destroy_publish_id=None) so it does not
@@ -1488,18 +1491,20 @@ async def test_restart_first_release_target_releases_stale_binding_no_retire():
     _setup_restart(svc, record, bot_uuid="BOT-old")
     svc._release_binding = Mock()
 
-    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op", in_place=in_place)
 
     assert result["success"] is True
     build_service.retire_superseded_bot.assert_not_called()  # bot already gone
     build_service.upgrade_async.assert_not_awaited()
     build_service.release_async.assert_awaited_once()  # recreate
+    assert build_service.release_async.await_args.kwargs["in_place"] is in_place
     # Old binding released with no destroy id (nothing was destroyed).
     svc._release_binding.assert_called_once_with(1, destroy_publish_id=None)
 
 
 @pytest.mark.asyncio
-async def test_restart_baas_not_live_target_upgrades_in_place():
+@pytest.mark.parametrize("in_place", [False, True])
+async def test_restart_baas_not_live_target_upgrades_in_place(in_place):
     # A baas/ARCA online bot in FAILED is rebuilt in place by the UPDATE, so the
     # restart upgrades (reuses the bot) — no recreate, no retire.
     publish_service = Mock()
@@ -1523,11 +1528,12 @@ async def test_restart_baas_not_live_target_upgrades_in_place():
     )
     _setup_restart(svc, record, bot_uuid="BOT-old")
 
-    result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
+    result = await svc.execute_restart(publish_id=1, stage="online", operator="op", in_place=in_place)
 
     assert result["success"] is True
     build_service.upgrade_async.assert_awaited_once()
     assert build_service.upgrade_async.await_args.kwargs["docker_image"] == "registry/arca:v2"
+    assert build_service.upgrade_async.await_args.kwargs["in_place"] is in_place
     build_service.release_async.assert_not_awaited()
     build_service.retire_superseded_bot.assert_not_called()
 
@@ -4259,7 +4265,8 @@ def test_restart_bot_missing_binding_returns_failure():
     assert result["success"] is False
 
 
-def test_restart_bot_success_enqueues_durable_task_and_returns_stage():
+@pytest.mark.parametrize("in_place", [False, True])
+def test_restart_bot_success_enqueues_durable_task_and_returns_stage(in_place):
     # #197: restart_bot no longer fire-and-forgets; it enqueues the durable
     # RESTART_TASK and returns the resolved stage/bot_uuid synchronously.
     from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
@@ -4275,9 +4282,10 @@ def test_restart_bot_success_enqueues_durable_task_and_returns_stage():
     svc._bot_service.get_bot = Mock(return_value={"bot_id": "bot-source"})
     svc._task_queue_service = Mock()
 
-    result = svc.restart_bot(publish_id=1, operator="op")
+    result = svc.restart_bot(publish_id=1, operator="op", in_place=in_place)
 
     svc._task_queue_service.enqueue.assert_called_once()
+    assert svc._task_queue_service.enqueue.call_args.args[1].get("in_place", False) is in_place
     assert svc._task_queue_service.enqueue.call_args.args[0] == RESTART_TASK
     assert result["success"] is True
     assert result["stage"] == PublishStage.ONLINE.value

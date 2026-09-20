@@ -24,6 +24,7 @@ class PullRequestTitleTest(unittest.TestCase):
             "fix(BCS): keep a legacy uppercase scope during transition",
             "feat(bcs, gateway): coordinate multiple modules",
             "build(deps-dev): bump test dependencies",
+            "perf(bcs): reduce idle delivery expiry polling",
         )
 
         for title in valid_titles:
@@ -36,7 +37,6 @@ class PullRequestTitleTest(unittest.TestCase):
             "feat: add whitelist observed state",
             "fix: 修复沙箱环境变量配置丢失问题",
             "fix openapi iam-token aliyun model",
-            "perf(bcs): unsupported type",
             "Feat(bcs): uppercase type",
             "feat(): empty scope",
             "feat( ): blank scope",
@@ -66,7 +66,7 @@ class PullRequestTitleTest(unittest.TestCase):
         )
         self.assertIn("Scope is required.", result.stdout)
         self.assertIn(
-            "feat | fix | refactor | docs | test | ci | build | chore",
+            "feat | fix | refactor | docs | test | ci | build | perf | chore",
             result.stdout,
         )
 

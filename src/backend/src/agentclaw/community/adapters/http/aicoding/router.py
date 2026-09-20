@@ -27,6 +27,7 @@ from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.aicoding.protocols import (
     AicodingBotResolutionServiceProtocol,
+    AicodingHostedWorkspaceServiceProtocol,
 )
 from agentclaw.community.api.workflow_catalog_service import WorkflowCatalogServiceProtocol
 from agentclaw.community.core.bot_collaborator.interceptor import (
@@ -310,8 +311,8 @@ async def create_bot_dima_workspace(
     bot_id: str,
     user_id: Optional[str] = Query(None, description="Bot owner user ID"),
     ctx: RequestContext = Depends(get_request_context),
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     bot_resolution_service: AicodingBotResolutionServiceProtocol = Injected(AicodingBotResolutionServiceProtocol),
+    hosted_workspace_service: AicodingHostedWorkspaceServiceProtocol = Injected(AicodingHostedWorkspaceServiceProtocol),
 ) -> DimaWorkspaceResponse:
     """为 Coding bot 创建 DIMA 工作空间（幂等）。
 
@@ -346,7 +347,7 @@ async def create_bot_dima_workspace(
         )
         if not resolved_bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
-        workspace_id = bot_service.ensure_hosted_workspace(
+        workspace_id = hosted_workspace_service.ensure_hosted_workspace(
             bot_id,
             str(resolved_bot.get("owner_id") or resolved_user_id),
         )

@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @source "../../../modules/workflow/web";
+@source "../../../modules/clawinsight/web";
+@source "../../../modules/clawevolve/web";
 
 body {
   margin: 0;

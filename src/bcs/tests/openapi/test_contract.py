@@ -2,8 +2,8 @@
 
 The public contract must expose exactly the approved operations across Authentication, Bot,
 Group, GroupParticipant, Session, SessionParticipant, Invitation, Friendship / FriendRequest,
-Channel Binding, and Register, and must not expose session-file, bot candidate
-search, message-send, Internal API, or routing-only path aliases.
+Message Delivery, Channel Binding, and Register, and must not expose session-file,
+bot candidate search, message-send, Internal API, or routing-only path aliases.
 """
 
 import sys
@@ -48,12 +48,18 @@ EXPECTED_OPERATIONS = {
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/collect"),
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}/collect"),
     ("get", "/openapi/v1/collaboration/sessions/{session_id}/messages"),
+    ("get", "/openapi/v1/collaboration/messages/{message_id}/deliveries"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query"),
+    ("post", "/openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/cancel"),
+    ("post", "/openapi/v1/collaboration/messages/{message_id}/deliveries/cancel"),
+    ("post", "/openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/resolve"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/participants"),
     ("patch", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
     ("post", "/openapi/v1/collaboration/groups/{group_id}/invitations"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/invitations"),
     ("post", "/openapi/v1/collaboration/invitations/{token}/accept"),
+    ("post", "/openapi/v1/collaboration/invite-codes/claim"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/token"),
     ("get", "/openapi/v1/collaboration/messages/ws"),
     ("get", "/openapi/v1/collaboration/bots/{bot_uuid}/friendships"),
@@ -97,7 +103,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_65_approved_operations() -> None:
+def test_contract_contains_exactly_the_72_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
@@ -128,7 +134,11 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
                 continue
             if path == "/openapi/v1/collaboration/messages/ws":
                 expected = {}
-            elif path.startswith("/openapi/v1/auth/") or path == "/openapi/v1/collaboration/register":
+            elif (
+                path.startswith("/openapi/v1/auth/")
+                or path == "/openapi/v1/collaboration/register"
+                or path == "/openapi/v1/collaboration/invite-codes/claim"
+            ):
                 expected = {}
             elif path == "/openapi/v1/collaboration/public-groups":
                 expected = {"user": "required"}
@@ -171,3 +181,20 @@ def test_contract_excludes_unapproved_runtime_and_routing_surfaces() -> None:
     assert not any(path.startswith("/openapi/v1/bcn/") for _, path in actual)
     assert not any(path.startswith("/openapi/v1/actors/") for _, path in actual)
     assert not any(path.startswith("/openapi/v1/internal/") for _, path in actual)
+
+
+def test_friend_connections_filter_and_pagination_contract() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"]["/openapi/v1/collaboration/friend-connections"]["get"]
+    parameters = {item["name"]: item for item in operation["parameters"]}
+    assert set(parameters) == {"actor_type", "actor_id", "target_type", "page", "page_size"}
+    assert set(parameters["target_type"]["schema"]["enum"]) == {"human", "bot"}
+    assert parameters["target_type"]["required"] is False
+    assert parameters["page"]["schema"]["default"] == 1
+    assert parameters["page"]["schema"]["minimum"] == 1
+    assert parameters["page_size"]["schema"]["default"] == 20
+    assert parameters["page_size"]["schema"]["minimum"] == 1
+    assert parameters["page_size"]["schema"]["maximum"] == 100
+    envelope = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    page = envelope["properties"]["data"]
+    assert set(page["required"]) == {"items", "total", "page", "page_size"}

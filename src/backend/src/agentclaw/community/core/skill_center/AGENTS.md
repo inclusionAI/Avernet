@@ -18,7 +18,7 @@
 | 共享资产 README、兼容发布状态 | 同文件独立 Router：`/skills/{skill_id}/readme`、发布状态资源 | README 不要求目标 Bot；不要和 Bot 参数值、Space Publication Attempt 混用 |
 | SkillSet 管理与 Skill/MCP 成员 | `skill_sets/router.py`：`/{bot_id}/skill-sets` | `SkillSetManagementService` → Desired-State UoW → Runtime Projector |
 | SC Public 懒引用 | `skill_sets/skill_center_references.py`：`/{bot_id}/skill-sets/{set_id}/skill-center-references` | `SkillCenterReferenceService` → 持久任务 → `SkillCenterReferenceProcessor` |
-| TeamClaw 市场、SC Public 市场、手动巡检 | `market/router.py`：POST `/market/skills`、`/market/skill-center/skills`、`/market/skill-center/sync` | `SkillMarketService`、`SkillCenterGatewayService`、`SkillCenterSyncService` |
+| TeamClaw 市场、SC Public 市场、手动巡检 | `market/router.py`：POST `/market/skills`、`/market/skill-center/skills`、`/market/skill-center/sync`；SC Public 搜索省略 `sortBy` 时默认 `hottest` | `SkillMarketService`、`SkillCenterGatewayService`、`SkillCenterSyncService` |
 | Space Skill 创建、列表、详情、Version、下线、复制 | `spaces/skill_routes.py` | `SpaceSkillApplicationService`、`SpaceSkillQueryService`、`SpaceSkillVersionQueryService`、`SpaceSkillOfflineService` |
 | Draft 文件、升级、Git 刷新、删除 | `spaces/router.py`：`/spaces/{space_id}/skills/{skill_id}/draft/...` | `SpaceSkillApplicationService` → Draft Repository + `DraftContentStore` |
 | Owner/Manager、编辑租约、编辑权限申请 | `spaces/router.py`：Skill grants/managers/owner、`draft/lease`、`editor-requests` | `SpaceSkillGrantService`、`DraftEditLeaseService`、`SpaceSkillEditorRequestService` |
@@ -75,7 +75,9 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - `policies/capability_ownership.py` 统一判定：Set 成员（含 inactive Set 和 excluded Default member）由 Set 控制；Direct-active 能力加入 Set 前先停用；同一 Bot 下只能属于一个 reaching Set（含 Default）。`RESOURCE_DIRECT_ACTIVE` 优先于另一个 Set 冲突。
 - Default member 被 exclusion 后仍属于 Default；重新启用走 un-exclude。Default 选择统一使用 `policies/default_skill_set_selection.py`，保留全局 Default 与 engine/template 兼容规则。
 - Engine/template 的代码型 Default MCP 是显式例外：`policies/platform_default_mcp.py` 管理政策事实，不能将它误认为都存在于 `ac_skill_set_mcp`。有效 MCP 还需合并政策默认项（应用 exclusion）及 active Skill dependencies；沿用 `collect_bot_active_mcps` 的统一入口。Platform Default MCP 拒绝 Direct control。
+- `SkillSetManagementService.list_resources()` 对 Default Set 只以当前 AgentPassport 的同一次快照补全已有 MCP 投影的 `name`/`description`，并同时读取 CLI；它不得以 Passport 增删成员、绕过 exclusion，或覆盖普通 Set 写入时固化的 MCP Center 展示快照。Passport 查询失败时保留 MCP 投影并返回空 CLI。
 - 普通技能集添加 MCP 同样必须拒绝目标 Bot 的代码型 Default MCP（按 `server_code`、engine/template/ext-info 判断，不减 exclusion）。Service 严格解析默认 codes，UoW 在写入前重检；返回 `RESOURCE_MANAGED_BY_PLATFORM_POLICY`。此校验不物化 Policy、不清理历史数据；默认集 un-exclude 及普通集移除历史重复成员仍可用。
+- 普通技能集添加远程 MCP 时，Service 在 UoW 写入前以用户有效 `endpoint_env`、transport 偏好和目标 engine 的同一端点选择规则验证 MCP Center detail；没有安全可投递端点时返回 `MCP_NO_COMPATIBLE_SECURE_ENDPOINT`，不得先写 Installation 再依赖 Runtime 投影报错。Runtime compose 仍使用同一选择规则，负责处理元数据在添加后变化或其他写入路径。
 
 `services/_mutation_flow.py::MutationProjectionFlow` 先提交 DB，再尽力投影；Runtime 不可达、PENDING、DEGRADED 不补偿回滚已提交的 Installation。DB/权限/领域校验失败仍返回失败。响应中的 `runtime_projection` 由 `runtime_projection_contract.py` 定义，不能把接口成功解释成全部设备文件已收敛。
 
@@ -86,9 +88,9 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 ## 4. Local、Repo、Center 的内容身份
 
 - `local://...`：Bot-owned 可变内容，由 Local upload/delete 服务及文件适配器管理；上传协议保留 raw ZIP，同时提供 multipart `files + file_paths` 文件夹上传。GET Bot Skills 的 `source=LOCAL` 仅列出该 Bot 上传资产，`active` 再筛选 Desired State；省略 source 保留完整可达资产列表。
-- Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义，历史 locator 超出当前包根时在写入前拒绝，迁移另行处理。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `src/backend/`）。
-- Local 内容替换/删除与 Skills Pool 文件迁移通过其 edit guard 协调，并有文件/DB 失败恢复逻辑。该 guard 的用途与普通 Set/Direct 命令不同；不能把 `_mutation_flow.py` 的无 Runtime 补偿规则推广到所有文件写入。
-- `git://...`：Repo 内容定位；`services/git_sync.py::GitSyncService` 管理 bootstrap、周期同步、DB/缓存、OSS 散目录及下载包。改 Git 供给时同时核对 `repository_catalog_service.py` 和实际消费端，避免只验证 DB。
+- Local 包地址由 `factories.py` 统一解析：Pool 先使用既有状态与路径，Legacy 通过 `LocalSkillStorageResolver` 选择上传根。共享仓库同步源仍归 `SkillRepoSyncPlugin`；公共上传业务消费解析结果，部署适配由 DI 选择。创建、重开和清理保持同一 locator 语义，历史 locator 超出当前包根时在写入前拒绝，迁移另行处理。包根是目录，存在性判定必须使用 `list_dir`，不得用 `read_file` 读取目录进行探测。合同测试见 `tests/community/contracts/test_local_skill_storage.py`（相对 `src/backend/`）。
+- Local 内容替换、删除与 Skills Pool 文件迁移通过其 edit guard 协调。声明 `skills.local_package.apply.v1` 的标准 Engine 以及全量切流的 Teclaw 接收 canonical ZIP 并在运行时完成 staging、exact replace、rollback 和 cleanup；Backend 只传 `skill_name + LEGACY|POOL`，校验返回 digest 后写 DB。旧标准 Engine 在写前 capability 明确缺失时继续走 Legacy Adapter；新请求发出后任何不确定结果都禁止回落旧协议。Replace 逐字保留既有 `git_path`，Engine `target_path` 只作诊断。运行时成功后的 DB 失败不反向删除文件，重试同一完整包收敛。删除则在权限、引用和就绪检查后，先委托运行时以一次包级操作删除完整内容根，再删除 Backend 元数据，不再由 Backend 执行文件枚举、quarantine、逐文件删除或恢复。运行时删除只有成功才允许进入元数据删除；两者不属于同一事务。该 guard 的用途与普通 Set/Direct 命令不同；不能把 `_mutation_flow.py` 的无 Runtime 补偿规则推广到其他文件写入。
+- `git://...`：Repo 内容定位；`services/git_sync.py::GitSyncService` 管理 bootstrap、周期同步、DB/缓存、OSS 散目录及下载包。Backend 启动只注册周期任务，不以远程 Git/OSS 对账作为就绪条件；首次自动对账等待完整同步周期并叠加既有 jitter。同步周期必须为正数、jitter 不能为负，无效环境配置在构造期 fail-fast。`sync_bootstrap()` 继续供显式手动同步及周期同步发现本地 bare repo 缺失时自愈；bootstrap clone 不设置进程级全局超时，Git 明确失败后仍进入既有 OSS fallback。发布的 Singlebox 默认配置不提供远程 Repo URL，是启动期本地 seed 的明确例外：只从已有的 host-side `~/aiworkbench/skills-repo` 初始化 SQLite 和 MarketCache，本地目录不存在时记录缺失并继续启动。显式运行时 overlay 配置 URL 时同样按周期对账，不在启动期 clone。改 Git 供给时同时核对 `repository_catalog_service.py` 和实际消费端，避免只验证 DB。
 - `center://<skill_code>`：SC 外部定位。`skill_code` 可为普通字符串，不要求 UUID，也不等于运行时名称。
 - `ac_skill.skill_uuid`：TeamClaw 内部稳定身份。Space 自建 Skill 发布时使用该 UUID 作为 SC code；Public 导入由 `public_center_identity.py` 基于 tenant/env/code 确定性派生内部 UUID。复用资产按来源身份，不能按名称复用 Local/Repo。
 - `ac_skill.name`：运行时名称，允许与 SC code 不同。Canonical 内容按内部 UUID + 精确 `sc_version_number` 寻址，不使用 name、latest/current 目录。
@@ -136,7 +138,7 @@ SC Public 引用已是持久异步批量 Operation：
 
 状态以 `reference_contract.py` 为准：QUEUED、RESOLVING_VERSION、MATERIALIZING、ADDING_TO_SKILL_SET、PROJECTING_RUNTIME、COMPLETED、FAILED。不要恢复旧的同步批量设计，也不要把 COMPLETED 自动解释为 Runtime 完全收敛。
 
-`SkillCenterSyncService` 只巡检已物化的 Public 资产，排除 Space-bound 等不适用项；周期和手动同步复用服务。配置/周期读取 `di/modules/skill_center_group4_module.py` 和服务构造参数，文档不固定部署值。新版本走同一 Materializer 与 Track Latest，不全量导入 SC 市场。
+`SkillCenterSyncService` 只巡检已物化的 Public 资产，排除 Space-bound 等不适用项；周期和手动同步复用服务。Lifecycle 启动只注册 periodic loop，首次自动巡检等待完整周期，不执行启动扫描。旧的 `SkillScanService` Center daily scheduler 已删除；它只保留独立的 Git archive 安全扫描。手动 OpenAPI `/openapi/v1/bots/market/skill-center/sync` 与 Legacy `/api/v1/skill-center/bootstrap` 仍是立即对账入口。配置/周期读取 `di/modules/skill_center_group4_module.py` 和服务构造参数，文档不固定部署值。新版本走同一 Materializer 与 Track Latest，不全量导入 SC 市场。
 
 ## 7. Runtime、Track Latest 与 Service Artifact
 
@@ -148,7 +150,7 @@ SC Public 引用已是持久异步批量 Operation：
 
 `services/skill_symlink_listener.py` 处理设备激活和重投影事件；通过正式 Projector 恢复当前 Desired State。既有兼容 fallback 不是新增业务写入入口。
 
-Desktop Skill Recovery 使用 Bot 级持久任务，但明确设备离线不是当前任务可修复的故障：`ACTIVE/PENDING` 可运行，`OFFLINE` 等待重连事件，`FAILED/RELEASING/RELEASED` 与未知状态停止。BaaS 仅按可信非 2xx JSON 的精确 `detail.error=NO_ACTIVE_DEVICES` 产生结构化离线错误；Runtime 返回 `DESKTOP_DEVICE_OFFLINE / PENDING / retryable=true`，其中 `retryable` 表示未来再次投影可能恢复，不授权当前任务高频重试。当前任务结束并释放 live key，健康扫描实际提交 `OFFLINE -> ACTIVE` 后发布 `RuntimeProjectionRequestedEvent` 立即唤醒，约十分钟 Sweeper 只为可运行状态兜底。timeout/5xx 继续故障退避，Center 正常下载仍按五秒进度跟进。
+Desktop Skill Recovery 使用 Bot 级持久任务，但明确设备离线不是当前任务可修复的故障：`ACTIVE/PENDING` 可运行，`OFFLINE` 等待重连事件，`FAILED/RELEASING/RELEASED` 与未知状态停止。BaaS 仅按可信非 2xx JSON 的精确 `detail.error=NO_ACTIVE_DEVICES` 产生结构化离线错误；Runtime 返回 `DESKTOP_DEVICE_OFFLINE / PENDING / retryable=true`，其中 `retryable` 表示未来再次投影可能恢复，不授权当前任务高频重试。当前任务结束并释放 live key，健康扫描实际提交 `OFFLINE -> ACTIVE` 后发布 `RuntimeProjectionRequestedEvent` 立即唤醒。恢复只由 Runtime Ready 事件与 Desired State 变化触发，不运行周期性全量 Sweeper。timeout/5xx 继续故障退避，Center 正常下载仍按五秒进度跟进；单 Task 总 deadline 为十分钟。
 
 Service Bot 的边界在 `community/core/service_bot/services/`：
 
@@ -232,6 +234,12 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 
 Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_center/`，继续复用 Query、DirectActivation、SkillSetManagement。Legacy scope/reference resolution 与 Factory 负责旧参数、Default/exclusion、设备路径适配；保留其 wire compatibility，不恢复第二条 Installation 写路径。
 
+旧版 `POST /api/skills/upload` 的失败业务响应继续使用 HTTP 200 和
+`success=false`，并额外返回 `error_code`（成功时为 `null`）。错误码定义在
+`core/skill_center/upload_error_codes.py`，Legacy HTTP adapter 负责将既有异常
+归类为该枚举。前端应按错误码而不是匹配 `message` 判断分支；完整枚举与兼容说明见
+`src/backend/specs/2026-09-14-legacy-skill-upload-error-contract.md`。
+
 ## 10. 当前边界：不得扩大成未交付能力
 
 - `SkillQueryService` 已支持 Bot-facing Center 详情、内容、参数前置解析与 Direct 操作，并支持无 Bot 的共享 README。Center 内容只读最新 PUBLISHED 数据库 Version 对应的 Canonical 精确版本；读取不调用 Engine、不下载，也不证明 Runtime 已应用该版本。
@@ -253,3 +261,7 @@ Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_ce
 以上测试路径除第一项外均相对 `src/backend/`。检查接口时从 Router 回溯到注入 Protocol、服务、Repository/Plugin 和错误映射；检查后台链路时再追到生命周期注册和 TaskQueue handler。列出尚未验证的外部消费者，避免以返回 200 或 Task enqueue 成功作为最终验收。
 
 历史 Spec 和前端联调文档位于 `src/backend/specs/2026-08-20-skill-capability-upgrade/`，Installation 设计位于 `src/backend/specs/2026-08-24-installation-single-source-of-truth/`。它们用于追溯决定；旧术语、废弃状态和未实现接口须与本文件及当前代码逐项核对后再使用。
+
+## 数字员工共享凭证保护
+
+已绑定数字员工的服务 Bot 在完整能力投影更新 AgentPass 前，通过数字员工服务申请非公开 MCP 权限，并保留历史 MCP 授权与草稿期望范围的并集。删除仅影响草稿 Runtime 配置；审批通过的发布流程在最终上线时收敛凭证范围。未绑定 Bot 的投影语义保持不变。

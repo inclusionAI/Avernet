@@ -11,9 +11,17 @@ from typing import Any
 
 from engine.community.kernel.center_content import (
     CenterContentPackage as PoolCenterContentPackage,
+)
+from engine.community.kernel.center_content import (
     CenterContentPendingPackage as PoolCenterContentPendingPackage,
+)
+from engine.community.kernel.center_content import (
     CenterContentReadyPackage as PoolCenterContentReadyPackage,
+)
+from engine.community.kernel.center_content import (
     CenterContentRequest as PoolCenterContentRequest,
+)
+from engine.community.kernel.center_content import (
     CenterContentUnavailablePackage as PoolCenterContentUnavailablePackage,
 )
 
@@ -35,6 +43,42 @@ class SkillStatus(Enum):
     ERROR = "error"
     DISABLED = "disabled"
     INSTALLING = "installing"
+
+
+class LocalSkillPackageLayout(StrEnum):
+    LEGACY = "LEGACY"
+    POOL = "POOL"
+
+
+class LocalSkillPackageAction(StrEnum):
+    CREATED = "created"
+    REPLACED = "replaced"
+    UNCHANGED = "unchanged"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalSkillPackageApplyRequest:
+    skill_name: str
+    layout: LocalSkillPackageLayout
+    package: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class LocalSkillPackageApplyResult:
+    skill_name: str
+    action: LocalSkillPackageAction
+    content_digest: str
+    target_path: str | None = None
+
+    def to_data(self) -> dict[str, str]:
+        data = {
+            "skill_name": self.skill_name,
+            "action": self.action.value,
+            "content_digest": self.content_digest,
+        }
+        if self.target_path is not None:
+            data["target_path"] = self.target_path
+        return data
 
 
 @dataclass
@@ -434,6 +478,15 @@ __all__ = [
     "CenterEnsureResult",
     "CleanSymlinksRequest",
     "CleanSymlinksResult",
+    "LocalSkillPackageAction",
+    "LocalSkillPackageApplyRequest",
+    "LocalSkillPackageApplyResult",
+    "LocalSkillPackageLayout",
+    "PoolCenterContentPackage",
+    "PoolCenterContentPendingPackage",
+    "PoolCenterContentReadyPackage",
+    "PoolCenterContentRequest",
+    "PoolCenterContentUnavailablePackage",
     "PoolLayoutActivateRequest",
     "PoolLayoutActivationResult",
     "PoolLayoutActivationStatus",
@@ -442,11 +495,6 @@ __all__ = [
     "PoolLayoutProbeStatus",
     "PoolLayoutRollbackRequest",
     "PoolMappingApplyMode",
-    "PoolCenterContentPackage",
-    "PoolCenterContentPendingPackage",
-    "PoolCenterContentReadyPackage",
-    "PoolCenterContentRequest",
-    "PoolCenterContentUnavailablePackage",
     "PoolMappingApplyRequest",
     "PoolMappingApplyResult",
     "PoolMappingItemResult",

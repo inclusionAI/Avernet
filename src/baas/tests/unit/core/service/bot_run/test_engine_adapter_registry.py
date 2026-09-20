@@ -33,7 +33,7 @@ def test_has_true_for_registered() -> None:
 
 def test_has_false_for_unregistered_no_raise() -> None:
     registry = BotEngineAdapterRegistry({"aicoding": MockAICodingAdapter()})
-    # openclaw / teclaw 不注册 → has 返回 False(BaasBotService 走 else 分支)
+    # 未注册的引擎 has 返回 False(BaasBotService 走 else 分支)
     assert registry.has("openclaw") is False
     assert registry.has("teclaw") is False
 
@@ -41,19 +41,26 @@ def test_has_false_for_unregistered_no_raise() -> None:
 # ── _real_engine_adapter_registry(bootstrap 装配) ────────────────────────
 
 
-def test_build_registers_three_engines() -> None:
+def test_build_registers_all_five_engines() -> None:
     registry = _real_engine_adapter_registry()
-    for engine in ("aicoding", "hermes", "claude_code"):
+    for engine in ("openclaw", "teclaw", "aicoding", "hermes", "claude_code"):
         assert registry.has(engine) is True
         adapter = registry.get(engine)
         assert isinstance(adapter, BotEngineAdapter)
         assert adapter.engine_type == engine
 
 
-def test_build_does_not_register_legacy_engines() -> None:
+def test_build_registers_openclaw_and_teclaw_with_dedicated_paths() -> None:
+    """openclaw/teclaw 亦经 adapter 表达：plan 纯委托后由各 adapter 承载亲和键差异。"""
     registry = _real_engine_adapter_registry()
-    assert registry.has("openclaw") is False
-    assert registry.has("teclaw") is False
+    assert registry.get("openclaw").ws_path() == "/api/openclaw/ws"
+    assert registry.get("teclaw").ws_path() == "/api/teclaw/ws"
+    assert (
+        registry.get("teclaw").session_consistency_key(
+            tc_bot_id="b1", user_id="u1", run_id="r1"
+        )
+        == "agent:main:default:r1:user:u1"
+    )
 
 
 def test_build_aicoding_ws_path_is_api_ws() -> None:

@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useFlowRuns, useWorkflowHealth } from '../../api/hooks'
+import { useFlowRuns, useWorkflowHealth, useAbortFlowRun } from '../../api/hooks'
 import { HealthScoreCard } from '../HealthScoreCard'
 import { SuccessTrendCard } from '../SuccessTrendCard'
 import StatusBadge from '../StatusBadge'
@@ -43,12 +43,31 @@ function StatCard({
 
 function RunRow({ run }: { run: FlowRun }) {
   const navigate = useNavigate()
+  const abortMutation = useAbortFlowRun()
+  const [confirmingAbort, setConfirmingAbort] = useState(false)
   const { node_count, succeeded_count, failed_count } = run
   const other = Math.max(0, node_count - succeeded_count - failed_count)
   const parts: string[] = []
   if (succeeded_count > 0) parts.push(`${succeeded_count} 成功`)
   if (failed_count > 0) parts.push(`${failed_count} 失败`)
   if (other > 0) parts.push(`${other} 其他`)
+
+  const isAbortable = ['running', 'waiting', 'blocked', 'pending', 'queued', 'postActionsRunning'].includes(run.status)
+
+  const handleAbort = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirmingAbort) {
+      setConfirmingAbort(true)
+      return
+    }
+    abortMutation.mutate(run.flow_id)
+    setConfirmingAbort(false)
+  }, [confirmingAbort, abortMutation, run.flow_id])
+
+  const handleCancelAbort = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    setConfirmingAbort(false)
+  }, [])
 
   return (
     <tr
@@ -90,6 +109,39 @@ function RunRow({ run }: { run: FlowRun }) {
       </td>
       <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-500">
         {formatDuration(run.total_duration_ms)}
+      </td>
+      <td className="whitespace-nowrap px-4 py-2 text-xs">
+        {isAbortable && (
+          confirmingAbort ? (
+            <span className="inline-flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleAbort}
+                disabled={abortMutation.isPending}
+                className="rounded-md bg-red-600 px-2 py-0.5 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              >
+                {abortMutation.isPending ? '中止中…' : '确认中止'}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelAbort}
+                className="rounded-md border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+              >
+                取消
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={handleAbort}
+              disabled={abortMutation.isPending}
+              className="inline-flex items-center gap-0.5 rounded-md border border-red-200 bg-white px-2 py-0.5 text-xs text-red-600 transition-colors hover:border-red-400 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              title="中止运行中的工作流"
+            >
+              ⛔ 中止
+            </button>
+          )
+        )}
       </td>
     </tr>
   )
@@ -239,6 +291,7 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">环境</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">开始时间</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">耗时</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">

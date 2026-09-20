@@ -96,6 +96,10 @@ class ProgressSyncMixin:
         source_status = _SUCCESS_SOURCE_STATUS[stage]
         target_status = _SUCCESS_TARGET_STATUS[stage]
         expected_ext = copy.deepcopy(ext)
+        if stage == PublishStage.ONLINE:
+            employee_provider = getattr(self, "_employee_publication_provider", None)
+            if employee_provider is not None:
+                employee_provider().finalize_scope(publish_id)
 
         # Clear the transient retry marker, then atomically advance the status
         # together with ext under the optimistic lock (a separate status-then-ext

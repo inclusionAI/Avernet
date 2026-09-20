@@ -30,6 +30,11 @@ bcs-protocol = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+bcs-db-api = { workspace = true }
+bcs-db-local = { workspace = true }
+# The integration suite uses the composition root's SQLite migration runner.
+sha2 = { workspace = true }
+hex = { workspace = true }
 bcs-system-message = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-event-store = { workspace = true }

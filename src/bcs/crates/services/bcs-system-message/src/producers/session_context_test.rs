@@ -294,7 +294,7 @@ async fn manager_worker_session_context_backfills_placeholder_names() {
 }
 
 #[tokio::test]
-async fn manager_worker_manager_reminder_lists_only_manager_tools() {
+async fn manager_worker_manager_reminder_only_prompts_task_dispatch() {
     let (manager_id, _worker_id, messages) = manager_worker_session_context_messages().await;
 
     let manager_message = messages
@@ -303,7 +303,7 @@ async fn manager_worker_manager_reminder_lists_only_manager_tools() {
         .expect("manager receives context");
 
     assert!(manager_message.message.contains("bcs_assign_task"));
-    assert!(manager_message.message.contains("bcs_task_complete"));
+    assert!(!manager_message.message.contains("bcs_task_complete"));
     assert!(manager_message.message.contains(
         "本群为任务群，你是主 Bot。派发子任务用 bcs_assign_task(target_bot, message)"
     ));
@@ -403,7 +403,7 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
             .as_str()
     };
     assert!(message_for(manager_id).contains("mcporter call bcs.bcs_assign_task"));
-    assert!(message_for(manager_id).contains("mcporter call bcs.bcs_task_complete"));
+    assert!(!message_for(manager_id).contains("bcs_task_complete"));
     assert!(message_for(mcporter_worker_id).contains("mcporter call bcs.bcs_send_task_message"));
     for bot_id in [manager_id, mcporter_worker_id] {
         assert!(message_for(bot_id).contains("必须保留并回传完整原始输出"));
@@ -486,7 +486,7 @@ async fn manager_worker_worker_context_omits_optional_send_message_tool_when_dis
     };
     let manager_message = message_for(manager_id);
     assert!(manager_message.contains("bcs_assign_task"));
-    assert!(manager_message.contains("bcs_task_complete"));
+    assert!(!manager_message.contains("bcs_task_complete"));
     assert!(!manager_message.contains("bcs_send_task_message"));
 
     let worker_message = message_for(worker_id);

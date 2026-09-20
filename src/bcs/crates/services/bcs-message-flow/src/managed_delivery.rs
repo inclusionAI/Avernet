@@ -255,6 +255,19 @@ impl ManagedMessageDelivery {
         }
         let mut primary = original.clone();
         primary.state = outcome.state;
+        if primary.state.status != original.state.status
+            && matches!(primary.state.status, Status::Unknown | Status::CancelUnknown)
+        {
+            primary.expire_at_ms = policy
+                .as_ref()
+                .and_then(|snapshot| snapshot.policy.queue_ttl_ms)
+                .map(|ttl| command.now_ms.saturating_add(ttl as i64));
+        }
+        if event == Event::QueueExpired
+            && matches!(original.state.status, Status::Unknown | Status::CancelUnknown)
+        {
+            primary.last_error_code = Some("unknown_ttl_expired".into());
+        }
         if manual {
             let metadata = primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}));
             let metadata = metadata.as_object_mut().ok_or(ManagedDeliveryError::Conflict)?;
@@ -644,12 +657,13 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         let policy = match &self.policy { Some(live) => Some(live.snapshot.read().await), None => None };
         if let Some(policy) = &policy {
           for command in &mut commands {
-            if !matches!(command.flow_kind, bcs_domain::message_delivery::DeliveryFlowKind::Group | bcs_domain::message_delivery::DeliveryFlowKind::System) { return Err(ManagedDeliveryError::Conflict); }
+            if !matches!(command.flow_kind, bcs_domain::message_delivery::DeliveryFlowKind::Group | bcs_domain::message_delivery::DeliveryFlowKind::System | bcs_domain::message_delivery::DeliveryFlowKind::Task) { return Err(ManagedDeliveryError::Conflict); }
             for target in &mut command.targets {
                 let drain = target.kind == DeliveryType::Send && target.semantic_projection_json.get("drain_context").and_then(|v| v.as_bool()) == Some(true)
                     && !self.repo.lookup(DeliveryLookup::LanePendingContextCarrier { bot: target.target_bot_id.clone(), session: command.message.session_id.clone(), now_ms: command.now_ms }).await?.is_empty();
                 let enabled = match command.flow_kind {
                     bcs_domain::message_delivery::DeliveryFlowKind::System => policy.policy.manages_system(&target.target_bot_id),
+                    bcs_domain::message_delivery::DeliveryFlowKind::Task => policy.policy.manages_task(&target.target_bot_id),
                     _ => policy.policy.manages_group(&target.target_bot_id),
                 };
                 if (!enabled && !drain)

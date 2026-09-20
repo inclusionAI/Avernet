@@ -366,6 +366,54 @@ def _seed_success(world) -> None:
               "config_artifact": _ARTIFACT})
 
 
+def _assert_in_place_task(_response, world):
+    from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
+    task = world.get(TaskQueueRepositoryProtocol).get_by_id(1)
+    assert task is not None
+    assert task.payload == {
+        "publish_id": 1, "stage": "online", "operator": _OWNER, "in_place": True,
+    }
+
+
+def _seed_restart_outsider(world):
+    _seed_success(world)
+    make_staff_user(world, user_id="restart_outsider")
+
+
+@endpoint_test(
+    method="POST", path="/api/service-bot/publish/{publish_id}/restart-in-place",
+    scenario="owner_queues_in_place_restart",
+    input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
+    seed=_seed_success,
+    expect=ExpectSuccess(status=200, json_contains={"success": True, "data": {"stage": "online"}}),
+    extra_assertions=(_assert_in_place_task,),
+)
+def owner_queues_in_place_restart():
+    """Owner's request persists the mode in the real durable queue."""
+
+
+@endpoint_test(
+    method="POST", path="/api/service-bot/publish/{publish_id}/restart-in-place",
+    scenario="outsider_cannot_restart_in_place",
+    input=CaseInput(path_params={"publish_id": _V1}, headers={"x-user-id": "restart_outsider"}),
+    seed=_seed_restart_outsider,
+    expect=ExpectError(status=403),
+)
+def outsider_cannot_restart_in_place():
+    """Same collaborator permission gate as normal restart."""
+
+
+@endpoint_test(
+    method="POST", path="/api/service-bot/publish/{publish_id}/restart-in-place",
+    scenario="draft_not_restartable",
+    input=CaseInput(path_params={"publish_id": _V1}, headers=_HEADERS),
+    seed=_seed_draft,
+    expect=ExpectError(status=200, json_contains={"success": False}),
+)
+def draft_not_restartable():
+    """The new route retains the publication's existing restart-stage rules."""
+
+
 def _seed_failed_verify(world) -> None:
     _seed_draft(world)
     _install_baas(world, progress_status="SUCCESS")

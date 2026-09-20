@@ -59,6 +59,9 @@ from agentclaw.community.api.collaborator_service import CollaboratorServiceProt
 from agentclaw.community.api.installation_backfill_service import (
     InstallationBackfillServiceProtocol,
 )
+from agentclaw.community.api.bot_common_config_service import (
+    BotCommonConfigServiceProtocol,
+)
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
@@ -68,6 +71,9 @@ from agentclaw.community.api.bot_cli_tool_service import (
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
     BotCliToolService,
+)
+from agentclaw.community.core.common_config.bot_config_service import (
+    BotCommonConfigService,
 )
 from agentclaw.community.api.bot_config_manifest_apply_service import (
     BotConfigManifestApplyServiceProtocol,
@@ -133,6 +139,9 @@ from agentclaw.community.api.skill_center_sync_service import (
     SkillCenterSyncServiceProtocol,
 )
 from agentclaw.community.api.track_latest import TrackLatestServiceProtocol
+from agentclaw.community.api.tc_resource_ready_observer import (
+    TcResourceReadyObserverProtocol,
+)
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
 )
@@ -267,6 +276,9 @@ from agentclaw.community.core.skill_center.services.draft_edit_lease_service imp
     DraftEditLeaseService,
 )
 from agentclaw.community.core.market_favorites.services import MarketFavoriteService
+from agentclaw.community.core.tc_file_upload_integrations.coordinator import (
+    TcResourceReadyCoordinator,
+)
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
@@ -288,6 +300,7 @@ from agentclaw.community.core.spaces.services import (
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (BotCommonConfigServiceProtocol, BotCommonConfigService),
     (ExpertChatInstanceServiceProtocol, ExpertChatInstanceService),
     (BotAppGrantServiceProtocol, BotAppGrantService),
     (CollaboratorServiceProtocol, CollaboratorService),
@@ -327,6 +340,7 @@ _PAIRS = [
     (SkillCenterReferenceServiceProtocol, SkillCenterReferenceService),
     (SkillCenterSyncServiceProtocol, SkillCenterSyncService),
     (TrackLatestServiceProtocol, TrackLatestService),
+    (TcResourceReadyObserverProtocol, TcResourceReadyCoordinator),
     (SpaceServiceProtocol, SpaceService),
     (SpaceAccessServiceProtocol, SpaceAccessService),
     (SpaceMemberServiceProtocol, SpaceMemberService),

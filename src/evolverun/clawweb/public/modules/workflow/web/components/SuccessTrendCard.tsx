@@ -16,14 +16,16 @@ export function SuccessTrendCard({
   days: controlledDays,
   onDaysChange,
   showRangeSelector = true,
+  embedded = false,
 }: {
   workflowId: string
   currentSuccessRate: string
   currentDetail: string
   compact?: boolean
-  days?: 1 | 7 | 30
+  days?: 1 | 'yesterday' | 7 | 30
   onDaysChange?: (days: 7 | 30) => void
   showRangeSelector?: boolean
+  embedded?: boolean
 }) {
   const [localDays, setLocalDays] = useState<7 | 30>(7)
   const days = controlledDays ?? localDays
@@ -38,7 +40,8 @@ export function SuccessTrendCard({
       setLoading(true)
       setError(false)
       try {
-        const res = await fetch(`/api/workflows/${encodeURIComponent(workflowId)}/success-trend?days=${days}`)
+        const apiDays = days === 'yesterday' ? 1 : days
+        const res = await fetch(`/api/workflows/${encodeURIComponent(workflowId)}/success-trend?days=${apiDays}`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const json = await res.json()
         if (!cancelled) setData(json.data ?? [])
@@ -68,7 +71,7 @@ export function SuccessTrendCard({
     : null
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+    <div className={`${embedded ? '' : 'rounded-xl border border-slate-200'} bg-white px-4 py-3`}>
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-semibold text-slate-900">成功率趋势</span>

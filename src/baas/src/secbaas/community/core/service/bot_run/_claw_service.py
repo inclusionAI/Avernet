@@ -30,6 +30,7 @@ from secbaas.community.api.bot_runtime import (
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.logger import get_logger
+from secbaas.community.spi.bot.engine_adapter import extract_session_key_from_planned_id
 from secbaas.community.spi.secret import SecretStorePlugin
 
 from ._async_chat_client import ConcurrentSessionError
@@ -78,7 +79,7 @@ class ClawBotService(BotService):
         config: BotServiceConfig,
         client_pool: AsyncChatClientPool,
         secret_store: SecretStorePlugin,
-        engine_adapter_registry: BotEngineAdapterRegistry | None = None,
+        engine_adapter_registry: BotEngineAdapterRegistry,
     ) -> None:
         """Initialize the Bot service.
 
@@ -86,8 +87,8 @@ class ClawBotService(BotService):
             config: Configuration for the Bot WebSocket service.
             client_pool: Connection pool for sandbox-level WS connection reuse.
             secret_store: Secret store plugin for token generation.
-            engine_adapter_registry: Optional registry for engine adapters
-                (aicoding / hermes / claude_code). When set and engine_type
+            engine_adapter_registry: Registry for engine adapters
+                (aicoding / hermes / claude_code). When engine_type
                 matches a registered adapter, _build_ws_url uses
                 adapter.ws_path() instead of the default f"/api/{engine}/ws".
         """
@@ -103,9 +104,9 @@ class ClawBotService(BotService):
         *,
         bot_id: str,
         session_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        binding_info: BotBindingInfo | None = None,
-        context: BotChatContext | None = None,
+        metadata: dict[str, Any],
+        binding_info: BotBindingInfo,
+        context: BotChatContext,
         run_id: str | None = None,
     ) -> SessionInfo:
         """Create a new conversation session via AsyncSessionClient.
@@ -118,24 +119,18 @@ class ClawBotService(BotService):
         Args:
             bot_id: Bot identifier in format "real_bot_id:entity_id".
             session_id: Optional session identifier to reuse.
-            metadata: Optional session metadata.
+            metadata: Session metadata.
             binding_info: Cached binding info (required, resolved via BotServicePlugin.get_binding).
-            context: Optional request context.
+            context: Request context.
             run_id: Optional run ID for correlating session with run record.
 
         Returns:
             SessionInfo: The created or reused session information.
 
         Raises:
-            BotServiceError: If binding_info is not provided.
+            BotServiceError: If binding_info is invalid.
         """
         logger.info("Create session: %s, %s", bot_id, session_id)
-
-        if binding_info is None:
-            raise BotServiceError(
-                "ClawBotService requires binding_info to create session. "
-                "Resolve binding info via BotServicePlugin.get_binding before calling create_session."
-            )
 
         sandbox_id = binding_info.sandbox_id
         real_bot_id = binding_info.bot_id
@@ -152,7 +147,6 @@ class ClawBotService(BotService):
         )
 
         # AsyncSessionClient 是 HTTP 无状态短连接，无需池化
-        metadata = metadata or {}
         session_client = self._create_session_client(sandbox_id)
         user_id = resolve_user_id(metadata, binding_info, context, entity_id)
 
@@ -163,6 +157,8 @@ class ClawBotService(BotService):
                     session_id=session_id,
                     user_id=user_id,
                     metadata=metadata,
+                    engine_type=binding_info.engine_type,
+                    bot_id=real_bot_id,
                     run_id=run_id,
                 )
         except BotServiceError:
@@ -198,6 +194,7 @@ class ClawBotService(BotService):
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> BotResponse:
         """Send a message and get response via ChatClient.
 
@@ -213,6 +210,9 @@ class ClawBotService(BotService):
             wait_result: Whether to wait for result.
             context: Optional request context.
             timeout: Optional timeout in seconds. None means no limit.
+            session_pending: session_id 为提前构造的计划值，发送前需先物化。
+            chat_metadata:
+            attachments:
 
         Returns:
             BotResponse: The bot's response.
@@ -224,9 +224,13 @@ class ClawBotService(BotService):
         engine_type = binding_info.engine_type
         if sandbox_id is None:
             raise BotServiceError("ClawBotService requires sandbox_id in binding_info.")
-        if engine_type is None:
-            raise BotServiceError(
-                "ClawBotService requires engine_type in binding_info."
+        if session_pending:
+            user_id = resolve_user_id({}, binding_info, context, binding_info.entity_id)
+            await self._materialize_session(
+                session_id=session_id,
+                binding_info=binding_info,
+                user_id=user_id,
+                metadata=dict(chat_metadata) if chat_metadata else {},
             )
 
         url = self._build_ws_url(sandbox_id, engine_type)
@@ -264,12 +268,15 @@ class ClawBotService(BotService):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         timeout: float,
+        chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
         与 send_message 相同的连接逻辑，但调用
         client.send_message_stream 并返回 AsyncIterator。
+        chat_metadata 兼作 session_pending 物化时 title/model 的透传通道。
         """
         sandbox_id = binding_info.sandbox_id
         engine_type = binding_info.engine_type
@@ -278,6 +285,15 @@ class ClawBotService(BotService):
         if engine_type is None:
             raise BotServiceError(
                 "ClawBotService requires engine_type in binding_info."
+            )
+
+        if session_pending:
+            user_id = resolve_user_id({}, binding_info, context, binding_info.entity_id)
+            await self._materialize_session(
+                session_id=session_id,
+                binding_info=binding_info,
+                user_id=user_id,
+                metadata=dict(chat_metadata) if chat_metadata else {},
             )
 
         url = self._build_ws_url(sandbox_id, engine_type)
@@ -314,6 +330,7 @@ class ClawBotService(BotService):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """注入消息到已有会话
 
@@ -325,11 +342,21 @@ class ClawBotService(BotService):
             message: 注入的消息内容
             binding_info: Binding info for WS connection.
             context: 可选的请求上下文（身份认证、调用者信息等）
+            session_pending: session_id 为提前构造的计划值，注入前需先物化。
         """
         sandbox_id = binding_info.sandbox_id
         engine_type = binding_info.engine_type
         if sandbox_id is None:
             raise BotServiceError("ClawBotService requires sandbox_id in binding_info.")
+
+        if session_pending:
+            user_id = resolve_user_id({}, binding_info, context, binding_info.entity_id)
+            await self._materialize_session(
+                session_id=session_id,
+                binding_info=binding_info,
+                user_id=user_id,
+                metadata={},
+            )
 
         url = self._build_ws_url(sandbox_id, engine_type or "openclaw")
         headers = self._get_headers(sandbox_id)
@@ -538,9 +565,8 @@ class ClawBotService(BotService):
         只有 aicoding / hermes / claude_code 会命中；openclaw / teclaw 恒返回 None
         → 走原始分支（字节级不变）。
         """
-        reg = self._engine_adapter_registry
-        if reg is not None and engine_type and reg.has(engine_type):
-            return reg.get(engine_type)
+        if engine_type and self._engine_adapter_registry.has(engine_type):
+            return self._engine_adapter_registry.get(engine_type)
         return None
 
     def _build_base_url(self, sandbox_id: str) -> str:
@@ -604,6 +630,8 @@ class ClawBotService(BotService):
         session_id: str | None,
         user_id: str,
         metadata: dict[str, Any],
+        engine_type: str = "openclaw",
+        bot_id: str = "",
         run_id: str | None = None,
     ) -> tuple[str, bool]:
         """Get an existing adapter session or create a new one.
@@ -613,6 +641,8 @@ class ClawBotService(BotService):
             session_id: Optional existing session ID to look up.
             user_id: The user ID for session creation.
             metadata: Session metadata.
+            engine_type: Engine type (e.g. "openclaw"), used for create_session params.
+            bot_id: Bot ID passed as agent_id to adapter.
             run_id: The run ID for session creation.
 
         Returns:
@@ -621,23 +651,66 @@ class ClawBotService(BotService):
         """
         if session_id:
             logger.info(
-                f"Adapter session already exists: session_id={session_id}, "
-                f"reusing existing session"
+                "Adapter session already exists: session_id=%s, reusing",
+                session_id,
             )
             return session_id, True
         else:
             adapter_session = await session_client.create_session(
                 title=metadata.get("title", None),
                 user_id=user_id,
-                model=metadata.get("model", None),
+                agent_id=bot_id,
                 uuid=run_id,
+                model=metadata.get("model", None),
+                engine=engine_type,
             )
             adapter_session_id = adapter_session.id
-            if not adapter_session_id.startswith("agent:main:"):
-                adapter_session_id = f"agent:main:{adapter_session_id}"
+            if engine_type == "openclaw":
+                if not adapter_session_id.startswith("agent:main:"):
+                    adapter_session_id = f"agent:main:{adapter_session_id}"
 
-            logger.info(f"Adapter session created: session_id={adapter_session_id}")
+            logger.info("Adapter session created: session_id=%s", adapter_session_id)
             return adapter_session_id, False
+
+    async def _materialize_session(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        user_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """用预先构造的 session_id 在 adapter 侧创建会话（幂等）。
+
+        与 _get_or_create_adapter_session 的"复用"分支不同：
+        这里明确知道 session_id 是计划值，需要先在 adapter 侧创建。
+        已存在则直接返回，保证并发安全。
+
+        adapter 的 create_session(uuid=...) 期望接收裸 session key，
+        而非完整 planned id（agent:main:session:{key}:user:{user_id}），
+        因此先提取 key 再传入。
+        """
+        metadata = metadata or {}
+        adapter_uuid = extract_session_key_from_planned_id(session_id)
+        sandbox_id = binding_info.sandbox_id
+        session_client = self._create_session_client(sandbox_id)
+        try:
+            async with session_client:
+                await session_client.create_session(
+                    title=metadata.get("title"),
+                    user_id=user_id,
+                    model=metadata.get("model"),
+                    uuid=adapter_uuid,
+                )
+                logger.info(
+                    "[materialize_session] created: session_id=%s, sandbox_id=%s",
+                    session_id,
+                    sandbox_id,
+                )
+        except Exception as e:
+            raise BotServiceError(
+                f"Failed to materialize session {session_id}: {e}"
+            ) from e
 
     def _get_path_target(self, sandbox_id: str) -> str:
         """Get the target path for HTTP requests.

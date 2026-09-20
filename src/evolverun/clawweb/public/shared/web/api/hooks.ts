@@ -252,6 +252,18 @@ export function useRerunFlowRun() {
   })
 }
 
+export function useAbortFlowRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (flowId: string) => api.runs.abort(flowId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
+      void queryClient.invalidateQueries({ queryKey: ['run'] })
+    },
+  })
+}
+
 export function useFlowRun(flowId: string) {
   return useQuery({
     queryKey: ['run', flowId],
@@ -1540,5 +1552,14 @@ export function useRestoreWorkflowVersion() {
       void queryClient.invalidateQueries({ queryKey: ['db-workflow', variables.workflowId] })
       void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
     },
+  })
+}
+
+export function useFlowApprovals(flowId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['flow-approvals', flowId],
+    queryFn: () => api.approval.listByFlow(flowId),
+    enabled: enabled && !!flowId,
+    refetchInterval: 5000,
   })
 }

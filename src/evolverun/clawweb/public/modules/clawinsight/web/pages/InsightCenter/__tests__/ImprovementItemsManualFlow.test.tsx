@@ -8,10 +8,14 @@ const mocks = vi.hoisted(() => ({
   improvement: vi.fn(),
   updateImprovement: vi.fn(),
   markHandled: vi.fn(),
+  adminImprovements: vi.fn(),
+  adminImprovement: vi.fn(),
+  adminMarkHandled: vi.fn(),
+  isAdmin: { value: false },
 }))
 
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({
-  useClientUser: () => ({ user: { userId: '2088' }, authState: 'ready' }),
+  useClientUser: () => ({ user: { userId: '2088', isAdmin: mocks.isAdmin.value }, authState: 'ready' }),
 }))
 
 vi.mock('../../../api/insight', () => ({ insightApi: mocks }))
@@ -58,6 +62,78 @@ describe('manual improvement flow', () => {
     )
   }
 
+  /** Admin view: readOnly + isAdmin + an explicit owner scope (management perspective). */
+  function renderAdminItems() {
+    return render(
+      <MemoryRouter>
+        <Routes>
+          <Route path="*" element={<ImprovementItems
+            selectedImprovementId={51}
+            ownerUserId="2088"
+            readOnly
+            botOptions={[{ botId: 'bot-manual', botName: '手动修复 Bot' }]}
+            onBotChange={() => {}}
+            onSelectImprovement={() => {}}
+            onGoFailures={() => {}}
+          />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  it('lets an admin advance an ACTIVE manual improvement to Agent verification', async () => {
+    mocks.isAdmin.value = true
+    const active = detail()
+    const verifying = detail({ status: 'IN_PROGRESS', handledAt: '2026-08-19T09:00:00Z', verificationStatus: 'PENDING', version: 2 })
+    mocks.adminImprovements.mockResolvedValue({ items: [active], nextCursor: null, statusCounts: { active: 1, inProgress: 0, resolved: 0, archived: 0 } })
+    mocks.adminImprovement.mockResolvedValue(active)
+    mocks.adminMarkHandled.mockResolvedValue(verifying)
+
+    try {
+      const user = userEvent.setup()
+      renderAdminItems()
+
+      // The admin path is the 管理员状态机 control, not the Owner-side button.
+      expect(screen.queryByRole('button', { name: '我已自行修复，开始验收' })).toBeNull()
+      await user.selectOptions(await screen.findByLabelText('管理员推进目标状态'), 'IN_PROGRESS')
+      await user.click(screen.getByRole('button', { name: '立即推进' }))
+      expect(mocks.adminMarkHandled).toHaveBeenCalledWith(51, 1)
+    } finally {
+      mocks.isAdmin.value = false
+    }
+  })
+
+  it('offers only the transitions the server accepts for the current status', async () => {
+    mocks.isAdmin.value = true
+    const active = detail()
+    mocks.adminImprovements.mockResolvedValue({ items: [active], nextCursor: null, statusCounts: { active: 1, inProgress: 0, resolved: 0, archived: 0 } })
+    mocks.adminImprovement.mockResolvedValue(active)
+
+    try {
+      renderAdminItems()
+      const select = await screen.findByLabelText('管理员推进目标状态') as HTMLSelectElement
+      // 待修复 is only valid from ARCHIVED, so an ACTIVE item must not offer it.
+      expect([...select.options].map((option) => option.text)).toEqual(['选择目标状态', '系统验收'])
+    } finally {
+      mocks.isAdmin.value = false
+    }
+  })
+
+  it('hides the admin state machine when the status has no allowed transition', async () => {
+    mocks.isAdmin.value = true
+    const verifying = detail({ status: 'IN_PROGRESS', handledAt: '2026-08-19T09:00:00Z', verificationStatus: 'PENDING', version: 2 })
+    mocks.adminImprovements.mockResolvedValue({ items: [verifying], nextCursor: null, statusCounts: { active: 0, inProgress: 1, resolved: 0, archived: 0 } })
+    mocks.adminImprovement.mockResolvedValue(verifying)
+
+    try {
+      renderAdminItems()
+      await screen.findByRole('button', { name: '驳回' })
+      expect(screen.queryByLabelText('管理员推进目标状态')).toBeNull()
+    } finally {
+      mocks.isAdmin.value = false
+    }
+  })
+
   it('opens Bot Repair from a manual improvement instead of the legacy governance task', async () => {
     const active = detail()
     mocks.improvements.mockResolvedValue({ items: [active], nextCursor: null, statusCounts: { active: 1, inProgress: 0, resolved: 0, archived: 0 } })
@@ -69,6 +145,22 @@ describe('manual improvement flow', () => {
     await user.click(await screen.findByRole('button', { name: '进入 Bot 修复' }))
     expect(screen.getByTestId('location')).toHaveTextContent('/evolve/new?type=repair&improvementId=51')
     expect(mocks.updateImprovement).not.toHaveBeenCalled()
+  })
+
+  it('lets the Owner mark a manual improvement handled without starting a Bot repair', async () => {
+    const active = detail()
+    const verifying = detail({ status: 'IN_PROGRESS', handledAt: '2026-08-19T09:00:00Z', verificationStatus: 'PENDING', version: 2 })
+    mocks.improvements.mockResolvedValue({ items: [active], nextCursor: null, statusCounts: { active: 1, inProgress: 0, resolved: 0, archived: 0 } })
+    mocks.improvement.mockResolvedValue(active)
+    mocks.markHandled.mockResolvedValue(verifying)
+
+    const user = userEvent.setup()
+    renderItems()
+
+    await user.click(await screen.findByRole('button', { name: '我已自行修复，开始验收' }))
+    expect(mocks.markHandled).toHaveBeenCalledWith(51, 1)
+    expect(await screen.findByText(/已进入 Agent 自动验收/)).toBeInTheDocument()
+    expect(screen.getByTestId('location')).not.toHaveTextContent('/evolve/new')
   })
 
   it('exposes manual repair controls after automatic verification fails', async () => {

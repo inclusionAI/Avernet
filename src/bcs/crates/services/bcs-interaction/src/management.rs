@@ -937,7 +937,6 @@ mod tests {
     };
     use serde_json::json;
     use tokio::sync::{Mutex, Notify};
-    use tracing::instrument::WithSubscriber;
 
     use super::InteractionManagement;
     use crate::MemoryInteractionStore;
@@ -969,6 +968,60 @@ mod tests {
         fn make_writer(&'a self) -> Self::Writer {
             SharedLogWriter(self.0.clone())
         }
+    }
+
+    // Install a process-wide tracing subscriber ONCE that writes into a
+    // shared buffer. `warn!` consults the process-global callsite Interest
+    // cache: with per-test scoped subscribers, the first test to evaluate a
+    // callsite without any subscriber installed poisons it as
+    // Interest::never for every later test, so scoped-subscriber log
+    // assertions flake under parallel test runs. One global subscriber keeps
+    // every callsite's cached interest consistent for the whole process.
+    static SHARED_LOGS: std::sync::OnceLock<SharedLogBuffer> = std::sync::OnceLock::new();
+    static GLOBAL_LOG_SUBSCRIBER: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+    fn capture_logs() -> SharedLogBuffer {
+        let installed = SHARED_LOGS.set(SharedLogBuffer::default());
+        let shared = SHARED_LOGS.get().expect("shared log buffer");
+        if installed.is_ok() {
+            let _ = GLOBAL_LOG_SUBSCRIBER.set(());
+            // set_global_default alone does NOT recompute the global callsite
+            // Interest cache or the dynamic max level, and a callsite first
+            // evaluated on a plain test thread (no scoped dispatch installed)
+            // registers against NO_SUBSCRIBER and caches Interest::never for
+            // the whole process. Registering two leaked dispatches flips the
+            // tracing-core dispatcher registry into direct-enumeration mode,
+            // so every subsequent Interest rebuild/registration evaluates
+            // against this always-accepting subscriber instead of the
+            // registering thread's (missing) default. The explicit rebuild
+            // un-poisons callsites cached before this first call.
+            let _ = tracing::subscriber::set_global_default(
+                tracing_subscriber::fmt()
+                    .with_ansi(false)
+                    .with_level(false)
+                    .with_target(false)
+                    .with_writer(shared.clone())
+                    .finish(),
+            );
+            std::mem::forget(tracing::Dispatch::new(
+                tracing_subscriber::fmt()
+                    .with_ansi(false)
+                    .with_level(false)
+                    .with_target(false)
+                    .with_writer(shared.clone())
+                    .finish(),
+            ));
+            std::mem::forget(tracing::Dispatch::new(
+                tracing_subscriber::fmt()
+                    .with_ansi(false)
+                    .with_level(false)
+                    .with_target(false)
+                    .with_writer(shared.clone())
+                    .finish(),
+            ));
+            tracing::callsite::rebuild_interest_cache();
+        }
+        shared.clone()
     }
 
     #[async_trait]
@@ -1979,15 +2032,10 @@ mod tests {
             "action":"submit",
             "answers":{"target":{"values":["private cloud"]}}
         });
-        let logs = SharedLogBuffer::default();
-        let subscriber = tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_level(false)
-            .with_target(false)
-            .with_writer(logs.clone())
-            .finish();
+        let logs = capture_logs();
+        logs.0.lock().expect("log buffer lock").clear();
 
-        let result = service.resolve(command).with_subscriber(subscriber).await;
+        let result = service.resolve(command).await;
 
         assert_eq!(
             result.unwrap_err(),

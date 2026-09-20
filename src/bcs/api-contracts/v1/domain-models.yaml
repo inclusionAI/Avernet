@@ -1597,6 +1597,11 @@ GroupMessage:
         chat or tool_call. Tool-call snapshots also carry tool_call_id,
         tool_name, and tool_args. Consumers should merge them by run_id and
         treat durable history as the eventual source of truth.
+        Human-facing terminal failures set terminal_state=error and is_error=true;
+        normal messages omit terminal_state. is_error alone may denote a tool
+        failure and must not mark the run failed. Merge by session, sender and
+        run_id; terminal failure takes precedence over stale pending snapshots.
+        Bot history responses filter these chat_error projections before conversion.
     attachments:
       type: array
       items:
@@ -1923,14 +1928,24 @@ FriendConnectionPage:
   required:
     - items
     - total
+    - page
+    - page_size
   properties:
     items:
       type: array
       items:
         $ref: "#/FriendConnection"
     total:
+      description: Total matching peers after target_type filtering and before pagination.
       type: integer
       minimum: 0
+    page:
+      type: integer
+      minimum: 1
+    page_size:
+      type: integer
+      minimum: 1
+      maximum: 100
 
 # ---- Success envelopes for batch 2 resources ------------------------------
 

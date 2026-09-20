@@ -22,6 +22,7 @@ const STATUS_COLORS: Record<string, string> = {
   skipped: '#9ca3af',
   blocked: '#f97316',
   postActionsRunning: '#3b82f6',
+  cancelled: '#ef4444',
 }
 
 const STATUS_BG: Record<string, string> = {
@@ -33,6 +34,7 @@ const STATUS_BG: Record<string, string> = {
   skipped: '#f9fafb',
   blocked: '#fff7ed',
   postActionsRunning: '#eff6ff',
+  cancelled: '#fef2f2',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -44,6 +46,7 @@ const STATUS_LABELS: Record<string, string> = {
   skipped: '已跳过',
   blocked: '已阻塞',
   postActionsRunning: '运行中',
+  cancelled: '已中止',
 }
 
 interface RunDagNodeData {

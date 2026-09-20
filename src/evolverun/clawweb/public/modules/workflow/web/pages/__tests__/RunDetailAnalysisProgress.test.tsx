@@ -69,6 +69,9 @@ vi.mock('../../components/SimpleRunLogsPanel', () => ({ default: () => <div>日�
 vi.mock('../../components/AnalysisModal', () => ({ default: () => <div>节点分析</div> }))
 vi.mock('../../components/InterventionPanel', () => ({ default: () => <div>人工干预</div> }))
 vi.mock('../../components/AnalyzeRunBotModal', () => ({ default: () => null }))
+vi.mock('@avernet/clawweb-shared/web/api/hooks', () => ({
+  useFlowApprovals: () => ({ data: { items: [] }, isLoading: false }),
+}))
 
 import RunDetail from '../RunDetail'
 

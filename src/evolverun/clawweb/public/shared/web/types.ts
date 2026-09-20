@@ -8,6 +8,7 @@ export interface ClientUser {
   isLogAdmin?: boolean
   isBenchAdmin?: boolean
   isClawEvolveAdmin?: boolean
+  isClawInsightAdmin?: boolean
   isSuperAdmin?: boolean
 }
 
@@ -310,6 +311,7 @@ export type NodeStatus =
   | 'failed'
   | 'blocked'
   | 'skipped'
+  | 'cancelled'
 
 export interface FlowRun {
   flow_id: string
@@ -712,7 +714,7 @@ export interface AppConfigUpdateInput {
   updated_by?: string
 }
 
-export type AdminRole = 'admin' | 'log_admin' | 'bench_admin' | 'claw_evolve_admin'
+export type AdminRole = 'admin' | 'log_admin' | 'bench_admin' | 'claw_evolve_admin' | 'claw_insight_admin'
 
 export interface AdminUserEntry {
   id: number
@@ -1590,7 +1592,7 @@ export interface ChatMessage {
 
 export interface NodeStepTraceStep {
   stepSeq: number
-  stepType: 'tool_call' | 'tool_result' | 'assistant_text' | 'progress'
+  stepType: 'tool_call' | 'tool_result' | 'assistant_text' | 'progress' | 'script_progress'
   toolName: string | null
   toolUseId: string | null
   toolInputJson: string | null
@@ -1731,6 +1733,15 @@ export interface RerunResult {
   sessionId: string | null
 }
 
+// ── Abort ──────────────────────────────────────────────────
+
+export interface AbortResult {
+  ok: boolean
+  flowId: string
+  status: string
+  reconciledNodes: number
+}
+
 // ── Smart Onboarding ──────────────────────────────────────
 
 export type SmartOnboardingPhase =
@@ -1849,6 +1860,49 @@ export type HttpCallbackConfigUpdateInput = Partial<Omit<HttpCallbackConfigCreat
 
 // ── Run Archive ──
 
+export type RunArchiveDiagnosis = {
+  diagnosisId: string
+  flowIds: string[]
+  nodeId: string | null
+  failureSignature: string
+  failureMode: string
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  reasoning: string
+  evidenceEventIds: string[]
+  suggestedFixSpec: string | null
+  proposal: {
+    schemaVersion: string
+    workflowId: string
+    baseSpecDigest: string | null
+    summary: string
+    operations: Array<{
+      op: 'replace' | 'add' | 'remove'
+      path: string
+      value?: unknown
+    }>
+  } | null
+}
+
+export type RunArchiveAnalysis = {
+  source: 'reused' | 'preview' | 'failed'
+  status: 'completed' | 'failed' | 'skipped'
+  analysisId: string | null
+  error: string | null
+  diagnoses: RunArchiveDiagnosis[]
+  summary: string | null
+}
+
+export type RunArchiveSuggestedYaml = {
+  yamlContent: string
+  patchProposal: {
+    schemaVersion: string
+    workflowId: string
+    operations: Array<{ op: string; path: string; value?: unknown }>
+  } | null
+  summary: string
+  confidence: 'low' | 'medium' | 'high'
+}
+
 export type RunArchiveData = {
   archive: {
     flowId: string
@@ -1892,6 +1946,10 @@ export type RunArchiveData = {
       detail: string
     }>
   }
+  // Part 3: AI diagnosis (optional — present when analysis is available)
+  analysis?: RunArchiveAnalysis | null
+  // Part 4: Suggested YAML (optional — derived from analysis proposals)
+  suggestedYaml?: RunArchiveSuggestedYaml | null
 }
 
 

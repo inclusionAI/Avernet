@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
+from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.devices.protocols import StoragePathProtocol
 from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer import (
     BotDeployContext,
@@ -68,7 +69,9 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         storage_path: StoragePathProtocol,
         sandbox_registry: EngineSandboxRegistry,
         bot_repo: "BotRepository",
+        storage_policy: BotStoragePolicyProtocol,
     ) -> None:
+        self._storage_policy = storage_policy
         self._storage_path = storage_path
         self._sandbox_registry = sandbox_registry
         # Read-only rules are per-bot: the defaults come from the engine's
@@ -80,6 +83,9 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         return DeployRuntime.MANAGED
 
     # ── DeployConfigComposer ────────────────────────────────────────────
+
+    def prepare_context(self, ctx: BotDeployContext) -> BotDeployContext:
+        return self._storage_policy.resolve_deploy_context(ctx)
 
     def build_start_command(self, ctx: BotDeployContext) -> str:
         """Chain the managed image's four boot scripts with ``&&``.
@@ -106,6 +112,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             ctx.version,
             ctx.mount_home_dir_storage,
             ctx.ext_info,
+            ctx.in_place,
         )
 
         # 4、 Start watchdog
@@ -128,8 +135,8 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         )
 
     def build_storage(self, ctx: BotDeployContext) -> Storage | None:
-        """Always a volume: every managed bot keeps its state on NAS."""
-        return self._setup_bot_storage(
+        """Build the original volume layout, then apply the resolved business policy."""
+        storage = self._setup_bot_storage(
             entity_id=ctx.entity_id,
             entity_type=ctx.entity_type,
             owner_id=ctx.owner_id,
@@ -139,6 +146,10 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             bot_type=ctx.bot_type,
             stage=ctx.stage or "",
         )
+
+        if storage is not None:
+            storage = self._storage_policy.apply_to_storage(storage, ctx)
+        return storage
 
     # ── the managed image's own composition ─────────────────────────────
 
@@ -184,6 +195,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         version: str | None = "1",
         mount_home_dir_storage: bool = False,
         ext_info: Optional[Dict[str, Any]] = None,
+        in_place: bool = False,
     ):
         """启动沙箱服务。"""
         # 保留 {token} 和 {client_id} 占位符，供后续替换
@@ -216,6 +228,8 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
 
         # 命中 home 目录挂载白名单时，通知容器内启动脚本使用 NAS home 目录。
         start_service_cmd += f" --useNas {str(mount_home_dir_storage).lower()}"
+        if in_place:
+            start_service_cmd += " --in_place_restart true"
 
         read_only_rules = self._get_set_read_only_rule(
             bot_id=bot_id, owner_id=owner_id,

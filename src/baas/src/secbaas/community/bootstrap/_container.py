@@ -179,6 +179,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         CoreTaskContainer,
         config=config,
         distributed_lock_service=services.distributed_lock_service,
+        distributed_lock_repository=repository.distributed_lock_repository,
         device_repo=repository.device_repository,
         device_binding_repo=repository.device_binding_repository,
         sandbox_device_router=services.sandbox_device_router,

@@ -341,6 +341,7 @@ async def test_list_returns_workspace_entries():
 
     env = await list_resources(
         page=PageParams(),
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         path="",
@@ -373,6 +374,7 @@ async def test_legacy_list_preview_action_reads_the_file_instead_of_listing_it()
     file_svc = _PreviewOnlyFileService({"test.txt": b"hello"})
     response = await list_resources(
         page=PageParams(),
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         path="test.txt",
@@ -399,6 +401,7 @@ async def test_list_joins_the_listed_directory_onto_entry_paths():
 
     env = await list_resources(
         page=PageParams(),
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         path="a/b",
@@ -421,7 +424,7 @@ async def test_list_never_exposes_the_container_path():
     ])
 
     env = await list_resources(
-        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        page=PageParams(), user_id="u1", owner_id="u1", bot_id="bot-x", path="", type=None,
         bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
     )
@@ -437,7 +440,7 @@ async def test_list_folder_filter_returns_directories():
     ])
 
     env = await list_resources(
-        page=PageParams(), owner_id="u1", bot_id="bot-x", path="",
+        page=PageParams(), user_id="u1", owner_id="u1", bot_id="bot-x", path="",
         type=OpenapiType.FOLDER,
         bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
@@ -454,7 +457,7 @@ async def test_list_file_filter_excludes_directories():
     ])
 
     env = await list_resources(
-        page=PageParams(), owner_id="u1", bot_id="bot-x", path="",
+        page=PageParams(), user_id="u1", owner_id="u1", bot_id="bot-x", path="",
         type=OpenapiType.FILE,
         bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
@@ -474,7 +477,7 @@ async def test_list_paginates_the_directory_in_memory():
 
     env = await list_resources(
         page=PageParams(page=2, page_size=2),
-        owner_id="u1", bot_id="bot-x", path="", type=None,
+        user_id="u1", owner_id="u1", bot_id="bot-x", path="", type=None,
         bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
     )
@@ -488,7 +491,7 @@ async def test_list_paginates_the_directory_in_memory():
 @pytest.mark.asyncio
 async def test_list_reads_x_trace_id_from_request():
     env = await list_resources(
-        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        page=PageParams(), user_id="u1", owner_id="u1", bot_id="bot-x", path="", type=None,
         bot_repo=_StubBotRepo(), file_svc=_StubListFileService([]),
         request=_request_with_trace("trace-list-1"),
     )
@@ -498,7 +501,7 @@ async def test_list_reads_x_trace_id_from_request():
 @pytest.mark.asyncio
 async def test_list_empty_workspace_returns_empty_page():
     env = await list_resources(
-        page=PageParams(), owner_id="u1", bot_id="bot-x", path="", type=None,
+        page=PageParams(), user_id="u1", owner_id="u1", bot_id="bot-x", path="", type=None,
         bot_repo=_StubBotRepo(), file_svc=_StubListFileService([]),
         request=_request_without_trace(),
     )
@@ -519,6 +522,7 @@ async def test_list_of_an_absent_directory_is_an_empty_page_not_a_500():
 
     env = await list_resources(
         page=PageParams(page=1, page_size=10),
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         path="nope",
@@ -542,6 +546,7 @@ async def test_list_does_not_swallow_other_upstream_statuses():
     with pytest.raises(httpx.HTTPStatusError):
         await list_resources(
             page=PageParams(page=1, page_size=10),
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             path="docs",
@@ -556,7 +561,7 @@ async def test_list_rejects_a_directory_escaping_the_workspace():
     file_svc = _StubListFileService([])
 
     resp = await list_resources(
-        page=PageParams(), owner_id="u1", bot_id="bot-x", path="../../etc",
+        page=PageParams(), user_id="u1", owner_id="u1", bot_id="bot-x", path="../../etc",
         type=None, bot_repo=_StubBotRepo(),
         file_svc=file_svc, request=_request_without_trace(),
     )
@@ -584,6 +589,7 @@ async def test_stat_returns_the_entry_for_a_path():
 
     env = await stat_resource(
         path="docs/a.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -606,6 +612,7 @@ async def test_stat_of_a_root_level_entry_lists_the_workspace_root():
 
     env = await stat_resource(
         path="notes.md",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -623,6 +630,7 @@ async def test_stat_reports_a_directory_as_a_folder():
 
     env = await stat_resource(
         path="docs",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -641,6 +649,7 @@ async def test_stat_404s_a_path_that_is_not_there():
     with pytest.raises(HTTPException) as exc:
         await stat_resource(
             path="docs/gone.txt",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             bot_repo=_StubBotRepo(),
@@ -663,6 +672,7 @@ async def test_stat_404s_when_the_parent_directory_is_absent():
     with pytest.raises(HTTPException) as exc:
         await stat_resource(
             path="nope/a.txt",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             bot_repo=_StubBotRepo(),
@@ -679,6 +689,7 @@ async def test_stat_requires_a_path():
     about it — so the empty path the listing accepts is refused here."""
     resp = await stat_resource(
         path="",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -696,6 +707,7 @@ async def test_stat_rejects_a_path_escaping_the_workspace():
 
     resp = await stat_resource(
         path="../../etc/passwd",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -714,12 +726,12 @@ async def test_stat_and_list_agree_because_they_read_one_seam():
     entries = {"docs": [_listed("a.txt", rel="docs/a.txt", size=99)]}
 
     listed = await list_resources(
-        page=PageParams(), owner_id="u1", bot_id="bot-x", path="docs", type=None,
+        page=PageParams(), user_id="u1", owner_id="u1", bot_id="bot-x", path="docs", type=None,
         bot_repo=_StubBotRepo(), file_svc=_StubListFileService(entries),
         request=_request_without_trace(),
     )
     statted = await stat_resource(
-        path="docs/a.txt", owner_id="u1", bot_id="bot-x",
+        path="docs/a.txt", user_id="u1", owner_id="u1", bot_id="bot-x",
         bot_repo=_StubBotRepo(), file_svc=_StubListFileService(entries),
         request=_request_without_trace(),
     )
@@ -805,6 +817,7 @@ async def test_upload_hands_the_workspace_relative_path_to_the_engine_seam():
     env = await upload_resource(
         path="hello.txt",
         content=b"file bytes",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=_StubFactory(),
@@ -834,12 +847,44 @@ async def test_upload_hands_the_workspace_relative_path_to_the_engine_seam():
 
 
 @pytest.mark.asyncio
+async def test_upload_records_the_verified_caller_not_the_addressed_owner():
+    """The record row exists to carry what the filesystem cannot know.
+
+    ``record_uploaded_file`` is the one place a record says *who uploaded the
+    file* — the console shows it and the repository can filter on it. A
+    collaborator uploading into a shared bot's workspace must therefore land
+    on the record under their own name; attributing the upload to the
+    addressed owner would put the owner's name on bytes somebody else wrote,
+    exactly the misattribution an audit column must not make.
+    """
+    service = _StubService()
+
+    env = await upload_resource(
+        path="hello.txt",
+        content=b"file bytes",
+        user_id="collab-1",
+        owner_id="owner-9",
+        bot_id="bot-x",
+        factory=_StubFactory(service),
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_without_trace(),
+    )
+
+    assert isinstance(env, Envelope)
+    assert env.code == CODE_CREATED
+    assert service.recorded[0]["user_id"] == "collab-1"
+    assert service.recorded[0]["created_by"] == "collab-1"
+
+
+@pytest.mark.asyncio
 async def test_upload_keeps_the_directories_carried_by_the_path():
     file_svc = _StubFileService()
 
     env = await upload_resource(
         path="docs/spec/a.txt",
         content=b"x",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=_StubFactory(),
@@ -881,6 +926,7 @@ async def test_upload_403s_a_read_only_path(path):
         await upload_resource(
             path=path,
             content=b"x",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             factory=_StubFactory(),
@@ -903,6 +949,7 @@ async def test_mkdir_403s_a_dot_prefixed_directory_at_any_depth(path):
     with pytest.raises(HTTPException) as exc:
         await create_directory(
             path=path,
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             bot_repo=_StubBotRepo(),
@@ -921,6 +968,7 @@ async def test_upload_rejects_a_path_escaping_the_workspace():
     resp = await upload_resource(
         path="../../etc/passwd",
         content=b"x",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-a",
         bot_repo=_StubBotRepo(),
@@ -941,6 +989,7 @@ async def test_upload_409_when_the_path_is_already_taken():
     resp = await upload_resource(
         path="taken.txt",
         content=b"x",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-a",
         bot_repo=_StubBotRepo(),
@@ -966,6 +1015,7 @@ async def test_upload_overwrite_replaces_an_occupied_path():
         path="docs/a.txt",
         content=b"new bytes",
         overwrite=True,
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=_StubFactory(service),
@@ -989,6 +1039,7 @@ async def test_upload_overwrite_replaces_the_record_rather_than_adding_one():
         path="docs/a.txt",
         content=b"new",
         overwrite=True,
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=_StubFactory(service),
@@ -1010,6 +1061,7 @@ async def test_upload_without_overwrite_leaves_the_record_alone():
     await upload_resource(
         path="docs/new.txt",
         content=b"x",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=_StubFactory(service),
@@ -1040,6 +1092,7 @@ async def test_upload_overwrite_does_not_roll_the_file_back_on_a_record_failure(
             path="a.txt",
             content=b"new",
             overwrite=True,
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             factory=_ExplodingFactory(),
@@ -1063,6 +1116,7 @@ async def test_upload_same_leaf_name_in_two_directories_does_not_collide():
     env = await upload_resource(
         path="b/x.txt",
         content=b"x",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-a",
         factory=_StubFactory(),
@@ -1085,6 +1139,7 @@ async def test_upload_400_when_the_service_rejects_the_file():
         await upload_resource(
             path="a.exe",
             content=b"x",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-a",
             bot_repo=_StubBotRepo(),
@@ -1103,6 +1158,7 @@ async def test_upload_502_when_the_device_write_fails():
         await upload_resource(
             path="a.txt",
             content=b"x",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-a",
             bot_repo=_StubBotRepo(),
@@ -1118,6 +1174,7 @@ async def test_upload_reads_x_trace_id_from_request():
     env = await upload_resource(
         path="hello.txt",
         content=b"x",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-a",
         factory=_StubFactory(),
@@ -1138,6 +1195,7 @@ async def test_download_returns_raw_bytes_for_a_workspace_path():
 
     response = await download_file(
         path="docs/a.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1157,6 +1215,7 @@ async def test_download_404_when_the_file_is_absent():
     with pytest.raises(HTTPException) as exc:
         await download_file(
             path="nope.txt",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             bot_repo=_StubBotRepo(),
@@ -1172,6 +1231,7 @@ async def test_download_rejects_a_path_escaping_the_workspace():
 
     resp = await download_file(
         path="../../etc/passwd",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1187,6 +1247,7 @@ async def test_download_rejects_a_path_escaping_the_workspace():
 async def test_preview_returns_decoded_content():
     env = await preview_file(
         path="a.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1208,6 +1269,7 @@ async def test_preview_413_when_over_the_cap():
 
     resp = await preview_file(
         path="big.bin",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1232,6 +1294,7 @@ async def test_read_404s_when_the_provider_reports_the_file_missing(handler):
     with pytest.raises(HTTPException) as exc:
         await handler(
             path="gone.txt",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             bot_repo=_StubBotRepo(),
@@ -1250,6 +1313,7 @@ async def test_read_does_not_swallow_other_upstream_statuses(code):
     with pytest.raises(httpx.HTTPStatusError):
         await download_file(
             path="a.txt",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             bot_repo=_StubBotRepo(),
@@ -1265,6 +1329,7 @@ async def test_download_serves_an_empty_file_rather_than_404ing_it():
     change removes. Only ``None`` means absent."""
     resp = await download_file(
         path="empty.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1280,6 +1345,7 @@ async def test_download_serves_an_empty_file_rather_than_404ing_it():
 async def test_preview_of_an_empty_file_is_empty_not_missing():
     env = await preview_file(
         path="empty.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1299,6 +1365,7 @@ async def test_download_413_when_the_device_refuses_an_oversized_file():
     regardless of which layer noticed."""
     resp = await download_file(
         path="big.bin",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1315,6 +1382,7 @@ async def test_download_413_when_the_device_refuses_an_oversized_file():
 async def test_preview_decodes_invalid_utf8_rather_than_failing():
     env = await preview_file(
         path="mixed.bin",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1333,6 +1401,7 @@ async def test_delete_file_removes_it_from_the_workspace():
 
     env = await delete_file(
         path="docs/a.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=_StubFactory(),
@@ -1368,6 +1437,7 @@ async def test_delete_file_drops_the_record_before_the_file():
 
     await delete_file(
         path="docs/a.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=_RecordingFactory(),
@@ -1396,6 +1466,7 @@ async def test_delete_file_leaves_the_file_when_the_record_drop_fails():
     with pytest.raises(RuntimeError):
         await delete_file(
             path="docs/a.txt",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             factory=_ExplodingFactory(),
@@ -1418,6 +1489,7 @@ async def test_delete_file_403s_a_read_only_path(path):
     with pytest.raises(HTTPException) as exc:
         await delete_file(
             path=path,
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             factory=SimpleNamespace(create=lambda **kw: None),
@@ -1446,6 +1518,7 @@ async def test_delete_file_502_when_the_device_refuses():
     with pytest.raises(HTTPException) as exc:
         await delete_file(
             path="docs/a.txt",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             factory=_StubFactory(),
@@ -1464,6 +1537,7 @@ async def test_delete_file_404_when_absent():
     with pytest.raises(HTTPException) as exc:
         await delete_file(
             path="gone.txt",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             factory=SimpleNamespace(create=lambda **kw: None),
@@ -1480,6 +1554,7 @@ async def test_mkdir_creates_a_directory_without_a_record():
 
     env = await create_directory(
         path="docs/spec",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1622,6 +1697,7 @@ async def test_real_factory_service_supports_every_handler_path_e2e():
     env = await upload_resource(
         path="docs/hello.txt",
         content=b"file bytes",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
@@ -1641,6 +1717,7 @@ async def test_real_factory_service_supports_every_handler_path_e2e():
     #    actually round-trips.
     env_s = await stat_resource(
         path="docs/hello.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1653,6 +1730,7 @@ async def test_real_factory_service_supports_every_handler_path_e2e():
     # 3. list its directory.
     env_l = await list_resources(
         page=PageParams(),
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         path="docs",
@@ -1666,6 +1744,7 @@ async def test_real_factory_service_supports_every_handler_path_e2e():
     # 4. download and preview it.
     response = await download_file(
         path="docs/hello.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1676,6 +1755,7 @@ async def test_real_factory_service_supports_every_handler_path_e2e():
 
     env_p = await preview_file(
         path="docs/hello.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1688,6 +1768,7 @@ async def test_real_factory_service_supports_every_handler_path_e2e():
     rows_before = len([r for r in repo._rows.values() if r.get("status") != "deleted"])
     env_d = await delete_file(
         path="docs/hello.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
@@ -1704,6 +1785,7 @@ async def test_real_factory_service_supports_every_handler_path_e2e():
     env2 = await upload_resource(
         path="docs/hello.txt",
         content=b"again",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
@@ -1729,12 +1811,12 @@ async def test_sequential_overwrite_leaves_one_live_record_for_the_path_e2e():
     file_svc = _StubReadFileService({})
 
     await upload_resource(
-        path="docs/a.txt", content=b"one", owner_id="u1", bot_id="bot-x",
+        path="docs/a.txt", content=b"one", user_id="u1", owner_id="u1", bot_id="bot-x",
         factory=factory, bot_repo=_StubBotRepo(), file_svc=file_svc,
         request=_request_without_trace(),
     )
     await upload_resource(
-        path="docs/a.txt", content=b"two", overwrite=True, owner_id="u1",
+        path="docs/a.txt", content=b"two", overwrite=True, user_id="u1", owner_id="u1",
         bot_id="bot-x", factory=factory, bot_repo=_StubBotRepo(),
         file_svc=file_svc, request=_request_without_trace(),
     )
@@ -1762,6 +1844,7 @@ async def test_file_reads_are_scoped_to_the_requested_bot():
 
     await download_file(
         path="a.txt",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -1781,6 +1864,7 @@ async def test_upload_returns_502_when_the_device_write_fails_e2e():
         await upload_resource(
             path="hello.txt",
             content=b"file bytes",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             factory=factory,
@@ -1804,6 +1888,7 @@ async def test_upload_records_the_uploader_for_the_console():
     env = await upload_resource(
         path="docs/a.txt",
         content=b"file bytes",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
@@ -1833,6 +1918,7 @@ async def test_upload_reports_the_file_the_way_a_listing_would():
     env = await upload_resource(
         path="docs/a.txt",
         content=b"file bytes",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
@@ -1865,6 +1951,7 @@ async def test_upload_rolls_the_file_back_when_the_record_write_fails():
         await upload_resource(
             path="a.txt",
             content=b"xy",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             factory=_ExplodingFactory(),
@@ -1900,6 +1987,7 @@ async def test_upload_treats_a_refused_rollback_as_a_failed_one(caplog):
             await upload_resource(
                 path="a.txt",
                 content=b"xy",
+                user_id="u1",
                 owner_id="u1",
                 bot_id="bot-x",
                 factory=_ExplodingFactory(),
@@ -1929,6 +2017,7 @@ async def test_upload_still_fails_when_the_rollback_itself_fails():
         await upload_resource(
             path="a.txt",
             content=b"xy",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             factory=_ExplodingFactory(),
@@ -1956,6 +2045,7 @@ async def test_upload_409_takes_precedence_over_the_502_path():
     resp = await upload_resource(
         path="hello.txt",
         content=b"x",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         factory=factory,
@@ -2032,6 +2122,7 @@ async def test_download_dir_returns_a_zip_of_the_subtree():
 
     response = await download_directory(
         path="docs",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -2059,6 +2150,7 @@ async def test_download_dir_of_the_root_zips_the_whole_workspace():
 
     response = await download_directory(
         path="",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -2084,6 +2176,7 @@ async def test_download_dir_rejects_a_path_escaping_the_workspace():
 
     resp = await download_directory(
         path="../secrets",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -2099,6 +2192,7 @@ async def test_download_dir_rejects_a_path_escaping_the_workspace():
 async def test_download_dir_404_when_the_directory_is_absent():
     resp = await download_directory(
         path="nope",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -2122,6 +2216,7 @@ async def test_download_dir_404s_when_the_provider_raises_the_upstream_404():
     with pytest.raises(HTTPException) as exc:
         await download_directory(
             path="nope",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             bot_repo=_StubBotRepo(),
@@ -2139,6 +2234,7 @@ async def test_download_dir_surfaces_an_upstream_fault():
     with pytest.raises(httpx.HTTPStatusError):
         await download_directory(
             path="docs",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             bot_repo=_StubBotRepo(),
@@ -2153,6 +2249,7 @@ async def test_download_dir_empty_directory_is_a_valid_root_only_archive():
     archive holding just its root entry — the walk can tell the two apart."""
     response = await download_directory(
         path="empty",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -2169,6 +2266,7 @@ async def test_download_dir_empty_directory_is_a_valid_root_only_archive():
 async def test_download_dir_413_when_a_cap_is_exceeded():
     resp = await download_directory(
         path="docs",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),
@@ -2191,6 +2289,7 @@ async def test_download_dir_propagates_a_mid_walk_failure():
     with pytest.raises(RuntimeError):
         await download_directory(
             path="docs",
+            user_id="u1",
             owner_id="u1",
             bot_id="bot-x",
             bot_repo=_StubBotRepo(),
@@ -2205,6 +2304,7 @@ async def test_download_dir_propagates_a_mid_walk_failure():
 async def test_download_dir_utf8_folder_name_in_the_disposition():
     response = await download_directory(
         path="文档",
+        user_id="u1",
         owner_id="u1",
         bot_id="bot-x",
         bot_repo=_StubBotRepo(),

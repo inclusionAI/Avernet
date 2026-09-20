@@ -16,7 +16,8 @@ import Repair from './Repair'
 import { evolveTaskRegistry, isEvolveTaskType } from '../features/evolve/task-registry'
 import EvolveBotPicker from '../components/EvolveBotPicker'
 import { evolveBotOptionKey } from '../components/evolveBotIdentity'
-import EvolveModelFields, { EVOLVE_CUSTOM_MODEL, EVOLVE_MODEL_OPTIONS } from '../components/EvolveModelFields'
+import EvolveModelFields, { EVOLVE_CUSTOM_MODEL } from '../components/EvolveModelFields'
+import { useEvolveModelConfig } from '../hooks/useEvolveModelConfig'
 import EvolveTaskOverview from '../components/EvolveTaskOverview'
 import { EvolveAdminScopeProvider, useEvolveAdminScope } from '../features/evolve/admin-scope'
 import {
@@ -291,6 +292,7 @@ export interface EvolveProps {
 function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveProps) {
   const openVersion = version === 'openversion'
   const localModel = openVersion ? singleboxModel : undefined
+  const modelConfig = useEvolveModelConfig()
   const navigate = useNavigate()
   const { user, authState } = useClientUser()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -322,7 +324,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [apiKey, setApiKey] = useState('')
   const [judgeBackend, setJudgeBackend] = useState<'subagent' | 'api'>('subagent')
   const [diagnoseSessionSource, setDiagnoseSessionSource] = useState<'local' | 'service_export'>('local')
-  const configuredInitialModel = ''
+  const configuredInitialModel = localModel?.trim() || modelConfig.defaultModel
   const [diagnoseModel, setDiagnoseModel] = useState(configuredInitialModel)
   const [workflowModel, setWorkflowModel] = useState(configuredInitialModel)
   const [lookbackDays, setLookbackDays] = useState('3')
@@ -348,6 +350,13 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [directGoalModel, setDirectGoalModel] = useState(configuredInitialModel)
   const [startDate, setStartDate] = useState(() => dateValue(-3))
   const [endDate, setEndDate] = useState(() => dateValue())
+
+  useEffect(() => {
+    if (!configuredInitialModel) return
+    setDiagnoseModel((current) => current || configuredInitialModel)
+    setWorkflowModel((current) => current || configuredInitialModel)
+    setDirectGoalModel((current) => current || configuredInitialModel)
+  }, [configuredInitialModel])
   const [customCommands, setCustomCommands] = useState(false)
   const [nodeCommandYamls, setNodeCommandYamls] = useState<Record<string, string>>({})
   const [nodeDefinitions, setNodeDefinitions] = useState<Record<string, NodeDefinition[]>>({})
@@ -1064,6 +1073,10 @@ function DiagnoseFields({
   onFocusIssueChange: (value: string) => void
   diagnoseIntent: string
 }) {
+  const { models } = useEvolveModelConfig()
+  const availableModels = configuredModel
+    ? [configuredModel, ...models.filter((item) => item !== configuredModel)]
+    : models
   return (
     <>
       <section className="border-t border-gray-100 pt-6">
@@ -1096,9 +1109,9 @@ function DiagnoseFields({
             <label><span className="mb-1.5 block text-xs font-medium text-gray-600">结束日期</span><input type="date" className={inputClass} value={endDate} min={startDate} max={dateValue()} onChange={(event) => onEndDateChange(event.target.value)} /></label>
           </> : <label><span className="mb-1.5 block text-xs font-medium text-gray-600">会话时间范围</span><select className={inputClass} value={lookbackDays} onChange={(event) => onLookbackDaysChange(event.target.value)}><option value="3">最近 3 天</option><option value="7">最近 7 天</option><option value="14">最近 14 天</option><option value="30">最近 30 天</option></select></label>}
           <EvolveModelFields
-            modelOptions={configuredModel ? [configuredModel, ...EVOLVE_MODEL_OPTIONS.filter((item) => item !== configuredModel)] : EVOLVE_MODEL_OPTIONS}
-            choice={!model || (configuredModel ? [configuredModel, ...EVOLVE_MODEL_OPTIONS] : EVOLVE_MODEL_OPTIONS).includes(model) ? model : EVOLVE_CUSTOM_MODEL}
-            customValue={!model || (configuredModel ? [configuredModel, ...EVOLVE_MODEL_OPTIONS] : EVOLVE_MODEL_OPTIONS).includes(model) ? '' : model}
+            modelOptions={availableModels}
+            choice={availableModels.includes(model) ? model : EVOLVE_CUSTOM_MODEL}
+            customValue={availableModels.includes(model) ? '' : model}
             onChoiceChange={(value) => onModelChange(value === EVOLVE_CUSTOM_MODEL ? '' : value)}
             onCustomValueChange={onModelChange}
             selectAriaLabel="诊断模型"
@@ -1129,10 +1142,11 @@ function TaskModelFields({ title, model, configuredModel, onModelChange }: {
   configuredModel?: string
   onModelChange: (value: string) => void
 }) {
+  const { models } = useEvolveModelConfig()
   const modelOptions = configuredModel
-    ? [configuredModel, ...EVOLVE_MODEL_OPTIONS.filter((item) => item !== configuredModel)]
-    : EVOLVE_MODEL_OPTIONS
-  const knownModel = !model || modelOptions.includes(model)
+    ? [configuredModel, ...models.filter((item) => item !== configuredModel)]
+    : models
+  const knownModel = modelOptions.includes(model)
   return <section className="border-t border-gray-100 pt-6">
     <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
     <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -1298,10 +1312,11 @@ function FullFlowFields({ mode, onModeChange, goal, onGoalChange, model, onModel
   configuredModel?: string;
   openVersion: boolean;
 }) {
+  const { models } = useEvolveModelConfig()
   const modelOptions = configuredModel
-    ? [configuredModel, ...EVOLVE_MODEL_OPTIONS.filter((item) => item !== configuredModel)]
-    : EVOLVE_MODEL_OPTIONS
-  const knownModel = !model || modelOptions.includes(model as (typeof modelOptions)[number])
+    ? [configuredModel, ...models.filter((item) => item !== configuredModel)]
+    : models
+  const knownModel = modelOptions.includes(model as (typeof modelOptions)[number])
   return (
     <>
       <section className="border-t border-gray-100 pt-6">

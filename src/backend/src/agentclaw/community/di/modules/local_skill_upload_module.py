@@ -7,6 +7,9 @@ from injector import Injector, inject, provider, singleton
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
+    LocalSkillPackageRuntime,
+)
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -28,10 +31,23 @@ from agentclaw.community.core.skill_center.services.local_skill_upload_service i
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterTransport,
+)
 
 
 class LocalSkillUploadBindings:
     """Keep package validation composition out of the aggregate Skill module."""
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_package_runtime(
+        self,
+        resolver: DeviceContextResolver,
+        transport: DeviceAdapterTransport,
+    ) -> LocalSkillPackageRuntime:
+        return LocalSkillPackageRuntime(resolver, transport)
 
     @singleton
     @provider
@@ -46,6 +62,7 @@ class LocalSkillUploadBindings:
         edit_guard: SkillsPoolEditGuard,
         injector: Injector,
         runtime_reconciler: BotRuntimeProjectorProtocol,
+        package_runtime: LocalSkillPackageRuntime,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
             skill_repo,
@@ -57,4 +74,5 @@ class LocalSkillUploadBindings:
             lambda: injector.get(DeviceContextResolver),
             runtime_reconciler,
             SkillPackageValidator(SkillParser()),
+            package_runtime,
         )

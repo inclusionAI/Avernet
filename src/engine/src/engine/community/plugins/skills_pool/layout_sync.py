@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -10,8 +11,13 @@ import stat
 from pathlib import Path
 from uuid import uuid4
 
+from engine.community.plugins.skills_pool.layout_atomic import (
+    atomic_rename_if_absent,
+)
+
 Fingerprint = tuple[str, str]
 Manifest = dict[str, Fingerprint]
+_PUBLISH_OWNER_FILENAME = ".owner.json"
 
 
 def mirror_local_tree(
@@ -31,8 +37,15 @@ def mirror_local_tree(
 
     pool_baseline = snapshot_local(pool_local)
     _remove_path(staging_root)
-    staging_root.mkdir()
     source_entries = sorted(source_root.iterdir(), key=lambda path: path.name)
+    if not source_entries and not pool_baseline:
+        # A fresh runtime has nothing to stage or reconcile. Avoid creating an
+        # empty directory only to remove it immediately: shared filesystems may
+        # reject that create/delete sequence even though a later retry can
+        # remove the now-stale directory.
+        return [], {}
+
+    staging_root.mkdir()
     for source in source_entries:
         _copy_entry(source, staging_root / source.name)
 
@@ -41,6 +54,7 @@ def mirror_local_tree(
         source_root=staging_root,
         pool_local=pool_local,
         baseline=pool_baseline,
+        publish_root=staging_root.with_name(f"{staging_root.name}.post-sync"),
     )
     if remove_missing:
         deleted = sorted(
@@ -108,6 +122,7 @@ def merge_post_cutover_changes(
     source_root: Path,
     pool_local: Path,
     baseline: Manifest,
+    publish_root: Path,
 ) -> dict[str, object]:
     """三方合并 rename 窗口内的 Legacy 变化，保留 Pool 新写入。
 
@@ -122,54 +137,83 @@ def merge_post_cutover_changes(
     遵守 quiesce/lock 协议，不属于本期。
     """
 
+    publish_owner = {
+        "schema": "skills-pool-layout-sync-publish.v1",
+        "pool_local": str(Path(os.path.abspath(pool_local))),
+        "publish_root": publish_root.name,
+    }
     source = snapshot_local(source_root)
     changed = {
         key
         for key in set(baseline) | set(source)
         if source.get(key) != baseline.get(key)
     }
-    applied: list[str] = []
-    conflicts: list[str] = sorted(key for key in changed if key not in source)
+    if not changed:
+        _remove_owned_publish_claim(
+            _publish_claim_root(
+                publish_root,
+                expected_owner=publish_owner,
+            )
+        )
+        _remove_owned_publish_root(
+            publish_root,
+            expected_owner=publish_owner,
+        )
+        return {
+            "applied": [],
+            "conflicts_preserved_in_pool": [],
+        }
 
-    upserts = sorted(
-        (key for key in changed if key in source),
-        key=lambda key: (key.count("/"), key),
-    )
-    for key in upserts:
-        source_path = source_root / key
-        target = pool_local / key
-        desired = source[key]
-        observed = _fingerprint(target)
-        if observed == desired:
-            continue
-        baseline_fingerprint = baseline.get(key)
-        if baseline_fingerprint is not None:
-            if observed == baseline_fingerprint and _replace_if_unchanged(
+    _prepare_publish_root(publish_root, expected_owner=publish_owner)
+    try:
+        applied: list[str] = []
+        conflicts: list[str] = sorted(key for key in changed if key not in source)
+
+        upserts = sorted(
+            (key for key in changed if key in source),
+            key=lambda key: (key.count("/"), key),
+        )
+        for key in upserts:
+            source_path = source_root / key
+            target = pool_local / key
+            desired = source[key]
+            observed = _fingerprint(target)
+            if observed == desired:
+                continue
+            baseline_fingerprint = baseline.get(key)
+            if baseline_fingerprint is not None:
+                if observed == baseline_fingerprint and _replace_if_unchanged(
+                    source=source_path,
+                    target=target,
+                    expected=baseline_fingerprint,
+                    desired=desired,
+                ):
+                    applied.append(key)
+                else:
+                    conflicts.append(key)
+                continue
+            if observed is not None:
+                conflicts.append(key)
+                continue
+            if not _create_if_absent(
                 source=source_path,
                 target=target,
-                expected=baseline_fingerprint,
                 desired=desired,
+                publish_root=publish_root,
             ):
-                applied.append(key)
-            else:
                 conflicts.append(key)
-            continue
-        if observed is not None:
-            conflicts.append(key)
-            continue
-        if not _create_if_absent(
-            source=source_path,
-            target=target,
-            desired=desired,
-        ):
-            conflicts.append(key)
-            continue
-        applied.append(key)
+                continue
+            applied.append(key)
 
-    return {
-        "applied": applied,
-        "conflicts_preserved_in_pool": conflicts,
-    }
+        return {
+            "applied": applied,
+            "conflicts_preserved_in_pool": conflicts,
+        }
+    finally:
+        _remove_owned_publish_root(
+            publish_root,
+            expected_owner=publish_owner,
+        )
 
 
 def snapshot_local(
@@ -240,6 +284,7 @@ def _create_if_absent(
     source: Path,
     target: Path,
     desired: Fingerprint,
+    publish_root: Path,
 ) -> bool:
     if _fingerprint(target) is not None:
         return False
@@ -253,7 +298,11 @@ def _create_if_absent(
             return False
         return _fingerprint(target) == desired
 
-    temporary = target.with_name(f".{target.name}.{uuid4().hex}.pool-sync")
+    temporary = (
+        publish_root / f".{target.name}.{uuid4().hex}.pool-sync"
+        if kind == "file"
+        else target.with_name(f".{target.name}.{uuid4().hex}.pool-sync")
+    )
     try:
         if kind == "file":
             shutil.copy2(source, temporary)
@@ -269,8 +318,10 @@ def _create_if_absent(
         return False
     try:
         if kind == "file":
-            os.link(temporary, target)
-            temporary.unlink()
+            if _fingerprint(temporary) != desired:
+                return False
+            if not atomic_rename_if_absent(temporary, target):
+                return False
         else:
             target.symlink_to(os.readlink(temporary))
             temporary.unlink()
@@ -340,6 +391,114 @@ def _remove_if_unchanged(*, target: Path, expected: Fingerprint) -> bool:
     except (FileNotFoundError, NotADirectoryError, OSError):
         return False
     return _fingerprint(target) is None
+
+
+def _prepare_publish_root(
+    publish_root: Path,
+    *,
+    expected_owner: dict[str, str],
+) -> None:
+    claim_root = _publish_claim_root(
+        publish_root,
+        expected_owner=expected_owner,
+    )
+    owner_bytes = json.dumps(
+        expected_owner,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    _remove_owned_publish_claim(claim_root)
+    _remove_owned_publish_root(
+        publish_root,
+        expected_owner=expected_owner,
+    )
+    claim_root.mkdir()
+    owner_path = claim_root / _PUBLISH_OWNER_FILENAME
+    try:
+        with owner_path.open("x", encoding="utf-8") as stream:
+            stream.write(owner_bytes.decode("utf-8"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        claim_fd = os.open(claim_root, os.O_RDONLY)
+        try:
+            os.fsync(claim_fd)
+        finally:
+            os.close(claim_fd)
+        if not atomic_rename_if_absent(claim_root, publish_root):
+            raise OSError(
+                errno.EEXIST,
+                "Pool publish staging was concurrently claimed",
+                str(publish_root),
+            )
+        parent_fd = os.open(publish_root.parent, os.O_RDONLY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    except OSError:
+        _remove_path(claim_root)
+        raise
+
+
+def _publish_claim_root(
+    publish_root: Path,
+    *,
+    expected_owner: dict[str, str],
+) -> Path:
+    owner_bytes = json.dumps(
+        expected_owner,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    owner_digest = hashlib.sha256(owner_bytes).hexdigest()[:16]
+    return publish_root.with_name(
+        f"{publish_root.name}.owner-{owner_digest}"
+    )
+
+
+def _remove_owned_publish_claim(claim_root: Path) -> None:
+    if not claim_root.exists() and not claim_root.is_symlink():
+        return
+    if claim_root.is_symlink() or not claim_root.is_dir():
+        raise OSError(
+            errno.EEXIST,
+            "Pool publish owner claim is not a directory",
+            str(claim_root),
+        )
+    _remove_path(claim_root)
+
+
+def _remove_owned_publish_root(
+    publish_root: Path,
+    *,
+    expected_owner: dict[str, str],
+) -> None:
+    if not publish_root.exists() and not publish_root.is_symlink():
+        return
+    if publish_root.is_symlink() or not publish_root.is_dir():
+        raise OSError(
+            errno.EEXIST,
+            "Pool publish staging is not an owned directory",
+            str(publish_root),
+        )
+    owner_path = publish_root / _PUBLISH_OWNER_FILENAME
+    try:
+        owner = json.loads(owner_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise OSError(
+            errno.EEXIST,
+            "Pool publish staging ownership is unproven",
+            str(publish_root),
+        ) from error
+    if owner != expected_owner:
+        raise OSError(
+            errno.EEXIST,
+            "Pool publish staging owner does not match",
+            str(publish_root),
+        )
+    _remove_path(publish_root)
 
 
 def _remove_path(path: Path) -> None:

@@ -167,6 +167,20 @@ source "${SCRIPT_DIR}/modules/engine.sh"
 source "${SCRIPT_DIR}/modules/baas.sh"
 source "${SCRIPT_DIR}/modules/backend.sh"
 source "${SCRIPT_DIR}/modules/frontend.sh"
+# Best-effort selection at source time: a broken variant config (typo'd
+# FRONTEND_VARIANT, a TEAMCLAW_DIR that was moved/deleted) must not brick
+# read-only and lifecycle commands — `stop all` has to keep working so a
+# running stack is never stranded without a script path to shut it down.
+# The selection falls back to the legacy mapping for those commands, while
+# FRONTEND_VARIANT keeps its (invalid) value: main() re-runs the strict
+# fail-fast for setup/start/restart, which fails with the same error as
+# before anything is built.
+if ! frontend_select_variant; then
+    log_warn "FRONTEND_VARIANT='${FRONTEND_VARIANT:-}' cannot be selected; using the legacy frontend mapping for read-only/lifecycle commands. start/setup will fail fast with the same error."
+    FRONTEND_DIR="${PROJECT_ROOT}/src/frontend"
+    FRONTEND_DEFAULT_SCRIPT="devs:local:oss"
+    FRONTEND_ROOT_ID="root-master"
+fi
 source "${SCRIPT_DIR}/modules/gateway.sh"
 source "${SCRIPT_DIR}/modules/bcs.sh"
 source "${SCRIPT_DIR}/modules/bcsfuse.sh"
@@ -410,6 +424,7 @@ show_help() {
     echo ""
     echo "Commands:"
     echo "  install-tools                  Install/upgrade dev tools (node, npm, uv, openclaw, optional Claude Code, ...)"
+    echo "  frontend-pull                  Pull the teamclaw frontend checkout (TEAMCLAW_DIR) to the tip of its current branch"
     echo "  setup [service|group|all]      Prepare artifacts/config/links; rebuild stale binaries"
     echo "  start [service|group|all]      Start target (default: current all group)"
     echo "  stop [service|group|all]       Stop target (default: current all group)"
@@ -789,13 +804,15 @@ setup_all_and_start() {
         show_local_mode_info
     fi
 
-    # 根据模式设置环境变量
+    # 根据模式设置环境变量。
+    # SERVER_ENV 不在这层 export：backend 的启动命令自带 SERVER_ENV=dev
+    # (modules/backend.sh)，而 gateway 视它为用户输入、local 兜底——这里
+    # 一旦 export 会把 gateway 推去读不存在的 application-dev.yaml，并跳过
+    # app.sh 仅在 local 分支武装的 dev 签名密钥（见 test_singlebox_server_env_dispatch.sh）。
     if [ "$LOCAL_MODE" = true ]; then
-        export SERVER_ENV=dev
         export LOCAL_DEV_MODE=true
     else
         export DATABASE_MODE=mysql
-        export SERVER_ENV=dev
     fi
     resolve_bcs_server_env
 
@@ -842,6 +859,7 @@ main() {
     # 解析命令行参数
     local command=""
     local services=()
+    local frontend_pull_args=()
 
     while [ $# -gt 0 ]; do
         case $1 in
@@ -983,6 +1001,18 @@ main() {
                 command="install-tools"
                 shift
                 ;;
+            frontend-pull)
+                # A command, not a service. Passthrough argv: frontend_pull
+                # validates its own options, and an unknown flag must be
+                # refused loudly by the command instead of being eaten by
+                # the generic option parser.
+                command="frontend-pull"
+                shift
+                while [ $# -gt 0 ]; do
+                    frontend_pull_args+=("$1")
+                    shift
+                done
+                ;;
             status|check)
                 command="$1"
                 shift
@@ -1014,14 +1044,24 @@ main() {
         esac
     done
 
-    # 根据模式设置环境变量
+    # 根据模式设置环境变量（SERVER_ENV 不 export 的原因见上方 setup_all_and_start 内注释）
     if [ "$LOCAL_MODE" = true ]; then
-        export SERVER_ENV=dev
         export LOCAL_DEV_MODE=true
     else
         export DATABASE_MODE=mysql
-        export SERVER_ENV=dev
     fi
+
+    # Strict variant fail-fast HERE, before directories/hook/model prep —
+    # the source-time selection (top of file) is deliberately best-effort so
+    # stop/status/clean/help stay usable with a broken FRONTEND_VARIANT
+    # config (a live stack must always keep a script path to stop it), but
+    # building/launching must refuse before anything is built.
+    case "$command" in
+        setup|start|restart|"")
+            frontend_select_variant || exit 1
+            ;;
+    esac
+
     apply_singlebox_mode_defaults
     resolve_bcs_server_env
 
@@ -1031,7 +1071,7 @@ main() {
     if [ "$STANDALONE_MODE" = true ]; then
         mkdir -p "${STANDALONE_RUNTIME_DIR}"
     fi
-    if [ -n "$command" ] && [ "$command" != "install-tools" ]; then
+    if [ -n "$command" ] && [ "$command" != "install-tools" ] && [ "$command" != "frontend-pull" ]; then
         if [ "$STANDALONE_MODE" = true ]; then
             show_standalone_mode_info
         elif [ "$LOCAL_MODE" = true ]; then
@@ -1086,6 +1126,16 @@ main() {
     case "$command" in
         install-tools)
             toolchain_setup
+            ;;
+        frontend-pull)
+            # A command, not a service: the strict setup/start/restart variant
+            # gate above deliberately does not apply (a pull never demands a
+            # startable stack), but the target checkout must still resolve —
+            # frontend_select_variant's teamclaw arm demands an existing
+            # TEAMCLAW_DIR, and frontend_pull itself hard-refuses an unset
+            # TEAMCLAW_DIR under the other variants.
+            frontend_select_variant || exit 1
+            frontend_pull ${frontend_pull_args[@]+"${frontend_pull_args[@]}"}
             ;;
         setup)
             load_engine_type

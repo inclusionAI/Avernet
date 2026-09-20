@@ -183,6 +183,7 @@ def _skill_sets(db: _Database) -> SkillSetManagementService:
         audit_log_repo=_AuditLog(),
         mcp_center=object(),
         mcp_auth=object(),
+        mcp_config=object(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )

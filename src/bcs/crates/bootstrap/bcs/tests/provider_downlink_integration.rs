@@ -77,6 +77,104 @@ async fn provider_bot_registers_and_is_routable_without_ws_connection() {
 }
 
 #[tokio::test]
+async fn provider_sse_final_without_timestamp_is_relayed_and_in_session_history() {
+    assert_sse_final_without_timestamp_in_history(false).await;
+}
+
+#[tokio::test]
+async fn provider_sse_deltas_then_final_without_timestamp_persist_full_answer_once() {
+    assert_sse_final_without_timestamp_in_history(true).await;
+}
+
+async fn assert_sse_final_without_timestamp_in_history(include_deltas: bool) {
+    let answer = "完整 SSE answer";
+    let mut events = Vec::new();
+    if include_deltas {
+        events.push(json!({"runId": "provider-run", "seq": 1,
+            "state": "delta", "deltaText": "完整 SSE "}));
+        events.push(json!({"runId": "provider-run", "seq": 2,
+            "state": "delta", "deltaText": "answer"}));
+    }
+    events.push(json!({"runId": "provider-run", "seq": 3, "state": "final",
+        "ts": 1786260001000_u64,
+        "message": {"role": "assistant", "content": [{"type": "text", "text": answer}]}}));
+    let stream: String = events.iter().map(|event| format!("event: chat\ndata: {event}\n\n")).collect();
+    let capture = ProviderCapture::default();
+    let app = Router::new().route("/webhook", post({
+        let capture = capture.clone();
+        move |headers: HeaderMap, Json(body): Json<Value>| {
+            let capture = capture.clone();
+            let stream = stream.clone();
+            async move {
+                let method = body["method"].as_str().unwrap_or_default().to_string();
+                capture.requests.lock().await.push(CapturedProviderRequest {
+                    authorization: headers.get(header::AUTHORIZATION)
+                        .and_then(|value| value.to_str().ok()).map(str::to_string),
+                    body,
+                });
+                if method == "chat.send" {
+                    Response::builder().header(header::CONTENT_TYPE, "text/event-stream")
+                        .body(Body::from(stream)).expect("SSE response")
+                } else {
+                    Json(json!({"ok": true})).into_response()
+                }
+            }
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+    let provider = ProviderServer { capture, addr, _handle: handle };
+    let bots_dir = create_temp_bots_dir();
+    let (bcs_addr, _bcs_server) = start_test_server(&bots_dir.path().to_path_buf()).await;
+    let client = reqwest::Client::new();
+    let mut driver = MockBot::connect(bcs_addr).await;
+    driver.register("Driver", &["drive"], bcs_addr).await;
+    let registered = register_provider_bot_with_protocol(
+        &client, bcs_addr, provider.url(), "timestamp-provider", "timestamp-bot", "2.0",
+    ).await;
+    let group_id = create_group(
+        &client, bcs_addr, &driver.token, &driver.bot_id, &registered.bot_uuid,
+    ).await;
+    provider.capture.wait_for_method("chat.inject").await;
+    provider.capture.clear().await;
+    let sessions: Value = client
+        .get(format!("http://{bcs_addr}/groups/{group_id}/sessions"))
+        .bearer_auth(&driver.token).send().await.unwrap()
+        .error_for_status().unwrap().json().await.unwrap();
+    let session_id = sessions["items"][0]["id"].as_str().expect("initial session");
+    client.post(format!("http://{bcs_addr}/groups/{group_id}/chat"))
+        .bearer_auth(&driver.token)
+        .json(&json!({
+            "session_id": session_id,
+            "from": driver.bot_id,
+            "message": format!("@{} please answer", registered.bot_uuid),
+        }))
+        .send().await.unwrap().error_for_status().unwrap();
+    let chat_send = provider.capture.wait_for_method("chat.send").await;
+    assert_eq!(chat_send.body["session_id"], session_id);
+    let frame = wait_for_bot_frame_containing(&mut driver, answer).await;
+    assert_eq!(frame["method"], "chat.send");
+    // This mock speaks the legacy WS version, which carries the session in
+    // bcs_group_id; Provider HTTP above uses the explicit session_id field.
+    assert_eq!(frame["params"]["bcs_group_id"], session_id);
+
+    // A Human history view reads public messages, so the Provider's private
+    // context copy cannot hide a regression in final relay/persistence.
+    let history: Vec<Value> = client
+        .get(format!("http://{bcs_addr}/sessions/{session_id}/messages"))
+        .header("X-Mock-User-Id", "11111111")
+        .send().await.expect("get session history")
+        .error_for_status().expect("history status")
+        .json().await.expect("history messages");
+    let replies: Vec<_> = history.iter()
+        .filter(|message| message["sender"] == registered.bot_uuid)
+        .collect();
+    assert_eq!(replies.len(), 1, "final must be persisted once: {history:?}");
+    assert_eq!(replies[0]["content"], answer);
+}
+
+#[tokio::test]
 async fn provider_final_callback_uses_run_context_not_request_group() {
     let provider = start_provider_webhook().await;
     let bots_dir = create_temp_bots_dir();

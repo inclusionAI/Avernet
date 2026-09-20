@@ -139,7 +139,7 @@ async def test_get_bot_stage_binding_info_paths():
     assert resp.message == "查询成功"
     assert resp.data == {"bot_id": "bot", "binding_id": 1}
     service.get_bot_stage_binding_info.assert_called_once_with(
-        bot_id="bot", owner_id="owner-1", stage="online"
+        bot_id="bot", owner_id="owner-1", stage="online", default_tag=None
     )
 
     service.get_bot_stage_binding_info.side_effect = BotNotFoundError("bot missing")
@@ -386,6 +386,60 @@ async def test_restart_publish_success_and_errors():
         resp = await router_publish.restart_publish(1, user=_USER, flow_service=flow)
         assert resp.error_code == code
         assert resp.success is False
+
+
+@pytest.mark.asyncio
+async def test_restart_in_place_success_failure_and_no_secret_log(caplog):
+    caplog.set_level("INFO")
+    flow = MagicMock()
+    flow.restart_bot.return_value = {"success": True, "stage": "online", "bot_uuid": "BOT-restart"}
+    resp = await router_publish.restart_publish_in_place(1, user=_USER, flow_service=flow)
+    assert resp.success is True
+    flow.restart_bot.assert_called_once_with(publish_id=1, operator="u1", in_place=True)
+    request = next(message for message in caplog.messages if "request publish_id=1" in message)
+    assert "system=backend direction=inbound method=POST" in request
+    assert "route=/{publish_id}/restart-in-place" in request
+    assert "operator=u1 in_place=true" in request
+    response = next(message for message in caplog.messages if "response publish_id=1" in message)
+    assert "stage=online in_place=true success=True bot_uuid=BOT-restart" in response
+    assert float(response.rsplit("elapsed_ms=", 1)[1]) >= 0
+    caplog.clear()
+    flow.restart_bot.return_value = {"success": False, "message": "not restartable"}
+    assert not (await router_publish.restart_publish_in_place(1, user=_USER, flow_service=flow)).success
+    assert any("response publish_id=1" in message and "in_place=true success=False" in message
+               for message in caplog.messages)
+    caplog.clear()
+    flow.restart_bot.side_effect = RuntimeError("token=test-token")
+    resp = await router_publish.restart_publish_in_place(1, user=_USER, flow_service=flow)
+    assert resp.error_code == 500
+    failure = next(message for message in caplog.messages if "failure publish_id=1" in message)
+    assert "in_place=true error_type=RuntimeError error_code=500" in failure
+    assert float(failure.rsplit("elapsed_ms=", 1)[1]) >= 0
+    assert "test-token" not in caplog.text
+    assert "test-token" not in resp.message
+    caplog.clear()
+    flow.restart_bot.reset_mock()
+    resp = await router_publish.restart_publish_in_place(1, user=_ANON, flow_service=flow)
+    assert resp.error_code == 400
+    flow.restart_bot.assert_not_called()
+    assert any("response publish_id=1 in_place=true success=false error_code=400" in message
+               for message in caplog.messages)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error,code", [
+    (PublishNotFoundError("missing"), 404),
+    (PublishStatusInvalidError("bad stage"), 400),
+    (PublishFlowServiceError("failed"), 500),
+])
+async def test_restart_in_place_domain_error_mapping(error, code):
+    flow = MagicMock()
+    flow.restart_bot.side_effect = error
+    resp = await router_publish.restart_publish_in_place(1, user=_USER, flow_service=flow)
+    assert resp.error_code == code
+    assert not resp.success
+    if code != 500:
+        assert resp.message == str(error)
 
 
 @pytest.mark.unit

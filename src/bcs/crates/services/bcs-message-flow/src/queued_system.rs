@@ -105,7 +105,8 @@ impl SystemMessageQueueService for QueuedSystemAdmission {
                 expire_at_ms: expiry, event });
             origins.push(origin);
         }
-        let admitted = service.admit_batch(commands).await.map_err(|_| invalid("system queue admission persistence failed"))?;
+        let admitted = service.admit_batch(commands).await.map_err(|error|
+            invalid(&format!("system queue admission persistence failed: {error}")))?;
         let mut recipients = Vec::new();
         for (result, origins) in admitted.into_iter().zip(origins) {
             for delivery in result.deliveries {

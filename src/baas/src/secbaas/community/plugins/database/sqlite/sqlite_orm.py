@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session, sessionmaker
 
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.database import DataSourcePlugin
+from secbaas.community.spi.database import (
+    BAAS_ORM_MODULES,
+    BAAS_OWNED_TABLES,
+    DataSourcePlugin,
+)
 
 logger = get_logger("database")
 
@@ -94,34 +98,13 @@ class SqliteOrmPlugin(DataSourcePlugin):
         logger.info("SqliteOrmPlugin initialized successfully")
 
     def create_all(self) -> None:
-        """Create all ORM tables.
+        """Create the ORM tables owned by the BAAS service.
 
-        Imports every known ORM model module first so that
-        ``Base.metadata`` is populated, then creates all tables.
-
-        This replaces the previous bootstrap-level model import.
+        The ``baas_*`` tables plus ``ac_lock_table`` (BAAS-exclusive). The
+        ``ac_bots`` / ``ac_bot_publish`` / ``ac_entity_device_binding`` tables
+        are created by the AgentClaw backend; see ``BAAS_OWNED_TABLES``.
         """
-        _orm_models = [
-            "secbaas.community.core.repository.ac_bot._orm_model",
-            "secbaas.community.core.repository.ac_bot_publish._orm_model",
-            "secbaas.community.core.repository.api_gateway._orm_model",
-            "secbaas.community.core.repository.arca_ttl._orm_model",
-            "secbaas.community.core.repository.bot._orm_model",
-            "secbaas.community.core.repository.bot_device_rel._orm_model",
-            "secbaas.community.core.repository.bot_run._orm_model",
-            "secbaas.community.core.repository.bot_session._orm_model",
-            "secbaas.community.core.repository.device._orm_model",
-            "secbaas.community.core.repository.device_binding._orm_model",
-            "secbaas.community.core.repository.device_template._orm_model",
-            "secbaas.community.core.repository.distributed_lock._orm_model",
-            "secbaas.community.core.repository.local_user_machine._orm_model",
-            "secbaas.community.core.repository.publish._orm_model",
-            "secbaas.community.core.repository.publish_batch._orm_model",
-            "secbaas.community.core.repository.publish_record._orm_model",
-            "secbaas.community.core.repository.system_config._orm_model",
-            "secbaas.community.core.repository.tenant._orm_model",
-            "secbaas.community.core.repository.ws_relay_session._orm_model",
-        ]
+        _orm_models = list(BAAS_ORM_MODULES)
         for _mod in _orm_models:
             try:
                 __import__(_mod)
@@ -133,12 +116,28 @@ class SqliteOrmPlugin(DataSourcePlugin):
 
         from secbaas.community.spi.database import Base
 
-        for table in Base.metadata.sorted_tables:
+        baas_tables = [
+            t for t in Base.metadata.sorted_tables if t.name in BAAS_OWNED_TABLES
+        ]
+        for table in baas_tables:
             for col in table.primary_key.columns.values():
                 if str(col.type).upper() == "BIGINT":
                     col.type = Integer()
 
-        Base.metadata.create_all(self._sync_engine)
+        try:
+            Base.metadata.create_all(self._sync_engine, tables=baas_tables)
+        except Exception as _exc:  # pragma: no cover - multi-worker cold-start race
+            # sofapy boots several workers that create the schema concurrently; two
+            # can pass checkfirst for the same table and one hits "already exists"
+            # (MySQL/MariaDB 1050; SQLite analogous). The table exists, so succeed.
+            if "already exists" in str(_exc).lower() or "1050" in str(_exc):
+                logger.warning(
+                    "SqliteOrmPlugin: table already exists during concurrent "
+                    "create_all (multi-worker race) — treating as success: %s",
+                    _exc,
+                )
+            else:
+                raise
 
         logger.info("SqliteOrmPlugin: tables created")
 

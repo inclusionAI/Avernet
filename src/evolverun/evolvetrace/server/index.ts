@@ -30,6 +30,7 @@ import { createAuthRouter } from "./routes/auth.js";
 import { createTCLogRouter } from "./routes/tclog.js";
 import { createSandboxQueryRouter } from "./routes/sandbox-query.js";
 import { createFacadesRouter } from "./routes/facades.js";
+import { createApprovalRouter } from "./routes/approval.js";
 import { createInternalRouter, type InternalRepos } from "./routes/internal/index.js";
 import { signatureMiddleware } from "./middleware/signature.js";
 import { adminAuthMiddleware } from "./middleware/admin-auth.js";
@@ -128,6 +129,7 @@ async function main(extensions?: EvolvetraceExtensions): Promise<void> {
     flowRunRepo, nodeExecRepo,
   ));
   app.use("/api/facades", createFacadesRouter(facadeRepo));
+  app.use("/api/approval", createApprovalRouter(db));
   app.use("/api/tclog", createTCLogRouter(db, flowRunRepo, botPermRepo));
   app.use("/api/sandbox-query", createSandboxQueryRouter({ sandboxQueryService }));
 

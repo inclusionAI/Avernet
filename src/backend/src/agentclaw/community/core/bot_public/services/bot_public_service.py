@@ -492,6 +492,9 @@ class BotPublicService(BotPublicServiceProtocol):
         operator_id = operator.staff_id if operator else owner_id
         ext = bot.get("ext") or {}
 
+        if public == "1" and ext.get("digital_employee"):
+            raise BotPublicServiceError("已绑定数字员工的 Bot 不支持发布到广场")
+
         # Compute access mode and update passport
         access_mode = _resolve_access_mode(public, friend_approval)
 

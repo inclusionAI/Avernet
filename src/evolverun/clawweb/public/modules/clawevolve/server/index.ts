@@ -18,3 +18,12 @@ export { BenchTemplateVersionRepository } from "./repositories/bench-template-ve
 export { BenchRunRepository } from "./repositories/bench-run-repository.js";
 export { BenchTaskResultRepository } from "./repositories/bench-task-result-repository.js";
 export type { ObjectStore, StoredObject } from "./services/object-storage/oss-object-store.js";
+export { createSessionAnalysisRouter } from "./routes/session-analysis.js";
+export { AisTaskRunner, type AisTaskDefinition } from "./services/ais/ais-task-runner.js";
+export { reconcileSessionAis, startSessionAisMonitor } from "./services/ais/session-ais-monitor.js";
+export type {
+  AisExecutor,
+  AisJobStatusDetail,
+  AisStatus,
+  SessionAisOptions,
+} from "./contracts/ais-executor.js";

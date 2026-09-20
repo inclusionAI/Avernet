@@ -246,6 +246,10 @@ export const insightApi = {
     });
   },
 
+  adminForceResolved(improvementId: number, input: { version: number; reason?: string }): Promise<ImprovementView> {
+    return fetchJson(`${BASE}/admin/improvements/${encodeURIComponent(improvementId)}/force-resolved`, { method: "POST", body: JSON.stringify({ ...input, resolvedSource: "ADMIN_MANUAL" }) });
+  },
+
   adminMarkHandled(improvementId: number, version: number): Promise<ImprovementView> {
     return fetchJson(`${BASE}/admin/improvements/${encodeURIComponent(improvementId)}/handled`, {
       method: "POST",

@@ -125,80 +125,59 @@ SHOW INDEX FROM ac_skills_pool_rollout_audit;
 
 ## 灰度顺序
 
-1. 通过 `GET /rollout` 核对当前环境、配置版本、feature 状态、已晋级引擎、
-   精确白名单和对照样本。
-2. 通过 `POST /rollout/feature` 启用 rollout。初始配置固定
-   `enable_all=false`，不存在通配入口。
-3. 通过 `POST /rollout/promote` 独立人工晋级 OpenClaw、Claude Code、
-   AICoding 或 Hermes；各引擎可并行建立精确白名单批次并执行 B0--B2。
-   `promoted_engines` 始终按该固定引擎顺序存储为唯一的规范子集，例如
-   `["openclaw", "aicoding"]` 合法。接口保留可选
-   `acceptance_batch_id` 以兼容既有调用方，但晋级不会读取、校验或审计其他
-   引擎的验收；它不是跨引擎门禁。
-4. 通过 `POST /rollout/controls` 为当前批次登记至少一个同环境、同引擎、
-   未命中白名单的负对照，以及一个 Teclaw 对照。
-5. 通过 `POST /rollout/whitelist` 添加精确 `(owner_id, bot_id)` 条目和
-   `batch_id`。批次扩大仍逐 Bot 执行，不提供 `enable_all`。
-6. 容器生命周期事件会正常唤醒迁移；需要主动触发时使用
+1. 通过 `GET /rollout` 核对当前环境、Policy schema、revision、feature、
+   Engine Admission Switch 和当前 Bot/Owner/Environment 规则。
+2. 首次从 v1 切换前保存原始配置；新 Policy 的第一次成功写入会把当前
+   v1 精确 Bot 条目解析为 Bot 当前 Engine，并在同一个 CAS 事务升级成 v2。
+3. 通过 `POST /rollout/feature` 启用全局 feature；请求必须携带刚刚读取的
+   `expected_revision`（配置不存在时显式传 `null`）。
+4. 通过 `PUT /rollout/engines/openclaw/admission` 打开 OpenClaw Engine
+   Admission Switch。该开关优先于所有 allow 规则；关闭只阻止新 claim，
+   不取消已 claim Bot。
+5. 使用下列互相独立、全部按 Engine 隔离的规则逐步扩大：
+   - `PUT|DELETE /rollout/bots/{bot_id}/allow`：精确 Bot；
+   - `PUT|DELETE /rollout/bots/{bot_id}/exclude`：最高优先级精确排除；
+   - `PUT|DELETE /rollout/owners/{owner_id}`：Owner + Engine；
+   - `PUT|DELETE /rollout/environments/{engine}`：当前环境的指定 Engine。
+6. 每次写入后重新 `GET /rollout` 获取新 revision；不能用旧 revision 连续写。
+7. 容器生命周期事件会正常唤醒迁移；需要主动触发时使用
    `POST /bots/{bot_id}/wake`。只有已持久化为可重试失败的 Bot 才使用
    `/retry`。
-7. 通过 `GET /bots/{bot_id}` 检查单 Bot 证据，通过
-   `GET /batches/{batch_id}?engine=...` 生成批次验收报告。
-8. 只有批次报告 `promotion_ready=true` 且人工确认实际业务指标后，才调用
-   `POST /rollout/batches/accept` 冻结该批次的验收报告。扩大批次时，新
-   `batch_id` 必须引用当前引擎最近的 `acceptance_batch_id`。owner 全量和
-   环境全量仍要求各目标引擎已晋级、存在最近已验收批次且没有该引擎 open
-   batch；Backend 不会自动验收、扩大或晋级。
-9. 如需在当前环境内按员工覆盖其存量重启和未来新建 Bot，调用
-   `POST /rollout/owners`，传入精确 `owner_id`、`engine`、`enabled` 和该
-   引擎最近一次已验收的 `acceptance_batch_id`。规则按
-   `(owner_id, engine)` 隔离，不会越过该引擎的晋级和验收门禁，也不会影响
-   其他员工。
-   精确负对照优先于 owner 全量并保持 Legacy；关闭规则只阻止尚未认领的
-   Bot，已认领 Bot 继续前滚。
+8. 通过 `GET /bots/{bot_id}` 检查单 Bot 的 Engine、claim/layout、
+   `policy_revision` 和 `admission_reason`。历史
+   `GET /batches/{batch_id}?engine=...` 只用于旧数据排障，不参与新扩量决策。
 
-示例：预发 OpenClaw 验收完成后，为员工 `168944` 开启 owner 全量：
+示例：为员工 `168944` 开启预发 OpenClaw Owner rollout：
 
 ```json
 {
-  "owner_id": "168944",
   "engine": "openclaw",
-  "enabled": true,
-  "acceptance_batch_id": "openclaw-pre-canary-1",
-  "reason": "OpenClaw canary accepted; enable all owner bots in pre"
+  "expected_revision": "<GET /rollout returned revision>",
+  "reason": "OpenClaw owner validation passed in pre"
 }
 ```
 
-该请求只写当前 Backend 所属环境的 `full_rollout_owners`。它不会立即扫描并
+该请求只写当前 Backend 所属环境的 `owner_rollouts`。它不会立即扫描并
 重启员工名下所有 Bot；后续创建、重启、ARCA alive、BaaS publish-completed
 或人工 wake 事件会触发首次认领。
 
-移出白名单会返回 `claimed_before` 和 `claimed_after`。未认领 Bot 将不再开始
-迁移；已经认领或已经 Pool-active 的 Bot 保持同一
-`migration_generation` 前滚，不会因移出白名单而回退。
+移除 allow 规则后，未认领 Bot 将不再开始迁移；已经认领或已经 Pool-active
+的 Bot 保持同一 `migration_generation` 前滚，不会因策略收缩而回退。
 
-所有配置写请求必须附带非空 `reason`。写入使用配置 revision CAS；发生并发
-修改时返回 409，操作者必须重新读取配置。每次成功变更都会在配置
-`ac_skills_pool_rollout_audit` 独立追加环境隐含范围内的 action、batch、
-操作者、原因、前后 revision、生效时间及批次验收快照；配置与审计事件在同一
-事务中提交。`ac_common_config.ext_info` 只保存当前 revision 和最近操作摘要，
-不承担审计历史。
+所有配置写请求必须附带非空 `reason` 和 `expected_revision`。发生并发修改时
+返回 `409 POLICY_REVISION_CONFLICT`，操作者必须重新读取。每次成功变更继续在
+`ac_skills_pool_rollout_audit` 追加 action、Engine/目标 evidence、操作者、原因、
+前后 revision 和生效时间；新事件 `batch_id` 为空。配置与审计事件同事务提交。
 
-## 验收报告
+## 历史 Batch 兼容
 
-批次报告包含：
-
-- rollout 配置 ID、版本、feature 状态和引擎晋级状态；
-- `eligible`、`attempted`、`claimed`、`preparing`、`active`、
-  `rolling_back`、`failed`；
-- `success_rate` 和 `failure_distribution`；
-- 数据不一致失败、负对照与 Teclaw 对照健康状态；
-- 隔离区清理资格和最终 `promotion_ready`。
-
-`data_consistent=false` 表示批次存在 `DATA_INCONSISTENT`、
-`ROLLBACK_DATA_INCONSISTENT`、`ACTIVE_ENTRY_CONFLICT` 或
-`MAPPING_DATA_INVALID`。任何失败、缺少对照、对照被认领或引擎未晋级都会使
-`promotion_ready=false`。
+- 新 Backend 兼容读取 v1/v2，但所有新写只产生 v2。
+- `POST /rollout/promote|full|whitelist|whitelist/remove|owners|batches/accept|controls`
+  统一返回 `410 ROLLOUT_BATCH_API_RETIRED`，不翻译、不双写。
+- `GET /batches/{batch_id}` 暂时只读保留。确认运维脚本和 Postman Collection
+  已迁移、连续一个发布周期无旧 API 流量后再删除。
+- Backend 如需回滚到不识别 v2 的旧版本，必须同步恢复切换前备份的 v1 配置；
+  只收缩业务放量时使用 Engine Admission Switch 或删除规则，不回滚代码。
 
 ## 人工恢复
 
@@ -218,16 +197,17 @@ SHOW INDEX FROM ac_skills_pool_rollout_audit;
 | 新 Backend + 旧镜像无 marker，保持 Legacy | `test_reconcile_service.py::test_non_ready_runtime_keeps_legacy_without_data_plane_changes` |
 | 新镜像已有 marker、未命中白名单，不认领 | `test_claim_service.py::test_ineligible_bot_does_not_persist_layout_state` |
 | 精确命中后认领，移出白名单仍前滚 | `test_claim_service.py::test_claim_is_sticky_after_whitelist_removal` |
-| owner + engine 全量覆盖未来新建与后续重启，且不影响其他 owner/engine | `test_rollout_gate.py::test_owner_full_rollout_admits_future_and_restarted_bots_for_that_engine` 与 `test_operations.py::test_owner_full_rollout_requires_and_audits_latest_engine_acceptance` |
+| Owner + Engine 规则覆盖未来新建与后续重启，且不影响其他 Owner/Engine | `test_rollout_gate.py` 的 v2 Engine-scoped allow cases 与 `test_operations.py::test_owner_environment_and_exclusion_rules_are_independent` |
 | ONLINE Legacy 服务不原地迁移 | `test_claim_service.py::test_published_service_and_teclaw_do_not_claim` |
 | 四个文件型引擎使用各自 Pool 路径和结构桥 | `test_reconcile_service.py::test_ready_claimed_bot_completes_pool_activation`、`::test_claude_code_uses_its_own_pool_paths_for_full_activation`、`::test_aicoding_uses_its_own_pool_paths_for_full_activation`、`::test_hermes_h0_ready_uses_its_own_pool_paths_for_full_activation` |
 | 新旧镜像对应的不同 Bot 独立收敛：新镜像可激活，旧镜像保持 Legacy | `test_reconcile_service.py::test_mixed_image_bots_reconcile_independently_in_one_environment` |
 | Teclaw 不进入文件系统迁移 | `test_rollout_gate.py` 与 `test_claim_service.py` 的 Teclaw no-op 测试 |
 | 服务发布固定草稿布局并向容器传递 | `test_arca_snapshot_producer.py::test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact` 与 `::test_release_translates_frozen_layout_into_container_env` |
 | 服务重启、回滚和扩容继承冻结制品布局 | `test_publish_flow_service.py::test_restart_and_recreate_preserve_frozen_pool_layout`、`::test_execute_rollback_with_config_artifact` 与 `::test_scale_bot_success_prefers_bot_ext_device_count` |
-| 批次必须有健康负对照、Teclaw 对照且无数据不一致 | `test_operational_query.py` |
-| 各引擎可独立晋级；同一引擎扩大批次仍必须引用已冻结验收 | `test_operations.py::test_engine_promotion_audit_does_not_depend_on_another_engine_batch`、`::test_other_engine_can_promote_while_existing_engine_batch_is_open` 与 `::test_next_batch_requires_latest_persisted_acceptance` |
-| 非前缀多引擎环境全量仍逐一要求验收且无 open batch | `test_operations.py::test_environment_full_rollout_checks_every_non_prefix_promoted_engine` |
+| Engine Admission Switch 优先于所有 allow 规则 | `test_rollout_gate.py::test_v2_engine_switch_precedes_every_allow_rule` |
+| 精确 exclusion 优先于 Bot、Owner 和 Environment allow | `test_rollout_gate.py::test_v2_exclusion_precedes_exact_owner_and_environment_rules` |
+| v1 首次新写升级 v2，且不保留 Batch 门禁 | `test_operations.py::test_first_v2_write_converts_v1_without_batch_gates` |
+| 旧 Batch 写 API 明确退出，新 Policy API 维持 operator-only | `test_skills_pool_ops_router.py::test_batch_write_routes_are_gone` 与 endpoint coverage |
 
 镜像 preparation 脚本、Hermes H0 和各引擎 companion 的验收由对应镜像/引擎
 仓库 CI 承担；本 Backend 报告只读取已提交的控制面与运行时证据，不推断容器

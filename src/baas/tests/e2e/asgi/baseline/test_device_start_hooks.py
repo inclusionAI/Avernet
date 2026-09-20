@@ -288,10 +288,10 @@ class TestCallbackServerNonProd:
         """Verify callback-server health endpoints work in non-prod env.
 
         The _start_hook_dispatcher uses _get_callback_server() which reads
-        config based on environment (prod vs. pre/dev). In non-prod envs,
-        the pre callback host path is used. This test verifies that the
-        health-checker and related endpoints are reachable, which indirectly
-        validates that the service configured as callback_server is functional.
+        config based on environment (dev/pre/prod). Each env maps to its own
+        callback host path. This test verifies that the health-checker and
+        related endpoints are reachable, which indirectly validates that the
+        service configured as callback_server is functional.
         """
         # Health checker endpoint — primary callback server health probe
         resp = await api.client.get(api.bot_health_url())

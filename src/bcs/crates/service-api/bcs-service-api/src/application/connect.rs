@@ -7,6 +7,14 @@ use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestSta
 
 use crate::core::error::ServiceResult;
 use crate::principal::RequestAuthHeaders;
+pub use crate::port::repo::edge_grant::FriendListQuery;
+
+/// Enriched page; ordering and filtered total are supplied by the repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FriendEntriesPage {
+    pub items: Vec<FriendListEntry>,
+    pub total: u64,
+}
 
 /// Outcome of `create_connect`. Mirrors `POST /friends/request` response.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +88,14 @@ pub trait ConnectService: Send + Sync {
 
     /// Friend list (any direction, default-profile edge), enriched.
     async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>>;
+
+    /// Bounded friend list with the same directional semantics as list_friends.
+    /// Filtering and pagination MUST run in the repository, not on a full list.
+    async fn list_friends_paginated(
+        &self,
+        actor: &str,
+        query: FriendListQuery,
+    ) -> ServiceResult<FriendEntriesPage>;
 
     /// Owner inbox / sent list (`GET /friends/requests`). Paginated.
     async fn list_requests(

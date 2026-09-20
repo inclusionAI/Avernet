@@ -176,6 +176,31 @@ SSE comment heartbeat 是纯传输保活：
 
 ## 3. chat 事件
 
+所有 `chat` 状态（`delta/final/error/aborted`）携带 `message` 时，使用同一套
+消息结构和时间字段规则：
+
+| 字段 | 要求 | 语义 |
+| --- | --- | --- |
+| `message.role` | 携带 `message` 时必填 | 消息角色，字符串 |
+| `message.content` | 携带 `message` 时必填 | 消息内容块数组 |
+| `message.timestamp` | 可选 | 消息时间，Unix 毫秒非负整数；有值时原样保留 |
+| 外层 `ts` | 推荐，非必填 | Provider 生成该事件的 Unix 毫秒时间，用于事件延迟观测 |
+
+BCS 在 Provider SSE 入口将消息转换为内部 `MessageContent` 前补齐缺失的
+`message.timestamp`：优先使用可解析为 `u64` 的外层 `ts`；外层 `ts` 也缺失或
+不可用时，使用该帧的 BCS 接收时间。补值只作用于消息副本，不修改原始 SSE
+事件；已提供的 `message.timestamp`（包括 `0`）不会被覆盖。
+
+此兼容只针对字段缺失。显式传入 `null`、字符串、负数等非法 timestamp，或
+`role/content` 结构错误时，仍按原有消息校验处理并告警，不会用补值掩盖错误。
+没有 `message` 的事件不会仅因补时间而生成消息；`errorMessage` 的正文兜底
+保持原有行为。
+
+两个时间字段不必相等：`message.timestamp` 描述消息本身，`ts` 描述本次事件。
+BCS 的事件去重仍使用 `seq`，路由仍使用可信 run context；session 历史查询
+返回的时间仍来自持久化记录的 `created_at`。上述补值规则只适用于 Provider
+SSE 入站，不改变共享 `MessageContent` 类型或 callback / WebSocket 契约。
+
 ### 3.1 delta
 
 ```http
