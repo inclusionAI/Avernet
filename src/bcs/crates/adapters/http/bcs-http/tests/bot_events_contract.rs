@@ -11,6 +11,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
+use base64::Engine;
 use bcs_bot::{BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_http::{
@@ -1546,10 +1547,38 @@ async fn bot_events_routes_jwt_shaped_token_to_agentpass_before_static_lookup() 
     assert_eq!(events[0].bot_id, agentpass_bot.bot_uuid);
 }
 
+fn diagnostic_jwt(header: Value, payload: Value, signature: &[u8]) -> String {
+    let encode = |bytes: &[u8]| {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    };
+    format!(
+        "{}.{}.{}",
+        encode(&serde_json::to_vec(&header).unwrap()),
+        encode(&serde_json::to_vec(&payload).unwrap()),
+        encode(signature),
+    )
+}
+
 #[tokio::test]
-async fn agentpass_resolve_returns_agent_code_binding_and_bot() {
+async fn agentpass_resolve_returns_agent_code_binding_bot_and_complete_jwt() {
+    let jwt_header = json!({
+        "alg": "RS256",
+        "kid": "agentpass-key-1",
+        "typ": "JWT"
+    });
+    let jwt_payload = json!({
+        "act": "agent-code-1",
+        "sno": "001234",
+        "sub": "operator-account",
+        "enabled": true,
+        "sequence": 7,
+        "roles": ["reviewer", "planner"],
+        "context": { "region": "cn", "optional": null }
+    });
+    let signature = b"distinct-agentpass-signature";
+    let token = diagnostic_jwt(jwt_header.clone(), jwt_payload.clone(), signature);
     let resolver = StaticAgentpassResolver::new(HashMap::from([(
-        "agentpass.header.sig".to_string(),
+        token.clone(),
         "agent-code-1".to_string(),
     )]));
     let TestApp {
@@ -1573,7 +1602,7 @@ async fn agentpass_resolve_returns_agent_code_binding_and_bot() {
                 .method("POST")
                 .uri("/providers/agentpass/resolve")
                 .header("X-BCN-Provider-Id", registered.provider_id.as_str())
-                .header("authorization", "Bearer agentpass.header.sig")
+                .header("authorization", format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1581,6 +1610,13 @@ async fn agentpass_resolve_returns_agent_code_binding_and_bot() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
     let body = response_json(response).await;
     assert_eq!(body["agent_code"], "agent-code-1");
     assert_eq!(body["provider_bot_binding"]["provider_id"], registered.provider_id);
@@ -1589,10 +1625,32 @@ async fn agentpass_resolve_returns_agent_code_binding_and_bot() {
     assert_eq!(body["bot"]["bot_uuid"], registered.bot_uuid);
     assert_eq!(body["bot"]["capabilities"]["name"], "Code Reviewer");
     assert!(body["bot"].get("dynamic_status").is_none());
+    assert_eq!(body["jwt"]["header"], jwt_header);
+    assert_eq!(body["jwt"]["payload"], jwt_payload);
+    assert_eq!(body["jwt"]["signature"]["present"], true);
+    assert_eq!(body["jwt"]["signature"]["byte_length"], signature.len());
+    assert_eq!(body["jwt"]["agentpass_resolved"], true);
+    assert!(body["jwt"].get("token").is_none());
+    assert!(body["jwt"]["signature"].get("value").is_none());
+    let serialized = body.to_string();
+    let signature_segment = token.rsplit('.').next().unwrap();
+    assert!(!serialized.contains(&token));
+    assert!(!serialized.contains(signature_segment));
 }
 
 #[tokio::test]
-async fn agentpass_resolve_returns_nulls_when_token_cannot_be_resolved() {
+async fn agentpass_resolve_formats_jwt_when_token_cannot_be_resolved() {
+    let jwt_header = json!({ "alg": "RS256", "typ": "JWT" });
+    let jwt_payload = json!({
+        "act": "unbound-agent",
+        "sno": "009999",
+        "custom": { "values": [1, false, null] }
+    });
+    let token = diagnostic_jwt(
+        jwt_header.clone(),
+        jwt_payload.clone(),
+        b"unresolved-signature",
+    );
     let TestApp { app, .. } = test_app(Arc::new(StaticAgentpassResolver::default()));
 
     let response = app
@@ -1601,7 +1659,7 @@ async fn agentpass_resolve_returns_nulls_when_token_cannot_be_resolved() {
                 .method("POST")
                 .uri("/providers/agentpass/resolve")
                 .header("X-BCN-Provider-Id", "prv_missing")
-                .header("authorization", "Bearer unknown.header.sig")
+                .header("authorization", format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1609,10 +1667,92 @@ async fn agentpass_resolve_returns_nulls_when_token_cannot_be_resolved() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
     let body = response_json(response).await;
     assert!(body["agent_code"].is_null());
     assert!(body["provider_bot_binding"].is_null());
     assert!(body["bot"].is_null());
+    assert_eq!(body["jwt"]["header"], jwt_header);
+    assert_eq!(body["jwt"]["payload"], jwt_payload);
+    assert_eq!(body["jwt"]["agentpass_resolved"], false);
+}
+
+#[tokio::test]
+async fn agentpass_resolve_reports_bounded_error_for_malformed_jwt() {
+    let TestApp { app, .. } = test_app(Arc::new(StaticAgentpassResolver::default()));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/providers/agentpass/resolve")
+                .header("X-BCN-Provider-Id", "prv_missing")
+                .header("authorization", "Bearer not-base64.e30.signature")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store")
+    );
+    let body = response_json(response).await;
+    assert!(body["agent_code"].is_null());
+    assert!(body["jwt"]["header"].is_null());
+    assert!(body["jwt"]["payload"].is_null());
+    assert_eq!(body["jwt"]["parse_error"], "invalid_header_encoding");
+    assert_eq!(body["jwt"]["agentpass_resolved"], false);
+}
+
+#[tokio::test]
+async fn agentpass_resolve_does_not_log_token_or_claims() {
+    let jwt_header = json!({ "alg": "RS256", "typ": "JWT" });
+    let jwt_payload = json!({
+        "act": "agent-code-log-sentinel",
+        "sno": "staff-number-log-sentinel",
+        "sub": "operator-log-sentinel"
+    });
+    let token = diagnostic_jwt(jwt_header, jwt_payload, b"signature-log-sentinel");
+    let resolver = StaticAgentpassResolver::new(HashMap::from([(
+        token.clone(),
+        "agent-code-log-sentinel".to_string(),
+    )]));
+    let TestApp { app, .. } = test_app(Arc::new(resolver));
+    let request_token = token.clone();
+
+    let logs = capture_tracing_logs(async move {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/providers/agentpass/resolve")
+                    .header("X-BCN-Provider-Id", "provider-log-sentinel")
+                    .header("authorization", format!("Bearer {request_token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let _ = response_json(response).await;
+    })
+    .await;
+
+    assert!(!logs.contains(&token));
+    assert!(!logs.contains("staff-number-log-sentinel"));
+    assert!(!logs.contains("operator-log-sentinel"));
 }
 
 #[tokio::test]
