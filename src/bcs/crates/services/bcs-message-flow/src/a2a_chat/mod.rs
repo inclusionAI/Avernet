@@ -1160,7 +1160,11 @@ fn build_chat_send_frame(
         // caller's local polling deadline or the BCS run lifecycle deadline.
         timeout_ms: Some(A2A_DOWNSTREAM_EXECUTION_TIMEOUT_MS),
         idempotency_key: None,
-        bcs_session_id: None,
+        // V3 keeps the execution session separate from the compatibility
+        // `bcs_group_id` field. Direct chats do not have a real group, but
+        // their resolved session key is still the trusted run scope that the
+        // plugin must echo on uplink events.
+        bcs_session_id: Some(session_key.to_string()),
         tags: tags.to_vec(),
         attachments: Vec::new(),
     };

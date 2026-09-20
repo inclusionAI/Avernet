@@ -159,7 +159,11 @@ impl CollaborationRuntime {
         }).await?;
         if let Some(context) = self.bot_run_context.as_ref() {
             context.put_context(BotRunContext { run_id: p.delivery_request_id.clone(), bot_id: p.assignee_bot_id.clone(),
-                group_id: String::new(), bcs_session_id: None, deadline_ms: p.deadline_ms, terminal: false }).await;
+                // Keep the trusted V3 run scope so uplink identity can be
+                // validated. The delivery correlation above makes the runtime
+                // consume these responses before ordinary group relay.
+                group_id: p.group_id.clone(), bcs_session_id: Some(p.session_id.clone()),
+                deadline_ms: p.deadline_ms, terminal: false }).await;
         }
         if !self.runs.begin_node_dispatch_send(claim, bcs_protocol::now_ms()).await? { return Ok(()); }
         info!(run_id = %run.run_id, group_id = %group.id, session_id = %run.session_id, node_id = %p.node_id,

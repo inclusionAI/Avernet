@@ -144,9 +144,9 @@ async fn test_structured_routing_send_vs_inject() {
     let tmp = create_temp_bots_dir();
     let (addr, _handle) = start_test_server(&tmp.path().to_path_buf()).await;
 
-    let mut bot_a = MockBot::connect(addr).await;
-    let mut bot_b = MockBot::connect(addr).await;
-    let mut bot_c = MockBot::connect(addr).await;
+    let mut bot_a = MockBot::connect_legacy(addr).await;
+    let mut bot_b = MockBot::connect_legacy(addr).await;
+    let mut bot_c = MockBot::connect_legacy(addr).await;
 
     bot_a.register("Coordinator", &["coordination"], addr).await;
     bot_b.register("DBA", &["database"], addr).await;
@@ -206,9 +206,9 @@ async fn test_hybrid_mode_legacy_mention_fallback() {
     let tmp = create_temp_bots_dir();
     let (addr, _handle) = start_test_server(&tmp.path().to_path_buf()).await;
 
-    let mut bot_a = MockBot::connect(addr).await;
-    let mut bot_b = MockBot::connect(addr).await;
-    let mut bot_c = MockBot::connect(addr).await;
+    let mut bot_a = MockBot::connect_legacy(addr).await;
+    let mut bot_b = MockBot::connect_legacy(addr).await;
+    let mut bot_c = MockBot::connect_legacy(addr).await;
 
     bot_a.register("Coordinator", &["coordination"], addr).await;
     bot_b.register("DBA", &["database"], addr).await;
@@ -264,9 +264,9 @@ async fn test_response_directive_in_group_context() {
     let tmp = create_temp_bots_dir();
     let (addr, _handle) = start_test_server(&tmp.path().to_path_buf()).await;
 
-    let mut bot_a = MockBot::connect(addr).await;
-    let mut bot_b = MockBot::connect(addr).await;
-    let mut bot_c = MockBot::connect(addr).await;
+    let mut bot_a = MockBot::connect_legacy(addr).await;
+    let mut bot_b = MockBot::connect_legacy(addr).await;
+    let mut bot_c = MockBot::connect_legacy(addr).await;
 
     bot_a.register("Coordinator", &["coordination"], addr).await;
     bot_b.register("DBA", &["database"], addr).await;
@@ -343,9 +343,9 @@ async fn test_backward_compat_you_are_mentioned() {
     let tmp = create_temp_bots_dir();
     let (addr, _handle) = start_test_server(&tmp.path().to_path_buf()).await;
 
-    let mut bot_a = MockBot::connect(addr).await;
-    let mut bot_b = MockBot::connect(addr).await;
-    let mut bot_c = MockBot::connect(addr).await;
+    let mut bot_a = MockBot::connect_legacy(addr).await;
+    let mut bot_b = MockBot::connect_legacy(addr).await;
+    let mut bot_c = MockBot::connect_legacy(addr).await;
 
     bot_a.register("Coordinator", &["coordination"], addr).await;
     bot_b.register("DBA", &["database"], addr).await;

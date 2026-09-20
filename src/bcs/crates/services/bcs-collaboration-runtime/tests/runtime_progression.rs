@@ -2716,8 +2716,11 @@ async fn single_node_run_completes_session_with_bot_final_text() {
     assert!(panel_text.contains(&format!("state-machine-run-{}", started.view.run.run_id)));
     assert!(panel_text.contains("State Machine - Single Node"));
     drop(frontend_commands);
-    assert_eq!(params.bcs_group_id, started.view.run.session_id);
-    assert_eq!(params.bcs_session_id, None);
+    assert_eq!(params.bcs_group_id, "group-1");
+    assert_eq!(
+        params.bcs_session_id.as_deref(),
+        Some(started.view.run.session_id.as_str())
+    );
     assert_eq!(
         params.session_context.session_id,
         started.view.run.session_id
@@ -2943,8 +2946,10 @@ async fn state_machine_bot_delivery_registers_message_flow_run_context() {
         .await
         .expect("state-machine delivery run context");
     assert_eq!(context.bot_id, "driver-bot");
-    assert!(context.group_id.is_empty());
-    assert!(context.bcs_session_id.is_none());
+    assert_eq!(context.group_id, "group-1");
+    let delivery_command = delivery.commands.lock().await[0].clone();
+    let delivery_params = chat_send_params(&delivery_command);
+    assert_eq!(context.bcs_session_id, delivery_params.bcs_session_id);
     assert!(!context.terminal);
     assert!(context.deadline_ms >= before_start_ms.saturating_add(CONFIGURED_TIMEOUT_MS));
     assert!(context.deadline_ms <= after_start_ms.saturating_add(CONFIGURED_TIMEOUT_MS));

@@ -157,8 +157,20 @@ impl MockBot {
             .await
             .expect("Failed to connect WebSocket");
         let mut bot = Self { ws, bot_id: String::new(), token: String::new() };
-        bot.do_connect(None).await;
+        bot.do_connect(None, None).await;
         // Drain any onboarding messages BCS sends to new bots
+        bot.drain_onboarding().await;
+        bot
+    }
+
+    /// Connect as a V2 bot for tests that exercise legacy uplink frames.
+    pub async fn connect_legacy(addr: SocketAddr) -> Self {
+        let url = format!("ws://{}/ws/bot", addr);
+        let (ws, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .expect("Failed to connect WebSocket");
+        let mut bot = Self { ws, bot_id: String::new(), token: String::new() };
+        bot.do_connect(None, Some(2)).await;
         bot.drain_onboarding().await;
         bot
     }
@@ -172,7 +184,7 @@ impl MockBot {
             .await
             .expect("Failed to connect WebSocket");
         let mut bot = Self { ws, bot_id: String::new(), token: String::new() };
-        bot.do_connect(Some(token.to_string())).await;
+        bot.do_connect(Some(token.to_string()), None).await;
         bot
     }
 
@@ -192,11 +204,13 @@ impl MockBot {
         }
     }
 
-    async fn do_connect(&mut self, token: Option<String>) {
+    async fn do_connect(&mut self, token: Option<String>, protocol_version: Option<u32>) {
         // BCN plugin passes token in bot.connect params (not URL query param)
-        let params = match &token {
-            Some(t) => json!({ "token": t }),
-            None => json!({}),
+        let params = match (&token, protocol_version) {
+            (Some(t), Some(version)) => json!({ "token": t, "protocol_version": version }),
+            (Some(t), None) => json!({ "token": t }),
+            (None, Some(version)) => json!({ "protocol_version": version }),
+            (None, None) => json!({}),
         };
         let frame = json!({
             "type": "req",
