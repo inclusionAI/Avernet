@@ -318,7 +318,7 @@ class BotRunRequestExecutor:
         if caller_sandbox_id:
             # caller 模式：容器在入队前已由 runner 后台拉起——直接用 queue meta
             # 的 sandbox 组 binding，不再二次调 caller-connection（run metadata
-            # 已脱敏无 cookie，caller 判定以 meta 的 sandbox 存在为准）
+            # 已脱敏无 iam_token，caller 判定以 meta 的 sandbox 存在为准）
             binding_info = build_caller_binding(run.bot_id, caller_sandbox_id)
         else:
             binding_info = await self._binding_resolver.resolve_binding(

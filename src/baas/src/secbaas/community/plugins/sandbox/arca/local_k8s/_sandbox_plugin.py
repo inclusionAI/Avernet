@@ -53,7 +53,7 @@ from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
 from ._sandbox import LocalK8sArcaSandbox
 
 if TYPE_CHECKING:
-    from kubernetes.client import ApiClient, AppsV1Api, CoreV1Api
+    from kubernetes.client import ApiClient
 
     from secbaas.community.api.device_manage import ArcaCredentials
 
@@ -157,7 +157,9 @@ def _namespace() -> str:
 
 
 def _container_port() -> int:
-    return _env_int(ENV_CONTAINER_PORT, _DEFAULT_CONTAINER_PORT) or _DEFAULT_CONTAINER_PORT
+    return (
+        _env_int(ENV_CONTAINER_PORT, _DEFAULT_CONTAINER_PORT) or _DEFAULT_CONTAINER_PORT
+    )
 
 
 def _image_pull_policy() -> str:
@@ -245,7 +247,9 @@ class LocalK8sClientManager:
             persist_config=False,
         )
         self._clients[key] = client
-        logger.info("local_k8s: created new ApiClient (context=%s)", context or "current")
+        logger.info(
+            "local_k8s: created new ApiClient (context=%s)", context or "current"
+        )
         return client
 
     def close(self) -> None:
@@ -372,9 +376,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         service = V1Service(
             api_version="v1",
             kind="Service",
-            metadata=V1ObjectMeta(
-                name=service_name, labels={"app": deployment_name}
-            ),
+            metadata=V1ObjectMeta(name=service_name, labels={"app": deployment_name}),
             spec=V1ServiceSpec(
                 type="NodePort",
                 selector={"app": deployment_name},
@@ -437,9 +439,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         service_name = _build_service_name(deployment_name)
         core_api = CoreV1Api(self._client())
 
-        svc = core_api.read_namespaced_service(
-            name=service_name, namespace=namespace
-        )
+        svc = core_api.read_namespaced_service(name=service_name, namespace=namespace)
         if not svc.spec or not svc.spec.ports:
             raise RuntimeError("local_k8s: service has no ports")
         node_port = svc.spec.ports[0].node_port

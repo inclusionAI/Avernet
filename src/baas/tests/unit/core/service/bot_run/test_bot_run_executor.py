@@ -425,7 +425,13 @@ async def test_executor_send_persistence_failure_marks_failed_and_reraises():
     repo.update_result.side_effect = RuntimeError("simulated 1064")
 
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(), MagicMock()
+        repo,
+        BotBindingResolver(plugin),
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
     )
 
     # execute() 的外层 except 会捕获并 mark FAILED，对调用方（worker）表现为正常返回。

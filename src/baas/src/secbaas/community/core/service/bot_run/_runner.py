@@ -64,6 +64,10 @@ if TYPE_CHECKING:
 
 logger = get_logger("core-bot-run")
 
+# 流式 caller 拉起等待期间的心跳间隔：须显著小于网关 read timeout
+# （典型 60s），避免容器拉起（分钟级）期间 SSE 连接被中间层掐断
+_CALLER_STREAM_HEARTBEAT_SECONDS = 10.0
+
 
 @dataclass(slots=True)
 class _BotRoute:
@@ -173,7 +177,7 @@ class BotRunner:
                 )
             return message_id, actual_session_id
 
-        # 2. DB-first: 入库（cookie 等敏感凭据剥离——原 metadata 只留内存链路）
+        # 2. DB-first: 入库（iam_token 等敏感凭据剥离——原 metadata 只留内存链路）
         self._insert_run(
             run_id=message_id,
             bot_id=bot_id,
@@ -185,8 +189,18 @@ class BotRunner:
         # 入库后任一步骤失败都将记录标记为 FAILED 并写入 error，便于排查
         try:
             route = await self._resolve_bot_route(bot_id, metadata)
+            caller_mode = is_caller_mode(metadata, route.binding_info)
+            logger.info(
+                "[runner.inject_message] caller mode check: bot_id=%s, engine_type=%s, "
+                "has_iam_token=%s, has_user_id=%s, result=%s",
+                route.binding_info.bot_id,
+                route.binding_info.engine_type,
+                bool(metadata.get("iam_token")),
+                bool(metadata.get("user_id")),
+                caller_mode,
+            )
             self._apply_caller_session_semantics(
-                route=route, bot_id=bot_id, metadata=metadata
+                route=route, bot_id=bot_id, caller_mode=caller_mode
             )
             raw_session_id = metadata.get("session_id")
 
@@ -199,7 +213,7 @@ class BotRunner:
                 context=context,
             )
 
-            if is_caller_mode(metadata):
+            if caller_mode:
                 # caller 模式：容器拉起分钟级——dispatch 整体后台化，立即返回
                 self._fire_caller_dispatch_later(
                     mode="inject",
@@ -302,11 +316,11 @@ class BotRunner:
             if actual_session_id is None:
                 actual_session_id = ""
                 logger.warning(
-                    "[runner.inject_message] actual session id is None, return  empty"
+                    "[runner.deliver_message] actual session id is None, return  empty"
                 )
             return message_id, actual_session_id
 
-        # 2. DB-first: 入库（cookie 等敏感凭据剥离——原 metadata 只留内存链路）
+        # 2. DB-first: 入库（iam_token 等敏感凭据剥离——原 metadata 只留内存链路）
         self._insert_run(
             run_id=message_id,
             bot_id=bot_id,
@@ -318,8 +332,18 @@ class BotRunner:
         # 入库后任一步骤失败都将记录标记为 FAILED 并写入 error，便于排查
         try:
             route = await self._resolve_bot_route(bot_id, metadata)
+            caller_mode = is_caller_mode(metadata, route.binding_info)
+            logger.info(
+                "[runner] caller mode check: bot_id=%s, engine_type=%s, "
+                "has_iam_token=%s, has_user_id=%s, result=%s",
+                route.binding_info.bot_id,
+                route.binding_info.engine_type,
+                bool(metadata.get("iam_token")),
+                bool(metadata.get("user_id")),
+                caller_mode,
+            )
             self._apply_caller_session_semantics(
-                route=route, bot_id=bot_id, metadata=metadata
+                route=route, bot_id=bot_id, caller_mode=caller_mode
             )
 
             # eval 对话 session 日志与保护性校验 — 委托 Plugin
@@ -336,13 +360,11 @@ class BotRunner:
                     session_id=metadata.get("session_id", ""),
                     method="deliver_message",
                 )
-                # Session 保护：评测流量未传显式 session_id，由 BaasBotService 层
-                # effective_session_id 兜底（系分 3.3.3）
                 session_id_from_metadata = metadata.get("session_id")
                 if not session_id_from_metadata:
                     logger.debug(
-                        "[runner.deliver_message] eval 对话缺少显式 session_id: "
-                        "eval_id=%s, bot_id=%s",
+                        "[runner.deliver_message] eval not exist session_id "
+                        "from metadata: eval_id=%s, bot_id=%s",
                         eval_id,
                         bot_id,
                     )
@@ -356,7 +378,7 @@ class BotRunner:
                 context=context,
             )
 
-            if is_caller_mode(metadata):
+            if caller_mode:
                 # caller 模式：容器拉起分钟级——dispatch 整体后台化，立即返回
                 self._fire_caller_dispatch_later(
                     mode="send",
@@ -463,8 +485,18 @@ class BotRunner:
             raise ValueError(f"Duplicate request in stream mode: {message_id}")
 
         route = await self._resolve_bot_route(bot_id, metadata)
+        caller_mode = is_caller_mode(metadata, route.binding_info)
+        logger.info(
+            "[runner.deliver_message_stream] caller mode check: bot_id=%s, engine_type=%s, "
+            "has_iam_token=%s, has_user_id=%s, result=%s",
+            route.binding_info.bot_id,
+            route.binding_info.engine_type,
+            bool(metadata.get("iam_token")),
+            bool(metadata.get("user_id")),
+            caller_mode,
+        )
         self._apply_caller_session_semantics(
-            route=route, bot_id=bot_id, metadata=metadata
+            route=route, bot_id=bot_id, caller_mode=caller_mode
         )
 
         # eval 对话 session 日志与保护性校验 — 委托 Plugin
@@ -494,7 +526,7 @@ class BotRunner:
 
         raw_session_id = metadata.get("session_id")
 
-        # DB-first: 入库（cookie 等敏感凭据剥离——原 metadata 只留内存链路）
+        # DB-first: 入库（iam_token 等敏感凭据剥离——原 metadata 只留内存链路）
         self._insert_run(
             run_id=message_id,
             bot_id=bot_id,
@@ -514,40 +546,45 @@ class BotRunner:
                 context=context,
             )
 
-            if is_caller_mode(metadata):
-                # 流式入口无法后台化（stream iterator 须同步返回）——保持同步
-                # 拉起：拿到真实 sandbox 后把 route 换成 caller binding 再发送
-                caller_binding = await self._binding_resolver.resolve_caller_binding(
-                    bot_id=bot_id, metadata=metadata
+            if caller_mode:
+                # caller 模式：容器拉起（分钟级）移入 iterator 首段执行，
+                # 不挡在响应头之前；等待期间以 heartbeat 保活（见 _caller_stream）
+                stream_iter = self._caller_stream(
+                    run_id=message_id,
+                    bot_id=bot_id,
+                    session_id=actual_session_id,
+                    message=message,
+                    metadata=metadata,
+                    context=context,
+                    route=route,
+                    timeout=timeout,
+                    attachments=attachments,
+                    session_pending=session_pending,
                 )
-                caller_binding.engine_type = route.binding_info.engine_type
-                route.binding_info = caller_binding
-                route.route_bot_id = caller_binding.bot_id
-                route.bot_service = self._bot_service_selector.select(caller_binding)
+            else:
+                chat_metadata = build_chat_metadata(
+                    metadata, run_id=message_id, eval_session_log=self._eval_session_log
+                )
 
-            chat_metadata = build_chat_metadata(
-                metadata, run_id=message_id, eval_session_log=self._eval_session_log
-            )
-
-            # 委托 dispatcher 流式发送
-            stream_iter = self._select_dispatcher(
-                bot_id,
-                engine_type=route.binding_info.engine_type,
-                method="stream",
-                metadata=metadata,
-            ).dispatch_send_stream(
-                bot_service=route.bot_service,
-                run_id=message_id,
-                session_id=actual_session_id,
-                message=message,
-                binding_info=route.binding_info,
-                context=context,
-                timeout=timeout,
-                bot_id=bot_id,
-                chat_metadata=chat_metadata,
-                attachments=attachments,
-                session_pending=session_pending,
-            )
+                # 委托 dispatcher 流式发送
+                stream_iter = self._select_dispatcher(
+                    bot_id,
+                    engine_type=route.binding_info.engine_type,
+                    method="stream",
+                    metadata=metadata,
+                ).dispatch_send_stream(
+                    bot_service=route.bot_service,
+                    run_id=message_id,
+                    session_id=actual_session_id,
+                    message=message,
+                    binding_info=route.binding_info,
+                    context=context,
+                    timeout=timeout,
+                    bot_id=bot_id,
+                    chat_metadata=chat_metadata,
+                    attachments=attachments,
+                    session_pending=session_pending,
+                )
         except Exception as e:
             self._mark_run_failed(message_id, e)
             raise
@@ -932,27 +969,112 @@ class BotRunner:
             route_bot_id=route_bot_id,
         )
 
+    @staticmethod
     def _apply_caller_session_semantics(
-        self,
         *,
         route: _BotRoute,
         bot_id: str,
-        metadata: dict[str, Any],
+        caller_mode: bool,
     ) -> None:
         """caller 模式：session 规划改用 caller binding 语义（就地改写 route）。
 
+        caller_mode 由入口判定（is_caller_mode + log）后传入。
         与既有 caller 链路语义一致：user_id 走 personal 短路取 entity_id、
         route_bot_id 为 bot_id（``build_caller_binding`` 的默认字段）；唯一升级
         是 engine_type 采用正常解析的真实值——teclaw 走物化，其余复用显式
         session_id。dispatch 用的真实 caller binding（带 sandbox）在拉起后
         另行组装，不经过本方法。
         """
-        if not is_caller_mode(metadata):
+        if not caller_mode:
             return
         session_binding = build_caller_binding(bot_id, "")
         session_binding.engine_type = route.binding_info.engine_type
         route.binding_info = session_binding
         route.route_bot_id = session_binding.bot_id
+
+    async def _caller_stream(
+        self,
+        *,
+        run_id: str,
+        bot_id: str,
+        session_id: str,
+        message: str,
+        metadata: dict[str, Any],
+        context: BotChatContext,
+        route: _BotRoute,
+        timeout: float,
+        attachments: list[Any] | None,
+        session_pending: bool,
+    ) -> AsyncIterator[StreamChunk]:
+        """caller 模式流式发送：容器拉起（分钟级）在 iterator 首段执行。
+
+        StreamingResponse 先发 200 响应头再迭代 body，拉起不挡在响应头
+        之前；等待期间周期产出 heartbeat chunk 保活，防网关 read timeout
+        掐断连接。拉起失败对齐后台 dispatch 语义：run 落 FAILED 并以
+        error chunk 收尾（此时 200 已发出，不再上抛）。转发阶段的断连
+        /失败语义由 dispatcher 自身处理（GeneratorExit 自然终止）。
+        """
+        engine_type = route.binding_info.engine_type
+        resolve = asyncio.create_task(
+            self._binding_resolver.resolve_caller_binding(
+                bot_id=bot_id, metadata=metadata
+            )
+        )
+        try:
+            # 首个 body 帧立即可用，确认流已建立
+            yield StreamChunk(type="heartbeat", content="")
+            while not resolve.done():
+                await asyncio.wait({resolve}, timeout=_CALLER_STREAM_HEARTBEAT_SECONDS)
+                if not resolve.done():
+                    yield StreamChunk(type="heartbeat", content="")
+            caller_binding = resolve.result()
+        except GeneratorExit:
+            # 客户端断连（拉起中）：取消等待，run 落 FAILED 防 PENDING 悬空
+            resolve.cancel()
+            self._mark_run_failed(
+                run_id,
+                RuntimeError("caller stream disconnected during provisioning"),
+            )
+            raise
+        except Exception as e:
+            self._mark_run_failed(run_id, e)
+            logger.warning(
+                "[runner] caller stream provisioning failed: run_id=%s, bot_id=%s, %s",
+                run_id,
+                bot_id,
+                e,
+            )
+            yield StreamChunk(type="error", content=str(e))
+            return
+
+        try:
+            caller_binding.engine_type = engine_type
+            route.binding_info = caller_binding
+            route.route_bot_id = caller_binding.bot_id
+            route.bot_service = self._bot_service_selector.select(caller_binding)
+            chat_metadata = build_chat_metadata(
+                metadata, run_id=run_id, eval_session_log=self._eval_session_log
+            )
+            inner = self._select_dispatcher(
+                bot_id, engine_type=engine_type, method="stream", metadata=metadata
+            ).dispatch_send_stream(
+                bot_service=route.bot_service,
+                run_id=run_id,
+                session_id=session_id,
+                message=message,
+                binding_info=route.binding_info,
+                context=context,
+                timeout=timeout,
+                bot_id=bot_id,
+                chat_metadata=chat_metadata,
+                attachments=attachments,
+                session_pending=session_pending,
+            )
+            async for chunk in inner:
+                yield chunk
+        except Exception as e:
+            self._mark_run_failed(run_id, e)
+            yield StreamChunk(type="error", content=str(e))
 
     def _fire_caller_dispatch_later(
         self,
@@ -972,7 +1094,7 @@ class BotRunner:
     ) -> None:
         """caller 模式 dispatch 后台化：拉容器（分钟级）+ IAM 刷新 → 入队。
 
-        cookie 留在任务闭包（内存），落库的 queue meta 只带 sandbox_id；
+        iam_token 留在任务闭包（内存），落库的 queue meta 只带 sandbox_id；
         失败由任务内部落 run 记录（FAILED），不再上抛。
         """
         task = asyncio.create_task(

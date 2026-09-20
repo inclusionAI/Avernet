@@ -120,9 +120,7 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         ]:
             try:
                 api(name=name, namespace=self._namespace)
-                logger.info(
-                    "local_k8s: deleted %s %s/%s", kind, self._namespace, name
-                )
+                logger.info("local_k8s: deleted %s %s/%s", kind, self._namespace, name)
             except ApiException as e:
                 if e.status != 404:
                     raise RuntimeError(
@@ -177,9 +175,7 @@ class LocalK8sArcaSandbox(ArcaSandbox):
                 elapsed_time=elapsed,
             )
         except ApiException as e:
-            logger.warning(
-                "local_k8s: exec_command failed (%s): %s", e.status, e.body
-            )
+            logger.warning("local_k8s: exec_command failed (%s): %s", e.status, e.body)
             return _ExecResult(
                 exit_code=-1,
                 stdout="",

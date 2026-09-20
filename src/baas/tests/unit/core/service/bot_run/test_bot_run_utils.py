@@ -27,6 +27,7 @@ from secbaas.community.core.service.bot_run import (
 from secbaas.community.core.service.bot_run._bot_run_utils import (
     build_caller_binding,
     build_chat_metadata,
+    is_caller_mode,
 )
 from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
 from secbaas.community.spi.bot.engine_adapter import extract_session_key_from_planned_id
@@ -718,7 +719,7 @@ class TestBuildCallerBinding:
 class TestResolveCallerBinding:
     """测试 BotBindingResolver.resolve_caller_binding：调 caller-connection 拉容器。
 
-    metadata 的 ``cookie`` 是裸 IAM token 值；resolver 包装成 Cookie 头格式
+    metadata 的 ``iam_token`` 是裸 IAM token 值；resolver 包装成 Cookie 头格式
     ``IAM_TOKEN=<值>`` 传给插件。
     """
 
@@ -730,7 +731,7 @@ class TestResolveCallerBinding:
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             metadata={
                 "user_id": "u-9",
-                "cookie": "test-value",
+                "iam_token": "test-value",
             },
         )
         plugin.get_caller_connection.assert_awaited_once_with(
@@ -776,7 +777,7 @@ class TestResolveBindingNormalOnly:
         resolver = BotBindingResolver(plugin)
         info = await resolver.resolve_binding(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
-            metadata={"cookie": "iam-token-value", "user_id": "u-1"},
+            metadata={"iam_token": "iam-value", "user_id": "u-1"},
         )
         assert info is not None
         assert info.device_provider == "teclaw"
@@ -789,6 +790,19 @@ class TestResolveBindingNormalOnly:
         resolver = BotBindingResolver(plugin)
         info = await resolver.resolve_binding(bot_id="", metadata={})
         assert info is None
+
+
+# ==================== Tests: is_caller_mode ====================
+
+
+class TestIsCallerMode:
+    """is_caller_mode 判定：metadata 双键 + binding 引擎条件。"""
+
+    def test_missing_binding_info_returns_false(self):
+        """binding_info 缺失时无法确认引擎，保守判 False（不拉容器）。"""
+        assert (
+            is_caller_mode({"iam_token": "iam-value", "user_id": "u-1"}, None) is False
+        )
 
 
 # ==================== Tests: extract_session_key_from_planned_id ====================

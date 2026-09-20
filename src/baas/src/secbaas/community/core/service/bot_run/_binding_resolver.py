@@ -97,17 +97,17 @@ class BotBindingResolver:
         ``CallerBotService``，并把返回的 sandbox_id 作为连接目标（不参与 device affinity 选设备）。
 
         拉起含 need_poll 轮询（分钟级），只应由 runner 的后台 dispatch 调用；
-        metadata 的 ``cookie``（IAM 凭据）只存在于内存请求链路，不落库。
+        metadata 的 ``iam_token``（IAM 凭据）只存在于内存请求链路，不落库。
         Principal 由 bot_service 插件用共享密钥自签。
         """
         real_bot_id, entity_id = parse_bot_id(bot_id)
         user_id = str(metadata.get("user_id") or "")
-        cookie = str(metadata.get("cookie") or "")
+        iam_token = str(metadata.get("iam_token") or "")
         sandbox_id = await self._bot_service_plugin.get_caller_connection(
             bot_id=real_bot_id,
             owner_id=entity_id,
             user_id=user_id,
-            cookie=f"IAM_TOKEN={cookie}",
+            cookie=f"IAM_TOKEN={iam_token}",
         )
         logger.info(
             "[resolve_caller_binding] bot_id=%s owner_id=%s user_id=%s sandbox_id=%s",

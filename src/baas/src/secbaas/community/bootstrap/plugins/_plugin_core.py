@@ -54,11 +54,11 @@ from secbaas.community.plugins.sandbox.arca.aliyun_ack import (
 from secbaas.community.plugins.sandbox.arca.local_docker import (
     LocalDockerArcaSandboxPlugin,
 )
-from secbaas.community.plugins.sandbox.arca.local_proc import (
-    LocalProcessArcaSandboxPlugin,
-)
 from secbaas.community.plugins.sandbox.arca.local_k8s import (
     LocalK8sArcaSandboxPlugin,
+)
+from secbaas.community.plugins.sandbox.arca.local_proc import (
+    LocalProcessArcaSandboxPlugin,
 )
 from secbaas.community.plugins.sandbox.desktop import (
     RealDesktopSandboxPlugin,

@@ -228,7 +228,7 @@ class TestRunnerCallerMode:
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             message="hi",
             context=context,
-            metadata={"cookie": "iam-token", "user_id": "u-1"},
+            metadata={"iam_token": "iam-token", "user_id": "u-1"},
         )
 
         # 拉起仍挂起：请求已返回，未入队
@@ -271,7 +271,7 @@ class TestRunnerCallerMode:
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             message="hi",
             context=context,
-            metadata={"cookie": "iam-token", "user_id": "u-1", "foo": "bar"},
+            metadata={"iam_token": "iam-token", "user_id": "u-1", "foo": "bar"},
         )
         for _ in range(100):
             if not runner._caller_dispatch_tasks:
@@ -279,7 +279,7 @@ class TestRunnerCallerMode:
             await asyncio.sleep(0)
 
         persisted = mock_run_repo.insert_run.call_args.kwargs["metadata"]
-        assert "cookie" not in persisted
+        assert "iam_token" not in persisted
         assert persisted["foo"] == "bar"
 
     @pytest.mark.asyncio
@@ -306,7 +306,7 @@ class TestRunnerCallerMode:
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             message="hi",
             context=context,
-            metadata={"cookie": "iam-token"},
+            metadata={"iam_token": "iam-token", "user_id": "u-1"},
         )
         for _ in range(100):
             if not runner._caller_dispatch_tasks:
@@ -341,7 +341,7 @@ class TestRunnerCallerMode:
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             message="hi",
             context=context,
-            metadata={"cookie": "iam-token"},
+            metadata={"iam_token": "iam-token", "user_id": "u-1"},
             message_id="msg-caller-1",
         )
         assert message_id == "msg-caller-1"
@@ -356,6 +356,247 @@ class TestRunnerCallerMode:
         kwargs = dispatcher.dispatch_inject.await_args.kwargs
         assert kwargs["binding_info"].sandbox_id == "sbx-inj"
         assert kwargs["binding_info"].device_provider == "caller"
+
+    @pytest.mark.asyncio
+    async def test_stream_returns_before_provisioning(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """流式 caller：立即返回，容器拉起发生在迭代开始后（不挡响应头）。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(return_value="sbx-st")
+
+        async def _inner():
+            yield StreamChunk(type="delta", content="hi")
+            yield StreamChunk(type="final", content="done")
+
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        dispatcher.dispatch_send_stream = MagicMock(return_value=_inner())
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        _, _, stream = await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"iam_token": "iam-token", "user_id": "u-1"},
+        )
+
+        # 返回时拉起尚未开始（SSE 响应头不被分钟级拉起阻塞）
+        mock_bot_service_plugin.get_caller_connection.assert_not_awaited()
+
+        chunks = [c async for c in stream]
+        mock_bot_service_plugin.get_caller_connection.assert_awaited_once()
+        assert [c.type for c in chunks] == ["heartbeat", "delta", "final"]
+        kw = dispatcher.dispatch_send_stream.call_args.kwargs
+        assert kw["binding_info"].sandbox_id == "sbx-st"
+        assert kw["binding_info"].device_provider == "caller"
+
+    @pytest.mark.asyncio
+    async def test_stream_provisioning_failure_yields_error(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """流式 caller 拉起失败：run 落 FAILED，流以 error chunk 收尾（不上抛）。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(
+            side_effect=RuntimeError("provisioning failed")
+        )
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        _, _, stream = await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"iam_token": "iam-token", "user_id": "u-1"},
+        )
+
+        chunks = [c async for c in stream]
+        assert chunks[0].type == "heartbeat"
+        assert chunks[-1].type == "error"
+        assert "provisioning failed" in chunks[-1].content
+        mock_run_repo.update_error.assert_called_once()
+        dispatcher.dispatch_send_stream.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stream_emits_heartbeats_while_provisioning(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+        monkeypatch,
+    ):
+        """容器拉起慢时周期产出 heartbeat 保活（防网关 read timeout）。"""
+        from secbaas.community.core.service.bot_run import _runner as runner_mod
+
+        monkeypatch.setattr(runner_mod, "_CALLER_STREAM_HEARTBEAT_SECONDS", 0.01)
+
+        release = asyncio.Event()
+
+        async def _slow_provision(**kwargs):
+            await release.wait()
+            return "sbx-slow"
+
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(
+            side_effect=_slow_provision
+        )
+
+        async def _inner():
+            yield StreamChunk(type="final", content="ok")
+
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        dispatcher.dispatch_send_stream = MagicMock(return_value=_inner())
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        _, _, stream = await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"iam_token": "iam-token", "user_id": "u-1"},
+        )
+
+        first = await stream.__anext__()
+        assert first.type == "heartbeat"
+        second = await stream.__anext__()
+        assert second.type == "heartbeat"
+
+        release.set()
+        rest = [c async for c in stream]
+        assert rest[-1].type == "final"
+        mock_bot_service_plugin.get_caller_connection.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_teclaw_engine_ignores_caller_mode(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        context,
+    ):
+        """teclaw 引擎不支持 caller 容器：携带 iam_token/user_id 也走普通模式。"""
+        teclaw_binding = BotBindingData(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            bot_type="service",
+            engine_type="teclaw",
+            binding_id=100003,
+            device_provider="teclaw",
+            device_id="dev-teclaw",
+        )
+        mock_bot_service_plugin.get_binding.return_value = teclaw_binding
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"iam_token": "iam-token", "user_id": "u-1"},
+        )
+
+        # 不拉容器、不走后台 caller dispatch：直接普通模式同步发送
+        mock_bot_service_plugin.get_caller_connection.assert_not_called()
+        dispatcher.dispatch_send.assert_awaited_once()
+        kw = dispatcher.dispatch_send.await_args.kwargs
+        assert kw["binding_info"].engine_type == "teclaw"
+
+    @pytest.mark.asyncio
+    async def test_stream_disconnect_during_provisioning_marks_run_failed(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """拉起期间客户端断连：取消拉起等待，run 落 FAILED（防 PENDING 悬空）。"""
+        release = asyncio.Event()
+
+        async def _slow_provision(**kwargs):
+            await release.wait()
+            return "sbx-slow"
+
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(
+            side_effect=_slow_provision
+        )
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        _, _, stream = await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"iam_token": "iam-token", "user_id": "u-1"},
+        )
+
+        first = await stream.__anext__()
+        assert first.type == "heartbeat"
+        await stream.aclose()
+        await asyncio.sleep(0)
+
+        mock_run_repo.update_error.assert_called_once()
+        release.set()
+
+    @pytest.mark.asyncio
+    async def test_stream_dispatch_failure_yields_error_chunk(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """拉起成功但 dispatcher 流发送抛错：run 落 FAILED，流以 error chunk 收尾。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(return_value="sbx-st")
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        dispatcher.dispatch_send_stream = MagicMock(
+            side_effect=RuntimeError("dispatch failed")
+        )
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        _, _, stream = await runner.deliver_message_stream(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"iam_token": "iam-token", "user_id": "u-1"},
+        )
+
+        chunks = [c async for c in stream]
+        assert chunks[0].type == "heartbeat"
+        assert chunks[-1].type == "error"
+        assert "dispatch failed" in chunks[-1].content
+        mock_run_repo.update_error.assert_called_once()
 
 
 # ==================== Tests: binding_info passthrough ====================
@@ -2726,7 +2967,7 @@ class TestEvalSessionLog:
             debug_calls = [
                 c
                 for c in mock_logger.debug.call_args_list
-                if "eval 对话缺少显式 session_id" in str(c)
+                if "eval not exist session_id from metadata" in str(c)
             ]
             assert len(debug_calls) == 1
 

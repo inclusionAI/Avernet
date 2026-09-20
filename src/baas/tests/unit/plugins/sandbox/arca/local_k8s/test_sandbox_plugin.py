@@ -7,8 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from secbaas.community.api.device_manage import ArcaCredentials
-from secbaas.community.api.device_manage import ResourceSpecification
+from secbaas.community.api.device_manage import ArcaCredentials, ResourceSpecification
 from secbaas.community.plugins.sandbox.arca.local_k8s import (
     LocalK8sArcaSandbox,
     LocalK8sArcaSandboxPlugin,
@@ -36,34 +35,31 @@ def mock_client():
 @pytest.fixture
 def plugin(mock_client):
     # Plugin now reads local_k8s params from env vars.
-    with patch.dict(
-        os.environ,
-        {
-            "LOCAL_K8S_NAMESPACE": "default",
-            "LOCAL_K8S_IMAGE": "bot-runtime:latest",
-            "LOCAL_K8S_CONTAINER_PORT": "8080",
-        },
-        clear=False,
-    ), patch(
-        "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
-        return_value="apiVersion: v1\nkind: Config",
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "LOCAL_K8S_NAMESPACE": "default",
+                "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                "LOCAL_K8S_CONTAINER_PORT": "8080",
+            },
+            clear=False,
+        ),
+        patch(
+            "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+            return_value="apiVersion: v1\nkind: Config",
+        ),
     ):
         plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
         plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
         yield plugin
 
 
-
-
 class TestLocalK8sPluginCreate:
     """Tests for create_sync_sandbox."""
 
-    @patch(
-        "kubernetes.client.AppsV1Api"
-    )
-    @patch(
-        "kubernetes.client.CoreV1Api"
-    )
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
     def test_create_sync_sandbox_returns_sandbox(
         self,
         mock_core_cls,
@@ -101,12 +97,8 @@ class TestLocalK8sPluginCreate:
         svc = mock_core.create_namespaced_service.call_args[1]["body"]
         assert svc.spec.type == "NodePort"
 
-    @patch(
-        "kubernetes.client.AppsV1Api"
-    )
-    @patch(
-        "kubernetes.client.CoreV1Api"
-    )
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
     def test_create_sync_sandbox_nodeport_uses_service(
         self,
         mock_core_cls,
@@ -114,18 +106,21 @@ class TestLocalK8sPluginCreate:
         mock_client,
     ) -> None:
         """NodePort mode should create a NodePort Service."""
-        with patch.dict(
-            os.environ,
-            {
-                "LOCAL_K8S_NAMESPACE": "default",
-                "LOCAL_K8S_IMAGE": "bot-runtime:latest",
-                "LOCAL_K8S_CONTAINER_PORT": "8080",
-                "LOCAL_K8S_NODE_PORT": "30080",
-            },
-            clear=False,
-        ), patch(
-            "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
-            return_value="apiVersion: v1\nkind: Config",
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_NAMESPACE": "default",
+                    "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                    "LOCAL_K8S_CONTAINER_PORT": "8080",
+                    "LOCAL_K8S_NODE_PORT": "30080",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
         ):
             plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
             plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
@@ -148,15 +143,18 @@ class TestLocalK8sPluginCreate:
 
     def test_create_sync_sandbox_missing_image_raises(self, mock_client) -> None:
         """Missing image should raise ValueError."""
-        with patch.dict(
-            os.environ,
-            {
-                "LOCAL_K8S_IMAGE": "",
-            },
-            clear=False,
-        ), patch(
-            "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
-            return_value="apiVersion: v1\nkind: Config",
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_IMAGE": "",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
         ):
             plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
             plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
@@ -168,26 +166,27 @@ class TestLocalK8sPluginCreate:
 class TestLocalK8sPluginResolve:
     """Tests for connection info resolution."""
 
-    @patch(
-        "kubernetes.client.CoreV1Api"
-    )
+    @patch("kubernetes.client.CoreV1Api")
     def test_resolve_ws_nodeport_reads_assigned_port(
         self,
         mock_core_cls,
         mock_client,
     ) -> None:
         """nodeport mode reads auto-assigned NodePort."""
-        with patch.dict(
-            os.environ,
-            {
-                "LOCAL_K8S_NAMESPACE": "default",
-                "LOCAL_K8S_IMAGE": "bot-runtime:latest",
-                "LOCAL_K8S_CONTAINER_PORT": "8080",
-            },
-            clear=False,
-        ), patch(
-            "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
-            return_value="apiVersion: v1\nkind: Config",
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_NAMESPACE": "default",
+                    "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                    "LOCAL_K8S_CONTAINER_PORT": "8080",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
         ):
             plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
             plugin._client_manager.get_client = lambda *args, **kwargs: mock_client
@@ -206,26 +205,27 @@ class TestLocalK8sPluginResolve:
 
         assert conn.ws_url == "ws://localhost:30081/api/openclaw/ws"
 
-    @patch(
-        "kubernetes.client.CoreV1Api"
-    )
+    @patch("kubernetes.client.CoreV1Api")
     def test_resolve_http_nodeport(
         self,
         mock_core_cls,
         mock_client,
     ) -> None:
         """HTTP connection resolves to localhost via NodePort."""
-        with patch.dict(
-            os.environ,
-            {
-                "LOCAL_K8S_NAMESPACE": "default",
-                "LOCAL_K8S_IMAGE": "bot-runtime:latest",
-                "LOCAL_K8S_CONTAINER_PORT": "8080",
-            },
-            clear=False,
-        ), patch(
-            "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
-            return_value="apiVersion: v1\nkind: Config",
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LOCAL_K8S_NAMESPACE": "default",
+                    "LOCAL_K8S_IMAGE": "bot-runtime:latest",
+                    "LOCAL_K8S_CONTAINER_PORT": "8080",
+                },
+                clear=False,
+            ),
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._resolve_kubeconfig",
+                return_value="apiVersion: v1\nkind: Config",
+            ),
         ):
             plugin = LocalK8sArcaSandboxPlugin(credentials=_make_credentials())
             plugin._client_manager.get_client = lambda *args, **kwargs: mock_client

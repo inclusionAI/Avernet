@@ -208,26 +208,36 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
     )
 
 
-def is_caller_mode(metadata: dict[str, Any] | None) -> bool:
-    """metadata 携带 ``cookie`` 即视作 caller 模式。
+def is_caller_mode(
+    metadata: dict[str, Any] | None,
+    binding_info: BotBindingInfo | None,
+) -> bool:
+    """caller 模式判定：metadata 双键 + 引擎非 teclaw。
 
-    ``cookie`` 同时是模式开关与拉容器的 IAM 凭据：值只允许存在于内存
-    请求链路（runner 入口 → 后台 dispatch 闭包），落库前必须经
-    :func:`strip_sensitive_metadata` 剥离。
+    metadata 需同时携带 ``iam_token``（拉容器的 IAM 凭据）与 ``user_id``
+    （caller-connection 使用者标识），缺一按普通模式解析；binding 引擎
+    类型为 ``teclaw`` 时不支持 caller 容器（teclaw 走物化/session 语义），
+    同样按普通模式。binding_info 缺失时无法确认引擎，保守判 False。
+    凭据只允许存在于内存请求链路（runner 入口 → 后台 dispatch 闭包 /
+    流式 iterator），落库前必须经 :func:`strip_sensitive_metadata` 剥离。
     """
-    return bool(metadata and metadata.get("cookie"))
+    if not (metadata and metadata.get("iam_token") and metadata.get("user_id")):
+        return False
+    if binding_info is None:
+        return False
+    return binding_info.engine_type != "teclaw"
 
 
 def strip_sensitive_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    """落库副本：剥离敏感凭据（cookie），其余键原样保留。
+    """落库副本：剥离敏感凭据（iam_token），其余键原样保留。
 
     run 记录 / queue meta 等持久化处一律使用本函数的返回值；原始
-    ``metadata``（含 cookie）只在内存链路（resolver 拉容器、后台任务
+    ``metadata``（含 iam_token）只在内存链路（resolver 拉容器、后台任务
     闭包）流转。
     """
-    if "cookie" not in metadata:
+    if "iam_token" not in metadata:
         return metadata
-    return {k: v for k, v in metadata.items() if k != "cookie"}
+    return {k: v for k, v in metadata.items() if k != "iam_token"}
 
 
 def build_caller_binding(bot_id: str, sandbox_id: str) -> BotBindingInfo:
