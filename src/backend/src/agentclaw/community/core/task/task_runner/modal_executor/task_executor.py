@@ -256,16 +256,22 @@ class TaskExecutor(TaskExecutorBbsMixin):
         skill_report = self._node_skill_report_enabled(node)
         session_id: str | None = None
         async with sem:
-            # P2 旁路:singlebot_2_group(默认 true)且 owner 在场且 bcs/identity_resolver/graph 已接
-            # → 建"二人 chat 群"(driver=assignee bot + 人类观察者,不发言),按 coop_group 收敛;不发 send_message。
-            _owner_present = bool(assignee_owner_id)
+            # P2 旁路:singlebot_2_group(默认 true)且提交任务的 Human owner 在场且
+            # bcs/identity_resolver/graph 已接 → 建"二人 chat 群"(driver=assignee bot +
+            # Human observer,不发言),按 coop_group 收敛;不发 send_message。
+            # 注意:assignee_owner_id 是执行 Bot 的实体 owner,不是提交任务的 Human,不能用它
+            # 判断是否应把 Human 拉进协作群。Relay 搜推通常只有纯 bot_id,但只要任务图谱
+            # 中存在 owner_user_id,仍必须走该旁路。
+            _task_owner_present = bool(
+                self._resolve_graph_owner_user_id(node.task_id)
+            )
             _bcs_wired = self._bcs is not None and self._identity_resolver is not None
             _flag = self._singlebot_2_group_enabled(node.task_id)
-            _bypass = _flag and _owner_present and _bcs_wired and self._graph is not None
+            _bypass = _flag and _task_owner_present and _bcs_wired and self._graph is not None
             logger.info(
-                "[task][task-executor] single_bot_dispatch task=%s node=%s assignee=%s owner_present=%s bcs_wired=%s graph=%s flag=%s → bypass=%s",
-                node.task_id, node.node_id, assignee, _owner_present, _bcs_wired,
-                self._graph is not None, _flag, _bypass,
+                "[task][task-executor] single_bot_dispatch task=%s node=%s assignee=%s task_owner_present=%s assignee_owner_present=%s bcs_wired=%s graph=%s flag=%s → bypass=%s",
+                node.task_id, node.node_id, assignee, _task_owner_present, bool(assignee_owner_id),
+                _bcs_wired, self._graph is not None, _flag, _bypass,
             )
             if _bypass:
                 try:
@@ -337,7 +343,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
         self,
         node: TaskNode,
         openapi_bot_id: str,
-        assignee_owner_id: str,
+        assignee_owner_id: str | None,
         loop_task_id: str,
     ) -> bool:
         """P2 旁路:single_bot → "manager_worker 群"(single bot 作 manager,自管自执行,无 worker;
@@ -542,32 +548,47 @@ class TaskExecutor(TaskExecutorBbsMixin):
             )
         )
 
+    def _resolve_graph_owner_user_id(self, task_id: str) -> str | None:
+        """从任务图谱解析提交任务的 Human 用户,而不是执行 Bot 的 owner。"""
+        if not task_id or self._graph is None:
+            return None
+        try:
+            snapshot = self._graph.query_task_dashboard(task_id)
+        except Exception:  # noqa: BLE001 graph 不可用/查询失败 → 不阻断建群
+            logger.warning("[task][task_executor] resolve graph owner_user_id 查询失败 task=%s", task_id)
+            return None
+        owner = (getattr(snapshot, "extend_props", None) or {}).get("owner_user_id")
+        logger.info(
+            "[task][task_executor] resolve_graph_owner_user_id task=%s owner=%s",
+            task_id,
+            owner,
+        )
+        return str(owner) if owner else None
+
     def _resolve_owner_user_id(self, gf: GroupFormation) -> str | None:
-        """解析任务 owner_user_id:优先 ``gf.extend_props["owner_user_id"]``(P2 直接注入);
-        否则按 ``loop_task_id``/``task_id`` 反查 ``graph.extend_props["owner_user_id"]``(覆盖 engine._drain
-        协作派发路径[GF 带 loop_task_id] 与 _run_yaml/start_coop_group 路径[GF 带 task_id],不改 dispatch/planning)。
-        无则 None → 不拉人类观察者。"""
+        """解析提交任务的 Human ``owner_user_id``。
+
+        优先使用 GroupFormation 显式透传的 Human owner,否则按
+        ``loop_task_id``/``task_id`` 反查任务图谱。执行 Bot 的
+        ``assignee_owner_id`` 只用于 Bot 身份组装,不能作为 Human observer 身份。
+        """
         explicit = gf.extend_props.get("owner_user_id")
         if explicit:
-            logger.info("[task][task_executor] resolve_owner_user_id 命中 gf.extend_props[owner_user_id] owner=%s", explicit)
+            logger.info(
+                "[task][task_executor] resolve_owner_user_id 命中 gf.extend_props[owner_user_id] owner=%s",
+                explicit,
+            )
             return str(explicit)
         loop_task_id = gf.extend_props.get("loop_task_id") or ""
-        # _drain 协作派发路径 GF 带 loop_task_id(task::node);_run_yaml/start_coop_group 路径 GF 带 task_id(无 loop_task_id)。
-        task_id = (loop_task_id.split("::", 1)[0] if loop_task_id else "") or (gf.extend_props.get("task_id") or "")
-        if task_id and self._graph is not None:
-            try:
-                snapshot = self._graph.query_task_dashboard(task_id)
-            except Exception:  # noqa: BLE001 graph 不可用/查询失败 → 不阻断建群,仅不拉人
-                logger.warning("[task][task_executor] resolve owner_user_id 查询失败 task=%s", task_id)
-                return None
-            owner = (getattr(snapshot, "extend_props", None) or {}).get("owner_user_id")
-            logger.info("[task][task_executor] resolve_owner_user_id 反查 graph task=%s owner=%s", task_id, owner)
-            return str(owner) if owner else None
-        logger.info(
-            "[task][task_executor] resolve_owner_user_id 无来源(owner_user_id/loop_task_id/task_id 均无, graph=%s)→ 不拉人类观察者",
-            self._graph is not None,
+        task_id = (loop_task_id.split("::", 1)[0] if loop_task_id else "") or (
+            gf.extend_props.get("task_id") or ""
         )
-        return None
+        owner = self._resolve_graph_owner_user_id(task_id)
+        if owner is None:
+            logger.info(
+                "[task][task_executor] resolve_owner_user_id 无来源(owner_user_id/loop_task_id/task_id 均无或 graph 无 owner)→ 不拉人类观察者"
+            )
+        return owner
 
     async def form_coop_group(self, gf: GroupFormation) -> str:
         bot_ids = list(dict.fromkeys(gf.bot_ids))

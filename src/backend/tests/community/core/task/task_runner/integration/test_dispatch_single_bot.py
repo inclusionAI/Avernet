@@ -513,29 +513,32 @@ class _Bcs2:
 
 
 class _Dash:
-    def __init__(self, execution_config):
-        self.extend_props = {"execution_config": execution_config, "owner_user_id": "35983"}
+    def __init__(self, execution_config, owner_user_id="35983"):
+        self.extend_props = {"execution_config": execution_config}
+        if owner_user_id is not None:
+            self.extend_props["owner_user_id"] = owner_user_id
 
 
 class _Graph2:
     """query_task_dashboard 返带 execution_config 的快照;update_task_node_info 捕获 patch。"""
 
-    def __init__(self, execution_config=None):
+    def __init__(self, execution_config=None, owner_user_id="35983"):
         self._ec = execution_config if execution_config is not None else {}
+        self._owner_user_id = owner_user_id
         self.patches = []
 
     def update_task_node_info(self, patch):
         self.patches.append(patch)
 
     def query_task_dashboard(self, task_id, node_id=None):
-        return _Dash(self._ec)
+        return _Dash(self._ec, self._owner_user_id)
 
 
-def _exe2(*, execution_config=None):
+def _exe2(*, execution_config=None, owner_user_id="35983"):
     bot = _Bot()
     bcs = _Bcs2()
     poller = _Poller()
-    graph = _Graph2(execution_config)
+    graph = _Graph2(execution_config, owner_user_id)
     exe = TaskExecutor(
         bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
         poller=poller, graph=graph, identity_resolver=_DoubleBcsBotIdentityResolver(),
@@ -573,10 +576,23 @@ def test_dispatch_single_bot_2_group_disabled_falls_back_to_send():
     assert poller.registered == []  # 默认 Push，不注册 poller
 
 
-def test_dispatch_single_bot_2_group_no_owner_falls_back_to_send():
-    """owner 缺失 → 即便 singlebot_2_group 默认 true,也回退老链路(二人群需要人类)。"""
-    exe, bot, bcs, poller, graph = _exe2()  # 默认 true
-    ok = _run(exe.dispatch([_node("drv")]))  # 无 assignee_owner_id
+def test_dispatch_single_bot_2_group_uses_task_human_owner_without_assignee_owner():
+    """Relay 只有纯 assignee bot_id 时,仍按任务图谱 Human owner 建群并追加 observer。"""
+    exe, bot, bcs, poller, graph = _exe2()  # 默认 true, graph owner_user_id=35983
+    ok = _run(exe.dispatch([_node("drv")]))  # 无执行 Bot assignee_owner_id
+    assert ok == [True]
+    assert bot.sent == []
+    assert len(bcs.created) == 1
+    req = bcs.created[0]
+    assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
+    assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
+    assert poller.registered == []
+
+
+def test_dispatch_single_bot_2_group_no_task_human_owner_falls_back_to_send():
+    """任务图谱没有提交任务 Human owner 时,才回退老链路。"""
+    exe, bot, bcs, poller, graph = _exe2(owner_user_id=None)  # 默认 true
+    ok = _run(exe.dispatch([_node("drv")]))
     assert ok == [True]
     assert bot.sent  # 老链路
     assert bcs.created == []
