@@ -73,6 +73,8 @@ class TaskDispatcher:
         logger.info("[task][dispatch] dispatch 入口 nodes=%s", [n.node_id for n in toDoTaskList])
         # v4:并发搜推(gather,无并发限流;catalog IO 耗时,串行是瓶颈)。BBS 节点跳过策略直接维持。
         async def _one(node: "TaskNode"):
+            # 清上一轮残留的失败 carrier,防重投成功后把旧降级备注粘到本轮 hit/miss 事件
+            node.run_info.extend_props.pop("_dispatch_failure", None)
             # 容错:搜推异常(无响应/推理失败/端口错)不崩整批,留 PENDING 标 dispatch_error 交 harness 重试搜推
             try:
                 if effective_run_mode(node) == "bbs":
@@ -106,6 +108,15 @@ class TaskDispatcher:
                     node.run_info.extend_props["pending_group_formation"] = result.group_formation
                 else:  # MISS
                     node.run_info.extend_props["miss_events"] = [result.miss_reason or "no_bot"]
+                # REQ-2 降级透传:rationale 装配抛错时 ``_build_search_rationale`` 已把原因回填到
+                # ``result.assembly_error``;写入节点 ``_dispatch_failure`` carrier,引擎 hit/miss
+                # DISPATCH 闸门据此在轨迹事件 ``ext_info`` 追加可见性备注(派发决策本身未失败,非 error_type)。
+                _assy_err = getattr(result, "assembly_error", None)
+                if _assy_err:
+                    node.run_info.extend_props["_dispatch_failure"] = {
+                        "error_type": "rationale_assembly_failed",
+                        "error_msg": str(_assy_err)[:500],
+                    }
                 # REQ-2 DISPATCH rationale —— 策略 apply 填充,经 ``dataclasses.asdict``
                 # 写入 ``node.run_info.extend_props["_dispatch_rationale"]`` 透给引擎
                 # DISPATCH 闸门(此为唯一 carrier,无 contextvar)。``None``/异常 → 不写
@@ -122,6 +133,10 @@ class TaskDispatcher:
                             node.node_id,
                             ex,
                         )
+                        node.run_info.extend_props["_dispatch_failure"] = {
+                            "error_type": "rationale_serialize_failed",
+                            "error_msg": f"{type(ex).__name__}: {ex}"[:500],
+                        }
                 group = getattr(result, "group_formation", None)
                 logger.info(
                     "[task][dispatch] task=%s node=%s outcome=%s run_mode=%s assignee=%s "
@@ -138,6 +153,12 @@ class TaskDispatcher:
             except Exception as ex:  # noqa: BLE001  搜推异常→吞掉,留 PENDING 交 harness 按超时重试
                 logger.warning("[task][dispatch] node=%s 搜推异常→留 PENDING 交 harness: %s", node.node_id, ex)
                 node.run_info.extend_props["dispatch_error"] = f"dispatch_exception:{type(ex).__name__}"
+                # 失败 carrier(含异常消息):引擎 dispatch_fail 闸门据此发射带 ``error_type=DISPATCH_STUCK``
+                # 的 DISPATCH 轨迹事件(短 ``dispatch_error`` 只够 harness 路由,这里补全诊断消息)。
+                node.run_info.extend_props["_dispatch_failure"] = {
+                    "error_type": "dispatch_exception",
+                    "error_msg": f"{type(ex).__name__}: {ex}"[:500],
+                }
                 return node
         out = list(await _aio.gather(*[_one(n) for n in toDoTaskList]))
         return out

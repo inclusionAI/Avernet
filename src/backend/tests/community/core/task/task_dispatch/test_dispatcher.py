@@ -441,3 +441,58 @@ def test_prefetch_caps_tokens_to_max():
     assert len(discover.keywords) == _PREFETCH_MAX_TOKENS
     # 每 token 返回独立 bot_id → 候选数 == 调用数
     assert len(cands) == _PREFETCH_MAX_TOKENS
+
+
+class TestDispatchExceptionCarrier:
+    """搜推异常 / rationale 装配失败 的诊断 carrier(per REQ-P1 dispatch-failure 可见性):
+
+    dispatcher 顶层 ``except`` 吞搜推异常时写 ``dispatch_error``(短状态串,供 harness 路由)
+    + ``_dispatch_failure``(含异常消息,供引擎 dispatch_fail 闸门发射带
+    ``error_type=DISPATCH_STUCK`` 的 ``dispatch`` 轨迹事件);rationale 装配抛错时在
+    ``sr.assembly_error`` 回填原因(经 ``_dispatch_failure`` 透传到 hit/miss 事件 ``ext_info``
+    备注)。``_one`` 入口清上一轮残留 ``_dispatch_failure`` 防重投污染本轮 hit 事件。"""
+
+    def test_search_exception_writes_dispatch_failure_carrier(self, svc):
+        class _RaisingStrategy(_StubDispatchStrategy):
+            def __init__(self) -> None:
+                super().__init__(SearchResult(outcome=SearchOutcome.MISS))
+
+            async def apply(self, node, graph):  # mirrors a search/recommend blow-up
+                raise RuntimeError("search/recommend blew up")
+
+        d = TaskDispatcher(svc)
+        d.set_strategies([_RaisingStrategy()])
+        node = _run(d.dispatch([_node("c1")]))[0]
+
+        # node 留 PENDING(无执行者)+ dispatch_error 短状态串(harness 路由用,类型级)
+        assert node.run_info.extend_props.get("dispatch_error") == "dispatch_exception:RuntimeError"
+        # 失败 carrier 含异常消息 —— 引擎 dispatch_fail 闸门据此发射轨迹事件(Step 1)
+        fail = node.run_info.extend_props.get("_dispatch_failure")
+        assert isinstance(fail, dict)
+        assert fail["error_type"] == "dispatch_exception"
+        assert "RuntimeError" in fail["error_msg"]
+        assert "blew up" in fail["error_msg"]
+
+    def test_stale_dispatch_failure_cleared_on_clean_redispatch(self, svc):
+        """重投命中时,上一轮残留的 ``_dispatch_failure`` 必须被清掉,避免旧降级备注粘到
+        本轮 hit_single 轨迹事件(引擎 hit 闸门据此决定是否附 ``ext_info`` 备注)。"""
+        node = _node("c1")
+        node.run_info.extend_props["_dispatch_failure"] = {"error_type": "stale", "error_msg": "old"}
+        d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot1"))
+        out = _run(d.dispatch([node]))
+        assert out[0].run_info.extend_props.get("_dispatch_failure") is None
+
+    def test_rationale_assembly_failure_sets_assembly_error(self):
+        """rationale 装配抛错(malformed score 不可 ``float()``)→ ``_build_search_rationale``
+        返回 None 且在 ``sr`` 上回填 ``assembly_error``(Step 2 的 carrier 源头);派发决策不受影响。"""
+        from agentclaw.community.core.task.task_dispatch.rationale import _build_search_rationale
+
+        sr = SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="b1")
+        candidates = [{"bot_id": "b1", "recommend": {"score": ["not", "a", "number"]}}]
+        result = _build_search_rationale(
+            node=_node("c1"), candidates=candidates, sr=sr, use_skill=False,
+            prompt_text=None, response_text=None, filter_ran=False, prefetch_tokens=[],
+        )
+        assert result is None
+        assert sr.assembly_error is not None
+        assert sr.assembly_error.startswith("rationale_assembly_failed")
