@@ -6,6 +6,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
+    Relation,
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
@@ -359,6 +360,10 @@ def test_prompt_formatter_relay_mode_injects_event_protocol_only():
     assert "DECLINED 请求体示例如下" in prompt
     assert '"payload": {"execution_decision": "DECLINED"}' in prompt
     assert "DECLINED payload 只能携带 execution_decision" in prompt
+    assert "请求顶层字段必须包含 task_id、node_id、event_type、event_id、holder_id、relay_turn、progress_reason" in prompt
+    assert "作为顶层 relay_turn 字段提交，严禁放入 payload" in prompt
+    assert "node_id 必须是 PLAN_RESULT 返回的 target_node_id" in prompt
+    assert "HTTP 200 前，不得向用户宣称任务已完成" in prompt
 
 
 def test_static_relay_prompt_waits_for_every_member_and_preserves_markdown():
@@ -676,3 +681,99 @@ def test_resume_relay_turn_sends_plan_only_prompt_to_current_holder():
     assert "不得重做业务执行" in message
     assert "relay_turn=renewed-turn" in message
     assert metadata == {"biz_task_id": "t1", "relay_resume": True}
+
+
+class _ResumeGraph:
+    """Expose the graph to the Relay resume path without adding graph writes."""
+
+    def __init__(self, dashboard):
+        self._dashboard = dashboard
+        self.patches = []
+
+    def query_task_dashboard(self, task_id, node_id=None):
+        assert task_id == "t1"
+        return self._dashboard
+
+    def report(self, data):
+        assert data.data["report_type"] == "NODE_PATCH"
+        patch = data.data["payload"]["patch"]
+        self.patches.append(patch)
+        return None
+
+
+def _resume_dashboard(node, successor=None):
+    dashboard = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
+        task_id="t1",
+    )
+    dashboard.tasks.append(node)
+    if successor is not None:
+        dashboard.tasks.append(successor)
+        dashboard.relations.append(Relation(src_id=node.node_id, dst_id=successor.node_id))
+    return dashboard
+
+
+def test_resume_relay_turn_reuses_pending_successor_without_replanning():
+    """A persisted successor means PLAN_RESULT already succeeded on a prior attempt."""
+    bot = _Bot()
+    node = _node("group-1", {"relay_holder_id": "relay-driver:owner-1"})
+    successor = TaskNode(
+        node_id="c2",
+        task_id="t1",
+        status=Status.PENDING,
+        task_spec=node.task_spec,
+        run_info=RuntimeInfo(run_mode="single_bot"),
+        node_run_graph=None,
+    )
+    graph = _ResumeGraph(_resume_dashboard(node, successor))
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=_Poller(),
+        graph=graph,
+        api_base_url="https://backend.example",
+    )
+
+    assert _run(exe.resume_relay_turn(node, "renewed-turn")) is True
+    message = bot.sent[0][1]
+    assert "pending_target_node_id=c2" in message
+    assert "pending_run_mode=single_bot" in message
+    assert "PLAN_RESULT 已成功，不得重新规划同一节点" in message
+    assert (
+        "立即 POST https://backend.example/api/v1/collaboration/tasks/dispatch"
+        in message
+    )
+    assert "origin_node_id=c1" in message
+    assert "target_node_id=<pending_target_node_id>" in message
+    assert "holder_id=relay-driver:owner-1" in message
+    assert graph.patches[0].node_id == "c1"
+    assert graph.patches[0].extend_props_patch["_exec_request_input"] == message
+
+
+def test_resume_relay_turn_without_successor_continues_from_plan_result():
+    """No persisted successor means the holder must resume from PLAN_RESULT."""
+    bot = _Bot()
+    node = _node("group-1", {"relay_holder_id": "relay-driver:owner-1"})
+    graph = _ResumeGraph(_resume_dashboard(node))
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=_Poller(),
+        graph=graph,
+        api_base_url="https://backend.example",
+    )
+
+    assert _run(exe.resume_relay_turn(node, "renewed-turn")) is True
+    message = bot.sent[0][1]
+    assert "pending_target_node_id=" in message
+    assert "pending_run_mode=" in message
+    assert "先依据当前节点已有 output 和根目标计算 gap" in message
+    assert "无 gap 则 POST PLAN_RESULT" in message

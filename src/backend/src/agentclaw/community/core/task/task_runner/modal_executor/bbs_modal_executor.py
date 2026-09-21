@@ -13,8 +13,8 @@ import time
 import uuid
 from typing import Any
 from agentclaw.community.core.task.domain.models import (
-    Context, Goal, RuntimeInfo, Status, TaskCallbackData, TaskNode, TaskNodePatch,
-    TaskSpec, task_spec_instruction, task_spec_title,
+    Context, Goal, RuntimeInfo, Status, TaskCallbackData, TaskGraphPatch, TaskNode,
+    TaskNodePatch, TaskSpec, task_spec_instruction, task_spec_title,
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     format_task_node_business_instruction,
@@ -57,6 +57,59 @@ def _resolve_owner_user_id_from_graph(graph, task_id: str) -> str:
         return ""
     owner = (getattr(snapshot, "extend_props", None) or {}).get("owner_user_id")
     return str(owner) if owner else ""
+
+
+def _release_relay_bbs_claim(graph, task_id: str, node_id: str, reason: str) -> None:
+    """Return a claimed Relay BBS baton to the square without touching predecessors."""
+    graph.report(TaskCallbackData(data={
+        "report_type": "NODE_PATCH",
+        "payload": {
+            "patch": TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                status=Status.PENDING,
+                run_mode="bbs",
+                assignee=None,
+                progress_reason="BBS 接力认领失败，任务回到广场等待重新认领",
+                failure_reason=reason,
+                extend_props_patch={
+                    "bbs_owner": None,
+                    "bbs_claim_id": None,
+                    "driver_bot_id": None,
+                    "next_relay_bots": [],
+                },
+            )
+        },
+    }))
+    graph.report(TaskCallbackData(data={
+        "report_type": "GRAPH_PATCH",
+        "payload": {
+            "task_id": task_id,
+            "patch": TaskGraphPatch(
+                extend_props_patch={"bbs_mode": True, "bbs_node_id": node_id}
+            ),
+        },
+    }))
+
+
+def _relay_bbs_execution_result_missing(graph, task_id: str, node_id: str) -> bool:
+    """Detect a claimed Relay BBS baton whose bot replied without reporting facts."""
+    try:
+        snapshot = graph.query_task_dashboard(task_id)
+    except Exception as exc:  # noqa: BLE001 graph query failure must not throw away output
+        logger.warning(
+            "[task][bbs_mode] cannot inspect relay execution result task=%s node=%s: %s",
+            task_id, node_id, exc,
+        )
+        return False
+    node = next(
+        (item for item in snapshot.tasks if item.node_id == node_id),
+        None,
+    )
+    if node is None or node.status != Status.RUNNING:
+        return False
+    extend_props = node.run_info.extend_props or {}
+    return str(extend_props.get("execution_decision") or "").strip().upper() == ""
 
 
 def _trajectory_node_id(execution_graph, target_node_id: str | None) -> str:
@@ -391,6 +444,22 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
             )
         logger.info("[task][bbs_mode] exec_done, task_id=%s, result=%s", task_id, task_result)
 
+        if target_node_id is not None and _relay_bbs_execution_result_missing(
+            graph, task_id, target_node_id
+        ):
+            _emit_bbs_trajectory(
+                task_context_service, execution_graph, target_node_id,
+                "bbs_execution_result_missing",
+                error_type="relay",
+                error_msg="relay BBS bot replied without EXECUTION_RESULT",
+                details={"winner_bot_id": winner_bot_id},
+            )
+            _release_relay_bbs_claim(
+                graph, task_id, target_node_id,
+                "relay BBS bot replied without EXECUTION_RESULT",
+            )
+            return
+
         _bbs_output = task_result.get("result") if isinstance(task_result, dict) else task_result
         _bbs_session = task_result.get("session_id") if isinstance(task_result, dict) else ""
         _scoped_patch = TaskNodePatch(
@@ -431,19 +500,25 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
             "bbs_execution_failed", exception=exc,
             details={"winner_bot_id": winner_bot_id},
         )
-        # send 失败 → 回收 claim(释放 bbs_owner,避免泄漏挡住后续重升 BBS)。
-        # send 失败不产生 BBS 回投，保留节点与运行记录，仅释放 claim。
-        graph.report(TaskCallbackData(data={
-            "report_type": "NODE_PATCH",
-            "payload": {"patch": TaskNodePatch(
-                task_id=task_id,
-                node_id=task_id,
-                # BBS dispatch failure releases the claim but must preserve the
-                # root HUNG recovery state. PLANNING would surface as EXECUTING
-                # and falsely make a terminal child set look active again.
-                extend_props_patch={"bbs_owner": None},
-            )},
-        }))
+        # Relay BBS keeps the owner on the target node. Release that node back
+        # to the square; legacy centralized BBS continues to release the root owner.
+        if target_node_id is not None:
+            _release_relay_bbs_claim(
+                graph, task_id, target_node_id,
+                f"relay BBS execution failed: {exc}",
+            )
+        else:
+            graph.report(TaskCallbackData(data={
+                "report_type": "NODE_PATCH",
+                "payload": {"patch": TaskNodePatch(
+                    task_id=task_id,
+                    node_id=task_id,
+                    # BBS dispatch failure releases the claim but must preserve the
+                    # root HUNG recovery state. PLANNING would surface as EXECUTING
+                    # and falsely make a terminal child set look active again.
+                    extend_props_patch={"bbs_owner": None},
+                )},
+            }))
         logger.warning("[task][bbs_mode] send 失败 bot=%s task=%s:%s", winner_bot_id, task_id, exc)
 
 

@@ -103,8 +103,10 @@ class _DiscoverTwo:
 class _ToggleDelivery:
     def __init__(self) -> None:
         self.succeeds = False
+        self.calls: list[str] = []
 
     async def deliver(self, node) -> bool:
+        self.calls.append(node.node_id)
         return self.succeeds
 
 
@@ -927,10 +929,13 @@ def test_failed_dispatch_reopens_same_turn_for_retry() -> None:
             target_node_id=retry_step,
             holder_id="main-bot",
             relay_turn=turn,
-            dispatch_id="dispatch-retry",
+            dispatch_id="dispatch-failed",
         )
     )
     assert retried["ok"] is True
+    # The same delivery id must retry a non-delivered attempt. It cannot report
+    # early idempotency after only consuming the Relay ticket.
+    assert delivery.calls.count(retry_step) == 2
     assert (
         graph_service.query_task_nodes(
             "relay-task",
@@ -938,6 +943,19 @@ def test_failed_dispatch_reopens_same_turn_for_retry() -> None:
         )[0].status
         == Status.RUNNING
     )
+    delivered_again = _run(
+        service.dispatch_task(
+            task_id="relay-task",
+            origin_node_id="relay-task",
+            target_node_id=retry_step,
+            holder_id="main-bot",
+            relay_turn=turn,
+            dispatch_id="dispatch-failed",
+        )
+    )
+    assert delivered_again["ok"] is True
+    assert delivered_again["idempotent"] is True
+    assert delivery.calls.count(retry_step) == 2
 
 
 def test_relay_coordinator_renews_only_expired_current_turn() -> None:

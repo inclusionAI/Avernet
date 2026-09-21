@@ -30,6 +30,9 @@ from agentclaw.community.core.task.task_center.relay import (
     emit_relay_callback_success,
     relay_attempt,
 )
+from agentclaw.community.core.task.task_center.task_service_relay_dispatch import (
+    TaskServiceRelayDispatchMixin,
+)
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
@@ -38,7 +41,7 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
 logger = logging.getLogger("task.relay.search")
 
 
-class TaskServiceRelayMixin:
+class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
     """Relay flow: report execution/plan/dispatch decisions, then dispatch once."""
 
     def _relay(self) -> RelayCoordinator:
@@ -176,6 +179,26 @@ class TaskServiceRelayMixin:
         event_key = f"{event_type}:{event_id}"
         reservation = relay.begin_event(task_id, event_key)
         reservation_state = str(reservation.get("state") or "")
+        # A CLAIMED reservation means this call owns the event. The active-baton
+        # guard applies only to a new execution report; completed and in-progress
+        # retries must remain idempotent after a terminal transition.
+        if event_type == "EXECUTION_RESULT" and reservation_state == "CLAIMED":
+            try:
+                if node.status != Status.RUNNING:
+                    raise TaskStateError(
+                        f"relay EXECUTION_RESULT target must be RUNNING node={node_id} "
+                        f"status={node.status}"
+                    )
+                if any(relation.src_id == node_id for relation in graph.relations):
+                    raise TaskStateError(
+                        "relay EXECUTION_RESULT target has already handed off a successor "
+                        f"node={node_id}"
+                    )
+            except TaskStateError:
+                # Do not leak a PROCESSING event reservation when a state guard
+                # rejects the report; the same event_id must remain safely retryable.
+                relay.release_event(task_id, event_key)
+                raise
         if reservation_state == "COMPLETED":
             stored = dict(reservation.get("result") or {})
             stored["ok"] = True
@@ -776,145 +799,6 @@ class TaskServiceRelayMixin:
             "node_id": node.node_id,
             "driver_bot_id": driver,
             "next_relay_bots": next_bots,
-        }
-
-    async def dispatch_task(
-        self,
-        *,
-        task_id: str,
-        origin_node_id: str,
-        target_node_id: str,
-        holder_id: str,
-        relay_turn: str,
-        dispatch_id: str,
-    ) -> dict[str, Any]:
-        relay = self._relay()
-        _, node = self._relay_node(task_id, target_node_id)
-        if node.run_info.extend_props.get("relay_dispatch_id") == dispatch_id:
-            return {"ok": True, "idempotent": True, "node_id": target_node_id}
-        try:
-            turn_node_id = relay.require(task_id, origin_node_id, holder_id, relay_turn)
-        except TaskStateError as exc:
-            self._emit_relay(
-                task_id=task_id,
-                node_id=target_node_id,
-                action_result="turn_invalid",
-                error_type=ReasonCatalog.RELAY,
-                error_msg=str(exc),
-                attempt=self._relay_attempt(task_id),
-                ext_info={"holder_id": holder_id, "relay_turn_prefix": relay_turn[:8]},
-            )
-            raise
-        if turn_node_id != origin_node_id:
-            raise TaskStateError("relay dispatch origin does not own current turn")
-        if node.run_info.extend_props.get("relay_planned_by") != origin_node_id:
-            raise TaskStateError("relay dispatch target was not planned by origin node")
-        if node.status != Status.PENDING:
-            raise TaskStateError(
-                f"relay dispatch target must be PENDING node={target_node_id}"
-            )
-        if node.run_info.run_mode not in {"single_bot", "coop_group"}:
-            raise TaskStateError(
-                "relay dispatch requires a persisted dispatch decision"
-            )
-        formation = None
-        if node.run_info.run_mode == "coop_group":
-            raw = node.run_info.extend_props.get("pending_group_formation") or {}
-            formation = GroupFormation.from_dict(raw)
-        self._report_relay_turn(
-            "RELAY_TURN_CONSUME",
-            task_id=task_id,
-            node_id=origin_node_id,
-            holder_id=holder_id,
-            token=relay_turn,
-        )
-        try:
-            extend_patch: dict[str, Any] = {"relay_dispatch_id": dispatch_id}
-            if formation is not None:
-                group_id = await self._relay_adapter.runner.form_coop_group(formation)
-                extend_patch["group_id"] = group_id
-            # Persist infrastructure delivery identity first, but expose RUNNING
-            # only after the actual Runner delivery succeeds.
-            self._report_node_patch(
-                TaskNodePatch(
-                    task_id=task_id,
-                    node_id=target_node_id,
-                    extend_props_patch=extend_patch,
-                )
-            )
-            refreshed = self._relay_node(task_id, target_node_id)[1]
-            delivered = bool(
-                (await self._relay_adapter.runner.start_run([refreshed]))[0]
-            )
-        except Exception:
-            logger.exception(
-                "[task][relay] dispatch failed task=%s origin=%s target=%s",
-                task_id,
-                origin_node_id,
-                target_node_id,
-            )
-            delivered = False
-        if not delivered:
-            self._report_node_patch(
-                TaskNodePatch(
-                    task_id=task_id,
-                    node_id=target_node_id,
-                    failure_reason="下一棒 Runner 派发失败",
-                    extend_props_patch={
-                        "relay_dispatch_id": None,
-                        "group_id": None,
-                    },
-                )
-            )
-            self._report_relay_turn(
-                "RELAY_TURN_REOPEN",
-                task_id=task_id,
-                node_id=origin_node_id,
-                holder_id=holder_id,
-                token=relay_turn,
-            )
-            self._emit_relay(
-                task_id=task_id,
-                node_id=target_node_id,
-                action_result="dispatch_failed_reopen",
-                error_type=ReasonCatalog.RELAY,
-                error_msg=f"relay dispatch failed node={target_node_id}",
-                status_from=Status.PENDING,
-                status_to=Status.PENDING,
-                attempt=self._relay_attempt(task_id),
-                ext_info={"holder_id": holder_id, "dispatch_id": dispatch_id},
-            )
-            raise TaskStateError(f"relay dispatch failed node={target_node_id}")
-        self._report_node_patch(
-            TaskNodePatch(
-                task_id=task_id,
-                node_id=target_node_id,
-                status=Status.RUNNING,
-                progress_reason="下一棒 Runner 已完成实际投递",
-            )
-        )
-        refreshed = self._relay_node(task_id, target_node_id)[1]
-        self._emit_relay(
-            task_id=task_id,
-            node_id=target_node_id,
-            action_result="dispatch",
-            status_from=Status.PENDING,
-            status_to=Status.RUNNING,
-            attempt=self._relay_attempt(task_id),
-            ext_info={
-                "holder_id": holder_id,
-                "dispatch_id": dispatch_id,
-                "run_mode": refreshed.run_info.run_mode,
-                "assignee": refreshed.run_info.assignee,
-            },
-        )
-        return {
-            "ok": True,
-            "origin_node_id": origin_node_id,
-            "target_node_id": target_node_id,
-            "run_mode": refreshed.run_info.run_mode,
-            "assignee": refreshed.run_info.assignee,
-            "group_id": refreshed.run_info.extend_props.get("group_id"),
         }
 
     def _claim_relay_bbs(

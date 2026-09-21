@@ -21,6 +21,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Status,
     TaskCallbackData,
+    TaskGraphPatch,
     TaskNodePatch,
     TaskNodeQueryCriteria,
     effective_run_mode,
@@ -102,6 +103,71 @@ class TaskHarness:
                 }
             )
         )
+
+    def _report_graph_patch(self, task_id: str, patch: TaskGraphPatch) -> None:
+        self._graph.report(
+            TaskCallbackData(
+                data={
+                    "report_type": "GRAPH_PATCH",
+                    "payload": {"task_id": task_id, "patch": patch},
+                }
+            )
+        )
+
+    def _recover_relay_without_execution_result(self, task_id: str, node) -> bool:
+        """Turn a delivered baton back to BBS when no execution fact arrives in SLA.
+
+        This pre-execution recovery is baton-owned: it publishes only the current
+        node and never falls through to centralized parent/root reconciliation.
+        """
+        try:
+            graph = self._graph.query_task_dashboard(task_id)
+        except Exception:  # noqa: BLE001 graph unavailable → keep normal harness semantics
+            return False
+        config = graph.extend_props.get("execution_config", {}) or {}
+        if config.get("orchestration_mode") != "relay":
+            return False
+        graph_terminal = getattr(graph.status, "value", graph.status) in {
+            "DONE",
+            "SUCCESS",
+            "HUNG",
+            "FAILED",
+            "CANCELLED",
+        }
+        if graph_terminal:
+            return False
+        turn = graph.extend_props.get("relay_turn") or {}
+        if str(turn.get("status") or "") == "GRANTED":
+            return False
+        extend_props = node.run_info.extend_props or {}
+        if str(extend_props.get("execution_decision") or "").strip().upper():
+            return False
+        self._report_node_patch(
+            TaskNodePatch(
+                task_id=task_id,
+                node_id=node.node_id,
+                status=Status.PENDING,
+                run_mode="bbs",
+                assignee=None,
+                progress_reason="执行超时未上报 EXECUTION_RESULT，当前棒转 BBS 广场",
+                failure_reason="执行超时未上报 EXECUTION_RESULT",
+                extend_props_patch={
+                    "bbs_owner": None,
+                    "bbs_claim_id": None,
+                },
+            )
+        )
+        self._report_graph_patch(
+            task_id,
+            TaskGraphPatch(
+                extend_props_patch={
+                    "bbs_mode": True,
+                    "bbs_node_id": node.node_id,
+                }
+            ),
+        )
+        self._dispatched_at.pop((task_id, node.node_id), None)
+        return True
 
     def _resume_expired_relay_turn(self, task_id: str) -> bool:
         """Resume a stale Relay turn before generic SLA logic can touch its node."""
@@ -191,6 +257,14 @@ class TaskHarness:
                     self._dispatched_at[key] = now  # 首见:记时,本轮不判
                     continue
                 if now - t0 > sla:
+                    if self._recover_relay_without_execution_result(task_id, n):
+                        logger.warning(
+                            "[task][relay] execution result missing task=%s node=%s "
+                            "published current baton to BBS",
+                            task_id,
+                            n.node_id,
+                        )
+                        continue
                     if effective_run_mode(n) == "bbs":
                         # BBS lease 到期(FR-EXT-06):owner bot 崩溃/挂起导致 RUNNING 超 SLA。
                         # 直写图(self._graph),不走 on_harness_fn:后者复位 RUNNING→PENDING 重派,

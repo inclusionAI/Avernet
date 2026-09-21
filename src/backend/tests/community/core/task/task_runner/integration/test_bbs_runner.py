@@ -168,6 +168,12 @@ class _FakeGraph:
                 )
                 node.status = Status.RUNNING
                 node.run_info.assignee = payload["bot_id"]
+                node.run_info.extend_props.update({
+                    "bbs_owner": payload["bot_id"],
+                    "relay_holder_id": payload["bot_id"],
+                    "driver_bot_id": payload["bot_id"],
+                    "next_relay_bots": [payload["bot_id"]],
+                })
             return result
         if report_type == "ADD_NODES":
             return self.add_task_nodes(
@@ -177,16 +183,41 @@ class _FakeGraph:
             )
         if report_type == "NODE_PATCH":
             return self.update_task_node_info(payload["patch"])
+        if report_type == "GRAPH_PATCH":
+            if self.dashboard is not None:
+                self.dashboard.extend_props.update(
+                    payload["patch"].extend_props_patch or {}
+                )
+            return MagicMock(success=True)
         raise AssertionError(report_type)
 
     def update_task_node_info(self, patch):
         if (
             patch.extend_props_patch
             and "bbs_owner" in patch.extend_props_patch
-            and patch.extend_props_patch["bbs_owner"] is None
+            and patch.node_id != "t-process-root"
         ):
             self.bbs_owner = None
             self.cleared = True
+        if self.dashboard is not None:
+            node = next(
+                (
+                    item for item in self.dashboard.tasks
+                    if item.node_id == patch.node_id
+                ),
+                None,
+            )
+            if node is not None:
+                if patch.status is not None:
+                    node.status = patch.status
+                if patch.run_mode is not None:
+                    node.run_info.run_mode = patch.run_mode
+                node.run_info.assignee = patch.assignee
+                node.run_info.extend_props.update(patch.extend_props_patch or {})
+                if patch.progress_reason:
+                    node.run_info.progress_reason = patch.progress_reason
+                if patch.failure_reason:
+                    node.run_info.failure_reason = patch.failure_reason
 
     def add_task_nodes(self, nodes, task_id, *, mark_parent_planning=True):
         # Mirror TaskGraphService's parent-state side effect so this test catches
@@ -293,7 +324,10 @@ def test_notify_reuses_existing_relay_bbs_node_for_dynamic_selection():
         task_id="t-relay",
         status=Status.PENDING,
         task_spec=execution_graph.tasks[0].task_spec,
-        run_info=RuntimeInfo(run_mode="bbs"),
+        run_info=RuntimeInfo(
+            run_mode="bbs",
+            extend_props={"execution_decision": "ACCEPTED"},
+        ),
         node_run_graph=None,
     )
     execution_graph.tasks.append(relay_node)
@@ -356,6 +390,43 @@ def test_notify_relay_empty_roster_keeps_bbs_node_pending_for_square():
     assert relay_node.status is Status.PENDING
     assert relay_node.run_info.assignee is None
     assert relay_node.run_info.run_mode == "bbs"
+
+
+def test_notify_relay_send_failure_releases_current_bbs_node():
+    """Relay BBS delivery failure releases the target node, not the root owner."""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay-send-failure", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-bbs-send-failure",
+        task_id="t-relay-send-failure",
+        status=Status.PENDING,
+        task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(run_mode="bbs"),
+        node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    graph.dashboard = execution_graph
+    bot = _FakeBot(rates={"A": 80}, dispatch_raises=True)
+    bcn = _FakeBcn(_roster("A"))
+
+    _run(notify(
+        execution_graph,
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        target_node_id="relay-bbs-send-failure",
+    ))
+
+    root = execution_graph.tasks[0]
+    assert root.status is Status.HUNG
+    assert relay_node.status is Status.PENDING
+    assert relay_node.run_info.run_mode == "bbs"
+    assert relay_node.run_info.assignee is None
+    assert relay_node.run_info.extend_props["bbs_owner"] is None
+    assert relay_node.run_info.extend_props["bbs_claim_id"] is None
+    assert execution_graph.extend_props["bbs_mode"] is True
+    assert execution_graph.extend_props["bbs_node_id"] == "relay-bbs-send-failure"
 
 
 def test_notify_empty_roster_returns_silently():

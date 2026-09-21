@@ -215,6 +215,26 @@ class TestPollOnce:
         assert resets[0].node_id == "c1"
         assert rec.patches[0].extend_props_patch.get("harness_reset") == "timeout"
 
+    def test_relay_execution_result_missing_publishes_current_bbs_baton(self, svc, graph):
+        graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+        _dispatch_running(svc, graph, "c1", run_mode="single_bot", assignee="bot1")
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=5.0)
+        h.register("t1")
+        assert h._poll_once() == []
+
+        h._dispatched_at[("t1", "c1")] = clock() - 10.0
+        assert h._poll_once() == []
+
+        node = svc._get_node(graph, "c1")
+        assert node.status is Status.PENDING
+        assert node.run_info.run_mode == "bbs"
+        assert rec.patches == []
+        assert graph.extend_props["bbs_mode"] is True
+        assert graph.extend_props["bbs_node_id"] == "c1"
+        assert ("t1", "c1") not in h._dispatched_at
+
     def test_not_timed_out_untouched(self, svc, graph):
         clock = _Clock(0.0)
         rec = Recorder()
