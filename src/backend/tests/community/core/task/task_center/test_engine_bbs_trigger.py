@@ -289,7 +289,9 @@ def test_engine_harness_hung_relay_mode_does_not_propagate_to_parent(svc):
     svc.add_task_nodes([_child("c1", "t6")], parent_node_id="t6")
     g.extend_props["execution_config"] = {"orchestration_mode": "relay"}
     g.extend_props["loop_round"] = 1
-    svc.update_task_node_info(_patch("t6", "t6", status=Status.DONE))
+    # Relay batons close through the event gateway. This legacy-parent test
+    # intentionally simulates an already-handed-off parent without reopening it.
+    svc._get_node(g, "t6").status = Status.DONE
     svc.update_task_node_info(
         _patch("t6", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="bot1")
     )

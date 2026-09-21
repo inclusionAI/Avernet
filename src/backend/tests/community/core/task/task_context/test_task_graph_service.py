@@ -376,6 +376,34 @@ class TestUpdateTaskNodeInfo:
         assert node.run_info.start_time is not None
         assert node.run_info.end_time is None
 
+    def test_relay_successor_node_rejects_later_status_writes(self, svc, graph):
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        svc.update_task_node_info(
+            _patch("t1", "t1", status=Status.RUNNING, run_mode="single_bot", assignee="b")
+        )
+        svc.update_task_node_info(_patch("t1", "t1", status=Status.DONE))
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1", mark_parent_planning=False)
+
+        with pytest.raises(TaskStateError, match="relay successor node is immutable"):
+            svc.update_task_node_info(_patch("t1", "t1", status=Status.HUNG))
+
+        assert svc._get_node(graph, "t1").status == Status.DONE
+        # Status-free lease/runtime maintenance remains a fold operation.
+        svc.update_task_node_info(
+            _patch("t1", "t1", extend_props_patch={"bbs_owner": None})
+        )
+        assert svc._get_node(graph, "t1").status == Status.DONE
+
+    def test_relay_terminal_node_rejects_direct_status_writes(self, svc, graph):
+        graph.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+        svc.update_task_node_info(_patch("t1", "t1", status=Status.RUNNING))
+        svc.update_task_node_info(_patch("t1", "t1", status=Status.DONE))
+
+        with pytest.raises(TaskStateError, match="relay terminal node status is immutable"):
+            svc.update_task_node_info(_patch("t1", "t1", status=Status.HUNG))
+
+        assert svc._get_node(graph, "t1").status == Status.DONE
+
     def test_planning_to_hung_writes_end_time_only(self, svc, graph):
         # 根在 init_graph 时已开始计时,即使纯规划节点未进入 RUNNING。
         svc.update_task_node_info(_patch("t1", "t1", status=Status.PLANNING))

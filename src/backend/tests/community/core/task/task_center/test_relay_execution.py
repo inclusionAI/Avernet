@@ -1334,6 +1334,11 @@ class TestRelayTrajectory:
             )
         )
         assert _run(service.resume_expired_relay_turn("relay-task")) is False
+        g = graph.query_task_dashboard("relay-task")
+        assert next(
+            n for n in g.tasks if n.node_id == "relay-task"
+        ).status == Status.DONE
+        assert g.status == Status.HUNG
         errors = {r.action_result: r for r in _relay_records(repo)}
         assert errors["dispatch_failed_reopen"].error_type == ReasonCatalog.RELAY.value
         assert errors["resume_exhausted_hung"].error_type == ReasonCatalog.RELAY.value

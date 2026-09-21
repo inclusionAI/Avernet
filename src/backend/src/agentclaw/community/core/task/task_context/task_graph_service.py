@@ -645,6 +645,29 @@ class TaskGraphService:
         def mutation(graph):
             node = self._require_node(graph, patch.node_id)
             prev_status = node.status
+            relay_mode = (
+                graph.extend_props.get("execution_config", {}) or {}
+            ).get("orchestration_mode") == "relay"
+            if relay_mode:
+                # Relay is baton-owned, not tree-aggregated. Once a node has
+                # handed off a successor, a later baton must not rewrite it.
+                has_successor = any(
+                    relation.src_id == patch.node_id
+                    and relation.type == RelationType.DEPENDENCY
+                    for relation in graph.relations
+                )
+                if has_successor and (
+                    patch.status is not None or patch.acceptance_result is not None
+                ):
+                    raise TaskStateError(
+                        "relay successor node is immutable: "
+                        f"task={patch.task_id} node={patch.node_id}"
+                    )
+                if node.status in _TERMINAL_STATUSES and patch.status is not None:
+                    raise TaskStateError(
+                        "relay terminal node status is immutable: "
+                        f"task={patch.task_id} node={patch.node_id} status={node.status}"
+                    )
             new_status: Status | None = None
             if patch.acceptance_result is not None:
                 if node.status in _TERMINAL_STATUSES:

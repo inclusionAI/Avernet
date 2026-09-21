@@ -449,15 +449,9 @@ class TaskServiceRelayMixin:
         max_resumes = int(config.get("RELAY_RESUME_MAX", 2))
         resumes = int(node.run_info.extend_props.get("relay_resume_count", 0))
         if resumes >= max_resumes:
-            self._report_node_patch(
-                TaskNodePatch(
-                    task_id=task_id,
-                    node_id=node_id,
-                    status=Status.HUNG,
-                    failure_reason="relay planning timeout exceeded resume limit",
-                    extend_props_patch={"relay_resume_exhausted": True},
-                )
-            )
+            # Relay nodes are immutable once they have handed off a successor.
+            # Exhausted recovery closes the task graph; it must not rewrite the
+            # previous baton to HUNG/REVIEWING from a later recovery step.
             self._report_graph_patch(
                 task_id,
                 TaskGraphPatch(
