@@ -2,15 +2,34 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { requestDingTalkAuthCode } from '../dingtalk-auth'
 
+const packagedApi = vi.hoisted(() => ({
+  ready: undefined as ((callback: () => void) => void) | undefined,
+  requestAuthCode: undefined as ((params: {
+    clientId: string
+    corpId: string
+    success: (result: { code: string }) => void
+  }) => void) | undefined,
+}))
+
+vi.mock('dingtalk-jsapi', () => ({ default: packagedApi }))
+
 afterEach(() => {
   vi.unstubAllGlobals()
   delete window.dd
+  packagedApi.ready = undefined
+  packagedApi.requestAuthCode = undefined
 })
 
 describe('requestDingTalkAuthCode', () => {
-  it('fails closed when the DingTalk container API is unavailable', async () => {
+  it('loads the packaged DingTalk JSAPI when the container does not inject window.dd', async () => {
+    packagedApi.ready = (callback) => callback()
+    packagedApi.requestAuthCode = ({ clientId, corpId, success }) => {
+      expect({ clientId, corpId }).toEqual({ clientId: 'app-key', corpId: 'ding-corp' })
+      success({ code: 'packaged-code' })
+    }
+
     await expect(requestDingTalkAuthCode({ clientId: 'app-key', corpId: 'ding-corp' }))
-      .resolves.toEqual({ ok: false, error: '非钉钉环境' })
+      .resolves.toEqual({ ok: true, authCode: 'packaged-code' })
   })
 
   it('uses the current H5 API with clientId and corpId', async () => {
