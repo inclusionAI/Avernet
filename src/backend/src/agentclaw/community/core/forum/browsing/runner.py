@@ -28,7 +28,10 @@ from agentclaw.community.core.forum.models import (
     BrowseSubscriptionRecord,
 )
 from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
-from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
+from agentclaw.community.core.task.task_runner.client.ports import (
+    BotSendResult,
+    OpenApiBotPort,
+)
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.log import get_logger
 
@@ -65,13 +68,16 @@ class BbsBrowseLoopRunner:
         *,
         bot_id: str,
         expected_mode: str,
-        timeout: float = 60.0,
     ) -> dict[str, Any]:
-        """Send one "go run bbs-browse now" message to ``bot_id``.
+        """Fire-and-forget: send one "go run bbs-browse now" message to ``bot_id``.
 
         The subscription MUST exist with ``expected_mode`` (framework or
         openclaw); cross-mode triggers return ``ValidationError`` so a mis-set
-        subscription cannot fire through the wrong entrypoint.
+        subscription cannot fire through the wrong entrypoint. Returns the(bot
+        run handle immediately — a Browse Run takes minutes; the trigger must
+        not block an HTTP request, so we use ``send_message`` and let the Bot
+        complete asynchronously. Results are observable downstream (BBS
+        topic/post listings), not synchronously here.
         """
         subscription = self._lookup(bot_id)
         if subscription.mode != expected_mode:
@@ -89,11 +95,11 @@ class BbsBrowseLoopRunner:
             "[bbs-browse-loop] push_browse_once bot=%s mode=%s backend=%s",
             bot_id, subscription.mode, backend_url,
         )
-        return await self._bot.send_and_wait_async(
+        return await self._send(
             bot_id=bot_id,
-            message=text,
+            text=text,
             metadata={"biz_module": "bbs_browse_loop", "mode": subscription.mode},
-            timeout=timeout,
+            mode=subscription.mode,
         )
 
     async def push_cron_event(
@@ -101,9 +107,8 @@ class BbsBrowseLoopRunner:
         *,
         bot_id: str,
         action: Literal["register", "remove"],
-        timeout: float = 30.0,
     ) -> dict[str, Any]:
-        """Tell an openclaw-mode Bot to add/remove its local cron job."""
+        """Fire-and-forget: tell an openclaw-mode Bot to add/remove its local cron job."""
         subscription = self._lookup(bot_id)
         if subscription.mode != BROWSE_MODE_OPENCLAW:
             raise ValidationError(
@@ -113,16 +118,44 @@ class BbsBrowseLoopRunner:
         logger.info(
             "[bbs-browse-loop] cron_event bot=%s action=%s", bot_id, action
         )
-        return await self._bot.send_and_wait_async(
+        return await self._send(
             bot_id=bot_id,
-            message=text,
+            text=text,
             metadata={
                 "biz_module": "bbs_browse_loop",
                 "action": action,
                 "mode": BROWSE_MODE_OPENCLAW,
             },
-            timeout=timeout,
+            mode=BROWSE_MODE_OPENCLAW,
+            action=action,
         )
+
+    async def _send(
+        self,
+        *,
+        bot_id: str,
+        text: str,
+        metadata: dict[str, Any],
+        mode: str,
+        action: str | None = None,
+    ) -> dict[str, Any]:
+        """Single delivery seam: face ``send_message`` (fire-and-forget) -> BotSendResult.
+
+        We never ``send_and_wait_async`` here: a Browse Run takes minutes and
+        blocking the caller (HTTP trigger or cron tick) is unacceptable.
+        """
+        result: BotSendResult = await self._bot.send_message(
+            bot_id=bot_id, message=text, metadata=metadata
+        )
+        out: dict[str, Any] = {
+            "run_id": result.run_id,
+            "session_id": result.session_id,
+            "mode": mode,
+            "status": "submitted",
+        }
+        if action is not None:
+            out["action"] = action
+        return out
 
     def _lookup(self, bot_id: str) -> BrowseSubscriptionRecord:
         sub = self._service.get_subscription(bot_id=bot_id)

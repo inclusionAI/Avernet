@@ -15,6 +15,7 @@ import pytest
 
 from agentclaw.community.core.errors import NotFound, ValidationError
 from agentclaw.community.core.forum.browsing.runner import BbsBrowseLoopRunner
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 from agentclaw.community.core.forum.models import BrowseSubscriptionRecord
 
 
@@ -31,24 +32,22 @@ def _sub(*, mode: str = "framework", bot_id: str = "bot-a") -> BrowseSubscriptio
 
 
 class _FakeBot:
-    """Implements only the methods the runner touches."""
+    """Implements only ``send_message`` — the runner is fire-and-forget."""
 
     def __init__(self) -> None:
         self.sent: list[dict[str, Any]] = []
 
-    async def send_and_wait_async(
+    async def send_message(
         self,
         *,
         bot_id: str,
         message: str,
-        metadata: dict[str, Any] | None = None,
-        timeout: float = 180.0,
-        poll_interval: float = 2.0,
-    ) -> dict[str, Any]:
+        metadata: dict[str, Any],
+    ) -> BotSendResult:
         self.sent.append(
-            {"bot_id": bot_id, "message": message, "metadata": metadata, "timeout": timeout}
+            {"bot_id": bot_id, "message": message, "metadata": metadata}
         )
-        return {"run_id": "run_x", "session_id": "sess_x"}
+        return BotSendResult(run_id="run_x", session_id="sess_x")
 
 
 class _FakeService:
@@ -66,7 +65,10 @@ async def test_push_browse_once_returns_bot_result_and_injects_paths(monkeypatch
     result = await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
     bot = runner._bot  # type: ignore[attr-defined]
 
-    assert result == {"run_id": "run_x", "session_id": "sess_x"}
+    assert result["run_id"] == "run_x"
+    assert result["session_id"] == "sess_x"
+    assert result["status"] == "submitted"
+    assert result["mode"] == "framework"
     assert len(bot.sent) == 1
     sent = bot.sent[0]
     assert sent["bot_id"] == "bot-a"
@@ -102,7 +104,11 @@ async def test_push_cron_event_only_for_openclaw(monkeypatch):
     runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
     result = await runner.push_cron_event(bot_id="bot-b", action="register")
     bot = runner._bot  # type: ignore[attr-defined]
-    assert result == {"run_id": "run_x", "session_id": "sess_x"}
+    assert len(bot.sent) == 1
+    assert result["run_id"] == "run_x"
+    assert result["status"] == "submitted"
+    assert result["mode"] == "openclaw"
+    assert result.get("action") == "register"
     sent = bot.sent[0]
     assert "[BBS-BROWSE-CRON]" in sent["message"]
     assert "打开" in sent["message"] or "注册" in sent["message"]
@@ -113,8 +119,9 @@ async def test_push_cron_event_only_for_openclaw(monkeypatch):
 @pytest.mark.asyncio
 async def test_push_cron_event_remove_message(monkeypatch):
     runner = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
-    await runner.push_cron_event(bot_id="bot-b", action="remove")
+    result = await runner.push_cron_event(bot_id="bot-b", action="remove")
     sent = runner._bot.sent[0]  # type: ignore[attr-defined]
     assert "[BBS-BROWSE-CRON]" in sent["message"]
     assert "关闭" in sent["message"] or "删除" in sent["message"] or "移除" in sent["message"]
+    assert result.get("action") == "remove"
     assert sent["metadata"]["action"] == "remove"
