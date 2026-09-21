@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 from pathlib import Path
@@ -180,6 +181,46 @@ def test_conflicting_legacy_entry_is_preserved_and_rejected(tmp_path: Path) -> N
         initialize_pool_native(engine="openclaw", home=home)
 
     assert (legacy_local / "do-not-delete").read_text() == "content"
+
+
+def test_prepared_migration_is_not_promoted_to_native_active(tmp_path: Path) -> None:
+    home = tmp_path / "home" / "admin"
+    ready_marker = home / ".openclaw/workspace/skills-pool/.pool-ready"
+    ready_marker.parent.mkdir(parents=True)
+    ready_marker.write_text('{"preparation_id":"prepared-1"}')
+
+    with pytest.raises(
+        PoolNativeInitializationError,
+        match="migration preparation requires recovery",
+    ):
+        initialize_pool_native(engine="openclaw", home=home)
+
+    assert ready_marker.read_text() == '{"preparation_id":"prepared-1"}'
+    assert not (ready_marker.parent / ".pool-active").exists()
+
+
+def test_legacy_entry_stat_error_is_not_treated_as_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    legacy_local = home / ".openclaw/workspace/skills/skills-local"
+    original_lstat = Path.lstat
+
+    def fail_legacy_lstat(path: Path):
+        if path == legacy_local:
+            raise OSError(errno.ESTALE, "stale NAS handle")
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", fail_legacy_lstat)
+
+    with pytest.raises(
+        PoolNativeInitializationError,
+        match="Legacy entry could not be inspected",
+    ):
+        initialize_pool_native(engine="openclaw", home=home)
+
+    assert not (home / ".openclaw/workspace/skills-pool/.pool-active").exists()
 
 
 def test_steady_probe_accepts_minimal_active_marker_without_ready_history(

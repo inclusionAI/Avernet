@@ -643,6 +643,47 @@ def test_active_marker_rejects_unretired_repo_bridge(tmp_path):
     assert result.evidence["reason"] == "retired_repo_bridge_present"
 
 
+@pytest.mark.parametrize(
+    ("error", "status", "reason"),
+    [
+        (
+            PermissionError("denied"),
+            RuntimeLayoutInspectionStatus.INVALID,
+            "retired_repo_bridge_unreadable",
+        ),
+        (
+            OSError(errno.ESTALE, "stale NAS handle"),
+            RuntimeLayoutInspectionStatus.TRANSIENT_ERROR,
+            "retired_repo_bridge_temporarily_unavailable",
+        ),
+    ],
+)
+def test_retired_bridge_stat_error_is_classified(
+    tmp_path, monkeypatch, error, status, reason
+):
+    home, active_root, _, pool_repo = _ready_home(tmp_path)
+    repo_bridge = active_root / "skills-repo"
+    _write_active_marker(home, activation_state="active")
+    original_lstat = Path.lstat
+
+    def fail_repo_bridge_lstat(path):
+        if path == repo_bridge:
+            raise error
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", fail_repo_bridge_lstat)
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is status
+    assert result.evidence["reason"] == reason
+
+
 def test_absent_marker_is_not_capable(tmp_path):
     result = inspect_runtime_layout(
         engine="openclaw",
