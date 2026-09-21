@@ -1,6 +1,7 @@
 //! Ephemeral, best-effort IM hints. Durable status queries remain authoritative.
 //! No notification replay, outbox, or per-message background task is created.
 use crate::BcsMessageFlow;
+use bcs_channel_api::{DeliveryReactionEvent, DeliveryReactionState};
 use bcs_domain::{
     DeliveryType, ParticipantRole,
     message_delivery::{MessageDeliveryStatus as Status, PersistedMessageDelivery},
@@ -15,35 +16,33 @@ const IM_QUEUED_HINT_DELAY_MS: i64 = 10_000;
 struct PendingHint {
     rows: BTreeMap<String, PersistedMessageDelivery>,
     sent: Vec<&'static str>,
-    reaction: Option<&'static str>,
+    reaction: Option<DeliveryReactionState>,
 }
 
-const DELIVERY_REACTION_TYPE: &str = "message.delivery.reaction";
-
-fn reaction(entry: &PendingHint, now: i64) -> Option<&'static str> {
+fn reaction(entry: &PendingHint, now: i64) -> Option<DeliveryReactionState> {
     if entry
         .rows
         .values()
         .any(|row| row.state.status == Status::Expired)
     {
-        return Some("expired");
+        return Some(DeliveryReactionState::Expired);
     }
     if entry.rows.values().any(|row| {
         row.state.status == Status::Queued
             && now.saturating_sub(row.created_at_ms) >= IM_QUEUED_HINT_DELAY_MS
     }) {
-        return Some("queued");
+        return Some(DeliveryReactionState::Queued);
     }
     if entry.reaction.is_some() && entry.rows.values().all(terminal) {
-        return Some("clear");
+        return Some(DeliveryReactionState::Clear);
     }
-    if entry.reaction == Some("queued")
+    if entry.reaction == Some(DeliveryReactionState::Queued)
         && entry
             .rows
             .values()
             .any(|row| matches!(row.state.status, Status::Dispatching | Status::Running))
     {
-        return Some("processing");
+        return Some(DeliveryReactionState::Processing);
     }
     None
 }
@@ -117,7 +116,7 @@ pub async fn run(
                     if let Some(state) = reaction(entry, now).filter(|state| Some(*state) != entry.reaction) {
                         let rows: Vec<_> = entry.rows.values().collect();
                         let result = tokio::time::timeout(Duration::from_secs(2), publish_reaction(&flow, &rows, state)).await;
-                        if !matches!(result, Ok(Ok(()))) { tracing::warn!(state, "delivery IM reaction failed; not replaying an ambiguous external write"); }
+                        if !matches!(result, Ok(Ok(()))) { tracing::warn!(state = state.as_str(), "delivery IM reaction failed; not replaying an ambiguous external write"); }
                         entry.reaction = Some(state);
                     }
                     let mut grouped: BTreeMap<&'static str, (&'static str, Vec<&PersistedMessageDelivery>)> = BTreeMap::new();
@@ -242,7 +241,7 @@ async fn publish(
 async fn publish_reaction(
     flow: &BcsMessageFlow,
     rows: &[&PersistedMessageDelivery],
-    state: &'static str,
+    state: DeliveryReactionState,
 ) -> bcs_service_api::ServiceResult<()> {
     let (Some(channel), Some(repository), Some(row)) =
         (flow.channel.get(), flow.message_repo.as_ref(), rows.first())
@@ -279,11 +278,10 @@ async fn publish_reaction(
             kind: ChannelOutboundEventKind::System,
             purpose: ChannelOutboundPurpose::Conversation,
             text: None,
-            raw_payload: serde_json::json!({
-                "type": DELIVERY_REACTION_TYPE,
-                "state": state,
-                "message_id": row.source_message_id,
-            }),
+            raw_payload: serde_json::to_value(DeliveryReactionEvent::new(
+                state,
+                row.source_message_id.clone(),
+            ))?,
             render_hint: ChannelRenderHint::IgnoreByDefault,
             source_im_message_id: Some(source.into()),
             source_is_channel: false,
