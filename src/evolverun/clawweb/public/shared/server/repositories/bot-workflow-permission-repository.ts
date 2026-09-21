@@ -116,17 +116,18 @@ export class BotWorkflowPermissionRepository {
     const field = fieldMap[permission];
 
     // Step 1: Check global wildcard permission.
-    // bot_owner_id='*' (with bot_id IS NULL) grants the permission to everyone.
+    // bot_owner_id='*' grants the permission to everyone.
+    // Treat bot_id='*' the same as NULL/empty: owner-level / all-bots grant.
     const globalRows = await this.db.query<Pick<BotWorkflowPermissionRow, typeof field>>(
-      `SELECT ${field} FROM bot_workflow_permissions WHERE (bot_id IS NULL OR bot_id = '') AND bot_owner_id = '*' AND workflow_id = ? AND ${field} = 1 LIMIT 1`,
+      `SELECT ${field} FROM bot_workflow_permissions WHERE bot_owner_id = '*' AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*') AND workflow_id = ? AND ${field} = 1 LIMIT 1`,
       [workflowId],
     );
     if (globalRows.length > 0) return true;
 
-    // Step 2: Check owner-level permission (bot_id IS NULL OR empty string)
+    // Step 2: Check owner-level permission (bot_id IS NULL, empty, or '*')
     // Owner-level permission grants access to all bots under that owner
     const ownerRows = await this.db.query<Pick<BotWorkflowPermissionRow, typeof field>>(
-      `SELECT ${field} FROM bot_workflow_permissions WHERE (bot_id IS NULL OR bot_id = '') AND bot_owner_id = ? AND workflow_id = ? AND ${field} = 1 LIMIT 1`,
+      `SELECT ${field} FROM bot_workflow_permissions WHERE bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*') AND workflow_id = ? AND ${field} = 1 LIMIT 1`,
       [botOwnerId, workflowId],
     );
     if (ownerRows.length > 0) return true;
@@ -274,8 +275,9 @@ export class BotWorkflowPermissionRepository {
     if (countRows[0].cnt === 0) return false;
 
     // Step 2: Check global wildcard (bot_owner_id='*' grants edit to everyone)
+    // Treat bot_id='*' the same as NULL/empty: owner-level / all-bots grant.
     const globalRows = await this.db.query<Pick<BotWorkflowPermissionRow, "can_edit">>(
-      `SELECT can_edit FROM bot_workflow_permissions WHERE workflow_id = ? AND (bot_id IS NULL OR bot_id = '') AND bot_owner_id = '*' AND can_edit = 1 LIMIT 1`,
+      `SELECT can_edit FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = '*' AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*') AND can_edit = 1 LIMIT 1`,
       [workflowId],
     );
     if (globalRows.length > 0) return true;
@@ -291,8 +293,9 @@ export class BotWorkflowPermissionRepository {
     }
 
     // Step 4: A concrete bot can inherit owner-level permission.
+    // Treat bot_id='*' as owner-level wildcard, same as NULL/empty.
     const ownerRows = await this.db.query<Pick<BotWorkflowPermissionRow, "can_edit">>(
-      `SELECT can_edit FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '') AND can_edit = 1 LIMIT 1`,
+      `SELECT can_edit FROM bot_workflow_permissions WHERE workflow_id = ? AND bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*') AND can_edit = 1 LIMIT 1`,
       [workflowId, userId],
     );
     if (ownerRows.length > 0) return true;
