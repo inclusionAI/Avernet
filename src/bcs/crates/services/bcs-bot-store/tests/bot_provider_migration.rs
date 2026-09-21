@@ -8,7 +8,7 @@ async fn upgraded() -> LocalSqliteDbPlugin {
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid, env, session_token) VALUES ('legacy', 'test', 'test-only-runtime')")).await.unwrap();
     db.execute(DbStatement::new("INSERT INTO bcs_provider_bot_bindings (bot_uuid, env, provider_id, provider_bot_ref) VALUES ('legacy', 'test', 'provider', 'ref')")).await.unwrap();
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../migrations/sqlite/031_bot_provider_storage.sql");
+        .join("../../../migrations/sqlite/030_bot_provider_storage.sql");
     let sql = std::fs::read_to_string(path).expect("additive Bot Provider migration must exist");
     for statement in sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
         db.execute(DbStatement::new(statement)).await.unwrap();

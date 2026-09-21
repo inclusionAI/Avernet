@@ -1,9 +1,9 @@
 //! Explicit, fenced migration. Never run this automatically at server startup.
 use super::*;
 use bcs_db_api::{DbTransactionStep, db_get_column};
-use bcs_service_api::bot_provider::{BotConnectionMode, BotProviderRecord};
+use bcs_service_api::bot_provider::BotConnectionMode;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct ProviderBotBackfillReport {
@@ -11,18 +11,6 @@ pub struct ProviderBotBackfillReport {
     pub ordinary_modes_to_backfill: usize,
     pub issues: Vec<String>,
     pub applied: bool,
-}
-
-// Historical payload is read only for audited migration. Never serialize/log it.
-#[derive(Deserialize)]
-struct LegacyRegistration {
-    provider_id: String,
-    provider_bot_ref: String,
-    bot_uuid: String,
-    owner: String,
-    bot_token: String,
-    mode: BotConnectionMode,
-    completed: bool,
 }
 
 fn read<T: bcs_db_api::FromDbColumn>(row: &DbRow, key: &str) -> ServiceResult<T> {
@@ -51,26 +39,7 @@ impl DbProviderStore {
             let binding = parse_binding(&row).ok_or_else(|| invalid("invalid legacy binding; repair before backfill"))?;
             bindings.insert(binding.bot_uuid.clone(), binding);
         }
-        let journal = self.db.query(DbStatement::with_params("SELECT provider_id, provider_bot_ref, bot_uuid, record_json, completed FROM bcs_provider_registrations WHERE env = ?", vec![env.as_str().into()])).await.map_err(bot_storage::storage_error)?;
         let mut report = ProviderBotBackfillReport { memberships_to_backfill: 0, ordinary_modes_to_backfill: 0, issues: Vec::new(), applied: false };
-        let mut historical = BTreeMap::new();
-        for row in journal {
-            let id: String = read(&row, "bot_uuid")?;
-            let json: String = read(&row, "record_json")?;
-            let Ok(record) = serde_json::from_str::<LegacyRegistration>(&json) else {
-                report.issues.push(format!("{id}: invalid legacy registration payload")); continue;
-            };
-            if record.bot_uuid != id || record.provider_id != read::<String>(&row, "provider_id")?
-                || record.provider_bot_ref != read::<String>(&row, "provider_bot_ref")?
-                || !record.completed || !read::<bool>(&row, "completed")?
-            { report.issues.push(format!("{id}: incomplete or inconsistent legacy registration")); continue; }
-            let Some(bot) = rows.get(&id) else { report.issues.push(format!("{id}: legacy registration has no Bot")); continue; };
-            if self.get_provider_bot(&id).await?.is_none()
-                && (bot.get_string("created_by").map_err(bot_storage::storage_error)?.as_deref() != Some(record.owner.as_str())
-                    || bot.get_string("session_token").map_err(bot_storage::storage_error)?.as_deref() != Some(record.bot_token.as_str()))
-            { report.issues.push(format!("{id}: legacy owner/credential changed; membership needs manual verification")); continue; }
-            if historical.insert(id.clone(), record).is_some() { report.issues.push(format!("{id}: multiple legacy memberships")); }
-        }
         for id in bindings.keys().filter(|id| !rows.contains_key(*id)) { report.issues.push(format!("{id}: binding has no Bot")); }
         let mut memberships = Vec::new();
         let mut ordinary = Vec::new();
@@ -97,13 +66,6 @@ impl DbProviderStore {
             } else if let Some(binding) = binding {
                 if deleted != binding.disabled { report.issues.push(format!("{id}: binding.disabled differs from Bot.is_deleted")); }
                 Some((binding_projection::metadata(binding.clone()), true))
-            } else if let Some(record) = historical.get(id) {
-                if record.mode != BotConnectionMode::Upstream { report.issues.push(format!("{id}: historical gateway has no binding")); continue; }
-                Some((BotProviderRecord {
-                    bot_uuid: id.clone(), provider_id: record.provider_id.clone(), provider_bot_ref: record.provider_bot_ref.clone(),
-                    connection_mode: BotConnectionMode::Upstream, webhook_url: None, is_deleted: deleted,
-                    registered_at: 0, updated_at: 0,
-                }, true))
             } else {
                 match row.get_string("connection_mode").map_err(bot_storage::storage_error)?.as_deref() {
                     None => ordinary.push(id.clone()),
@@ -120,11 +82,6 @@ impl DbProviderStore {
                     || (record.connection_mode == BotConnectionMode::Upstream && record.webhook_url.is_some())
                 {
                     report.issues.push(format!("{id}: invalid Provider metadata"));
-                }
-                if let Some(legacy) = historical.get(id) {
-                    if record.provider_id != legacy.provider_id || record.provider_bot_ref != legacy.provider_bot_ref {
-                        report.issues.push(format!("{id}: journal and current membership disagree"));
-                    }
                 }
                 // MySQL's existing binding key commonly uses a case-insensitive
                 // collation. Conservative ASCII folding prevents cutover clashes.

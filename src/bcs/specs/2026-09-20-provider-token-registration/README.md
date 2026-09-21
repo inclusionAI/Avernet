@@ -92,15 +92,13 @@ does not change membership or write policy.
 
 ## Deployment and verification
 
-- Apply additive MySQL `030_bot_provider_storage.sql` before new server code;
-  SQLite applies version 031 on bootstrap. Older numbered migrations stay frozen,
-  including the historical journal migrations (MySQL 029 / SQLite 030).
+- Apply additive MySQL `029_bot_provider_storage.sql` before new server code;
+  SQLite applies version 030 on bootstrap. Earlier upstream migrations stay frozen.
+  This PR has never been deployed; its unused registration-table draft and
+  compatibility reader are removed, not retained or followed by a drop migration.
 - Follow the [fenced migration and read-source rollout](../../docs/provider-bot-storage-migration.md).
   Schema expansion alone does not backfill membership. Legacy binding reads remain
   the default; switch only after every environment passes the audit.
-- Historical journal rows are retained for reconciliation; they may contain
-  runtime credentials, so restrict DB/backup access. No runtime flow reads/writes
-  the journal, and this change does not drop the table or delete its data.
 - Memory Provider metadata is process-local. Durable restart guarantees require
   SQLite/MySQL; the backfill utility applies only to durable SQL storage.
 - Rollback of the read-source setting preserves dual writes. An old binary is

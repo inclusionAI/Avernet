@@ -93,9 +93,9 @@ async fn check_full_mysql_chain(db: &dyn DbPlugin, global: &MigrateGlobalArgs) -
     let args = chain_args();
     let result: Result<()> = async {
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=30\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=29\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=30).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=29).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
@@ -120,7 +120,7 @@ async fn check_full_mysql_chain(db: &dyn DbPlugin, global: &MigrateGlobalArgs) -
         }
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=10\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=9\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_chain_columns(db).await?;
         let row = db.query(DbStatement::new("SELECT tags_json, message_view_scope FROM bcs_group_participants WHERE bot_uuid = 'chain-bot'")).await?.remove(0);
@@ -172,7 +172,6 @@ async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
         ("bcs_state_machine_runs", vec!["root_run_id", "rerun_of", "session_activation_count", "opening_message_override_json"]),
         ("bcs_group_sessions", vec!["message_visibility_version", "callback_lease_owner", "callback_lease_token", "callback_lease_until_ms"]),
         ("bcs_state_machine_definition_snapshots", vec!["execution_plan_json", "execution_plan_content_hash", "execution_plan_compiler_version"]),
-        ("bcs_provider_registrations", vec!["provider_id", "provider_bot_ref", "bot_uuid", "record_json", "completed"]),
     ] {
         let rows = db.query(DbStatement::with_params("SELECT column_name AS column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?", vec![DbValue::from(table)])).await?;
         let actual = rows.iter().map(|row| db_get_column::<String>(row, "column_name")).collect::<bcs_db_api::DbResult<Vec<_>>>()?;

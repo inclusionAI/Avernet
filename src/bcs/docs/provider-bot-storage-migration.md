@@ -30,8 +30,8 @@ keeps its credential behavior; scoped token registration returns real Bot tokens
 ## Expand, fence, backfill, validate, switch
 
 1. Back up the database and retain a recoverable pre-upgrade snapshot. Apply
-   MySQL migration **030** (`030_bot_provider_storage.sql`) using the normal
-   migration tooling. SQLite bootstrap applies version **031**. Earlier migration
+   MySQL migration **029** (`029_bot_provider_storage.sql`) using the normal
+   migration tooling. SQLite bootstrap applies version **030**. Earlier upstream migration
    names, numbers and checksums must remain unchanged. Existing rows start with
    nullable migration-state fields; new ordinary Bots explicitly use upstream.
 2. Keep `binding` reads while deploying the dual-write code. Do not enable new
@@ -52,8 +52,8 @@ keeps its credential behavior; scoped token registration returns real Bot tokens
    `--sqlite`. The file contains the existing `MysqlDbConfig` format; keep secrets
    out of command arguments, source control and logs. The utility never prints it.
 4. Resolve every audit issue and rerun. The audit reports orphan Bots/bindings,
-   missing Providers, partial metadata, duplicate refs, incomplete/inconsistent
-   historical journals and binding/Bot lifecycle mismatches. It does not guess
+   missing Providers, partial metadata, duplicate refs and binding/Bot lifecycle
+   mismatches. It does not guess
    whether an old `disabled` binding should delete an active Bot. Operators must
    choose the intended lifecycle state and reconcile it explicitly. No automatic
    cleanup, token rotation, ownership changes or tombstone resurrection occurs.
@@ -68,14 +68,13 @@ keeps its credential behavior; scoped token registration returns real Bot tokens
    for gateways, upstream WS reconnect, HTTP routing and Provider callbacks. The
    switch is configuration-driven at process assembly, not a live hot reload.
 
-The utility copies gateway identity/override/timestamps from legacy bindings and
-can recover a completed historical upstream journal when its Bot and owner/token
-evidence agree. Ordinary unmigrated Bots become upstream. Old plugin registrations
-with neither binding nor journal have no durable Provider evidence: their
-affiliation cannot be inferred. Reconcile those identities through verified
-Provider-admin registration before relying on complete membership reporting.
-Recovered historical upstream timestamps are zero when no reliable timestamp is
-available. Historical journals are retained unchanged, including their credentials.
+The utility copies gateway identity/override/timestamps from legacy bindings.
+Ordinary unmigrated Bots become upstream; existing Bot-owned Provider metadata
+is validated and preserved. Old plugin registrations without durable Provider
+metadata or a binding have no recoverable affiliation evidence. Reconcile those
+identities through verified Provider-admin registration before relying on complete
+membership reporting. Backfill does not change or duplicate Bot credentials and
+does not use their values as affiliation evidence.
 
 ## Rollback and limitations
 
@@ -95,6 +94,6 @@ available. Historical journals are retained unchanged, including their credentia
 - Existing Provider caches retain their 30-second cross-instance visibility
   limit. Local successful writes invalidate their binding cache; restart/drain
   instances during cutover. No new distributed cache-coherence guarantee is added.
-- No runtime registration journal remains. The historical table is not dropped
-  in this rollout; a later, separately approved cleanup can remove it after audit
-  and rollback-retention requirements are satisfied.
+- This PR has never been deployed. Its discarded registration-table draft is
+  removed from the migration chain and backfill code; no cleanup/drop migration
+  or compatibility table is required. Fresh databases never create it.

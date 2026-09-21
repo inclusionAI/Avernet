@@ -10,6 +10,7 @@
 
 ## Approved scope
 
+- Cleanup decision (2026-09-21): the user confirmed this PR has never been deployed. Remove the unused registration-table DDL and compatibility reader entirely. Only this PR's unreleased migration slots are consolidated to MySQL 029 / SQLite 030; upstream history stays unchanged. First verify failing migration-chain and backfill-without-extra-table tests, then remove the old SQL/reader, align tests/docs, and run affected suites. Do not add a drop-table migration, compatibility shim, or another document at the repository root.
 - Add Bot `provider_id`, `provider_bot_ref`, nullable migration-state `connection_mode`, nullable `webhook_url`, and preserve any binding timestamps required by existing public responses.
 - New ordinary Bots explicitly use upstream with no Provider. Provider upstream Bots never write HTTP bindings. Gateway Bots persist both Bot metadata and compatibility bindings.
 - Enforce one Provider per Bot/environment and unique Provider/ref across modes. Do not silently reuse deleted identities, replace tokens, change Provider, or change mode on registration replay.
@@ -18,7 +19,7 @@
 - Preserve OpenAPI legacy token/register and old Provider-admin `plugin`/`gateway` defaults and credential behavior. Upstream requires no webhook or downlink credential. Gateway endpoints resolve Bot override before Provider default.
 - Eliminate journal reservation/completion and credential replay. Scoped duplicate refs conflict; distinct refs can reuse a valid registration token. Preserve legacy admin replay behavior.
 - Use existing database transactions for coupled persistent writes. Full Bot/Human/owner-edge exactly-once registration is not promised; all failures propagate.
-- Keep committed numbered migrations frozen. Provide audited backfill/preflight, writer fencing, consistency validation and rollback documentation. Do not auto-delete inconsistent or populated legacy data.
+- Keep earlier upstream migrations frozen. Provide audited binding backfill/preflight, writer fencing, consistency validation and rollback documentation. Consolidate only this PR's unused draft migrations per the cleanup decision above; do not change any live database.
 - Work only in this isolated checkout. No subagents, parent checkout edits, PR description edits or production migrations. The user subsequently authorized commit and push with `--no-verify` directly to PR #2358's head branch, `vzvince/Avernet:codex/provider-token-registration`; do not modify the parent checkout or its local branch.
 - Preserve existing file layout. Per the user's latest instruction, do not split existing files to meet the 1,000-line guideline; keep changes limited to the requested behavior.
 
@@ -35,7 +36,7 @@ Baseline command from `src/bcs`: `CARGO_TARGET_DIR=/private/tmp/avernet-provider
 
 ## Task 2: Schema and persistence
 
-**Files:** new MySQL migration after 029; SQLite migration after 030 under `src/bcs/crates/bootstrap/bcs/src/migrations/`; focused new membership module under `src/bcs/crates/services/bcs-bot-store/src/`; corresponding store/migration tests.
+**Files:** MySQL `029_bot_provider_storage.sql`; SQLite `030_bot_provider_storage.sql`; focused new membership module under `src/bcs/crates/services/bcs-bot-store/src/`; corresponding store/migration tests.
 
 1. Write failing fresh-schema/upgrade and Memory/SQLite repository tests.
 2. Add nullable migration-state columns and environment-scoped Provider/ref uniqueness without changing historical migrations.
@@ -74,9 +75,9 @@ Baseline command from `src/bcs`: `CARGO_TARGET_DIR=/private/tmp/avernet-provider
 
 **Files:** focused migration/preflight tools and tests; Provider integration docs; affected `CONTEXT.md`; this plan and progress ledger.
 
-1. Write failing tests for mismatch detection, repeatable backfill and classification of existing journal data.
+1. Write failing tests for mismatch detection, repeatable binding backfill and preservation of Bot-owned upstream metadata.
 2. Implement audited preflight/backfill and document additive schema, legacy-read dual-write rollout, writer fencing, consistency gates, read cutover and rollback.
-3. Remove obsolete journal runtime code and wiring after replacement contracts pass. Do not rewrite old migration files or auto-drop populated tables.
+3. Remove obsolete registration-table DDL, readers, tests and wiring after replacement contracts pass. Preserve earlier upstream migrations and do not operate on a live database.
 4. Run affected module, conformance and architecture checks; run `git diff --check`. Report any existing file-size gate conflict without refactoring files to satisfy it.
 5. Self-review (subagents prohibited) and report actual checks, unavailable validations and remaining risks. Do not publish.
 
@@ -97,8 +98,9 @@ Baseline command from `src/bcs`: `CARGO_TARGET_DIR=/private/tmp/avernet-provider
 - Initial Memory/SQLite Bot membership, gateway dual-write and rollback contract: 3 tests passed. Historical migrations remain unchanged.
 - Initial implementation milestone: scoped registration and runtime composition use Bot-backed Provider metadata; validation was still in progress at this point.
 - Scope correction: reverted size-driven splits of six existing source/test containers and removed the 35 extracted files, preserving the intended feature edits. `cargo check --offline --locked -p bcs --lib --examples`, 27 focused store tests, the downlink configuration test, and `git diff --check` all passed after restoration. Main and parent feature checkouts remain clean. This verifies the scope correction, not full feature acceptance.
-- Final implementation: all six tasks are implemented. Bot-backed membership, gateway-only dual writes, both read selectors, legacy mutation compatibility, journal-free scoped registration, additive schemas and audited backfill are present. Historical registration tables/data are retained; no production migration was performed.
+- Final implementation: all six tasks are implemented. Bot-backed membership, gateway-only dual writes, both read selectors, legacy mutation compatibility, scoped registration, additive schemas and audited binding backfill are present. The unused registration-table draft was removed after confirming this PR has never been deployed; no production migration was performed.
 - Final regressions fixed and verified: missing SQL test-fixture columns, MySQL migration-count expectations, unmigrated gateway deletion, upstream Provider switching authorization, incomplete/missing-Provider backfill evidence, and the application-to-repository boundary. Shared conformance covers the new metadata/projection ports and Provider deletion core contract. Review was author self-review only; no independent reviewer or subagent was used.
 - Final verification (2026-09-21): affected module suites passed 866 tests (10 ignored); host bootstrap/selected real HTTP/WS suites passed 302 (5 ignored). Total: 1,168 passed, zero failed, 15 ignored. Library/example compilation, 30-file MySQL migration static validation, OpenAPI validation (72 operations), store boundaries, port purity, forbidden-symbol/interceptor checks, and whitespace checks passed.
 - Remaining verification limits: live MySQL is unavailable (Docker daemon stopped); full Singlebox was not run; the full architecture gate is not green/completed. Dependency/import/trait-naming failures were reproduced in the unchanged parent checkout, and the broad conformance discovery run was interrupted. No gate or allowlist was weakened. Existing oversized files were counted and left intact as requested.
 - Delivery state at the implementation-validation checkpoint: changes were uncommitted in the isolated checkout, with root and parent feature checkouts clean. Subsequent publication is authorized directly to PR #2358's head branch using `commit --no-verify` and `push --no-verify`; no PR description edit or production data change is included. See the current addendum in `src/bcs/specs/2026-09-20-provider-token-registration/validation.md` and `src/bcs/docs/provider-bot-storage-migration.md` for evidence and rollout constraints.
+- Undeployed-draft cleanup completed: removed the unused registration SQL, migration wiring, payload deserializer/recovery logic and test fixtures; kept binding-to-Bot backfill. MySQL 029 / SQLite 030 now expand only Bot metadata. Regression tests failed before removal, then final store/admin and host bootstrap/HTTP suites passed 463 tests (14 ignored, zero failed). MySQL static validation passed for 29 consecutive files. Earlier upstream migrations are unchanged; no live database, root checkout or parent checkout was modified. The user subsequently authorized committing and pushing this cleanup to PR #2358 with `--no-verify`.

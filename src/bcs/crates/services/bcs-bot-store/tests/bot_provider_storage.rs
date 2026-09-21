@@ -27,7 +27,6 @@ fn caps() -> BotCapabilities {
 async fn backfill_rejects_missing_providers_and_partial_membership() {
     let db = sqlite().await;
     let env = bcs_config::resolve_env_str();
-    db.execute(DbStatement::new("CREATE TABLE bcs_provider_registrations (env TEXT, provider_id TEXT, provider_bot_ref TEXT, bot_uuid TEXT, record_json TEXT, completed INTEGER)")).await.unwrap();
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, name) VALUES ('orphan', ?, 'Orphan')", vec![env.as_str().into()])).await.unwrap();
     db.execute(DbStatement::with_params("INSERT INTO bcs_provider_bot_bindings (bot_uuid, env, provider_id, provider_bot_ref) VALUES ('orphan', ?, 'missing-provider', 'ref')", vec![env.as_str().into()])).await.unwrap();
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, name, provider_bot_ref) VALUES ('partial', ?, 'Partial', 'dangling-ref')", vec![env.as_str().into()])).await.unwrap();
@@ -39,22 +38,19 @@ async fn backfill_rejects_missing_providers_and_partial_membership() {
 }
 
 #[tokio::test]
-async fn backfill_recovers_completed_upstream_journal_without_consuming_it() {
+async fn backfill_preserves_registered_upstream_without_a_binding() {
     let db = sqlite().await;
-    let env = bcs_config::resolve_env_str();
-    db.execute(DbStatement::new("CREATE TABLE bcs_provider_registrations (env TEXT, provider_id TEXT, provider_bot_ref TEXT, bot_uuid TEXT, record_json TEXT, completed INTEGER)")).await.unwrap();
-    db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, name, created_by, session_token) VALUES ('old-upstream', ?, 'Old', 'alice', 'test-old-upstream-runtime')", vec![env.as_str().into()])).await.unwrap();
-    let payload = serde_json::json!({"provider_id": "provider-a", "provider_bot_ref": "old-ref", "bot_uuid": "old-upstream", "owner": "alice", "bot_token": "test-old-upstream-runtime", "mode": "upstream", "completed": true}).to_string();
-    db.execute(DbStatement::with_params("INSERT INTO bcs_provider_registrations (env, provider_id, provider_bot_ref, bot_uuid, record_json, completed) VALUES (?, 'provider-a', 'old-ref', 'old-upstream', ?, 1)", vec![env.as_str().into(), payload.into()])).await.unwrap();
     let store = DbProviderStore::sqlite(db.clone());
+    let original = record("upstream", BotConnectionMode::Upstream);
+    store.create_provider_bot(original.clone(), caps(), "alice", "test-upstream-runtime").await.unwrap();
     let report = store.backfill_provider_bots(true, true).await.unwrap();
-    assert_eq!(report.memberships_to_backfill, 1);
+    assert_eq!(report.memberships_to_backfill + report.ordinary_modes_to_backfill, 0);
     assert!(report.issues.is_empty());
-    let record = store.get_provider_bot("old-upstream").await.unwrap().unwrap();
-    assert_eq!(record.connection_mode, BotConnectionMode::Upstream);
-    assert_eq!(record.provider_bot_ref, "old-ref");
-    assert!(store.get_binding_by_bot_uuid("old-upstream").await.unwrap().is_none());
-    assert_eq!(db.query(DbStatement::new("SELECT bot_uuid FROM bcs_provider_registrations")).await.unwrap().len(), 1);
+    assert_eq!(store.get_provider_bot("upstream").await.unwrap(), Some(original));
+    assert!(store.get_binding_by_bot_uuid("upstream").await.unwrap().is_none());
+    let rows = db.query(DbStatement::new("SELECT created_by, session_token FROM bcs_bots WHERE bot_uuid = 'upstream'")).await.unwrap();
+    assert_eq!(rows[0].get_string("created_by").unwrap().as_deref(), Some("alice"));
+    assert_eq!(rows[0].get_string("session_token").unwrap().as_deref(), Some("test-upstream-runtime"));
     assert_eq!(store.backfill_provider_bots(false, false).await.unwrap().memberships_to_backfill, 0);
 }
 
@@ -147,7 +143,6 @@ async fn read_source_is_explicit_and_does_not_change_gateway_writes() {
 async fn audited_backfill_is_explicit_repeatable_and_blocks_state_mismatches() {
     let db = sqlite().await;
     let env = bcs_config::resolve_env_str();
-    db.execute(DbStatement::new("CREATE TABLE bcs_provider_registrations (env TEXT, provider_id TEXT, provider_bot_ref TEXT, bot_uuid TEXT, record_json TEXT, completed INTEGER)")).await.unwrap();
     for id in ["old-gateway", "ordinary"] {
         db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, name, session_token) VALUES (?, ?, ?, ?)", vec![id.into(), env.as_str().into(), id.into(), format!("test-{id}-runtime").into()])).await.unwrap();
     }

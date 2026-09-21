@@ -16,12 +16,55 @@ configuration selects binding-based (default) or Bot-mode delivery reads. Runtim
 registration journal reservation/replay is removed; duplicate scoped refs return
 409 and distinct refs can reuse a valid token. Bot/binding SQL writes are atomic,
 but later owner-edge failures or lost responses can require operator repair.
-Historical journal tables and credentials remain unchanged, not dropped.
+The user confirmed this PR has never been deployed. Its unused registration-table
+DDL and compatibility reader are removed entirely; no drop migration or recovery
+shim is retained. Only Bot metadata is added, as MySQL 029 / SQLite 030. Earlier
+upstream migrations are unchanged.
 
-### Final verification
+### Unused draft cleanup verification (2026-09-21)
+
+The final cleanup removes the unused SQL files, migration registration, legacy
+payload deserializer and recovery logic, test fixtures and retention instructions.
+The fresh-schema path no longer creates an extra registration table. Existing
+Provider bindings remain the supported source for affiliation backfill.
+
+Tests were first observed failing without the extra table and with the corrected
+migration counts. The following final runs then exited successfully:
+
+```sh
+cargo test --offline --locked -p bcs-bot-store -p bcs-admin --quiet
+
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+  -u http_proxy -u https_proxy -u all_proxy \
+  cargo test --offline --locked -p bcs --features test-utils --lib \
+  --test provider_registration_openapi --test provider_registration_config \
+  --test provider_bot_webhook_integration --test openapi_v1_mount --quiet
+
+cargo run --offline --locked -p bcs-admin --quiet -- \
+  db migrate --dialect mysql --check-files
+```
+
+- Store/admin: **161 passed, zero failed, 9 ignored**.
+- Bootstrap and real HTTP/WS integration: **302 passed, zero failed, 5 ignored**.
+- Combined: **463 passed, zero failed, 14 ignored**. Focused reruns are not
+  double-counted. The bootstrap suite includes all 34 migration tests.
+- MySQL static validation: **29 consecutive files**, unchanged baseline checksum.
+  SQLite has **30 consecutive versions**; upgrade/repeat/partial-step tests pass.
+- The upgrade test verifies that Bot expansion creates no new tables and leaves
+  all prior migration-history rows unchanged. Backfill tests use no extra table
+  and preserve existing upstream affiliation, owner and runtime credential.
+- Repository search found no removed table name, obsolete SQL filename or legacy
+  deserializer references. `git diff --check` passed. Every changed source file
+  was counted; none exceeds 1,000 lines and no size-driven split was performed.
+- No live database was changed and no independent reviewer/subagent was used.
+  The user subsequently authorized publishing this cleanup to PR #2358 with
+  `commit --no-verify` and `push --no-verify`. Live MySQL, full Singlebox and
+  full architecture gates were not rerun; the existing limitations below remain.
+
+### Storage consolidation verification before draft cleanup
 
 Run from `src/bcs`, with `CARGO_TARGET_DIR` pointing to a separate temporary build
-directory. Both final test commands exited successfully after the last code fix:
+directory. Both test commands exited successfully at the pre-cleanup checkpoint:
 
 ```sh
 cargo test --offline --locked --no-fail-fast \
@@ -44,8 +87,9 @@ cargo run --offline --locked -p bcs-admin --quiet -- \
   5 ignored**. Loopback server tests ran on the host.
 - Combined: **1,168 passed, zero failed, 15 ignored**; focused reruns are not
   counted again. Registration HTTP coverage exercises both direction read sources.
-- Compilation and all **30** MySQL migration file checks passed. New additive
-  migrations are SQLite **031** / MySQL **030**; historical migrations are frozen.
+- Compilation and all **30** then-present MySQL migration file checks passed.
+  The subsequent unused-draft cleanup consolidates this PR to MySQL **029** /
+  SQLite **030**; cleanup-specific rerun results are recorded separately below.
 - OpenAPI validated **72 operations**. Store boundaries, port purity,
   forbidden-symbol and interceptor checks passed, as did `git diff --check`.
 - Regression tests were observed failing before fixes for legacy gateway deletion,
@@ -74,7 +118,7 @@ cargo run --offline --locked -p bcs-admin --quiet -- \
 
 See [the rollout and rollback guide](../../docs/provider-bot-storage-migration.md)
 for migration commands, legacy affiliation gaps, lifecycle reconciliation and
-retained-journal cleanup constraints. CLI packaging and bridge startup remain
+the unreleased-draft cleanup scope. CLI packaging and bridge startup remain
 outside this storage follow-up.
 
 ## Historical Phase 1 and rebase record
@@ -143,13 +187,13 @@ passed 26 tests (5 ignored). Total: **1,161 passed, 0 failed, 16 ignored**.
 The focused migration run (`cargo test --offline -p bcs --lib migrations::
 --quiet`) additionally passed 33 tests, a subset of the bootstrap run. Two new
 regression tests first failed with the upstream-only migration runner, then
-passed after registration was appended as SQLite 030 / MySQL 029. They verify
-unique consecutive versions, coexistence with Fixed Loop, upgrade from SQLite
-029, preservation of every prior history row, and idempotent journal retention.
+passed against the earlier registration draft. Its migration-chain coverage
+has since been replaced with Bot metadata expansion, continuous numbering and
+preservation of upstream schema/history without creating an extra table.
 
 `cargo run --offline -p bcs-admin --quiet -- db migrate --dialect mysql
 --check-files` passed for all 29 MySQL files. The real-MySQL full-chain test now
-expects 29 migrations and checks the journal columns; it remains ignored locally
+then expected 29 migrations; it remains ignored locally
 because the host Docker daemon is not running. Static checks are not execution
 evidence for a live MySQL deployment.
 

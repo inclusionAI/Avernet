@@ -39,8 +39,9 @@ cached in a second journal. Memory metadata is process-local.
 
 ProviderBindingProjection selects legacy binding reads or strict Bot-mode reads,
 independently of gateway dual writes. Affiliation alone is not a delivery binding.
-SQLite 031 / MySQL 030 add nullable migration-state columns and a unique index.
-The explicit fenced backfill audits old bindings and historical completed journal
-rows without changing Bot credentials, owners, deletion state or legacy rows.
-Historical SQLite 030 / MySQL 029 stay frozen; runtime registration no longer uses
-their journal. See docs/provider-bot-storage-migration.md for rollout limitations.
+SQLite 030 / MySQL 029 add nullable migration-state columns and a unique index.
+The explicit fenced backfill audits existing Bot metadata and legacy bindings
+without changing Bot credentials, owners, deletion state or binding rows. No
+separate registration table is created or queried. Upstream migrations remain
+unchanged; this PR's unused drafts were consolidated before its first deployment.
+See docs/provider-bot-storage-migration.md for rollout limitations.

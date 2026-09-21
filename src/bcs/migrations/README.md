@@ -2,22 +2,18 @@
 
 This directory contains BCS database schema migrations.
 
-Provider-scoped OpenAPI registration adds MySQL/OceanBase
-`029_provider_registrations.sql` and SQLite `030_provider_registrations.sql`.
-The independent journal binds `(env, provider_id, provider_bot_ref)` to one Bot
-identity and resumable registration state; it is not an HTTP delivery binding.
+Bot-owned Provider storage adds MySQL/OceanBase `029_bot_provider_storage.sql`
+and SQLite `030_bot_provider_storage.sql`. These extend `bcs_bots` with Provider
+identity, connection mode, webhook metadata and environment-scoped uniqueness;
+they do not create a separate registration table. Gateway writes retain the
+existing binding projection; upstream writes do not create bindings.
 Apply remote DDL before new server code; SQLite bootstrap migrates automatically.
-No historical backfill is required. Rollback may retain the additive table.
-The internal JSON includes a Bot runtime credential: restrict access and backups
-as for `bcs_bots.session_token` and do not export it in management responses.
+Follow the [fenced backfill and rollout guide](../docs/provider-bot-storage-migration.md)
+to migrate existing bindings before switching the delivery read source.
 
-The user-approved rebase of unreleased PR #2358 on 2026-09-21 moves only its
-registration migrations from MySQL 028 / SQLite 029 to MySQL 029 / SQLite 030.
-Upstream's Fixed Loop migrations and all earlier migration bodies/identifiers
-remain unchanged. A database that applied the earlier registration draft is
-not an automatic upgrade target: use a fresh disposable database, or plan an
-explicit reviewed reconciliation for retained data. Never delete or rewrite
-migration history to silence a name/checksum conflict.
+The user confirmed PR #2358 has never been deployed and approved consolidating
+its draft DB changes. Only this PR's unreleased slots are changed; upstream's
+Fixed Loop migrations and all earlier bodies/identifiers remain unchanged.
 
 MySQL/OceanBase queue tables (021/022) follow the existing `bcs_chat_runs`
 convention: auto-increment `id` primary key and database-managed `gmt_create` /
@@ -72,7 +68,7 @@ must apply the subsequent numbered migrations in order as well.
 | 026 | `mysql/026_run_reply_segments.sql` | Run reply reconstruction index (SQLite version 027) |
 | 027 | `mysql/027_provider_bot_webhook.sql` | Per-Bot Provider webhook endpoint (SQLite version 028) |
 | 028 | `mysql/028_fixed_loop_runtime.sql` | Fixed Loop snapshot plan, failure/Judge state, opening/dispatch checkpoints and recovery indexes (SQLite version 029) |
-| 029 | `mysql/029_provider_registrations.sql` | Provider-scoped registration identity and retry journal (SQLite version 030) |
+| 029 | `mysql/029_bot_provider_storage.sql` | Bot-owned Provider identity, delivery mode and webhook metadata (SQLite version 030) |
 
 The consolidated Fixed Loop schema is MySQL 028 and SQLite
 `029_fixed_loop_runtime.sql`. Each includes three nullable snapshot plan columns,
@@ -344,7 +340,8 @@ Versions `022`–`027` add delivery queues, policy and query indexes; `028` adds
 the per-Bot Provider webhook endpoint, and `029` adds
 the fixed Loop snapshot plan, progression/session recovery indexes, saved
 failure/Judge state and opening/dispatch checkpoints in one migration.
-Version `030` adds the independent Provider registration journal.
+Version `030` adds Provider identity, delivery mode and webhook metadata to Bots,
+with a unique environment-scoped Provider/ref index and no new table.
 
 Versions `001`–`021` are defined in Rust. Independent SQL files were introduced
 for `022`–`027` by the message congestion-control change; the runner loads them
@@ -412,7 +409,7 @@ available number in their own dialect and document the corresponding change.
 | Delivery queues, policy and query indexes | 021–026 | 022–027 |
 | Per-Bot Provider webhook endpoint | 027 | 028 |
 | Fixed Loop plan, recovery indexes, failure/Judge state and opening/dispatch checkpoints | 028 | 029 |
-| Provider-scoped registration journal | 029 | 030 |
+| Bot-owned Provider identity, delivery mode and webhook metadata | 029 | 030 |
 | HumanInput index prefix | 001/008 for fresh databases; manual repair if required | no equivalent MySQL index-size limit |
 
 The committed-migration freeze also applies to historical migration bodies in
