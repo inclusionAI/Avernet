@@ -22,9 +22,6 @@ from dataclasses import asdict
 
 import pytest
 
-from agentclaw.community.core.repository.protocols.task import (
-    TaskTrajectoryRepositoryProtocol,
-)
 from agentclaw.community.core.task.domain.errors import (
     TrajectoryAnalysisError,
     TrajectoryAnalysisNotConfiguredError,
@@ -35,7 +32,6 @@ from agentclaw.community.core.task.repository.types import (
 )
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
     AnalysisType,
-    ReasonCatalog,
     TaskTrajectory,
     TrajectoryAnalysis,
     TrajectoryActionType,
@@ -289,21 +285,26 @@ async def test_do_analysis_true_backfills_and_returns_fresh_analysis():
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_do_analysis_true_overwrites_previous_analysis():
-    """决策 #13: each do_analysis=true OVERWRITES the prior analysis (no merge)."""
+async def test_do_analysis_true_returns_existing_analysis_without_recalling_bot():
+    """``do_analysis=true`` is IDEMPOTENT: if the assembled trajectory already
+    carries ``analysis`` (head row non-empty), return it directly WITHOUT calling
+    the bot / no backfill (省一次 bot 调用 / 504 风险). 决策 #13's "every
+    do_analysis=true OVERWRITES" is revised to "ensure analyzed" — to FORCE a
+    refresh, clear the persisted head-row analysis (置空), then do_analysis=true
+    re-runs the bot. 决策 #13's no-merge (when it DOES run) still holds."""
     traj = _make_trajectory(analysis='{"old": true}')
     assembler = _FakeAssembler(traj)
-    analysis = _make_analysis()
-    analyzer = _FakeAnalyzer(analysis=analysis)
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())  # would run only if NOT short-circuited
     repo = _FakeRepo()
     config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
     svc = TaskTrajectoryService(assembler, repo, analyzer, config)
 
     result = await svc.get_trajectory("t1", do_analysis=True)
 
-    # the returned analysis is the NEW JSON, not the old persisted one
-    assert result.analysis == json.dumps(asdict(analysis), ensure_ascii=False)
-    assert '"old"' not in result.analysis
+    # existing analysis returned verbatim; bot NOT called; no backfill
+    assert result.analysis == '{"old": true}'
+    assert analyzer.calls == 0
+    assert repo.backfill_calls == []
 
 
 # ---------------------------------------------------------------------------

@@ -304,12 +304,16 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         table and returns ``TaskTrajectory``; ``analysis`` = persisted or
         ``None``; no DB write, no bot call.
 
-        ``do_analysis=True``: assembles → builds ``ext_info_lookup`` → calls the
-        configured ``tc_bot`` analyzer → serializes the resulting
-        ``TrajectoryAnalysis`` JSON → ``backfill_analysis`` (overwrite, 决策 #13)
-        → returns the same-shape ``TaskTrajectory`` carrying the fresh analysis.
-        Bot failure/timeout → ``TrajectoryAnalysisError`` re-raised (504, no
-        backfill — 决策 #14); bot not configured →
+        ``do_analysis=True``: IDEMPOTENT — assembles; if the head row already
+        carries a non-empty ``analysis``, returns it directly WITHOUT calling the
+        bot (省一次 bot 调用 / 504). Only an empty/None analysis proceeds: builds
+        ``ext_info_lookup`` → calls the configured ``tc_bot`` analyzer → serializes
+        the ``TrajectoryAnalysis`` JSON → ``backfill_analysis`` (overwrite, 决策 #13
+        on the bot-run path) → returns the same-shape ``TaskTrajectory`` carrying
+        the fresh analysis. To FORCE a refresh, clear the persisted head-row
+        analysis, then re-call ``do_analysis=True``. Bot failure/timeout →
+        ``TrajectoryAnalysisError`` re-raised (504, no backfill — 决策 #14); bot
+        not configured (AND analysis absent) →
         ``TrajectoryAnalysisNotConfiguredError`` (503).
         """
         if not do_analysis:
@@ -321,13 +325,27 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
     # ------------------------------------------------------------------
 
     async def _do_analysis(self, task_id: str) -> TaskTrajectory:
-        """Assemble → build ext_info_lookup → analyze → backfill → return."""
+        """Assemble → (已有 analysis 则直接返回,不再请求 bot) → build ext_info_lookup
+        → analyze → backfill → return."""
         # 1. Assemble the timeline (read-side; no DB write beyond the head UPSERT
         #    which preserves existing analysis/gmt_modified).
         trajectory = self._assembler.assemble(task_id)
 
+        # idempotent 快路径:head 行 analysis 非空 → 已分析过,不再请求 bot,直接返回
+        # 持久化的分析。``do_analysis=true`` 的语义因此从"每次强制重跑 bot"改为"确保
+        # 有分析"(省一次 bot 调用 / 超时 / 504 风险)。只有 analysis 为 None/空串才走 bot。
+        # 需强制重分析时:清掉持久化 analysis(或将来加 force=true 入口)。
+        if trajectory.analysis:
+            logger.info(
+                "[task][trajectory] analysis already present, skip bot call "
+                "(idempotent do_analysis) task=%s head_analysis_len=%d",
+                task_id, len(trajectory.analysis),
+            )
+            return trajectory
+
         # 2. Build ext_info_lookup from the repo's records (the assembler DROPPED
         #    ext_info; the analyzer re-queries via this closure).
+        ext_info_lookup = _build_ext_info_lookup(self._repo, task_id)
         ext_info_lookup = _build_ext_info_lookup(self._repo, task_id)
 
         # 3. Resolve the deployment-configured analysis bot_id (decision #10:

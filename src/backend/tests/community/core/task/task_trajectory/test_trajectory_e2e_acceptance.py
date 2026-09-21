@@ -972,44 +972,82 @@ class TestDoAnalysisTrueServicePath:
         (asserted via ``_FakeBot.last_call``) and as ``analysis_executor`` into the
         returned analysis. An env variant that's unset → None → 503 (strict —
         mirrors ``base_url_pre`` empty → port None): pre env without ``_pre``, or
-        prod env without the prod id, BOTH decline ``do_analysis=true``."""
-        db = _make_db()
-        repo = TaskTrajectoryRepository(db)
+        prod env without the prod id, BOTH decline ``do_analysis=true``.
+
+        Each call uses a FRESH trajectory repo (empty analysis) so ``do_analysis=true``
+        actually runs the bot — the service now short-circuits when analysis already
+        exists (see ``test_do_analysis_idempotent_returns_persisted_without_bot_call``)."""
         task_id, child = "e2e-env", "cx"
-        graph_svc = TaskGraphService()
-        _drive_submit(repo, graph_svc, task_id=task_id)
-        _drive_plan(repo, graph_svc, task_id=task_id, child_node_id=child)
-        _drive_dispatch(repo, graph_svc, task_id=task_id, child_node_id=child)
 
-        bot = _FakeBot(content=json.dumps({"analysis_output": "x"}, ensure_ascii=False))
-        analyzer = TaskTrajectoryAnalyzer(bot=bot)
-
-        def _svc(cfg):
-            return TaskTrajectoryService(TaskTrajectoryAssembler(repo), repo, analyzer, cfg)
+        def _fresh_svc_and_bot(cfg):
+            repo = TaskTrajectoryRepository(_make_db())
+            graph_svc = TaskGraphService()
+            _drive_submit(repo, graph_svc, task_id=task_id)
+            _drive_plan(repo, graph_svc, task_id=task_id, child_node_id=child)
+            _drive_dispatch(repo, graph_svc, task_id=task_id, child_node_id=child)
+            bot = _FakeBot(content=json.dumps({"analysis_output": "x"}, ensure_ascii=False))
+            svc = TaskTrajectoryService(
+                TaskTrajectoryAssembler(repo), repo, TaskTrajectoryAnalyzer(bot=bot), cfg,
+            )
+            return svc, bot
 
         # prod env (default) → analysis_bot_id
         monkeypatch.setenv("SERVER_ENV", "prod")
-        _run(_svc(TrajectoryAnalysisConfig(analysis_bot_id="botA", analysis_bot_id_pre="botB"))
-             .get_trajectory(task_id, do_analysis=True))
+        svc, bot = _fresh_svc_and_bot(TrajectoryAnalysisConfig(analysis_bot_id="botA", analysis_bot_id_pre="botB"))
+        _run(svc.get_trajectory(task_id, do_analysis=True))
         assert bot.last_call["bot_id"] == "botA"
 
         # pre env → analysis_bot_id_pre
         monkeypatch.setenv("SERVER_ENV", "pre")
-        _run(_svc(TrajectoryAnalysisConfig(analysis_bot_id="botA", analysis_bot_id_pre="botB"))
-             .get_trajectory(task_id, do_analysis=True))
+        svc, bot = _fresh_svc_and_bot(TrajectoryAnalysisConfig(analysis_bot_id="botA", analysis_bot_id_pre="botB"))
+        _run(svc.get_trajectory(task_id, do_analysis=True))
         assert bot.last_call["bot_id"] == "botB"
 
         # pre env but _pre unset → None → 503 (strict, mirrors base_url_pre empty)
         monkeypatch.setenv("SERVER_ENV", "pre")
+        svc, _bot = _fresh_svc_and_bot(TrajectoryAnalysisConfig(analysis_bot_id="botA"))
         with pytest.raises(TrajectoryAnalysisNotConfiguredError):
-            _run(_svc(TrajectoryAnalysisConfig(analysis_bot_id="botA"))
-                 .get_trajectory(task_id, do_analysis=True))
+            _run(svc.get_trajectory(task_id, do_analysis=True))
 
         # prod env but prod id unset → None → 503
         monkeypatch.setenv("SERVER_ENV", "prod")
+        svc, _bot = _fresh_svc_and_bot(TrajectoryAnalysisConfig(analysis_bot_id_pre="botB"))
         with pytest.raises(TrajectoryAnalysisNotConfiguredError):
-            _run(_svc(TrajectoryAnalysisConfig(analysis_bot_id_pre="botB"))
-                 .get_trajectory(task_id, do_analysis=True))
+            _run(svc.get_trajectory(task_id, do_analysis=True))
+
+    def test_do_analysis_idempotent_returns_persisted_without_bot_call(self, monkeypatch):
+        """``do_analysis=true`` is IDEMPOTENT: when the head row already carries a
+        non-empty ``analysis``, it returns the persisted analysis directly WITHOUT
+        calling the bot (省一次 bot 调用 / 超时 / 504). Only an empty/None analysis
+        triggers the bot (see the env-aware + ``test_do_analysis_true…`` tests)."""
+        db = _make_db()
+        repo = TaskTrajectoryRepository(db)
+        task_id = "e2e-idem"
+        graph_svc = TaskGraphService()
+        _drive_submit(repo, graph_svc, task_id=task_id)   # SUBMIT event row
+        # warmup: assemble once to ensure the head row exists (upsert_head) BEFORE
+        # backfill — emit_submit_trajectory only inserts the SUBMIT event; the head
+        # is created lazily on the first assemble. Without this, backfill's UPDATE
+        # hits 0 rows and the idempotent short-circuit never fires.
+        assembler = TaskTrajectoryAssembler(repo)
+        assert assembler.assemble(task_id).timeline, "warmup assemble should yield the SUBMIT event"
+        persisted = json.dumps({
+            "analysis_type": "tc_bot", "analysis_executor": "prior-bot",
+            "analysis_input": "prior input", "analysis_output": "prior conclusion",
+            "gmt_create": 1, "boost_reason": "prior boost", "failure_reason": None,
+        }, ensure_ascii=False)
+        repo.backfill_analysis(task_id, persisted)
+
+        bot = _FakeBot(content=json.dumps({"analysis_output": "should not be called"}, ensure_ascii=False))
+        svc = TaskTrajectoryService(
+            assembler, repo, TaskTrajectoryAnalyzer(bot=bot),
+            TrajectoryAnalysisConfig(analysis_bot_id="botA"),
+        )
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        result = _run(svc.get_trajectory(task_id, do_analysis=True))
+        # returned the PRIOR (persisted) analysis, NOT a fresh one
+        assert result.analysis == persisted
+        assert bot.last_call is None  # bot was NOT called — this is the idempotent short-circuit
 
 
 # ---------------------------------------------------------------------------
