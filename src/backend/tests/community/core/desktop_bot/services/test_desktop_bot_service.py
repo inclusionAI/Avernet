@@ -1512,6 +1512,12 @@ class TestPublishPolling:
         """SUCCESS 时应调 _trigger_device_alive(device_id)，不单独调 _update_local_status。"""
         service, mocks = poll_service()
         service._trigger_device_alive = MagicMock()
+        service._trigger_pool_data_init_after_activation = MagicMock(
+            side_effect=lambda **_kwargs: (
+                mocks["bot_repo"].update_by_owner.called
+                or pytest.fail("data-init triggered before start_status persisted")
+            )
+        )
 
         with patch("httpx.Client") as mock_client:
             mock_response = MagicMock()
@@ -1528,6 +1534,12 @@ class TestPublishPolling:
             )
 
         service._trigger_device_alive.assert_called_once_with("BOT-abc")
+        service._trigger_pool_data_init_after_activation.assert_called_once_with(
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            binding_id="1",
+            device_id="BOT-abc",
+        )
         # _update_local_status 不应再被单独调用（由 report_device_alive 内部处理）
         mocks["binding_repo"].update_status.assert_not_called()
 

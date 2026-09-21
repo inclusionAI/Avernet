@@ -2239,13 +2239,6 @@ class DesktopBotService(DesktopBotServiceProtocol):
                             "bot_id=%s device_id=%s", bot_id, device_id,
                         )
                         final_status = "ACTIVE_FALLBACK"
-                    else:
-                        self._trigger_pool_data_init_after_activation(
-                            bot_id=bot_id,
-                            owner_id=owner_id,
-                            device_id=device_id,
-                            binding_id=binding_id,
-                        )
                     break
 
                 if status == "FAILED":
@@ -2378,7 +2371,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "[DesktopBotService._poll_publish_progress] "
                 "ext update failed: bot_id=%s error=%s", bot_id, e,
             )
-        if final_status == "ACTIVE_FALLBACK":
+        if final_status in {"ACTIVE", "ACTIVE_FALLBACK"}:
             self._trigger_pool_data_init_after_activation(
                 bot_id=bot_id,
                 owner_id=owner_id,
