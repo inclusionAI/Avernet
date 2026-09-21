@@ -19,6 +19,9 @@ from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import (
+    CollaboratorServiceProtocol as CoreCollaboratorServiceProtocol,
+)
 from agentclaw.community.core.caller_identity.protocols import (
     CallerIdentityTokenExchangeProtocol,
     CallerRuntimeUpdaterProtocol,
@@ -65,6 +68,7 @@ class CallerIdentityModule(Module):
         repository: CallerIdentityRepositoryProtocol,
         mcp_sync_service: MCPSyncServiceProtocol,
         passport_plugin: PassportPlugin,
+        collaborator_service: CoreCollaboratorServiceProtocol,
     ) -> CallerIdentityService:
         """Construct the draft configuration and Agent Principal sync service."""
         return CallerIdentityService(
@@ -75,6 +79,7 @@ class CallerIdentityModule(Module):
             repository=repository,
             mcp_sync_service=mcp_sync_service,
             passport_plugin=passport_plugin,
+            collaborator_service=collaborator_service,
         )
 
     @singleton
