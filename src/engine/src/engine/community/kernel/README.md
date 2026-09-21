@@ -8,6 +8,7 @@ Bottom layer: primitives shared by `core` internals and `plugins`. Because
 ```yaml
 purpose: "Foundational primitives shared by core internals and plugin transport (e.g. wire frames); the bottom layer, importing nothing internal."
 provides:
+  - "engine.community.kernel.file_count — stable scan errors, request correlation and recursive log-field redaction"
   - "engine.community.kernel.frames — wire-protocol envelope types (RequestFrame, ResponseFrame, EventFrame, ErrorShape, StateVersion, ErrorCodes) + protocol constants"
 consumes:
   []

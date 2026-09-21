@@ -12,6 +12,7 @@ from typing import Any
 
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.file.models import (
+    CountFilesResult,
     FileEntry,
     ListDirResult,
     RemoveResult,
@@ -53,6 +54,13 @@ class ClaudeCodeFileAdapter(FileService):
 
     def __init__(self, port: ClaudeCodeFilePort) -> None:
         self._port = port
+
+    async def count_files(self, path: str, auth: AuthContext | None = None) -> CountFilesResult:
+        from engine.community.kernel.file_count import FileCountError
+
+        # Multiple configured file roots do not define a canonical engine root.
+        log.info("engine.file_count.unsupported", extra={"engine": "claude_code"})
+        raise FileCountError("unsupported")
 
     async def upload(
         self,

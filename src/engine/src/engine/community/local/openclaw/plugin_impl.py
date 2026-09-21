@@ -212,6 +212,12 @@ class LocalOpenClawPluginImpl(OpenClawPlugin):
         self._history[session_key] = []
         return {"success": True, "payload": {"sessionKey": session_key}}
 
+    async def count_files(self, path: str) -> dict[str, Any]:
+        from engine.community.kernel.file_count import FileCountError
+
+        # This in-memory double has no authorized physical filesystem root.
+        raise FileCountError("unsupported")
+
     async def upload(self, target_path: str, content: bytes) -> dict[str, Any]:
         if not target_path:
             raise ValueError("target_path is required")
