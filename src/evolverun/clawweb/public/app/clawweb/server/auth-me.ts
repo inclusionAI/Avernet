@@ -42,8 +42,15 @@ function decodeJwtPayload(token: string): IamTokenPayload | null {
 }
 
 function isLoopbackHost(request: Request): boolean {
-  const host = request.get("host") ?? "";
-  return host.includes("localhost") || host.includes("127.0.0.1");
+  const host = (request.get("host") ?? "").trim().toLowerCase();
+  const expectedHost = /^(?:localhost|127\.0\.0\.1)(?::\d{1,5})?$/.test(host)
+    || /^\[::1\](?::\d{1,5})?$/.test(host);
+  if (!expectedHost) return false;
+
+  const remoteAddress = request.socket.remoteAddress?.toLowerCase();
+  return remoteAddress === "127.0.0.1"
+    || remoteAddress === "::1"
+    || remoteAddress === "::ffff:127.0.0.1";
 }
 
 function identityFromIamToken(request: Request): ResolvedIdentity | null {

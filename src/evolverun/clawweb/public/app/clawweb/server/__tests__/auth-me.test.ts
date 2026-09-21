@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import express from "express";
 import cookieParser from "cookie-parser";
-import type { Server } from "node:http";
+import { request as httpRequest, type Server } from "node:http";
 import type { AdminConfig } from "@avernet/clawweb-shared/server/db";
 import { adminAuthMiddleware } from "@avernet/clawweb-shared/server/middleware/admin-auth";
 import type { AdminAuthRepository } from "@avernet/clawweb-shared/server/middleware/admin-auth";
@@ -250,6 +250,26 @@ describe("resolveAuthMeIdentity", () => {
       const response = await fetch(`${baseUrl}/api/session-user`);
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ userId: "dev_local" });
+    });
+  });
+
+  it("rejects a loopback connection whose Host only contains the localhost substring", async () => {
+    await withApp({ config: adminConfig(), environment: "dev" }, async (baseUrl) => {
+      const url = new URL(`${baseUrl}/api/session-user`);
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        const request = httpRequest({
+          hostname: url.hostname,
+          port: url.port,
+          path: url.pathname,
+          headers: { Host: "evil-localhost.example" },
+        }, (response) => {
+          response.resume();
+          response.once("end", () => resolve(response.statusCode));
+        });
+        request.once("error", reject);
+        request.end();
+      });
+      expect(status).toBe(401);
     });
   });
 });
