@@ -32,7 +32,7 @@ describe('approval display configuration', () => {
     expect(screen.queryByRole('button', { name: '确认执行' })).toBeNull();
   });
 
-  it('ignores a historical URL empId and submits a fresh DingTalk auth code', async () => {
+  it('opens a historical empId/corpId link and submits a fresh DingTalk auth code', async () => {
     let resolved = false;
     const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
     window.dd = {
@@ -53,12 +53,13 @@ describe('approval display configuration', () => {
       return { ok: true, json: async () => ({ ...card, status: resolved ? 'approved' : 'pending' }) };
     }));
 
-    render(<MemoryRouter initialEntries={['/approval/1?empId=forged-user']}><Routes><Route path='/approval/:id' element={<Approval />} /></Routes></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/approval/1?empId=legacy-reviewer&corpId=legacy-corp']}><Routes><Route path='/approval/:id' element={<Approval />} /></Routes></MemoryRouter>);
     await userEvent.click(await screen.findByRole('button', { name: '确认执行' }));
 
     const resolveRequest = requests.find((request) => request.url.endsWith('/resolve'));
     expect(resolveRequest?.body).toEqual({ authCode: 'fresh-code', action: 'approve' });
     expect(requests.some((request) => request.url.includes('empId='))).toBe(false);
+    expect(requests.some((request) => request.url.includes('corpId='))).toBe(false);
   });
 
   it('shows the server identity rejection instead of a generic HTTP label', async () => {

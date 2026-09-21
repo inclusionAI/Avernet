@@ -49,6 +49,16 @@ it('rejects URL-era empId-only submissions and exposes public DingTalk auth conf
  expect(row.status).toBe('pending');
 });
 
+it('does not expose a standalone auth-code exchange endpoint',async()=>{
+ const {base}=await fixture([]);
+ const response=await fetch(base.replace(/\/1$/, '/auth/dingtalk'),{
+  method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({authCode:'reviewer-code'}),
+ });
+ expect(response.status).toBe(404);
+});
+
 
 it('retains missing and invalid approval responses', async () => {
   const {base}=await fixture([]);

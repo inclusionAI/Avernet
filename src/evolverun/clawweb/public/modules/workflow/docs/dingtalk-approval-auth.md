@@ -29,10 +29,10 @@ The resolve request body is:
 ## Compatibility
 
 - Existing workflow YAML and pending approval records require no migration.
-- Historical links containing `empId` or `corpId` still open and display the
-  approval, but those query parameters do not authorize an action.
+- Historical links containing `empId` or `corpId` still open, display, and can
+  resolve an existing approval after the page obtains a fresh DingTalk
+  `authCode`. Those query parameters never authorize the action.
 - An old cached page that submits only `empId` receives HTTP 401. Refreshing
   the page loads the auth-code flow.
 - Deployments without the DingTalk identity adapter return HTTP 503 for the
-  public config and identity-exchange endpoints; they must not fall back to a
-  URL identity.
+  public config or resolve request; they must not fall back to a URL identity.

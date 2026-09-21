@@ -46,28 +46,6 @@ export function createApprovalRouter(db: IDatabase, options: ApprovalRouterOptio
   });
 
   /**
-   * POST /api/approval/auth/dingtalk — exchange DingTalk authCode for userId
-   *
-   * Body: { authCode: string }
-   * Returns: { ok: boolean, userId?: string, error?: string }
-   *
-   * Deployments provide the DingTalk identity adapter at composition time.
-   * Missing configuration fails closed; URL parameters are never identity.
-   */
-  router.post("/auth/dingtalk", asyncHandler(async (req: Request, res: Response) => {
-    const { authCode } = req.body as { authCode?: string };
-    if (!authCode) {
-      res.status(400).json({ ok: false, error: "缺少 authCode" });
-      return;
-    }
-    if (!options.dingTalk) {
-      res.status(503).json({ ok: false, error: "钉钉免登未配置" });
-      return;
-    }
-    res.json(await options.dingTalk.exchangeAuthCode(authCode));
-  }));
-
-  /**
    * GET /api/approval/by-flow/:flowId — list approval cards for a run
    *
    * Returns all approval cards associated with the given flow_id (run ID),
