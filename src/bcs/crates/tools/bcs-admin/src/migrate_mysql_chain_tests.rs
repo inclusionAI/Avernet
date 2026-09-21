@@ -168,7 +168,7 @@ async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
         ("bcs_messages", vec!["owner_bot_id", "visibility_domain", "audience_kind", "audience_actor_ids_json"]),
         ("bcs_state_machine_node_runs", vec!["outcome", "responded_by", "failure_action"]),
         ("bcs_group_participants", vec!["tags_json", "message_view_scope"]),
-        ("bcs_bots", vec!["task_claim_mode", "task_dream_mode", "user_visibility", "friend_ext", "friend_check_in_strategy", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url", "provider_registered_at", "provider_updated_at"]),
+        ("bcs_bots", vec!["task_claim_mode", "task_dream_mode", "user_visibility", "friend_ext", "friend_check_in_strategy", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url"]),
         ("bcs_state_machine_runs", vec!["root_run_id", "rerun_of", "session_activation_count", "opening_message_override_json"]),
         ("bcs_group_sessions", vec!["message_visibility_version", "callback_lease_owner", "callback_lease_token", "callback_lease_until_ms"]),
         ("bcs_state_machine_definition_snapshots", vec!["execution_plan_json", "execution_plan_content_hash", "execution_plan_compiler_version"]),

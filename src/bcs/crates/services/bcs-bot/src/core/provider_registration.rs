@@ -169,9 +169,6 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         if self.bindings.get_binding_by_provider_ref(&command.provider_id, &command.provider_bot_ref).await?.is_some() {
             return Err(ServiceError::Conflict("provider_bot_ref is already registered".into()));
         }
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-            .map(|value| value.as_millis() as u64)
-            .map_err(|_| ServiceError::InternalError("system clock is before epoch".into()))?;
         let record = ProviderRegistrationRecord {
             provider_id: command.provider_id, provider_bot_ref: command.provider_bot_ref,
             owner: command.owner, mode: command.mode, bot_name: command.bot_name,
@@ -181,7 +178,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         self.registrations.create_provider_bot(BotProviderRecord {
             bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(),
             provider_bot_ref: record.provider_bot_ref.clone(), connection_mode: record.mode,
-            webhook_url: record.webhook_url.clone(), is_deleted: false, registered_at: now, updated_at: now,
+            webhook_url: record.webhook_url.clone(), is_deleted: false,
         }, BotCapabilities {
             name: Some(record.bot_name.clone()), visibility: "protected".into(), ..BotCapabilities::default()
         }, &record.owner, &record.bot_token).await?;

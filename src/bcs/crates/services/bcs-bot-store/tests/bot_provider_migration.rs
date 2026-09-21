@@ -17,9 +17,17 @@ async fn upgraded() -> LocalSqliteDbPlugin {
 }
 
 #[tokio::test]
+async fn provider_schema_adds_only_identity_mode_and_webhook() {
+    let db = upgraded().await;
+    let columns: Vec<String> = db.query(DbStatement::new("PRAGMA table_info(bcs_bots)")).await.unwrap()
+        .iter().map(|row| row.get_string("name").unwrap().unwrap()).collect();
+    assert_eq!(columns, ["bot_uuid", "env", "session_token", "is_deleted", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url"]);
+}
+
+#[tokio::test]
 async fn additive_schema_preserves_legacy_identity_and_marks_mode_unmigrated() {
     let db = upgraded().await;
-    let rows = db.query(DbStatement::new("SELECT session_token, connection_mode, provider_id, provider_bot_ref, webhook_url, provider_registered_at, provider_updated_at FROM bcs_bots WHERE bot_uuid = 'legacy'")).await.unwrap();
+    let rows = db.query(DbStatement::new("SELECT session_token, connection_mode, provider_id, provider_bot_ref, webhook_url FROM bcs_bots WHERE bot_uuid = 'legacy'")).await.unwrap();
     assert_eq!(rows[0].get_string("session_token").unwrap().as_deref(), Some("test-only-runtime"));
     assert_eq!(rows[0].get_string("connection_mode").unwrap(), None);
     assert_eq!(rows[0].get_string("provider_id").unwrap(), None);

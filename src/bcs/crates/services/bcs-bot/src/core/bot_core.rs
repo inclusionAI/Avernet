@@ -468,7 +468,10 @@ impl BotRegistryCoreService for BotCore {
         if let Some(metadata) = &self.bot_providers {
             let result = async {
                 if let Some(record) = metadata.get_provider_bot(bot_id).await? {
-                    return metadata.delete_provider_bot(&record.provider_id, bot_id, record.updated_at.saturating_add(1)).await;
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                        .map(|value| value.as_millis() as u64)
+                        .map_err(|_| ServiceError::InternalError("system clock is before epoch".into()))?;
+                    return metadata.delete_provider_bot(&record.provider_id, bot_id, now).await;
                 }
                 // Legacy-read rollout can encounter a gateway before backfill.
                 // Let the dual-write projection attach metadata and delete both

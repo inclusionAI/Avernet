@@ -3,17 +3,31 @@
 ## Contract
 
 `bcs_bots` is the authority for `provider_id`, `provider_bot_ref`,
-`connection_mode` (`plugin` or `gateway`), nullable `webhook_url`, and Provider
-metadata timestamps. Existing `is_deleted` is the lifecycle authority. Provider
+`connection_mode` (`plugin` or `gateway`) and nullable `webhook_url`.
+Existing `is_deleted` is the lifecycle authority. Provider
 affiliation alone does not imply HTTP delivery or grant gateway-only permissions.
+
+No separate Provider timestamps are stored on the Bot. Bot lifecycle timestamps
+remain unchanged; legacy binding response timestamps still come from the binding.
+The Bot-mode read source selects direction and metadata from the Bot and obtains
+only compatibility timestamps from its matching gateway binding. Missing gateway
+bindings fail explicitly rather than inventing timestamp values.
+
+Provider metadata writes use business-state conditions, unique constraints and
+transactions, not a timestamp/version precondition. Concurrent explicit webhook
+updates follow database write ordering; repeated affiliation is a no-op and cannot
+restore a stale callback. The existing single-binding lock is unchanged; no new
+Bot or Provider-wide explicit lock is introduced. Updating a Provider itself does
+not update its Bots.
 
 Provider-admin DTOs, registration token scopes, OpenAPI registration and Bot
 storage reuse `bcs-domain::ProviderBotConnectionMode::{Gateway, Plugin}`.
 `plugin` is the existing name for upstream WebSocket/plugin/bridge connections;
 there is no separate `upstream` wire or stored value. The old Provider-admin
 default remains `gateway`; token/register explicitly defaults to `plugin`.
-Only this PR's undeployed SQLite 030 draft constraint is corrected. MySQL 029
-uses VARCHAR without a mode default or CHECK and needs no DDL change. Earlier
+Only this PR's undeployed MySQL 029 / SQLite 030 drafts are corrected: the SQLite
+mode constraint uses the shared enum, and both omit duplicate Provider timestamps.
+MySQL uses VARCHAR without a mode default or CHECK. Earlier
 migration names and checksums are untouched. Retained development databases
 using the discarded draft require an explicit upgrade or recreation, and draft
 tokens must be reissued; never edit recorded checksums to bypass validation.

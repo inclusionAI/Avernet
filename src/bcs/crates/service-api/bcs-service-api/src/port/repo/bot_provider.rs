@@ -19,6 +19,7 @@ pub trait BotProviderRepoPort: Send + Sync {
     /// Attach an existing active Bot without replacing its credential or owner.
     /// Allows the existing upstream-to-gateway transition, never Provider transfer
     /// or gateway-to-upstream. Maintains gateway projection atomically in SQL.
+    /// Repeated identical affiliation does not update the webhook or timestamps.
     async fn attach_provider_bot(&self, record: BotProviderRecord) -> ServiceResult<()>;
 
     /// Strict create: do not replace an existing Bot, token or Provider/ref.
@@ -31,12 +32,15 @@ pub trait BotProviderRepoPort: Send + Sync {
 
     /// Atomically update the gateway Bot override and compatibility binding.
     /// Authorization and effective-endpoint validation belong to the core.
+    /// No caller version is required; explicit updates use write ordering.
+    /// updated_at is the legacy binding timestamp input, not a Bot revision.
     async fn update_provider_webhook(
         &self, provider_id: &str, bot_uuid: &str, webhook_url: Option<String>, updated_at: u64,
     ) -> ServiceResult<BotProviderRecord>;
 
     /// Soft-delete the Bot and disable its gateway compatibility projection.
     /// Returns false for an already-deleted Bot. Never releases its Provider/ref.
+    /// updated_at is for the legacy binding only; no metadata version is stored.
     async fn delete_provider_bot(
         &self, provider_id: &str, bot_uuid: &str, updated_at: u64,
     ) -> ServiceResult<bool>;

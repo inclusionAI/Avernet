@@ -22,22 +22,28 @@ impl ProviderBindingProjection {
         }
         Ok(())
     }
+
+    async fn delivery(&self, record: BotProviderRecord) -> ServiceResult<Option<ProviderBotBinding>> {
+        if record.connection_mode != BotConnectionMode::Gateway { return Ok(None); }
+        // Mode, affiliation and override come from the Bot. Public legacy
+        // binding timestamps still come from the binding, not duplicate columns.
+        let binding = self.legacy.get_binding_by_bot_uuid(&record.bot_uuid).await?
+            .filter(|binding| binding.provider_id == record.provider_id && binding.provider_bot_ref == record.provider_bot_ref)
+            .ok_or_else(|| ServiceError::InternalError("gateway Bot has no matching binding".into()))?;
+        Ok(Some(ProviderBotBinding {
+            bot_uuid: record.bot_uuid, provider_id: record.provider_id, provider_bot_ref: record.provider_bot_ref,
+            webhook_url: record.webhook_url, disabled: record.is_deleted,
+            created_at: binding.created_at, updated_at: binding.updated_at,
+        }))
+    }
 }
 
 pub(super) fn metadata(binding: ProviderBotBinding) -> BotProviderRecord {
     BotProviderRecord {
         bot_uuid: binding.bot_uuid, provider_id: binding.provider_id, provider_bot_ref: binding.provider_bot_ref,
         connection_mode: BotConnectionMode::Gateway, webhook_url: binding.webhook_url,
-        is_deleted: binding.disabled, registered_at: binding.created_at, updated_at: binding.updated_at,
+        is_deleted: binding.disabled,
     }
-}
-
-pub(super) fn delivery(record: BotProviderRecord) -> Option<ProviderBotBinding> {
-    (record.connection_mode == BotConnectionMode::Gateway).then_some(ProviderBotBinding {
-        bot_uuid: record.bot_uuid, provider_id: record.provider_id, provider_bot_ref: record.provider_bot_ref,
-        webhook_url: record.webhook_url, disabled: record.is_deleted,
-        created_at: record.registered_at, updated_at: record.updated_at,
-    })
 }
 
 #[async_trait]
@@ -52,8 +58,11 @@ impl ProviderBotBindingRepoPort for ProviderBindingProjection {
         }
         match self.bots.get_connection_mode(bot_uuid).await? {
             None | Some(BotConnectionMode::Plugin) => Ok(None),
-            Some(BotConnectionMode::Gateway) => self.bots.get_provider_bot(bot_uuid).await?
-                .and_then(delivery).map(Some).ok_or_else(|| ServiceError::InternalError("gateway Bot has no Provider metadata".into())),
+            Some(BotConnectionMode::Gateway) => {
+                let record = self.bots.get_provider_bot(bot_uuid).await?
+                    .ok_or_else(|| ServiceError::InternalError("gateway Bot has no Provider metadata".into()))?;
+                self.delivery(record).await
+            }
         }
     }
 
@@ -61,7 +70,10 @@ impl ProviderBotBindingRepoPort for ProviderBindingProjection {
         if self.source == DownlinkDetectionSource::Binding {
             self.legacy.get_binding_by_provider_ref(provider_id, provider_bot_ref).await
         } else {
-            Ok(self.bots.get_provider_bot_by_ref(provider_id, provider_bot_ref).await?.and_then(delivery))
+            match self.bots.get_provider_bot_by_ref(provider_id, provider_bot_ref).await? {
+                Some(record) => self.delivery(record).await,
+                None => Ok(None),
+            }
         }
     }
 
@@ -69,7 +81,11 @@ impl ProviderBotBindingRepoPort for ProviderBindingProjection {
         if self.source == DownlinkDetectionSource::Binding {
             self.legacy.list_bindings_by_provider(provider_id).await
         } else {
-            Ok(self.bots.list_provider_bot_metadata(Some(provider_id)).await?.into_iter().filter_map(delivery).collect())
+            let mut bindings = Vec::new();
+            for record in self.bots.list_provider_bot_metadata(Some(provider_id)).await? {
+                if let Some(binding) = self.delivery(record).await? { bindings.push(binding); }
+            }
+            Ok(bindings)
         }
     }
 
@@ -83,7 +99,8 @@ impl ProviderBotBindingRepoPort for ProviderBindingProjection {
         let Some(binding) = self.get_binding_by_bot_uuid(bot_uuid).await? else { return Ok(None); };
         if binding.provider_id != provider_id { return Err(ServiceError::Forbidden("provider_id_mismatch".into())); }
         self.ensure_metadata(&binding).await?;
-        self.bots.update_provider_webhook(provider_id, bot_uuid, webhook_url.map(str::to_owned), updated_at).await.map(delivery)
+        let record = self.bots.update_provider_webhook(provider_id, bot_uuid, webhook_url.map(str::to_owned), updated_at).await?;
+        self.delivery(record).await
     }
 
     async fn update_binding_disabled(&self, bot_uuid: &str, disabled: bool, updated_at: u64) -> ServiceResult<Option<ProviderBotBinding>> {
@@ -95,6 +112,9 @@ impl ProviderBotBindingRepoPort for ProviderBindingProjection {
         if binding.disabled { return Ok(Some(binding)); }
         self.ensure_metadata(&binding).await?;
         self.bots.delete_provider_bot(&binding.provider_id, bot_uuid, updated_at).await?;
-        self.bots.get_provider_bot(bot_uuid).await.map(|record| record.and_then(delivery))
+        match self.bots.get_provider_bot(bot_uuid).await? {
+            Some(record) => self.delivery(record).await,
+            None => Ok(None),
+        }
     }
 }

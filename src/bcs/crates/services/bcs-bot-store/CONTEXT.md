@@ -40,6 +40,13 @@ cached in a second journal. Memory metadata is process-local.
 ProviderBindingProjection selects legacy binding reads or strict Bot-mode reads,
 independently of gateway dual writes. Affiliation alone is not a delivery binding.
 SQLite 030 / MySQL 029 add nullable migration-state columns and a unique index.
+Bot Provider metadata has no separate timestamps or version field. Binding
+response timestamps stay on the legacy binding; Bot-mode projections read them
+from the matching binding without changing the direction/metadata authority.
+Mutations retain business-state checks, uniqueness and gateway transactionality;
+explicit webhook updates do not require an old version. Repeated affiliation does
+not rewrite callback state. No new explicit locks are added to the existing
+single-binding lock, and Provider updates never lock all affiliated Bots.
 Historical data correction is handled by a separate reviewed work order, not a
 dedicated store method or executable. Normal registration, mutation and gateway
 projection writes are unchanged. No separate registration table is created or

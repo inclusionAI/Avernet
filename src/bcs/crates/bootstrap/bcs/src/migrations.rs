@@ -363,7 +363,7 @@ async fn apply_sqlite_migration_body(
                     index_present = true;
                 }
             }
-            let added = ["provider_id", "provider_bot_ref", "connection_mode", "webhook_url", "provider_registered_at", "provider_updated_at"];
+            let added = ["provider_id", "provider_bot_ref", "connection_mode", "webhook_url"];
             for (index, sql) in include_str!("../../../../migrations/sqlite/030_bot_provider_storage.sql")
                 .split(';').map(str::trim).filter(|sql| !sql.is_empty()).enumerate()
             {

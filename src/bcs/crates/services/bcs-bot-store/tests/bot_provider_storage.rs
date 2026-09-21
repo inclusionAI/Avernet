@@ -15,12 +15,38 @@ fn record(id: &str, mode: BotConnectionMode) -> BotProviderRecord {
     BotProviderRecord {
         bot_uuid: id.into(), provider_id: "provider-a".into(), provider_bot_ref: id.into(),
         connection_mode: mode, webhook_url: None, is_deleted: false,
-        registered_at: 1000, updated_at: 1000,
     }
 }
 
 fn caps() -> BotCapabilities {
     BotCapabilities { name: Some("Provider Bot".into()), visibility: "protected".into(), ..Default::default() }
+}
+
+#[tokio::test]
+async fn delivery_sources_preserve_binding_timestamps_through_mutations() {
+    use bcs_service_api::bot_provider::DownlinkDetectionSource;
+    use bcs_bot_store::provider::ProviderBindingProjection;
+    let db = sqlite().await;
+    let store = Arc::new(DbProviderStore::sqlite(db.clone()));
+    store.create_provider_bot(record("gateway-times", BotConnectionMode::Gateway), caps(), "owner-a", "test-times-runtime").await.unwrap();
+    db.execute(DbStatement::new("UPDATE bcs_provider_bot_bindings SET gmt_create = '2020-01-01 00:00:00', gmt_modified = '2020-02-01 00:00:00'")).await.unwrap();
+    let expected = store.get_binding_by_bot_uuid("gateway-times").await.unwrap().unwrap();
+    for source in [DownlinkDetectionSource::Binding, DownlinkDetectionSource::BotConnectionMode] {
+        let reader = ProviderBindingProjection::new(store.clone(), store.clone(), source);
+        assert_eq!(reader.get_binding_by_bot_uuid("gateway-times").await.unwrap().unwrap(), expected);
+        assert_eq!(reader.get_binding_by_provider_ref("provider-a", "gateway-times").await.unwrap().unwrap(), expected);
+        assert_eq!(reader.list_bindings_by_provider("provider-a").await.unwrap(), vec![expected.clone()]);
+    }
+    let reader = ProviderBindingProjection::new(store.clone(), store.clone(), DownlinkDetectionSource::BotConnectionMode);
+    for webhook in [None, Some("https://example.org/callback"), Some("https://example.org/callback")] {
+        let updated = reader.update_binding_webhook_url("provider-a", "gateway-times", webhook, 2000).await.unwrap().unwrap();
+        assert_eq!(updated, store.get_binding_by_bot_uuid("gateway-times").await.unwrap().unwrap());
+        assert_eq!(updated.created_at, expected.created_at);
+    }
+    let deleted = reader.update_binding_disabled("gateway-times", true, 3000).await.unwrap().unwrap();
+    assert_eq!(deleted, store.get_binding_by_bot_uuid("gateway-times").await.unwrap().unwrap());
+    assert!(deleted.disabled);
+    assert_eq!(deleted.created_at, expected.created_at);
 }
 
 #[tokio::test]

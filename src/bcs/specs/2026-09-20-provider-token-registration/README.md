@@ -95,6 +95,11 @@ does not change membership or write policy.
 
 ## Deployment and verification
 
+- Bot Provider metadata adds only identity/ref, mode and nullable webhook. Bot
+  and binding lifecycle timestamps remain in their existing locations; no
+  Provider-specific Bot timestamps or metadata-version checks are introduced.
+  Provider updates do not lock or rewrite affiliated Bots. The existing gateway
+  binding lock is unchanged.
 - Apply additive MySQL `029_bot_provider_storage.sql` before new server code;
   SQLite applies version 030 on bootstrap. Earlier upstream migrations stay frozen.
   This PR has never been deployed; its unused registration-table draft and

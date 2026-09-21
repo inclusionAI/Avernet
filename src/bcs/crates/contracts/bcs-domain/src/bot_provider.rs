@@ -25,6 +25,4 @@ pub struct BotProviderRecord {
     pub connection_mode: BotConnectionMode,
     pub webhook_url: Option<String>,
     pub is_deleted: bool,
-    pub registered_at: u64,
-    pub updated_at: u64,
 }

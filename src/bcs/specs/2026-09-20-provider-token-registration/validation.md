@@ -1,5 +1,30 @@
 # Phase 1 implementation validation
 
+## Timestamp-removal follow-up (2026-09-21)
+
+The user authorized removing the two duplicate Provider timestamp columns from
+this unmerged PR's MySQL 029 / SQLite 030, BotProviderRecord and its consumers.
+Bot lifecycle timestamps and legacy binding response timestamps remain. Earlier
+migrations are untouched. Retained draft databases require explicit upgrade or
+recreation; no live database or recorded checksum is modified by this change.
+
+Timestamp/version CAS is removed, with no replacement version or new explicit
+lock. The existing single-binding lock is unchanged. Business-state predicates,
+unique constraints and atomic gateway dual writes remain. Repeated affiliation
+does not rewrite callbacks, and explicit webhook writes use database ordering.
+
+The schema-column and binding-timestamp regressions failed before implementation.
+The focused migration/store/concurrent-webhook run then passed **13 tests, zero
+failed**. The concurrent test forces both requests to read the same Bot snapshot;
+both writes succeed and the resulting Bot/binding callback agrees. Shared
+Memory/SQLite conformance also exercises repeated association, same-value webhook
+updates, stale association rejection and deletion protection.
+
+The user requested `commit --no-verify` and `push --no-verify` while the broader
+local checks continue, so remote CI can start immediately. Broad-suite results
+are not claimed at this publication checkpoint. No PR description edit, new
+backfill command, production data change or independent/subagent review is included.
+
 ## Current addendum: Bot-owned Provider storage (2026-09-21)
 
 This follow-up was implemented and validated in an isolated checkout based on

@@ -348,7 +348,6 @@ impl ProviderCore {
                     metadata.attach_provider_bot(BotProviderRecord {
                         bot_uuid: bot_uuid.clone(), provider_id: provider.provider_id.clone(), provider_bot_ref: provider_bot_ref.clone(),
                         connection_mode: BotConnectionMode::Plugin, webhook_url: None, is_deleted: false,
-                        registered_at: now, updated_at: now,
                     }).await?;
                 }
                 info!(
@@ -987,7 +986,7 @@ impl ProviderBotCoreService for ProviderCore {
         self.authenticated_provider(provider_id, provider_admin_token).await?;
         let Some(metadata) = &self.bot_providers else { return Ok(None); };
         let Some(record) = metadata.get_provider_bot_by_ref(provider_id, provider_bot_ref).await? else { return Ok(None); };
-        let deleted = metadata.delete_provider_bot(provider_id, &record.bot_uuid, record.updated_at.saturating_add(1)).await?;
+        let deleted = metadata.delete_provider_bot(provider_id, &record.bot_uuid, now_ms()).await?;
         // The durable tombstone has committed. Clear runtime/token caches too.
         self.registry.soft_delete(&record.bot_uuid).await;
         Ok(Some(bcs_service_api::core::ProviderBotDeletion { bot_uuid: record.bot_uuid, deleted }))

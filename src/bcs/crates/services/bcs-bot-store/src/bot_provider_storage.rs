@@ -33,8 +33,6 @@ fn decode(row: &DbRow) -> ServiceResult<BotProviderRecord> {
             provider_bot_ref: bcs_db_api::db_get_column(row, "provider_bot_ref")?,
             connection_mode: mode, webhook_url: row.get_string("webhook_url")?,
             is_deleted: bcs_db_api::db_get_column(row, "is_deleted")?,
-            registered_at: bcs_db_api::db_get_column(row, "provider_registered_at")?,
-            updated_at: bcs_db_api::db_get_column(row, "provider_updated_at")?,
         })
     };
     read().map_err(|_| ServiceError::InternalError("invalid or unmigrated Bot Provider metadata".into()))
@@ -90,15 +88,11 @@ impl BotProviderRepoPort for DbProviderStore {
 
     async fn attach_provider_bot(&self, record: BotProviderRecord) -> ServiceResult<()> {
         validate_record(&record)?;
-        let mut next = record.clone();
         let previous = self.get_provider_bot(&record.bot_uuid).await?;
-        let revision = previous.as_ref().map(|record| record.updated_at);
-        if let Some(previous) = previous {
+        if let Some(previous) = &previous {
             if previous.is_deleted || previous.provider_id != record.provider_id || previous.provider_bot_ref != record.provider_bot_ref
                 || (previous.connection_mode == BotConnectionMode::Gateway && (record.connection_mode != BotConnectionMode::Gateway || previous.webhook_url != record.webhook_url))
             { return Err(ServiceError::Conflict("Bot Provider membership cannot be replaced".into())); }
-            next.registered_at = previous.registered_at;
-            next.updated_at = next.updated_at.max(previous.updated_at.saturating_add(1));
         }
         let binding = self.get_binding_by_bot_uuid(&record.bot_uuid).await?;
         if let Some(binding) = &binding {
@@ -107,23 +101,33 @@ impl BotProviderRepoPort for DbProviderStore {
                 || binding.webhook_url != record.webhook_url
             { return Err(ServiceError::Conflict("gateway projection differs from Bot membership".into())); }
         }
+        // Reattachment is not a webhook update. In particular, never write a
+        // previously read callback over a concurrent explicit webhook change.
+        if previous.as_ref() == Some(&record) {
+            if record.connection_mode == BotConnectionMode::Gateway && binding.is_none() {
+                return Err(ServiceError::Conflict("gateway projection is missing".into()));
+            }
+            return Ok(());
+        }
         let env = resolve_env();
-        let mode = next.connection_mode.as_str();
+        let mode = record.connection_mode.as_str();
+        // Only a first affiliation or plugin-to-gateway transition writes.
+        // Both necessarily change a value, including on MySQL. Recheck the
+        // business constraints in the UPDATE, without a timestamp/version CAS.
         let mut steps = vec![DbTransactionStep::ExecuteChecked {
             statement: DbStatement::with_params(
-                "UPDATE bcs_bots SET provider_id = ?, provider_bot_ref = ?, connection_mode = ?, webhook_url = ?, provider_registered_at = ?, provider_updated_at = ?, updated_at = CURRENT_TIMESTAMP \
+                "UPDATE bcs_bots SET provider_id = ?, provider_bot_ref = ?, connection_mode = ?, webhook_url = ?, updated_at = CURRENT_TIMESTAMP \
                  WHERE bot_uuid = ? AND env = ? AND is_deleted = 0 \
-                 AND (provider_id IS NULL OR (provider_id = ? AND provider_bot_ref = ? AND (connection_mode = ? OR connection_mode = ?))) \
-                 AND ((? IS NULL AND provider_updated_at IS NULL) OR provider_updated_at = ?) \
+                 AND (provider_id IS NULL OR (provider_id = ? AND provider_bot_ref = ? AND connection_mode = 'plugin' AND ? = 'gateway')) \
                  AND NOT EXISTS (SELECT 1 FROM bcs_provider_bot_bindings WHERE env = ? AND provider_id = ? AND provider_bot_ref = ? AND bot_uuid <> ?)",
-                vec![next.provider_id.as_str().into(), next.provider_bot_ref.as_str().into(), mode.into(), next.webhook_url.clone().into(), next.registered_at.into(), next.updated_at.into(),
-                    next.bot_uuid.as_str().into(), env.as_str().into(), next.provider_id.as_str().into(), next.provider_bot_ref.as_str().into(), BotConnectionMode::Plugin.as_str().into(), mode.into(),
-                    revision.map(DbValue::from).unwrap_or(DbValue::Null), revision.map(DbValue::from).unwrap_or(DbValue::Null),
-                    env.as_str().into(), next.provider_id.as_str().into(), next.provider_bot_ref.as_str().into(), next.bot_uuid.as_str().into()]), expected_affected_rows: 1,
+                vec![record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), mode.into(), record.webhook_url.clone().into(),
+                    record.bot_uuid.as_str().into(), env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), mode.into(),
+                    env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), record.bot_uuid.as_str().into()]),
+            expected_affected_rows: 1,
         }];
-        if next.connection_mode == BotConnectionMode::Gateway && binding.is_none() {
+        if record.connection_mode == BotConnectionMode::Gateway && binding.is_none() {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(Self::insert_binding_sql(),
-                vec![next.bot_uuid.as_str().into(), next.provider_id.as_str().into(), next.provider_bot_ref.as_str().into(), env.as_str().into(), false.into(), next.webhook_url.into()])));
+                vec![record.bot_uuid.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), env.as_str().into(), false.into(), record.webhook_url.clone().into()])));
         }
         self.db.transaction(steps).await.map_err(storage_error)?;
         self.bindings.invalidate(&format!("{env}:{}", record.bot_uuid));
@@ -133,7 +137,7 @@ impl BotProviderRepoPort for DbProviderStore {
     async fn get_provider_bot(&self, bot_uuid: &str) -> ServiceResult<Option<BotProviderRecord>> {
         let rows = self.db.query(DbStatement::with_params(
             "SELECT bot_uuid, provider_id, provider_bot_ref, connection_mode, webhook_url, \
-             is_deleted, provider_registered_at, provider_updated_at FROM bcs_bots \
+             is_deleted FROM bcs_bots \
              WHERE bot_uuid = ? AND env = ? AND provider_id IS NOT NULL",
             vec![bot_uuid.into(), resolve_env().into()])).await.map_err(storage_error)?;
         rows.first().map(decode).transpose()
@@ -152,14 +156,14 @@ impl BotProviderRepoPort for DbProviderStore {
             statement: DbStatement::with_params(
                 "INSERT INTO bcs_bots (bot_uuid, env, name, bot_info, session_token, created_by, \
                  visibility, status, actor_kind, is_deleted, registered_at, updated_at, agent_code, \
-                 provider_id, provider_bot_ref, connection_mode, webhook_url, provider_registered_at, provider_updated_at) \
-                 SELECT ?, ?, ?, ?, ?, ?, ?, 'online', 'bot', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ? \
+                 provider_id, provider_bot_ref, connection_mode, webhook_url) \
+                 SELECT ?, ?, ?, ?, ?, ?, ?, 'online', 'bot', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ? \
                  WHERE NOT EXISTS (SELECT 1 FROM bcs_provider_bot_bindings WHERE env = ? AND provider_id = ? AND provider_bot_ref = ?)",
                 vec![record.bot_uuid.as_str().into(), env.as_str().into(), capabilities.name.as_deref().unwrap_or(&record.bot_uuid).into(),
                     info.into(), token.into(), owner.into(), capabilities.visibility.as_str().into(),
                     capabilities.agent_code.clone().into(),
                     record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), mode.into(), record.webhook_url.clone().into(),
-                    record.registered_at.into(), record.updated_at.into(), env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into()]),
+                    env.as_str().into(), record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into()]),
             expected_affected_rows: 1,
         }];
         if record.connection_mode == BotConnectionMode::Gateway {
@@ -172,31 +176,35 @@ impl BotProviderRepoPort for DbProviderStore {
         Ok(())
     }
 
-    async fn update_provider_webhook(&self, provider_id: &str, bot_uuid: &str, webhook_url: Option<String>, updated_at: u64) -> ServiceResult<BotProviderRecord> {
+    async fn update_provider_webhook(&self, provider_id: &str, bot_uuid: &str, webhook_url: Option<String>, _updated_at: u64) -> ServiceResult<BotProviderRecord> {
         let mut record = self.require_provider_bot(provider_id, bot_uuid).await?;
         if record.is_deleted || record.connection_mode != BotConnectionMode::Gateway {
             return Err(ServiceError::Conflict("webhook updates require an active gateway Bot".into()));
         }
         let env = resolve_env();
-        let next = updated_at.max(record.updated_at.saturating_add(1));
         let steps = vec![
             self.lock_gateway_binding(&record, &env),
-            DbTransactionStep::ExecuteChecked { statement: DbStatement::with_params(
-                "UPDATE bcs_bots SET webhook_url = ?, provider_updated_at = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? \
-                 AND provider_id = ? AND connection_mode = 'gateway' AND is_deleted = 0 AND provider_updated_at = ?",
-                vec![webhook_url.clone().into(), next.into(), bot_uuid.into(), env.as_str().into(), provider_id.into(), record.updated_at.into()]), expected_affected_rows: 1 },
+            DbTransactionStep::Execute(DbStatement::with_params(
+                "UPDATE bcs_bots SET webhook_url = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? \
+                 AND provider_id = ? AND provider_bot_ref = ? AND connection_mode = 'gateway' AND is_deleted = 0",
+                vec![webhook_url.clone().into(), bot_uuid.into(), env.as_str().into(), provider_id.into(), record.provider_bot_ref.as_str().into()])),
+            // A same-value webhook UPDATE may report zero changed rows on
+            // MySQL. Check business state, not affected rows or old timestamps;
+            // the UPDATE holds its normal write lock until transaction end.
+            DbTransactionStep::Query(DbStatement::with_params(
+                "SELECT bot_uuid FROM bcs_bots WHERE bot_uuid = ? AND env = ? AND provider_id = ? AND provider_bot_ref = ? AND connection_mode = 'gateway' AND is_deleted = 0",
+                vec![bot_uuid.into(), env.as_str().into(), provider_id.into(), record.provider_bot_ref.as_str().into()])),
             DbTransactionStep::Execute(DbStatement::with_transaction_params(
-                format!("UPDATE bcs_provider_bot_bindings SET webhook_url = ?, {} WHERE bot_uuid = ? AND env = ?", self.now_modified_clause()),
-                vec![DbTransactionParam::value(webhook_url.clone()), DbTransactionParam::query_result(0, 0, "bot_uuid"), DbTransactionParam::value(env.as_str())])),
+                format!("UPDATE bcs_provider_bot_bindings SET webhook_url = ?, {} WHERE bot_uuid = ? AND env = ? AND bot_uuid = ?", self.now_modified_clause()),
+                vec![DbTransactionParam::value(webhook_url.clone()), DbTransactionParam::query_result(0, 0, "bot_uuid"), DbTransactionParam::value(env.as_str()), DbTransactionParam::query_result(2, 0, "bot_uuid")])),
         ];
         self.db.transaction(steps).await.map_err(storage_error)?;
         self.bindings.invalidate(&format!("{env}:{bot_uuid}"));
         record.webhook_url = webhook_url;
-        record.updated_at = next;
         Ok(record)
     }
 
-    async fn delete_provider_bot(&self, provider_id: &str, bot_uuid: &str, updated_at: u64) -> ServiceResult<bool> {
+    async fn delete_provider_bot(&self, provider_id: &str, bot_uuid: &str, _updated_at: u64) -> ServiceResult<bool> {
         let record = self.require_provider_bot(provider_id, bot_uuid).await?;
         if record.is_deleted { return Ok(false); }
         let env = resolve_env();
@@ -205,8 +213,8 @@ impl BotProviderRepoPort for DbProviderStore {
             steps.push(self.lock_gateway_binding(&record, &env));
         }
         steps.push(DbTransactionStep::ExecuteChecked { statement: DbStatement::with_params(
-            "UPDATE bcs_bots SET is_deleted = 1, provider_updated_at = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? AND provider_id = ? AND is_deleted = 0 AND provider_updated_at = ?",
-            vec![updated_at.max(record.updated_at.saturating_add(1)).into(), bot_uuid.into(), env.as_str().into(), provider_id.into(), record.updated_at.into()]), expected_affected_rows: 1 });
+            "UPDATE bcs_bots SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? AND provider_id = ? AND provider_bot_ref = ? AND connection_mode = ? AND is_deleted = 0",
+            vec![bot_uuid.into(), env.as_str().into(), provider_id.into(), record.provider_bot_ref.as_str().into(), record.connection_mode.as_str().into()]), expected_affected_rows: 1 });
         if record.connection_mode == BotConnectionMode::Gateway {
             steps.push(DbTransactionStep::Execute(DbStatement::with_transaction_params(
                 format!("UPDATE bcs_provider_bot_bindings SET disabled = 1, {} WHERE bot_uuid = ? AND env = ?", self.now_modified_clause()),

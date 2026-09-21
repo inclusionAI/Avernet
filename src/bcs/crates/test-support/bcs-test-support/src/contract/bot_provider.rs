@@ -6,7 +6,6 @@ fn record(id: &str, mode: BotConnectionMode) -> BotProviderRecord {
     BotProviderRecord {
         bot_uuid: id.into(), provider_id: "provider-a".into(), provider_bot_ref: id.into(),
         connection_mode: mode, webhook_url: None, is_deleted: false,
-        registered_at: 1000, updated_at: 1000,
     }
 }
 
@@ -23,6 +22,13 @@ pub async fn bot_provider_repo_port_contract_tests(repo: &dyn BotProviderRepoPor
     repo.create_provider_bot(gateway.clone(), caps(), "owner-a", "test-gateway-runtime").await.unwrap();
     assert_eq!(repo.get_provider_bot("gateway").await.unwrap(), Some(gateway));
     assert!(bindings.get_binding_by_bot_uuid("gateway").await.unwrap().is_some());
+    // Repeated affiliation is a no-op, not a timestamp/version update.
+    for id in ["upstream", "gateway"] {
+        let existing = repo.get_provider_bot(id).await.unwrap().unwrap();
+        repo.attach_provider_bot(existing.clone()).await.unwrap();
+        repo.attach_provider_bot(existing.clone()).await.unwrap();
+        assert_eq!(repo.get_provider_bot(id).await.unwrap(), Some(existing));
+    }
 
     let mut duplicate = record("other-id", BotConnectionMode::Gateway);
     duplicate.provider_bot_ref = "upstream".into();
@@ -33,11 +39,18 @@ pub async fn bot_provider_repo_port_contract_tests(repo: &dyn BotProviderRepoPor
     let updated = repo.get_provider_bot("gateway").await.unwrap().unwrap();
     assert_eq!(updated.webhook_url.as_deref(), Some("https://example.org/bot"));
     assert_eq!(bindings.get_binding_by_bot_uuid("gateway").await.unwrap().unwrap().webhook_url, updated.webhook_url);
+    repo.update_provider_webhook("provider-a", "gateway", updated.webhook_url.clone(), 2000).await.unwrap();
+    repo.update_provider_webhook("provider-a", "gateway", None, 2000).await.unwrap();
+    assert!(repo.get_provider_bot("gateway").await.unwrap().unwrap().webhook_url.is_none());
+    assert!(bindings.get_binding_by_bot_uuid("gateway").await.unwrap().unwrap().webhook_url.is_none());
+    assert!(repo.attach_provider_bot(updated).await.is_err(), "stale affiliation must not restore a previous webhook");
     assert!(repo.update_provider_webhook("provider-a", "upstream", Some("https://example.org/bot".into()), 2000).await.is_err());
 
     repo.delete_provider_bot("provider-a", "gateway", 3000).await.unwrap();
     assert!(repo.get_provider_bot("gateway").await.unwrap().unwrap().is_deleted);
     assert!(bindings.get_binding_by_bot_uuid("gateway").await.unwrap().unwrap().disabled);
+    assert!(!repo.delete_provider_bot("provider-a", "gateway", 3000).await.unwrap());
+    assert!(repo.update_provider_webhook("provider-a", "gateway", None, 3000).await.is_err());
     assert!(repo.create_provider_bot(record("gateway", BotConnectionMode::Gateway), caps(), "owner-a", "test-resurrection-runtime").await.is_err());
 }
 

@@ -18,6 +18,12 @@ impl MemoryBotProviderStore {
 
 fn conflict() -> ServiceError { ServiceError::Conflict("Bot or Provider/ref is already registered or changed".into()) }
 
+fn binding_now_ms() -> ServiceResult<u64> {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_millis() as u64)
+        .map_err(|_| ServiceError::InternalError("system clock is before epoch".into()))
+}
+
 #[async_trait]
 impl BotProviderRepoPort for MemoryBotProviderStore {
     async fn get_provider_bot_by_ref(&self, provider_id: &str, provider_bot_ref: &str) -> ServiceResult<Option<BotProviderRecord>> {
@@ -33,7 +39,7 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         Ok(self.bots.try_get(bot_uuid).await?.map(|_| BotConnectionMode::Plugin))
     }
 
-    async fn attach_provider_bot(&self, mut record: BotProviderRecord) -> ServiceResult<()> {
+    async fn attach_provider_bot(&self, record: BotProviderRecord) -> ServiceResult<()> {
         bot_storage::validate_record(&record)?;
         let mut records = self.records.write().await;
         let mut bindings = self.bindings.bindings_by_bot.write().await;
@@ -43,8 +49,6 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         if let Some(previous) = records.get(&record.bot_uuid) {
             if previous.is_deleted || previous.provider_id != record.provider_id || previous.provider_bot_ref != record.provider_bot_ref
                 || (previous.connection_mode == BotConnectionMode::Gateway && (record.connection_mode != BotConnectionMode::Gateway || previous.webhook_url != record.webhook_url)) { return Err(conflict()); }
-            record.registered_at = previous.registered_at;
-            record.updated_at = record.updated_at.max(previous.updated_at.saturating_add(1));
         }
         let key = (record.provider_id.clone(), record.provider_bot_ref.clone());
         if refs.get(&key).is_some_and(|id| id != &record.bot_uuid) { return Err(conflict()); }
@@ -52,9 +56,11 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
             if binding.disabled || record.connection_mode != BotConnectionMode::Gateway || binding.provider_id != record.provider_id
                 || binding.provider_bot_ref != record.provider_bot_ref || binding.webhook_url != record.webhook_url { return Err(conflict()); }
         } else if record.connection_mode == BotConnectionMode::Gateway {
+            if records.get(&record.bot_uuid).is_some_and(|previous| previous.connection_mode == BotConnectionMode::Gateway) { return Err(conflict()); }
+            let now = binding_now_ms()?;
             bindings.insert(record.bot_uuid.clone(), ProviderBotBinding {
                 bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(), provider_bot_ref: record.provider_bot_ref.clone(),
-                webhook_url: record.webhook_url.clone(), disabled: false, created_at: record.registered_at, updated_at: record.updated_at,
+                webhook_url: record.webhook_url.clone(), disabled: false, created_at: now, updated_at: now,
             });
             refs.insert(key, record.bot_uuid.clone());
         }
@@ -79,13 +85,14 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
             || bindings.contains_key(&record.bot_uuid)
             || records.values().any(|existing| existing.provider_id == record.provider_id && existing.provider_bot_ref == record.provider_bot_ref)
         { return Err(conflict()); }
+        let now = binding_now_ms()?;
         if !self.bots.create_registration_if_absent(record.bot_uuid.clone(), capabilities, owner, token).await? {
             return Err(conflict());
         }
         if record.connection_mode == BotConnectionMode::Gateway {
             bindings.insert(record.bot_uuid.clone(), ProviderBotBinding {
                 bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(), provider_bot_ref: record.provider_bot_ref.clone(),
-                webhook_url: record.webhook_url.clone(), disabled: false, created_at: record.registered_at, updated_at: record.updated_at,
+                webhook_url: record.webhook_url.clone(), disabled: false, created_at: now, updated_at: now,
             });
             refs.insert(key, record.bot_uuid.clone());
         }
@@ -101,9 +108,8 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         let mut bindings = self.bindings.bindings_by_bot.write().await;
         let binding = bindings.get_mut(bot_uuid).filter(|b| !b.disabled && b.provider_id == provider_id && b.provider_bot_ref == record.provider_bot_ref).ok_or_else(conflict)?;
         record.webhook_url = webhook_url.clone();
-        record.updated_at = updated_at.max(record.updated_at.saturating_add(1));
         binding.webhook_url = webhook_url;
-        binding.updated_at = record.updated_at;
+        binding.updated_at = updated_at;
         Ok(record.clone())
     }
 
@@ -118,8 +124,7 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         } else { None };
         if !self.bots.soft_delete(bot_uuid).await { return Err(conflict()); }
         record.is_deleted = true;
-        record.updated_at = updated_at.max(record.updated_at.saturating_add(1));
-        if let Some(binding) = binding { binding.disabled = true; binding.updated_at = record.updated_at; }
+        if let Some(binding) = binding { binding.disabled = true; binding.updated_at = updated_at; }
         Ok(true)
     }
 }
