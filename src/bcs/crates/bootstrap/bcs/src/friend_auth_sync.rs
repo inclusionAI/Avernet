@@ -8,8 +8,11 @@ use bcs_service_api::port::{
     FriendAuthSyncAction, FriendAuthSyncCommand, FriendAuthSyncPort,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tracing::{info, warn};
+
+const SYNC_TIMEOUT: Duration = Duration::from_secs(10);
 
 const SYNC_PATH: &str = "/api/internal/bot-friend-auth/sync";
 
@@ -53,6 +56,23 @@ impl HttpFriendAuthSyncPort {
     }
 }
 
+// TC's transport address contract has exactly two non-empty components.
+// Do not accept empty components, whitespace, or additional separators.
+fn tc_bot_identity(actor_id: &str) -> Option<(&str, &str)> {
+    let (bot_id, work_no) = actor_id.split_once(':')?;
+    if bot_id.is_empty() || bot_id.chars().any(char::is_whitespace)
+        || work_no.is_empty() || work_no.contains(':') || work_no.chars().any(char::is_whitespace)
+    {
+        return None;
+    }
+    Some((bot_id, work_no))
+}
+
+#[derive(Deserialize)]
+struct FriendAuthSyncResponse {
+    synced: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct FriendAuthSyncRequest {
     bot_id: String,
@@ -69,14 +89,17 @@ impl HttpFriendAuthSyncPort {
         command: &FriendAuthSyncCommand,
     ) -> Result<reqwest::RequestBuilder, ServiceError> {
         let url = self.sync_url()?;
+        let (bot_id, owner_work_no) = tc_bot_identity(&command.bot_id).ok_or_else(|| {
+            ServiceError::InternalError("friend-auth-sync requires a TC bot_id:workNo".to_string())
+        })?;
         let payload = FriendAuthSyncRequest {
-            bot_id: command.bot_id.clone(),
-            owner_work_no: command.owner_work_no.clone(),
+            bot_id: bot_id.to_string(),
+            owner_work_no: owner_work_no.to_string(),
             human_work_no: command.human_work_no.clone(),
             action: command.action.as_str(),
             request_id: command.request_id.clone(),
         };
-        let mut request = self.client.post(url);
+        let mut request = self.client.post(url).timeout(SYNC_TIMEOUT);
         // Only forward the gateway principal + trace ids. Openapi
         // Authorization/Cookie identity is intentionally NOT sent.
         if let Some(auth) = command.request_auth.as_ref() {
@@ -99,6 +122,11 @@ impl HttpFriendAuthSyncPort {
 #[async_trait]
 impl FriendAuthSyncPort for HttpFriendAuthSyncPort {
     async fn sync(&self, command: FriendAuthSyncCommand) -> ServiceResult<()> {
+        // TC addresses bots as bot_id:workNo. Other BCS bots are not TC
+        // resources and must never reach the TC authorization endpoint.
+        if tc_bot_identity(&command.bot_id).is_none() {
+            return Ok(());
+        }
         info!(
             action = command.action.as_str(),
             bot_id = %command.bot_id,
@@ -115,14 +143,19 @@ impl FriendAuthSyncPort for HttpFriendAuthSyncPort {
             ServiceError::InternalError(format!("friend-auth-sync request failed: {error}"))
         })?;
         if response.status().is_success() {
-            info!(status = %response.status(), "friend-auth-sync sent successfully");
+            let result: FriendAuthSyncResponse = response.json().await.map_err(|error| {
+                ServiceError::InternalError(format!("invalid friend-auth-sync response: {error}"))
+            })?;
+            if !result.synced {
+                return Err(ServiceError::InternalError("friend-auth-sync was not applied".to_string()));
+            }
+            info!("friend-auth-sync sent successfully");
             return Ok(());
         }
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        warn!(%status, body = %body, "friend-auth-sync non-success");
-        // Best-effort: never block BCS on the sync result. Log + return Ok.
-        Ok(())
+        warn!(%status, "friend-auth-sync non-success");
+        // The caller owns best-effort policy; the port must report failure.
+        Err(ServiceError::InternalError(format!("friend-auth-sync returned {status}")))
     }
 }
 
@@ -150,7 +183,7 @@ mod tests {
         let adapter = HttpFriendAuthSyncPort::new("https://backend.example.com/api/").expect("valid");
         let command = FriendAuthSyncCommand {
             env: "dev".to_string(),
-            bot_id: "bot-1".to_string(),
+            bot_id: "bot-1:85020".to_string(),
             owner_work_no: "85020".to_string(),
             human_work_no: "88123".to_string(),
             action: FriendAuthSyncAction::Grant,
@@ -167,6 +200,7 @@ mod tests {
             }),
         };
         let req = adapter.build_request(&command).unwrap().build().unwrap();
+        assert_eq!(req.timeout(), Some(&SYNC_TIMEOUT));
         assert!(req.headers().get(reqwest::header::AUTHORIZATION).is_none());
         assert!(req.headers().get(reqwest::header::COOKIE).is_none());
         assert_eq!(
@@ -179,3 +213,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "friend_auth_sync_tests.rs"]
+mod sync_contract_tests;

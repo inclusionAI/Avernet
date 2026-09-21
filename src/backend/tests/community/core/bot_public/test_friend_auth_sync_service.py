@@ -31,6 +31,7 @@ def _svc(bot=_UNSET, agent_code="ac-123", create_result=None, query_result=None)
     passport = MagicMock()
     auth_rel = MagicMock()
     auth_rel.create_relationship.return_value = create_result
+    auth_rel.delete_relationship.return_value = True
     auth_rel.query_relationships.return_value = query_result if query_result is not None else []
     return FriendAuthSyncService(
         bot_repo=bot_repo, passport_plugin=passport, auth_relationship_plugin=auth_rel
@@ -120,3 +121,10 @@ def test_sync_raises_agent_code_unavailable_when_neither_ext_nor_query_resolve()
     )
     with pytest.raises(AgentCodeUnavailableError):
         svc.sync(bot_id="bot-1", owner_work_no="85020", human_work_no="88123", action="grant")
+
+
+def test_sync_revoke_failed_delete_raises_sync_error():
+    svc, _, auth_rel = _svc(query_result=[{"auth_id": 7}])
+    auth_rel.delete_relationship.return_value = False
+    with pytest.raises(AuthRelationshipSyncError):
+        svc.sync(bot_id="bot-1", owner_work_no="85020", human_work_no="88123", action="revoke")

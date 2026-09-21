@@ -101,7 +101,8 @@ class FriendAuthSyncService:
             for rel in rels:
                 auth_id = rel.get("auth_id") or rel.get("authId")
                 if auth_id is not None:
-                    self._auth_rel.delete_relationship(int(auth_id))
+                    if not self._auth_rel.delete_relationship(int(auth_id)):
+                        raise AuthRelationshipSyncError("delete_relationship returned False")
                     deleted = True
             return {
                 "synced": True,

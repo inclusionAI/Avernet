@@ -26,8 +26,11 @@ impl FriendAuthSyncAction {
 #[derive(Debug, Clone)]
 pub struct FriendAuthSyncCommand {
     pub env: String,
+    /// BCS target actor ID. The TC HTTP adapter accepts only `bot_id:workNo`
+    /// and sends its bare bot ID and owner suffix to TC; other IDs are skipped.
     pub bot_id: String,
-    /// Bot owner work no (bare).
+    /// Legacy bot owner metadata (bare). The TC HTTP adapter uses the actor
+    /// suffix instead, including when this metadata is absent or stale.
     pub owner_work_no: String,
     /// Friend work no (bare, no `human_` prefix).
     pub human_work_no: String,
