@@ -56,12 +56,72 @@ def load_device_props(raw: Any) -> dict[str, Any]:
     return props if isinstance(props, dict) else {}
 
 
-class BaasDesktopRestartRepositoryMixin:
-    """Atomic persistence seam for the Desktop BaaS restart boundary."""
+class BaasDesktopLifecycleRepositoryMixin:
+    """Atomic persistence seams for guarded Desktop BaaS lifecycle writes."""
 
     _db: Any
 
     def _bot_env(self): ...
+
+    def reuse_released_baas_desktop_binding_if_matches(
+        self,
+        *,
+        binding_id: int,
+        device_id: str,
+        entity_id: str,
+        env: str,
+        expected_client_id: str,
+        expected_callback_token: str,
+        device_props: dict[str, Any],
+        apply_reason: str | None,
+        applied_by: str,
+    ) -> bool:
+        with self._db.orm_session() as db:
+            try:
+                begin_guarded_transaction(
+                    db, purpose="BaaS Desktop create binding reuse"
+                )
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == binding_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                persisted_props = (
+                    load_device_props(binding.device_props)
+                    if binding is not None
+                    else {}
+                )
+                if (
+                    binding is None
+                    or binding.status != "RELEASED"
+                    or binding.device_provider != "baas"
+                    or binding.device_id != device_id
+                    or binding.entity_id != entity_id
+                    or binding.entity_type != "staff"
+                    or binding.env != env
+                    or persisted_props.get("client_id") != expected_client_id
+                    or persisted_props.get("callback_token")
+                    != expected_callback_token
+                ):
+                    db.rollback()
+                    return False
+                binding.device_props = json.dumps(
+                    device_props, ensure_ascii=False
+                )
+                binding.status = _PENDING
+                binding.apply_reason = apply_reason
+                binding.applied_by = applied_by
+                binding.release_reason = None
+                binding.released_by = None
+                binding.released_at = None
+                binding.last_alive_at = None
+                binding.gmt_modified = func.now()
+                db.commit()
+                return True
+            except Exception:
+                db.rollback()
+                raise
 
     def transition_layout_startup_status_if_matches(
         self,

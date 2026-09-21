@@ -268,6 +268,27 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def reuse_released_baas_desktop_binding_if_matches(
+        self,
+        *,
+        binding_id: int,
+        device_id: str,
+        entity_id: str,
+        env: str,
+        expected_client_id: str,
+        expected_callback_token: str,
+        device_props: dict[str, Any],
+        apply_reason: str | None,
+        applied_by: str,
+    ) -> bool:
+        """Reuse only the released BaaS binding from this Desktop create.
+
+        The released row, ownership scope, environment, provider, and persisted
+        Desktop callback credentials are checked atomically before reuse.
+        """
+        ...
+
+    @abstractmethod
     def get_active_engine_by_device_id(self, *, device_id: str) -> str:
         """通过设备ID获取Bot的 active_engine."""
         ...

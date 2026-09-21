@@ -854,23 +854,49 @@ class DesktopBotService(DesktopBotServiceProtocol):
         # Step 6: 写入本地数据库（binding + bot）
         binding_id: int | None = None
         try:
-            binding_id = self._binding_repo.insert_binding(
-                entity_id=user_id,
-                entity_type="staff",
-                device_id=bot_uuid,
-                device_provider="baas",
-                env=env,
-                device_props={
-                    "bot_uuid": bot_uuid,
-                    "client_id": client_id,
-                    "callback_token": callback_token,
-                    "publish_id": str(publish_id) if publish_id else None,
-                    "envs": self._desktop_layout_env(layout_credentials),
-                },
-                status="PENDING",
-                apply_reason=f"Create desktop bot: {bot.get('bot_name', '')}",
-                applied_by=user_id,
+            binding_props = {
+                "bot_uuid": bot_uuid,
+                "client_id": client_id,
+                "callback_token": callback_token,
+                "publish_id": str(publish_id) if publish_id else None,
+                "envs": self._desktop_layout_env(layout_credentials),
+            }
+            apply_reason = f"Create desktop bot: {bot.get('bot_name', '')}"
+            released_binding = self._binding_repo.get_released_binding(
+                device_id=bot_uuid
             )
+            if released_binding is not None:
+                reused = (
+                    self._binding_repo.reuse_released_baas_desktop_binding_if_matches(
+                        binding_id=released_binding.id,
+                        device_id=bot_uuid,
+                        entity_id=user_id,
+                        env=env,
+                        expected_client_id=client_id,
+                        expected_callback_token=callback_token,
+                        device_props=binding_props,
+                        apply_reason=apply_reason,
+                        applied_by=user_id,
+                    )
+                )
+                if not reused:
+                    raise DesktopBotServiceError(
+                        "released Desktop binding does not match the persisted "
+                        f"creation context: bot_id={bot_id}"
+                    )
+                binding_id = released_binding.id
+            else:
+                binding_id = self._binding_repo.insert_binding(
+                    entity_id=user_id,
+                    entity_type="staff",
+                    device_id=bot_uuid,
+                    device_provider="baas",
+                    env=env,
+                    device_props=binding_props,
+                    status="PENDING",
+                    apply_reason=apply_reason,
+                    applied_by=user_id,
+                )
 
             ext = {
                 **initial_ext,
@@ -1909,7 +1935,8 @@ class DesktopBotService(DesktopBotServiceProtocol):
     ) -> None:
         """轮询 publish 进度，根据结果更新本地 bot 状态。
 
-        在后台线程中运行。SUCCESS → _trigger_device_alive（含 ACTIVE 状态变更 + DeviceActivatedEvent）。
+        在后台线程中运行。首次创建 SUCCESS 走 device-alive 激活；restart
+        SUCCESS 先按 publish identity 原子提交 ACTIVE，再请求 Runtime Projection。
         BaaS 明确 FAILED → _update_local_status(FAILED)。
         轮询超时 → 保持 PENDING + ext.start_status=DOWNLOADING，委托周期扫描裁决。
 
@@ -2023,11 +2050,12 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     if layout_status == _DesktopLayoutConfirmationStatus.FAILED:
                         if restart_publish_id is not None:
                             transition = (
-                                self._transition_desktop_restart_failed_if_current(
+                                self._transition_desktop_restart_terminal_if_current(
                                     binding_id=binding_id,
                                     bot_id=bot_id,
                                     owner_id=owner_id,
                                     publish_id=restart_publish_id,
+                                    status="FAILED",
                                 )
                             )
                             if transition is (
@@ -2042,6 +2070,27 @@ class DesktopBotService(DesktopBotServiceProtocol):
                             continue
                         final_status = "FAILED"
                         break
+                    if restart_publish_id is not None:
+                        transition = (
+                            self._transition_desktop_restart_terminal_if_current(
+                                binding_id=binding_id,
+                                bot_id=bot_id,
+                                owner_id=owner_id,
+                                publish_id=restart_publish_id,
+                                status="ACTIVE",
+                            )
+                        )
+                        if transition is _DesktopTerminalTransitionStatus.COMMITTED:
+                            self._request_runtime_projection_after_reconnect(
+                                bot_id=bot_id,
+                                owner_id=owner_id,
+                                binding_id=binding_id,
+                            )
+                            return
+                        if transition is _DesktopTerminalTransitionStatus.SUPERSEDED:
+                            return
+                        terminal_persistence_pending = True
+                        continue
                     final_status = "ACTIVE"
                     if not self._trigger_device_alive(device_id):
                         logger.warning(
@@ -2054,11 +2103,12 @@ class DesktopBotService(DesktopBotServiceProtocol):
 
                 if status == "FAILED":
                     if restart_publish_id is not None:
-                        transition = self._transition_desktop_restart_failed_if_current(
+                        transition = self._transition_desktop_restart_terminal_if_current(
                             binding_id=binding_id,
                             bot_id=bot_id,
                             owner_id=owner_id,
                             publish_id=restart_publish_id,
+                            status="FAILED",
                         )
                         if transition is _DesktopTerminalTransitionStatus.COMMITTED:
                             return
@@ -2266,22 +2316,26 @@ class DesktopBotService(DesktopBotServiceProtocol):
             return _DesktopLayoutConfirmationStatus.PENDING, True
         return _DesktopLayoutConfirmationStatus.PENDING, False
 
-    def _transition_desktop_restart_failed_if_current(
+    def _transition_desktop_restart_terminal_if_current(
         self,
         *,
         binding_id: str,
         bot_id: str,
         owner_id: str,
         publish_id: str,
+        status: str,
     ) -> _DesktopTerminalTransitionStatus:
+        if status not in {"ACTIVE", "FAILED"}:
+            raise ValueError(f"unsupported Desktop restart status: {status}")
         try:
             bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         except Exception:
             logger.exception(
-                "[DesktopBotService] restart failure Bot lookup failed: "
-                "bot_id=%s publish_id=%s",
+                "[DesktopBotService] restart terminal Bot lookup failed: "
+                "bot_id=%s publish_id=%s status=%s",
                 bot_id,
                 publish_id,
+                status,
             )
             return _DesktopTerminalTransitionStatus.RETRY
         if bot is None:
@@ -2290,8 +2344,10 @@ class DesktopBotService(DesktopBotServiceProtocol):
         if raw_ext is not None and not isinstance(raw_ext, dict):
             return _DesktopTerminalTransitionStatus.RETRY
         current_ext = raw_ext if isinstance(raw_ext, dict) else {}
-        failed_ext = dict(current_ext)
-        failed_ext["start_status"] = "FAILED"
+        terminal_ext = dict(current_ext)
+        terminal_ext["start_status"] = (
+            "SUCCEEDED" if status == "ACTIVE" else "FAILED"
+        )
         try:
             committed = self._binding_repo.transition_baas_restart_terminal(
                 binding_id=int(binding_id),
@@ -2299,16 +2355,17 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 owner_id=owner_id,
                 publish_id=publish_id,
                 request_id=None,
-                status="FAILED",
+                status=status,
                 expected_bot_ext=raw_ext,
-                bot_ext=failed_ext,
+                bot_ext=terminal_ext,
             )
         except Exception:
             logger.exception(
-                "[DesktopBotService] guarded restart failure transition failed: "
-                "bot_id=%s publish_id=%s",
+                "[DesktopBotService] guarded restart terminal transition failed: "
+                "bot_id=%s publish_id=%s status=%s",
                 bot_id,
                 publish_id,
+                status,
             )
             return _DesktopTerminalTransitionStatus.RETRY
         if committed:

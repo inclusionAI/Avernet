@@ -412,6 +412,103 @@ def test_reuse_binding_clears_release_fields(repo):
     assert rec.last_alive_at is None
 
 
+def test_reuse_released_desktop_binding_requires_exact_creation_context(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            device_props={
+                "client_id": "client-1",
+                "callback_token": "token-1",
+                "publish_id": "16",
+            },
+        )
+    )
+    repo.release_binding(
+        binding_id=bid,
+        release_reason="Desktop bot creation did not persist",
+        released_by="u001",
+    )
+
+    reused = repo.reuse_released_baas_desktop_binding_if_matches(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id="client-1",
+        expected_callback_token="token-1",
+        device_props={
+            "client_id": "client-1",
+            "callback_token": "token-1",
+            "publish_id": "17",
+        },
+        apply_reason="Create desktop bot: Desktop",
+        applied_by="u001",
+    )
+
+    assert reused is True
+    binding = repo.get_by_id(bid)
+    assert binding.status == "PENDING"
+    assert binding.device_props["publish_id"] == "17"
+    assert binding.release_reason is None
+    assert binding.released_by is None
+    assert binding.released_at is None
+    assert repo.reuse_released_baas_desktop_binding_if_matches(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id="client-1",
+        expected_callback_token="token-1",
+        device_props={"client_id": "client-1", "callback_token": "token-1"},
+        apply_reason="Create desktop bot: Desktop",
+        applied_by="u001",
+    ) is False
+
+
+@pytest.mark.parametrize(
+    ("expected_client_id", "expected_callback_token"),
+    [("other-client", "token-1"), ("client-1", "other-token")],
+)
+def test_reuse_released_desktop_binding_rejects_foreign_creation_context(
+    repo,
+    expected_client_id,
+    expected_callback_token,
+):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            device_props={
+                "client_id": "client-1",
+                "callback_token": "token-1",
+            },
+        )
+    )
+    repo.release_binding(binding_id=bid, release_reason="done", released_by="u001")
+
+    reused = repo.reuse_released_baas_desktop_binding_if_matches(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id=expected_client_id,
+        expected_callback_token=expected_callback_token,
+        device_props={"client_id": "client-1", "callback_token": "token-1"},
+        apply_reason="Create desktop bot: Desktop",
+        applied_by="u001",
+    )
+
+    assert reused is False
+    assert repo.get_by_id(bid).status == "RELEASED"
+
+
 def test_batch_update_env(repo):
     a = repo.insert_binding(**_binding(device_id="d1", env="dev"))
     b = repo.insert_binding(**_binding(device_id="d2", env="dev"))
