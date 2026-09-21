@@ -3,9 +3,20 @@
 ## Contract
 
 `bcs_bots` is the authority for `provider_id`, `provider_bot_ref`,
-`connection_mode` (`upstream` or `gateway`), nullable `webhook_url`, and Provider
+`connection_mode` (`plugin` or `gateway`), nullable `webhook_url`, and Provider
 metadata timestamps. Existing `is_deleted` is the lifecycle authority. Provider
 affiliation alone does not imply HTTP delivery or grant gateway-only permissions.
+
+Provider-admin DTOs, registration token scopes, OpenAPI registration and Bot
+storage reuse `bcs-domain::ProviderBotConnectionMode::{Gateway, Plugin}`.
+`plugin` is the existing name for upstream WebSocket/plugin/bridge connections;
+there is no separate `upstream` wire or stored value. The old Provider-admin
+default remains `gateway`; token/register explicitly defaults to `plugin`.
+Only this PR's undeployed SQLite 030 draft constraint is corrected. MySQL 029
+uses VARCHAR without a mode default or CHECK and needs no DDL change. Earlier
+migration names and checksums are untouched. Retained development databases
+using the discarded draft require an explicit upgrade or recreation, and draft
+tokens must be reissued; never edit recorded checksums to bypass validation.
 
 Gateway creation, webhook updates and soft deletion still maintain
 `bcs_provider_bot_bindings`. Upstream never writes a binding. SQL couples the Bot
@@ -33,7 +44,7 @@ keeps its credential behavior; scoped token registration returns real Bot tokens
    MySQL migration **029** (`029_bot_provider_storage.sql`) using the normal
    migration tooling. SQLite bootstrap applies version **030**. Earlier upstream migration
    names, numbers and checksums must remain unchanged. Existing rows start with
-   nullable migration-state fields; new ordinary Bots explicitly use upstream.
+   nullable migration-state fields; new ordinary Bots explicitly store `plugin`.
 2. Keep `binding` reads while deploying the dual-write code. Do not enable new
    cross-mode registration while old writers remain. Before the backfill, stop or
    fence **every** writer for the target environment, including old binaries,

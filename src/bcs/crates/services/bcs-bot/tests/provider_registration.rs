@@ -267,7 +267,7 @@ async fn issuance_and_upstream_do_not_read_downlink_credentials() {
         assert!(f.core.authorize(&f.provider, "alice").await.is_ok());
         assert!(
             f.core
-                .register(request(&f, ProviderRegistrationMode::Upstream))
+                .register(request(&f, ProviderRegistrationMode::Plugin))
                 .await
                 .unwrap()
                 .record
@@ -294,7 +294,7 @@ fn request(f: &Fixture, mode: ProviderRegistrationMode) -> RegisterProviderBot {
 #[tokio::test]
 async fn upstream_persists_membership_without_delivery_binding_and_rejects_duplicate_ref() {
     let f = fixture(None, false).await;
-    let command = request(&f, ProviderRegistrationMode::Upstream);
+    let command = request(&f, ProviderRegistrationMode::Plugin);
     let first = f.core.register(command.clone()).await.unwrap();
     assert!(matches!(f.core.register(command).await, Err(ServiceError::Conflict(_))));
     assert!(!first.record.bot_token.starts_with("MOCK_"));
@@ -413,7 +413,7 @@ async fn authorization_and_conflicts_are_enforced_on_every_request() {
     ));
     let shared = fixture(None, true).await;
     assert!(shared.core.authorize(&shared.provider, "bob").await.is_ok());
-    let command = request(&shared, ProviderRegistrationMode::Upstream);
+    let command = request(&shared, ProviderRegistrationMode::Plugin);
     shared.core.register(command.clone()).await.unwrap();
     let mut hijack = command.clone();
     hijack.owner = "bob".into();
@@ -469,7 +469,7 @@ async fn self_service_cannot_redirect_shared_provider_credentials() {
 async fn self_service_can_register_upstream_or_use_provider_default_callback() {
     let f = fixture(Some("https://shared.example.com/hook"), true).await;
     for (reference, mode) in [
-        ("upstream", ProviderRegistrationMode::Upstream),
+        ("upstream", ProviderRegistrationMode::Plugin),
         ("gateway", ProviderRegistrationMode::Gateway),
     ] {
         let mut command = request(&f, mode);
@@ -493,7 +493,7 @@ async fn self_service_can_register_upstream_or_use_provider_default_callback() {
 async fn validation_rejects_upstream_webhook_and_unsafe_gateway_before_writes() {
     let f = fixture(None, false).await;
     for mode in [
-        ProviderRegistrationMode::Upstream,
+        ProviderRegistrationMode::Plugin,
         ProviderRegistrationMode::Gateway,
     ] {
         let mut command = request(&f, mode);
@@ -512,7 +512,7 @@ async fn validation_rejects_upstream_webhook_and_unsafe_gateway_before_writes() 
 #[tokio::test]
 async fn completed_retry_never_recreates_deleted_bot() {
     let f = fixture(None, false).await;
-    let command = request(&f, ProviderRegistrationMode::Upstream);
+    let command = request(&f, ProviderRegistrationMode::Plugin);
     let first = f.core.register(command.clone()).await.unwrap();
     f.registry.soft_delete(&first.record.bot_uuid).await;
     assert!(f.core.register(command).await.is_err());
@@ -531,7 +531,7 @@ async fn changed_mode_or_webhook_and_rotated_token_conflict_without_mutation() {
     let command = request(&f, ProviderRegistrationMode::Gateway);
     let first = f.core.register(command.clone()).await.unwrap();
     let mut change = command.clone();
-    change.mode = ProviderRegistrationMode::Upstream;
+    change.mode = ProviderRegistrationMode::Plugin;
     assert!(matches!(
         f.core.register(change).await,
         Err(ServiceError::Conflict(_))
@@ -563,7 +563,7 @@ async fn changed_mode_or_webhook_and_rotated_token_conflict_without_mutation() {
 #[tokio::test]
 async fn concurrent_duplicates_conflict_but_distinct_refs_can_register() {
     let f = fixture(None, false).await;
-    let command = request(&f, ProviderRegistrationMode::Upstream);
+    let command = request(&f, ProviderRegistrationMode::Plugin);
     let (a, b) = tokio::join!(f.core.register(command.clone()), f.core.register(command.clone()));
     assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
     assert!(matches!(a.err().or_else(|| b.err()), Some(ServiceError::Conflict(_))));

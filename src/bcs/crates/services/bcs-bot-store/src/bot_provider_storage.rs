@@ -7,7 +7,7 @@ use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 pub(super) fn validate_record(record: &BotProviderRecord) -> ServiceResult<()> {
     if record.bot_uuid.trim().is_empty() || record.provider_id.trim().is_empty()
         || record.provider_bot_ref.trim().is_empty() || record.is_deleted
-        || (record.connection_mode == BotConnectionMode::Upstream && record.webhook_url.is_some())
+        || (record.connection_mode == BotConnectionMode::Plugin && record.webhook_url.is_some())
     {
         return Err(ServiceError::InvalidOperation { message: "invalid Bot Provider metadata".into(), request_id: None });
     }
@@ -26,11 +26,7 @@ pub(super) fn storage_error(error: DbError) -> ServiceError {
 fn decode(row: &DbRow) -> ServiceResult<BotProviderRecord> {
     let read = || -> Result<BotProviderRecord, DbError> {
         let mode: String = bcs_db_api::db_get_column(row, "connection_mode")?;
-        let mode = match mode.as_str() {
-            "upstream" => BotConnectionMode::Upstream,
-            "gateway" => BotConnectionMode::Gateway,
-            _ => return Err(DbError::Conversion("invalid Bot connection mode".into())),
-        };
+        let mode = mode.parse::<BotConnectionMode>().map_err(|message| DbError::Conversion(message.into()))?;
         Ok(BotProviderRecord {
             bot_uuid: bcs_db_api::db_get_column(row, "bot_uuid")?,
             provider_id: bcs_db_api::db_get_column(row, "provider_id")?,
@@ -87,9 +83,8 @@ impl BotProviderRepoPort for DbProviderStore {
         match rows.first().map(|row| row.get_string("connection_mode")).transpose().map_err(storage_error)?.flatten().as_deref() {
             None if rows.is_empty() => Ok(None),
             None => Err(ServiceError::InternalError("Bot connection mode has not been migrated".into())),
-            Some("upstream") => Ok(Some(BotConnectionMode::Upstream)),
-            Some("gateway") => Ok(Some(BotConnectionMode::Gateway)),
-            Some(_) => Err(ServiceError::InternalError("invalid Bot connection mode".into())),
+            Some(mode) => mode.parse::<BotConnectionMode>().map(Some)
+                .map_err(|message| ServiceError::InternalError(message.into())),
         }
     }
 
@@ -113,16 +108,16 @@ impl BotProviderRepoPort for DbProviderStore {
             { return Err(ServiceError::Conflict("gateway projection differs from Bot membership".into())); }
         }
         let env = resolve_env();
-        let mode = match next.connection_mode { BotConnectionMode::Upstream => "upstream", BotConnectionMode::Gateway => "gateway" };
+        let mode = next.connection_mode.as_str();
         let mut steps = vec![DbTransactionStep::ExecuteChecked {
             statement: DbStatement::with_params(
                 "UPDATE bcs_bots SET provider_id = ?, provider_bot_ref = ?, connection_mode = ?, webhook_url = ?, provider_registered_at = ?, provider_updated_at = ?, updated_at = CURRENT_TIMESTAMP \
                  WHERE bot_uuid = ? AND env = ? AND is_deleted = 0 \
-                 AND (provider_id IS NULL OR (provider_id = ? AND provider_bot_ref = ? AND (connection_mode = 'upstream' OR connection_mode = ?))) \
+                 AND (provider_id IS NULL OR (provider_id = ? AND provider_bot_ref = ? AND (connection_mode = ? OR connection_mode = ?))) \
                  AND ((? IS NULL AND provider_updated_at IS NULL) OR provider_updated_at = ?) \
                  AND NOT EXISTS (SELECT 1 FROM bcs_provider_bot_bindings WHERE env = ? AND provider_id = ? AND provider_bot_ref = ? AND bot_uuid <> ?)",
                 vec![next.provider_id.as_str().into(), next.provider_bot_ref.as_str().into(), mode.into(), next.webhook_url.clone().into(), next.registered_at.into(), next.updated_at.into(),
-                    next.bot_uuid.as_str().into(), env.as_str().into(), next.provider_id.as_str().into(), next.provider_bot_ref.as_str().into(), mode.into(),
+                    next.bot_uuid.as_str().into(), env.as_str().into(), next.provider_id.as_str().into(), next.provider_bot_ref.as_str().into(), BotConnectionMode::Plugin.as_str().into(), mode.into(),
                     revision.map(DbValue::from).unwrap_or(DbValue::Null), revision.map(DbValue::from).unwrap_or(DbValue::Null),
                     env.as_str().into(), next.provider_id.as_str().into(), next.provider_bot_ref.as_str().into(), next.bot_uuid.as_str().into()]), expected_affected_rows: 1,
         }];
@@ -152,7 +147,7 @@ impl BotProviderRepoPort for DbProviderStore {
         let env = resolve_env();
         let info = serde_json::to_string(&capabilities)
             .map_err(|_| ServiceError::InternalError("Bot capability serialization failed".into()))?;
-        let mode = match record.connection_mode { BotConnectionMode::Upstream => "upstream", BotConnectionMode::Gateway => "gateway" };
+        let mode = record.connection_mode.as_str();
         let mut steps = vec![DbTransactionStep::ExecuteChecked {
             statement: DbStatement::with_params(
                 "INSERT INTO bcs_bots (bot_uuid, env, name, bot_info, session_token, created_by, \

@@ -106,7 +106,7 @@ async fn exercise_registration(source: bcs_domain::bot_provider::DownlinkDetecti
         StatusCode::CREATED,
     )
     .await;
-    assert_eq!(upstream["registration"]["mode"], "upstream");
+    assert_eq!(upstream["registration"]["mode"], "plugin");
     assert_eq!(upstream["registration"]["provider_id"], id);
     // Provider/ref is unique, but the registration token is reusable for
     // distinct refs. Duplicate POSTs no longer replay runtime credentials.

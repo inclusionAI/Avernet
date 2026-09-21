@@ -51,7 +51,7 @@ impl ProviderBotBindingRepoPort for ProviderBindingProjection {
             return self.legacy.get_binding_by_bot_uuid(bot_uuid).await;
         }
         match self.bots.get_connection_mode(bot_uuid).await? {
-            None | Some(BotConnectionMode::Upstream) => Ok(None),
+            None | Some(BotConnectionMode::Plugin) => Ok(None),
             Some(BotConnectionMode::Gateway) => self.bots.get_provider_bot(bot_uuid).await?
                 .and_then(delivery).map(Some).ok_or_else(|| ServiceError::InternalError("gateway Bot has no Provider metadata".into())),
         }

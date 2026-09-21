@@ -31,7 +31,7 @@ impl ProviderRegistrationCoreService for FakeProviderRegistration {
             return Err(error);
         }
         Ok(vec![
-            ProviderRegistrationMode::Upstream,
+            ProviderRegistrationMode::Plugin,
             ProviderRegistrationMode::Gateway,
         ])
     }
@@ -92,7 +92,7 @@ pub(super) fn scoped_payload() -> ProviderRegisterTokenPayload {
         id: "human_human_staff-1".into(),
         provider_id: "provider-a".into(),
         allowed_modes: vec![
-            ProviderRegistrationMode::Upstream,
+            ProviderRegistrationMode::Plugin,
             ProviderRegistrationMode::Gateway,
         ],
         exp: now_secs() + 60,
@@ -203,7 +203,7 @@ async fn provider_issuance_authorizes_human_and_signs_six_hour_scope() {
     assert_eq!(
         serde_json::to_value(view.registration).unwrap(),
         json!({
-            "token_version": 2, "provider_id": "provider-a", "allowed_modes": ["upstream", "gateway"],
+            "token_version": 2, "provider_id": "provider-a", "allowed_modes": ["plugin", "gateway"],
         })
     );
     assert!(register_token_decode_and_verify(&view.token, SECRET).is_err());
@@ -230,7 +230,7 @@ async fn scoped_registration_uses_token_identity_and_maps_only_public_result() {
     let (svc, core, management, onboarding) = scoped_service();
     for mode in [
         None,
-        Some(ProviderRegistrationMode::Upstream),
+        Some(ProviderRegistrationMode::Plugin),
         Some(ProviderRegistrationMode::Gateway),
     ] {
         let view = svc
@@ -269,7 +269,7 @@ async fn scoped_registration_uses_token_identity_and_maps_only_public_result() {
         assert_eq!(command.owner, "human_staff-1");
         assert_eq!(
             command.mode,
-            mode.unwrap_or(ProviderRegistrationMode::Upstream)
+            mode.unwrap_or(ProviderRegistrationMode::Plugin)
         );
     }
     assert!(management.connected.lock().unwrap().is_empty());
@@ -301,7 +301,7 @@ async fn requested_mode_must_be_in_signed_allowlist() {
     let (svc, core, _, _) = scoped_service();
     for (allowed, requested) in [
         (
-            ProviderRegistrationMode::Upstream,
+            ProviderRegistrationMode::Plugin,
             Some(ProviderRegistrationMode::Gateway),
         ),
         (ProviderRegistrationMode::Gateway, None),
@@ -452,7 +452,7 @@ async fn legacy_token_and_registration_json_keep_exact_old_shape() {
     );
     let result = svc
         .register_bot(RegisterBot {
-            mode: Some(ProviderRegistrationMode::Upstream),
+            mode: Some(ProviderRegistrationMode::Plugin),
             ..register_command(view.token)
         })
         .await

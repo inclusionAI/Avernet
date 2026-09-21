@@ -75,7 +75,7 @@ impl RegisterServiceImpl {
         bot_name: &str,
         payload: ProviderRegisterTokenPayload,
     ) -> Result<BotRegistration, ApplicationError> {
-        let mode = command.mode.unwrap_or(ProviderRegistrationMode::Upstream);
+        let mode = command.mode.unwrap_or(ProviderRegistrationMode::Plugin);
         if !payload.allowed_modes.contains(&mode) {
             return Err(ApplicationError::forbidden("registration mode is not authorized"));
         }
@@ -206,7 +206,7 @@ impl RegisterService for RegisterServiceImpl {
             }
             Err(_) => return Err(ApplicationError::Unauthenticated),
         };
-        if command.mode.unwrap_or(ProviderRegistrationMode::Upstream) != ProviderRegistrationMode::Upstream
+        if command.mode.unwrap_or(ProviderRegistrationMode::Plugin) != ProviderRegistrationMode::Plugin
             || command.provider_bot_ref.is_some()
             || command.webhook_url.is_some()
         {

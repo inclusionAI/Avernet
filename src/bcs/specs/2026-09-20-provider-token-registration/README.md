@@ -9,7 +9,7 @@ The public prefix is `/openapi/v1/collaboration`.
    token binds that Provider and Human; the response contains
    `registration.token_version=2`, `provider_id`, and `allowed_modes`.
 2. The client redeems it without a login principal:
-   `POST /register?token=<token>&bot-name=<name>&provider_bot_ref=<stable-ref>&mode=upstream`.
+   `POST /register?token=<token>&bot-name=<name>&provider_bot_ref=<stable-ref>&mode=plugin`.
    Use `mode=gateway` for downlink and optionally add URL-encoded `webhook_url`.
 3. Save the returned Bot UUID/token securely. The later CLI phase starts the
    matching runtime; registration itself does not start or health-check it.
@@ -21,7 +21,10 @@ tokens to a local bridge.
 
 ## Defaults and permissions
 
-Omitting `provider_id` preserves v1 issuance. Omitting `mode` preserves upstream.
+Omitting `provider_id` preserves v1 issuance. Omitting `mode` preserves upstream
+behavior, represented by `plugin`. Provider-admin registration still defaults to
+`gateway`. Both APIs, signed `allowed_modes` and `bcs_bots.connection_mode` use
+the same `ProviderBotConnectionMode` enum and `plugin`/`gateway` strings.
 Existing `bot-name` and `bot_name` are accepted. Legacy request/response fields,
 status/envelope codes and six-hour expiry remain unchanged. Optional registration
 metadata is absent for legacy calls. v1 tokens reject gateway, webhook and Provider
@@ -45,7 +48,7 @@ verification rejects this version. Token mode scope cannot be expanded by a requ
 
 | Mode | Membership | Runtime credential | Delivery binding | Endpoint |
 | --- | --- | --- | --- | --- |
-| upstream | Provider metadata in `bcs_bots` | Real Bot token | None | Not accepted |
+| plugin (upstream) | Provider metadata in `bcs_bots` | Real Bot token | None | Not accepted |
 | gateway | Provider metadata in `bcs_bots` | Real Bot token | Compatibility binding | Bot override, else Provider default |
 
 Gateway needs an enabled downlink using `static_bearer` or `provider_admin` auth;

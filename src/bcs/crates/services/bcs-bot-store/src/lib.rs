@@ -391,7 +391,7 @@ impl PersistentBotRepo {
             // on the column default). UPSERT-style updates above intentionally
             // leave `status` untouched so a hidden actor stays hidden across
             // re-onboards (Requirement 3.16#7).
-            let sql = "INSERT INTO bcs_bots (bot_uuid, name, bot_info, session_token, created_by, visibility, status, actor_kind, agent_code, is_deleted, env, registered_at, updated_at, connection_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'upstream')";
+            let sql = "INSERT INTO bcs_bots (bot_uuid, name, bot_info, session_token, created_by, visibility, status, actor_kind, agent_code, is_deleted, env, registered_at, updated_at, connection_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)";
             self.db_execute_affected(sql, vec![
                 Value::from(bot_uuid),
                 Value::from(name),
@@ -410,6 +410,7 @@ impl PersistentBotRepo {
                 agent_code_value.clone(),
                 Value::from(0_i64),
                 Value::from(env.as_str()),
+                Value::from(bcs_service_api::bot_provider::BotConnectionMode::Plugin.as_str()),
             ]).await
         }.map_err(|e| {
             warn!(request_id = %bcs_observability::CurrentRequestId, bot_uuid = %bot_uuid, error = %e, "save_to_db: failed");

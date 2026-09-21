@@ -16,8 +16,15 @@ fn delivery_source_accepts_only_explicit_supported_sources() {
 }
 
 #[test]
-fn stored_connection_mode_is_independent_of_the_legacy_admin_plugin_spelling() {
-    assert_eq!(serde_json::to_string(&BotConnectionMode::Upstream).unwrap(), "\"upstream\"");
-    assert_eq!(serde_json::to_string(&BotConnectionMode::Gateway).unwrap(), "\"gateway\"");
-    assert!(serde_json::from_str::<BotConnectionMode>("\"plugin\"").is_err());
+fn stored_connection_mode_uses_the_same_values_as_provider_administration() {
+    for (mode, value) in [(BotConnectionMode::Plugin, "plugin"), (BotConnectionMode::Gateway, "gateway")] {
+        assert_eq!(serde_json::to_value(mode).unwrap(), serde_json::json!(value));
+        assert_eq!(mode.as_str(), value);
+        assert_eq!(value.parse::<BotConnectionMode>().unwrap(), mode);
+        assert_eq!(serde_json::from_value::<BotConnectionMode>(serde_json::json!(value)).unwrap(), mode);
+    }
+    for value in ["upstream", "Plugin", "Gateway", "", "bogus"] {
+        assert!(value.parse::<BotConnectionMode>().is_err());
+        assert!(serde_json::from_value::<BotConnectionMode>(serde_json::json!(value)).is_err());
+    }
 }

@@ -97,7 +97,7 @@ async fn admin_modes_and_gateway_mutations_keep_both_views_consistent() {
         let (plugin, token) = admin.register_provider_bot_with_bot_uuid(&provider.provider.provider_id, &provider.provider_admin_token,
             params("plugin", ProviderBotConnectionMode::Plugin)).await.unwrap();
         assert!(token.is_none());
-        assert_eq!(metadata.get_provider_bot(&plugin.bot_uuid).await.unwrap().unwrap().connection_mode, BotConnectionMode::Upstream);
+        assert_eq!(metadata.get_provider_bot(&plugin.bot_uuid).await.unwrap().unwrap().connection_mode, BotConnectionMode::Plugin);
         assert!(providers.get_binding_by_bot_uuid(&plugin.bot_uuid).await.unwrap().is_none());
         assert!(matches!(registry.resolve_delivery_target(&plugin.bot_uuid).await.unwrap(), BotDeliveryTarget::WebSocket { .. }));
         let view = control_plane.get(&plugin.bot_uuid, &bcs_config::resolve_env_str()).await.unwrap().unwrap();

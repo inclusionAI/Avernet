@@ -59,7 +59,7 @@ impl DbProviderStore {
                 match (record.connection_mode, binding) {
                     (BotConnectionMode::Gateway, Some(b)) if record.provider_id == b.provider_id && record.provider_bot_ref == b.provider_bot_ref
                         && record.webhook_url == b.webhook_url && record.is_deleted == b.disabled => {},
-                    (BotConnectionMode::Upstream, None) => {},
+                    (BotConnectionMode::Plugin, None) => {},
                     _ => report.issues.push(format!("{id}: Bot metadata and gateway projection disagree")),
                 }
                 Some((record, false))
@@ -69,7 +69,7 @@ impl DbProviderStore {
             } else {
                 match row.get_string("connection_mode").map_err(bot_storage::storage_error)?.as_deref() {
                     None => ordinary.push(id.clone()),
-                    Some("upstream") => {},
+                    Some(mode) if mode.parse::<BotConnectionMode>() == Ok(BotConnectionMode::Plugin) => {},
                     _ => report.issues.push(format!("{id}: connection mode has no valid Provider metadata")),
                 }
                 None
@@ -79,7 +79,7 @@ impl DbProviderStore {
                     report.issues.push(format!("{id}: Provider does not exist in this environment"));
                 }
                 if record.provider_id.trim().is_empty() || record.provider_bot_ref.trim().is_empty()
-                    || (record.connection_mode == BotConnectionMode::Upstream && record.webhook_url.is_some())
+                    || (record.connection_mode == BotConnectionMode::Plugin && record.webhook_url.is_some())
                 {
                     report.issues.push(format!("{id}: invalid Provider metadata"));
                 }
@@ -98,7 +98,7 @@ impl DbProviderStore {
         if !report.issues.is_empty() { return Err(invalid("backfill blocked; resolve every dry-run issue first")); }
         let mut steps = Vec::new();
         for record in &memberships {
-            let mode = match record.connection_mode { BotConnectionMode::Upstream => "upstream", BotConnectionMode::Gateway => "gateway" };
+            let mode = record.connection_mode.as_str();
             steps.push(DbTransactionStep::ExecuteChecked { statement: DbStatement::with_params(
                 "UPDATE bcs_bots SET provider_id = ?, provider_bot_ref = ?, connection_mode = ?, webhook_url = ?, provider_registered_at = ?, provider_updated_at = ? \
                  WHERE bot_uuid = ? AND env = ? AND provider_id IS NULL AND provider_bot_ref IS NULL AND is_deleted = ?",
@@ -106,8 +106,8 @@ impl DbProviderStore {
         }
         for id in ordinary {
             steps.push(DbTransactionStep::ExecuteChecked { statement: DbStatement::with_params(
-                "UPDATE bcs_bots SET connection_mode = 'upstream' WHERE bot_uuid = ? AND env = ? AND provider_id IS NULL AND connection_mode IS NULL",
-                vec![id.into(), env.as_str().into()]), expected_affected_rows: 1 });
+                "UPDATE bcs_bots SET connection_mode = ? WHERE bot_uuid = ? AND env = ? AND provider_id IS NULL AND connection_mode IS NULL",
+                vec![BotConnectionMode::Plugin.as_str().into(), id.into(), env.as_str().into()]), expected_affected_rows: 1 });
         }
         if !steps.is_empty() { self.db.transaction(steps).await.map_err(bot_storage::storage_error)?; }
         report.applied = true;

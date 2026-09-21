@@ -29,10 +29,23 @@ async fn additive_schema_preserves_legacy_identity_and_marks_mode_unmigrated() {
 }
 
 #[tokio::test]
+async fn schema_accepts_the_shared_modes_and_rejects_draft_spelling() {
+    let db = upgraded().await;
+    for mode in ["plugin", "gateway"] {
+        db.execute(DbStatement::with_params("UPDATE bcs_bots SET connection_mode = ? WHERE bot_uuid = 'legacy'", vec![mode.into()])).await.unwrap();
+        let rows = db.query(DbStatement::new("SELECT connection_mode FROM bcs_bots WHERE bot_uuid = 'legacy'")).await.unwrap();
+        assert_eq!(rows[0].get_string("connection_mode").unwrap().as_deref(), Some(mode));
+    }
+    for mode in ["upstream", "Plugin", "Gateway", "", "bogus"] {
+        assert!(db.execute(DbStatement::with_params("UPDATE bcs_bots SET connection_mode = ? WHERE bot_uuid = 'legacy'", vec![mode.into()])).await.is_err());
+    }
+}
+
+#[tokio::test]
 async fn provider_ref_uniqueness_spans_modes_and_preserves_deleted_identity() {
     let db = upgraded().await;
     db.execute(DbStatement::new("UPDATE bcs_bots SET provider_id = 'provider', provider_bot_ref = 'ref', connection_mode = 'gateway', is_deleted = 1 WHERE bot_uuid = 'legacy'")).await.unwrap();
-    assert!(db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid, env, provider_id, provider_bot_ref, connection_mode) VALUES ('other', 'test', 'provider', 'ref', 'upstream')")).await.is_err());
-    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid, env, provider_id, provider_bot_ref, connection_mode) VALUES ('other', 'different-env', 'provider', 'ref', 'upstream')")).await.unwrap();
-    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid, env, connection_mode) VALUES ('ordinary-a', 'test', 'upstream'), ('ordinary-b', 'test', 'upstream')")).await.unwrap();
+    assert!(db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid, env, provider_id, provider_bot_ref, connection_mode) VALUES ('other', 'test', 'provider', 'ref', 'plugin')")).await.is_err());
+    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid, env, provider_id, provider_bot_ref, connection_mode) VALUES ('other', 'different-env', 'provider', 'ref', 'plugin')")).await.unwrap();
+    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid, env, connection_mode) VALUES ('ordinary-a', 'test', 'plugin'), ('ordinary-b', 'test', 'plugin')")).await.unwrap();
 }

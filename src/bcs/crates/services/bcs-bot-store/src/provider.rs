@@ -1433,7 +1433,7 @@ mod tests {
         .expect("create bcs_provider_bot_bindings");
         db.execute(DbStatement::new(
             "CREATE TABLE bcs_bots (
-                connection_mode TEXT DEFAULT 'upstream',
+                connection_mode TEXT DEFAULT 'plugin',
                 bot_uuid TEXT NOT NULL,
                 env TEXT NOT NULL,
                 name TEXT NOT NULL DEFAULT '',

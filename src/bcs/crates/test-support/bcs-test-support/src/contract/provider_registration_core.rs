@@ -12,7 +12,7 @@ pub async fn provider_registration_core_service_contract_tests(
     owner: &str,
 ) {
     let modes = core.authorize(provider_id, owner).await.unwrap();
-    assert!(modes.contains(&ProviderRegistrationMode::Upstream));
+    assert!(modes.contains(&ProviderRegistrationMode::Plugin));
     assert!(modes.contains(&ProviderRegistrationMode::Gateway));
     assert!(matches!(
         core.authorize(provider_id, "not-provider-owner").await,
@@ -22,7 +22,7 @@ pub async fn provider_registration_core_service_contract_tests(
         provider_id: provider_id.into(),
         provider_bot_ref: "contract-upstream".into(),
         owner: owner.into(),
-        mode: ProviderRegistrationMode::Upstream,
+        mode: ProviderRegistrationMode::Plugin,
         bot_name: "Contract bot".into(),
         webhook_url: None,
     };

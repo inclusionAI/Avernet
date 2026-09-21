@@ -2,7 +2,7 @@
 -- Keep legacy gateway bindings as the compatibility delivery projection.
 ALTER TABLE bcs_bots ADD COLUMN provider_id TEXT COLLATE BINARY DEFAULT NULL;
 ALTER TABLE bcs_bots ADD COLUMN provider_bot_ref TEXT COLLATE BINARY DEFAULT NULL;
-ALTER TABLE bcs_bots ADD COLUMN connection_mode TEXT DEFAULT NULL CHECK (connection_mode IN ('upstream', 'gateway'));
+ALTER TABLE bcs_bots ADD COLUMN connection_mode TEXT DEFAULT NULL CHECK (connection_mode IN ('plugin', 'gateway'));
 ALTER TABLE bcs_bots ADD COLUMN webhook_url TEXT DEFAULT NULL;
 ALTER TABLE bcs_bots ADD COLUMN provider_registered_at INTEGER DEFAULT NULL;
 ALTER TABLE bcs_bots ADD COLUMN provider_updated_at INTEGER DEFAULT NULL;

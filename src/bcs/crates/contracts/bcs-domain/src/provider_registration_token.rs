@@ -18,12 +18,7 @@ const CURRENT_VERSION: u8 = 2;
 const PURPOSE: &str = "provider_bot_registration";
 
 /// Provider connection modes authorized by a registration token.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderRegistrationMode {
-    Upstream,
-    Gateway,
-}
+pub use crate::provider::ProviderBotConnectionMode as ProviderRegistrationMode;
 
 /// Signed authorization for one human to register bots with one provider.
 ///
@@ -154,7 +149,7 @@ mod tests {
             id: "human_user123".to_string(),
             provider_id: "provider-a".to_string(),
             allowed_modes: vec![
-                ProviderRegistrationMode::Upstream,
+                ProviderRegistrationMode::Plugin,
                 ProviderRegistrationMode::Gateway,
             ],
             exp: u64::MAX,
@@ -176,15 +171,15 @@ mod tests {
     #[test]
     fn roundtrip_preserves_all_fields_and_allowed_mode_combinations() {
         for modes in [
-            vec![ProviderRegistrationMode::Upstream],
+            vec![ProviderRegistrationMode::Plugin],
             vec![ProviderRegistrationMode::Gateway],
             vec![
-                ProviderRegistrationMode::Upstream,
+                ProviderRegistrationMode::Plugin,
                 ProviderRegistrationMode::Gateway,
             ],
             vec![
                 ProviderRegistrationMode::Gateway,
-                ProviderRegistrationMode::Upstream,
+                ProviderRegistrationMode::Plugin,
             ],
         ] {
             let expected = ProviderRegisterTokenPayload {
@@ -213,7 +208,7 @@ mod tests {
                 "purpose": "provider_bot_registration",
                 "id": "human_user123",
                 "provider_id": "provider-a",
-                "allowed_modes": ["upstream", "gateway"],
+                "allowed_modes": ["plugin", "gateway"],
                 "exp": u64::MAX,
             })
         );
@@ -299,7 +294,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_or_non_snake_case_modes() {
-        for mode in ["plugin", "Upstream", "Gateway", ""] {
+        for mode in ["upstream", "Plugin", "Gateway", ""] {
             let mut value = serde_json::to_value(payload()).unwrap();
             value["allowed_modes"] = json!([mode]);
             assert!(
@@ -379,17 +374,17 @@ mod tests {
     fn rejects_duplicate_modes() {
         for modes in [
             vec![
-                ProviderRegistrationMode::Upstream,
-                ProviderRegistrationMode::Upstream,
+                ProviderRegistrationMode::Plugin,
+                ProviderRegistrationMode::Plugin,
             ],
             vec![
                 ProviderRegistrationMode::Gateway,
                 ProviderRegistrationMode::Gateway,
             ],
             vec![
-                ProviderRegistrationMode::Upstream,
+                ProviderRegistrationMode::Plugin,
                 ProviderRegistrationMode::Gateway,
-                ProviderRegistrationMode::Upstream,
+                ProviderRegistrationMode::Plugin,
             ],
         ] {
             let invalid = ProviderRegisterTokenPayload {

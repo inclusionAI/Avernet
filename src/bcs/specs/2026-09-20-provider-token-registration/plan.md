@@ -11,7 +11,7 @@ Provider-admin registration, CLI and bridge startup remain unchanged.
   Authorize its owner/creator or an explicitly configured self-service Provider.
   Issue purpose-bound v2 tokens; legacy v1 verifiers reject them.
 - Registration derives owner and Provider from the signed token, requires a
-  stable `provider_bot_ref` for v2, accepts upstream/gateway and optional
+  stable `provider_bot_ref` for v2, accepts plugin/gateway and optional
   `webhook_url`. It never accepts Provider-admin credentials or owner overrides.
 - Membership is distinct from delivery: upstream persists membership and a real
   runtime token without an HTTP binding. Gateway adds a delivery binding.

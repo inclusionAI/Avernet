@@ -41,14 +41,15 @@ async fn backfill_rejects_missing_providers_and_partial_membership() {
 async fn backfill_preserves_registered_upstream_without_a_binding() {
     let db = sqlite().await;
     let store = DbProviderStore::sqlite(db.clone());
-    let original = record("upstream", BotConnectionMode::Upstream);
+    let original = record("upstream", BotConnectionMode::Plugin);
     store.create_provider_bot(original.clone(), caps(), "alice", "test-upstream-runtime").await.unwrap();
     let report = store.backfill_provider_bots(true, true).await.unwrap();
     assert_eq!(report.memberships_to_backfill + report.ordinary_modes_to_backfill, 0);
     assert!(report.issues.is_empty());
     assert_eq!(store.get_provider_bot("upstream").await.unwrap(), Some(original));
     assert!(store.get_binding_by_bot_uuid("upstream").await.unwrap().is_none());
-    let rows = db.query(DbStatement::new("SELECT created_by, session_token FROM bcs_bots WHERE bot_uuid = 'upstream'")).await.unwrap();
+    let rows = db.query(DbStatement::new("SELECT created_by, session_token, connection_mode FROM bcs_bots WHERE bot_uuid = 'upstream'")).await.unwrap();
+    assert_eq!(rows[0].get_string("connection_mode").unwrap().as_deref(), Some("plugin"));
     assert_eq!(rows[0].get_string("created_by").unwrap().as_deref(), Some("alice"));
     assert_eq!(rows[0].get_string("session_token").unwrap().as_deref(), Some("test-upstream-runtime"));
     assert_eq!(store.backfill_provider_bots(false, false).await.unwrap().memberships_to_backfill, 0);
@@ -89,7 +90,7 @@ async fn attach_existing_bot_preserves_credential_and_rejects_provider_takeover(
     let env = bcs_config::resolve_env_str();
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, name, session_token) VALUES ('existing', ?, 'Existing', 'test-original-runtime')", vec![env.into()])).await.unwrap();
     let store = DbProviderStore::sqlite(db.clone());
-    let upstream = record("existing", BotConnectionMode::Upstream);
+    let upstream = record("existing", BotConnectionMode::Plugin);
     store.attach_provider_bot(upstream.clone()).await.unwrap();
     assert_eq!(store.get_provider_bot_by_ref("provider-a", "existing").await.unwrap(), Some(upstream));
     assert!(store.get_binding_by_bot_uuid("existing").await.unwrap().is_none());
@@ -98,7 +99,7 @@ async fn attach_existing_bot_preserves_credential_and_rejects_provider_takeover(
     let mut takeover = record("existing", BotConnectionMode::Gateway);
     takeover.provider_id = "provider-b".into();
     assert!(store.attach_provider_bot(takeover).await.is_err());
-    assert!(store.attach_provider_bot(record("existing", BotConnectionMode::Upstream)).await.is_err());
+    assert!(store.attach_provider_bot(record("existing", BotConnectionMode::Plugin)).await.is_err());
     let rows = db.query(DbStatement::new("SELECT session_token FROM bcs_bots WHERE bot_uuid = 'existing'")).await.unwrap();
     assert_eq!(rows[0].get_string("session_token").unwrap().as_deref(), Some("test-original-runtime"));
     assert_eq!(store.list_provider_bot_metadata(Some("provider-a")).await.unwrap().len(), 1);
@@ -124,7 +125,7 @@ async fn read_source_is_explicit_and_does_not_change_gateway_writes() {
     let store = Arc::new(DbProviderStore::sqlite(db.clone()));
     let legacy = ProviderBindingProjection::new(store.clone(), store.clone(), DownlinkDetectionSource::Binding);
     let bots = ProviderBindingProjection::new(store.clone(), store.clone(), DownlinkDetectionSource::BotConnectionMode);
-    store.create_provider_bot(record("upstream", BotConnectionMode::Upstream), caps(), "owner-a", "test-source-upstream").await.unwrap();
+    store.create_provider_bot(record("upstream", BotConnectionMode::Plugin), caps(), "owner-a", "test-source-upstream").await.unwrap();
     store.create_provider_bot(record("gateway", BotConnectionMode::Gateway), caps(), "owner-a", "test-source-gateway").await.unwrap();
     for reader in [&legacy, &bots] {
         assert!(reader.get_binding_by_bot_uuid("upstream").await.unwrap().is_none());
@@ -160,7 +161,7 @@ async fn audited_backfill_is_explicit_repeatable_and_blocks_state_mismatches() {
     assert!(store.backfill_provider_bots(true, false).await.is_err());
     store.backfill_provider_bots(true, true).await.unwrap();
     assert_eq!(store.get_provider_bot("old-gateway").await.unwrap().unwrap().connection_mode, BotConnectionMode::Gateway);
-    assert_eq!(store.get_connection_mode("ordinary").await.unwrap(), Some(BotConnectionMode::Upstream));
+    assert_eq!(store.get_connection_mode("ordinary").await.unwrap(), Some(BotConnectionMode::Plugin));
     let report = store.backfill_provider_bots(false, false).await.unwrap();
     assert!(report.issues.is_empty());
     assert_eq!(report.memberships_to_backfill + report.ordinary_modes_to_backfill, 0);

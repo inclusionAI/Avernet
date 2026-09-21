@@ -14,7 +14,7 @@ const REGISTER: &str = "/openapi/v1/collaboration/register";
 
 #[tokio::test]
 async fn scoped_http_registration_uses_signed_owner_and_provider_anonymously() {
-    for mode in ["", "&mode=upstream", "&mode=gateway"] {
+    for mode in ["", "&mode=plugin", "&mode=gateway"] {
         for webhook in ["", "&webhook_url=https%3A%2F%2Fexample.test%2Foverride"] {
             if mode != "&mode=gateway" && !webhook.is_empty() {
                 continue;
@@ -36,7 +36,7 @@ async fn scoped_http_registration_uses_signed_owner_and_provider_anonymously() {
             assert_eq!(
                 issued["data"]["registration"],
                 json!({
-                    "token_version": 2, "provider_id": "provider-a", "allowed_modes": ["upstream", "gateway"],
+                    "token_version": 2, "provider_id": "provider-a", "allowed_modes": ["plugin", "gateway"],
                 })
             );
             let token = issued["data"]["token"].as_str().unwrap();
@@ -53,7 +53,7 @@ async fn scoped_http_registration_uses_signed_owner_and_provider_anonymously() {
                 if mode == "&mode=gateway" {
                     "gateway"
                 } else {
-                    "upstream"
+                    "plugin"
                 }
             );
             assert_eq!(
@@ -200,7 +200,7 @@ async fn signed_scope_and_expiry_fail_before_core_in_http() {
         ..scoped_payload()
     };
     let upstream = ProviderRegisterTokenPayload {
-        allowed_modes: vec![ProviderRegistrationMode::Upstream],
+        allowed_modes: vec![ProviderRegistrationMode::Plugin],
         ..scoped_payload()
     };
     for (token, status) in [

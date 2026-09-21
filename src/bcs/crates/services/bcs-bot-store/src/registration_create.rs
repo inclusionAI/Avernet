@@ -1,6 +1,7 @@
 //! Strict Bot creation, separate from the legacy registration/upsert path.
 
 use bcs_db_api::DbError;
+use bcs_service_api::bot_provider::BotConnectionMode;
 
 use super::{
     BotCapabilities, BotInfo, DbSqlFlavor, PersistentBotRepo, ServiceError, ServiceResult, Value,
@@ -55,12 +56,12 @@ impl PersistentBotRepo {
         let result = self.db_execute_affected(
             "INSERT INTO bcs_bots (bot_uuid, name, bot_info, session_token, created_by, \
              visibility, status, actor_kind, agent_code, is_deleted, env, registered_at, updated_at, connection_mode) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'upstream')",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)",
             vec![Value::from(bot_id.as_str()),
                 Value::from(capabilities.name.as_deref().unwrap_or(&bot_id)), Value::from(info),
                 Value::from(token), Value::from(created_by), Value::from(visibility),
                 Value::from("online"), Value::from("bot"), Value::from(capabilities.agent_code),
-                Value::from(0_i64), Value::from(env.as_str())],
+                Value::from(0_i64), Value::from(env.as_str()), Value::from(BotConnectionMode::Plugin.as_str())],
         ).await;
         match result {
             // Do not hydrate caches from the proposed record. A delayed INSERT

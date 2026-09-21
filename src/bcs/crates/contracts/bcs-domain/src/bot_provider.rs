@@ -2,9 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-// Registration tokens and persisted Bot records use the same public mode names.
-// The legacy Provider-admin `plugin` spelling is translated at its boundary.
-pub use crate::provider_registration_token::ProviderRegistrationMode as BotConnectionMode;
+// Provider administration, registration tokens and Bot records share one type.
+pub use crate::provider::ProviderBotConnectionMode as BotConnectionMode;
 
 /// Selects how the delivery resolver determines a Bot's transport. This does
 /// not select a registration writer or grant Provider management privileges.

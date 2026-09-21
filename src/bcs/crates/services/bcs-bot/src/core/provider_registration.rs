@@ -86,7 +86,7 @@ impl ProviderRegistrationCore {
         provider: &ProviderRecord,
         command: &RegisterProviderBot,
     ) -> ServiceResult<Option<String>> {
-        if command.mode == ProviderRegistrationMode::Upstream {
+        if command.mode == ProviderRegistrationMode::Plugin {
             if command.webhook_url.is_some() {
                 return Err(invalid("upstream registration cannot specify webhook_url"));
             }
@@ -143,7 +143,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         self.authorized_provider(provider_id, owner).await?;
         // Endpoint readiness is checked at registration, never at issuance.
         Ok(vec![
-            ProviderRegistrationMode::Upstream,
+            ProviderRegistrationMode::Plugin,
             ProviderRegistrationMode::Gateway,
         ])
     }

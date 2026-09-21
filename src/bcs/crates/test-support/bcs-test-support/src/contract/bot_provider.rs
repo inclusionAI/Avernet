@@ -15,7 +15,7 @@ fn caps() -> BotCapabilities {
 }
 
 pub async fn bot_provider_repo_port_contract_tests(repo: &dyn BotProviderRepoPort, bindings: &dyn ProviderBotBindingRepoPort) {
-    let upstream = record("upstream", BotConnectionMode::Upstream);
+    let upstream = record("upstream", BotConnectionMode::Plugin);
     repo.create_provider_bot(upstream.clone(), caps(), "owner-a", "test-upstream-runtime").await.unwrap();
     assert_eq!(repo.get_provider_bot("upstream").await.unwrap(), Some(upstream));
     assert!(bindings.get_binding_by_bot_uuid("upstream").await.unwrap().is_none());
@@ -43,7 +43,7 @@ pub async fn bot_provider_repo_port_contract_tests(repo: &dyn BotProviderRepoPor
 
 /// Binding consumer contract, exercised against the compatibility projection.
 pub async fn provider_bot_binding_repo_port_contract_tests(repo: &dyn ProviderBotBindingRepoPort, bots: &dyn BotProviderRepoPort) {
-    bots.create_provider_bot(record("projection", BotConnectionMode::Upstream), caps(), "owner-a", "test-projection-runtime").await.unwrap();
+    bots.create_provider_bot(record("projection", BotConnectionMode::Plugin), caps(), "owner-a", "test-projection-runtime").await.unwrap();
     let binding = ProviderBotBinding {
         bot_uuid: "projection".into(), provider_id: "provider-a".into(), provider_bot_ref: "projection".into(),
         webhook_url: None, disabled: false, created_at: 1000, updated_at: 1000,

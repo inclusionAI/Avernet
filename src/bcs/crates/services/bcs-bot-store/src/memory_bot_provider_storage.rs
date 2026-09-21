@@ -30,7 +30,7 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
 
     async fn get_connection_mode(&self, bot_uuid: &str) -> ServiceResult<Option<BotConnectionMode>> {
         if let Some(record) = self.get_provider_bot(bot_uuid).await? { return Ok(Some(record.connection_mode)); }
-        Ok(self.bots.try_get(bot_uuid).await?.map(|_| BotConnectionMode::Upstream))
+        Ok(self.bots.try_get(bot_uuid).await?.map(|_| BotConnectionMode::Plugin))
     }
 
     async fn attach_provider_bot(&self, mut record: BotProviderRecord) -> ServiceResult<()> {

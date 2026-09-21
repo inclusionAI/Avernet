@@ -32,7 +32,7 @@ RegisterTokenResult:
           uniqueItems: true
           items:
             type: string
-            enum: [upstream, gateway]
+            enum: [plugin, gateway]
 
 BotRegistrationResult:
   type: object
@@ -62,13 +62,13 @@ BotRegistrationResult:
           type: string
         mode:
           type: string
-          enum: [upstream, gateway]
+          enum: [plugin, gateway]
         webhook_url:
           type: [string, "null"]
-          description: Stored Bot override. Null means inherit Provider default for gateway; always null for upstream.
+          description: Stored Bot override. Null means inherit Provider default for gateway; always null for plugin.
         effective_webhook_url:
           type: [string, "null"]
-          description: Current resolved gateway endpoint; null for upstream.
+          description: Current resolved gateway endpoint; null for plugin.
 
 RegisterTokenPath:
   get:
@@ -146,16 +146,18 @@ RegisterPath:
       Anonymous endpoint. The register token is the only credential; BCS verifies
       the HMAC token before creating the Bot. The Bot is onboarded under the
       human actor encoded in the token, establishing ownership.
-      Mode defaults to upstream. A v1 token cannot register gateway or Provider
+      Mode defaults to plugin (upstream WebSocket/bridge connection), using the
+      same plugin/gateway values as Provider administration and Bot storage.
+      A v1 token cannot register gateway or Provider
       options. A v2 token requires provider_bot_ref; Provider/owner cannot be
       overridden by request parameters. Provider authorization is checked again
-      on redemption. Upstream saves membership without HTTP delivery binding.
+      on redemption. Plugin saves membership without HTTP delivery binding.
       Gateway uses webhook_url override or Provider default; only the Provider
       creator/owners may set an override because delivery uses a shared Provider
       credential. Self-service callers must use the Provider default. At least one usable
       endpoint is required, together with an existing, enabled
       downlink_bcs_to_provider credential with a nonblank secret. Gateway checks
-      these prerequisites before creation; upstream does not read or require
+      these prerequisites before creation; plugin does not read or require
       a downlink credential. Credential-store failures return 500, not a readiness
       error. Provider/ref is unique across modes and retained after soft deletion.
       Any duplicate scoped ref returns 409, including an identical retry.
@@ -187,8 +189,8 @@ RegisterPath:
         required: false
         schema:
           type: string
-          enum: [upstream, gateway]
-          default: upstream
+          enum: [plugin, gateway]
+          default: plugin
       - name: provider_bot_ref
         in: query
         required: false

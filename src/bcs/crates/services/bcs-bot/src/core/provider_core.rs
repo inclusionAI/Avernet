@@ -191,7 +191,7 @@ impl ProviderCore {
         if let Some(metadata) = &self.bot_providers {
             if let Some(existing) = metadata.get_provider_bot_by_ref(provider_id, &provider_bot_ref).await? {
                 if existing.is_deleted || bot_uuid.as_deref() != Some(existing.bot_uuid.as_str())
-                    || existing.connection_mode != BotConnectionMode::Upstream
+                    || existing.connection_mode != BotConnectionMode::Plugin
                     || connection_mode != ProviderBotConnectionMode::Plugin
                 { return Err(ServiceError::Conflict("Provider/ref is already registered".into())); }
             }
@@ -347,7 +347,7 @@ impl ProviderCore {
                 if let Some(metadata) = &self.bot_providers {
                     metadata.attach_provider_bot(BotProviderRecord {
                         bot_uuid: bot_uuid.clone(), provider_id: provider.provider_id.clone(), provider_bot_ref: provider_bot_ref.clone(),
-                        connection_mode: BotConnectionMode::Upstream, webhook_url: None, is_deleted: false,
+                        connection_mode: BotConnectionMode::Plugin, webhook_url: None, is_deleted: false,
                         registered_at: now, updated_at: now,
                     }).await?;
                 }
