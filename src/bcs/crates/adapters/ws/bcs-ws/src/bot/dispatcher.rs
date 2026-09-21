@@ -32,7 +32,7 @@ use tracing::{Instrument, Span, debug, info, info_span, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::run_event_v3::{NormalizedBotEvent, normalize_v3_event};
-use crate::bot::BotConnectionRegistry;
+use crate::bot::{BotConnectionRegistry, normalize_client_kind};
 use crate::shared::RunChannelManager;
 
 pub type Result<T> = std::result::Result<T, BotWsDispatchError>;
@@ -370,7 +370,7 @@ async fn handle_bot_connect(
         }
     }
 
-    let client_kind = params.client_kind.clone();
+    let client_kind = normalize_client_kind(params.client_kind);
     let result = state
         .bot_runtime
         .connect_streaming(BotRuntimeConnectCommand {

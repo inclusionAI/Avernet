@@ -15,7 +15,7 @@ pub(super) async fn maybe_handle_coordination_echo(
     if !task_intent_eligible || cmd.event_type != "agent" || cmd.group_id.is_empty() {
         return Ok(None);
     }
-    if data.get("isError").and_then(|value| value.as_bool()) == Some(true) {
+    if data.get("isError").and_then(Value::as_bool) != Some(false) {
         return Ok(None);
     }
 

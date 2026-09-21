@@ -41,15 +41,21 @@ pub(super) fn normalize_v3_event(event: &EventFrame) -> Result<NormalizedBotEven
 }
 
 fn normalize_agent(agent: bcs_protocol::stream::AgentEvent) -> Result<NormalizedBotEvent> {
-    let run_id = agent.run_id.clone();
+    let run_id = agent.run_id;
+    let session_id = agent.session_id;
+    let seq = agent.seq;
+    let ts = agent.ts.unwrap_or_default();
     let (stream, data, task_intent_eligible) = match agent.data {
         AgentData::Tool(data) => {
-            let eligible = matches!(data.phase, bcs_protocol::stream::ToolPhase::Result);
+            let eligible = matches!(data.phase, bcs_protocol::stream::ToolPhase::Result)
+                && data.is_error == Some(false);
             ("tool", serde_json::to_value(data)?, eligible)
         }
         AgentData::Thinking(data) => ("thinking", serde_json::to_value(data)?, false),
         AgentData::Assistant { raw } => ("assistant", raw, false),
-        AgentData::Error { raw } => ("error", raw, false),
+        AgentData::Error { raw } => {
+            return Ok(normalize_agent_error(run_id, session_id, seq, ts, raw));
+        }
         AgentData::Approval(data) => ("approval", serde_json::to_value(data)?, false),
         AgentData::Lifecycle(data) => ("lifecycle", serde_json::to_value(data)?, false),
         AgentData::Phase(data) => ("phase", serde_json::to_value(data)?, false),
@@ -59,12 +65,11 @@ fn normalize_agent(agent: bcs_protocol::stream::AgentEvent) -> Result<Normalized
             ));
         }
     };
-    let is_final = stream == "error";
     let mut payload = serde_json::json!({
         "run_id": run_id,
         "bcs_group_id": "",
         "stream": stream,
-        "ts": agent.ts.unwrap_or_default(),
+        "ts": ts,
         "data": data,
     });
     if task_intent_eligible {
@@ -76,10 +81,40 @@ fn normalize_agent(agent: bcs_protocol::stream::AgentEvent) -> Result<Normalized
         "agent".to_string(),
         payload,
         ChatEventState::Delta,
-        is_final,
-        agent.session_id,
-        agent.seq,
+        false,
+        session_id,
+        seq,
     ))
+}
+
+fn normalize_agent_error(
+    run_id: String,
+    session_id: Option<String>,
+    seq: Option<u64>,
+    ts: u64,
+    raw: Value,
+) -> NormalizedBotEvent {
+    let mut payload = serde_json::json!({
+        "run_id": run_id,
+        "bcs_group_id": "",
+        "state": "error",
+        "ts": ts,
+    });
+    for key in ["message", "errorMessage", "errorKind", "errorCode"] {
+        if let Some(value) = raw.get(key) {
+            payload[key] = value.clone();
+        }
+    }
+    (
+        run_id,
+        String::new(),
+        "chat.event".to_string(),
+        payload,
+        ChatEventState::Error,
+        true,
+        session_id,
+        seq,
+    )
 }
 
 fn normalize_chat(chat: bcs_protocol::stream::ChatEvent) -> Result<NormalizedBotEvent> {

@@ -157,7 +157,7 @@ impl MockBot {
             .await
             .expect("Failed to connect WebSocket");
         let mut bot = Self { ws, bot_id: String::new(), token: String::new() };
-        bot.do_connect(None, None).await;
+        bot.do_connect(None).await;
         // Drain any onboarding messages BCS sends to new bots
         bot.drain_onboarding().await;
         bot
@@ -169,8 +169,8 @@ impl MockBot {
         let (ws, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("Failed to connect WebSocket");
-        let mut bot = Self { ws, bot_id: String::new(), token: String::new() };
-        bot.do_connect(None, Some(2)).await;
+        let mut bot = Self::from_parts(ws, String::new(), String::new());
+        bot.do_connect_v2().await;
         bot.drain_onboarding().await;
         bot
     }
@@ -184,7 +184,7 @@ impl MockBot {
             .await
             .expect("Failed to connect WebSocket");
         let mut bot = Self { ws, bot_id: String::new(), token: String::new() };
-        bot.do_connect(Some(token.to_string()), None).await;
+        bot.do_connect(Some(token.to_string())).await;
         bot
     }
 
@@ -204,14 +204,24 @@ impl MockBot {
         }
     }
 
-    async fn do_connect(&mut self, token: Option<String>, protocol_version: Option<u32>) {
+    fn from_parts(ws: WsStream, bot_id: String, value: String) -> Self {
+        Self { ws, bot_id, token: value }
+    }
+
+    async fn do_connect(&mut self, token: Option<String>) {
         // BCN plugin passes token in bot.connect params (not URL query param)
-        let params = match (&token, protocol_version) {
-            (Some(t), Some(version)) => json!({ "token": t, "protocol_version": version }),
-            (Some(t), None) => json!({ "token": t }),
-            (None, Some(version)) => json!({ "protocol_version": version }),
-            (None, None) => json!({}),
+        let params = match &token {
+            Some(t) => json!({ "token": t }),
+            None => json!({}),
         };
+        self.send_connect(params).await;
+    }
+
+    async fn do_connect_v2(&mut self) {
+        self.send_connect(json!({ "protocol_version": 2 })).await;
+    }
+
+    async fn send_connect(&mut self, params: Value) {
         let frame = json!({
             "type": "req",
             "id": "connect_001",
@@ -221,7 +231,8 @@ impl MockBot {
         let resp = self.send_and_recv(frame).await.expect("No response to bot.connect");
         assert!(resp["ok"].as_bool().unwrap_or(false), "bot.connect failed: {resp}");
         self.bot_id = resp["payload"]["bot_uuid"].as_str().unwrap_or("").to_string();
-        self.token = resp["payload"]["token"].as_str().unwrap_or("").to_string();
+        let value = resp["payload"]["token"].as_str().unwrap_or("").to_string();
+        self.token = value;
     }
 
     /// Onboard via HTTP API and set visibility to public (mirrors `bcs-cli onboard`).

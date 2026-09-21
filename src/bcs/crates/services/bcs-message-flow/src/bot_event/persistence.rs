@@ -407,7 +407,11 @@ pub(super) async fn tool_result_matches_start(
     else {
         return false;
     };
-    let Some(start) = flow.message_tracker.get_tool_call_start(tool_call_id).await else {
+    let Some(start) = flow
+        .message_tracker
+        .get_tool_call_start(&cmd.run_id, tool_call_id)
+        .await
+    else {
         return false;
     };
     start.bot_id == cmd.bot_id
@@ -440,7 +444,10 @@ pub(super) async fn persist_tool_result(
         .unwrap_or(false);
     let result = data.get("result").cloned().unwrap_or(Value::Null);
 
-    let start_info = flow.message_tracker.get_tool_call_start(tool_call_id).await;
+    let start_info = flow
+        .message_tracker
+        .get_tool_call_start(&cmd.run_id, tool_call_id)
+        .await;
     let (args, run_id, session_id, start_name) = match start_info {
         Some(ref info) => (
             info.args.clone(),
@@ -494,7 +501,7 @@ pub(super) async fn persist_tool_result(
     )
     .await?;
     flow.message_tracker
-        .remove_tool_call_start(tool_call_id)
+        .remove_tool_call_start(&cmd.run_id, tool_call_id)
         .await;
     Ok(())
 }

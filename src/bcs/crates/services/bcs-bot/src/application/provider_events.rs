@@ -697,7 +697,12 @@ fn stamp_provider_task_intent_candidate(event_type: &str, payload: &mut Value) {
             .get("data")
             .and_then(|data| data.get("phase"))
             .and_then(Value::as_str)
-            == Some("result");
+            == Some("result")
+        && object
+            .get("data")
+            .and_then(|data| data.get("isError"))
+            .and_then(Value::as_bool)
+            == Some(false);
     if eligible {
         object.insert(TASK_INTENT_ELIGIBLE_KEY.to_string(), Value::Bool(true));
     }
@@ -815,6 +820,36 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_task_intent_candidate_requires_explicit_success() {
+        for (is_error, eligible) in [
+            (Some(Value::Bool(false)), true),
+            (Some(Value::Bool(true)), false),
+            (Some(Value::String("false".to_string())), false),
+            (None, false),
+        ] {
+            let mut payload = json!({
+                "stream": "tool",
+                "data": {
+                    "phase": "result",
+                    "name": "mcp__bcs__bcs_assign_task",
+                    "toolCallId": "call-1",
+                    "result": "ok"
+                }
+            });
+            if let Some(is_error) = is_error {
+                payload["data"]["isError"] = is_error;
+            }
+
+            stamp_provider_task_intent_candidate("agent", &mut payload);
+
+            assert_eq!(
+                payload.get(TASK_INTENT_ELIGIBLE_KEY).and_then(Value::as_bool),
+                eligible.then_some(true)
+            );
+        }
+    }
 
     #[test]
     fn state_machine_visible_text_expires_one_day_after_run_deadline() {

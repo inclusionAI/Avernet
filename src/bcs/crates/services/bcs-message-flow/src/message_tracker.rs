@@ -32,9 +32,10 @@ pub struct BotEventRunInfo {
 /// flushed as a single INSERT — drastically reducing DB write pressure for
 /// high-frequency per-token delta streams.
 pub struct MessageTracker {
-    /// tool_call_id → ToolCallStartInfo (cached on ToolCallStart, cleared when
-    /// the owning run completes or the start event expires)
-    tool_call_starts: Mutex<HashMap<String, ToolCallStartInfo>>,
+    /// (run_id, tool_call_id) → ToolCallStartInfo (cached on ToolCallStart,
+    /// cleared when the owning run completes or the start event expires).
+    /// Tool call ids are unique only within one run.
+    tool_call_starts: Mutex<HashMap<(String, String), ToolCallStartInfo>>,
     /// run_id:tool_call_id → first-seen timestamp for coordination echoes.
     coordination_echoes: Mutex<HashMap<String, u64>>,
     /// run_id → coordination surface resolved from the run's bot Provider.
@@ -112,13 +113,19 @@ impl MessageTracker {
     pub async fn cache_tool_call_start(&self, tool_call_id: String, info: ToolCallStartInfo) {
         let mut pending = self.tool_call_starts.lock().await;
         cleanup_expired_tool_starts(&mut pending, bcs_protocol::now_ms());
-        pending.insert(tool_call_id, info);
+        pending.insert((info.run_id.clone(), tool_call_id), info);
     }
 
-    pub async fn get_tool_call_start(&self, tool_call_id: &str) -> Option<ToolCallStartInfo> {
+    pub async fn get_tool_call_start(
+        &self,
+        run_id: &str,
+        tool_call_id: &str,
+    ) -> Option<ToolCallStartInfo> {
         let mut pending = self.tool_call_starts.lock().await;
         cleanup_expired_tool_starts(&mut pending, bcs_protocol::now_ms());
-        pending.get(tool_call_id).cloned()
+        pending
+            .get(&(run_id.to_string(), tool_call_id.to_string()))
+            .cloned()
     }
 
     /// Clone all pending tool starts without consuming or mutating tracker state.
@@ -126,12 +133,15 @@ impl MessageTracker {
         let pending = self.tool_call_starts.lock().await;
         pending
             .iter()
-            .map(|(tool_call_id, info)| (tool_call_id.clone(), info.clone()))
+            .map(|((_, tool_call_id), info)| (tool_call_id.clone(), info.clone()))
             .collect()
     }
 
-    pub async fn remove_tool_call_start(&self, tool_call_id: &str) {
-        self.tool_call_starts.lock().await.remove(tool_call_id);
+    pub async fn remove_tool_call_start(&self, run_id: &str, tool_call_id: &str) {
+        self.tool_call_starts
+            .lock()
+            .await
+            .remove(&(run_id.to_string(), tool_call_id.to_string()));
     }
 
     pub async fn mark_coordination_echo_seen(&self, key: String, now_ms: u64, ttl_ms: u64) -> bool {
@@ -350,7 +360,7 @@ impl MessageTracker {
 }
 
 fn cleanup_expired_tool_starts(
-    pending: &mut HashMap<String, ToolCallStartInfo>,
+    pending: &mut HashMap<(String, String), ToolCallStartInfo>,
     now_ms: u64,
 ) {
     pending.retain(|_, info| !tool_start_expired(info, now_ms));
@@ -410,7 +420,10 @@ mod tests {
             )
             .await;
 
-        assert!(tracker.get_tool_call_start("tool-1").await.is_none());
+        assert!(tracker
+            .get_tool_call_start("run-1", "tool-1")
+            .await
+            .is_none());
     }
 
     #[tokio::test]
@@ -439,7 +452,59 @@ mod tests {
         );
         assert_eq!(tracker.snapshot_tool_call_starts().await.len(), 1);
         assert_eq!(tracker.peek_chat_buf("run-1").await.as_deref(), Some("partial reply"));
-        assert!(tracker.get_tool_call_start("tool-1").await.is_some());
+        assert!(tracker
+            .get_tool_call_start("run-1", "tool-1")
+            .await
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn tool_call_starts_are_isolated_by_run() {
+        let tracker = MessageTracker::new();
+        for run_id in ["run-1", "run-2"] {
+            tracker
+                .cache_tool_call_start(
+                    "shared-tool-id".to_string(),
+                    ToolCallStartInfo {
+                        bot_id: "bot-1".to_string(),
+                        run_id: run_id.to_string(),
+                        session_id: "session-1".to_string(),
+                        name: format!("tool-{run_id}"),
+                        args: Value::Null,
+                        created_at_ms: bcs_protocol::now_ms(),
+                    },
+                )
+                .await;
+        }
+
+        assert_eq!(
+            tracker
+                .get_tool_call_start("run-1", "shared-tool-id")
+                .await
+                .expect("run-1 tool start")
+                .name,
+            "tool-run-1"
+        );
+        assert_eq!(
+            tracker
+                .get_tool_call_start("run-2", "shared-tool-id")
+                .await
+                .expect("run-2 tool start")
+                .name,
+            "tool-run-2"
+        );
+
+        tracker
+            .remove_tool_call_start("run-1", "shared-tool-id")
+            .await;
+        assert!(tracker
+            .get_tool_call_start("run-1", "shared-tool-id")
+            .await
+            .is_none());
+        assert!(tracker
+            .get_tool_call_start("run-2", "shared-tool-id")
+            .await
+            .is_some());
     }
 
     #[tokio::test]

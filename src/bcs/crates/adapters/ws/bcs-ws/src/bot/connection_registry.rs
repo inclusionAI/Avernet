@@ -21,6 +21,19 @@ fn is_unknown_method_code(code: &str) -> bool {
     .any(|candidate| code.eq_ignore_ascii_case(candidate))
 }
 
+pub(crate) fn normalize_client_kind(client_kind: Option<String>) -> Option<String> {
+    client_kind
+        .map(|kind| kind.trim().to_string())
+        .filter(|kind| !kind.is_empty())
+        .map(|kind| {
+            if kind.eq_ignore_ascii_case("native_mcp") {
+                "native_mcp".to_string()
+            } else {
+                kind
+            }
+        })
+}
+
 #[derive(Debug)]
 struct BotConnection {
     tx: mpsc::Sender<String>,
@@ -60,6 +73,7 @@ impl BotConnectionRegistry {
         protocol_version: u32,
         client_kind: Option<String>,
     ) {
+        let client_kind = normalize_client_kind(client_kind);
         self.connections.write().await.insert(
             bot_id,
             BotConnection {

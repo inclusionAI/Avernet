@@ -2610,6 +2610,78 @@ async fn agent_tool_result_coordination_echo_dispatches_task() {
 }
 
 #[tokio::test]
+async fn agent_tool_result_coordination_requires_explicit_success() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.service_mode = Some("master_slave".to_string());
+    support.group.upsert(group).await.unwrap();
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+    let echo = coordination_echo(
+        "bcs_assign_task",
+        json!({
+            "target_bot": "bot-observer",
+            "message": "must not dispatch",
+        }),
+    );
+
+    for (index, is_error) in [
+        None,
+        Some(Value::String("false".to_string())),
+        Some(Value::Bool(true)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let run_id = format!("failed-tool-run-{index}");
+        let tool_call_id = format!("failed-tool-{index}");
+        record_matching_tool_start(
+            &flow,
+            "bot-driver",
+            &run_id,
+            "group-1",
+            "group-1:abcdef12",
+            "Bash",
+            &tool_call_id,
+        )
+        .await;
+        let mut event_payload = agent_tool_result_payload(
+            Some("Bash"),
+            &tool_call_id,
+            &echo,
+            false,
+        );
+        match is_error {
+            Some(value) => event_payload["data"]["isError"] = value,
+            None => {
+                event_payload["data"]
+                    .as_object_mut()
+                    .expect("tool result data")
+                    .remove("isError");
+            }
+        }
+        flow.handle_bot_event(BotEventCommand {
+            bot_id: "bot-driver".to_string(),
+            run_id,
+            group_id: "group-1".to_string(),
+            event_type: "agent".to_string(),
+            event_payload,
+            state: ChatEventState::Delta,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await
+        .unwrap();
+    }
+
+    assert!(support.bot_delivery.kinds().await.is_empty());
+}
+
+#[tokio::test]
 async fn duplicate_agent_tool_result_coordination_echo_dispatches_once() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();

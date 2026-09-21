@@ -892,7 +892,7 @@ async fn bot_v3_connect_negotiates_canonical_events_and_validates_run_sequence()
         Some(serde_json::json!({
             "bot_id": "bot-v3",
             "protocol_version": 3,
-            "client_kind": "native_mcp"
+            "client_kind": " Native_MCP "
         })),
     ));
     dispatch_frame(
@@ -911,6 +911,17 @@ async fn bot_v3_connect_negotiates_canonical_events_and_validates_run_sequence()
     assert_eq!(payload["capabilities"]["unified_run_events"], true);
     assert_eq!(payload["capabilities"]["tool_result_task_intent"], true);
     assert_eq!(payload["capabilities"]["canonical_session_id"], true);
+    assert_eq!(
+        state
+            .dispatch_state
+            .bot_connections
+            .protocol("bot-v3")
+            .await
+            .expect("connected protocol")
+            .client_kind
+            .as_deref(),
+        Some("native_mcp")
+    );
 
     state
         .bot_run_context
@@ -991,6 +1002,73 @@ async fn bot_v3_connect_negotiates_canonical_events_and_validates_run_sequence()
     .await
     .expect_err("V3 sequence must be strictly increasing per run");
     assert!(error.to_string().contains("duplicate or regressed"));
+}
+
+#[tokio::test]
+async fn bot_v3_agent_error_is_adapted_to_terminal_chat_error() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered_bot_id = None;
+
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-v3-error",
+        "bot.connect",
+        Some(serde_json::json!({
+            "bot_id": "bot-v3-error",
+            "protocol_version": 3
+        })),
+    ));
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
+
+    state
+        .bot_run_context
+        .put_context(BotRunContext {
+            run_id: "run-v3-error".to_string(),
+            bot_id: "bot-v3-error".to_string(),
+            group_id: "group-1".to_string(),
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+
+    let event = BcsFrame::Event(EventFrame::new(
+        "agent",
+        Some(serde_json::json!({
+            "runId": "run-v3-error",
+            "sessionId": "group-1:abcdef12",
+            "seq": 1,
+            "ts": 123,
+            "stream": "error",
+            "errorCode": "MODEL_ERROR",
+            "errorMessage": "model failed"
+        })),
+        Some(1),
+    ));
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&event).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+
+    let events = state.message_flow.bot_events.lock().await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "chat.event");
+    assert_eq!(events[0].state, ChatEventState::Error);
+    assert_eq!(events[0].event_payload["state"], "error");
+    assert_eq!(events[0].event_payload["errorCode"], "MODEL_ERROR");
+    assert_eq!(events[0].event_payload["errorMessage"], "model failed");
 }
 
 #[tokio::test]
