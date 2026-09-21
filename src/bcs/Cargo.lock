@@ -309,6 +309,7 @@ dependencies = [
  "bcs-fuse-client",
  "bcs-fusion",
  "bcs-group",
+ "bcs-group-context",
  "bcs-group-store",
  "bcs-http",
  "bcs-human-notify-api",
@@ -1211,6 +1212,17 @@ dependencies = [
  "tokio-test",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "bcs-group-context"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-domain",
+ "bcs-service-api",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

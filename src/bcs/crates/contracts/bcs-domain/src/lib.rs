@@ -17,6 +17,7 @@ pub mod edge_permission;
 pub mod friend;
 pub mod fusion;
 pub mod group;
+pub mod group_context;
 pub mod group_id;
 pub mod invite;
 pub mod message;

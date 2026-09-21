@@ -3,6 +3,7 @@ use std::sync::{Arc, OnceLock};
 use async_trait::async_trait;
 use axum::http::HeaderName;
 use bcs_fuse_client::FuseClient;
+use bcs_group_context::{GroupContextApplication, GroupContextCore, NoopGroupContextRepo};
 pub use bcs_http::state::BotRuntimeTokenResolverPort;
 use bcs_http::state::{
     BcsHttpAuthBotRuntimeTokenResolver, BotRequestPort, ChainUserIdentityPort, HealthPort,
@@ -93,6 +94,11 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
 
     HttpAppState::new(services_with_secret)
         .with_group_application(group_application)
+        .with_group_context_application({
+            let repo = Arc::new(NoopGroupContextRepo);
+            let core = Arc::new(GroupContextCore::new(repo));
+            Arc::new(GroupContextApplication::new(core))
+        })
         .with_session_application(session_application)
         .with_session_file_application(session_file_application)
         .with_bot_runtime_token_resolver(runtime_token_resolver)

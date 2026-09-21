@@ -216,6 +216,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/bots/{id}/admission",
             get(routes::admission::get_admission),
         )
+        .route(
+            "/groupcontext/status",
+            post(routes::group_contexts::status),
+        )
         .route("/groups", get(routes::groups::list_groups).post(routes::groups::create_group))
         .route("/groups/my", get(routes::groups::list_my_groups))
         .route(

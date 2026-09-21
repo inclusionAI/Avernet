@@ -5,6 +5,7 @@ pub mod error;
 pub mod friend;
 pub mod fusion;
 pub mod group;
+pub mod group_context;
 pub mod interaction;
 pub mod message;
 pub mod message_delivery;

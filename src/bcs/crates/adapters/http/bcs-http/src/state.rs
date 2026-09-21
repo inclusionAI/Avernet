@@ -9,6 +9,7 @@ pub use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort};
 use bcs_service_api::application::v1::{
     GroupService, InternalBotAttributesService, SessionFileApplicationService, SessionService,
 };
+use bcs_service_api::application::group_context::GroupContextService;
 use bcs_service_api::{ProviderCredentialRepoPort, ProviderStreamGrayList};
 use bcs_services_container::Services;
 use std::sync::Arc;
@@ -434,6 +435,7 @@ fn purge_expired(runs: &mut HashMap<String, AdminInvocationRun>) {
 pub struct HttpAppState {
     pub services: Services,
     pub group_application: Option<Arc<dyn GroupService>>,
+    pub group_context_application: Option<Arc<dyn GroupContextService>>,
     pub session_application: Option<Arc<dyn SessionService>>,
     pub session_file_application: Option<Arc<dyn SessionFileApplicationService>>,
     pub internal_bot_attributes_service: Option<Arc<dyn InternalBotAttributesService>>,
@@ -491,6 +493,7 @@ impl HttpAppState {
         Self {
             services,
             group_application: None,
+            group_context_application: None,
             session_application: None,
             session_file_application: None,
             internal_bot_attributes_service: None,
@@ -557,6 +560,14 @@ impl HttpAppState {
 
     pub fn with_group_application(mut self, service: Arc<dyn GroupService>) -> Self {
         self.group_application = Some(service);
+        self
+    }
+
+    pub fn with_group_context_application(
+        mut self,
+        service: Arc<dyn GroupContextService>,
+    ) -> Self {
+        self.group_context_application = Some(service);
         self
     }
 
