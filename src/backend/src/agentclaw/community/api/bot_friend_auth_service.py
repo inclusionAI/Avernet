@@ -6,7 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class FriendAuthSyncServiceProtocol(Protocol):
-    """Sync a human→bot friend relationship to AceAgent (via AuthRelationshipPlugin)."""
+    """Sync a human→bot friend relationship to the authorization relationship service (via AuthRelationshipPlugin)."""
 
     def sync(
         self,

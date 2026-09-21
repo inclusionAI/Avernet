@@ -238,6 +238,7 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "CannotRemoveSelfError", "BotNotServiceTypeError",
     "LockNotHeldError", "LockReleaseDeniedError",
     "PatchEngineError",
+    "FriendAuthSyncError", "BotNotFoundError", "AgentCodeUnavailableError", "AuthRelationshipSyncError",
     # Domain dataclasses / context records (not service instances):
     "OperatorContext", "ChannelRecord",
     "BatchSyncReport", "SyncResult",

@@ -1663,11 +1663,11 @@ struct FriendListConnect {
 #[async_trait]
 impl bcs_service_api::application::connect::ConnectService for FriendListConnect {
     async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<bcs_service_api::application::connect::ConnectResult> { unreachable!() }
-    async fn approve(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> { unreachable!() }
+    async fn approve(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
     async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> { unreachable!() }
     async fn cancel(&self, _: &str) -> ServiceResult<()> { unreachable!() }
     async fn get_request(&self, _: &str) -> ServiceResult<bcs_domain::edge_permission::PermissionRequest> { unreachable!() }
-    async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> { unreachable!() }
+    async fn revoke_friend(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { unreachable!() }
     async fn list_requests(&self, _: &str, _: bcs_service_api::application::connect::RequestDirection, _: Option<bcs_domain::edge_permission::RequestStatus>, _: u32, _: u32) -> ServiceResult<bcs_service_api::application::connect::RequestsPage> { unreachable!() }
     async fn list_friends(&self, _: &str) -> ServiceResult<Vec<bcs_domain::edge_permission::FriendListEntry>> {
         panic!("V1 must not fetch the full friend list")

@@ -1,4 +1,4 @@
-"""Sync human→bot friend relationships to AceAgent on behalf of BCS.
+"""Sync human→bot friend relationships to the authorization relationship service on behalf of BCS.
 
 Reuses ``resolve_agent_code`` (bot_management.utils) to resolve the bot's
 agent_code internally, then delegates to ``AuthRelationshipPlugin``.
@@ -24,7 +24,7 @@ class AgentCodeUnavailableError(FriendAuthSyncError):
 
 
 class AuthRelationshipSyncError(FriendAuthSyncError):
-    """AceAgent call ultimately failed (after plugin-internal retries)."""
+    """Authorization relationship call ultimately failed (after plugin-internal retries)."""
 
 
 from typing import Any
