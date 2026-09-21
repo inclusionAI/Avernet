@@ -120,6 +120,31 @@ async fn group_context_delivery_config_validates_create_and_update() -> TestResu
     Ok(())
 }
 
+#[test]
+fn group_context_delivery_config_resolves_supported_and_defensive_values() {
+    for (config, expected) in [
+        (serde_json::json!({}), None),
+        (
+            serde_json::json!({ "group_context_delivery": "send" }),
+            Some(bcs_domain::DeliveryType::Send),
+        ),
+        (
+            serde_json::json!({ "group_context_delivery": "inject" }),
+            Some(bcs_domain::DeliveryType::Inject),
+        ),
+        (
+            serde_json::json!({ "group_context_delivery": "unsupported" }),
+            None,
+        ),
+        (
+            serde_json::json!({ "group_context_delivery": 1 }),
+            None,
+        ),
+    ] {
+        assert_eq!(crate::binding_group_context_delivery(&config), expected);
+    }
+}
+
 #[tokio::test]
 async fn inbound_bot_target_does_not_inject_initial_group_context() -> TestResult {
     let harness = TestHarness::new(manager_group("group_1")).await?;
