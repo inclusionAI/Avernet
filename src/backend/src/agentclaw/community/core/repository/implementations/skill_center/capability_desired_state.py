@@ -21,6 +21,7 @@ from agentclaw.community.core.repository.implementations.skill_center.default_sk
     global_default_scope,
 )
 from agentclaw.community.core.repository.implementations.skill_center.tables import (
+    bot_mcp_configs,
     default_exclusions,
     mcp_installations,
     skill_installations,
@@ -92,6 +93,9 @@ class CapabilityDesiredStateRepository(
                 session, bot_id=bot_id, owner_id=owner_id, env=env
             )
             mcps = mcp_installations.uninstall_all(
+                session, bot_id=bot_id, owner_id=owner_id, env=env
+            )
+            bot_mcp_configs.delete_all(
                 session, bot_id=bot_id, owner_id=owner_id, env=env
             )
             return {"skills": skills, "mcps": mcps}
@@ -604,6 +608,13 @@ class CapabilityDesiredStateRepository(
                     env=get_current_env(),
                     server_codes=mcp_codes,
                 )
+                bot_mcp_configs.delete(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                    server_codes=mcp_codes,
+                )
             session.flush()
             # The projection needs to know which MCPs this Set just claimed
             # or released, and they are only knowable under the row lock this
@@ -710,6 +721,24 @@ class CapabilityDesiredStateRepository(
                 )
             mcp_installations.uninstall_all(
                 session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+            )
+            # Compensation restores the prior installed set. Keep overrides for
+            # codes that are about to be restored, but remove orphan rows for
+            # codes the restored desired state no longer owns.
+            existing_override_codes = set(
+                bot_mcp_configs.get_all(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                )
+            )
+            bot_mcp_configs.delete(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                env=get_current_env(),
+                server_codes=existing_override_codes - set(state.mcp_installations),
             )
             for server_code in sorted(state.mcp_installations):
                 mcp_installations.install(

@@ -1,30 +1,30 @@
-"""``mcp`` → ``DirectActivationService``. Converges the enabled-server set.
+"""``mcp`` → ``DirectActivationService``. Converges installation + Bot config.
 
-**The entry shape.** ``identity`` for this category is the entry's
-``server_code``, and that is the entry's only key: this category fetches
-nothing, so it has no source spelling at all::
+**The entry shape.** ``identity`` is ``server_code``; optional ``config`` is a
+closed Bot-scoped connection override. This category fetches no content::
 
     manifest:
       mcp:
         - server_code: gh
+          config:
+            endpoint_env: PRE
+            transport_protocol: STREAMABLE_HTTP
         - server_code: slack
 
-An entry reaches ``resolve`` as ``{"server_code": "gh"}``. A category
+An entry reaches ``resolve`` with the normalized config preserved. A category
 declared empty (``mcp: []``) deactivates every server the manifest owns.
 
 The area this overwrites is the enabled-server set for this category —
 "the enabled-server set" — the MCP servers active on *this bot*, stored in
 ``ac_bot_mcp_installation`` and keyed ``(bot_id, owner_id, env, server_code)``.
 Declared and not active ⇒ activated. Active and no longer declared ⇒
-deactivated. Already active ⇒ ``unchanged``, and nothing is called.
+deactivated. A changed or removed override ⇒ ``updated``. Matching installation
+and override ⇒ ``unchanged``, and nothing is called.
 
-**Nothing here touches account-scoped MCP configuration.** ``ac_user_mcp_config``
-is keyed ``(user_id, server_code)`` and writing it calls
-``sync_mcp_detail_to_all_bots`` — so a per-bot apply reaching that write would
-change configuration for every bot the owner has. That is why ``mcp[].config``
-left schema v1 (see ``manifest-schema`` §3.1), and a structural test asserts this
-module cannot reach ``update_user_unified_config``, ``write_unified_config`` or
-``sync_mcp_detail_to_all_bots``.
+**Nothing here writes account-scoped MCP configuration.** Explicit values go to
+``ac_bot_mcp_config`` in the same Desired-State transaction as the installation.
+``ac_user_mcp_config`` remains the inherited default and is never mutated by a
+Manifest apply.
 
 **Deactivating servers a user turned on through the UI is intended**, and is the
 cost §3.2 accepted when it made a declared category overwrite its area. It is
@@ -52,25 +52,37 @@ from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCa
 from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
     MCPAuthServiceProtocol,
 )
+from agentclaw.community.core.mcp.mcp_config_service_protocol import (
+    MCPConfigServiceProtocol,
+)
 from agentclaw.community.core.ports.activation_port import ActivationPort
+
+
+def _comparison_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalize only semantics that HTTP defines as case-insensitive."""
+    if config is None:
+        return None
+    comparable = dict(config)
+    headers = comparable.get("headers")
+    if isinstance(headers, dict):
+        comparable["headers"] = {str(name).lower(): value for name, value in headers.items()}
+    return comparable
 
 
 class McpMaterialiser(Materialiser):
     """Converges this bot's enabled MCP servers toward the declaration.
 
-    ``identity`` and ``Intent.value`` are both the server code — there is
-    nothing else to write, so the value carries no extra shape::
+    ``identity`` is the server code and ``Intent.value`` is the optional
+    normalized Bot override::
 
-        resolve -> ResolveResult(intents=(Intent("gh", "gh"),))
+        resolve -> ResolveResult(intents=(Intent("gh", {"headers": {}}),))
         plan    -> CategoryPlan(
-                       entries=(PlannedEntry(Intent("gh", "gh"), "unchanged"),),
+                       entries=(PlannedEntry(Intent("gh", {"headers": {}}), "updated"),),
                        removals=("old",))
-        write   -> (EntryResult(ManifestCategory.MCP, "gh",
-                                EntryOutcome.UNCHANGED),)
+        write   -> (EntryResult(ManifestCategory.MCP, "gh", EntryOutcome.UPDATED),)
 
-    ``plan`` answers only ``unchanged`` or ``created``: a server is either in
-    the installed set or it is not, so there is no third state to call
-    ``updated``.
+    ``plan`` compares both the installed set and persisted override, so it can
+    answer ``created``, ``updated`` or ``unchanged``.
     """
 
     construct = ManifestCategory.MCP
@@ -79,11 +91,13 @@ class McpMaterialiser(Materialiser):
         self,
         activation_service: ActivationPort,
         mcp_auth_service: MCPAuthServiceProtocol,
+        mcp_config_service: MCPConfigServiceProtocol,
     ) -> None:
         self._activation = activation_service
         # The *same* permission service ``DirectActivationService`` consults, so
         # the answer here cannot diverge from the answer the write would get.
         self._mcp_auth = mcp_auth_service
+        self._mcp_config = mcp_config_service
 
     async def resolve(
         self, ctx: ApplyContext, entries: Sequence[dict[str, Any]]
@@ -117,6 +131,18 @@ class McpMaterialiser(Materialiser):
         failures: list[ResolveFailure] = []
         seen: set[str] = set()
         platform_owned = self._platform_owned(ctx)
+        declared_codes = {
+            entry.get("server_code")
+            for entry in entries
+            if isinstance(entry.get("server_code"), str)
+            and entry.get("server_code")
+        }
+        set_managed = self._activation.set_managed_mcp_codes(
+            bot_id=ctx.bot_id,
+            owner_id=ctx.owner_id,
+            actor_id=ctx.actor_id,
+            server_codes=declared_codes,
+        )
 
         for index, entry in enumerate(entries):
             server_code = entry.get("server_code") if isinstance(entry, dict) else None
@@ -154,6 +180,15 @@ class McpMaterialiser(Materialiser):
                     )
                 )
                 continue
+            if server_code in set_managed:
+                failures.append(
+                    ResolveFailure(
+                        server_code,
+                        "this MCP server is managed by a SkillSet and cannot be "
+                        "configured directly by a manifest",
+                    )
+                )
+                continue
             if not self._permitted(ctx, server_code):
                 failures.append(
                     ResolveFailure(
@@ -163,7 +198,29 @@ class McpMaterialiser(Materialiser):
                     )
                 )
                 continue
-            intents.append(Intent(server_code, server_code))
+            config = entry.get("config")
+            normalized_config = (
+                config if isinstance(config, dict) and config else None
+            )
+            verdict = self._mcp_config.validate_bot_override(
+                user_id=ctx.owner_id,
+                server_code=server_code,
+                config=normalized_config,
+                engine_type=ctx.engine_type,
+            )
+            if not verdict.get("valid"):
+                failures.append(
+                    ResolveFailure(
+                        server_code, str(verdict.get("error") or "invalid config")
+                    )
+                )
+                continue
+            intents.append(
+                Intent(
+                    server_code,
+                    normalized_config,
+                )
+            )
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
@@ -224,14 +281,33 @@ class McpMaterialiser(Materialiser):
             )
         ) - self._platform_owned(ctx)
         declared = {intent.identity for intent in intents}
+        set_managed = self._activation.set_managed_mcp_codes(
+            bot_id=ctx.bot_id,
+            owner_id=ctx.owner_id,
+            actor_id=ctx.actor_id,
+            server_codes=current | declared,
+        )
+        if set_managed:
+            raise ValueError(
+                "Manifest cannot directly manage SkillSet-owned MCP servers: "
+                + ", ".join(sorted(set_managed))
+            )
+        overrides = self._activation.get_mcp_overrides(
+            bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
+        )
 
         planned = tuple(
             PlannedEntry(
                 intent,
                 (
-                    EntryOutcome.UNCHANGED.value
-                    if intent.identity in current
-                    else EntryOutcome.CREATED.value
+                    EntryOutcome.CREATED.value
+                    if intent.identity not in current
+                    else (
+                        EntryOutcome.UNCHANGED.value
+                        if _comparison_config(overrides.get(intent.identity))
+                        == _comparison_config(intent.value)
+                        else EntryOutcome.UPDATED.value
+                    )
                 ),
             )
             for intent in intents
@@ -259,8 +335,12 @@ class McpMaterialiser(Materialiser):
                     )
                 )
                 continue
-            await self._activation.activate_mcp(
+            # One UoW owns installation and override convergence. Even a newly
+            # installed bare entry must pass ``config=None`` so a historical
+            # orphan override cannot survive and silently regain effect.
+            await self._activation.set_mcp_override(
                 server_code=planned.intent.identity,
+                config=planned.intent.value,
                 bot_id=ctx.bot_id,
                 owner_id=ctx.owner_id,
                 actor_id=ctx.actor_id,

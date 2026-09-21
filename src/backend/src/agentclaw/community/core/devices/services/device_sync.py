@@ -108,6 +108,8 @@ class DeviceSync(Protocol):
         custom_headers: Optional[dict[str, str]] = None,
         endpoint_env: str = "PROD",
         transport_protocol: Optional[str] = None,
+        url_override: Optional[str] = None,
+        strict_transport_protocol: bool = False,
     ) -> bool:
         """Push a single MCP server config to the device. Returns ``True`` on
         success. May raise on transport error (parity with the legacy impl)."""

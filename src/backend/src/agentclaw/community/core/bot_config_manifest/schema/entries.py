@@ -14,8 +14,8 @@ two copies of one grammar drift, and the document is the one users read.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
@@ -81,26 +81,15 @@ CATEGORY_ENTRY_KEYS: dict[ManifestCategory, frozenset[str]] = {
     ManifestCategory.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack"},
     ManifestCategory.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
     ManifestCategory.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
-    # A registry reference, not a fetch: no source-side field applies.
-    #
-    # ``config`` was here and is deliberately gone. manifest-schema §3.1 defined
-    # it as per-bot configuration "the same shape as the existing MCP config
-    # API" — but that API writes ``ac_user_mcp_config``, keyed
-    # ``(user_id, server_code)``, and its write calls
-    # ``sync_mcp_detail_to_all_bots``. Materialising a declared ``config`` would
-    # therefore make applying ONE bot's manifest change MCP configuration for
-    # EVERY bot its owner has: a blast radius no other category has, and one
-    # §3.2's per-category area rule does not sanction. Its payload is also
-    # ``api_key`` and ``custom_headers``, which design §4.5 forbids a manifest
-    # from carrying at all.
-    #
-    # What is genuinely per-bot is the enabled-server set
-    # (``ac_bot_mcp_installation``) — exactly what §3.2 names as this category's
-    # area, and exactly what apply converges. So a v1 entry is a bare
-    # ``server_code``, and ``config`` is refused by the ``unknown_field`` path
-    # below the same way the retired ``cli_tools.entrypoints`` is.
-    ManifestCategory.MCP: frozenset({"server_code"}),
+    # A registry reference with an optional Bot-scoped connection override.
+    ManifestCategory.MCP: frozenset({"server_code", "config"}),
 }
+
+_MCP_CONFIG_KEYS = frozenset({"url", "headers", "endpoint_env", "transport_protocol"})
+_MCP_ENDPOINT_ENVS = frozenset({"PROD", "PRE"})
+_MCP_TRANSPORT_PROTOCOLS = frozenset({"SSE", "STREAMABLE_HTTP"})
+_MAX_MCP_HEADER_NAME_CHARS = 256
+_MAX_MCP_HEADER_VALUE_CHARS = 2000
 
 #: The four mutually exclusive ways an entry can name its content (schema §2).
 _SOURCE_SELECTORS = ("from", "source", "content")
@@ -560,7 +549,7 @@ def check_source_subpath(
 
 
 def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> None:
-    """An MCP entry is a registry reference; it never carries a credential.
+    """Validate one registry reference and its optional Bot override.
 
     Whether the ``server_code`` exists and whether the tenant may enable it are
     **apply-time** questions (schema §3.1 reuses the existing permission check),
@@ -576,6 +565,112 @@ def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> No
             "missing_server_code",
             "an mcp entry must name a registry 'server_code'",
         )
+    if "config" not in entry:
+        return
+    config = entry.get("config")
+    config_location = f"{location}.config"
+    if not isinstance(config, dict):
+        ctx.add(config_location, "invalid_mcp_config", "mcp config must be an object")
+        return
+    for key in config:
+        if key not in _MCP_CONFIG_KEYS:
+            ctx.add(
+                f"{config_location}.{key}",
+                "unknown_field",
+                f"unknown field '{key}' for an mcp config",
+            )
+
+    if "url" in config:
+        url = config.get("url")
+        parsed = None
+        invalid_url_text = (
+            not isinstance(url, str)
+            or not url
+            or any(character.isspace() or ord(character) < 32 for character in url)
+        )
+        if not invalid_url_text:
+            try:
+                parsed = urlsplit(url)
+                # Accessing these properties performs validation that
+                # ``urlsplit`` otherwise defers (malformed IPv6 / port).
+                _ = parsed.hostname
+                _ = parsed.port
+            except ValueError:
+                parsed = None
+        if (
+            invalid_url_text
+            or parsed is None
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or not parsed.hostname
+        ):
+            ctx.add(
+                f"{config_location}.url",
+                "invalid_mcp_url",
+                "mcp url must be an absolute http or https URL",
+            )
+
+    endpoint_env = config.get("endpoint_env")
+    if "endpoint_env" in config and endpoint_env not in _MCP_ENDPOINT_ENVS:
+        ctx.add(
+            f"{config_location}.endpoint_env",
+            "invalid_endpoint_env",
+            "endpoint_env must be PROD or PRE",
+        )
+
+    protocol = config.get("transport_protocol")
+    if isinstance(protocol, str):
+        protocol = protocol.upper()
+        config["transport_protocol"] = protocol
+    if "transport_protocol" in config and protocol not in _MCP_TRANSPORT_PROTOCOLS:
+        ctx.add(
+            f"{config_location}.transport_protocol",
+            "invalid_transport_protocol",
+            "transport_protocol must be SSE or STREAMABLE_HTTP",
+        )
+
+    if "headers" in config:
+        _validate_mcp_headers(ctx, f"{config_location}.headers", config.get("headers"))
+
+
+def _validate_mcp_headers(ctx: Context, location: str, headers: Any) -> None:
+    if not isinstance(headers, dict):
+        ctx.add(
+            location, "invalid_headers", "headers must be an object of string values"
+        )
+        return
+    seen: set[str] = set()
+    for name, value in headers.items():
+        field_location = f"{location}.{name}"
+        folded = name.lower() if isinstance(name, str) else ""
+        if (
+            not isinstance(name, str)
+            or not name
+            or not name.strip()
+            or len(name) > _MAX_MCP_HEADER_NAME_CHARS
+            or "\r" in name
+            or "\n" in name
+        ):
+            ctx.add(field_location, "invalid_header_name", "header name is invalid")
+            continue
+        if folded in seen:
+            ctx.add(
+                field_location,
+                "duplicate_header_name",
+                "header names are case-insensitive and must be unique",
+            )
+        seen.add(folded)
+        if (
+            not isinstance(value, str)
+            or len(value) > _MAX_MCP_HEADER_VALUE_CHARS
+            or "\r" in value
+            or "\n" in value
+        ):
+            ctx.add(
+                field_location,
+                "invalid_header_value",
+                "header value must be a string without CR or LF",
+            )
 
 
 def validate_resource_entry(

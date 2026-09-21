@@ -343,6 +343,7 @@ def test_the_materialiser_is_registered_under_its_own_construct() -> None:
     registry = build_materialisers(
         script_service=object(), activation_service=object(),
         mcp_auth_service=object(), identity_service=object(),
+        mcp_config_service=object(),
         upload_service=object(), capability_reader=object(),
         package_validator=object(), entry_fetcher=object(),
         resource_service=object(), cli_tool_service=object(),

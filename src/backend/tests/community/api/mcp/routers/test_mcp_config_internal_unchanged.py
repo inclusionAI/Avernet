@@ -72,11 +72,25 @@ def repo(engine):
 @pytest.fixture
 def config_service(repo):
     mcp_center = MagicMock()
-    mcp_center.get_mcp_detail.return_value = {"serverCode": "mcp.third.weather"}
+    mcp_center.get_mcp_detail.return_value = {
+        "serverCode": "mcp.third.weather",
+        "runMode": "REMOTE",
+        "endpoints": [
+            {
+                "env": "PROD",
+                "networkType": "INTERNET",
+                "transportProtocol": "SSE",
+            }
+        ],
+    }
+    bot_config_repo = MagicMock()
+    bot_config_repo.list_by_owner_and_server_code.return_value = {}
     return MCPConfigService(
         user_mcp_config_repo=repo,
+        bot_mcp_config_repo=bot_config_repo,
         mcp_center=mcp_center,
         bot_repo=MagicMock(),
+        capability_reader=MagicMock(),
         mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
         secret_resolver=MagicMock(),
     )

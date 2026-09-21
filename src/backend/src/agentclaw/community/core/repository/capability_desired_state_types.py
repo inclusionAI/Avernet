@@ -54,6 +54,8 @@ class DesiredStateMutation:
     field is read by the command to build its ``ProjectionScope`` and goes no
     further.
     """
+    updated_mcp_codes: frozenset[str] = frozenset()
+    """MCP codes whose Bot-scoped connection override changed."""
 
 
 @dataclass(frozen=True)

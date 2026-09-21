@@ -114,6 +114,7 @@ def test_every_registered_materialiser_has_a_place_in_the_order():
             script_service=object(),
             activation_service=object(),
             mcp_auth_service=object(),
+            mcp_config_service=object(),
             identity_service=object(),
             upload_service=object(),
             capability_reader=object(),

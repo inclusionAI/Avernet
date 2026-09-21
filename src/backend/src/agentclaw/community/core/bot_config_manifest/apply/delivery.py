@@ -82,6 +82,9 @@ from agentclaw.community.core.bot_startup_script.bot_startup_script_service_prot
     BotStartupScriptServiceProtocol,
 )
 from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServiceProtocol
+from agentclaw.community.core.mcp.mcp_config_service_protocol import (
+    MCPConfigServiceProtocol,
+)
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
@@ -176,6 +179,7 @@ class MaterialiserPorts:
     #: the family's delivery port — so the ``cli_tools`` materialiser takes one
     #: dependency and the family difference stays here, where W6 put it.
     cli_tool_service: CliToolService
+    mcp_config_service: MCPConfigServiceProtocol
 
     def as_kwargs(self) -> dict[str, Any]:
         """The same ten fields as a plain dict, ready to splat into
@@ -193,6 +197,7 @@ class MaterialiserPorts:
             "entry_fetcher": self.entry_fetcher,
             "resource_service": self.resource_service,
             "cli_tool_service": self.cli_tool_service,
+            "mcp_config_service": self.mcp_config_service,
         }
 
 

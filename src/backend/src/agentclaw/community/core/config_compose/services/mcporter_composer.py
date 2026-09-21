@@ -163,7 +163,10 @@ class McporterComposer:
             item.endpoint_env,
             item.transport_protocol,
             item.network_priority,
+            item.strict_transport_protocol,
         )
+        if item.url_override:
+            endpoint = item.url_override
         endpoint, headers = self._inline_secrets(endpoint, item.api_key, item.headers)
 
         return McpServerRef(
@@ -229,6 +232,7 @@ class McporterComposer:
         endpoint_env: str,
         transport_protocol: str | None,
         network_priority: tuple[str, ...] | None = None,
+        strict_transport_protocol: bool = False,
     ) -> tuple[str, str]:
         """Pick the (url, transport) for a REMOTE MCP, mirroring device rules.
 
@@ -263,7 +267,12 @@ class McporterComposer:
 
         if network_priority:
             return self._select_by_priority(
-                server_code, endpoints, endpoint_env, network_priority
+                server_code,
+                endpoints,
+                endpoint_env,
+                network_priority,
+                transport_protocol=transport_protocol,
+                strict_transport_protocol=strict_transport_protocol,
             )
 
         valid = [
@@ -288,6 +297,11 @@ class McporterComposer:
                 ),
                 None,
             )
+            if ep is None and strict_transport_protocol:
+                raise McporterComposeError(
+                    f"MCP {server_code}: no usable {transport_protocol} endpoint "
+                    f"in {endpoint_env}."
+                )
         if ep is None:
             ep = next(
                 (
@@ -308,6 +322,9 @@ class McporterComposer:
         endpoints: list[dict[str, Any]],
         endpoint_env: str,
         network_priority: tuple[str, ...],
+        *,
+        transport_protocol: str | None = None,
+        strict_transport_protocol: bool = False,
     ) -> tuple[str, str]:
         """Pick the (url, transport) deterministically for a priority engine.
 
@@ -345,6 +362,18 @@ class McporterComposer:
                 f"{len(endpoints)} endpoint(s), none on a reachable network for "
                 "this env."
             )
+
+        if strict_transport_protocol and transport_protocol:
+            candidates = [
+                ep
+                for ep in candidates
+                if ep.get("transportProtocol") == transport_protocol
+            ]
+            if not candidates:
+                raise McporterComposeError(
+                    f"MCP {server_code}: no usable {transport_protocol} endpoint "
+                    f"in {endpoint_env}."
+                )
 
         def _key(ep: dict[str, Any]) -> tuple[int, int]:
             tp = ep.get("transportProtocol", "SSE")

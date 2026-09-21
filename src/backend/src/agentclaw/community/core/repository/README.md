@@ -114,9 +114,12 @@ provides:
   - RenderScreenRepository
   - TemplateRepository
   - UserMCPConfigRepository
+  - BotMCPConfigRepositoryProtocol
+  - BotMCPConfigRepository
   - SourceCredentialRepository
   - CapabilityDesiredStateRepositoryProtocol
   - CapabilityDesiredStateRepository
+  - MCPDefaultExclusionReaderProtocol
   - SkillEditorRequestRepositoryProtocol
   # spaces / market_favorites
   - SpaceRepositoryProtocol

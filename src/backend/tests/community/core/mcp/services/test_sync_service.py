@@ -103,9 +103,15 @@ def _make_sync_service(
                 "clis": existing_clis if isinstance(existing_clis, list) else [],
             }
     service.mcp_config_service = mcp_config_service or MagicMock()
-    service.mcp_config_service.build_mcp_sync_payload.return_value = (
-        None, {}, "PROD", None
-    )
+    if mcp_config_service is None:
+        service.mcp_config_service.build_mcp_sync_payload.return_value = (
+            None, {}, "PROD", None
+        )
+        service.mcp_config_service.get_bot_override.return_value = None
+        service.mcp_config_service.validate_bot_override.return_value = {
+            "valid": True,
+            "error": None,
+        }
     service.bot_repository = bot_repository or MagicMock()
     if bot_repository is None:
         service.bot_repository.get_by_id_and_owner.return_value = {"id": 42, "ext": {}}
@@ -1034,6 +1040,166 @@ class TestSyncMcpDetailToAllBots:
         plugin.sync_single_mcp.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_forwards_bot_url_override_to_device_payload(self):
+        plugin = _make_plugin()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        config = MagicMock()
+        config.build_mcp_sync_payload.return_value = (None, {}, "PROD", "SSE")
+        config.get_bot_override.return_value = {"url": "https://bot.example.test/mcp"}
+        bot_repo = MagicMock()
+        bot_repo.list_by_entity.return_value = (1, [{"bot_id": "bot1"}])
+        service = _make_sync_service(
+            bot_repository=bot_repo,
+            mcp_config_service=config,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1",
+            server_code="mcp.x",
+            mcp_data={"server_code": "mcp.x"},
+            entity_id="u1",
+            entity_type="staff",
+        )
+
+        assert result["success"] is True
+        assert config.build_mcp_sync_payload.call_args.kwargs["bot_override"] == {
+            "url": "https://bot.example.test/mcp"
+        }
+        assert plugin.sync_single_mcp.call_args.kwargs["url_override"] == (
+            "https://bot.example.test/mcp"
+        )
+        assert (
+            plugin.sync_single_mcp.call_args.kwargs["strict_transport_protocol"]
+            is False
+        )
+
+    @pytest.mark.asyncio
+    async def test_marks_manifest_transport_selection_as_strict(self):
+        plugin = _make_plugin()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        config = MagicMock()
+        config.build_mcp_sync_payload.return_value = (None, {}, "PRE", "SSE")
+        config.get_bot_override.return_value = {"transport_protocol": "SSE"}
+        bot_repo = MagicMock()
+        bot_repo.list_by_entity.return_value = (1, [{"bot_id": "bot1"}])
+        service = _make_sync_service(
+            bot_repository=bot_repo,
+            mcp_config_service=config,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1",
+            server_code="mcp.x",
+            mcp_data={"server_code": "mcp.x"},
+            entity_id="u1",
+            entity_type="staff",
+        )
+
+        assert result["success"] is True
+        assert (
+            plugin.sync_single_mcp.call_args.kwargs["strict_transport_protocol"] is True
+        )
+
+    @pytest.mark.asyncio
+    async def test_manifest_endpoint_makes_inherited_transport_strict(self):
+        plugin = _make_plugin()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        config = MagicMock()
+        config.build_mcp_sync_payload.return_value = (None, {}, "PRE", "SSE")
+        config.get_bot_override.return_value = {"endpoint_env": "PRE"}
+        config.validate_bot_override.return_value = {"valid": True, "error": None}
+        bot_repo = MagicMock()
+        bot_repo.list_by_entity.return_value = (1, [{"bot_id": "bot1"}])
+        service = _make_sync_service(
+            bot_repository=bot_repo,
+            mcp_config_service=config,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1",
+            server_code="mcp.x",
+            mcp_data={"server_code": "mcp.x"},
+            entity_id="u1",
+            entity_type="staff",
+        )
+
+        assert result["success"] is True
+        assert (
+            plugin.sync_single_mcp.call_args.kwargs["strict_transport_protocol"] is True
+        )
+
+    @pytest.mark.asyncio
+    async def test_center_drift_blocks_a_persisted_override_before_device_write(self):
+        plugin = _make_plugin()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        config = MagicMock()
+        config.get_bot_override.return_value = {"endpoint_env": "PRE"}
+        config.validate_bot_override.return_value = {
+            "valid": False,
+            "error": "MCP 在 PRE 环境没有可用端点",
+        }
+        bot_repo = MagicMock()
+        bot_repo.list_by_entity.return_value = (1, [{"bot_id": "bot1"}])
+        service = _make_sync_service(
+            bot_repository=bot_repo,
+            mcp_config_service=config,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1",
+            server_code="mcp.x",
+            mcp_data={"server_code": "mcp.x"},
+            entity_id="u1",
+            entity_type="staff",
+        )
+
+        assert result["success"] is False
+        plugin.sync_single_mcp.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_user_config_fanout_validates_with_each_resolved_bot_engine(self):
+        plugin = _make_plugin()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        resolver.resolve_for_bot.return_value = DeviceContext(
+            provider="teclaw",
+            conn_info={"engine_type": "teclaw"},
+            binding_id=42,
+            bot_id="bot1",
+            user_id="u1",
+        )
+        config = MagicMock()
+        config.get_bot_override.return_value = {"endpoint_env": "PRE"}
+        config.validate_bot_override.return_value = {"valid": True, "error": None}
+        config.build_mcp_sync_payload.return_value = (None, {}, "PRE", "SSE")
+        bot_repo = MagicMock()
+        bot_repo.list_by_entity.return_value = (1, [{"bot_id": "bot1"}])
+        service = _make_sync_service(
+            bot_repository=bot_repo,
+            mcp_config_service=config,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1",
+            server_code="mcp.x",
+            mcp_data={"server_code": "mcp.x"},
+            entity_id="u1",
+            entity_type="staff",
+        )
+
+        assert result["success"] is True
+        assert config.validate_bot_override.call_args.kwargs["engine_type"] == "teclaw"
+
+    @pytest.mark.asyncio
     async def test_all_devices_fail_returns_failure(self):
         """When every device that has the MCP fails to sync, the batch reports
         failure (→ caller rolls back). Uniform across providers (Option B)."""
@@ -1080,6 +1246,61 @@ class TestSyncMcpDetailToAllBots:
 
         assert result["success"] is True
         assert result["sync_results"][0]["reason"] == "缺少设备连接信息"
+
+    @pytest.mark.asyncio
+    async def test_fanout_pages_through_every_bot(self):
+        plugin = _make_plugin(has_mcp=MagicMock(return_value=False))
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        bot_repo = MagicMock()
+
+        def page(*, page, **_kwargs):
+            if page == 1:
+                return 101, [{"bot_id": f"bot-{index}"} for index in range(100)]
+            if page == 2:
+                return 101, [{"bot_id": "bot-100"}]
+            return 101, []
+
+        bot_repo.list_by_entity.side_effect = page
+        service = _make_sync_service(
+            bot_repository=bot_repo,
+            resolver=resolver,
+            dispatcher=dispatcher,
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1",
+            server_code="mcp.x",
+            mcp_data={"server_code": "mcp.x"},
+            entity_id="u1",
+            entity_type="staff",
+        )
+
+        assert result["success"] is True
+        assert len(result["sync_results"]) == 101
+        assert [call.kwargs["page"] for call in bot_repo.list_by_entity.call_args_list] == [1, 2]
+
+    @pytest.mark.asyncio
+    async def test_fanout_page_failure_does_not_report_partial_success(self):
+        bot_repo = MagicMock()
+
+        def page(*, page, **_kwargs):
+            if page == 1:
+                return 101, [{"bot_id": f"bot-{index}"} for index in range(100)]
+            raise RuntimeError("page unavailable")
+
+        bot_repo.list_by_entity.side_effect = page
+        service = _make_sync_service(bot_repository=bot_repo)
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1",
+            server_code="mcp.x",
+            mcp_data={"server_code": "mcp.x"},
+            entity_id="u1",
+            entity_type="staff",
+        )
+
+        assert result["success"] is False
+        assert result["sync_results"] == []
 
 
 class TestSyncMcpDetailsForBot:

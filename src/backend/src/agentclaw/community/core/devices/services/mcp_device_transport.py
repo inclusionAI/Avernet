@@ -175,12 +175,16 @@ def push_single_mcp(
         custom_headers: Optional[Dict[str, str]] = None,
         endpoint_env: str = "PROD",
         transport_protocol: Optional[str] = None,
+        url_override: Optional[str] = None,
+        strict_transport_protocol: bool = False,
 ) -> bool:
     """增量同步：将单个 MCP 添加（或更新）到设备。"""
     try:
         config = convert_to_device_format(
             mcp_data, api_key=api_key, custom_headers=custom_headers,
             endpoint_env=endpoint_env, transport_protocol=transport_protocol,
+            url_override=url_override,
+            strict_transport_protocol=strict_transport_protocol,
         )
 
         try:
