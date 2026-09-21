@@ -199,6 +199,75 @@ def test_prepared_migration_is_not_promoted_to_native_active(tmp_path: Path) -> 
     assert not (ready_marker.parent / ".pool-active").exists()
 
 
+def test_completed_pool_restart_repairs_marker_with_preserved_ready_history(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    pool_root = home / ".openclaw/workspace/skills-pool"
+    active_root = home / ".openclaw/workspace/skills"
+    ready_marker = pool_root / ".pool-ready"
+    active_root.mkdir(parents=True)
+    (pool_root / "skills-local").mkdir(parents=True)
+    ready_marker.write_text('{"preparation_id":"prepared-1"}')
+
+    evidence = initialize_pool_native(
+        engine="openclaw",
+        home=home,
+        steady_state=True,
+    )
+
+    assert evidence.roots_initialized is True
+    assert json.loads((pool_root / ".pool-active").read_text()) == {
+        "activation_state": "active",
+        "engine": "openclaw",
+        "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+    }
+    assert ready_marker.read_text() == '{"preparation_id":"prepared-1"}'
+
+
+def test_completed_pool_restart_does_not_recreate_missing_roots(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    pool_root = home / ".openclaw/workspace/skills-pool"
+    active_root = home / ".openclaw/workspace/skills"
+    ready_marker = pool_root / ".pool-ready"
+    active_root.mkdir(parents=True)
+    pool_root.mkdir(parents=True)
+    ready_marker.write_text('{"preparation_id":"prepared-1"}')
+
+    with pytest.raises(
+        PoolNativeInitializationError,
+        match="required root is absent",
+    ):
+        initialize_pool_native(
+            engine="openclaw",
+            home=home,
+            steady_state=True,
+        )
+
+    assert not (pool_root / "skills-local").exists()
+    assert not (pool_root / ".pool-active").exists()
+    assert ready_marker.is_file()
+
+
+def test_restart_with_active_marker_does_not_recreate_missing_roots(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    initialize_pool_native(engine="openclaw", home=home)
+    pool_local = home / ".openclaw/workspace/skills-pool/skills-local"
+    pool_local.rmdir()
+
+    with pytest.raises(
+        PoolNativeInitializationError,
+        match="required root is absent",
+    ):
+        initialize_pool_native(engine="openclaw", home=home)
+
+    assert not pool_local.exists()
+
+
 def test_legacy_entry_stat_error_is_not_treated_as_absent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -263,3 +332,29 @@ def test_cli_prints_machine_readable_initialization_evidence(
         "layout_contract_version": LAYOUT_CONTRACT_VERSION,
         "roots_initialized": True,
     }
+
+
+def test_cli_accepts_trusted_steady_state_for_completed_pool_repair(
+    tmp_path: Path,
+) -> None:
+    pool_root = tmp_path / ".openclaw/workspace/skills-pool"
+    (tmp_path / ".openclaw/workspace/skills").mkdir(parents=True)
+    (pool_root / "skills-local").mkdir(parents=True)
+    ready_marker = pool_root / ".pool-ready"
+    ready_marker.write_text('{"preparation_id":"prepared-1"}')
+
+    assert (
+        main(
+            [
+                "--engine",
+                "openclaw",
+                "--home",
+                str(tmp_path),
+                "--steady-state",
+            ]
+        )
+        == 0
+    )
+
+    assert (pool_root / ".pool-active").is_file()
+    assert ready_marker.is_file()

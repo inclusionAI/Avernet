@@ -33,7 +33,7 @@ def _invalid(
         engine="openclaw",
         layout_contract_version=contract,
         preparation_id=None,
-        evidence={"reason": reason, "marker": str(layout.ready_marker)},
+        evidence={"reason": reason, "marker": str(layout.active_marker)},
     )
 
 
@@ -51,7 +51,7 @@ def _transient(
         preparation_id=None,
         evidence={
             "reason": reason,
-            "marker": str(layout.ready_marker),
+            "marker": str(layout.active_marker),
             "error_type": type(error).__name__,
             "errno": error.errno,
         },

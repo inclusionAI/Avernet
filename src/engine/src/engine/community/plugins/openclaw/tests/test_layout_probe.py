@@ -555,6 +555,7 @@ def test_active_marker_stat_error_is_classified(
 
     assert result.status is status
     assert result.evidence["reason"] == reason
+    assert result.evidence["marker"] == str(active_marker)
 
 
 def test_active_marker_os_error_is_not_treated_as_absent(tmp_path, monkeypatch):
@@ -586,6 +587,7 @@ def test_active_marker_os_error_is_not_treated_as_absent(tmp_path, monkeypatch):
 
     assert result.status is RuntimeLayoutInspectionStatus.TRANSIENT_ERROR
     assert result.evidence["reason"] == "active_marker_temporarily_unavailable"
+    assert result.evidence["marker"] == str(active_marker)
 
 
 def test_active_marker_read_io_error_is_transient(tmp_path, monkeypatch):

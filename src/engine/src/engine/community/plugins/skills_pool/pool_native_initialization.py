@@ -134,12 +134,16 @@ def initialize_pool_native(
     *,
     engine: str,
     home: Path = Path("/home/admin"),
+    steady_state: bool = False,
 ) -> PoolNativeInitializationEvidence:
     """Establish the minimal Pool roots without Legacy preparation or copying.
 
     This capability is intentionally OpenClaw-only.  Migration startup keeps
     using its preparation/finalizing contract, and other engines retain their
-    current rollout boundaries.
+    current rollout boundaries. ``steady_state`` must come from the trusted
+    persisted layout state; filesystem evidence alone must not infer it.  It
+    allows an already-completed Pool restart to repair a missing active marker
+    while preserving historical migration preparation evidence.
     """
 
     if engine != "openclaw":
@@ -153,7 +157,7 @@ def initialize_pool_native(
     marker = _read_active_marker(layout.active_marker)
     if marker is not None:
         _validate_active_marker(marker, engine=engine)
-    elif _path_present(
+    elif not steady_state and _path_present(
         layout.ready_marker,
         description="Pool migration preparation marker",
     ):
@@ -167,9 +171,10 @@ def initialize_pool_native(
                 f"legacy entry conflicts with Pool-native startup: {legacy_entry}"
             )
 
-    _require_directory(layout.active_root, create=True)
-    _require_directory(layout.pool_root, create=True)
-    _require_directory(layout.pool_local, create=True)
+    create_roots = marker is None and not steady_state
+    _require_directory(layout.active_root, create=create_roots)
+    _require_directory(layout.pool_root, create=create_roots)
+    _require_directory(layout.pool_local, create=create_roots)
 
     if marker is None:
         created = _atomic_create_active_marker(
@@ -202,8 +207,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--engine", required=True)
     parser.add_argument("--home", type=Path, default=Path("/home/admin"))
+    parser.add_argument(
+        "--steady-state",
+        action="store_true",
+        help=(
+            "trusted persisted layout is already Pool-active; permit marker "
+            "repair while preserving historical migration preparation"
+        ),
+    )
     args = parser.parse_args(argv)
-    evidence = initialize_pool_native(engine=args.engine, home=args.home)
+    evidence = initialize_pool_native(
+        engine=args.engine,
+        home=args.home,
+        steady_state=args.steady_state,
+    )
     print(json.dumps(evidence.to_dict(), sort_keys=True, separators=(",", ":")))
     return 0
 
