@@ -4,10 +4,10 @@ from __future__ import annotations
 from injector import inject
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.api.bot_message_feedback_service import (
+from agentclaw.community.core.bot_message_feedback.schemas import BotMessageFeedbackRecord
+from agentclaw.community.core.bot_message_feedback.service_protocol import (
     BotMessageFeedbackServiceProtocol,
 )
-from agentclaw.community.core.bot_message_feedback.schemas import BotMessageFeedbackRecord
 from agentclaw.community.core.repository.protocols.bot_message_feedback import (
     BotMessageFeedbackRepositoryProtocol,
 )

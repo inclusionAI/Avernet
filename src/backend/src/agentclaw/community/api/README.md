@@ -181,6 +181,7 @@ internal_dependencies:
   - agentclaw.community.core.aicoding.workitem_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.workspace_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_app_grant.bot_app_grant_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_message_feedback.service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_chat.bot_chat_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_chat.human_bot_friendship_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_collaborator.collaborator_lock_service_protocol  # Protocol defined in its owning core module, re-exported here
