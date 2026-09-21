@@ -1,4 +1,4 @@
-"""Tests for SkillParameterService (async, DeviceFileSystemPlugin-based)."""
+"""Tests for the asynchronous SkillParameterService storage consumer."""
 
 import json
 from unittest.mock import AsyncMock
@@ -13,16 +13,16 @@ from agentclaw.community.core.skill_center.errors import LocalSkillStorageError
 
 
 @pytest.fixture
-def mock_device_fs():
-    fs = AsyncMock()
-    fs.read_file = AsyncMock(return_value=None)
-    fs.write_file = AsyncMock(return_value=None)
-    return fs
+def mock_storage():
+    storage = AsyncMock()
+    storage.read = AsyncMock(return_value=None)
+    storage.write = AsyncMock(return_value=None)
+    return storage
 
 
 @pytest.fixture
-def svc(mock_device_fs):
-    return SkillParameterService(device_fs=mock_device_fs)
+def svc(mock_storage):
+    return SkillParameterService(storage=mock_storage)
 
 
 # ---------- async_load ----------
@@ -30,26 +30,23 @@ def svc(mock_device_fs):
 
 @pytest.mark.asyncio
 async def test_async_load_returns_empty_when_read_file_returns_none(
-    svc, mock_device_fs
+    svc, mock_storage
 ):
-    """read_file returns None → _data initialises with empty parameters."""
-    mock_device_fs.read_file.return_value = None
+    """A storage-confirmed absence initialises an empty parameter document."""
+    mock_storage.read.return_value = None
     await svc.async_load()
     assert svc._data == {"parameters": {}}
-    mock_device_fs.read_file.assert_awaited_once_with(
-        DEFAULT_PARAMETERS_PATH,
-        preserve_read_errors=True,
-    )
+    mock_storage.read.assert_awaited_once_with(DEFAULT_PARAMETERS_PATH)
 
 
 @pytest.mark.asyncio
-async def test_async_load_parses_valid_json(svc, mock_device_fs):
-    """read_file returns valid JSON → _data is populated correctly."""
+async def test_async_load_parses_valid_json(svc, mock_storage):
+    """Storage content is parsed into the in-memory parameter document."""
     payload = {
         "parameters": {"my_skill": {"key": "val"}},
         "updated_at": "2025-01-01T00:00:00",
     }
-    mock_device_fs.read_file.return_value = json.dumps(payload).encode("utf-8")
+    mock_storage.read.return_value = json.dumps(payload).encode("utf-8")
     await svc.async_load()
     assert svc._data == payload
     assert svc.get_skill_parameters("my_skill") == {"key": "val"}
@@ -57,52 +54,52 @@ async def test_async_load_parses_valid_json(svc, mock_device_fs):
 
 @pytest.mark.asyncio
 async def test_async_load_rejects_invalid_json_without_treating_it_as_empty(
-    svc, mock_device_fs
+    svc, mock_storage
 ):
-    mock_device_fs.read_file.return_value = b"NOT JSON{{"
+    mock_storage.read.return_value = b"NOT JSON{{"
     with pytest.raises(LocalSkillStorageError):
         await svc.async_load()
     assert svc._data == {}
-    mock_device_fs.write_file.assert_not_awaited()
+    mock_storage.write.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_async_load_rejects_invalid_structure_and_read_failures(
-    svc, mock_device_fs
+    svc, mock_storage
 ):
-    mock_device_fs.read_file.return_value = b'{"parameters": []}'
+    mock_storage.read.return_value = b'{"parameters": []}'
     with pytest.raises(LocalSkillStorageError):
         await svc.async_load()
-    mock_device_fs.write_file.assert_not_awaited()
+    mock_storage.write.assert_not_awaited()
 
-    mock_device_fs.read_file.side_effect = TimeoutError("device timed out")
+    mock_storage.read.side_effect = TimeoutError("device timed out")
     with pytest.raises(LocalSkillStorageError):
         await svc.async_load()
-    mock_device_fs.write_file.assert_not_awaited()
+    mock_storage.write.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_async_load_custom_path():
     """Constructor accepts a custom file_path."""
-    fs = AsyncMock()
-    fs.read_file = AsyncMock(return_value=None)
+    storage = AsyncMock()
+    storage.read = AsyncMock(return_value=None)
     custom = "/tmp/custom/params.json"
-    svc = SkillParameterService(device_fs=fs, file_path=custom)
+    svc = SkillParameterService(storage=storage, file_path=custom)
     await svc.async_load()
-    fs.read_file.assert_awaited_once_with(custom, preserve_read_errors=True)
+    storage.read.assert_awaited_once_with(custom)
 
 
 # ---------- save_skill_parameters ----------
 
 
 @pytest.mark.asyncio
-async def test_save_skill_parameters_writes_json(svc, mock_device_fs):
-    """save_skill_parameters stores in _data and calls write_file."""
+async def test_save_skill_parameters_writes_json(svc, mock_storage):
+    """save_skill_parameters stores in _data and delegates to storage."""
     await svc.async_load()
     await svc.save_skill_parameters("my_skill", {"api_key": "abc123"})
 
-    mock_device_fs.write_file.assert_awaited_once()
-    call_args = mock_device_fs.write_file.call_args
+    mock_storage.write.assert_awaited_once()
+    call_args = mock_storage.write.call_args
     path_arg, content_arg = call_args[0]
     assert path_arg == DEFAULT_PARAMETERS_PATH
     written = json.loads(content_arg.decode("utf-8"))
@@ -111,18 +108,18 @@ async def test_save_skill_parameters_writes_json(svc, mock_device_fs):
 
 
 @pytest.mark.asyncio
-async def test_save_replaces_only_one_skill_and_preserves_metadata(svc, mock_device_fs):
+async def test_save_replaces_only_one_skill_and_preserves_metadata(svc, mock_storage):
     payload = {
         "format_version": 1,
         "parameters": {"a": {"old": True}, "b": {"kept": 2}},
         "updated_at": "2025-01-01T00:00:00",
     }
-    mock_device_fs.read_file.return_value = json.dumps(payload).encode()
+    mock_storage.read.return_value = json.dumps(payload).encode()
     await svc.async_load()
 
     assert await svc.save_skill_parameters("a", {"new": False}) is True
 
-    written = json.loads(mock_device_fs.write_file.await_args.args[1])
+    written = json.loads(mock_storage.write.await_args.args[1])
     assert written["format_version"] == 1
     assert written["parameters"] == {"a": {"new": False}, "b": {"kept": 2}}
 
@@ -131,26 +128,26 @@ async def test_save_replaces_only_one_skill_and_preserves_metadata(svc, mock_dev
 
 
 @pytest.mark.asyncio
-async def test_delete_skill_parameters_removes_key(svc, mock_device_fs):
+async def test_delete_skill_parameters_removes_key(svc, mock_storage):
     """delete removes the skill key and persists."""
     payload = {"parameters": {"a": {"x": 1}, "b": {"y": 2}}}
-    mock_device_fs.read_file.return_value = json.dumps(payload).encode()
+    mock_storage.read.return_value = json.dumps(payload).encode()
     await svc.async_load()
 
     await svc.delete_skill_parameters("a")
 
     assert "a" not in svc._data["parameters"]
     assert "b" in svc._data["parameters"]
-    mock_device_fs.write_file.assert_awaited_once()
+    mock_storage.write.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_delete_nonexistent_skill_is_noop(svc, mock_device_fs):
+async def test_delete_nonexistent_skill_is_noop(svc, mock_storage):
     """Deleting a skill that doesn't exist should still succeed and persist."""
     await svc.async_load()
     await svc.delete_skill_parameters("nonexistent")
-    # write_file is still called (current behaviour)
-    mock_device_fs.write_file.assert_awaited_once()
+    # The document is still persisted for this historical no-op operation.
+    mock_storage.write.assert_awaited_once()
 
 
 # ---------- sync readers ----------
@@ -169,9 +166,9 @@ def test_get_all_parameters_empty(svc):
 
 
 @pytest.mark.asyncio
-async def test_check_parameters_required_finds_missing(svc, mock_device_fs):
+async def test_check_parameters_required_finds_missing(svc, mock_storage):
     payload = {"parameters": {"my_skill": {"token": "ok"}}}
-    mock_device_fs.read_file.return_value = json.dumps(payload).encode()
+    mock_storage.read.return_value = json.dumps(payload).encode()
     await svc.async_load()
 
     schema = [
@@ -192,9 +189,9 @@ def test_check_parameters_required_empty_schema(svc):
 
 
 @pytest.mark.asyncio
-async def test_check_parameters_required_all_present(svc, mock_device_fs):
+async def test_check_parameters_required_all_present(svc, mock_storage):
     payload = {"parameters": {"s": {"a": "1", "b": "2"}}}
-    mock_device_fs.read_file.return_value = json.dumps(payload).encode()
+    mock_storage.read.return_value = json.dumps(payload).encode()
     await svc.async_load()
 
     schema = [{"name": "a", "required": True}, {"name": "b", "required": True}]

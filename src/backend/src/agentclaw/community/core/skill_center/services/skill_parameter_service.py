@@ -1,8 +1,8 @@
 """
-技能参数管理服务 - 通过 DeviceFileSystem 读写文件
+技能参数管理服务 - 通过参数文档存储读写文件
 
 存储位置：SKILL_PARAMETERS_FILE_PATH（容器内固定路径）
-通过 DeviceFileSystem 读写，自动适配 local/arca
+通过注入的参数文档存储读写，保持设备与运行时细节在编排层。
 """
 
 import json
@@ -11,6 +11,9 @@ from typing import Any
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.skill_center.errors import LocalSkillStorageError
+from agentclaw.community.core.skill_center.skill_parameter_storage import (
+    SkillParameterStorage,
+)
 
 
 logger = get_logger()
@@ -23,22 +26,26 @@ DEFAULT_PARAMETERS_PATH = SKILL_PARAMETERS_FILE_PATH
 
 
 class SkillParameterService:
-    """技能参数管理服务 - 通过 DeviceFileSystem 读写文件"""
+    """技能参数管理服务 - 通过参数文档存储读写文件"""
 
     def __init__(
-        self, device_fs, file_path: str | None = None, *, engine_io_enabled: bool = True
+        self,
+        storage: SkillParameterStorage,
+        file_path: str | None = None,
+        *,
+        engine_io_enabled: bool = True,
     ):
         """
         初始化服务
 
         Args:
-            device_fs: DeviceFileSystem 实例
+            storage: 当前 Bot 参数文档的领域存储。
             file_path: 自定义参数文件路径（默认使用 DEFAULT_PARAMETERS_PATH）
             engine_io_enabled: 是否对 engine 读写 ``skill_parameters.json``。teclaw
                 不使用该文件（engine 不持有/不消费它），故由工厂置 ``False``，使
                 load/save 成为 no-op，不向 engine 发起任何读写。
         """
-        self._device_fs = device_fs
+        self._storage = storage
         self._file_path = file_path or SKILL_PARAMETERS_FILE_PATH
         self._engine_io_enabled = engine_io_enabled
         self._data: dict[str, Any] = {}
@@ -54,10 +61,7 @@ class SkillParameterService:
             )
             return
         try:
-            content = await self._device_fs.read_file(
-                self._file_path,
-                preserve_read_errors=True,
-            )
+            content = await self._storage.read(self._file_path)
             if content is None:
                 self._data = {"parameters": {}}
                 logger.info(
@@ -107,7 +111,7 @@ class SkillParameterService:
             content = json.dumps(candidate, indent=2, ensure_ascii=False).encode(
                 "utf-8"
             )
-            await self._device_fs.write_file(self._file_path, content)
+            await self._storage.write(self._file_path, content)
             self._data = candidate
             logger.info(
                 f"[SkillParameterService] Saved parameters, size={len(content)}"

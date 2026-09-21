@@ -73,6 +73,8 @@ provides:
   - "SkillManifestValidationIssue"
   - "SkillManifestValidationResult"
   - "SkillUploadErrorCode"
+  - "SkillParameterStorage"
+  - "DeviceFileSystemParameterStorage"
   - "SkillCenterGatewayService"
   - "SkillCenterReferenceService"
   - "SkillCenterReferenceProcessor"
