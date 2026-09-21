@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
+    AcceptanceCriteria, Context, Goal, RuntimeInfo, Status,
     TaskExecutionGraph, TaskNode, TaskNodePatch, TaskSpec,
 )
 from agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor import (
@@ -25,8 +25,7 @@ def _execution_graph(task_id="t1", objective="整理基础架构方向架构师�
     root = TaskNode(
         node_id=task_id, task_id=task_id, status=Status.HUNG,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="架构师名册", instruction="整理3位架构师"),
-            context=Context(background="基础架构方向"),
+            context=Context(title="架构师名册", background="基础架构方向"),
             goal=Goal(objective=objective,
                       acceptances=[AcceptanceCriteria("ac_arch", "给出3位架构师姓名/角色+职责")]),
         ),
@@ -145,11 +144,40 @@ class _FakeGraph:
         self.cleared = False                 # bbs_owner 被清回 None 标记(收口 finally / except 释放)
         self.added_nodes = []                # notify 创建的 scoped BBS 节点
         self.root_status = Status.HUNG       # BBS 创建前根节点的恢复态
+        self.dashboard = None
 
     def claim_bbs_owner(self, task_id, bot_id):
         self.claimed = bot_id
         self.bbs_owner = bot_id
         return MagicMock(success=True)
+
+    def query_task_dashboard(self, task_id):
+        if self.dashboard is None:
+            raise TaskStateError(f"dashboard unavailable: {task_id}")
+        return self.dashboard
+
+    def report(self, data):
+        report_type = data.data["report_type"]
+        payload = data.data["payload"]
+        if report_type == "BBS_CLAIM":
+            result = self.claim_bbs_owner(payload["task_id"], payload["bot_id"])
+            if payload.get("node_id") and self.dashboard is not None:
+                node = next(
+                    item for item in self.dashboard.tasks
+                    if item.node_id == payload["node_id"]
+                )
+                node.status = Status.RUNNING
+                node.run_info.assignee = payload["bot_id"]
+            return result
+        if report_type == "ADD_NODES":
+            return self.add_task_nodes(
+                payload["nodes"],
+                payload["task_id"],
+                mark_parent_planning=payload.get("mark_parent_planning", True),
+            )
+        if report_type == "NODE_PATCH":
+            return self.update_task_node_info(payload["patch"])
+        raise AssertionError(report_type)
 
     def update_task_node_info(self, patch):
         if (
@@ -239,9 +267,9 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert msg_bot == "B"
     # notify 仅完成 BBS 投递与 scoped 节点回写；根节点仍保持 HUNG，
     # 后续由 callback/report 进入 engine.on_bbs_report 才能统一收口。
-    assert on_bbs_report.calls == []
-    assert graph.bbs_owner == "B"
-    assert not graph.cleared
+    assert len(on_bbs_report.calls) == 1
+    assert graph.bbs_owner is None
+    assert graph.cleared
     assert len(graph.added_nodes) == 1
     scoped = graph.added_nodes[0]
     assert scoped.run_info.start_time is not None
@@ -267,6 +295,7 @@ def test_notify_reuses_existing_relay_bbs_node_for_dynamic_selection():
     execution_graph.tasks.append(relay_node)
     bot = _FakeBot(rates={"A": 90})
     bcn = _FakeBcn(_roster("A"))
+    graph.dashboard = execution_graph
 
     _run(notify(
         execution_graph,
@@ -423,7 +452,7 @@ def test_notify_records_winner_relay_reason_in_scoped_extend_props():
                 skill_name="bbs-relay-single-task", on_bbs_report=on_bbs_report))
 
     assert graph.claimed == "B"  # 最高 completion_rate 胜出(选优键未变)
-    assert on_bbs_report.calls == []
+    assert len(on_bbs_report.calls) == 1
     scoped = [p for p in graph.patches if p.node_id != "t1"]
     assert len(scoped) == 1
     assert scoped[0].extend_props_patch["relay_reason"] == "已产出相关交付,可补完剩余 gap"

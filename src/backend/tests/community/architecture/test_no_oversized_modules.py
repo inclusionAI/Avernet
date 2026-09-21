@@ -29,6 +29,7 @@ The allowlist tracks the 20 files that were over 1000 lines on the
 day this guard was introduced. As they are decomposed, entries get
 deleted — the guard becomes tighter automatically.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -36,7 +37,7 @@ import pathlib
 import pytest
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]  # .../src/backend
 _AGENTCLAW_ROOT = _BACKEND_ROOT / "src" / "agentclaw"
 
 
@@ -68,85 +69,49 @@ _ALLOWLIST: dict[str, str] = {
     # after the guard landed was always going to hit this. Splitting the *seam*
     # from the *table* is still the obvious refactor when someone wants it;
     # it should just be its own change, not a rider on a feature.
-    "adapters/http/openapi_v1/admission.py":
-        "1020 — one ADMISSION row per public operation; grows with the surface",
+    "adapters/http/openapi_v1/admission.py": "1020 — one ADMISSION row per public operation; grows with the surface",
     # The third file of that shape, and it crossed for the same reason: W9's
     # three ``cli-tools`` operations were the first rows added after it reached
     # exactly 1000. Splitting the ``Check``/``EDIT_LOCK`` vocabulary at the top
     # from the table below it is the obvious refactor and is still available —
     # it just should not ride on a feature that adds three rows.
-    "adapters/http/openapi_v1/authorization.py":
-        "1011 — one AUTHORIZATION row per public operation; grows with the surface",
+    "adapters/http/openapi_v1/authorization.py": "1011 — one AUTHORIZATION row per public operation; grows with the surface",
     # ── bot_management cluster ───────────────────────────────────────
-    "adapters/http/bot_management/router.py":
-        "~2931 lines — biggest router; bot CRUD + lifecycle + status + engine config + ext.",
-    "adapters/http/openapi_v1/bots/router.py":
-        "~1137 lines — TC revamp public bots surface; CRUD + /all list + dormant + "
-        "data-init + startup-script + passport + engine-config",
-    "core/bot_management/services/bot_service.py":
-        "~2894 lines — central bot service; handles create/get/update/delete + engine resolution.",
-    "core/bot_management/services/data_init_service.py":
-        "~1111 lines — bot data initialization service.",
-
+    "adapters/http/bot_management/router.py": "~2931 lines — biggest router; bot CRUD + lifecycle + status + engine config + ext.",
+    "adapters/http/openapi_v1/bots/router.py": "~1137 lines — TC revamp public bots surface; CRUD + /all list + dormant + "
+    "data-init + startup-script + passport + engine-config",
+    "core/bot_management/services/bot_service.py": "~2894 lines — central bot service; handles create/get/update/delete + engine resolution.",
+    "core/bot_management/services/data_init_service.py": "~1111 lines — bot data initialization service.",
     # ── skill_center cluster ─────────────────────────────────────────
-    "core/skill_center/services/skill_service.py":
-        "~2444 lines — central skill service; CRUD, market, install, parameters, members.",
-    "core/skill_center/services/skill_set_service.py":
-        "~2412 lines — skill-set service; default, sync, active management.",
-    "core/skill_center/services/git_sync.py":
-        "~1012 lines — git-sync orchestration for skills repo.",
-    "adapters/http/skill_center/skills.py":
-        "~2176 lines — skill router; CRUD + market + members + versions.",
-    "adapters/http/skill_center/skillsets.py":
-        "~1443 lines — skill-set router; CRUD + skills + mcps + default-skill admin.",
-
+    "core/skill_center/services/skill_service.py": "~2444 lines — central skill service; CRUD, market, install, parameters, members.",
+    "core/skill_center/services/skill_set_service.py": "~2412 lines — skill-set service; default, sync, active management.",
+    "core/skill_center/services/git_sync.py": "~1012 lines — git-sync orchestration for skills repo.",
+    "adapters/http/skill_center/skills.py": "~2176 lines — skill router; CRUD + market + members + versions.",
+    "adapters/http/skill_center/skillsets.py": "~1443 lines — skill-set router; CRUD + skills + mcps + default-skill admin.",
     # ── service_bot cluster ──────────────────────────────────────────
-    "core/service_bot/services/baas_service.py":
-        "~2608 lines — single BaasService: BaaS API client + payload builders "
-        "+ sandbox/mount-point shaping + dataclasses. Demoted from the Rule 20 "
-        "plugin split back to a plain core service (2026-06-13); splitting the "
-        "body is a separate refactor.",
-    "core/service_bot/services/bot_build_service.py":
-        "~1014 lines — bot build orchestration; current code exceeds cap after build config generation.",
-    "core/service_bot/services/bot_publish_service.py":
-        "~1019 lines — central publish service; rollback logic extracted to publish_rollback_mixin.py.",
-    "adapters/http/service_bot/router_publish.py":
-        "~1131 lines — publish/upgrade/update-type/restart/offline endpoints.",
-
+    "core/service_bot/services/baas_service.py": "~2608 lines — single BaasService: BaaS API client + payload builders "
+    "+ sandbox/mount-point shaping + dataclasses. Demoted from the Rule 20 "
+    "plugin split back to a plain core service (2026-06-13); splitting the "
+    "body is a separate refactor.",
+    "core/service_bot/services/bot_build_service.py": "~1014 lines — bot build orchestration; current code exceeds cap after build config generation.",
+    "core/service_bot/services/bot_publish_service.py": "~1019 lines — central publish service; rollback logic extracted to publish_rollback_mixin.py.",
+    "adapters/http/service_bot/router_publish.py": "~1131 lines — publish/upgrade/update-type/restart/offline endpoints.",
     # ── antprocess cluster (vendor facades, prod-only overlay) ───────
-    "corp/plugins/prod/antprocess_facades/BPInstanceFacade.py":
-        "~2778 lines — BPM instance facade (legacy ANT process integration).",
-    "corp/plugins/prod/antprocess_facades/BPInstanceQueryFacade.py":
-        "~1397 lines — BPM query facade.",
-    "corp/plugins/prod/antprocess_facades/WTTicketActorQueryFacade.py":
-        "~1084 lines — WT ticket actor query facade.",
-
+    "corp/plugins/prod/antprocess_facades/BPInstanceFacade.py": "~2778 lines — BPM instance facade (legacy ANT process integration).",
+    "corp/plugins/prod/antprocess_facades/BPInstanceQueryFacade.py": "~1397 lines — BPM query facade.",
+    "corp/plugins/prod/antprocess_facades/WTTicketActorQueryFacade.py": "~1084 lines — WT ticket actor query facade.",
     # ── devices cluster ──────────────────────────────────────────────
-    "adapters/http/devices/router.py":
-        "~1123 lines — device lifecycle + connection + multi-instance "
-        "(instances list / restart / bot_id conn-info) endpoints. Multi-instance "
-        "surface (§1/§2/§3) added on top of the existing device CRUD router; "
-        "extracting it into a sibling router is a separate refactor.",
-    "core/devices/services/device_service.py":
-        "~1461 lines — device lifecycle, binding, allocation.",
-    "corp/core/devices/services/arca_device_service.py":
-        "~1147 lines — arca sandbox device adapter (corp-only prod plugin).",
-    "core/desktop_bot/services/desktop_bot_service.py":
-        "~1492 lines — desktop-bot lifecycle service.",
-
+    "adapters/http/devices/router.py": "~1123 lines — device lifecycle + connection + multi-instance "
+    "(instances list / restart / bot_id conn-info) endpoints. Multi-instance "
+    "surface (§1/§2/§3) added on top of the existing device CRUD router; "
+    "extracting it into a sibling router is a separate refactor.",
+    "core/devices/services/device_service.py": "~1461 lines — device lifecycle, binding, allocation.",
+    "corp/core/devices/services/arca_device_service.py": "~1147 lines — arca sandbox device adapter (corp-only prod plugin).",
+    "core/desktop_bot/services/desktop_bot_service.py": "~1492 lines — desktop-bot lifecycle service.",
     # ── other ────────────────────────────────────────────────────────
-    "adapters/http/harness/router.py":
-        "~2352 lines — harness router; patch/diagnose/templates/recordings.",
-    "core/repository/implementations/skill_center/skill.py":
-        "~1722 lines — unified ORM skill repository (covers all skill CRUD).",
-    "core/bot_public/services/bot_public_service.py":
-        "~1166 lines — bot-public / friend-bot discovery + approval service.",
-
-    # ── task cluster (grew past the cap in the task-claim / secbaas grant PR) ───
-    "core/task/task_center/engine.py":
-        "~1504 lines — task center engine (run/dispatch/aggregation). Grew past the "
-        "cap with the task-claim + stateless secbaas relay work; split run/dispatch "
-        "and group-formation into sub-modules in a follow-up refactor.",
+    "adapters/http/harness/router.py": "~2352 lines — harness router; patch/diagnose/templates/recordings.",
+    "core/repository/implementations/skill_center/skill.py": "~1722 lines — unified ORM skill repository (covers all skill CRUD).",
+    "core/bot_public/services/bot_public_service.py": "~1166 lines — bot-public / friend-bot discovery + approval service.",
 }
 
 
@@ -154,12 +119,13 @@ _ALLOWLIST: dict[str, str] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _rel(path: pathlib.Path) -> str:
     rel = path.relative_to(_AGENTCLAW_ROOT).as_posix()
     # B11: layers migrate under ``agentclaw/community/<layer>``. Strip the
     # ``community/`` prefix so layer-relative allowlist keys ("core/...") match
     # whichever side of the move a file is on.
-    return rel[len("community/"):] if rel.startswith("community/") else rel
+    return rel[len("community/") :] if rel.startswith("community/") else rel
 
 
 def _line_count(path: pathlib.Path) -> int:
@@ -173,6 +139,7 @@ def _line_count(path: pathlib.Path) -> int:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 def test_no_new_oversized_files():
@@ -196,8 +163,7 @@ def test_no_new_oversized_files():
         pytest.fail(
             f"Found {len(new_offenders)} new file(s) over the "
             f"{_MAX_LINES}-line cap. Split before merging — each file "
-            "should hold one cohesive concern:\n  "
-            + "\n  ".join(new_offenders)
+            "should hold one cohesive concern:\n  " + "\n  ".join(new_offenders)
         )
 
 

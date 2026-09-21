@@ -1,7 +1,7 @@
 """TDD tests for the EXECUTE/VERIFY trajectory gates (REQ-5).
 
 P3 item 4 of the task-trajectory spec. The EXECUTE/VERIFY gates live in
-``ExecutionEngine.on_report`` (engine.py:~1907/1916/1926 — the three sites where
+``CentralizedExecutionAdapter.on_report`` (engine.py:~1907/1916/1926 — the three sites where
 ``_log_action(NodeAction.EXECUTE/VERIFY, ...)`` fires). They must fire **additive**
 ``TrajectoryActionType.EXECUTE`` / ``TrajectoryActionType.VERIFY`` trajectory rows
 with:
@@ -53,7 +53,6 @@ import asyncio
 import json
 import logging
 
-import pytest
 
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
@@ -61,7 +60,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskCallbackData,
@@ -71,7 +69,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
 )
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.callback_adapter import (
     CallbackAdapter,
@@ -102,10 +100,10 @@ def _task_info(task_id: str = "t1", max_depth: int = 3, extra_cfg: dict | None =
     cfg = {"MAX_DEPTH": max_depth, "BBS_MAX_DEPTH": 3, "task_type": "dynamic"}
     if extra_cfg:
         cfg.update(extra_cfg)
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(
                 objective="o",
                 acceptances=[AcceptanceCriteria(id="ac1", description="d")],
@@ -230,7 +228,7 @@ class _StubRunner:
         return "grp_stub"
 
 
-class _TrajectoryCaseEngine(ExecutionEngine):
+class _TrajectoryCaseEngine(CentralizedExecutionAdapter):
     """Test subclass — injects stubs + a trajectory repo (mirrors the RESET
     / DISPATCH / PLAN gate test subclasses)."""
 
@@ -1090,10 +1088,10 @@ def _static_task_info(task_id: str = "t1") -> TaskInfo:
         "task_type": "static_plan",
         "static_plan_yaml": _STATIC_PLAN_YAML_TRAJ,
     }
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(
                 objective="o",
                 acceptances=[AcceptanceCriteria(id="ac1", description="d")],

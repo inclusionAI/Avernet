@@ -1,7 +1,7 @@
 import asyncio
 
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
+    AcceptanceCriteria, Context, Goal, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import BcsCreateGroupResult
@@ -14,8 +14,7 @@ from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_iden
 
 def _node(group_id="g1", task_id="t1"):
     return TaskNode(node_id="n1", task_id=task_id, status=Status.RUNNING,
-                    task_spec=TaskSpec(Metadata(task_id, "T", "do"), Context("bg"),
-                                       Goal("O", [AcceptanceCriteria("a1", "d")])),
+                    task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [AcceptanceCriteria("a1", "d")])),
                     run_info=RuntimeInfo(run_mode="coop_group", assignee=group_id),
                     node_run_graph=None)  # type: ignore[arg-type]
 
@@ -98,7 +97,7 @@ def test_form_coop_group_relay_footer_only_reporter_no_duplicate_protocol():
     fmt = PromptFormatterImpl()
     relay_body = "# 接自:上游Bot\n## 上游产出正文\n上游摘要\n## 本角色任务\n执行投放"
     n = TaskNode(node_id="n1", task_id="t1", status=Status.RUNNING,
-                 task_spec=TaskSpec(Metadata("t1", "T", relay_body), Context("bg"), Goal("O", [])),
+                 task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [])),
                  run_info=RuntimeInfo(), node_run_graph=None)  # type: ignore[arg-type]
     fc_msg = fmt.format_execute({
         "mode": "execute", "node_instruction": relay_body, "skill_report_enabled": True,

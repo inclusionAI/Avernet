@@ -86,28 +86,25 @@ class TaskType(StrEnum):
 
 # ===== 规格面(Task Specification)=====
 @dataclass
-class Metadata:
-    task_id: str
-    title: str
-    instruction: str               # 核心执行指令(Prompt/提示词)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"task_id": self.task_id, "title": self.title, "instruction": self.instruction}
-
-
-@dataclass
 class Context:
-    background: str
-    extend_props: dict[str, Any] = field(default_factory=dict)  # 上下文扩展属性(非结构化补充)
+    """任务业务上下文。title/background 可为空，extend_props 承载交付物、约束和资源。"""
+
+    background: str = ""
+    extend_props: dict[str, Any] = field(default_factory=dict)
+    title: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {"background": self.background, "extend_props": dict(self.extend_props)}
+        return {
+            "title": self.title,
+            "background": self.background,
+            "extend_props": dict(self.extend_props),
+        }
 
 
 @dataclass
 class AcceptanceCriteria:
     id: str
-    description: str               # 验收标准的具体描述(无 type 字段)
+    description: str
 
     def to_dict(self) -> dict[str, Any]:
         return {"id": self.id, "description": self.description}
@@ -119,32 +116,86 @@ class Goal:
     acceptances: list[AcceptanceCriteria]
 
     def to_dict(self) -> dict[str, Any]:
-        return {"objective": self.objective, "acceptances": [a.to_dict() for a in self.acceptances]}
-
-
-@dataclass
-class TaskSpec:
-    metadata: Metadata
-    context: Context
-    goal: Goal                     # 无 SLA
-
-    def to_dict(self) -> dict[str, Any]:
         return {
-            "metadata": self.metadata.to_dict(),
-            "context": self.context.to_dict(),
-            "goal": self.goal.to_dict(),
+            "objective": self.objective,
+            "acceptances": [a.to_dict() for a in self.acceptances],
         }
 
 
 @dataclass
-class TaskInfo:
-    """对外 ``execute`` 入参。"""
+class TaskSpec:
+    """纯业务规格：不承载 task_id、instruction、assignee 或其它运行态。"""
 
+    context: Context
+    goal: Goal
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"context": self.context.to_dict(), "goal": self.goal.to_dict()}
+
+
+def task_spec_title(spec: "TaskSpec") -> str:
+    return str(spec.context.title or spec.goal.objective or "").strip()
+
+
+def task_spec_instruction(spec: "TaskSpec") -> str:
+    """Build an execution instruction from business facts without storing one in TaskSpec."""
+    parts = [str(spec.goal.objective or "").strip()]
+    props = spec.context.extend_props or {}
+    for label, key in (("交付物", "deliverables"), ("约束", "constraints"), ("资源", "resources")):
+        values = props.get(key) or []
+        if isinstance(values, list) and values:
+            parts.append(f"{label}: " + "；".join(str(item) for item in values))
+    if spec.context.background:
+        parts.append(f"背景: {spec.context.background}")
+    return "\n".join(part for part in parts if part)
+
+
+@dataclass
+class TaskInfo:
+    """正式任务信息；task_id 属于任务实体，不属于 TaskSpec。"""
+
+    task_id: str
     task_spec: TaskSpec
     source_type: str       # "bot" | "coop_group"
     owner_bot_id: str         # owning bot id
     owner_user_id: str = ""   # owning user id, kept separate from owner_bot_id
     execution_config: dict[str, Any] = field(default_factory=dict)  # 指定 bot/workflow yaml/MAX_DEPTH 等
+
+
+@dataclass(frozen=True)
+class TaskRuntimeProfile:
+    """Task-creation snapshot of governed orchestration strategies and modes."""
+
+    planner_strategy: str = "default"
+    dispatcher_strategy: str = "default"
+    runner_strategy: str = "default"
+    allowed_run_modes: tuple[str, ...] = ("single_bot", "coop_group", "bbs")
+
+    @classmethod
+    def from_execution_config(cls, config: dict[str, Any]) -> "TaskRuntimeProfile":
+        raw = config.get("runtime_profile") or {}
+        if not isinstance(raw, dict):
+            raw = {}
+        modes = raw.get("allowed_run_modes", config.get("allowed_run_modes"))
+        if not isinstance(modes, (list, tuple)) or not modes:
+            modes = cls.allowed_run_modes
+        normalized = tuple(
+            dict.fromkeys(str(mode).strip() for mode in modes if str(mode).strip())
+        )
+        return cls(
+            planner_strategy=str(raw.get("planner_strategy") or "default"),
+            dispatcher_strategy=str(raw.get("dispatcher_strategy") or "default"),
+            runner_strategy=str(raw.get("runner_strategy") or "default"),
+            allowed_run_modes=normalized or cls.allowed_run_modes,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "planner_strategy": self.planner_strategy,
+            "dispatcher_strategy": self.dispatcher_strategy,
+            "runner_strategy": self.runner_strategy,
+            "allowed_run_modes": list(self.allowed_run_modes),
+        }
 
 
 # ===== 运行态(Runtime Graph)=====
@@ -155,6 +206,25 @@ class AcceptanceResult:
     verdict: AcceptanceVerdict
     acceptances_metric: list[Any] = field(default_factory=list)  # 已满足的验收指标明细(新协议为指标对象数组,放宽为 Any)
     gaps: list[Any] = field(default_factory=list)  # 与期望目标的差距(驱动 plan 自算,非 plan 入参);新协议 FAIL 为对象数组,放宽为 Any
+
+
+@dataclass
+class DoneOutput:
+    """Graph 已接纳、可供后续规划复用的节点执行事实。"""
+
+    node_id: str
+    actual_goal: Goal
+    output: dict[str, Any]
+    acceptance_result: AcceptanceResult
+
+
+@dataclass
+class TaskContext:
+    """跨中心化与 Relay 共用的最小任务业务上下文。"""
+
+    spec: TaskSpec
+    all_done_output: list[DoneOutput]
+    gaps: list[str]
 
 
 @dataclass
@@ -273,7 +343,7 @@ class TaskSummary:
     task_id: str
     run_id: int
     status: Status
-    title: str = ""              # 根节点 task_spec.metadata.title
+    title: str = ""              # 根节点 task_spec.context.title
     node_count: int = 0          # 图中节点总数
     loop_round: int = 0          # 图级轮次
     bbs_mode: bool = False       # 图 extend_props["bbs_mode"] 投影(BBS-relay 升级标志)
@@ -303,6 +373,9 @@ class TaskNodePatch:
     progress_reason: str | None = None                       # 推进原因(规划/搜推/派发)
     failure_reason: str | None = None                        # 失败原因(规划/搜推/派发/执行)
     extend_props_patch: dict[str, Any] | None = None         # miss_events / hung_reason(stuck) / harness_retries / 崩溃栈
+    actual_goal: Goal | None = None                            # Relay 当前 Bot 实际接受的执行目标
+    local_acceptance_result: AcceptanceResult | None = None   # Relay 节点局部验收事实，不直接驱动终态
+    execution_decision: str | None = None                      # ACCEPTED | DECLINED
 
 
 @dataclass

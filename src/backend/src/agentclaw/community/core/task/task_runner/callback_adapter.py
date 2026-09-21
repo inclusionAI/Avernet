@@ -1,4 +1,4 @@
-"""回投适配层:TaskCallbackData → TaskNodePatch → ExecutionEngine.on_report。
+"""回投适配层:TaskCallbackData → TaskNodePatch → CentralizedExecutionAdapter.on_report。
 
 对齐 plan.md §3.5.2。TaskLoopCallback 实现类(实现 api/task/task_loop_callback.py Protocol)并入此模块。
 协程化:report_result/start_run 为 async(on_report 链路 async),await 不阻塞回投调用方。
@@ -372,14 +372,14 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         callback_repo: "TaskCallbackRepositoryProtocol | None" = None,
         task_context_service: "TaskContextServiceProtocol | None" = None,
     ) -> None:
-        """adapter: CallbackAdapter;engine: ExecutionEngine(on_report async 入口)。
+        """adapter: CallbackAdapter;lifecycle: CentralizedExecutionAdapter(on_report async 入口)。
         callback_repo: 回投落库协议(DI 在 prod 注入真实实现;``None`` 时跳过落库,纯内核/单测路径用)。
         task_context_service: 任务轨迹旁路采集的外部入口(可选,REQ-5;spec 2026-09-18 重构):prod 经
         DI 注入,供 ``ingest_parse_error`` 旁路发射 ``parse_error`` 轨迹事件(经内部 TaskTrajectoryService
         emit_trajectory_event,不进 on_report 链路);``None`` 时静默 no-op(与引擎内 ``_log_trajectory``
         同约定)。镜像 ``callback_repo`` 的注入形态(可选、None no-op),不破坏既有构造调用。"""
         self._adapter = adapter
-        self._engine = engine
+        self._lifecycle = engine
         self._callback_repo = callback_repo
         self._task_context_service = task_context_service
 
@@ -428,7 +428,7 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         if record is not None:
             self._set_pending_audit(record)
         try:
-            await self._engine.on_start(patch)
+            await self._lifecycle.on_start(patch)
         finally:
             if record is not None:
                 self._fallback_persist_audit()
@@ -481,7 +481,7 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         logger.info("[task_callback] report_result, adapt patch, %s", patch)
 
         try:
-            await self._engine.on_report(patch)
+            await self._lifecycle.on_report(patch)
         finally:
             if record is not None:
                 self._fallback_persist_audit()

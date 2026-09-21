@@ -4,7 +4,6 @@
 不删除节点，仅释放 bbs_owner claim。根目标是否满足由框架经 owner 复核(``plan(root)``→``_maybe_finish_graph``)
 判定。
 """
-import uuid
 
 import pytest
 
@@ -16,7 +15,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     Status,
     TaskGraphPatch,
     TaskInfo,
@@ -27,10 +25,10 @@ from agentclaw.community.core.task.task_context.task_graph_service import TaskGr
 
 
 def _ti(tid):
-    return TaskInfo(
+    return TaskInfo(task_id=tid,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=tid, title="t", instruction="i"),
-            context=Context(background="", extend_props={}),
+
+            context=Context(background="", extend_props={}, title="t"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         source_type="bot",
@@ -41,10 +39,8 @@ def _ti(tid):
 
 def _scoped_spec():
     return TaskSpec(
-        metadata=Metadata(
-            task_id=f"bbs-{uuid.uuid4().hex[:6]}", title="bbs-scoped", instruction="do part"
-        ),
-        context=Context(background="", extend_props={}),
+
+        context=Context(background="", extend_props={}, title="bbs-scoped"),
         goal=Goal(objective="part", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
     )
 

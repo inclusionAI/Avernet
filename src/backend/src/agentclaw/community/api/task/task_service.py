@@ -1,4 +1,5 @@
 """对外任务服务契约(任务中心 TaskService facade)。对齐 plan §3.7 + 任务中心文档 yugg6dorsxo8sgmp。"""
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -6,6 +7,7 @@ from typing import Protocol, runtime_checkable
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
     NodeOpResult,
+    TaskContext,
     TaskExecutionGraph,
     TaskNode,
     TaskOpResult,
@@ -20,12 +22,16 @@ from agentclaw.community.core.task.repository.types import (
 
 @runtime_checkable
 class TaskServiceProtocol(Protocol):
-    """系统唯一对外入口。facade 内部由 ExecutionEngine 编排核协调
+    """系统唯一对外入口。facade 内部由 CentralizedExecutionAdapter 编排核协调
     TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner。"""
 
     async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
         """提交执行任务:持久化 task_info(PENDING)→ initialize_graph(根 PENDING)→ 编排核 on_execute
         首帧推进。task_id 服务端生成(uuid4)。返回 TaskOpResult(含 task_id + run_id)。"""
+        ...
+
+    def get_task_context(self, task_id: str) -> TaskContext:
+        """Return the latest common TaskContext projection."""
         ...
 
     def get_task_dashboard(
@@ -72,7 +78,12 @@ class TaskServiceProtocol(Protocol):
         ...
 
     def claim_bbs_task(
-        self, task_id: str, bot_id: str, node_id: str | None = None
+        self,
+        task_id: str,
+        bot_id: str,
+        node_id: str | None = None,
+        *,
+        claim_id: str | None = None,
     ) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(恰一赢;输者/非 bbs 任务 → TaskStateError)。
 
@@ -80,38 +91,68 @@ class TaskServiceProtocol(Protocol):
         ...
 
     async def report_task_event(
-        self, *, task_id: str, node_id: str, event_type: str, event_id: str,
-        holder_id: str, payload: dict, relay_turn: str | None = None,
-        progress_reason: str | None = None, failure_reason: str | None = None,
+        self,
+        *,
+        task_id: str,
+        node_id: str,
+        event_type: str,
+        event_id: str,
+        holder_id: str,
+        payload: dict,
+        relay_turn: str | None = None,
+        progress_reason: str | None = None,
+        failure_reason: str | None = None,
     ) -> dict:
         """Apply a signed, idempotent skill event to a relay task."""
         ...
 
     def record_relay_callback_success(
-        self, *, task_id: str, node_id: str, event_type: str, event_id: str,
-        holder_id: str, relay_turn: str | None, payload: dict, result: dict,
+        self,
+        *,
+        task_id: str,
+        node_id: str,
+        event_type: str,
+        event_id: str,
+        holder_id: str,
+        relay_turn: str | None,
+        payload: dict,
+        result: dict,
     ) -> None:
         """Best-effort trajectory record for a successfully applied relay callback."""
         ...
 
     def record_relay_callback_error(
-        self, *, task_id: str, node_id: str, event_type: str, event_id: str,
-        holder_id: str, relay_turn: str | None, progress_reason: str | None,
-        failure_reason: str | None, payload: dict | None, error_phase: str,
-        exception_type: str, error_msg: str,
+        self,
+        *,
+        task_id: str,
+        node_id: str,
+        event_type: str,
+        event_id: str,
+        holder_id: str,
+        relay_turn: str | None,
+        progress_reason: str | None,
+        failure_reason: str | None,
+        payload: dict | None,
+        error_phase: str,
+        exception_type: str,
+        error_msg: str,
     ) -> None:
-        """Best-effort trajectory record for authenticated callback validation/process errors."""
+        """Best-effort trajectory record for relay callback errors."""
         ...
 
-    async def search_task_candidates(
-        self, *, task_id: str, node_id: str, holder_id: str, relay_turn: str,
-    ) -> dict:
-        """Return candidates only; the calling search skill owns the decision."""
+    async def search_task_candidates(self, *, query: str) -> dict:
+        """Search candidates only; the calling skill owns task-flow decisions."""
         ...
 
     async def dispatch_task(
-        self, *, task_id: str, node_id: str, holder_id: str,
-        relay_turn: str, dispatch_id: str,
+        self,
+        *,
+        task_id: str,
+        origin_node_id: str,
+        target_node_id: str,
+        holder_id: str,
+        relay_turn: str,
+        dispatch_id: str,
     ) -> dict:
         """Validate a persisted decision and dispatch it through the existing Runner."""
         ...
@@ -126,14 +167,18 @@ class TaskServiceProtocol(Protocol):
         ...
 
     async def report_bbs_result(
-        self, task_id: str, node_id: str, bot_id: str,
+        self,
+        task_id: str,
+        node_id: str,
+        bot_id: str,
         acceptance_result: AcceptanceResult | None = None,
-        output_patch: dict | None = None, exec_error: str | None = None,
+        output_patch: dict | None = None,
+        exec_error: str | None = None,
     ) -> NodeOpResult:
         """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim;收口由框架经 owner 复核根 gap 自行收口(非 bot 声明)。
 
         acceptance_result(PASS→SUCCESS / FAIL+gaps→DONE)/ output_patch(checkpoint fold)/
-        exec_error(执行报错 fold)。bot_id 须为当前 bbs_owner,否则 TaskStateError。委托 ExecutionEngine.on_bbs_report。
+        exec_error(执行报错 fold)。bot_id 须为当前 bbs_owner,否则 TaskStateError。委托 CentralizedExecutionAdapter.on_bbs_report。
         """
         ...
 
@@ -152,7 +197,7 @@ class TaskServiceProtocol(Protocol):
         failure_reason: "str | None" = None,
         extend_props_patch: "dict | None" = None,
     ) -> NodeOpResult:
-        """内部节点写口:直接更新节点 run_info(透传 ``TaskNodePatch`` 经 ``ExecutionEngine.on_report`` 落库)。
+        """内部节点写口:直接更新节点 run_info(透传 ``TaskNodePatch`` 经 ``CentralizedExecutionAdapter.on_report`` 落库)。
 
         与回投走同一入口(``on_report``):``acceptance_result`` 验收驱动翻态 / ``exec_error`` 执行报错
         (→ on_harness 重投)/ ``status`` 框架直驱;三者全空仅 fold 非状态字段(**会触发引擎收敛旁路**,
@@ -161,7 +206,11 @@ class TaskServiceProtocol(Protocol):
         ...
 
     async def converge_by_session(
-        self, session_id: str, *, success: bool, output: object = None,
+        self,
+        session_id: str,
+        *,
+        success: bool,
+        output: object = None,
     ) -> bool:
         """BCN/ClawMind 终态回调后收敛:按 ``session_id`` 查 ``task_node_run_info`` →
         框架 ``(task_id, node_id)`` → ``report_result`` → ``on_report`` → 翻态(引擎验收+传播+根收敛)。
@@ -181,5 +230,5 @@ class TaskServiceProtocol(Protocol):
     async def redrive_task(self, task_id: str) -> None:
         """Recovery resume entrypoint: re-dispatch a hydrated non-terminal task
         after an instance restart / rolling deploy. Idempotent; non-terminal
-        runtime status only. Drives ``ExecutionEngine.redrive``."""
+        runtime status only. Drives ``CentralizedExecutionAdapter.redrive``."""
         ...

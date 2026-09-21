@@ -7,7 +7,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -16,17 +15,17 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
     effective_run_mode,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 RND = "20260828_f7wfi27d"
 
 
 def _ti(tid: str) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=tid,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=tid, title="claim root", instruction="root"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="claim root"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         source_type="bot",
@@ -41,8 +40,8 @@ def _bbs_leaf(tid: str) -> TaskNode:
         task_id=tid,
         status=Status.PENDING,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=tid, title="bbs leaf", instruction="bbs part"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="bbs leaf"),
             goal=Goal(objective="part", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         run_info=RuntimeInfo(run_mode="bbs", assignee=RND),
@@ -80,7 +79,7 @@ async def test_bbs_handoff_claim_keeps_run_mode_bbs_after_leaked_single_bot(monk
     svc.initialize_graph(_ti(tid))
     svc.add_task_nodes([_bbs_leaf(tid)], parent_node_id=tid)
 
-    engine = ExecutionEngine(svc)
+    engine = CentralizedExecutionAdapter(svc)
     engine._runner = _LeakyRunner(svc)
     monkeypatch.setattr(engine, "_bbs_handoff_delay", lambda *a, **k: 0.0)
 

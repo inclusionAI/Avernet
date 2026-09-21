@@ -1,6 +1,6 @@
-"""M2 ExecutionEngine on_* 单测(对齐 tasks.md T2.x)。
+"""M2 CentralizedExecutionAdapter on_* 单测(对齐 tasks.md T2.x)。
 
-in-test CaseEngine(ExecutionEngine)子类覆写 _build_* 注入 stub planner/dispatcher/runner(T1=A corp 最简形态);
+in-test CaseEngine(CentralizedExecutionAdapter)子类覆写 _build_* 注入 stub planner/dispatcher/runner(T1=A corp 最简形态);
 真实 TaskGraphService。验收 100% 回投(无 verify port);BBS 投递归 runner(无 bbs market port)。
 覆盖:on_execute 首帧、on_report PASS 传播/根等回投、on_report FAIL 补救/升 BBS、on_miss 拆细/升 BBS、
 on_harness 复位重投、loop_round 仅升 BBS++、零 case grep。
@@ -20,7 +20,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     PlanResult,
     RuntimeInfo,
     Status,
@@ -29,7 +28,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService, TaskGraphPatch
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
@@ -38,10 +37,10 @@ from agentclaw.community.core.task.task_dispatch.strategies import GroupFormatio
 def _task_info(
     task_id: str = "t1", max_depth: int = 3, task_type: str = "dynamic"
 ) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -132,7 +131,7 @@ class StubRunner:
         return "grp_stub"
 
 
-class _CaseEngine(ExecutionEngine):
+class _CaseEngine(CentralizedExecutionAdapter):
     """测试子类覆写 _build_* 注入 stub(T1=A:corp 最简形态)。"""
 
     def __init__(self, graph, planner=None, dispatcher=None, runner=None):
@@ -851,7 +850,7 @@ class TestMaxPlanRound:
 # ===== 零 case 知识 =====
 class TestZeroCaseKnowledge:
     def test_no_node_name_literals_in_engine(self):
-        import agentclaw.community.core.task.task_center.engine as m
+        import agentclaw.community.core.task.task_runner.execution_adapters as m
         src = open(m.__file__).read()
         forbidden = ["N_overview", "N_market", "N_aggregate", "N_verify", "N_report", "N_practice", "n_root", "dim_"]
         hits = [f for f in forbidden if f in src]

@@ -49,16 +49,12 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     PlanResult,
-    RuntimeInfo,
-    Status,
     TaskInfo,
-    TaskNode,
     TaskSpec,
 )
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_plan.planner import TaskPlanner
 from agentclaw.community.core.task.task_plan.strategies import (
@@ -78,10 +74,10 @@ def _run(coro):
 
 
 def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(
                 objective="存储架构分析",
                 acceptances=[AcceptanceCriteria(id="ac1", description="d")],
@@ -97,6 +93,7 @@ def _wf_task_info(task_id: str = "t1") -> TaskInfo:
     """TaskInfo with a workflow (yaml-style) execution_config — selects the
     `WorkflowPlanningStrategy` (its `matches()` checks `cfg.get("workflow")`)."""
     return TaskInfo(
+        task_id=task_id,
         task_spec=_task_info(task_id).task_spec,
         source_type="bot",
         owner_bot_id="owner:1",
@@ -167,7 +164,7 @@ class _ScriptedPlanner:
         return self._results[idx]
 
 
-class _TrajectoryCaseEngine(ExecutionEngine):
+class _TrajectoryCaseEngine(CentralizedExecutionAdapter):
     """Test subclass — injects stubs + a trajectory repo (mirrors the existing
     `_CaseEngine` in test_engine.py + the dispatch test's `_TrajectoryCaseEngine`
     but adds the trajectory_repo passthrough for PLAN-gate tests)."""

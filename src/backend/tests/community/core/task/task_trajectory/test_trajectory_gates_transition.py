@@ -62,7 +62,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     PlanResult,
     RuntimeInfo,
     Status,
@@ -72,7 +71,10 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
 )
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
+from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import (
+    TaskTrajectoryService,
+)
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
 )
@@ -81,7 +83,6 @@ from agentclaw.community.core.task.task_context.task_trajectory.analyzer import 
     _terminal_status,
 )
 from agentclaw.community.core.task.task_context.task_trajectory.models import (
-    AnalysisType,
     ReasonCatalog,
     TaskTrajectory,
     TrajectoryActionType,
@@ -103,10 +104,10 @@ def _task_info(task_id: str = "t1", max_depth: int = 3, extra_cfg: dict | None =
     cfg = {"MAX_DEPTH": max_depth, "BBS_MAX_DEPTH": 3, "task_type": "dynamic"}
     if extra_cfg:
         cfg.update(extra_cfg)
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(
                 objective="o",
                 acceptances=[AcceptanceCriteria(id="ac1", description="d")],
@@ -194,7 +195,7 @@ class _StubRunner:
         return "grp_stub"
 
 
-class _TrajectoryCaseEngine(ExecutionEngine):
+class _TrajectoryCaseEngine(CentralizedExecutionAdapter):
     """Test subclass — injects stubs + a trajectory repo (mirrors the P3
     gate-test subclasses)."""
 
@@ -259,10 +260,10 @@ class TestTransitionActionResultMapping:
         (Status.PLANNING, "planning"),
     ])
     def test_status_to_lowercase_name(self, status, expected):
-        assert ExecutionEngine._transition_action_result(status) == expected
+        assert TaskTrajectoryService._transition_action_result(status) == expected
 
     def test_none_status_to_transition(self):
-        assert ExecutionEngine._transition_action_result(None) == "transition"
+        assert TaskTrajectoryService._transition_action_result(None) == "transition"
 
 
 # ---------------------------------------------------------------------------

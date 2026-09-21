@@ -15,7 +15,12 @@ from typing import Any, Protocol
 
 from agentclaw.community.core.task.domain.json_extract import extract_json
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
-from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode
+from agentclaw.community.core.task.domain.models import (
+    TaskExecutionGraph,
+    TaskNode,
+    task_spec_instruction,
+    task_spec_title,
+)
 from agentclaw.community.core.task.domain.prompt_constants import (
     NO_WEB_SEARCH_CONSTRAINT,
 )
@@ -338,8 +343,8 @@ class SearchBasedDispatchStrategy:
             _tc = (
                 (
                     _spec.goal.objective
-                    or _spec.metadata.instruction
-                    or _spec.metadata.title
+                    or task_spec_instruction(_spec)
+                    or task_spec_title(_spec)
                 )
                 or ""
             ).strip()
@@ -499,7 +504,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
     demand = {
         "node_id": node.node_id,
         "goal": spec.goal.objective,
-        "instruction": spec.metadata.instruction,
+        "instruction": task_spec_instruction(spec),
         "acceptances": [
             {"id": a.id, "description": a.description} for a in spec.goal.acceptances
         ],

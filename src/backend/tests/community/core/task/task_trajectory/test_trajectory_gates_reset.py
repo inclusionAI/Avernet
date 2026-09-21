@@ -1,7 +1,7 @@
 """TDD tests for the RESET trajectory gate (REQ-4).
 
 P3 item 3 of the task-trajectory spec. The harness RESET gate lives in
-``ExecutionEngine._on_harness_collect`` (engine.py), reached via ``on_harness``
+``CentralizedExecutionAdapter._on_harness_collect`` (engine.py), reached via ``on_harness``
 (harness polls) and via ``on_report`` exec-error callbacks. The gate must fire
 an **additive** ``TrajectoryActionType.RESET`` trajectory event next to each
 harness reset point with:
@@ -54,13 +54,11 @@ import asyncio
 import json
 import time
 
-import pytest
 
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -70,7 +68,7 @@ from agentclaw.community.core.task.domain.models import (
     effective_run_mode,
 )
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_harness.harness import (
     TaskHarness,
@@ -93,10 +91,10 @@ def _task_info(task_id: str = "t1", max_depth: int = 3, extra_cfg: dict | None =
     cfg = {"MAX_DEPTH": max_depth, "BBS_MAX_DEPTH": 3, "task_type": "dynamic"}
     if extra_cfg:
         cfg.update(extra_cfg)
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(
                 objective="o",
                 acceptances=[AcceptanceCriteria(id="ac1", description="d")],
@@ -198,7 +196,7 @@ class _StubRunner:
         return "grp_stub"
 
 
-class _TrajectoryCaseEngine(ExecutionEngine):
+class _TrajectoryCaseEngine(CentralizedExecutionAdapter):
     """Test subclass — injects stubs + a trajectory repo (mirrors the PLAN and
     DISPATCH gate test subclasses but adds the trajectory_repo passthrough)."""
 

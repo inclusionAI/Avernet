@@ -15,7 +15,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -41,10 +40,10 @@ def _run(coro):
 
 
 def _task_info(task_id: str = "t1") -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="目标任务", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",

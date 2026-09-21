@@ -6,17 +6,17 @@ import pytest
 
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, Status, TaskInfo, TaskNodePatch, TaskSpec,
+    AcceptanceCriteria, Context, Goal, Status, TaskInfo, TaskNodePatch, TaskSpec,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 def _task_info(task_id: str = "t1") -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="O", acceptances=[AcceptanceCriteria(id="a1", description="done")]),
         ),
         source_type="bot",
@@ -31,7 +31,7 @@ def _run(coro):
 def _engine_with_root(task_id="t1"):
     graph = TaskGraphService()
     graph.initialize_graph(_task_info(task_id))
-    eng = ExecutionEngine(graph)
+    eng = CentralizedExecutionAdapter(graph)
     # initialize_graph 建图首帧:全局图 status=RUNNING,只含根节点(node_id==task_id) PENDING。
     root = next(n for n in graph.query_task_dashboard(task_id).tasks if n.node_id)
     return eng, graph, root

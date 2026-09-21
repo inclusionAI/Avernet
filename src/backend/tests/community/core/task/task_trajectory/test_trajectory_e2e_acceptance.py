@@ -83,8 +83,6 @@ import asyncio
 import json
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Any
 
 import pytest
 from sqlalchemy import create_engine
@@ -96,7 +94,6 @@ from agentclaw.community.core.repository.implementations.task.task_trajectory_re
     TaskTrajectoryRepository,
 )
 from agentclaw.community.core.task.domain.errors import (
-    TrajectoryAnalysisError,
     TrajectoryAnalysisNotConfiguredError,
 )
 from agentclaw.community.core.task.domain.models import (
@@ -105,7 +102,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     PlanResult,
     RuntimeInfo,
     Status,
@@ -115,7 +111,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
 )
@@ -133,7 +129,6 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
     ReasonCatalog,
     TaskTrajectory,
     TrajectoryActionType,
-    TrajectoryEvent,
     TrajectoryAnalysis,
 )
 from agentclaw.community.core.task.task_context.task_trajectory.payloads import (
@@ -210,10 +205,10 @@ def _task_info(task_id: str = "t1", max_depth: int = 3, extra_cfg: dict | None =
     cfg = {"MAX_DEPTH": max_depth, "BBS_MAX_DEPTH": 3, "task_type": "dynamic"}
     if extra_cfg:
         cfg.update(extra_cfg)
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(
                 objective="存储架构分析",
                 acceptances=[AcceptanceCriteria(id="ac1", description="d")],
@@ -313,7 +308,7 @@ class _StubRunner:
         return "grp_stub"
 
 
-class _TrajectoryCaseEngine(ExecutionEngine):
+class _TrajectoryCaseEngine(CentralizedExecutionAdapter):
     """Engine test subclass — injects stubs + a trajectory repo (mirrors the
     four P3-1..P3-5 gate-test subclasses). Used for the PLAN/DISPATCH/
     EXECUTE/VERIFY/RESET drives."""

@@ -16,7 +16,7 @@ from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.domain.errors import NodeNotFoundError, TaskStateError
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
+    AcceptanceCriteria, Context, Goal, RuntimeInfo, Status,
     TaskExecutionGraph, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_runner.callback_correlation import (
@@ -53,8 +53,7 @@ def _raise(exc):
 def _make_node(task_id, node_id, status) -> TaskNode:
     return TaskNode(
         node_id=node_id, task_id=task_id, status=status,
-        task_spec=TaskSpec(Metadata(task_id, "T", "do"), Context("bg"),
-                           Goal("O", [AcceptanceCriteria("a1", "d")])),
+        task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [AcceptanceCriteria("a1", "d")])),
         run_info=RuntimeInfo(), node_run_graph=None,  # type: ignore[arg-type]
     )
 
@@ -99,10 +98,10 @@ class _StubService:
 
     async def dispatch_task(self, **kwargs):
         self.callback.calls.append(("dispatch", kwargs))
-        return {"ok": True, "node_id": kwargs["node_id"]}
+        return {"ok": True, "node_id": kwargs["target_node_id"]}
 
-    def claim_bbs_task(self, task_id, bot_id, node_id=None):
-        self.callback.calls.append(("bbs_claim", (task_id, bot_id, node_id)))
+    def claim_bbs_task(self, task_id, bot_id, node_id=None, claim_id=None):
+        self.callback.calls.append(("bbs_claim", (task_id, bot_id, node_id, claim_id)))
         return SimpleNamespace(node_id=task_id)
 
 
@@ -246,7 +245,8 @@ class TestRouter:
             "/api/v1/collaboration/tasks/dispatch",
             json={
                 "task_id": "t1",
-                "node_id": "next",
+                "origin_node_id": "origin",
+                "target_node_id": "next",
                 "holder_id": "bot-1",
                 "relay_turn": "turn-1",
                 "dispatch_id": "dispatch-1",
@@ -264,7 +264,7 @@ class TestRouter:
         )
         assert response.status_code == 200, response.text
         assert svc.callback.calls == [
-            ("bbs_claim", ("t1", "bbs-bot", "bbs-step"))
+            ("bbs_claim", ("t1", "bbs-bot", "bbs-step", None))
         ]
 
     def test_relay_event_uses_typed_task_service_entry(self, client):

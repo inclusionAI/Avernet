@@ -1,8 +1,8 @@
 """TaskModule — production singletons for the task goal-driven execution framework。
 
-装配 TaskGraphService(local in-mem)+ TaskService(facade;内部 ExecutionEngine)。
-引擎构造期收传输端口(bot/bcs/discover),由 DI 从配置注入;端口缺省(community 未配 BaaS/BCS 密钥)
-→ 引擎退化为纯内核路径(默认空端口规划/派发 stub),prod 由 corp overlay 注真实端口实现。
+装配 TaskGraphService(local in-mem)+ TaskService(facade;内部 CentralizedExecutionAdapter)。
+中心化生命周期构造期收传输端口(bot/bcs/discover),由 DI 从配置注入;端口缺省(community 未配 BaaS/BCS 密钥)
+→ 中心化生命周期退化为纯内核路径(默认空端口规划/派发 stub),prod 由 corp overlay 注真实端口实现。
 
 注册 TaskServiceProtocol / TaskLoopCallbackProtocol 供 http adapter 注入(Rule 14:DI composition root)。
 """
@@ -151,7 +151,7 @@ class TaskModule(Module):
         task_dispatch: TaskDispatchConfig,
         injector: Injector,
     ) -> TaskService:
-        """构造 TaskService facade(引擎自当 ResultSink/TaskContextBuilder;构造期收端口)。
+        """构造 TaskService facade(中心化生命周期自当 ResultSink/TaskContextBuilder;构造期收端口)。
 
         端口接线策略(组合根按 ``DEPLOY_PROFILE`` 选实现,不在 adapter 内 if):
         - ``DEPLOY_PROFILE=singlebox`` → singlebox 真实链路(``SingleboxEngineAdapter`` 直连 per-bot 引擎 +
@@ -276,7 +276,7 @@ class TaskModule(Module):
             task_node_run_info_repo = None
         # 任务轨迹旁路采集落库(REQ-11):经 task_context_service 外部入口;TaskPersistenceModule 装了
         # 即取到 TaskContextServiceProtocol(与 task_info_repo / callback_repo / task_node_repo 同模块
-        # 绑定);未绑 → 取不到 → 引擎内 _log_trajectory / callback 解析旁路静默 no-op(纯内核/轻量
+        # 绑定);未绑 → 取不到 → 中心化生命周期内 _log_trajectory / callback 解析旁路静默 no-op(纯内核/轻量
         # 测试路径用;与 task_action_log 完全解耦)。重构后外部不直接持 trajectory repo,只持本 service。
         # INFO(非 WARNING):该 except 在每个轻量 DI 测试里也会触发(故意不绑 task_context_service),
         # WARNING 会在那里噪音化 + 触发 log-assertion 测试失败;INFO 让 prod 真实 misbinding

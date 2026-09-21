@@ -1,6 +1,6 @@
 """Test support for the spec-2026-09-18 trajectory → ``task_context_service`` reroute.
 
-After the reroute, ``ExecutionEngine`` / ``TaskService`` / ``TaskLoopCallback`` take
+After the reroute, ``CentralizedExecutionAdapter`` / ``TaskService`` / ``TaskLoopCallback`` take
 ``task_context_service: TaskContextServiceProtocol | None`` instead of a raw
 ``TaskTrajectoryRepositoryProtocol`` (the trajectory repo is now internal to the
 ``task_context.task_trajectory`` sub-module, reached only via the facade). The gate

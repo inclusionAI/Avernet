@@ -1,16 +1,27 @@
 from agentclaw.community.core.task.domain.models import (
-    Context, Goal, Metadata, RuntimeInfo, Status, TaskExecutionGraph, TaskNode, TaskSpec,
+    Context,
+    Goal,
+    RuntimeInfo,
+    Status,
+    TaskExecutionGraph,
+    TaskNode,
+    TaskSpec,
 )
 from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
-from agentclaw.community.core.task.task_plan.static_plan_runtime import StaticPlanRuntime
+from agentclaw.community.core.task.task_plan.static_plan import StaticPlanRuntime
 
 
 def _graph():
-    graph = TaskExecutionGraph(run_id=1, loop_round=0, status=Status.RUNNING, task_id="t1")
+    graph = TaskExecutionGraph(
+        run_id=1, loop_round=0, status=Status.RUNNING, task_id="t1"
+    )
     root = TaskNode(
-        node_id="t1", task_id="t1", status=Status.PLANNING,
-        task_spec=TaskSpec(Metadata("t1", "root", "root"), Context(""), Goal("root", [])),
-        run_info=RuntimeInfo(), node_run_graph=graph,
+        node_id="t1",
+        task_id="t1",
+        status=Status.PLANNING,
+        task_spec=TaskSpec(context=Context("", title="root"), goal=Goal("root", [])),
+        run_info=RuntimeInfo(),
+        node_run_graph=graph,
     )
     graph.tasks.append(root)
     return graph
@@ -55,8 +66,14 @@ def test_runtime_marks_two_root_nodes_ready_together_and_resolves_input():
 
     assert {node.node_id for node in readiness.ready} == {"risk", "strategy"}
     assert readiness.skipped == ()
-    assert {node.task_spec.context.extend_props["static_input"]["okr"] for node in readiness.ready} == {"increase conversion"}
-    assert readiness.ready[0].run_info.extend_props["pending_group_formation"].bot_ids == ["risk-a", "risk-b"]
+    assert {
+        node.task_spec.context.extend_props["static_input"]["okr"]
+        for node in readiness.ready
+    } == {"increase conversion"}
+    assert readiness.ready[0].run_info.extend_props["static_group"]["bot_ids"] == [
+        "risk-a",
+        "risk-b",
+    ]
 
 
 def test_runtime_join_is_not_ready_until_both_predecessors_done():
@@ -75,7 +92,8 @@ def test_runtime_join_is_not_ready_until_both_predecessors_done():
     second = runtime.ready(graph)
     assert [node.node_id for node in second.ready] == ["approval"]
     assert second.ready[0].task_spec.context.extend_props["static_input"] == {
-        "risk_result": "risk", "strategy_result": "strategy"
+        "risk_result": "risk",
+        "strategy_result": "strategy",
     }
 
 

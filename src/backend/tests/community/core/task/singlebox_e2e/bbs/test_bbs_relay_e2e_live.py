@@ -55,7 +55,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     Status,
     TaskGraphPatch,
     TaskInfo,
@@ -89,16 +88,13 @@ SUB_DOMAINS = ["基础架构", "中间件架构", "数据架构", "业务架构"
 
 def _task_info(owner_id: str) -> TaskInfo:
     return TaskInfo(
+        task_id=TASK_ID,
         task_spec=TaskSpec(
-            metadata=Metadata(
-                task_id=TASK_ID,
+            context=Context(
                 title="整理支付宝公司内部技术架构师",
-                instruction=(
-                    "整理支付宝(蚂蚁集团)内部各技术架构方向的架构师/负责人清单,"
-                    "覆盖基础架构/中间件/数据/业务等方向。"
-                ),
+                background="支付宝内部技术架构师梳理",
+                extend_props={},
             ),
-            context=Context(background="支付宝内部技术架构师梳理", extend_props={}),
             goal=Goal(
                 objective="整理支付宝公司内部技术架构师(各方向架构师姓名/角色/职责清单)",
                 acceptances=[

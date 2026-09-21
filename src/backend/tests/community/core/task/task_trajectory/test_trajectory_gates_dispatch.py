@@ -6,7 +6,7 @@ P3 item 1 of the task-trajectory spec. Covers four surfaces (per tasks.md P3):
        into `node.run_info.extend_props["_dispatch_rationale"]` carrying
        `strategy_name`/`decision_mode`/`candidates` for the engine DISPATCH gate to read.
     2. **DISPATCH gate emits a trajectory event with the rationale** — with a
-       capturing fake trajectory repo injected into `ExecutionEngine`, drive each
+       capturing fake trajectory repo injected into `CentralizedExecutionAdapter`, drive each
        of the three DISPATCH gates (`HIT_SINGLE` / `HIT_MULTI` / `MISS`) via
        `_prepare_into` + `_drain` / `on_miss` and assert the emitted
        `task_trajectory_events` row has `action_type=dispatch`, matching
@@ -42,7 +42,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -50,7 +49,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
 )
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
 from agentclaw.community.core.task.task_dispatch.strategies import (
@@ -76,10 +75,10 @@ def _run(coro):
 
 
 def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(
                 objective="存储架构分析",
                 acceptances=[AcceptanceCriteria(id="ac1", description="d")],
@@ -348,7 +347,7 @@ class _StubRunner:
         return "grp_stub"
 
 
-class _TrajectoryCaseEngine(ExecutionEngine):
+class _TrajectoryCaseEngine(CentralizedExecutionAdapter):
     """Test subclass — injects stubs + a trajectory repo (mirrors the existing
     `_CaseEngine` in test_engine.py but adds the trajectory_repo passthrough)."""
 

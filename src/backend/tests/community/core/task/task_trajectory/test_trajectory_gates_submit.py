@@ -64,7 +64,6 @@ from agentclaw.community.core.task.domain.requests import (
     RequestAcceptance,
     RequestContext,
     RequestGoal,
-    RequestMetadata,
     RequestTaskSpec,
     TaskInfoRequest,
 )
@@ -134,8 +133,8 @@ def _request(
         cfg.update(extra_cfg)
     return TaskInfoRequest(
         task_spec=RequestTaskSpec(
-            metadata=RequestMetadata(title="T", instruction="do"),
-            context=RequestContext(background="bg"),
+
+            context=RequestContext(background="bg", title="T"),
             goal=RequestGoal(
                 objective="o",
                 acceptances=[RequestAcceptance(id="ac1", acceptance="acc")],
@@ -243,9 +242,6 @@ class TestSubmitGateEmission:
         """``action_input`` MUST equal ``SHA-256(json.dumps(spec.to_dict(),
         sort_keys=True))`` — mirrors the PLAN digest convention (P3-2:
         SHA-256 over a stringified/serialized form)."""
-        from agentclaw.community.core.task.domain.models import (
-            AcceptanceCriteria, Context, Goal, Metadata, TaskInfo, TaskSpec,
-        )
 
         repo = _TrajRepo()
         svc = _service(repo)

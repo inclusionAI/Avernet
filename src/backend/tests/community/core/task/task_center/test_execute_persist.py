@@ -17,8 +17,7 @@ from agentclaw.community.core.task.domain.models import (
     Status, TaskNodePatch, TaskSourceType, TaskType,
 )
 from agentclaw.community.core.task.domain.requests import (
-    RequestAcceptance, RequestContext, RequestGoal, RequestMetadata,
-    RequestTaskSpec, TaskInfoRequest,
+    RequestAcceptance, RequestContext, RequestGoal, RequestTaskSpec, TaskInfoRequest,
 )
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
@@ -53,8 +52,8 @@ def repo():
 def _request() -> TaskInfoRequest:
     return TaskInfoRequest(
         task_spec=RequestTaskSpec(
-            metadata=RequestMetadata(title="T", instruction="do"),
-            context=RequestContext(background="bg"),
+
+            context=RequestContext(background="bg", title="T"),
             goal=RequestGoal(objective="o", acceptances=[RequestAcceptance(id="ac1", acceptance="acc")]),
         ),
         source_type=TaskSourceType.API,
@@ -91,7 +90,8 @@ def test_execute_persists_task_info_row(repo):
     assert row.status is Status.PENDING
     assert row.source_type == "api"
     assert row.owner_user_id == "U1" and row.owner_bot_id == "B1"
-    assert row.task_spec["metadata"]["task_id"] == "persist-tid"
+    assert "metadata" not in row.task_spec
+    assert row.task_spec["context"]["title"] == "T"
     assert row.task_spec["goal"]["acceptances"] == [{"id": "ac1", "description": "acc"}]
 
 

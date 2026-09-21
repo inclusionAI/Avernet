@@ -9,7 +9,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     NodeAction,
     NodeActionEvent,
     Relation,
@@ -42,42 +41,26 @@ def _acceptance_from_dict(value: dict[str, Any] | None) -> AcceptanceResult | No
 
 
 def task_spec_to_dict(spec: TaskSpec) -> dict[str, Any]:
-    return {
-        "metadata": {
-            "task_id": spec.metadata.task_id,
-            "title": spec.metadata.title,
-            "instruction": spec.metadata.instruction,
-        },
-        "context": {
-            "background": spec.context.background,
-            "extend_props": dict(spec.context.extend_props),
-        },
-        "goal": {
-            "objective": spec.goal.objective,
-            "acceptances": [
-                {"id": item.id, "description": item.description}
-                for item in spec.goal.acceptances
-            ],
-        },
-    }
+    return spec.to_dict()
 
 
 def task_spec_from_dict(value: dict[str, Any]) -> TaskSpec:
-    metadata = value.get("metadata", {})
-    context = value.get("context", {})
-    goal = value.get("goal", {})
+    # Legacy persisted specs carried title/instruction/task_id under metadata.
+    # Normalize once at the persistence boundary; the domain TaskSpec stays clean.
+    metadata = value.get("metadata", {}) if isinstance(value, dict) else {}
+    context = value.get("context", {}) if isinstance(value, dict) else {}
+    goal = value.get("goal", {}) if isinstance(value, dict) else {}
+    extend_props = dict(context.get("extend_props", {}))
+    legacy_instruction = str(metadata.get("instruction", "")).strip()
+    objective = str(goal.get("objective", "")).strip() or legacy_instruction
     return TaskSpec(
-        metadata=Metadata(
-            task_id=str(metadata.get("task_id", "")),
-            title=str(metadata.get("title", "")),
-            instruction=str(metadata.get("instruction", "")),
-        ),
         context=Context(
+            title=str(context.get("title", "") or metadata.get("title", "")),
             background=str(context.get("background", "")),
-            extend_props=dict(context.get("extend_props", {})),
+            extend_props=extend_props,
         ),
         goal=Goal(
-            objective=str(goal.get("objective", "")),
+            objective=objective,
             acceptances=[
                 AcceptanceCriteria(
                     id=str(item.get("id", "")),
@@ -95,6 +78,7 @@ def runtime_to_dict(runtime: RuntimeInfo) -> dict[str, Any]:
         "assignee": runtime.assignee,
         "start_time": runtime.start_time,
         "end_time": runtime.end_time,
+        "actual_goal": runtime.actual_goal.to_dict() if runtime.actual_goal else None,
         "output": dict(runtime.output),
         "acceptance_result": _acceptance_to_dict(runtime.acceptance_result),
         "progress_reason": runtime.progress_reason,
@@ -110,6 +94,20 @@ def runtime_from_dict(value: dict[str, Any] | None) -> RuntimeInfo:
         assignee=value.get("assignee"),
         start_time=value.get("start_time"),
         end_time=value.get("end_time"),
+        actual_goal=(
+            Goal(
+                objective=str(value["actual_goal"].get("objective", "")),
+                acceptances=[
+                    AcceptanceCriteria(
+                        id=str(item.get("id", "")),
+                        description=str(item.get("description", "")),
+                    )
+                    for item in value["actual_goal"].get("acceptances", [])
+                ],
+            )
+            if isinstance(value.get("actual_goal"), dict)
+            else None
+        ),
         output=dict(value.get("output", {})),
         acceptance_result=_acceptance_from_dict(value.get("acceptance_result")),
         progress_reason=value.get("progress_reason"),

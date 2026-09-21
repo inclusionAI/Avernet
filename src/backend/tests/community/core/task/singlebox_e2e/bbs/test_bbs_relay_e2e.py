@@ -39,7 +39,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     Status,
     TaskGraphPatch,
     TaskInfo,
@@ -90,10 +89,10 @@ class _Clock:
 
 
 def _task_info(task_id: str, *, execution_config: dict | None = None) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="t", instruction="i"),
-            context=Context(background="", extend_props={}),
+
+            context=Context(background="", extend_props={}, title="t"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         source_type="bot",
@@ -175,7 +174,7 @@ def _root_owner(nodes: dict[str, dict], task_id: str):
 def client():
     """独立 FastAPI app + test injector(TaskModule + stub discover)。返回 (TestClient, injector)。
 
-    经 TestClient 驱动 HTTP facade 真实 DI(TaskService → ExecutionEngine → TaskGraphService,
+    经 TestClient 驱动 HTTP facade 真实 DI(TaskService → CentralizedExecutionAdapter → TaskGraphService,
     bbs relay 全程 collector-free,不依赖 bot/bcs/discover 端口);经 injector 取 TaskGraphService
     做 SSOT 白盒播种。范本:test_bbs_{claim,attach,result}_route.py(同手法)。
     """

@@ -86,5 +86,6 @@ def test_graph_to_dto_projects_execution_config_once_at_top_level():
         "source_type": "bot",
         "owner_bot_id": "b1",
         "owner_user_id": "",
+        "gaps": [],
         "custom": "kept",
     }

@@ -29,7 +29,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import require_user_
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, Status, TaskInfo, TaskSpec,
+    AcceptanceCriteria, Context, Goal, Status, TaskInfo, TaskSpec,
 )
 from agentclaw.community.core.task.repository.types import TaskInfoRecord
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
@@ -321,15 +321,15 @@ class TestTaskExecute:
         record = repo.get(task_id)
         assert record is not None
         spec = record.task_spec
-        assert spec["metadata"]["title"] == "OKR 实现"
-        assert spec["metadata"]["instruction"] == "为业务提升双十一活动转化率"
+        assert spec["context"]["title"] == "OKR 实现"
+        assert spec["goal"]["objective"] == "提升双十一活动转化率"
         assert spec["goal"]["objective"] == "提升双十一活动转化率"
         assert spec["context"]["background"] == "活动周期：2026.10.15-2026.11.15；预算约束1000万"
         assert spec["goal"]["acceptances"] == [
             {"id": "acc_risk", "description": "风险评估群需产出可承接下发的结果"}
         ]
-        assert "运行静态模板" not in spec["metadata"]["instruction"]
-        assert spec["metadata"]["title"] != "okr-implementation"
+        assert "运行静态模板" not in spec["goal"]["objective"]
+        assert spec["context"]["title"] != "okr-implementation"
         assert spec["goal"]["objective"] != "okr-implementation"
         assert record.execution_config["static_plan_id"] == "okr-implementation-relay"
         assert record.execution_config["static_plan_yaml"]
@@ -421,7 +421,8 @@ class TestTaskList:
         assert record["source_type"] == "bot"
         assert record["owner_user_id"] == "owner_user"
         assert record["owner_bot_id"] == "owner_bot"
-        assert record["task_spec"]["metadata"]["task_id"] == task_id
+        assert record["task_id"] == task_id
+        assert "metadata" not in record["task_spec"]
         assert record["task_spec"]["goal"]["objective"] == "产出尽调报告"
         assert record["execution_config"]["task_type"] == "dynamic"
         assert record["status"] == "REVIEWING"
@@ -531,6 +532,20 @@ class TestTaskList:
         assert r.status_code == 400, r.text
 
 
+class TestTaskContext:
+    def test_context_returns_minimal_common_business_shape(self, client):
+        c, _ = client
+        task_id = _execute_and_get_id(c)
+        response = c.get(f"/api/v1/collaboration/tasks/{task_id}/context")
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert set(data) == {"spec", "all_done_output", "gaps"}
+        assert set(data["spec"]) == {"context", "goal"}
+        assert "metadata" not in data["spec"]
+        assert "task_id" not in data
+        assert "relay_turn" not in data
+
+
 class TestTaskDashboard:
     def test_dashboard_returns_graph_structure(self, client):
         c, _ = client
@@ -545,7 +560,8 @@ class TestTaskDashboard:
         # 根节点 task_spec 字段透传(task_id 服务端回填进 metadata)
         root = next(n for n in body["tasks"] if n["node_id"] == task_id)
         assert root["status"] == "REVIEWING"
-        assert root["task_spec"]["metadata"]["task_id"] == task_id
+        assert "metadata" not in root["task_spec"]
+        assert root["task_spec"]["context"]["title"]
         assert root["task_spec"]["goal"]["objective"] == "产出尽调报告"
         # include_action_log 默认关:action_log 不返回(空),避免常规查询 payload 膨胀
         assert root["run_info"]["action_log"] == []
@@ -576,16 +592,14 @@ class TestTaskCallbackReport:
         graph_svc = inj.get(TaskGraphService)
         # 经 graph_svc 建图(根 PENDING),不走 execute(execute 会驱动引擎在 stub 路径把图推到 DONE,
         # 致 add_task_nodes 触发条件 a 失效)。本测聚焦 HTTP 回投端点,非引擎规划逻辑。
-        graph_svc.initialize_graph(TaskInfo(
-            task_spec=TaskSpec(Metadata("t_http", "T", "i"), Context("bg"),
-                               Goal("o", [AcceptanceCriteria("a1", "d1")])),
+        graph_svc.initialize_graph(TaskInfo(task_id="t_http",
+            task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("o", [AcceptanceCriteria("a1", "d1")])),
             source_type="bot", owner_bot_id="owner_bot", execution_config={}))
         # 手动建一个 RUNNING 子节点(backdoor:直接调 graph_svc),模拟引擎已派发
         from agentclaw.community.core.task.domain.models import TaskNode, RuntimeInfo
         child = TaskNode(
             node_id="N_http", task_id="t_http", status=Status.RUNNING,
-            task_spec=TaskSpec(Metadata("t_http", "T", "i"), Context("bg"),
-                               Goal("o", [AcceptanceCriteria("a1", "d1")])),
+            task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("o", [AcceptanceCriteria("a1", "d1")])),
             run_info=RuntimeInfo(run_mode="single_bot", assignee="bot1"),
             node_run_graph=None,  # type: ignore[arg-type]
         )

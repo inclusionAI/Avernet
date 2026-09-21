@@ -7,7 +7,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
@@ -26,11 +25,7 @@ def _node(objective: str) -> TaskNode:
         node_id="t1",
         task_id="t1",
         status=Status.HUNG,
-        task_spec=TaskSpec(
-            Metadata("t1", "BBS", "execute updated task"),
-            Context("updated context"),
-            Goal(objective, [AcceptanceCriteria("a1", "done")]),
-        ),
+        task_spec=TaskSpec(context=Context("updated context", title="BBS"), goal=Goal(objective, [AcceptanceCriteria("a1", "done")])),
         run_info=RuntimeInfo(run_mode="bbs"),
         node_run_graph=None,  # type: ignore[arg-type]
     )

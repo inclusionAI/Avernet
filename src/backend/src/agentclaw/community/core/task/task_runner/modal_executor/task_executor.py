@@ -14,7 +14,12 @@ import time
 from typing import Any
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
-from agentclaw.community.core.task.domain.models import TaskNode, TaskNodePatch
+from agentclaw.community.core.task.domain.models import (
+    TaskCallbackData,
+    TaskNode,
+    TaskNodePatch,
+    task_spec_instruction,
+)
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
@@ -108,6 +113,14 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
         self._group_meta: dict[
             str, dict[str, Any]
         ] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
+
+    def _report_node_patch(self, patch: TaskNodePatch):
+        if self._graph is None:
+            return None
+        return self._graph.report(TaskCallbackData(data={
+            "report_type": "NODE_PATCH",
+            "payload": {"patch": patch},
+        }))
 
     async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         sem = asyncio.Semaphore(_DISPATCH_CONCURRENCY)
@@ -331,7 +344,7 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                 # 原始节点事实，避免 single_bot 和 multi_bot 产生两份不同的任务指令。
                 "task_id": node.task_id,
                 "task_objective": node.task_spec.goal.objective,
-                "task_instruction": node.task_spec.metadata.instruction,
+                "task_instruction": task_spec_instruction(node.task_spec),
                 "acceptances": [
                     {"id": item.id, "description": item.description}
                     for item in node.task_spec.goal.acceptances
@@ -354,7 +367,7 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
         )
         # 落库:run_mode single_bot→coop_group(收敛按协作群),extend_props 记 actual_run_mode=single_bot(原模式留痕)。
         if self._graph is not None:
-            self._graph.update_task_node_info(
+            self._report_node_patch(
                 TaskNodePatch(
                     task_id=node.task_id,
                     node_id=node.node_id,
@@ -397,7 +410,9 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
     async def _dispatch_coop_group(
         self, node: TaskNode, sem: asyncio.Semaphore
     ) -> bool:
-        group_id = node.run_info.assignee
+        # Relay keeps the business assignee as the next group driver. The actual
+        # BCS delivery identity is infrastructure metadata created by /dispatch.
+        group_id = node.run_info.extend_props.get("group_id") or node.run_info.assignee
         meta = self._group_meta.get(group_id)
         collab_mode = (meta or {}).get("collab_mode", "chat")
         loop_task_id = f"{node.task_id}::{node.node_id}"
@@ -498,7 +513,7 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                 text = None
             if text is not None:
                 ep["_exec_request_input"] = text
-        self._graph.update_task_node_info(
+        self._report_node_patch(
             TaskNodePatch(
                 task_id=node.task_id, node_id=node.node_id, extend_props_patch=ep
             )

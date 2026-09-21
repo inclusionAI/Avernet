@@ -15,10 +15,10 @@ import time
 from unittest.mock import AsyncMock, patch
 
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
+    AcceptanceCriteria, Context, Goal, RuntimeInfo, Status,
     TaskInfo, TaskNode, TaskSpec,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.client.double.double_bcs_client import _DoubleBcsClient
 from agentclaw.community.core.task.task_runner.client.double.double_open_api_bot import _DoubleOpenApiBot
@@ -136,9 +136,9 @@ class _DiscoverStub:
 
 def _task_info(task_id="t_phase"):
     return TaskInfo(
+        task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="存储尽调", instruction="produce DD"),
-            context=Context(background="存储行业"),
+            context=Context(title="存储尽调", background="存储行业"),
             goal=Goal(objective="产出尽调报告",
                       acceptances=[AcceptanceCriteria(id=f"ac{i}", description=f"d{i}") for i in range(1, 6)]),
         ),
@@ -156,7 +156,7 @@ class TestSingleBotPollReportE2E:
     def test_single_bot_dispatch_poll_report_done(self):
         svc = TaskGraphService()
         svc.initialize_graph(_task_info())
-        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub(),
+        eng = CentralizedExecutionAdapter(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub(),
                               bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True,
                               task_settings=_PollerModeSettings())
         _run(eng.on_execute("t_phase"))
@@ -186,7 +186,7 @@ class TestCoopGroupManagerWorkerE2E:
         bcs = _DoubleBcsClient(session_status="completed", session_output={
                                    "success": True, "data": "group_out", "gaps": []},
                                poll_once_then_terminal=True, terminal_after=1)
-        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
+        eng = CentralizedExecutionAdapter(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
                               bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True,
                               task_settings=_PollerModeSettings())
         _run(eng.on_execute("t_phase"))
@@ -223,7 +223,7 @@ class TestManagerWorkerEventSubscriptionsE2E:
         svc = TaskGraphService()
         svc.initialize_graph(_task_info())
         bcs = _RecordingDoubleBcsClient(poll_once_then_terminal=False)   # 建群即可断言,不靠终态
-        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
+        eng = CentralizedExecutionAdapter(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
                               bcs_identity=_DoubleBcsBotIdentityResolver(),
                               api_base_url="https://api.example.com", task_search_skill_enabled=True)
         _run(eng.on_execute("t_phase"))
@@ -259,7 +259,7 @@ class TestCoopGroupStateMachineE2E:
         bcs = _DoubleBcsClient(sm_status="completed", sm_output={
                                    "success": True, "data": "sm_out", "gaps": []},
                                poll_once_then_terminal=True, terminal_after=1)
-        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
+        eng = CentralizedExecutionAdapter(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
                               bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True,
                               task_settings=_PollerModeSettings())
         _run(eng.on_execute("t_phase"))
@@ -280,7 +280,7 @@ class TestBbsDispatchE2E:
         svc = TaskGraphService()
         svc.initialize_graph(_task_info("t_bbs"))
         bcs = _DoubleBcsClient()
-        exe = eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
+        exe = eng = CentralizedExecutionAdapter(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
                                     bcs_identity=_DoubleBcsBotIdentityResolver())
         n = TaskNode(node_id="N_bbs", task_id="t_bbs", status=Status.RUNNING,
                      task_spec=_task_info("t_bbs").task_spec,
@@ -305,7 +305,7 @@ class TestR3LockModel:
         per-task threading.RLock 应保证 on_report 串行执行,不竞态翻态(update_task_node_info 状态机不破)。"""
         svc = TaskGraphService()
         svc.initialize_graph(_task_info("t_lock"))
-        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub(),
+        eng = CentralizedExecutionAdapter(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub(),
                               bcs_identity=_DoubleBcsBotIdentityResolver())
         # 手动建两个 PENDING 子节点 + 父 PLANNING,模拟一批兄弟
         from agentclaw.community.core.task.domain.models import TaskNodePatch, AcceptanceResult, AcceptanceVerdict
@@ -359,6 +359,6 @@ def _wait_for(pred, timeout=10.0, interval=0.1):
     raise AssertionError(f"等待超时({timeout}s)条件未达成")
 
 
-def _stop_poller(eng: ExecutionEngine):
+def _stop_poller(eng: CentralizedExecutionAdapter):
     if getattr(eng, "_executor", None) is not None and eng._executor._poller is not None:  # type: ignore[attr-defined]
         eng._executor._poller.stop()  # type: ignore[attr-defined]

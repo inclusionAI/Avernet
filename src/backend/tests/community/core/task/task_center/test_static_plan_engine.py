@@ -1,10 +1,10 @@
 import asyncio
 
 from agentclaw.community.core.task.domain.models import (
-    Context, Goal, Metadata, RuntimeInfo, Status, TaskExecutionGraph, TaskInfo,
+    Context, Goal, RuntimeInfo, Status, TaskInfo,
     TaskNode, TaskNodePatch, TaskSpec, AcceptanceResult, AcceptanceVerdict,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
 from agentclaw.community.core.task.task_dispatch.strategies import DirectDispatchStrategy
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
@@ -63,7 +63,7 @@ class _Runner:
 
 
 def _engine(graph, runner):
-    class StaticEngine(ExecutionEngine):
+    class StaticEngine(CentralizedExecutionAdapter):
         def _build_dispatcher(self):
             return TaskDispatcher(self._graph, pool=[DirectDispatchStrategy()])
 
@@ -74,12 +74,8 @@ def _engine(graph, runner):
 
 
 def _task_info():
-    return TaskInfo(
-        task_spec=TaskSpec(
-            Metadata("t1", "OKR", "implement"),
-            Context("", {"template_input": {"okr": "increase conversion"}}),
-            Goal("okr-implementation", []),
-        ),
+    return TaskInfo(task_id="t1",
+        task_spec=TaskSpec(context=Context("", {"template_input": {"okr": "increase conversion"}}, title="OKR"), goal=Goal("okr-implementation", [])),
         source_type="api",
         owner_bot_id="entry-bot",
         execution_config={"task_type": "static_plan", "static_plan_yaml": PLAN,
@@ -163,12 +159,8 @@ def test_static_plan_default_real_report_with_fallback_timeout(monkeypatch):
 
     # execution_config.static_fallback_timeout 覆盖(env 缺省)
     gs2 = TaskGraphService()
-    ti2 = TaskInfo(
-        task_spec=TaskSpec(
-            Metadata("t2", "OKR", "implement"),
-            Context("", {"template_input": {"okr": "x"}}),
-            Goal("okr-implementation", []),
-        ),
+    ti2 = TaskInfo(task_id="t2",
+        task_spec=TaskSpec(context=Context("", {"template_input": {"okr": "x"}}, title="OKR"), goal=Goal("okr-implementation", [])),
         source_type="api", owner_bot_id="entry-bot",
         execution_config={"task_type": "static_plan", "static_plan_yaml": PLAN,
                           "template_input": {"okr": "x"}, "static_fallback_timeout": 15},
@@ -205,11 +197,7 @@ def test_bbs_handoff_uses_single_bot_delivery_without_changing_bbs_origin():
         node_id="handoff",
         task_id="t1",
         status=Status.PENDING,
-        task_spec=TaskSpec(
-            Metadata("t1", "handoff", "implement unavailable items"),
-            Context("", {"static_input": {"unhandled_tasks": [{"id": "u1"}]}}),
-            Goal("implement", []),
-        ),
+        task_spec=TaskSpec(context=Context("", {"static_input": {"unhandled_tasks": [{"id": "u1"}]}}, title="handoff"), goal=Goal("implement", [])),
         run_info=RuntimeInfo(run_mode="bbs"),
         node_run_graph=None,  # type: ignore[arg-type]
     )

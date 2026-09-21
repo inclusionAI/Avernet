@@ -66,7 +66,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -81,12 +80,11 @@ from agentclaw.community.core.task.domain.requests import (
     RequestAcceptance,
     RequestContext,
     RequestGoal,
-    RequestMetadata,
     RequestTaskSpec,
     TaskInfoRequest,
 )
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
@@ -131,10 +129,10 @@ class _RaisingAndCapturingRepo:
 
 
 def _task_info(task_id: str = "guard-t1", max_depth: int = 3) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(
                 objective="o",
                 acceptances=[AcceptanceCriteria(id="ac1", description="d")],
@@ -180,8 +178,8 @@ def _request(*, task_type=TaskType.DYNAMIC,
     cfg: dict = {"task_type": task_type}
     return TaskInfoRequest(
         task_spec=RequestTaskSpec(
-            metadata=RequestMetadata(title="T", instruction="do"),
-            context=RequestContext(background="bg"),
+
+            context=RequestContext(background="bg", title="T"),
             goal=RequestGoal(
                 objective="o",
                 acceptances=[RequestAcceptance(id="ac1", acceptance="acc")],
@@ -273,7 +271,7 @@ _MINIMAL_RATIONALE: dict = {
 # -- Engine / service test subclasses ---------------------------------------
 
 
-class _TrajectoryCaseEngine(ExecutionEngine):
+class _TrajectoryCaseEngine(CentralizedExecutionAdapter):
     """Engine test subclass — injects stubs + a trajectory repo (mirrors the
     four P3-1..P3-5 gate-test subclasses); used for the PLAN/DISPATCH/
     EXECUTE/VERIFY/RESET drives in the consolidated guard."""

@@ -18,33 +18,17 @@
 
 ```text
 core/task/
-├── README.md                      # 本目录规范文档
-├── domain/                        # shared kernel:纯领域模型 + 统一 errors(零依赖,无 services)
-│   ├── models.py                  #   领域 dataclass/enum + 中间类型(patch/criteria/op_result/callback_data)
-│   └── errors.py                  #   统一错误(全框架唯一 errors 收口)
-├── task_center/                   # TaskService facade + ExecutionEngine 编排核(非独立模块)
-│   ├── task_service.py            #   facade API(execute / get_task_dashboard / list_tasks)
-│   └── engine.py                  #   ExecutionEngine:on_* 事件驱动 + 状态条件(a/b/c)推进
-├── task_context/                    # TaskGraphService 图谱 SSOT + task_context_service 轨迹读写门面(独立模块)
-│   ├── task_graph_service.py      #   7+2 API:原子变更唯一网关 + relations 分解树派生查询
-│   ├── task_context_service.py   #   轨迹读+写的单一对外入口(relay→task_trajectory 子模块;spec 2026-09-18)
-│   └── task_trajectory/          #   任务轨迹采集旁路子模块(零侵入正向驱动;spec 2026-09-16)
-│       ├── models.py             #   纯 dataclass/enum:TrajectoryEvent/TaskTrajectory/TrajectoryAnalysis/ReasonCatalog/DispatchRationale/TrajectoryActionType
-│       ├── payloads.py           #   emit_trajectory_event / emit_submit_trajectory 发射器
-│       ├── time_utils.py         #   gmt_* 北京时间存储值 ↔ epoch-ms 转换
-│       ├── assembler.py          #   只读组装:事件表 → TaskTrajectory
-│       ├── analyzer.py           #   总体分析:rule/llm/tc_bot 多执行者
-│       └── trajectory_service.py #   TaskTrajectoryService 内部契约 + 实现(对外不暴露)
-├── task_plan/                     # TaskPlanner 规划编排壳 + DecomposerPort seam(可插拔)
-│   └── planner.py                 #   plan(graph) → 委托 decompose(零 case 知识);protocols.py 延后
-├── task_dispatch/                 # TaskDispatcher 搜推分发 + BotDiscoverPort seam(可插拔)
-│   └── dispatcher.py              #   dispatch(toDoList) → 填 run_mode/assignee 返 list[TaskNode];protocols.py 延后
-├── task_runner/                   # TaskRunner 三模态执行 + 回投适配
-│   ├── runner.py                  #   start_run(批量)三模态自适应 + form_coop_group/get_group_session
-│   └── callback_adapter.py        #   TaskCallbackData → TaskNodePatch → engine.on_report
-├── task_harness/                  # TaskHarness 旁路常驻巡检
-│   └── harness.py                 #   周期巡检超时/崩溃 → 复位 PENDING 重投(不抢正向)
-└── task_discovery/                # 占位(另一位同学的任务挖掘模块,本框架不实现)
+├── README.md
+├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
+├── task_center/                   # TaskService facade 与双模式入口
+├── task_plan/                     # TaskPlanner + static_plan.py 统一领域定义/Runtime
+├── task_dispatch/                 # TaskDispatcher + query-only TaskSearch
+├── task_runner/                   # TaskRunner、模式 Adapter、语义事件分发与回投适配
+├── task_context/                  # 统一 TaskGraphService + TaskContext 投影 + TaskTrajectoryService
+│   ├── task_graph_service.py      # 唯一公开图谱领域服务与事实入口
+│   └── task_graph_support.py      # 私有 report/状态策略/查询/TaskContext 投影函数
+├── task_harness/                  # TaskHarness 重试、超时、恢复与 redrive
+└── task_discovery/                # Bot 候选发现与会话创建
 ```
 
 ## 节点状态机流转(6 节点态 + 图态;双机实现于 TaskGraphService)
@@ -139,7 +123,7 @@ stateDiagram-v2
 
 | 驱动源 | 入口 | 触发条件 | 状态推进 |
 |---|---|---|---|
-| `TaskService.execute` | `on_execute` | 条件 a:根 PENDING | 根→plan→add 子(父→PLANNING)→dispatch→start_run |
+| `TaskService.execute` | `PLAN_REQUESTED` → `CentralizedExecutionAdapter` | 条件 a:根 PENDING | Graph 持久化计划事件→Planner→产生 `DISPATCH_REQUESTED`→兼容派发执行 |
 | skill 回投 PASS | `on_report`(→`_on_pass_collect`) | 子 DONE | 父 plan:有子→add+dispatch;gap 闭→传播 DONE 上行/根→图 DONE |
 | skill 回投 FAIL+gaps | `on_report`(→`_on_fail_collect`) | 叶验收不过 | 叶→FAILED,等 harness 重派重试(不立即拆) |
 | skill 回投 exec_error | `on_report`(→`_on_harness_collect`) | bot 没跑通 | RUNNING/FAILED→PENDING 复位重投;达 MAX_HARNESS→HUNG 升 BBS |
@@ -155,7 +139,7 @@ stateDiagram-v2
 
 | 方法 | 所在类 | 签名 |
 |---|---|---|
-| `on_execute` / `on_report` / `on_miss` / `on_harness` | `ExecutionEngine` | `async def` |
+| `on_execute` / `on_report` / `on_miss` / `on_harness` | `CentralizedExecutionAdapter` | `async def` |
 | `start_run` / `form_coop_group` | `TaskRunner` | `async def` |
 | `deliver` | `DeliveryPort`(Protocol) | `async def deliver(node) -> bool` |
 | `report_result` / `start_run` | `TaskLoopCallback` | `async def` |
@@ -202,3 +186,43 @@ stateDiagram-v2
 
 - 单测经 `asyncio.new_event_loop().run_until_complete(coro)` 驱动 async 编排方法 helper,**不用 `@pytest.mark.asyncio`**(对齐本仓现有测试约定)。
 - 真实投递/seam 经 `run_until_complete` 驱动;sync stub runner 仍可被 `await`(返非 coroutine 协程兼容由 `iscoroutine` 兜底,harness 用)。
+
+## 2026-09-10 双编排边界
+
+当前任务模块同时支持中心化规划执行和分布式 Relay 接力，目标契约以
+`src/backend/specs/2026-09-10-task-module-boundary-and-strategy-extensibility/`
+为准。
+
+共同边界：
+
+- `TaskGraphService` 是唯一图谱领域服务；中心化与 Relay 不再通过 Mixin、monkey patch 或模式专用 Graph 类扩展它。
+- `task_graph_support.py` 仅承载私有 report、状态策略、查询和 TaskContext 投影函数，不构成第二套领域对象。
+- `TaskSpec` 只保存 `context + goal`；`task_id` 属于任务/节点实体，执行指令由业务事实按需投影。
+- `TaskGraphService.report(...)` 是 Planner、Dispatcher、Runner、Harness、BBS 和 Relay 写入图谱事实的统一入口。
+- `GET /api/v1/collaboration/tasks/{task_id}/context` 返回通用
+  `TaskContext(spec, all_done_output, gaps)`。
+- `/search` 只检索候选；`DISPATCH_RESULT` 记录决策；`/dispatch` 执行实际投递。
+- `TaskRuntimeProfile` 在建图时冻结策略名和允许的执行模态。
+
+模式差异：
+
+- 中心化模式已由 Graph 语义事件启动：`PLAN_REQUESTED → DISPATCH_REQUESTED`。规划、派发、投递、结果收敛、恢复和轨迹分别归属 `TaskPlanner`、`TaskDispatcher`、`TaskRunner`、`TaskGraphService`、`TaskHarness` 与 `TaskTrajectoryService`；`static_plan.py` 只保留 Static Plan 定义和纯 Runtime，Static Plan 的编排动作归还上述现有模块；`CentralizedExecutionAdapter` 仅保留模式路由、端口装配和兼容事件入口。
+- Relay 模式由当前 Bot 的 task-loop Skill 计算能力范围和 GAP；每次 `PLAN_RESULT` 最多创建一个下一棒，Graph 生成节点 ID，后续节点不回写前序节点运行事实。
+- Relay BBS 是目标节点级认领；认领 Bot 执行同一 Relay 闭环，不进入中心化根节点收敛。
+
+## 中心化语义事件驱动迁移
+
+当前动态中心化任务的首轮入口为：
+
+```text
+TaskService.execute
+  → TaskGraphService.emit_semantic_event(PLAN_REQUESTED)
+  → TaskSemanticEventDispatcher
+  → CentralizedExecutionAdapter.handle_plan_requested
+  → Graph.emit_semantic_event(DISPATCH_REQUESTED)
+  → CentralizedExecutionAdapter.handle_dispatch_requested
+  → 现有 TaskRunner.start_run/form_coop_group
+```
+
+语义事件记录持久化在 Graph 的 `_semantic_outbox` 中，并支持 pending/acked 状态。
+`handle_dispatch_requested` 通过 `TaskDispatcher._prepare_into` 与 `TaskRunner._drain` 完成派发准备和锁外投递；不再引入 `Centralized*Handler`，也不再使用多继承拼装中心化执行链路。

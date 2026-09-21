@@ -1,6 +1,6 @@
 """M6 singlebox E2E:任务目标驱动执行框架端到端(权威剧本 gwqie46v7hzr1w6h 机制)。
 
-全模块接(真实 TaskGraphService/ExecutionEngine/TaskPlanner/TaskDispatcher/TaskRunner),
+全模块接(真实 TaskGraphService/CentralizedExecutionAdapter/TaskPlanner/TaskDispatcher/TaskRunner),
 CaseEngine 子类覆写 _build_* 注入 case 策略 adapter(CaseDecomposer/CaseBotDiscover)+ test runner stub。
 覆盖三模态(single_bot / coop_group / bbs)+ FAIL 补救治愈 + MISS 升 BBS + BBS bot 认领 + STUCK→HUNG。
 节点名为 stub 产出(非框架写死);框架零 case 知识。验收 100% 回投(无 verify port);BBS 投递归 runner(无 market)。
@@ -15,18 +15,16 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     PlanResult,
     RelationType,
     RuntimeInfo,
     Status,
     TaskInfo,
     TaskNode,
-    TaskNodePatch,
     TaskSpec,
     TaskCallbackData,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_dispatch.strategies import (
     GroupFormation,
@@ -39,9 +37,9 @@ from agentclaw.community.core.task.task_context.task_graph_service import TaskGr
 # ===== domain helpers =====
 def _task_info(task_id: str = "t_case", *, max_depth: int = 3) -> TaskInfo:
     return TaskInfo(
+        task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="存储行业尽调", instruction="produce a DD report"),
-            context=Context(background="存储行业"),
+            context=Context(title="存储行业尽调", background="存储行业"),
             goal=Goal(
                 objective="产出一份尽调报告",
                 acceptances=[AcceptanceCriteria(id=f"ac{i}", description=f"d{i}") for i in range(1, 6)],
@@ -57,13 +55,12 @@ def _task_info_request(task_id: str = "t_case", *, max_depth: int = 3):
     """TaskInfoRequest for execute (task_id is supplied by the provider, not the request)."""
     from agentclaw.community.core.task.domain.models import TaskSourceType
     from agentclaw.community.core.task.domain.requests import (
-        RequestAcceptance, RequestContext, RequestGoal, RequestMetadata,
+        RequestAcceptance, RequestContext, RequestGoal,
         RequestTaskSpec, TaskInfoRequest,
     )
     return TaskInfoRequest(
         task_spec=RequestTaskSpec(
-            metadata=RequestMetadata(title="存储行业尽调", instruction="produce a DD report"),
-            context=RequestContext(background="存储行业"),
+            context=RequestContext(title="存储行业尽调", background="存储行业"),
             goal=RequestGoal(
                 objective="产出一份尽调报告",
                 acceptances=[RequestAcceptance(id=f"ac{i}", acceptance=f"d{i}") for i in range(1, 6)],
@@ -267,7 +264,7 @@ class _TestRunner:
 
 
 # ===== CaseEngine:覆写 _build_* 注入 case 策略 + test runner =====
-class _CaseEngine(ExecutionEngine):
+class _CaseEngine(CentralizedExecutionAdapter):
     def __init__(self, graph, decomposer, discover, runner=None):
         self._case_decomposer = decomposer
         self._case_discover = discover
@@ -297,7 +294,7 @@ class _CaseTaskService(TaskService):
         self._cr = runner
         super().__init__(graph, harness=harness, task_id_provider=task_id_provider)
 
-    def _build_engine(self, *, bot=None, bcs=None, discover=None) -> ExecutionEngine:
+    def _build_centralized_adapter(self, *, bot=None, bcs=None, discover=None) -> CentralizedExecutionAdapter:
         # case 测试覆写:注入 stub 策略/投递的 _CaseEngine(忽略传入端口)
         return _CaseEngine(self._graph, self._cd, self._cbd, self._cr)
 
@@ -309,7 +306,7 @@ def _patch(task_id: str, node_id: str, **kw) -> "object":
 
 
 def _wire_facade(*, task_id="t_case", max_depth=3, miss_nodes=None) -> tuple:
-    """接线 case facade:真实 TaskGraphService + ExecutionEngine(经 _CaseEngine 注入 case 策略 stub)。
+    """接线 case facade:真实 TaskGraphService + CentralizedExecutionAdapter(经 _CaseEngine 注入 case 策略 stub)。
     v4:bbs_max_depth 已废(图级总轮次由 MAX_LOOP=10 承载);MISS/FAIL 补救改为 harness 重新派发执行(不拆子)。"""
     svc = TaskGraphService()
     runner = _TestRunner(svc)
@@ -395,7 +392,7 @@ class TestFailRemedyCure:
         # 执行报错(exec_error:run/transport fail)→harness 重新派发执行重试(不拆子)。
         # 注:验收 FAIL(verdict FAILED)现由 on_report 折叠为节点 HUNG+升 BBS(终态,不复位重投);
         # harness 重投仅用于执行报错(RUNNING→PENDING→dispatch→RUNNING),与验收 gap 语义不同。
-        _run(facade._engine.on_harness(_patch("t_case", "N_market", exec_error="run_transport_fail")))
+        _run(facade._centralized_adapter.on_harness(_patch("t_case", "N_market", exec_error="run_transport_fail")))
         g = svc.query_task_dashboard("t_case")
         assert svc._get_node(g, "N_market").status == Status.RUNNING  # harness 重新派发执行
         # 重新派发后回投 PASS → DONE
@@ -447,8 +444,7 @@ class TestMissEscalateBbs:
         claim = facade.claim_bbs_task("t_case", bbs_bot_id)
         assert claim.success
         scoped_spec = TaskSpec(
-            metadata=Metadata(task_id="N_practice_bbs_bbs", title="BBS 接力段", instruction="做剩余尽调"),
-            context=Context(background="BBS 接力"),
+            context=Context(title="BBS 接力段", background="BBS 接力"),
             goal=Goal(objective="完成剩余", acceptances=[AcceptanceCriteria(id="ac_bbs", description="done")]),
         )
         scoped = facade.attach_bbs_node("t_case", "t_case", scoped_spec, bbs_bot_id)

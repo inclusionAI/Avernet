@@ -20,7 +20,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     PlanResult,
     RuntimeInfo,
     Status,
@@ -30,7 +29,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_center.engine import ExecutionEngine
+from agentclaw.community.core.task.task_runner.execution_adapters import CentralizedExecutionAdapter
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
 from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
@@ -38,10 +37,10 @@ from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
 
 # ===== domain helpers (mirrors test_engine.py minimal setup) =====
 def _task_info(task_id: str = "t1", max_depth: int = 3) -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -96,7 +95,7 @@ class StubDispatcher:
         return out
 
 
-class _CaseEngine(ExecutionEngine):
+class _CaseEngine(CentralizedExecutionAdapter):
     """测试子类:bot/bcs 留 None(不启 poller 线程),注入 stub planner/dispatcher/runner。"""
 
     def __init__(self, graph, planner=None, dispatcher=None, runner=None):
@@ -123,7 +122,7 @@ def svc() -> TaskGraphService:
 # ===== _schedule_bbs_notify 直测 =====
 def test_engine_schedule_bbs_notify_submits_to_durable_loop():
     """BBS submission is independent of the caller's short-lived Harness loop."""
-    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    engine = CentralizedExecutionAdapter(graph=MagicMock(), api_base_url="http://x")
     engine._runner = MagicMock()
     engine._runner.start_run = AsyncMock(return_value=[True])
     engine._bot = MagicMock()
@@ -162,7 +161,7 @@ def test_engine_schedule_bbs_notify_submits_to_durable_loop():
 
 
 def test_engine_schedule_bbs_notify_skips_when_root_missing(caplog):
-    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    engine = CentralizedExecutionAdapter(graph=MagicMock(), api_base_url="http://x")
     engine._runner = MagicMock()
     fake_g = MagicMock()
     fake_g.tasks = [_child("child", "t1")]
@@ -174,7 +173,7 @@ def test_engine_schedule_bbs_notify_skips_when_root_missing(caplog):
 
 
 def test_engine_background_false_result_is_visible(caplog):
-    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    engine = CentralizedExecutionAdapter(graph=MagicMock(), api_base_url="http://x")
     future = concurrent.futures.Future()
     future._bbs_task_id = "t1"
     engine._bg_tasks.add(future)
@@ -189,7 +188,7 @@ def test_engine_background_false_result_is_visible(caplog):
 
 def test_engine_bbs_survives_caller_loop_shutdown():
     """A caller driven by asyncio.run cannot cancel the durable BBS coroutine."""
-    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    engine = CentralizedExecutionAdapter(graph=MagicMock(), api_base_url="http://x")
     started = threading.Event()
     finished = threading.Event()
 
@@ -233,7 +232,7 @@ def test_engine_bbs_schedule_reaches_notify_through_start_run():
         formatter=None, context=None, sink=None, poller=None,
         graph=graph, api_base_url="http://x",
     )
-    engine = ExecutionEngine(graph=graph, api_base_url="http://x")
+    engine = CentralizedExecutionAdapter(graph=graph, api_base_url="http://x")
     engine._runner = TaskRunner(graph, execution_backend=executor)
     durable_future = concurrent.futures.Future()
     submitted = {}
@@ -258,7 +257,7 @@ def test_engine_bbs_schedule_reaches_notify_through_start_run():
 
 def test_engine_schedule_bbs_notify_skips_when_no_runner():
     """无 runner(端口缺失)→ 静默跳过,不抛、不建任务。"""
-    engine = ExecutionEngine(graph=MagicMock(), bot=None, bcs=None, api_base_url="")
+    engine = CentralizedExecutionAdapter(graph=MagicMock(), bot=None, bcs=None, api_base_url="")
     engine._runner = None
     # 不抛即可
     engine._schedule_bbs_notify("t1", MagicMock())

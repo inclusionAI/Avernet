@@ -7,14 +7,14 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
 import json
 import logging
 import time
 import uuid
 from typing import Any
 from agentclaw.community.core.task.domain.models import (
-    Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskNodePatch, TaskSpec,
+    Context, Goal, RuntimeInfo, Status, TaskCallbackData, TaskNode, TaskNodePatch,
+    TaskSpec, task_spec_instruction, task_spec_title,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,18 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     winner = max(bids, key=lambda b: b["completion_rate"])
     winner_bot_id = winner["bot_id"]
     try:
-        graph.claim_bbs_owner(task_id, winner_bot_id)
+        graph.report(TaskCallbackData(data={
+            "report_type": "BBS_CLAIM",
+            "payload": {
+                "task_id": task_id,
+                "node_id": target_node_id,
+                "bot_id": winner_bot_id,
+                "claim_id": (
+                    f"auto-{task_id}-{target_node_id}-{winner_bot_id}"
+                    if target_node_id else None
+                ),
+            },
+        }))
         bbs_claim_at = int(time.time() * 1000)
     except Exception as exc:
         logger.warning("[task][bbs_mode] claim 失败 task=%s:%s", task_id, exc)
@@ -123,54 +134,21 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     actual_run_mode = "coop_group" if (_group_enabled and group_executor is not None) else "bbs"
 
     if target_node_id is not None:
-        # Relay already planned the BBS node. Reuse it so centralized dynamic
-        # selection does not create a second ``bbs-xxxx`` node.
+        # Relay claim is node-local and already transitions the target to RUNNING.
+        refreshed = graph.query_task_dashboard(task_id)
         bbs_task_node = next(
-            (item for item in execution_graph.tasks if item.node_id == target_node_id),
+            (item for item in refreshed.tasks if item.node_id == target_node_id),
             None,
         )
-        if bbs_task_node is None or bbs_task_node.status != Status.PENDING:
+        if bbs_task_node is None or bbs_task_node.status != Status.RUNNING:
             logger.warning(
-                "[task][bbs_mode] relay target missing/not pending task=%s node=%s",
+                "[task][bbs_mode] relay target missing/not running after claim task=%s node=%s",
                 task_id,
                 target_node_id,
             )
-            graph.update_task_node_info(
-                TaskNodePatch(
-                    task_id=task_id,
-                    node_id=task_id,
-                    extend_props_patch={"bbs_owner": None},
-                )
-            )
             return
-        bbs_task_node = replace(
-            bbs_task_node,
-            run_info=replace(
-                bbs_task_node.run_info,
-                run_mode="bbs",
-                assignee=winner_bot_id,
-                start_time=bbs_claim_at,
-                extend_props={
-                    **dict(bbs_task_node.run_info.extend_props),
-                    "actual_run_mode": "bbs",
-                    "bbs_claim_at": bbs_claim_at,
-                },
-            ),
-        )
-        graph.update_task_node_info(
-            TaskNodePatch(
-                task_id=task_id,
-                node_id=target_node_id,
-                status=Status.RUNNING,
-                run_mode="bbs",
-                assignee=winner_bot_id,
-                start_time=bbs_claim_at,
-                progress_reason=f"BBS 动态选人完成，{winner_bot_id} 开始执行",
-                extend_props_patch={"actual_run_mode": "bbs", "bbs_claim_at": bbs_claim_at},
-            )
-        )
         logger.info(
-            "[task][bbs_mode] relay target reused task=%s node=%s winner=%s",
+            "[task][bbs_mode] relay target claimed task=%s node=%s winner=%s",
             task_id,
             target_node_id,
             winner_bot_id,
@@ -182,9 +160,8 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             task_id=task_id,
             status=Status.PENDING,
             task_spec=TaskSpec(
-                metadata=Metadata(task_id=task_id, title=winner.get("title"), instruction=""),
-                context=Context(background=""),
-                goal=Goal(objective=winner.get("goal"), acceptances=[]),
+                context=Context(title=str(winner.get("title") or ""), background=""),
+                goal=Goal(objective=str(winner.get("goal") or ""), acceptances=[]),
             ),
             run_info=RuntimeInfo(
                 run_mode=actual_run_mode,
@@ -194,10 +171,16 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             ),
             node_run_graph=None
         )
-        graph.add_task_nodes([bbs_task_node], task_id, mark_parent_planning=False)
+        graph.report(TaskCallbackData(data={
+            "report_type": "ADD_NODES",
+            "payload": {
+                "task_id": task_id,
+                "nodes": [bbs_task_node],
+                "parent_node_id": task_id,
+                "mark_parent_planning": False,
+            },
+        }))
         logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
-        graph.add_relations(task_id, [(task_id, bbs_task_node.node_id)])
-        logger.info("[task][bbs_mode] add_edge, task_id=%s, node=%s", task_id, bbs_task_node.node_id)
 
     # 任务msg
     msg = _task_msg(
@@ -268,26 +251,36 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             }
         )
 
-        logger.warning(
-        "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 终态 + 保持根 HUNG, 不驱动收敛、不写根 output(排查 engine._build_executor/build_integration 漏传 on_bbs_report)",
-        task_id
-        )
-        graph.update_task_node_info(_scoped_patch)
+        if target_node_id is None and on_bbs_report is not None:
+            await on_bbs_report(_scoped_patch)
+        else:
+            if target_node_id is None:
+                logger.warning(
+                    "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 运行事实，保持根 HUNG",
+                    task_id,
+                )
+            # Relay target stays RUNNING until its task-loop Skill reports
+            # EXECUTION_RESULT; centralized fallback records the scoped output.
+            graph.report(TaskCallbackData(data={
+                "report_type": "NODE_PATCH",
+                "payload": {"patch": _scoped_patch},
+            }))
         logger.info("[task][bbs_mode] finish_rely_task, task_id=%s, task_result=%s, scoped_patch=%s", task_id, task_result, _scoped_patch)
     except Exception as exc:
         logger.error("[task][bbs_mode] rely_task_meet_exception, task_id=%s, exception=%s", task_id, exc)
         # send 失败 → 回收 claim(释放 bbs_owner,避免泄漏挡住后续重升 BBS)。
         # send 失败不产生 BBS 回投，保留节点与运行记录，仅释放 claim。
-        graph.update_task_node_info(
-            TaskNodePatch(
+        graph.report(TaskCallbackData(data={
+            "report_type": "NODE_PATCH",
+            "payload": {"patch": TaskNodePatch(
                 task_id=task_id,
                 node_id=task_id,
                 # BBS dispatch failure releases the claim but must preserve the
                 # root HUNG recovery state. PLANNING would surface as EXECUTING
                 # and falsely make a terminal child set look active again.
                 extend_props_patch={"bbs_owner": None},
-            )
-        )
+            )},
+        }))
         logger.warning("[task][bbs_mode] send 失败 bot=%s task=%s:%s", winner_bot_id, task_id, exc)
 
 
@@ -416,7 +409,7 @@ def _build_task_snapshot(execution_graph) -> dict:
     done_children = [
         {
             "node_id": n.node_id,
-            "title": n.task_spec.metadata.title,
+            "title": task_spec_title(n.task_spec),
             "output": (n.run_info.output if n.run_info else None),
         }
         for n in tasks
@@ -427,7 +420,7 @@ def _build_task_snapshot(execution_graph) -> dict:
         "node_id": root.node_id,
         "status": str(root.status),
         "goal": goal.objective,
-        "instruction": spec.metadata.instruction,
+        "instruction": task_spec_instruction(spec),
         "background": ctx.background if ctx else None,
         "acceptances": [
             {"id": a.id, "description": a.description} for a in goal.acceptances

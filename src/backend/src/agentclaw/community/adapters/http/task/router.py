@@ -297,7 +297,7 @@ async def update_task_node(
     request: Request,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
-    """内部节点写口:直接更新节点 run_info(经 ``update_task_node_info`` → ``ExecutionEngine.on_report`` 落库并触发翻态/验收/收敛传播)。
+    """内部节点写口:直接更新节点 run_info(经 ``update_task_node_info`` → ``CentralizedExecutionAdapter.on_report`` 落库并触发翻态/验收/收敛传播)。
 
     透传 ``TaskNodePatch`` 三选一终态翻转(互斥):``acceptance_result`` 验收 / ``exec_error`` 执行报错(→ on_harness 重投)/
     ``status`` 框架直驱;三空仅 fold 非状态字段。供内部/测试直驱节点状态,不经 BBS claim 校验(区别于 ``bbs/result``)。领域异常→ ``@envelope_errors`` 映射。"""

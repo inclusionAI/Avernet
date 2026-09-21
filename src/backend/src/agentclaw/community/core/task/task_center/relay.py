@@ -1,4 +1,5 @@
 """Persistent relay-turn coordination stored with the task graph snapshot."""
+
 from __future__ import annotations
 
 import hashlib
@@ -55,10 +56,23 @@ class RelayCoordinator:
             self._require_relay(graph)
             self._graph._require_node(graph, node_id)
             current = graph.extend_props.get("relay_turn") or {}
+            current_node = self._graph._get_node(graph, node_id)
+            terminal_graph = getattr(graph.status, "value", graph.status) in {
+                "DONE",
+                "SUCCESS",
+                "HUNG",
+                "FAILED",
+                "CANCELLED",
+            }
+            terminal_node = getattr(
+                getattr(current_node, "status", None), "value", None
+            ) in {"DONE", "SUCCESS", "HUNG", "FAILED", "CANCELLED"}
             if retry_event and (
                 current.get("node_id") != node_id
                 or current.get("holder_id") != holder_id
                 or current.get("status") == "CONSUMED"
+                or terminal_graph
+                or terminal_node
             ):
                 return False, None, False
             active = current.get("status") == "GRANTED" and int(
@@ -104,7 +118,9 @@ class RelayCoordinator:
 
     def _token_matches(self, current: dict, token: str) -> bool:
         digest = self._digest(token)
-        return any(hmac.compare_digest(value, digest) for value in self._token_digests(current))
+        return any(
+            hmac.compare_digest(value, digest) for value in self._token_digests(current)
+        )
 
     def require(self, task_id: str, node_id: str, holder_id: str, token: str) -> str:
         graph = self._graph.query_task_dashboard(task_id)
@@ -144,7 +160,9 @@ class RelayCoordinator:
 
         self._graph._mutate_with_version_retry(task_id, mutation)
 
-    def renew_expired(self, task_id: str, node_id: str, holder_id: str) -> RelayTurn | None:
+    def renew_expired(
+        self, task_id: str, node_id: str, holder_id: str
+    ) -> RelayTurn | None:
         """Renew an expired current-baton lease for a resume prompt.
 
         This only updates graph-level relay control metadata. It never changes a
@@ -198,6 +216,86 @@ class RelayCoordinator:
 
         self._graph._mutate_with_version_retry(task_id, mutation)
 
+    def begin_event(self, task_id: str, event_key: str) -> dict:
+        """Atomically reserve a relay event across instances.
+
+        ``seen_event`` followed by a later mutation is racy: two replicas can
+        both observe a missing event.  The reservation is stored in the same
+        optimistic graph snapshot and expires so a crashed owner can be
+        retried.
+        """
+        now = int(time.time() * 1000)
+
+        def mutation(graph):
+            records = dict(graph.extend_props.get("relay_event_records") or {})
+            current = records.get(event_key) or {}
+            state = str(current.get("state") or "")
+            claimed_at = int(current.get("claimed_at_ms") or 0)
+            if state == "COMPLETED":
+                return {"state": state, "result": current.get("result")}, None, False
+            if state == "PROCESSING" and now - claimed_at < self._ttl_ms:
+                return {"state": state}, None, False
+            records[event_key] = {"state": "PROCESSING", "claimed_at_ms": now}
+            graph.extend_props["relay_event_records"] = records
+            return {"state": "CLAIMED"}, None, True
+
+        return self._graph._mutate_with_version_retry(task_id, mutation)
+
+    def complete_event(self, task_id: str, event_key: str, result: dict) -> None:
+        """Commit the result of a previously reserved event."""
+
+        def mutation(graph):
+            records = dict(graph.extend_props.get("relay_event_records") or {})
+            current = dict(records.get(event_key) or {})
+            current.update(
+                {
+                    "state": "COMPLETED",
+                    "result": dict(result),
+                    "completed_at_ms": int(time.time() * 1000),
+                }
+            )
+            records[event_key] = current
+            graph.extend_props["relay_event_records"] = records
+            graph.extend_props["relay_event_ids"] = (
+                list(graph.extend_props.get("relay_event_ids") or []) + [event_key]
+            )[-200:]
+            return None, None, True
+
+        self._graph._mutate_with_version_retry(task_id, mutation)
+
+    def release_event(self, task_id: str, event_key: str) -> None:
+        """Release a failed reservation so the caller can retry safely."""
+
+        def mutation(graph):
+            records = dict(graph.extend_props.get("relay_event_records") or {})
+            if event_key not in records:
+                return None, None, False
+            records.pop(event_key, None)
+            graph.extend_props["relay_event_records"] = records
+            return None, None, True
+
+        self._graph._mutate_with_version_retry(task_id, mutation)
+
+    def expire_turn(self, task_id: str, node_id: str, holder_id: str) -> bool:
+        """Atomically close an expired relay lease for recovery exhaustion."""
+        now = int(time.time() * 1000)
+
+        def mutation(graph):
+            current = dict(graph.extend_props.get("relay_turn") or {})
+            if (
+                current.get("status") != "GRANTED"
+                or current.get("node_id") != node_id
+                or current.get("holder_id") != holder_id
+                or int(current.get("expires_at_ms") or 0) > now
+            ):
+                return False, None, False
+            current["status"] = "EXPIRED"
+            current["expired_at_ms"] = now
+            graph.extend_props["relay_turn"] = current
+            return True, None, True
+
+        return bool(self._graph._mutate_with_version_retry(task_id, mutation))
+
     def seen_event(self, task_id: str, event_id: str) -> bool:
         graph = self._graph.query_task_dashboard(task_id)
         return event_id in (graph.extend_props.get("relay_event_ids") or [])
@@ -224,6 +322,53 @@ def _diagnostic_text(value: object) -> str | None:
     if len(text) <= _MAX_DIAGNOSTIC_TEXT:
         return text
     return f"{text[:_MAX_DIAGNOSTIC_TEXT]}...(truncated)"
+
+
+def relay_attempt(service: Any, task_id: str) -> int:
+    try:
+        return int(service._graph.query_task_dashboard(task_id).loop_round or 0)
+    except Exception:  # noqa: BLE001 diagnostics only
+        return 0
+
+
+def emit_relay_event(
+    service: Any,
+    *,
+    task_id: str,
+    node_id: str,
+    action_result: str,
+    error_type: ReasonCatalog | None = None,
+    error_msg: str | None = None,
+    ext_info: dict[str, Any] | None = None,
+    status_from: Any = None,
+    status_to: Any = None,
+    attempt: int = 0,
+) -> None:
+    """Emit Relay trajectory evidence without affecting task progression."""
+    context_service = getattr(service, "_task_context_service", None)
+    if context_service is None:
+        return
+    try:
+        context_service.emit_trajectory_event(
+            task_id,
+            node_id,
+            "relay",
+            action_result=action_result,
+            error_type=error_type,
+            error_msg=error_msg,
+            ext_info=ext_info,
+            status_from=status_from,
+            status_to=status_to,
+            attempt=attempt,
+        )
+    except Exception as exc:  # noqa: BLE001 diagnostic path must not block Relay
+        logger.warning(
+            "[task][relay][trajectory] task=%s node=%s result=%s failed: %s",
+            task_id,
+            node_id,
+            action_result,
+            exc,
+        )
 
 
 def emit_relay_callback_success(

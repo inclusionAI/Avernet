@@ -19,12 +19,10 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     TaskGraphPatch,
     TaskInfo,
     TaskSpec,
 )
-from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
@@ -70,10 +68,10 @@ def client():
 def _bbs_task(injector: Injector, task_id: str) -> None:
     """经 injector 取得 TaskGraphService,建图并置 bbs_mode=True。"""
     graph_svc = injector.get(TaskGraphService)
-    graph_svc.initialize_graph(TaskInfo(
+    graph_svc.initialize_graph(TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="t", instruction="i"),
-            context=Context(background="", extend_props={}),
+
+            context=Context(background="", extend_props={}, title="t"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         source_type="bot",

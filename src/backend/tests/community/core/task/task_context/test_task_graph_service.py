@@ -21,7 +21,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskInfo,
@@ -38,10 +37,10 @@ from agentclaw.community.core.task.task_context.task_graph_service import TaskGr
 
 # ===== fixtures / helpers =====
 def _task_info(task_id: str = "t1") -> TaskInfo:
-    return TaskInfo(
+    return TaskInfo(task_id=task_id,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="T", instruction="do it"),
-            context=Context(background="bg"),
+
+            context=Context(background="bg", title="T"),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
@@ -612,3 +611,20 @@ class TestEffectiveStatus:
         before = g.status
         _ = g.effective_status  # 读派生不写存储
         assert g.status == before
+
+
+def test_runtime_profile_is_frozen_at_graph_creation(svc: TaskGraphService):
+    info = _task_info("profile-task")
+    info.execution_config["runtime_profile"] = {
+        "planner_strategy": "gap_based",
+        "dispatcher_strategy": "search",
+        "runner_strategy": "default",
+        "allowed_run_modes": ["single_bot"],
+    }
+    graph = svc.initialize_graph(info)
+    info.execution_config["runtime_profile"]["allowed_run_modes"].append("bbs")
+    assert graph.extend_props["runtime_profile"]["allowed_run_modes"] == ["single_bot"]
+    with pytest.raises(TaskStateError, match="not allowed"):
+        svc.update_task_node_info(
+            _patch("profile-task", "profile-task", run_mode="bbs")
+        )

@@ -11,7 +11,6 @@ singlebox 模式下 ``DeviceAdapterTransport`` 绑的是 ``InMemoryDeviceAdapter
 """
 from __future__ import annotations
 
-import os
 from typing import Any, Protocol
 
 import httpx

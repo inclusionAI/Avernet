@@ -3,7 +3,7 @@ import asyncio
 import httpx
 
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
+    AcceptanceCriteria, Context, Goal, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
@@ -62,8 +62,7 @@ def test_get_state_machine_run():
 
 def _node(group_id="g1"):
     return TaskNode(node_id="n1", task_id="t1", status=Status.RUNNING,
-                    task_spec=TaskSpec(Metadata("t1", "T", "do"), Context("bg"),
-                                       Goal("O", [AcceptanceCriteria("a1", "d")])),
+                    task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [AcceptanceCriteria("a1", "d")])),
                     run_info=RuntimeInfo(run_mode="coop_group", assignee=group_id),
                     node_run_graph=None)  # type: ignore[arg-type]
 
@@ -146,6 +145,10 @@ class _Graph:
 
     def update_task_node_info(self, patch):
         self.patches.append(patch)
+
+    def report(self, data):
+        assert data.data["report_type"] == "NODE_PATCH"
+        return self.update_task_node_info(data.data["payload"]["patch"])
 
 
 def test_dispatch_state_machine_persists_group_run_ids_to_node_extend_props():

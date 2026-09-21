@@ -1,403 +1,571 @@
-# 目标设计：任务模块事件反应链与统一任务入口
+# 目标设计：统一任务事实边界与中心化 / Relay 双模式
 
-## 1. 总体架构
+> 本计划描述目标架构、领域契约和实现顺序。它不把当前代码行为误写为目标态已实现行为。
 
-任务执行闭环是“图谱状态驱动的事件反应链”：任何参与者向 `TaskGraphService.report` 上报事实；图谱服务校验并推进状态机，原子持久化后发布语义事件；TaskPlanner、TaskDispatcher、TaskRunner 各自消费事件、完成本职决策或执行，再向同一入口上报。不存在负责串行调用各模块的中心化业务编排器。
+## 1. Architecture overview
 
-```text
-参与者 report → TaskGraphService → Outbox / Event Bus
-                                  ↓
-             TaskPlanner / TaskDispatcher / TaskRunner
-                                  ↓
-                        TaskGraphService.report
-```
+### 1.1 Shared kernel, different orchestration actors
 
-## 2. 模块职责和允许的接口
-
-| 模块 | 对外接口/订阅 | 输入 | 输出 | 不负责 |
-| --- | --- | --- | --- | --- |
-| TaskCli | `task-cli [goal]`、`task-cli get`、`task-cli list` | 一句话目标、终端对话 | 文本追问、`task_id`、查询结果 | 任务规则、澄清状态、规划、派发、执行 |
-| TaskService | `intake(TaskIntakeRequest) -> TaskIntakeResult`、`execute(TaskInfoRequest)`、`get_task_dashboard(...)`、`list_tasks(...)` | 澄清对话、已确认任务请求、查询条件 | 澄清结果、`TaskOpResult`、图谱/列表 | TaskPlanner/TaskDispatcher/TaskRunner 的具体策略 |
-| TaskGraphService | `report(TaskCallbackData)`、受控查询 | 报告事实、查询条件 | `TaskOpResult`、语义事件、图谱视图 | 规划、选人、实际执行 |
-| TaskPlanner | 订阅 `PLAN_REQUESTED`；`plan(TaskContext)` | `TaskContext` | `PlanResult`，通过 `report` 上报 | 图谱读写、派发、运行 |
-| TaskDispatcher | 订阅 `DISPATCH_REQUESTED`；`dispatch(TaskNode)` | 一个 `TaskNode` | `TaskNodePatch`，通过 `report` 上报 | 状态迁移、批处理、启动执行 |
-| TaskRunner | 订阅 `EXECUTION_REQUESTED`；`run(TaskNode)` | 一个 `TaskNode` | 启动事实和执行结果，通过 `report` 上报 | 图谱读写、规划、选人 |
-
-`TaskIntake` 不是独立领域模块或公开服务；它只是 `TaskService.intake` 内部维护的澄清会话状态。TaskCli 只依赖 TaskService，且每一轮均调用同一个 `intake` 接口。
-
-## 3. 领域对象
-
-复用：`TaskExecutionGraph`、`TaskNode`、`TaskNodePatch`、`TaskSpec`、`PlanResult`、`TaskCallbackData`、`TaskOpResult`、`NodeOpResult`。
-
-唯一新增跨模块领域视图是 `TaskContext`。它是图谱服务按规划所需最小范围生成的只读投影，不是完整图谱、Snapshot 或另一套命令对象：
-
-```python
-@dataclass(frozen=True)
-class TaskContext:
-    task_id: str
-    target_node_id: str | None
-    graph_version: int
-    task_spec: TaskSpec
-    node_and_dependency_state: ...
-    relevant_completed_outputs: ...
-    acceptance_criteria_and_current_gap: ...
-    constraints_resources_and_authorization_scope: ...
-```
-
-`graph_version` 属于 `TaskExecutionGraph`，随 `TaskContext` 或 `TaskNode` 携带，用于上报时的乐观并发校验，不是独立业务参数。
-
-`TaskContext` 是面向本次规划的最新完整任务投影：它同时包含任务目标与验收标准、图谱/节点/依赖状态、与本次决策相关的已完成产出、当前未满足的 GAP，以及约束、资源和授权边界。接力模式中，刚完成节点 A 的结果是触发新规划的最新增量，A 的 Bot 仍必须以图谱生成的这个完整投影计算 GAP；不得用 A 的本地结果替代整个上下文。
-
-### 3.1 任务识别澄清契约
-
-TaskCli 与后端只有一个澄清接口和一对输入/输出对象。首次提交、补充回答、选择表达、确认、取消都是自然语言 `message`，不增加 `answer`、`review`、`confirm` 等子接口或 CLI 二级命令：
-
-```python
-class TaskService:
-    async def intake(self, request: TaskIntakeRequest) -> TaskIntakeResult: ...
-
-class TaskIntakeRequest:
-    intake_session_id: str | None
-    message: str
-    target: {type: "BOT" | "GROUP", identifier: str} | None
-
-class TaskIntakeResult:
-    intake_session_id: str
-    status: TaskIntakeStatus
-    task_id: str | None
-    task_info: ...
-    missing_fields: list[str]
-    questions: list[str]
-```
-
-`intake_session_id=None` 仅在首次请求时合法。TaskService 创建会话、生成该 ID、绑定实际处理澄清的 Bot/group 与当前草稿；后续轮次必须带回它，且不得改变已绑定目标。它只关联澄清会话，不是 `task_id`，不进入 `TaskSpec` 或任务图谱。
-
-`TaskIntakeStatus` 仅为 `CLARIFYING`、`READY_FOR_CONFIRMATION`、`CONFIRMED`、`CANCELLED`。显式 TaskCli 入口不返回 `NOT_TASK`；目标不清、信息不足或一句话混合多个独立任务时返回 `CLARIFYING`，并由 `questions` 要求用户明确本次任务。执行中的 `EXECUTING`、`SUCCESS`、`FAILED` 属于正式任务/图谱状态，不是澄清状态。
-
-所有状态均返回同一 `task_info` 字段名及完整字段形状，未知值以空字符串或空列表表达：
+两种模式共享任务事实和执行载体：
 
 ```text
+TaskSpec / TaskNode / RuntimeInfo / TaskContext
+                ↓
+        TaskGraphService.report
+                ↓
+      persistence + state machine + outbox
+                ↓
+  /search → DISPATCH_RESULT → /dispatch → TaskRunner
+```
+
+差异只在“谁规划、谁决策、何种状态收敛”：
+
+| 维度 | 中心化规划执行 | 分布式 Relay 接力执行 |
+| --- | --- | --- |
+| 规划主体 | Backend `TaskPlanner` | 当前 baton Bot / 群 Manager 的 task-loop Skill |
+| 派发决策主体 | Backend `TaskDispatcher` 策略 | 当前 baton Skill |
+| 实际投递 | `TaskRunner` | `TaskRunner` |
+| 节点拓扑 | 可生成多个节点和依赖关系 | 每轮最多一个 next TaskNode，严格串行 |
+| 父节点收敛 | Graph 根据子节点/依赖状态收敛 | 不做父子回写；当前棒交接即 DONE |
+| BBS | Graph/Runner 的中心化 BBS 策略 | target baton 节点级发布和认领，认领者继续 Relay |
+
+### 1.2 Module responsibilities
+
+| 模块 | 输入 | 输出 | 禁止职责 |
+| --- | --- | --- | --- |
+| task-loop recognition | 用户消息、澄清历史 | `task_info` 草案和卡片投影 | 创建图、执行任务、直接调用 Graph 写入 |
+| TaskService | 已确认 `TaskInfoRequest` | 正式任务、根节点、首棒投递 | 业务规划、候选决策 |
+| TaskGraphService | 查询或 report 事实 | `TaskContext`、原子状态变更、语义事件 | 能力匹配、GAP 语义推理、候选排序 |
+
+`TaskGraphService` 是唯一公开图谱领域类。中心化和 Relay 的差异只存在于其内部私有状态策略函数中；禁止定义 `CentralizedTaskGraphService`、`RelayTaskGraphService`、Graph Mixin，或通过 `TaskGraphService.method = function` 动态挂载能力。为满足文件大小约束，report 路由、状态策略、查询和 TaskContext 投影统一收口到 `task_graph_support.py` 的私有模块级函数；公开方法和领域身份仍统一归属于 `TaskGraphService`。
+| TaskPlanner | `TaskContext` + 当前目标节点 | 中心化 `PlanResult` | 写图、派发、执行 |
+| Relay Skill | `TaskContext` + 当前节点 + Bot 事实 | actual_goal、gaps、next TaskSpec、派发决策 | 直接写图、直接创建群、绕过 Runner 投递 |
+| TaskDispatcher | 中心化待派发节点 | 中心化派发决策 | 状态迁移、执行 |
+| `/search` | query | candidates[] | 感知图谱、决定模态、写入任务 |
+| TaskRunner | 已决策节点 | 外部会话/群创建、投递结果 | 规划、搜索、直接写图 |
+
+## 2. Domain model
+
+### 2.1 Task recognition draft and confirmation mapping
+
+`task_info` 保留为识别澄清阶段的统一任务草案。卡片协议是其 UI 投影：`task_clarify` 使用顶层字段，`task_ready` 使用 `task_ready.task`；两者的外层 UI 字段不进入正式任务领域。
+
+```python
 task_info = {
-  title: str,
-  goal: str,
-  background: str,
-  deliverables: list[str],
-  acceptance_criteria: list[str],
-  constraints: list[str],
-  resources: list[...]
+    # optional
+    "title": str,
+    "background": str,
+    "resources": list[str],
+
+    # required before confirmation
+    "goal": str,
+    "deliverables": list[str],
+    "acceptance_criteria": list[str],
+    "constraints": list[str],
 }
 ```
 
-`task_info` 是澄清接口的稳定数据字段，不新造与正式任务实体并列的领域对象。
-
-`goal`、`deliverables`、`acceptance_criteria`、`constraints` 是可确认任务的四个必填要素；`title`、`background`、`resources` 同时从用户描述解析，缺失时不阻塞确认（标题可由 goal 生成）。`resources` 只表示用户提供的文档、链接、文件或其他外部资料，不表示运行时资源、Bot、预算或执行模式。
-
-确认轮由 TaskService 在同一次 `intake` 调用内完成 `task_info -> TaskInfoRequest -> execute(...)`。因此对外 `status=CONFIRMED` 时 `task_id` 必须已生成；若 `execute` 失败则整个调用返回提交错误，不得返回虚假的 `CONFIRMED`。TaskCli 不缓存或转换 `task_info`，也不直接调用 `execute`。
-
-确认后字段映射复用现有 `TaskInfoRequest` / `TaskSpec` 结构：
-
-```text
-task_info.title                -> TaskSpec.metadata.title
-task_info.goal                 -> TaskSpec.goal.objective
-task_info.acceptance_criteria  -> TaskSpec.goal.acceptances
-task_info.background           -> TaskSpec.context.background
-task_info.deliverables         -> TaskSpec.context.extend_props.deliverables
-task_info.constraints          -> TaskSpec.context.extend_props.constraints
-task_info.resources            -> TaskSpec.context.extend_props.resources
+```python
+def init_task_request(
+    task_info: dict[str, Any],
+    source_context: SourceContext,
+) -> TaskInfoRequest:
+    ...
 ```
 
-`TaskSpec` 不包含 `task_id`；任务身份只属于正式任务记录与 `TaskExecutionGraph`，节点身份只属于 `TaskNode`。`TaskSpec.metadata.instruction` 只承载系统指令或受控运行时配置，不能由用户任务信息拼接而成。
+Mapping:
 
-## 4. 统一上报和图谱写入
+```text
+task_info.title                → TaskSpec.context.title
+task_info.background           → TaskSpec.context.background
+task_info.deliverables         → TaskSpec.context.extend_props["deliverables"]
+task_info.constraints          → TaskSpec.context.extend_props["constraints"]
+task_info.resources            → TaskSpec.context.extend_props["resources"]
+task_info.goal                 → TaskSpec.goal.objective
+task_info.acceptance_criteria  → TaskSpec.goal.acceptances
 
-统一上报接口定义并实现于 `TaskGraphService`：
+source_context                 → source_type / owner_user_id / owner_bot_id /
+                                 execution_config / task_type / workflow_id /
+                                 orchestration_mode
+```
+
+`title` 和 `background` 为可选业务上下文，缺失时使用空字符串；四要素完整性只由 task-loop 澄清阶段保证，`init_task_request` 只转换，不重复业务澄清。
+
+### 2.2 TaskSpec and node facts
 
 ```python
-class TaskGraphService:
-    async def report(self, data: TaskCallbackData) -> TaskOpResult: ...
+@dataclass
+class Context:
+    title: str
+    background: str
+    extend_props: dict[str, Any]
+
+
+@dataclass
+class Goal:
+    objective: str
+    acceptances: list[AcceptanceCriteria]
+
+
+@dataclass
+class TaskSpec:
+    context: Context
+    goal: Goal
 ```
 
-`TaskCallbackData` 是报告数据载体；它不是接口。它的结构化信封包含 `report_type`、`task_id`、`node_id`、`graph_version` 和 `payload`。
-
-| `report_type` | payload | 可改变的事实 |
-| --- | --- | --- |
-| `PLAN` | `PlanResult` | 图谱结构和规划结论 |
-| `DISPATCH` | `TaskNodePatch` | `run_mode`、`assignee`、派发诊断字段 |
-| `EXECUTION_STARTED` / `EXECUTION_START_FAILED` | `TaskNodePatch` | 启动事实和诊断字段 |
-| `EXECUTION_RESULT` | 执行结果 payload | 输出、完成或失败事实 |
-| `OBSERVATION` / `INVALID_REPORT` | 审计 payload | 仅审计，不推进节点状态 |
-| `RECOVERY` | `TaskNodePatch` | 已定义的恢复字段 |
-
-TaskGraphService 校验身份、版本、幂等、状态机、字段白名单和授权范围；然后持久化图谱事实与 Outbox 事件。图谱原始变更和持久化实现仅属于 Graph 模块内部，其他模块不可访问。
-
-TaskPlanner、TaskDispatcher、TaskRunner 只获得绑定到 `TaskGraphService.report` 的单方法能力，不获得完整 GraphService 实例；因此不能读取图谱或调用原始写方法。
-
-## 5. 事件和模块 API
-
-核心语义事件：
+`TaskSpec` 不包含：
 
 ```text
-PLAN_REQUESTED(TaskContext)
-DISPATCH_REQUESTED(TaskNode)
-EXECUTION_REQUESTED(TaskNode)
-TASK_TERMINATED(...)
+metadata
+task_id
+instruction
+assignee
+run_mode
+relay_turn
 ```
-
-事件契约只声明业务 payload。Graph 与 Event Bus 可以在内部使用投递目标完成定向投递：中心化模式投递给 Master runtime，接力模式投递给刚完成上游节点的 Bot runtime；该投递信息不进入 `TaskContext`、`TaskNode` 或下列模块 API。接力上报的合法性由 Graph 基于报告身份、`TaskContext` / `TaskNode` 已有的 `graph_version`、父节点关系、深度和既有回调幂等机制校验。Dispatcher 写入 `TaskNodePatch` 的 `run_mode`、`assignee` 已固化在后续 `TaskNode` 中，故不另设 `execution_carrier` 入参。
 
 ```python
-class TaskPlanner(Protocol):
-    async def plan(self, context: TaskContext) -> PlanResult: ...
-
-class TaskDispatcher(Protocol):
-    async def dispatch(self, node: TaskNode) -> TaskNodePatch: ...
-
-class TaskRunner(Protocol):
-    async def run(self, node: TaskNode) -> bool: ...
+@dataclass
+class RuntimeInfo:
+    run_mode: str | None
+    assignee: str | None
+    actual_goal: Goal | None
+    output: dict[str, Any]
+    acceptance_result: AcceptanceResult | None
+    progress_reason: str | None
+    failure_reason: str | None
+    extend_props: dict[str, Any]
 ```
 
-事件消费支持至少一次投递和幂等。批量并发属于事件消费层的吞吐能力，不进入 TaskDispatcher 或 TaskRunner 的领域入参。工作流是单 Bot executor 的实现，YAML 是协作组 executor/策略的实现，均不属于 TaskCli 命令。
+字段语义：
 
-Relay 允许执行 Bot 通过受控 HTTP Skill 协议作为外部事件消费者/生产者：后端不替 Relay Bot 直接运行 Planner 或 Dispatcher，而是验证 `EXECUTION_RESULT`、签发 `relay_turn`，再接受同一 baton 上的 `PLAN_RESULT`、`DISPATCH_RESULT` 和 `DISPATCH`。该适配层必须把外部事件翻译为 Graph report，不得把 HTTP 调用语义扩散到核心策略接口。
+```text
+TaskNode.task_spec
+= 上一棒或中心化 Planner 对该节点的预期子任务。
 
-## 6. 标准数据流
+RuntimeInfo.actual_goal
+= 当前执行 Bot 经过能力准入后实际接受的执行范围。
 
-1. TaskCli 将每轮输入交给 `TaskService.intake(TaskIntakeRequest)`；TaskService 创建/恢复澄清会话，并通过目标 Bot/group 已挂载的 `task-loop` 完成识别、四要素澄清和确认。
-2. 确认轮中，TaskService 内部将 `task_info` 映射为 `TaskInfoRequest` 并调用 `execute(...)`，创建正式图谱和根节点，产生 `PLAN_REQUESTED(TaskContext)`；成功后以 `TaskIntakeResult(status=CONFIRMED, task_id=...)` 返回 TaskCli。
-3. TaskPlanner 上报 `PLAN`；图谱接纳后为就绪节点产生 `DISPATCH_REQUESTED(TaskNode)`。
-4. TaskDispatcher 上报 `DISPATCH`；图谱接纳后产生 `EXECUTION_REQUESTED(TaskNode)`。
-5. TaskRunner 启动 executor，并上报启动事实；执行实体上报最终结果。
-6. 图谱根据节点状态、依赖、验收和策略产生下一轮规划、派发、执行或终态事件。每次执行结果先被图谱接纳，再由图谱生成最新 `TaskContext`；没有模块可以以本地结果直接触发下一模块。
+RuntimeInfo.output / acceptance_result
+= 当前 Bot 针对 actual_goal 的真实产出和局部验收事实。
+```
 
-## 7. 统一逻辑链与不同物理执行拓扑
-
-每个任务都使用同一逻辑职责和因果顺序：`TaskGraphService → TaskPlanner → TaskDispatcher → TaskRunner → TaskGraphService.report`。中心化动态规划与接力规划不是两套执行架构；差异仅在 Graph 将事件定向投递到哪个实际运行时，以及该运行时挂载哪种策略。
-
-| 逻辑角色 | 中心化动态规划 / Master-Slave 的实际执行者 | 接力规划的实际执行者 |
-| --- | --- | --- |
-| TaskPlanner | Master Bot runtime 的中心化规划策略 | 上一个节点完成者的 Bot runtime 中的 relay 规划策略 |
-| TaskDispatcher | 中心化 Dispatcher runtime / 策略 | 同一上游 Bot runtime 中的 relay 派发策略 |
-| TaskRunner | 被派发的单 Bot、协作组或 BBS 的 Runner strategy | 被派发的下一执行 carrier 的 Runner strategy |
-
-物理同驻不改变逻辑边界：接力 Bot runtime 可以同时挂载 TaskRunner、TaskPlanner 和 TaskDispatcher 的策略 adapter，但它们只能分别响应 `EXECUTION_REQUESTED`、`PLAN_REQUESTED` 和 `DISPATCH_REQUESTED`。它们不可以在内存中直接从 Runner 调 Planner/Dispatcher，也不可以直接改图谱。
-
-### 7.1 中心化动态规划与 Master-Slave
-
-Master runtime 消费 `PLAN_REQUESTED(TaskContext)` 并以 `PLAN` 上报阶段性 `PlanResult`；图谱为就绪节点生成 `DISPATCH_REQUESTED`，中心化 Dispatcher 决定 execution carrier，TaskRunner 在被选 carrier 侧实际执行。Master-Slave 只是 PlanResult 中存在多个 worker 节点以及依赖解锁汇总节点，仍使用这一条事件链。
-
-### 7.2 接力规划：完整上下文驱动的续接
-
-Relay 是 Skill 驱动的串行 baton，不是中心化父子聚合流程。以 A 完成、规划后续工作 B 为例：
-
-1. 承载 A 的执行实体通过 Relay callback report 上报 `EXECUTION_RESULT`。Graph 只更新 A 的执行事实，并签发当前 holder 专属、带 TTL 的 `relay_turn`。
-2. A runtime 必须保存该 `relay_turn`，读取最新共享黑板/TaskContext，计算根目标 GAP；不能把 execution report 当作本棒结束。
-3. A runtime 上报 `PLAN_RESULT`：无 GAP 时结束任务；有 GAP 时必须且只能规划一个下一棒节点 B。Graph 将 A 标记为 `DONE`、追加 B，并递增 Relay 轮次；不把 B 当作 A 的结构子任务去做父节点聚合。
-4. A runtime 为 B 构造纯搜索 query，调用 `/search`。搜索接口只返回真实候选事实，不接收 task/node/holder/turn/catalog，也不负责 HIT/MISS 或执行模态。
-5. A runtime 基于候选事实完成 `HIT_SINGLE`、`HIT_MULTI_BOTS` 或 `MISS` 决策并上报 `DISPATCH_RESULT`。HIT 之后使用同一 `relay_turn` 调 `/dispatch`，MISS 由后端在已有 Relay BBS 节点上启动统一 BBS 动态选人。
-6. Graph 接纳派发后，下一棒 carrier 收到 `EXECUTION_REQUESTED`/等价 `[task-execute]` 上下文。B 完成后从第 1 步重新开始。
-
-Relay 的 `relay_turn` 采用单持有者 lease。重复 execution report 必须幂等；lease 过期时由 Relay 专属 watchdog 续租并向原 holder 发送 `[RESUME_RELAY]`，要求直接从 `PLAN_RESULT` 恢复，不重做业务执行、不走中心化 `exec_stuck/child_hung` 收口。恢复达到上限时，只能挂起当前 baton 节点或进入明确的 Relay 恢复策略，不能回写前序节点。
-
-Relay 节点隔离规则：当前棒的执行、失败、BBS 认领、BBS 结果和恢复只允许更新当前节点以及图级 Relay 控制元数据；前序节点一旦交接，不再被后续节点修改。中心化模式的父子状态聚合不得复用到 Relay。
-
-Relay 策略只替换 TaskPlanner/TaskDispatcher/TaskRunner 的内部决策，不改变报告入口、事件类型或 Graph 校验边界。接力 Bot 无权直接增删节点、直接启动下一执行者或直接修改图谱。
-
-### 7.3 Execution carrier 与 BBS 升级
-
-Dispatcher 的输出不是“必须找到 Bot B”，而是为单节点确定 execution carrier：
-
-| 搜推结果 | `TaskNodePatch` 中的派发结果 | 后续执行 |
-| --- | --- | --- |
-| 匹配单 Bot | `run_mode=single_bot`、Bot assignee | single-bot Runner strategy |
-| 匹配协作组 | `run_mode=coop_group`、group assignee | coop-group Runner strategy |
-| 单 Bot/协作组均无可用匹配 | `run_mode=bbs`、BBS carrier 与候选失败诊断 | BBS Runner strategy |
-
-三种情况均只上报一次最终 `DISPATCH` patch。BBS 的建群、招募、成员认领和内部协作是 BBS Runner strategy 的执行职责；Graph 只接收其指定协调者的启动/结果事实。
-
-中心化 BBS 可以由中心化 Graph 状态策略收口；Relay BBS 必须复用统一动态选人能力但绑定到已规划的当前 BBS 节点，认领/执行完成后重新签发 Relay turn，继续 `PLAN_RESULT`。Relay BBS 不修改根节点或任何前序节点状态，也不调用中心化 `_on_pass_collect`/父子聚合。
-
-## 8. B 端策略插件与组合编排
-
-TaskCli 不加载、注册或选择插件。插件由 B 端控制面治理；任务运行时只使用已经被租户批准并由 Profile 冻结的 adapter。
-
-### 8.1 模块稳定，策略可插拔
-
-`TaskPlanner`、`TaskDispatcher`、`TaskRunner` 是稳定宿主模块。第三方扩展的是其内部策略 seam，不替换模块本身：
+### 2.3 TaskContext
 
 ```python
-class TaskPlanningStrategy(Protocol):
-    async def plan(self, context: TaskContext) -> PlanResult: ...
+@dataclass
+class DoneOutput:
+    node_id: str
+    actual_goal: Goal
+    output: dict[str, Any]
+    acceptance_result: AcceptanceResult
 
-class TaskDispatchStrategy(Protocol):
-    async def dispatch(self, node: TaskNode) -> TaskNodePatch: ...
 
-class TaskRunnerStrategy(Protocol):
-    async def run(self, node: TaskNode) -> bool: ...
+@dataclass
+class TaskContext:
+    spec: TaskSpec
+    all_done_output: list[DoneOutput]
+    gaps: list[str]
 ```
 
-这三类接口分别复用 `TaskPlanner.plan`、`TaskDispatcher.dispatch`、`TaskRunner.run` 的既有入出参。`TaskRunnerStrategy` 是 executor 扩展 seam：它执行实际启动，TaskRunner 负责启动事实与结果事实的统一上报。
-
-内置策略与第三方策略处于同一注册目录。例如：
-
-| 宿主模块 | 内置策略 | 可新增的 B 端策略 |
-| --- | --- | --- |
-| TaskPlanner | master-planning、relay-planning | 领域规划策略 |
-| TaskDispatcher | keyword-match | semantic-match |
-| TaskRunner | single-bot、coop-group、bbs | distributed-execution |
-
-所有策略 adapter 都不得读写图谱、调用 TaskService、调用其他任务模块或绕过 `TaskGraphService.report`。
-
-### 8.2 插件注册与租户激活
-
-插件包声明插件 ID、不可变版本、契约版本、贡献的策略、entrypoint、配置 Schema、支持的 run mode 和权限。B 端控制面按以下顺序治理：
+`TaskContext` 是通用领域对象：
 
 ```text
-发布插件包 → 安装并校验契约 → 对租户激活 → 应用 TaskRuntimeProfile
+- 不包含 task_id、node_id、graph_version、关系图、assignee、群会话、relay_turn；
+- 不包含 current node；当前节点由 Runner / Planner 目标传入；
+- 不包含 aggregate_acceptance_result；根任务当前仍未覆盖的范围直接表达为 gaps；
+- 不使用 Gap 领域对象，gaps 直接为 list[str]；每个字符串必须是可规划、可交接的完整业务缺口描述。
 ```
 
-控制面验证插件来源、契约版本、配置 Schema、运行模式和租户授权。插件管理命令或管理后台属于 B 端控制面，不属于 TaskCli；TaskCli 保持一句话任务入口。
-
-### 8.3 TaskRuntimeProfile：声明式组合
-
-`TaskRuntimeProfile` 是租户范围的声明式配置，而不是可直接执行和互调模块的插件。它将已经激活的策略版本组合为一个受治理的运行方案：
-
-```yaml
-apiVersion: task-runtime-profile/v1
-id: acme-distributed-release-v1
-version: 1
-
-match:
-  tenant: acme
-  taskLabels: [release]
-
-bindings:
-  planner:
-    ref: builtin.master-planning
-
-  dispatcher:
-    chain:
-      - ref: acme.semantic-match@1.0.0
-      - ref: builtin.keyword-match
-
-  runners:
-    single_bot:
-      ref: builtin.single-bot
-    coop_group:
-      ref: builtin.coop-group
-    bbs:
-      ref: builtin.bbs
-    distributed:
-      ref: acme.distributed-execution@1.0.0
-```
-
-TaskService 在创建任务时按租户、Bot、来源和任务标签解析 Profile，校验其所有策略均已激活，并将 `profile_id`、Profile 版本、插件版本及 digest 冻结到任务受控运行配置。运行中的任务不会因 Profile 或插件升级发生策略漂移。
-
-### 8.4 组合规则
-
-- 每个规划事件只由一个 TaskPlanningStrategy 产生可上报的 `PlanResult`；不合并多个规划结果。
-- Dispatcher 可以按 Profile 链式尝试策略。策略在产生外部副作用前返回受约定的 `NO_MATCH`；TaskDispatcher 继续尝试下一项，且仅将最终 `TaskNodePatch` 上报一次。
-- Dispatcher 只能从冻结 Profile 允许的 run mode/TaskRunnerStrategy 中选择执行方式；TaskGraphService 校验该选择。
-- TaskRunner 按节点 run mode 选择一个 TaskRunnerStrategy。启动外部执行后不进行通用 fallback，避免重复副作用；需要重试或故障切换时，由该 Runner strategy 在自身幂等语义内实现。
-- Profile 只能选择、路由和配置策略，不能重排“规划 → 派发 → 执行”生命周期。
-
-### 8.5 定制扩展场景
-
-下列 case 说明 Profile 支持“只替换一个策略”到“三类策略联合定制”的渐进扩展；未声明的绑定均使用系统内置策略。
-
-| Case | B 端目标 | Profile 绑定 | 运行时链路 | 关键约束 |
-| --- | --- | --- | --- | --- |
-| A：语义搜推 | 在保留现有规划和执行方式的前提下，提高 Bot 匹配质量 | `planner=builtin.master-planning`；`dispatcher=[acme.semantic-match, builtin.keyword-match]`；Runner 保持内置 | semantic-match 无候选时返回 `NO_MATCH`，TaskDispatcher 尝试 keyword-match；最终 Patch 决定 single-bot、coop-group 或 bbs | 两个 Dispatcher 策略都尚未产生外部副作用；只上报最终 Patch |
-| B：分布式执行 | 将计算密集型节点投递到企业分布式调度平台 | Planner、Dispatcher 保持内置；`runners.distributed=acme.distributed-execution` | Dispatcher 为 `compute` 节点选择 `run_mode=distributed`；TaskRunner 加载 distributed strategy，向调度平台提交并由回调报告结果 | TaskGraphService 只接受冻结 Profile 允许的 `distributed`；启动后不切换到其他 Runner strategy |
-| C：领域规划 | 用合规/发布领域规则规划工作节点，继续复用平台搜推和协作执行 | `planner=acme.compliance-planning`；`dispatcher=builtin.keyword-match`；Runner 保持内置 | 自定义 Planner 基于 TaskContext 返回带依赖的 PlanResult；后续节点仍按标准派发、执行、回报 | Planner 只产生 PlanResult，不直接指定执行者、派发或建图 |
-| D：端到端定制发布 | 发布任务采用领域规划、语义匹配和分布式执行组合 | `planner=acme.release-planning`；`dispatcher=[acme.semantic-match, builtin.keyword-match]`；`runners.distributed=acme.distributed-execution` | release Planner 产出发布节点；semantic dispatcher 选择带发布权限的 worker pool 并设为 distributed；Runner 提交发布平台 | 每个事件轮次仍只有一个主 Planner、一个最终 Dispatcher 决策、一个按 run mode 选中的 Runner strategy |
-| E：只组合内置能力 | 不开发插件，仅为不同租户选择不同执行模式 | `planner=builtin.relay-planning`；`dispatcher=builtin.keyword-match`；`runners.bbs=builtin.bbs` | 节点完成后触发接力规划；派发 BBS 节点；BBS strategy 执行并报告结果 | Profile 是策略选择，不改变接力规划、图谱校验或报告闭环 |
-
-Case A 的 Profile 片段：
-
-```yaml
-bindings:
-  planner:
-    ref: builtin.master-planning
-  dispatcher:
-    chain:
-      - ref: acme.semantic-match@1.0.0
-      - ref: builtin.keyword-match
-```
-
-Case B 的 Profile 片段：
-
-```yaml
-bindings:
-  planner:
-    ref: builtin.master-planning
-  dispatcher:
-    ref: builtin.keyword-match
-  runners:
-    distributed:
-      ref: acme.distributed-execution@1.0.0
-```
-
-TaskCli 对以上 case 一律保持相同：用户或 Agent 只输入任务目标；Profile 匹配、策略选择和插件版本冻结由 TaskService 在任务创建时完成。
-
-## 9. TaskCli、目标路由与任务识别澄清
-
-TaskCli 是人和 Agent 的统一终端入口，公开命令保持极简：
+纳入 `all_done_output` 的规则：
 
 ```text
-task-cli [<一句话任务目标>]
-task-cli get <task_id>
-task-cli list
+- EXECUTION_RESULT 已被 Graph 接纳；
+- execution_decision = ACCEPTED；
+- actual_goal 非空；
+- 具有真实可复用 output 与局部 acceptance_result。
 ```
 
-`task-cli` 在一个由后端创建的新澄清会话中完成任务识别、补齐 `goal`、`deliverables`、`acceptance_criteria`、`constraints`、展示汇总和最终确认。确认前不创建正式任务；确认并成功提交后返回 `task_id`。不暴露 `intake_id`、`answer`、`review`、`confirm`、workflow 或 YAML 二级命令。
+`DECLINED`、未执行节点、只有搜索/派发事实的节点不纳入。
 
-### 9.1 TaskCli 与 task-loop 的职责
-
-TaskCli 不能也不应直接加载 `SKILL.md` 或运行 Skill。调用路径为：
+### 2.4 GAP lifecycle
 
 ```text
-TaskCli → TaskService.intake → Bot Runtime/Chat API → 已挂载 task-loop
-        ← TaskIntakeResult  ← 结构化 task_info / 澄清状态
+根节点初始化
+  → Graph 持久化 gaps=[]，其语义仅为“尚无已提交的 PLAN_RESULT GAP 快照”，不是任务完成。
+  → 首棒 Skill 基于根 TaskSpec、根 TaskNode 和空 DoneOutput 计算初始 GAP。
+
+当前 Bot 执行完成
+  → EXECUTION_RESULT 持久化当前节点事实。
+  → Bot 重新读取最新 TaskContext。
+  → Skill 使用最新 TaskContext + 当前节点事实重新解析 new_gaps。
+  → PLAN_RESULT 持久化 new_gaps，整体覆盖旧 gaps。
 ```
 
-task-loop 只根据当前消息和已绑定 Bot 会话历史做任务识别、信息抽取、缺口提问与确认判定；它不创建任务、执行任务、写图谱、调用 Planner/Dispatcher/Runner。其核心输出是渠道无关的 `task_info` 与澄清判定；TaskService 将其规范化为 `TaskIntakeResult`。产品聊天可将该结果渲染为 AixUI 卡片，TaskCli 仅渲染为终端文本。TaskService 负责会话持久化、权限校验、目标路由和确认后的 `execute` 编排。
+`gaps` 不是节点局部验收的字符串拼接；Skill 必须基于根任务、全部 DoneOutput 与节点局部验收重新推理。只有已接纳的 `PLAN_RESULT(gaps=[])` 才表示根任务已无已知缺口；Graph 不把初始空数组自行解释为完成。
 
-### 9.2 发起身份与目标选择
+## 3. Unified APIs
 
-人身份可使用以下命令；`@` 只在首次请求映射为 `TaskIntakeRequest.target`：
+### 3.1 Create confirmed task
+
+```http
+POST /api/v1/collaboration/tasks/execute
+```
+
+Input: `TaskInfoRequest` from `init_task_request(task_info, source_context)`.
+
+Output:
+
+```json
+{
+  "task_id": "...",
+  "root_node_id": "...",
+  "run_id": 1,
+  "status": "RUNNING",
+  "first_assignee": "..."
+}
+```
+
+Graph initializes the root TaskNode with root TaskSpec and empty RuntimeInfo, then Runner delivers the first baton.
+
+### 3.2 Read latest task context
+
+```http
+GET /api/v1/collaboration/tasks/{task_id}/context
+```
+
+Input: path-only `task_id`. No request body, query parameters, `include_*` switches, `node_id`, `holder_id`, or relay token.
+
+Response envelope `data` is exactly `TaskContext`:
+
+```json
+{
+  "spec": {},
+  "all_done_output": [],
+  "gaps": []
+}
+```
+
+The endpoint is common to centralized planning, Relay, BBS and recovery. Authorization comes from transport/runtime identity, not business request fields.
+
+### 3.3 Unified fact report
+
+```http
+POST /api/v1/collaboration/tasks/callback/report
+```
+
+Common envelope:
+
+```json
+{
+  "task_id": "...",
+  "node_id": "...",
+  "event_type": "EXECUTION_RESULT | PLAN_RESULT | DISPATCH_RESULT",
+  "event_id": "...",
+  "holder_id": "...",
+  "relay_turn": "...",
+  "progress_reason": "...",
+  "failure_reason": null,
+  "payload": {}
+}
+```
+
+`relay_turn` is required only for Relay post-execution planning and dispatch actions; it is not returned by `/context`.
+
+#### `EXECUTION_RESULT`
+
+```json
+{
+  "execution_decision": "ACCEPTED | DECLINED",
+  "actual_goal": {},
+  "output": {},
+  "acceptance_result": {}
+}
+```
+
+Rules:
 
 ```text
-task-cli [<一句话任务目标>]
-task-cli [<一句话任务目标>] @<bot>
-task-cli [<一句话任务目标>] @<group>
+ACCEPTED → actual_goal and acceptance_result are required; output is the real business result.
+DECLINED → actual_goal=null, output={}, acceptance_result=null; failure_reason=capability_mismatch.
 ```
 
-- 显式 Bot/group 目标优先，TaskService 必须校验访问权限、运行状态、任务认领权限和 task-loop 激活状态；不满足时明确拒绝，不静默回退。
-- 未显式指定时，按“用户同名 Bot → 需求 Bot → 随机一个合格 Bot”的顺序选择；没有合格 Bot 时提示用户创建 Bot。
-- 合格 Bot 是用户有权限访问、已启用、任务认领已开启、运行时可用且 task-loop 已激活的 Bot。协作群仅由显式指定；后端解析一个具有同等资格的 intake owner/master Bot 承载澄清。
-- Bot 身份调用 `task-cli [<一句话任务目标>]` 时，目标固定为当前 Bot，并新建澄清会话；不使用默认、随机或其他 Bot。后续确认仍遵守该 Bot 的授权策略。
+Graph persists only the current node execution facts and grants the current Relay holder a planning authority.
 
-### 9.3 终端交互与确认后结果
+#### `PLAN_RESULT` (Relay)
 
-TaskCli 根据 `TaskIntakeResult` 渲染自然语言追问和汇总；它不向用户暴露 `intake_session_id`。`READY_FOR_CONFIRMATION` 时展示 `task_info` 摘要并等待用户继续输入“确认提交”等自然语言消息。`CONFIRMED` 时展示任务已提交执行、`task_id`、标题、初始状态和 `task-cli get <task_id>` 查询提示；不会再把确认当作一个待处理的 UI 状态。
+```json
+{
+  "gaps": ["..."],
+  "next_task_spec": {}
+}
+```
 
-### 9.4 多轮澄清示例
+Rules:
 
-以“上线支付风控模型 v3”为例，三个维度的交互如下；每轮均为同一个 `intake` 接口。
+```text
+gaps != [] → next_task_spec is required; Graph creates exactly one next TaskNode with empty RuntimeInfo.
+gaps == [] → next_task_spec must be null; current node becomes SUCCESS and graph becomes DONE.
+```
 
-| 轮次 | 用户 / TaskCli 输入 | 接口返回 | 系统展示或后续动作 |
-| --- | --- | --- | --- |
-| 1 | `task-cli "帮我上线支付风控模型 v3"`；`{intake_session_id: null, message: "帮我上线支付风控模型 v3", target: null}` | `{intake_session_id: "tis_01HXYZ", status: "CLARIFYING", task_info: {title: "支付风控模型 v3 上线", goal: "将支付风控模型 v3 上线生产", background: "", deliverables: [], acceptance_criteria: [], constraints: [], resources: []}, missing_fields: ["deliverables", "acceptance_criteria", "constraints"], questions: ["本次需要交付哪些具体产物？", "上线成功的验收标准是什么？", "是否有时间窗口、灰度范围或变更限制？"]}` | 展示目标与三个问题。 |
-| 2 | 用户回答：“交付上线记录、监控看板链接和回滚预案；先灰度 10%，核心指标不劣化；本周五 18 点后执行，不能影响已有线上版本。”；TaskCli 原样带回 `tis_01HXYZ` | `status: "READY_FOR_CONFIRMATION"`；`task_info.deliverables=[上线记录, 监控看板链接, 回滚预案]`；`task_info.acceptance_criteria=[完成生产灰度发布, 灰度比例达到 10%, 核心指标不劣化]`；`task_info.constraints=[本周五 18:00 后执行, 不得影响当前线上版本]`；`missing_fields=[]` | 展示完整任务摘要，并询问“是否确认提交执行？”。 |
-| 3 | 用户：“确认提交”；`{intake_session_id: "tis_01HXYZ", message: "确认提交", target: null}` | `status: "CONFIRMED"`，返回完整 `task_info` 与 `task_id: "task_01HABC"` | 后端已在该轮完成 `task_info -> TaskInfoRequest -> execute(...)`；终端展示“任务已提交执行”、任务 ID、标题、初始状态与 `task-cli get task_01HABC`。 |
+With gaps, Graph atomically persists gaps, transitions the current node to DONE, creates one target node, increments Relay loop state and issues dispatch authority.
 
-若第 3 轮 `execute(...)` 失败，接口返回提交错误而不是 `CONFIRMED`；澄清会话和草稿保留，用户可在同一会话修改信息或再次确认。
+#### `DISPATCH_RESULT` (Relay)
 
-## 10. 目标态质量约束
+```json
+{
+  "outcome": "HIT_SINGLE | HIT_MULTI_BOTS | MISS",
+  "run_mode": "single_bot | coop_group | bbs",
+  "driver_bot_id": "...",
+  "next_relay_bots": ["..."],
+  "group_name": "...",
+  "miss_reason": "..."
+}
+```
 
-- 仅 Graph 模块拥有图谱状态写入和持久化。
-- TaskPlanner、TaskDispatcher、TaskRunner 不依赖完整 `TaskExecutionGraph`、GraphService 或彼此实现。
-- `report` 对所有报告类型执行版本、幂等、状态机和字段白名单校验。
-- 三种策略模式通过同一事件链闭环；接力越权或过期报告被拒绝。
-- 插件只能通过声明的策略 seam 被宿主模块调用；Profile 引用、租户授权、版本和 digest 在建任务时校验并冻结。
-- TaskCli 对话在确认前不生成正式 `task_id`。
+Rules:
+
+```text
+HIT_SINGLE:
+  run_mode=single_bot
+  next_relay_bots has exactly one item
+  driver_bot_id equals that item.
+
+HIT_MULTI_BOTS:
+  run_mode=coop_group
+  driver_bot_id belongs to next_relay_bots.
+  driver_bot_id is the next group Manager and unique Relay Holder.
+
+MISS:
+  run_mode=bbs
+  next_relay_bots=[]
+  driver_bot_id is absent.
+```
+
+Graph records only target-node dispatch facts. A decision does not make the target node RUNNING; that happens after Runner delivery succeeds.
+
+### 3.4 Pure candidate search
+
+```http
+POST /api/v1/collaboration/tasks/search
+```
+
+Input:
+
+```json
+{"query": "..."}
+```
+
+Output:
+
+```json
+{
+  "candidates": [
+    {
+      "bot_uuid": "...",
+      "bot_name": "...",
+      "bot_desc": "...",
+      "bot_type": "bot",
+      "status": "online",
+      "recommend": {}
+    }
+  ],
+  "total": 1
+}
+```
+
+`/search` does not receive graph identifiers, does not read/write Graph and does not select a carrier.
+
+### 3.5 Actual delivery
+
+```http
+POST /api/v1/collaboration/tasks/dispatch
+```
+
+Input:
+
+```json
+{
+  "task_id": "...",
+  "origin_node_id": "...",
+  "target_node_id": "...",
+  "holder_id": "...",
+  "relay_turn": "...",
+  "dispatch_id": "..."
+}
+```
+
+The Runner validates that target node is the origin's current planned child, is PENDING and has an accepted `DISPATCH_RESULT`.
+
+Output contains delivery identity and target node RUNNING state.
+
+### 3.6 BBS claim
+
+```http
+POST /api/v1/collaboration/tasks/bbs/claim
+```
+
+Input:
+
+```json
+{
+  "task_id": "...",
+  "node_id": "...",
+  "bot_id": "...",
+  "claim_id": "..."
+}
+```
+
+The claim is node-local CAS. On success it sets the target node assignee/driver to claimant and transitions target PENDING → RUNNING. No predecessor or root runtime fact changes.
+
+## 4. Relay seven-step loop
+
+### Step 1 — Read latest context
+
+```text
+GET /tasks/{task_id}/context → TaskContext
+```
+
+The Bot also receives its current `TaskNode.task_spec`, `task_id`, `node_id`, execution identity and backend address from Runner delivery.
+
+### Step 2 — Interpret GAP and match local capability
+
+The Skill locally evaluates:
+
+```text
+TaskContext
++ current TaskNode.task_spec
++ IDENTITY.md / role boundary
++ mounted Skills / allowed tools / actual availability
+→ actual_goal | DECLINED
+```
+
+Effective coverage requires role coverage **and** Skill/tool evidence. A tool or generic model capability alone cannot authorize a professional task.
+
+### Step 3 — Execute only actual_goal
+
+The Bot produces only real output and a local acceptance result for actual_goal. Required tools being unavailable cannot be replaced by model memory.
+
+### Step 4 — Report execution fact
+
+```text
+EXECUTION_RESULT → persist current RuntimeInfo → receive plan authority
+```
+
+### Step 5 — Recalculate GAP and plan one baton
+
+The Bot re-reads latest TaskContext. The Skill evaluates root Spec, all DoneOutput, prior gaps and current-node result to obtain `new_gaps`.
+
+```text
+new_gaps + optional next TaskSpec → PLAN_RESULT
+```
+
+Graph either completes task or creates exactly one empty-runtime next node.
+
+### Step 6 — Search candidates
+
+The Skill builds a query from `new_gaps` and target TaskSpec:
+
+```text
+/search(query) → candidates[]
+```
+
+### Step 7 — Persist Skill dispatch decision
+
+The Skill selects `HIT_SINGLE`, `HIT_MULTI_BOTS` or `MISS` using real candidate facts and reports `DISPATCH_RESULT` with `run_mode`, `driver_bot_id` and `next_relay_bots`.
+
+### Step 8 — Deliver or publish BBS
+
+```text
+HIT → /dispatch → Runner delivery → target PENDING → RUNNING
+MISS → target node published to BBS → /bbs/claim → target PENDING → RUNNING
+```
+
+For `coop_group`:
+
+```text
+- current baton Bot calls /dispatch but does not enter the next group by default;
+- driver_bot_id is selected from next_relay_bots;
+- driver_bot_id is group Manager and next unique Relay Holder;
+- other next_relay_bots are workers;
+- original Human is added as observer;
+- target node assignee is driver_bot_id; created group_id is runtime infrastructure metadata.
+```
+
+The next single Bot, group Driver or BBS claimant starts Step 1 again.
+
+## 5. Centralized planning execution flow
+
+Centralized mode uses the same facts and Runner but a different orchestration actor:
+
+```text
+Graph state transition
+  → PLAN_REQUESTED(target node)
+  → TaskPlanner.plan(TaskContext, target node)
+  → report centralized plan result
+  → Graph creates one or more nodes and dependency relations
+  → DISPATCH_REQUESTED(each ready node)
+  → TaskDispatcher.dispatch(node)
+  → report dispatch fact
+  → EXECUTION_REQUESTED(node)
+  → TaskRunner.run(node)
+  → report execution fact
+  → Graph applies dependency/parent convergence
+```
+
+Centralized planner and dispatcher never receive or mutate full graph persistence. They use the same `TaskContext` read model and report gateway, but Graph owns dependency validation and parent-state derivation.
+
+## 6. State policy
+
+### 6.1 Relay
+
+```text
+PENDING --delivery/claim--> RUNNING
+RUNNING --EXECUTION_RESULT--> RUNNING (execution fact accepted)
+RUNNING --PLAN_RESULT with gaps--> DONE + one new PENDING baton
+RUNNING --PLAN_RESULT with no gaps--> SUCCESS + graph DONE
+```
+
+No Relay action may change predecessor/root execution state.
+
+### 6.2 Centralized
+
+Centralized node/parent state follows the existing dependency graph policy. Parent state may be PLANNING/RUNNING/DONE/SUCCESS/HUNG according to child execution and Graph convergence; this policy is isolated from Relay.
+
+## 7. Extensibility and profiles
+
+`TaskRuntimeProfile` freezes allowed strategies and run modes at task creation. It may select central Planner/Dispatcher/Runner strategies, search strategy chains and allowed `single_bot`/`coop_group`/`bbs` runners.
+
+Profile governance does not alter these invariants:
+
+```text
+- Graph owns facts and state transitions.
+- Relay Skill owns relay capability/GAP/candidate reasoning.
+- /search remains pure.
+- /dispatch remains actual delivery only.
+- Plugins do not access graph write methods or reorder lifecycle stages.
+```
+
+## 8. Migration and compatibility
+
+This target design intentionally replaces stale Relay protocol semantics:
+
+```text
+metadata.instruction                 → removed from target TaskSpec
+completed_scope / uncovered_scope    → replaced by actual_goal, DoneOutput and TaskContext.gaps
+aggregate_acceptance_result          → replaced by TaskContext.gaps + per-node acceptance_result
+has_gap                              → derived from gaps emptiness
+children[] in Relay plan             → one optional next_task_spec; Graph assigns node_id
+root-level Relay BBS owner           → target BBS node-local claim
+```
+
+Compatibility adapters may accept legacy event names/payloads during migration, but they must normalize into this target model before Graph persistence.
+
+### 1.3 Engine 拆除边界
+
+本架构不允许 `task_center/engine.py` 作为任务模块的统一总编排器。中心化模式保留一个仅服务中心化执行的 `CentralizedExecutionAdapter` 适配模块，用于兼容现有中心化生命周期行为；它不被 Relay 使用，不负责 Relay 的规划、搜推或交接。
+
+- Relay 直接使用 TaskService 组合的 Runner、Search 和 Graph.report 边界；不得通过中心化生命周期对象访问 `_runner`、`_discover`。
+- Callback、Harness 和中心化请求只依赖 `CentralizedExecutionAdapter` 的公开生命周期协议。
+- `engine.py` 文件及 `ExecutionEngine` 符号必须删除，生产代码和测试不得再导入旧模块。
+- 后续可继续将 `CentralizedExecutionAdapter` 按 Planner/Dispatcher/Runner/Harness 责任拆分，但本次不再引入第二个通用总编排器。

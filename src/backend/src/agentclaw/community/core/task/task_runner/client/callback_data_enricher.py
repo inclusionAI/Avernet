@@ -116,7 +116,7 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
     - ``run_id`` = int(flow_runs.id)(非法 → 0);图级 status 由底层 status 映射 7 态;
       ``output`` = 解析 flow_runs.result_json;
     - extend_props 白名单取 flow_runs 的 workflow 标识/运行指标;
-    - nodes 取 node_executions:task_spec.metadata.title ← node_title(缺则 node_id),
+    - nodes 取 node_executions:task_spec.context.title ← node_title(缺则 node_id),
       run_info.{start,end}_time 秒→毫秒;output = 解析 output_json;token_usage/input/
       system_context/timing/error 等富字段折叠进 run_info.extend_props;
     - relations 由各节点 input_json.nodeOutputKeys(params 的兄弟字段)派生(多父 DAG),

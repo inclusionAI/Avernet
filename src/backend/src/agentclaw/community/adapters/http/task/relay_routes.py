@@ -12,15 +12,28 @@ from agentclaw.community.adapters.http.task.schemas import (
     BbsAttachDTO,
     BbsClaimDTO,
     BbsResultDTO,
+    LatestTaskContextDTO,
     TaskDispatchRequestDTO,
     TaskSearchRequestDTO,
     acceptance_result_from_dto,
+    task_context_to_dto,
     task_spec_from_dto,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.di import Injected
 
 router = APIRouter()
+
+
+@router.get("/{task_id}/context", response_model=Envelope[LatestTaskContextDTO])
+@envelope_errors
+async def get_latest_task_context(
+    task_id: str,
+    request: Request,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[LatestTaskContextDTO]:
+    """Return the common business TaskContext for either orchestration mode."""
+    return envelope(task_context_to_dto(service.get_task_context(task_id)), request)
 
 
 @router.post("/search", response_model=Envelope[dict[str, Any]])
@@ -54,7 +67,9 @@ async def dispatch_task(
         method=request.method, path=request.url.path,
     )
     result = await service.dispatch_task(
-        task_id=body.task_id, node_id=body.node_id,
+        task_id=body.task_id,
+        origin_node_id=body.origin_node_id,
+        target_node_id=body.target_node_id,
         holder_id=body.holder_id, relay_turn=body.relay_turn,
         dispatch_id=body.dispatch_id,
     )
@@ -77,7 +92,9 @@ async def bbs_claim(
             source="task_loop", headers=request.headers, raw_body=raw,
             method=request.method, path=request.url.path,
         )
-    result = service.claim_bbs_task(body.task_id, body.bot_id, body.node_id)
+    result = service.claim_bbs_task(
+        body.task_id, body.bot_id, body.node_id, claim_id=body.claim_id
+    )
     return envelope({"root_node_id": result.node_id, "task_id": body.task_id}, request)
 
 

@@ -6,7 +6,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
@@ -15,7 +14,7 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
 from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
-from agentclaw.community.core.task.task_plan.static_plan_runtime import StaticPlanRuntime
+from agentclaw.community.core.task.task_plan.static_plan import StaticPlanRuntime
 from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
     OpenApiAuthError,
     OpenApiBadRequestError,
@@ -39,11 +38,7 @@ def _node(assignee="bot9:ent1", extend_props=None):
         node_id="c1",
         task_id="t1",
         status=Status.RUNNING,
-        task_spec=TaskSpec(
-            Metadata("t1", "T", "do"),
-            Context("bg"),
-            Goal("O", [AcceptanceCriteria("a1", "d")]),
-        ),
+        task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [AcceptanceCriteria("a1", "d")])),
         run_info=RuntimeInfo(
             run_mode="single_bot", assignee=assignee, extend_props=extend_props or {}
         ),
@@ -83,6 +78,10 @@ class _Graph:
 
     def update_task_node_info(self, patch):
         self.patches.append(patch)
+
+    def report(self, data):
+        assert data.data["report_type"] == "NODE_PATCH"
+        return self.update_task_node_info(data.data["payload"]["patch"])
 
     def query_task_dashboard(self, task_id, node_id=None):
         return None
@@ -285,12 +284,12 @@ def test_prompt_formatter_skill_report_on_uses_http_post():
 def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
     """# 接自 接力分支(static_plan):交接正文 + 执行闭环(禁联网/平台回收/接力交接,不含 HTTP 上报协议)+ 中文输出约束。"""
     from agentclaw.community.core.task.domain.models import (
-        Goal, Metadata, Context, TaskSpec, TaskNode, RuntimeInfo, Status,
+        Goal, Context, TaskSpec, TaskNode, RuntimeInfo, Status,
     )
     fmt = PromptFormatterImpl()
     relay = "# 接自:上游Bot\n## 上游产出正文\n上游摘要\n## 本角色任务\n执行投放"
     n = TaskNode(node_id="n1", task_id="t1", status=Status.RUNNING,
-                 task_spec=TaskSpec(Metadata("t1", "T", relay), Context("bg"), Goal("O", [])),
+                 task_spec=TaskSpec(context=Context("bg", title="T"), goal=Goal("O", [])),
                  run_info=RuntimeInfo(), node_run_graph=None)  # type: ignore[arg-type]
     s = fmt.format_execute({
         "mode": "execute", "node_instruction": relay,
@@ -330,7 +329,7 @@ def test_static_relay_prompt_waits_for_every_member_and_preserves_markdown():
         "## 本角色任务\n联合完成评审"
     )
     node = _node()
-    node.task_spec.metadata.instruction = relay
+    node.run_info.extend_props["execution_prompt"] = relay
 
     prompt = PromptFormatterImpl().format_execute(
         {"mode": "execute", "node_instruction": relay},
@@ -420,11 +419,7 @@ def test_static_plan_owner_reaches_final_openapi_bot_identity():
         node_id="t1",
         task_id="t1",
         status=Status.PLANNING,
-        task_spec=TaskSpec(
-            Metadata("t1", "root", "root"),
-            Context(""),
-            Goal("root", []),
-        ),
+        task_spec=TaskSpec(context=Context("", title="root"), goal=Goal("root", [])),
         run_info=RuntimeInfo(),
         node_run_graph=graph,
     )
@@ -529,6 +524,10 @@ class _Graph2:
 
     def update_task_node_info(self, patch):
         self.patches.append(patch)
+
+    def report(self, data):
+        assert data.data["report_type"] == "NODE_PATCH"
+        return self.update_task_node_info(data.data["payload"]["patch"])
 
     def query_task_dashboard(self, task_id, node_id=None):
         return _Dash(self._ec, self._owner_user_id)

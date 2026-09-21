@@ -10,11 +10,9 @@ import pytest
 from agentclaw.community.core.task.domain.json_extract import extract_json
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
-    AcceptanceResult,
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
@@ -92,8 +90,8 @@ def _graph() -> TaskExecutionGraph:
     g = TaskExecutionGraph(loop_round=0, status=Status.PENDING, run_id="r", output={},
                            tasks=[], relations=[], extend_props={})
     g.tasks.append(TaskNode(node_id="t_case", task_id="t_case", status=Status.PENDING,
-        task_spec=TaskSpec(metadata=Metadata(task_id="t_case", title="T", instruction="i"),
-                           context=Context(background="bg"),
+        task_spec=TaskSpec(
+                           context=Context(background="bg", title="T"),
                            goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")])),
         run_info=RuntimeInfo(), node_run_graph=None))  # type: ignore[arg-type]
     return g
@@ -107,7 +105,7 @@ class TestPlanParserWiring:
                "result": {"content": "根据剧本,返回 N_overview。\n```json\n[{\"metadata\": {\"task_id\": \"N_overview\", \"title\": \"存储行业概览\", \"instruction\": \"撰写概览\"}, \"context\": {\"background\": \"bg\", \"extend_props\": {}}, \"goal\": {\"objective\": \"o\", \"acceptances\": [{\"id\": \"ac_overview\", \"description\": \"d\"}]}}]\n```"}}
         pr = _parse_plan_result(run, g.tasks[0], g)
         assert [k.node_id for k in pr.children] == ["N_overview"]
-        assert pr.children[0].task_spec.metadata.title == "存储行业概览"
+        assert pr.children[0].task_spec.context.title == "存储行业概览"
 
     def test_clean_empty_array_backward_compat(self):
         from agentclaw.community.core.task.task_plan.strategies import _parse_plan_result
@@ -129,7 +127,8 @@ class TestPlanParserWiring:
         assert "禁止" in prompt
         assert "plan_parse_fail" in prompt
         # 协议格式表:必须字段及类型
-        assert "metadata.task_id" in prompt
+        assert "node_id" in prompt
+        assert "context.title" in prompt
         assert "has_gap" in prompt
         assert "gap_detail" in prompt
         assert "acceptance_result" in prompt

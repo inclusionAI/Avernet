@@ -54,7 +54,6 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
@@ -258,8 +257,8 @@ class _FakeGraph:
 
 def _node(task_id: str, node_id: str, status: Status = Status.RUNNING) -> TaskNode:
     spec = TaskSpec(
-        metadata=Metadata(task_id=task_id, title="t", instruction="i"),
-        context=Context(background=""), goal=Goal(objective="", acceptances=[]),
+
+        context=Context(background="", title="t"), goal=Goal(objective="", acceptances=[]),
     )
     return TaskNode(
         node_id=node_id, task_id=task_id, status=status, task_spec=spec,
@@ -268,7 +267,7 @@ def _node(task_id: str, node_id: str, status: Status = Status.RUNNING) -> TaskNo
 
 
 class _CallbackTestService(TaskService):
-    """真实 ``TaskService`` + 注入式编排核:test seam 是覆写 ``_build_engine``。
+    """真实 ``TaskService`` + 注入式编排核:test seam 是覆写 ``_build_centralized_adapter``。
 
     用真实 ``apply_manager_worker_event``/``converge_by_session``/``get_task_dashboard``,
     配合内存 repo 与 ``_FakeGraph``,可端到端观察"回投 → 转换 → 落库 → adapt → on_report 翻态"。
@@ -281,7 +280,7 @@ class _CallbackTestService(TaskService):
             graph, callback_repo=callback_repo, task_node_run_info_repo=run_info_repo,
         )
 
-    def _build_engine(self, **kw):  # noqa: D401, ANN202
+    def _build_centralized_adapter(self, **kw):  # noqa: D401, ANN202
         return self._test_engine
 
 

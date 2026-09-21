@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import contextmanager
 import logging
 from dataclasses import replace
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from agentclaw.community.core.base import Base
+from agentclaw.community.core.repository.implementations.task.task_trajectory_repository import (
+    TaskTrajectoryRepository,
+)
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     Status,
@@ -19,35 +27,23 @@ from agentclaw.community.core.task.domain.requests import (
     RequestAcceptance,
     RequestContext,
     RequestGoal,
-    RequestMetadata,
     RequestTaskSpec,
     TaskInfoRequest,
 )
 from agentclaw.community.core.task.task_center.relay import RelayCoordinator
 from agentclaw.community.core.task.task_center.task_service import TaskService
-from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-from agentclaw.community.core.task.task_dispatch.claim_join_gate import RELAY_EXECUTION
-
-from contextlib import contextmanager
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from agentclaw.community.core.base import Base
-from agentclaw.community.core.repository.implementations.task.task_trajectory_repository import (
-    TaskTrajectoryRepository,
+from agentclaw.community.core.task.task_context.task_graph_service import (
+    TaskGraphService,
 )
-from agentclaw.community.core.task.task_context.task_trajectory.models import ReasonCatalog
-import agentclaw.community.core.task.repository.models  # noqa: F401  register trajectory ORM tables
+from agentclaw.community.core.task.task_dispatch.claim_join_gate import RELAY_EXECUTION
+from agentclaw.community.core.task.task_context.task_trajectory.models import (
+    ReasonCatalog,
+)
+import agentclaw.community.core.task.repository.models  # noqa: F401
 from tests.community.core.task.task_trajectory._task_context_support import _tcs
 
 
 class _InMemorySqliteDB:
-    """In-memory SQLite DatabasePlugin stand-in offering ``orm_session()`` (mirrors
-    ``test_trajectory_e2e_acceptance`` so the REAL ``TaskTrajectoryRepository`` persists
-    relay REACH trajectory events)."""
-
     def __init__(self, engine) -> None:
         self._factory = sessionmaker(bind=engine, autoflush=False)
 
@@ -66,9 +62,7 @@ class _InMemorySqliteDB:
 
 def _make_db():
     engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     Base.metadata.create_all(engine)
     return _InMemorySqliteDB(engine)
@@ -117,8 +111,7 @@ class _ToggleDelivery:
 def _request() -> TaskInfoRequest:
     return TaskInfoRequest(
         task_spec=RequestTaskSpec(
-            metadata=RequestMetadata(title="调研", instruction="完成首轮分析"),
-            context=RequestContext(background="共享背景"),
+            context=RequestContext(title="调研", background="共享背景"),
             goal=RequestGoal(
                 objective="完成市场研究和结论",
                 acceptances=[RequestAcceptance(id="a1", acceptance="结论可执行")],
@@ -146,6 +139,20 @@ def _child_spec() -> dict:
     }
 
 
+def _accepted(output):
+    if not isinstance(output, dict):
+        output = {"result": output}
+    return {
+        "execution_decision": "ACCEPTED",
+        "output": output,
+        "acceptance_result": {
+            "verdict": "DONE",
+            "acceptances_metric": [],
+            "gaps": [],
+        },
+    }
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -162,20 +169,16 @@ def _service(*, discover=None, relay_enabled: bool = True, task_context_service=
 
 
 def _service_with_traj():
-    """Service wired with a REAL in-memory ``TaskTrajectoryRepository`` so relay
-    ``REACH`` trajectory events persist into the trajectory table. Returns
-    ``(service, graph, repo)``."""
     repo = TaskTrajectoryRepository(_make_db())
     service, graph = _service(task_context_service=_tcs(repo))
     return service, graph, repo
 
 
-def _relay_records(repo) -> list:
-    """The persisted RELAY trajectory rows for the relay task, in ``gmt_create`` ASC
-    order (emission order). Other action types (e.g. submit) filtered out."""
+def _relay_records(repo):
     return [
-        rec for rec in repo.list_events_by_task("relay-task")
-        if str(rec.action_type) == "relay"
+        record
+        for record in repo.list_events_by_task("relay-task")
+        if str(record.action_type) == "relay"
     ]
 
 
@@ -187,27 +190,43 @@ def _plan_and_select(
     turn: str,
     child_node_id: str,
     event_suffix: str,
-) -> None:
-    spec = _child_spec()
-    spec["metadata"]["task_id"] = child_node_id
-    _run(service.report_task_event(
-        task_id="relay-task", node_id=origin_node_id,
-        event_type="PLAN_RESULT", event_id=f"plan-{event_suffix}",
-        holder_id=holder_id, relay_turn=turn,
-        progress_reason="当前全局 gap 需要下一棒补齐",
-        payload={"has_gap": True, "children": [{"node_id": child_node_id, "task_spec": spec}]},
-    ))
+) -> str:
+    del child_node_id  # Graph owns target node identity in the new Relay contract.
+    planned = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=origin_node_id,
+            event_type="PLAN_RESULT",
+            event_id=f"plan-{event_suffix}",
+            holder_id=holder_id,
+            relay_turn=turn,
+            progress_reason="当前全局 gap 需要下一棒补齐",
+            payload={
+                "gaps": ["补齐市场研究 gap"],
+                "next_task_spec": _child_spec(),
+            },
+        )
+    )
+    target_node_id = planned["target_node_id"]
     _run(service.search_task_candidates(query="补齐市场研究 gap"))
-    _run(service.report_task_event(
-        task_id="relay-task", node_id=child_node_id,
-        event_type="DISPATCH_RESULT", event_id=f"search-{event_suffix}",
-        holder_id=holder_id, relay_turn=turn,
-        progress_reason="候选 Bot 能力与下一节点目标匹配",
-        payload={
-            "outcome": "HIT_SINGLE",
-            "assignee": "research-bot",
-        },
-    ))
+    _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=target_node_id,
+            event_type="DISPATCH_RESULT",
+            event_id=f"search-{event_suffix}",
+            holder_id=holder_id,
+            relay_turn=turn,
+            progress_reason="候选 Bot 能力与下一节点目标匹配",
+            payload={
+                "outcome": "HIT_SINGLE",
+                "run_mode": "single_bot",
+                "driver_bot_id": "research-bot",
+                "next_relay_bots": ["research-bot"],
+            },
+        )
+    )
+    return target_node_id
 
 
 def test_relay_search_logs_empty_result_diagnostics(caplog) -> None:
@@ -221,9 +240,16 @@ def test_relay_search_logs_empty_result_diagnostics(caplog) -> None:
 
     assert result == {"candidates": [], "total": 0}
     messages = [record.getMessage() for record in caplog.records]
-    assert any("search_start" in message and "存储行业尽调" in message for message in messages)
-    assert any("search_complete" in message and "raw_item_count=0" in message for message in messages)
-    assert any("search_empty reason=no_matching_candidates" in message for message in messages)
+    assert any(
+        "search_start" in message and "存储行业尽调" in message for message in messages
+    )
+    assert any(
+        "search_complete" in message and "raw_item_count=0" in message
+        for message in messages
+    )
+    assert any(
+        "search_empty reason=no_matching_candidates" in message for message in messages
+    )
 
 
 def test_relay_search_logs_discover_failure(caplog) -> None:
@@ -254,145 +280,252 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
     assert root.run_info.assignee == "main-bot"
     assert graph.extend_props["execution_config"]["orchestration_mode"] == "relay"
 
-    execution = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task",
-        event_type="EXECUTION_RESULT", event_id="exec-1", holder_id="main-bot",
-        progress_reason="首棒形成分析，可以规划补充研究",
-        payload={"success": True, "output": {"summary": "首轮结论"}},
-    ))
+    execution = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="exec-1",
+            holder_id="main-bot",
+            progress_reason="首棒形成分析，可以规划补充研究",
+            payload=_accepted({"summary": "首轮结论"}),
+        )
+    )
     turn = execution["relay_turn"]
 
-    _plan_and_select(
-        service, origin_node_id="relay-task", holder_id="main-bot",
-        turn=turn, child_node_id="research-step", event_suffix="1",
+    research_step = _plan_and_select(
+        service,
+        origin_node_id="relay-task",
+        holder_id="main-bot",
+        turn=turn,
+        child_node_id="research-step",
+        event_suffix="1",
     )
-    dispatched = _run(service.dispatch_task(
-        task_id="relay-task", node_id="research-step", holder_id="main-bot",
-        relay_turn=turn, dispatch_id="dispatch-1",
-    ))
+    dispatched = _run(
+        service.dispatch_task(
+            task_id="relay-task",
+            origin_node_id="relay-task",
+            target_node_id=research_step,
+            holder_id="main-bot",
+            relay_turn=turn,
+            dispatch_id="dispatch-1",
+        )
+    )
     assert dispatched["assignee"] == "research-bot"
-    assert graph_service.query_task_nodes(
-        "relay-task", TaskNodeQueryCriteria(node_ids=["research-step"]),
-    )[0].status == Status.RUNNING
-
-    second = _run(service.report_task_event(
-        task_id="relay-task", node_id="research-step",
-        event_type="EXECUTION_RESULT", event_id="exec-2", holder_id="research-bot",
-        progress_reason="第二棒产出完成，继续计算全局 gap",
-        payload={"success": True, "output": {"recommendation": "进入市场"}},
-    ))
-    _plan_and_select(
-        service, origin_node_id="research-step", holder_id="research-bot",
-        turn=second["relay_turn"], child_node_id="final-step", event_suffix="2",
+    assert (
+        graph_service.query_task_nodes(
+            "relay-task",
+            TaskNodeQueryCriteria(node_ids=[research_step]),
+        )[0].status
+        == Status.RUNNING
     )
-    _run(service.dispatch_task(
-        task_id="relay-task", node_id="final-step", holder_id="research-bot",
-        relay_turn=second["relay_turn"], dispatch_id="dispatch-2",
-    ))
-    third = _run(service.report_task_event(
-        task_id="relay-task", node_id="final-step",
-        event_type="EXECUTION_RESULT", event_id="exec-3", holder_id="research-bot",
-        progress_reason="最终一棒产出完成，检查根验收标准",
-        payload={"success": True, "output": {"final": "complete"}},
-    ))
-    _run(service.report_task_event(
-        task_id="relay-task", node_id="final-step",
-        event_type="PLAN_RESULT", event_id="plan-3", holder_id="research-bot",
-        relay_turn=third["relay_turn"], progress_reason="根目标已全部满足",
-        payload={"has_gap": False, "children": []},
-    ))
+
+    second = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=research_step,
+            event_type="EXECUTION_RESULT",
+            event_id="exec-2",
+            holder_id="research-bot",
+            progress_reason="第二棒产出完成，继续计算全局 gap",
+            payload=_accepted({"recommendation": "进入市场"}),
+        )
+    )
+    final_step = _plan_and_select(
+        service,
+        origin_node_id=research_step,
+        holder_id="research-bot",
+        turn=second["relay_turn"],
+        child_node_id="final-step",
+        event_suffix="2",
+    )
+    _run(
+        service.dispatch_task(
+            task_id="relay-task",
+            origin_node_id=research_step,
+            target_node_id=final_step,
+            holder_id="research-bot",
+            relay_turn=second["relay_turn"],
+            dispatch_id="dispatch-2",
+        )
+    )
+    third = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=final_step,
+            event_type="EXECUTION_RESULT",
+            event_id="exec-3",
+            holder_id="research-bot",
+            progress_reason="最终一棒产出完成，检查根验收标准",
+            payload=_accepted({"final": "complete"}),
+        )
+    )
+    _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=final_step,
+            event_type="PLAN_RESULT",
+            event_id="plan-3",
+            holder_id="research-bot",
+            relay_turn=third["relay_turn"],
+            progress_reason="根目标已全部满足",
+            payload={"gaps": [], "next_task_spec": None},
+        )
+    )
     final = graph_service.query_task_dashboard("relay-task")
-    assert [node.status for node in final.tasks] == [Status.DONE, Status.DONE, Status.SUCCESS]
+    assert [node.status for node in final.tasks] == [
+        Status.DONE,
+        Status.DONE,
+        Status.SUCCESS,
+    ]
     assert final.status == Status.DONE
 
 
-def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_reset() -> None:
+def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_reset() -> (
+    None
+):
     service, graph_service = _service()
     _run(service.execute(_request()))
-    turn = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"output": "done"},
-    ))["relay_turn"]
-    _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
-        event_id="plan", holder_id="main-bot", relay_turn=turn,
-        progress_reason="需要 BBS 承接下一棒",
-        payload={"has_gap": True, "children": [{"node_id": "bbs-step", "task_spec": _child_spec()}]},
-    ))
+    turn = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted("done"),
+        )
+    )["relay_turn"]
+    planned = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id="plan",
+            holder_id="main-bot",
+            relay_turn=turn,
+            progress_reason="需要 BBS 承接下一棒",
+            payload={"gaps": ["补齐市场研究 gap"], "next_task_spec": _child_spec()},
+        )
+    )
+    bbs_step = planned["target_node_id"]
     _run(service.search_task_candidates(query="补齐市场研究 gap"))
-    published = _run(service.report_task_event(
-        task_id="relay-task", node_id="bbs-step", event_type="DISPATCH_RESULT",
-        event_id="miss", holder_id="main-bot", relay_turn=turn,
-        progress_reason="无直接候选，发布 BBS 广场",
-        failure_reason="候选能力均不匹配", payload={
-            "outcome": "MISS",
-            "miss_reason": "no capability match",
-        },
-    ))
+    published = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=bbs_step,
+            event_type="DISPATCH_RESULT",
+            event_id="miss",
+            holder_id="main-bot",
+            relay_turn=turn,
+            progress_reason="无直接候选，发布 BBS 广场",
+            failure_reason="候选能力均不匹配",
+            payload={
+                "outcome": "MISS",
+                "miss_reason": "no capability match",
+            },
+        )
+    )
     assert published["published_bbs"]
-    service.claim_bbs_task("relay-task", "bbs-bot", "bbs-step")
+    service.claim_bbs_task("relay-task", "bbs-bot", bbs_step)
     graph = graph_service.query_task_dashboard("relay-task")
     root = next(node for node in graph.tasks if node.node_id == "relay-task")
-    bbs = next(node for node in graph.tasks if node.node_id == "bbs-step")
+    bbs = next(node for node in graph.tasks if node.node_id == bbs_step)
     assert root.status == Status.DONE
     assert bbs.status == Status.RUNNING
     assert bbs.run_info.assignee == "bbs-bot"
     with pytest.raises(TaskStateError):
-        service.claim_bbs_task("relay-task", "other-bbs-bot", "bbs-step")
+        service.claim_bbs_task("relay-task", "other-bbs-bot", bbs_step)
 
-    continued = _run(service.report_task_event(
-        task_id="relay-task", node_id="bbs-step", event_type="EXECUTION_RESULT",
-        event_id="bbs-exec", holder_id="bbs-bot",
-        progress_reason="BBS 执行产出完成，继续计算全局 gap",
-        payload={"success": True, "output": {"bbs_result": "补齐证据"}},
-    ))
-    assert next(
-        node for node in graph_service.query_task_dashboard("relay-task").tasks
-        if node.node_id == "relay-task"
-    ).status == Status.DONE
-    _run(service.report_task_event(
-        task_id="relay-task", node_id="bbs-step", event_type="PLAN_RESULT",
-        event_id="bbs-plan", holder_id="bbs-bot", relay_turn=continued["relay_turn"],
-        progress_reason="BBS 产出已满足根目标",
-        payload={"has_gap": False, "children": []},
-    ))
+    continued = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=bbs_step,
+            event_type="EXECUTION_RESULT",
+            event_id="bbs-exec",
+            holder_id="bbs-bot",
+            progress_reason="BBS 执行产出完成，继续计算全局 gap",
+            payload=_accepted({"bbs_result": "补齐证据"}),
+        )
+    )
+    assert (
+        next(
+            node
+            for node in graph_service.query_task_dashboard("relay-task").tasks
+            if node.node_id == "relay-task"
+        ).status
+        == Status.DONE
+    )
+    _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=bbs_step,
+            event_type="PLAN_RESULT",
+            event_id="bbs-plan",
+            holder_id="bbs-bot",
+            relay_turn=continued["relay_turn"],
+            progress_reason="BBS 产出已满足根目标",
+            payload={"gaps": [], "next_task_spec": None},
+        )
+    )
     assert graph_service.query_task_dashboard("relay-task").status == Status.DONE
 
 
 def test_relay_bbs_result_only_completes_claimed_baton_node() -> None:
     service, graph_service = _service()
     _run(service.execute(_request()))
-    turn = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="bbs-root-exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"output": "done"},
-    ))["relay_turn"]
-    _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
-        event_id="bbs-plan", holder_id="main-bot", relay_turn=turn,
-        progress_reason="下一棒转 BBS 广场",
-        payload={"has_gap": True, "children": [{"node_id": "bbs-step", "task_spec": _child_spec()}]},
-    ))
-    _run(service.report_task_event(
-        task_id="relay-task", node_id="bbs-step", event_type="DISPATCH_RESULT",
-        event_id="bbs-search", holder_id="main-bot", relay_turn=turn,
-        progress_reason="普通候选无法覆盖，发布 BBS",
-        failure_reason="无匹配候选",
-        payload={"outcome": "MISS", "miss_reason": "no_candidates"},
-    ))
-    service.claim_bbs_task("relay-task", "bbs-bot", "bbs-step")
+    turn = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="bbs-root-exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted("done"),
+        )
+    )["relay_turn"]
+    planned = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id="bbs-plan",
+            holder_id="main-bot",
+            relay_turn=turn,
+            progress_reason="下一棒转 BBS 广场",
+            payload={"gaps": ["补齐市场研究 gap"], "next_task_spec": _child_spec()},
+        )
+    )
+    bbs_step = planned["target_node_id"]
+    _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=bbs_step,
+            event_type="DISPATCH_RESULT",
+            event_id="bbs-search",
+            holder_id="main-bot",
+            relay_turn=turn,
+            progress_reason="普通候选无法覆盖，发布 BBS",
+            failure_reason="无匹配候选",
+            payload={"outcome": "MISS", "miss_reason": "no_candidates"},
+        )
+    )
+    service.claim_bbs_task("relay-task", "bbs-bot", bbs_step)
     before = graph_service.query_task_dashboard("relay-task")
     root_before = next(node for node in before.tasks if node.node_id == "relay-task")
     graph_status_before = before.status
 
-    result = _run(service.report_bbs_result(
-        "relay-task", "bbs-step", "bbs-bot", output_patch={"bbs_result": "done"}
-    ))
+    result = _run(
+        service.report_bbs_result(
+            "relay-task", bbs_step, "bbs-bot", output_patch={"bbs_result": "done"}
+        )
+    )
 
     after = graph_service.query_task_dashboard("relay-task")
     root_after = next(node for node in after.tasks if node.node_id == "relay-task")
-    bbs_after = next(node for node in after.tasks if node.node_id == "bbs-step")
+    bbs_after = next(node for node in after.tasks if node.node_id == bbs_step)
     assert result.new_status == Status.DONE
     assert root_after.status == root_before.status
     assert after.status == graph_status_before
@@ -412,11 +545,17 @@ def test_root_holder_accepts_frontend_composite_bot_identity() -> None:
     service, _ = _service()
     request = replace(_request(), owner_bot_id="main-bot:owner-1")
     _run(service.execute(request))
-    result = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="composite-exec", holder_id="main-bot:owner-1",
-        progress_reason="主 Bot 首棒完成", payload={"output": "done"},
-    ))
+    result = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="composite-exec",
+            holder_id="main-bot:owner-1",
+            progress_reason="主 Bot 首棒完成",
+            payload=_accepted("done"),
+        )
+    )
     assert result["relay_turn"]
 
 
@@ -424,11 +563,16 @@ def test_relay_rejects_missing_trajectory_reason() -> None:
     service, graph_service = _service()
     _run(service.execute(_request()))
     with pytest.raises(TaskStateError, match="progress_reason"):
-        _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task",
-            event_type="EXECUTION_RESULT", event_id="no-reason",
-            holder_id="main-bot", payload={"output": "done"},
-        ))
+        _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id="relay-task",
+                event_type="EXECUTION_RESULT",
+                event_id="no-reason",
+                holder_id="main-bot",
+                payload=_accepted("done"),
+            )
+        )
     root = graph_service.query_task_dashboard("relay-task").tasks[0]
     assert root.run_info.output == {}
 
@@ -436,46 +580,79 @@ def test_relay_rejects_missing_trajectory_reason() -> None:
 def test_retried_execution_report_does_not_invalidate_first_turn_token() -> None:
     service, graph_service = _service()
     _run(service.execute(_request()))
-    first = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="same-exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"output": "done"},
-    ))
-    retried = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="same-exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"output": "done"},
-    ))
+    first = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="same-exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted("done"),
+        )
+    )
+    retried = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="same-exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted("done"),
+        )
+    )
     assert retried["idempotent"] is True
     assert retried["relay_turn"] != first["relay_turn"]
 
-    result = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
-        event_id="finish", holder_id="main-bot", relay_turn=first["relay_turn"],
-        progress_reason="根目标已满足",
-        payload={"has_gap": False, "children": []},
-    ))
+    result = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id="finish",
+            holder_id="main-bot",
+            relay_turn=first["relay_turn"],
+            progress_reason="根目标已满足",
+            payload={"gaps": [], "next_task_spec": None},
+        )
+    )
     assert result["completed"] is True
 
-    delayed = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="same-exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"output": "done"},
-    ))
+    delayed = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="same-exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted("done"),
+        )
+    )
     assert delayed == {"ok": True, "idempotent": True, "turn_consumed": True}
-    assert graph_service.query_task_dashboard("relay-task").extend_props[
-        "relay_turn"
-    ]["status"] == "CONSUMED"
+    assert (
+        graph_service.query_task_dashboard("relay-task").extend_props["relay_turn"][
+            "status"
+        ]
+        == "CONSUMED"
+    )
 
 
 def test_expired_turn_is_recovered_by_idempotent_execution_retry() -> None:
     service, graph_service = _service()
     _run(service.execute(_request()))
-    first = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="recover-exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"output": "done"},
-    ))
+    first = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="recover-exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted("done"),
+        )
+    )
     graph = graph_service.query_task_dashboard("relay-task")
     expired = dict(graph.extend_props["relay_turn"])
     expired["expires_at_ms"] = 0
@@ -483,18 +660,30 @@ def test_expired_turn_is_recovered_by_idempotent_execution_retry() -> None:
         "relay-task", TaskGraphPatch(extend_props_patch={"relay_turn": expired})
     )
     with pytest.raises(TaskStateError, match="invalid"):
-        _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
-            event_id="stale-plan", holder_id="main-bot", relay_turn=first["relay_turn"],
-            progress_reason="尝试使用已过期接力权",
-            payload={"has_gap": False, "children": []},
-        ))
+        _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id="relay-task",
+                event_type="PLAN_RESULT",
+                event_id="stale-plan",
+                holder_id="main-bot",
+                relay_turn=first["relay_turn"],
+                progress_reason="尝试使用已过期接力权",
+                payload={"gaps": [], "next_task_spec": None},
+            )
+        )
 
-    recovered = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="recover-exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"output": "done"},
-    ))
+    recovered = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="recover-exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted("done"),
+        )
+    )
     assert recovered["idempotent"] is True
     assert recovered["relay_turn"] != first["relay_turn"]
 
@@ -502,44 +691,81 @@ def test_expired_turn_is_recovered_by_idempotent_execution_retry() -> None:
 def test_only_group_manager_can_report_and_continue() -> None:
     service, _ = _service(discover=_DiscoverTwo())
     _run(service.execute(_request()))
-    turn = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="root-exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"output": "done"},
-    ))["relay_turn"]
+    turn = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="root-exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted("done"),
+        )
+    )["relay_turn"]
     spec = _child_spec()
-    _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
-        event_id="group-plan", holder_id="main-bot", relay_turn=turn,
-        progress_reason="下一棒需要多 Bot 协作",
-        payload={"has_gap": True, "children": [{"node_id": "group-step", "task_spec": spec}]},
-    ))
+    planned = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id="group-plan",
+            holder_id="main-bot",
+            relay_turn=turn,
+            progress_reason="下一棒需要多 Bot 协作",
+            payload={"gaps": ["需要多 Bot 协作"], "next_task_spec": spec},
+        )
+    )
+    group_step = planned["target_node_id"]
     _run(service.search_task_candidates(query="补齐市场研究 gap"))
-    _run(service.report_task_event(
-        task_id="relay-task", node_id="group-step", event_type="DISPATCH_RESULT",
-        event_id="group-search", holder_id="main-bot", relay_turn=turn,
-        progress_reason="两个 Bot 能力互补，由 manager 汇总",
-        payload={
-            "outcome": "HIT_MULTI_BOTS",
-            "bot_ids": ["manager-bot", "member-bot"],
-            "collab_mode": "manager_worker",
-        },
-    ))
-    _run(service.dispatch_task(
-        task_id="relay-task", node_id="group-step", holder_id="main-bot",
-        relay_turn=turn, dispatch_id="group-dispatch",
-    ))
+    _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=group_step,
+            event_type="DISPATCH_RESULT",
+            event_id="group-search",
+            holder_id="main-bot",
+            relay_turn=turn,
+            progress_reason="两个 Bot 能力互补，由 manager 汇总",
+            payload={
+                "outcome": "HIT_MULTI_BOTS",
+                "bot_ids": ["manager-bot", "member-bot"],
+                "collab_mode": "manager_worker",
+            },
+        )
+    )
+    _run(
+        service.dispatch_task(
+            task_id="relay-task",
+            origin_node_id="relay-task",
+            target_node_id=group_step,
+            holder_id="main-bot",
+            relay_turn=turn,
+            dispatch_id="group-dispatch",
+        )
+    )
     with pytest.raises(TaskStateError, match="not assignee"):
-        _run(service.report_task_event(
-            task_id="relay-task", node_id="group-step", event_type="EXECUTION_RESULT",
-            event_id="member-exec", holder_id="member-bot",
-            progress_reason="普通成员试图越权续棒", payload={"output": "member"},
-        ))
-    manager = _run(service.report_task_event(
-        task_id="relay-task", node_id="group-step", event_type="EXECUTION_RESULT",
-        event_id="manager-exec", holder_id="manager-bot",
-        progress_reason="manager 已汇总协作群产出", payload={"output": "group result"},
-    ))
+        _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id=group_step,
+                event_type="EXECUTION_RESULT",
+                event_id="member-exec",
+                holder_id="member-bot",
+                progress_reason="普通成员试图越权续棒",
+                payload=_accepted("member"),
+            )
+        )
+    manager = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id=group_step,
+            event_type="EXECUTION_RESULT",
+            event_id="manager-exec",
+            holder_id="manager-bot",
+            progress_reason="manager 已汇总协作群产出",
+            payload=_accepted("group result"),
+        )
+    )
     assert manager["relay_turn"]
 
 
@@ -548,7 +774,10 @@ def test_default_centralized_mode_creates_no_relay_turn() -> None:
         service, graph_service = _service(relay_enabled=False)
         submitted = await service.execute(_request())
         graph = graph_service.query_task_dashboard(submitted.task_id)
-        assert graph.extend_props["execution_config"]["orchestration_mode"] == "centralized"
+        assert (
+            graph.extend_props["execution_config"]["orchestration_mode"]
+            == "centralized"
+        )
         assert "relay_turn" not in graph.extend_props
         await service.drain_background()
 
@@ -556,7 +785,9 @@ def test_default_centralized_mode_creates_no_relay_turn() -> None:
 
 
 @pytest.mark.parametrize("task_type", ["workflow", "yaml", "static_plan", "bbs"])
-def test_relay_setting_does_not_capture_non_dynamic_execution_adapters(task_type: str) -> None:
+def test_relay_setting_does_not_capture_non_dynamic_execution_adapters(
+    task_type: str,
+) -> None:
     service, _ = _service(relay_enabled=True)
     request = replace(_request(), execution_config={"task_type": task_type})
 
@@ -568,24 +799,36 @@ def test_relay_setting_does_not_capture_non_dynamic_execution_adapters(task_type
 def test_relay_plan_rejects_parallel_children() -> None:
     service, graph_service = _service()
     _run(service.execute(_request()))
-    turn = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"output": "done"},
-    ))["relay_turn"]
-    with pytest.raises(TaskStateError, match="exactly one"):
-        _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
-            event_id="parallel-plan", holder_id="main-bot", relay_turn=turn,
-            progress_reason="错误地产生多个并行下一棒",
-            payload={
-                "has_gap": True,
-                "children": [
-                    {"node_id": "one", "task_spec": _child_spec()},
-                    {"node_id": "two", "task_spec": _child_spec()},
-                ],
-            },
-        ))
+    turn = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted("done"),
+        )
+    )["relay_turn"]
+    with pytest.raises(TaskStateError, match="requires next_task_spec"):
+        _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id="relay-task",
+                event_type="PLAN_RESULT",
+                event_id="parallel-plan",
+                holder_id="main-bot",
+                relay_turn=turn,
+                progress_reason="错误地产生多个并行下一棒",
+                payload={
+                    "has_gap": True,
+                    "children": [
+                        {"node_id": "one", "task_spec": _child_spec()},
+                        {"node_id": "two", "task_spec": _child_spec()},
+                    ],
+                },
+            )
+        )
     assert len(graph_service.query_task_dashboard("relay-task").tasks) == 1
 
 
@@ -604,38 +847,65 @@ def test_invalid_relay_bbs_claim_does_not_reserve_task_owner() -> None:
 def test_failed_dispatch_reopens_same_turn_for_retry() -> None:
     service, graph_service = _service()
     delivery = _ToggleDelivery()
-    service._engine._runner.set_delivery("single_bot", delivery)
+    service._runner.set_delivery("single_bot", delivery)
     _run(service.execute(_request()))
-    turn = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"output": "done"},
-    ))["relay_turn"]
-    _plan_and_select(
-        service, origin_node_id="relay-task", holder_id="main-bot",
-        turn=turn, child_node_id="retry-step", event_suffix="retry",
+    turn = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted("done"),
+        )
+    )["relay_turn"]
+    retry_step = _plan_and_select(
+        service,
+        origin_node_id="relay-task",
+        holder_id="main-bot",
+        turn=turn,
+        child_node_id="retry-step",
+        event_suffix="retry",
     )
 
     with pytest.raises(TaskStateError, match="dispatch failed"):
-        _run(service.dispatch_task(
-            task_id="relay-task", node_id="retry-step", holder_id="main-bot",
-            relay_turn=turn, dispatch_id="dispatch-failed",
-        ))
+        _run(
+            service.dispatch_task(
+                task_id="relay-task",
+                origin_node_id="relay-task",
+                target_node_id=retry_step,
+                holder_id="main-bot",
+                relay_turn=turn,
+                dispatch_id="dispatch-failed",
+            )
+        )
     failed = graph_service.query_task_nodes(
-        "relay-task", TaskNodeQueryCriteria(node_ids=["retry-step"]),
+        "relay-task",
+        TaskNodeQueryCriteria(node_ids=[retry_step]),
     )[0]
     assert failed.status == Status.PENDING
     assert failed.run_info.failure_reason == "下一棒 Runner 派发失败"
 
     delivery.succeeds = True
-    retried = _run(service.dispatch_task(
-        task_id="relay-task", node_id="retry-step", holder_id="main-bot",
-        relay_turn=turn, dispatch_id="dispatch-retry",
-    ))
+    retried = _run(
+        service.dispatch_task(
+            task_id="relay-task",
+            origin_node_id="relay-task",
+            target_node_id=retry_step,
+            holder_id="main-bot",
+            relay_turn=turn,
+            dispatch_id="dispatch-retry",
+        )
+    )
     assert retried["ok"] is True
-    assert graph_service.query_task_nodes(
-        "relay-task", TaskNodeQueryCriteria(node_ids=["retry-step"]),
-    )[0].status == Status.RUNNING
+    assert (
+        graph_service.query_task_nodes(
+            "relay-task",
+            TaskNodeQueryCriteria(node_ids=[retry_step]),
+        )[0].status
+        == Status.RUNNING
+    )
 
 
 def test_relay_coordinator_renews_only_expired_current_turn() -> None:
@@ -658,12 +928,18 @@ def test_relay_coordinator_renews_only_expired_current_turn() -> None:
 def test_expired_relay_resume_only_mutates_current_baton_node() -> None:
     service, graph_service = _service()
     _run(service.execute(_request()))
-    first_turn = _run(service.report_task_event(
-        task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-        event_id="resume-root-exec", holder_id="main-bot", progress_reason="首棒完成",
-        payload={"success": True, "output": {"scope": "first"}},
-    ))["relay_turn"]
-    _plan_and_select(
+    first_turn = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="resume-root-exec",
+            holder_id="main-bot",
+            progress_reason="首棒完成",
+            payload=_accepted({"scope": "first"}),
+        )
+    )["relay_turn"]
+    resume_step = _plan_and_select(
         service,
         origin_node_id="relay-task",
         holder_id="main-bot",
@@ -672,18 +948,18 @@ def test_expired_relay_resume_only_mutates_current_baton_node() -> None:
         event_suffix="resume",
     )
     RelayCoordinator(graph_service).consume(
-        "relay-task", "resume-step", "main-bot", first_turn
+        "relay-task", resume_step, "main-bot", first_turn
     )
     graph_service.update_task_node_info(
         TaskNodePatch(
             task_id="relay-task",
-            node_id="resume-step",
+            node_id=resume_step,
             status=Status.RUNNING,
             extend_props_patch={"relay_holder_id": "research-bot"},
         )
     )
     coordinator = RelayCoordinator(graph_service, ttl_seconds=0)
-    assert coordinator.grant("relay-task", "resume-step", "research-bot") is not None
+    assert coordinator.grant("relay-task", resume_step, "research-bot") is not None
 
     resumed: list[tuple[str, str]] = []
 
@@ -691,9 +967,10 @@ def test_expired_relay_resume_only_mutates_current_baton_node() -> None:
         resumed.append((node.node_id, turn))
         return True
 
-    service._engine._runner.resume_relay_turn = _resume  # type: ignore[method-assign]
+    service._runner.resume_relay_turn = _resume  # type: ignore[method-assign]
     parent_before = next(
-        node for node in graph_service.query_task_dashboard("relay-task").tasks
+        node
+        for node in graph_service.query_task_dashboard("relay-task").tasks
         if node.node_id == "relay-task"
     )
     parent_status_before = parent_before.status
@@ -703,254 +980,312 @@ def test_expired_relay_resume_only_mutates_current_baton_node() -> None:
 
     graph = graph_service.query_task_dashboard("relay-task")
     parent_after = next(node for node in graph.tasks if node.node_id == "relay-task")
-    baton_after = next(node for node in graph.tasks if node.node_id == "resume-step")
-    assert resumed and resumed[0][0] == "resume-step"
+    baton_after = next(node for node in graph.tasks if node.node_id == resume_step)
+    assert resumed and resumed[0][0] == resume_step
     assert parent_after.status == parent_status_before
     assert parent_after.run_info.output == parent_output_before
     assert baton_after.run_info.extend_props["relay_resume_count"] == 1
-    assert graph.extend_props["relay_turn"]["node_id"] == "resume-step"
+    assert graph.extend_props["relay_turn"]["node_id"] == resume_step
+
+
+def test_task_context_projects_only_accepted_done_outputs_and_latest_gaps() -> None:
+    service, graph_service = _service()
+    _run(service.execute(_request()))
+    execution = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="context-exec",
+            holder_id="main-bot",
+            progress_reason="完成本地覆盖范围",
+            payload=_accepted({"evidence": "local-result"}),
+        )
+    )
+    before_plan = service.get_task_context("relay-task")
+    assert before_plan.spec.context.title == "调研"
+    assert before_plan.gaps == []
+    assert [item.node_id for item in before_plan.all_done_output] == ["relay-task"]
+    assert before_plan.all_done_output[0].output == {"evidence": "local-result"}
+
+    planned = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id="context-plan",
+            holder_id="main-bot",
+            relay_turn=execution["relay_turn"],
+            progress_reason="仍缺最新证据",
+            payload={
+                "gaps": ["缺少最近三个月证据"],
+                "next_task_spec": _child_spec(),
+            },
+        )
+    )
+    after_plan = service.get_task_context("relay-task")
+    assert after_plan.gaps == ["缺少最近三个月证据"]
+    target = graph_service.query_task_nodes(
+        "relay-task",
+        TaskNodeQueryCriteria(node_ids=[planned["target_node_id"]]),
+    )[0]
+    assert target.run_info.actual_goal is None
+    assert target.run_info.output == {}
+    assert target.run_info.acceptance_result is None
+
+
+def test_declined_execution_is_not_exposed_as_done_output() -> None:
+    service, _ = _service()
+    _run(service.execute(_request()))
+    _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="context-declined",
+            holder_id="main-bot",
+            progress_reason="职责不覆盖专业研究",
+            failure_reason="capability_mismatch",
+            payload={
+                "execution_decision": "DECLINED",
+                "actual_goal": None,
+                "output": {},
+                "acceptance_result": None,
+            },
+        )
+    )
+    assert service.get_task_context("relay-task").all_done_output == []
 
 
 class TestRelayTrajectory:
-    """Relay (``orchestration_mode == "relay"``) 完整 timeline + 错误落在
-    ``task_trajectory_events``:每个接力阶段(``bootstrap/execution_result/plan_result/
-    dispatch_result/dispatch/bbs_claim/bbs_result/turn_resume``)发一条 ``RELAY`` 事件,
-    失败态(execution_failed/gap_hung/max_loop_hung/dispatch_failed_reopen/turn_invalid/
-    resume_exhausted_hung)带 ``error_type=ReasonCatalog.RELAY``. 复用真实 in-memory
-    ``TaskTrajectoryRepository``(经 ``_tcs`` 包成 ``TaskContextService``)持久化,
-    其余 relay 测试 ``task_context_service=None`` → ``_emit_relay`` no-op,不受影响。
-    """
-
     def test_full_cycle_emits_relay_timeline_in_order(self):
         service, _graph, repo = _service_with_traj()
         _run(service.execute(_request()))
-        exec1 = _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-            event_id="exec-1", holder_id="main-bot", progress_reason="首棒形成分析",
-            payload={"success": True, "output": {"summary": "首轮"}},
-        ))
-        _plan_and_select(service, origin_node_id="relay-task", holder_id="main-bot",
-                         turn=exec1["relay_turn"], child_node_id="research-step", event_suffix="1")
-        _run(service.dispatch_task(
-            task_id="relay-task", node_id="research-step", holder_id="main-bot",
-            relay_turn=exec1["relay_turn"], dispatch_id="dispatch-1",
-        ))
-        exec2 = _run(service.report_task_event(
-            task_id="relay-task", node_id="research-step", event_type="EXECUTION_RESULT",
-            event_id="exec-2", holder_id="research-bot", progress_reason="第二棒产出",
-            payload={"success": True, "output": {"recommendation": "进入市场"}},
-        ))
-        _plan_and_select(service, origin_node_id="research-step", holder_id="research-bot",
-                         turn=exec2["relay_turn"], child_node_id="final-step", event_suffix="2")
-        _run(service.dispatch_task(
-            task_id="relay-task", node_id="final-step", holder_id="research-bot",
-            relay_turn=exec2["relay_turn"], dispatch_id="dispatch-2",
-        ))
-        exec3 = _run(service.report_task_event(
-            task_id="relay-task", node_id="final-step", event_type="EXECUTION_RESULT",
-            event_id="exec-3", holder_id="research-bot", progress_reason="最终一棒产出",
-            payload={"success": True, "output": {"final": "complete"}},
-        ))
-        _run(service.report_task_event(
-            task_id="relay-task", node_id="final-step", event_type="PLAN_RESULT",
-            event_id="plan-final", holder_id="research-bot", relay_turn=exec3["relay_turn"],
-            progress_reason="根目标已全部满足", payload={"has_gap": False, "children": []},
-        ))
-
-        recs = _relay_records(repo)
-        assert [(r.node_id, r.action_result) for r in recs] == [
+        exec1 = _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id="relay-task",
+                event_type="EXECUTION_RESULT",
+                event_id="exec-1",
+                holder_id="main-bot",
+                progress_reason="首棒完成",
+                payload=_accepted({"summary": "首轮"}),
+            )
+        )
+        step1 = _plan_and_select(
+            service,
+            origin_node_id="relay-task",
+            holder_id="main-bot",
+            turn=exec1["relay_turn"],
+            child_node_id="ignored",
+            event_suffix="1",
+        )
+        _run(
+            service.dispatch_task(
+                task_id="relay-task",
+                origin_node_id="relay-task",
+                target_node_id=step1,
+                holder_id="main-bot",
+                relay_turn=exec1["relay_turn"],
+                dispatch_id="dispatch-1",
+            )
+        )
+        exec2 = _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id=step1,
+                event_type="EXECUTION_RESULT",
+                event_id="exec-2",
+                holder_id="research-bot",
+                progress_reason="第二棒完成",
+                payload=_accepted({"recommendation": "进入市场"}),
+            )
+        )
+        step2 = _plan_and_select(
+            service,
+            origin_node_id=step1,
+            holder_id="research-bot",
+            turn=exec2["relay_turn"],
+            child_node_id="ignored",
+            event_suffix="2",
+        )
+        _run(
+            service.dispatch_task(
+                task_id="relay-task",
+                origin_node_id=step1,
+                target_node_id=step2,
+                holder_id="research-bot",
+                relay_turn=exec2["relay_turn"],
+                dispatch_id="dispatch-2",
+            )
+        )
+        exec3 = _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id=step2,
+                event_type="EXECUTION_RESULT",
+                event_id="exec-3",
+                holder_id="research-bot",
+                progress_reason="最终完成",
+                payload=_accepted({"final": "complete"}),
+            )
+        )
+        _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id=step2,
+                event_type="PLAN_RESULT",
+                event_id="plan-final",
+                holder_id="research-bot",
+                relay_turn=exec3["relay_turn"],
+                progress_reason="根目标完成",
+                payload={"gaps": []},
+            )
+        )
+        assert [(r.node_id, r.action_result) for r in _relay_records(repo)] == [
             ("relay-task", "bootstrap"),
             ("relay-task", "execution_result"),
             ("relay-task", "plan_result"),
-            ("research-step", "hit_single"),
-            ("research-step", "dispatch"),
-            ("research-step", "execution_result"),
-            ("research-step", "plan_result"),
-            ("final-step", "hit_single"),
-            ("final-step", "dispatch"),
-            ("final-step", "execution_result"),
-            ("final-step", "plan_result"),
+            (step1, "hit_single"),
+            (step1, "dispatch"),
+            (step1, "execution_result"),
+            (step1, "plan_result"),
+            (step2, "hit_single"),
+            (step2, "dispatch"),
+            (step2, "execution_result"),
+            (step2, "plan_result"),
         ]
-        # happy path: no relay errors recorded
-        assert all(r.error_type is None for r in recs)
 
-    def test_callback_success_emits_correlated_progress_event(self):
+    def test_callback_events_are_correlated_without_leaking_turn(self):
         service, _graph, repo = _service_with_traj()
         _run(service.execute(_request()))
-
         service.record_relay_callback_success(
             task_id="relay-task",
             node_id="relay-task",
             event_type="EXECUTION_RESULT",
-            event_id="exec-http-1",
+            event_id="exec-http",
             holder_id="main-bot",
             relay_turn=None,
-            payload={"success": True, "output": {"summary": "done"}},
-            result={"ok": True, "relay_turn": "secret-turn-token"},
+            payload={"success": True},
+            result={"ok": True, "relay_turn": "secret-token"},
         )
-
-        progress = _relay_records(repo)[-1]
-        assert progress.action_result == "callback_reported"
-        assert progress.error_type is None
-        ext_info = json.loads(progress.ext_info)
-        assert ext_info["event_type"] == "EXECUTION_RESULT"
-        assert ext_info["event_id"] == "exec-http-1"
-        assert ext_info["relay_turn_granted"] is True
-        assert ext_info["payload_keys"] == ["output", "success"]
-        assert "secret-turn-token" not in progress.ext_info
-
-    def test_callback_failure_emits_correlated_diagnostic_event(self):
-        service, _graph, repo = _service_with_traj()
-        _run(service.execute(_request()))
-
         service.record_relay_callback_error(
             task_id="relay-task",
             node_id="relay-task",
             event_type="PLAN_RESULT",
-            event_id="plan-invalid",
+            event_id="bad-plan",
             holder_id="main-bot",
-            relay_turn="secret-turn-token",
-            progress_reason="继续规划",
+            relay_turn="secret-token",
+            progress_reason="规划",
             failure_reason=None,
-            payload={"has_gap": True, "children": []},
+            payload={"gaps": ["x"]},
             error_phase="processing",
             exception_type="TaskStateError",
-            error_msg="relay plan must produce exactly one next node",
+            error_msg="bad plan",
         )
+        records = _relay_records(repo)
+        assert records[-2].action_result == "callback_reported"
+        assert records[-1].action_result == "callback_report_failed"
+        assert records[-1].error_type == ReasonCatalog.RELAY.value
+        assert "secret-token" not in records[-1].ext_info
+        assert json.loads(records[-1].ext_info)["relay_turn_prefix"] == "secret-t"
 
-        failure = _relay_records(repo)[-1]
-        assert failure.action_result == "callback_report_failed"
-        assert failure.error_type == ReasonCatalog.RELAY.value
-        assert failure.error_msg == "relay plan must produce exactly one next node"
-        ext_info = json.loads(failure.ext_info)
-        assert ext_info["error_phase"] == "processing"
-        assert ext_info["exception_type"] == "TaskStateError"
-        assert ext_info["relay_turn_prefix"] == "secret-t"
-        assert "secret-turn-token" not in failure.ext_info
-        assert ext_info["payload_keys"] == ["children", "has_gap"]
-
-    def test_miss_emits_miss_and_bbs_claim_without_error(self):
+    def test_miss_claim_and_bbs_result_emit_relay_events(self):
         service, _graph, repo = _service_with_traj()
         _run(service.execute(_request()))
-        turn = _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-            event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
-            payload={"output": "done"},
-        ))["relay_turn"]
-        _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
-            event_id="plan", holder_id="main-bot", relay_turn=turn,
-            progress_reason="需要 BBS 承接下一棒",
-            payload={"has_gap": True, "children": [{"node_id": "bbs-step", "task_spec": _child_spec()}]},
-        ))
-        _run(service.search_task_candidates(query="补齐市场研究 gap"))
-        _run(service.report_task_event(
-            task_id="relay-task", node_id="bbs-step", event_type="DISPATCH_RESULT",
-            event_id="miss", holder_id="main-bot", relay_turn=turn,
-            progress_reason="无直接候选，发布 BBS", failure_reason="候选能力均不匹配",
-            payload={"outcome": "MISS", "miss_reason": "no capability"},
-        ))
-        service.claim_bbs_task("relay-task", "bbs-bot", "bbs-step")
-        recs = _relay_records(repo)
-        pairs = [(r.node_id, r.action_result) for r in recs]
-        assert ("bbs-step", "miss") in pairs
-        assert ("bbs-step", "bbs_claim") in pairs
-        miss = next(r for r in recs if r.action_result == "miss")
-        # MISS is an expected relay sub-outcome (→ BBS), not an error classification.
-        assert miss.error_type is None
+        execution = _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id="relay-task",
+                event_type="EXECUTION_RESULT",
+                event_id="exec",
+                holder_id="main-bot",
+                progress_reason="首棒完成",
+                payload=_accepted({"summary": "done"}),
+            )
+        )
+        planned = _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id="relay-task",
+                event_type="PLAN_RESULT",
+                event_id="plan",
+                holder_id="main-bot",
+                relay_turn=execution["relay_turn"],
+                progress_reason="需要 BBS",
+                payload={"gaps": ["专业缺口"], "next_task_spec": _child_spec()},
+            )
+        )
+        target = planned["target_node_id"]
+        _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id=target,
+                event_type="DISPATCH_RESULT",
+                event_id="miss",
+                holder_id="main-bot",
+                relay_turn=execution["relay_turn"],
+                progress_reason="发布 BBS",
+                failure_reason="无匹配",
+                payload={"outcome": "MISS", "miss_reason": "no_candidates"},
+            )
+        )
+        service.claim_bbs_task("relay-task", "bbs-bot", target)
+        _run(
+            service.report_bbs_result(
+                "relay-task", target, "bbs-bot", output_patch={"bbs_result": "done"}
+            )
+        )
+        pairs = [(r.node_id, r.action_result) for r in _relay_records(repo)]
+        assert (target, "miss") in pairs
+        assert (target, "bbs_claim") in pairs
+        assert (target, "bbs_result") in pairs
 
-    def test_bbs_result_emits_bbs_result_event_without_error(self):
-        service, _graph, repo = _service_with_traj()
+    def test_dispatch_failure_and_resume_exhaustion_emit_errors(self):
+        service, graph, repo = _service_with_traj()
+        delivery = _ToggleDelivery()
+        service._runner.set_delivery("single_bot", delivery)
         _run(service.execute(_request()))
-        turn = _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-            event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
-            payload={"output": "done"},
-        ))["relay_turn"]
-        _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
-            event_id="plan", holder_id="main-bot", relay_turn=turn, progress_reason="下一棒转 BBS",
-            payload={"has_gap": True, "children": [{"node_id": "bbs-step", "task_spec": _child_spec()}]},
-        ))
-        _run(service.report_task_event(
-            task_id="relay-task", node_id="bbs-step", event_type="DISPATCH_RESULT",
-            event_id="miss", holder_id="main-bot", relay_turn=turn, progress_reason="发布 BBS",
-            failure_reason="无匹配", payload={"outcome": "MISS", "miss_reason": "no_candidates"},
-        ))
-        service.claim_bbs_task("relay-task", "bbs-bot", "bbs-step")
-        _run(service.report_bbs_result(
-            "relay-task", "bbs-step", "bbs-bot", output_patch={"bbs_result": "done"}
-        ))
-        recs = _relay_records(repo)
-        br = next(r for r in recs if r.action_result == "bbs_result")
-        assert br.node_id == "bbs-step"
-        assert br.error_type is None  # no exec_error on this BBS run
-
-    def test_dispatch_failure_emits_relay_error_with_message(self):
-        service, _graph, repo = _service_with_traj()
-        delivery = _ToggleDelivery()  # succeeds=False → Runner 投递失败
-        service._engine._runner.set_delivery("single_bot", delivery)
-        _run(service.execute(_request()))
-        turn = _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-            event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
-            payload={"output": "done"},
-        ))["relay_turn"]
-        _plan_and_select(service, origin_node_id="relay-task", holder_id="main-bot",
-                         turn=turn, child_node_id="retry-step", event_suffix="retry")
+        execution = _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id="relay-task",
+                event_type="EXECUTION_RESULT",
+                event_id="exec",
+                holder_id="main-bot",
+                progress_reason="首棒完成",
+                payload=_accepted({"summary": "done"}),
+            )
+        )
+        target = _plan_and_select(
+            service,
+            origin_node_id="relay-task",
+            holder_id="main-bot",
+            turn=execution["relay_turn"],
+            child_node_id="ignored",
+            event_suffix="failure",
+        )
         with pytest.raises(TaskStateError, match="dispatch failed"):
-            _run(service.dispatch_task(
-                task_id="relay-task", node_id="retry-step", holder_id="main-bot",
-                relay_turn=turn, dispatch_id="dispatch-failed",
-            ))
-        recs = _relay_records(repo)
-        fail = next(r for r in recs if r.action_result == "dispatch_failed_reopen")
-        assert fail.error_type == ReasonCatalog.RELAY.value
-        assert "dispatch failed" in (fail.error_msg or "")
-
-    def test_turn_invalid_emits_relay_error_before_raise(self):
-        service, graph_service, repo = _service_with_traj()
-        _run(service.execute(_request()))
-        first = _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-            event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
-            payload={"output": "done"},
-        ))["relay_turn"]
-        graph = graph_service.query_task_dashboard("relay-task")
-        expired = dict(graph.extend_props["relay_turn"])
-        expired["expires_at_ms"] = 0
-        graph_service.update_task_graph_info(
-            "relay-task", TaskGraphPatch(extend_props_patch={"relay_turn": expired})
+            _run(
+                service.dispatch_task(
+                    task_id="relay-task",
+                    origin_node_id="relay-task",
+                    target_node_id=target,
+                    holder_id="main-bot",
+                    relay_turn=execution["relay_turn"],
+                    dispatch_id="dispatch-failed",
+                )
+            )
+        g = graph.query_task_dashboard("relay-task")
+        g.extend_props["relay_turn"]["expires_at_ms"] = 0
+        graph.update_task_node_info(
+            TaskNodePatch(
+                task_id="relay-task",
+                node_id="relay-task",
+                extend_props_patch={"relay_resume_count": 2},
+            )
         )
-        with pytest.raises(TaskStateError, match="invalid"):
-            _run(service.report_task_event(
-                task_id="relay-task", node_id="relay-task", event_type="PLAN_RESULT",
-                event_id="stale-plan", holder_id="main-bot", relay_turn=first,
-                progress_reason="尝试用过期 turn 规划",
-                payload={"has_gap": False, "children": []},
-            ))
-        recs = _relay_records(repo)
-        inv = next(r for r in recs if r.action_result == "turn_invalid")
-        assert inv.error_type == ReasonCatalog.RELAY.value
-        assert "invalid" in (inv.error_msg or "")
-
-    def test_resume_exhaustion_emits_hung_relay_error(self):
-        service, graph_service, repo = _service_with_traj()
-        _run(service.execute(_request()))
-        _run(service.report_task_event(
-            task_id="relay-task", node_id="relay-task", event_type="EXECUTION_RESULT",
-            event_id="exec", holder_id="main-bot", progress_reason="首棒完成",
-            payload={"output": "done"},
-        ))
-        g = graph_service.query_task_dashboard("relay-task")
-        node_id = str((g.extend_props.get("relay_turn") or {}).get("node_id") or "relay-task")
-        # mark the baton node as already at the resume limit (RELAY_RESUME_MAX default 2)
-        graph_service.update_task_node_info(TaskNodePatch(
-            task_id="relay-task", node_id=node_id,
-            extend_props_patch={"relay_resume_count": 2},
-        ))
         assert _run(service.resume_expired_relay_turn("relay-task")) is False
-        recs = _relay_records(repo)
-        exh = next(r for r in recs if r.action_result == "resume_exhausted_hung")
-        assert exh.error_type == ReasonCatalog.RELAY.value
-        assert "resume" in (exh.error_msg or "")
+        errors = {r.action_result: r for r in _relay_records(repo)}
+        assert errors["dispatch_failed_reopen"].error_type == ReasonCatalog.RELAY.value
+        assert errors["resume_exhausted_hung"].error_type == ReasonCatalog.RELAY.value
