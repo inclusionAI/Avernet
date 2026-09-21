@@ -6,8 +6,15 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 from agentclaw.community.core.bot_management.errors import BotCreationRetainedError
 from agentclaw.community.core.bot_management.services.bot_service import (
+    BotLimitExceededError,
+    BotNameExistsError,
+    BotNameInvalidError,
     BotNotFoundError,
+    BotOperationNotAllowedError,
+    BotPermissionError,
     BotServiceError,
+    DefaultBotTeclawNotAllowedError,
+    DeviceLimitError,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipError
@@ -18,6 +25,18 @@ if TYPE_CHECKING:
 
 
 logger = get_logger()
+
+
+_NON_RETAINABLE_CREATION_ERRORS = (
+    BotLimitExceededError,
+    BotNameExistsError,
+    BotNameInvalidError,
+    BotNotFoundError,
+    BotOperationNotAllowedError,
+    BotPermissionError,
+    DefaultBotTeclawNotAllowedError,
+    DeviceLimitError,
+)
 
 
 class _RetainedAuthRelationshipError(
@@ -71,6 +90,8 @@ def _raise_with_retry_handle(
     error: Exception,
     creation_succeeded: bool,
 ) -> NoReturn:
+    if isinstance(error, _NON_RETAINABLE_CREATION_ERRORS):
+        raise error
     if not creation_succeeded:
         try:
             retained_bot = bot_service.get_bot(bot_id, user_id)
