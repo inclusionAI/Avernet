@@ -295,6 +295,7 @@ class TaskServiceRelayMixin:
                     else str(failure_reason or "execution declined"),
                     status_to=Status.RUNNING,
                     attempt=self._relay_attempt(task_id),
+                    boost_reason=progress_reason,
                     ext_info={"holder_id": holder_id, "relay_turn_granted": True},
                 )
             elif event_type == "PLAN_RESULT":
@@ -311,9 +312,11 @@ class TaskServiceRelayMixin:
                     if failed
                     else (Status.SUCCESS if result.get("completed") else Status.DONE),
                     attempt=self._relay_attempt(task_id),
+                    boost_reason=progress_reason,
                     ext_info={
                         "completed": bool(result.get("completed")),
                         "target_node_id": result.get("target_node_id"),
+                        "holder_id": holder_id,
                     },
                 )
 
@@ -751,7 +754,12 @@ class TaskServiceRelayMixin:
                 node_id=node.node_id,
                 action_result="miss",
                 attempt=self._relay_attempt(graph.task_id),
-                ext_info={"published_bbs": True, "miss_reason": reason},
+                boost_reason=progress_reason,
+                ext_info={
+                    "published_bbs": True,
+                    "miss_reason": reason,
+                    "holder_id": holder_id,
+                },
             )
             return {"ok": True, "published_bbs": True, "node_id": node.node_id}
         else:
@@ -762,7 +770,13 @@ class TaskServiceRelayMixin:
             node_id=node.node_id,
             action_result="hit_single" if outcome == "HIT_SINGLE" else "hit_multi",
             attempt=self._relay_attempt(graph.task_id),
-            ext_info={"driver_bot_id": driver, "next_relay_bots": next_bots},
+            boost_reason=progress_reason,
+            ext_info={
+                "driver_bot_id": driver,
+                "next_relay_bots": next_bots,
+                "holder_id": holder_id,
+                "planned_by": node.run_info.extend_props.get("relay_planned_by"),
+            },
         )
         return {
             "ok": True,

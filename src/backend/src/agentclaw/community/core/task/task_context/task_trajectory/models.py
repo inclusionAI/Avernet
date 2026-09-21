@@ -86,7 +86,8 @@ class TrajectoryEvent:
     """单条轨迹事件(FLAT 投影行;无嵌套 ``payload`` / ``rationale`` / ``phase``)。
 
     定型列即领域字段;附加素材(``DispatchRationale`` / RESET 计量 / SUBMIT 来源等)由采集层
-    写入事件行 ``ext_info`` 自由 JSON 列(领域对象不映射,analyzer 按需读)。
+    写入事件行 ``ext_info`` 自由 JSON 列(领域对象不整体映射,仅定向投影 ``holder_id`` 供展示,
+    analyzer 仍按需读取完整 JSON)。
     ``gmt_create`` = 事件发射时间(timeline 排序依据);``gmt_modified`` 仅在分析回填 ``analysis``
     时更新(未回填时 == ``gmt_create``)。``analysis`` 为内嵌 ``TrajectoryAnalysis`` JSON 字符串,
     发射时为 ``None``,分析完成后统一回填(REC-9)。``action_input`` **不截断**(原文落库)。
@@ -104,6 +105,8 @@ class TrajectoryEvent:
     status_to: Status | None = None          # 动作后节点状态(未翻态时 None)
     error_type: ReasonCatalog | None = None   # 仅出错时填(成功为 None)
     error_msg: str | None = None              # 截断错误消息(成功为 None)
+    boost_reason: str | None = None           # 本次动作推进原因(成功推进时可填)
+    holder_id: str | None = None              # Relay 当前动作执行人(ext_info 定向投影)
     analysis: str | None = None              # 内嵌 TrajectoryAnalysis JSON(发射时 None)
 
 

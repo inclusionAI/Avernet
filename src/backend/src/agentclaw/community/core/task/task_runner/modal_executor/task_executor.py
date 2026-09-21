@@ -1,9 +1,4 @@
-"""TaskExecutor:三模态派发(single_bot/coop_group/bbs)+ poller 登记入口。
-
-dispatch(async):上游 start_run caller loop 上 gather+Semaphore await 端口 IO,拿到 run_id 即返回
-(不等待结果);BBS 也经统一 dispatch 入口启动。form_coop_group(async):BCS 建群壳。
-poller 为独立 daemon sidecar(同 TaskHarness)。
-"""
+"""TaskExecutor: 单 Bot、协作群和 BBS 三模态投递，并记录执行轨迹。"""
 
 from __future__ import annotations
 
@@ -23,6 +18,7 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+from agentclaw.community.core.task.task_context.task_context_service import build_task_runner_execution_event_kwargs
 
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsCreateGroupRequest,
@@ -54,8 +50,7 @@ logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
 _BCS_PARTICIPANT_ROLES = {"driver", "consultant", "manager", "worker", "observer"}
 
-# 人类观察者(不发言)拉人机制:任务 owner 以 observer 角色被追加进协作群,
-# routing_policy.inject_observers 让终产投递给观察者(观察者不参与发言)。bot_uuid=human_<owner_user_id>。
+# 人类观察者以 observer 角色入群但不发言，终产通过 inject_observers 投递。
 _HUMAN_OBSERVER_ROUTING_POLICY: dict[str, Any] = {"default_bot_final_delivery": "inject_observers"}
 # 走人类观察者拉人的协作模式(state_machine 群 participants 不得带 role,故不在此拉人)。
 _HUMAN_OBSERVER_MODES = {"chat", "manager_worker"}
@@ -92,6 +87,7 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
         bot_token_provider=None,
         task_settings=None,
         on_bbs_report=None,
+        task_context_service=None,
     ) -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None; context:
         TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。graph:
@@ -110,6 +106,7 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
         self._bot_token_provider = bot_token_provider
         self._task_settings = task_settings
         self._on_bbs_report = on_bbs_report  # 引擎 on_bbs_report 收口回调(供 BBS dispatch→notify 走引擎收敛)
+        self._task_context_service = task_context_service
         self._group_meta: dict[
             str, dict[str, Any]
         ] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
@@ -147,14 +144,16 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                     node.node_id,
                     node.run_info.assignee,
                 )
-                return await self._dispatch_single_bot(node, sem)
+                return await self._dispatch_execution_with_trajectory(
+                    node, mode, self._dispatch_single_bot(node, sem))
             if mode == "coop_group":
                 logger.info(
                     "[task][task-executor] >>> 投递 coop_group task=%s node=%s → form_coop_group(create_group)",
                     node.task_id,
                     node.node_id,
                 )
-                return await self._dispatch_coop_group(node, sem)
+                return await self._dispatch_execution_with_trajectory(
+                    node, mode, self._dispatch_coop_group(node, sem))
             logger.warning(
                 "[task][task-executor] node=%s 未知 run_mode=%s → 不投递",
                 node.node_id,
@@ -163,6 +162,37 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
             return False
 
         return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
+
+    def _record_execution_trajectory(
+        self, node: TaskNode, mode: str, action_result: str, *, exception=None, phase: str = "dispatch",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        if self._task_context_service is None:
+            return
+        try:
+            kwargs = build_task_runner_execution_event_kwargs(
+                node, mode, action_result, exception=exception, phase=phase, details=details)
+            self._task_context_service.emit_trajectory_event(node.task_id, node.node_id, "execute", **kwargs)
+        except Exception as exc:  # noqa: BLE001 observational write cannot break dispatch
+            logger.warning(
+                "[task][trajectory] task-runner 轨迹发射失败 task=%s node=%s: %s",
+                node.task_id, node.node_id, exc)
+
+    async def _dispatch_execution_with_trajectory(self, node: TaskNode, mode: str, operation) -> bool:
+        try:
+            result = await operation
+        except Exception as exc:  # noqa: BLE001 记录后保持原执行语义
+            self._record_execution_trajectory(node, mode, f"{mode}_start_failed", exception=exc)
+            if mode == "single_bot" and isinstance(exc, (OpenApiAuthError, OpenApiBadRequestError)):
+                logger.warning(
+                    "[task][task-executor] single_bot 派发失败(%s) task=%s node=%s bot=%s: %s",
+                    type(exc).__name__, node.task_id, node.node_id, node.run_info.assignee, exc)
+                return False
+            raise
+        self._record_execution_trajectory(
+            node, mode, f"{mode}_started" if result else f"{mode}_start_failed",
+            details=None if result else {"failure_reason": "dispatch_returned_false"})
+        return result
 
     def _skill_report_enabled(self) -> bool:
         """统一结果回收开关(默认 True=skill HTTP Push)。
@@ -247,45 +277,37 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                     return await self._dispatch_single_bot_2_group(
                         node, openapi_bot_id, assignee_owner_id, loop_task_id
                     )
-                except Exception:  # noqa: BLE001 旁路建群失败 → 回退老链路(不阻断 single_bot 投递)
+                except Exception as exc:  # noqa: BLE001 旁路建群失败 → 回退老链路(不阻断 single_bot 投递)
                     logger.exception(
                         "[task][task-executor] singlebot_2_group 旁路失败 → 回退老链路 task=%s node=%s",
                         node.task_id, node.node_id,
+                    )
+                    self._record_execution_trajectory(
+                        node, "single_bot", "single_bot_group_fallback", exception=exc,
+                        phase="single_bot_2_group", details={"fallback": True},
                     )
             logger.info(
                 "[task][task-executor] single_bot 走老链路(send_message) task=%s node=%s bot=%s",
                 node.task_id, node.node_id, openapi_bot_id,
             )
-            try:
-                ctx = dict(self._context.build(node.task_id, node.node_id) or {})
-                ctx.update({
-                    "task_id": node.task_id,
-                    "node_id": node.node_id,
-                    "execution_mode": "single_bot",
-                    # 所有任务模式统一由 skill_report_enabled 决定回收链路:
-                    #   False → Bot 不主动 callback，由平台负责回收; True → Bot HTTP Push /callback/report。
-                    "skill_report_enabled": skill_report,
-                    "backend": self._api_base_url,
-                })
-                message = self._formatter.format_execute(ctx, node)
-                sent = await self._bot.send_message(
-                    bot_id=openapi_bot_id,
-                    message=message,
-                    metadata={"biz_task_id": node.task_id},
-                )
-                run_id = sent.run_id
-                session_id = sent.session_id
-            except (OpenApiAuthError, OpenApiBadRequestError) as exc:
-                logger.warning(
-                    "[task][task-executor] single_bot 派发失败(OpenAPI %s)task=%s node=%s bot=%s: %s "
-                    "→ 留 PENDING 交 harness;grep [task][openapi_bot] 看具体哪步(http)失败",
-                    type(exc).__name__,
-                    node.task_id,
-                    node.node_id,
-                    assignee,
-                    exc,
-                )
-                return False
+            ctx = dict(self._context.build(node.task_id, node.node_id) or {})
+            ctx.update({
+                "task_id": node.task_id,
+                "node_id": node.node_id,
+                "execution_mode": "single_bot",
+                # 所有任务模式统一由 skill_report_enabled 决定回收链路:
+                #   False → Bot 不主动 callback，由平台负责回收; True → Bot HTTP Push /callback/report。
+                "skill_report_enabled": skill_report,
+                "backend": self._api_base_url,
+            })
+            message = self._formatter.format_execute(ctx, node)
+            sent = await self._bot.send_message(
+                bot_id=openapi_bot_id,
+                message=message,
+                metadata={"biz_task_id": node.task_id},
+            )
+            run_id = sent.run_id
+            session_id = sent.session_id
             if skill_report:
                 logger.info(
                     "[task][task-executor] single_bot skill-report 开关已开 task=%s node=%s bot=%s "

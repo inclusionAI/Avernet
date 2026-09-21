@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import threading
+from typing import TYPE_CHECKING
 
 from agentclaw.community.core.task.task_runner.client.double.double_bcs_client import _DoubleBcsClient
 from agentclaw.community.core.task.task_runner.client.double.double_context_provider import (
@@ -16,10 +17,15 @@ from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_iden
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
 
+if TYPE_CHECKING:
+    from agentclaw.community.core.task.task_runner.modal_executor.task_executor import (
+        TaskExecutor,
+    )
 
 
 def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = True,
-                      identity_resolver=None, on_bbs_report=None) -> TaskExecutor:
+                      identity_resolver=None, on_bbs_report=None,
+                      task_context_service=None) -> TaskExecutor:
     # Lazy imports keep the client package importable from modal_executor modules
     # without creating a client -> modal_executor -> client cycle.
     from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
@@ -47,6 +53,7 @@ def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = 
     exe = TaskExecutor(
         bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=ctx, sink=sink,
         poller=poller, identity_resolver=identity_resolver, on_bbs_report=on_bbs_report,
+        task_context_service=task_context_service,
     )
     if poller_thread:
         t = threading.Thread(target=poller.run_poll_loop, daemon=True)

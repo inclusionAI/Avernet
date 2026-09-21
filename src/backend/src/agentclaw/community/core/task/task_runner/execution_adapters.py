@@ -225,6 +225,7 @@ class CentralizedExecutionAdapter:
             bot_token_provider=self._bot_token_provider,
             task_settings=self._task_settings,
             on_bbs_report=self.on_bbs_report,
+            task_context_service=self._task_context_service,
         )
         import threading as _t
 

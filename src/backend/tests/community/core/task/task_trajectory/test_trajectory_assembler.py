@@ -114,6 +114,7 @@ def _event_record(
     status_to: str | None = None,
     error_type: str | None = None,
     error_msg: str | None = None,
+    boost_reason: str | None = None,
 ) -> TrajectoryEventRecord:
     """Build a TrajectoryEventRecord with naive-Beijing gmt_* derived from int-ms
     (mirrors the P2 emitter's ``_now_datetime`` so round-trip tests use the
@@ -131,6 +132,7 @@ def _event_record(
         status_to=status_to,
         error_type=error_type,
         error_msg=error_msg,
+        boost_reason=boost_reason,
         ext_info=ext_info,
         analysis=analysis,
         gmt_create=dt,
@@ -315,7 +317,8 @@ def test_assemble_maps_record_fields_round_trip():
             status_from="RUNNING", status_to="FAILED",
             error_type="underlying_interface_error",
             error_msg="interface exploded: timeout",
-            ext_info='{"schema_v":1,"strategy":"direct","候选":"中文"}',
+            boost_reason="候选能力匹配",
+            ext_info='{"schema_v":1,"holder_id":"bot-holder-1","候选":"中文"}',
             analysis='{"analysis_type":"tc_bot","executor":"bot-1"}',
         ),
     ]
@@ -355,11 +358,30 @@ def test_assemble_maps_record_fields_round_trip():
     assert ev.attempt == 2
     assert ev.action_result == "failed"
     assert ev.error_msg == "interface exploded: timeout"
+    assert ev.boost_reason == "候选能力匹配"
+    assert ev.holder_id == "bot-holder-1"
     # The record's ext_info is NOT lost — it remains in the table (asserted via
     # ``repo.list_events_by_task`` round-trip; the analyzer reads it later).
     persisted = repo.list_events_by_task("T-1")
     assert len(persisted) == 1
-    assert persisted[0].ext_info == '{"schema_v":1,"strategy":"direct","候选":"中文"}'
+    assert persisted[0].ext_info == (
+        '{"schema_v":1,"holder_id":"bot-holder-1","候选":"中文"}'
+    )
+
+
+def test_assemble_keeps_event_when_ext_info_is_invalid_json():
+    """损坏的自由 JSON 仅令 holder_id 缺失，不能丢弃整条轨迹事件。"""
+    record = _event_record(
+        action_type="relay",
+        action_result="execution_result",
+        ext_info="{invalid-json",
+        boost_reason="执行完成",
+    )
+    trajectory = _build_assembler(_FakeRepo(events=[record])).assemble("T-1")
+
+    assert len(trajectory.timeline) == 1
+    assert trajectory.timeline[0].holder_id is None
+    assert trajectory.timeline[0].boost_reason == "执行完成"
 
 
 # ---------------------------------------------------------------------------

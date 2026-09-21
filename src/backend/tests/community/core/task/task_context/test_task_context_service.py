@@ -1,4 +1,4 @@
-"""Unit tests for ``TaskContextService`` — the external facade that relays the 3
+"""Unit tests for ``TaskContextService`` — the external facade that relays
 trajectory operations to the internal ``TaskTrajectoryService`` (spec 2026-09-18).
 
 Pins the relay contract (Rule 1 / Rule 3 — the public Service API means what it says):
@@ -6,7 +6,7 @@ Pins the relay contract (Rule 1 / Rule 3 — the public Service API means what i
     inner service's result; 503/504 errors (``TrajectoryAnalysisNotConfiguredError``
     / ``TrajectoryAnalysisError``) propagate unmodified (the facade does NOT swallow
     — on-demand analysis-trigger failures must stay visible; decision #14).
-  * ``emit_trajectory_event`` / ``emit_submit_trajectory`` forward every arg to the
+  * ``emit_trajectory_event`` forwards every arg to the
     inner service (no leading ``repo`` arg — the repo is internal to the trajectory
     sub-module). The facade holds NO repo — it depends only on
     ``TaskTrajectoryServiceProtocol``.
@@ -52,7 +52,6 @@ class _FakeTrajectoryService:
         self._raise_exc = raise_exc
         self.get_calls: list[tuple[str, bool]] = []
         self.emit_event_calls: list[dict] = []
-        self.emit_submit_calls: list[dict] = []
 
     async def get_trajectory(self, task_id, *, do_analysis=False):
         self.get_calls.append((task_id, do_analysis))
@@ -63,7 +62,7 @@ class _FakeTrajectoryService:
     def emit_trajectory_event(
         self, task_id, node_id, action_type, *, action_result,
         action_input=None, error_type=None, error_msg=None, ext_info=None,
-        status_from=None, status_to=None, attempt=0, now_ms=None,
+        status_from=None, status_to=None, attempt=0, boost_reason=None, now_ms=None,
     ):
         self.emit_event_calls.append(
             {
@@ -71,17 +70,10 @@ class _FakeTrajectoryService:
                 "action_result": action_result, "action_input": action_input,
                 "error_type": error_type, "error_msg": error_msg, "ext_info": ext_info,
                 "status_from": status_from, "status_to": status_to,
-                "attempt": attempt, "now_ms": now_ms,
+                "attempt": attempt, "boost_reason": boost_reason, "now_ms": now_ms,
             }
         )
 
-    def emit_submit_trajectory(self, task_id, task_info, *, submitted_at_ms, node_id=None):
-        self.emit_submit_calls.append(
-            {
-                "task_id": task_id, "task_info": task_info,
-                "submitted_at_ms": submitted_at_ms, "node_id": node_id,
-            }
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +122,7 @@ def test_get_trajectory_analysis_error_propagates_without_swallow():
 
 
 # ---------------------------------------------------------------------------
-# emit_trajectory_event / emit_submit_trajectory — relay write (fire-and-forget)
+# emit_trajectory_event — relay write (fire-and-forget)
 # ---------------------------------------------------------------------------
 
 
@@ -141,14 +133,14 @@ def test_emit_trajectory_event_relays_all_kwargs_to_inner():
     svc.emit_trajectory_event(
         "t1", "n1", TrajectoryActionType.EXECUTE,
         action_result="ok", action_input="req", status_from="RUNNING",
-        status_to="DONE", attempt=1, ext_info={"k": "v"},
+        status_to="DONE", attempt=1, ext_info={"k": "v"}, boost_reason="why this bot",
     )
     assert inner.emit_event_calls == [
         {
             "task_id": "t1", "node_id": "n1", "action_type": TrajectoryActionType.EXECUTE,
             "action_result": "ok", "action_input": "req", "error_type": None,
             "error_msg": None, "ext_info": {"k": "v"}, "status_from": "RUNNING",
-            "status_to": "DONE", "attempt": 1, "now_ms": None,
+            "status_to": "DONE", "attempt": 1, "boost_reason": "why this bot", "now_ms": None,
         }
     ]
 
@@ -165,15 +157,6 @@ def test_emit_trajectory_event_minimal_args_relays_defaults():
     assert rec["attempt"] == 0 and rec["now_ms"] is None
 
 
-@pytest.mark.unit
-def test_emit_submit_trajectory_relays_to_inner():
-    inner = _FakeTrajectoryService()
-    svc = TaskContextService(trajectory_service=inner)
-    task_info = object()  # opaque — the relay passes it through untouched
-    svc.emit_submit_trajectory("t1", task_info, submitted_at_ms=123, node_id="root")
-    assert inner.emit_submit_calls == [
-        {"task_id": "t1", "task_info": task_info, "submitted_at_ms": 123, "node_id": "root"}
-    ]
 
 
 # ---------------------------------------------------------------------------

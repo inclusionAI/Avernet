@@ -620,8 +620,8 @@ class TestTrajectoryActionLogDecoupling:
                     )
 
     def test_trajectory_emitter_does_not_invoke_action_log_writer(self):
-        """The trajectory emission path (``emit_trajectory_event`` /
-        ``emit_submit_trajectory``) must NOT invoke ``append_action_event``
+        """The ``emit_trajectory_event`` path must NOT invoke
+        ``append_action_event``
         — the graph method that mutates the in-memory ``action_log`` (the
         ``task_action_log`` backbone). The trajectory side is a direct-INSERT
         to ``task_trajectory_events`` via ``repo.insert_event``; routing it
@@ -637,7 +637,6 @@ class TestTrajectoryActionLogDecoupling:
 
         emitter_function_names = {
             "emit_trajectory_event",
-            "emit_submit_trajectory",
             "build_trajectory_event_record",
         }
         emitter_function_defs = [
@@ -646,8 +645,8 @@ class TestTrajectoryActionLogDecoupling:
             and node.name in emitter_function_names
         ]
         assert emitter_function_defs, (
-            "expected emit_trajectory_event / emit_submit_trajectory / "
-            "build_trajectory_event_record definitions in payloads.py"
+            "expected emit_trajectory_event / build_trajectory_event_record "
+            "definitions in payloads.py"
         )
         found_names = {fn.name for fn in emitter_function_defs}
         assert found_names == emitter_function_names, (

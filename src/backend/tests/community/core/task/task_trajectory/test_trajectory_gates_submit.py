@@ -34,7 +34,7 @@ The emitted row must carry (per REQ-6 / spec clarification):
 Invariants the tests pin (cross-cutting with the task constraints):
     * ``submit`` is **NOT** a ``NodeAction``; the root node's ``action_log``
       never contains a ``submit`` action — the trajectory row goes to the
-      ``_TrajRepo`` fake via ``emit_submit_trajectory`` → ``emit_trajectory_event``
+      ``_TrajRepo`` fake via ``emit_trajectory_event``
       direct-INSERT only (no ``append_action_event`` / ``_log_action``).
     * ``NodeAction`` enum / ``append_action_event`` / ``task_action_log``
       untouched.
@@ -511,7 +511,7 @@ class TestSubmitGateZeroIntrusion:
         """``submit`` is a trajectory action-type, NOT a ``NodeAction``. The
         root node's ``action_log`` (the in-memory ``append_action_event`` path)
         never contains a ``submit`` action — the trajectory row goes through
-        ``emit_submit_trajectory`` → ``emit_trajectory_event`` direct-INSERT
+        ``emit_trajectory_event`` direct-INSERT
         only. Pins the ``NodeAction`` / ``append_action_event`` / ``task_action_log``
         untouched invariant."""
         graph = TaskGraphService()

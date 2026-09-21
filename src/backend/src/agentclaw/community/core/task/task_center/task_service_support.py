@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from agentclaw.community.core.task.domain.models import Status
+import hashlib
+import json
+from typing import Any
+
+from agentclaw.community.core.task.domain.models import Status, TaskInfo
 
 
 def parse_status_filter(status: str | None) -> list[Status] | None:
@@ -13,6 +17,39 @@ def parse_status_filter(status: str | None) -> list[Status] | None:
     if not parts:
         return None
     return [Status(part) for part in parts]
+
+
+def build_submit_trajectory_event_kwargs(
+    task_info: TaskInfo, submitted_at_ms: int,
+) -> dict[str, Any]:
+    """Build REQ-6 SUBMIT fields for the generic trajectory emitter."""
+    try:
+        payload = json.dumps(
+            task_info.task_spec.to_dict(), sort_keys=True, ensure_ascii=False
+        )
+        task_spec_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    except Exception:  # noqa: BLE001 trajectory assembly must not block submit
+        task_spec_digest = None
+    try:
+        raw_task_type = task_info.execution_config.get("task_type")
+        task_type = getattr(raw_task_type, "value", raw_task_type)
+    except Exception:  # noqa: BLE001 trajectory assembly must not block submit
+        task_type = None
+    return {
+        "action_result": "success",
+        "action_input": task_spec_digest,
+        "ext_info": {
+            "source": task_info.source_type,
+            "task_type": task_type,
+            "owner_user_id": task_info.owner_user_id,
+            "owner_bot_id": task_info.owner_bot_id,
+            "submitted_at": submitted_at_ms,
+        },
+        "status_from": None,
+        "status_to": Status.PENDING,
+        "attempt": 0,
+        "now_ms": submitted_at_ms,
+    }
 
 
 def resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:

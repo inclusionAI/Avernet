@@ -64,6 +64,7 @@ from agentclaw.community.core.task.task_runner.callback_adapter import (
 from agentclaw.community.core.task.task_center import task_service_queries
 from agentclaw.community.core.task.task_center.task_service_support import (
     STATIC_PLAN_TEMPLATES,
+    build_submit_trajectory_event_kwargs,
 )
 
 from agentclaw.community.core.task.task_center.task_service_execution import (
@@ -446,11 +447,14 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
                 return TaskOpResult(
                     task_id=task_id, success=False, error=f"persist failed: {exc}"
                 )
-        # REQ-6 SUBMIT trajectory gate: fire once after task_info persists (above task_type branch).
-        # Persist IntegrityError short-circuits above; trajectory assembly swallowed in helper (决策 #14).
+        # REQ-6: submit reuses the generic trajectory event entry.
         if self._task_context_service is not None:
-            self._task_context_service.emit_submit_trajectory(
-                task_id, task_info, submitted_at_ms=int(time.time() * 1000)
+            submitted_at_ms = int(time.time() * 1000)
+            self._task_context_service.emit_trajectory_event(
+                task_id,
+                task_id,
+                "submit",
+                **build_submit_trajectory_event_kwargs(task_info, submitted_at_ms),
             )
         graph = self._graph.initialize_graph(task_info)
         self._enrich_anniversary_trigger_bot_name(request, graph)

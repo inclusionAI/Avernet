@@ -20,7 +20,6 @@ the emission gate tests and raises on accidental use (read-path coverage lives i
 from __future__ import annotations
 
 from agentclaw.community.core.task.task_context.task_trajectory.payloads import (
-    emit_submit_trajectory as _emit_submit_trajectory,
     emit_trajectory_event as _emit_trajectory_event,
 )
 
@@ -50,6 +49,7 @@ class _TestTaskContextService:
         status_from=None,
         status_to=None,
         attempt=0,
+        boost_reason=None,
         now_ms=None,
     ):
         _emit_trajectory_event(
@@ -65,17 +65,10 @@ class _TestTaskContextService:
             status_from=status_from,
             status_to=status_to,
             attempt=attempt,
+            boost_reason=boost_reason,
             now_ms=now_ms,
         )
 
-    def emit_submit_trajectory(self, task_id, task_info, *, submitted_at_ms, node_id=None):
-        _emit_submit_trajectory(
-            self._repo,
-            task_id,
-            task_info,
-            submitted_at_ms=submitted_at_ms,
-            node_id=node_id,
-        )
 
 
 def _tcs(repo):

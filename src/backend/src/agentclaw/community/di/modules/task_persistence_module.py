@@ -213,7 +213,7 @@ class TaskPersistenceModule(Module):
         ``TaskContextServiceProtocol`` (re-exported from
         ``api/task/task_context_service.py``): the 2 HTTP routers go to
         ``get_trajectory``; the engine / task_service / callback_adapter emission
-        gates go to ``emit_trajectory_event`` / ``emit_submit_trajectory``
+        gates go to ``emit_trajectory_event``
         (fire-and-forget, decision #14). The trajectory repo + emit helpers stay
         internal to the ``task_context.task_trajectory`` sub-module.
         """

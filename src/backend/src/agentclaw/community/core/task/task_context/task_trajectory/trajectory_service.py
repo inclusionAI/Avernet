@@ -96,15 +96,11 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
 )
 from agentclaw.community.core.task.task_context.task_trajectory.payloads import (
     emit_trajectory_event as _emit_trajectory_event,
-    emit_submit_trajectory as _emit_submit_trajectory,
 )
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
 
 if TYPE_CHECKING:
-    # ``Status`` / ``TaskInfo`` are used only in emit_* annotations (the methods
-    # pass values through to the payloads emitters which read fields via attribute
-    # access at runtime); guarded to keep the runtime import surface minimal.
-    from agentclaw.community.core.task.domain.models import Status, TaskInfo
+    from agentclaw.community.core.task.domain.models import Status
 
 logger = logging.getLogger("task.trajectory")
 
@@ -253,20 +249,10 @@ class TaskTrajectoryServiceProtocol(Protocol):
         status_from: "Status | str | None" = None,
         status_to: "Status | str | None" = None,
         attempt: int = 0,
+        boost_reason: str | None = None,
         now_ms: int | None = None,
     ) -> None:
         """Fire-and-forget trajectory event write (never raises; decision #14)."""
-        ...
-
-    def emit_submit_trajectory(
-        self,
-        task_id: str,
-        task_info: "TaskInfo",
-        *,
-        submitted_at_ms: int,
-        node_id: str | None = None,
-    ) -> None:
-        """Fire-and-forget SUBMIT trajectory event write (never raises; decision #14)."""
         ...
 
 
@@ -447,6 +433,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         status_from: "Status | str | None" = None,
         status_to: "Status | str | None" = None,
         attempt: int = 0,
+        boost_reason: str | None = None,
         now_ms: int | None = None,
     ) -> None:
         """Emit one trajectory event via the repo. Fire-and-forget (decision #14):
@@ -464,25 +451,8 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             status_from=status_from,
             status_to=status_to,
             attempt=attempt,
+            boost_reason=boost_reason,
             now_ms=now_ms,
-        )
-
-    def emit_submit_trajectory(
-        self,
-        task_id: str,
-        task_info: "TaskInfo",
-        *,
-        submitted_at_ms: int,
-        node_id: str | None = None,
-    ) -> None:
-        """Emit the SUBMIT trajectory event (REQ-6). Fire-and-forget (decision #14):
-        never raises; ``self._repo is None`` (lightweight DI) → no-op."""
-        _emit_submit_trajectory(
-            self._repo,
-            task_id,
-            task_info,
-            submitted_at_ms=submitted_at_ms,
-            node_id=node_id,
         )
 
     def _emit_plan_trajectory(

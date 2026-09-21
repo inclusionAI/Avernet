@@ -8,7 +8,8 @@
 所有动态文本经 ``html.escape``(防 XSS:``action_input``/``error_msg`` 等来自外部 bot/请求)。
 ``analysis`` 是 ``TrajectoryAnalysis`` JSON 字符串(执行者多源,DTO 层保持 string 透出),这里
 解析出 boost_reason / failure_reason / analysis_output 等做人类可读呈现,解析失败则降级显示原文。
-``ext_info`` 不在 DTO(REQ-1),故页面不展示候选/JOIN 丢因等附加素材(仅 action_input/error)。
+``ext_info`` 不整体进入 DTO(REQ-1),页面仅展示定向投影的 ``holder_id``，不展示候选/JOIN
+丢因等其他附加素材。
 """
 from __future__ import annotations
 
@@ -99,6 +100,8 @@ def _render_event(ev: "object") -> str:
     status_to = getattr(ev, "status_to", None)
     error_type = getattr(ev, "error_type", None)
     error_msg = getattr(ev, "error_msg", None)
+    boost_reason = getattr(ev, "boost_reason", None)
+    holder_id = getattr(ev, "holder_id", None)
     action_input = getattr(ev, "action_input", None)
 
     theme = _ACTION_THEME.get(action_type, "#475569")
@@ -117,19 +120,39 @@ def _render_event(ev: "object") -> str:
     parts.append(f'<span class="time">{html.escape(_fmt_time(gmt_create))}</span>')
     parts.append("</div>")
 
+    # 当前动作执行人
+    if holder_id:
+        parts.append(
+            '<div class="ev-meta"><span class="ev-label">执行人</span>'
+            f'<span class="ev-value">{html.escape(str(holder_id))}</span></div>'
+        )
+
     # 状态迁移
     if status_from or status_to:
         frm = html.escape(str(status_from)) if status_from else "∅"
         to = html.escape(str(status_to)) if status_to else "∅"
         parts.append(f'<div class="ev-status">{frm} → {to}</div>')
 
+    # 推进原因
+    if boost_reason:
+        parts.append(
+            '<div class="ev-reason"><span class="ev-label">推进原因</span>'
+            f'<span class="ev-value">{html.escape(str(boost_reason))}</span></div>'
+        )
+
     # 错误块
     if error_type or error_msg:
         parts.append('<div class="ev-error">')
         if error_type:
-            parts.append(f'<span class="err-type">{html.escape(str(error_type))}</span>')
+            parts.append(
+                '<div><span class="err-label">错误类型</span>'
+                f'<span class="err-type">{html.escape(str(error_type))}</span></div>'
+            )
         if error_msg:
-            parts.append(f'<span class="err-msg">{html.escape(str(error_msg))}</span>')
+            parts.append(
+                '<div><span class="err-label">错误信息</span>'
+                f'<span class="err-msg">{html.escape(str(error_msg))}</span></div>'
+            )
         parts.append("</div>")
 
     # action_input(可折叠;防长文本撑爆页面)
@@ -242,9 +265,17 @@ def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = Fals
   .node {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #475569; font-size: 12px; }}
   .attempt, .time {{ color: #94a3b8; font-size: 12px; }}
   .time {{ margin-left: auto; }}
+  .ev-meta, .ev-reason {{ display: flex; gap: 10px; margin-top: 8px; padding: 6px 10px;
+                            border-radius: 6px; font-size: 12px; }}
+  .ev-meta {{ background: #f8fafc; border: 1px solid #e2e8f0; }}
+  .ev-reason {{ background: #eff6ff; border: 1px solid #bfdbfe; }}
+  .ev-label, .err-label {{ flex: 0 0 64px; font-weight: 600; color: #475569; }}
+  .ev-value {{ color: #334155; word-break: break-word; }}
   .ev-status {{ margin-top: 7px; font-size: 12px; color: #475569; font-family: ui-monospace, monospace; }}
   .ev-error {{ margin-top: 8px; padding: 7px 10px; background: #fef2f2; border: 1px solid #fecaca;
               border-radius: 6px; font-size: 12px; }}
+  .ev-error > div {{ display: flex; gap: 10px; }}
+  .err-label {{ color: #991b1b; }}
   .err-type {{ font-weight: 600; color: #991b1b; margin-right: 8px; }}
   .err-msg {{ color: #7f1d1d; word-break: break-word; }}
   details.ev-input {{ margin-top: 8px; font-size: 12px; color: #475569; }}

@@ -4,7 +4,7 @@ The SPEC's HEADLINE ACCEPTANCE (``specs/2026-09-16-task-trajectory-collection-
 and-analysis/spec.md`` §"验收(端到端)"). Exercises the REAL assembly + analysis
 path built in P0-P5 against a REAL in-memory SQLite ``TaskTrajectoryRepository``
 (not a fake). For each of the four spec acceptance cases it drives a task
-through the REAL engine gates (SUBMIT via ``emit_submit_trajectory`` / PLAN via
+through the REAL engine gates (SUBMIT via ``emit_trajectory_event`` / PLAN via
 ``_plan_with_retry`` / DISPATCH via ``_prepare_into``+``_drain`` / EXECUTE+
 VERIFY via ``on_report`` / RESET via ``on_harness``), persists every event
 through the real emitter into the real repo, then reads it back with the real
@@ -131,8 +131,11 @@ from agentclaw.community.core.task.task_context.task_trajectory.models import (
     TrajectoryActionType,
     TrajectoryAnalysis,
 )
+from agentclaw.community.core.task.task_center.task_service_support import (
+    build_submit_trajectory_event_kwargs,
+)
 from agentclaw.community.core.task.task_context.task_trajectory.payloads import (
-    emit_submit_trajectory,
+    emit_trajectory_event,
 )
 from agentclaw.community.core.task.task_context.task_trajectory.trajectory_service import (
     TaskTrajectoryService,
@@ -379,9 +382,8 @@ _SAMPLE_RATIONALE: dict = {
 
 
 def _drive_submit(repo, graph_svc, *, task_id: str) -> TaskGraphService:
-    """SUBMIT phase: emit the REAL SUBMIT gate row via the REAL
-    ``emit_submit_trajectory`` helper (the same helper ``TaskService.execute``
-    calls, REQ-6) into ``repo`` + initialize the graph (``task_type="dynamic"``).
+    """SUBMIT phase: emit the same generic event shape used by
+    ``TaskService.execute`` (REQ-6), then initialize the graph.
 
     Driven directly (not via ``TaskService.execute``) because: (1) the DYNAMIC
     branch schedules a background ``on_execute`` that would pollute the repo
@@ -392,9 +394,10 @@ def _drive_submit(repo, graph_svc, *, task_id: str) -> TaskGraphService:
     skipped (immaterial — the SUBMIT row is what the spec exercises)."""
     task_info = _task_info(task_id)
     graph_svc.initialize_graph(task_info)
-    emit_submit_trajectory(
-        repo, task_id, task_info,
-        submitted_at_ms=int(time.time() * 1000),
+    submitted_at_ms = int(time.time() * 1000)
+    emit_trajectory_event(
+        repo, task_id, task_id, "submit",
+        **build_submit_trajectory_event_kwargs(task_info, submitted_at_ms),
     )
     return graph_svc
 
@@ -1021,7 +1024,7 @@ class TestDoAnalysisTrueServicePath:
         graph_svc = TaskGraphService()
         _drive_submit(repo, graph_svc, task_id=task_id)   # SUBMIT event row
         # warmup: assemble once to ensure the head row exists (upsert_head) BEFORE
-        # backfill — emit_submit_trajectory only inserts the SUBMIT event; the head
+        # backfill — submit emission only inserts the SUBMIT event; the head
         # is created lazily on the first assemble. Without this, backfill's UPDATE
         # hits 0 rows and the idempotent short-circuit never fires.
         assembler = TaskTrajectoryAssembler(repo)

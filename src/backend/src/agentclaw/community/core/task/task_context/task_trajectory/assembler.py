@@ -27,10 +27,10 @@ the head's persisted ``analysis``):
      OWN enum — a shared enumer (``Status(action_type)``, ``TrajectoryActionType
      (status_from)``) would raise on a realistic value. The mapping below never
      mixes them.
-   * ``action_input`` / ``ext_info`` / ``analysis``: passed through as the
-     raw JSON strings the emitter wrote (``ext_info``/``analysis`` are JSON
-     via ``json.dumps(…, ensure_ascii=False)`` at emit time). The assembler
-     does NOT parse them — the P5 analyzer parses on demand.
+   * ``action_input`` / ``analysis``: passed through as the raw strings the
+     emitter wrote. ``ext_info`` remains absent from the domain object; the
+     assembler only safely projects its ``holder_id`` key for trajectory UI/API
+     display, while the P5 analyzer still queries the complete JSON on demand.
    * ``attempt`` / ``task_id`` / ``node_id`` / ``action_result`` / ``error_msg``:
      pass through verbatim.
 3. Read the head: ``list_head(task_id)`` → ``TaskTrajectoryRecord | None``;
@@ -80,6 +80,7 @@ timeline; never touches ``task_action_log``) + 决策 #14 + plan.md Phase 4.
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime
@@ -108,6 +109,23 @@ logger = logging.getLogger("task.trajectory")
 # ---------------------------------------------------------------------------
 # datetime → int-ms inverse of the P2 emitter's Beijing storage convention
 # ---------------------------------------------------------------------------
+
+
+def _holder_id_from_ext_info(ext_info: str | None) -> str | None:
+    """从自由 JSON 中仅投影 Relay 执行人；损坏附加信息不影响事件读取。"""
+    if not ext_info:
+        return None
+    try:
+        data = json.loads(ext_info)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    holder_id = data.get("holder_id")
+    if holder_id is None:
+        return None
+    value = str(holder_id).strip()
+    return value or None
 
 
 def _datetime_to_int_ms(dt: Optional[datetime]) -> int:
@@ -271,5 +289,7 @@ class TaskTrajectoryAssembler:
             status_to=status_to,
             error_type=error_type,
             error_msg=rec.error_msg,
+            boost_reason=rec.boost_reason,
+            holder_id=_holder_id_from_ext_info(rec.ext_info),
             analysis=rec.analysis,
         )

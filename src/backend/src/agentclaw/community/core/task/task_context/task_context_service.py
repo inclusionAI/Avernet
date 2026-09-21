@@ -23,8 +23,6 @@ Surface — one method per external trajectory operation:
   504 (bot failure, no backfill) error semantics propagate unchanged.
 * ``emit_trajectory_event(...)`` (sync) — fire-and-forget event write (decision #14).
   Relays; never raises; no-op when the trajectory repo is unbound (lightweight DI).
-* ``emit_submit_trajectory(...)`` (sync) — fire-and-forget SUBMIT event write
-  (decision #14). Relays; never raises.
 
 Pure relay/facade — holds NO repo, only ``TaskTrajectoryServiceProtocol``.
 
@@ -53,11 +51,42 @@ if TYPE_CHECKING:
     # values straight through to the trajectory service emitter (which reads fields via
     # attribute access at runtime). TYPE_CHECKING-guarded to keep the runtime import
     # surface minimal — mirrors payloads.py / trajectory_service.py.
-    from agentclaw.community.core.task.domain.models import Status, TaskInfo
+    from agentclaw.community.core.task.domain.models import Status, TaskNode
     from agentclaw.community.core.task.task_context.task_trajectory.models import (
         ReasonCatalog,
         TrajectoryActionType,
     )
+
+
+def build_task_runner_execution_event_kwargs(
+    node: "TaskNode", mode: str, action_result: str, *, exception: Exception | None = None,
+    phase: str = "dispatch", details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build task-runner EXECUTE fields for ``emit_trajectory_event``."""
+    ext_info = {
+        "execution_mode": mode, "assignee": node.run_info.assignee, "phase": phase,
+    }
+    error_type = None
+    if exception is not None:
+        exception_type = type(exception).__name__
+        ext_info["exception_type"] = exception_type
+        if isinstance(exception, (TimeoutError, ConnectionError)):
+            error_type = "transport_error"
+        elif exception_type in {"OpenApiAuthError", "OpenApiBadRequestError"}:
+            error_type = "underlying_interface_error"
+        else:
+            error_type = "unclassified"
+    if details:
+        ext_info.update(details)
+    return {
+        "action_result": action_result,
+        "error_type": error_type,
+        "error_msg": str(exception)[:2000] if exception is not None else None,
+        "ext_info": ext_info,
+        "status_from": node.status,
+        "status_to": node.status,
+        "attempt": node.run_info.extend_props.get("harness_retries", 0),
+    }
 
 
 @runtime_checkable
@@ -68,7 +97,7 @@ class TaskContextServiceProtocol(Protocol):
     Consumers:
       * 2 HTTP routers → ``get_trajectory``.
       * ``engine.py`` / ``task_service.py`` / ``callback_adapter.py`` →
-        ``emit_trajectory_event`` / ``emit_submit_trajectory`` (fire-and-forget).
+        ``emit_trajectory_event`` (fire-and-forget).
     """
 
     async def get_trajectory(
@@ -95,25 +124,15 @@ class TaskContextServiceProtocol(Protocol):
         status_from: "Status | str | None" = None,
         status_to: "Status | str | None" = None,
         attempt: int = 0,
+        boost_reason: str | None = None,
         now_ms: int | None = None,
     ) -> None:
         """Fire-and-forget trajectory event write (never raises; decision #14)."""
         ...
 
-    def emit_submit_trajectory(
-        self,
-        task_id: str,
-        task_info: "TaskInfo",
-        *,
-        submitted_at_ms: int,
-        node_id: str | None = None,
-    ) -> None:
-        """Fire-and-forget SUBMIT trajectory event write (never raises; decision #14)."""
-        ...
-
 
 class TaskContextService(TaskContextServiceProtocol):
-    """Facade: relays the 3 external trajectory operations to the internal
+    """Facade: relays external trajectory operations to the internal
     ``TaskTrajectoryService``. Holds no repo (pure relay); the trajectory repo is
     internal to the ``task_trajectory`` sub-module.
 
@@ -149,6 +168,7 @@ class TaskContextService(TaskContextServiceProtocol):
         status_from: "Status | str | None" = None,
         status_to: "Status | str | None" = None,
         attempt: int = 0,
+        boost_reason: str | None = None,
         now_ms: int | None = None,
     ) -> None:
         self._ts.emit_trajectory_event(
@@ -163,20 +183,6 @@ class TaskContextService(TaskContextServiceProtocol):
             status_from=status_from,
             status_to=status_to,
             attempt=attempt,
+            boost_reason=boost_reason,
             now_ms=now_ms,
-        )
-
-    def emit_submit_trajectory(
-        self,
-        task_id: str,
-        task_info: "TaskInfo",
-        *,
-        submitted_at_ms: int,
-        node_id: str | None = None,
-    ) -> None:
-        self._ts.emit_submit_trajectory(
-            task_id,
-            task_info,
-            submitted_at_ms=submitted_at_ms,
-            node_id=node_id,
         )

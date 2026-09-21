@@ -85,9 +85,6 @@ class _StubTrajectoryService:
     def emit_trajectory_event(self, *args, **kwargs) -> None:
         pass  # pragma: no cover
 
-    def emit_submit_trajectory(self, *args, **kwargs) -> None:
-        pass  # pragma: no cover
-
 
 class _StubModule(Module):
     """Binds ``TaskContextServiceProtocol`` to a stub instance (injector-level
@@ -131,6 +128,8 @@ def _make_trajectory(*, analysis: str | None = None) -> TaskTrajectory:
                 attempt=0,
                 gmt_create=2000,
                 gmt_modified=2000,
+                boost_reason="候选能力匹配，选择 Bot bot-a",
+                holder_id="bot-a",
             ),
         ],
         analysis=analysis,
@@ -355,7 +354,8 @@ def test_trajectory_dto_has_flat_event_fields_no_ext_info(client):
     for field in (
         "task_id", "node_id", "action_type", "action_result", "attempt",
         "gmt_create", "gmt_modified", "action_input", "status_from",
-        "status_to", "error_type", "error_msg", "analysis",
+        "status_to", "error_type", "error_msg", "boost_reason",
+        "holder_id", "analysis",
     ):
         assert field in ev, f"missing field {field}"
     # ext_info is NOT on the DTO (REQ-1)
@@ -386,6 +386,10 @@ def test_trajectory_display_html_returns_html_page():
     assert "t1" in body                          # task_id
     assert "submit" in body and "dispatch" in body  # action_types rendered
     assert "hit_single" in body                  # action_result chip
+    assert "推进原因" in body
+    assert "候选能力匹配，选择 Bot bot-a" in body
+    assert "执行人" in body
+    assert "bot-a" in body
     # the persisted analysis content is surfaced (boost_reason from _analysis_json)
     assert "策略=search 选中=botA(hit_single)" in body
     assert "推进理由" in body                     # analysis section label
@@ -419,6 +423,8 @@ def test_trajectory_display_html_escapes_dynamic_content():
         attempt=1, gmt_create=3000, gmt_modified=3000,
         error_type=ReasonCatalog.UNDERLYING_INTERFACE_ERROR,
         error_msg='boom <script>alert(1)</script> "x"',
+        boost_reason='匹配 <img src=x onerror=alert(2)>',
+        holder_id='bot<script>alert(3)</script>',
         action_input='payload <img src=x onerror=alert(1)>',
     )
     traj = TaskTrajectory(
@@ -440,6 +446,11 @@ def test_trajectory_display_html_escapes_dynamic_content():
     # neutralized by escaping ``<``/``>``.
     assert "&lt;script&gt;" in body
     assert "&lt;img" in body
+    assert "错误类型" in body
+    assert "underlying_interface_error" in body
+    assert "错误信息" in body
+    assert "推进原因" in body
+    assert "执行人" in body
 
 
 @pytest.mark.unit

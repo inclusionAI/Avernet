@@ -1142,7 +1142,8 @@ class TestRelayTrajectory:
                 payload={"gaps": []},
             )
         )
-        assert [(r.node_id, r.action_result) for r in _relay_records(repo)] == [
+        records = _relay_records(repo)
+        assert [(r.node_id, r.action_result) for r in records] == [
             ("relay-task", "bootstrap"),
             ("relay-task", "execution_result"),
             ("relay-task", "plan_result"),
@@ -1155,6 +1156,21 @@ class TestRelayTrajectory:
             (step2, "execution_result"),
             (step2, "plan_result"),
         ]
+        assert all(record.error_type is None for record in records)
+        hit_records = [
+            record for record in records if record.action_result == "hit_single"
+        ]
+        assert hit_records
+        assert all(
+            record.boost_reason == "候选 Bot 能力与下一节点目标匹配"
+            for record in hit_records
+        )
+        plan_holders = [
+            json.loads(record.ext_info).get("holder_id")
+            for record in records
+            if record.action_result == "plan_result"
+        ]
+        assert plan_holders == ["main-bot", "research-bot", "research-bot"]
 
     def test_callback_events_are_correlated_without_leaking_turn(self):
         service, _graph, repo = _service_with_traj()

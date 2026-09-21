@@ -343,6 +343,7 @@ def emit_relay_event(
     status_from: Any = None,
     status_to: Any = None,
     attempt: int = 0,
+    boost_reason: str | None = None,
 ) -> None:
     """Emit Relay trajectory evidence without affecting task progression."""
     context_service = getattr(service, "_task_context_service", None)
@@ -360,6 +361,7 @@ def emit_relay_event(
             status_from=status_from,
             status_to=status_to,
             attempt=attempt,
+            boost_reason=boost_reason,
         )
     except Exception as exc:  # noqa: BLE001 diagnostic path must not block Relay
         logger.warning(
