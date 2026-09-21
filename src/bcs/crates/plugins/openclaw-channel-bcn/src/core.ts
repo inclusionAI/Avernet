@@ -15,12 +15,26 @@ import {
   BCS_TASK_MESSAGE_TOOL_SCHEMA,
   BCS_TASK_COMPLETE_TOOL_SCHEMA,
 } from './inbound-handler.js';
+import {
+  handleGroupContextStatus,
+  handleGroupContextCreate,
+  handleGroupContextUpdate,
+  handleGroupContextRetrieve,
+  GROUP_CONTEXT_STATUS_TOOL_SCHEMA,
+  GROUP_CONTEXT_CREATE_TOOL_SCHEMA,
+  GROUP_CONTEXT_UPDATE_TOOL_SCHEMA,
+  GROUP_CONTEXT_RETRIEVE_TOOL_SCHEMA,
+} from './group-context-handler.js';
 
 export const BCS_CORE_TOOL_NAMES = [
   'bcs_route',
   'bcs_assign_task',
   'bcs_send_task_message',
   'bcs_task_complete',
+  'bcs_group_context_status',
+  'bcs_group_context_create',
+  'bcs_group_context_update',
+  'bcs_group_context_retrieve',
 ] as const;
 
 export interface BcsCoreRegistrationOptions {
@@ -241,6 +255,92 @@ export function registerBcsCore(
       };
     },
     { name: 'bcs_task_complete' },
+  );
+
+  // ── Group Context tools: always active in BCS sessions ──────────────────
+
+  api.registerTool(
+    (ctx: OpenClawPluginToolContext) => {
+      const { sessionKey, channel } = rememberSessionSandbox(ctx);
+      if (channel !== 'bcs' || !sessionKey) return null;
+      return {
+        name: GROUP_CONTEXT_STATUS_TOOL_SCHEMA.name,
+        label: 'BCS Group Context Status',
+        description: GROUP_CONTEXT_STATUS_TOOL_SCHEMA.description,
+        parameters: GROUP_CONTEXT_STATUS_TOOL_SCHEMA.parameters,
+        async execute(_toolCallId: string, params: Record<string, unknown>) {
+          const result = await handleGroupContextStatus(sessionKey, params);
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+            details: result,
+          };
+        },
+      };
+    },
+    { name: 'bcs_group_context_status' },
+  );
+
+  api.registerTool(
+    (ctx: OpenClawPluginToolContext) => {
+      const { sessionKey, channel } = rememberSessionSandbox(ctx);
+      if (channel !== 'bcs' || !sessionKey) return null;
+      return {
+        name: GROUP_CONTEXT_CREATE_TOOL_SCHEMA.name,
+        label: 'BCS Group Context Create',
+        description: GROUP_CONTEXT_CREATE_TOOL_SCHEMA.description,
+        parameters: GROUP_CONTEXT_CREATE_TOOL_SCHEMA.parameters,
+        async execute(_toolCallId: string, params: Record<string, unknown>) {
+          const result = await handleGroupContextCreate(sessionKey, params);
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+            details: result,
+          };
+        },
+      };
+    },
+    { name: 'bcs_group_context_create' },
+  );
+
+  api.registerTool(
+    (ctx: OpenClawPluginToolContext) => {
+      const { sessionKey, channel } = rememberSessionSandbox(ctx);
+      if (channel !== 'bcs' || !sessionKey) return null;
+      return {
+        name: GROUP_CONTEXT_UPDATE_TOOL_SCHEMA.name,
+        label: 'BCS Group Context Update',
+        description: GROUP_CONTEXT_UPDATE_TOOL_SCHEMA.description,
+        parameters: GROUP_CONTEXT_UPDATE_TOOL_SCHEMA.parameters,
+        async execute(_toolCallId: string, params: Record<string, unknown>) {
+          const result = await handleGroupContextUpdate(sessionKey, params);
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+            details: result,
+          };
+        },
+      };
+    },
+    { name: 'bcs_group_context_update' },
+  );
+
+  api.registerTool(
+    (ctx: OpenClawPluginToolContext) => {
+      const { sessionKey, channel } = rememberSessionSandbox(ctx);
+      if (channel !== 'bcs' || !sessionKey) return null;
+      return {
+        name: GROUP_CONTEXT_RETRIEVE_TOOL_SCHEMA.name,
+        label: 'BCS Group Context Retrieve',
+        description: GROUP_CONTEXT_RETRIEVE_TOOL_SCHEMA.description,
+        parameters: GROUP_CONTEXT_RETRIEVE_TOOL_SCHEMA.parameters,
+        async execute(_toolCallId: string, params: Record<string, unknown>) {
+          const result = await handleGroupContextRetrieve(sessionKey, params);
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+            details: result,
+          };
+        },
+      };
+    },
+    { name: 'bcs_group_context_retrieve' },
   );
 
   return {
