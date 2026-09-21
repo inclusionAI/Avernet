@@ -26,6 +26,27 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
       enrollmentState: summary ? 'ENROLLED' : 'NOT_ENROLLED', monitoring: summary,
       capabilities: { canView: true, canRequestEnrollment: !summary } };
   }
+  function directoryIdBefore(left: string, right: string): boolean {
+    return left.length < right.length || (left.length === right.length && left < right);
+  }
+  function matchesQuery(bot: DirectoryBot, q: string): boolean {
+    if (!q) return true;
+    const needle = q.toLowerCase();
+    return [bot.botName, bot.botId, bot.ownerId].some(value => value.toLowerCase().includes(needle));
+  }
+  async function monitoredDirectory(q: string, after: string | null, limit: number) {
+    // Monitoring storage is the source of truth for enrollment. Resolve those
+    // identities through the directory afterwards instead of scanning the newest
+    // directory rows and hoping they contain every monitored target.
+    const targets = await store.listCheckedTargets();
+    const resolved = await Promise.all(targets.map(target => directory.get(target, storageScope)));
+    const candidates = resolved.filter((bot): bot is DirectoryBot => bot !== null && matchesQuery(bot, q))
+      .sort((a, b) => a.directoryId.length !== b.directoryId.length
+        ? b.directoryId.length - a.directoryId.length
+        : b.directoryId.localeCompare(a.directoryId));
+    const eligible = after ? candidates.filter(bot => directoryIdBefore(bot.directoryId, after)) : candidates;
+    return { items: eligible.slice(0, limit), hasMore: eligible.length > limit };
+  }
   return {
     async options(p, query) {
       authorize(p);
@@ -40,23 +61,16 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
       const window = parseWindow(query, now());
       const context = JSON.stringify([1, p.staffId, p.isClawInsightAdmin, p.tenant, [...p.allowedTargetEnvs].sort(), scope, q, limit, window]);
       let after = query.cursor ? references.readCursor(String(query.cursor), context) : null;
-      let more = false;
-      const items: BotOption[] = [];
-      // Cross-connection membership scan: bounded to 200 candidates, consumes only visited rows.
-      for (let scanned = 0; scanned < 200 && items.length < limit;) {
-        const batchSize = scope === 'monitored' ? Math.min(50, 200 - scanned) : limit;
-        const batch = await directory.search({ principal: p, scope, q, limit: batchSize, after });
-        const summaries = await store.summaries(batch.items, window);
-        more = batch.hasMore;
-        for (let i = 0; i < batch.items.length; i++) {
-          const bot = batch.items[i];
-          after = bot.directoryId; scanned++;
-          if (scope !== 'monitored' || summaries[i]) items.push(option(bot, summaries[i], p.tenant));
-          if (items.length === limit) { more = i < batch.items.length - 1 || batch.hasMore; break; }
-        }
-        if (!more || scope !== 'monitored' || !batch.items.length) break;
+      let page: { items: DirectoryBot[]; hasMore: boolean };
+      if (scope === 'monitored') {
+        page = await monitoredDirectory(q, after, limit);
+      } else {
+        page = await directory.search({ principal: p, scope, q, limit, after });
       }
-      return { items, nextCursor: more && after ? references.cursor(after, context) : null, window };
+      const summaries = await store.summaries(page.items, window);
+      const items = page.items.map((bot, index) => option(bot, summaries[index], p.tenant));
+      const nextAfter = page.items.length ? page.items[page.items.length - 1].directoryId : after;
+      return { items, nextCursor: page.hasMore && nextAfter ? references.cursor(nextAfter, context) : null, window };
     },
     async status(p, ref, query) {
       const bot = await visible(p, ref);

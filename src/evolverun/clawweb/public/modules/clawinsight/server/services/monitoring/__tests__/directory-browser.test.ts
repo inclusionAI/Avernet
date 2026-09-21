@@ -151,16 +151,15 @@ describe('directory, authorization and browser contracts', () => {
     await check(a);
     await expect(browser().enroll(member, { botRef: ref })).rejects.toMatchObject({ code: 'ALREADY_ENROLLED' });
   });
-  it('binds cursors to user, role, search, range and expiry and does not lose monitored page boundaries', async () => {
+  it('uses checked targets as the monitored source and keeps cursor boundaries stable', async () => {
     for (let i = 0; i < 205; i++) await bot({ ...a, botId: `bot-${i}` });
     await check({ ...a, botId: 'bot-0' }); await check({ ...a, botId: 'bot-1' });
     const q = { ...all, scope: 'monitored', limit: '1' };
     const first = await browser().options(admin, q);
-    expect(first.items).toEqual([]); expect(first.nextCursor).toBeTruthy();
+    expect(first.items[0]?.botId).toBe('bot-1'); expect(first.nextCursor).toBeTruthy();
     const second = await browser().options(admin, { ...q, cursor: first.nextCursor! });
-    expect(second.items[0]?.botId).toBe('bot-1');
-    const third = await browser().options(admin, { ...q, cursor: second.nextCursor! });
-    expect(third.items[0]?.botId).toBe('bot-0'); expect(third.nextCursor).toBeNull();
+    expect(second.items[0]?.botId).toBe('bot-0'); expect(second.nextCursor).toBeNull();
+    expect((await browser().options(admin, { ...q, q: 'bot-0' })).items.map(item => item.botId)).toEqual(['bot-0']);
     for (const change of [{ q: 'x' }, { start: String(now), end: String(now+1000) }, { scope: 'all' }, { limit: '2' }]) {
       await expect(browser().options(admin, { ...q, ...change, cursor: first.nextCursor! })).rejects.toMatchObject({ code: 'INVALID_EVENT' });
     }
@@ -185,7 +184,7 @@ describe('directory, authorization and browser contracts', () => {
     await db.exec('DROP TABLE ac_bots');
     await expect(createTargetResolver(directory, scope).resolve('default')).rejects.toMatchObject({ code: 'NOT_READY' });
     expect(parseWindow(all, now)).toEqual(window);
-    expect(parseWindow({}, now)).toEqual({ startMs: Date.parse('2026-09-04T00:00:00+08:00'), endMs: Date.parse('2026-09-11T00:00:00+08:00') });
+    expect(parseWindow({}, now)).toEqual({ startMs: Date.parse('2026-09-10T00:00:00+08:00'), endMs: Date.parse('2026-09-11T00:00:00+08:00') });
     for (const query of [{ start: '0' }, { start: '5', end: '4' }, { start: '0', end: String(367*86400_000) }, { start: '-1', end: 'all' }]) {
       expect(() => parseWindow(query, now)).toThrow();
     }

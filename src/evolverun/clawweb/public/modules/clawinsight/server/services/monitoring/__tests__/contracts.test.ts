@@ -20,7 +20,7 @@ const check = { schemaVersion: CHECK_VERSION, botId: "mock-bot-te", engine: "TE"
   lastSuccessfulCheckAt: new Date(now).toISOString(), status: "HEALTHY" };
 afterEach(() => { vi.unstubAllEnvs(); });
 function store(): MonitoringStore {
-  return { summaries: vi.fn(), listTargets: vi.fn().mockResolvedValue([]), insertDiagnosis: vi.fn().mockResolvedValue(true), applyCheck: vi.fn().mockResolvedValue(true),
+  return { summaries: vi.fn(), listCheckedTargets: vi.fn().mockResolvedValue([]), listTargets: vi.fn().mockResolvedValue([]), insertDiagnosis: vi.fn().mockResolvedValue(true), applyCheck: vi.fn().mockResolvedValue(true),
     readStatus: vi.fn().mockResolvedValue({ check: null, count: 0 }), listDiagnoses: vi.fn() };
 }
 describe("monitoring contract validation", () => {

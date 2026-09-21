@@ -2,7 +2,7 @@
 
 **版本：v2.7 · 紧凑分页与适中列间距**
 **日期：2026-09-20**
-**状态：功能已实现；本地验证结果见提交说明，仍待生产联调与部署验收。**
+**状态：实现及本地验证见实施记录；仍待生产联调与部署验收。**
 **修改仓库：Avernet（公共实现）和 OCB（最小接线）；不修改 claw-validation。**
 
 > 本版完整替代 v1.0 与 v2.0；保留 v2.0 的数据、权限和兼容决策，仅将已确认的 V7 局部界面调整纳入最终实施与验收范围。用户已完成新表创建，本轮不执行 DDL、不修改旧 UNIQUE、不自动迁移数据库。claw-validation 正在更新，本轮不修改其源码、配置格式、本地队列、报送协议或事件 ID 生成方式。根据用户最新确认，允许 OCB 最小接线，复用已有登录服务、管理员名单和 ac_bots 连接；不另建认证系统。
@@ -399,7 +399,7 @@ Content-Type: application/json
 
 ### 7.4 统计定义
 
-默认最近 7 个北京时间自然日（含今日，结束为明日 00:00），转 UTC 毫秒，使用 `[start,end)`；所有候选/状态接口回传或共享同一窗口。允许沿用页面日期选择器修改窗口，验证 start<end 及合理查询上限。
+默认当天北京时间自然日（结束为次日 00:00），转 UTC 毫秒，使用 `[start,end)`；所有候选/状态接口回传或共享同一窗口。允许沿用页面日期选择器修改窗口，验证 start<end 及合理查询上限。
 
 实现协议细化：两端均省略使用上述默认窗口；显式窗口须同时提供 start/end，有限边界为 UTC 毫秒且跨度不超过 366 天。页面“全部时间”显式发送 `start=all&end=all`，包含 NULL 会话时间；单端 `all` 表示该端无界，另一端仍须有效，存在时间条件时排除 NULL。此约定不修改旧接口日期参数或统计含义。
 
@@ -436,8 +436,8 @@ Content-Type: application/json
 
 视觉基准为本目录更新后的 **V7 `member.html` 与 `admin.html`**（`index.html` 等同 member）。V7 是已确认 V6 页面的局部补丁，不是一套新页面；仅作为布局/交互参考，不代表真实数据和权限已接通。
 
-- 普通用户：`design-demos/agent-monitor-search/member.html`。
-- 管理员：`design-demos/agent-monitor-search/admin.html`。
+- 普通用户：`/Users/wjh/workspace/design-demos/agent-monitor-search/member.html`。
+- 管理员：`/Users/wjh/workspace/design-demos/agent-monitor-search/admin.html`。
 - 此前 `design-demos/agent-monitor-pagination/` 中的整页分页 Demo **不作为实现或视觉验收依据**；不得复制其页面框架、数据集、标题/统计改版或表体滚动设计。
 - 相对已确认 V6，允许的视觉变化只有：诊断列表 footer，以及 TC 标签/时间列为增加间距而必需的列宽调整与溢出处理。保持原有导航、标题、上下文卡片、Bot 选择器、筛选区、记录内容、行高、展开详情和加入提示。
 - V7 不额外增加可见统计、新筛选项或场景开关；不改变既定角色能力、日期口径、数据排序和真实数据量。第 7.4 节的生产时间窗口约定不因 HTML 固定日期演示而更改。

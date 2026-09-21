@@ -70,6 +70,16 @@ export class MonitoringRepository implements MonitoringStore {
   async summaries(targets: readonly MonitoringTarget[], window: MonitoringWindow) {
     return this.run(() => readMonitoringSummaries(this.db, targets.map(target), window));
   }
+  async listCheckedTargets(): Promise<MonitoringTarget[]> {
+    return this.run(async () => {
+      // Enrollment is defined by a persisted bot-check. Diagnosis-only rows are
+      // intentionally excluded from the browser's monitored scope.
+      const rows = await this.db.query(`SELECT bot_id, entity_id, env FROM ${CHECKS_TABLE}
+        ORDER BY bot_id, entity_id, env`);
+      return rows.map((row) => target({ botId: String(row.bot_id), entityId: String(row.entity_id), env: String(row.env) }));
+    });
+  }
+
   async listTargets(): Promise<MonitoringTarget[]> {
     return this.run(async () => {
       // Both tables are authoritative: checks discover quiet bots; diagnoses preserve history.

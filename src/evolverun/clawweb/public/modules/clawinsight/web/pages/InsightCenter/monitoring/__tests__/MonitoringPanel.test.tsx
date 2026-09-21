@@ -65,21 +65,21 @@ describe('MonitoringPanel', () => {
     fireEvent.click(trigger);
     expect(screen.getByLabelText('业务问题类型')).toHaveValue('外部服务异常');
     fireEvent.click(screen.getByRole('button', { name: '重置' }));
-    await waitFor(() => expect(api.targetDiagnoses.mock.lastCall?.[1]).toMatchObject({ businessProblemCategory: '', businessProblemSubtype: '', page: 1, ...beijingDateRange(7) }));
+    await waitFor(() => expect(api.targetDiagnoses.mock.lastCall?.[1]).toMatchObject({ businessProblemCategory: '', businessProblemSubtype: '', page: 1, ...beijingDateRange(1) }));
   });
 
-  it('initializes each mount with the last seven Beijing calendar days and 20 rows, including across midnight', async () => {
+  it("initializes each mount with today's Beijing calendar day and 20 rows, including across midnight", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-31T15:59:59Z'));
     const first = render(<MonitoringPanel />);
     await act(async () => {});
-    expect(api.targetDiagnoses.mock.lastCall?.[1]).toMatchObject({ startDate: '2026-08-25', endDate: '2026-08-31', page: 1, pageSize: 20 });
+    expect(api.targetDiagnoses.mock.lastCall?.[1]).toMatchObject({ startDate: '2026-08-31', endDate: '2026-08-31', page: 1, pageSize: 20 });
     expect(screen.getByLabelText('每页条数')).toHaveValue('20');
     first.unmount();
     vi.setSystemTime(new Date('2026-08-31T16:00:01Z'));
     render(<MonitoringPanel />);
     await act(async () => {});
-    expect(api.targetDiagnoses.mock.lastCall?.[1]).toMatchObject({ startDate: '2026-08-26', endDate: '2026-09-01', pageSize: 20 });
+    expect(api.targetDiagnoses.mock.lastCall?.[1]).toMatchObject({ startDate: '2026-09-01', endDate: '2026-09-01', pageSize: 20 });
     fireEvent.click(screen.getByRole('button', { name: '选择会话时间范围' }));
     fireEvent.click(screen.getByRole('button', { name: '全部时间' }));
     await act(async () => {});
@@ -123,7 +123,7 @@ describe('MonitoringPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     expect(api.targetDiagnoses).toHaveBeenCalledTimes(calls);
     fireEvent.click(screen.getByRole('button', { name: '选择会话时间范围' }));
-    expect(screen.getByLabelText('开始日期')).toHaveValue(beijingDateRange(7).startDate);
+    expect(screen.getByLabelText('开始日期')).toHaveValue(beijingDateRange(1).startDate);
     fireEvent.input(screen.getByLabelText('开始日期'), { target: { value: '2026-09-01' } });
     fireEvent.input(screen.getByLabelText('结束日期'), { target: { value: '2026-09-10' } });
     fireEvent.click(screen.getByRole('button', { name: '应用' }));
@@ -217,7 +217,7 @@ describe('MonitoringPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '近 7 天' }));
     await waitFor(() => expect(api.targetDiagnoses.mock.lastCall?.[1]).toMatchObject(beijingDateRange(7)));
     fireEvent.click(await screen.findByRole('button', { name: '清空筛选条件' }));
-    await waitFor(() => expect(api.targetDiagnoses.mock.lastCall?.[1]).toMatchObject({ ...beijingDateRange(7), keyword: '', decision: 'ALL', page: 1 }));
+    await waitFor(() => expect(api.targetDiagnoses.mock.lastCall?.[1]).toMatchObject({ ...beijingDateRange(1), keyword: '', decision: 'ALL', page: 1 }));
   });
   it('closes menus with Escape and restores trigger focus', async () => {
     render(<MonitoringPanel />);

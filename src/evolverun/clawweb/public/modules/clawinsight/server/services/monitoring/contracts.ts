@@ -65,6 +65,8 @@ export type MonitoringSummary = {
 };
 /** Plugin API: durable storage. Successful writes mean committed, never merely queued. */
 export interface MonitoringStore {
+  /** Targets with a persisted bot-check; diagnosis-only targets are excluded. */
+  listCheckedTargets(): Promise<MonitoringTarget[]>;
   /** Distinct persisted bot IDs from both checks and diagnoses, ordered by botId. */
   listTargets(): Promise<MonitoringTarget[]>;
   summaries(targets: readonly MonitoringTarget[], window: MonitoringWindow): Promise<(MonitoringSummary | null)[]>;

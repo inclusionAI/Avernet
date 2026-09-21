@@ -9,7 +9,7 @@ export function queryKeys(query: Record<string, unknown>, keys: readonly string[
 export function parseWindow(query: Record<string, unknown>, now: number): MonitoringWindow {
   if (query.start === undefined && query.end === undefined) {
     const day = Math.floor((now + 8 * 3600_000) / 86400_000) * 86400_000 - 8 * 3600_000;
-    return { startMs: day - 6 * 86400_000, endMs: day + 86400_000 };
+    return { startMs: day, endMs: day + 86400_000 };
   }
   const bound = (v: unknown) => {
     if (v === 'all') return null;

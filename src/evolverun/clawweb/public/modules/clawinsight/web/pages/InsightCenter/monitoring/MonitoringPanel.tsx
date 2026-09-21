@@ -10,7 +10,7 @@ import { MonitoringEnrollment } from './MonitoringEnrollment';
 import { MonitoringPagination } from './MonitoringPagination';
 
 export { displayTime } from './DiagnosisRecord';
-const initialQuery = (): MonitoringQuery => ({ ...beijingDateRange(7), decision: 'ALL', keyword: '', page: 1, pageSize: 20 });
+const initialQuery = (): MonitoringQuery => ({ ...beijingDateRange(1), decision: 'ALL', keyword: '', page: 1, pageSize: 20 });
 const states = { HEALTHY: '监控正常', ERROR: '检查异常', UNKNOWN: '状态未知', PAUSED: '已暂停' };
 
 export default function MonitoringPanel({ isAdmin = false }: { isAdmin?: boolean }) {
