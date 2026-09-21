@@ -4,6 +4,10 @@
 
 这份文档描述 自建 bot 平台，如何作为一个 Bot Provider 接入 Avernet 的组件之一 ：Bot协作网络（BCN，Bot Coordination Network）。
 
+上行和下行的 token/register 注册见[Provider 注册说明](../specs/2026-09-20-provider-token-registration/README.md)。
+Provider 归属统一存入 `bcs_bots`；下行继续双写 binding，上行不写。
+线上切换到连接模式判断前，先完成[存量迁移、校验与回滚准备](provider-bot-storage-migration.md)。
+
 
 ## 什么时候需要这种接入方式
 

@@ -72,6 +72,15 @@ pub enum ConnectStreamError {
 /// Service for bot registration and discovery.
 #[async_trait]
 pub trait BotRegistryCoreService: Send + Sync {
+    /// Atomic create-only registration; existing active/deleted identities must
+    /// never be updated. Storage errors propagate, not an absent-record result.
+    async fn create_registration_if_absent(
+        &self, _bot_id: String, _capabilities: BotCapabilities,
+        _created_by: &str, _token: &str,
+    ) -> ServiceResult<bool> {
+        Err(ServiceError::InternalError("atomic registration creation is not configured".into()))
+    }
+
     /// Register or update a bot.
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()>;
 
@@ -454,6 +463,12 @@ pub trait BotRegistryCoreService: Send + Sync {
 
     /// Load the session token for a bot.
     async fn load_token(&self, bot_id: &str) -> Option<String>;
+
+    /// Fallible, authoritative credential read for registration verification.
+    /// Missing/deleted identities return None; storage failures remain errors.
+    async fn try_load_token(&self, _bot_id: &str) -> ServiceResult<Option<String>> {
+        Err(ServiceError::InternalError("fallible credential lookup is not configured".into()))
+    }
 
     /// Find a bot by its token. Returns bot_id if found.
     async fn find_bot_by_token(&self, token: &str) -> Option<String>;

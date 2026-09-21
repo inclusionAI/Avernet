@@ -5,10 +5,11 @@ use bcs_domain::{MessageAudience, MessageVisibilityDomain};
 use bcs_protocol::{BcsFrame, RequestFrame};
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget,
-    BotEventCommand, BotEventOutcome, CallerContext, ChatAbortCommand, ChatAbortOutcome, FrontendDeliveryCommand,
-    FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget,
-    FusionRequest, GroupCallbackCommand, GroupCallbackOutcome, GroupChatCommand,
-    GroupFusionCommand, GroupFusionService, GroupMessageType, MessageFlowService, MessageRole,
+    BotEventCommand, BotEventOutcome, CallerContext, CancelLatestQueuedMessageCommand,
+    ChatAbortCommand, ChatAbortOutcome, FrontendDeliveryCommand, FrontendDeliveryKind,
+    FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, FusionRequest,
+    GroupCallbackCommand, GroupCallbackOutcome, GroupChatCommand, GroupFusionCommand,
+    GroupFusionService, GroupMessageType, MessageFlowService, MessageRole,
     PersistentGroupSendCommand, ServiceError, ServiceResult, TaskCompleteCommand,
     TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome, TaskRunAliasRegistration,
     WebSendCommand, WebSendOutcome,
@@ -140,6 +141,18 @@ async fn added_message_flow_methods_fail_closed_for_noop_and_legacy_implementati
             .await,
         "message flow service is not configured",
     );
+    for service in [&noop as &dyn MessageFlowService, &legacy] {
+        assert_service_not_configured(
+            service
+                .cancel_latest_queued_message(CancelLatestQueuedMessageCommand {
+                    caller: CallerContext::Public,
+                    group_id: "group-1".to_string(),
+                    session_id: "group-1:session".to_string(),
+                })
+                .await,
+            "latest queued message cancellation is not configured",
+        );
+    }
 }
 
 fn group_chat_command() -> GroupChatCommand {

@@ -2,6 +2,7 @@
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import Approval from '../Approval';
 
@@ -29,5 +30,56 @@ describe('approval display configuration', () => {
     show({ ...card, status: 'approved', approvedBy: ['reviewer'], resolvedAt: 145, display: { approvedText: '已完成处置复核' } });
     expect((await screen.findAllByText('已完成处置复核')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: '确认执行' })).toBeNull();
+  });
+
+  it('opens a historical empId/corpId link and submits a fresh DingTalk auth code', async () => {
+    let resolved = false;
+    const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    window.dd = {
+      ready: (callback) => callback(),
+      requestAuthCode: ({ success }) => success({ code: 'fresh-code' }),
+    };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      requests.push({ url, body });
+      if (url.endsWith('/auth/dingtalk/config')) {
+        return { ok: true, json: async () => ({ clientId: 'app-key', corpId: 'ding-corp' }) };
+      }
+      if (url.endsWith('/resolve')) {
+        resolved = true;
+        return { ok: true, json: async () => ({ ok: true, status: 'approved' }) };
+      }
+      return { ok: true, json: async () => ({ ...card, status: resolved ? 'approved' : 'pending' }) };
+    }));
+
+    render(<MemoryRouter initialEntries={['/approval/1?empId=legacy-reviewer&corpId=legacy-corp']}><Routes><Route path='/approval/:id' element={<Approval />} /></Routes></MemoryRouter>);
+    await userEvent.click(await screen.findByRole('button', { name: '确认执行' }));
+
+    const resolveRequest = requests.find((request) => request.url.endsWith('/resolve'));
+    expect(resolveRequest?.body).toEqual({ authCode: 'fresh-code', action: 'approve' });
+    expect(requests.some((request) => request.url.includes('empId='))).toBe(false);
+    expect(requests.some((request) => request.url.includes('corpId='))).toBe(false);
+  });
+
+  it('shows the server identity rejection instead of a generic HTTP label', async () => {
+    window.dd = {
+      ready: (callback) => callback(),
+      requestAuthCode: ({ success }) => success({ code: 'stranger-code' }),
+    };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/auth/dingtalk/config')) {
+        return { ok: true, json: async () => ({ clientId: 'app-key', corpId: 'ding-corp' }) };
+      }
+      if (url.endsWith('/resolve')) {
+        return { ok: false, status: 403, json: async () => ({ error: 'Forbidden', message: '您不是此审批的授权审批人' }) };
+      }
+      return { ok: true, json: async () => card };
+    }));
+
+    render(<MemoryRouter initialEntries={['/approval/1']}><Routes><Route path='/approval/:id' element={<Approval />} /></Routes></MemoryRouter>);
+    await userEvent.click(await screen.findByRole('button', { name: '确认执行' }));
+    expect(await screen.findByText('操作失败: 您不是此审批的授权审批人')).toBeTruthy();
   });
 });

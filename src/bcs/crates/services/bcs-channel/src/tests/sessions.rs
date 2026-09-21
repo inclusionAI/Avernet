@@ -48,6 +48,7 @@ async fn inbound_group_target_injects_initial_context_once_for_new_session() -> 
         reason,
         session_input,
         task_ledger,
+        driver_delivery,
         ..
     } = &notification.event
     else {
@@ -58,8 +59,90 @@ async fn inbound_group_target_injects_initial_context_once_for_new_session() -> 
     assert_eq!(reason, "跨团队协作");
     assert_eq!(session_input, &None);
     assert_eq!(task_ledger, &None);
+    assert_eq!(driver_delivery, &None);
 
     Ok(())
+}
+
+#[tokio::test]
+async fn inbound_group_target_injects_driver_context_when_binding_configures_inject() -> TestResult {
+    let harness = TestHarness::new(chat_group("group_1")).await?;
+    let mut config = dingtalk_config("robot_1");
+    config[GROUP_CONTEXT_DELIVERY_CONFIG] = serde_json::json!("inject");
+    harness.service.create_binding(CreateBindingCommand {
+        channel_type: channel_type(), account_ref: "robot_1".to_string(),
+        target: BindingTarget::Group { group_id: "group_1".to_string() },
+        group_chat_scope: Some(GroupChatScope::ConversationShared),
+        outbound_visibility: Visibility::FullTranscript, env: "dev".to_string(),
+        created_by: Some("creator".to_string()), config,
+    }).await?;
+
+    harness.service.handle_inbound(group_inbound("conv_1", "u1", Some("张三"), "msg_1", true)).await?;
+
+    let notifications = harness.system_message.notifications.lock().await;
+    assert_eq!(notifications.len(), 1);
+    let SystemMessageEvent::SessionContext { driver_delivery, .. } = &notifications[0].event else {
+        return Err("expected session context notification".into());
+    };
+    assert_eq!(driver_delivery, &Some(bcs_domain::DeliveryType::Inject),
+        "binding group_context_delivery=inject must override the driver's send");
+    Ok(())
+}
+
+#[tokio::test]
+async fn group_context_delivery_config_validates_create_and_update() -> TestResult {
+    let harness = TestHarness::new(manager_group("group_1")).await?;
+    let mut config = dingtalk_config("robot_1");
+    config[GROUP_CONTEXT_DELIVERY_CONFIG] = serde_json::json!("both");
+    let mut command = CreateBindingCommand {
+        channel_type: channel_type(), account_ref: "robot_1".to_string(),
+        target: BindingTarget::Group { group_id: "group_1".to_string() },
+        group_chat_scope: Some(GroupChatScope::ConversationShared),
+        outbound_visibility: Visibility::FullTranscript, env: "dev".to_string(),
+        created_by: Some("creator".to_string()), config,
+    };
+    assert!(matches!(harness.service.create_binding(command.clone()).await, Err(ChannelUseCaseError::InvalidParams(_))));
+    assert!(harness.binding_repo.list().await?.is_empty());
+    command.config[GROUP_CONTEXT_DELIVERY_CONFIG] = serde_json::json!("inject");
+    let binding = harness.service.create_binding(command).await?;
+    assert_eq!(binding.config[GROUP_CONTEXT_DELIVERY_CONFIG], "inject");
+    for invalid in [serde_json::Value::Null, serde_json::json!(1), serde_json::json!("true")] {
+        let mut config = dingtalk_config("robot_1");
+        config[GROUP_CONTEXT_DELIVERY_CONFIG] = invalid;
+        assert!(matches!(harness.service.update_binding_config(&binding.id, config).await, Err(ChannelUseCaseError::InvalidParams(_))));
+    }
+    let stored = harness.binding_repo.get(&binding.id).await?.expect("binding");
+    assert_eq!(stored.config[GROUP_CONTEXT_DELIVERY_CONFIG], "inject");
+    let mut config = dingtalk_config("robot_1");
+    config[GROUP_CONTEXT_DELIVERY_CONFIG] = serde_json::json!("send");
+    harness.service.update_binding_config(&binding.id, config).await?;
+    assert_eq!(harness.binding_repo.get(&binding.id).await?.expect("binding").config[GROUP_CONTEXT_DELIVERY_CONFIG], "send");
+    Ok(())
+}
+
+#[test]
+fn group_context_delivery_config_resolves_supported_and_defensive_values() {
+    for (config, expected) in [
+        (serde_json::json!({}), None),
+        (
+            serde_json::json!({ "group_context_delivery": "send" }),
+            Some(bcs_domain::DeliveryType::Send),
+        ),
+        (
+            serde_json::json!({ "group_context_delivery": "inject" }),
+            Some(bcs_domain::DeliveryType::Inject),
+        ),
+        (
+            serde_json::json!({ "group_context_delivery": "unsupported" }),
+            None,
+        ),
+        (
+            serde_json::json!({ "group_context_delivery": 1 }),
+            None,
+        ),
+    ] {
+        assert_eq!(crate::binding_group_context_delivery(&config), expected);
+    }
 }
 
 #[tokio::test]

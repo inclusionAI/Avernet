@@ -7,6 +7,7 @@
 pub mod bot_control_plane;
 pub mod error;
 pub mod event;
+pub mod provider_registration;
 
 pub use bcs_domain::*;
 pub use bot_control_plane::*;

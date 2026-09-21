@@ -357,9 +357,7 @@ class TestDeleteExpiredLocksByPrefix:
     ):
         mock_session.query.return_value.filter.return_value.delete.return_value = 2
 
-        result = repository.delete_expired_locks_by_prefix(
-            "botrun:session:", now=NOW
-        )
+        result = repository.delete_expired_locks_by_prefix("botrun:session:", now=NOW)
 
         assert result == 2
         mock_session.query.assert_called_once_with(DistributedLockModel)
@@ -367,18 +365,14 @@ class TestDeleteExpiredLocksByPrefix:
     def test_returns_zero_when_no_rows_match(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.delete.return_value = 0
 
-        result = repository.delete_expired_locks_by_prefix(
-            "botrun:session:", now=NOW
-        )
+        result = repository.delete_expired_locks_by_prefix("botrun:session:", now=NOW)
 
         assert result == 0
 
     def test_returns_int_when_rowcount_is_large(self, repository, mock_session):
         mock_session.query.return_value.filter.return_value.delete.return_value = 1000
 
-        result = repository.delete_expired_locks_by_prefix(
-            "botrun:session:", now=NOW
-        )
+        result = repository.delete_expired_locks_by_prefix("botrun:session:", now=NOW)
 
         assert result == 1000
         assert isinstance(result, int)
@@ -388,9 +382,7 @@ class TestDeleteExpiredLocksByPrefix:
         chain = mock_session.query.return_value.filter.return_value
         chain.delete.return_value = 5
 
-        result = repository.delete_expired_locks_by_prefix(
-            "botrun:session:", now=NOW
-        )
+        result = repository.delete_expired_locks_by_prefix("botrun:session:", now=NOW)
 
         assert result == 5
         mock_session.query.return_value.filter.assert_called_once()

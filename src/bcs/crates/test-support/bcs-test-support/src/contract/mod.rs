@@ -10,3 +10,6 @@ pub mod lifecycle;
 pub mod plugin;
 pub mod port;
 pub mod repo;
+pub mod provider_registration_core;
+pub mod bot_registration_create;
+pub mod bot_provider;

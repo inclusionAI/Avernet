@@ -18,6 +18,7 @@ use tracing::{debug, info, warn};
 
 use super::ids::{new_bot_uuid, new_session_token};
 use super::provider_core::{parse_coordination_config, parse_downlink_config};
+use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 
 /// Core bot registry service implementation.
 ///
@@ -29,6 +30,7 @@ pub struct BotCore {
     provider_repo: Option<Arc<dyn ProviderRepoPort>>,
     provider_credentials: Option<Arc<dyn ProviderCredentialRepoPort>>,
     provider_bindings: Option<Arc<dyn ProviderBotBindingRepoPort>>,
+    bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
 }
 
 impl BotCore {
@@ -50,6 +52,7 @@ impl BotCore {
             provider_repo: None,
             provider_credentials: None,
             provider_bindings: None,
+            bot_providers: None,
         }
     }
 
@@ -64,7 +67,13 @@ impl BotCore {
             provider_repo: Some(provider_repo),
             provider_credentials: Some(provider_credentials),
             provider_bindings: Some(provider_bindings),
+            bot_providers: None,
         }
+    }
+
+    pub fn with_bot_provider_repo(mut self, repo: Arc<dyn BotProviderRepoPort>) -> Self {
+        self.bot_providers = Some(repo);
+        self
     }
 
     /// Borrow the provider-bindings repo, if wired. Used by the application
@@ -74,6 +83,27 @@ impl BotCore {
         &self,
     ) -> Option<&Arc<dyn ProviderBotBindingRepoPort>> {
         self.provider_bindings.as_ref()
+    }
+
+    /// Check affiliation before a delivery switch can create owner edges.
+    pub(crate) async fn validate_provider_switch_membership(
+        &self, bot_id: &str, provider_id: &str, provider_bot_ref: &str, owner: &str,
+    ) -> ServiceResult<()> {
+        let Some(metadata) = &self.bot_providers else { return Ok(()); };
+        if let Some(record) = metadata.get_provider_bot(bot_id).await? {
+            if record.is_deleted || record.provider_id != provider_id || record.provider_bot_ref != provider_bot_ref {
+                return Err(ServiceError::Conflict("Bot Provider membership cannot be replaced".into()));
+            }
+            if self.repo.try_get(bot_id).await?.is_some_and(|bot| bot.created_by.as_deref().is_some_and(|existing| existing != owner)) {
+                return Err(ServiceError::Forbidden("Bot owner does not match Provider reference owner".into()));
+            }
+        }
+        if metadata.get_provider_bot_by_ref(provider_id, provider_bot_ref).await?
+            .is_some_and(|record| record.is_deleted || record.bot_uuid != bot_id)
+        {
+            return Err(ServiceError::Conflict("Provider/ref is already registered".into()));
+        }
+        Ok(())
     }
 
     /// Returns Ok iff the provider is fully ready to receive downlink
@@ -156,6 +186,12 @@ impl ServiceLifecycle for BotCore {
 
 #[async_trait]
 impl BotRegistryCoreService for BotCore {
+    async fn create_registration_if_absent(
+        &self, bot_id: String, capabilities: BotCapabilities, created_by: &str, token: &str,
+    ) -> ServiceResult<bool> {
+        self.repo.create_registration_if_absent(bot_id, capabilities, created_by, token).await
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         self.repo.register(bot_id, capabilities).await
     }
@@ -424,11 +460,43 @@ impl BotRegistryCoreService for BotCore {
     }
 
     async fn unregister(&self, bot_id: &str) -> bool {
-        self.repo.unregister(bot_id).await
+        self.soft_delete(bot_id).await
     }
 
     async fn soft_delete(&self, bot_id: &str) -> bool {
-        self.repo.soft_delete(bot_id).await
+        let mut deleted = false;
+        if let Some(metadata) = &self.bot_providers {
+            let result = async {
+                if let Some(record) = metadata.get_provider_bot(bot_id).await? {
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                        .map(|value| value.as_millis() as u64)
+                        .map_err(|_| ServiceError::InternalError("system clock is before epoch".into()))?;
+                    return metadata.delete_provider_bot(&record.provider_id, bot_id, now).await;
+                }
+                // Legacy-read rollout can encounter a gateway before backfill.
+                // Let the dual-write projection attach metadata and delete both
+                // representations before clearing the registry's runtime state.
+                if let Some(bindings) = &self.provider_bindings {
+                    if let Some(binding) = bindings.get_binding_by_bot_uuid(bot_id).await? {
+                        if binding.disabled {
+                            return Err(ServiceError::Conflict("disabled legacy binding requires audited migration".into()));
+                        }
+                        return bindings.update_binding_disabled(bot_id, true, binding.updated_at.saturating_add(1)).await
+                            .map(|updated| updated.is_some());
+                    }
+                }
+                Ok(false)
+            }.await;
+            match result {
+                Ok(value) => deleted = value,
+                Err(error) => {
+                    warn!(bot_id, error = %error, "Bot Provider soft deletion failed");
+                    return false;
+                }
+            }
+        }
+        // Also clear the registry's runtime/token caches after the durable write.
+        self.repo.soft_delete(bot_id).await || deleted
     }
 
     async fn cleanup_expired(&self) {
@@ -497,6 +565,10 @@ impl BotRegistryCoreService for BotCore {
 
     async fn load_token(&self, bot_id: &str) -> Option<String> {
         self.repo.load_token(bot_id).await
+    }
+
+    async fn try_load_token(&self, bot_id: &str) -> ServiceResult<Option<String>> {
+        self.repo.try_load_token(bot_id).await
     }
 
     async fn find_bot_by_token(&self, token: &str) -> Option<String> {

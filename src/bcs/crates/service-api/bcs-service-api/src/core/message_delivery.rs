@@ -15,6 +15,8 @@ pub enum DeliveryLifecycleEvent {
     DefinitelyNotSent {
         retry: bool,
     },
+    /// Transport explicitly rejected the request without starting a Bot run.
+    TransportRejected,
     TransportUnknown,
     /// Authorized human certifies that this uncertain attempt never sent.
     ResolveNotSent,

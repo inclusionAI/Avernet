@@ -86,6 +86,57 @@ describe("BotWorkflowPermissionRepository", () => {
     });
   });
 
+  describe("checkPermission", () => {
+    it("allows execute for owner-level bot_id='*' record", async () => {
+      const { repo } = createRepo();
+      await repo.upsert({ bot_id: "*", bot_owner_id: "390565", workflow_id: "wf", can_view: 1, can_execute: 1, can_edit: 1 });
+      expect(await repo.checkPermission("default", "390565", "wf", "execute")).toBe(true);
+      expect(await repo.checkPermission("default", "390565", "wf", "edit")).toBe(true);
+      expect(await repo.checkPermission("default", "390565", "wf", "view")).toBe(true);
+    });
+
+    it("allows execute for owner-level NULL bot_id record", async () => {
+      const { repo } = createRepo();
+      await repo.upsert({ bot_id: null, bot_owner_id: "390565", workflow_id: "wf", can_view: 1, can_execute: 1, can_edit: 0 });
+      expect(await repo.checkPermission("default", "390565", "wf", "execute")).toBe(true);
+      expect(await repo.checkPermission("default", "390565", "wf", "edit")).toBe(false);
+    });
+
+    it("allows execute for global wildcard bot_owner_id='*' bot_id='*' record", async () => {
+      const { repo } = createRepo();
+      await repo.upsert({ bot_id: "*", bot_owner_id: "*", workflow_id: "wf", can_view: 1, can_execute: 1, can_edit: 0 });
+      expect(await repo.checkPermission("any-bot", "any-owner", "wf", "execute")).toBe(true);
+    });
+
+    it("denies when only specific bot is allowed and a different bot requests", async () => {
+      const { repo } = createRepo();
+      await repo.upsert({ bot_id: "botA", bot_owner_id: "390565", workflow_id: "wf", can_view: 1, can_execute: 1, can_edit: 0 });
+      expect(await repo.checkPermission("botB", "390565", "wf", "execute")).toBe(false);
+      expect(await repo.checkPermission("botA", "390565", "wf", "execute")).toBe(true);
+    });
+  });
+
+  describe("hasEditPermission", () => {
+    it("allows edit for owner-level bot_id='*' record", async () => {
+      const { repo } = createRepo();
+      await repo.upsert({ bot_id: "*", bot_owner_id: "390565", workflow_id: "wf", can_view: 1, can_execute: 1, can_edit: 1 });
+      expect(await repo.hasEditPermission("wf", "390565", "default")).toBe(true);
+      expect(await repo.hasEditPermission("wf", "390565")).toBe(true);
+    });
+
+    it("allows edit for global wildcard record", async () => {
+      const { repo } = createRepo();
+      await repo.upsert({ bot_id: "*", bot_owner_id: "*", workflow_id: "wf", can_view: 1, can_execute: 1, can_edit: 1 });
+      expect(await repo.hasEditPermission("wf", "anyone", "default")).toBe(true);
+    });
+
+    it("denies edit when only execute is granted", async () => {
+      const { repo } = createRepo();
+      await repo.upsert({ bot_id: "*", bot_owner_id: "390565", workflow_id: "wf", can_view: 1, can_execute: 1, can_edit: 0 });
+      expect(await repo.hasEditPermission("wf", "390565", "default")).toBe(false);
+    });
+  });
+
   describe("getViewByIdsForOwner", () => {
     it("returns null when no permission records exist", async () => {
       const { repo } = createRepo();

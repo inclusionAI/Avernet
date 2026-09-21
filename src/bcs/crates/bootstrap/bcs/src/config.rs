@@ -194,6 +194,9 @@ fn default_history_attachment_ttl() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderHttpConfig {
+    /// Select HTTP delivery identity reads; writes always maintain gateway bindings.
+    #[serde(default)]
+    pub downlink_detection_source: bcs_domain::bot_provider::DownlinkDetectionSource,
     /// Inbound HTTP header names that BCS may forward to HTTP provider webhooks.
     /// Empty by default; matching is case-insensitive.
     #[serde(default)]
@@ -324,6 +327,10 @@ pub struct CollaborationConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpenApiV1Config {
+    /// Explicitly approved Providers accepting registration by any authenticated
+    /// Human. Empty means only the Provider creator/owners may issue tokens.
+    #[serde(default)]
+    pub registration_self_service_provider_ids: Vec<String>,
     #[serde(default = "default_openapi_v1_public_collaboration_base_url")]
     pub public_collaboration_base_url: String,
     /// Base URL for internal-collaboration endpoints that live under a
@@ -337,6 +344,7 @@ pub struct OpenApiV1Config {
 impl Default for OpenApiV1Config {
     fn default() -> Self {
         Self {
+            registration_self_service_provider_ids: Vec::new(),
             public_collaboration_base_url: default_openapi_v1_public_collaboration_base_url(),
             internal_collaboration_base_url: None,
         }
@@ -1982,6 +1990,7 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
             "x-bcn-protocol-version",
         ] {
             let config = ProviderHttpConfig {
+                downlink_detection_source: Default::default(),
                 queue_persistable_headers: Vec::new(),
                 bypass_headers: vec![name.to_string()],
             };
@@ -1990,6 +1999,16 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
                 "header name {name:?} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn downlink_detection_source_defaults_to_legacy_and_rejects_unknown_values() {
+        use bcs_domain::bot_provider::DownlinkDetectionSource;
+        let legacy: ProviderHttpConfig = toml::from_str("").unwrap();
+        assert_eq!(legacy.downlink_detection_source, DownlinkDetectionSource::Binding);
+        let bots: ProviderHttpConfig = toml::from_str("downlink_detection_source = 'bot_connection_mode'").unwrap();
+        assert_eq!(bots.downlink_detection_source, DownlinkDetectionSource::BotConnectionMode);
+        assert!(toml::from_str::<ProviderHttpConfig>("downlink_detection_source = 'auto'").is_err());
     }
 
     #[test]

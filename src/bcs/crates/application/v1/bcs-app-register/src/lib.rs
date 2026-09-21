@@ -1,26 +1,32 @@
 //! Versioned bot registration use case for the BCN V1 API.
 //!
-//! Mints and verifies short-lived `human_*` register tokens through the
-//! shared `bcs_domain` HMAC helpers (same secret, payload format, and TTL as
-//! the legacy `GET /register/token` route), so tokens issued by either route
-//! are interchangeable. Registration turns a verified token into a newly
-//! connected and onboarded bot credential; `POST /register` is anonymous by
-//! contract and the token is its only credential.
+//! Unscoped v1 tokens retain the legacy payload, TTL and onboarding behavior
+//! and are interchangeable with tokens from the legacy registration route.
+//! Provider-scoped v2 tokens carry signed owner, Provider and mode restrictions;
+//! they are not accepted by legacy registration and are not interchangeable.
+//! the injected core owns authorization and all scoped registration mutations.
+//! `POST /register` is anonymous and the register token is its only credential.
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bcs_domain::{
-    register_token_decode_and_verify, register_token_encode, RegisterTokenPayload,
+    register_token_decode_and_verify, register_token_encode, RegisterTokenPayload, RegisterTokenError,
+};
+use bcs_domain::provider_registration_token::{
+    self, ProviderRegisterTokenPayload, ProviderRegistrationMode,
 };
 use bcs_service_api::{
     AdminBotOnboardCommand, BotConnectCommand, BotManagementService,
-    BotOnboardingService, OnboardActorIdentity,
+    BotOnboardingService, OnboardActorIdentity, ServiceError,
 };
 use bcs_service_api::application::v1::{
-    ApplicationError, BotRegistration,
-    IssueRegisterToken, RegisterBot, RegisterService, RegisterTokenView,
+    ApplicationError, BotRegistration, BotRegistrationScope,
+    IssueRegisterToken, RegisterBot, RegisterService, RegisterTokenScope, RegisterTokenView,
+};
+use bcs_service_api::core::provider_registration::{
+    ProviderRegistrationCoreService, RegisterProviderBot,
 };
 
 /// Register-token lifetime, matching the legacy `GET /register/token` route.
@@ -31,6 +37,7 @@ pub struct RegisterServiceImpl {
     bot_management: Arc<dyn BotManagementService>,
     bot_onboarding: Arc<dyn BotOnboardingService>,
     token_secret: Vec<u8>,
+    provider_registration: Option<Arc<dyn ProviderRegistrationCoreService>>,
 }
 
 impl RegisterServiceImpl {
@@ -43,7 +50,82 @@ impl RegisterServiceImpl {
             bot_management,
             bot_onboarding,
             token_secret,
+            provider_registration: None,
         }
+    }
+
+    /// Enable scoped registration; the legacy constructor leaves it disabled.
+    pub fn with_provider_registration(
+        mut self,
+        core: Arc<dyn ProviderRegistrationCoreService>,
+    ) -> Self {
+        self.provider_registration = Some(core);
+        self
+    }
+
+    fn provider_registration(&self) -> Result<&dyn ProviderRegistrationCoreService, ApplicationError> {
+        self.provider_registration.as_deref().ok_or_else(|| {
+            ApplicationError::invalid("invalid_request", "provider registration is not enabled")
+        })
+    }
+
+    async fn register_provider_bot(
+        &self,
+        command: &RegisterBot,
+        bot_name: &str,
+        payload: ProviderRegisterTokenPayload,
+    ) -> Result<BotRegistration, ApplicationError> {
+        let mode = command.mode.unwrap_or(ProviderRegistrationMode::Plugin);
+        if !payload.allowed_modes.contains(&mode) {
+            return Err(ApplicationError::forbidden("registration mode is not authorized"));
+        }
+        let provider_bot_ref = command.provider_bot_ref.as_deref()
+            .filter(|reference| !reference.trim().is_empty())
+            .ok_or_else(|| ApplicationError::invalid(
+                "invalid_request", "provider_bot_ref is required for provider registration",
+            ))?;
+        let owner = payload.id.strip_prefix("human_")
+            .ok_or(ApplicationError::Unauthenticated)?;
+        let result = self.provider_registration()?.register(RegisterProviderBot {
+            provider_id: payload.provider_id,
+            provider_bot_ref: provider_bot_ref.to_string(),
+            owner: owner.to_string(),
+            mode,
+            bot_name: bot_name.to_string(),
+            webhook_url: command.webhook_url.clone(),
+        }).await.map_err(provider_registration_error)?;
+        let record = result.record;
+        Ok(BotRegistration {
+            bot_name: record.bot_name,
+            bot_uuid: record.bot_uuid,
+            bot_token: record.bot_token,
+            registration: Some(BotRegistrationScope {
+                provider_id: record.provider_id,
+                provider_bot_ref: record.provider_bot_ref,
+                mode: record.mode,
+                webhook_url: record.webhook_url,
+                effective_webhook_url: result.effective_webhook_url,
+            }),
+        })
+    }
+}
+
+fn provider_registration_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Forbidden(_) => ApplicationError::forbidden("provider registration is forbidden"),
+        ServiceError::ProviderNotFound(_) => ApplicationError::not_found(
+            "provider_not_found", "provider not found",
+        ),
+        ServiceError::Conflict(_) => ApplicationError::conflict(
+            "registration_conflict", "registration conflicts with an existing registration",
+        ),
+        ServiceError::InvalidOperation { .. } => ApplicationError::invalid(
+            "invalid_request", "invalid provider registration request",
+        ),
+        ServiceError::ProviderNotReadyForDownlink { .. } => ApplicationError::invalid(
+            "invalid_request", "provider is not ready for gateway registration",
+        ),
+        _ => ApplicationError::internal("provider registration failed"),
     }
 }
 
@@ -65,6 +147,31 @@ impl RegisterService for RegisterServiceImpl {
                 "register token issuance requires an authenticated Human principal",
             )
         })?;
+        if let Some(provider_id) = command.provider_id {
+            if provider_id.trim().is_empty() {
+                return Err(ApplicationError::invalid("invalid_request", "provider_id must not be blank"));
+            }
+            let allowed_modes = self.provider_registration()?
+                .authorize(&provider_id, &user.id).await.map_err(provider_registration_error)?;
+            let payload = ProviderRegisterTokenPayload {
+                v: 2,
+                purpose: "provider_bot_registration".to_string(),
+                id: format!("human_{}", user.id),
+                provider_id: provider_id.clone(),
+                allowed_modes: allowed_modes.clone(),
+                exp: now_secs() + REGISTER_TOKEN_TTL_SECONDS,
+            };
+            return Ok(RegisterTokenView {
+                token: provider_registration_token::encode(&payload, &self.token_secret),
+                expires_at: payload.exp * 1000,
+                note: REGISTER_TOKEN_NOTE.to_string(),
+                registration: Some(RegisterTokenScope {
+                    token_version: 2,
+                    provider_id,
+                    allowed_modes,
+                }),
+            });
+        }
         let payload = RegisterTokenPayload {
             v: 1,
             id: format!("human_{}", user.id),
@@ -74,6 +181,7 @@ impl RegisterService for RegisterServiceImpl {
             token: register_token_encode(&payload, &self.token_secret),
             expires_at: payload.exp * 1000,
             note: REGISTER_TOKEN_NOTE.to_string(),
+            registration: None,
         })
     }
 
@@ -89,8 +197,23 @@ impl RegisterService for RegisterServiceImpl {
                 format!("bot-name must be 2-64 characters, got {name_len}"),
             ));
         }
-        let payload = register_token_decode_and_verify(&command.token, &self.token_secret)
-            .map_err(|_| ApplicationError::Unauthenticated)?;
+        let payload = match register_token_decode_and_verify(&command.token, &self.token_secret) {
+            Ok(payload) => payload,
+            Err(RegisterTokenError::UnsupportedVersion) => {
+                let payload = provider_registration_token::decode_and_verify(&command.token, &self.token_secret)
+                    .map_err(|_| ApplicationError::Unauthenticated)?;
+                return self.register_provider_bot(&command, bot_name, payload).await;
+            }
+            Err(_) => return Err(ApplicationError::Unauthenticated),
+        };
+        if command.mode.unwrap_or(ProviderRegistrationMode::Plugin) != ProviderRegistrationMode::Plugin
+            || command.provider_bot_ref.is_some()
+            || command.webhook_url.is_some()
+        {
+            return Err(ApplicationError::invalid(
+                "invalid_request", "legacy register tokens only support ordinary upstream registration",
+            ));
+        }
         let staff_no = payload.id.trim_start_matches("human_").to_string();
         let connect = self
             .bot_management
@@ -101,9 +224,7 @@ impl RegisterService for RegisterServiceImpl {
                 protocol_version: None,
             })
             .await
-            .map_err(|error| {
-                ApplicationError::internal(format!("bot connect failed: {error}"))
-            })?;
+            .map_err(|_| ApplicationError::internal("bot connect failed"))?;
         if let Err(error) = self
             .bot_onboarding
             .admin_onboard_bot(AdminBotOnboardCommand {
@@ -131,6 +252,7 @@ impl RegisterService for RegisterServiceImpl {
             bot_name: bot_name.to_string(),
             bot_uuid: connect.bot_uuid,
             bot_token: connect.token,
+            registration: None,
         })
     }
 }
@@ -141,6 +263,8 @@ impl RegisterService for RegisterServiceImpl {
 
 #[cfg(test)]
 mod tests {
+    mod http;
+    mod provider_registration;
     use super::*;
     use std::collections::HashMap;
 
@@ -310,6 +434,7 @@ mod tests {
         let (svc, _, _) = service(false, false);
         let view = svc
             .issue_register_token(IssueRegisterToken {
+                provider_id: None,
                 caller: human_caller("staff-1"),
             })
             .await
@@ -327,6 +452,7 @@ mod tests {
         let (svc, _, _) = service(false, false);
         let error = svc
             .issue_register_token(IssueRegisterToken {
+                provider_id: None,
                 caller: AuthenticatedCaller {
                     tenant: None,
                     user: None,
@@ -345,12 +471,16 @@ mod tests {
         let (svc, management, onboarding) = service(false, false);
         let token_view = svc
             .issue_register_token(IssueRegisterToken {
+                provider_id: None,
                 caller: human_caller("staff-9"),
             })
             .await
             .expect("issue");
         let registration = svc
             .register_bot(RegisterBot {
+                mode: None,
+                provider_bot_ref: None,
+                webhook_url: None,
                 token: token_view.token,
                 bot_name: "  测试机器人  ".to_string(),
             })
@@ -380,6 +510,7 @@ mod tests {
     async fn token_verification_failures_map_to_unauthenticated() {
         let (svc, _, _) = service(false, false);
         svc.issue_register_token(IssueRegisterToken {
+                provider_id: None,
                 caller: human_caller("staff-1"),
             })
             .await
@@ -387,6 +518,9 @@ mod tests {
         for bad in ["not-a-token"] {
             let error = svc
                 .register_bot(RegisterBot {
+                mode: None,
+                provider_bot_ref: None,
+                webhook_url: None,
                     token: bad.to_string(),
                     bot_name: "ok-name".to_string(),
                 })
@@ -405,6 +539,9 @@ mod tests {
         );
         let error = svc
             .register_bot(RegisterBot {
+                mode: None,
+                provider_bot_ref: None,
+                webhook_url: None,
                 token: other,
                 bot_name: "ok-name".to_string(),
             })
@@ -420,6 +557,9 @@ mod tests {
         for bad in ["a", too_long.as_str()] {
             let error = svc
                 .register_bot(RegisterBot {
+                mode: None,
+                provider_bot_ref: None,
+                webhook_url: None,
                     token: "unused".to_string(),
                     bot_name: bad.to_string(),
                 })
@@ -434,12 +574,16 @@ mod tests {
         let (svc, _, _) = service(true, false);
         let token_view = svc
             .issue_register_token(IssueRegisterToken {
+                provider_id: None,
                 caller: human_caller("staff-1"),
             })
             .await
             .expect("issue");
         let error = svc
             .register_bot(RegisterBot {
+                mode: None,
+                provider_bot_ref: None,
+                webhook_url: None,
                 token: token_view.token,
                 bot_name: "ok-name".to_string(),
             })
@@ -453,12 +597,16 @@ mod tests {
         let (svc, _, onboarding) = service(false, true);
         let token_view = svc
             .issue_register_token(IssueRegisterToken {
+                provider_id: None,
                 caller: human_caller("staff-1"),
             })
             .await
             .expect("issue");
         let registration = svc
             .register_bot(RegisterBot {
+                mode: None,
+                provider_bot_ref: None,
+                webhook_url: None,
                 token: token_view.token,
                 bot_name: "ok-name".to_string(),
             })

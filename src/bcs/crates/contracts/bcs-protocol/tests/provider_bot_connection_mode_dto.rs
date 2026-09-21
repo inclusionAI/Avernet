@@ -4,6 +4,38 @@
 use bcs_protocol::http::{ProviderBotConnectionModeDto, RegisterProviderBotRequest};
 
 #[test]
+fn all_connection_mode_names_are_the_same_type() {
+    use std::any::TypeId;
+    use bcs_domain::{bot_provider::BotConnectionMode, provider::ProviderBotConnectionMode,
+        provider_registration_token::ProviderRegistrationMode};
+
+    let common = TypeId::of::<ProviderBotConnectionMode>();
+    assert_eq!(TypeId::of::<ProviderBotConnectionModeDto>(), common);
+    assert_eq!(TypeId::of::<ProviderRegistrationMode>(), common);
+    assert_eq!(TypeId::of::<BotConnectionMode>(), common);
+}
+
+#[test]
+fn registration_and_storage_preserve_the_existing_wire_values() {
+    use bcs_domain::{bot_provider::BotConnectionMode,
+        provider_registration_token::ProviderRegistrationMode};
+
+    for value in ["plugin", "gateway"] {
+        let json = serde_json::json!(value);
+        let registration: ProviderRegistrationMode = serde_json::from_value(json.clone()).unwrap();
+        let stored: BotConnectionMode = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(registration).unwrap(), json);
+        assert_eq!(serde_json::to_value(stored).unwrap(), json);
+    }
+    for value in ["upstream", "Plugin", "Gateway", "", "bogus"] {
+        let json = serde_json::json!(value);
+        assert!(serde_json::from_value::<ProviderBotConnectionModeDto>(json.clone()).is_err());
+        assert!(serde_json::from_value::<ProviderRegistrationMode>(json.clone()).is_err());
+        assert!(serde_json::from_value::<BotConnectionMode>(json).is_err());
+    }
+}
+
+#[test]
 fn absent_connection_mode_parses_as_none_and_defaults_to_gateway() {
     let req: RegisterProviderBotRequest = serde_json::from_str(
         r#"{

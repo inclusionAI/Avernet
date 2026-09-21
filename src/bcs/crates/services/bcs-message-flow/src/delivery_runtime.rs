@@ -417,7 +417,7 @@ impl DeliveryRuntime {
                                                 error = ?result.error,
                                                 "delivery explicitly rejected; marking terminal failed"
                                             );
-                                            Event::Failed
+                                            Event::TransportRejected
                                         }
                                         _ => {
                                             tracing::warn!(delivery_id = %id, %request_id, "delivery outcome unknown; no automatic resend");

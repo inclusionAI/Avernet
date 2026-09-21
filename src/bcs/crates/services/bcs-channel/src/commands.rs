@@ -1,8 +1,8 @@
-//! Channel(IM)slash 命令拦截：`/new` 会话重置。
+//! Channel(IM)slash 命令拦截：会话重置和队列控制。
 //!
-//! 当前仅支持 `/new`：归档当前会话（Running → Completed，历史保留），
-//! 后续消息经既有 lazy rollover 自动创建全新会话。解析器为 match 结构，
-//! 后续命令（/help 等）在这里扩展。
+//! `/new` 归档当前会话；`/abort` 终止当前会话的 active Bot run；
+//! `/cacel`（兼容 `/cancel`）只取消当前 Human 最近一条尚未发出的 IM
+//! 排队消息。命令不会作为普通聊天内容转发给 Bot。
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -30,12 +30,16 @@ pub(crate) const STATE_MACHINE_STARTING_TEXT: &str = "流程正在启动，请�
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChannelCommand {
     NewSession,
+    Abort,
+    CancelQueued,
 }
 
 /// 仅精确匹配（去首尾空白）；`/new foo`、`//new` 视为普通消息。
 pub(crate) fn parse_channel_command(text: &str) -> Option<ChannelCommand> {
     match text.trim() {
         "/new" => Some(ChannelCommand::NewSession),
+        "/abort" => Some(ChannelCommand::Abort),
+        "/cacel" | "/cancel" => Some(ChannelCommand::CancelQueued),
         _ => None,
     }
 }
@@ -237,6 +241,14 @@ impl BcsChannelService {
                 let ctx = self.resolve_inbound_context(binding, msg, actor_id).await?;
                 self.execute_new_session(&ctx, binding, msg).await?;
             }
+            ChannelCommand::Abort => {
+                let ctx = self.resolve_inbound_context(binding, msg, actor_id).await?;
+                self.execute_abort(&ctx, binding, msg, actor_id).await?;
+            }
+            ChannelCommand::CancelQueued => {
+                let ctx = self.resolve_inbound_context(binding, msg, actor_id).await?;
+                self.execute_cancel_queued(&ctx, binding, msg, actor_id).await?;
+            }
         }
         Ok(Some(()))
     }
@@ -261,6 +273,7 @@ impl BcsChannelService {
                 &msg.conversation_type,
                 ctx.im_user_id.as_deref(),
                 "",
+                "new",
                 RESET_QUEUED_TEXT,
                 Some(&msg.msg_id),
             )
@@ -297,6 +310,7 @@ impl BcsChannelService {
                 &msg.conversation_type,
                 ctx.im_user_id.as_deref(),
                 "",
+                "new",
                 NOTHING_TO_RESET_TEXT,
                 Some(&msg.msg_id),
             )
@@ -326,6 +340,7 @@ impl BcsChannelService {
                     &msg.conversation_type,
                     ctx.im_user_id.as_deref(),
                     &session.id,
+                    "new",
                     STATE_MACHINE_STARTING_TEXT,
                     Some(&msg.msg_id),
                 )
@@ -382,6 +397,7 @@ impl BcsChannelService {
             &msg.conversation_type,
             ctx.im_user_id.as_deref(),
             &old_session_id,
+            "new",
             RESET_QUEUED_TEXT,
             Some(&msg.msg_id),
         )
@@ -466,6 +482,7 @@ impl BcsChannelService {
                         &reset.im_conversation_type,
                         reset.im_user_id.as_deref(),
                         &reset.old_session_id,
+                        "new",
                         RESET_DONE_TEXT,
                         Some(&reset.source_im_message_id),
                     )
@@ -561,7 +578,7 @@ impl BcsChannelService {
         self.execute_deferred_reset(reset).await;
     }
 
-    async fn execute_deferred_reset(&self, reset: PendingSessionReset) {
+    pub(crate) async fn execute_deferred_reset(&self, reset: PendingSessionReset) {
         if let Err(error) = self.execute_session_reset(reset).await {
             warn!(error = %error, "channel command: deferred session reset failed");
         }
@@ -571,13 +588,14 @@ impl BcsChannelService {
     /// 不依赖 try_outbound —— 无会话场景（/new 为首条消息）没有可供
     /// 路由的 session。bcs_session_id 在无会话时传空串。
     #[allow(clippy::too_many_arguments)]
-    async fn send_command_reply(
+    pub(crate) async fn send_command_reply(
         &self,
         binding: &ChannelBinding,
         im_conversation_id: &str,
         im_conversation_type: &str,
         im_user_id: Option<&str>,
         bcs_session_id: &str,
+        command: &'static str,
         text: &str,
         source_im_message_id: Option<&str>,
     ) -> Result<(), ChannelUseCaseError> {
@@ -610,7 +628,7 @@ impl BcsChannelService {
                 text: Some(text.to_string()),
                 raw_payload: serde_json::json!({
                     "type": "channel.command",
-                    "command": "new",
+                    "command": command,
                 }),
                 render_hint: crate::ChannelRenderHint::Render,
                 source_im_message_id: source_im_message_id.map(str::to_string),
@@ -650,6 +668,15 @@ mod tests {
     #[test]
     fn parse_accepts_exact_new_command() {
         assert_eq!(parse_channel_command("/new"), Some(ChannelCommand::NewSession));
+        assert_eq!(parse_channel_command("/abort"), Some(ChannelCommand::Abort));
+        assert_eq!(
+            parse_channel_command("/cacel"),
+            Some(ChannelCommand::CancelQueued)
+        );
+        assert_eq!(
+            parse_channel_command("/cancel"),
+            Some(ChannelCommand::CancelQueued)
+        );
     }
 
     #[test]
@@ -662,7 +689,9 @@ mod tests {
 
     #[test]
     fn parse_rejects_non_command_texts() {
-        for text in ["", "new", "/new x", "//new", "/NEW", "/new/"] {
+        for text in [
+            "", "new", "/new x", "//new", "/NEW", "/new/", "/abort now", "/CACEL",
+        ] {
             assert_eq!(parse_channel_command(text), None, "text: {text:?}");
         }
     }

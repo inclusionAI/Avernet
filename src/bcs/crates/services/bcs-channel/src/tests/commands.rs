@@ -1,6 +1,92 @@
 use super::*;
 
 #[tokio::test]
+async fn abort_command_targets_every_bot_in_the_current_session() -> TestResult {
+    let harness = TestHarness::new(manager_group("group_1")).await?;
+    create_group_binding(&harness, "group_1", GroupChatScope::ConversationShared).await?;
+    harness
+        .service
+        .handle_inbound(group_inbound(
+            "conv_1",
+            "u1",
+            Some("张三"),
+            "msg_1",
+            true,
+        ))
+        .await?;
+    harness
+        .message_flow
+        .abort_success_bots
+        .lock()
+        .await
+        .insert("manager_bot".to_string());
+
+    harness
+        .service
+        .handle_inbound(group_command("conv_1", "u1", "msg_abort", "/abort"))
+        .await?;
+
+    let mut targets = harness
+        .message_flow
+        .chat_aborts
+        .lock()
+        .await
+        .iter()
+        .map(|command| command.bot_id.clone())
+        .collect::<Vec<_>>();
+    targets.sort();
+    assert_eq!(targets, vec!["manager_bot", "worker_bot"]);
+    assert_eq!(harness.message_flow.web_sends.lock().await.len(), 1);
+    let events = harness.delivery.events.lock().await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].text.as_deref(),
+        Some(crate::queue_commands::ABORT_DONE_TEXT)
+    );
+    assert_eq!(events[0].raw_payload["command"], "abort");
+    Ok(())
+}
+
+#[tokio::test]
+async fn cacel_command_cancels_latest_queued_message_without_bot_send() -> TestResult {
+    let harness = TestHarness::new(manager_group("group_1")).await?;
+    create_group_binding(&harness, "group_1", GroupChatScope::ConversationShared).await?;
+    harness
+        .service
+        .handle_inbound(group_inbound(
+            "conv_1",
+            "u1",
+            Some("张三"),
+            "msg_1",
+            true,
+        ))
+        .await?;
+    *harness
+        .message_flow
+        .queued_cancellation_succeeds
+        .lock()
+        .await = true;
+
+    let mut command = group_command("conv_1", "u1", "msg_cancel", "/cacel");
+    command.is_at_bot = false;
+    harness.service.handle_inbound(command).await?;
+
+    let cancellations = harness.message_flow.queued_cancellations.lock().await;
+    assert_eq!(cancellations.len(), 1);
+    assert_eq!(cancellations[0].group_id, "group_1");
+    drop(cancellations);
+    assert_eq!(harness.message_flow.web_sends.lock().await.len(), 1);
+    let events = harness.delivery.events.lock().await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].text.as_deref(),
+        Some(crate::queue_commands::CANCEL_DONE_TEXT)
+    );
+    assert_eq!(events[0].raw_payload["command"], "cacel");
+    Ok(())
+}
+
+#[tokio::test]
 async fn sender_identity_forwarding_does_not_change_new_command_routing() -> TestResult {
     let harness = TestHarness::new(manager_group("group_1")).await?;
     let mut binding = active_binding(

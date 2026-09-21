@@ -17,7 +17,7 @@ use bcs_service_api::application::v1::{
 use bcs_service_api::{
     ActorKind, ActorStatus, BotUseCaseError, CoordinationMode, DeleteProviderBotCommand,
     ProviderAuthMode,
-    ProviderBotBinding, ProviderBotConnectionMode, ProviderBotRosterItem,
+    ProviderBotBinding, ProviderBotRosterItem,
     ProviderBotTaskModesFilter, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
     ProviderRecord, RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
     SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult, TaskModeMatch,
@@ -215,7 +215,7 @@ pub async fn register_provider_bot(
             // this so W-before-P /补注册 over an existing real-token bot proceeds to
             // the token-preserving soft-merge path.
             reject_existing_bot_uuid: allowed_switch_provider && !plugin_mode,
-            connection_mode: connection_mode_from_wire(connection_mode),
+            connection_mode,
         })
         .await
         .map_err(provider_error)?;
@@ -598,13 +598,6 @@ fn auth_mode_from_wire(mode: ProviderAuthModeDto) -> ProviderAuthMode {
         ProviderAuthModeDto::StaticBearer => ProviderAuthMode::StaticBearer,
         ProviderAuthModeDto::AgentPass => ProviderAuthMode::AgentPass,
         ProviderAuthModeDto::ProviderAdmin => ProviderAuthMode::ProviderAdmin,
-    }
-}
-
-fn connection_mode_from_wire(mode: ProviderBotConnectionModeDto) -> ProviderBotConnectionMode {
-    match mode {
-        ProviderBotConnectionModeDto::Gateway => ProviderBotConnectionMode::Gateway,
-        ProviderBotConnectionModeDto::Plugin => ProviderBotConnectionMode::Plugin,
     }
 }
 

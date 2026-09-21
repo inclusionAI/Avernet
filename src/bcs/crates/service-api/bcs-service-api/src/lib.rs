@@ -24,6 +24,8 @@ pub mod principal;
 pub mod types;
 pub mod workbench_use_cases;
 
+pub use bcs_domain::bot_provider;
+
 pub use actors::{
     ActorCapabilitiesView, ActorDirectoryEntry, ActorDirectoryService, ActorListCommand,
     ActorListResult, ActorSearchCommand, ActorSearchContext, ActorSearchResult,
@@ -163,7 +165,8 @@ pub use human_actors::{
 pub use message_flow::{
     A2aChatCommand, A2aChatOutcome, A2aChatRunService, A2aChatService, A2aRunStatus,
     AsyncA2aChatAccepted, AsyncA2aChatCommand,
-    BotEventCommand, BotEventOutcome, ChatAbortCommand, ChatAbortFailure, ChatAbortOutcome,
+    BotEventCommand, BotEventOutcome, CancelLatestQueuedMessageCommand,
+    CancelLatestQueuedMessageOutcome, ChatAbortCommand, ChatAbortFailure, ChatAbortOutcome,
     ChatAbortScope, ChatEventState, ChatResponseMode, ChatRunCancelCommand, ChatRunQueryCommand,
     Conflict, ConflictPosition,
     FusionRequest, FusionResponse, GroupCallbackCommand, GroupCallbackOutcome, GroupChatCommand,

@@ -377,12 +377,23 @@ impl ProviderManagementService for ProviderManagement {
         self.ensure_provider_admin_active(&command.provider_id, &command.provider_admin_token)
             .await?;
 
+        if let Some(result) = self.provider_bot_core.delete_registered_provider_bot(
+            &command.provider_id, &command.provider_admin_token, &command.provider_bot_ref,
+        ).await? {
+            self.channel_binding_cleanup.delete_bindings_for_bot(&result.bot_uuid).await?;
+            return Ok(DeleteProviderBotOutcome {
+                bot_uuid: result.bot_uuid, provider_id: command.provider_id,
+                provider_bot_ref: command.provider_bot_ref, deleted: result.deleted,
+            });
+        }
+        let mut was_active_binding = false;
         let binding = self
             .provider_bot_core
             .get_provider_bot_binding_by_ref(&command.provider_id, &command.provider_bot_ref)
             .await?;
         let bot_uuid = match binding {
             Some(binding) => {
+                was_active_binding = !binding.disabled;
                 if binding.provider_id != command.provider_id {
                     return Err(ServiceError::Forbidden("provider_id_mismatch".to_string()));
                 }
@@ -416,7 +427,7 @@ impl ProviderManagementService for ProviderManagement {
         // longer validate this bot as a target, then remove its channel bindings.
         // Cleanup failure is returned as an error; re-deleting is idempotent for
         // binding-backed bots because the provider binding row still resolves bot_uuid.
-        let deleted = self.registry.soft_delete(&bot_uuid).await;
+        let deleted = self.registry.soft_delete(&bot_uuid).await || was_active_binding;
         self.channel_binding_cleanup
             .delete_bindings_for_bot(&bot_uuid)
             .await?;

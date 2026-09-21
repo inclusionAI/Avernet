@@ -44,6 +44,7 @@ fn log_bot_cache_source(source: &'static str) {
 pub mod memory;
 pub mod provider;
 pub mod provider_cache;
+mod registration_create;
 
 #[cfg(test)]
 #[path = "../tests/unit/heartbeat.rs"]
@@ -390,7 +391,7 @@ impl PersistentBotRepo {
             // on the column default). UPSERT-style updates above intentionally
             // leave `status` untouched so a hidden actor stays hidden across
             // re-onboards (Requirement 3.16#7).
-            let sql = "INSERT INTO bcs_bots (bot_uuid, name, bot_info, session_token, created_by, visibility, status, actor_kind, agent_code, is_deleted, env, registered_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)";
+            let sql = "INSERT INTO bcs_bots (bot_uuid, name, bot_info, session_token, created_by, visibility, status, actor_kind, agent_code, is_deleted, env, registered_at, updated_at, connection_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)";
             self.db_execute_affected(sql, vec![
                 Value::from(bot_uuid),
                 Value::from(name),
@@ -409,6 +410,7 @@ impl PersistentBotRepo {
                 agent_code_value.clone(),
                 Value::from(0_i64),
                 Value::from(env.as_str()),
+                Value::from(bcs_service_api::bot_provider::BotConnectionMode::Plugin.as_str()),
             ]).await
         }.map_err(|e| {
             warn!(request_id = %bcs_observability::CurrentRequestId, bot_uuid = %bot_uuid, error = %e, "save_to_db: failed");
@@ -1140,6 +1142,16 @@ impl BotMetricsSnapshotPort for PersistentBotRepo {
 
 #[async_trait]
 impl BotRepoPort for PersistentBotRepo {
+    async fn try_load_token(&self, bot_id: &str) -> ServiceResult<Option<String>> {
+        self.load_registration_token(bot_id).await
+    }
+
+    async fn create_registration_if_absent(
+        &self, bot_id: String, capabilities: BotCapabilities, created_by: &str, token: &str,
+    ) -> ServiceResult<bool> {
+        self.create_registration_once(bot_id, capabilities, created_by, token).await
+    }
+
     // ===== Registration & Discovery =====
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {

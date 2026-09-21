@@ -48,6 +48,15 @@ if TYPE_CHECKING:
 
 logger = get_logger("core-bot-run")
 
+#: run 终态兜底检查的节流间隔（秒）。seq 未变化时轮询循环约 50ms 一轮，
+#: 若每轮都查 DB 会在空轮询期放大无效查询量（CPU 火焰图 ~5-10%）。
+_RUN_STATUS_CHECK_INTERVAL_SECONDS = 1.0
+
+#: 空闲轮询的起步间隔与退避上限（秒）。seq 未变化时间隔翻倍，一有新
+#: chunk 立即重置回起步档：活跃流保持低取数延迟，停顿的流降低空转频率。
+_POLL_BASE_INTERVAL_SECONDS = 0.05
+_POLL_MAX_INTERVAL_SECONDS = 0.5
+
 
 class QueueTaskMessageDispatcher:
     """队列化消息分发器
@@ -218,14 +227,17 @@ class QueueTaskMessageDispatcher:
         使用 ZCache watermark 避免空轮询：
         - 读取 cache key `run:{run_id}:seq` 获取最新 seq 和 chunk_type
         - 仅当 seq 变化时查 DB 取 chunk 内容
+        - 空闲时指数退避（50ms 起步、500ms 封顶），取到新 chunk 立即重置
 
         遇到 final/error chunk 后停止迭代。
         finally 块清理 chunk 表记录。
         """
         terminal_types = {"final", "error", "aborted"}
         last_seq = 0
+        poll_interval = _POLL_BASE_INTERVAL_SECONDS
         cache_key = f"run:{run_id}:seq"
         deadline = asyncio.get_event_loop().time() + timeout if timeout else None
+        last_status_check: float | None = None
 
         try:
             while True:
@@ -257,8 +269,10 @@ class QueueTaskMessageDispatcher:
                         pass
 
                 # 3. seq 有变化 → 查 DB 取新 chunks
+                fetched = 0
                 if wm_seq > last_seq:
                     chunks = self._chunk_repository.get_chunks_after(run_id, last_seq)
+                    fetched = len(chunks)
                     for chunk_rec in chunks:
                         last_seq = chunk_rec.seq
                         if chunk_rec.chunk_type == "agent":
@@ -302,21 +316,34 @@ class QueueTaskMessageDispatcher:
                             )
                         if chunk_rec.chunk_type in terminal_types:
                             return
+                if fetched:
+                    # 活跃流：本轮取到新 chunk，重置到起步档保持低取数延迟
+                    poll_interval = _POLL_BASE_INTERVAL_SECONDS
                 else:
-                    # seq 没变，短暂等待避免 busy-loop
-                    await asyncio.sleep(0.05)
+                    # seq 没变（或行尚不可见）：指数退避，空闲越久间隔越长，
+                    # 空转频率从 20 QPS 降到最低 2 QPS
+                    await asyncio.sleep(poll_interval)
+                    poll_interval = min(poll_interval * 2, _POLL_MAX_INTERVAL_SECONDS)
 
-                # 4. 检查 run 是否已终结（Worker 可能已崩溃）
-                run = self._run_repository.get_by_run_id(run_id)
-                if run and run.status in ("FAILED", "TIME_OUT", "ABORTED"):
-                    chunk_type = (
-                        "aborted" if run.status == "ABORTED" else "error"
-                    )
-                    yield StreamChunk(
-                        type=chunk_type,
-                        content=f"run terminated with status {run.status}",
-                    )
-                    return
+                # 4. 检查 run 是否已终结（Worker 可能已崩溃）。
+                #    兜底检查按固定间隔节流：首轮立即检查，之后至多每
+                #    _RUN_STATUS_CHECK_INTERVAL_SECONDS 秒查一次 DB。
+                now = asyncio.get_event_loop().time()
+                if (
+                    last_status_check is None
+                    or now - last_status_check >= _RUN_STATUS_CHECK_INTERVAL_SECONDS
+                ):
+                    last_status_check = now
+                    run = self._run_repository.get_by_run_id(run_id)
+                    if run and run.status in ("FAILED", "TIME_OUT", "ABORTED"):
+                        chunk_type = (
+                            "aborted" if run.status == "ABORTED" else "error"
+                        )
+                        yield StreamChunk(
+                            type=chunk_type,
+                            content=f"run terminated with status {run.status}",
+                        )
+                        return
 
         finally:
             if self._should_cleanup_chunks():

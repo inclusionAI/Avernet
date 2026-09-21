@@ -135,6 +135,14 @@ reverse order; disabled Eventing injects a capability-disabled application
 service and registers no worker lifecycle.
 It selects concrete V1 application facades and injects their Gateway Principal
 verifier, but does not own request-time business policy.
+Provider-scoped registration receives the shared Provider credential repository
+alongside Provider and Bot metadata repositories; gateway readiness policy stays
+in ProviderRegistrationCore. All assembly paths inject one binding projection
+selected by provider_http.downlink_detection_source (binding by default, or
+bot_connection_mode). The switch changes reads only; gateway writes remain dual.
+Historical membership correction is a separate deployment work order; no
+dedicated correction executable or DB operation is shipped. Startup applies
+additive schema but never guesses/backfills historical membership.
 
 ## Tests
 

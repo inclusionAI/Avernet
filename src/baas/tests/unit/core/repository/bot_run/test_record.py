@@ -29,7 +29,14 @@ class TestRunStatus:
 
     def test_all_statuses(self):
         values = {s.value for s in RunStatus}
-        assert values == {"PENDING", "RUNNING", "COMPLETED", "FAILED", "TIME_OUT", "ABORTED"}
+        assert values == {
+            "PENDING",
+            "RUNNING",
+            "COMPLETED",
+            "FAILED",
+            "TIME_OUT",
+            "ABORTED",
+        }
 
     def test_from_value(self):
         assert RunStatus("PENDING") is RunStatus.PENDING

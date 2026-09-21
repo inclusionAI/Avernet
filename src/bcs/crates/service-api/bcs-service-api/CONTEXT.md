@@ -2,6 +2,11 @@
 
 ## Provides
 
+MessageFlowService exposes a Human-scoped latest-queued cancellation command for
+IM adapters. It selects only the caller's newest canonical IM source in the
+requested Session and cancels only still-unsent Send deliveries; active work
+remains the separate scoped `chat.abort` contract.
+
 BotDeliveryResult distinguishes a complete downstream rejection
 (`delivered=false`) from an uncertain transport error (`Err`). A rejection is
 terminal and is never retryable by itself; safe retry still requires the
@@ -375,3 +380,24 @@ consumers must rebuild against 0.2.0. Bootstrap maps into the separate
 required.
 
 Provider management supports optional shared endpoints and saved Bot overrides. BotWebhookChange represents unchanged/inherit/set independently of HTTP; resolved BotDeliveryTarget still requires a concrete URL. Repository endpoint updates return persisted bindings or errors.
+
+OpenAPI RegisterService adds optional Provider selection at issuance and mode/ref/
+webhook at redemption. Optional metadata is omitted for legacy v1 responses.
+ProviderRegistrationCoreService owns scoped authorization and strict creation;
+BotProviderRepoPort replaces journal reservation/completion with Bot-owned Provider
+identity, cross-mode uniqueness and gateway-only dual writes. Duplicate scoped refs
+conflict without credential replay; different refs may share a valid register token.
+Shared receipt DTOs live in types (no repo-to-core dependency). Core and repository
+contracts have shared conformance harnesses, including Memory/SQLite implementations.
+No Plugin API changes. Token v2 purpose and mode claims cannot be widened during redemption.
+
+ProviderBotCoreService also owns authorized deletion by Bot Provider/ref metadata
+for both modes. ProviderManagement invokes this core operation before its legacy
+binding fallback and then performs channel cleanup; it never accesses the metadata
+repository directly. A missing metadata identity returns None, but storage and
+authorization errors propagate and must not trigger the fallback.
+
+BotRegistryCoreService/BotRepoPort add fail-closed `create_registration_if_absent`
+for this flow. It is atomic, preserves existing active/deleted identities and
+never uses upsert semantics; existing registration methods remain unchanged.
+Memory and persistent stores implement it, with race, tombstone and failure tests.

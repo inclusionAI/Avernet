@@ -545,9 +545,13 @@ name = "bcs-app-register"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
+ "bcs-api-http",
  "bcs-domain",
  "bcs-service-api",
+ "serde_json",
  "tokio",
+ "tower",
  "tracing",
 ]
 
@@ -718,6 +722,7 @@ dependencies = [
  "bcs-organization",
  "bcs-organization-store",
  "bcs-protocol",
+ "bcs-relation",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",
@@ -823,6 +828,7 @@ dependencies = [
  "async-trait",
  "bcs-service-api",
  "bytes",
+ "serde",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
@@ -1501,6 +1507,7 @@ dependencies = [
  "bcs-bot",
  "bcs-cache-api",
  "bcs-cache-local",
+ "bcs-channel-api",
  "bcs-chat-run-store",
  "bcs-config-api",
  "bcs-db-api",

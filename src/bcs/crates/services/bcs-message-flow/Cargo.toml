@@ -22,6 +22,7 @@ regex = { workspace = true }
 tokio = { workspace = true }
 
 bcs-domain = { workspace = true }
+bcs-channel-api = { workspace = true }
 bcs-config-api = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-chat-run-store = { workspace = true }
@@ -42,4 +43,4 @@ tracing-subscriber = { workspace = true }
 bcs-message-store = { workspace = true }
 bcs-test-support = { workspace = true }
 bcs-cache-local = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

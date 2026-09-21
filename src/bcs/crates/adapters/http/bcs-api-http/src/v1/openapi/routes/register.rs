@@ -1,10 +1,11 @@
 use axum::Router;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Extension, Json, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use bcs_service_api::application::v1::{AuthenticatedCaller, IssueRegisterToken, RegisterBot};
+use bcs_service_api::application::v1::ProviderRegistrationMode;
 use serde::Deserialize;
 
 use crate::v1::common::{
@@ -22,24 +23,35 @@ pub fn public_router() -> Router<ApiState> {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct RegisterTokenQuery {
+    pub provider_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct RegisterQuery {
     pub token: Option<String>,
     #[serde(alias = "bot-name")]
     pub bot_name: Option<String>,
+    pub mode: Option<ProviderRegistrationMode>,
+    pub provider_bot_ref: Option<String>,
+    pub webhook_url: Option<String>,
 }
 
 async fn get_register_token(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
+    query: Result<Query<RegisterTokenQuery>, QueryRejection>,
 ) -> Result<Response, ErrorResponse> {
+    let Query(query) = query.map_err(|_| invalid_request(&request_id, "invalid registration query"))?;
     let result = state
         .register_service
-        .issue_register_token(IssueRegisterToken { caller })
+        .issue_register_token(IssueRegisterToken { caller, provider_id: query.provider_id })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
         StatusCode::OK,
+        [(header::CACHE_CONTROL, "no-store")],
         Json(Envelope::success(20_000, "OK", result, request_id.0)),
     )
         .into_response())
@@ -51,7 +63,7 @@ async fn register_bot(
     query: Result<Query<RegisterQuery>, QueryRejection>,
 ) -> Result<Response, ErrorResponse> {
     let request_id = RequestId::from_headers(&headers);
-    let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let Query(query) = query.map_err(|_| invalid_request(&request_id, "invalid registration query"))?;
     let token = query
         .token
         .filter(|token| !token.is_empty())
@@ -63,11 +75,18 @@ async fn register_bot(
         .ok_or_else(|| invalid_request(&request_id, "missing required parameter: bot-name"))?;
     let result = state
         .register_service
-        .register_bot(RegisterBot { token, bot_name })
+        .register_bot(RegisterBot {
+            token,
+            bot_name,
+            mode: query.mode,
+            provider_bot_ref: query.provider_bot_ref,
+            webhook_url: query.webhook_url,
+        })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
         StatusCode::CREATED,
+        [(header::CACHE_CONTROL, "no-store")],
         Json(Envelope::success(20_100, "Created", result, request_id.0)),
     )
         .into_response())

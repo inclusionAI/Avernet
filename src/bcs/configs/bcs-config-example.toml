@@ -51,6 +51,12 @@ dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
 
+[provider_http]
+# Keep legacy binding reads during rollout. Both modes still write gateway bindings.
+# Select "bot_connection_mode" only after the fenced Provider/Bot backfill audit.
+# See docs/provider-bot-storage-migration.md for cutover and rollback requirements.
+downlink_detection_source = "binding"
+
 [gateway_principal]
 # Accept tokens minted by either the gateway or the backend (shared key).
 issuers = ["gateway", "backend"]

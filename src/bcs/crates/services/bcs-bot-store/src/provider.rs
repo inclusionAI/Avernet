@@ -1,6 +1,15 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+#[path = "bot_provider_storage.rs"]
+mod bot_storage;
+#[path = "memory_bot_provider_storage.rs"]
+mod memory_bot_storage;
+pub use memory_bot_storage::MemoryBotProviderStore;
+#[path = "provider_binding_projection.rs"]
+mod binding_projection;
+pub use binding_projection::ProviderBindingProjection;
+
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 use tracing::warn;
@@ -1421,6 +1430,7 @@ mod tests {
         .expect("create bcs_provider_bot_bindings");
         db.execute(DbStatement::new(
             "CREATE TABLE bcs_bots (
+                connection_mode TEXT DEFAULT 'plugin',
                 bot_uuid TEXT NOT NULL,
                 env TEXT NOT NULL,
                 name TEXT NOT NULL DEFAULT '',

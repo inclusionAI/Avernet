@@ -75,6 +75,11 @@ describe("run history keyword filtering", () => {
         expect(await read("?workflowId=wf&query=bot_one&botId=bot_two")).toMatchObject({ total: 0, runs: [] });
         expect(await read("?workflowId=wf&query=%25")).toMatchObject({ total: 0, runs: [] });
         expect((await read("?workflowId=wf&query=bot_one")).total).toBe(1);
+        // botId filter with wildcard view scope must use LIKE on origin_bot_id (botId:botOwnerId).
+        // Regression guard: previously used IN ('botId:%') which never matched real values.
+        const botFiltered = await read("?workflowId=wf&botId=bot_one");
+        expect(botFiltered.total).toBe(1);
+        expect(botFiltered.runs.map((r: { flow_id: string }) => r.flow_id)).toEqual(["old-match"]);
         for (const query of ["?query=foreign", "?workflowId=other", "?query=bot_one&workflowId=other"]) {
           const hidden = await read(query);
           expect(hidden.total).toBe(0);

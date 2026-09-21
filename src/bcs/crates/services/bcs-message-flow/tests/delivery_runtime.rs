@@ -231,6 +231,7 @@ async fn explicit_delivery_rejection_is_terminal_releases_lane_and_is_not_retrie
     let failed = wait_status(&service, "rejected", Status::Failed).await?;
     assert!(failed.state.may_have_been_sent);
     assert_eq!(failed.attempt_no, 1);
+    assert_eq!(failed.last_error_code, None);
     let unchanged = service.transition(event(&failed, Event::Completed)).await?;
     assert_eq!(unchanged.state.status, Status::Failed);
     wait_status(&service, "successor", Status::Dispatching).await?;
@@ -345,6 +346,7 @@ async fn websocket_disconnect_before_send_is_terminal_and_not_retried(
     let failed = wait_status(&service, "disconnected", Status::Failed).await?;
     assert!(failed.state.may_have_been_sent);
     assert_eq!(failed.attempt_no, 1);
+    assert_eq!(failed.last_error_code, None);
     assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 1);
     stop.send(true)?;
     task.await??;

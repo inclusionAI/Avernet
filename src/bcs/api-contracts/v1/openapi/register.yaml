@@ -15,6 +15,24 @@ RegisterTokenResult:
       description: Absolute token expiry in milliseconds since the Unix epoch.
     note:
       type: string
+    registration:
+      type: object
+      additionalProperties: false
+      required: [token_version, provider_id, allowed_modes]
+      description: Present only for scoped v2 tokens. Absence means legacy v1 issuance.
+      properties:
+        token_version:
+          type: integer
+          enum: [2]
+        provider_id:
+          type: string
+        allowed_modes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [plugin, gateway]
 
 BotRegistrationResult:
   type: object
@@ -28,10 +46,29 @@ BotRegistrationResult:
       type: string
     bot_uuid:
       type: string
-      description: Newly created Bot UUID.
+      description: Newly created Bot UUID. A duplicate scoped Provider/ref returns 409.
     bot_token:
       type: string
-      description: Credential the new Bot uses for WebSocket and HTTP auth. Shown once.
+      description: New Bot runtime credential, returned only on successful creation; never replayed, and never a Provider-admin or shared downlink credential.
+    registration:
+      type: object
+      additionalProperties: false
+      required: [provider_id, provider_bot_ref, mode, webhook_url, effective_webhook_url]
+      description: Present only for Provider-scoped registration. Does not indicate bridge process readiness.
+      properties:
+        provider_id:
+          type: string
+        provider_bot_ref:
+          type: string
+        mode:
+          type: string
+          enum: [plugin, gateway]
+        webhook_url:
+          type: [string, "null"]
+          description: Stored Bot override. Null means inherit Provider default for gateway; always null for plugin.
+        effective_webhook_url:
+          type: [string, "null"]
+          description: Current resolved gateway endpoint; null for plugin.
 
 RegisterTokenPath:
   get:
@@ -43,8 +80,23 @@ RegisterTokenPath:
       token; Bot, App, and AccessKey principals are rejected with 403. The token
       is an HMAC document signed by the deployment's invite secret, valid for six
       hours, and is the sole credential consumed by the anonymous POST /register.
+      Without provider_id this preserves the legacy v1 token and response.
+      With provider_id, the caller must own the enabled Provider or the Provider
+      must be explicitly approved for self-service registration by server config.
+      A v2 token fixes Provider and Human ownership and allowed modes; it cannot
+      be consumed by legacy /register. Neither a webhook nor downlink credential
+      readiness is required at token issuance.
     x-avernet-security:
       user: required
+    parameters:
+      - name: provider_id
+        in: query
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9_.:-]+$'
     responses:
       "200":
         description: Register token issued.
@@ -61,7 +113,7 @@ RegisterTokenPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal carries no Human identity.
+        description: Principal has no Human identity, is not authorized for this Provider, or Provider is disabled.
         x-error-codes:
           - forbidden
         content:
@@ -70,6 +122,20 @@ RegisterTokenPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
+      "400":
+        description: Invalid or blank Provider identifier.
+        x-error-codes: [invalid_request]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Provider does not exist.
+        x-error-codes: [provider_not_found]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
 
 RegisterPath:
   post:
@@ -80,6 +146,26 @@ RegisterPath:
       Anonymous endpoint. The register token is the only credential; BCS verifies
       the HMAC token before creating the Bot. The Bot is onboarded under the
       human actor encoded in the token, establishing ownership.
+      Mode defaults to plugin (upstream WebSocket/bridge connection), using the
+      same plugin/gateway values as Provider administration and Bot storage.
+      A v1 token cannot register gateway or Provider
+      options. A v2 token requires provider_bot_ref; Provider/owner cannot be
+      overridden by request parameters. Provider authorization is checked again
+      on redemption. Plugin saves membership without HTTP delivery binding.
+      Gateway uses webhook_url override or Provider default; only the Provider
+      creator/owners may set an override because delivery uses a shared Provider
+      credential. Self-service callers must use the Provider default. At least one usable
+      endpoint is required, together with an existing, enabled
+      downlink_bcs_to_provider credential with a nonblank secret. Gateway checks
+      these prerequisites before creation; plugin does not read or require
+      a downlink credential. Credential-store failures return 500, not a readiness
+      error. Provider/ref is unique across modes and retained after soft deletion.
+      Any duplicate scoped ref returns 409, including an identical retry.
+      A valid token can register multiple distinct refs. SQL Bot creation and
+      gateway binding creation are atomic; owner-edge failures are returned but
+      may leave an existing Bot requiring operator reconciliation. Registration is not an
+      endpoint-update or mode-migration API. Responses containing tokens must not
+      be cached. No bridge process is started by this API.
     x-avernet-security: {}
     parameters:
       - name: token
@@ -98,6 +184,30 @@ RegisterPath:
           type: string
           minLength: 2
           maxLength: 64
+      - name: mode
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [plugin, gateway]
+          default: plugin
+      - name: provider_bot_ref
+        in: query
+        required: false
+        description: Required with a Provider-scoped v2 token; stable identity within the Provider.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[A-Za-z0-9_.:-]+$'
+      - name: webhook_url
+        in: query
+        required: false
+        description: Optional gateway-only Bot override, restricted to Provider creator/owners. Self-service callers must omit it and inherit Provider default. Blank is invalid; subject to outbound URL policy.
+        schema:
+          type: string
+          format: uri
+          minLength: 1
     responses:
       "201":
         description: Bot registered with its credentials.
@@ -106,7 +216,7 @@ RegisterPath:
             schema:
               $ref: ../domain-models.yaml#/BotRegistrationEnvelope
       "400":
-        description: Missing or invalid parameters, or invalid name length.
+        description: Missing or invalid parameters, invalid name length, or gateway endpoint/downlink credential not ready.
         x-error-codes:
           - invalid_request
         content:
@@ -123,3 +233,24 @@ RegisterPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
+      "403":
+        description: Provider registration or webhook override is not authorized, or requested mode is outside token scope.
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Provider no longer exists.
+        x-error-codes: [provider_not_found]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Registration identity or previously registered Bot/delivery state conflicts.
+        x-error-codes: [registration_conflict]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope

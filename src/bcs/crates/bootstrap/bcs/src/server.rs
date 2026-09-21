@@ -1178,18 +1178,22 @@ pub struct BcsServerExtensions {
 
 #[derive(Clone)]
 struct ProviderRepoBundle {
+    bot_providers: Arc<dyn bcs_service_api::port::repo::bot_provider::BotProviderRepoPort>,
     provider_repo: Arc<dyn ProviderRepoPort>,
     provider_credentials: Arc<dyn ProviderCredentialRepoPort>,
     provider_bindings: Arc<dyn ProviderBotBindingRepoPort>,
     organization_candidates: Arc<dyn bcs_service_api::OrganizationCandidateReadPort>,
 }
 
-fn memory_provider_repos() -> ProviderRepoBundle {
+fn memory_provider_repos(bots: Arc<dyn bcs_service_api::BotRepoPort>, source: bcs_domain::bot_provider::DownlinkDetectionSource) -> ProviderRepoBundle {
     let store = Arc::new(MemoryProviderStore::new());
+    let bot_providers = Arc::new(bcs_bot_store::provider::MemoryBotProviderStore::new(bots, store.clone()));
+    let provider_bindings = Arc::new(bcs_bot_store::provider::ProviderBindingProjection::new(store.clone(), bot_providers.clone(), source));
     ProviderRepoBundle {
+        bot_providers,
         provider_repo: store.clone(),
         provider_credentials: store.clone(),
-        provider_bindings: store.clone(),
+        provider_bindings,
         organization_candidates: store,
     }
 }
@@ -1210,6 +1214,7 @@ fn db_sql_flavor(db_kind: &DbPluginKind) -> DbSqlFlavor {
 fn db_provider_repos(
     db_plugin: Arc<dyn bcs_db_api::DbPlugin>,
     db_kind: &DbPluginKind,
+    source: bcs_domain::bot_provider::DownlinkDetectionSource,
 ) -> ProviderRepoBundle {
     let store = match db_kind {
         DbPluginKind::LocalSqlite => Arc::new(DbProviderStore::sqlite(db_plugin)),
@@ -1221,10 +1226,12 @@ fn db_provider_repos(
             )
         }
     };
+    let provider_bindings = Arc::new(bcs_bot_store::provider::ProviderBindingProjection::new(store.clone(), store.clone(), source));
     ProviderRepoBundle {
+        bot_providers: store.clone(),
         provider_repo: store.clone(),
         provider_credentials: store.clone(),
-        provider_bindings: store.clone(),
+        provider_bindings,
         organization_candidates: store,
     }
 }
@@ -1316,7 +1323,7 @@ fn build_provider_services_with_webhook_url_guard(
         repos.provider_bindings.clone(),
         registry.clone(),
         webhook_url_guard,
-    ));
+    ).with_bot_provider_repo(repos.bot_providers.clone()));
     let provider_core: Arc<dyn ProviderCoreService> = provider_core_impl.clone();
     let provider_bot_core: Arc<dyn ProviderBotCoreService> = provider_core_impl;
     let mut provider_management = ProviderManagement::new(
@@ -1623,11 +1630,20 @@ fn build_openapi_v1_state(
     Arc<dyn bcs_service_api::InternalBotAttributesService>,
 ) {
     let relation_env = crate::env::resolve_env();
+    let provider_registration = Arc::new(bcs_bot::core::provider_registration::ProviderRegistrationCore::new(
+        provider_repos.provider_repo.clone(),
+        provider_repos.provider_credentials.clone(),
+        provider_repos.provider_bindings.clone(),
+        provider_repos.bot_providers.clone(),
+        registry.clone(), relation.clone(), relation_env.clone(),
+        config.openapi_v1.registration_self_service_provider_ids.clone(),
+        outbound_url_guard_from_config(config),
+    ));
     let control_plane = Arc::new(BotControlPlaneCore::new(
         control_plane_repo,
         provider_repos.provider_repo.clone(),
         provider_repos.provider_bindings.clone(),
-    ));
+    ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
     let bot_service = Arc::new(BotServiceImpl::new(
         control_plane.clone(),
         registry.clone(),
@@ -1727,7 +1743,7 @@ fn build_openapi_v1_state(
             bot_management,
             bot_onboarding,
             invite_token_secret.clone(),
-        ));
+        ).with_provider_registration(provider_registration));
     let collaboration_template_service: Arc<
         dyn bcs_service_api::application::v1::CollaborationTemplateService,
     > = Arc::new(V1CollaborationTemplateServiceImpl::new(
@@ -2114,8 +2130,8 @@ impl Default for BcsServerState {
                 .expect("Gateway Principal verifier configuration must be valid");
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
-        let provider_repos = memory_provider_repos();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(config.bots_base_dir.clone()));
+        let provider_repos = memory_provider_repos(bot_repo.clone(), config.provider_http.downlink_detection_source);
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
         let bot_core_arc: Arc<BotCore> = Arc::new(BotCore::with_provider_repos(
@@ -2123,7 +2139,7 @@ impl Default for BcsServerState {
             provider_repos.provider_repo.clone(),
             provider_repos.provider_credentials.clone(),
             provider_repos.provider_bindings.clone(),
-        ));
+        ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
         // F.1/F.2 dual-write wiring: relation store must be created BEFORE
         // friend_store and provider_management so it can be injected into both.
@@ -2135,7 +2151,7 @@ impl Default for BcsServerState {
                 control_plane_repo.clone(),
                 provider_repos.provider_repo.clone(),
                 provider_repos.provider_bindings.clone(),
-            ));
+            ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
@@ -3723,8 +3739,8 @@ impl BcsServer {
         // Create service implementations (synchronous, in-memory mode)
         assert!(!config.message_delivery.flow_enabled.group,
             "managed Group delivery requires the durable async server constructor");
-        let provider_repos = memory_provider_repos();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(config.bots_base_dir.clone()));
+        let provider_repos = memory_provider_repos(bot_repo.clone(), config.provider_http.downlink_detection_source);
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
         let bot_core_arc: Arc<BotCore> = Arc::new(BotCore::with_provider_repos(
@@ -3732,7 +3748,7 @@ impl BcsServer {
             provider_repos.provider_repo.clone(),
             provider_repos.provider_credentials.clone(),
             provider_repos.provider_bindings.clone(),
-        ));
+        ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
         // Local single-node mode uses an in-memory relation graph.
         // F.1/F.2 dual-write wiring: relation store must be created BEFORE
@@ -3745,7 +3761,7 @@ impl BcsServer {
                 control_plane_repo.clone(),
                 provider_repos.provider_repo.clone(),
                 provider_repos.provider_bindings.clone(),
-            ));
+            ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
@@ -4325,7 +4341,7 @@ impl BcsServer {
         let db_kind = infrastructure_plugins.db_kind();
         let db_flavor = db_sql_flavor(&db_kind);
         let event_repo = crate::eventing_wiring::db_event_repo(db_plugin.clone(), db_flavor);
-        let provider_repos = db_provider_repos(db_plugin.clone(), &db_kind);
+        let provider_repos = db_provider_repos(db_plugin.clone(), &db_kind, config.provider_http.downlink_detection_source);
 
         let cache_plugin = infrastructure_plugins
             .cache()
@@ -4343,7 +4359,7 @@ impl BcsServer {
             provider_repos.provider_repo.clone(),
             provider_repos.provider_credentials.clone(),
             provider_repos.provider_bindings.clone(),
-        ));
+        ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
 
         let leader_election_registration = if extensions.leader_election.is_some() {
@@ -4412,7 +4428,7 @@ impl BcsServer {
                 control_plane_repo.clone(),
                 provider_repos.provider_repo.clone(),
                 provider_repos.provider_bindings.clone(),
-            ));
+            ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let (provider_core, provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
@@ -5855,15 +5871,15 @@ mod tests {
     #[tokio::test]
     async fn provider_management_deletes_channel_bindings_when_provider_bot_is_deleted() {
         let temp_dir = tempfile::TempDir::new().expect("temp dir");
-        let provider_repos = memory_provider_repos();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
+        let provider_repos = memory_provider_repos(bot_repo.clone(), Default::default());
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_provider_repos(
             bot_repo,
             provider_repos.provider_repo.clone(),
             provider_repos.provider_credentials.clone(),
             provider_repos.provider_bindings.clone(),
-        ));
+        ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let relation: Arc<dyn bcs_service_api::RelationCoreService> =
             Arc::new(RelationCore::memory());
         let cleanup = Arc::new(RecordingChannelBindingCleanup::default());
@@ -5872,7 +5888,7 @@ mod tests {
                 control_plane_repo,
                 provider_repos.provider_repo.clone(),
                 provider_repos.provider_bindings.clone(),
-            ));
+            ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let (_provider_core, _provider_bot_core, provider_management) =
             build_provider_services_with_webhook_url_guard(
                 &provider_repos,

@@ -11,6 +11,7 @@
 
 pub mod actor;
 pub mod attachment;
+pub mod bot_provider;
 pub mod channel;
 pub mod collaboration;
 pub mod edge_permission;
@@ -25,6 +26,7 @@ pub mod organization;
 pub mod opening_message;
 pub mod proposal;
 pub mod provider;
+pub mod provider_registration_token;
 pub mod register;
 pub mod registry;
 pub mod routing;

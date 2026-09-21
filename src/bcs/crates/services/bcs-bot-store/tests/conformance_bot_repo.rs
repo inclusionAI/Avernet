@@ -11,7 +11,20 @@ use bcs_service_api::{
     ConnectStreamError, ServiceError, Skill, mock_token,
 };
 use bcs_test_support::contract::port::bot_metrics_snapshot_port_contract_tests;
+use bcs_test_support::contract::bot_registration_create::atomic_registration_creation_contract;
 use bcs_test_support::contract::repo::bot_repo_port_contract_tests;
+
+#[tokio::test]
+async fn conformance_memory_atomic_registration_creation() {
+    let temp = tempfile::tempdir().unwrap();
+    atomic_registration_creation_contract(&MemoryBotRepo::with_base_dir(temp.path().into())).await;
+}
+
+#[tokio::test]
+async fn conformance_persistent_atomic_registration_creation() {
+    let repo = PersistentBotRepo::with_sql_flavor(sqlite_db().await, bcs_db_api::DbSqlFlavor::Sqlite);
+    atomic_registration_creation_contract(&repo).await;
+}
 
 #[tokio::test]
 async fn persistent_bot_repo_passes_bot_repo_contract() {
@@ -680,6 +693,7 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     db.execute(DbStatement::new(
         "CREATE TABLE bcs_bots (
+                connection_mode TEXT DEFAULT 'plugin',
             bot_uuid TEXT NOT NULL,
             name TEXT,
             bot_info TEXT,
