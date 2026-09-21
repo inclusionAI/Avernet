@@ -13,7 +13,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from engine.community.plugin_api.workspace_root import workspace_root_strict
+from engine.community.plugin_api.workspace_root import workspace_root, workspace_root_strict
+from engine.community.plugins.file_count import count_files
 
 log = logging.getLogger("openclaw-port")
 
@@ -104,6 +105,10 @@ def _convert_path(target: str) -> Path:
 
 class _FilePortMixin:
     """Domain mixin: file system operations (local-infra, no gateway/pool/token)."""
+
+    async def count_files(self, path: str) -> dict[str, Any]:
+        """Count inside this engine's root, without legacy prefix remapping."""
+        return await count_files(workspace_root().parent, path)
 
     async def upload(self, target_path: str, content: bytes) -> dict[str, Any]:
         """Write ``content`` to ``target_path`` after path rewrite.

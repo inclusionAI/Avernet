@@ -14,6 +14,7 @@ provides:
 consumes:
   []
 internal_dependencies:
+  - agentclaw.community.kernel.file_count
   - agentclaw.community.kernel.publish_ignore
   - agentclaw.community.core.base
   - agentclaw.community.core.service_bot.services.baas_service  # BAAS dataclass (BotWsConnectionInfoResponse) typed in BaasServiceProtocol
