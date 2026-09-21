@@ -101,7 +101,7 @@ def format_task_node_business_instruction(
                 json.dumps(execution_payload, ensure_ascii=False),
                 "DECLINED 请求体示例如下；DECLINED payload 只能携带 execution_decision，不得携带 actual_goal、output、acceptance_result 或 gaps，不可伪造业务产出，原因写入 failure_reason：",
                 json.dumps(declined_payload, ensure_ascii=False),
-                "响应 data.relay_turn 是后续 PLAN/搜索/派发的唯一接力凭证，必须原样保存，不得自行生成。",
+                "响应 data.relay_turn 是后续 PLAN/搜索/派发的唯一接力凭证，必须原样保存，不得自行生成。ACCEPTED 和 DECLINED 都一样：HTTP 成功只是第4步完成，必须立即使用该凭证继续第5步；不得输出「等待引擎」后停止。",
                 f"5. 再次 GET {backend}/api/v1/collaboration/tasks/{task_id}/context，基于根 TaskSpec、all_done_output、本节点实际产出与验收事实重新计算 gaps。将 event_type=PLAN_RESULT POST 到 callback/report，payload={{gaps,next_task_spec}}；gaps 非空时 next_task_spec 必须是唯一下一棒 context+goal，节点 ID 由 Graph 生成；gaps=[] 时 next_task_spec=null，任务结束。PLAN_RESULT HTTP 成功且 gaps 非空时必须原样保存响应中的 target_node_id；未成功读取该值时只能用相同 event_id 原样重试本事件，不得进入搜索或派发。",
                 f"6. 若产生下一步节点，先根据该节点 goal、gap 和 instruction 构造搜索 query，再 POST {backend}/api/v1/collaboration/tasks/search，请求体只能传 {{\"query\": \"...\"}}。搜索接口只返回候选事实，不感知任务图，也不决定执行模态。",
                 "7. 根据搜索返回的真实字段，由 Skill 判断 HIT_SINGLE、HIT_MULTI_BOTS 或 MISS。向 callback/report 上报 event_type=DISPATCH_RESULT，payload 使用 outcome、run_mode、driver_bot_id、next_relay_bots；协作群 driver 必须属于 next_relay_bots，当前棒不进入下一棒群，Human 默认作为 observer。MISS 必须提供 miss_reason。",

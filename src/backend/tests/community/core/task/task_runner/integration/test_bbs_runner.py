@@ -324,6 +324,40 @@ def test_notify_reuses_existing_relay_bbs_node_for_dynamic_selection():
     assert "执行步骤：1、执行任务 2、通过post接口上报结果" not in relay_msg
 
 
+def test_notify_relay_empty_roster_keeps_bbs_node_pending_for_square():
+    """Relay MISS 动态选人失败时，BBS 节点保持 PENDING 等待广场认领。"""
+    graph = _FakeGraph()
+    execution_graph = _execution_graph("t-relay-square", _GOAL)
+    relay_node = TaskNode(
+        node_id="relay-bbs-square",
+        task_id="t-relay-square",
+        status=Status.PENDING,
+        task_spec=execution_graph.tasks[0].task_spec,
+        run_info=RuntimeInfo(run_mode="bbs"),
+        node_run_graph=None,
+    )
+    execution_graph.tasks.append(relay_node)
+    graph.dashboard = execution_graph
+    bot = _FakeBot(rates={})
+    bcn = _FakeBcn([])
+
+    _run(notify(
+        execution_graph,
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        target_node_id="relay-bbs-square",
+    ))
+
+    assert graph.claimed is None
+    assert graph.added_nodes == []
+    assert bot.sent_messages == []
+    assert relay_node.status is Status.PENDING
+    assert relay_node.run_info.assignee is None
+    assert relay_node.run_info.run_mode == "bbs"
+
+
 def test_notify_empty_roster_returns_silently():
     """空 roster → 静默返回(不 claim、不 send)。"""
     bot = _FakeBot(rates={})

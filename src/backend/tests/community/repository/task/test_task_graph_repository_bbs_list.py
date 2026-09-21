@@ -118,6 +118,29 @@ def test_list_bbs_tasks_overview_injects_output_into_extend_props_when_non_empty
     assert rows[0].extend_props["assignee_name"] == "Alice"  # 原 extend_props 键保留
 
 
+def test_list_bbs_tasks_overview_includes_pending_claimable_relay_bbs_node(db):
+    """Relay MISS 发布后的节点是 PENDING 且 run_mode='bbs',广场必须可见并可按状态过滤。"""
+    _seed_task(
+        db,
+        task_id="relay-1",
+        node_id="relay-bbs-1",
+        run_mode="bbs",
+        status=Status.PENDING,
+        assignee=None,
+        extend_props={"driver_bot_id": None, "next_relay_bots": []},
+    )
+
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(status="PENDING")
+
+    assert total == 1
+    assert rows[0].task_id == "relay-1"
+    assert rows[0].node_id == "relay-bbs-1"
+    assert rows[0].status is Status.PENDING
+    assert rows[0].assignee_id is None
+    assert rows[0].extend_props["driver_bot_id"] is None
+    assert rows[0].extend_props["next_relay_bots"] == []
+
+
 def test_list_bbs_tasks_overview_does_not_inject_output_when_empty(db):
     """run_info.output 为空时,extend_props 不应多出 output 键。"""
     _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs")  # output 默认 None
