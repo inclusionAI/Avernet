@@ -1,7 +1,27 @@
 #!/usr/bin/env bash
-# Keep this entry point and its agency_*.py helpers together.
+# Self-contained entry point for the agency-agent launcher.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CACHE_ROOT="${HOME}/.avernet/bcs/agency-agent/.bundle"
+CACHE_VERSION="v1"
+BUNDLE_DIR="$CACHE_ROOT/$CACHE_VERSION"
+if [[ ! -f "$SCRIPT_DIR/agency_launcher.py" ]]; then
+    if [[ ! -f "$BUNDLE_DIR/agency_launcher.py" ]]; then
+        mkdir -p "$CACHE_ROOT"
+        TMP_DIR="$(mktemp -d "$CACHE_ROOT/.download.XXXXXX")"
+        trap 'rm -rf "$TMP_DIR"' EXIT
+        # Use a fixed ref so the launcher never pulls a moving branch unexpectedly.
+        curl -fsSL "https://github.com/inclusionAI/Avernet/archive/refs/heads/dev.tar.gz" -o "$TMP_DIR/avernet.tar.gz"
+        tar -xzf "$TMP_DIR/avernet.tar.gz" -C "$TMP_DIR"
+        cp -R "$TMP_DIR/Avernet-dev/src/bcs/third-party/agency-agent/"* "$TMP_DIR/bundle/"
+        for module in agency_launcher.py agency_console.py agency_parallel.py agency_profiles.py agency_runtime.py; do
+            [[ -f "$TMP_DIR/bundle/$module" ]] || { printf 'Missing %s in downloaded bundle\n' "$module" >&2; exit 1; }
+        done
+        mkdir -p "$BUNDLE_DIR"
+        mv "$TMP_DIR/bundle"/* "$BUNDLE_DIR/"
+    fi
+    SCRIPT_DIR="$BUNDLE_DIR"
+fi
 if [[ -n "${AGENCY_PYTHON:-}" ]]; then
     exec "$AGENCY_PYTHON" "$SCRIPT_DIR/agency_launcher.py" "$@"
 fi
