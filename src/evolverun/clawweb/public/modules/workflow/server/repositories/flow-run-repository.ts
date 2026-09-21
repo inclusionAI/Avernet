@@ -212,8 +212,8 @@ export class FlowRunRepository {
         conds.push("1 = 0");
       } else if (!options.allowedBotIds.includes("*")) {
         const patterns = options.allowedBotIds.map((id) => `${id}:%`);
-        const placeholders = patterns.map(() => "?").join(",");
-        conds.push(`(origin_bot_id IN (${placeholders}) OR origin_bot_id IS NULL OR origin_bot_id = '')`);
+        const placeholders = patterns.map(() => "origin_bot_id LIKE ?").join(" OR ");
+        conds.push(`(${placeholders} OR origin_bot_id IS NULL OR origin_bot_id = '')`);
         params.push(...patterns);
       }
     }
