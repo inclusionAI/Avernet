@@ -372,7 +372,7 @@ class TestClawMind:
         assert len(eg["tasks"]) == 1
         assert eg["tasks"][0]["node_id"] == "N1"
         assert eg["tasks"][0]["status"] == "DONE"
-        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "N1"   # 无 node_title → 退 node_id
+        assert eg["tasks"][0]["task_spec"]["context"]["title"] == "N1"   # 无 node_title → 退 node_id
         assert eg["tasks"][0]["run_info"]["output"] == {"answer": 42}
         assert eg["relations"] == []
         assert rec.extend_props is None               # claw_mind 无额外扩展
@@ -531,7 +531,7 @@ class TestBCNStateMachine:
         assert eg["extend_props"]["definition"] == {"name": "sm"}
         assert len(eg["tasks"]) == 1 and eg["tasks"][0]["node_id"] == "N1"
         assert eg["tasks"][0]["status"] == "DONE"           # 节点执行 status=completed → DONE
-        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "Step1"  # display_name
+        assert eg["tasks"][0]["task_spec"]["context"]["title"] == "Step1"  # display_name
         assert eg["tasks"][0]["run_info"]["assignee"] == "b1"
         assert eg["tasks"][0]["run_info"]["extend_props"] == {"attempt": 1, "outcome": "success",
                                                               "status": "completed"}

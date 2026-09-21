@@ -59,7 +59,7 @@ class TestEnrichClawMind:
         assert eg["status"] == "DONE"                   # succeeded → DONE
         assert eg["tasks"][0]["node_id"] == "N1"
         assert eg["tasks"][0]["status"] == "DONE"
-        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "N1"   # 无 node_title → 退 node_id
+        assert eg["tasks"][0]["task_spec"]["context"]["title"] == "N1"   # 无 node_title → 退 node_id
         assert eg["tasks"][0]["run_info"]["output"] == {"answer": 42}
         assert eg["extend_props"]["origin_session_id"] == "S-9"
         assert eg["relations"] == []                    # N1 无 nodeOutputKeys
@@ -100,7 +100,7 @@ class TestEnrichBcn:
         assert eg["extend_props"]["definition"] == {"name": "sm"}
         assert eg["tasks"][0]["node_id"] == "N1"
         assert eg["tasks"][0]["status"] == "DONE"        # 节点 completed → DONE
-        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "Step1"   # display_name
+        assert eg["tasks"][0]["task_spec"]["context"]["title"] == "Step1"   # display_name
         assert eg["relations"] == [{"src_id": "N1", "dst_id": "N2",
                                     "type": "DEPENDENCY", "extend_props": {}}]
 

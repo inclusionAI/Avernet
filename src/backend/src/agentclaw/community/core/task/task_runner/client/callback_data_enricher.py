@@ -180,8 +180,15 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
             "task_id": "",
             "status": status.value,
             "task_spec": {
-                "metadata": {"task_id": node_id, "title": title, "instruction": ""},
-                "context": {"background": "", "extend_props": {}},
+                "context": {
+                    "title": title,
+                    "background": "",
+                    "extend_props": {
+                        "deliverables": [],
+                        "constraints": [],
+                        "resources": [],
+                    },
+                },
                 "goal": {"objective": "", "acceptances": []},
             },
             "run_info": {
@@ -297,8 +304,15 @@ def _bcn_node_task(dag_node: dict, exec_node: dict) -> dict[str, Any]:
         "task_id": "",
         "status": _bcn_node_status(ex_status).value,
         "task_spec": {
-            "metadata": {"task_id": nid, "title": title, "instruction": ""},
-            "context": {"background": "", "extend_props": {}},
+            "context": {
+                "title": title,
+                "background": "",
+                "extend_props": {
+                    "deliverables": [],
+                    "constraints": [],
+                    "resources": [],
+                },
+            },
             "goal": {"objective": "", "acceptances": []},
         },
         "run_info": {

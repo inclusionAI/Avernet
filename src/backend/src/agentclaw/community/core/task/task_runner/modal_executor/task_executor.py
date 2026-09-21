@@ -866,7 +866,7 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                     relay_blackboard=gf.extend_props.get("relay_blackboard"),
                 )
             elif str(_task_instruction).lstrip().startswith("# 接自"):
-                # 接力协作群(static_plan):真正的多 bot 协作群 task_instruction 由 engine 直取 raw metadata.instruction,未走
+                # 接力协作群(static_plan):真正的多 bot 协作群 task_instruction 由 engine 从 TaskSpec 业务事实派生,未走
                 # format_execute,缺 _static_relay_closure(承接→执行→交接三步硬约束)+ 中文输出约束。此处按需(以 '三步缺一不可'
                 # 标记判定,避免 singlebot_2_group 已含 closure 重复注入)补齐 closure+中文+driver/reporter 脚注,不重复 目标/验收标准。
                 _ctx_body = _task_instruction.rstrip()

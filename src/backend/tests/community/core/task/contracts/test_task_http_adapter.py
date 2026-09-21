@@ -451,6 +451,8 @@ class TestTaskList:
         records = r.json()["data"]
         assert [record["task_id"] for record in records] == ["other-user-task"]
         assert records[0]["owner_user_id"] == "other-user"
+        assert "metadata" not in records[0]["task_spec"]
+        assert records[0]["task_spec"]["context"]["title"] == ""
 
     def test_list_filters_persisted_status(self, client):
         c, _ = client

@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from agentclaw.community.core.task.repository.serializers import task_spec_from_dict
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.task_context.task_trajectory.models import TaskTrajectory
@@ -468,9 +469,8 @@ def execution_graph_to_product_status(execution_graph: Any) -> Any:
 
     ``execution_graph`` is a third-party execution snapshot stored as a plain
     dictionary, so it does not pass through :func:`graph_to_dto`'s typed graph
-    conversion. Normalize only the graph-level ``status`` and each direct
-    task's ``status`` at the HTTP response boundary, leaving the stored
-    execution snapshot and nested metadata untouched.
+    conversion. Normalize graph/task statuses and project nested TaskSpec
+    values to the canonical ``context + goal`` response shape.
     """
     if not isinstance(execution_graph, dict):
         return execution_graph
@@ -482,14 +482,12 @@ def execution_graph_to_product_status(execution_graph: Any) -> Any:
     raw_tasks = normalized.get("tasks")
     if isinstance(raw_tasks, list):
         normalized["tasks"] = [
-            (
-                {
-                    **task,
-                    "status": runtime_status_to_product_status(task["status"]),
-                }
-                if isinstance(task, dict) and "status" in task
-                else task
-            )
+            {
+                **task,
+                **({"status": runtime_status_to_product_status(task["status"])} if "status" in task else {}),
+                **({"task_spec": task_spec_from_dict(task["task_spec"]).to_dict()} if isinstance(task.get("task_spec"), dict) else {}),
+            }
+            if isinstance(task, dict) else task
             for task in raw_tasks
         ]
     return normalized
@@ -759,7 +757,7 @@ def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
             if record.execution_config is not None
             else None
         ),
-        task_spec=dict(record.task_spec),
+        task_spec=task_spec_from_dict(record.task_spec).to_dict(),
         status=runtime_status_to_product_status(record.status),
         gmt_create=record.gmt_create,
         gmt_modified=record.gmt_modified,
@@ -768,8 +766,8 @@ def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
 
 def bbs_task_overview_to_dto(record) -> BbsTaskItemDTO:
     """BbsTaskOverviewRecord -> BbsTaskItemDTO(Rule 22):二次解析 task_spec/extend_props。"""
-    task_spec = record.task_spec or {}
-    metadata = task_spec.get("metadata") or {}
+    task_spec = task_spec_from_dict(record.task_spec or {}).to_dict()
+    context = task_spec.get("context") or {}
     goal = task_spec.get("goal") or {}
     extend_props = record.extend_props or {}
     return BbsTaskItemDTO(
@@ -785,7 +783,7 @@ def bbs_task_overview_to_dto(record) -> BbsTaskItemDTO:
         relay_begin_time=record.relay_begin_time,
         relay_end_time=record.relay_end_time,
         task_spec=dict(task_spec),
-        title=metadata.get("title"),
+        title=context.get("title") or goal.get("objective"),
         goal=goal.get("objective"),
         acceptances=goal.get("acceptances"),
         assignee_name=extend_props.get("assignee_name"),

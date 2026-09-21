@@ -163,7 +163,7 @@ class TestClawMind:
         assert len(eg["tasks"]) == 1
         assert eg["tasks"][0]["node_id"] == "N1"
         assert eg["tasks"][0]["status"] == "DONE"
-        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "N1"  # 无 node_title → 退 node_id
+        assert eg["tasks"][0]["task_spec"]["context"]["title"] == "N1"  # 无 node_title → 退 node_id
         assert eg["tasks"][0]["run_info"]["output"] == {"answer": 42}
         assert eg["relations"] == []                        # N1 无 nodeOutputKeys
         assert d["_raw_callback_body"] == self._BODY            # 原始 body → orig_callback_data
@@ -319,9 +319,8 @@ class TestClawMind:
         report = nodes["report"]
         assert report["task_id"] == ""
         assert report["status"] == "DONE"
-        assert report["task_spec"]["metadata"]["task_id"] == "report"
-        assert report["task_spec"]["metadata"]["title"] == "调研报告"
-        assert report["task_spec"]["metadata"]["instruction"] == ""
+        assert "metadata" not in report["task_spec"]
+        assert report["task_spec"]["context"]["title"] == "调研报告"
         assert report["task_spec"]["goal"]["acceptances"] == []
         assert report["run_info"]["start_time"] == 1787719266000   # 秒 → 毫秒
         assert report["run_info"]["end_time"] == 1787719384000
@@ -390,7 +389,7 @@ class TestClawMind:
         g = _claw_mind_graph(body, "result")
         assert g["status"] == "FAILED"
         assert g["tasks"][0]["status"] == "FAILED"
-        assert g["tasks"][0]["task_spec"]["metadata"]["title"] == "调研拆题"
+        assert g["tasks"][0]["task_spec"]["context"]["title"] == "调研拆题"
         assert g["tasks"][0]["run_info"]["extend_props"]["error_text"] == "boom"
 
     def test_execution_graph_filters_dangling_edges(self):

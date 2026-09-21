@@ -149,7 +149,15 @@ def test_execution_graph_statuses_are_mapped_at_product_boundary():
     execution_graph = {
         "status": "PENDING",
         "tasks": [
-            {"node_id": "n1", "status": "RUNNING"},
+            {
+                "node_id": "n1",
+                "status": "RUNNING",
+                "task_spec": {
+                    "metadata": {"task_id": "n1", "title": "旧标题", "instruction": "旧目标"},
+                    "context": {"background": "背景", "extend_props": {}},
+                    "goal": {"objective": "", "acceptances": []},
+                },
+            },
             {"node_id": "n2", "status": "HUNG"},
             {"node_id": "n3", "status": "DONE", "run_info": {"status": "completed"}},
         ],
@@ -164,8 +172,11 @@ def test_execution_graph_statuses_are_mapped_at_product_boundary():
         "REVIEWING",
         "DONE",
     ]
-    # Only the graph and direct task statuses are projected; nested metadata is untouched.
     assert normalized["extend_props"]["status"] == "completed"
+    normalized_spec = normalized["tasks"][0]["task_spec"]
+    assert "metadata" not in normalized_spec
+    assert normalized_spec["context"]["title"] == "旧标题"
+    assert normalized_spec["goal"]["objective"] == "旧目标"
     assert execution_graph["status"] == "PENDING"
     assert execution_graph["tasks"][0]["status"] == "RUNNING"
 
