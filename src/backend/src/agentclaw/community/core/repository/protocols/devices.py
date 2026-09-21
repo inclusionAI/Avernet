@@ -268,10 +268,28 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
-    def reuse_released_baas_desktop_binding_if_matches(
+    def detach_released_baas_desktop_binding_if_matches(
         self,
         *,
         binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        device_id: str,
+        entity_id: str,
+        env: str,
+        expected_client_id: str,
+        expected_callback_token: str,
+    ) -> bool:
+        """Detach one retained Bot from its matching released Desktop binding."""
+        ...
+
+    @abstractmethod
+    def recover_baas_desktop_creation_binding_if_matches(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
         device_id: str,
         entity_id: str,
         env: str,
@@ -281,11 +299,22 @@ class DeviceBindingRepository(Protocol):
         apply_reason: str | None,
         applied_by: str,
     ) -> bool:
-        """Reuse only the released BaaS binding from this Desktop create.
+        """Recover a released or pending orphan from this Desktop create.
 
-        The released row, ownership scope, environment, provider, and persisted
-        Desktop callback credentials are checked atomically before reuse.
+        The claimed Bot, ownership scope, environment, provider, status, current
+        links, and persisted Desktop callback credentials are checked atomically.
         """
+        ...
+
+    @abstractmethod
+    def claim_baas_desktop_data_init_trigger_if_ready(
+        self,
+        *,
+        binding_id: int,
+        device_id: str,
+        startup_identity: str,
+    ) -> bool:
+        """Claim a confirmed Pool trigger once Binding and Bot are ready."""
         ...
 
     @abstractmethod

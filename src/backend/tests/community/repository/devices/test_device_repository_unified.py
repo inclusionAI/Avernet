@@ -412,7 +412,7 @@ def test_reuse_binding_clears_release_fields(repo):
     assert rec.last_alive_at is None
 
 
-def test_reuse_released_desktop_binding_requires_exact_creation_context(repo):
+def test_reuse_released_desktop_binding_requires_exact_creation_context(repo, db):
     bid = repo.insert_binding(
         **_binding(
             entity_id="u001",
@@ -432,9 +432,21 @@ def test_reuse_released_desktop_binding_requires_exact_creation_context(repo):
         release_reason="Desktop bot creation did not persist",
         released_by="u001",
     )
+    _bot(
+        db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        status="PROVISIONING",
+        device_id=None,
+        binding_id=None,
+        env="dev",
+    )
 
-    reused = repo.reuse_released_baas_desktop_binding_if_matches(
+    reused = repo.recover_baas_desktop_creation_binding_if_matches(
         binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
         device_id="desktop-bot-uuid",
         entity_id="u001",
         env="dev",
@@ -456,8 +468,15 @@ def test_reuse_released_desktop_binding_requires_exact_creation_context(repo):
     assert binding.release_reason is None
     assert binding.released_by is None
     assert binding.released_at is None
-    assert repo.reuse_released_baas_desktop_binding_if_matches(
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="desktop-bot").one()
+        bot.status = "PENDING"
+        bot.binding_id = bid
+        bot.device_id = "desktop-bot-uuid"
+    assert repo.recover_baas_desktop_creation_binding_if_matches(
         binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
         device_id="desktop-bot-uuid",
         entity_id="u001",
         env="dev",
@@ -475,6 +494,7 @@ def test_reuse_released_desktop_binding_requires_exact_creation_context(repo):
 )
 def test_reuse_released_desktop_binding_rejects_foreign_creation_context(
     repo,
+    db,
     expected_client_id,
     expected_callback_token,
 ):
@@ -492,9 +512,21 @@ def test_reuse_released_desktop_binding_rejects_foreign_creation_context(
         )
     )
     repo.release_binding(binding_id=bid, release_reason="done", released_by="u001")
+    _bot(
+        db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        status="PROVISIONING",
+        device_id=None,
+        binding_id=None,
+        env="dev",
+    )
 
-    reused = repo.reuse_released_baas_desktop_binding_if_matches(
+    reused = repo.recover_baas_desktop_creation_binding_if_matches(
         binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
         device_id="desktop-bot-uuid",
         entity_id="u001",
         env="dev",
@@ -507,6 +539,265 @@ def test_reuse_released_desktop_binding_rejects_foreign_creation_context(
 
     assert reused is False
     assert repo.get_by_id(bid).status == "RELEASED"
+
+
+def test_detach_released_desktop_binding_repairs_retained_bot(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            device_props={
+                "client_id": "client-1",
+                "callback_token": "token-1",
+            },
+        )
+    )
+    _bot(
+        db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        active_engine="openclaw",
+        device_id="desktop-bot-uuid",
+        binding_id=bid,
+        status="PENDING",
+        env="dev",
+    )
+    repo.release_binding(
+        binding_id=bid,
+        release_reason="Desktop bot creation did not persist",
+        released_by="u001",
+    )
+
+    repaired = repo.detach_released_baas_desktop_binding_if_matches(
+        binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id="client-1",
+        expected_callback_token="token-1",
+    )
+
+    assert repaired is True
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="desktop-bot").one()
+        assert bot.status == "PENDING"
+        assert bot.binding_id is None
+        assert bot.device_id is None
+
+
+@pytest.mark.parametrize("status", ["RELEASED", "PENDING"])
+def test_recover_desktop_creation_binding_accepts_only_matching_orphan(
+    repo, db, status
+):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            status=status,
+            device_props={
+                "client_id": "client-1",
+                "callback_token": "token-1",
+                "publish_id": "16",
+            },
+        )
+    )
+    if status == "RELEASED":
+        repo.release_binding(
+            binding_id=bid,
+            release_reason="Desktop bot creation did not persist",
+            released_by="u001",
+        )
+    _bot(
+        db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        status="PROVISIONING",
+        device_id=None,
+        binding_id=None,
+        env="dev",
+    )
+
+    recovered = repo.recover_baas_desktop_creation_binding_if_matches(
+        binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id="client-1",
+        expected_callback_token="token-1",
+        device_props={
+            "client_id": "client-1",
+            "callback_token": "token-1",
+            "publish_id": "17",
+        },
+        apply_reason="Create desktop bot: Desktop",
+        applied_by="u001",
+    )
+
+    assert recovered is True
+    binding = repo.get_by_id(bid)
+    assert binding.status == "PENDING"
+    assert binding.device_props["publish_id"] == "17"
+    assert binding.release_reason is None
+
+
+def test_recover_desktop_creation_binding_rejects_foreign_bot_link(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            status="PENDING",
+            device_props={
+                "client_id": "client-1",
+                "callback_token": "token-1",
+            },
+        )
+    )
+    _bot(
+        db,
+        bot_id="foreign-bot",
+        owner_id="other-owner",
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        env="dev",
+    )
+    _bot(
+        db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        status="PROVISIONING",
+        env="dev",
+    )
+
+    assert repo.recover_baas_desktop_creation_binding_if_matches(
+        binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id="client-1",
+        expected_callback_token="token-1",
+        device_props={"client_id": "client-1", "callback_token": "token-1"},
+        apply_reason="Create desktop bot: Desktop",
+        applied_by="u001",
+    ) is False
+
+
+def test_desktop_data_init_trigger_claim_is_current_and_once(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            status="ACTIVE",
+            device_props={
+                "restart_publish_id": "17",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        status="ACTIVE",
+        env="dev",
+        ext=json.dumps(
+            {
+                "start_status": "SUCCEEDED",
+                "data_init_status": "pending_init",
+            }
+        ),
+    )
+
+    assert repo.claim_baas_desktop_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    ) is True
+    assert repo.claim_baas_desktop_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    ) is False
+    assert repo.claim_baas_desktop_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="16",
+    ) is False
+
+
+def test_desktop_data_init_trigger_claim_waits_for_active_bot(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            status="ACTIVE",
+            device_props={
+                "restart_publish_id": "17",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        status="PENDING",
+        env="dev",
+        ext=json.dumps(
+            {
+                "start_status": "SUCCEEDED",
+                "data_init_status": "pending_init",
+            }
+        ),
+    )
+
+    assert repo.claim_baas_desktop_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    ) is False
+
+    with repo._db.orm_session() as db:
+        db.query(BotModel).filter(BotModel.binding_id == bid).update(
+            {BotModel.status: "ACTIVE"}, synchronize_session=False
+        )
+
+    assert repo.claim_baas_desktop_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    ) is True
 
 
 def test_batch_update_env(repo):

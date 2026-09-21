@@ -337,6 +337,40 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 binding_id,
             )
 
+    def _trigger_pool_data_init_after_activation(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        binding_id: int | str,
+        device_id: str,
+    ) -> None:
+        """Retry pending data-init only for a confirmed Pool Desktop startup."""
+        try:
+            bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+            if (
+                bot is None
+                or bot.get("status") != DeviceBindingStatus.ACTIVE.value
+                or str(bot.get("binding_id")) != str(binding_id)
+            ):
+                return
+            ext = bot.get("ext") or {}
+            if not isinstance(ext, dict) or ext.get("skills_layout") != "pool":
+                return
+            self._device_service.trigger_data_init_on_device_ready(
+                device_id=device_id,
+                binding_id=int(binding_id),
+                require_pool_confirmation=True,
+            )
+        except Exception:
+            logger.exception(
+                "[DesktopBotService] Pool data-init readiness trigger failed: "
+                "bot_id=%s binding_id=%s device_id=%s",
+                bot_id,
+                binding_id,
+                device_id,
+            )
+
     def _merge_bot_ext(self, bot_id: str, owner_id: str, patch: dict) -> bool:
         """Read-modify-write bot ext field, merging only specified keys."""
         try:
@@ -763,6 +797,35 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     "persisted desktop creation credentials are incomplete"
                 )
 
+            retained_binding_id = existing_bot.get("binding_id")
+            retained_device_id = existing_bot.get("device_id")
+            if retained_binding_id and retained_device_id:
+                retained_binding = self._binding_repo.get_by_id(
+                    int(retained_binding_id)
+                )
+                if (
+                    retained_binding is not None
+                    and str(retained_binding.status or "").upper()
+                    == DeviceBindingStatus.RELEASED.value
+                ):
+                    detached = (
+                        self._binding_repo.detach_released_baas_desktop_binding_if_matches(
+                            binding_id=int(retained_binding_id),
+                            bot_id=bot_id,
+                            owner_id=user_id,
+                            device_id=str(retained_device_id),
+                            entity_id=user_id,
+                            env=env,
+                            expected_client_id=client_id,
+                            expected_callback_token=callback_token,
+                        )
+                    )
+                    if not detached:
+                        raise DesktopBotServiceError(
+                            "released Desktop binding could not be detached from "
+                            f"the retained Bot: bot_id={bot_id}"
+                        )
+
         layout_credentials = self._desktop_layout_credentials_for_scope(
             env=env,
             entity_id=user_id,
@@ -865,13 +928,13 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "envs": self._desktop_layout_env(layout_credentials),
             }
             apply_reason = f"Create desktop bot: {bot.get('bot_name', '')}"
-            released_binding = self._binding_repo.get_released_binding(
-                device_id=bot_uuid
-            )
-            if released_binding is not None:
-                reused = (
-                    self._binding_repo.reuse_released_baas_desktop_binding_if_matches(
-                        binding_id=released_binding.id,
+            recoverable_binding = self._binding_repo.get_by_device_id(bot_uuid)
+            if recoverable_binding is not None:
+                recovered = (
+                    self._binding_repo.recover_baas_desktop_creation_binding_if_matches(
+                        binding_id=recoverable_binding.id,
+                        bot_id=bot_id,
+                        owner_id=user_id,
                         device_id=bot_uuid,
                         entity_id=user_id,
                         env=env,
@@ -882,12 +945,12 @@ class DesktopBotService(DesktopBotServiceProtocol):
                         applied_by=user_id,
                     )
                 )
-                if not reused:
+                if not recovered:
                     raise DesktopBotServiceError(
-                        "released Desktop binding does not match the persisted "
+                        "existing Desktop binding does not match the persisted "
                         f"creation context: bot_id={bot_id}"
                     )
-                binding_id = released_binding.id
+                binding_id = recoverable_binding.id
             else:
                 binding_id = self._binding_repo.insert_binding(
                     entity_id=user_id,
@@ -1031,9 +1094,12 @@ class DesktopBotService(DesktopBotServiceProtocol):
                         bot_id,
                         existing["binding_id"],
                     )
-                elif retained_status == DeviceBindingStatus.STOPPED.value:
+                elif retained_status in {
+                    DeviceBindingStatus.FAILED.value,
+                    DeviceBindingStatus.STOPPED.value,
+                }:
                     raise DesktopBotServiceError(
-                        "Desktop bot retained binding is stopped: "
+                        f"Desktop bot retained binding is {retained_status.lower()}: "
                         f"bot_id={bot_id} binding_id={existing['binding_id']}"
                     )
                 else:
@@ -2131,6 +2197,12 @@ class DesktopBotService(DesktopBotServiceProtocol):
                             )
                         )
                         if transition is _DesktopTerminalTransitionStatus.COMMITTED:
+                            self._trigger_pool_data_init_after_activation(
+                                bot_id=bot_id,
+                                owner_id=owner_id,
+                                device_id=device_id,
+                                binding_id=binding_id,
+                            )
                             self._request_runtime_projection_after_reconnect(
                                 bot_id=bot_id,
                                 owner_id=owner_id,
@@ -2167,6 +2239,13 @@ class DesktopBotService(DesktopBotServiceProtocol):
                             "bot_id=%s device_id=%s", bot_id, device_id,
                         )
                         final_status = "ACTIVE_FALLBACK"
+                    else:
+                        self._trigger_pool_data_init_after_activation(
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            device_id=device_id,
+                            binding_id=binding_id,
+                        )
                     break
 
                 if status == "FAILED":
@@ -2298,6 +2377,13 @@ class DesktopBotService(DesktopBotServiceProtocol):
             logger.warning(
                 "[DesktopBotService._poll_publish_progress] "
                 "ext update failed: bot_id=%s error=%s", bot_id, e,
+            )
+        if final_status == "ACTIVE_FALLBACK":
+            self._trigger_pool_data_init_after_activation(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                device_id=device_id,
+                binding_id=binding_id,
             )
 
     @staticmethod

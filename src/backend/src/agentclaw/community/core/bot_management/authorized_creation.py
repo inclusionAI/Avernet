@@ -79,7 +79,11 @@ def _raise_with_retry_handle(
         if (
             not isinstance(retained_bot, dict)
             or retained_bot.get("bot_id") != bot_id
-            or retained_bot.get("status") not in {"PENDING", "PROVISIONING"}
+            or retained_bot.get("status") not in {
+                "PENDING",
+                "PROVISIONING",
+                "ACTIVE",
+            }
         ):
             raise error
     retained_error = (

@@ -251,6 +251,42 @@ def test_immediate_create_failure_returns_retained_bot_retry_handle():
     bot_service.get_bot.assert_called_once_with("20260805_ab12cd34", "85020")
 
 
+def test_active_tail_failure_returns_retained_bot_retry_handle():
+    passport = MagicMock()
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac-1",
+    }
+    bot_service = MagicMock(spec=BotServiceProtocol)
+    bot_service.is_first_bot.return_value = True
+    bot_service.create_bot.side_effect = BotServiceError(
+        "Failed to create publish record for service bot"
+    )
+    bot_service.get_bot.return_value = {
+        "bot_id": "20260805_ab12cd34",
+        "owner_id": "85020",
+        "status": "ACTIVE",
+        "binding_id": 42,
+    }
+    skill_set_factory = MagicMock()
+    skill_set_factory.create.return_value.get_bot_mcp_codes.return_value = []
+
+    with pytest.raises(BotCreationRetainedError) as error:
+        create_bot_with_authorization(
+            user_id="85020",
+            nick_name="Alice",
+            bot_id="20260805_ab12cd34",
+            spec=_spec(),
+            context=_CONTEXT,
+            bot_service=bot_service,
+            passport_plugin=passport,
+            auth_rel_plugin=MagicMock(),
+            skill_set_factory=skill_set_factory,
+        )
+
+    assert error.value.bot_id == "20260805_ab12cd34"
+
+
 def test_immediate_relationship_failure_returns_retained_bot_retry_handle():
     passport = MagicMock()
     passport.apply_first_agent_passport.return_value = {

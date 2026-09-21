@@ -8,6 +8,9 @@ from typing import Any
 from sqlalchemy import func
 
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
+from agentclaw.community.core.devices.protocols import (
+    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
+)
 from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.plugin_api.models import BotModel
 
@@ -63,10 +66,80 @@ class BaasDesktopLifecycleRepositoryMixin:
 
     def _bot_env(self): ...
 
-    def reuse_released_baas_desktop_binding_if_matches(
+    def detach_released_baas_desktop_binding_if_matches(
         self,
         *,
         binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        device_id: str,
+        entity_id: str,
+        env: str,
+        expected_client_id: str,
+        expected_callback_token: str,
+    ) -> bool:
+        with self._db.orm_session() as db:
+            try:
+                begin_guarded_transaction(
+                    db, purpose="BaaS Desktop retained binding detach"
+                )
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == binding_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                persisted_props = (
+                    load_device_props(binding.device_props)
+                    if binding is not None
+                    else {}
+                )
+                if (
+                    binding is None
+                    or binding.status != "RELEASED"
+                    or binding.device_provider != "baas"
+                    or binding.device_id != device_id
+                    or binding.entity_id != entity_id
+                    or binding.entity_type != "staff"
+                    or binding.env != env
+                    or persisted_props.get("client_id") != expected_client_id
+                    or persisted_props.get("callback_token")
+                    != expected_callback_token
+                ):
+                    db.rollback()
+                    return False
+                bot = (
+                    db.query(BotModel)
+                    .filter(
+                        BotModel.bot_id == bot_id,
+                        BotModel.owner_id == owner_id,
+                        BotModel.binding_id == binding_id,
+                        BotModel.device_id == device_id,
+                        BotModel.status == _PENDING,
+                        BotModel.is_delete == 0,
+                        self._bot_env(),
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if bot is None:
+                    db.rollback()
+                    return False
+                bot.binding_id = None
+                bot.device_id = None
+                bot.gmt_modified = func.now()
+                db.commit()
+                return True
+            except Exception:
+                db.rollback()
+                raise
+
+    def recover_baas_desktop_creation_binding_if_matches(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
         device_id: str,
         entity_id: str,
         env: str,
@@ -94,7 +167,7 @@ class BaasDesktopLifecycleRepositoryMixin:
                 )
                 if (
                     binding is None
-                    or binding.status != "RELEASED"
+                    or binding.status not in {_PENDING, "RELEASED"}
                     or binding.device_provider != "baas"
                     or binding.device_id != device_id
                     or binding.entity_id != entity_id
@@ -104,6 +177,39 @@ class BaasDesktopLifecycleRepositoryMixin:
                     or persisted_props.get("callback_token")
                     != expected_callback_token
                 ):
+                    db.rollback()
+                    return False
+                bot = (
+                    db.query(BotModel)
+                    .filter(
+                        BotModel.bot_id == bot_id,
+                        BotModel.owner_id == owner_id,
+                        BotModel.status == "PROVISIONING",
+                        BotModel.is_delete == 0,
+                        self._bot_env(),
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if (
+                    bot is None
+                    or bot.binding_id not in {None, binding_id}
+                    or bot.device_id not in {None, device_id}
+                ):
+                    db.rollback()
+                    return False
+                competing_link = (
+                    db.query(BotModel.id)
+                    .filter(
+                        BotModel.binding_id == binding_id,
+                        BotModel.id != bot.id,
+                        BotModel.is_delete == 0,
+                        self._bot_env(),
+                    )
+                    .with_for_update()
+                    .first()
+                )
+                if competing_link is not None:
                     db.rollback()
                     return False
                 binding.device_props = json.dumps(
@@ -116,6 +222,74 @@ class BaasDesktopLifecycleRepositoryMixin:
                 binding.released_by = None
                 binding.released_at = None
                 binding.last_alive_at = None
+                binding.gmt_modified = func.now()
+                db.commit()
+                return True
+            except Exception:
+                db.rollback()
+                raise
+
+    def claim_baas_desktop_data_init_trigger_if_ready(
+        self,
+        *,
+        binding_id: int,
+        device_id: str,
+        startup_identity: str,
+    ) -> bool:
+        marker_key = "data_init_triggered_startup_identity"
+        with self._db.orm_session() as db:
+            try:
+                begin_guarded_transaction(
+                    db, purpose="BaaS Desktop data-init trigger claim"
+                )
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == binding_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                props = (
+                    load_device_props(binding.device_props)
+                    if binding is not None
+                    else {}
+                )
+                if (
+                    binding is None
+                    or binding.device_id != device_id
+                    or binding.device_provider != "baas"
+                    or binding.status != _ACTIVE
+                    or resolve_startup_identity(props) != startup_identity
+                    or str(
+                        props.get(LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY) or ""
+                    )
+                    != startup_identity
+                    or str(props.get(marker_key) or "") == startup_identity
+                ):
+                    db.rollback()
+                    return False
+                bot = (
+                    db.query(BotModel)
+                    .filter(
+                        BotModel.binding_id == binding_id,
+                        BotModel.is_delete == 0,
+                        self._bot_env(),
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                bot_ext = load_device_props(bot.ext) if bot is not None else {}
+                if (
+                    bot is None
+                    or bot.device_id != device_id
+                    or bot.status != _ACTIVE
+                    or bot_ext.get("start_status") != "SUCCEEDED"
+                    or bot_ext.get("data_init_status")
+                    not in {"pending_init", "failed"}
+                ):
+                    db.rollback()
+                    return False
+                props[marker_key] = startup_identity
+                binding.device_props = json.dumps(props, ensure_ascii=False)
                 binding.gmt_modified = func.now()
                 db.commit()
                 return True

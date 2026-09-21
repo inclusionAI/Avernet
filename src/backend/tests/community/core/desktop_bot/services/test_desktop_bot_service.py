@@ -523,7 +523,7 @@ class TestCreate:
             ]
         )
         mocks["bot_repo"].get_by_id_and_owner.return_value = inserted_bot
-        mocks["binding_repo"].get_released_binding.return_value = MagicMock(
+        mocks["binding_repo"].get_by_device_id.return_value = MagicMock(
             id=41,
             entity_id="u001",
             entity_type="staff",
@@ -535,7 +535,7 @@ class TestCreate:
         )
         mocks[
             "binding_repo"
-        ].reuse_released_baas_desktop_binding_if_matches.return_value = True
+        ].recover_baas_desktop_creation_binding_if_matches.return_value = True
 
         result = service.create_after_authorization(
             bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
@@ -547,7 +547,7 @@ class TestCreate:
         assert mocks["binding_repo"].insert_binding.call_count == 1
         reuse = mocks[
             "binding_repo"
-        ].reuse_released_baas_desktop_binding_if_matches.call_args
+        ].recover_baas_desktop_creation_binding_if_matches.call_args
         assert reuse.kwargs["binding_id"] == 41
         assert reuse.kwargs["expected_client_id"] == first_binding_props["client_id"]
         assert reuse.kwargs["expected_callback_token"] == first_binding_props[
@@ -603,10 +603,14 @@ class TestCreate:
         mocks["bot_repo"].update_by_owner.side_effect = None
         mocks["bot_repo"].update_by_owner.return_value = retained_bot
         mocks["binding_repo"].get_by_id.return_value = released_binding
-        mocks["binding_repo"].get_released_binding.return_value = released_binding
+        mocks["binding_repo"].get_by_device_id.return_value = released_binding
         mocks[
             "binding_repo"
-        ].reuse_released_baas_desktop_binding_if_matches.return_value = True
+        ].detach_released_baas_desktop_binding_if_matches.return_value = True
+        mocks["bot_repo"].claim_provisioning.return_value = True
+        mocks[
+            "binding_repo"
+        ].recover_baas_desktop_creation_binding_if_matches.return_value = True
         service._start_publish_polling.side_effect = None
 
         result = service.create_after_authorization(
@@ -620,7 +624,90 @@ class TestCreate:
         assert mocks["binding_repo"].insert_binding.call_count == 1
         mocks[
             "binding_repo"
-        ].reuse_released_baas_desktop_binding_if_matches.assert_called_once()
+        ].detach_released_baas_desktop_binding_if_matches.assert_called_once()
+        mocks[
+            "binding_repo"
+        ].recover_baas_desktop_creation_binding_if_matches.assert_called_once()
+
+    def test_retry_recovers_pending_orphan_after_release_failure(self):
+        service, mocks = _make_service_with_mocks()
+        existing = {
+            "bot_id": "desktop_bot_retry",
+            "owner_id": "u001",
+            "entity_id": "u001",
+            "entity_type": "staff",
+            "status": "PENDING",
+            "binding_id": None,
+            "device_id": None,
+            "active_engine": "openclaw",
+            "ext": {
+                "client_id": "persisted-client",
+                "callback_token": "persisted-token",
+                "passport": {"agent_code": "ac-existing"},
+            },
+        }
+        orphan = MagicMock(
+            id=41,
+            entity_id="u001",
+            entity_type="staff",
+            device_id="bu-resumed",
+            device_provider="baas",
+            env="dev",
+            status="PENDING",
+            device_props={
+                "client_id": "persisted-client",
+                "callback_token": "persisted-token",
+            },
+        )
+        mocks["bot_repo"].get_by_id_and_owner.return_value = existing
+        mocks["bot_repo"].claim_provisioning.return_value = True
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-existing"
+        }
+        mocks["baas"].post_bots_api.return_value = {
+            "bot_uuid": "bu-resumed",
+            "publish_id": 91,
+        }
+        mocks["binding_repo"].get_by_device_id.return_value = orphan
+        mocks[
+            "binding_repo"
+        ].recover_baas_desktop_creation_binding_if_matches.return_value = True
+
+        result = service.create_after_authorization(
+            bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+            user_id="u001",
+            machine_id="m-002",
+        )
+
+        assert result["binding_id"] == 41
+        mocks["binding_repo"].insert_binding.assert_not_called()
+
+    def test_failed_retained_binding_does_not_return_create_success(self):
+        service, mocks = _make_service_with_mocks()
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop_bot_retry",
+            "owner_id": "u001",
+            "device_id": "bu-failed",
+            "binding_id": 20,
+            "ext": {"passport": {"agent_code": "ac-existing"}},
+        }
+        mocks["binding_repo"].get_by_id.return_value = MagicMock(
+            id=20,
+            device_id="bu-failed",
+            entity_id="u001",
+            entity_type="staff",
+            device_provider="baas",
+            status="FAILED",
+        )
+
+        with pytest.raises(DesktopBotServiceError, match="binding is failed"):
+            service.create_after_authorization(
+                bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+                user_id="u001",
+                machine_id="m-002",
+            )
+
+        mocks["baas"].post_bots_api.assert_not_called()
 
     def test_concurrent_provisional_desktop_create_returns_in_progress(self):
         service, mocks = _make_service_with_mocks()
@@ -1444,6 +1531,33 @@ class TestPublishPolling:
         # _update_local_status 不应再被单独调用（由 report_device_alive 内部处理）
         mocks["binding_repo"].update_status.assert_not_called()
 
+    def test_poll_alive_fallback_retries_pool_data_init_after_active_write(
+        self, poll_service
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._trigger_device_alive = MagicMock(return_value=False)
+        service._trigger_pool_data_init_after_activation = MagicMock()
+
+        service._poll_publish_progress(
+            publish_id="pub-001",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-abc",
+        )
+
+        mocks["binding_repo"].update_status.assert_called_once_with(
+            binding_id="1",
+            status="ACTIVE",
+        )
+        service._trigger_pool_data_init_after_activation.assert_called_once_with(
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            binding_id="1",
+            device_id="BOT-abc",
+        )
+
     def test_poll_failed_still_calls_update_local_status(self, poll_service):
         """FAILED 时走原有 _update_local_status 逻辑。"""
         service, mocks = poll_service()
@@ -1734,7 +1848,9 @@ class TestPublishPolling:
         mocks["bot_repo"].get_by_id_and_owner.return_value = {
             "bot_id": "desktop_bot_001",
             "owner_id": "u001",
-            "ext": {"publish_id": "1001"},
+            "status": "ACTIVE",
+            "binding_id": 1,
+            "ext": {"publish_id": "1001", "skills_layout": "pool"},
         }
         mocks["binding_repo"].transition_baas_restart_terminal.return_value = True
         mocks["binding_repo"].get_by_id.return_value = MagicMock(
@@ -1806,6 +1922,13 @@ class TestPublishPolling:
             bot_id="desktop_bot_001",
             owner_id="u001",
             binding_id="1",
+        )
+        mocks[
+            "device_service"
+        ].trigger_data_init_on_device_ready.assert_called_once_with(
+            device_id="BOT-pool",
+            binding_id=1,
+            require_pool_confirmation=True,
         )
         service._trigger_device_alive.assert_not_called()
 
@@ -2447,7 +2570,7 @@ def _make_service_with_mocks():
     # _build_desktop_bot_payload calls _get_start_cmd and _get_destroy_cmd on baas
     mocks["baas"]._get_start_cmd.return_value = "echo start"
     mocks["baas"]._get_destroy_cmd.return_value = None
-    mocks["binding_repo"].get_released_binding.return_value = None
+    mocks["binding_repo"].get_by_device_id.return_value = None
     mocks["binding_repo"].prepare_baas_desktop_restart.return_value = True
     return service, mocks
 

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentclaw.community.core.devices.services.device_service import (
+    BAAS_DEVICE_PROVIDER,
     DeviceService,
     LOCAL_DEVICE_PROVIDER,
     ARCA_DEVICE_PROVIDER,
@@ -95,6 +96,7 @@ def _make_service(
     task_queue_service=None,
     oss_record_repo=None,
     layout_confirmation=None,
+    data_init_service_provider=None,
 ) -> DeviceService:
     repo = repo or MagicMock()
     bot_query = bot_query or MagicMock()
@@ -108,6 +110,7 @@ def _make_service(
         sandbox_client=sandbox_client or _make_sandbox_client(),
         task_queue_service=task_queue_service,
         layout_confirmation=layout_confirmation or MagicMock(),
+        data_init_service_provider=data_init_service_provider,
     )
 
 
@@ -915,6 +918,71 @@ class TestReportDeviceAlive:
         assert event.sandbox_id == "sbx-abc@alt-0"
         reset_event_bus()
 
+    def test_data_init_readiness_may_arrive_before_or_after_active(self):
+        props = {
+            "restart_publish_id": "17",
+            "layout_confirmed_startup_identity": "17",
+        }
+        pending = _make_record(
+            status=DeviceBindingStatus.PENDING.value,
+            device_provider="baas",
+            device_props=props,
+        )
+        active = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider="baas",
+            device_props=props,
+        )
+        repo = MagicMock()
+        repo.get_by_id.side_effect = [pending, active]
+        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = True
+        service = _make_service(repo=repo)
+        service._trigger_data_init_on_device_ready = MagicMock()
+
+        service.trigger_data_init_on_device_ready(
+            device_id=pending.device_id,
+            binding_id=pending.id,
+            require_pool_confirmation=True,
+        )
+        service.trigger_data_init_on_device_ready(
+            device_id=active.device_id,
+            binding_id=active.id,
+            require_pool_confirmation=True,
+        )
+
+        service._trigger_data_init_on_device_ready.assert_called_once_with(
+            device_id=active.device_id,
+            record=active,
+        )
+        repo.claim_baas_desktop_data_init_trigger_if_ready.assert_called_once_with(
+            binding_id=active.id,
+            device_id=active.device_id,
+            startup_identity="17",
+        )
+
+    def test_pool_data_init_readiness_rejects_superseded_confirmation(self):
+        active = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider="baas",
+            device_props={
+                "restart_publish_id": "18",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+        repo = MagicMock()
+        repo.get_by_id.return_value = active
+        service = _make_service(repo=repo)
+        service._trigger_data_init_on_device_ready = MagicMock()
+
+        service.trigger_data_init_on_device_ready(
+            device_id=active.device_id,
+            binding_id=active.id,
+            require_pool_confirmation=True,
+        )
+
+        repo.claim_baas_desktop_data_init_trigger_if_ready.assert_not_called()
+        service._trigger_data_init_on_device_ready.assert_not_called()
+
     def test_pending_activation_has_one_mcp_writer_owned_by_device_event(self):
         """The Device callback publishes one event; it must not also sync MCP."""
         from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
@@ -1366,6 +1434,41 @@ class TestReportDeviceStatus:
             startup_identity="sandbox-current",
             status="SUCCEEDED",
             message=None,
+        )
+
+    def test_baas_succeeded_without_layout_evidence_requires_confirmation(self):
+        record = _make_record(
+            device_provider=BAAS_DEVICE_PROVIDER,
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={
+                "callback_token": "tok",
+                "restart_publish_id": "17",
+            },
+        )
+        updated = _make_record(
+            device_provider=BAAS_DEVICE_PROVIDER,
+            status=DeviceBindingStatus.ACTIVE.value,
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = updated
+        repo.transition_layout_startup_status_if_matches.return_value = True
+        svc = _make_service(repo=repo)
+        svc.trigger_data_init_on_device_ready = MagicMock()
+
+        result = svc.report_device_status(
+            device_id=record.device_id,
+            status="SUCCEEDED",
+            message=None,
+            token="tok",
+            startup_identity="17",
+        )
+
+        assert result is updated
+        svc.trigger_data_init_on_device_ready.assert_called_once_with(
+            device_id=record.device_id,
+            binding_id=record.id,
+            require_pool_confirmation=True,
         )
 
     def test_invalid_pool_layout_evidence_marks_binding_and_bot_failed(self):

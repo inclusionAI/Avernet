@@ -47,6 +47,7 @@ from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
+    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
     LayoutInitializationConflictError,
     LayoutInitializationEvidenceError,
     LayoutInitializationConfirmationProtocol,
@@ -1241,7 +1242,14 @@ class DeviceService:
         elif status == "SUCCEEDED":
             # 设备自报启动成功，前置条件 bot_status=ACTIVE + start_status=SUCCEEDED 均已满足
             logger.info(f"report_device_status device_id={device_id} status=SUCCEEDED triggering_data_init")
-            self._trigger_data_init_on_device_ready(device_id=device_id, record=record)
+            self.trigger_data_init_on_device_ready(
+                device_id=device_id,
+                binding_id=record.id,
+                require_pool_confirmation=(
+                    guarded_status_callback
+                    and record.device_provider == BAAS_DEVICE_PROVIDER
+                ),
+            )
 
         updated_record = self._repo.get_by_id(record.id)
         if updated_record is None:
@@ -1671,6 +1679,73 @@ class DeviceService:
         threading.Thread(
             target=bind_current_avernet_tenant(_run), daemon=True
         ).start()
+
+    def trigger_data_init_on_device_ready(
+        self,
+        *,
+        device_id: str,
+        binding_id: int,
+        require_pool_confirmation: bool = False,
+    ) -> None:
+        """Trigger pending data-init once both Binding and Bot are ACTIVE.
+
+        The status callback and Desktop activation paths both call this seam so
+        SUCCEEDED and ACTIVE may arrive in either order. The existing
+        ``data_init_status`` guard keeps the operation idempotent.
+        """
+        try:
+            record = self._repo.get_by_id(binding_id)
+            if (
+                record is None
+                or record.device_id != device_id
+                or record.status != DeviceBindingStatus.ACTIVE.value
+            ):
+                logger.info(
+                    "data_init_trigger skipped binding_not_active_or_current: "
+                    f"device_id={device_id} binding_id={binding_id}"
+                )
+                return
+            startup_identity = resolve_startup_identity(record.device_props)
+            confirmed_identity = str(
+                (record.device_props or {}).get(
+                    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY
+                )
+                or ""
+            )
+            if require_pool_confirmation:
+                if (
+                    record.device_provider != BAAS_DEVICE_PROVIDER
+                    or startup_identity is None
+                    or confirmed_identity != startup_identity
+                ):
+                    logger.info(
+                        "data_init_trigger skipped unconfirmed_or_superseded: "
+                        f"device_id={device_id} binding_id={binding_id} "
+                        f"startup_identity={startup_identity} "
+                        f"confirmed_identity={confirmed_identity}"
+                    )
+                    return
+                if not self._repo.claim_baas_desktop_data_init_trigger_if_ready(
+                    binding_id=binding_id,
+                    device_id=device_id,
+                    startup_identity=startup_identity,
+                ):
+                    logger.info(
+                        "data_init_trigger skipped already_claimed_or_not_ready: "
+                        f"device_id={device_id} binding_id={binding_id} "
+                        f"startup_identity={startup_identity}"
+                    )
+                    return
+            self._trigger_data_init_on_device_ready(
+                device_id=device_id,
+                record=record,
+            )
+        except Exception as exc:
+            logger.warning(
+                "data_init_trigger readiness check failed: "
+                f"device_id={device_id} binding_id={binding_id} exc={exc}",
+                exc_info=True,
+            )
 
     def _trigger_data_init_on_device_ready(self, *, device_id: str, record) -> None:
         """当设备自报 SUCCEEDED 时触发 data-init。
