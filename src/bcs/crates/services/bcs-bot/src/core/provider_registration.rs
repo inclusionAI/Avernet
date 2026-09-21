@@ -1,6 +1,6 @@
 //! Provider-scoped registration. Membership and HTTP delivery are separate.
 use super::ids::{new_bot_uuid, new_session_token};
-use super::provider_core::parse_downlink_config;
+use super::provider_core::{DownlinkConfig, parse_downlink_config};
 use async_trait::async_trait;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::core::provider_registration::*;
@@ -84,6 +84,7 @@ impl ProviderRegistrationCore {
     async fn endpoint(
         &self,
         provider: &ProviderRecord,
+        downlink: &DownlinkConfig,
         command: &RegisterProviderBot,
     ) -> ServiceResult<Option<String>> {
         if command.mode == ProviderRegistrationMode::Plugin {
@@ -99,11 +100,8 @@ impl ProviderRegistrationCore {
                 "only Provider managers may set a Bot webhook override".into(),
             ));
         }
-        let downlink = parse_downlink_config(&provider.config)?;
-        if !downlink.enabled || downlink.auth_mode == ProviderAuthMode::AgentPass {
-            return Err(invalid(
-                "gateway requires enabled static_bearer or provider_admin downlink",
-            ));
+        if !downlink.enabled {
+            return Err(invalid("gateway requires enabled downlink"));
         }
         let url = command
             .webhook_url
@@ -163,7 +161,8 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
                 "bot-name must be 2-64 characters without surrounding whitespace",
             ));
         }
-        let effective_webhook_url = self.endpoint(&provider, &command).await?;
+        let downlink = parse_downlink_config(&provider.config)?;
+        let effective_webhook_url = self.endpoint(&provider, &downlink, &command).await?;
         // No reservation journal and no credential replay. The database enforces
         // Provider/ref uniqueness across both modes, including deleted Bots.
         if self.bindings.get_binding_by_provider_ref(&command.provider_id, &command.provider_bot_ref).await?.is_some() {
@@ -180,7 +179,12 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             provider_bot_ref: record.provider_bot_ref.clone(), connection_mode: record.mode,
             webhook_url: record.webhook_url.clone(), is_deleted: false,
         }, BotCapabilities {
-            name: Some(record.bot_name.clone()), visibility: "protected".into(), ..BotCapabilities::default()
+            name: Some(record.bot_name.clone()), visibility: "protected".into(),
+            // Match Provider-admin registration for both connection modes:
+            // AgentPass identifies this Bot by its Provider's external ref.
+            agent_code: (downlink.auth_mode == ProviderAuthMode::AgentPass)
+                .then(|| record.provider_bot_ref.clone()),
+            ..BotCapabilities::default()
         }, &record.owner, &record.bot_token).await?;
         self.registry
             .ensure_human_actor(&record.owner, &record.owner)

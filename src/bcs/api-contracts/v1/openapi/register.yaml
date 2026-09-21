@@ -152,6 +152,10 @@ RegisterPath:
       options. A v2 token requires provider_bot_ref; Provider/owner cannot be
       overridden by request parameters. Provider authorization is checked again
       on redemption. Plugin saves membership without HTTP delivery binding.
+      Both modes support static_bearer, provider_admin and agentpass Providers.
+      For AgentPass, provider_bot_ref must be the real AgentPass agent code;
+      BCS saves it as the Bot's agent_code, as in Provider-admin registration.
+      No separate agent_code parameter or AgentPass token is required to register.
       Gateway uses webhook_url override or Provider default; only the Provider
       creator/owners may set an override because delivery uses a shared Provider
       credential. Self-service callers must use the Provider default. At least one usable
@@ -194,7 +198,7 @@ RegisterPath:
       - name: provider_bot_ref
         in: query
         required: false
-        description: Required with a Provider-scoped v2 token; stable identity within the Provider.
+        description: Required with a Provider-scoped v2 token; stable identity within the Provider. For AgentPass Providers, supply the real AgentPass agent code, which is also stored as the Bot's agent_code in both modes.
         schema:
           type: string
           minLength: 1

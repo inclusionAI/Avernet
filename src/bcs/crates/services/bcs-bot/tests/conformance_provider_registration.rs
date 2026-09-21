@@ -11,6 +11,12 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn conformance_scoped_provider_registration_core() {
+    for auth_mode in [ProviderAuthMode::StaticBearer, ProviderAuthMode::ProviderAdmin, ProviderAuthMode::AgentPass] {
+        exercise_registration_contract(auth_mode).await;
+    }
+}
+
+async fn exercise_registration_contract(auth_mode: ProviderAuthMode) {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(MemoryProviderStore::new());
     let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
@@ -30,7 +36,7 @@ async fn conformance_scoped_provider_registration_core() {
     let provider = admin.register_provider(
         "Contract Provider".into(),
         None,
-        ProviderAuthMode::StaticBearer,
+        auth_mode,
         "owner".into(),
         None,
         None,

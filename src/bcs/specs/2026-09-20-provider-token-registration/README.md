@@ -51,9 +51,19 @@ verification rejects this version. Token mode scope cannot be expanded by a requ
 | plugin (upstream) | Provider metadata in `bcs_bots` | Real Bot token | None | Not accepted |
 | gateway | Provider metadata in `bcs_bots` | Real Bot token | Compatibility binding | Bot override, else Provider default |
 
-Gateway needs an enabled downlink using `static_bearer` or `provider_admin` auth;
-AgentPass Providers are not silently converted. Existing Provider protocol and
-credentials remain unchanged. Gateway registration requires at least one allowed
+Both modes support `static_bearer`, `provider_admin` and `agentpass` Providers.
+For AgentPass, clients supply the real AgentPass agent code as `provider_bot_ref`.
+Registration passes that value through Bot capabilities to persist it in the
+dedicated `bcs_bots.agent_code` column, exactly as Provider-admin registration
+does for either mode. The serialized/public capabilities view still omits it.
+Other auth modes leave `agent_code` unset. There is no separate agent-code
+parameter and registration still authenticates with the scoped register token,
+not an AgentPass token. AgentPass callback verification remains unchanged.
+
+Gateway needs an enabled downlink. Existing Provider protocol, auth mode and
+credentials remain unchanged, including the shared `downlink_bcs_to_provider`
+credential used for BCS-to-Provider delivery for AgentPass Providers.
+Gateway registration requires at least one allowed
 endpoint and an existing, enabled `downlink_bcs_to_provider` credential with a
 nonblank secret before creating an identity. Missing, disabled or blank credentials
 return 400 `invalid_request`; credential repository read failures propagate as 500.
@@ -120,4 +130,6 @@ does not change membership or write policy.
 Tests cover legacy token rejection, scope/auth failures, wire compatibility,
 memory/SQLite metadata and dual-write conformance, endpoint precedence, real owner
 edges, duplicate rejection and prevention of token rotation/deleted-Bot resurrection.
+The OpenAPI registration matrix covers all three Provider auth modes and both
+delivery read sources, including persisted AgentPass codes for plugin and gateway.
 MySQL query/schema checks do not substitute for a live MySQL deployment test.

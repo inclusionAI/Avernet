@@ -62,6 +62,9 @@ Human/owner-edge writes follow and failures propagate, without journal-based res
 Duplicate Provider/ref returns Conflict; distinct refs may share a valid register token.
 Upstream memberships never create delivery bindings or MOCK credentials through this
 flow. Legacy Provider-admin plugin registration retains its MOCK/preserved-token rules.
+Both flows derive AgentPass Bot `agent_code` from `provider_bot_ref` in either
+connection mode, using the already loaded Provider config and the existing atomic
+Bot write. This does not add a repository read or a separate metadata update.
 BotCore, ProviderCore and ProviderManagement synchronize gateway webhook/deletion
 changes through the injected projection. Delivery switching validates affiliation
 before owner-edge writes. Bot control-plane views hydrate upstream affiliation from

@@ -1,5 +1,7 @@
 //! Real bootstrap -> HTTP -> application -> core -> stores registration path.
 mod helpers;
+use bcs_db_api::{DbPlugin, DbStatement};
+use bcs_db_local::LocalSqliteDbPlugin;
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
@@ -35,18 +37,39 @@ async fn data(request: reqwest::RequestBuilder, expected: StatusCode) -> Value {
 #[tokio::test]
 async fn scoped_register_mount_preserves_legacy_and_creates_both_transports() {
     use bcs_domain::bot_provider::DownlinkDetectionSource;
+    // This binary has one test; initialize its dedicated test-only secret before
+    // any server starts threads or snapshots the environment.
+    unsafe {
+        std::env::set_var(
+            "BCS_SECRET_PROVIDER_REGISTRATION_TEST",
+            "test-only-gateway-principal-signing-key",
+        );
+    }
     for source in [DownlinkDetectionSource::Binding, DownlinkDetectionSource::BotConnectionMode] {
-        tokio::time::timeout(std::time::Duration::from_secs(45), exercise_registration(source))
-            .await
-            .expect("registration integration exceeded its deadline");
+        for auth_mode in ["static_bearer", "provider_admin", "agentpass"] {
+            tokio::time::timeout(std::time::Duration::from_secs(45), exercise_registration(source, auth_mode))
+                .await
+                .expect("registration integration exceeded its deadline");
+        }
     }
 }
 
-async fn exercise_registration(source: bcs_domain::bot_provider::DownlinkDetectionSource) {
+async fn exercise_registration(source: bcs_domain::bot_provider::DownlinkDetectionSource, auth_mode: &str) {
     let dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&dir.path().into());
     config.provider_http.downlink_detection_source = source;
-    let (addr, task) = helpers::start_test_server_with_config(config).await;
+    let db_path = dir.path().join("registration.sqlite");
+    config.database.sqlite.path = db_path.to_str().unwrap().into();
+    config.auth.allow_mock_headers = true;
+    config.secret.provider = "env".into();
+    config.gateway_principal.signing_key_secret = Some("provider-registration-test".into());
+    config.group_session_ws.signing_key_secret = "provider-registration-test".into();
+    config.session_files.backend.insert(
+        "data_dir".into(), toml::Value::String(dir.path().join("files").to_str().unwrap().into()),
+    );
+    let (addr, task) = bcs::BcsServer::new_with_storage(config).await.unwrap()
+        .run_on_random_port().await.unwrap();
+    let db = LocalSqliteDbPlugin::new_file(db_path.to_str().unwrap()).unwrap();
     let abort = task.abort_handle();
     // Ensure a failed assertion cannot leave a server listening in the test process.
     struct Stop(tokio::task::AbortHandle);
@@ -68,7 +91,7 @@ async fn exercise_registration(source: bcs_domain::bot_provider::DownlinkDetecti
         .header("X-Mock-User-Id", "11111111")
         .json(
             &json!({"name": "Poolab registration test", "protocol_version": "2.0",
-            "auth": {"mode": "static_bearer"}}),
+            "auth": {"mode": auth_mode}}),
         )
         .send()
         .await
@@ -108,6 +131,7 @@ async fn exercise_registration(source: bcs_domain::bot_provider::DownlinkDetecti
     .await;
     assert_eq!(upstream["registration"]["mode"], "plugin");
     assert_eq!(upstream["registration"]["provider_id"], id);
+    assert_agent_code(&db, &upstream, "cc-upstream", auth_mode).await;
     // Provider/ref is unique, but the registration token is reusable for
     // distinct refs. Duplicate POSTs no longer replay runtime credentials.
     let retried = client.post(&api).query(&upstream_query).send().await.unwrap();
@@ -146,6 +170,7 @@ async fn exercise_registration(source: bcs_domain::bot_provider::DownlinkDetecti
     assert!(gateway.get("bcs_to_provider_token").is_none());
     assert_ne!(gateway["bot_token"], provider["provider_admin_token"]);
     assert_ne!(gateway["bot_token"], provider["bcs_to_provider_token"]);
+    assert_agent_code(&db, &gateway, "codex-gateway", auth_mode).await;
     // The unchanged legacy handler must reject scoped tokens, not create an ordinary Bot.
     let legacy_reject = client
         .post(format!("{base}/register"))
@@ -172,4 +197,18 @@ async fn exercise_registration(source: bcs_domain::bot_provider::DownlinkDetecti
     )
     .await;
     assert_eq!(legacy.as_object().unwrap().len(), 3);
+}
+
+async fn assert_agent_code(db: &dyn DbPlugin, result: &Value, bot_ref: &str, auth_mode: &str) {
+    let rows = db.query(DbStatement::with_params(
+        "SELECT agent_code, bot_info FROM bcs_bots WHERE bot_uuid = ?",
+        vec![result["bot_uuid"].as_str().unwrap().into()],
+    )).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    let expected = (auth_mode == "agentpass").then_some(bot_ref);
+    assert_eq!(rows[0].get_string("agent_code").unwrap().as_deref(), expected);
+    let capabilities: Value = serde_json::from_str(&rows[0].get_string("bot_info").unwrap().unwrap()).unwrap();
+    // The routing identifier belongs in the dedicated column, not the
+    // serialized/public BotCapabilities view (which intentionally omits it).
+    assert!(capabilities.get("agent_code").is_none());
 }

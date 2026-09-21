@@ -8,7 +8,7 @@ use bcs_service_api::core::provider_registration::*;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_service_api::{
     BotDeliveryTarget, BotRegistryCoreService, ProviderAuthMode, ProviderBotBindingRepoPort,
-    ProviderCoreService, ProviderCredential, ProviderCredentialRepoPort, ProviderRepoPort,
+    ProviderBotCoreService, ProviderCoreService, ProviderCredential, ProviderCredentialRepoPort, ProviderRepoPort,
     RelationCoreService, ServiceError, ServiceResult,
 };
 use std::sync::Arc;
@@ -32,6 +32,15 @@ async fn fixture_with_credentials(
     self_service: bool,
     credentials: Option<Arc<dyn ProviderCredentialRepoPort>>,
 ) -> Fixture {
+    fixture_with_auth(endpoint, self_service, credentials, ProviderAuthMode::StaticBearer).await
+}
+
+async fn fixture_with_auth(
+    endpoint: Option<&str>,
+    self_service: bool,
+    credentials: Option<Arc<dyn ProviderCredentialRepoPort>>,
+    auth_mode: ProviderAuthMode,
+) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let providers = Arc::new(MemoryProviderStore::new());
     let credentials = credentials.unwrap_or_else(|| providers.clone());
@@ -54,7 +63,7 @@ async fn fixture_with_credentials(
         .register_provider(
             "Poolab".into(),
             endpoint.map(str::to_owned),
-            ProviderAuthMode::StaticBearer,
+            auth_mode,
             "alice".into(),
             None,
             None,
@@ -89,6 +98,7 @@ async fn fixture_with_credentials(
     }
 }
 
+#[derive(Clone, Copy)]
 enum CredentialRead {
     Missing,
     Disabled,
@@ -166,11 +176,18 @@ impl ProviderCredentialRepoPort for ReadinessCredentials {
 }
 
 async fn assert_gateway_not_ready(outcome: CredentialRead) {
+    for auth_mode in [ProviderAuthMode::StaticBearer, ProviderAuthMode::ProviderAdmin, ProviderAuthMode::AgentPass] {
+        assert_gateway_not_ready_for_auth(outcome, auth_mode).await;
+    }
+}
+
+async fn assert_gateway_not_ready_for_auth(outcome: CredentialRead, auth_mode: ProviderAuthMode) {
     let credentials = ReadinessCredentials::new(outcome);
-    let f = fixture_with_credentials(
+    let f = fixture_with_auth(
         Some("https://shared.example.com/hook"),
         false,
         Some(credentials.clone()),
+        auth_mode,
     )
     .await;
     let result = f
@@ -288,6 +305,39 @@ fn request(f: &Fixture, mode: ProviderRegistrationMode) -> RegisterProviderBot {
         mode,
         bot_name: "Test bot".into(),
         webhook_url: None,
+    }
+}
+
+#[tokio::test]
+async fn agentpass_upstream_preserves_agent_code_without_downlink_credentials() {
+    let credentials = ReadinessCredentials::new(CredentialRead::Error);
+    let f = fixture_with_auth(None, true, Some(credentials.clone()), ProviderAuthMode::AgentPass).await;
+    assert!(f.core.authorize(&f.provider, "bob").await.is_ok());
+    let mut command = request(&f, ProviderRegistrationMode::Plugin);
+    command.owner = "bob".into();
+    let registered = f.core.register(command).await.unwrap();
+    assert_eq!(f.registry.find_bot_by_agent_code("stable-ref").await, Some(registered.record.bot_uuid.clone()));
+    assert!(f.providers.get_binding_by_bot_uuid(&registered.record.bot_uuid).await.unwrap().is_none());
+    assert!(matches!(f.registry.resolve_delivery_target(&registered.record.bot_uuid).await.unwrap(), BotDeliveryTarget::WebSocket { .. }));
+    assert_eq!(credentials.reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn agentpass_gateway_supports_existing_delivery_and_callback_authentication() {
+    for endpoint in [None, Some("https://shared.example.com/hook")] {
+        let f = fixture_with_auth(endpoint, false, None, ProviderAuthMode::AgentPass).await;
+        let mut command = request(&f, ProviderRegistrationMode::Gateway);
+        if endpoint.is_none() {
+            command.webhook_url = Some("https://individual.example.com/hook".into());
+        }
+        let registered = f.core.register(command).await.unwrap();
+        assert_eq!(f.registry.find_bot_by_agent_code("stable-ref").await, Some(registered.record.bot_uuid.clone()));
+        assert!(matches!(f.registry.resolve_delivery_target(&registered.record.bot_uuid).await.unwrap(),
+            BotDeliveryTarget::HttpProvider { provider_bot_ref, webhook_url, .. }
+                if provider_bot_ref == "stable-ref" && Some(webhook_url.as_str()) == registered.effective_webhook_url.as_deref()));
+        let admin = ProviderCore::new(f.providers.clone(), f.providers.clone(), f.providers.clone(), f.registry.clone());
+        let authenticated = admin.authenticate_agentpass_event(&f.provider, "stable-ref").await.unwrap();
+        assert_eq!(authenticated.bot_uuid, registered.record.bot_uuid);
     }
 }
 
@@ -440,7 +490,13 @@ async fn authorization_and_conflicts_are_enforced_on_every_request() {
 
 #[tokio::test]
 async fn self_service_cannot_redirect_shared_provider_credentials() {
-    let f = fixture(Some("https://shared.example.com/hook"), true).await;
+    for auth_mode in [ProviderAuthMode::StaticBearer, ProviderAuthMode::ProviderAdmin, ProviderAuthMode::AgentPass] {
+        assert_self_service_cannot_redirect(auth_mode).await;
+    }
+}
+
+async fn assert_self_service_cannot_redirect(auth_mode: ProviderAuthMode) {
+    let f = fixture_with_auth(Some("https://shared.example.com/hook"), true, None, auth_mode).await;
     assert!(f.core.authorize(&f.provider, "bob").await.is_ok());
     let mut command = request(&f, ProviderRegistrationMode::Gateway);
     command.owner = "bob".into();
@@ -467,7 +523,13 @@ async fn self_service_cannot_redirect_shared_provider_credentials() {
 
 #[tokio::test]
 async fn self_service_can_register_upstream_or_use_provider_default_callback() {
-    let f = fixture(Some("https://shared.example.com/hook"), true).await;
+    for auth_mode in [ProviderAuthMode::StaticBearer, ProviderAuthMode::ProviderAdmin, ProviderAuthMode::AgentPass] {
+        assert_self_service_can_register(auth_mode).await;
+    }
+}
+
+async fn assert_self_service_can_register(auth_mode: ProviderAuthMode) {
+    let f = fixture_with_auth(Some("https://shared.example.com/hook"), true, None, auth_mode).await;
     for (reference, mode) in [
         ("upstream", ProviderRegistrationMode::Plugin),
         ("gateway", ProviderRegistrationMode::Gateway),
