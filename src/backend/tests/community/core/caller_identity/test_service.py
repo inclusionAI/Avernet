@@ -26,6 +26,7 @@ from agentclaw.community.core.caller_identity import service as caller_identity_
 from agentclaw.community.core.caller_identity.credential import CallerToken
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityEngineChangedError, CallerIdentityLockMismatchError
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.mcp.services.cli_passport_scope import (
     CliPassportScopeReconciler,
@@ -54,6 +55,7 @@ def _service(
     repository=None,
     passport_plugin=None,
     without_cli_scope_reconciler: bool = False,
+    collaborator_service=None,
 ):
     bot_repository = MagicMock()
     bot_repository.get_by_id.return_value = bot
@@ -81,9 +83,11 @@ def _service(
         mcp_sync_service=mcp_sync_service,
         passport_plugin=passport_plugin,
         cli_scope_reconciler=cli_scope_reconciler,
+        collaborator_service=collaborator_service,
     )
     return service, SimpleNamespace(
         bot_repository=bot_repository,
+        collaborator_repository=collaborator_repository,
         lock_repository=lock_repository,
         mcp_provider=mcp_provider,
         repository=repository,
@@ -867,6 +871,106 @@ def test_caller_context_returns_mcp_and_cli_sparse_caller_overrides() -> None:
     deps.repository.list_draft_call_types.assert_called_once_with(1, "openclaw")
     deps.repository.list_draft_cli_call_types.assert_called_once_with(1, "openclaw")
     deps.cli_scope_reconciler.current_passport_cli_items.assert_not_called()
+
+
+class _OperableCollaborators:
+    """Stands in for ``CollaboratorService.get_operable_permission_level``.
+
+    Mirrors the doubles in ``engine_runtime/test_relay.py`` — the seam picks
+    this method by ``getattr(type(x), ...)`` and delegates ``bot``/``user_id``/
+    ``env`` to it, so a plain ``MagicMock`` cannot stand in.
+    """
+
+    def __init__(self, level: "PermissionLevel"):
+        self._level = level
+        self.calls: list[dict[str, object]] = []
+
+    def get_operable_permission_level(self, *, bot, user_id, env=None):
+        self.calls.append(
+            {"bot_id": bot.get("bot_id"), "user_id": user_id, "env": env}
+        )
+        return self._level.value
+
+
+def test_caller_context_admits_space_member_without_collaborator_row() -> None:
+    """A Team-Space member reads the Caller context at MEMBER, gate-aligned.
+
+    The reachable-without-a-row case the raw collaborator table cannot see:
+    the operable ladder answers the same question the operator gates answer,
+    so a space member no longer passes the gate and 404s one call later.
+    Read stays read-only — ``editable`` remains owner-only.
+    """
+    collaborators = _OperableCollaborators(PermissionLevel.MEMBER)
+    service, deps = _service(bot=_bot(), collaborator_service=collaborators)
+    deps.collaborator_repository.get_by_bot_and_user.return_value = None
+
+    context = service.get_context(
+        bot_id="bot-1",
+        actor_id="member-1",
+        stage=CallerIdentityStage.DRAFT,
+    )
+
+    assert context.editable is False
+    # The seam is authoritative and receives the record's env, not a guess.
+    assert collaborators.calls == [
+        {"bot_id": "bot-1", "user_id": "member-1", "env": "test"}
+    ]
+    deps.collaborator_repository.get_by_bot_and_user.assert_not_called()
+
+
+def test_caller_context_refuses_when_operable_ladder_answers_none() -> None:
+    """A revoked Space relation refutes a stale explicit collaborator row.
+
+    The COSEC recheck inside the ladder must subsume the raw row: keeping the
+    row-lookup as a second chance would re-admit an editor removed from the
+    Space — the exact hole the gates closed.
+    """
+    service, deps = _service(
+        bot=_bot(), collaborator_service=_OperableCollaborators(PermissionLevel.NONE)
+    )
+    # A row the raw lookup would happily accept.
+    deps.collaborator_repository.get_by_bot_and_user.return_value = {"user_id": "editor-1"}
+
+    with pytest.raises(CallerIdentityPermissionError):
+        service.get_context(
+            bot_id="bot-1",
+            actor_id="editor-1",
+            stage=CallerIdentityStage.DRAFT,
+        )
+
+
+def test_caller_context_operable_lookup_failure_fails_closed() -> None:
+    """A Space-services blip refuses the read rather than publishing it."""
+
+    class _Broken:
+        def get_operable_permission_level(self, *, bot, user_id, env=None):
+            raise RuntimeError("space services unavailable")
+
+    service, deps = _service(bot=_bot(), collaborator_service=_Broken())
+
+    with pytest.raises(CallerIdentityPermissionError):
+        service.get_context(
+            bot_id="bot-1",
+            actor_id="member-1",
+            stage=CallerIdentityStage.DRAFT,
+        )
+
+
+def test_caller_context_keeps_raw_row_path_without_the_operable_seam() -> None:
+    """Legacy wiring (no seam injected) adjudicates on the raw row, unchanged."""
+    service, deps = _service(bot=_bot())
+    deps.collaborator_repository.get_by_bot_and_user.return_value = {"user_id": "member-1"}
+
+    context = service.get_context(
+        bot_id="bot-1",
+        actor_id="member-1",
+        stage=CallerIdentityStage.DRAFT,
+    )
+
+    assert context.editable is False
+    deps.collaborator_repository.get_by_bot_and_user.assert_called_once_with(
+        1, "member-1", "test"
+    )
 
 
 @pytest.mark.asyncio
