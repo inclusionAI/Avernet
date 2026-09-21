@@ -48,6 +48,9 @@ from agentclaw.community.core.skill_center.services.skill_cache import MarketCac
 from agentclaw.community.core.skill_center.services.skill_parameter_service import (
     SkillParameterService,
 )
+from agentclaw.community.core.skill_center.skill_parameter_storage import (
+    DeviceFileSystemParameterStorage,
+)
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetService,
@@ -806,7 +809,8 @@ class SkillParameterServiceFactory(SkillParameterServiceFactoryProtocol):
         # no-ops. arca/baas/local keep reading/writing the engine-absolute default.
         engine_io_enabled = ctx.provider != "teclaw"
         service = SkillParameterService(
-            device_fs=device_fs, engine_io_enabled=engine_io_enabled
+            storage=DeviceFileSystemParameterStorage(device_fs),
+            engine_io_enabled=engine_io_enabled,
         )
         if load_on_init:
             await service.async_load()
