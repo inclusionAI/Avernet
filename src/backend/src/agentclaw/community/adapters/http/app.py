@@ -158,6 +158,7 @@ from agentclaw.community.adapters.http.bot_dormant.router import internal_router
 from agentclaw.community.adapters.http.spaces_internal import router as spaces_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_publish import router as service_bot_publish_router  # noqa: E402
+from agentclaw.community.adapters.http.service_bot.router_file_count import router as service_bot_file_count_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
 from agentclaw.community.adapters.http.task import task_internal_router, task_callback_router  # noqa: E402
 # skills / skillsets / skill_scan / skill_auth 全部切换到新架构 (core/skill_center + device plugin 抽象)
@@ -953,6 +954,7 @@ app.include_router(bot_dormant_internal_router)
 app.include_router(spaces_internal_router)
 app.include_router(service_bot_router)
 app.include_router(service_bot_publish_router)
+app.include_router(service_bot_file_count_router)
 app.include_router(bot_collaborator_router)
 app.include_router(skill_scan.router)
 app.include_router(skill_auth.router)

@@ -21,12 +21,22 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from engine.community.core.engine.context import AuthContext
-from engine.community.core.file.models import ListDirResult, RemoveResult, UploadResult
+from engine.community.core.file.models import CountFilesResult, ListDirResult, RemoveResult, UploadResult
 
 
 @runtime_checkable
 class FileService(Protocol):
     """Backend talks to filesystem-aware engines through this Protocol."""
+
+    async def count_files(
+        self, path: str, auth: AuthContext | None = None,
+    ) -> CountFilesResult:
+        """Count ordinary entries inside the engine root, never following links.
+
+        Failure raises kernel FileCountError; unsupported implementations must
+        explicitly fail rather than return a partial or empty result.
+        """
+        ...
 
     async def upload(
         self,

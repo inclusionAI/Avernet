@@ -7,6 +7,7 @@ Service-bot domain — bot publication facade, BAAS service binding, sub-resourc
 ```yaml
 purpose: "Service-bot domain — bot publication facade, BAAS service binding, sub-resource management."
 provides:
+  - "FileCountService"
   - "BuildIgnoreService"
   - "PublishIgnoreService"
   - "BotProcess"
@@ -37,6 +38,8 @@ consumes:
   - "SystemConfig"
   - "PassportPlugin"
 internal_dependencies:
+  - agentclaw.community.kernel.file_count
+  - agentclaw.community.plugin_api.file_count_runtime
   - agentclaw.community.core.base
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.core.repository.protocols.build_ignore

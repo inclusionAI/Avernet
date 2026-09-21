@@ -123,6 +123,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.bot_inventory.local_progress
   - agentclaw.community.core.resources.link_workflow
+  - agentclaw.community.core.service_bot.file_count_service_protocol
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.kernel.publish_ignore
   - agentclaw.community.core.digital_employee.contracts
