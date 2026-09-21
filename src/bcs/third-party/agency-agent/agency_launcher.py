@@ -18,6 +18,8 @@ import sys
 import time
 from pathlib import Path
 
+from agency_console import report, style
+from agency_parallel import run_parallel
 from agency_profiles import (
     Profile,
     build_config,
@@ -45,30 +47,49 @@ from agency_runtime import (
 )
 
 
+class AgentSelection(argparse.Action):
+    """Keep --team and --profile in their original command-line order."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        selections = list(getattr(namespace, self.dest, None) or [])
+        selections.append((self.const, values))
+        setattr(namespace, self.dest, selections)
+
+
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False, epilog=(
         'Runs in the foreground; Ctrl+C stops owned Gateways but keeps credentials. '
         'Model credentials must be supplied via provider environment variables or the model JSON.'))
     parser.add_argument('--agency-dir', type=Path,
-                        help='local checkout; default: clone/reuse <state-dir>/agency-agents')
-    parser.add_argument('--profile', action='append', required=True,
-                        help='repeat for each relative Markdown path or unique file stem')
+                        help='local checkout; default: clone/reuse <state-dir>/agency-agent')
+    parser.add_argument('--engine', default='openclaw', choices=['openclaw'],
+                        help='agent engine (currently only openclaw is supported)')
+    parser.add_argument('--profile', dest='selections', action=AgentSelection, const='profile',
+                        metavar='TEAM/PROFILE', help='repeat to select team/profile (optional .md suffix)')
+    parser.add_argument('--team', dest='selections', action=AgentSelection, const='team',
+                        metavar='TEAM', help='start a team; deduplicated totals over 5 require interactive confirmation')
     parser.add_argument('--model-config', type=Path, default=Path.home() / '.openclaw/openclaw.json',
                         help='model JSON (default: ~/.openclaw/openclaw.json); other settings are ignored')
     parser.add_argument('--bcs-endpoint', required=True, help='HTTP(S) BCS base URL, including deployment prefix if needed')
     credentials = parser.add_mutually_exclusive_group()
     credentials.add_argument('--token', help='Human/User registration token, as in install.sh')
     credentials.add_argument('--token-file', type=Path, help='registration token file; otherwise BCS_REGISTER_TOKEN')
-    parser.add_argument('--yes', action='store_true', help='accept all changed profile overwrites without prompting')
-    parser.add_argument('--reregister-bcs', action='store_true', help='re-register every selected instance that already has a BCS session')
-    parser.add_argument('--state-dir', type=Path, default=Path.home() / '.bcs/agency',
-                        help='dedicated persistent directory (default: ~/.bcs/agency)')
+    parser.add_argument('--overwrite-profile', action='store_true', help='accept all changed profile overwrites without prompting')
+    parser.add_argument('--reregister', action='store_true', help='re-register every selected instance that already has a BCS session')
+    parser.add_argument('--state-dir', type=Path, default=Path.home() / '.avernet/bcs/agency-agent',
+                        help='dedicated persistent directory (default: ~/.avernet/bcs/agency-agent; instances go under <engine>)')
+    parser.add_argument('--parallel', type=int, default=4,
+                        help='maximum concurrent installation/startup tasks (default: 4; use 1 for serial)')
     parser.add_argument('--base-port', type=int, default=19000)
     parser.add_argument('--port-step', type=int, default=20, help='spacing for new Gateways, at least 20')
     parser.add_argument('--startup-timeout', type=float, default=90, help='seconds to verify each BCS connection')
     parser.add_argument('--bcn-plugin', default='@avernet-plugin/openclaw-channel-bcn@1.0.23',
                         help='OpenClaw plugin install spec (pinned npm package, local built directory or tarball)')
     args = parser.parse_args()
+    if args.parallel < 1:
+        parser.error('--parallel must be a positive integer')
+    if not args.selections:
+        parser.error('at least one --profile or --team is required')
     if args.port_step < 20 or not 1024 <= args.base_port <= 65515:
         parser.error('--port-step must be >=20 and --base-port must be 1024..65515')
     if not 0 < args.startup_timeout <= 3600:
@@ -108,10 +129,25 @@ def interactive_input() -> bool:
 
 def ask_yes_no(question: str, default: bool = False) -> bool:
     suffix = ' [Y/n] ' if default else ' [y/N] '
-    answer = input(question + suffix).strip().lower()
+    answer = input(style(question + suffix, 'warning')).strip().lower()
     if not answer:
         return default
     return answer in {'y', 'yes'}
+
+
+def confirm_team_size(selections: list[tuple[str, str]], agent_count: int) -> bool:
+    """Ask once about a large team-expanded launch, before touching any instance."""
+    if agent_count <= 5 or not any(kind == 'team' for kind, _ in selections):
+        return True
+    report(f'WARNING: selected {agent_count} agents in total after deduplication. '
+           'Launching this many agents uses more processes/memory and may incur model costs.', 'warning')
+    if not interactive_input():
+        raise ValueError('launching a team with more than 5 agents requires confirmation '
+                         'in an interactive terminal; no instances were changed')
+    try:
+        return ask_yes_no(f'Continue launching all {agent_count} agents?')
+    except EOFError:
+        return False
 
 
 def prepare_plans(args, profiles, root: Path, ws_url: str, registration_proof: str) -> list[LaunchPlan]:
@@ -129,6 +165,8 @@ def prepare_plans(args, profiles, root: Path, ws_url: str, registration_proof: s
             raise ValueError('instance directory must not be a symlink')
         record = existing.get(profile.instance_id)
         if record:
+            if record.get('engine', 'openclaw') != args.engine:
+                raise ValueError(f'{profile.instance_id}: saved engine differs; refusing to reuse its state')
             expected = {'profile_path': profile.path, 'bcs_url': ws_url, 'plugin': args.bcn_plugin}
             if any(record.get(key) != value for key, value in expected.items()):
                 raise ValueError(f'{profile.instance_id}: endpoint or plugin changed; use a new --state-dir')
@@ -161,13 +199,13 @@ def choose_profile_actions(plans: list[LaunchPlan], args, registration_proof: st
     for plan in plans:
         if not plan.record or plan.record.get('source_sha256') == plan.profile.digest:
             continue
-        if args.yes:
+        if args.overwrite_profile:
             plan.overwrite = True
         elif interactive_input():
             plan.overwrite = ask_yes_no(
                 f'[{plan.profile.name}] Source profile changed. Overwrite the local profile?')
         else:
-            raise ValueError(f'{plan.state.name}: profile changed; rerun with --yes to allow overwrite')
+            raise ValueError(f'{plan.state.name}: profile changed; rerun with --overwrite-profile to allow overwrite')
         if not plan.overwrite:
             snapshot = plan.state / 'profile.md'
             saved = load_profile_snapshot(snapshot, plan.record['profile_path'])
@@ -177,12 +215,12 @@ def choose_profile_actions(plans: list[LaunchPlan], args, registration_proof: st
     existing = [plan for plan in plans if plan.existing_session is not None]
     if not existing:
         return
-    if args.reregister_bcs:
+    if args.reregister:
         do_reregister = True
     elif interactive_input():
-        print('\nExisting BCS sessions detected:', flush=True)
+        report('\nExisting BCS sessions detected:')
         for plan in existing:
-            print(f'  {plan.profile.name}: Bot ID {plan.existing_session["bot_uuid"]}', flush=True)
+            report(f'  {plan.profile.name}: Bot ID {plan.existing_session["bot_uuid"]}')
         do_reregister = ask_yes_no('Re-register all existing BCS sessions as new Bots?')
     else:
         do_reregister = False
@@ -199,7 +237,7 @@ def prepare_workspace(profile, state: Path, port: int, args, model: dict, ws_url
     write_json(state / 'instance.json', {
         'profile_path': profile.path, 'source_sha256': profile.digest,
         'source_root': str(args.agency_dir.resolve()), 'bcs_url': ws_url,
-        'port': port, 'plugin': args.bcn_plugin,
+        'port': port, 'plugin': args.bcn_plugin, 'engine': args.engine,
     })
     snapshot = state / 'profile.md'
     if overwrite_profile and snapshot.exists():
@@ -265,6 +303,7 @@ def publish_capabilities(runtime: OpenClaw, endpoint: str, profile, state: Path,
         diagnostic['attempts'] = attempt
         try:
             result = post_json(endpoint + '/bots/onboard', payload, session['token'])
+            runtime.check_alive()
             returned_id = result.get('bot_uuid')
             confirmed = (result.get('onboarded') is True
                          and (returned_id is None or returned_id == session['bot_uuid']))
@@ -277,7 +316,8 @@ def publish_capabilities(runtime: OpenClaw, endpoint: str, profile, state: Path,
             diagnostic.pop('response', None)
             diagnostic['error'] = str(error)
         if attempt < CAPABILITY_ATTEMPTS:
-            time.sleep(CAPABILITY_DELAYS[attempt - 1])
+            runtime.pause(CAPABILITY_DELAYS[attempt - 1])
+    runtime.check_alive()
     write_json(pending, diagnostic)
     return False
 
@@ -295,21 +335,37 @@ def run(args) -> None:
     else:
         registration_proof = os.environ.get('BCS_REGISTER_TOKEN', '').strip()
     root = args.state_dir.expanduser().resolve()
-    with state_lock(root):
-        args.agency_dir = (args.agency_dir.expanduser() if args.agency_dir is not None
-                           else ensure_agency_checkout(root))
-        profiles = load_profiles(args.agency_dir, args.profile)
-        plans = prepare_plans(args, profiles, root, ws_url, registration_proof)
+    if any(root.glob('*/instance.json')):
+        raise ValueError('legacy flat instance layout detected; run migrate-layout.sh before launching')
+    if args.agency_dir is None:
+        # Serialize only shared checkout setup, not the lifetime of another engine.
+        with state_lock(root):
+            args.agency_dir = ensure_agency_checkout(root)
+    else:
+        args.agency_dir = args.agency_dir.expanduser()
+    engine_root = root / args.engine
+    with state_lock(engine_root):
+        profiles = load_profiles(args.agency_dir, args.selections)
+        if not confirm_team_size(args.selections, len(profiles)):
+            report('Launch cancelled; no instances were changed.', 'warning')
+            return
+        plans = prepare_plans(args, profiles, engine_root, ws_url, registration_proof)
         choose_profile_actions(plans, args, registration_proof)
         runtime = OpenClaw(executable)
         try:
             # Finish all plugin installs before any registration. Confirmation has
             # already happened for every profile, so a declined overwrite still runs
             # with its saved local snapshot and can participate in the global BCS choice.
-            for plan in plans:
-                print(f'PREPARING {plan.profile.name} (port {plan.port})', flush=True)
+            def prepare(plan: LaunchPlan) -> None:
+                runtime.check_cancelled()
+                report(f'[{plan.profile.name}] PREPARING (port {plan.port})')
                 prepare_workspace(plan.profile, plan.state, plan.port, args, model, ws_url, plan.overwrite)
+                runtime.check_cancelled()
+                report(f'[{plan.profile.name}] INSTALLING BCN plugin')
                 runtime.install(plan.state, args.bcn_plugin)
+                report(f'[{plan.profile.name}] PREPARED', 'success')
+
+            run_parallel(plans, prepare, args.parallel, runtime.cancel)
 
             sessions: dict[Path, dict] = {}
             reregistration_items: list[tuple[Path, dict, dict]] = []
@@ -326,25 +382,29 @@ def run(args) -> None:
                 commit_reregistrations(reregistration_items)
             for plan in plans:
                 configure_channel(plan.state, sessions[plan.state], ws_url, plan.profile)
-            for plan in plans:
+            def start_and_connect(plan: LaunchPlan) -> bool:
+                runtime.check_cancelled()
+                report(f'[{plan.profile.name}] STARTING (port {plan.port})')
                 runtime.start(plan.state)
-            pending_capabilities = 0
-            for plan in plans:
                 runtime.wait_connected(plan.state, args.startup_timeout)
                 # A successful handshake may rotate the reconnect token.
                 session = load_session(plan.state, ws_url)
                 confirmed = publish_capabilities(runtime, endpoint, plan.profile, plan.state, session)
                 capability_status = 'confirmed' if confirmed else 'pending'
                 if not confirmed:
-                    pending_capabilities += 1
-                    print(f'WARNING {plan.state.name}: capability metadata pending; private diagnostic: '
-                          f'{plan.state / "bcs-onboard-last-response.json"}', flush=True)
-                print(f'CONNECTED {plan.profile.name}: bot_id={session["bot_uuid"]}, port={plan.port}, '
-                      f'capabilities={capability_status}, state={plan.state}', flush=True)
+                    report(f'WARNING [{plan.profile.name}]: capability metadata pending; private diagnostic: '
+                           f'{plan.state / "bcs-onboard-last-response.json"}', 'warning')
+                report(f'[{plan.profile.name}] CONNECTED: bot_id={session["bot_uuid"]}, port={plan.port}, '
+                       f'capabilities={capability_status}, state={plan.state}', 'success')
+                return confirmed
+
+            statuses = run_parallel(plans, start_and_connect, args.parallel, runtime.cancel)
+            pending_capabilities = statuses.count(False)
             suffix = (f' capability metadata pending for {pending_capabilities} instance(s);'
                       if pending_capabilities else '')
-            print(f'ALL CONNECTED —{suffix} model replies not tested. '
-                  'Ctrl+C stops these Gateways; state is retained.', flush=True)
+            report(f'ALL CONNECTED —{suffix} model replies not tested. '
+                   'Ctrl+C stops these Gateways; state is retained.',
+                   'warning' if pending_capabilities else 'success')
             while True:
                 runtime.check_alive()
                 time.sleep(0.5)
@@ -360,13 +420,13 @@ def main() -> int:
     try:
         run(args)
     except KeyboardInterrupt:
-        print('Stopped owned Gateways; profile state and BCS credentials retained.', flush=True)
+        report('Stopped owned Gateways; profile state and BCS credentials retained.')
         return 0
     except (ValueError, TypeError, OSError, RuntimeError, subprocess.TimeoutExpired) as error:
         # Values raised by helpers are sanitized. OSError may contain sensitive paths;
         # subprocess timeouts can contain command output, so do not stringify either.
         message = str(error) if isinstance(error, (ValueError, TypeError, RuntimeError)) else type(error).__name__
-        print(f'ERROR: {message}', file=sys.stderr, flush=True)
+        report(f'ERROR: {message}', 'error', error=True)
         return 1
     return 0
 

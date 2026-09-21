@@ -59,32 +59,68 @@ def parse_profile_document(source: str, relative_path: str, selector: str = 'pro
                    body + '\n', source, hashlib.sha256(source.encode()).hexdigest())
 
 
-def load_profiles(repo: Path, selectors: list[str]) -> list[Profile]:
+def _selection_parts(value: str, *, team_only: bool = False) -> list[str]:
+    parts = value.split('/')
+    if (not value or (team_only and len(parts) != 1)
+            or (not team_only and len(parts) < 2)
+            or any(not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]*', part) for part in parts)):
+        spelling = 'team' if team_only else 'team/profile'
+        raise ValueError(f'selection must use {spelling} format without absolute paths or traversal')
+    return parts
+
+
+def _contained_file(repo: Path, relative: Path) -> Path:
+    try:
+        resolved = (repo / relative).resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise ValueError(f'profile not found: {relative.as_posix()}') from None
+    if not resolved.is_relative_to(repo) or not resolved.is_file():
+        raise ValueError('profile must be a Markdown file contained in --agency-dir')
+    return resolved
+
+
+def load_profiles(repo: Path, selections: list[tuple[str, str]]) -> list[Profile]:
+    """Expand ordered profile/team selections; canonical file paths are identities.
+
+    `team/profile` and `team/profile.md` refer to the same file. Team members are
+    sorted by repository-relative path (including nested divisions); repeated
+    selections keep their first position, never create duplicate instances.
+    """
     repo = repo.resolve(strict=True)
     profiles: list[Profile] = []
     seen: set[Path] = set()
-    for selector in selectors:
-        relative = Path(selector)
-        if relative.is_absolute() or '..' in relative.parts:
-            raise ValueError('profile must be a relative path inside --agency-dir')
-        candidate = repo / relative
-        if not candidate.is_file() and len(relative.parts) == 1:
-            candidates = [p for p in repo.rglob('*.md') if p.stem == relative.stem
-                          and not any(part.startswith('.') for part in p.relative_to(repo).parts)
-                          and 'integrations' not in p.relative_to(repo).parts]
-            if len(candidates) != 1:
-                raise ValueError(f'profile selector {selector!r} is missing or ambiguous; use its relative path')
-            candidate = candidates[0]
-        path = candidate.resolve(strict=True)
-        if not path.is_relative_to(repo) or path.suffix.lower() != '.md':
-            raise ValueError('profile must be a Markdown file contained in --agency-dir')
-        if path in seen:
-            raise ValueError('the same profile was selected more than once')
-        seen.add(path)
-        if path.stat().st_size > 512 * 1024:
-            raise ValueError('profile exceeds the 512 KiB input limit')
-        source = path.read_text(encoding='utf-8')
-        profiles.append(parse_profile_document(source, str(path.relative_to(repo)), selector))
+    for kind, selector in selections:
+        if kind == 'team':
+            _selection_parts(selector, team_only=True)
+            directory = repo / selector
+            if directory.is_symlink() or not directory.is_dir():
+                raise ValueError(f'team not found or is a symlink: {selector}')
+            # os.walk does not follow directory symlinks. Explicitly refuse them
+            # rather than silently producing an incomplete or escaped team.
+            members = sorted(directory.rglob('*.md'))
+            if any(path.is_symlink() and path.is_dir() for path in directory.rglob('*')):
+                raise ValueError(f'team contains a symlinked directory: {selector}')
+            candidates = [path.relative_to(repo) for path in members
+                          if path.stem.lower() not in {'readme', 'agents', 'contributing', 'license'}
+                          and not any(part.startswith('.') for part in path.relative_to(repo).parts)]
+            if not candidates:
+                raise ValueError(f'team contains no agent profiles: {selector}')
+        else:
+            parts = _selection_parts(selector)
+            filename = Path(parts[-1])
+            if filename.suffix and filename.suffix != '.md':
+                raise ValueError('profile must use team/profile or team/profile.md')
+            relative = Path(*parts)
+            candidates = [relative if filename.suffix == '.md' else relative.with_suffix('.md')]
+        for relative in candidates:
+            path = _contained_file(repo, relative)
+            if path in seen:
+                continue
+            seen.add(path)
+            if path.stat().st_size > 512 * 1024:
+                raise ValueError('profile exceeds the 512 KiB input limit')
+            source = path.read_text(encoding='utf-8')
+            profiles.append(parse_profile_document(source, str(path.relative_to(repo)), selector))
     return profiles
 
 

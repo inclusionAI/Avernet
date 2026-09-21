@@ -9,11 +9,15 @@ import signal
 import subprocess
 import tempfile
 import time
+from concurrent.futures import CancelledError
 from contextlib import contextmanager
 from pathlib import Path
+from threading import Event, Lock
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+from agency_console import report
 
 PLUGIN_ID = 'openclaw-channel-bcn'
 # Public bootstrap source explicitly chosen for the agency launcher.
@@ -224,20 +228,30 @@ def child_environment(state: Path) -> dict[str, str]:
     return env
 
 
-def terminate(process: subprocess.Popen) -> None:
-    # Signal the group even if its leader already exited: a descendant may remain.
+def signal_group(process: subprocess.Popen, sig: signal.Signals) -> bool:
+    # Reap before signalling, but also handle exit between poll() and killpg().
+    # Retry only after confirming the leader exited; real permission errors fail.
+    process.poll()
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            os.killpg(process.pid, sig)
+        except PermissionError:
+            if process.poll() is None:
+                raise
+            os.killpg(process.pid, sig)
     except ProcessLookupError:
+        return False
+    return True
+
+
+def terminate(process: subprocess.Popen) -> None:
+    if not signal_group(process, signal.SIGTERM):
         return
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         pass
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    signal_group(process, signal.SIGKILL)
     process.wait()
 
 
@@ -265,7 +279,7 @@ def ensure_agency_checkout(root: Path) -> Path:
     executable = shutil.which('git')
     if not executable:
         raise ValueError('git is required to clone/reuse the default repository; or supply --agency-dir')
-    destination = root / 'agency-agents'
+    destination = root / 'agency-agent'
     if destination.is_symlink():
         raise ValueError('agency-agents cache must not be a symlink; supply --agency-dir instead')
     if destination.exists():
@@ -274,7 +288,7 @@ def ensure_agency_checkout(root: Path) -> Path:
         if Path(top).resolve() != destination.resolve() or origin != AGENCY_REPOSITORY:
             raise ValueError('existing agency-agents cache is not the expected repository; supply --agency-dir')
         return destination
-    print('Cloning agency-agents into the state directory (first use only)...', flush=True)
+    report('Cloning agency-agents into the state directory (first use only)...')
     with tempfile.TemporaryDirectory(prefix='.agency-clone-', dir=root) as temporary:
         checkout = Path(temporary) / 'checkout'
         run_git(executable, ['clone', '--depth', '1', '--', AGENCY_REPOSITORY, str(checkout)], root)
@@ -294,13 +308,41 @@ class OpenClaw:
     def __init__(self, executable: str):
         self.executable = executable
         self.gateways: list[tuple[Path, subprocess.Popen]] = []
+        self._cancelled = Event()
+        self._spawn_lock = Lock()
+
+    def cancel(self) -> None:
+        with self._spawn_lock:
+            self._cancelled.set()
+
+    def check_cancelled(self) -> None:
+        if self._cancelled.is_set():
+            raise CancelledError('launcher stopped')
+
+    def pause(self, seconds: float) -> None:
+        if self._cancelled.wait(seconds):
+            raise CancelledError('launcher stopped')
 
     def command(self, state: Path, args: list[str], timeout: float = 120) -> dict:
-        process = subprocess.Popen([self.executable, *args], env=child_environment(state),
-                                   cwd=state, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   text=True, start_new_session=True)
+        with self._spawn_lock:
+            self.check_cancelled()
+            process = subprocess.Popen([self.executable, *args], env=child_environment(state),
+                                       cwd=state, stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       text=True, start_new_session=True)
+        deadline = time.monotonic() + timeout
         try:
-            stdout, stderr = process.communicate(timeout=timeout)
+            while True:
+                self.check_cancelled()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(process.args, timeout)
+                try:
+                    stdout, stderr = process.communicate(timeout=min(0.2, remaining))
+                    self.check_cancelled()
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
         except BaseException:
             terminate(process)
             raise
@@ -337,8 +379,8 @@ class OpenClaw:
                        for p in result.get('plugins', [])):
                 raise
             self.command(state, ['plugins', 'enable', PLUGIN_ID])
-            print(f'{state.name}: recovered BCN setup configuration conflict; '
-                  'plugin load and enable verified.', flush=True)
+            report(f'[{state.name}] recovered BCN setup configuration conflict; '
+                   'plugin load and enable verified.', 'warning')
         result = self.command(state, ['plugins', 'list', '--json'])
         if not any(p.get('id') == PLUGIN_ID and p.get('status') == 'loaded'
                    for p in result.get('plugins', [])):
@@ -348,15 +390,19 @@ class OpenClaw:
         log = state / 'gateway.log'
         # Start a fresh log for this attempt, never infer readiness from old output.
         write_private(log, '')
-        with log.open('a') as output:
+        with log.open('a') as output, self._spawn_lock:
+            self.check_cancelled()
             process = subprocess.Popen([self.executable, 'gateway', 'run'],
                                        env=child_environment(state), cwd=state,
                                        stdin=subprocess.DEVNULL, stdout=output,
                                        stderr=subprocess.STDOUT, start_new_session=True)
-        self.gateways.append((state, process))
+            self.gateways.append((state, process))
 
     def check_alive(self) -> None:
-        for state, process in self.gateways:
+        self.check_cancelled()
+        with self._spawn_lock:
+            gateways = list(self.gateways)
+        for state, process in gateways:
             if process.poll() is not None:
                 raise RuntimeError(f'{state.name}: Gateway exited ({process.returncode}); inspect its private gateway.log')
 
@@ -379,9 +425,15 @@ class OpenClaw:
                         return
             except (RuntimeError, subprocess.TimeoutExpired):
                 pass
-            time.sleep(min(0.3, max(0, deadline - time.monotonic())))
+            self.pause(min(0.3, max(0, deadline - time.monotonic())))
         raise RuntimeError(f'{state.name}: BCS connection timed out; inspect its private gateway.log')
 
     def close(self) -> None:
-        for _, process in reversed(self.gateways):
+        self.cancel()
+        # run_parallel has joined all workers: no command/spawn can outlive this.
+        with self._spawn_lock:
+            gateways, self.gateways = self.gateways, []
+        # Each group receives TERM once, then is reaped before moving on. Sending
+        # TERM in advance and again in terminate races with short-lived children.
+        for _, process in reversed(gateways):
             terminate(process)
