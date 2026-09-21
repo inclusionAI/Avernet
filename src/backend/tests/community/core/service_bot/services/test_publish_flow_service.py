@@ -1119,7 +1119,7 @@ async def test_build_phase_routes_arca_and_merges_mount_ext():
 
 
 @pytest.mark.asyncio
-async def test_build_phase_projects_everything_before_artifact_build():
+async def test_build_phase_projects_skills_only_before_artifact_build():
     arca = _StubProducer({"migration_path": "/m/3"})
     router = DeployArtifactProducerRouter(
         providers={"baas": arca}, default_provider_key="baas"
@@ -1143,7 +1143,7 @@ async def test_build_phase_projects_everything_before_artifact_build():
     runtime_projector.project.assert_awaited_once_with(
         bot_id="b1",
         owner_id="owner-1",
-        scope=ProjectionScope.everything(),
+        scope=ProjectionScope(skills=True),
     )
     assert len(arca.calls) == 1
     assert dict(arca.calls[0].bot) == bot
@@ -1197,7 +1197,13 @@ async def test_build_phase_routes_external_and_merges_artifact_ext():
         "active_engine": "teclaw",
         "env": "prod",
     }
-    svc, _ = _build_svc_with_router(router, bot, provider="teclaw")
+    runtime_projector = AsyncMock()
+    svc, _ = _build_svc_with_router(
+        router,
+        bot,
+        provider="teclaw",
+        runtime_projector=runtime_projector,
+    )
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=2)
     await svc.execute_build_phase(record, "op")
@@ -1207,6 +1213,11 @@ async def test_build_phase_routes_external_and_merges_artifact_ext():
     assert dict(teclaw.calls[0].bot) == bot
     assert teclaw.calls[0].version == 2
     assert arca.calls == []
+    runtime_projector.project.assert_awaited_once_with(
+        bot_id="b2",
+        owner_id="owner-1",
+        scope=ProjectionScope(skills=True),
+    )
     # external pins the refs-only artifact onto ext (no mount chain). The teclaw
     # file-promotion gather merges its (here empty) snapshot into the artifact,
     # so the resources/identity_files keys are present (empty).
