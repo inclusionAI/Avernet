@@ -16,6 +16,9 @@ from agentclaw.community.core.task.domain.models import (
     Context, Goal, RuntimeInfo, Status, TaskCallbackData, TaskNode, TaskNodePatch,
     TaskSpec, task_spec_instruction, task_spec_title,
 )
+from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
+    format_task_node_business_instruction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -283,18 +286,36 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
         }))
         logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
 
-    # 任务msg
-    msg = _task_msg(
-        skill_name,
-        execution_graph,
-        backend_url,
-        winner_bot_id,
-        bbs_task_node.task_id,
-        bbs_task_node.node_id,
-        winner.get("relay_reason", ""),
-        title=winner.get("title", ""),
-        goal=winner.get("goal", ""),
-    )
+    # 任务msg:分布式 Relay 的 BBS 认领者仍是一条普通接力棒，只允许接收
+    # 同一的 context→EXECUTION_RESULT→PLAN_RESULT→search→DISPATCH_RESULT→dispatch
+    # 闭环；中心化 legacy BBS 才保留旧的 status/output 一次性上报协议。
+    relay_inputs = None
+    if _relay_mode(execution_graph, target_node_id):
+        relay_inputs = _relay_task_inputs(
+            execution_graph=execution_graph,
+            node=bbs_task_node,
+            reason=winner.get("relay_reason", ""),
+            title=winner.get("title", ""),
+            goal=winner.get("goal", ""),
+        )
+        msg = _relay_task_msg(
+            inputs=relay_inputs,
+            backend_url=backend_url,
+            bot_id=winner_bot_id,
+            node=bbs_task_node,
+        )
+    else:
+        msg = _task_msg(
+            skill_name,
+            execution_graph,
+            backend_url,
+            winner_bot_id,
+            bbs_task_node.task_id,
+            bbs_task_node.node_id,
+            winner.get("relay_reason", ""),
+            title=winner.get("title", ""),
+            goal=winner.get("goal", ""),
+        )
 
     # 执行bbs，执行完后再更新
     _emit_bbs_trajectory(
@@ -317,8 +338,33 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
                     node_id=bbs_task_node.node_id,
                     winner_bot_id=winner_bot_id,
                     owner_user_id=_owner_user_id,
-                    task_instruction=msg,
+                    task_instruction=(
+                        str(relay_inputs["instruction"])
+                        if relay_inputs is not None
+                        else msg
+                    ),
                     deadline_monotonic=time.monotonic() + _OVERALL_TIMEOUT_4_DOT,
+                    relay_execution=relay_inputs is not None,
+                    task_objective=(
+                        str(relay_inputs["objective"])
+                        if relay_inputs is not None
+                        else ""
+                    ),
+                    acceptances=(
+                        relay_inputs["acceptances"]
+                        if relay_inputs is not None
+                        else []
+                    ),
+                    upstream_outputs=(
+                        relay_inputs["upstream_outputs"]
+                        if relay_inputs is not None
+                        else {}
+                    ),
+                    relay_blackboard=(
+                        relay_inputs["relay_blackboard"]
+                        if relay_inputs is not None
+                        else None
+                    ),
                 )
             except Exception as exc:  # noqa: BLE101 建群/轮询失败 → 回退 send_and_wait(不阻断 single bot 投递)
                 logger.error(
@@ -600,6 +646,90 @@ def _bid_prompt(execution_graph, bot_id: str) -> str:
         '{"completion_rate": <0-100整数>, "relay_reason": "<可完成理由与依据>", '
         '"title": "<你能完成的这部分事项的标题>", "goal": "<你能完成的这部分事项的目标/目标成果>"}\n'
         f"任务态快照\n{json.dumps(snapshot, ensure_ascii=False)}\n"
+    )
+
+
+def _relay_mode(execution_graph, target_node_id: str | None) -> bool:
+    """Use Relay protocol for a node-local BBS claim in distributed Relay mode."""
+    if target_node_id is not None:
+        return True
+    config = (getattr(execution_graph, "extend_props", None) or {}).get(
+        "execution_config", {}
+    )
+    return isinstance(config, dict) and config.get("orchestration_mode") == "relay"
+
+
+def _relay_claim_instruction(
+    *, title: str, goal: str, reason: str,
+) -> str:
+    lines: list[str] = []
+    if title:
+        lines.append(f"BBS认领范围: {title}")
+    if goal:
+        lines.append(f"BBS认领目标: {goal}")
+    if reason:
+        lines.append(f"BBS认领依据: {reason}")
+    return "；".join(lines)
+
+
+def _relay_task_inputs(
+    *,
+    execution_graph,
+    node: TaskNode,
+    reason: str,
+    title: str = "",
+    goal: str = "",
+) -> dict[str, Any]:
+    """Return the Relay task facts used by direct delivery and group delivery."""
+    snapshot = _build_task_snapshot(execution_graph)
+    claim_instruction = _relay_claim_instruction(
+        title=title, goal=goal, reason=reason
+    )
+    instruction = task_spec_instruction(node.task_spec)
+    if claim_instruction:
+        instruction = f"{claim_instruction}\n{instruction}"
+    upstream = {
+        str(item.get("node_id")): item.get("output")
+        for item in snapshot.get("done_children", [])
+        if isinstance(item, dict) and item.get("node_id")
+    }
+    return {
+        "objective": str(node.task_spec.goal.objective),
+        "instruction": instruction,
+        "acceptances": [
+            {"id": acceptance.id, "description": acceptance.description}
+            for acceptance in node.task_spec.goal.acceptances
+        ],
+        "upstream_outputs": upstream,
+        "relay_blackboard": {
+            "snapshot": snapshot,
+            "bbs_claim_title": title,
+            "bbs_claim_goal": goal,
+            "bbs_claim_reason": reason,
+        },
+    }
+
+
+def _relay_task_msg(
+    *,
+    inputs: dict[str, Any],
+    backend_url: str,
+    bot_id: str,
+    node: TaskNode,
+) -> str:
+    """Build the unified Relay closure instruction for a node-local BBS claimant."""
+    return format_task_node_business_instruction(
+        task_id=str(node.task_id),
+        node_id=str(node.node_id),
+        backend=backend_url,
+        objective=str(inputs["objective"]),
+        instruction=str(inputs["instruction"]),
+        acceptances=inputs["acceptances"],
+        upstream_outputs=inputs["upstream_outputs"],
+        reporter_bot_id=str(bot_id),
+        executor_bot_ids=[str(bot_id)],
+        relay_execution=True,
+        relay_blackboard=inputs["relay_blackboard"],
     )
 
 

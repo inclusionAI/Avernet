@@ -57,7 +57,7 @@ def format_task_node_business_instruction(
             "progress_reason": "为什么当前事实可以被记录",
             "failure_reason": None,
             "payload": {
-                "execution_decision": "ACCEPTED 或 DECLINED",
+                "execution_decision": "ACCEPTED",
                 "actual_goal": {
                     "objective": "能力匹配后实际执行的 goal",
                     "acceptances": [{"id": "验收项ID", "description": "验收要求"}],
@@ -71,6 +71,16 @@ def format_task_node_business_instruction(
                     "gaps": [],
                 },
             },
+        }
+        declined_payload = {
+            "task_id": task_id,
+            "node_id": node_id,
+            "event_type": "EXECUTION_RESULT",
+            "event_id": "每次事件使用新的 UUID",
+            "holder_id": reporter,
+            "progress_reason": "能力准入结论",
+            "failure_reason": "capability_mismatch",
+            "payload": {"execution_decision": "DECLINED"},
         }
         return "\n".join(
             [
@@ -87,8 +97,10 @@ def format_task_node_business_instruction(
                 f"1. 获取最新上下文：GET {backend}/api/v1/collaboration/tasks/{task_id}/context。",
                 "2. 能力准入：先用 IDENTITY.md 的职责边界、已激活 Skills 和可用工具判断本棒可覆盖范围；只执行被职责与工具同时覆盖的子项，不硬做全部需求。未覆盖或关键工具不可用时规划下一棒，不得改用通用模型知识或其它工具替代。",
                 "3. 执行与本地验收：完成真实业务推理和可复核产出；driver 汇总协作群分内产出，逐条对照 actual_goal 的验收项形成节点级验收事实。",
-                f"4. POST {callback} 上报 EXECUTION_RESULT；event_id 必须新生成。ACCEPTED 必须携带 actual_goal、output、acceptance_result；DECLINED 只携带能力不匹配事实，不得伪造业务产出。请求体示例：",
+                f"4. POST {callback} 上报 EXECUTION_RESULT；event_id 必须新生成。ACCEPTED 请求体示例：",
                 json.dumps(execution_payload, ensure_ascii=False),
+                "DECLINED 请求体示例如下；DECLINED payload 只能携带 execution_decision，不得携带 actual_goal、output、acceptance_result 或 gaps，不可伪造业务产出，原因写入 failure_reason：",
+                json.dumps(declined_payload, ensure_ascii=False),
                 "响应 data.relay_turn 是后续 PLAN/搜索/派发的唯一接力凭证，必须原样保存，不得自行生成。",
                 f"5. 再次 GET {backend}/api/v1/collaboration/tasks/{task_id}/context，基于根 TaskSpec、all_done_output、本节点实际产出与验收事实重新计算 gaps。将 event_type=PLAN_RESULT POST 到 callback/report，payload={{gaps,next_task_spec}}；gaps 非空时 next_task_spec 必须是唯一下一棒 context+goal，节点 ID 由 Graph 生成；gaps=[] 时 next_task_spec=null，任务结束。PLAN_RESULT HTTP 成功且 gaps 非空时必须原样保存响应中的 target_node_id；未成功读取该值时只能用相同 event_id 原样重试本事件，不得进入搜索或派发。",
                 f"6. 若产生下一步节点，先根据该节点 goal、gap 和 instruction 构造搜索 query，再 POST {backend}/api/v1/collaboration/tasks/search，请求体只能传 {{\"query\": \"...\"}}。搜索接口只返回候选事实，不感知任务图，也不决定执行模态。",

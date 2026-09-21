@@ -302,6 +302,37 @@ def test_relay_dynamic_group_injects_only_relay_event_protocol():
     assert ctx.count("[task-execute]") == 1
 
 
+def test_bbs_relay_group_serializes_relay_facts_into_unified_protocol():
+    """BBS Relay manager_worker 群必须由建群器统一格式化 Relay 事实，不套中心化回投协议。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       api_base_url="http://backend")
+    result = _run(exe._bbs_execute_as_manager_worker_group(
+        task_id="t1",
+        node_id="n1",
+        winner_bot_id="mgr",
+        owner_user_id="35983",
+        task_instruction="BBS认领目标:完成行业研究\n执行行业研究与投资分析",
+        deadline_monotonic=0,
+        relay_execution=True,
+        task_objective="补齐存储行业尽调缺口",
+        acceptances=[{"id": "a1", "description": "结论可复核"}],
+        upstream_outputs={"up1": "上游摘要"},
+        relay_blackboard={"snapshot": {"loop_round": 1}},
+    ))
+
+    assert result["session_id"] == "s1"
+    context = bcs.created[0].context
+    assert "【分布式接力闭环】" in context
+    assert "GET http://backend/api/v1/collaboration/tasks/t1/context" in context
+    assert '"event_type": "EXECUTION_RESULT"' in context
+    assert "PLAN_RESULT" in context and "DISPATCH_RESULT" in context
+    assert "【业务节点执行协议】" not in context
+    assert "回投请求体只能包含" not in context
+    assert context.count("[task-execute]") == 1
+
+
 def test_dynamic_group_rewrites_legacy_business_envelope_to_unified_protocol():
     """动态群不得因旧指令文本而回退到旧通用上下文。"""
     bcs = _Bcs()

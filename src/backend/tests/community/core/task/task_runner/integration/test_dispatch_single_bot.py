@@ -356,6 +356,9 @@ def test_prompt_formatter_relay_mode_injects_event_protocol_only():
     assert '"status": "SUCCESS"' not in prompt
     assert "唯一允许的节点回投" not in prompt
     assert "收到 HTTP 200 后立即停止，不得再次 POST" not in prompt
+    assert "DECLINED 请求体示例如下" in prompt
+    assert '"payload": {"execution_decision": "DECLINED"}' in prompt
+    assert "DECLINED payload 只能携带 execution_decision" in prompt
 
 
 def test_static_relay_prompt_waits_for_every_member_and_preserves_markdown():

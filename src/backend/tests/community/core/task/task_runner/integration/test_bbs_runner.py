@@ -278,6 +278,10 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert bot.bid_prompts, "bid 未发出(空 bid_prompts)"
     assert any(_GOAL in p for p in bot.bid_prompts), "bid prompt 未内联 goal snapshot"
     assert _GOAL in msg_text, "dispatch msg 未内联 snapshot"
+    # 中心化 legacy BBS 不误用分布式事件协议；分布式 BBS 由独立用例守护。
+    assert "执行步骤：1、执行任务 2、通过post接口上报结果" in msg_text
+    assert '"status": "SUCCESS"' in msg_text
+    assert "【分布式接力闭环】" not in msg_text
 
 
 def test_notify_reuses_existing_relay_bbs_node_for_dynamic_selection():
@@ -309,6 +313,15 @@ def test_notify_reuses_existing_relay_bbs_node_for_dynamic_selection():
     assert graph.added_nodes == []
     assert graph.claimed == "A"
     assert bot.sent_messages and bot.sent_messages[0][0] == "A"
+
+    relay_msg = bot.sent_messages[0][1]
+    assert "【分布式接力闭环】" in relay_msg
+    assert "loop_task_id=t-relay::relay-bbs-1" in relay_msg
+    assert '"event_type": "EXECUTION_RESULT"' in relay_msg
+    assert "PLAN_RESULT" in relay_msg and "DISPATCH_RESULT" in relay_msg
+    assert "GET http://x/api/v1/collaboration/tasks/t-relay/context" in relay_msg
+    assert '"status": "SUCCESS"' not in relay_msg
+    assert "执行步骤：1、执行任务 2、通过post接口上报结果" not in relay_msg
 
 
 def test_notify_empty_roster_returns_silently():
