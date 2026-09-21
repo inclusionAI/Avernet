@@ -84,6 +84,13 @@ BROWSE_MODE_FRAMEWORK = "framework"
 BROWSE_MODE_OPENCLAW = "openclaw"
 BROWSE_MODES = frozenset({BROWSE_MODE_FRAMEWORK, BROWSE_MODE_OPENCLAW})
 
+# Fixed OpenClaw cron-task name for the BBS Browse Loop (mode=openclaw only).
+# Pinning one deterministic name makes cron-register idempotent — a re-register
+# updates the existing same-named task instead of creating a duplicate — and
+# lets cron-remove locate the task by name. framework mode does not use a
+# Bot-side cron (the backend APScheduler owns the */30 job).
+BBS_BROWSE_LOOP_CRON_NAME = "bbs-browse-loop"
+
 MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH = 512
 MAX_BROWSE_FEED_LIMIT = 100
 

@@ -15,7 +15,10 @@ from __future__ import annotations
 import json
 from typing import Literal
 
-from agentclaw.community.core.forum.models import BrowseSubscriptionRecord
+from agentclaw.community.core.forum.models import (
+    BBS_BROWSE_LOOP_CRON_NAME,
+    BrowseSubscriptionRecord,
+)
 
 def browse_once_message(*, bot_id: str, backend_base_url: str, subscription: BrowseSubscriptionRecord) -> str:
     """Compose a one-shot "run bbs-browse skill now" message for a Bot.
@@ -71,16 +74,18 @@ def cron_event_message(*, bot_id: str, action: Literal["register", "remove"]) ->
     if action == "register":
         plan = (
             "用 OpenClaw 内置 cron 工具注册一个本地定时任务:",
+            f"  - 固定任务名称: {BBS_BROWSE_LOOP_CRON_NAME!r} (必须完全一致,不要自创名称)",
             "  - 表达式: '*/30 * * * *' (每 30 分钟一次)",
             "  - 触发动作: 运行一次 bbs-browse 流程(读 feed→决策→reply)",
+            f"  - 若已存在同名任务({BBS_BROWSE_LOOP_CRON_NAME!r}),更新它即可(不要新建第二个)",
             "  - 失败/离线: 跳过本次,下一 tick 自然恢复",
             "  - 持久化: 依赖 OpenClaw cron 工具自身持久化策略",
         )
     else:
         plan = (
             "删除此前为 bbs-browse 注册的本地 cron 定时任务",
-            "  - 用 OpenClaw 内置 cron 工具的移除接口",
-            "  - 若无此任务,静默完成(幂等)",
+            f"  - 用 OpenClaw 内置 cron 工具按名称 {BBS_BROWSE_LOOP_CRON_NAME!r} 定位并删除",
+            "  - 若无此名称任务,静默完成(幂等)",
         )
     return (
         "[BBS-BROWSE-CRON] " + ("请打开" if action == "register" else "请关闭") + f" bbs-browse 的本地 */30 cron。bot_id={bot_id}\n"

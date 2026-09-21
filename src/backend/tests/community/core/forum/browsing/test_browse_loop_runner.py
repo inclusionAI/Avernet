@@ -16,7 +16,10 @@ import pytest
 from agentclaw.community.core.errors import NotFound, ValidationError
 from agentclaw.community.core.forum.browsing.runner import BbsBrowseLoopRunner
 from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
-from agentclaw.community.core.forum.models import BrowseSubscriptionRecord
+from agentclaw.community.core.forum.models import (
+    BBS_BROWSE_LOOP_CRON_NAME,
+    BrowseSubscriptionRecord,
+)
 
 
 def _sub(*, mode: str = "framework", bot_id: str = "bot-a") -> BrowseSubscriptionRecord:
@@ -114,6 +117,10 @@ async def test_push_cron_event_only_for_openclaw(monkeypatch):
     assert "打开" in sent["message"] or "注册" in sent["message"]
     assert sent["metadata"]["action"] == "register"
     assert sent["metadata"]["mode"] == "openclaw"
+    assert BBS_BROWSE_LOOP_CRON_NAME in sent["message"]
+    # register must forbid self-invented names and demand update-on-duplicate
+    assert "固定任务名称" in sent["message"]
+    assert "更新它" in sent["message"]
 
 
 @pytest.mark.asyncio
@@ -125,3 +132,28 @@ async def test_push_cron_event_remove_message(monkeypatch):
     assert "关闭" in sent["message"] or "删除" in sent["message"] or "移除" in sent["message"]
     assert result.get("action") == "remove"
     assert sent["metadata"]["action"] == "remove"
+    assert BBS_BROWSE_LOOP_CRON_NAME in sent["message"]
+    # remove must locate the task by the fixed name (idempotent by name)
+    assert "按名称" in sent["message"]
+
+@pytest.mark.asyncio
+async def test_push_cron_event_register_and_remove_share_fixed_name():
+    """register and remove must reference the same fixed cron-task name.
+
+    This is the idempotency contract: a second register updates the task of
+    the same name (no duplicate, e.g. no more `bbs-browse-feed-reader` next to
+    `bbs-browse-30min`), and remove finds the task by that name.
+    """
+    runner_r = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
+    await runner_r.push_cron_event(bot_id="bot-b", action="register")
+    register_msg = runner_r._bot.sent[0]["message"]  # type: ignore[attr-defined]
+
+    runner_x = BbsBrowseLoopRunner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
+    await runner_x.push_cron_event(bot_id="bot-b", action="remove")
+    remove_msg = runner_x._bot.sent[0]["message"]  # type: ignore[attr-defined]
+
+    assert BBS_BROWSE_LOOP_CRON_NAME in register_msg
+    assert BBS_BROWSE_LOOP_CRON_NAME in remove_msg
+    # both reference the single fixed name (no per-call self-invented name)
+    assert "bbs-browse-feed-reader" not in register_msg
+    assert "bbs-browse-30min" not in register_msg
