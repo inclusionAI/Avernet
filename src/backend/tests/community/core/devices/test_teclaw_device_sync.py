@@ -230,6 +230,22 @@ def test_entity_id_defaults_to_owner_id_when_omitted():
     assert m["composer"].compose.call_args.args[0].entity_id == "org_7"
 
 
+def test_compose_uses_bot_owner_not_the_triggering_caller():
+    service, m = _make_service(user_id="collaborator", owner_id="owner")
+
+    service.sync_symlinks([])
+
+    request = m["composer"].compose.call_args.args[0]
+    assert request.user_id == "owner"
+    engine_ext = m["http_client"].post.call_args.kwargs["json"]["bot_config"][
+        "engine_ext"
+    ]
+    assert engine_ext["owner_id"] == "owner"
+    assert m["baas"].get_http_info.call_args.kwargs["device_affinity"] == (
+        "collaborator"
+    )
+
+
 def test_engine_ext_is_enriched_with_identity_and_draft_stage():
     service, m = _make_service()
 

@@ -394,8 +394,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
         endpoint_env: Optional[str] = None,
         transport_protocol: Optional[str] = None,
         engine_type: Optional[str] = None,
-        bot_id: str | None = None,
-        owner_id: str | None = None,
+        bot_override: dict[str, Any] | None = None,
     ) -> tuple[Optional[str], dict[str, str], str, Optional[str]]:
         """根据用户配置与默认值构建合并后的 MCP 同步参数。
 
@@ -440,21 +439,16 @@ class MCPConfigService(MCPConfigServiceProtocol):
 
         user_headers = custom_headers if custom_headers is not None else extra_config.get("headers", {})
 
-        bot_override: dict[str, Any] | None = None
         # A Bot override is the highest configuration source. Missing keys
         # inherit; an explicit empty headers map deliberately blocks user
         # headers while retaining platform defaults below.
-        if bot_id is not None and owner_id is not None:
-            bot_override = self.bot_mcp_config_repo.get_by_bot_and_server_code(
-                bot_id=bot_id, owner_id=owner_id, server_code=server_code
-            )
-            if bot_override:
-                if "headers" in bot_override:
-                    user_headers = bot_override["headers"]
-                if "endpoint_env" in bot_override:
-                    _endpoint_env = bot_override["endpoint_env"]
-                if "transport_protocol" in bot_override:
-                    _transport_protocol = bot_override["transport_protocol"]
+        if bot_override:
+            if "headers" in bot_override:
+                user_headers = bot_override["headers"]
+            if "endpoint_env" in bot_override:
+                _endpoint_env = bot_override["endpoint_env"]
+            if "transport_protocol" in bot_override:
+                _transport_protocol = bot_override["transport_protocol"]
 
         # An arbitrary Manifest URL is outside the Center endpoint's trust
         # boundary. Never redirect inherited user credentials, default auth

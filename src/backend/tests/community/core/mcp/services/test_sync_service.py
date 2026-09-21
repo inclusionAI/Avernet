@@ -1064,6 +1064,9 @@ class TestSyncMcpDetailToAllBots:
         )
 
         assert result["success"] is True
+        assert config.build_mcp_sync_payload.call_args.kwargs["bot_override"] == {
+            "url": "https://bot.example.test/mcp"
+        }
         assert plugin.sync_single_mcp.call_args.kwargs["url_override"] == (
             "https://bot.example.test/mcp"
         )

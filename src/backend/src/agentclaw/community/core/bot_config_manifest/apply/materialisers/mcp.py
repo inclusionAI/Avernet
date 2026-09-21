@@ -199,24 +199,26 @@ class McpMaterialiser(Materialiser):
                 )
                 continue
             config = entry.get("config")
-            if isinstance(config, dict) and config:
-                verdict = self._mcp_config.validate_bot_override(
-                    user_id=ctx.owner_id,
-                    server_code=server_code,
-                    config=config,
-                    engine_type=ctx.engine_type,
-                )
-                if not verdict.get("valid"):
-                    failures.append(
-                        ResolveFailure(
-                            server_code, str(verdict.get("error") or "invalid config")
-                        )
+            normalized_config = (
+                config if isinstance(config, dict) and config else None
+            )
+            verdict = self._mcp_config.validate_bot_override(
+                user_id=ctx.owner_id,
+                server_code=server_code,
+                config=normalized_config,
+                engine_type=ctx.engine_type,
+            )
+            if not verdict.get("valid"):
+                failures.append(
+                    ResolveFailure(
+                        server_code, str(verdict.get("error") or "invalid config")
                     )
-                    continue
+                )
+                continue
             intents.append(
                 Intent(
                     server_code,
-                    config if isinstance(config, dict) and config else None,
+                    normalized_config,
                 )
             )
 

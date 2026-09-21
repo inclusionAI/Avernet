@@ -73,6 +73,5 @@ class MCPConfigServiceProtocol(Protocol):
         endpoint_env: str | None = None,
         transport_protocol: str | None = None,
         engine_type: str | None = None,
-        bot_id: str | None = None,
-        owner_id: str | None = None,
+        bot_override: dict[str, Any] | None = None,
     ) -> tuple[str | None, dict[str, str], str, str | None]: ...

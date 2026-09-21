@@ -903,8 +903,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
             endpoint_env=endpoint_env,
             transport_protocol=transport_protocol,
             engine_type=engine_type,
-            bot_id=bot_id,
-            owner_id=user_id,
+            bot_override=bot_override,
         )
         url_override = bot_override.get("url") if bot_override else None
         strict_transport_protocol = bool(

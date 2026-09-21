@@ -368,6 +368,30 @@ async def test_new_bare_mcp_entry_also_clears_an_orphan_override():
 
 
 @pytest.mark.asyncio
+async def test_bare_mcp_entry_validates_inherited_config_before_any_write():
+    activations = FakeActivationService()
+    config_service = MagicMock()
+    config_service.validate_bot_override.return_value = {
+        "valid": False,
+        "error": "inherited endpoint is unavailable",
+    }
+
+    report = await _apply(
+        _engine(activations=activations, mcp_config=config_service),
+        "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: gh\n",
+    )
+
+    assert report.status is ApplyStatus.FAILED
+    assert activations.writes == 0
+    config_service.validate_bot_override.assert_called_once_with(
+        user_id="u_owner",
+        server_code="gh",
+        config=None,
+        engine_type="claude_code",
+    )
+
+
+@pytest.mark.asyncio
 async def test_header_name_case_only_change_is_unchanged():
     activations = FakeActivationService(installed={"gh"})
     activations.mcp_overrides["gh"] = {"headers": {"X-Project": "same"}}

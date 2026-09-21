@@ -655,9 +655,8 @@ class TestMCPConfigServiceBuildPayload:
 
         _, headers, endpoint_env, transport = svc.build_mcp_sync_payload(
             user_id="user1",
-            bot_id="bot-1",
-            owner_id="user1",
             mcp_data={"serverCode": "mcp.test"},
+            bot_override={"headers": {}, "endpoint_env": "PRE"},
         )
 
         assert headers == {"X-Platform": "1"}
@@ -701,15 +700,18 @@ class TestMCPConfigServiceBuildPayload:
 
         api_key, headers, _, transport = svc.build_mcp_sync_payload(
             user_id="user1",
-            bot_id="bot-1",
-            owner_id="user1",
             mcp_data={"serverCode": "mcp.test"},
+            bot_override={
+                "url": "https://custom.example/mcp",
+                "headers": {"X-Manifest": "non-sensitive"},
+            },
         )
 
         assert api_key is None
         assert headers == {"X-Manifest": "non-sensitive"}
         assert transport == "SSE"
         resolver.get_secret.assert_not_called()
+        bot_repo.get_by_bot_and_server_code.assert_not_called()
 
     def test_managed_header_overrides_user_header_case_insensitively(self, monkeypatch):
         repo = MagicMock()

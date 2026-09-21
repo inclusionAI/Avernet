@@ -417,8 +417,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     user_id=req.user_id,
                     mcp_data=md,
                     engine_type=req.engine_type,
-                    bot_id=req.bot_id,
-                    owner_id=req.user_id,
+                    bot_override=bot_override,
                 )
             )
             inputs.append(
