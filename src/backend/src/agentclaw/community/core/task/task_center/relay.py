@@ -241,16 +241,23 @@ class RelayCoordinator:
 
         return self._graph._mutate_with_version_retry(task_id, mutation)
 
-    def complete_event(self, task_id: str, event_key: str, result: dict) -> None:
-        """Commit the result of a previously reserved event."""
+    def complete_event(
+        self, task_id: str, event_key: str, result: dict
+    ) -> None:
+        """Commit a previously reserved event without persisting bearer tokens."""
 
         def mutation(graph):
             records = dict(graph.extend_props.get("relay_event_records") or {})
             current = dict(records.get(event_key) or {})
+            persisted_result = {
+                key: value
+                for key, value in result.items()
+                if key not in {"relay_turn", "dispatch_turn"}
+            }
             current.update(
                 {
                     "state": "COMPLETED",
-                    "result": dict(result),
+                    "result": persisted_result,
                     "completed_at_ms": int(time.time() * 1000),
                 }
             )

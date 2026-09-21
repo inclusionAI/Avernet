@@ -90,11 +90,11 @@ def format_task_node_business_instruction(
                 f"4. POST {callback} 上报 EXECUTION_RESULT；event_id 必须新生成。ACCEPTED 必须携带 actual_goal、output、acceptance_result；DECLINED 只携带能力不匹配事实，不得伪造业务产出。请求体示例：",
                 json.dumps(execution_payload, ensure_ascii=False),
                 "响应 data.relay_turn 是后续 PLAN/搜索/派发的唯一接力凭证，必须原样保存，不得自行生成。",
-                f"5. 再次 GET {backend}/api/v1/collaboration/tasks/{task_id}/context，基于根 TaskSpec、all_done_output、本节点实际产出与验收事实重新计算 gaps。将 event_type=PLAN_RESULT POST 到 callback/report，payload={{gaps,next_task_spec}}；gaps 非空时 next_task_spec 必须是唯一下一棒 context+goal，节点 ID 由 Graph 生成；gaps=[] 时 next_task_spec=null，任务结束。",
+                f"5. 再次 GET {backend}/api/v1/collaboration/tasks/{task_id}/context，基于根 TaskSpec、all_done_output、本节点实际产出与验收事实重新计算 gaps。将 event_type=PLAN_RESULT POST 到 callback/report，payload={{gaps,next_task_spec}}；gaps 非空时 next_task_spec 必须是唯一下一棒 context+goal，节点 ID 由 Graph 生成；gaps=[] 时 next_task_spec=null，任务结束。PLAN_RESULT HTTP 成功且 gaps 非空时必须原样保存响应中的 target_node_id；未成功读取该值时只能用相同 event_id 原样重试本事件，不得进入搜索或派发。",
                 f"6. 若产生下一步节点，先根据该节点 goal、gap 和 instruction 构造搜索 query，再 POST {backend}/api/v1/collaboration/tasks/search，请求体只能传 {{\"query\": \"...\"}}。搜索接口只返回候选事实，不感知任务图，也不决定执行模态。",
                 "7. 根据搜索返回的真实字段，由 Skill 判断 HIT_SINGLE、HIT_MULTI_BOTS 或 MISS。向 callback/report 上报 event_type=DISPATCH_RESULT，payload 使用 outcome、run_mode、driver_bot_id、next_relay_bots；协作群 driver 必须属于 next_relay_bots，当前棒不进入下一棒群，Human 默认作为 observer。MISS 必须提供 miss_reason。",
-                f"8. HIT_SINGLE/HIT_MULTI_BOTS 后 POST {backend}/api/v1/collaboration/tasks/dispatch，传 task_id、origin_node_id、target_node_id、holder_id、relay_turn、唯一 dispatch_id。只有 HTTP 200 才算交接成功；MISS 自动发布 BBS。",
-                "BBS 认领者执行完成后也从第1步开始，继续同一接力闭环。任一接口失败时不得伪造成功；在 failure_reason 记录真实原因。",
+                f"8. HIT_SINGLE/HIT_MULTI_BOTS 后 POST {backend}/api/v1/collaboration/tasks/dispatch，传 task_id、origin_node_id、target_node_id、holder_id、relay_turn、唯一 dispatch_id。dispatch 是最后一步：必须先满足 target_node_id 来自 PLAN_RESULT 原始响应且不等于 origin_node_id、同一 target_node_id 的 DISPATCH_RESULT 已 HTTP 200、relay_turn 未过期且属于当前 origin。缺少任一前置变量时停止等待恢复，不得用 root/task_id 猜测 target，也不得直接调用 /dispatch。只有 HTTP 200 才算交接成功；MISS 自动发布 BBS。",
+                "BBS 认领者执行完成后也从第1步开始，继续同一接力闭环。只允许使用本指令明确列出的 context、callback/report、search、dispatch、BBS claim 五个端点；404 时必须校验路径和 task_id/node_id，不得换近似 URL 继续探测。任一接口失败时不得伪造成功；在 failure_reason 记录真实原因。",
                 OUTPUT_LANGUAGE_CONSTRAINT,
             ]
         )

@@ -301,6 +301,38 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
         child_node_id="research-step",
         event_suffix="1",
     )
+
+    # PLAN_RESULT must be persistable as an idempotent HTTP fact. A live
+    # TaskNode in the event record would break repository JSON persistence and
+    # make a response-loss retry unable to recover target_node_id.
+    event_records = graph_service.query_task_dashboard("relay-task").extend_props[
+        "relay_event_records"
+    ]
+    plan_record = event_records["PLAN_RESULT:plan-1"]
+    execution_record = event_records["EXECUTION_RESULT:exec-1"]
+    assert plan_record["result"]["target_node_id"] == research_step
+    assert "dispatch_turn" not in plan_record["result"]
+    assert "relay_turn" not in execution_record["result"]
+    serialized_events = json.dumps(event_records)
+    assert turn not in serialized_events
+    replayed_plan = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id="plan-1",
+            holder_id="main-bot",
+            relay_turn=turn,
+            progress_reason="当前全局 gap 需要下一棒补齐",
+            payload={
+                "gaps": ["补齐市场研究 gap"],
+                "next_task_spec": _child_spec(),
+            },
+        )
+    )
+    assert replayed_plan["idempotent"] is True
+    assert replayed_plan["target_node_id"] == research_step
+
     dispatched = _run(
         service.dispatch_task(
             task_id="relay-task",

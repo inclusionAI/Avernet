@@ -258,8 +258,6 @@ class TaskServiceRelayMixin:
                             holder_id=holder_id,
                             token=relay_turn,
                         )
-                    else:
-                        result["dispatch_turn"] = relay_turn
                 else:
                     if (
                         node.run_info.extend_props.get("relay_planned_by")

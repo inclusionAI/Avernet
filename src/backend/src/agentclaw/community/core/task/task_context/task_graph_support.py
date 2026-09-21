@@ -622,7 +622,6 @@ def apply_relay_plan_result(
                 "completed": False,
                 "origin_node_id": origin_node_id,
                 "target_node_id": child_id,
-                "target_node": child,
             },
             None,
             True,
