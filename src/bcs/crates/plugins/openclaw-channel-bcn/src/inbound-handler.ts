@@ -2749,17 +2749,6 @@ export function initAgentEventsSubscription(log?: {
         sendVisibleReplyDelta(resolvedRunId, log);
         markVisibleReplySegmentBoundary(resolvedRunId);
       }
-
-      if (terminalOutcome === 'final') {
-        sendFinalVisibleReplyOnce(resolvedRunId, log, { source: 'agent_lifecycle' });
-      } else if (terminalOutcome === 'error') {
-        sendRunErrorOnce(
-          resolvedRunId,
-          'Agent run failed before completing a reply.',
-          log,
-          `agent lifecycle ${stringField(evt.data, 'phase') ?? 'error'}`,
-        );
-      }
     }
 
     // Build the agent event payload for BCS — always use the original runId
@@ -2778,6 +2767,14 @@ export function initAgentEventsSubscription(log?: {
       return true;
     }
 
+    // A terminal chat frame closes the run in BCS. If another path already
+    // emitted it, suppress this trailing lifecycle frame instead of sending an
+    // event that BCS must reject as terminal.
+    if (terminalOutcome && context.finalSent) {
+      void cleanupRunContext(resolvedRunId, log);
+      return true;
+    }
+
     // Forward to BCS
     client.sendEvent('agent', agentPayload as unknown as Record<string, unknown>);
 
@@ -2785,6 +2782,16 @@ export function initAgentEventsSubscription(log?: {
       `[BCS] Forwarded agent event: runId=${evt.runId}, stream=${evt.stream}, groupId=${context.groupId}`,
     );
     if (terminalOutcome) {
+      if (terminalOutcome === 'final') {
+        sendFinalVisibleReplyOnce(resolvedRunId, log, { source: 'agent_lifecycle' });
+      } else {
+        sendRunErrorOnce(
+          resolvedRunId,
+          'Agent run failed before completing a reply.',
+          log,
+          `agent lifecycle ${stringField(evt.data, 'phase') ?? 'error'}`,
+        );
+      }
       void cleanupRunContext(resolvedRunId, log);
     }
     return true; // Indicate event was handled

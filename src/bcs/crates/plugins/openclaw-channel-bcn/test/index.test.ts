@@ -1398,6 +1398,18 @@ describe('openclaw-channel-bcn', () => {
       );
       assert.deepEqual(chatEventsBeforeDispatchSettles.map(item => item.payload.runId), [ runId, runId ]);
 
+      const terminalLifecycleIndex = events.findIndex(
+        item => item.event === 'agent' && item.payload.stream === 'lifecycle' && item.payload.phase === 'end',
+      );
+      const terminalChatIndex = events.findIndex(
+        item => item.event === 'chat' && item.payload.state === 'final',
+      );
+      assert.ok(terminalLifecycleIndex >= 0, 'terminal lifecycle event should be forwarded');
+      assert.ok(
+        terminalLifecycleIndex < terminalChatIndex,
+        'terminal lifecycle event must precede the terminal chat frame',
+      );
+
       assert.ok(releaseDispatch, 'dispatcher should still be waiting when lifecycle final is sent');
       releaseDispatch();
       await pending;
