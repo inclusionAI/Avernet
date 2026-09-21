@@ -559,7 +559,11 @@ children[] in Relay plan             → one optional next_task_spec; Graph assi
 root-level Relay BBS owner           → target BBS node-local claim
 ```
 
-Compatibility adapters may accept legacy event names/payloads during migration, but they must normalize into this target model before Graph persistence.
+Migration compatibility is mode-scoped:
+
+- Relay result callbacks are no longer allowed to bypass the target model with the centralized node-terminal `status/output/acceptance_result` payload. Such requests are rejected with a state conflict and must be retried as `EXECUTION_RESULT → PLAN_RESULT → DISPATCH_RESULT`.
+- The legacy Relay `SEARCH_RESULT` event alias remains accepted and is normalized to `DISPATCH_RESULT`.
+- Centralized execution continues to support its existing node callback during migration.
 
 ### 1.3 Engine 拆除边界
 

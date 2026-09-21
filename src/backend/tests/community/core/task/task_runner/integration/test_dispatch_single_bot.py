@@ -320,6 +320,42 @@ def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
     assert "必须使用中文" in s
 
 
+def test_prompt_formatter_relay_mode_injects_event_protocol_only():
+    """Relay prompt must not carry the centralized terminal callback protocol."""
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
+        task_id="t1",
+        extend_props={"execution_config": {"orchestration_mode": "relay"}},
+    )
+    node = _node()
+    node.node_run_graph = graph
+
+    prompt = PromptFormatterImpl().format_execute(
+        {
+            "mode": "execute",
+            "node_instruction": "分析行业",
+            "execution_mode": "single_bot",
+            "skill_report_enabled": True,
+            "backend": "http://backend",
+            "task_id": "t1",
+            "node_id": "c1",
+        },
+        node,
+    )
+
+    assert "【分布式接力闭环】" in prompt
+    assert "GET http://backend/api/v1/collaboration/tasks/t1/context" in prompt
+    assert '"event_type": "EXECUTION_RESULT"' in prompt
+    assert "PLAN_RESULT" in prompt and "DISPATCH_RESULT" in prompt
+    assert "严禁回到中心化的 status/output/acceptance_result 节点终态回调" in prompt
+    assert "EXECUTION_RESULT 成功当作本棒结束" in prompt
+    assert '"status": "SUCCESS"' not in prompt
+    assert "唯一允许的节点回投" not in prompt
+    assert "收到 HTTP 200 后立即停止，不得再次 POST" not in prompt
+
+
 def test_static_relay_prompt_waits_for_every_member_and_preserves_markdown():
     """静态协作接力必须在全员完成后唯一汇总，并要求结构化 Markdown 产出。"""
     relay = (

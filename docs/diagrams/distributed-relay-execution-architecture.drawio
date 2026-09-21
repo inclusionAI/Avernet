@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="Electron" modified="2026-09-21T00:00:00.000Z" agent="Codex" version="31.1.8" compressed="false" pages="2">
+  <diagram name="模块架构" id="模块架构">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2500" pageHeight="1500" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="p1_title" value="&lt;b&gt;分布式 Relay 接力执行模式 · 模块架构&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:14px;color:#5B6573&quot;&gt;每一棒遵循同一执行闭环；Graph 只接受语义事实，Skill 承载流程推理&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FFFFFF;strokeColor=#16324F;strokeWidth=2;fontSize=24;strokeWidth=0;align=left;" vertex="1" parent="1">
+          <mxGeometry x="60" y="30" width="2380" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="intake" value="Task-Loop Skill · 任务识别与澄清" style="swimlane;startSize=34;rounded=1;html=1;whiteSpace=wrap;fillColor=#F8FAFC;swimlaneFillColor=#D9EAF7;strokeColor=#4F81BD;strokeWidth=2;fontFamily=Arial;fontSize=16;fontStyle=1;container=1;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="2380" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="human" value="① Human&lt;br&gt;一句话任务需求" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#F2F2F2;strokeColor=#7F8C8D;strokeWidth=2;fontStyle=1;" vertex="1" parent="intake">
+          <mxGeometry x="40" y="55" width="260" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="recognize" value="② 任务识别 + 澄清卡片&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;goal / deliverables / acceptances / constraints&lt;br&gt;title / background / resources（可选）&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#D9EAF7;strokeColor=#4F81BD;strokeWidth=2;fontStyle=1;" vertex="1" parent="intake">
+          <mxGeometry x="390" y="45" width="520" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="confirm" value="③ Human 确认&lt;br&gt;init_task_request(task_info, source_context)" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FFF2CC;strokeColor=#BF9000;strokeWidth=2;fontStyle=1;" vertex="1" parent="intake">
+          <mxGeometry x="1010" y="55" width="490" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="execute" value="④ TaskService.execute(TaskInfoRequest)&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;execution_config.orchestration_mode = relay&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FCE4D6;strokeColor=#ED7D31;strokeWidth=2;fontStyle=1;" vertex="1" parent="intake">
+          <mxGeometry x="1610" y="55" width="700" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_int_1" value="需求" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="human" target="recognize">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_int_2" value="补全 / 确认" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="recognize" target="confirm">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_int_3" value="TaskInfoRequest" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="confirm" target="execute">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="graph" value="统一任务图谱 · TaskGraphService" style="swimlane;startSize=40;rounded=1;html=1;whiteSpace=wrap;fillColor=#F8FAFC;swimlaneFillColor=#E2F0D9;strokeColor=#70AD47;strokeWidth=2;fontFamily=Arial;fontSize=17;fontStyle=1;container=1;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="60" y="360" width="650" height="840" as="geometry"/>
+        </mxCell>
+        <mxCell id="init_graph" value="initialize_graph(TaskInfo)&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;创建根 TaskNode；首棒 owner_bot RUNNING&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#E2F0D9;strokeColor=#70AD47;strokeWidth=2;fontStyle=1;" vertex="1" parent="graph">
+          <mxGeometry x="30" y="60" width="590" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="get_context" value="GET /api/v1/collaboration/tasks/{task_id}/context&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;→ TaskContext(spec, all_done_output, gaps)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#DDF3F5;strokeColor=#2A8C94;strokeWidth=2;fontStyle=1;" vertex="1" parent="graph">
+          <mxGeometry x="30" y="180" width="590" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="report" value="POST /api/v1/collaboration/tasks/callback/report&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;EXECUTION_RESULT / PLAN_RESULT / DISPATCH_RESULT&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FCE4D6;strokeColor=#ED7D31;strokeWidth=2;fontStyle=1;" vertex="1" parent="graph">
+          <mxGeometry x="30" y="305" width="590" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="facts" value="Graph Facts&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;TaskSpec · RuntimeInfo · assignee · run_mode · status&lt;br&gt;前序节点事实不可被后棒回写&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#D9EAF7;strokeColor=#4F81BD;strokeWidth=2;" vertex="1" parent="graph">
+          <mxGeometry x="30" y="435" width="285" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="lease" value="Relay Authority&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;relay_turn TTL · holder · event_id 幂等&lt;br&gt;单一当前棒写权限&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#E4DFEC;strokeColor=#8064A2;strokeWidth=2;" vertex="1" parent="graph">
+          <mxGeometry x="335" y="435" width="285" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="trajectory" value="TaskTrajectory / Outbox&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;事实轨迹 · 可靠事件 · 可观测性&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#F2F2F2;strokeColor=#7F8C8D;strokeWidth=2;" vertex="1" parent="graph">
+          <mxGeometry x="30" y="590" width="285" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="query_dash" value="内部查询&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;query_task_dashboard(task_id)&lt;br&gt;query node/runtime facts&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#F2F2F2;strokeColor=#7F8C8D;strokeWidth=2;" vertex="1" parent="graph">
+          <mxGeometry x="335" y="590" width="285" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="graph_rule" value="&lt;b&gt;唯一事实写入口&lt;/b&gt;&lt;br&gt;所有节点状态与运行事实统一经 TaskGraphService.report 更新" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#F4CCCC;strokeColor=#C00000;strokeWidth=2;fontStyle=1;" vertex="1" parent="graph">
+          <mxGeometry x="30" y="725" width="590" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="skill" value="当前棒 Relay Bot + task-loop Skill" style="swimlane;startSize=40;rounded=1;html=1;whiteSpace=wrap;fillColor=#F8FAFC;swimlaneFillColor=#D9EAF7;strokeColor=#4F81BD;strokeWidth=2;fontFamily=Arial;fontSize=17;fontStyle=1;container=1;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="760" y="360" width="760" height="840" as="geometry"/>
+        </mxCell>
+        <mxCell id="s1" value="1. 读取最新 TaskContext" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#DDF3F5;strokeColor=#2A8C94;strokeWidth=2;fontStyle=1;" vertex="1" parent="skill">
+          <mxGeometry x="30" y="60" width="700" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="s2" value="2. Gap 与能力准入匹配&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;TaskNode.task_spec + IDENTITY/职责 + 已激活 Skills + 可用工具&lt;br&gt;&lt;b&gt;角色覆盖 AND 工具能力覆盖&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FFF2CC;strokeColor=#BF9000;strokeWidth=2;fontStyle=1;" vertex="1" parent="skill">
+          <mxGeometry x="30" y="145" width="700" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3" value="3. 执行本棒实际目标&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;匹配：actual_goal + output + acceptance_result&lt;br&gt;零匹配/工具不可用：DECLINED，不得用模型常识硬做&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#D9EAF7;strokeColor=#4F81BD;strokeWidth=2;fontStyle=1;" vertex="1" parent="skill">
+          <mxGeometry x="30" y="270" width="700" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="s4" value="4. 上报 EXECUTION_RESULT" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FCE4D6;strokeColor=#ED7D31;strokeWidth=2;fontStyle=1;" vertex="1" parent="skill">
+          <mxGeometry x="30" y="400" width="330" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="s5" value="5. 重读上下文并计算新 gaps&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;all_done_output + 节点 acceptance_result → Skill 语义推理&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#DDF3F5;strokeColor=#2A8C94;strokeWidth=2;fontStyle=1;" vertex="1" parent="skill">
+          <mxGeometry x="390" y="400" width="340" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="s6" value="6. 上报 PLAN_RESULT&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;gaps=[] → 完成&lt;br&gt;gaps≠[] → exactly one next_task_spec&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FCE4D6;strokeColor=#ED7D31;strokeWidth=2;fontStyle=1;" vertex="1" parent="skill">
+          <mxGeometry x="30" y="500" width="700" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="s7" value="7. 构造 query → 搜索候选 → 决策模态&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;0: MISS · 1–2: HIT_SINGLE · ≥3: HIT_MULTI_BOTS&lt;br&gt;Skill 选择 driver_bot_id + next_relay_bots&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FFF2CC;strokeColor=#BF9000;strokeWidth=2;fontStyle=1;" vertex="1" parent="skill">
+          <mxGeometry x="30" y="605" width="700" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="s8" value="8. 上报 DISPATCH_RESULT → 调用 /dispatch" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FCE4D6;strokeColor=#ED7D31;strokeWidth=2;fontStyle=1;" vertex="1" parent="skill">
+          <mxGeometry x="30" y="725" width="700" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="delivery" value="任务搜推 · 派发 · 执行" style="swimlane;startSize=40;rounded=1;html=1;whiteSpace=wrap;fillColor=#F8FAFC;swimlaneFillColor=#FCE4D6;strokeColor=#ED7D31;strokeWidth=2;fontFamily=Arial;fontSize=17;fontStyle=1;container=1;pointerEvents=0;" vertex="1" parent="1">
+          <mxGeometry x="1570" y="360" width="870" height="840" as="geometry"/>
+        </mxCell>
+        <mxCell id="search" value="TaskDispatcher / TaskSearch&lt;br&gt;&lt;b&gt;POST /api/v1/collaboration/tasks/search&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;in: { query }&lt;br&gt;out: { candidates[{bot_uuid, bot_name?, bot_desc?, bot_type?, status?, recommend}], total }&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FFF2CC;strokeColor=#BF9000;strokeWidth=2;fontStyle=1;" vertex="1" parent="delivery">
+          <mxGeometry x="30" y="60" width="810" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="decision" value="Skill 决策并上报&lt;br&gt;DISPATCH_RESULT" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#E4DFEC;strokeColor=#8064A2;strokeWidth=2;fontStyle=1;" vertex="1" parent="delivery">
+          <mxGeometry x="270" y="215" width="330" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="dispatch" value="TaskDispatcher&lt;br&gt;&lt;b&gt;POST /api/v1/collaboration/tasks/dispatch&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;in: task_id, origin_node_id, target_node_id,&lt;br&gt;holder_id, relay_turn, dispatch_id&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FCE4D6;strokeColor=#ED7D31;strokeWidth=2;fontStyle=1;" vertex="1" parent="delivery">
+          <mxGeometry x="30" y="325" width="810" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="single" value="HIT_SINGLE&lt;br&gt;&lt;b&gt;单 Bot Runner&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;driver = only next relay bot&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#D9EAF7;strokeColor=#4F81BD;strokeWidth=2;fontStyle=1;" vertex="1" parent="delivery">
+          <mxGeometry x="30" y="485" width="245" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="group" value="HIT_MULTI_BOTS&lt;br&gt;&lt;b&gt;协作群 Runner&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;driver + workers&lt;br&gt;Human observer&lt;br&gt;当前棒默认不入群&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#DDF3F5;strokeColor=#2A8C94;strokeWidth=2;fontStyle=1;" vertex="1" parent="delivery">
+          <mxGeometry x="310" y="485" width="245" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="bbs" value="MISS&lt;br&gt;&lt;b&gt;BBS 执行模态&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;POST /bbs/claim&lt;br&gt;POST /bbs/result&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FFF2CC;strokeColor=#BF9000;strokeWidth=2;fontStyle=1;" vertex="1" parent="delivery">
+          <mxGeometry x="590" y="485" width="250" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="runner" value="TaskRunner 稳定能力&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;start_run · form_coop_group · get_group_session · resume_relay_turn&lt;br&gt;派发成功后目标节点才进入 RUNNING&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#E2F0D9;strokeColor=#70AD47;strokeWidth=2;fontStyle=1;" vertex="1" parent="delivery">
+          <mxGeometry x="30" y="640" width="810" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="nextbot" value="下一棒 Bot(s) 接棒&lt;br&gt;&lt;b&gt;重复同一 Relay Skill 闭环&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#F4CCCC;strokeColor=#C00000;strokeWidth=2;fontStyle=1;" vertex="1" parent="delivery">
+          <mxGeometry x="210" y="760" width="450" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_exec_init" value="initialize_graph(TaskInfo)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0.15;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="execute" target="init_graph">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="350" y="330"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_ctx_skill" value="TaskContext" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="get_context" target="s1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_s4_report" value="EXECUTION_RESULT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0;exitY=0.5;entryX=1;entryY=0.4;" edge="1" parent="1" source="s4" target="report">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_s6_report" value="PLAN_RESULT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0;exitY=0.5;entryX=1;entryY=0.7;" edge="1" parent="1" source="s6" target="report">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_s7_search" value="POST /search {query}" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.4;entryX=0;entryY=0.5;" edge="1" parent="1" source="s7" target="search">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_search_s7" value="candidates[]" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;dashed=1;exitX=0;exitY=0.8;entryX=1;entryY=0.8;" edge="1" parent="1" source="search" target="s7">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1550" y="1090"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_s8_report" value="DISPATCH_RESULT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0;exitY=0.5;entryX=1;entryY=0.9;" edge="1" parent="1" source="s8" target="report">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="740" y="1160"/>
+              <mxPoint x="740" y="760"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_s8_dispatch" value="POST /dispatch" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="s8" target="dispatch">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_dispatch_single" value="HIT_SINGLE" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0.2;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="dispatch" target="single">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_dispatch_group" value="HIT_MULTI_BOTS" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="dispatch" target="group">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_dispatch_bbs" value="MISS" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0.8;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="dispatch" target="bbs">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_single_runner" value="start_run" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.2;entryY=0;" edge="1" parent="1" source="single" target="runner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_group_runner" value="form_coop_group" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="group" target="runner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_bbs_runner" value="claim / result" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.8;entryY=0;" edge="1" parent="1" source="bbs" target="runner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_runner_next" value="send execution instruction" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="runner" target="nextbot">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_loop" value="下一棒循环" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#C00000;fontColor=#C00000;strokeWidth=3;exitX=0;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="nextbot" target="s1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1540" y="1180"/>
+              <mxPoint x="1540" y="330"/>
+              <mxPoint x="1140" y="330"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="rules" value="&lt;b&gt;Relay 不变量&lt;/b&gt;　① 当前棒完成后直接 DONE，后棒不得修改前序/根节点运行事实　② Graph 生成下一节点 ID，每轮最多一个下一棒节点　③ /search 仅搜索、不感知任务 ID、不写图　④ DISPATCH_RESULT 是决策事实，/dispatch 是真实交付　⑤ gaps=[] → 任务 DONE；超轮次/恢复耗尽 → HUNG" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FFF7ED;strokeColor=#ED7D31;strokeWidth=2;align=left;fontSize=15;spacingLeft=20;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1250" width="2380" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="recovery" value="恢复侧路：relay_turn 过期 → TaskHarness.resume_relay_turn → [RESUME_RELAY]；只恢复当前棒 authority/lease，不重做已完成业务工作，不做中心化父子收敛" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#E4DFEC;strokeColor=#8064A2;strokeWidth=2;align=left;fontSize=14;spacingLeft=20;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1390" width="2380" height="55" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram name="执行链路与API" id="执行链路与API">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2700" pageHeight="1750" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="q_title" value="&lt;b&gt;分布式 Relay 接力执行 · 执行链路与交互 API&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:14px;color:#5B6573&quot;&gt;实线 = HTTP/调用　虚线 = 返回/事实结果　红色 = 结束或恢复分支&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FFFFFF;strokeColor=#16324F;strokeWidth=2;fontSize=24;strokeWidth=0;align=left;" vertex="1" parent="1">
+          <mxGeometry x="50" y="25" width="2600" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_h" value="Human" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#F2F2F2;strokeColor=#7F8C8D;strokeWidth=2;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="80" y="120" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_h_bottom" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="202" y="1375" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_h_line" value="" style="edgeStyle=none;html=1;strokeColor=#CBD5E1;strokeWidth=1;dashed=1;startArrow=none;endArrow=none;exitX=0.5;exitY=1;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="a_h" target="a_h_bottom">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_skill" value="当前棒 Bot&lt;br&gt;Task-Loop Skill" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#D9EAF7;strokeColor=#4F81BD;strokeWidth=2;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="390" y="120" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_skill_bottom" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="1375" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_skill_line" value="" style="edgeStyle=none;html=1;strokeColor=#CBD5E1;strokeWidth=1;dashed=1;startArrow=none;endArrow=none;exitX=0.5;exitY=1;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="a_skill" target="a_skill_bottom">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_service" value="TaskService" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FCE4D6;strokeColor=#ED7D31;strokeWidth=2;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="760" y="120" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_service_bottom" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="882" y="1375" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_service_line" value="" style="edgeStyle=none;html=1;strokeColor=#CBD5E1;strokeWidth=1;dashed=1;startArrow=none;endArrow=none;exitX=0.5;exitY=1;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="a_service" target="a_service_bottom">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_graph" value="TaskGraphService" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#E2F0D9;strokeColor=#70AD47;strokeWidth=2;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="120" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_graph_bottom" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1202" y="1375" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_graph_line" value="" style="edgeStyle=none;html=1;strokeColor=#CBD5E1;strokeWidth=1;dashed=1;startArrow=none;endArrow=none;exitX=0.5;exitY=1;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="a_graph" target="a_graph_bottom">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_search" value="TaskDispatcher&lt;br&gt;TaskSearch" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FFF2CC;strokeColor=#BF9000;strokeWidth=2;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="120" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_search_bottom" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1572" y="1375" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_search_line" value="" style="edgeStyle=none;html=1;strokeColor=#CBD5E1;strokeWidth=1;dashed=1;startArrow=none;endArrow=none;exitX=0.5;exitY=1;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="a_search" target="a_search_bottom">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_runner" value="TaskRunner" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#DDF3F5;strokeColor=#2A8C94;strokeWidth=2;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="1810" y="120" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_runner_bottom" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1932" y="1375" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_runner_line" value="" style="edgeStyle=none;html=1;strokeColor=#CBD5E1;strokeWidth=1;dashed=1;startArrow=none;endArrow=none;exitX=0.5;exitY=1;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="a_runner" target="a_runner_bottom">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_next" value="下一棒 Bot(s)&lt;br&gt;/ BBS Bot" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#E4DFEC;strokeColor=#8064A2;strokeWidth=2;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="2200" y="120" width="250" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_next_bottom" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="2322" y="1375" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_next_line" value="" style="edgeStyle=none;html=1;strokeColor=#CBD5E1;strokeWidth=1;dashed=1;startArrow=none;endArrow=none;exitX=0.5;exitY=1;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="a_next" target="a_next_bottom">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m0s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="202" y="240" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m0t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="240" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m0" value="&lt;b&gt;0.&lt;/b&gt; 一句话需求 → 自动识别 → 澄清卡片 → Human 确认" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m0s" target="m0t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m1s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="320" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m1t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="882" y="320" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m1" value="&lt;b&gt;1.&lt;/b&gt; execute(TaskInfoRequest)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m1s" target="m1t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m2s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="882" y="400" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m2t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1202" y="400" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m2" value="&lt;b&gt;2.&lt;/b&gt; initialize_graph(TaskInfo) → root TaskNode / 首棒 RUNNING" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m2s" target="m2t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m3s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="500" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m3t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1202" y="500" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m3" value="&lt;b&gt;3.&lt;/b&gt; GET /api/v1/collaboration/tasks/{task_id}/context" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m3s" target="m3t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m3rs" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1202" y="560" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m3rt" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="560" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m3R" value="&lt;b&gt;3R.&lt;/b&gt; TaskContext {spec, all_done_output[], gaps[]}" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;dashed=1;" edge="1" parent="1" source="m3rs" target="m3rt">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m4s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="650" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m4t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1202" y="650" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m4" value="&lt;b&gt;4.&lt;/b&gt; POST /callback/report · EXECUTION_RESULT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m4s" target="m4t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m5s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="740" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m5t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1202" y="740" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m5" value="&lt;b&gt;5.&lt;/b&gt; GET /{task_id}/context · 重读最新事实" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m5s" target="m5t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m6s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="830" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m6t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1202" y="830" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m6" value="&lt;b&gt;6.&lt;/b&gt; POST /callback/report · PLAN_RESULT {gaps, next_task_spec?}" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m6s" target="m6t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m7s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="930" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m7t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1572" y="930" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m7" value="&lt;b&gt;7.&lt;/b&gt; POST /search {query}" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m7s" target="m7t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m7rs" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1572" y="990" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m7rt" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="990" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m7R" value="&lt;b&gt;7R.&lt;/b&gt; {candidates[], total}" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;dashed=1;" edge="1" parent="1" source="m7rs" target="m7rt">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m8s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="1080" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m8t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1202" y="1080" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m8" value="&lt;b&gt;8.&lt;/b&gt; POST /callback/report · DISPATCH_RESULT" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m8s" target="m8t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m9s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="512" y="1170" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m9t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1572" y="1170" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m9" value="&lt;b&gt;9.&lt;/b&gt; POST /dispatch {task_id, origin_node_id, target_node_id, holder_id, relay_turn, dispatch_id}" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m9s" target="m9t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m10s" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1572" y="1260" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m10t" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1932" y="1260" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m10" value="&lt;b&gt;10.&lt;/b&gt; 实际交付：single_bot / coop_group / bbs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m10s" target="m10t">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="m10rs" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="1932" y="1340" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m10rt" value="" style="ellipse;html=1;fillOpacity=0;strokeOpacity=0;" vertex="1" parent="1">
+          <mxGeometry x="2322" y="1340" width="6" height="6" as="geometry"/>
+        </mxCell>
+        <mxCell id="m10R" value="&lt;b&gt;10R.&lt;/b&gt; 创建会话/协作群并发送下一棒执行指令" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#374151;fontColor=#374151;exitX=0.5;exitY=0.5;entryX=0.5;entryY=0.5;" edge="1" parent="1" source="m10rs" target="m10rt">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="complete" value="完成分支&lt;br&gt;&lt;b&gt;gaps == []&lt;/b&gt;&lt;br&gt;PLAN_RESULT 不含 next_task_spec&lt;br&gt;Graph → task DONE" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#E2F0D9;strokeColor=#70AD47;strokeWidth=2;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1430" width="420" height="210" as="geometry"/>
+        </mxCell>
+        <mxCell id="single_c" value="HIT_SINGLE&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;driver_bot_id = 唯一 next_relay_bot&lt;br&gt;/dispatch → TaskRunner.start_run&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#D9EAF7;strokeColor=#4F81BD;strokeWidth=2;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="510" y="1430" width="420" height="210" as="geometry"/>
+        </mxCell>
+        <mxCell id="multi_c" value="HIT_MULTI_BOTS&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;driver ∈ next_relay_bots&lt;br&gt;driver 是唯一下一棒 holder&lt;br&gt;Human 作为 observer 入群&lt;br&gt;当前棒默认不入群&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#DDF3F5;strokeColor=#2A8C94;strokeWidth=2;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="970" y="1430" width="440" height="210" as="geometry"/>
+        </mxCell>
+        <mxCell id="bbs_c" value="MISS → BBS&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;POST /bbs/claim {task_id,node_id,bot_id,claim_id}&lt;br&gt;POST /bbs/result {task_id,node_id,bot_id,output_patch,acceptance_result,exec_error}&lt;br&gt;claimant 获得新 relay_turn 后继续循环&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#FFF2CC;strokeColor=#BF9000;strokeWidth=2;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="1430" width="560" height="210" as="geometry"/>
+        </mxCell>
+        <mxCell id="resume_c" value="恢复 / 终止&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;turn expired → resume_relay_turn → [RESUME_RELAY]&lt;br&gt;不重做已完成业务工作&lt;br&gt;max rounds / resume exhausted → HUNG&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#F4CCCC;strokeColor=#C00000;strokeWidth=2;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="2050" y="1430" width="580" height="210" as="geometry"/>
+        </mxCell>
+        <mxCell id="contract" value="&lt;b&gt;核心 DTO 约束&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;&lt;b&gt;EXECUTION_RESULT&lt;/b&gt;: execution_decision, actual_goal?, output, acceptance_result?　|　&lt;b&gt;PLAN_RESULT&lt;/b&gt;: gaps, next_task_spec?　|　&lt;b&gt;DISPATCH_RESULT&lt;/b&gt;: outcome, driver_bot_id?, next_relay_bots?, collab_mode?, miss_reason?&lt;br&gt;&lt;b&gt;统一 envelope&lt;/b&gt;: task_id, node_id, event_type, event_id, holder_id, relay_turn?, progress_reason?, failure_reason?, payload　|　SEARCH_RESULT 仅兼容旧名并归一为 DISPATCH_RESULT&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fontFamily=Arial;fontSize=14;fontColor=#1F2937;align=center;verticalAlign=middle;spacing=8;fillColor=#F8FAFC;strokeColor=#16324F;strokeWidth=2;align=left;spacingLeft=15;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1665" width="2580" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="loop2" value="下一棒重复步骤 3–10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Arial;fontSize=12;fontColor=#374151;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#C00000;fontColor=#C00000;strokeWidth=3;exitX=1;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="a_next" target="a_skill">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2620" y="155"/>
+              <mxPoint x="2620" y="110"/>
+              <mxPoint x="515" y="110"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

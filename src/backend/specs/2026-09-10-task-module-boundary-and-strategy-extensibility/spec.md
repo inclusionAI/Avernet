@@ -80,6 +80,8 @@
 - [ ] Relay 协作群决策包含 `driver_bot_id` 和 `next_relay_bots`；`driver_bot_id` 必须属于 `next_relay_bots`，并作为下一棒群 Manager、唯一 Relay Holder 和节点 assignee。
 - [ ] 当前棒 Bot 默认不加入下一棒协作群；Human 默认以 observer 身份加入下一棒协作群。
 - [ ] Relay BBS claim 是目标 BBS 节点级 claim；BBS Bot 认领后执行相同 Relay 闭环，不能触发中心化根节点或父子收敛。
+- [ ] Relay 结果入口只接受 `EXECUTION_RESULT`、`PLAN_RESULT` 和 `DISPATCH_RESULT`；中心化节点终态 callback 不能把 Relay 节点或根任务推到终态。
+- [ ] Runner 给 Relay 节点只注入同一套事件协议，不得同时携带中心化一次性回投协议。
 
 ### Centralized planning execution
 

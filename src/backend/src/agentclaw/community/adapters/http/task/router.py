@@ -12,6 +12,9 @@ from fastapi.responses import HTMLResponse
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
+from agentclaw.community.adapters.http.task.relay_callback_guard import (
+    record_relay_callback_error, reject_legacy_relay_result,
+)
 from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
 from agentclaw.community.adapters.http.task.schemas import (
     RelayTaskEventDTO, TaskCallbackDataDTO, TaskCallbackRequest,
@@ -59,30 +62,6 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
-
-
-def _record_relay_callback_error(
-    svc: TaskServiceProtocol, raw_obj: dict[str, Any], phase: str, exc: Exception,
-) -> None:
-    def value(key: str) -> str:
-        return str(raw_obj.get(key) or "")
-
-    payload = raw_obj.get("payload")
-    try:
-        svc.record_relay_callback_error(
-            task_id=value("task_id"), node_id=value("node_id"),
-            event_type=value("event_type"), event_id=value("event_id"),
-            holder_id=value("holder_id"), relay_turn=value("relay_turn") or None,
-            progress_reason=value("progress_reason") or None,
-            failure_reason=value("failure_reason") or None,
-            payload=payload if isinstance(payload, dict) else None, error_phase=phase,
-            exception_type=type(exc).__name__, error_msg=str(exc),
-        )
-    except Exception as emit_exc:  # noqa: BLE001 trajectory must not mask callback
-        logger.warning(
-            "[task][relay][callback] failure trajectory failed phase=%s: %s",
-            phase, emit_exc, exc_info=True,
-        )
 
 
 router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
@@ -815,6 +794,7 @@ async def _dispatch_impl(
     if not isinstance(_raw_obj, dict):
         raise HTTPException(status_code=422, detail="callback body must be a JSON object")
 
+    reject_legacy_relay_result(disposition, _raw_obj, svc)
     if _raw_obj.get("event_type") in {
         "EXECUTION_RESULT", "PLAN_RESULT", "DISPATCH_RESULT", "SEARCH_RESULT",
     }:
@@ -825,7 +805,7 @@ async def _dispatch_impl(
                 source="task_loop", headers=request.headers, raw_body=raw,
                 method=request.method, path=request.url.path,
             )
-            _record_relay_callback_error(svc, _raw_obj, "validation", exc)
+            record_relay_callback_error(svc, _raw_obj, "validation", exc)
             raise HTTPException(status_code=422, detail="invalid relay task event") from exc
         auth.verify(
             source="task_loop", headers=request.headers, raw_body=raw,
@@ -840,7 +820,7 @@ async def _dispatch_impl(
                 failure_reason=event.failure_reason, payload=event.payload,
             )
         except Exception as exc:
-            _record_relay_callback_error(svc, _raw_obj, "processing", exc)
+            record_relay_callback_error(svc, _raw_obj, "processing", exc)
             raise
         try:
             svc.record_relay_callback_success(

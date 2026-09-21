@@ -64,13 +64,22 @@ class _StubService:
     def __init__(self) -> None:
         self.callback = _StubCallback()
         self._node_status: dict[tuple[str, str], Status] = {}
+        self._execution_config: dict = {}
         self.relay_exception: Exception | None = None
 
     def set_node_status(self, task_id, node_id, status) -> None:
         self._node_status[(task_id, node_id)] = status
 
+    def set_execution_config(self, execution_config: dict) -> None:
+        self._execution_config = execution_config
+
     def get_task_dashboard(self, task_id, node_id=None) -> TaskExecutionGraph:
-        g = TaskExecutionGraph(run_id=1, loop_round=0, status=Status.PENDING)
+        g = TaskExecutionGraph(
+            run_id=1,
+            loop_round=0,
+            status=Status.PENDING,
+            extend_props={"execution_config": self._execution_config},
+        )
         for (tid, nid), st in list(self._node_status.items()):
             if tid == task_id:
                 g.tasks.append(_make_node(tid, nid, st))
@@ -181,6 +190,51 @@ class TestRouter:
         success = svc.callback.calls[1][1]
         assert success["event_type"] == "EXECUTION_RESULT"
         assert success["event_id"] == "event-report-1"
+
+    def test_legacy_callback_rejected_for_relay_task(self, task_client):
+        client, svc = task_client
+        svc.set_execution_config({"orchestration_mode": "relay"})
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json={
+                "task_id": "t1",
+                "node_id": "c1",
+                "status": "SUCCESS",
+                "output": "误用旧协议直接完成",
+                "acceptance_result": {"verdict": "DONE", "acceptances_metric": [], "gaps": []},
+                "extend_props": {},
+            },
+        )
+        assert response.status_code == 409, response.text
+        assert svc.callback.calls == []
+
+    def test_task_level_legacy_callback_rejected_for_relay_task(self, client):
+        client, svc = client
+        svc.set_execution_config({"orchestration_mode": "relay"})
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/workflow_result",
+            json=_body(task_id="t1", status="COMPLETED", is_success=True),
+        )
+        assert response.status_code == 409, response.text
+        assert svc.callback.calls == []
+
+    def test_typed_relay_event_accepted_for_relay_task(self, task_client):
+        client, svc = task_client
+        svc.set_execution_config({"orchestration_mode": "relay"})
+        response = client.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json={
+                "task_id": "t1",
+                "node_id": "c1",
+                "event_type": "EXECUTION_RESULT",
+                "event_id": "event-relay-1",
+                "holder_id": "bot-1",
+                "progress_reason": "execution complete",
+                "payload": {"success": True, "output": {"result": "done"}},
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert [call[0] for call in svc.callback.calls] == ["relay", "relay_success"]
 
     def test_relay_callback_validation_error_records_diagnostic_trajectory(self, task_client):
         client, svc = task_client

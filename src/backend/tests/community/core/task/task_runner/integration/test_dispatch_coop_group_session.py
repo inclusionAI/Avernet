@@ -271,6 +271,37 @@ def test_form_coop_group_singlebot_2_group_uses_single_business_protocol():
     assert "完整协作群执行输出" not in ctx
 
 
+def test_relay_dynamic_group_injects_only_relay_event_protocol():
+    """Relay collaboration groups must not receive the old one-shot callback."""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       api_base_url="http://backend")
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "worker"], collab_mode="manager_worker",
+        members_info=[
+            {"bot_id": "mgr", "role": "manager"},
+            {"bot_id": "worker", "role": "worker"},
+        ],
+        extend_props={
+            "manager_bot_id": "mgr", "dynamic_task_node_protocol": True,
+            "relay_execution": True, "loop_task_id": "t1::n1", "task_id": "t1",
+            "task_objective": "补齐存储行业尽调缺口",
+            "task_instruction": "执行行业研究与投资分析",
+            "acceptances": [{"id": "a1", "description": "结论可复核"}],
+        },
+    )))
+
+    ctx = bcs.created[0].context
+    assert "【分布式接力闭环】" in ctx
+    assert '"event_type": "EXECUTION_RESULT"' in ctx
+    assert "PLAN_RESULT" in ctx and "DISPATCH_RESULT" in ctx
+    assert "严禁回到中心化的 status/output/acceptance_result 节点终态回调" in ctx
+    assert '"status": "SUCCESS"' not in ctx
+    assert "唯一允许的节点回投" not in ctx
+    assert ctx.count("[task-execute]") == 1
+
+
 def test_dynamic_group_rewrites_legacy_business_envelope_to_unified_protocol():
     """动态群不得因旧指令文本而回退到旧通用上下文。"""
     bcs = _Bcs()

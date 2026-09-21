@@ -20,62 +20,6 @@ from agentclaw.community.core.task.task_runner.client.ports import (
 )
 
 
-def _skill_report_instruction(
-    context: dict[str, Any], *, task_id: str, node_id: str
-) -> str:
-    """skill HTTP callback protocol block for task-node result reporting.
-
-    Only emitted when ``skill_report_enabled`` is true. The disabled path must
-    not describe the platform's pull protocol to the model; the platform owns
-    result collection in that mode.
-    """
-    backend = str(context.get("backend") or "{backend}")
-    reporter = context.get("reporter_bot_id")
-    reporter_line = (
-        f"唯一上报者: reporter_bot_id={reporter}; reporter_role={context.get('reporter_role') or 'worker'}。"
-        if reporter
-        else "当前执行 Bot 是唯一上报者。"
-    )
-    return "\n".join(
-        [
-            "【强制执行闭环，不得跳过】",
-            "产出为本:本节点的全部价值=阶段1 在本条消息正文给出的真实业务产出;阶段2-4 只是对该产出的校验与回投,不是任务本身。"
-            "若阶段1 正文没有可直接阅读的真实业务内容(只见标题/阶段名,或内容被外置到工具写文件/写代码里而不在正文),"
-            "则整轮作废,不得进入阶段2-4,更不得靠自我背书的空壳去抢上报——那是无产出的假闭环。",
-            "执行约束:严禁调用联网搜索/web_search 工具或联网浏览外部资源获取信息(任务指定的上报接口除外),仅依据给定上下文与自身知识产出。",
-            "阶段1 执行：在本条消息正文完整完成上面任务指令、给出完整执行产出(完整分析/结论/内容正文),正文必须可直接读到真实业务内容;"
-            "禁止:①只写小标题或阶段名(如 阶段1:完成分析文档)就跳过;②仅靠调用工具(写文件/写代码/写表格)后即视为完成而正文无内容;"
-            "③把产出只放进后续上报请求体却不出现在对话正文。产出完整后再进入阶段2。阶段4 上报时把这份完整产出原样填入 output 字段。",
-            "阶段2 校验：执行完成后，必须逐条对照当前 goal.acceptances，明确判断每条是否满足；不能只凭‘看起来完成’结束。",
-            "阶段3 验收：整理完整 output；验收全部满足则 status=SUCCESS，否则 status=DONE，并在 acceptance_result.gaps 写明差距；只有执行失败才使用 status=FAILED。",
-            "阶段4 上报：必须真正发起 HTTP POST，不能只在对话中输出‘完成’或只返回 JSON。",
-            reporter_line,
-            f"回调地址: POST {backend}/api/v1/collaboration/tasks/callback/report",
-            "请求体只能包含以下节点级字段，不要增加 loop_task_id/workflow_type/workflow_id/instance_id/result 包装：",
-            json.dumps(
-                {
-                    "task_id": task_id,
-                    "node_id": node_id,
-                    "status": "SUCCESS",
-                    "output": "完整执行输出",
-                    "acceptance_result": {
-                        "verdict": "DONE",
-                        "acceptances_metric": [
-                            {"id": "验收项ID", "passed": True, "summary": "满足原因"}
-                        ],
-                        "gaps": [],
-                    },
-                    "extend_props": {},
-                },
-                ensure_ascii=False,
-            ),
-            "上报前自检：task_id/node_id 必须使用当前节点值；status 只能是 SUCCESS(验收通过)/DONE(验收未通过)/FAILED(执行失败)；验收通过时 verdict=DONE 且 gaps=[]，验收未通过时 verdict=FAILED 且 gaps 非空；acceptances_metric 必须是数组，不要改成 {验收项ID:{passed,summary}} 映射；收到 HTTP 200 前不得认为上报完成。",
-            "收尾轮约束:收到 HTTP 200 即视为本节点上报完成;此后回复只能是**一句话确认**(如 已上报成功),严禁在收尾轮再次贴出阶段1执行产出、验收正文、上报请求体或任何此前已产出的内容——执行产出只在阶段1给出一次,不得重复。",
-            "上报工具与方法:上报只能用 exec/curl 以 JSON body 发起 POST 到回调地址;严禁用 web_fetch / web_search 等工具调用上报接口(它们是 GET/检索,会 405);收到 HTTP 200 立即停止,不得对同一节点重复 POST、不得换工具重试、不得在 200 之后再发起任何上报或收尾调用。",
-        ]
-    )
-
-
 def format_task_node_business_instruction(
     *,
     task_id: str,
@@ -91,16 +35,70 @@ def format_task_node_business_instruction(
     relay_execution: bool = False,
     relay_blackboard: dict[str, Any] | None = None,
 ) -> str:
-    """Build the one business protocol shared by every manager-worker node.
+    """Build the single per-node protocol used by runner delivery.
 
-    BCS owns member assignment and group completion through its system context.
-    This text deliberately contains no ``bcs_*`` instruction: it only defines
-    the business work, acceptance and node callback owned by the task module.
+    Relay tasks use one event-driven baton protocol. Centralized nodes use the
+    original terminal callback protocol, because their graph completion is
+    owned by the task engine rather than the next bot.
     """
     backend = backend.rstrip("/") or "{backend}"
     reporter = reporter_bot_id or "BCS 系统上下文标识为 manager/driver 的 Bot"
     executors = executor_bot_ids or ([reporter_bot_id] if reporter_bot_id else [])
     callback = f"{backend}/api/v1/collaboration/tasks/callback/report"
+    context = f"[task-loop] loop_task_id={task_id}::{node_id}; backend={backend}"
+
+    if relay_execution:
+        execution_payload = {
+            "task_id": task_id,
+            "node_id": node_id,
+            "event_type": "EXECUTION_RESULT",
+            "event_id": "每次事件使用新的 UUID",
+            "holder_id": reporter,
+            "progress_reason": "为什么当前事实可以被记录",
+            "failure_reason": None,
+            "payload": {
+                "execution_decision": "ACCEPTED 或 DECLINED",
+                "actual_goal": {
+                    "objective": "能力匹配后实际执行的 goal",
+                    "acceptances": [{"id": "验收项ID", "description": "验收要求"}],
+                },
+                "output": {"result": "完整执行产出"},
+                "acceptance_result": {
+                    "verdict": "DONE 或 FAILED",
+                    "acceptances_metric": [
+                        {"id": "验收项ID", "passed": True, "summary": "证据摘要"}
+                    ],
+                    "gaps": [],
+                },
+            },
+        }
+        return "\n".join(
+            [
+                "[task-execute]",
+                "【分布式接力闭环】这是本棒唯一执行与上报协议；严禁回到中心化的 status/output/acceptance_result 节点终态回调，也严禁把 EXECUTION_RESULT 成功当作本棒结束。",
+                context,
+                f"唯一闭环持有者 holder_id: {reporter}。协作群成员完成分工产出后，driver/manager 汇总、验收并驱动本棒闭环；其它成员不调用任务接口。",
+                f"本群执行者: {json.dumps(executors, ensure_ascii=False)}",
+                f"目标:{objective}",
+                f"指令:{instruction}",
+                f"验收标准:{json.dumps(acceptances, ensure_ascii=False)}",
+                f"上游产出:{json.dumps(upstream_outputs or {}, ensure_ascii=False, default=str)}",
+                f"共享任务黑板:{json.dumps(relay_blackboard or {}, ensure_ascii=False, default=str)}",
+                f"1. 获取最新上下文：GET {backend}/api/v1/collaboration/tasks/{task_id}/context。",
+                "2. 能力准入：先用 IDENTITY.md 的职责边界、已激活 Skills 和可用工具判断本棒可覆盖范围；只执行被职责与工具同时覆盖的子项，不硬做全部需求。未覆盖或关键工具不可用时规划下一棒，不得改用通用模型知识或其它工具替代。",
+                "3. 执行与本地验收：完成真实业务推理和可复核产出；driver 汇总协作群分内产出，逐条对照 actual_goal 的验收项形成节点级验收事实。",
+                f"4. POST {callback} 上报 EXECUTION_RESULT；event_id 必须新生成。ACCEPTED 必须携带 actual_goal、output、acceptance_result；DECLINED 只携带能力不匹配事实，不得伪造业务产出。请求体示例：",
+                json.dumps(execution_payload, ensure_ascii=False),
+                "响应 data.relay_turn 是后续 PLAN/搜索/派发的唯一接力凭证，必须原样保存，不得自行生成。",
+                f"5. 再次 GET {backend}/api/v1/collaboration/tasks/{task_id}/context，基于根 TaskSpec、all_done_output、本节点实际产出与验收事实重新计算 gaps。将 event_type=PLAN_RESULT POST 到 callback/report，payload={{gaps,next_task_spec}}；gaps 非空时 next_task_spec 必须是唯一下一棒 context+goal，节点 ID 由 Graph 生成；gaps=[] 时 next_task_spec=null，任务结束。",
+                f"6. 若产生下一步节点，先根据该节点 goal、gap 和 instruction 构造搜索 query，再 POST {backend}/api/v1/collaboration/tasks/search，请求体只能传 {{\"query\": \"...\"}}。搜索接口只返回候选事实，不感知任务图，也不决定执行模态。",
+                "7. 根据搜索返回的真实字段，由 Skill 判断 HIT_SINGLE、HIT_MULTI_BOTS 或 MISS。向 callback/report 上报 event_type=DISPATCH_RESULT，payload 使用 outcome、run_mode、driver_bot_id、next_relay_bots；协作群 driver 必须属于 next_relay_bots，当前棒不进入下一棒群，Human 默认作为 observer。MISS 必须提供 miss_reason。",
+                f"8. HIT_SINGLE/HIT_MULTI_BOTS 后 POST {backend}/api/v1/collaboration/tasks/dispatch，传 task_id、origin_node_id、target_node_id、holder_id、relay_turn、唯一 dispatch_id。只有 HTTP 200 才算交接成功；MISS 自动发布 BBS。",
+                "BBS 认领者执行完成后也从第1步开始，继续同一接力闭环。任一接口失败时不得伪造成功；在 failure_reason 记录真实原因。",
+                OUTPUT_LANGUAGE_CONSTRAINT,
+            ]
+        )
+
     payload = {
         "task_id": task_id,
         "node_id": node_id,
@@ -118,7 +116,7 @@ def format_task_node_business_instruction(
     parts = [
         "[task-execute]",
         "【业务节点执行协议】本协议只约束业务执行、验收和回投；成员派发、消息收集与群收尾由系统上下文处理，不要自行调用或复述这些调度动作。",
-        f"[task-loop] loop_task_id={task_id}::{node_id}; backend={backend}",
+        context,
         f"唯一回投者: {reporter}。除唯一回投者外，任何成员都不得调用节点 callback。",
         f"本群执行者: {json.dumps(executors, ensure_ascii=False)}。driver/manager 同时是执行者，必须完成自己的业务推理，不得只派发后等待成员。",
         f"目标:{objective}",
@@ -129,33 +127,6 @@ def format_task_node_business_instruction(
         "验收项覆盖要求：acceptances_metric 必须逐条且仅一次覆盖上面的每个验收项 id；每项包含 id、passed（布尔值）和 summary（证据摘要）。全部通过：status=SUCCESS、verdict=DONE、gaps=[]；存在未满足项：status=DONE、verdict=FAILED、gaps 必须逐条说明；只有实际执行异常才可使用 status=FAILED。",
         "执行约束：禁止联网检索、浏览外部网页或访问外部 API 获取信息；仅依据给定上下文与自身知识完成业务。下方指定的唯一节点回投接口不受此限制，必须按规定调用。",
     ]
-    if relay_execution:
-        event_payload = {
-            "task_id": task_id,
-            "node_id": node_id,
-            "event_type": "EXECUTION_RESULT",
-            "event_id": "每次事件使用新的 UUID",
-            "holder_id": reporter,
-            "progress_reason": "为什么当前结果可以进入下一步规划",
-            "failure_reason": None,
-            "payload": {"success": True, "output": "完整执行产出"},
-        }
-        parts.extend(
-            [
-                "【分布式接力闭环】你同时负责本棒执行、验收、gap 规划、搜推决策与下一棒派发；后端只维护共享任务图谱、校验决策并调用 Runner。",
-                f"共享任务黑板:{json.dumps(relay_blackboard or {}, ensure_ascii=False, default=str)}",
-                f"1. 完成本节点后 POST {callback}，请求体为：",
-                json.dumps(event_payload, ensure_ascii=False),
-                "响应 data.relay_turn 是后续规划、搜索、派发的唯一接力凭证，必须原样保存，不得自行生成。",
-                "2. GET /api/v1/collaboration/tasks/{task_id}/context 读取最新 TaskContext，基于根 TaskSpec、all_done_output 和当前节点事实重算 gaps。将 PLAN_RESULT POST 到 callback/report，payload={gaps,next_task_spec}；gaps 非空时 next_task_spec 必须是唯一下一棒 context+goal，节点 ID 由 Graph 生成；gaps=[] 时 next_task_spec=null，任务结束。",
-                f'3. 若产生下一步节点，先根据该节点 goal、gap 和 instruction 构造搜索 query，再 POST {backend}/api/v1/collaboration/tasks/search，请求体只能传 {{"query": "..."}}。搜索接口只返回候选事实，不感知任务图，也不决定执行模态。',
-                "4. 根据搜索返回的真实字段，由 Skill 判断 HIT_SINGLE、HIT_MULTI_BOTS 或 MISS。DISPATCH_RESULT 使用 run_mode、driver_bot_id、next_relay_bots；协作群 driver 必须属于 next_relay_bots，当前棒不进入下一棒群，Human 默认作为 observer。MISS 需 miss_reason。",
-                f"5. HIT_SINGLE/HIT_MULTI_BOTS 后 POST {backend}/api/v1/collaboration/tasks/dispatch，传 task_id、origin_node_id、target_node_id、holder_id、relay_turn、唯一 dispatch_id。只有 HTTP 200 才算交接成功。MISS 自动发布 BBS。",
-                "BBS 认领者执行完成后也从第1步开始，继续同一接力闭环。任一接口失败时不得伪造成功；在 failure_reason 记录真实原因。",
-                OUTPUT_LANGUAGE_CONSTRAINT,
-            ]
-        )
-        return "\n".join(parts)
     if not skill_report_enabled:
         parts.append(_no_callback_instruction())
         return "\n".join(parts)
