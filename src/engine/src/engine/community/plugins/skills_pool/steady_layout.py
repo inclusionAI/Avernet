@@ -14,7 +14,7 @@ from engine.community.core.skills.layout_planner import (
     resolved_filesystem_layout_evidence,
 )
 from engine.community.plugins.skills_pool.active_marker_validation import (
-    steady_active_marker_valid,
+    startup_active_marker_valid,
 )
 from engine.community.plugins.skills_pool.center_mount import (
     inspect_center_mount,
@@ -114,9 +114,9 @@ def inspect_openclaw_steady_active(
                 contract=expected_contract_version,
                 reason="active_marker_contract_mismatch",
             )
-        if marker.get("activation_state") == "finalizing" or has_preparation:
+        if marker.get("activation_state") == "finalizing":
             return None
-    if not steady_active_marker_valid(
+    if not startup_active_marker_valid(
         marker,
         engine="openclaw",
         expected_contract_version=expected_contract_version,
@@ -155,12 +155,28 @@ def inspect_openclaw_steady_active(
             )
 
     for name, path in (("local", layout.local_bridge), ("repo", layout.repo_bridge)):
-        if path.exists() or path.is_symlink():
+        try:
+            path.lstat()
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        except PermissionError:
             return _invalid(
                 layout=layout,
                 contract=expected_contract_version,
-                reason=f"retired_{name}_bridge_present",
+                reason=f"retired_{name}_bridge_unreadable",
             )
+        except OSError as error:
+            return _transient(
+                layout=layout,
+                contract=expected_contract_version,
+                reason=f"retired_{name}_bridge_temporarily_unavailable",
+                error=error,
+            )
+        return _invalid(
+            layout=layout,
+            contract=expected_contract_version,
+            reason=f"retired_{name}_bridge_present",
+        )
 
     try:
         repo_mounted = repo_is_mounted(layout.pool_repo)

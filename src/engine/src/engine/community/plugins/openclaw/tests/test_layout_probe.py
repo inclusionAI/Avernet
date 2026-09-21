@@ -162,10 +162,11 @@ def test_active_marker_requires_direct_pool_mappings_and_absent_storage_entries(
     assert result.evidence["checks"]["legacy_storage_entries_absent"] is True
 
 
-def test_migrated_active_marker_still_requires_repo_mount(tmp_path):
-    home, active_root, _, _ = _ready_home(tmp_path)
+def test_migrated_active_marker_reports_repo_mount_as_diagnostic(tmp_path):
+    home, active_root, pool_local, _ = _ready_home(tmp_path)
     (active_root / "skills-repo").unlink()
     _write_active_marker(home, activation_state="active")
+    (pool_local.parent / ".pool-ready").unlink()
 
     result = inspect_runtime_layout(
         engine="openclaw",
@@ -174,11 +175,11 @@ def test_migrated_active_marker_still_requires_repo_mount(tmp_path):
         repo_is_mounted=lambda _path: False,
     )
 
-    assert result.status is RuntimeLayoutInspectionStatus.INVALID
-    assert result.evidence["reason"] == "pool_repo_not_mounted"
+    assert result.status is RuntimeLayoutInspectionStatus.READY
+    assert result.evidence["mount_diagnostics"]["pool_repo_mounted"] is False
 
 
-def test_migrated_active_marker_rejects_broken_managed_entry(tmp_path):
+def test_migrated_active_marker_does_not_gate_on_one_broken_skill(tmp_path):
     home, active_root, pool_local, pool_repo = _ready_home(tmp_path)
     (active_root / "skills-repo").unlink()
     (active_root / "broken").symlink_to(
@@ -186,6 +187,7 @@ def test_migrated_active_marker_rejects_broken_managed_entry(tmp_path):
         target_is_directory=True,
     )
     _write_active_marker(home, activation_state="active")
+    (pool_local.parent / ".pool-ready").unlink()
 
     result = inspect_runtime_layout(
         engine="openclaw",
@@ -194,8 +196,7 @@ def test_migrated_active_marker_rejects_broken_managed_entry(tmp_path):
         repo_is_mounted=lambda path: path == pool_repo,
     )
 
-    assert result.status is RuntimeLayoutInspectionStatus.INVALID
-    assert result.evidence["reason"] == "active_managed_entry_invalid"
+    assert result.status is RuntimeLayoutInspectionStatus.READY
 
 
 @pytest.mark.parametrize("activation_state", ["active", "finalizing"])
@@ -556,6 +557,37 @@ def test_active_marker_stat_error_is_classified(
     assert result.evidence["reason"] == reason
 
 
+def test_active_marker_os_error_is_not_treated_as_absent(tmp_path, monkeypatch):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    active_marker = _write_active_marker(home)
+    (home / ".openclaw/workspace/skills-pool/.pool-ready").unlink()
+    original_stat = os.stat
+    original_lstat = os.lstat
+
+    def fail_active_marker_stat(path, *args, **kwargs):
+        if Path(path) == active_marker:
+            raise OSError(errno.ESTALE, "stale NAS handle")
+        return original_stat(path, *args, **kwargs)
+
+    def fail_active_marker_lstat(path, *args, **kwargs):
+        if Path(path) == active_marker:
+            raise OSError(errno.ESTALE, "stale NAS handle")
+        return original_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", fail_active_marker_stat)
+    monkeypatch.setattr(os, "lstat", fail_active_marker_lstat)
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.TRANSIENT_ERROR
+    assert result.evidence["reason"] == "active_marker_temporarily_unavailable"
+
+
 def test_active_marker_read_io_error_is_transient(tmp_path, monkeypatch):
     home, _, _, pool_repo = _ready_home(tmp_path)
     active_marker = _write_active_marker(home)
@@ -594,6 +626,47 @@ def test_active_marker_rejects_unretired_repo_bridge(tmp_path):
     assert result.evidence["reason"] == "retired_repo_bridge_present"
 
 
+@pytest.mark.parametrize(
+    ("error", "status", "reason"),
+    [
+        (
+            PermissionError("denied"),
+            RuntimeLayoutInspectionStatus.INVALID,
+            "retired_repo_bridge_unreadable",
+        ),
+        (
+            OSError(errno.ESTALE, "stale NAS handle"),
+            RuntimeLayoutInspectionStatus.TRANSIENT_ERROR,
+            "retired_repo_bridge_temporarily_unavailable",
+        ),
+    ],
+)
+def test_retired_bridge_stat_error_is_classified(
+    tmp_path, monkeypatch, error, status, reason
+):
+    home, active_root, _, pool_repo = _ready_home(tmp_path)
+    repo_bridge = active_root / "skills-repo"
+    _write_active_marker(home, activation_state="active")
+    original_lstat = Path.lstat
+
+    def fail_repo_bridge_lstat(path):
+        if path == repo_bridge:
+            raise error
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", fail_repo_bridge_lstat)
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+    )
+
+    assert result.status is status
+    assert result.evidence["reason"] == reason
+
+
 def test_absent_marker_is_not_capable(tmp_path):
     result = inspect_runtime_layout(
         engine="openclaw",
@@ -627,9 +700,13 @@ def test_marker_nas_io_error_is_transient(tmp_path, monkeypatch):
 
 def test_marker_stat_nas_io_error_is_transient(tmp_path, monkeypatch):
     home, _, _, pool_repo = _ready_home(tmp_path)
+    ready_marker = home / ".openclaw/workspace/skills-pool/.pool-ready"
+    original_stat = Path.stat
 
-    def fail_marker_stat(_path, *_args, **_kwargs):
-        raise OSError(errno.ESTALE, "stale NAS handle")
+    def fail_marker_stat(path, *args, **kwargs):
+        if path == ready_marker:
+            raise OSError(errno.ESTALE, "stale NAS handle")
+        return original_stat(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "stat", fail_marker_stat)
 

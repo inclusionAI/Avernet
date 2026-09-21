@@ -91,6 +91,18 @@ def _validate_active_marker(marker: dict[str, object], *, engine: str) -> None:
         raise PoolNativeInitializationError("Pool active marker conflicts with startup")
 
 
+def _path_present(path: Path, *, description: str) -> bool:
+    try:
+        path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as error:
+        raise PoolNativeInitializationError(
+            f"{description} could not be inspected: {path}"
+        ) from error
+    return True
+
+
 def _atomic_create_active_marker(path: Path, marker: dict[str, str]) -> bool:
     payload = json.dumps(
         marker,
@@ -141,9 +153,16 @@ def initialize_pool_native(
     marker = _read_active_marker(layout.active_marker)
     if marker is not None:
         _validate_active_marker(marker, engine=engine)
+    elif _path_present(
+        layout.ready_marker,
+        description="Pool migration preparation marker",
+    ):
+        raise PoolNativeInitializationError(
+            "Pool migration preparation requires recovery before native startup"
+        )
 
     for legacy_entry in (layout.legacy_local, layout.legacy_repo):
-        if legacy_entry.exists() or legacy_entry.is_symlink():
+        if _path_present(legacy_entry, description="Legacy entry"):
             raise PoolNativeInitializationError(
                 f"legacy entry conflicts with Pool-native startup: {legacy_entry}"
             )

@@ -106,31 +106,6 @@ def startup_active_marker_valid(
     )
 
 
-def steady_active_marker_valid(
-    marker: object,
-    *,
-    engine: str,
-    expected_contract_version: str,
-) -> bool:
-    """Validate only a native Pool steady-state identity.
-
-    Migration identity belongs to ``finalizing`` recovery and is deliberately
-    not part of the long-lived ``active`` contract.
-    """
-
-    if not isinstance(marker, dict):
-        return False
-    return (
-        startup_active_marker_valid(
-            marker,
-            engine=engine,
-            expected_contract_version=expected_contract_version,
-        )
-        and "preparation_id" not in marker
-        and "migration_generation" not in marker
-    )
-
-
 def active_entries_failure_reason(
     layout: ActiveMarkerLayout,
     *,
