@@ -346,15 +346,14 @@ class McpConfig(BaseModel):
 class McpConfigWrite(BaseModel):
     """Write the unified config. An omitted (null) field means "leave unchanged".
 
-    The write is projected to every Bot under the caller on a best-effort
-    basis. Per-Bot delivery failures do not roll back persisted desired state;
-    a batch-level failure still answers an upstream error.
+    The write is projected only to Bots that effectively consume this MCP on a
+    best-effort basis. Per-Bot delivery failures do not roll back persisted
+    desired state; Bots that do not consume the MCP receive no projection.
     """
 
     # extra="forbid": an unknown field is a 422, not a silent no-op. In
-    # particular the old sync_mode field is gone — the only push path is to
-    # every device under the caller, so a per-device mode would advertise
-    # something the server ignores.
+    # particular the old sync_mode field is gone — consumer selection is a
+    # control-plane decision, not a caller-selectable per-device mode.
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={

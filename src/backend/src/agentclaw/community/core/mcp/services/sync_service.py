@@ -52,16 +52,13 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
-# 详情投递的并发上限,理由见 ``detail_fanout.fan_out_mcp_details``。两条链路各有
-# 一个:desired state 投递(caller 给定列表)与 collect 后投递,可能并发打同一台设备。
 _DESIRED_STATE_DETAIL_CONCURRENCY = 10
 _COLLECTED_DETAIL_CONCURRENCY = 5
+_USER_CONFIG_FANOUT_CONCURRENCY = 5
 
 
 @dataclass
 class DeviceSyncResult:
-    """设备 MCP 同步操作的结构化结果。"""
-
     success: bool = False
     stage: str = "init"
     total: int = 0
@@ -73,7 +70,6 @@ class DeviceSyncResult:
     device_desc: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """展平为调用方期望的遗留字典格式。"""
         return {
             "success": self.success,
             "stage": self.stage,
@@ -85,6 +81,24 @@ class DeviceSyncResult:
             "retry_attempts": self.retry_attempts,
             "device_ip": self.device_desc,
         }
+
+
+def _sync_summary(sync_results: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "affected_bot_count": len(sync_results),
+        "synced_count": sum(1 for item in sync_results if item.get("synced")),
+        "offline_count": sum(
+            1 for item in sync_results if item.get("reason") == "设备离线"
+        ),
+        "runtime_drift_count": sum(
+            1 for item in sync_results if item.get("reason") == "RUNTIME_DRIFT"
+        ),
+        "failed_count": sum(
+            1
+            for item in sync_results
+            if not item.get("synced") and item.get("reason") != "设备离线"
+        ),
+    }
 
 
 class MCPSyncService(MCPSyncServiceProtocol):
@@ -104,29 +118,6 @@ class MCPSyncService(MCPSyncServiceProtocol):
         device_sync_dispatcher_provider: 'Callable[[], "DeviceSyncDispatcher"]',
         employee_service_provider: Callable[[], DigitalEmployeeServiceProtocol] | None = None,
     ) -> None:
-        """初始化 MCP 同步编排服务。
-
-        Args:
-            mcp_provider_factory: 惰性工厂，用于延迟解析 ``BotMCPProvider``。
-                直接注入会导致循环依赖，因此通过工厂在首次使用时再解析。
-            mcp_center: MCP Center 插件，用于补全 MCP 元数据。
-            user_mcp_config_repo: 用户 MCP 配置仓库。
-            passport_update: Passport 插件，用于更新 passport MCP 列表。
-            mcp_config_service: MCP 配置服务，用于构建同步请求参数。
-            bot_repository: Bot 仓库，用于查询 bot 信息。
-            caller_identity_repository: Caller 身份仓库，用于保留显式 MCP 调用身份。
-            resolver_provider: Lazy thunk 返回 ``DeviceContextResolver``。它以
-                ``(bot_id, user_id)`` 解析 binding，并通过 ConnInfoBuilder 生成
-                typed ``DeviceContext``。Lazy 用于打破构造期 DI 循环:
-                ``BotService → SkillSetServiceFactory → MCPSyncService
-                → DeviceContextResolver → ArcaConnInfoBuilder → DeviceService
-                → BotService`` —— 与 ``SkillSetServiceFactory`` 同款手法。
-            device_sync_dispatcher_provider: Lazy thunk 返回 ``DeviceSyncDispatcher``，
-                按 ``ctx.provider`` 选择 Core ``DeviceSync`` 服务。MCP 投递不再由
-                caller 分支 ``device_provider``；服务按容器类型决定投递方式
-                (arca/baas 单条 ``/api/mcp`` 增量,teclaw 重组并投递整份
-                ``BotConfigArtifact``)。Lazy 与 ``resolver_provider`` 同因。
-        """
         self._mcp_provider_factory = mcp_provider_factory
         self._mcp_provider_cached: BotMCPProvider | None = None
         self.mcp_center = mcp_center
@@ -162,22 +153,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         engine_type: Optional[str] = None,
         active_only: bool = False,
     ) -> dict[str, Any]:
-        """推送 bot 关联的 MCP 完整配置到设备。
-
-        Args:
-            user_id: 用户 ID。
-            entity_id: 实体 ID。
-            bot_id: 目标 bot ID。
-            entity_type: 实体类型，默认 ``staff``。
-            engine_type: 引擎类型，默认 ``openclaw``。
-            active_only: 为 True 时只推送当前**激活** skill sets 中的 MCP；
-                为 False 时推送该 bot 关联的**全部** MCP（含 inactive）。
-
-        Returns:
-            同步结果字典，包含 ``success``、``success_count``、
-            ``failed_count``、``failed_server_codes``、``synced_server_codes`` 等字段。
-            设备离线时返回 ``{"success": False, "error": ...}``。
-        """
+        """Push the Bot's MCP configuration to its resolved device."""
         effective_engine = engine_type or "openclaw"
         scope_desc = "激活" if active_only else "全部"
         logger.info(
@@ -549,127 +525,169 @@ class MCPSyncService(MCPSyncServiceProtocol):
         custom_headers: Optional[dict[str, str]] = None,
         endpoint_env: Optional[str] = None,
         transport_protocol: Optional[str] = None,
+        target_bot_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Best-effort 地将单个 MCP 配置推送到指定实体下的全部 Bot。
-
-        用户配置是持久化的 desired state；一次设备投递只是让运行时尽快
-        收敛，不能因为任一历史、离线或暂时失败的 Bot 回滚用户已确认的
-        配置。每个 Bot 的解析、探测、配置组装和投递错误都进入
-        ``sync_results``，由调用方透传。只有无法列举整个实体 Bot 集合这种
-        批次级故障才返回 ``success=False``。
-        """
-        bot_ids: list[str] = []
-        try:
-            page = 1
-            page_size = 100
-            total = 0
-            seen: set[str] = set()
-            while True:
-                before = len(bot_ids)
-                total, bots = self.bot_repository.list_by_entity(
-                    entity_id=entity_id,
-                    entity_type=entity_type,
-                    page=page,
-                    page_size=page_size,
+        """Project one persisted user config to its effective consumers."""
+        control_plane_selected = target_bot_ids is not None
+        if target_bot_ids is None:
+            bot_ids: list[str] = []
+            try:
+                page = 1
+                page_size = 100
+                total = 0
+                seen: set[str] = set()
+                while True:
+                    before = len(bot_ids)
+                    total, bots = self.bot_repository.list_by_entity(
+                        entity_id=entity_id,
+                        entity_type=entity_type,
+                        page=page,
+                        page_size=page_size,
+                    )
+                    for bot in bots:
+                        bot_id = bot.get("bot_id")
+                        if bot_id and bot_id not in seen:
+                            seen.add(bot_id)
+                            bot_ids.append(bot_id)
+                    if not bots or len(bot_ids) >= total or len(bot_ids) == before:
+                        break
+                    page += 1
+                logger.info(
+                    "[MCPSyncService] 查询实体 bot: entity=%s type=%s total=%s",
+                    entity_id, entity_type, total,
                 )
-                for bot in bots:
-                    bot_id = bot.get("bot_id")
-                    if bot_id and bot_id not in seen:
-                        seen.add(bot_id)
-                        bot_ids.append(bot_id)
-                if not bots or len(bot_ids) >= total or len(bot_ids) == before:
-                    break
-                page += 1
+            except Exception as e:
+                logger.error("[MCPSyncService] 查询 bot 列表失败: %s", e)
+                return {
+                    "success": False,
+                    "sync_results": [],
+                    "sync_summary": _sync_summary([]),
+                    "error": "查询 bot 列表失败，无法完成 MCP 配置同步",
+                }
+        else:
+            bot_ids = list(dict.fromkeys(
+                bot_id for bot_id in target_bot_ids if isinstance(bot_id, str) and bot_id
+            ))
             logger.info(
-                "[MCPSyncService] 查询实体 bot: entity=%s type=%s total=%s",
-                entity_id, entity_type, total,
+                "[MCPSyncService] 控制面选中 MCP 消费者: entity=%s type=%s server_code=%s total=%s",
+                entity_id, entity_type, server_code, len(bot_ids),
             )
-        except Exception as e:
-            logger.error("[MCPSyncService] 查询 bot 列表失败: %s", e)
-            return {
-                "success": False,
-                "sync_results": [],
-                "error": "查询 bot 列表失败，无法完成 MCP 配置同步",
-            }
 
         if not bot_ids:
-            logger.info("[MCPSyncService] 未找到 bot，无需同步")
-            return {"success": True, "sync_results": [], "error": None}
+            logger.info("[MCPSyncService] 未找到 MCP 消费者，无需同步")
+            return {
+                "success": True,
+                "sync_results": [],
+                "sync_summary": _sync_summary([]),
+                "error": None,
+            }
 
-        sync_results: list[dict[str, Any]] = []
+        semaphore = asyncio.Semaphore(_USER_CONFIG_FANOUT_CONCURRENCY)
 
-        for bot_id in bot_ids:
-            # per-bot 投递插件由 resolver+dispatcher 按容器类型路由；无可投递
-            # 设备只记录 outcome。先解析才能知道设备是否存在，所以离线 Bot
-            # 必须在这里被转换为可透传的 best-effort 结果，而不是逸出整批。
-            try:
-                ctx = self._resolver_provider().resolve_for_bot(bot_id, entity_id)
-            except (DeviceNotBoundError, UnknownProviderError) as exc:
-                logger.warning("[MCPSyncService] 跳过 bot=%s: 缺少连接信息", bot_id)
-                sync_results.append({
-                    "bot_id": bot_id,
-                    "synced": False,
-                    "reason": "缺少设备连接信息",
-                    "error": str(exc),
-                })
-                continue
-            except DeviceOfflineError as exc:
-                logger.warning("[MCPSyncService] 跳过 bot=%s: 设备离线", bot_id)
-                sync_results.append({
-                    "bot_id": bot_id,
-                    "synced": False,
-                    "reason": "设备离线",
-                    "error": str(exc),
-                })
-                continue
-            try:
-                plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
-                effective_engine_type = ctx.conn_info.get("engine_type")
-                # 探测设备是否已装该 MCP；arca/baas 真实探测，未装则跳过。
-                # 整产物设备（teclaw）的 has_mcp 恒为 True，会尝试投递整份
-                # artifact；失败同样只记录该 Bot 的 outcome。下次设备恢复、
-                # 显式 Apply 或重启都会从持久化 desired state 再次收敛。
-                has_mcp = await asyncio.to_thread(plugin.has_mcp, server_code)
-                if not has_mcp:
-                    logger.warning(
-                        "[MCPSyncService] bot=%s 设备上未找到 MCP %s", bot_id, server_code
+        async def _sync_one(bot_id: str) -> dict[str, Any]:
+            async with semaphore:
+                try:
+                    ctx = await asyncio.to_thread(
+                        self._resolver_provider().resolve_for_bot, bot_id, entity_id
                     )
-                    sync_results.append({
-                        "bot_id": bot_id, "synced": False, "reason": "设备上未找到该 MCP",
-                    })
-                    continue
+                except (DeviceNotBoundError, UnknownProviderError) as exc:
+                    logger.warning("[MCPSyncService] 跳过 bot=%s: 缺少连接信息", bot_id)
+                    return {
+                        "bot_id": bot_id,
+                        "synced": False,
+                        "reason": "缺少设备连接信息",
+                        "error": str(exc),
+                    }
+                except DeviceOfflineError as exc:
+                    logger.warning("[MCPSyncService] 跳过 bot=%s: 设备离线", bot_id)
+                    return {
+                        "bot_id": bot_id,
+                        "synced": False,
+                        "reason": "设备离线",
+                        "error": str(exc),
+                    }
+                try:
+                    plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
+                    effective_engine_type = ctx.conn_info.get("engine_type")
+                    has_mcp = await asyncio.to_thread(plugin.has_mcp, server_code)
+                    if not has_mcp and control_plane_selected:
+                        logger.warning(
+                            "[MCPSyncService] bot=%s MCP=%s 运行态漂移，开始全量收敛",
+                            bot_id, server_code,
+                        )
+                        scope = await self.refresh_mcp_scope(
+                            user_id=user_id, entity_id=entity_id, bot_id=bot_id,
+                            entity_type=entity_type, engine_type=effective_engine_type,
+                        )
+                        details = await self.sync_mcp_details(
+                            user_id=user_id, entity_id=entity_id, bot_id=bot_id,
+                            entity_type=entity_type, engine_type=effective_engine_type,
+                        ) if scope.get("success") else None
+                        target_synced = await self._sync_mcp_detail(
+                            plugin=plugin,
+                            user_id=user_id,
+                            bot_id=bot_id,
+                            mcp_data=mcp_data,
+                            api_key=api_key,
+                            custom_headers=custom_headers,
+                            endpoint_env=endpoint_env,
+                            transport_protocol=transport_protocol,
+                            engine_type=effective_engine_type,
+                        ) if details and details.get("success") else False
+                        recovered = bool(
+                            scope.get("success") and details and details.get("success")
+                            and target_synced
+                        )
+                        return {
+                            "bot_id": bot_id,
+                            "synced": recovered,
+                            "reason": "RUNTIME_DRIFT",
+                            "error": None if recovered else (
+                                (details or scope).get("error", "运行态全量收敛失败")
+                            ),
+                        }
+                    if not has_mcp:
+                        return {
+                            "bot_id": bot_id,
+                            "synced": False,
+                            "reason": "设备上未找到该 MCP",
+                        }
 
-                logger.info("[MCPSyncService] 正在同步 MCP %s 到 bot=%s", server_code, bot_id)
+                    logger.info("[MCPSyncService] 正在同步 MCP %s 到 bot=%s", server_code, bot_id)
 
-                sync_success = await self._sync_mcp_detail(
-                    plugin=plugin,
-                    user_id=user_id,
-                    bot_id=bot_id,
-                    mcp_data=mcp_data,
-                    api_key=api_key,
-                    custom_headers=custom_headers,
-                    endpoint_env=endpoint_env,
-                    transport_protocol=transport_protocol,
-                    engine_type=effective_engine_type,
-                )
+                    sync_success = await self._sync_mcp_detail(
+                        plugin=plugin,
+                        user_id=user_id,
+                        bot_id=bot_id,
+                        mcp_data=mcp_data,
+                        api_key=api_key,
+                        custom_headers=custom_headers,
+                        endpoint_env=endpoint_env,
+                        transport_protocol=transport_protocol,
+                        engine_type=effective_engine_type,
+                    )
 
-                if sync_success:
-                    logger.info("[MCPSyncService] bot=%s 同步成功", bot_id)
-                else:
-                    logger.error("[MCPSyncService] bot=%s 同步失败", bot_id)
+                    if sync_success:
+                        logger.info("[MCPSyncService] bot=%s 同步成功", bot_id)
+                    else:
+                        logger.error("[MCPSyncService] bot=%s 同步失败", bot_id)
 
-                sync_results.append({
-                    "bot_id": bot_id,
-                    "synced": sync_success,
-                    "error": None if sync_success else "设备同步返回失败",
-                })
-            except Exception as e:
-                logger.error("[MCPSyncService] 同步到 bot=%s 异常: %s", bot_id, e)
-                sync_results.append({
-                    "bot_id": bot_id, "synced": False, "error": str(e),
-                })
+                    return {
+                        "bot_id": bot_id,
+                        "synced": sync_success,
+                        "error": None if sync_success else "设备同步返回失败",
+                    }
+                except Exception as e:
+                    logger.error("[MCPSyncService] 同步到 bot=%s 异常: %s", bot_id, e)
+                    return {"bot_id": bot_id, "synced": False, "error": str(e)}
 
-        return {"success": True, "sync_results": sync_results, "error": None}
+        sync_results = list(await asyncio.gather(*(_sync_one(bot_id) for bot_id in bot_ids)))
+        return {
+            "success": True,
+            "sync_results": sync_results,
+            "sync_summary": _sync_summary(sync_results),
+            "error": None,
+        }
 
     async def _declare_mcp_scope(
         self,

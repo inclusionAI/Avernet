@@ -195,6 +195,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
         overrides = self.bot_mcp_config_repo.list_by_owner_and_server_code(
             owner_id=user_id, server_code=server_code
         )
+        affected_bot_ids: list[str] = []
         bot_ids = self._bot_repo.list_live_bot_ids_by_owner(user_id)
         for bot_id in bot_ids:
             bot = self._bot_repo.get_by_id_and_owner(bot_id, user_id)
@@ -209,6 +210,10 @@ class MCPConfigService(MCPConfigServiceProtocol):
                 bot=bot,
             ):
                 continue
+            # This is the runtime-equivalent control-plane decision.  Keep it
+            # with validation so the subsequent delivery fan-out does not
+            # enumerate every Bot again or ask unrelated devices for state.
+            affected_bot_ids.append(bot_id)
             override = overrides.get(bot_id, {})
             engine_type = bot.get("active_engine") or bot.get("engine")
             before = self._validate_effective_config(
@@ -231,7 +236,11 @@ class MCPConfigService(MCPConfigServiceProtocol):
                     "kind": "new_bot_conflict",
                     "error": f"Bot {bot_id}: {after['error']}",
                 }
-        return {"valid": True, "error": None}
+        return {
+            "valid": True,
+            "error": None,
+            "affected_bot_ids": affected_bot_ids,
+        }
 
     def _validate_effective_config(
         self,

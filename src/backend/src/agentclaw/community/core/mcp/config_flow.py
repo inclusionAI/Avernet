@@ -59,6 +59,7 @@ class UnifiedConfig:
     # ``has_config``. Always ``True`` for a write result.
     exists: bool = field(default=True)
     sync_results: list[dict[str, Any]] | None = field(default=None)
+    sync_summary: dict[str, int] | None = field(default=None)
 
 
 def mcp_coords_from_record(bot_id: str, owner_id: str) -> BotConfigCoords:
@@ -168,7 +169,8 @@ async def write_unified_config(
     3. Confirm the server exists via the marketplace, **before** any write, so a
        bad server code never touches the database.
     4. Write the row, keeping the previous config for rollback.
-    5. Best-effort push to every Bot under the identity and collect its outcome.
+    5. Best-effort push only to the effective consumers identified during
+       validation, and collect their outcomes.
     6. Keep the write when individual Bot delivery fails: the stored user
        config is desired state and a later runtime projection can converge it.
        Only a batch-level failure (for example, Bot enumeration unavailable)
@@ -204,6 +206,13 @@ async def write_unified_config(
             raise McpMarketUnavailableError(candidate["error"])
         raise McpConfigValueError(candidate["error"])
 
+    # ``validate_user_config_update`` is the canonical runtime-equivalent
+    # control-plane read. Reuse its answer rather than enumerating every Bot
+    # and probing each device merely to discover that it does not consume this
+    # MCP. ``None`` retains compatibility with an out-of-tree implementation
+    # of the config service until it adopts the enriched result.
+    affected_bot_ids = candidate.get("affected_bot_ids")
+
     old_config = config_service.update_user_unified_config(
         user_id=user_id,
         server_code=server_code,
@@ -231,6 +240,7 @@ async def write_unified_config(
             custom_headers=headers,
             endpoint_env=endpoint_env,
             transport_protocol=normalized_tp,
+            target_bot_ids=affected_bot_ids,
         )
     except Exception as exc:
         # Per-Bot delivery errors are converted to sync_results by the batch
@@ -260,6 +270,7 @@ async def write_unified_config(
         headers=None,  # write path has never echoed headers — read path does
         has_config=bool(api_key or headers or transport_protocol),
         sync_results=result.get("sync_results"),
+        sync_summary=result.get("sync_summary"),
     )
 
 

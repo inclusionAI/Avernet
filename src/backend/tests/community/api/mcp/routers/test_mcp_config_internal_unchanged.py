@@ -150,8 +150,9 @@ def test_get_config_when_absent_is_unchanged(client):
             "headers": {},
             "endpoint_env": "PROD",
             "transport_protocol": None,
-            "has_config": False,
-            "sync_results": None,
+                "has_config": False,
+                "sync_results": None,
+                "sync_summary": None,
         },
     }
 
@@ -185,8 +186,9 @@ def test_get_config_masks_api_key_and_omits_tenant(client, repo):
             "headers": {"x-ling-auth": "tok"},
             "endpoint_env": "PRE",
             "transport_protocol": "SSE",
-            "has_config": True,
-            "sync_results": None,
+                "has_config": True,
+                "sync_results": None,
+                "sync_summary": None,
         },
     }
     assert "avernet_tenant" not in resp.text
@@ -209,7 +211,7 @@ def test_post_config_creates_and_response_is_unchanged(client, repo):
     assert resp.status_code == 200
     assert resp.json() == {
         "success": True,
-        "message": "MCP config updated and synced to all devices",
+            "message": "MCP config updated and synced to affected devices",
         "data": {
             "server_code": "mcp.third.weather",
             "api_key": "sk-a****mnop",
@@ -219,8 +221,9 @@ def test_post_config_creates_and_response_is_unchanged(client, repo):
             "headers": None,
             "endpoint_env": "PROD",
             "transport_protocol": "SSE",  # upper-cased, as before
-            "has_config": True,
-            "sync_results": [],
+                "has_config": True,
+                "sync_results": [],
+                "sync_summary": None,
         },
     }
     assert "avernet_tenant" not in resp.text

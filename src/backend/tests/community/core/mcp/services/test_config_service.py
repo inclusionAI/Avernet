@@ -277,6 +277,7 @@ class TestMCPConfigServiceValidateHeaders:
         )
 
         assert result["valid"] is True
+        assert result["affected_bot_ids"] == ["bot-1"]
 
     def test_validate_user_update_ignores_stale_override_for_deleted_bot(self):
         center = MagicMock()

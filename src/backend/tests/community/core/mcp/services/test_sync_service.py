@@ -13,7 +13,7 @@ state persists and each delivery outcome is returned to the caller.
 The plugin's MCP methods are **synchronous** (the service wraps them in
 ``asyncio.to_thread``), so the doubles use plain ``MagicMock``.
 """
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1278,6 +1278,49 @@ class TestSyncMcpDetailToAllBots:
         assert result["success"] is True
         assert result["sync_results"][0]["synced"] is False
         plugin.sync_single_mcp.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_control_plane_targets_bypass_unrelated_bot_enumeration(self):
+        plugin = _make_plugin()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        bot_repo = MagicMock()
+        service = _make_sync_service(
+            bot_repository=bot_repo, resolver=resolver, dispatcher=dispatcher
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
+            entity_id="u1", entity_type="staff", target_bot_ids=["target-bot"],
+        )
+
+        bot_repo.list_by_entity.assert_not_called()
+        resolver.resolve_for_bot.assert_called_once_with("target-bot", "u1")
+        assert result["sync_summary"] == {
+            "affected_bot_count": 1,
+            "synced_count": 1,
+            "offline_count": 0,
+            "runtime_drift_count": 0,
+            "failed_count": 0,
+        }
+
+    @pytest.mark.asyncio
+    async def test_control_plane_target_missing_at_device_recovers_full_mcp_state(self):
+        plugin = _make_plugin(has_mcp=MagicMock(return_value=False))
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        service = self._service_with_one_bot(resolver=resolver, dispatcher=dispatcher)
+        service.refresh_mcp_scope = AsyncMock(return_value={"success": True})
+        service.sync_mcp_details = AsyncMock(return_value={"success": True})
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
+            entity_id="100", entity_type="staff", target_bot_ids=["bot1"],
+        )
+
+        assert result["sync_results"] == [{
+            "bot_id": "bot1", "synced": True, "reason": "RUNTIME_DRIFT", "error": None,
+        }]
+        service.refresh_mcp_scope.assert_awaited_once()
+        service.sync_mcp_details.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_bot_without_device_is_skipped(self):
