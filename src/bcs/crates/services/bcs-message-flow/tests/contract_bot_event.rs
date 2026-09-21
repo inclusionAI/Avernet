@@ -208,7 +208,7 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     assert_eq!(messages[0].raw_payload["type"], "message.delivery.reaction");
     assert_eq!(messages[0].raw_payload["state"], "queued");
     assert_eq!(messages[0].raw_payload["message_id"], "im-queue");
-    let failed_row = &admitted.deliveries[1];
+    let failed_row = admitted.deliveries.iter().find(|row| row.target_bot_id == "bot-observer").unwrap();
     let running = service.transition(DeliveryTransitionCommand { delivery_id: failed_row.delivery_id.clone(), expected_state_version: failed_row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
         now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
@@ -241,21 +241,25 @@ async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restar
     let rejected_hint = channel.outbound().await;
     assert_eq!(rejected_hint[1].source_im_message_id.as_deref(), Some("im-rejected-source"));
     assert!(rejected_hint[1].text.as_ref().unwrap().contains("bot-observer：处理失败"));
-    let row = &admitted.deliveries[0];
+    let row = admitted.deliveries.iter().find(|row| row.target_bot_id == "bot-driver").unwrap();
     service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
         now_ms: now, request_id: None, actor_id: Some("human_1".into()), reply: None, transport_context_json: None, deadline_at_ms: None,
     }).await.unwrap();
     timeout(Duration::from_secs(2), async {
-        while channel.outbound().await.len() < 3 { tokio::time::sleep(Duration::from_millis(10)).await; }
+        while channel.outbound().await.len() < 4 { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();
-    assert!(channel.outbound().await[2].text.as_ref().unwrap().contains("已取消"));
+    let messages = channel.outbound().await;
+    assert_eq!(messages[2].raw_payload["type"], "message.delivery.reaction");
+    assert_eq!(messages[2].raw_payload["state"], "clear");
+    assert_eq!(messages[2].source_im_message_id.as_deref(), Some("im-original"));
+    assert!(messages[3].text.as_ref().unwrap().contains("已取消"));
     shutdown.send(true).unwrap();
     notifications.await.unwrap();
     let (shutdown, receiver) = tokio::sync::watch::channel(false);
     let restarted = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
     tokio::time::sleep(Duration::from_millis(150)).await;
-    assert_eq!(channel.outbound().await.len(), 3, "notifications are not replayed from durable state");
+    assert_eq!(channel.outbound().await.len(), 4, "notifications are not replayed from durable state");
     shutdown.send(true).unwrap();
     restarted.await.unwrap();
 }

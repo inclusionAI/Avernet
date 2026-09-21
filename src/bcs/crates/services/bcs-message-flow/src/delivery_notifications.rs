@@ -34,6 +34,9 @@ fn reaction(entry: &PendingHint, now: i64) -> Option<&'static str> {
     }) {
         return Some("queued");
     }
+    if entry.reaction.is_some() && entry.rows.values().all(terminal) {
+        return Some("clear");
+    }
     if entry.reaction == Some("queued")
         && entry
             .rows
