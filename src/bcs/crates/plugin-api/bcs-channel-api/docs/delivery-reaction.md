@@ -40,6 +40,11 @@ Each state replaces the previous delivery-status reaction for the same
 ignore it because its render hint is `IgnoreByDefault`. Providers should also
 ignore unsupported future states rather than rendering the raw payload.
 
+For a source message with multiple Send targets, BCS keeps `queued` while any
+target remains queued, then uses `processing` while a target is dispatching or
+running. BCS emits `expired` only after no target remains queued or processing
+and at least one target expired.
+
 The Rust wire types are `DeliveryReactionEvent` and `DeliveryReactionState` in
 `bcs-channel-api`. The protocol test in
 `tests/delivery_reaction_protocol.rs` pins the discriminator, state spellings,

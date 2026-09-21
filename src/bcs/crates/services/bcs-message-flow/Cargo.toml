@@ -43,4 +43,4 @@ tracing-subscriber = { workspace = true }
 bcs-message-store = { workspace = true }
 bcs-test-support = { workspace = true }
 bcs-cache-local = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

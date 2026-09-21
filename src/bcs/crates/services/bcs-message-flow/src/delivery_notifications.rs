@@ -11,6 +11,9 @@ use bcs_service_api::{ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelR
 use std::{collections::BTreeMap, sync::Weak, time::Duration};
 
 const IM_QUEUED_HINT_DELAY_MS: i64 = 10_000;
+// Each attempt may wait two seconds on repository/provider I/O. Return to the
+// select loop after one attempt so committed state changes keep draining.
+const MAX_IM_DELIVERY_ATTEMPTS_PER_TICK: usize = 1;
 
 #[derive(Default)]
 struct PendingHint {
@@ -20,29 +23,21 @@ struct PendingHint {
 }
 
 fn reaction(entry: &PendingHint, now: i64) -> Option<DeliveryReactionState> {
-    if entry
-        .rows
-        .values()
-        .any(|row| row.state.status == Status::Expired)
-    {
-        return Some(DeliveryReactionState::Expired);
+    if entry.rows.values().any(|row| row.state.status == Status::Queued) {
+        return entry.rows.values().any(|row| {
+            row.state.status == Status::Queued
+                && now.saturating_sub(row.created_at_ms) >= IM_QUEUED_HINT_DELAY_MS
+        }).then_some(DeliveryReactionState::Queued);
     }
-    if entry.rows.values().any(|row| {
-        row.state.status == Status::Queued
-            && now.saturating_sub(row.created_at_ms) >= IM_QUEUED_HINT_DELAY_MS
-    }) {
-        return Some(DeliveryReactionState::Queued);
+    if entry.rows.values().any(|row| matches!(row.state.status, Status::Dispatching | Status::Running)) {
+        return (entry.reaction == Some(DeliveryReactionState::Queued))
+            .then_some(DeliveryReactionState::Processing);
+    }
+    if entry.rows.values().any(|row| row.state.status == Status::Expired) {
+        return Some(DeliveryReactionState::Expired);
     }
     if entry.reaction.is_some() && entry.rows.values().all(terminal) {
         return Some(DeliveryReactionState::Clear);
-    }
-    if entry.reaction == Some(DeliveryReactionState::Queued)
-        && entry
-            .rows
-            .values()
-            .any(|row| matches!(row.state.status, Status::Dispatching | Status::Running))
-    {
-        return Some(DeliveryReactionState::Processing);
     }
     None
 }
@@ -112,12 +107,16 @@ pub async fn run(
             _ = tick.tick() => {
                 let Some(flow) = flow.upgrade() else { return; };
                 let now = chrono::Utc::now().timestamp_millis();
+                let mut delivery_attempts = 0;
                 for entry in pending.values_mut() {
-                    if let Some(state) = reaction(entry, now).filter(|state| Some(*state) != entry.reaction) {
-                        let rows: Vec<_> = entry.rows.values().collect();
-                        let result = tokio::time::timeout(Duration::from_secs(2), publish_reaction(&flow, &rows, state)).await;
-                        if !matches!(result, Ok(Ok(()))) { tracing::warn!(state = state.as_str(), "delivery IM reaction failed; not replaying an ambiguous external write"); }
-                        entry.reaction = Some(state);
+                    if delivery_attempts < MAX_IM_DELIVERY_ATTEMPTS_PER_TICK {
+                        if let Some(state) = reaction(entry, now).filter(|state| Some(*state) != entry.reaction) {
+                            delivery_attempts += 1;
+                            let rows: Vec<_> = entry.rows.values().collect();
+                            let result = tokio::time::timeout(Duration::from_secs(2), publish_reaction(&flow, &rows, state)).await;
+                            if !matches!(result, Ok(Ok(()))) { tracing::warn!(state = state.as_str(), "delivery IM reaction failed; not replaying an ambiguous external write"); }
+                            entry.reaction = Some(state);
+                        }
                     }
                     let mut grouped: BTreeMap<&'static str, (&'static str, Vec<&PersistedMessageDelivery>)> = BTreeMap::new();
                     for row in entry.rows.values() {
@@ -127,7 +126,8 @@ pub async fn run(
                             }
                         }
                     }
-                    if grouped.is_empty() { continue; }
+                    if grouped.is_empty() || delivery_attempts >= MAX_IM_DELIVERY_ATTEMPTS_PER_TICK { continue; }
+                    delivery_attempts += 1;
                     // One aggregated hint per source message and notification batch.
                     let rows: Vec<_> = grouped.values().flat_map(|(_, rows)| rows.iter().copied()).collect();
                     let text = grouped.values().map(|(text, rows)| format!("{}：{}", rows.iter().map(|r| r.target_bot_id.as_str()).collect::<Vec<_>>().join("、"), text)).collect::<Vec<_>>().join("\n");
@@ -136,7 +136,12 @@ pub async fn run(
                     if !matches!(result, Ok(Ok(()))) { tracing::warn!("delivery IM hint failed; not replaying an ambiguous external write"); }
                     entry.sent.extend(keys);
                 }
-                pending.retain(|_, entry| !entry.rows.values().all(terminal));
+                pending.retain(|_, entry| {
+                    if !entry.rows.values().all(terminal) { return true; }
+                    let reaction_pending = reaction(entry, now).is_some_and(|state| Some(state) != entry.reaction);
+                    let hint_pending = entry.rows.values().filter_map(hint).any(|(key, _)| !entry.sent.contains(&key));
+                    reaction_pending || hint_pending
+                });
             }
         }
     }
