@@ -6,9 +6,9 @@ MCPSyncService no longer branches on ``device_provider``: it obtains a per-bot
 and calls the MCP methods on it. The plugin decides *how* to deliver
 (arca/baas per-MCP, teclaw whole-artifact, local no-op) — that's covered by
 the plugin/contract tests. Here we assert the service routes correctly, maps
-``DeviceNotBoundError`` / ``UnknownProviderError`` to the "missing device"
-error, and that the multi-bot batch rolls back uniformly (Option B — a teclaw
-delivery failure is NOT best-effort).
+``DeviceNotBoundError`` / ``UnknownProviderError`` / ``DeviceOfflineError``
+to per-Bot outcomes. The multi-Bot user-config fan-out is best-effort: desired
+state persists and each delivery outcome is returned to the caller.
 
 The plugin's MCP methods are **synchronous** (the service wraps them in
 ``asyncio.to_thread``), so the doubles use plain ``MagicMock``.
@@ -20,6 +20,7 @@ import pytest
 from agentclaw.community.core.devices.services.device_context import (
     DeviceContext,
     DeviceNotBoundError,
+    DeviceOfflineError,
 )
 from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
@@ -1135,7 +1136,7 @@ class TestSyncMcpDetailToAllBots:
         )
 
     @pytest.mark.asyncio
-    async def test_center_drift_blocks_a_persisted_override_before_device_write(self):
+    async def test_center_drift_is_reported_without_device_write_or_batch_failure(self):
         plugin = _make_plugin()
         resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
         config = MagicMock()
@@ -1161,7 +1162,12 @@ class TestSyncMcpDetailToAllBots:
             entity_type="staff",
         )
 
-        assert result["success"] is False
+        assert result["success"] is True
+        assert result["sync_results"] == [{
+            "bot_id": "bot1",
+            "synced": False,
+            "error": "设备同步返回失败",
+        }]
         plugin.sync_single_mcp.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1200,9 +1206,8 @@ class TestSyncMcpDetailToAllBots:
         assert config.validate_bot_override.call_args.kwargs["engine_type"] == "teclaw"
 
     @pytest.mark.asyncio
-    async def test_all_devices_fail_returns_failure(self):
-        """When every device that has the MCP fails to sync, the batch reports
-        failure (→ caller rolls back). Uniform across providers (Option B)."""
+    async def test_all_devices_fail_is_best_effort(self):
+        """All device writes may fail without rolling back desired state."""
         plugin = _make_plugin(sync_single_mcp=MagicMock(return_value=False))
         resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
         service = self._service_with_one_bot(resolver=resolver, dispatcher=dispatcher)
@@ -1212,8 +1217,50 @@ class TestSyncMcpDetailToAllBots:
             entity_id="100", entity_type="staff",
         )
 
-        assert result["success"] is False
+        assert result["success"] is True
         assert result["sync_results"][0]["synced"] is False
+
+    @pytest.mark.asyncio
+    async def test_offline_bot_is_reported_and_skipped(self):
+        """An offline historical Bot is not allowed to abort the user write."""
+        resolver = MagicMock()
+        resolver.resolve_for_bot.side_effect = DeviceOfflineError(
+            "No active device for binding=42"
+        )
+        dispatcher = MagicMock()
+        service = self._service_with_one_bot(resolver=resolver, dispatcher=dispatcher)
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
+            entity_id="100", entity_type="staff",
+        )
+
+        assert result["success"] is True
+        assert result["sync_results"] == [{
+            "bot_id": "bot1",
+            "synced": False,
+            "reason": "设备离线",
+            "error": "No active device for binding=42",
+        }]
+        dispatcher.dispatch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_error_is_reported_without_failing_the_batch(self):
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher()
+        dispatcher.dispatch.side_effect = RuntimeError("dispatcher unavailable")
+        service = self._service_with_one_bot(resolver=resolver, dispatcher=dispatcher)
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
+            entity_id="100", entity_type="staff",
+        )
+
+        assert result["success"] is True
+        assert result["sync_results"] == [{
+            "bot_id": "bot1",
+            "synced": False,
+            "error": "dispatcher unavailable",
+        }]
 
     @pytest.mark.asyncio
     async def test_device_without_mcp_is_skipped(self):

@@ -229,6 +229,41 @@ def test_post_config_creates_and_response_is_unchanged(client, repo):
     assert stored["extra_config"]["headers"] == {"x-ling-auth": "tok"}
 
 
+def test_post_config_returns_best_effort_per_bot_outcomes(client, sync_service):
+    async def _sync(**_kwargs):
+        return {
+            "success": True,
+            "error": None,
+            "sync_results": [
+                {
+                    "bot_id": "offline-bot",
+                    "synced": False,
+                    "reason": "设备离线",
+                    "error": "No active device for binding=42",
+                }
+            ],
+        }
+
+    sync_service.sync_mcp_detail_to_all_bots = _sync
+
+    resp = client.post(
+        "/api/mcp/user/config",
+        json={"server_code": "mcp.third.weather", "headers": {"X-Test": "v"}},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+    assert resp.json()["data"]["sync_results"] == [
+        {
+            "conn_info": None,
+            "bot_id": "offline-bot",
+            "synced": False,
+            "reason": "设备离线",
+            "error": "No active device for binding=42",
+        }
+    ]
+
+
 def test_post_config_stamps_the_default_tenant(client, engine):
     """An internal request carries no tenant, so rows land on ``teamclaw``."""
     client.post(
