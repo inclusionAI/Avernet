@@ -153,7 +153,8 @@ impl LiveStory {
     async fn finish_bot(&self, text: &str, previous: Option<&str>) {
         let request = self.provider.capture.wait_for_method("chat.send").await;
         assert_eq!(request.authorization.as_deref(), Some(format!("Bearer {}", self.bot.bcs_to_provider_token).as_str()));
-        assert_eq!(request.body["bcn_group_id"], self.session_id);
+        assert_eq!(request.body["bcn_group_id"], self.group_id);
+        assert_eq!(request.body["session_id"], self.session_id);
         if let Some(previous) = previous {
             assert!(request.body["message"].to_string().contains(previous), "missing previous output: {}", request.body["message"]);
         }

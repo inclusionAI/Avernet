@@ -185,7 +185,8 @@ class Story:
         assert len(requests) == 1, "Unexpected concurrent or duplicate Provider delivery"
         request = requests[0]
         assert request["authorization"] == "Bearer " + self.provider["bcs_to_provider_token"]
-        assert request["body"]["bcn_group_id"] == self.session_id
+        assert request["body"]["bcn_group_id"] == self.group_id
+        assert request["body"]["session_id"] == self.session_id
         assert previous in json.dumps(request["body"]["message"]), "Provider prompt lost the preceding output"
         self.post("/control/provider/clear", mock=True)
         # The mock records chat.send before BCS has consumed its HTTP ACK.
