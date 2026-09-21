@@ -61,14 +61,10 @@ function failureMessage(error: DingTalkFailure): string {
   return typeof error === 'string' ? error : '获取钉钉授权码失败'
 }
 
-export async function requestDingTalkAuthCode(config: DingTalkPublicConfig): Promise<DingTalkAuthCodeResult> {
-  const api = window.dd ?? await loadPackagedDingTalkApi()
+export function requestDingTalkAuthCode(config: DingTalkPublicConfig): Promise<DingTalkAuthCodeResult> {
   return new Promise((resolve) => {
-    if (!api) {
-      resolve({ ok: false, error: '钉钉 JSAPI 加载失败' })
-      return
-    }
     let settled = false
+    let timeout: number
     const finish = (result: DingTalkAuthCodeResult) => {
       if (settled) return
       settled = true
@@ -79,7 +75,8 @@ export async function requestDingTalkAuthCode(config: DingTalkPublicConfig): Pro
       result.code ? { ok: true, authCode: result.code } : { ok: false, error: '钉钉未返回授权码' },
     )
     const fail = (error: DingTalkFailure) => finish({ ok: false, error: failureMessage(error) })
-    const request = () => {
+    const request = (api: DingTalkApi) => {
+      if (settled) return
       if (api.requestAuthCode) {
         api.requestAuthCode({ ...config, success, fail })
         return
@@ -91,8 +88,17 @@ export async function requestDingTalkAuthCode(config: DingTalkPublicConfig): Pro
       }
       finish({ ok: false, error: '钉钉 JSAPI 不支持免登' })
     }
-    const timeout = window.setTimeout(() => finish({ ok: false, error: '钉钉环境检测超时' }), 5000)
-    if (api.ready) api.ready(request)
-    else request()
+    const start = async () => {
+      const api = window.dd ?? await loadPackagedDingTalkApi()
+      if (settled) return
+      if (!api) {
+        finish({ ok: false, error: '钉钉 JSAPI 加载失败' })
+        return
+      }
+      if (api.ready) api.ready(() => request(api))
+      else request(api)
+    }
+    timeout = window.setTimeout(() => finish({ ok: false, error: '钉钉环境检测超时' }), 5000)
+    void start()
   })
 }
