@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { once } from 'node:events';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPreviewApp } from '../server';
