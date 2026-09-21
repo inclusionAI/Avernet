@@ -11,6 +11,15 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class CountFilesResult:
+    """Recursive regular file entry count, preserving the requested path."""
+
+    path: str
+    file_count: int
+    elapsed_ms: int
+
+
+@dataclass
 class UploadResult:
     """Outcome of :meth:`FileService.upload`."""
 
@@ -52,6 +61,7 @@ class ListDirResult:
 
 
 __all__ = [
+    "CountFilesResult",
     "FileEntry",
     "ListDirResult",
     "RemoveResult",

@@ -30,6 +30,8 @@ from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeP
 
 from typing import Annotated, Callable
 from agentclaw.community.api.publish_ignore_service import PublishIgnoreServiceProtocol
+from agentclaw.community.api.file_count_service import FileCountServiceProtocol
+from agentclaw.community.plugin_api.file_count_runtime import FileCountRuntime
 from agentclaw.community.api.build_ignore_service import BuildIgnoreServiceProtocol
 from agentclaw.community.core.repository.protocols.build_ignore import BuildIgnoreRepositoryProtocol
 from agentclaw.community.plugin_api.publish_ignore_runtime import PublishIgnoreRuntime
@@ -230,6 +232,30 @@ class ServiceBotModule(Module):
             injector.get(BotRepository), injector.get(RuntimeBindingResolutionService),
             injector.get(DeviceBindingRepository), injector.get(CollaboratorServiceProtocol),
             injector.get(PublishIgnoreRuntime), env_utils.get_current_env(),
+        )
+
+    @singleton
+    @provider
+    def file_count_runtime(self, injector: Injector) -> FileCountRuntime:
+        from agentclaw.community.plugins.community.file_count_runtime import HttpFileCountRuntime
+        from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+
+        return HttpFileCountRuntime(
+            injector.get(BaasService), injector.get(DeviceContextResolver),
+            injector.get(DeviceAdapterTransport), injector.get(Annotated[HttpClient, QUALIFIER_GENERAL]),
+        )
+
+    @singleton
+    @provider
+    def file_count_service(self, injector: Injector) -> FileCountServiceProtocol:
+        from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import CollaboratorServiceProtocol
+        from agentclaw.community.core.service_bot.services.file_count_service import FileCountService
+        from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
+
+        return FileCountService(
+            injector.get(BotRepository), injector.get(RuntimeBindingResolutionService),
+            injector.get(DeviceBindingRepository), injector.get(CollaboratorServiceProtocol),
+            injector.get(FileCountRuntime), env_utils.get_current_env(),
         )
 
     def configure(self, binder: Binder) -> None:

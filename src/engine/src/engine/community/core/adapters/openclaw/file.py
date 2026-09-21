@@ -16,6 +16,7 @@ from typing import Any
 
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.file.models import (
+    CountFilesResult,
     FileEntry,
     ListDirResult,
     RemoveResult,
@@ -30,6 +31,10 @@ class OpenClawFileAdapter(FileService):
 
     def __init__(self, port: OpenClawFilePort) -> None:
         self._port = port
+
+    async def count_files(self, path: str, auth: AuthContext | None = None) -> CountFilesResult:
+        raw = await self._port.count_files(path)
+        return CountFilesResult(**raw)
 
     async def upload(
         self,
