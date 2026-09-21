@@ -11,6 +11,7 @@ from agentclaw.community.core.bot_message_feedback.service_protocol import (
 from agentclaw.community.core.repository.protocols.bot_message_feedback import (
     BotMessageFeedbackRepositoryProtocol,
 )
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 class BotMessageFeedbackService(BotMessageFeedbackServiceProtocol):
@@ -34,6 +35,7 @@ class BotMessageFeedbackService(BotMessageFeedbackServiceProtocol):
         session_key: str | None = None,
         reason: str | None = None,
         comment: str | None = None,
+        env: str | None = None,
     ) -> BotMessageFeedbackRecord:
         if not message_id or not message_id.strip():
             raise ValueError("message_id is required")
@@ -50,6 +52,9 @@ class BotMessageFeedbackService(BotMessageFeedbackServiceProtocol):
             raise ValueError("comment must be a string or null")
         if reason is not None and not isinstance(reason, str):
             raise ValueError("reason must be a string or null")
+
+        # 未提供环境时，使用当前运行时环境（dev/pre/prod）
+        env = (env or "").strip().lower() or get_current_env()
 
         # 点赞时不保留之前点踩的原因/评论，避免数据污脏
         if feedback_type == "like":
@@ -68,6 +73,7 @@ class BotMessageFeedbackService(BotMessageFeedbackServiceProtocol):
                 bot_id=bot_id,
                 reason=reason,
                 comment=comment,
+                env=env,
             )
         except IntegrityError:
             # Concurrent insert: the unique key already exists, retry as update.
@@ -82,5 +88,6 @@ class BotMessageFeedbackService(BotMessageFeedbackServiceProtocol):
                 bot_id=bot_id,
                 reason=reason,
                 comment=comment,
+                env=env,
             )
 

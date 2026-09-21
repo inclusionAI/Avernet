@@ -26,6 +26,7 @@ def _record(
     bot_id="b1",
     reason=None,
     comment=None,
+    env="dev",
 ):
     return BotMessageFeedbackRecord(
         id=1,
@@ -39,6 +40,7 @@ def _record(
         feedback_type=feedback_type,
         reason=reason,
         comment=comment,
+        env=env,
         created_at=datetime.now(),
         updated_at=datetime.now(),
     )
@@ -86,6 +88,7 @@ async def test_submit_feedback_returns_success():
     assert response.data.message_content == "answer"
     assert response.data.user_message_id == "msg-0"
     assert response.data.user_message_content == "question"
+    assert response.data.env == "dev"
     service.submit_feedback.assert_awaited_once_with(
         message_id="msg-1",
         user_id="u1",

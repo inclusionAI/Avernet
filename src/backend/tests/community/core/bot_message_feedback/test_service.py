@@ -21,6 +21,7 @@ def _record(
     bot_id="b1",
     reason=None,
     comment=None,
+    env="dev",
 ):
     return BotMessageFeedbackRecord(
         id=1,
@@ -34,6 +35,7 @@ def _record(
         feedback_type=feedback_type,
         reason=reason,
         comment=comment,
+        env=env,
         created_at=datetime.now(),
         updated_at=datetime.now(),
     )
@@ -102,6 +104,7 @@ async def test_submit_feedback_calls_repo_upsert_with_qa_pair():
         bot_id="b1",
         reason="inaccurate",
         comment="bad",
+        env="dev",
     )
 
 
@@ -146,6 +149,7 @@ async def test_like_clears_reason_and_comment():
         bot_id="b1",
         reason=None,
         comment=None,
+        env="dev",
     )
 
 

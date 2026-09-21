@@ -20,6 +20,7 @@ class BotMessageFeedbackRecord:
     feedback_type: str
     reason: str | None
     comment: str | None
+    env: str
     created_at: datetime
     updated_at: datetime
 
