@@ -12,10 +12,11 @@ projection can be added later without a schema change.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
+from agentclaw.community.core.task.domain.artifact import Artifact, artifact_from_dict
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
     AcceptanceVerdict,
@@ -80,6 +81,8 @@ class TaskNodeRunInfoRecord:
     start_time: Optional[int]
     update_time: Optional[int]
     end_time: Optional[int]
+    output_artifact_ids: tuple[str, ...] = ()      # 阶段一 Artifact 双写回填(旧行 → 空)
+    primary_output_artifact_id: Optional[str] = None
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
 
@@ -208,4 +211,52 @@ class TaskActionLogRecord:
             status_from=self.status_from,
             status_to=self.status_to,
             payload=dict(self.payload),
+        )
+
+
+@dataclass(frozen=True)
+class ArtifactRecord:
+    """Table-faithful record for one immutable task artifact (``task_artifact``).
+
+    结构化 TEXT 列持已解析 JSON:``content`` 为带 ``kind`` 判别键的 ArtifactContent
+    dict,``lineage`` 为血缘 dict,``created_by`` 为 ``{actor_type, actor_id}`` dict。
+    表无 update 路径 — 产物不可变,内容变化插入新行(``supersedes`` 指向旧行)。
+    """
+
+    id: int
+    artifact_id: str
+    task_id: str
+    node_id: str
+    artifact_kind: str  # ArtifactKind wire value
+    content: dict[str, Any]
+    created_by: dict[str, Any]
+    created_at: int
+    session_id: Optional[str] = None
+    run_id: Optional[str] = None
+    attempt: int = 0
+    lineage: dict[str, Any] = field(default_factory=dict)
+    supersedes: Optional[str] = None
+    gmt_create: Optional[datetime] = None
+    gmt_modified: Optional[datetime] = None
+
+    def to_artifact(self) -> Artifact:
+        """Project onto the domain ``Artifact`` (parses/validates via the domain
+        ``artifact_from_dict`` choke point, mirroring ``to_acceptance_result``)."""
+        return artifact_from_dict(
+            {
+                "artifact_id": self.artifact_id,
+                "artifact_kind": self.artifact_kind,
+                "scope": {
+                    "task_id": self.task_id,
+                    "session_id": self.session_id,
+                    "run_id": self.run_id,
+                    "node_id": self.node_id,
+                    "attempt": self.attempt,
+                },
+                "content": dict(self.content),
+                "lineage": dict(self.lineage) if self.lineage else {},
+                "supersedes": self.supersedes,
+                "created_by": dict(self.created_by),
+                "created_at": self.created_at,
+            }
         )

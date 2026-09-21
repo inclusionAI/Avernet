@@ -1,4 +1,4 @@
-"""ORM models for the 5 collaboration-task tables.
+"""ORM models for the 5 collaboration-task tables (+ task_artifact manifest).
 
 Mirrors ``core/task_queue/repository/models.py``: ``Base`` from ``core/base``,
 ``with_variant(Integer, "sqlite")`` for autoincrement BIGINT PKs, ``utf8mb4_bin``
@@ -29,6 +29,7 @@ from sqlalchemy.sql import func
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.domain.models import RelationType, Status
 from agentclaw.community.core.task.repository.types import (
+    ArtifactRecord,
     TaskCallbackRecord,
     TaskInfoRecord,
     TaskNodeRecord,
@@ -160,6 +161,8 @@ class TaskNodeRunInfoModel(Base):
     run_mode = Column(String(64), nullable=True)
     assignee = Column(_ASSIGNEE, nullable=True)
     output = Column(Text, nullable=True)
+    output_artifact_ids = Column(Text, nullable=True)  # JSON list;旧行/未启用 → NULL
+    primary_output_artifact_id = Column(_binary_string(128), nullable=True)
     acceptance_result = Column(Text, nullable=True)
     retry = Column(Integer, nullable=False, default=0)
     session_id = Column(_SESSION_ID, nullable=True)
@@ -187,6 +190,8 @@ class TaskNodeRunInfoModel(Base):
             run_mode=self.run_mode,
             assignee=self.assignee,
             output=_loads(self.output),
+            output_artifact_ids=list(_loads(self.output_artifact_ids) or []),
+            primary_output_artifact_id=self.primary_output_artifact_id,
             acceptance_result=_loads(self.acceptance_result),
             retry=self.retry,
             session_id=self.session_id,
@@ -317,3 +322,56 @@ class TaskActionLogModel(Base):
         Index("idx_task_action_task_node", "task_id", "node_id", "seq"),
         Index("idx_task_action_created", "gmt_create"),
     )
+
+
+class TaskArtifactModel(Base):
+    """Immutable artifact manifest (``task_artifact``, append-only — no update path;
+    content changes insert a new row whose ``supersedes`` points at the old one)."""
+
+    __tablename__ = "task_artifact"
+
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
+    artifact_id = Column(_binary_string(128), nullable=False)
+    task_id = Column(_TASK_ID, nullable=False)
+    node_id = Column(_NODE_ID, nullable=False)
+    session_id = Column(_SESSION_ID, nullable=True)
+    run_id = Column(_RUN_ID, nullable=True)
+    attempt = Column(Integer, nullable=False, default=0)
+    artifact_kind = Column(String(64), nullable=False)
+    content = Column(Text, nullable=False)
+    lineage = Column(Text, nullable=True)
+    supersedes = Column(_binary_string(128), nullable=True)
+    created_by = Column(Text, nullable=False)
+    created_at = Column(BigInteger, nullable=False)
+    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("uk_artifact", "artifact_id", unique=True),
+        Index("idx_artifact_task_node", "task_id", "node_id"),
+        Index("idx_artifact_session", "session_id"),
+        Index("idx_artifact_supersedes", "supersedes"),
+    )
+
+    def to_record(self) -> ArtifactRecord:
+        return ArtifactRecord(
+            id=self.id,
+            artifact_id=self.artifact_id,
+            task_id=self.task_id,
+            node_id=self.node_id,
+            session_id=self.session_id,
+            run_id=self.run_id,
+            attempt=self.attempt,
+            artifact_kind=self.artifact_kind,
+            content=_loads(self.content) or {},
+            lineage=_loads(self.lineage) or {},
+            supersedes=self.supersedes,
+            created_by=_loads(self.created_by) or {},
+            created_at=self.created_at,
+            gmt_create=self.gmt_create,
+            gmt_modified=self.gmt_modified,
+        )

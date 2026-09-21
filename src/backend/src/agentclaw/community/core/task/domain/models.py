@@ -188,6 +188,8 @@ class RuntimeInfo:
     start_time: int | None = None         # 任务/节点开始时间(根在 init_graph;叶子 task_dispatch/BBS claim 时写)
     end_time: int | None = None           # 进终态时写(毫秒,int(time.time()*1000))
     output: dict[str, Any] = field(default_factory=dict)
+    output_artifact_ids: list[str] = field(default_factory=list)   # 节点产物 ID(阶段一 Artifact 双写;空 = 未启用/未产出)
+    primary_output_artifact_id: str | None = None  # 主产物(默认用于最终输出/UI 主展示;最新发布者)
     acceptance_result: AcceptanceResult | None = None
     extend_props: dict[str, Any] = field(default_factory=dict)  # miss_events/崩溃栈/超时/hung_reason(stuck)
     action_log: list[NodeActionEvent] = field(default_factory=list)  # 动作级历史快照(append-only)
@@ -295,6 +297,7 @@ class TaskNodePatch:
     assignee: str | None = None
     start_time: int | None = None                    # 节点进入 task_dispatch/BBS claim 的时间
     output_patch: dict[str, Any] | None = None               # fold 到 run_info.output
+    artifact_ids: list[str] | None = None                    # 外部声明的产物 ID(阶段一 Artifact 双写回填;None=不动)
     acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(PASS→DONE/FAIL+gaps→DONE)
     exec_error: str | None = None                            # 执行报错信号(非验收;→ on_harness 重投,)
     extend_props_patch: dict[str, Any] | None = None         # miss_events / hung_reason(stuck) / harness_retries / 崩溃栈

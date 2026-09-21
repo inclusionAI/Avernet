@@ -96,6 +96,8 @@ def runtime_to_dict(runtime: RuntimeInfo) -> dict[str, Any]:
         "start_time": runtime.start_time,
         "end_time": runtime.end_time,
         "output": dict(runtime.output),
+        "output_artifact_ids": list(runtime.output_artifact_ids),
+        "primary_output_artifact_id": runtime.primary_output_artifact_id,
         "acceptance_result": _acceptance_to_dict(runtime.acceptance_result),
         "extend_props": dict(runtime.extend_props),
     }
@@ -109,6 +111,10 @@ def runtime_from_dict(value: dict[str, Any] | None) -> RuntimeInfo:
         start_time=value.get("start_time"),
         end_time=value.get("end_time"),
         output=dict(value.get("output", {})),
+        output_artifact_ids=[
+            str(x) for x in (value.get("output_artifact_ids") or [])
+        ],  # 旧行/未启用 → 空列表
+        primary_output_artifact_id=value.get("primary_output_artifact_id") or None,
         acceptance_result=_acceptance_from_dict(value.get("acceptance_result")),
         extend_props=dict(value.get("extend_props", {})),
     )

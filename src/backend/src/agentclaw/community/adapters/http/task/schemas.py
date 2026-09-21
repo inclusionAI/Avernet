@@ -260,6 +260,14 @@ class RuntimeInfoDTO(BaseModel):
         default_factory=dict,
         description="节点输出(checkpoint fold);adapter 路径以 output key 落 run_info.output,DTO 层展平为标量(去除两层 output 嵌套)",
     )
+    output_artifact_ids: list[str] = Field(
+        default_factory=list,
+        description="节点产物 ID(阶段一 Artifact 双写;空列表 = 未启用产物或未产出)",
+    )
+    primary_output_artifact_id: str | None = Field(
+        None,
+        description="主产物 ID(默认用于最终输出/UI 主展示;最新发布者)",
+    )
     acceptance_result: AcceptanceResultDTO | None = Field(None, description="验收结论")
     extend_props: dict[str, Any] = Field(
         default_factory=dict, description="运行时扩展属性"
@@ -617,6 +625,8 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                     start_time=n.run_info.start_time,
                     end_time=n.run_info.end_time,
                     output=_unwrap_node_output(n.run_info.output),
+                    output_artifact_ids=list(n.run_info.output_artifact_ids),
+                    primary_output_artifact_id=n.run_info.primary_output_artifact_id,
                     acceptance_result=ar_dto,
                     extend_props={
                         k: v

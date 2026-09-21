@@ -132,6 +132,13 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                     "start_time": runtime_row.start_time if runtime_row else None,
                     "end_time": runtime_row.end_time if runtime_row else None,
                     "output": json.loads(runtime_row.output) if runtime_row and runtime_row.output else {},
+                    "output_artifact_ids": (
+                        json.loads(runtime_row.output_artifact_ids)
+                        if runtime_row and runtime_row.output_artifact_ids else []
+                    ),
+                    "primary_output_artifact_id": (
+                        runtime_row.primary_output_artifact_id if runtime_row else None
+                    ),
                     "acceptance_result": (
                         json.loads(runtime_row.acceptance_result)
                         if runtime_row and runtime_row.acceptance_result else None
@@ -330,6 +337,11 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             run_row.run_mode = node.run_info.run_mode
             run_row.assignee = node.run_info.assignee
             run_row.output = self._json(node.run_info.output)
+            run_row.output_artifact_ids = (
+                self._json(list(node.run_info.output_artifact_ids))
+                if node.run_info.output_artifact_ids else None
+            )
+            run_row.primary_output_artifact_id = node.run_info.primary_output_artifact_id
             acceptance = node.run_info.acceptance_result
             run_row.acceptance_result = self._json(
                 {

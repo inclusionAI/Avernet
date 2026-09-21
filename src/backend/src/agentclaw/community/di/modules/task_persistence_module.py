@@ -9,6 +9,9 @@ infrastructure module (CommunityDatabase / SqliteDB / corp ZdasDB). Mirrors
 
 from injector import Binder, Module, singleton
 
+from agentclaw.community.core.repository.implementations.task.artifact_repository import (
+    TaskArtifactRepository,
+)
 from agentclaw.community.core.repository.implementations.task.task_action_log_repository import (
     TaskActionLogRepository,
 )
@@ -32,6 +35,7 @@ from agentclaw.community.core.repository.implementations.task.task_node_run_info
 )
 from agentclaw.community.core.repository.protocols.task import (
     TaskActionLogRepositoryProtocol,
+    TaskArtifactRepositoryProtocol,
     TaskCallbackRepositoryProtocol,
     TaskGraphRepositoryProtocol,
     TaskInfoRepositoryProtocol,
@@ -66,5 +70,10 @@ class TaskPersistenceModule(Module):
         binder.bind(
             TaskCallbackRepositoryProtocol,
             to=TaskCallbackRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            TaskArtifactRepositoryProtocol,
+            to=TaskArtifactRepository,
             scope=singleton,
         )

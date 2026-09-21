@@ -15,7 +15,17 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskGraphRepositoryProtocol,
     TaskInfoRepositoryProtocol,
 )
+from agentclaw.community.core.task.domain.artifact import (
+    ActorRef,
+    ActorType,
+    ArtifactContent,
+    ArtifactKind,
+    ArtifactScope,
+    StructuredContent,
+    TextContent,
+)
 from agentclaw.community.core.task.domain.errors import (
+    ArtifactError,
     GraphAlreadyInitializedError,
     GraphVersionConflictError,
     GraphIntegrityError,
@@ -118,6 +128,8 @@ class TaskGraphService:
         # without attaching the aggregate graph repository. When graph_repo is
         # present, it updates task_info atomically with the graph snapshot.
         self._task_info_repo = task_info_repo
+        # 产物应用服务(阶段一 Artifact 双写 seam;None=未装配,轻量/纯内核路径跳过)
+        self._artifact_service: Any = None
         self._locks: dict[str, threading.RLock] = {}
         self._registry_lock = threading.RLock()
         self._run_id_counter = 0
@@ -139,6 +151,16 @@ class TaskGraphService:
         the task_info repository is available.
         """
         self._task_info_repo = task_info_repo
+
+    def bind_artifact_service(self, artifact_service: Any) -> None:
+        """Attach the artifact application service at the composition root.
+
+        阶段一(语雀产物领域对象设计 §12):装配后 ``update_task_node_info`` 在
+        output fold 时同步发布不可变 Artifact,并把 id 回填到
+        ``run_info.output_artifact_ids``(与图保存同一次版本提交落库);未装配
+        (纯内核/轻量测试注入器)则完全跳过,行为与既有路径一致。
+        """
+        self._artifact_service = artifact_service
 
     def _lock_for(self, task_id: str) -> threading.RLock:
         with self._registry_lock:
@@ -477,6 +499,9 @@ class TaskGraphService:
                 node.run_info.end_time = None
             if patch.output_patch is not None:
                 node.run_info.output.update(patch.output_patch)
+                self._maybe_publish_output_artifact(graph, node, patch.output_patch)
+            if patch.artifact_ids is not None:
+                self._fold_external_artifact_ids(node, patch.artifact_ids)
             if patch.run_mode is not None:
                 node.run_info.run_mode = patch.run_mode or None
             if patch.assignee is not None:
@@ -508,6 +533,94 @@ class TaskGraphService:
             ), None, True
 
         return self._mutate_with_version_retry(patch.task_id, mutation)
+
+    # ===== 阶段一 Artifact 双写(语雀《BCN 产物领域对象设计》§12)=====
+    def _maybe_publish_output_artifact(
+        self, graph: TaskExecutionGraph, node: TaskNode, output_patch: dict[str, Any]
+    ) -> None:
+        """output fold 伴生发布不可变 Artifact,并把 id 回填 ``run_info``。
+
+        - 未装配 ArtifactService(纯内核/轻量注入器)→ 直接跳过,行为与既有路径一致;
+        - 发布按确定性 artifact_id 幂等 — 图版本冲突重放 mutation 不会产生重复行;
+        - 阶段一过渡决策:产物写入失败(含仓储基础设施异常)**log-and-continue**,
+          不中断既有回报链路(output dict 已 fold,兼容投影无损)。阶段二下游改读
+          Artifact 后翻转为 fail-closed(文档 §9"持久化写入失败必须向上返回错误"
+          为全量切流后的终态,此差异为刻意为之)。
+        """
+        if self._artifact_service is None:
+            return
+        try:
+            extend_props = node.run_info.extend_props or {}
+            scope = ArtifactScope(
+                task_id=graph.task_id,
+                node_id=node.node_id,
+                session_id=extend_props.get("session_id") or None,
+                run_id=str(graph.run_id) if graph.run_id else None,
+                attempt=self._safe_attempt(extend_props.get("harness_retries")),
+            )
+            created_by = ActorRef(
+                actor_type=(
+                    ActorType.BOT if node.run_info.assignee else ActorType.SYSTEM
+                ),
+                actor_id=str(node.run_info.assignee or "task_framework"),
+            )
+            artifact = self._artifact_service.publish(
+                scope=scope,
+                artifact_kind=ArtifactKind.SUMMARY,  # 阶段一节点产物均为结论文本;业务语义通道阶段二接入
+                content=self._output_patch_as_content(output_patch),
+                created_by=created_by,
+            )
+        except ArtifactError as exc:
+            _LOG.warning(
+                "[artifact] 双写产物失败(跳过,兼容投影不受损) task=%s node=%s: %s",
+                graph.task_id, node.node_id, exc,
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 仓储等基础设施异常与领域误用同语义:log-and-continue
+            _LOG.warning(
+                "[artifact] 双写产物基础设施异常(跳过) task=%s node=%s: %s",
+                graph.task_id, node.node_id, exc,
+            )
+            return
+        ids = node.run_info.output_artifact_ids
+        if artifact.artifact_id not in ids:
+            ids.append(artifact.artifact_id)
+        # 最新发布的产物为默认主产物(状态机最终输出/UI 主展示,文档 §8)。
+        node.run_info.primary_output_artifact_id = artifact.artifact_id
+
+    @staticmethod
+    def _output_patch_as_content(output_patch: dict[str, Any]) -> ArtifactContent:
+        """output_patch → 互斥内容分支(阶段一启发式):
+
+        单值文本(如 callback 归一的 ``{"output": <文本>}``)→ Text(markdown);
+        其余 dict → Structured(JSON)。上报方显式 kind/media_type 通道留待阶段二
+        (Judge/Projector 演进)接入。
+        """
+        values = list(output_patch.values())
+        if len(output_patch) == 1 and isinstance(values[0], str):
+            return TextContent(text=values[0], media_type="text/markdown")
+        return StructuredContent(value=dict(output_patch))
+
+    @staticmethod
+    def _fold_external_artifact_ids(node: TaskNode, artifact_ids: list[str]) -> None:
+        """外部声明的产物 ID fold(预留通道:未来回调直接携带 artifact id 时使用)。
+
+        去重追加;primary 未设置时取首个,不覆盖 ``_maybe_publish_output_artifact``
+        已写的主产物。
+        """
+        existing = node.run_info.output_artifact_ids
+        for artifact_id in artifact_ids:
+            if artifact_id and artifact_id not in existing:
+                existing.append(artifact_id)
+        if node.run_info.primary_output_artifact_id is None and existing:
+            node.run_info.primary_output_artifact_id = existing[0]
+
+    @staticmethod
+    def _safe_attempt(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
 
     def append_action_event(
         self,

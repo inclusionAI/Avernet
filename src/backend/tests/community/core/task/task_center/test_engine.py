@@ -1147,3 +1147,78 @@ class TestPrepareModeCoverageSerial:
         assert node.run_info.run_mode in (None, "")
         assert node.run_info.assignee in (None, "")
         assert node.run_info.extend_props["dispatch_error"] == "start_run_failed"
+
+
+# ===== 阶段一 Artifact 双写(语雀《BCN 产物领域对象设计》§12):on_report 端到端 =====
+class TestArtifactDoubleWriteOnReport:
+    def test_report_result_publishes_artifact_end_to_end(self):
+        """回投经 engine.report_result 收敛到 graph 网关 → output fold 伴生发布
+        不可变 Artifact,run_info 产物字段回填,兼容投影(output dict)无损。"""
+        from contextlib import contextmanager
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+
+        from agentclaw.community.core.base import Base
+        import agentclaw.community.core.task.repository.models  # noqa: F401
+        from agentclaw.community.core.repository.implementations.task.artifact_repository import (
+            TaskArtifactRepository,
+        )
+        from agentclaw.community.core.task.task_artifact import ArtifactService
+
+        class _SQLite:
+            def __init__(self, engine):
+                self._factory = sessionmaker(bind=engine, autoflush=False)
+
+            @contextmanager
+            def orm_session(self):
+                db = self._factory()
+                try:
+                    yield db
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    raise
+                finally:
+                    db.close()
+
+        eng_db = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(eng_db)
+        artifact_service = ArtifactService(
+            repository=TaskArtifactRepository(_SQLite(eng_db)), clock=lambda: 1780000000000
+        )
+
+        svc = TaskGraphService()
+        svc.bind_artifact_service(artifact_service)
+        graph = svc.initialize_graph(_task_info())
+        svc.add_task_nodes([_child("c0")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c0", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        engine = _engine(svc)
+
+        _run(
+            engine.on_report(
+                _patch(
+                    "t1",
+                    "c0",
+                    output_patch={"output": "尽调报告正文"},
+                    acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE),
+                )
+            )
+        )
+
+        node = svc._get_node(graph, "c0")
+        assert node.status == Status.SUCCESS
+        assert node.run_info.output == {"output": "尽调报告正文"}          # 兼容投影无损
+        assert len(node.run_info.output_artifact_ids) == 1
+        artifact = artifact_service.get(node.run_info.primary_output_artifact_id)
+        assert artifact.content.kind == "text"
+        assert artifact.content.text == "尽调报告正文"
+        assert artifact.scope.node_id == "c0"
+        assert artifact.created_by.to_dict() == {"actor_type": "bot", "actor_id": "b"}
+        # 行内不含任何临时 URL/Token/object_handle(文档 §5.2 稳定领域数据约束)
+        assert "storage_ref" not in artifact.to_dict()

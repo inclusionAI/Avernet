@@ -33,6 +33,24 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
 )
 from agentclaw.community.core.repository.implementations.platform.session_resource import SessionResourceRepository
+from agentclaw.community.core.session_resources.types import SessionResourceStatus
+from agentclaw.community.core.task.task_artifact.ports import SessionFileReadinessPort
+
+
+class SessionResourceFileReadiness(SessionFileReadinessPort):
+    """``SessionFileReadinessPort`` 组合根适配器:task core 只依赖窄契约(方向
+    显式化),此处桥接到 SessionResource 仓储(PLAN:跨模块 import 仅发生在组合根)。
+
+    就绪 = ``get_by_resource_id`` 命中且状态 READY —— 支撑产物领域不变量
+    "只有 Ready 的会话文件才能发布为正式 Artifact"(语雀产物领域对象设计 §9)。
+    """
+
+    def __init__(self, repository: SessionResourceRepositoryProtocol) -> None:
+        self._repository = repository
+
+    def is_ready(self, file_id: str) -> bool:
+        record = self._repository.get_by_resource_id(file_id)
+        return record is not None and record.status is SessionResourceStatus.READY
 
 
 class SessionResourcesModule(Module):
@@ -52,6 +70,8 @@ class SessionResourcesModule(Module):
             to=SessionResourceTaskLifecycle,
             scope=singleton,
         )
+        # task 模块产物 File 分支的就绪校验 seam(窄契约,组合根桥接)。
+        binder.bind(SessionFileReadinessPort, to=SessionResourceFileReadiness, scope=singleton)
 
     @singleton
     @provider

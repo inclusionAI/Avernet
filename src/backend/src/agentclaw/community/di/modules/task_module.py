@@ -39,11 +39,16 @@ from agentclaw.community.api.task.task_grant_service import (
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.repository.protocols.task import (
+    TaskArtifactRepositoryProtocol,
     TaskCallbackRepositoryProtocol,
     TaskGraphRepositoryProtocol,
     TaskInfoRepositoryProtocol,
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
+)
+from agentclaw.community.core.task.task_artifact import (
+    ArtifactService,
+    SessionFileReadinessPort,
 )
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_center.recovery_lifecycle import (
@@ -259,6 +264,13 @@ class TaskModule(Module):
         # fixture 若未装则取不到 → 跳过回投落库(与 task_info_repo 缺省同语义,不阻断编排核推进)。
         if task_info_repo is not None:
             graph.bind_task_info_repository(task_info_repo)
+        # 阶段一 Artifact 双写 seam:装配产物应用服务后,graph 网关在 output fold 时
+        # 同步发布不可变 Artifact 并回填 run_info(未装 TaskPersistenceModule 的纯内核/
+        # 轻量注入器解析失败 → 跳过产物双写,不阻断,与 task_info_repo 缺省同语义)。
+        try:
+            graph.bind_artifact_service(injector.get(ArtifactService))
+        except Exception:  # noqa: BLE101 未绑定 → 跳过产物双写(阶段一兼容:纯 dict 投影照常)
+            logger.info("[task][task-module] ArtifactService 未装配 → 跳过产物双写")
         try:
             callback_repo = injector.get(TaskCallbackRepositoryProtocol)
         except Exception:  # noqa: BLE101 未绑定 → 跳过回投落库
@@ -343,6 +355,26 @@ class TaskModule(Module):
             task_settings=task_settings,
             bot_bindings=bot_bindings,
         )
+
+    @singleton
+    @provider
+    def artifact_service(self, injector: Injector) -> ArtifactService:
+        """产物应用服务(阶段一,语雀产物领域对象设计 §12)。
+
+        仓储必装(TaskPersistenceModule);readiness seam 缺省 None —— 未装
+        SessionResourcesModule 的 profile 下 File 分支 fail-closed(阶段一无
+        File 生产方,Text/Structured 不受影响)。轻量测试未装 TaskPersistenceModule
+        时本 provider 解析失败,由调用方(graph 绑定处)按"未装配即跳过产物双写"
+        处理(与 task_info_repo 同语义)。
+        """
+        repository = injector.get(TaskArtifactRepositoryProtocol)
+        try:
+            readiness: SessionFileReadinessPort | None = injector.get(
+                SessionFileReadinessPort
+            )
+        except Exception:  # noqa: BLE001 未装 SessionResourcesModule → File 分支 fail-closed
+            readiness = None
+        return ArtifactService(repository=repository, readiness=readiness)
 
     @singleton
     @provider

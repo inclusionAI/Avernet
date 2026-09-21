@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Optional, Protocol, Sequence, runtime_checkabl
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
     from agentclaw.community.core.task.repository.types import (
+        ArtifactRecord,
         BbsTaskOverviewRecord,
         TaskActionLogRecord,
         TaskCallbackRecord,
@@ -415,6 +416,55 @@ class TaskActionLogRepositoryProtocol(Protocol):
         offset: int = 0,
     ) -> list["TaskActionLogRecord"]:
         """Return bounded diagnostic action history."""
+        ...
+
+
+@runtime_checkable
+class TaskArtifactRepositoryProtocol(Protocol):
+    """Append-only durable store for ``task_artifact`` (immutable artifact manifest).
+
+    无 update 成员 — 产物不可变:内容变化创建新 ``artifact_id`` 并以 ``supersedes``
+    指向旧行(权威源:语雀《BCN 产物领域对象设计》§7)。
+    """
+
+    @abstractmethod
+    def insert(self, record: "ArtifactRecord") -> "ArtifactRecord":
+        """Insert one artifact row keyed by ``artifact_id``. Raises
+        ``IntegrityError`` on a duplicate ``artifact_id`` — callers treat that as
+        same-content replay idempotency. Returns the stored record (with
+        ``id``/``gmt_*``)."""
+        ...
+
+    @abstractmethod
+    def get(self, artifact_id: str) -> Optional["ArtifactRecord"]:
+        """Return the row for ``artifact_id``, or ``None``."""
+        ...
+
+    @abstractmethod
+    def list_by_task(self, task_id: str) -> list["ArtifactRecord"]:
+        """All artifacts for ``task_id``, ``created_at`` ascending (stable audit order)."""
+        ...
+
+    @abstractmethod
+    def list_by_node(
+        self, task_id: str, node_id: str, *, attempt: Optional[int] = None
+    ) -> list["ArtifactRecord"]:
+        """Artifacts for ``(task_id, node_id)``; optionally narrowed to one
+        ``attempt``. ``created_at`` ascending."""
+        ...
+
+    @abstractmethod
+    def latest_by_node(
+        self, task_id: str, node_id: str, *, attempt: Optional[int] = None
+    ) -> Optional["ArtifactRecord"]:
+        """Newest artifact for ``(task_id, node_id)`` (``created_at``/``id`` desc) —
+        the head of the ``supersedes`` chain. ``None`` if absent."""
+        ...
+
+    @abstractmethod
+    def list_superseding(self, artifact_id: str) -> list["ArtifactRecord"]:
+        """Rows whose ``supersedes`` == ``artifact_id`` (audit: who replaced this
+        artifact). ``created_at`` ascending."""
         ...
 
 

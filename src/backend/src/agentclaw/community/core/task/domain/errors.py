@@ -40,3 +40,19 @@ class DecomposeError(TaskError):
 
 class BotIdentityResolutionError(TaskError):
     """产品 Bot ID 无法唯一解析为 BCS Bot UUID。"""
+
+
+class ArtifactError(TaskError):
+    """产物(Artifact)框架基错。"""
+
+
+class ArtifactContentError(ArtifactError):
+    """产物内容(tagged union)非法:未知 kind、缺必填分支字段、非 JSON 结构化值等。"""
+
+
+class ArtifactFileNotReadyError(ArtifactError):
+    """File 分支引用的 SessionResource 未处于 READY 状态(或就绪校验器未装配)。"""
+
+
+class ArtifactReferenceError(ArtifactError):
+    """产物引用非法:supersedes/derived_from/collection items 指向不存在的 Artifact。"""
