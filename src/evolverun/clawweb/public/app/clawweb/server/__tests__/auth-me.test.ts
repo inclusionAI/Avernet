@@ -230,19 +230,26 @@ describe("GET /api/auth/me", () => {
 });
 
 describe("resolveAuthMeIdentity", () => {
-  it("provides the same server-verified cookie identity to other routes", async () => {
+  it("does not treat an unsigned IAM token payload as a verified production identity", async () => {
     await withApp({ config: adminConfig(), environment: "prod" }, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/session-user`, {
         headers: { cookie: cookieHeader(["IAM_TOKEN", iamToken({ sno: "reviewer", name: "Reviewer" })]) },
       });
-      expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({ userId: "reviewer", nickName: "Reviewer" });
+      expect(response.status).toBe(401);
     });
   });
 
   it("does not create a production identity without a login session", async () => {
     await withApp({ config: adminConfig(), environment: "prod" }, async (baseUrl) => {
       expect((await fetch(`${baseUrl}/api/session-user`)).status).toBe(401);
+    });
+  });
+
+  it("keeps the loopback development identity available for local approval testing", async () => {
+    await withApp({ config: adminConfig(), environment: "dev" }, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/session-user`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ userId: "dev_local" });
     });
   });
 });

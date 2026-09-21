@@ -36,6 +36,12 @@ from the ClawWeb login request and checks that server-verified user against the
 approval record. The browser does not send an `empId`, and this path does not
 require the DingTalk JSAPI.
 
+The public runner does not treat a decoded `IAM_TOKEN` payload as verified
+identity. In production, a host must inject an identity resolver that validates
+the login session with its identity provider before this endpoint can approve
+or reject. The public runner only retains its loopback `dev` identity for local
+testing; deployment hosts supply their own verified resolver.
+
 ## Compatibility
 
 - Existing workflow YAML and pending approval records require no migration.

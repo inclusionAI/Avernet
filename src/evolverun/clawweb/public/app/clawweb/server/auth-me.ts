@@ -82,8 +82,7 @@ function devIdentity(devUserId: string): ResolvedIdentity {
   };
 }
 
-/** Resolve the authenticated request identity for any server route that needs it. */
-export function resolveAuthMeIdentity(request: Request, options: AuthMeOptions): ResolvedIdentity | null {
+function resolveDisplayIdentity(request: Request, options: AuthMeOptions): ResolvedIdentity | null {
   const isLocalDev = isLoopbackHost(request) && options.environment === "dev";
   const devUserId = options.devUserId ?? "dev_local";
   const devModeRequested = isLocalDev
@@ -93,6 +92,25 @@ export function resolveAuthMeIdentity(request: Request, options: AuthMeOptions):
   return identityFromIamToken(request)
     ?? (isLocalDev ? identityFromLocalDevCookie(request) : null)
     ?? (isLocalDev ? devIdentity(devUserId) : null);
+}
+
+/**
+ * Resolve an identity that is safe to use for sensitive actions.
+ *
+ * The public runner has no IAM signature verifier, so an IAM token decoded by
+ * `resolveDisplayIdentity` is intentionally excluded here. Internal hosts must
+ * supply their own server-verified resolver. The loopback development identity
+ * remains available only when the server is explicitly running in `dev`.
+ */
+export function resolveAuthMeIdentity(request: Request, options: AuthMeOptions): ResolvedIdentity | null {
+  const isLocalDev = isLoopbackHost(request) && options.environment === "dev";
+  if (!isLocalDev) return null;
+
+  const devUserId = options.devUserId ?? "dev_local";
+  const devModeRequested = request.query.dev === "1" || request.header("X-ClawWeb-Dev-Mode") === "1";
+  if (devModeRequested) return devIdentity(devUserId);
+
+  return identityFromLocalDevCookie(request) ?? devIdentity(devUserId);
 }
 
 export function createAuthMeHandler(options: AuthMeOptions): RequestHandler {
@@ -114,7 +132,7 @@ export function createAuthMeHandler(options: AuthMeOptions): RequestHandler {
       });
     };
 
-    const identity = resolveAuthMeIdentity(request, options);
+    const identity = resolveDisplayIdentity(request, options);
     if (identity?.userId === devUserId && identity.userName === devUserId) {
       respondAsDevUser();
       return;
