@@ -219,21 +219,42 @@ async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
     assert_eq!(failed.last_error_code.as_deref(), Some("bot_terminal_error"));
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(channel.outbound().await.len(), 1, "a terminal chat error has its own safe channel feedback and must not also emit a generic delivery hint");
+    let rejected = service.admit(AdmitMessageDeliveries {
+        display_message: None,
+        message_id: "im-rejected".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now, expire_at_ms: None, event: None,
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-observer".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
+        message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-original".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
+            message_type: "chat".into(), content: json!({"text":"reject","source_im_message_id":"im-rejected-source"}), client_msg_id: None, owner_bot_id: None, created_at: now as u64, run_id: String::new() },
+    }).await.unwrap().deliveries.remove(0);
+    let rejected = service.transition(DeliveryTransitionCommand { delivery_id: rejected.delivery_id.clone(), expected_state_version: rejected.state.state_version,
+        event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
+        now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
+    }).await.unwrap();
+    service.transition(DeliveryTransitionCommand { delivery_id: rejected.delivery_id.clone(), expected_state_version: rejected.state.state_version,
+        event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::TransportRejected,
+        now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
+    }).await.unwrap();
+    timeout(Duration::from_secs(2), async {
+        while channel.outbound().await.len() < 2 { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+    let rejected_hint = channel.outbound().await;
+    assert_eq!(rejected_hint[1].source_im_message_id.as_deref(), Some("im-rejected-source"));
+    assert!(rejected_hint[1].text.as_ref().unwrap().contains("bot-observer：处理失败"));
     let row = &admitted.deliveries[0];
     service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
         now_ms: now, request_id: None, actor_id: Some("human_1".into()), reply: None, transport_context_json: None, deadline_at_ms: None,
     }).await.unwrap();
     timeout(Duration::from_secs(2), async {
-        while channel.outbound().await.len() < 2 { tokio::time::sleep(Duration::from_millis(10)).await; }
+        while channel.outbound().await.len() < 3 { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();
-    assert!(channel.outbound().await[1].text.as_ref().unwrap().contains("已取消"));
+    assert!(channel.outbound().await[2].text.as_ref().unwrap().contains("已取消"));
     shutdown.send(true).unwrap();
     notifications.await.unwrap();
     let (shutdown, receiver) = tokio::sync::watch::channel(false);
     let restarted = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
     tokio::time::sleep(Duration::from_millis(150)).await;
-    assert_eq!(channel.outbound().await.len(), 2, "notifications are not replayed from durable state");
+    assert_eq!(channel.outbound().await.len(), 3, "notifications are not replayed from durable state");
     shutdown.send(true).unwrap();
     restarted.await.unwrap();
 }

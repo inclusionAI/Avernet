@@ -141,7 +141,7 @@ impl ManagedMessageDelivery {
         let primary = self.repo.get_delivery(&command.delivery_id).await?.ok_or(ManagedDeliveryError::NotFound)?;
         if primary.target_bot_id != owner { return Err(ManagedDeliveryError::Conflict); }
         let mut rows = vec![primary.clone()];
-        if primary.state.kind == DeliveryType::Send && matches!(command.event, Event::CancelRequested | Event::Completed | Event::Failed | Event::Aborted | Event::PreparationFailed | Event::QueueExpired | Event::DefinitelyNotSent { .. } | Event::ResolveNotSent | Event::ResolveStopped) {
+        if primary.state.kind == DeliveryType::Send && matches!(command.event, Event::CancelRequested | Event::Completed | Event::Failed | Event::TransportRejected | Event::Aborted | Event::PreparationFailed | Event::QueueExpired | Event::DefinitelyNotSent { .. } | Event::ResolveNotSent | Event::ResolveStopped) {
             rows.extend(self.repo.lookup(DeliveryLookup::Bound(primary.delivery_id.clone())).await?);
             if !primary.state.may_have_been_sent || matches!(command.event, Event::DefinitelyNotSent { .. } | Event::ResolveNotSent) {
                 rows.extend(self.repo.lookup(DeliveryLookup::Successor { bot: primary.target_bot_id.clone(), session: primary.session_id.clone(), after_seq: primary.source_session_seq, exclude: primary.delivery_id.clone(), now_ms: command.now_ms }).await?);

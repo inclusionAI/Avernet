@@ -131,6 +131,7 @@ impl MessageDeliveryCoreService for MessageDeliveryCore {
                     result.state.may_have_been_sent = false;
                     status
                 }
+                Event::TransportRejected if active(current.status) => Status::Failed,
                 Event::ResolveNotSent if matches!(current.status, Status::Unknown | Status::CancelUnknown) => {
                     result.state.may_have_been_sent = false;
                     if current.status == Status::CancelUnknown { Status::Cancelled } else { Status::Failed }
