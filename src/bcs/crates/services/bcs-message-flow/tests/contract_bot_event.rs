@@ -165,7 +165,7 @@ async fn queue_reconstruction_never_rewrites_channel_or_frontend_final() {
 }
 
 #[tokio::test]
-async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
+async fn queued_im_reaction_targets_source_message_and_does_not_replay_on_restart() {
     use bcs_domain::{DeliveryType, NewMessage, SenderType, message_delivery::DeliveryFlowKind};
     use bcs_service_api::{ManagedMessageDeliveryService, DeliveryTransitionCommand};
     use bcs_service_api::port::repo::message_delivery::{AdmitMessageDeliveries, DeliveryAdmissionTarget};
@@ -203,10 +203,11 @@ async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].source_im_message_id.as_deref(), Some("im-original"));
     assert_eq!(messages[0].bcs_session_id, "group-1:im-original");
-    let text = messages[0].text.as_ref().unwrap();
-    assert!(text.contains("bot-driver") && text.contains("bot-observer") && text.contains("已排队"));
-    assert!(text.contains("/abort") && text.contains("/cacel"));
-    assert!(!text.contains("context-only"));
+    assert_eq!(messages[0].text, None);
+    assert_eq!(messages[0].render_hint, ChannelRenderHint::IgnoreByDefault);
+    assert_eq!(messages[0].raw_payload["type"], "message.delivery.reaction");
+    assert_eq!(messages[0].raw_payload["state"], "queued");
+    assert_eq!(messages[0].raw_payload["message_id"], "im-queue");
     let failed_row = &admitted.deliveries[1];
     let running = service.transition(DeliveryTransitionCommand { delivery_id: failed_row.delivery_id.clone(), expected_state_version: failed_row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
@@ -257,6 +258,53 @@ async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
     assert_eq!(channel.outbound().await.len(), 3, "notifications are not replayed from durable state");
     shutdown.send(true).unwrap();
     restarted.await.unwrap();
+}
+
+#[tokio::test]
+async fn expired_im_reaction_replaces_queue_state_on_the_same_source_message() {
+    use bcs_domain::{DeliveryType, NewMessage, SenderType, message_delivery::DeliveryFlowKind};
+    use bcs_service_api::{DeliveryTransitionCommand, ManagedMessageDeliveryService};
+    use bcs_service_api::port::repo::message_delivery::{AdmitMessageDeliveries, DeliveryAdmissionTarget};
+    let fixture = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+    let service = Arc::new(bcs_message_flow::managed_delivery::ManagedMessageDelivery::new(repo.clone()));
+    let flow = Arc::new(BcsMessageFlow::new(fixture.group, fixture.routing, fixture.registry, fixture.bot_delivery, fixture.frontend_delivery)
+        .with_message_repo(repo).with_managed_deliveries(service.clone()));
+    let channel = Arc::new(RecordingChannelService::default());
+    assert!(flow.channel_slot().set(channel.clone()).is_ok());
+    let (shutdown, receiver) = tokio::sync::watch::channel(false);
+    let notifications = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
+    let now = chrono::Utc::now().timestamp_millis();
+    let admitted = service.admit(AdmitMessageDeliveries {
+        display_message: None,
+        message_id: "im-expiring".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 11_000, expire_at_ms: Some(now + 1_000), event: None,
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send, max_queued: 10, semantic_projection_json: json!({"version":1}) }],
+        message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-expiring".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
+            message_type: "chat".into(), content: json!({"text":"later","source_im_message_id":"im-expiring-source"}), client_msg_id: None, owner_bot_id: None, created_at: (now - 11_000) as u64, run_id: String::new() },
+    }).await.unwrap();
+    timeout(Duration::from_secs(2), async {
+        while channel.outbound().await.is_empty() { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+    let queued = &channel.outbound().await[0];
+    assert_eq!(queued.source_im_message_id.as_deref(), Some("im-expiring-source"));
+    assert_eq!(queued.raw_payload["state"], "queued");
+    let row = &admitted.deliveries[0];
+    service.transition(DeliveryTransitionCommand {
+        delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::QueueExpired,
+        now_ms: now + 1_000, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
+    }).await.unwrap();
+    timeout(Duration::from_secs(2), async {
+        while channel.outbound().await.len() < 2 { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+    let messages = channel.outbound().await;
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[1].source_im_message_id.as_deref(), Some("im-expiring-source"));
+    assert_eq!(messages[1].text, None);
+    assert_eq!(messages[1].raw_payload["type"], "message.delivery.reaction");
+    assert_eq!(messages[1].raw_payload["state"], "expired");
+    shutdown.send(true).unwrap();
+    notifications.await.unwrap();
 }
 
 #[async_trait::async_trait]

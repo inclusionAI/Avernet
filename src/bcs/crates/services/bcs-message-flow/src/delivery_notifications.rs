@@ -15,26 +15,38 @@ const IM_QUEUED_HINT_DELAY_MS: i64 = 10_000;
 struct PendingHint {
     rows: BTreeMap<String, PersistedMessageDelivery>,
     sent: Vec<&'static str>,
+    reaction: Option<&'static str>,
 }
 
-fn hint(row: &PersistedMessageDelivery, now: i64) -> Option<(&'static str, &'static str)> {
-    use bcs_domain::message_delivery::DeliveryWaitReason;
+const DELIVERY_REACTION_TYPE: &str = "message.delivery.reaction";
+
+fn reaction(entry: &PendingHint, now: i64) -> Option<&'static str> {
+    if entry
+        .rows
+        .values()
+        .any(|row| row.state.status == Status::Expired)
+    {
+        return Some("expired");
+    }
+    if entry.rows.values().any(|row| {
+        row.state.status == Status::Queued
+            && now.saturating_sub(row.created_at_ms) >= IM_QUEUED_HINT_DELAY_MS
+    }) {
+        return Some("queued");
+    }
+    if entry.reaction == Some("queued")
+        && entry
+            .rows
+            .values()
+            .any(|row| matches!(row.state.status, Status::Dispatching | Status::Running))
+    {
+        return Some("processing");
+    }
+    None
+}
+
+fn hint(row: &PersistedMessageDelivery) -> Option<(&'static str, &'static str)> {
     match row.state.status {
-        Status::Queued
-            if now.saturating_sub(row.created_at_ms) >= IM_QUEUED_HINT_DELAY_MS
-                && row.wait_reason == Some(DeliveryWaitReason::BotOffline) =>
-        {
-            Some((
-                "offline",
-                "服务正在恢复，短暂等待 Bot 重新连接。可发送 /abort 终止前面的处理，或发送 /cacel 取消当前排队消息",
-            ))
-        }
-        Status::Queued if now.saturating_sub(row.created_at_ms) >= IM_QUEUED_HINT_DELAY_MS => {
-            Some((
-                "queued",
-                "消息已排队，正在等待该 Bot 的处理名额。可发送 /abort 终止前面的处理，或发送 /cacel 取消当前排队消息",
-            ))
-        }
         Status::Unknown => Some((
             "unknown",
             "处理状态暂时无法确认，该 Bot 在本会话中的后续请求已暂停",
@@ -48,7 +60,7 @@ fn hint(row: &PersistedMessageDelivery, now: i64) -> Option<(&'static str, &'sta
             == Some(crate::managed_delivery::BOT_TERMINAL_ERROR_CODE) => None,
         Status::Failed => Some(("failed", "处理失败")),
         Status::Cancelled => Some(("cancelled", "消息已取消")),
-        Status::Expired => Some(("expired", "排队消息已过期")),
+        Status::Expired => None,
         Status::RejectedCapacity => {
             Some(("rejected_capacity", "该 Bot 队列已满，本次请求未被接收"))
         }
@@ -99,9 +111,15 @@ pub async fn run(
                 let Some(flow) = flow.upgrade() else { return; };
                 let now = chrono::Utc::now().timestamp_millis();
                 for entry in pending.values_mut() {
+                    if let Some(state) = reaction(entry, now).filter(|state| Some(*state) != entry.reaction) {
+                        let rows: Vec<_> = entry.rows.values().collect();
+                        let result = tokio::time::timeout(Duration::from_secs(2), publish_reaction(&flow, &rows, state)).await;
+                        if !matches!(result, Ok(Ok(()))) { tracing::warn!(state, "delivery IM reaction failed; not replaying an ambiguous external write"); }
+                        entry.reaction = Some(state);
+                    }
                     let mut grouped: BTreeMap<&'static str, (&'static str, Vec<&PersistedMessageDelivery>)> = BTreeMap::new();
                     for row in entry.rows.values() {
-                        if let Some((key, text)) = hint(row, now) {
+                        if let Some((key, text)) = hint(row) {
                             if !entry.sent.contains(&key) {
                                 grouped.entry(key).or_insert_with(|| (text, Vec::new())).1.push(row);
                             }
@@ -216,4 +234,61 @@ async fn publish(
         text: Some(text), raw_payload: serde_json::json!({"state":"delivery_status", "message_id":row.source_message_id}),
         render_hint: ChannelRenderHint::Render, source_im_message_id: Some(source.into()), source_is_channel: false,
     }).await.map_err(|_| bcs_service_api::ServiceError::InternalError("delivery IM notification failed".into()))
+}
+
+async fn publish_reaction(
+    flow: &BcsMessageFlow,
+    rows: &[&PersistedMessageDelivery],
+    state: &'static str,
+) -> bcs_service_api::ServiceResult<()> {
+    let (Some(channel), Some(repository), Some(row)) =
+        (flow.channel.get(), flow.message_repo.as_ref(), rows.first())
+    else {
+        return Ok(());
+    };
+    let message = repository
+        .get_message_by_id(&row.session_id, &row.source_message_id)
+        .await
+        .map_err(|_| {
+            bcs_service_api::ServiceError::InternalError("delivery source lookup failed".into())
+        })?;
+    let Some(message) = message else {
+        return Ok(());
+    };
+    if message.owner_bot_id.is_some() {
+        return Ok(());
+    }
+    let Some(source) = message
+        .content
+        .get("source_im_message_id")
+        .and_then(|value| value.as_str())
+    else {
+        return Ok(());
+    };
+    channel
+        .try_outbound(OutboundMessage {
+            group_id: row.group_id.clone(),
+            bcs_session_id: row.session_id.clone(),
+            run_id: row.run_id.clone().unwrap_or_default(),
+            sender_actor_id: row.target_bot_id.clone(),
+            sender_role: ParticipantRole::Driver,
+            sender_label: "BCS".into(),
+            kind: ChannelOutboundEventKind::System,
+            purpose: ChannelOutboundPurpose::Conversation,
+            text: None,
+            raw_payload: serde_json::json!({
+                "type": DELIVERY_REACTION_TYPE,
+                "state": state,
+                "message_id": row.source_message_id,
+            }),
+            render_hint: ChannelRenderHint::IgnoreByDefault,
+            source_im_message_id: Some(source.into()),
+            source_is_channel: false,
+        })
+        .await
+        .map_err(|_| {
+            bcs_service_api::ServiceError::InternalError(
+                "delivery IM reaction notification failed".into(),
+            )
+        })
 }

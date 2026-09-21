@@ -456,8 +456,10 @@ Private owner 的 Human 代理读取仍以授权查询为准，不扩大私有�
 | `admission_error` | `Option<&'static str>` | 准入错误码（仅 `delivery_provider_headers_unsupported`） |
 | `content_preview` | `Option<String>` | 消息正文预览（UTF-8 安全截断至前 200 字节，超出以 `…` 结尾），供前端排队列表展示 |
 
-IM 使用原消息来源和原 canonical Session：排队超过 2 秒提示，离线尽快提示，同一消息
-多目标聚合；取消、失败和不确定状态提供简短说明。inject 和普通成功不额外提示。
+IM 使用原消息来源和原 canonical Session：排队超过 10 秒时，将原消息上的状态表情切换为
+“排队中 /abort终止 /cancel取消”；恢复处理时切回“思考中”；排队过期时切换为“已过期”。状态表情始终通过
+`source_im_message_id` 精确绑定原始用户消息，同一消息的多目标状态聚合。取消、失败和
+不确定状态继续提供简短说明；inject 和普通成功不额外提示。
 通知有界、失败不回滚、不重试可能已发出的 IM 消息，重启不回放历史提示。
 
 Provider 缓存过期后，只允许认证且原绑定一致的迟到终态通过 durable 状态进行核对，
