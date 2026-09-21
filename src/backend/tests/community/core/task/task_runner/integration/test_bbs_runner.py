@@ -514,3 +514,58 @@ def test_notify_brings_winner_title_goal_into_execution_message():
     assert "B 部分标题" in msg_text  # 胜出 bot 的 bid title 进执行消息
     assert "B 部分目标" in msg_text  # 胜出 bot 的 bid goal 进执行消息
     assert "A 部分" not in msg_text  # 未胜出 bot 的 title/goal 不进执行消息
+
+
+class _TrajectoryContext:
+    def __init__(self):
+        self.events: list[tuple] = []
+
+    def emit_trajectory_event(self, task_id, node_id, action_type, **kwargs):
+        self.events.append((task_id, node_id, action_type, kwargs))
+
+
+def test_notify_records_bbs_milestones_in_trajectory():
+    trajectory = _TrajectoryContext()
+    graph = _FakeGraph()
+    bot = _FakeBot(rates={"A": 80})
+    bcn = _FakeBcn(_roster("A"))
+
+    _run(notify(
+        _execution_graph("t-trajectory"),
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        task_context_service=trajectory,
+    ))
+
+    assert [event[3]["action_result"] for event in trajectory.events] == [
+        "bbs_entered",
+        "bbs_bid_broadcast",
+        "bbs_execution_started",
+    ]
+    assert all(event[2] == "execute" for event in trajectory.events)
+    assert trajectory.events[1][3]["ext_info"]["candidate_count"] == 1
+    assert trajectory.events[2][3]["ext_info"]["winner_bot_id"] == "A"
+
+
+def test_notify_records_execution_exception_in_trajectory():
+    trajectory = _TrajectoryContext()
+    graph = _FakeGraph()
+    bot = _FakeBot(rates={"A": 80}, dispatch_raises=True)
+    bcn = _FakeBcn(_roster("A"))
+
+    _run(notify(
+        _execution_graph("t-trajectory-error"),
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        task_context_service=trajectory,
+    ))
+
+    event = trajectory.events[-1][3]
+    assert event["action_result"] == "bbs_execution_failed"
+    assert event["error_type"] == "unclassified"
+    assert event["error_msg"] == "dispatch failed"
+    assert event["ext_info"]["exception_type"] == "RuntimeError"

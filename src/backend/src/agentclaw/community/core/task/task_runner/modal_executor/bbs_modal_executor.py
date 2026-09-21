@@ -56,10 +56,58 @@ def _resolve_owner_user_id_from_graph(graph, task_id: str) -> str:
     return str(owner) if owner else ""
 
 
-async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
+def _trajectory_node_id(execution_graph, target_node_id: str | None) -> str:
+    return str(target_node_id or execution_graph.task_id)
+
+
+def _emit_bbs_trajectory(
+    task_context_service,
+    execution_graph,
+    target_node_id: str | None,
+    action_result: str,
+    *,
+    exception: Exception | None = None,
+    details: dict[str, Any] | None = None,
+    error_msg: str | None = None,
+) -> None:
+    """Write BBS milestones/errors through the task-context trajectory facade."""
+    if task_context_service is None:
+        return
+    task_id = str(execution_graph.task_id)
+    ext_info: dict[str, Any] = {"execution_mode": "bbs", "phase": "bbs_modal"}
+    if details:
+        ext_info.update(details)
+    error_type = None
+    if exception is not None:
+        exception_type = type(exception).__name__
+        ext_info["exception_type"] = exception_type
+        error_type = (
+            "transport_error"
+            if isinstance(exception, (TimeoutError, ConnectionError))
+            else "unclassified"
+        )
+        error_msg = str(exception)[:2000]
+    try:
+        task_context_service.emit_trajectory_event(
+            task_id,
+            _trajectory_node_id(execution_graph, target_node_id),
+            "execute",
+            action_result=action_result,
+            error_type=error_type,
+            error_msg=error_msg,
+            ext_info=ext_info,
+        )
+    except Exception as exc:  # noqa: BLE001 trajectory is observational only
+        logger.warning(
+            "[task][trajectory] BBS 轨迹发射失败 task=%s action=%s: %s",
+            task_id, action_result, exc,
+        )
+
+
+async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
                  skill_name: str = _BBS_SKILL_NAME,
                  on_bbs_report=None, group_executor=None,
-                 target_node_id: str | None = None) -> None:
+                 target_node_id: str | None = None, task_context_service=None) -> None:
     """查询开启 claim 的 provider Bot,再执行 bid→select→claim→dispatch。
 
     ``bcn``: :class:`BcnService`(由 DI 注入的任务模块普通消费依赖),复用 register/switch provider-bot 同源
@@ -68,11 +116,20 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     """
     logger.info("[task][bbs_mode] bbs_runner, begin, task_id=%s, backend_url=%s, skill_name=%s", execution_graph.task_id, backend_url, skill_name)
     task_id = execution_graph.task_id
+    _emit_bbs_trajectory(
+        task_context_service, execution_graph, target_node_id, "bbs_entered",
+    )
     if bcn is None or bot is None:
         logger.error("[task][bbs_mode] skip: bcn/bot 缺失 task=%s", task_id)
         return
     logger.info("[task][bbs_mode] bbs_runner, list_bots, task_id=%s", execution_graph.task_id)
-    entries = await _list_claim_bots(bcn, task_id)
+    entries = await _list_claim_bots(
+        bcn, task_id,
+        on_error=lambda exc: _emit_bbs_trajectory(
+            task_context_service, execution_graph, target_node_id,
+            "bbs_roster_failed", exception=exc,
+        ),
+    )
     logger.info(
         "[task][bbs_mode] bbs_runner, begin, task_id=%s, entries=%d,%s",
         execution_graph.task_id, len(entries), entries,
@@ -84,18 +141,33 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         return
 
     logger.info("[task][bbs_mode] roster 取成功 task=%s, num=%d", task_id, len(entries))
+    _emit_bbs_trajectory(
+        task_context_service, execution_graph, target_node_id,
+        "bbs_bid_broadcast", details={"candidate_count": len(entries)},
+    )
     # Phase 1: bid (并发评估,3分钟超时)
     try:
         bid_results = await asyncio.wait_for(
             asyncio.gather(
-                *[_bid_one(bot, r, execution_graph) for r in entries],
+                *[_bid_one(
+                    bot, r, execution_graph,
+                    on_error=lambda exc, bot_id=r.get("bot_id"): _emit_bbs_trajectory(
+                        task_context_service, execution_graph, target_node_id,
+                        "bbs_bid_failed", exception=exc,
+                        details={"bot_id": bot_id},
+                    ),
+                ) for r in entries],
                 return_exceptions=True,
             ),
             timeout=_OVERALL_TIMEOUT_4_BID,
         )
         logger.info("[task][bbs_mode] task_id=%s, bid_results=%s", task_id, bid_results)
-    except asyncio.TimeoutError:
+    except asyncio.TimeoutError as exc:
         logger.error("[task][bbs_mode] bid 超时(180s)task=%s,取已回复", task_id)
+        _emit_bbs_trajectory(
+            task_context_service, execution_graph, target_node_id,
+            "bbs_bid_failed", exception=exc,
+        )
         bid_results = []
 
     # 解析回复
@@ -127,6 +199,10 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         bbs_claim_at = int(time.time() * 1000)
     except Exception as exc:
         logger.warning("[task][bbs_mode] claim 失败 task=%s:%s", task_id, exc)
+        _emit_bbs_trajectory(
+            task_context_service, execution_graph, target_node_id,
+            "bbs_claim_failed", exception=exc,
+        )
         return
     logger.info("[task][bbs_mode] bid winner is=%s, task_id=%s", winner_bot_id, task_id)
 
@@ -196,6 +272,11 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     )
 
     # 执行bbs，执行完后再更新
+    _emit_bbs_trajectory(
+        task_context_service, execution_graph, target_node_id,
+        "bbs_execution_started",
+        details={"winner_bot_id": winner_bot_id, "execution_mode": actual_run_mode},
+    )
     try:
         logger.info("[task][bbs_mode] begin_rely_task, task_id=%s, msg=%s", task_id, msg)
         if _group_enabled and group_executor is not None:
@@ -217,6 +298,11 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                 logger.error(
                     "[task][bbs_mode] manager_worker 群执行失败 → 回退 send_and_wait task=%s: %s",
                     task_id, exc,
+                )
+                _emit_bbs_trajectory(
+                    task_context_service, execution_graph, target_node_id,
+                    "bbs_group_execution_failed", exception=exc,
+                    details={"winner_bot_id": winner_bot_id},
                 )
                 task_result = await bot.send_and_wait_async(
                     bot_id=winner_bot_id, message=msg, metadata={"biz_task_id": task_id},
@@ -268,6 +354,11 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         logger.info("[task][bbs_mode] finish_rely_task, task_id=%s, task_result=%s, scoped_patch=%s", task_id, task_result, _scoped_patch)
     except Exception as exc:
         logger.error("[task][bbs_mode] rely_task_meet_exception, task_id=%s, exception=%s", task_id, exc)
+        _emit_bbs_trajectory(
+            task_context_service, execution_graph, target_node_id,
+            "bbs_execution_failed", exception=exc,
+            details={"winner_bot_id": winner_bot_id},
+        )
         # send 失败 → 回收 claim(释放 bbs_owner,避免泄漏挡住后续重升 BBS)。
         # send 失败不产生 BBS 回投，保留节点与运行记录，仅释放 claim。
         graph.report(TaskCallbackData(data={
@@ -284,7 +375,33 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         logger.warning("[task][bbs_mode] send 失败 bot=%s task=%s:%s", winner_bot_id, task_id, exc)
 
 
-async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
+async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
+                 skill_name: str = _BBS_SKILL_NAME,
+                 on_bbs_report=None, group_executor=None,
+                 target_node_id: str | None = None, task_context_service=None) -> None:
+    """Run the BBS flow and record uncaught notify errors in task trajectory."""
+    try:
+        await _notify_impl(
+            execution_graph=execution_graph,
+            bcn=bcn,
+            bot=bot,
+            graph=graph,
+            backend_url=backend_url,
+            skill_name=skill_name,
+            on_bbs_report=on_bbs_report,
+            group_executor=group_executor,
+            target_node_id=target_node_id,
+            task_context_service=task_context_service,
+        )
+    except Exception as exc:  # noqa: BLE001 preserve existing notify propagation
+        _emit_bbs_trajectory(
+            task_context_service, execution_graph, target_node_id,
+            "bbs_notify_failed", exception=exc,
+        )
+        raise
+
+
+async def _list_claim_bots(bcn, task_id: str, *, on_error=None) -> list[dict]:
     """查询 claim-enabled roster with bounded timeout/retry.
 
     Empty results are valid and are not retried. Only request failures and
@@ -311,6 +428,8 @@ async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
                     "[task][bbs_mode] list_bots exhausted task=%s attempts=%d error=%s",
                     task_id, attempt, exc,
                 )
+                if on_error is not None:
+                    on_error(exc)
                 return []
             delay = _ROSTER_RETRY_DELAY * (2 ** (attempt - 1))
             logger.warning(
@@ -322,7 +441,7 @@ async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
     return []
 
 
-async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
+async def _bid_one(bot, rost_entry, execution_graph, *, on_error=None) -> dict | None:
     """一发一收:发给 bot 评估 prompt,取回复 content JSON {completion_rate, relay_reason, title, goal}。"""
     task_id = execution_graph.task_id
     bot_id = rost_entry["bot_id"]
@@ -335,6 +454,8 @@ async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
         logger.info("[task][bbs_mode] bid send_and_wait 成功 bot=%s，%s", bot_id, run)
     except Exception as exc:
         logger.error("[task][bbs_mode] bid send_and_wait 失败 bot=%s:%s", bot_id, exc)
+        if on_error is not None:
+            on_error(exc)
         return None
     return {"bot_id": bot_id, "run": run}
 

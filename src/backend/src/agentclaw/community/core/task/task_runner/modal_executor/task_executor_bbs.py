@@ -122,6 +122,7 @@ class TaskExecutorBbsMixin:
             skill_name=bbs_modal_executor._BBS_SKILL_NAME,
             on_bbs_report=self._on_bbs_report,
             group_executor=self._bbs_execute_as_manager_worker_group,
+            task_context_service=self._task_context_service,
         )
 
     @staticmethod

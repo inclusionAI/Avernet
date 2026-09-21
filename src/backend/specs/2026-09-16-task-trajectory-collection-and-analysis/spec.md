@@ -106,6 +106,7 @@
 - **验收标准**: 给定一条 `exec_error` 来自 bot 回调的轨迹,对应 EXECUTE/VERIFY 轨迹事件 `error_type=underlying_interface_error`、`error_msg` 带接口消息;解析失败类 `error_type=parse_error`;`action_input` 带完整请求内容。
 - **改动文件**: `core/task/task_center/engine.py`(EXECUTE/VERIFY 闸门挂轨迹发射)、`core/task/task_runner/callback_adapter.py`(把 origin 透出到 patch,供发射点读取)
 - **task_runner 启动轨迹补充(2026-09-21)**: `TaskExecutor.dispatch` 对 `single_bot` 与 `coop_group` 的真实投递记录 `EXECUTE` 事件。投递成功分别使用 `single_bot_started` / `coop_group_started`;投递失败使用 `*_start_failed`,保留原有返回值或异常传播语义。`ext_info` 至少包含 `execution_mode`、`assignee`、`phase`，异常时补 `exception_type`;single-bot 退化群失败并回退直发时记录 `single_bot_group_fallback`。轨迹写入失败仅 WARNING，不得影响主链路。
+- **BBS 模态轨迹补充(2026-09-21)**: `bbs_modal_executor.notify` 在进入 BBS、广播竞价、开始向胜出 Bot/协作群执行三个节点分别发射 `EXECUTE` 事件，`action_result` 为 `bbs_entered`、`bbs_bid_broadcast`、`bbs_execution_started`;notify 内部 roster、竞价、claim、执行及未捕获异常发射对应失败事件并记录 `error_type`、`error_msg`、`ext_info.exception_type`。统一经 `task_context_service.emit_trajectory_event` 写入，轨迹写入失败仅 WARNING，不得影响 BBS 主链路。
 - **状态**: 待实现
 
 ### REQ-6: 采集层 — 新增 `SUBMIT` 动作事件(补齐"从提交"段)
