@@ -38,4 +38,12 @@ class MCPSyncServiceProtocol(Protocol):
         identity_modes: Mapping[str, object],
     ) -> Mapping[str, Any]: ...
 
-    async def sync_mcp_detail_to_all_bots(self, *args: Any, **kwargs: Any) -> Any: ...
+    async def sync_mcp_detail_to_all_bots(self, *args: Any, **kwargs: Any) -> Any:
+        """Fan out one persisted user MCP config as a best-effort projection.
+
+        The returned mapping has ``success=False`` only when the batch itself
+        cannot run (for example, the Bot inventory cannot be listed). Per-Bot
+        resolution, probe, dispatch and delivery failures are returned in
+        ``sync_results`` and do not revoke the already persisted desired state.
+        """
+        ...

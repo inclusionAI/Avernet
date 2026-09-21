@@ -512,10 +512,11 @@ async def update_mcp_config(
 ) -> Envelope[McpConfig]:
     """Write the caller's unified config and push it to the caller's devices.
 
-    A null field is left unchanged (merge, not replace). If the device push
-    fails the write is rolled back and the call fails — the caller never ends up
-    with a config that is stored but not in effect. The response is re-read from
-    storage so it is exactly what a subsequent GET would return.
+    A null field is left unchanged (merge, not replace). Per-Bot delivery is
+    best-effort: a temporarily unavailable device does not roll back the
+    persisted user config. A batch-level failure still rolls the write back.
+    The response is re-read from storage so it is exactly what a subsequent GET
+    would return.
     """
     await write_unified_config(
         user_id=owner_id,

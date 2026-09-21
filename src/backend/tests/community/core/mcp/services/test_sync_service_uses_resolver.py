@@ -327,7 +327,7 @@ class TestSyncMcpDetailsBulkUsesResolver:
 
 
 class TestResolverErrorsMapToMissingDevice:
-    """resolver 抛 DeviceNotBoundError / UnknownProviderError 时,
+    """resolver 抛 DeviceNotBoundError / UnknownProviderError / DeviceOfflineError 时,
     sync_mcp_detail / remove_mcp_detail / _declare_mcp_scope / _sync_mcp_details
     都映射到旧 ``{"success": False, "error": "缺少设备连接信息..."}`` 的 wire shape。
     sync_mcp_detail_to_all_bots 走 best-effort 跳过路径。
@@ -397,4 +397,34 @@ class TestResolverErrorsMapToMissingDevice:
         # batch 走 best-effort: success=True,但单 bot 标记 reason
         assert result["success"] is True
         assert result["sync_results"][0]["reason"] == "缺少设备连接信息"
+        dispatcher.dispatch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sync_mcp_detail_to_all_bots_skips_when_offline(self):
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceOfflineError,
+        )
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.side_effect = DeviceOfflineError("offline")
+        dispatcher = MagicMock()
+        bot_repo = MagicMock()
+        bot_repo.list_by_entity.return_value = (1, [{"bot_id": "bot1"}])
+        service = _make_service(
+            resolver=resolver,
+            dispatcher=dispatcher,
+            bot_repository=bot_repo,
+        )
+
+        result = await service.sync_mcp_detail_to_all_bots(
+            user_id="u1",
+            server_code="mcp.x",
+            mcp_data={"server_code": "mcp.x"},
+            entity_id="100",
+            entity_type="staff",
+        )
+
+        assert result["success"] is True
+        assert result["sync_results"][0]["reason"] == "设备离线"
+        assert result["sync_results"][0]["error"] == "offline"
         dispatcher.dispatch.assert_not_called()

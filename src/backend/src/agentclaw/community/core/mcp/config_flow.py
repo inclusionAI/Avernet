@@ -168,9 +168,11 @@ async def write_unified_config(
     3. Confirm the server exists via the marketplace, **before** any write, so a
        bad server code never touches the database.
     4. Write the row, keeping the previous config for rollback.
-    5. Push to every device under the identity.
-    6. If the push fails, roll the write back and raise — the caller never ends
-       up with a config that is stored but not in effect.
+    5. Best-effort push to every Bot under the identity and collect its outcome.
+    6. Keep the write when individual Bot delivery fails: the stored user
+       config is desired state and a later runtime projection can converge it.
+       Only a batch-level failure (for example, Bot enumeration unavailable)
+       rolls the write back and raises.
 
     Returns a write-shaped :class:`UnifiedConfig`: ``headers`` is ``None`` (the
     write response has never echoed them) and the value fields reflect the
@@ -231,13 +233,10 @@ async def write_unified_config(
             transport_protocol=normalized_tp,
         )
     except Exception as exc:
-        # The sync service contracts to *return* a failure dict rather than
-        # raise, but a device push that raises anyway (a dependency throwing,
-        # a future change) must not leave the freshly written credentials
-        # stored-but-unpushed — that is exactly the atomic write-and-push
-        # contract this function promises. Roll the row back and surface it as
-        # a sync failure, the same class a returned failure raises, so each
-        # surface maps it (internal 500 / public 502) with the row restored.
+        # Per-Bot delivery errors are converted to sync_results by the batch
+        # service. An exception here is therefore a batch-level failure (or a
+        # programming/dependency fault), for which rollback remains the safe
+        # answer.
         _roll_back()
         raise McpSyncFailedError(str(exc)) from exc
 

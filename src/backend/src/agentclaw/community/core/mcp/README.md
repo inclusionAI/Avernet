@@ -75,6 +75,12 @@ They propagate to running engines through `DeviceSync`; the same resolver is use
 for restart/whole-artifact composition. Contract changes therefore affect Manifest
 apply, user-config fan-out, every DeviceSync implementation, and OCB's ARCA adapter.
 
+User-default fan-out is best-effort: the persistent `ac_user_mcp_config` row is
+the desired state, while each reachable Bot is projected independently. A
+per-Bot resolution, probe, dispatch, or delivery failure is returned in
+`sync_results` and does not roll the row back; only a batch-level inability to
+enumerate the entity's Bot set remains a write failure.
+
 A custom Bot URL does not inherit static user/default/managed credentials in the
 server entry. Container-wide mcporter `headerPolicies` remain host-matched runtime
 policy, however; this core module neither emits nor disables them per server.

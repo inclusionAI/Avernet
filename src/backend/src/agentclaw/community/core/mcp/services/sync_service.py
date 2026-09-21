@@ -17,6 +17,7 @@ from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeS
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.devices.services.device_context import (
+    DeviceOfflineError,
     DeviceNotBoundError,
     UnknownProviderError,
 )
@@ -549,10 +550,13 @@ class MCPSyncService(MCPSyncServiceProtocol):
         endpoint_env: Optional[str] = None,
         transport_protocol: Optional[str] = None,
     ) -> dict[str, Any]:
-        """将单个 MCP 配置推送到指定实体下的全部 bot。
+        """Best-effort 地将单个 MCP 配置推送到指定实体下的全部 Bot。
 
-        流程：列出实体下所有 bot → 探测设备是否已安装该 MCP →
-        仅对已安装的设备执行同步。未安装或离线的 bot 会被记录原因并跳过。
+        用户配置是持久化的 desired state；一次设备投递只是让运行时尽快
+        收敛，不能因为任一历史、离线或暂时失败的 Bot 回滚用户已确认的
+        配置。每个 Bot 的解析、探测、配置组装和投递错误都进入
+        ``sync_results``，由调用方透传。只有无法列举整个实体 Bot 集合这种
+        批次级故障才返回 ``success=False``。
         """
         bot_ids: list[str] = []
         try:
@@ -593,30 +597,38 @@ class MCPSyncService(MCPSyncServiceProtocol):
             return {"success": True, "sync_results": [], "error": None}
 
         sync_results: list[dict[str, Any]] = []
-        any_success = False
-        has_mcp_devices = 0
 
         for bot_id in bot_ids:
-            # per-bot 投递插件由 resolver+dispatcher 按容器类型路由；无可投递设备→跳过(不计入回滚判定)。
+            # per-bot 投递插件由 resolver+dispatcher 按容器类型路由；无可投递
+            # 设备只记录 outcome。先解析才能知道设备是否存在，所以离线 Bot
+            # 必须在这里被转换为可透传的 best-effort 结果，而不是逸出整批。
             try:
                 ctx = self._resolver_provider().resolve_for_bot(bot_id, entity_id)
-            except (DeviceNotBoundError, UnknownProviderError):
+            except (DeviceNotBoundError, UnknownProviderError) as exc:
                 logger.warning("[MCPSyncService] 跳过 bot=%s: 缺少连接信息", bot_id)
                 sync_results.append({
-                    "bot_id": bot_id, "synced": False, "reason": "缺少设备连接信息",
+                    "bot_id": bot_id,
+                    "synced": False,
+                    "reason": "缺少设备连接信息",
+                    "error": str(exc),
                 })
                 continue
-            plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
-            effective_engine_type = ctx.conn_info.get("engine_type")
-
+            except DeviceOfflineError as exc:
+                logger.warning("[MCPSyncService] 跳过 bot=%s: 设备离线", bot_id)
+                sync_results.append({
+                    "bot_id": bot_id,
+                    "synced": False,
+                    "reason": "设备离线",
+                    "error": str(exc),
+                })
+                continue
             try:
-                # 探测设备是否已装该 MCP；arca/baas 真实探测，未装则跳过（不计入）。
-                # 整产物设备（teclaw）的 has_mcp 恒为 True：始终投递并计入回滚判定，
-                # 即一次 teclaw 投递失败会让本批整体回滚——与 arca/baas 一致（Option B）。
-                # TODO(totalfrank): 与 teclaw 团队同步——配置投递失败会回滚用户的 MCP
-                #   配置改动（容器无后台 re-pull，不能让已落库的改动停留在过期容器上）。
-                #   凭据已内联进产物，改 api_key 即改产物字节，无需容器侧 secret broker
-                #   或 auth_ref 二次解析。
+                plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
+                effective_engine_type = ctx.conn_info.get("engine_type")
+                # 探测设备是否已装该 MCP；arca/baas 真实探测，未装则跳过。
+                # 整产物设备（teclaw）的 has_mcp 恒为 True，会尝试投递整份
+                # artifact；失败同样只记录该 Bot 的 outcome。下次设备恢复、
+                # 显式 Apply 或重启都会从持久化 desired state 再次收敛。
                 has_mcp = await asyncio.to_thread(plugin.has_mcp, server_code)
                 if not has_mcp:
                     logger.warning(
@@ -627,7 +639,6 @@ class MCPSyncService(MCPSyncServiceProtocol):
                     })
                     continue
 
-                has_mcp_devices += 1
                 logger.info("[MCPSyncService] 正在同步 MCP %s 到 bot=%s", server_code, bot_id)
 
                 sync_success = await self._sync_mcp_detail(
@@ -644,7 +655,6 @@ class MCPSyncService(MCPSyncServiceProtocol):
 
                 if sync_success:
                     logger.info("[MCPSyncService] bot=%s 同步成功", bot_id)
-                    any_success = True
                 else:
                     logger.error("[MCPSyncService] bot=%s 同步失败", bot_id)
 
@@ -658,26 +668,6 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 sync_results.append({
                     "bot_id": bot_id, "synced": False, "error": str(e),
                 })
-
-        # 只有"确实有该 MCP 的设备全部失败"时才整体报错；
-        # 如果设备上没有该 MCP 或者根本没有设备，不算失败。
-        if has_mcp_devices > 0 and not any_success:
-            logger.error(
-                "[MCPSyncService] 全部 %s 台含该 MCP 的设备均同步失败", has_mcp_devices
-            )
-            first_error = next(
-                (
-                    r.get("error")
-                    for r in sync_results
-                    if r.get("error")
-                ),
-                None,
-            )
-            return {
-                "success": False,
-                "sync_results": sync_results,
-                "error": first_error or "所有设备同步失败",
-            }
 
         return {"success": True, "sync_results": sync_results, "error": None}
 
