@@ -6,7 +6,7 @@ import type { AdminConfig } from "@avernet/clawweb-shared/server/db";
 import { adminAuthMiddleware } from "@avernet/clawweb-shared/server/middleware/admin-auth";
 import type { AdminAuthRepository } from "@avernet/clawweb-shared/server/middleware/admin-auth";
 import type { AdminRole, AdminUserSet } from "@avernet/clawweb-shared/server/repositories/admin-user-repository";
-import { createAuthMeHandler } from "../auth-me.js";
+import { createAuthMeHandler, resolveAuthMeIdentity } from "../auth-me.js";
 
 const EMPTY_ROSTER: AdminUserSet = {
   admins: new Set(),
@@ -66,7 +66,13 @@ async function withApp(
   const app = express();
   app.use(cookieParser());
   app.use(adminAuthMiddleware({ config: options.config, repository: options.repository ?? null }));
-  app.get("/api/auth/me", createAuthMeHandler({ environment: options.environment ?? "dev" }));
+  const authOptions = { environment: options.environment ?? "dev" };
+  app.get("/api/auth/me", createAuthMeHandler(authOptions));
+  app.get("/api/session-user", (req, res) => {
+    const identity = resolveAuthMeIdentity(req, authOptions);
+    if (!identity) return res.status(401).json({ error: "Unauthorized" });
+    return res.json(identity);
+  });
   app.get("/api/whoami", (req, res) => {
     res.json({
       isAdmin: req.isAdmin === true,
@@ -219,6 +225,24 @@ describe("GET /api/auth/me", () => {
     await withApp({ config: adminConfig(), environment: "prod" }, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/auth/me`);
       expect(response.status).toBe(401);
+    });
+  });
+});
+
+describe("resolveAuthMeIdentity", () => {
+  it("provides the same server-verified cookie identity to other routes", async () => {
+    await withApp({ config: adminConfig(), environment: "prod" }, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/session-user`, {
+        headers: { cookie: cookieHeader(["IAM_TOKEN", iamToken({ sno: "reviewer", name: "Reviewer" })]) },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ userId: "reviewer", nickName: "Reviewer" });
+    });
+  });
+
+  it("does not create a production identity without a login session", async () => {
+    await withApp({ config: adminConfig(), environment: "prod" }, async (baseUrl) => {
+      expect((await fetch(`${baseUrl}/api/session-user`)).status).toBe(401);
     });
   });
 });

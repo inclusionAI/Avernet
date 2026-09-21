@@ -11,20 +11,13 @@ afterEach(() => {
   delete window.dd
 })
 
-it('uses a fresh DingTalk auth code instead of the browser user id', async () => {
+it('uses the server-verified ClawWeb session without requesting DingTalk auth', async () => {
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = []
-  window.dd = {
-    ready: (callback) => callback(),
-    requestAuthCode: ({ success }) => success({ code: 'panel-auth-code' }),
-  }
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     requests.push({ url, body })
-    if (url.endsWith('/auth/dingtalk/config')) {
-      return { ok: true, json: async () => ({ clientId: 'app-key', corpId: 'ding-corp' }) }
-    }
-    if (url.endsWith('/resolve')) {
+    if (url.endsWith('/resolve/session')) {
       return { ok: true, json: async () => ({ ok: true, status: 'approved' }) }
     }
     return {
@@ -58,7 +51,8 @@ it('uses a fresh DingTalk auth code instead of the browser user id', async () =>
   />)
   await userEvent.click(await screen.findByRole('button', { name: '通过' }))
 
-  const resolveRequest = requests.find((request) => request.url.endsWith('/resolve'))
-  expect(resolveRequest?.body).toEqual({ authCode: 'panel-auth-code', action: 'approve' })
+  const resolveRequest = requests.find((request) => request.url.endsWith('/resolve/session'))
+  expect(resolveRequest?.body).toEqual({ action: 'approve' })
+  expect(requests.some((request) => request.url.endsWith('/auth/dingtalk/config'))).toBe(false)
   expect(requests.some((request) => request.url.includes('empId='))).toBe(false)
 })

@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import StatusBadge from './StatusBadge'
 import { formatTime, formatDuration } from '@avernet/workflow/web/utils/time'
 import { approvalDisplay, type ApprovalDisplay } from '../../shared/approval-display'
-import { loadDingTalkConfig, requestDingTalkAuthCode } from '../services/dingtalk-auth'
 import type { FlowRun } from '@avernet/clawweb-shared/web/types'
 import type { ApprovalCardSummary } from '@avernet/clawweb-shared/web/api/client'
 
@@ -93,14 +92,13 @@ async function fetchApproval(id: number): Promise<ApprovalData> {
 async function resolveApproval(
   id: number,
   action: 'approve' | 'reject',
-  authCode: string,
   comment?: string,
   detail?: Record<string, unknown>,
 ): Promise<ResolveResult> {
-  const res = await fetch(`/api/approval/${id}/resolve`, {
+  const res = await fetch(`/api/approval/${id}/resolve/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ authCode, action, comment, detail }),
+    body: JSON.stringify({ action, comment, detail }),
   })
   const body = await res.json() as ResolveResult
   if (!res.ok) return { ...body, error: body.message || body.error || `HTTP ${res.status}` }
@@ -252,16 +250,10 @@ export default function ApprovalSlidePanel({ card, run, onClose, onResolved }: A
 
       setActionLoading(true)
       try {
-        const config = await loadDingTalkConfig()
-        const auth = await requestDingTalkAuthCode(config)
-        if (auth.ok === false) {
-          setResult({ error: auth.error })
-          return
-        }
         const detail = isSectionMode && data.sections
           ? buildDetailPayload(data.sections, sectionSelection)
           : undefined
-        const res = await resolveApproval(card.id, action, auth.authCode, comment || undefined, detail)
+        const res = await resolveApproval(card.id, action, comment || undefined, detail)
         setResult(res)
         if (res.ok) {
           const fresh = await fetchApproval(card.id)

@@ -9,7 +9,7 @@ async function fixture(content: unknown) {
  const row: ApprovalCardRow={id:1,flow_id:'flow-1',node_id:'review',workflow_id:'test',workflow_title:'流程',approval_type:'HUMAN_CONFIRM',message:'确认',card_fields_json:JSON.stringify(content),approver_ids:'reviewer',approver_names:'审核人',approval_policy:'any',approved_by:'',rejected_by:'',status:'pending',delivery_mode:'card-web',created_at:100,resolved_at:null,comment:null};
  const db={query:async(_sql:string,p:unknown[])=>p?.[0]===1?[{...row}]:[],exec:async(_sql:string,p:unknown[])=>{[row.approved_by,row.rejected_by,row.status,row.resolved_at,row.comment]=p as any;return {affectedRows:1};}};
  const app=express();app.use(express.json());app.use('/approval',createApprovalRouter(db as any, {
-  dingTalk: {
+ dingTalk: {
    clientId: 'test-client-id',
    corpId: 'test-corp-id',
    exchangeAuthCode: async (authCode: string) => authCode === 'reviewer-code'
@@ -18,6 +18,11 @@ async function fixture(content: unknown) {
       ? { ok: true as const, userId: 'stranger' }
       : { ok: false as const, error: '授权码无效' },
   },
+  resolveSessionIdentity: async (req) => req.headers.cookie === 'session=reviewer'
+   ? { ok: true as const, userId: 'reviewer' }
+   : req.headers.cookie === 'session=stranger'
+     ? { ok: true as const, userId: 'stranger' }
+     : { ok: false as const, error: '未登录' },
  }));
  const server=app.listen(0,'127.0.0.1');servers.push(server);await new Promise<void>(resolve=>server.once('listening',resolve));
  const base=`http://127.0.0.1:${(server.address() as any).port}/approval/1`;
@@ -46,6 +51,31 @@ it('rejects URL-era empId-only submissions and exposes public DingTalk auth conf
  const response=await fetch(`${base}/resolve`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({empId:'reviewer',action:'approve'})});
  expect(response.status).toBe(401);
  expect((await response.json()).message).toBe('无法验证钉钉身份');
+ expect(row.status).toBe('pending');
+});
+
+it('uses the server-verified ClawWeb session for workbench approval actions',async()=>{
+ const {base,row}=await fixture([]);
+ const submit=(cookie:string,empId?:string)=>fetch(`${base}/resolve/session`,{
+  method:'POST',
+  headers:{'Content-Type':'application/json',cookie},
+  body:JSON.stringify({empId,action:'approve'}),
+ });
+ expect((await submit('session=stranger','reviewer')).status).toBe(403);
+ expect(row.status).toBe('pending');
+ expect((await submit('session=reviewer','stranger')).status).toBe(200);
+ expect(row.approved_by).toBe('reviewer');
+});
+
+it('rejects unauthenticated workbench approval actions',async()=>{
+ const {base,row}=await fixture([]);
+ const response=await fetch(`${base}/resolve/session`,{
+  method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({action:'approve'}),
+ });
+ expect(response.status).toBe(401);
+ expect((await response.json()).message).toBe('未登录');
  expect(row.status).toBe('pending');
 });
 

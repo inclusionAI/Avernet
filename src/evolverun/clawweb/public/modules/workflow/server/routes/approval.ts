@@ -18,7 +18,7 @@ import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-ha
 import { parseApprovalCardContent } from "../../shared/approval-display.js";
 import { invalidateResolvedCache } from "./internal/approval-cards.js";
 
-export type DingTalkIdentityResult =
+export type ApprovalIdentityResult =
   | { ok: true; userId: string }
   | { ok: false; error: string };
 
@@ -26,8 +26,9 @@ export type ApprovalRouterOptions = {
   dingTalk?: {
     clientId: string;
     corpId: string;
-    exchangeAuthCode: (authCode: string) => Promise<DingTalkIdentityResult>;
+    exchangeAuthCode: (authCode: string) => Promise<ApprovalIdentityResult>;
   };
+  resolveSessionIdentity?: (request: Request) => Promise<ApprovalIdentityResult>;
 };
 
 // ── Route factory ──────────────────────────────────────────────────────
@@ -35,6 +36,73 @@ export type ApprovalRouterOptions = {
 export function createApprovalRouter(db: IDatabase, options: ApprovalRouterOptions = {}): Router {
   const router = Router();
   const repo = new ApprovalCardRepository(db);
+
+  type ResolveBody = {
+    action: "approve" | "reject";
+    comment?: string;
+    detail?: Record<string, unknown>;
+  };
+
+  function parseResolveRequest(req: Request, res: Response): { id: number; body: ResolveBody } | null {
+    const id = parseInt(String(req.params.id), 10);
+    if (Number.isNaN(id)) {
+      res.status(400).json({ error: "Bad Request", message: "无效的审批 ID" });
+      return null;
+    }
+    const { action, comment, detail } = req.body as Partial<ResolveBody>;
+    if (!action || (action !== "approve" && action !== "reject")) {
+      res.status(400).json({ error: "Bad Request", message: "action 必须是 'approve' 或 'reject'" });
+      return null;
+    }
+    return { id, body: { action, comment, detail } };
+  }
+
+  async function recordVerifiedAction(
+    id: number,
+    empId: string,
+    body: ResolveBody,
+    res: Response,
+  ): Promise<void> {
+    const { action, comment, detail } = body;
+    const commentToStore = (detail && typeof detail === "object" && Object.keys(detail).length > 0)
+      ? JSON.stringify({ note: comment ?? "", detail })
+      : (comment ?? undefined);
+
+    const result = await repo.recordAction(id, empId, action, commentToStore);
+    invalidateResolvedCache();
+
+    if (!result.ok && result.error) {
+      if (result.error === "审批记录未找到") {
+        res.status(404).json({ error: "Not Found", message: result.error });
+        return;
+      }
+      if (result.error === "您不是此审批的授权审批人") {
+        res.status(403).json({ error: "Forbidden", message: result.error });
+        return;
+      }
+      if (result.error === "审批已处理") {
+        res.status(409).json({
+          error: "Conflict",
+          message: result.error,
+          status: result.status,
+          approvedBy: result.approvedBy,
+          rejectedBy: result.rejectedBy,
+        });
+        return;
+      }
+      res.status(500).json({ error: "Internal Error", message: result.error });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      action,
+      status: result.status,
+      approvedBy: result.approvedBy,
+      rejectedBy: result.rejectedBy,
+      comment: comment ?? null,
+    });
+  }
 
   router.get("/auth/dingtalk/config", (_req: Request, res: Response) => {
     const config = options.dingTalk;
@@ -194,26 +262,14 @@ export function createApprovalRouter(db: IDatabase, options: ApprovalRouterOptio
    * No external callback — workflow runtime polls the DB.
    */
   router.post("/:id/resolve", asyncHandler(async (req: Request, res: Response) => {
-    const id = parseInt(String(req.params.id), 10);
-    if (Number.isNaN(id)) {
-      res.status(400).json({ error: "Bad Request", message: "无效的审批 ID" });
-      return;
-    }
-
-    const { authCode, action, comment, detail } = req.body as {
+    const parsed = parseResolveRequest(req, res);
+    if (!parsed) return;
+    const { authCode } = req.body as {
       authCode?: string;
-      action?: string;
-      comment?: string;
-      detail?: Record<string, unknown>;
     };
 
     if (!authCode) {
       res.status(401).json({ error: "Unauthorized", message: "无法验证钉钉身份" });
-      return;
-    }
-
-    if (!action || (action !== "approve" && action !== "reject")) {
-      res.status(400).json({ error: "Bad Request", message: "action 必须是 'approve' 或 'reject'" });
       return;
     }
 
@@ -227,50 +283,23 @@ export function createApprovalRouter(db: IDatabase, options: ApprovalRouterOptio
       res.status(401).json({ error: "Unauthorized", message: identity.error });
       return;
     }
-    const empId = identity.userId;
+    await recordVerifiedAction(parsed.id, identity.userId, parsed.body, res);
+  }));
 
-    // Build comment: if detail is provided, store as structured JSON; otherwise plain text
-    const commentToStore = (detail && typeof detail === "object" && Object.keys(detail).length > 0)
-      ? JSON.stringify({ note: comment ?? "", detail })
-      : (comment ?? undefined);
-
-    const result = await repo.recordAction(id, empId, action as "approve" | "reject", commentToStore);
-
-    // Invalidate resolved-cards cache — status may have changed from pending to approved/rejected
-    invalidateResolvedCache();
-
-    if (!result.ok && result.error) {
-      // Determine status code based on error type
-      if (result.error === "审批记录未找到") {
-        res.status(404).json({ error: "Not Found", message: result.error });
-        return;
-      }
-      if (result.error === "您不是此审批的授权审批人") {
-        res.status(403).json({ error: "Forbidden", message: result.error });
-        return;
-      }
-      if (result.error === "审批已处理") {
-        res.status(409).json({
-          error: "Conflict",
-          message: result.error,
-          status: result.status,
-          approvedBy: result.approvedBy,
-          rejectedBy: result.rejectedBy,
-        });
-        return;
-      }
-      res.status(500).json({ error: "Internal Error", message: result.error });
+  /** POST /api/approval/:id/resolve/session — resolve from a server-verified ClawWeb session. */
+  router.post("/:id/resolve/session", asyncHandler(async (req: Request, res: Response) => {
+    const parsed = parseResolveRequest(req, res);
+    if (!parsed) return;
+    if (!options.resolveSessionIdentity) {
+      res.status(503).json({ error: "Service Unavailable", message: "ClawWeb 登录认证未配置" });
       return;
     }
-
-    res.json({
-      ok: true,
-      action,
-      status: result.status,
-      approvedBy: result.approvedBy,
-      rejectedBy: result.rejectedBy,
-      comment: comment ?? null,
-    });
+    const identity = await options.resolveSessionIdentity(req);
+    if (identity.ok === false) {
+      res.status(401).json({ error: "Unauthorized", message: identity.error });
+      return;
+    }
+    await recordVerifiedAction(parsed.id, identity.userId, parsed.body, res);
   }));
 
   /**

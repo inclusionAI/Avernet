@@ -72,13 +72,32 @@ function identityFromLocalDevCookie(request: Request): ResolvedIdentity | null {
   return { userId, nickName, userName: userId, avatarUrl: "", displayName: nickName };
 }
 
+function devIdentity(devUserId: string): ResolvedIdentity {
+  return {
+    userId: devUserId,
+    nickName: "Dev Local",
+    userName: devUserId,
+    avatarUrl: "",
+    displayName: "Dev Local",
+  };
+}
+
+/** Resolve the authenticated request identity for any server route that needs it. */
+export function resolveAuthMeIdentity(request: Request, options: AuthMeOptions): ResolvedIdentity | null {
+  const isLocalDev = isLoopbackHost(request) && options.environment === "dev";
+  const devUserId = options.devUserId ?? "dev_local";
+  const devModeRequested = isLocalDev
+    && (request.query.dev === "1" || request.header("X-ClawWeb-Dev-Mode") === "1");
+  if (devModeRequested) return devIdentity(devUserId);
+
+  return identityFromIamToken(request)
+    ?? (isLocalDev ? identityFromLocalDevCookie(request) : null)
+    ?? (isLocalDev ? devIdentity(devUserId) : null);
+}
+
 export function createAuthMeHandler(options: AuthMeOptions): RequestHandler {
   const devUserId = options.devUserId ?? "dev_local";
   return (request, response) => {
-    const isLocalDev = isLoopbackHost(request) && options.environment === "dev";
-    const devModeRequested = isLocalDev
-      && (request.query.dev === "1" || request.header("X-ClawWeb-Dev-Mode") === "1");
-
     const respondAsDevUser = () => {
       response.json({
         userId: devUserId,
@@ -95,21 +114,12 @@ export function createAuthMeHandler(options: AuthMeOptions): RequestHandler {
       });
     };
 
-    if (devModeRequested) {
+    const identity = resolveAuthMeIdentity(request, options);
+    if (identity?.userId === devUserId && identity.userName === devUserId) {
       respondAsDevUser();
       return;
     }
-
-    const identity = identityFromIamToken(request)
-      ?? (isLocalDev ? identityFromLocalDevCookie(request) : null);
-
-    // A loopback dev run has no SSO to authenticate against, so it resolves as the dev user.
-    // Any real identity found above still wins, which keeps owner-scoped data intact.
     if (!identity) {
-      if (isLocalDev) {
-        respondAsDevUser();
-        return;
-      }
       response.status(401).json({ error: "Unauthorized", message: "Missing login cookie" });
       return;
     }
