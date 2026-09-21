@@ -54,8 +54,8 @@ impl PersistentBotRepo {
         };
         let result = self.db_execute_affected(
             "INSERT INTO bcs_bots (bot_uuid, name, bot_info, session_token, created_by, \
-             visibility, status, actor_kind, agent_code, is_deleted, env, registered_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+             visibility, status, actor_kind, agent_code, is_deleted, env, registered_at, updated_at, connection_mode) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'upstream')",
             vec![Value::from(bot_id.as_str()),
                 Value::from(capabilities.name.as_deref().unwrap_or(&bot_id)), Value::from(info),
                 Value::from(token), Value::from(created_by), Value::from(visibility),

@@ -24,6 +24,8 @@ pub mod principal;
 pub mod types;
 pub mod workbench_use_cases;
 
+pub use bcs_domain::bot_provider;
+
 pub use actors::{
     ActorCapabilitiesView, ActorDirectoryEntry, ActorDirectoryService, ActorListCommand,
     ActorListResult, ActorSearchCommand, ActorSearchContext, ActorSearchResult,

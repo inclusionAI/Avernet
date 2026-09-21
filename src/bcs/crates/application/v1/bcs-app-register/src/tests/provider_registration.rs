@@ -64,7 +64,6 @@ impl ProviderRegistrationCoreService for FakeProviderRegistration {
                 bot_uuid: "scoped-bot".into(),
                 bot_token: "runtime-token".into(),
                 webhook_url: command.webhook_url,
-                completed: true,
             },
         })
     }

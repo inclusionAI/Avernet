@@ -1,11 +1,11 @@
 use bcs_bot::core::provider_registration::ProviderRegistrationCore;
 use bcs_bot::{BotCore, ProviderCore};
-use bcs_bot_store::provider_registration::MemoryProviderRegistrationStore;
+use bcs_bot_store::provider::MemoryBotProviderStore;
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_relation::RelationCore;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::core::provider_registration::*;
-use bcs_service_api::port::repo::provider_registration::ProviderRegistrationRepoPort;
+use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_service_api::{
     BotDeliveryTarget, BotRegistryCoreService, ProviderAuthMode, ProviderBotBindingRepoPort,
     ProviderCoreService, ProviderCredential, ProviderCredentialRepoPort, ProviderRepoPort,
@@ -17,7 +17,7 @@ struct Fixture {
     core: ProviderRegistrationCore,
     registry: Arc<BotCore>,
     providers: Arc<MemoryProviderStore>,
-    journal: Arc<MemoryProviderRegistrationStore>,
+    membership: Arc<MemoryBotProviderStore>,
     relations: Arc<RelationCore>,
     provider: String,
     _dir: tempfile::TempDir,
@@ -35,10 +35,11 @@ async fn fixture_with_credentials(
     let dir = tempfile::tempdir().unwrap();
     let providers = Arc::new(MemoryProviderStore::new());
     let credentials = credentials.unwrap_or_else(|| providers.clone());
-    let journal = Arc::new(MemoryProviderRegistrationStore::new());
+    let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
+    let membership = Arc::new(MemoryBotProviderStore::new(bots.clone(), providers.clone()));
     let relations = Arc::new(RelationCore::new());
     let registry = Arc::new(BotCore::with_provider_repos(
-        Arc::new(MemoryBotRepo::with_base_dir(dir.path().into())),
+        bots,
         providers.clone(),
         credentials.clone(),
         providers.clone(),
@@ -66,7 +67,7 @@ async fn fixture_with_credentials(
         providers.clone(),
         credentials,
         providers.clone(),
-        journal.clone(),
+        membership.clone(),
         registry.clone(),
         relations.clone(),
         "prod".into(),
@@ -81,7 +82,7 @@ async fn fixture_with_credentials(
         core,
         registry,
         providers,
-        journal,
+        membership,
         relations,
         provider,
         _dir: dir,
@@ -188,8 +189,8 @@ async fn assert_gateway_not_ready(outcome: CredentialRead) {
         1
     );
     assert!(
-        f.journal
-            .get(&f.provider, "stable-ref")
+        f.membership
+            .get_provider_bot_by_ref(&f.provider, "stable-ref")
             .await
             .unwrap()
             .is_none()
@@ -204,24 +205,24 @@ async fn assert_gateway_not_ready(outcome: CredentialRead) {
 }
 
 #[tokio::test]
-async fn gateway_rejects_missing_downlink_credential_before_reservation() {
+async fn gateway_rejects_missing_downlink_credential_before_writes() {
     assert_gateway_not_ready(CredentialRead::Missing).await;
 }
 
 #[tokio::test]
-async fn gateway_rejects_disabled_downlink_credential_before_reservation() {
+async fn gateway_rejects_disabled_downlink_credential_before_writes() {
     assert_gateway_not_ready(CredentialRead::Disabled).await;
 }
 
 #[tokio::test]
-async fn gateway_rejects_empty_downlink_secret_before_reservation() {
+async fn gateway_rejects_empty_downlink_secret_before_writes() {
     for secret in ["", " \t"] {
         assert_gateway_not_ready(CredentialRead::Empty(secret)).await;
     }
 }
 
 #[tokio::test]
-async fn gateway_propagates_credential_read_failure_before_reservation() {
+async fn gateway_propagates_credential_read_failure_before_writes() {
     let credentials = ReadinessCredentials::new(CredentialRead::Error);
     let f = fixture_with_credentials(
         Some("https://shared.example.com/hook"),
@@ -238,8 +239,8 @@ async fn gateway_propagates_credential_read_failure_before_reservation() {
         1
     );
     assert!(
-        f.journal
-            .get(&f.provider, "stable-ref")
+        f.membership
+            .get_provider_bot_by_ref(&f.provider, "stable-ref")
             .await
             .unwrap()
             .is_none()
@@ -270,7 +271,7 @@ async fn issuance_and_upstream_do_not_read_downlink_credentials() {
                 .await
                 .unwrap()
                 .record
-                .completed
+                .bot_uuid.len() > 0
         );
         assert_eq!(
             credentials.reads.load(std::sync::atomic::Ordering::SeqCst),
@@ -291,22 +292,18 @@ fn request(f: &Fixture, mode: ProviderRegistrationMode) -> RegisterProviderBot {
 }
 
 #[tokio::test]
-async fn upstream_persists_membership_without_delivery_binding_and_retries_stably() {
+async fn upstream_persists_membership_without_delivery_binding_and_rejects_duplicate_ref() {
     let f = fixture(None, false).await;
     let command = request(&f, ProviderRegistrationMode::Upstream);
     let first = f.core.register(command.clone()).await.unwrap();
-    let second = f.core.register(command).await.unwrap();
-    assert_eq!(first.record.bot_uuid, second.record.bot_uuid);
-    assert_eq!(first.record.bot_token, second.record.bot_token);
+    assert!(matches!(f.core.register(command).await, Err(ServiceError::Conflict(_))));
     assert!(!first.record.bot_token.starts_with("MOCK_"));
-    assert!(first.record.completed);
     assert!(
-        f.journal
-            .get(&f.provider, "stable-ref")
+        f.membership
+            .get_provider_bot_by_ref(&f.provider, "stable-ref")
             .await
             .unwrap()
-            .unwrap()
-            .completed
+            .is_some()
     );
     assert!(
         f.providers
@@ -386,7 +383,7 @@ async fn gateway_inherits_or_overrides_endpoint_without_copying_default() {
 }
 
 #[tokio::test]
-async fn token_authorization_needs_no_webhook_but_gateway_validates_before_reservation() {
+async fn token_authorization_needs_no_webhook_but_gateway_validates_before_writes() {
     let f = fixture(None, false).await;
     assert!(f.core.authorize(&f.provider, "alice").await.is_ok());
     assert!(
@@ -396,8 +393,8 @@ async fn token_authorization_needs_no_webhook_but_gateway_validates_before_reser
             .is_err()
     );
     assert!(
-        f.journal
-            .get(&f.provider, "stable-ref")
+        f.membership
+            .get_provider_bot_by_ref(&f.provider, "stable-ref")
             .await
             .unwrap()
             .is_none()
@@ -453,8 +450,8 @@ async fn self_service_cannot_redirect_shared_provider_credentials() {
         Err(ServiceError::Forbidden(_))
     ));
     assert!(
-        f.journal
-            .get(&f.provider, "stable-ref")
+        f.membership
+            .get_provider_bot_by_ref(&f.provider, "stable-ref")
             .await
             .unwrap()
             .is_none()
@@ -503,8 +500,8 @@ async fn validation_rejects_upstream_webhook_and_unsafe_gateway_before_writes() 
         command.webhook_url = Some("http://127.0.0.1/hook".into());
         assert!(f.core.register(command).await.is_err());
         assert!(
-            f.journal
-                .get(&f.provider, "stable-ref")
+            f.membership
+                .get_provider_bot_by_ref(&f.provider, "stable-ref")
                 .await
                 .unwrap()
                 .is_none()
@@ -525,87 +522,6 @@ async fn completed_retry_never_recreates_deleted_bot() {
             .await
             .unwrap()
             .is_none()
-    );
-}
-
-struct FailCompletionOnce {
-    inner: Arc<MemoryProviderRegistrationStore>,
-    fail: std::sync::atomic::AtomicBool,
-}
-
-#[async_trait::async_trait]
-impl ProviderRegistrationRepoPort for FailCompletionOnce {
-    async fn get(
-        &self,
-        provider: &str,
-        reference: &str,
-    ) -> bcs_service_api::ServiceResult<Option<ProviderRegistrationRecord>> {
-        self.inner.get(provider, reference).await
-    }
-    async fn reserve(
-        &self,
-        record: ProviderRegistrationRecord,
-    ) -> bcs_service_api::ServiceResult<ProviderRegistrationRecord> {
-        self.inner.reserve(record).await
-    }
-    async fn complete(
-        &self,
-        provider: &str,
-        reference: &str,
-    ) -> bcs_service_api::ServiceResult<()> {
-        if self.fail.swap(false, std::sync::atomic::Ordering::SeqCst) {
-            return Err(ServiceError::InternalError(
-                "injected journal write failure".into(),
-            ));
-        }
-        self.inner.complete(provider, reference).await
-    }
-}
-
-#[tokio::test]
-async fn failed_completion_is_not_success_and_retry_resumes_same_identity() {
-    let f = fixture(Some("https://shared.example.com/hook"), false).await;
-    let core = ProviderRegistrationCore::new(
-        f.providers.clone(),
-        f.providers.clone(),
-        f.providers.clone(),
-        Arc::new(FailCompletionOnce {
-            inner: f.journal.clone(),
-            fail: true.into(),
-        }),
-        f.registry.clone(),
-        f.relations.clone(),
-        "prod".into(),
-        vec![],
-        OutboundUrlGuard::strict(),
-    );
-    let command = request(&f, ProviderRegistrationMode::Gateway);
-    assert!(core.register(command.clone()).await.is_err());
-    let pending = f
-        .journal
-        .get(&f.provider, "stable-ref")
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(!pending.completed);
-    assert!(
-        f.registry
-            .try_get(&pending.bot_uuid)
-            .await
-            .unwrap()
-            .is_some()
-    );
-    let recovered = core.register(command).await.unwrap();
-    assert_eq!(pending.bot_uuid, recovered.record.bot_uuid);
-    assert_eq!(pending.bot_token, recovered.record.bot_token);
-    assert!(recovered.record.completed);
-    assert_eq!(
-        f.providers
-            .list_bindings_by_provider(&f.provider)
-            .await
-            .unwrap()
-            .len(),
-        1
     );
 }
 
@@ -643,42 +559,16 @@ async fn changed_mode_or_webhook_and_rotated_token_conflict_without_mutation() {
     );
 }
 
+
 #[tokio::test]
-async fn pending_retry_never_recreates_a_deleted_bot() {
+async fn concurrent_duplicates_conflict_but_distinct_refs_can_register() {
     let f = fixture(None, false).await;
-    let core = ProviderRegistrationCore::new(
-        f.providers.clone(),
-        f.providers.clone(),
-        f.providers.clone(),
-        Arc::new(FailCompletionOnce {
-            inner: f.journal.clone(),
-            fail: true.into(),
-        }),
-        f.registry.clone(),
-        f.relations.clone(),
-        "prod".into(),
-        vec![],
-        OutboundUrlGuard::strict(),
-    );
     let command = request(&f, ProviderRegistrationMode::Upstream);
-    assert!(core.register(command.clone()).await.is_err());
-    let pending = f
-        .journal
-        .get(&f.provider, "stable-ref")
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(!pending.completed);
-    assert!(f.registry.soft_delete(&pending.bot_uuid).await);
-    assert!(
-        core.register(command).await.is_err(),
-        "pending retry resurrected a deleted Bot"
-    );
-    assert!(
-        f.registry
-            .try_get(&pending.bot_uuid)
-            .await
-            .unwrap()
-            .is_none()
-    );
+    let (a, b) = tokio::join!(f.core.register(command.clone()), f.core.register(command.clone()));
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    assert!(matches!(a.err().or_else(|| b.err()), Some(ServiceError::Conflict(_))));
+    let mut another = command;
+    another.provider_bot_ref = "another-ref".into();
+    f.core.register(another).await.unwrap();
+    assert_eq!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().len(), 2);
 }

@@ -37,7 +37,7 @@ fn human_input_index_revisions_preserve_archives_and_pass_static_gate() -> Resul
     assert_eq!(migrations[1].sql, LEGACY_008.replace(old_key, new_key));
     assert!(check_mysql_migration_files(&index_migration_args(vec![]))?.contains("migration files check ok"));
     let active = load_selected_migrations(&index_migration_args(vec![]))?;
-    assert_eq!(active.iter().map(|migration| migration.number).collect::<Vec<_>>(), (1..=29).collect::<Vec<_>>());
+    assert_eq!(active.iter().map(|migration| migration.number).collect::<Vec<_>>(), (1..=30).collect::<Vec<_>>());
     assert!(!active.iter().any(|migration| migration.sql.contains("DROP INDEX `idx_human_input_scope_status`")));
 
     Ok(())

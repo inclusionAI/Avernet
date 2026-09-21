@@ -15,6 +15,8 @@ use bcs_service_api::{
 };
 
 use super::ids::{new_bot_uuid, new_provider_id, new_session_token};
+use bcs_service_api::bot_provider::{BotConnectionMode, BotProviderRecord};
+use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 
 #[derive(Clone)]
 pub struct ProviderCore {
@@ -23,6 +25,7 @@ pub struct ProviderCore {
     bindings: Arc<dyn ProviderBotBindingRepoPort>,
     registry: Arc<dyn BotRegistryCoreService>,
     webhook_url_guard: OutboundUrlGuard,
+    bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
 }
 
 impl ProviderCore {
@@ -54,7 +57,13 @@ impl ProviderCore {
             bindings,
             registry,
             webhook_url_guard,
+            bot_providers: None,
         }
+    }
+
+    pub fn with_bot_provider_repo(mut self, repo: Arc<dyn BotProviderRepoPort>) -> Self {
+        self.bot_providers = Some(repo);
+        self
     }
 
     async fn authenticated_provider(
@@ -179,6 +188,26 @@ impl ProviderCore {
             }
         }
 
+        if let Some(metadata) = &self.bot_providers {
+            if let Some(existing) = metadata.get_provider_bot_by_ref(provider_id, &provider_bot_ref).await? {
+                if existing.is_deleted || bot_uuid.as_deref() != Some(existing.bot_uuid.as_str())
+                    || existing.connection_mode != BotConnectionMode::Upstream
+                    || connection_mode != ProviderBotConnectionMode::Plugin
+                { return Err(ServiceError::Conflict("Provider/ref is already registered".into())); }
+            }
+            if let Some(bot_id) = &bot_uuid {
+                if let Some(existing) = metadata.get_provider_bot(bot_id).await? {
+                    if existing.is_deleted || existing.provider_id != provider_id || existing.provider_bot_ref != provider_bot_ref {
+                        return Err(ServiceError::Conflict("Bot Provider membership cannot be replaced".into()));
+                    }
+                }
+                if let Some(existing) = self.registry.try_get(bot_id).await? {
+                    if existing.created_by.as_deref().is_some_and(|existing_owner| existing_owner != owner) {
+                        return Err(ServiceError::Forbidden("Bot owner does not match registration owner".into()));
+                    }
+                }
+            }
+        }
         let downlink = parse_downlink_config(&provider.config)?;
         if matches!(connection_mode, ProviderBotConnectionMode::Gateway)
             && webhook_url.is_none() && downlink.webhook_url.is_none()
@@ -315,6 +344,13 @@ impl ProviderCore {
                     created_at: now,
                     updated_at: now,
                 };
+                if let Some(metadata) = &self.bot_providers {
+                    metadata.attach_provider_bot(BotProviderRecord {
+                        bot_uuid: bot_uuid.clone(), provider_id: provider.provider_id.clone(), provider_bot_ref: provider_bot_ref.clone(),
+                        connection_mode: BotConnectionMode::Upstream, webhook_url: None, is_deleted: false,
+                        registered_at: now, updated_at: now,
+                    }).await?;
+                }
                 info!(
                     provider_id = %provider.provider_id,
                     bot_id = %bot_uuid,
@@ -945,6 +981,18 @@ impl ProviderCoreService for ProviderCore {
 
 #[async_trait]
 impl ProviderBotCoreService for ProviderCore {
+    async fn delete_registered_provider_bot(
+        &self, provider_id: &str, provider_admin_token: &str, provider_bot_ref: &str,
+    ) -> ServiceResult<Option<bcs_service_api::core::ProviderBotDeletion>> {
+        self.authenticated_provider(provider_id, provider_admin_token).await?;
+        let Some(metadata) = &self.bot_providers else { return Ok(None); };
+        let Some(record) = metadata.get_provider_bot_by_ref(provider_id, provider_bot_ref).await? else { return Ok(None); };
+        let deleted = metadata.delete_provider_bot(provider_id, &record.bot_uuid, record.updated_at.saturating_add(1)).await?;
+        // The durable tombstone has committed. Clear runtime/token caches too.
+        self.registry.soft_delete(&record.bot_uuid).await;
+        Ok(Some(bcs_service_api::core::ProviderBotDeletion { bot_uuid: record.bot_uuid, deleted }))
+    }
+
     async fn update_provider_bot_webhook(
         &self, provider_id: &str, provider_admin_token: &str,
         provider_bot_ref: &str, webhook_url: Option<String>,
@@ -1168,13 +1216,18 @@ impl ProviderBotCoreService for ProviderCore {
         if binding.provider_id != provider_id {
             return Err(ServiceError::Forbidden("provider_id_mismatch".to_string()));
         }
-        self.bindings
+        let updated = self.bindings
             .update_binding_disabled(bot_uuid, disabled, now_ms())
             .await?
             .ok_or_else(|| ServiceError::InvalidOperation {
                 message: format!("provider bot '{}' not found", bot_uuid),
                 request_id: None,
-            })
+            })?;
+        if disabled && self.bot_providers.is_some() {
+            // The projection has committed the tombstone; evict runtime caches.
+            self.registry.soft_delete(bot_uuid).await;
+        }
+        Ok(updated)
     }
 
     async fn update_provider_bot(

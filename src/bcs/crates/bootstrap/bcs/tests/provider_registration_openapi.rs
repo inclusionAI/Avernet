@@ -34,14 +34,19 @@ async fn data(request: reqwest::RequestBuilder, expected: StatusCode) -> Value {
 
 #[tokio::test]
 async fn scoped_register_mount_preserves_legacy_and_creates_both_transports() {
-    tokio::time::timeout(std::time::Duration::from_secs(45), exercise_registration())
-        .await
-        .expect("registration integration exceeded its deadline");
+    use bcs_domain::bot_provider::DownlinkDetectionSource;
+    for source in [DownlinkDetectionSource::Binding, DownlinkDetectionSource::BotConnectionMode] {
+        tokio::time::timeout(std::time::Duration::from_secs(45), exercise_registration(source))
+            .await
+            .expect("registration integration exceeded its deadline");
+    }
 }
 
-async fn exercise_registration() {
+async fn exercise_registration(source: bcs_domain::bot_provider::DownlinkDetectionSource) {
     let dir = helpers::create_temp_bots_dir();
-    let (addr, task) = helpers::start_test_server(&dir.path().into()).await;
+    let mut config = helpers::create_test_config(&dir.path().into());
+    config.provider_http.downlink_detection_source = source;
+    let (addr, task) = helpers::start_test_server_with_config(config).await;
     let abort = task.abort_handle();
     // Ensure a failed assertion cannot leave a server listening in the test process.
     struct Stop(tokio::task::AbortHandle);
@@ -103,12 +108,10 @@ async fn exercise_registration() {
     .await;
     assert_eq!(upstream["registration"]["mode"], "upstream");
     assert_eq!(upstream["registration"]["provider_id"], id);
-    let retried = data(
-        client.post(&api).query(&upstream_query),
-        StatusCode::CREATED,
-    )
-    .await;
-    assert_eq!(upstream, retried);
+    // Provider/ref is unique, but the registration token is reusable for
+    // distinct refs. Duplicate POSTs no longer replay runtime credentials.
+    let retried = client.post(&api).query(&upstream_query).send().await.unwrap();
+    assert_eq!(retried.status(), StatusCode::CONFLICT);
     let mut connected =
         helpers::MockBot::reconnect(addr, upstream["bot_token"].as_str().unwrap()).await;
     assert_eq!(connected.bot_id, upstream["bot_uuid"].as_str().unwrap());

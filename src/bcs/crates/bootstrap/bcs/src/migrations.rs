@@ -120,6 +120,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 28, name: "provider_bot_webhook" },
     SqliteMigration { version: 29, name: "fixed_loop_runtime" },
     SqliteMigration { version: 30, name: "provider_registrations" },
+    SqliteMigration { version: 31, name: "bot_provider_storage" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -352,6 +353,29 @@ async fn apply_sqlite_migration_body(
         29 => add_sqlite_fixed_loop_runtime_schema(db).await,
         30 => {
             db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/030_provider_registrations.sql"))).await?;
+            Ok(())
+        }
+        31 => {
+            let columns = db.query(DbStatement::new("PRAGMA table_info(bcs_bots)")).await?
+                .iter().map(|row| db_get_column::<String>(row, "name")).collect::<DbResult<Vec<_>>>()?;
+            let indexes = db.query(DbStatement::new("PRAGMA index_list(bcs_bots)")).await?;
+            let mut index_present = false;
+            for row in indexes {
+                if db_get_column::<String>(&row, "name")? == "uk_bcs_bots_provider_ref_env" {
+                    if !db_get_column::<bool>(&row, "unique")? {
+                        return Err(DbError::Conversion("Bot Provider/ref index must be unique".into()));
+                    }
+                    index_present = true;
+                }
+            }
+            let added = ["provider_id", "provider_bot_ref", "connection_mode", "webhook_url", "provider_registered_at", "provider_updated_at"];
+            for (index, sql) in include_str!("../../../../migrations/sqlite/031_bot_provider_storage.sql")
+                .split(';').map(str::trim).filter(|sql| !sql.is_empty()).enumerate()
+            {
+                if index < added.len() && columns.iter().any(|column| column == added[index]) { continue; }
+                if index == added.len() && index_present { continue; }
+                db.execute(DbStatement::new(sql)).await?;
+            }
             Ok(())
         }
         _ => Ok(()),

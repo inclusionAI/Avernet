@@ -45,14 +45,14 @@ verification rejects this version. Token mode scope cannot be expanded by a requ
 
 | Mode | Membership | Runtime credential | Delivery binding | Endpoint |
 | --- | --- | --- | --- | --- |
-| upstream | Durable registration record | Real Bot token | None | Not accepted |
-| gateway | Durable registration record | Real Bot token | Provider binding | Bot override, else Provider default |
+| upstream | Provider metadata in `bcs_bots` | Real Bot token | None | Not accepted |
+| gateway | Provider metadata in `bcs_bots` | Real Bot token | Compatibility binding | Bot override, else Provider default |
 
 Gateway needs an enabled downlink using `static_bearer` or `provider_admin` auth;
 AgentPass Providers are not silently converted. Existing Provider protocol and
 credentials remain unchanged. Gateway registration requires at least one allowed
 endpoint and an existing, enabled `downlink_bcs_to_provider` credential with a
-nonblank secret before reserving an identity. Missing, disabled or blank credentials
+nonblank secret before creating an identity. Missing, disabled or blank credentials
 return 400 `invalid_request`; credential repository read failures propagate as 500.
 Issuance and upstream registration do not read or require downlink credentials;
 issuance also requires no endpoint.
@@ -61,7 +61,7 @@ distinguishes stored `webhook_url` and resolved `effective_webhook_url`.
 Only the Provider creator/owners may supply a Bot webhook override: the existing
 delivery protocol sends a Provider-wide bearer to that endpoint. Self-service
 callers may register upstream or use the configured Provider default for gateway,
-but cannot direct that bearer to their own endpoint (403 before reservation).
+but cannot direct that bearer to their own endpoint (403 before creation).
 Supporting independent self-service callbacks requires separately designed
 Bot-scoped downlink credentials and is not included in this phase.
 Legacy Provider Bot lists continue listing delivery bindings, not new upstream
@@ -70,40 +70,46 @@ memberships. A membership-list API is not part of this phase.
 ## Retry and lifecycle
 
 The immutable key is `(env, provider_id, provider_bot_ref)`. Ref/Provider IDs use
-1–128 ASCII letters, digits, underscore, hyphen, dot or colon. Retries with the same
-owner, mode, validated Bot name and override return the same ID/token. Different
-inputs yield 409; use existing management APIs for subsequent changes. A ref
-already used by the legacy Provider API is not adopted.
+1–128 ASCII letters, digits, underscore, hyphen, dot or colon. A duplicate ref
+returns 409 even for identical input; it does not replay an ID/token. A valid
+token can create multiple distinct refs. A ref already used by the legacy Provider
+API is not adopted. Use existing management APIs for endpoint changes or delivery
+switching; registration does not transfer Provider ownership or change mode.
 
-Reservation persists before Bot creation. Bot creation uses an atomic insert-only
-operation that treats tombstones as existing identities, never read-then-upsert.
-Bot registration, Human actor/owner edges,
-and optional binding are completed before the reservation is marked complete.
-Any failure returns an error; retry resumes the same identity. This is a resumable
-multi-step operation, not a cross-store atomic transaction. Pending rows must not
-be purged automatically: a partial registration may already have a Bot. Completed
-retries do not recreate deleted Bots, restore removed/disabled bindings, or roll
-back rotated credentials. Concurrent claims cannot reassign a winning reservation.
+There is no registration journal in the runtime flow. SQL atomically inserts the
+Bot with Provider metadata and, for gateway only, its compatibility binding.
+Uniqueness includes retained soft-deleted Bots. Human/owner-edge writes follow;
+errors propagate but these writes do not form one cross-store transaction.
+A failure before the Bot transaction commits can be retried. A failure or lost
+response after commit needs operator reconciliation; retry returns 409 and cannot
+recover the original runtime credential. Do not blindly change refs on an ambiguous
+failure. This explicitly replaces the earlier journal-based resume contract.
+
+Both modes persist Provider affiliation in `bcs_bots`; only gateway creates or
+updates `bcs_provider_bot_bindings`. Gateway disabled state mirrors Bot soft
+deletion, not temporary WS disconnection. The configurable delivery read source
+does not change membership or write policy.
 
 ## Deployment and verification
 
-- Apply additive MySQL migration `029_provider_registrations.sql` before deploying
-  new server code. SQLite automatically applies migration 030 on bootstrap.
-- The approved rebase renumbers only this unreleased PR's original MySQL 028 /
-  SQLite 029 migrations; upstream Fixed Loop history stays unchanged. Earlier
-  registration-draft databases need a fresh disposable database or an explicitly
-  reviewed retained-data reconciliation, never rewritten migration records.
-- The ledger contains a runtime credential like the existing Bot store. Restrict
-  DB access and backups accordingly; it is never serialized as an API response.
-- Memory mode is process-local, matching existing memory Provider stores. Durable
-  restart/retry guarantees require SQLite/MySQL.
-- Rollback leaves the additive table in place. Older servers reject v2 tokens;
-  their original v1 calls remain supported. No legacy data backfill is required.
+- Apply additive MySQL `030_bot_provider_storage.sql` before new server code;
+  SQLite applies version 031 on bootstrap. Older numbered migrations stay frozen,
+  including the historical journal migrations (MySQL 029 / SQLite 030).
+- Follow the [fenced migration and read-source rollout](../../docs/provider-bot-storage-migration.md).
+  Schema expansion alone does not backfill membership. Legacy binding reads remain
+  the default; switch only after every environment passes the audit.
+- Historical journal rows are retained for reconciliation; they may contain
+  runtime credentials, so restrict DB/backup access. No runtime flow reads/writes
+  the journal, and this change does not drop the table or delete its data.
+- Memory Provider metadata is process-local. Durable restart guarantees require
+  SQLite/MySQL; the backfill utility applies only to durable SQL storage.
+- Rollback of the read-source setting preserves dual writes. An old binary is
+  not automatically safe after new upstream memberships or lifecycle changes.
 - Contract propagation: domain v2 codec, Service API DTO/core/repo traits, application
   facade, HTTP adapter, memory/SQL stores, bootstrap/config and OpenAPI schemas.
   No new Plugin API or bridge/CLI changes are included.
 
 Tests cover legacy token rejection, scope/auth failures, wire compatibility,
-memory/SQLite reservation conformance, endpoint precedence, real owner edges,
-completion failure/retry and prevention of token rotation/deleted-Bot resurrection.
+memory/SQLite metadata and dual-write conformance, endpoint precedence, real owner
+edges, duplicate rejection and prevention of token rotation/deleted-Bot resurrection.
 MySQL query/schema checks do not substitute for a live MySQL deployment test.

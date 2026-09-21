@@ -378,11 +378,19 @@ Provider management supports optional shared endpoints and saved Bot overrides. 
 
 OpenAPI RegisterService adds optional Provider selection at issuance and mode/ref/
 webhook at redemption. Optional metadata is omitted for legacy v1 responses.
-ProviderRegistrationCoreService owns scoped authorization and resumable admission;
-ProviderRegistrationRepoPort owns first-writer reservation/completion only. Shared
-record DTOs live in types (no repo-to-core dependency). Both new traits have shared
-conformance harnesses, with Memory/SQLite implementations for the repo. No Plugin
-API changes. Token v2 purpose and mode claims cannot be widened during redemption.
+ProviderRegistrationCoreService owns scoped authorization and strict creation;
+BotProviderRepoPort replaces journal reservation/completion with Bot-owned Provider
+identity, cross-mode uniqueness and gateway-only dual writes. Duplicate scoped refs
+conflict without credential replay; different refs may share a valid register token.
+Shared receipt DTOs live in types (no repo-to-core dependency). Core and repository
+contracts have shared conformance harnesses, including Memory/SQLite implementations.
+No Plugin API changes. Token v2 purpose and mode claims cannot be widened during redemption.
+
+ProviderBotCoreService also owns authorized deletion by Bot Provider/ref metadata
+for both modes. ProviderManagement invokes this core operation before its legacy
+binding fallback and then performs channel cleanup; it never accesses the metadata
+repository directly. A missing metadata identity returns None, but storage and
+authorization errors propagate and must not trigger the fallback.
 
 BotRegistryCoreService/BotRepoPort add fail-closed `create_registration_if_absent`
 for this flow. It is atomic, preserves existing active/deleted identities and

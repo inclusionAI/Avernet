@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_service_api::{
     ActorKind, BotCandidateReadQuery, BotControlPlaneCandidate, BotControlPlaneCoreService, BotSearchCandidateQuery,
     BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneProvider,
@@ -13,6 +14,7 @@ pub struct BotControlPlaneCore {
     control_plane: Arc<dyn BotControlPlaneRepoPort>,
     providers: Arc<dyn ProviderRepoPort>,
     provider_bindings: Arc<dyn ProviderBotBindingRepoPort>,
+    bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
 }
 
 impl BotControlPlaneCore {
@@ -25,7 +27,13 @@ impl BotControlPlaneCore {
             control_plane,
             providers,
             provider_bindings,
+            bot_providers: None,
         }
+    }
+
+    pub fn with_bot_provider_repo(mut self, repo: Arc<dyn BotProviderRepoPort>) -> Self {
+        self.bot_providers = Some(repo);
+        self
     }
 
     async fn hydrate(
@@ -41,9 +49,16 @@ impl BotControlPlaneCore {
             .provider_bindings
             .list_bindings_by_bot_uuids(&physical_ids)
             .await?;
-        let mut provider_ids = bindings
-            .iter()
-            .map(|binding| binding.provider_id.clone())
+        let mut membership = bindings.iter().map(|binding| (binding.bot_uuid.clone(), binding.provider_id.clone())).collect::<HashMap<_, _>>();
+        if let Some(metadata) = &self.bot_providers {
+            for id in &physical_ids {
+                if let Some(record) = metadata.get_provider_bot(id).await? {
+                    membership.insert(id.clone(), record.provider_id);
+                }
+            }
+        }
+        let mut provider_ids = membership
+            .values().cloned()
             .collect::<HashSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -55,17 +70,13 @@ impl BotControlPlaneCore {
             .into_iter()
             .map(|provider| (provider.provider_id.clone(), provider))
             .collect::<HashMap<_, _>>();
-        let bindings = bindings
-            .into_iter()
-            .map(|binding| (binding.bot_uuid.clone(), binding))
-            .collect::<HashMap<_, _>>();
 
         Ok(records
             .into_iter()
             .map(|record| {
-                let provider = bindings
+                let provider = membership
                     .get(&record.bot_id)
-                    .and_then(|binding| providers.get(&binding.provider_id))
+                    .and_then(|provider_id| providers.get(provider_id))
                     .map(|provider| BotControlPlaneProvider {
                         provider_id: provider.provider_id.clone(),
                         name: provider.name.clone(),

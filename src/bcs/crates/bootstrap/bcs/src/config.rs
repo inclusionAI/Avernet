@@ -194,6 +194,9 @@ fn default_history_attachment_ttl() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderHttpConfig {
+    /// Select HTTP delivery identity reads; writes always maintain gateway bindings.
+    #[serde(default)]
+    pub downlink_detection_source: bcs_domain::bot_provider::DownlinkDetectionSource,
     /// Inbound HTTP header names that BCS may forward to HTTP provider webhooks.
     /// Empty by default; matching is case-insensitive.
     #[serde(default)]
@@ -1987,6 +1990,7 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
             "x-bcn-protocol-version",
         ] {
             let config = ProviderHttpConfig {
+                downlink_detection_source: Default::default(),
                 queue_persistable_headers: Vec::new(),
                 bypass_headers: vec![name.to_string()],
             };
@@ -1995,6 +1999,16 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
                 "header name {name:?} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn downlink_detection_source_defaults_to_legacy_and_rejects_unknown_values() {
+        use bcs_domain::bot_provider::DownlinkDetectionSource;
+        let legacy: ProviderHttpConfig = toml::from_str("").unwrap();
+        assert_eq!(legacy.downlink_detection_source, DownlinkDetectionSource::Binding);
+        let bots: ProviderHttpConfig = toml::from_str("downlink_detection_source = 'bot_connection_mode'").unwrap();
+        assert_eq!(bots.downlink_detection_source, DownlinkDetectionSource::BotConnectionMode);
+        assert!(toml::from_str::<ProviderHttpConfig>("downlink_detection_source = 'auto'").is_err());
     }
 
     #[test]

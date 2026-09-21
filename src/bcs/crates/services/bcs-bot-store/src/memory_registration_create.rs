@@ -6,7 +6,8 @@
 //! it, so the caller's active-Bot check fails closed. The same applies after a
 //! repository restart. Files alone cannot prove a Bot is active: deletion markers
 //! are process-local and another writer may have rotated its token or metadata.
-//! Use PersistentBotRepo for resumable durable registration; do not recover this
+//! Use PersistentBotRepo for durable creation; scoped registration does not replay
+//! credentials or resume owner-edge writes. Do not recover this
 //! window by publishing the retry's candidate or blindly loading the old file.
 
 use std::io::{ErrorKind, Write};

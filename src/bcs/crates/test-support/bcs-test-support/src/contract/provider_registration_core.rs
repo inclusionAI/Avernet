@@ -27,12 +27,11 @@ pub async fn provider_registration_core_service_contract_tests(
         webhook_url: None,
     };
     let first = core.register(request.clone()).await.unwrap();
-    assert!(first.record.completed);
     assert_eq!(first.record.owner, owner);
     assert!(!first.record.bot_token.is_empty());
     assert!(!first.record.bot_token.starts_with("MOCK_"));
     assert!(first.effective_webhook_url.is_none());
-    assert!(core.register(request.clone()).await.unwrap().record == first.record);
+    assert!(matches!(core.register(request.clone()).await, Err(ServiceError::Conflict(_))));
     let mut changed = request.clone();
     changed.bot_name = "Changed bot".into();
     assert!(matches!(

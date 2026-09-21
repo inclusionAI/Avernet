@@ -1009,6 +1009,7 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     db.execute(DbStatement::new(
         "CREATE TABLE bcs_bots (
+            connection_mode TEXT DEFAULT 'upstream',
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

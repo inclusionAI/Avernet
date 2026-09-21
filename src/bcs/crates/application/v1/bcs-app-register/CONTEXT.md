@@ -44,7 +44,9 @@ mode must be in its allowlist and `provider_bot_ref` must be nonblank.
 
 Only v1 tokens are interchangeable with legacy registration. V2 tokens are
 purpose-bound Provider capabilities and legacy registration rejects them.
-The core owns persistence, retry identity, owner edges and delivery binding.
+The core owns persistence, Provider/ref uniqueness, owner edges and delivery binding.
+Duplicate scoped refs conflict; no runtime credential is replayed. A valid token
+can create different refs. Owner-edge failures can require operator reconciliation.
 The HTTP adapter owns query parsing, status codes, envelopes and no-store headers.
 
 ## Change impact

@@ -1,5 +1,87 @@
 # Phase 1 implementation validation
 
+## Current addendum: Bot-owned Provider storage (2026-09-21)
+
+This follow-up was implemented and validated in an isolated checkout based on
+`5d52048dd29027faf304e57c63114b1902f66095`. It supersedes the historical journal,
+retry/replay, migration-version and file-splitting notes below. Root and parent
+feature checkouts are unchanged. The user subsequently authorized commit and
+push with `--no-verify` directly to PR #2358's head branch,
+`vzvince/Avernet:codex/provider-token-registration`. This authorization does not
+include a PR description edit or production migration.
+
+Provider identity/mode/webhook metadata now resides in `bcs_bots`. Gateway writes
+still maintain the legacy binding projection; upstream writes do not. A typed
+configuration selects binding-based (default) or Bot-mode delivery reads. Runtime
+registration journal reservation/replay is removed; duplicate scoped refs return
+409 and distinct refs can reuse a valid token. Bot/binding SQL writes are atomic,
+but later owner-edge failures or lost responses can require operator repair.
+Historical journal tables and credentials remain unchanged, not dropped.
+
+### Final verification
+
+Run from `src/bcs`, with `CARGO_TARGET_DIR` pointing to a separate temporary build
+directory. Both final test commands exited successfully after the last code fix:
+
+```sh
+cargo test --offline --locked --no-fail-fast \
+  -p bcs-bot -p bcs-bot-store -p bcs-app-register -p bcs-domain \
+  -p bcs-service-api -p bcs-api-http -p bcs-test-support -p bcs-admin --quiet
+
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+  -u http_proxy -u https_proxy -u all_proxy \
+  cargo test --offline --locked -p bcs --features test-utils --lib \
+  --test provider_registration_openapi --test provider_registration_config \
+  --test provider_bot_webhook_integration --test openapi_v1_mount --quiet
+
+cargo check --offline --locked -p bcs --lib --examples
+cargo run --offline --locked -p bcs-admin --quiet -- \
+  db migrate --dialect mysql --check-files
+```
+
+- Affected modules: **866 passed, zero failed, 10 ignored**.
+- Bootstrap and selected HTTP/WS integration: **302 passed, zero failed,
+  5 ignored**. Loopback server tests ran on the host.
+- Combined: **1,168 passed, zero failed, 15 ignored**; focused reruns are not
+  counted again. Registration HTTP coverage exercises both direction read sources.
+- Compilation and all **30** MySQL migration file checks passed. New additive
+  migrations are SQLite **031** / MySQL **030**; historical migrations are frozen.
+- OpenAPI validated **72 operations**. Store boundaries, port purity,
+  forbidden-symbol and interceptor checks passed, as did `git diff --check`.
+- Regression tests were observed failing before fixes for legacy gateway deletion,
+  Provider switching authorization, backfill evidence validation and application
+  repository access. Shared contracts cover metadata, compatibility bindings and
+  Provider-admin deletion. Review was author self-review, not independent review.
+
+### Remaining verification and rollout limits
+
+- Live MySQL migration/conformance was not run: Docker is installed but its
+  daemon is stopped, and no local server was available. Static checks and SQLite
+  tests are not proof of a live MySQL upgrade.
+- The complete Singlebox coverage/E2E stack was not run.
+- The full architecture gate is not green or complete. Dependency-script,
+  import and trait-naming failures were reproduced in the unchanged parent
+  checkout; the broad conformance discovery build was interrupted. A sandboxed
+  telemetry socket test failed on permissions; the final host bootstrap run
+  passed. No gates or baselines were weakened.
+- All added/modified source line counts were checked. Existing files above
+  1,000 lines remain intact per the user's explicit no-splitting instruction;
+  size-driven extractions were reverted. No size allowlist was changed, and a
+  source-size CI gate may therefore still reject these existing files.
+- Backfill requires writer fencing, an issue-free audit and a staging rehearsal.
+  The configuration switch is restart-based. Read-source rollback is supported;
+  rolling back to arbitrary old writer binaries is not automatically safe.
+
+See [the rollout and rollback guide](../../docs/provider-bot-storage-migration.md)
+for migration commands, legacy affiliation gaps, lifecycle reconciliation and
+retained-journal cleanup constraints. CLI packaging and bridge startup remain
+outside this storage follow-up.
+
+## Historical Phase 1 and rebase record
+
+The following records describe earlier commits, not the current storage model
+or current publication authorization.
+
 Branch: `codex/provider-token-registration`.
 Original base: freshly fetched `upstream/dev`, commit
 `7d39e392b99d8bf8351b029c3128d97d1c230411`.

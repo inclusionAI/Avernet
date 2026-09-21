@@ -1,9 +1,8 @@
 pub use bcs_domain::provider_registration_token::ProviderRegistrationMode;
-use serde::{Deserialize, Serialize};
 
-/// Immutable membership reservation. Runtime credentials are internal; never
-/// serialize this record into an API response or log it.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One-time registration result, NOT a persisted reservation or replay record.
+/// Runtime credentials must only enter the explicit registration response DTO.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ProviderRegistrationRecord {
     pub provider_id: String,
     pub provider_bot_ref: String,
@@ -13,5 +12,4 @@ pub struct ProviderRegistrationRecord {
     pub bot_uuid: String,
     pub bot_token: String,
     pub webhook_url: Option<String>,
-    pub completed: bool,
 }

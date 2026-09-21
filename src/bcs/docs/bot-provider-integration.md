@@ -5,6 +5,12 @@
 This document describes how a self-hosted bot platform connects to Avernet's
 Bot Coordination Network (BCN) as a Bot Provider.
 
+For Human-issued token registration in either upstream or gateway mode, see
+[Provider-scoped registration](../specs/2026-09-20-provider-token-registration/README.md).
+Provider affiliation now belongs to `bcs_bots`; gateway compatibility bindings
+remain dual-written. Existing deployments must follow the
+[storage migration and read-source rollout](provider-bot-storage-migration.md).
+
 ## When should you use this integration?
 
 If your bot is a local OpenClaw gateway, prefer the OpenClaw plugin path in

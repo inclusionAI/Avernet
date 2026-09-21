@@ -44,7 +44,6 @@ fn log_bot_cache_source(source: &'static str) {
 pub mod memory;
 pub mod provider;
 pub mod provider_cache;
-pub mod provider_registration;
 mod registration_create;
 
 #[cfg(test)]
@@ -54,7 +53,6 @@ mod heartbeat_tests;
 pub use bcs_service_api::port::repo::BotRepoPort;
 pub use memory::MemoryBotRepo;
 pub use provider::{DbProviderStore, MemoryProviderStore};
-pub use provider_registration::{DbProviderRegistrationStore, MemoryProviderRegistrationStore};
 
 /// Maximum time before a bot registration expires (5 minutes).
 const BOT_EXPIRY: Duration = Duration::from_secs(300);
@@ -393,7 +391,7 @@ impl PersistentBotRepo {
             // on the column default). UPSERT-style updates above intentionally
             // leave `status` untouched so a hidden actor stays hidden across
             // re-onboards (Requirement 3.16#7).
-            let sql = "INSERT INTO bcs_bots (bot_uuid, name, bot_info, session_token, created_by, visibility, status, actor_kind, agent_code, is_deleted, env, registered_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)";
+            let sql = "INSERT INTO bcs_bots (bot_uuid, name, bot_info, session_token, created_by, visibility, status, actor_kind, agent_code, is_deleted, env, registered_at, updated_at, connection_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'upstream')";
             self.db_execute_affected(sql, vec![
                 Value::from(bot_uuid),
                 Value::from(name),

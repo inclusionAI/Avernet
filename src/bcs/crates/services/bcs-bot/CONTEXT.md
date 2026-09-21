@@ -52,12 +52,17 @@ delivery state machine or resume nonterminal streams from durable metadata.
 
 BotCore resolves binding webhook overrides before the optional Provider default. Gateway registration validates an effective endpoint before writes; address-only PATCH validates Provider ownership and preserves capabilities. Explicit receiver failures do not select a fallback endpoint.
 
-ProviderRegistrationCore consumes typed owner/self-service policy and the independent
-ProviderRegistrationRepoPort. It reauthorizes token-scoped registration, validates
-mode/endpoint before reservation, and reads the injected ProviderCredentialRepoPort
+ProviderRegistrationCore consumes typed owner/self-service policy and BotProviderRepoPort.
+It reauthorizes token-scoped registration, validates mode/endpoint before creation,
+and reads the injected ProviderCredentialRepoPort
 for gateway readiness: the downlink credential must exist, be enabled and have a
 nonblank secret. Credential read failures propagate; issuance and upstream never
-read or require that credential. It resumes Bot/owner-edge/binding writes before
-marking completion. Upstream memberships never create delivery bindings or MOCK
-credentials. Shared conformance and failure/retry tests cover this new core;
-legacy Provider-admin registration remains unchanged.
+read or require that credential. Bot creation and gateway projection are atomic in SQL;
+Human/owner-edge writes follow and failures propagate, without journal-based resume.
+Duplicate Provider/ref returns Conflict; distinct refs may share a valid register token.
+Upstream memberships never create delivery bindings or MOCK credentials through this
+flow. Legacy Provider-admin plugin registration retains its MOCK/preserved-token rules.
+BotCore, ProviderCore and ProviderManagement synchronize gateway webhook/deletion
+changes through the injected projection. Delivery switching validates affiliation
+before owner-edge writes. Bot control-plane views hydrate upstream affiliation from
+Bot metadata without treating it as HTTP delivery or adding gateway-only privileges.

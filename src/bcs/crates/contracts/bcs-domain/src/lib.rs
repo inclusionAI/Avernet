@@ -11,6 +11,7 @@
 
 pub mod actor;
 pub mod attachment;
+pub mod bot_provider;
 pub mod channel;
 pub mod collaboration;
 pub mod edge_permission;

@@ -9,9 +9,7 @@ pub mod interceptor;
 pub mod lifecycle;
 pub mod plugin;
 pub mod port;
-pub mod provider_registration;
 pub mod repo;
 pub mod provider_registration_core;
 pub mod bot_registration_create;
-
-pub use provider_registration::provider_registration_repo_port_contract_tests;
+pub mod bot_provider;

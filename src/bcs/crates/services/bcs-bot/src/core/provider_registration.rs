@@ -4,9 +4,10 @@ use super::provider_core::parse_downlink_config;
 use async_trait::async_trait;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::core::provider_registration::*;
-use bcs_service_api::port::repo::provider_registration::ProviderRegistrationRepoPort;
+use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
+use bcs_service_api::bot_provider::BotProviderRecord;
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, ProviderAuthMode, ProviderBotBinding,
+    BotCapabilities, BotRegistryCoreService, ProviderAuthMode,
     ProviderBotBindingRepoPort, ProviderCredentialRepoPort, ProviderRecord, ProviderRepoPort,
     RelationCoreService, ServiceError, ServiceResult,
 };
@@ -16,7 +17,7 @@ pub struct ProviderRegistrationCore {
     providers: Arc<dyn ProviderRepoPort>,
     credentials: Arc<dyn ProviderCredentialRepoPort>,
     bindings: Arc<dyn ProviderBotBindingRepoPort>,
-    registrations: Arc<dyn ProviderRegistrationRepoPort>,
+    registrations: Arc<dyn BotProviderRepoPort>,
     registry: Arc<dyn BotRegistryCoreService>,
     relations: Arc<dyn RelationCoreService>,
     env: String,
@@ -30,7 +31,7 @@ impl ProviderRegistrationCore {
         providers: Arc<dyn ProviderRepoPort>,
         credentials: Arc<dyn ProviderCredentialRepoPort>,
         bindings: Arc<dyn ProviderBotBindingRepoPort>,
-        registrations: Arc<dyn ProviderRegistrationRepoPort>,
+        registrations: Arc<dyn BotProviderRepoPort>,
         registry: Arc<dyn BotRegistryCoreService>,
         relations: Arc<dyn RelationCoreService>,
         env: String,
@@ -129,54 +130,7 @@ impl ProviderRegistrationCore {
         Ok(Some(url.clone()))
     }
 
-    async fn check_binding(&self, record: &ProviderRegistrationRecord) -> ServiceResult<bool> {
-        let existing = self
-            .bindings
-            .get_binding_by_provider_ref(&record.provider_id, &record.provider_bot_ref)
-            .await?;
-        let by_bot = self
-            .bindings
-            .get_binding_by_bot_uuid(&record.bot_uuid)
-            .await?;
-        match (existing, by_bot) {
-            (None, None) => Ok(false),
-            (Some(binding), Some(by_bot))
-                if record.mode == ProviderRegistrationMode::Gateway
-                    && binding == by_bot
-                    && binding.bot_uuid == record.bot_uuid
-                    && !binding.disabled
-                    && binding.webhook_url == record.webhook_url =>
-            {
-                Ok(true)
-            }
-            _ => Err(ServiceError::Conflict(
-                "registration delivery binding has changed or ref is already used".into(),
-            )),
-        }
-    }
 
-    async fn check_bot(&self, record: &ProviderRegistrationRecord) -> ServiceResult<()> {
-        let bot = self
-            .registry
-            .try_get(&record.bot_uuid)
-            .await?
-            .ok_or_else(|| {
-                ServiceError::Conflict("registered Bot is missing or has been removed".into())
-            })?;
-        if bot.created_by.as_deref() != Some(record.owner.as_str())
-            || self
-                .registry
-                .try_load_token(&record.bot_uuid)
-                .await?
-                .as_deref()
-                != Some(record.bot_token.as_str())
-        {
-            return Err(ServiceError::Conflict(
-                "registered Bot ownership or credential has changed".into(),
-            ));
-        }
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -210,74 +164,27 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             ));
         }
         let effective_webhook_url = self.endpoint(&provider, &command).await?;
-        // Do not adopt a Bot that was registered through another registration API.
-        if self
-            .registrations
-            .get(&command.provider_id, &command.provider_bot_ref)
-            .await?
-            .is_none()
-            && self
-                .bindings
-                .get_binding_by_provider_ref(&command.provider_id, &command.provider_bot_ref)
-                .await?
-                .is_some()
-        {
-            return Err(ServiceError::Conflict(
-                "provider_bot_ref is already registered through another API".into(),
-            ));
+        // No reservation journal and no credential replay. The database enforces
+        // Provider/ref uniqueness across both modes, including deleted Bots.
+        if self.bindings.get_binding_by_provider_ref(&command.provider_id, &command.provider_bot_ref).await?.is_some() {
+            return Err(ServiceError::Conflict("provider_bot_ref is already registered".into()));
         }
-        let mut record = self
-            .registrations
-            .reserve(ProviderRegistrationRecord {
-                provider_id: command.provider_id.clone(),
-                provider_bot_ref: command.provider_bot_ref.clone(),
-                owner: command.owner.clone(),
-                mode: command.mode,
-                bot_name: command.bot_name.clone(),
-                bot_uuid: new_bot_uuid(),
-                bot_token: new_session_token(),
-                webhook_url: command.webhook_url.clone(),
-                completed: false,
-            })
-            .await?;
-        if record.owner != command.owner
-            || record.mode != command.mode
-            || record.bot_name != command.bot_name
-            || record.webhook_url != command.webhook_url
-        {
-            return Err(ServiceError::Conflict(
-                "provider_bot_ref has different immutable registration inputs".into(),
-            ));
-        }
-        let binding_exists = self.check_binding(&record).await?;
-        if record.completed {
-            self.check_bot(&record).await?;
-            if record.mode == ProviderRegistrationMode::Gateway && !binding_exists {
-                return Err(ServiceError::Conflict(
-                    "registered delivery binding has been removed".into(),
-                ));
-            }
-            return Ok(ProviderRegistrationResult {
-                record,
-                effective_webhook_url,
-            });
-        }
-        // Create-only is atomic at the store. A delayed concurrent retry must
-        // not turn a stale "missing" read into an upsert of completed state.
-        // Tombstones also count as existing; no lossy tombstone lookup is used.
-        self.registry
-            .create_registration_if_absent(
-                record.bot_uuid.clone(),
-                BotCapabilities {
-                    name: Some(record.bot_name.clone()),
-                    visibility: "protected".into(),
-                    ..BotCapabilities::default()
-                },
-                &record.owner,
-                &record.bot_token,
-            )
-            .await?;
-        self.check_bot(&record).await?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_millis() as u64)
+            .map_err(|_| ServiceError::InternalError("system clock is before epoch".into()))?;
+        let record = ProviderRegistrationRecord {
+            provider_id: command.provider_id, provider_bot_ref: command.provider_bot_ref,
+            owner: command.owner, mode: command.mode, bot_name: command.bot_name,
+            bot_uuid: new_bot_uuid(), bot_token: new_session_token(),
+            webhook_url: command.webhook_url,
+        };
+        self.registrations.create_provider_bot(BotProviderRecord {
+            bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(),
+            provider_bot_ref: record.provider_bot_ref.clone(), connection_mode: record.mode,
+            webhook_url: record.webhook_url.clone(), is_deleted: false, registered_at: now, updated_at: now,
+        }, BotCapabilities {
+            name: Some(record.bot_name.clone()), visibility: "protected".into(), ..BotCapabilities::default()
+        }, &record.owner, &record.bot_token).await?;
         self.registry
             .ensure_human_actor(&record.owner, &record.owner)
             .await?;
@@ -288,32 +195,6 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
                 &self.env,
             )
             .await?;
-        if record.mode == ProviderRegistrationMode::Gateway && !binding_exists {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|value| value.as_millis() as u64)
-                .map_err(|_| ServiceError::InternalError("system clock is before epoch".into()))?;
-            let binding = ProviderBotBinding {
-                bot_uuid: record.bot_uuid.clone(),
-                provider_id: record.provider_id.clone(),
-                provider_bot_ref: record.provider_bot_ref.clone(),
-                webhook_url: record.webhook_url.clone(),
-                disabled: false,
-                created_at: now,
-                updated_at: now,
-            };
-            if let Err(error) = self.bindings.insert_binding(binding).await {
-                // A concurrent identical request may already have committed it.
-                // Never treat an unrelated write failure as successful.
-                if !self.check_binding(&record).await? {
-                    return Err(error);
-                }
-            }
-        }
-        self.registrations
-            .complete(&record.provider_id, &record.provider_bot_ref)
-            .await?;
-        record.completed = true;
         Ok(ProviderRegistrationResult {
             record,
             effective_webhook_url,

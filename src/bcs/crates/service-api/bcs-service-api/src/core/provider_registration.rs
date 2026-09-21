@@ -31,8 +31,9 @@ pub trait ProviderRegistrationCoreService: Send + Sync {
         owner: &str,
     ) -> ServiceResult<Vec<ProviderRegistrationMode>>;
 
-    /// Reauthorizes and resumes a scoped immutable registration. Failures must
-    /// propagate; retries must not allocate another Bot or change ownership.
+    /// Reauthorizes and creates a scoped Bot. Duplicate Provider/ref conflicts;
+    /// no credentials are replayed. Human/owner-edge failures propagate and may
+    /// require explicit reconciliation after the Bot transaction has committed.
     async fn register(
         &self,
         command: RegisterProviderBot,
