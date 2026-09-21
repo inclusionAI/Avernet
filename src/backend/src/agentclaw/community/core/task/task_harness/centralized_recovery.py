@@ -757,6 +757,18 @@ def _maybe_propagate_hung(
     被上方 ``g.status==HUNG`` 短路拦截、不再调度,保留反失控兜底。在途 BBS(``bbs_owner``
     非空)亦跳过,不重复派发。``loop_round`` 只在根确认进入 BBS 时递增。
     """
+    # 分布式 Relay 不走中心化 HUNG 冒泡：当前节点 HUNG 只代表本棒失败，
+    # 不允许把父级/根节点回写为 HUNG（避免后棒影响前棒事实）。
+    graph = self._graph.query_task_dashboard(task_id)
+    config = graph.extend_props.get("execution_config", {}) or {}
+    if config.get("orchestration_mode") == "relay":
+        logger.info(
+            "[task][hung-propagate] task=%s node=%s relay 模式跳过父级/根 HUNG 冒泡",
+            task_id,
+            node_id,
+        )
+        return
+
     # 任意 HUNG 都必须沿依赖链冒泡到根。根 HUNG 后再由统一入口进入 BBS，
     # 不允许 miss_depth_exhausted 之类的特殊分支把根留在 PLANNING/EXECUTING。
     cur = node_id

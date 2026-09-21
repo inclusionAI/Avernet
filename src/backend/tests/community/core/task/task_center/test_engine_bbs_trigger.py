@@ -283,6 +283,25 @@ def test_engine_schedule_bbs_notify_fires_at_recoverable_intercept(svc):
     assert g.status != Status.HUNG  # graph.status 仍是进行态镜像，根 HUNG 是 BBS 可恢复入口
 
 
+def test_engine_harness_hung_relay_mode_does_not_propagate_to_parent(svc):
+    """Relay 模式当前棒 HUNG 不允许回写父级状态。"""
+    g = svc.initialize_graph(_task_info("t6", max_depth=2))
+    svc.add_task_nodes([_child("c1", "t6")], parent_node_id="t6")
+    g.extend_props["execution_config"] = {"orchestration_mode": "relay"}
+    g.extend_props["loop_round"] = 1
+    svc.update_task_node_info(_patch("t6", "t6", status=Status.DONE))
+    svc.update_task_node_info(
+        _patch("t6", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="bot1")
+    )
+    eng = _engine(svc)
+
+    eng._hung_and_escalate("t6", "c1", "exec_stuck")
+
+    assert svc._get_node(g, "c1").status == Status.HUNG
+    assert svc._get_node(g, "t6").status == Status.DONE
+    assert svc._get_node(g, "t6").run_info.extend_props.get("hung_reason") is None
+
+
 def test_engine_harness_exhausted_schedules_bbs_recoverable(svc):
     """harness 耗尽(exec_stuck)→节点 HUNG 冒泡到根→根 HUNG 升 BBS 可恢复态。
 
