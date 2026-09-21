@@ -398,10 +398,10 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         try:
             await self._engine.on_report(patch)
         finally:
-            if record is not None:
-                self._fallback_persist_audit()
-            else:
-                self._set_pending_audit(None)
+            # 走到这里 payload 必非 None(上面 388 已拦截并 return)→ record 必非 None;
+            # 审计经图仓储同事务落库,未消费则由 _fallback_persist_audit 兜底
+            # (其自身处理 None/无 repo two 种缺省)。
+            self._fallback_persist_audit()
         logger.info("[task_callback] report_result, finish")
 
     async def ingest(self, data: TaskCallbackData) -> None:

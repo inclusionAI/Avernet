@@ -358,3 +358,172 @@ class TestZeroCase:
 def test_ingest_parse_error_without_repository_is_noop():
     cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine())
     _run(cb.ingest_parse_error({"flow_id": "flow-1"}, "bad embedded json"))
+
+
+# ===== 幂等/审计/兜底落库(T4b 补充:覆盖率循环 batch 4)=====
+class _ProcessRepo:
+    """完整 callback repo 桩:upsert + find_by_event_id + upsert_error，行为可注入。"""
+
+    def __init__(self, prior=None, raise_finder=False, raise_upsert=False):
+        self.calls: list = []
+        self.error_calls: list = []
+        self._prior = prior
+        self._raise_finder = raise_finder
+        self._raise_upsert = raise_upsert
+
+    def upsert(self, rec):
+        self.calls.append(rec)
+        if self._raise_upsert:
+            raise RuntimeError("db down")
+        return rec
+
+    def find_by_event_id(self, event_id):
+        if self._raise_finder:
+            raise RuntimeError("lookup down")
+        return self._prior
+
+    def upsert_error(self, rec):
+        self.error_calls.append(rec)
+        return rec
+
+
+class TestEventIdempotency:
+    def test_derive_event_id_without_loop_task_id_returns_none(self):
+        # ingest-only 事件(无 loop_task_id 路由键)→ 无幂等键
+        from agentclaw.community.core.task.task_runner.callback_adapter import (
+            _derive_event_id,
+        )
+        assert _derive_event_id({"result": {"success": True}}, "ingest") is None
+
+    def test_start_run_skips_on_processed_event(self):
+        prior = type("Prior", (), {"process_status": "PROCESSED"})()
+        repo = _ProcessRepo(prior=prior)
+        engine = RecordingEngine()
+        cb = TaskLoopCallback(CallbackAdapter(), engine, callback_repo=repo)
+        _run(cb.start_run(_data(loop_task_id="t1::c1")))
+        assert engine.starts == []      # 幂等重放:不推进编排核
+        assert repo.calls == []         # 也不再落库(该事件已 PROCESSED)
+
+    def test_finder_failure_fails_open(self):
+        # 幂等键查询异常不阻断回投(fail-open:视为未处理,继续推进)
+        repo = _ProcessRepo(raise_finder=True)
+        engine = RecordingEngine()
+        cb = TaskLoopCallback(CallbackAdapter(), engine, callback_repo=repo)
+        assert cb._is_already_processed("evt-1") is False
+
+    def test_report_result_with_finder_failure_still_progresses(self):
+        repo = _ProcessRepo(raise_finder=True)
+        engine = RecordingEngine()
+        cb = TaskLoopCallback(CallbackAdapter(), engine, callback_repo=repo)
+        _run(cb.report_result(_data(loop_task_id="t1::c1", success=True, data="ok")))
+        assert len(engine.reports) == 1          # 查询失败 → 照常 on_report
+        assert len(repo.calls) == 1              # 审计照常落库(fallback 兜底)
+
+
+class TestIngestAudit:
+    def test_ingest_non_dict_or_no_repo_skips_silently(self):
+        repo = _ProcessRepo()
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine(), callback_repo=repo)
+        _run(cb.ingest(TaskCallbackData(data="not-a-dict")))   # 非 dict → 不落
+        assert repo.calls == []
+        cb_no_repo = TaskLoopCallback(CallbackAdapter(), RecordingEngine())
+        _run(cb_no_repo.ingest(TaskCallbackData(data={"k": 1})))  # 无 repo → 不落、不抛
+
+    def test_ingest_upsert_failure_is_best_effort(self):
+        repo = _ProcessRepo(raise_upsert=True)
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine(), callback_repo=repo)
+        _run(cb.ingest(_data(loop_task_id="t1::c1")))
+        # 落库异常仅告警,不向回投调用方抛
+
+    def test_ingest_parse_error_persists_upsert_error_row(self):
+        repo = _ProcessRepo()
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine(), callback_repo=repo)
+        raw = {
+            "flow_id": "fl-1",
+            "ext_info": {"flow_runs": {"origin_session_key": "S-9", "status": "failed"}},
+        }
+        _run(cb.ingest_parse_error(raw, "boom: bad json"))
+        rec = repo.error_calls[0]
+        assert rec.invoker == "claw_mind"
+        assert rec.run_id == "fl-1" and rec.node_id == ""
+        assert rec.main_session_id == "S-9"          # origin_session_key 优先
+        assert rec.exec_error == "boom: bad json"
+        assert rec.extend_props is raw               # 原始上报数据完整保留
+        assert '"flow_id": "fl-1"' in rec.orig_callback_data
+
+    def test_ingest_parse_error_maps_origin_session_id_and_junk_raw(self):
+        repo = _ProcessRepo()
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine(), callback_repo=repo)
+        _run(cb.ingest_parse_error(
+            {"flow_id": "fl-2", "ext_info": {"flow_runs": {"origin_session_id": "S-8"}}},
+            "e1",
+        ))
+        assert repo.error_calls[0].main_session_id == "S-8"   # 无 key → 退 origin_session_id
+        _run(cb.ingest_parse_error("not-a-dict", "e2"))       # 非 dict 原始报文 → 空串记审计
+        rec = repo.error_calls[1]
+        assert rec.run_id == "" and rec.main_session_id == ""
+        assert rec.orig_callback_data == ""
+
+    def test_ingest_parse_error_without_repo_only_logs(self):
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine())  # 无 repo → 仅日志
+        _run(cb.ingest_parse_error({"flow_id": "x"}, "e"))             # 不抛、不落
+
+
+class TestAdaptPollerNodeOverride:
+    def test_explicit_node_id_overrides_loop_task_id_suffix(self):
+        adapter = CallbackAdapter()
+        d = TaskCallbackData(data={
+            "loop_task_id": "t1::c1", "node_id": "n9",
+            "workflow_type": "single_bot", "result": {"success": True, "data": "x"},
+        })
+        patch = adapter.adapt(d)
+        assert patch.task_id == "t1" and patch.node_id == "n9"   # 显式 node_id 优先
+
+
+class TestPendingAuditContext:
+    def test_consume_pending_audit_returns_and_clears(self):
+        from agentclaw.community.core.task.task_runner.callback_adapter import (
+            _PENDING_CALLBACK_AUDIT,
+        )
+        cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine())
+        marker = object()
+        _PENDING_CALLBACK_AUDIT.set(marker)
+        assert cb._consume_pending_audit() is marker     # 取走后清空
+        assert cb._consume_pending_audit() is None       # 空 context → None,不清残留
+
+    def test_start_run_non_dict_payload_clears_pending_audit(self):
+        # payload 非 dict → 无 event_id/审计记录:must 清 pending context(不残留上一次未消费审计)。
+        # contextvars.set 只作用于当前 task 的上下文副本 → 断言必须在同一协程内做。
+        from agentclaw.community.core.task.task_runner.callback_adapter import (
+            _PENDING_CALLBACK_AUDIT,
+        )
+        engine = RecordingEngine()
+        cb = TaskLoopCallback(CallbackAdapter(), engine)
+        stale = object()
+
+        async def _scenario():
+            _PENDING_CALLBACK_AUDIT.set(stale)
+            await cb.start_run(TaskCallbackData(data="not-a-dict"))
+            return _PENDING_CALLBACK_AUDIT.get(), len(engine.starts)
+
+        leftover, starts = _run(_scenario())
+        assert leftover is None                           # 非 dict 起跑路径清空残留
+        assert starts == 1                                # 仍走 on_start(幂等推进)
+        assert engine.starts[0].task_id == "" and engine.starts[0].node_id == ""
+        # 无 loop_task_id → 空路由键 patch(artifact/仓储层不落,与既有非 dict 语义一致)
+
+
+class TestFallbackPersistAudit:
+    def test_fallback_persist_survives_engine_exception(self):
+        class _BoomEngine:
+            async def on_report(self, patch):
+                raise RuntimeError("engine down")
+
+        repo = _ProcessRepo()
+        cb = TaskLoopCallback(CallbackAdapter(), _BoomEngine(), callback_repo=repo)
+        try:
+            _run(cb.report_result(_data(loop_task_id="t1::c1", success=True, data="x")))
+        except RuntimeError:
+            pass
+        # 引擎抛错也必须落审计(finally 兜底),否则幂等键丢失导致重放
+        assert len(repo.calls) == 1
