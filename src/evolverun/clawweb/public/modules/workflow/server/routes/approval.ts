@@ -18,11 +18,32 @@ import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-ha
 import { parseApprovalCardContent } from "../../shared/approval-display.js";
 import { invalidateResolvedCache } from "./internal/approval-cards.js";
 
+export type DingTalkIdentityResult =
+  | { ok: true; userId: string }
+  | { ok: false; error: string };
+
+export type ApprovalRouterOptions = {
+  dingTalk?: {
+    clientId: string;
+    corpId: string;
+    exchangeAuthCode: (authCode: string) => Promise<DingTalkIdentityResult>;
+  };
+};
+
 // ── Route factory ──────────────────────────────────────────────────────
 
-export function createApprovalRouter(db: IDatabase): Router {
+export function createApprovalRouter(db: IDatabase, options: ApprovalRouterOptions = {}): Router {
   const router = Router();
   const repo = new ApprovalCardRepository(db);
+
+  router.get("/auth/dingtalk/config", (_req: Request, res: Response) => {
+    const config = options.dingTalk;
+    if (!config?.clientId || !config.corpId) {
+      res.status(503).json({ error: "Service Unavailable", message: "钉钉免登未配置" });
+      return;
+    }
+    res.json({ clientId: config.clientId, corpId: config.corpId });
+  });
 
   /**
    * POST /api/approval/auth/dingtalk — exchange DingTalk authCode for userId
@@ -30,9 +51,8 @@ export function createApprovalRouter(db: IDatabase): Router {
    * Body: { authCode: string }
    * Returns: { ok: boolean, userId?: string, error?: string }
    *
-   * In community/open-source mode there is no DingTalk backend; the caller
-   * should fall back to URL-based empId.  We return ok=false so the frontend
-   * can gracefully degrade.
+   * Deployments provide the DingTalk identity adapter at composition time.
+   * Missing configuration fails closed; URL parameters are never identity.
    */
   router.post("/auth/dingtalk", asyncHandler(async (req: Request, res: Response) => {
     const { authCode } = req.body as { authCode?: string };
@@ -40,9 +60,11 @@ export function createApprovalRouter(db: IDatabase): Router {
       res.status(400).json({ ok: false, error: "缺少 authCode" });
       return;
     }
-    // Community stub: no DingTalk OAuth backend configured.
-    // Internal deployments override this route with a real token exchange.
-    res.json({ ok: false, error: "社区版未配置钉钉认证" });
+    if (!options.dingTalk) {
+      res.status(503).json({ ok: false, error: "钉钉免登未配置" });
+      return;
+    }
+    res.json(await options.dingTalk.exchangeAuthCode(authCode));
   }));
 
   /**
@@ -102,10 +124,10 @@ export function createApprovalRouter(db: IDatabase): Router {
   /**
    * GET /api/approval/:id — get approval details
    *
-   * Query param: empId (optional) — if provided, checks if this person is an approver
+   * Query param: empId (optional) — retained only as an untrusted display hint for old clients
    *
    * Returns the approval card data including card fields, approvers, and status.
-   * empId is not required to view the card — it's only needed for action authorization.
+   * empId is not required to view the card and never authorizes an action.
    *
    * card_fields_json supports two shapes:
    *   - Legacy: Array<{label, value}> → rendered as traditional card
@@ -185,9 +207,9 @@ export function createApprovalRouter(db: IDatabase): Router {
   /**
    * POST /api/approval/:id/resolve — execute approval action
    *
-   * Body: { empId: string, action: "approve" | "reject", comment?: string }
+   * Body: { authCode: string, action: "approve" | "reject", comment?: string }
    *
-   * 1. Verify empId is an authorized approver
+   * 1. Exchange the short-lived authCode and verify the authenticated user is an approver
    * 2. Record the action in the DB
    * 3. Evaluate approval policy
    * 4. Update status if policy is met
@@ -200,15 +222,15 @@ export function createApprovalRouter(db: IDatabase): Router {
       return;
     }
 
-    const { empId, action, comment, detail } = req.body as {
-      empId?: string;
+    const { authCode, action, comment, detail } = req.body as {
+      authCode?: string;
       action?: string;
       comment?: string;
       detail?: Record<string, unknown>;
     };
 
-    if (!empId) {
-      res.status(400).json({ error: "Bad Request", message: "缺少 empId" });
+    if (!authCode) {
+      res.status(401).json({ error: "Unauthorized", message: "无法验证钉钉身份" });
       return;
     }
 
@@ -216,6 +238,18 @@ export function createApprovalRouter(db: IDatabase): Router {
       res.status(400).json({ error: "Bad Request", message: "action 必须是 'approve' 或 'reject'" });
       return;
     }
+
+    if (!options.dingTalk) {
+      res.status(503).json({ error: "Service Unavailable", message: "钉钉免登未配置" });
+      return;
+    }
+
+    const identity = await options.dingTalk.exchangeAuthCode(authCode);
+    if (identity.ok === false) {
+      res.status(401).json({ error: "Unauthorized", message: identity.error });
+      return;
+    }
+    const empId = identity.userId;
 
     // Build comment: if detail is provided, store as structured JSON; otherwise plain text
     const commentToStore = (detail && typeof detail === "object" && Object.keys(detail).length > 0)
@@ -265,7 +299,6 @@ export function createApprovalRouter(db: IDatabase): Router {
    * GET /api/approval/:id/status — poll approval status
    *
    * Lightweight endpoint for status polling (no card data, just status).
-   * Query param: empId (optional, for approver check)
    */
   router.get("/:id/status", asyncHandler(async (req: Request, res: Response) => {
     const id = parseInt(String(req.params.id), 10);
