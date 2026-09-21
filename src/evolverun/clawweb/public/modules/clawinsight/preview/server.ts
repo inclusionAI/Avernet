@@ -1,9 +1,8 @@
 /** Explicit loopback-only UI acceptance fixture; never imported by production. */
 import express from 'express';
-import { DatabaseSync } from 'node:sqlite';
+import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
-import { sqliteDialect } from '@avernet/clawweb-shared/server/db/dialect';
-import type { IDatabase } from '@avernet/clawweb-shared/server/db';
+import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
 import { initializeMonitoringSqlite } from '../server/services/monitoring/schema';
 import { MonitoringRepository } from '../server/repositories/monitoring-repository';
 import { SqlMonitoringBotDirectory } from '../server/repositories/monitoring-bot-directory';
@@ -12,18 +11,7 @@ import { createMonitoringRouter } from '../server/routes/monitoring';
 import { parseCheck, parseDiagnosis } from '../server/services/monitoring/validation';
 
 export async function createPreviewApp() {
-  const sqlite = new DatabaseSync(':memory:');
-  const db: IDatabase = {
-    dbType: 'sqlite', dialect: sqliteDialect,
-    async query<T>(sql: string, params: unknown[] = []) { return sqlite.prepare(sql).all(...params as never[]) as T[]; },
-    async exec(sql, params) {
-      if (params === undefined) { sqlite.exec(sql); return { affectedRows: 0 }; }
-      try { const result = sqlite.prepare(sql).run(...params as never[]); return { affectedRows: Number(result.changes), insertId: Number(result.lastInsertRowid) }; }
-      catch (error) { if ((error as { errcode?: number }).errcode === 2067) Object.assign(error as object, { code: 'SQLITE_CONSTRAINT_UNIQUE' }); throw error; }
-    },
-    async transaction(fn) { sqlite.exec('BEGIN'); try { const value = await fn(this); sqlite.exec('COMMIT'); return value; } catch (error) { sqlite.exec('ROLLBACK'); throw error; } },
-    async close() { sqlite.close(); },
-  };
+  const db = new SqliteDatabase(new Database(':memory:'));
   await initializeMonitoringSqlite(db);
   await db.exec(`CREATE TABLE ac_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT, entity_id TEXT, env TEXT,
     bot_name TEXT, owner_id TEXT, owner_name TEXT, avernet_tenant TEXT, is_delete INTEGER DEFAULT 0)`);

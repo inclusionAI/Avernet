@@ -1,6 +1,6 @@
 # ClawWeb test CI
 
-From `src/evolverun/clawweb`, use Node 22.14.0 to match CI:
+From `src/evolverun/clawweb`, use Node 20.19.0:
 
 ```sh
 npm ci --no-audit --no-fund
@@ -9,13 +9,6 @@ npm run ci:check
 node --test scripts/ci/run-tests.test.mjs
 npm run test:ci
 ```
-
-The private development workspace requires Node >=22.14.0; CI pins 22.14.0 for
-reproducibility. The monitoring preview HTTP tests import `node:sqlite`, which
-Node 20 does not provide. This changes the development/test baseline, not the
-published packages' production runtime contracts. After switching Node major
-versions, rerun `npm ci` so native dependencies such as `better-sqlite3` match
-the selected runtime.
 
 This workflow only needs this repository. Packages are discovered from the existing
 workspace list. Build precedes tests because package exports reference `dist`.
@@ -31,9 +24,10 @@ files, excluding tests, fixtures and generated output. Shared code executed only
 through another package is not counted as that package's own coverage. Incomplete
 coverage is labelled explicitly; do not interpret it as complete application coverage.
 
-GitHub publishes the summary and uploads reports even after test failure. Install,
-build, check and test failures all fail the workflow. No coverage threshold is
-introduced. Existing business test failures must be tracked separately; this change does not repair or skip them.
+GitHub publishes the summary and uploads reports even after test failure. Only
+the added test step is advisory during observation; install/build/check remain
+required. No coverage threshold is introduced. Existing business test failures
+must be tracked separately; this change does not repair or skip them.
 
 ## Local entry
 

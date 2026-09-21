@@ -22,9 +22,9 @@ done
 
 node -e '
   const [major, minor] = process.versions.node.split(".").map(Number);
-  const supported = (major === 22 && minor >= 14) || major > 22;
+  const supported = (major === 20 && minor >= 19) || (major === 22 && minor >= 12) || major > 22;
   if (!supported) {
-    console.error(`Node.js ${process.versions.node} is unsupported; use Node 22.14.0 (CI version) or newer`);
+    console.error(`Node.js ${process.versions.node} is unsupported; use 20.19.0 or >=22.12.0`);
     process.exit(1);
   }
 '

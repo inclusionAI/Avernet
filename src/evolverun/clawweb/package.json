@@ -21,8 +21,5 @@
     "istanbul-lib-coverage": "3.2.2",
     "istanbul-lib-report": "3.0.1",
     "istanbul-reports": "3.2.0"
-  },
-  "engines": {
-    "node": ">=22.14.0"
   }
 }
