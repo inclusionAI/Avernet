@@ -74,10 +74,27 @@ def config_service(tmp_path):
     )
     UserMCPConfig.__table__.create(engine)
     repo = UserMCPConfigRepository(_FileSqliteDB(engine))
+    bot_config_repo = MagicMock()
+    bot_config_repo.list_by_owner_and_server_code.return_value = {}
+    center = MagicMock()
+    center.get_mcp_detail.return_value = {
+        "serverCode": SERVER,
+        "runMode": "REMOTE",
+        "endpoints": [
+            {
+                "env": "PROD",
+                "networkType": "INTERNET",
+                "transportProtocol": "SSE",
+                "url": "https://example.test/mcp",
+            }
+        ],
+    }
     return MCPConfigService(
         user_mcp_config_repo=repo,
-        mcp_center=MagicMock(),
+        bot_mcp_config_repo=bot_config_repo,
+        mcp_center=center,
         bot_repo=MagicMock(),
+        capability_reader=MagicMock(),
         mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
         secret_resolver=MagicMock(),
     )
@@ -86,7 +103,19 @@ def config_service(tmp_path):
 @pytest.fixture
 def market():
     m = MagicMock()
-    m.get_mcp_detail.return_value = {"serverCode": SERVER, "name": "Weather"}
+    m.get_mcp_detail.return_value = {
+        "serverCode": SERVER,
+        "name": "Weather",
+        "runMode": "REMOTE",
+        "endpoints": [
+            {
+                "env": "PROD",
+                "networkType": "INTERNET",
+                "transportProtocol": "SSE",
+                "url": "https://example.test/mcp",
+            }
+        ],
+    }
     return m
 
 

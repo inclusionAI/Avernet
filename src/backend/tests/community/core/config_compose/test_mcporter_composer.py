@@ -76,6 +76,21 @@ def test_remote_without_secret_has_clean_headers() -> None:
     assert server.headers == {"content-type": "application/json"}
 
 
+def test_bot_url_override_replaces_selected_center_url_but_keeps_transport() -> None:
+    composer = McporterComposer()
+    item = McpComposeInput(
+        mcp_data=_remote_mcp(protocol="SSE"),
+        endpoint_env="PROD",
+        transport_protocol="SSE",
+        url_override="https://bot.example.test/custom-mcp",
+    )
+
+    server = composer.compose_server(item)
+
+    assert server.endpoint == "https://bot.example.test/custom-mcp"
+    assert server.transport == "sse"
+
+
 def test_authorization_api_key_is_appended_to_url() -> None:
     composer = McporterComposer()
     item = McpComposeInput(
@@ -377,6 +392,39 @@ def test_teclaw_network_primary_office_beats_internet_streamable() -> None:
     )
     assert server.endpoint == "https://office-sse"
     assert server.transport == "sse"
+
+
+def test_manifest_transport_is_strict_even_with_teclaw_network_priority() -> None:
+    item = McpComposeInput(
+        mcp_data=_multi(
+            _ep("OFFICE", "STREAMABLE_HTTP", "https://office-http"),
+            _ep("INTERNET", "SSE", "https://internet-sse"),
+        ),
+        endpoint_env="PROD",
+        transport_protocol="SSE",
+        strict_transport_protocol=True,
+        network_priority=TECLAW_MCP_NETWORK_PRIORITY,
+    )
+
+    server = McporterComposer().compose_server(item)
+
+    assert server.endpoint == "https://internet-sse"
+    assert server.transport == "sse"
+
+
+def test_manifest_transport_missing_after_apply_fails_without_fallback() -> None:
+    item = McpComposeInput(
+        mcp_data=_multi(
+            _ep("OFFICE", "STREAMABLE_HTTP", "https://office-http"),
+        ),
+        endpoint_env="PROD",
+        transport_protocol="SSE",
+        strict_transport_protocol=True,
+        network_priority=TECLAW_MCP_NETWORK_PRIORITY,
+    )
+
+    with pytest.raises(McporterComposeError, match="no usable SSE"):
+        McporterComposer().compose_server(item)
 
 
 def test_teclaw_transport_breaks_tie_within_network() -> None:

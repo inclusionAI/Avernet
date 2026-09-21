@@ -85,6 +85,10 @@ from agentclaw.community.api.bot_config_manifest_apply_service import (
     BotConfigManifestApplyServiceProtocol,
 )
 from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
+from agentclaw.community.core.mcp.mcp_config_service_protocol import (
+    MCPConfigServiceProtocol as CoreMCPConfigServiceProtocol,
+)
+from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
     DirectActivationServiceProtocol,
 )
@@ -877,6 +881,15 @@ class BotManagementModule(Module):
         would get.
         """
         return lambda: injector.get(MCPAuthServiceProtocol)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_mcp_config_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], CoreMCPConfigServiceProtocol]:
+        """The Center-aware validator and effective-config resolver for MCP apply."""
+        return lambda: injector.get(MCPConfigService)
 
     @singleton
     @provider

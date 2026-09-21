@@ -1,4 +1,4 @@
-"""Service API Protocol for MCP per-user unified config.
+"""Service API Protocol for inherited user config and Bot MCP overrides.
 
 Re-export only. The Protocol is defined in its owning core module
 (``core/mcp/mcp_config_service_protocol.py``) so the concrete service can

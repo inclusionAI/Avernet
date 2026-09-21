@@ -130,6 +130,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_config_surface    # BotConfigCoords, the shared config-category address type
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.mcp_default_exclusion
   - agentclaw.community.core.repository.protocols.center_skill_access
   - agentclaw.community.core.repository.protocols.space_skill_version # published Space Skill read contract consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
@@ -309,9 +310,11 @@ materialized-only set again.
 
 Installation (`ac_bot_skill_installation` / `ac_bot_mcp_installation`) is the
 single source of truth for a Bot's active capabilities, and four seams keep it
-that way:
+that way. `ac_bot_mcp_config` is the adjacent desired-state fact for explicit
+Bot MCP connection overrides; installation and one MCP override change share
+the same UoW transaction.
 
-- **One writer.** Each Installation/exclusion table's SQL lives in exactly one
+- **One writer.** Each Installation/exclusion/Bot-MCP-config table's SQL lives in exactly one
   command module under
   `core/repository/implementations/skill_center/tables/`; only the
   `CapabilityDesiredStateRepository` unit of work composes them. An

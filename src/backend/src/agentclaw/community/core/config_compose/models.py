@@ -207,6 +207,8 @@ class McpComposeInput:
     headers: dict[str, str] = field(default_factory=dict)
     endpoint_env: str = "PROD"
     transport_protocol: str | None = None
+    url_override: str | None = None
+    strict_transport_protocol: bool = False
     network_priority: tuple[str, ...] | None = None
     """Network types in descending priority for endpoint selection (e.g. teclaw's
     ``("OFFICE", "INTERNET", "INTRANET")``). When set, the composer picks the

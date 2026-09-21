@@ -75,16 +75,18 @@ def skill_release_scope(result: DesiredStateMutation) -> ProjectionScope:
 def mcp_claim_scope(result: DesiredStateMutation) -> ProjectionScope:
     """Project only the MCP codes the committed mutation actually claimed."""
     return ProjectionScope(
-        mcp=bool(result.mcp_codes),
+        mcp=bool(result.mcp_codes or result.updated_mcp_codes),
         claimed_mcp=result.mcp_codes,
+        updated_mcp=result.updated_mcp_codes,
     )
 
 
 def mcp_release_scope(result: DesiredStateMutation) -> ProjectionScope:
-    """Project only the MCP codes the committed mutation actually released."""
+    """Release removed installs and refresh overrides that fell back to defaults."""
     return ProjectionScope(
-        mcp=bool(result.mcp_codes),
+        mcp=bool(result.mcp_codes or result.updated_mcp_codes),
         released_mcp=result.mcp_codes,
+        updated_mcp=result.updated_mcp_codes,
     )
 
 

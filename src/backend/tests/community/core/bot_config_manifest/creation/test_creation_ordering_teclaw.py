@@ -134,6 +134,7 @@ def _build(db):
             script_service=scripts,
             activation_service=FakeActivationService(),
             mcp_auth_service=FakeMcpAuth(),
+            mcp_config_service=object(),
             identity_service=PlatformIdentity(store),
             upload_service=FakeSkillUploadService(),
             capability_reader=FakeCapabilityReader(),

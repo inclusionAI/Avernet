@@ -865,10 +865,18 @@ class TestSyncMcpDesiredState:
     @pytest.mark.asyncio
     async def test_release_only_reuses_device_and_still_declares_empty_scope(self):
         svc, plugin = self._make_svc()
-        svc._mcp_sync_service.remove_mcp_detail = AsyncMock(return_value={"success": True})
+        events = []
+
+        async def remove(**_kwargs):
+            events.append("remove")
+            return {"success": True}
+
+        svc._mcp_sync_service.remove_mcp_detail = AsyncMock(side_effect=remove)
+        plugin.sync_all_mcp_servers.side_effect = lambda _codes: events.append("declare") or True
         assert await svc.project_mcps(
             claimed=frozenset(), released=frozenset({"mcp.old"}), declared=set()
         )
+        assert events == ["declare", "remove"]
         assert svc._mcp_sync_service.remove_mcp_detail.await_args.kwargs["device_sync"] is plugin
         svc._resolver.resolve_for_bot.assert_called_once()
         plugin.sync_all_mcp_servers.assert_called_once_with([])

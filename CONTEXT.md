@@ -233,3 +233,13 @@ _避免使用_: 技能名称、来源定位符
 **外部版本键（External Version Key）**:
 技能中心或 Skill Repo 用于精确寻址某个已发布技能版本的不可变字符串，例如 `1.0.0`。它通过外部技能映射关联到 OCB 技能版本，不参与 OCB 内部版本排序，也不能充当 OCB 版本身份。
 _避免使用_: 版本序号、展示版本、latest
+
+## Manifest MCP 配置
+
+**Bot MCP 覆盖配置（Bot MCP Override）**:
+通过 Manifest 为一个 Bot 和一个 MCP 显式声明的连接配置。它只保存覆盖字段，不复制用户配置或 MCP Center 元数据。
+_避免使用_: 用户 MCP 配置、最终运行时配置
+
+**有效 MCP 配置（Effective MCP Configuration）**:
+针对一个 Bot 和一个 MCP，将 Bot 覆盖、用户配置、MCP Center 元数据及平台规则解析后得到的运行时连接配置。
+_避免使用_: Manifest 原文、MCP 安装关系

@@ -524,18 +524,27 @@ TOOLS.md 的必要性根源。仓库里的 `bcs-cli` 正是这个双件套的现
 ```yaml
 mcp:
   - server_code: mcp.ant.homistudio.meetmcp
+    config:
+      endpoint_env: PRE
+      transport_protocol: STREAMABLE_HTTP
+      url: https://meeting-bot.example.com/mcp
+      headers:
+        X-Project: meeting-assistant
 ```
 
 **含义**：让这批 bot 都带上会议信息能力。
 
-**只接受注册表引用**，不接受任意 URL——`server_code` 指向平台 MCP 注册表
-（`mcp.ant.homistudio.meetmcp` 是注册表真实条目）。**凭证永不出现在
-manifest**：需要 `api_key` 的 server，其配置仍走现有统一配置存储；若必需
-配置缺失，该条目记 `failed` 并给出明确错误（「server X 需要先配置
-api_key」），不影响其余条目。
+`server_code` 只接受平台注册表引用；`config.url` 是该已登记 MCP 在这个 Bot 上
+的连接地址覆盖，不会注册新的 MCP。`config` 只支持 URL、非敏感明文 Header、
+`endpoint_env` 和 `transport_protocol`；`api_key` 仍走现有 user config。
+Manifest 显式协议必须能在 Center 的对应环境中找到，不能 fallback 到另一协议。
+自定义 URL 的后端静态 server 配置不会继承 user/default/平台托管凭据；需要的
+非敏感 Header 必须在同一条目的 `config.headers` 中显式声明。容器级 mcporter
+`headerPolicies` 仍会按 host 动态生效，当前不能由单个条目关闭。
 
-**apply 做什么**：校验 `server_code` 存在于注册表且租户有权限（复用现有
-`check_mcp_permission` 路径）→ 确保它在该 bot 的 MCP 集合中。
+**apply 做什么**：校验注册、权限及 Center 端点组合 → 在同一事务中收敛该 Bot
+的 MCP 安装关系和 override 配置 → best-effort 投影。配置字段优先级是
+Manifest/Bot > user config > Center/default；`headers: {}` 会屏蔽 user headers。
 
 **交付**：ARCA 系走现有按-MCP 推送（设备 `/api/mcp` 路径）；teclaw 在
 artifact 组装时进入 `mcp.servers[]`，凭证按现状于 compose 时从平台配置

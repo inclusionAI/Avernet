@@ -189,6 +189,26 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         """
         ...
     @abstractmethod
+    def set_mcp_override(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        server_code: str,
+        config: dict | None,
+        platform_default_codes: frozenset[str],
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
+        """Install one direct MCP and replace its Bot override atomically."""
+        ...
+
+    @abstractmethod
+    def get_mcp_overrides(self, *, bot_id: str, owner_id: str) -> dict[str, dict]:
+        """Return the Bot's explicit overrides keyed by server code."""
+        ...
+
+    @abstractmethod
     def remove_mcp(
         self,
         *,
@@ -285,6 +305,18 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     def list_installed_mcps(
         self, *, bot_id: str, owner_id: str, engine_type: str | None = None
     ) -> set[str]: ...
+    @abstractmethod
+    def set_managed_mcp_codes(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        server_codes: set[str],
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> set[str]:
+        """Return candidate codes whose SkillSet ownership forbids direct writes."""
+        ...
     @abstractmethod
     def set_skill_set_active(
         self,

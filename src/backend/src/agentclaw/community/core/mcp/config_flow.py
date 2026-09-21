@@ -189,6 +189,19 @@ async def write_unified_config(
     if not mcp_data:
         raise McpServerNotFoundError(server_code)
 
+    candidate = config_service.validate_user_config_update(
+        user_id=user_id,
+        server_code=server_code,
+        api_key=api_key,
+        headers=headers,
+        endpoint_env=endpoint_env,
+        transport_protocol=normalized_tp,
+    )
+    if not candidate["valid"]:
+        if candidate.get("kind") == "center_unavailable":
+            raise McpMarketUnavailableError(candidate["error"])
+        raise McpConfigValueError(candidate["error"])
+
     old_config = config_service.update_user_unified_config(
         user_id=user_id,
         server_code=server_code,

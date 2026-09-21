@@ -313,6 +313,8 @@ def test_mcp_delegations_go_through_transport():
         custom_headers=None,
         endpoint_env="PROD",
         transport_protocol=None,
+        url_override=None,
+        strict_transport_protocol=False,
     )
     mt.probe_mcp.assert_called_once_with(transport, "a")
     mt.remove_mcp.assert_called_once_with(transport, "a")

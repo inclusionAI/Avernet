@@ -3014,6 +3014,24 @@ async def test_a_declared_claim_delivers_only_that_code():
     )
 
     assert factory.service.deliveries == [(frozenset({"mcp.weather"}), frozenset())]
+
+
+@pytest.mark.asyncio
+async def test_removing_direct_override_refreshes_when_skill_still_supplies_mcp():
+    factory = _RuntimeFactory()
+    runtime = _scoped_projector(factory=factory)
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(
+            mcp=True,
+            released_mcp=frozenset({"mcp.weather"}),
+            updated_mcp=frozenset({"mcp.weather"}),
+        ),
+    )
+
+    assert factory.service.deliveries == [(frozenset({"mcp.weather"}), frozenset())]
     # Declaration stays total even though delivery did not.
     assert factory.service.mcp_codes == {
         "mcp.weather",
@@ -4416,6 +4434,23 @@ async def test_an_mcp_only_scope_does_not_touch_the_skill_runtime():
     assert pool.verify_calls == []
     # ...while the half it did declare still ran in full.
     assert factory.service.mcp_codes is not None
+
+
+@pytest.mark.asyncio
+async def test_an_mcp_config_update_redelivers_only_the_updated_server():
+    factory = _RuntimeFactory()
+    runtime = _scoped_projector(factory=factory)
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(
+            mcp=True,
+            updated_mcp=frozenset({"mcp.weather"}),
+        ),
+    )
+
+    assert factory.service.deliveries == [(frozenset({"mcp.weather"}), frozenset())]
 
 
 @pytest.mark.asyncio
