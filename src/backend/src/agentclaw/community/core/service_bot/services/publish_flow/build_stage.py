@@ -142,11 +142,14 @@ class BuildStageRunner:
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {bot_id}")
 
+        # Build declares only Skill convergence. Per-domain file-backed engines
+        # therefore leave Draft MCP state untouched before snapshot; whole-artifact
+        # engines still recompose and deliver the complete persisted artifact.
         try:
             await self._runtime_projector.project(
                 bot_id=str(bot["bot_id"]),
                 owner_id=str(bot["owner_id"]),
-                scope=ProjectionScope.everything(),
+                scope=ProjectionScope(skills=True),
             )
         except Exception:
             logger.exception(
