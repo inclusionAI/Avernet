@@ -1269,6 +1269,7 @@ dependencies = [
  "bcs-domain",
  "bcs-friend",
  "bcs-group",
+ "bcs-group-context",
  "bcs-group-store",
  "bcs-jwt",
  "bcs-message-store",
