@@ -9,6 +9,13 @@ from typing import Any
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import (
+    CollaboratorServiceProtocol,
+)
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_collaborator.protocols import (
+    resolve_operable_permission_level,
+)
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.caller_identity.contracts import (
     CALLER_IDENTITY_CAPABILITY,
@@ -68,9 +75,11 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         mcp_sync_service: CallerMcpSyncProtocol,
         passport_plugin: PassportPlugin | None = None,
         cli_scope_reconciler: CliPassportScopeReconciler | None = None,
+        collaborator_service: CollaboratorServiceProtocol | None = None,
     ) -> None:
         self._bot_repository = bot_repository
         self._collaborator_repository = collaborator_repository
+        self._collaborator_service = collaborator_service
         self._lock_repository = lock_repository
         self._mcp_provider = mcp_provider
         self._repository = repository
@@ -692,6 +701,33 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         is_owner = str(bot.get("owner_id") or "") == actor_id
         if is_owner:
             return bot, True
+        if self._collaborator_service is not None:
+            # Gate-aligned adjudication: the operable ladder (explicit row,
+            # then the Space-derived grant, then the COSEC revocation recheck)
+            # answers the same question the operator gates answer, so a
+            # Space member no longer passes the gate and 404s one call later,
+            # and an editor removed from the Space is refused here as there.
+            # Fails closed on a lookup blip, like ``bot_access``/``gate.py``:
+            # the direction of the guess decides what a database outage does.
+            try:
+                level = resolve_operable_permission_level(
+                    self._collaborator_service,
+                    bot=bot,
+                    user_id=actor_id,
+                    owner_id=str(bot.get("owner_id") or ""),
+                    env=str(bot["env"]),
+                )
+            except Exception:
+                logger.warning(
+                    "[caller_identity] operable-level lookup failed for "
+                    "bot=%s user=%s; refusing the read",
+                    bot.get("bot_id"),
+                    actor_id,
+                )
+                raise CallerIdentityPermissionError from None
+            if level < PermissionLevel.MEMBER:
+                raise CallerIdentityPermissionError
+            return bot, False
         collaborator = self._collaborator_repository.get_by_bot_and_user(
             int(bot["id"]),
             actor_id,
