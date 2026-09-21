@@ -661,7 +661,12 @@ impl ConnectService for DbConnectService {
             })
     }
 
-    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<u64>> {
+    async fn revoke_friend(
+        &self,
+        caller: &str,
+        target: &str,
+        request_auth: Option<RequestAuthHeaders>,
+    ) -> ServiceResult<Vec<u64>> {
         // D12 friend edges are `grant_ref_id == target.default` (caller→target)
         // or `grant_ref_id == caller.default` (target→caller, Bot↔Bot). Revoke
         // exactly those friend edges; leave other (profile/rules) edges alone.
@@ -704,6 +709,37 @@ impl ConnectService for DbConnectService {
                     self.edge_grants.revoke_grant(g.edge_id, &self.env).await?;
                     revoked.push(g.edge_id);
                 }
+            }
+        }
+
+        // 11d: best-effort friend-auth-sync revoke trigger (human→bot). The
+        // inbound principal (the user doing the unfriend) is forwarded so the
+        // backend can authenticate the work-order teardown call.
+        let caller_kind = actor_kind_of(caller);
+        let target_kind = actor_kind_of(target);
+        if caller_kind == ActorKind::Human && target_kind == ActorKind::Bot {
+            let owner_work_no = self
+                .owner_work_no_from_bot_config(target, &self.env)
+                .await
+                .unwrap_or_default();
+            let command = FriendAuthSyncCommand {
+                env: self.env.clone(),
+                bot_id: target.to_string(),
+                owner_work_no,
+                human_work_no: caller
+                    .strip_prefix("human_")
+                    .unwrap_or(caller)
+                    .to_string(),
+                action: FriendAuthSyncAction::Revoke,
+                request_id: None,
+                request_auth: request_auth.clone(),
+            };
+            if let Err(err) = self.friend_auth_sync.sync(command).await {
+                warn!(
+                    error = %err,
+                    bot_id = %target,
+                    "friend-auth-sync revoke failed (best-effort)"
+                );
             }
         }
 
@@ -1378,7 +1414,9 @@ impl EdgePermissionFriendSyncService for DbConnectService {
             }
         };
 
-        self.revoke_friend(caller, target).await.map(|_| ())
+        // The edge-permission sync path has no inbound HTTP principal; pass
+        // None (the revoke trigger degrades to a best-effort, auth-less call).
+        self.revoke_friend(caller, target, None).await.map(|_| ())
     }
 }
 
@@ -3291,7 +3329,7 @@ mod tests {
         assert_eq!(created.edge_ids.len(), 1);
         assert!(eg.has_friend_edge("human_1", "x:unf", "dev").await);
 
-        let n = svc.revoke_friend("human_1", "x:unf").await.expect("revoke ok");
+        let n = svc.revoke_friend("human_1", "x:unf", None).await.expect("revoke ok");
         assert_eq!(n.len(), 1, "Human→Bot: revoked exactly 1 friend edge");
         assert!(!eg.has_friend_edge("human_1", "x:unf", "dev").await);
     }
@@ -3305,7 +3343,7 @@ mod tests {
         svc.create_connect("x:uA", "x:uB", None, None).await.expect("connect");
         assert!(eg.has_friend_edge("x:uA", "x:uB", "dev").await);
 
-        let n = svc.revoke_friend("x:uA", "x:uB").await.expect("revoke ok");
+        let n = svc.revoke_friend("x:uA", "x:uB", None).await.expect("revoke ok");
         assert_eq!(n.len(), 2, "Bot↔Bot: revoked both friend edges");
         assert!(!eg.has_friend_edge("x:uA", "x:uB", "dev").await);
     }
@@ -3334,7 +3372,7 @@ mod tests {
         .await
         .expect("insert writer edge");
 
-        let n = svc.revoke_friend("human_1", "x:keep").await.expect("revoke");
+        let n = svc.revoke_friend("human_1", "x:keep", None).await.expect("revoke");
         assert_eq!(n.len(), 1, "only the friend (default) edge revoked");
         let active = eg.list_active_grants("human_1", "x:keep", "dev").await;
         assert_eq!(active.len(), 1, "writer edge survives");

@@ -213,6 +213,7 @@ impl ConnectService for RecordingConnectService {
         &self,
         _: &str,
         _: &str,
+        _: Option<bcs_service_api::RequestAuthHeaders>,
     ) -> ServiceResult<Vec<u64>> {
         unreachable!("not used")
     }

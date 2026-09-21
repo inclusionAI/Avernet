@@ -62,7 +62,7 @@ impl ConnectService for NoopConnectService {
     async fn get_request(&self, _: &str) -> ServiceResult<PermissionRequest> {
         Err(bcs_service_api::ServiceError::FriendRequestNotFound("noop".to_string()))
     }
-    async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> { Ok(vec![]) }
+    async fn revoke_friend(&self, _: &str, _: &str, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<Vec<u64>> { Ok(vec![]) }
     async fn list_friends(&self, _: &str) -> ServiceResult<Vec<FriendListEntry>> { Ok(vec![]) }
     async fn list_friends_paginated(&self, _: &str, _: FriendListQuery) -> ServiceResult<FriendEntriesPage> {
         Ok(FriendEntriesPage { items: vec![], total: 0 })

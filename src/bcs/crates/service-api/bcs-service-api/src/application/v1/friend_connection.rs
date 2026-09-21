@@ -162,6 +162,10 @@ pub struct ListFriendConnections {
 pub struct DeleteFriendConnection {
     pub caller: AuthenticatedCaller,
     pub target_actor: FriendConnectionActor,
+    /// Forwarded gateway principal + trace headers so the revoke
+    /// friend-auth-sync trigger (Task 11d) can authenticate the backend
+    /// work-order call.
+    pub request_auth: Option<RequestAuthHeaders>,
 }
 
 #[async_trait]

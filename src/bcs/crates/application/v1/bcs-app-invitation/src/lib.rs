@@ -1031,7 +1031,7 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
         let caller = Self::caller_default_actor(&command.caller)?;
         let target = Self::actor_to_internal(&command.target_actor);
         let revoked = connect
-            .revoke_friend(&caller, &target)
+            .revoke_friend(&caller, &target, command.request_auth.clone())
             .await
             .map_err(map_service_error)?;
         Ok(DeleteResult {

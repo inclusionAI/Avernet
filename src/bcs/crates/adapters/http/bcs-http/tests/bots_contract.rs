@@ -99,7 +99,12 @@ impl ConnectService for RecordingSearchConnectService {
         Err(ServiceError::FriendRequestNotFound("not configured".to_string()))
     }
 
-    async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> {
+    async fn revoke_friend(
+        &self,
+        _: &str,
+        _: &str,
+        _: Option<bcs_service_api::RequestAuthHeaders>,
+    ) -> ServiceResult<Vec<u64>> {
         Ok(vec![])
     }
 

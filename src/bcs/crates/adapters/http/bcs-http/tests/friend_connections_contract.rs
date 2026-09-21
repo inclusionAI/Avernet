@@ -129,7 +129,12 @@ impl ConnectService for RecordingConnectService {
             })
     }
 
-    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<u64>> {
+    async fn revoke_friend(
+        &self,
+        caller: &str,
+        target: &str,
+        _request_auth: Option<bcs_service_api::RequestAuthHeaders>,
+    ) -> ServiceResult<Vec<u64>> {
         self.revoke_commands
             .lock()
             .await

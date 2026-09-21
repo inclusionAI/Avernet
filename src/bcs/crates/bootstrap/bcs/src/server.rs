@@ -4576,8 +4576,7 @@ impl BcsServer {
         let friend_svc: Arc<dyn bcs_service_api::FriendCoreService> = Arc::new(
             FriendCore::with_repo(friend_repo)
                 .with_relation(relation_svc.clone())
-                .with_edge_permission_sync(edge_permission_friend_sync)
-                .with_friend_auth_sync(friend_auth_sync.clone()),
+                .with_edge_permission_sync(edge_permission_friend_sync),
         );
         let friend_request_svc: Arc<dyn bcs_service_api::FriendRequestCoreService> =
             Arc::new(FriendRequestCore::with_repo(
