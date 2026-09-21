@@ -532,21 +532,15 @@ below.
   until `AGENTCLAW_SECRET_*` carries a master key every PUT answers the loud
   503 rather than storing plaintext. That is the guard working, not a defect
   — the alternative is tenant tokens in the clear.
-- **`mcp[].config` was removed from schema v1, and the gap it exposed is
-  recorded rather than quietly patched.** `manifest-schema` §3.1 defined it as
-  per-bot configuration *"the same shape as the existing MCP config API"* —
-  which cannot be true of both halves. That API writes `ac_user_mcp_config`,
-  keyed `(user_id, server_code)`, and its write calls
-  `sync_mcp_detail_to_all_bots`: applying **one** bot's manifest would have
-  changed MCP configuration for **every** bot its owner has, a blast radius no
-  other category has and one §3.2's per-category area rule never sanctioned. Its
-  payload is `api_key` and `custom_headers`, which design §4.5 keeps out of a
-  manifest regardless. What *is* per-bot — `ac_bot_mcp_installation`, the
-  enabled-server set — is exactly what §3.2 names as the category's area and
-  exactly what apply converges. The follow-up, additive and non-breaking, is
-  `ac_bot_mcp_call_config`'s `call_type`: genuinely per-bot, but outside §3.2's
-  area and carrying draft/lock-epoch/irreversibility semantics an idempotent
-  re-apply has to answer for first.
+- **`mcp[].config` is Bot-scoped desired state.** It is a closed object containing
+  only `url`, non-sensitive plaintext `headers`, `endpoint_env`, and
+  `transport_protocol`. Apply validates the registered `server_code`, permission,
+  and Center endpoint combination, then writes the installation and the explicit
+  override to `ac_bot_mcp_installation` / `ac_bot_mcp_config` in one transaction.
+  Missing fields inherit `ac_user_mcp_config`; Manifest fields win per field.
+  `headers` is the exception with complete-field semantics: present replaces user
+  headers, including `{}`. `api_key`, secret references, arbitrary MCP registration,
+  and stdio launch commands remain outside the Manifest contract.
 - **Fetch-time limits are absent from the write surface on purpose.** Schema
   §5's download sizes, unpacked sizes, archive file counts and timeouts cannot
   be enforced by a surface that never fetches; they are **the fetcher's
@@ -698,6 +692,7 @@ consumes:
   - "SkillPackageValidator (core.skill_center.skill_package) — the manual-upload package gate the `skills` materialiser validates fetched bytes with, so an installed skill is an uploaded one (W5)"
   - "ManifestContentServiceProtocol.latest_receipt — the per-source receipt lookup the entry fetch pipeline asks (W5)"
   - "MCPAuthServiceProtocol (api) — the same permission check DirectActivationService consults, asked up front so a category is all-or-nothing"
+  - "MCPConfigServiceProtocol (core.mcp) — validates Bot overrides against Center metadata before any MCP category write"
   - "ManifestContentRepositoryProtocol (core.repository) — persistence for the append-only provenance log"
   - "TeclawEngineTestProtocol (core.bot_startup_script, bound to core.bot_management TeclawProvisionService) — the single definition of 'runs in a teclaw container'"
   - "VALID_IDENTITY_FILES / CLAUDE_CODE_IDENTITY_FILES (core.services.identity) — the identity vocabulary, imported lazily because that module pulls in the device dispatcher"
@@ -726,6 +721,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_management.token_vault
   - agentclaw.community.core.bot_management.utils  # resolve_agent_code — the creation job asks whether completion's *second* write (the owner relationship) actually landed, since the bot record alone cannot tell it
   - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults
+  - agentclaw.community.core.mcp.mcp_config_service_protocol  # Center-aware validation for Bot MCP overrides
   - agentclaw.community.core.repository
   - agentclaw.community.core.resources.services.file_service  # the workspace file surface's admission constants, re-asked at resolve (W6)
   - agentclaw.community.core.services.identity  # the device-backed IdentityFilePort forwards to it (TYPE_CHECKING only — the module reaches the device dispatcher graph at import)

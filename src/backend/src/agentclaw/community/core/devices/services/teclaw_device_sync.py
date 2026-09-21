@@ -196,6 +196,8 @@ class TeclawDeviceSyncService(DeviceSync):
         custom_headers: dict[str, str] | None = None,
         endpoint_env: str = "PROD",
         transport_protocol: str | None = None,
+        url_override: str | None = None,
+        strict_transport_protocol: bool = False,
     ) -> bool:
         return self._compose_and_deliver(caller="sync_single_mcp")["success"]
 
@@ -237,7 +239,7 @@ class TeclawDeviceSyncService(DeviceSync):
                 ComposeRequest(
                     entity_id=self._entity_id,
                     bot_id=self._bot_id,
-                    user_id=self._user_id,
+                    user_id=self._owner_id,
                     engine_type=self._engine_type,
                     entity_type=self._entity_type,
                     occasion=occasion,
@@ -252,14 +254,15 @@ class TeclawDeviceSyncService(DeviceSync):
             # Enrich the composer's (empty) engine_ext with the backend identity/stage
             # keys, mirroring the publish producer so the engine sees the same shape on
             # every push. Runtime edits only touch the live/draft bot → stage=draft.
-            # owner_id tracks ComposeRequest.user_id (= self._user_id), as in the
-            # producer (engine_ext.owner_id == compose user_id, not entity_id).
+            # owner_id tracks ComposeRequest.user_id (= the persisted Bot owner),
+            # as in the producer; the triggering caller remains transport/audit
+            # context and must not select owner-scoped configuration.
             artifact = dataclasses.replace(
                 artifact,
                 engine_ext=enrich_engine_ext(
                     artifact.engine_ext,
                     bot_id=self._bot_id,
-                    owner_id=self._user_id,
+                    owner_id=self._owner_id,
                     bot_name=self._bot_name,
                     stage=PublishStage.DRAFT,
                 ),

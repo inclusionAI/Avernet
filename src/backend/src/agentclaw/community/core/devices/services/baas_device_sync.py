@@ -205,11 +205,15 @@ class BaasDeviceSyncService(DeviceSync):
         custom_headers: "dict[str, str] | None" = None,
         endpoint_env: str = "PROD",
         transport_protocol: "str | None" = None,
+        url_override: "str | None" = None,
+        strict_transport_protocol: bool = False,
     ) -> bool:
         return mcp_transport.push_single_mcp(
             self._transport, mcp_data,
             api_key=api_key, custom_headers=custom_headers,
             endpoint_env=endpoint_env, transport_protocol=transport_protocol,
+            url_override=url_override,
+            strict_transport_protocol=strict_transport_protocol,
         )
 
     def sync_remove_mcp(self, server_code: str) -> bool:

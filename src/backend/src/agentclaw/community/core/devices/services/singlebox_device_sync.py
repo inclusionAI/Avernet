@@ -70,6 +70,8 @@ class SingleboxDeviceSyncService(DeviceSync):
         custom_headers: Optional[dict[str, str]] = None,
         endpoint_env: str = "PROD",
         transport_protocol: Optional[str] = None,
+        url_override: Optional[str] = None,
+        strict_transport_protocol: bool = False,
     ) -> bool:
         return self._delegate.sync_single_mcp(
             mcp_data,
@@ -77,6 +79,8 @@ class SingleboxDeviceSyncService(DeviceSync):
             custom_headers=custom_headers,
             endpoint_env=endpoint_env,
             transport_protocol=transport_protocol,
+            url_override=url_override,
+            strict_transport_protocol=strict_transport_protocol,
         )
 
     def sync_remove_mcp(self, server_code: str) -> bool:

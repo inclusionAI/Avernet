@@ -77,6 +77,28 @@ class _DelegatingActivation(ActivationPort):
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
 
+    def get_mcp_overrides(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, dict]:
+        return self._inner.get_mcp_overrides(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        )
+
+    def set_managed_mcp_codes(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        server_codes: set[str],
+    ) -> set[str]:
+        return self._inner.set_managed_mcp_codes(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            server_codes=server_codes,
+        )
+
     # ── writes, each pinned to this family's projection choice ───────────
 
     async def activate_mcp(
@@ -85,6 +107,24 @@ class _DelegatingActivation(ActivationPort):
         return await self._inner.activate_mcp(
             server_code=server_code, bot_id=bot_id, owner_id=owner_id,
             actor_id=actor_id, project=self._PROJECT,
+        )
+
+    async def set_mcp_override(
+        self,
+        *,
+        server_code: str,
+        config: dict | None,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        return await self._inner.set_mcp_override(
+            server_code=server_code,
+            config=config,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            project=self._PROJECT,
         )
 
     async def deactivate_mcp(

@@ -74,6 +74,9 @@ if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see b
     from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
         MCPAuthServiceProtocol,
     )
+    from agentclaw.community.core.mcp.mcp_config_service_protocol import (
+        MCPConfigServiceProtocol,
+    )
     from agentclaw.community.core.skill_center.capability_state_contract import (
         BotCapabilityStateReaderProtocol,
     )
@@ -341,6 +344,7 @@ def build_materialisers(
     script_service: BotStartupScriptServiceProtocol,
     activation_service: ActivationPort,
     mcp_auth_service: MCPAuthServiceProtocol,
+    mcp_config_service: MCPConfigServiceProtocol,
     identity_service: IdentityFilePort,
     upload_service: SkillPackageUploadPort,
     capability_reader: BotCapabilityStateReaderProtocol,
@@ -403,7 +407,7 @@ def build_materialisers(
 
     materialisers: tuple[Materialiser, ...] = (
         ScriptMaterialiser(script_service),
-        McpMaterialiser(activation_service, mcp_auth_service),
+        McpMaterialiser(activation_service, mcp_auth_service, mcp_config_service),
         IdentityMaterialiser(identity_service, entry_fetcher),
         SkillsMaterialiser(
             upload_service,

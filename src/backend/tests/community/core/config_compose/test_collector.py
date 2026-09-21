@@ -274,13 +274,70 @@ def test_mcps_run_collect_then_per_server_merge():
     svc.mcp_center.get_mcp_detail.return_value = {"runMode": "REMOTE", "endpoints": []}
     mcp_cfg = MagicMock()
     mcp_cfg.build_mcp_sync_payload.return_value = ("kee", {"h": "v"}, "PROD", "http")
+    mcp_cfg.get_bot_override.side_effect = lambda **kwargs: (
+        {"url": "https://bot-a.example.test/mcp"}
+        if kwargs["server_code"] == "a"
+        else None
+    )
+    mcp_cfg.validate_bot_override.return_value = {"valid": True, "error": None}
     inputs = _collector(skill_set_service=svc, mcp_config_service=mcp_cfg).mcps(_req())
     assert [i.mcp_data["server_code"] for i in inputs] == ["a", "b"]
     assert inputs[0].api_key == "kee"
     assert inputs[0].headers == {"h": "v"}
     assert inputs[0].endpoint_env == "PROD"
     assert inputs[0].transport_protocol == "http"
+    assert inputs[0].url_override == "https://bot-a.example.test/mcp"
+    assert inputs[0].strict_transport_protocol is False
+    assert inputs[1].url_override is None
     assert mcp_cfg.build_mcp_sync_payload.call_count == 2
+    assert mcp_cfg.build_mcp_sync_payload.call_args_list[0].kwargs[
+        "bot_override"
+    ] == {"url": "https://bot-a.example.test/mcp"}
+    assert (
+        mcp_cfg.build_mcp_sync_payload.call_args_list[1].kwargs["bot_override"]
+        is None
+    )
+
+
+@pytest.mark.unit
+def test_mcps_reject_persisted_override_that_center_no_longer_supports():
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = [{"server_code": "a"}]
+    svc.mcp_center.get_mcp_detail.return_value = {
+        "serverCode": "a",
+        "runMode": "REMOTE",
+        "endpoints": [],
+    }
+    mcp_cfg = MagicMock()
+    mcp_cfg.get_bot_override.return_value = {"endpoint_env": "PRE"}
+    mcp_cfg.validate_bot_override.return_value = {
+        "valid": False,
+        "error": "MCP 在 PRE 环境没有可用端点",
+    }
+
+    with pytest.raises(McporterComposeError, match="persisted Bot override"):
+        _collector(skill_set_service=svc, mcp_config_service=mcp_cfg).mcps(_req())
+
+    mcp_cfg.build_mcp_sync_payload.assert_not_called()
+
+
+@pytest.mark.unit
+def test_mcps_make_inherited_transport_strict_when_manifest_sets_endpoint_env():
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = [{"server_code": "a"}]
+    svc.mcp_center.get_mcp_detail.return_value = {
+        "serverCode": "a",
+        "runMode": "REMOTE",
+        "endpoints": [],
+    }
+    mcp_cfg = MagicMock()
+    mcp_cfg.get_bot_override.return_value = {"endpoint_env": "PRE"}
+    mcp_cfg.validate_bot_override.return_value = {"valid": True, "error": None}
+    mcp_cfg.build_mcp_sync_payload.return_value = (None, {}, "PRE", "SSE")
+
+    inputs = _collector(skill_set_service=svc, mcp_config_service=mcp_cfg).mcps(_req())
+
+    assert inputs[0].strict_transport_protocol is True
 
 
 @pytest.mark.unit

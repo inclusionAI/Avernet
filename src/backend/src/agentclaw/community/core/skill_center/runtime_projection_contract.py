@@ -381,6 +381,8 @@ class ProjectionScope:
     #: MCP codes this mutation added to the Bot. Configuration is pushed for
     #: these and no others, so a one-MCP add stays a one-MCP device write.
     claimed_mcp: frozenset[str] = frozenset()
+    #: MCP codes whose Bot-scoped connection override changed.
+    updated_mcp: frozenset[str] = frozenset()
     #: MCP codes this mutation took away. Configuration is deleted for these
     #: and no others.
     released_mcp: frozenset[str] = frozenset()

@@ -46,3 +46,27 @@ class UserMCPConfigRepository(Protocol):
     @abstractmethod
     def delete(self, config_id: str) -> bool:
         ...
+
+
+@runtime_checkable
+class BotMCPConfigRepositoryProtocol(Protocol):
+    """Read-side repository for Bot-scoped MCP overrides."""
+
+    @abstractmethod
+    def get_by_bot_and_server_code(
+        self, *, bot_id: str, owner_id: str, server_code: str
+    ) -> Optional[dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    def list_by_bot(
+        self, *, bot_id: str, owner_id: str
+    ) -> dict[str, dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    def list_by_owner_and_server_code(
+        self, *, owner_id: str, server_code: str
+    ) -> dict[str, dict[str, Any]]:
+        """Return Bot overrides affected by one user-level config update."""
+        ...

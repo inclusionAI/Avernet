@@ -1015,27 +1015,104 @@ manifest:
     } <= codes
 
 
-def test_the_retired_mcp_config_field_is_refused_rather_than_ignored():
-    """``mcp[].config`` was defined as per-bot configuration "the same shape as
-    the existing MCP config API" — but that API writes ``ac_user_mcp_config``,
-    keyed ``(user_id, server_code)``, and its write fans out via
-    ``sync_mcp_detail_to_all_bots``. Applying one bot's manifest would have
-    changed MCP configuration for every bot its owner has; its payload is also
-    api_key and custom_headers, which design §4.5 keeps out of a manifest
-    entirely. A v1 entry is a bare ``server_code``, and the field is refused by
-    name rather than silently ignored — same treatment as the retired
-    ``cli_tools.entrypoints`` above, for the same reason."""
+def test_mcp_config_accepts_the_closed_bot_override_shape():
     document = """schema_version: 1
 manifest:
   mcp:
     - server_code: github
       config:
-        endpoint_env: PROD
+        url: http://mcp.example.test/mcp
+        headers:
+          X-Project: project-a
+        endpoint_env: PRE
+        transport_protocol: streamable_http
 """
+    accepted = _accept(document)
+    assert accepted.parsed["manifest"]["mcp"][0]["config"][
+        "transport_protocol"
+    ] == "STREAMABLE_HTTP"
+
+
+def test_mcp_config_refuses_unknown_fields_and_invalid_remote_values():
+    document = """schema_version: 1
+manifest:
+  mcp:
+    - server_code: github
+      config:
+        api_key: secret
+        url: relative/mcp
+        endpoint_env: DEV
+        transport_protocol: WEBSOCKET
+        headers:
+          X-Trace: |
+            ok
+            Injected: value
+"""
+    rejected = set(_reject(document))
+    assert ("manifest.mcp[0].config.api_key", "unknown_field") in rejected
+    assert ("manifest.mcp[0].config.url", "invalid_mcp_url") in rejected
+    assert ("manifest.mcp[0].config.endpoint_env", "invalid_endpoint_env") in rejected
     assert (
-        "manifest.mcp[0].config",
-        "unknown_field",
-    ) in _reject(document)
+        "manifest.mcp[0].config.transport_protocol",
+        "invalid_transport_protocol",
+    ) in rejected
+    assert (
+        "manifest.mcp[0].config.headers.X-Trace",
+        "invalid_header_value",
+    ) in rejected
+
+
+def test_mcp_config_rejects_newline_in_header_name():
+    document = """schema_version: 1
+manifest:
+  mcp:
+    - server_code: github
+      config:
+        headers:
+          "X-Bad\\nInjected": value
+"""
+
+    assert "invalid_header_name" in _codes(document)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://[",
+        "https://mcp.example.test/path with space",
+    ],
+)
+def test_mcp_config_rejects_malformed_urls_without_crashing(url):
+    document = f"""schema_version: 1
+manifest:
+  mcp:
+    - server_code: github
+      config:
+        url: {url!r}
+"""
+
+    assert "invalid_mcp_url" in _codes(document)
+
+
+def test_mcp_config_rejects_blank_header_name():
+    document = """schema_version: 1
+manifest:
+  mcp:
+    - server_code: github
+      config:
+        headers:
+          "   ": value
+"""
+
+    assert "invalid_header_name" in _codes(document)
+
+
+def test_mcp_config_distinguishes_missing_headers_from_an_explicit_empty_map():
+    accepted = _accept(
+        "schema_version: 1\nmanifest:\n  mcp:\n"
+        "    - server_code: github\n      config:\n        headers: {}\n"
+    )
+    assert accepted.parsed["manifest"]["mcp"][0]["config"]["headers"] == {}
 
 
 def test_an_mcp_entry_is_accepted_as_a_bare_server_code():

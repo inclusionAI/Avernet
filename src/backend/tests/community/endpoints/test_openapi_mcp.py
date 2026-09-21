@@ -187,6 +187,9 @@ def _seed_happy_services(world) -> None:
     def validate_headers_for_mcp(_self, *_args, **_kwargs):
         return {"valid": True, "error": None}
 
+    def validate_user_config_update(_self, *_args, **_kwargs):
+        return {"valid": True, "error": None}
+
     def update_user_unified_config(_self, **_kwargs):
         # Returns the pre-write row, which the flow keeps for rollback.
         return _stored_config()
@@ -200,6 +203,7 @@ def _seed_happy_services(world) -> None:
         {
             "get_user_unified_config": get_user_unified_config,
             "validate_headers_for_mcp": validate_headers_for_mcp,
+            "validate_user_config_update": validate_user_config_update,
             "update_user_unified_config": update_user_unified_config,
             "rollback_unified_config": rollback_unified_config,
         },

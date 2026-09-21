@@ -202,6 +202,7 @@ def _build(db):
             script_service=scripts,
             activation_service=PlatformActivation(activation),
             mcp_auth_service=FakeMcpAuth(),
+            mcp_config_service=object(),
             identity_service=PlatformIdentity(store),
             upload_service=PlatformSkillPackageUpload(store, validator=validator, skill_repository=skills),
             capability_reader=reader_of_active,

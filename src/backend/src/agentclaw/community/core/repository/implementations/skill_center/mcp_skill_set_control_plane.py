@@ -7,6 +7,7 @@ from agentclaw.community.core.repository.implementations.skill_center.bot_skills
     set_member_mcp_codes,
 )
 from agentclaw.community.core.repository.implementations.skill_center.tables import (
+    bot_mcp_configs,
     default_exclusions,
     mcp_installations,
 )
@@ -20,6 +21,9 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
     require_direct_mcp_control_allowed,
     require_can_join_set,
     require_non_platform_mcp,
+)
+from agentclaw.community.core.skill_center.errors import (
+    SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -165,6 +169,10 @@ class McpSkillSetControlPlaneCommands:
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), server_codes={server_code},
                 )
+                bot_mcp_configs.delete(
+                    session, bot_id=bot_id, owner_id=owner_id,
+                    env=get_current_env(), server_codes={server_code},
+                )
             session.flush()
             return DesiredStateMutation(
                 self._as_item(row), True, old,
@@ -213,6 +221,10 @@ class McpSkillSetControlPlaneCommands:
             # the exclusion already existed; otherwise the installed half of
             # the runtime union would bypass policy indefinitely.
             removed_installation = mcp_installations.uninstall(
+                session, bot_id=bot_id, owner_id=owner_id,
+                env=get_current_env(), server_codes={server_code},
+            )
+            bot_mcp_configs.delete(
                 session, bot_id=bot_id, owner_id=owner_id,
                 env=get_current_env(), server_codes={server_code},
             )
@@ -297,6 +309,66 @@ class McpSkillSetControlPlaneCommands:
                 {}, True, old, mcp_codes=frozenset({server_code})
             )
 
+    def set_mcp_override(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        server_code: str,
+        config: dict | None,
+        platform_default_codes: frozenset[str],
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> DesiredStateMutation:
+        """Atomically install one direct MCP and replace its Bot override."""
+        with self._db.transactional_orm_session() as session:
+            require_direct_mcp_control_allowed(
+                server_code=server_code,
+                platform_default_codes=platform_default_codes,
+            )
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            self._require_not_set_managed(
+                session,
+                set_ids=self._mcp_referencing_set_ids(session, server_code=server_code),
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
+            installed = mcp_installations.install(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                env=get_current_env(),
+                server_code=server_code,
+            )
+            override_changed = bot_mcp_configs.replace(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                env=get_current_env(),
+                server_code=server_code,
+                config=config,
+            )
+            session.flush()
+            return DesiredStateMutation(
+                {},
+                installed or override_changed,
+                old,
+                mcp_codes=frozenset({server_code}) if installed else frozenset(),
+                updated_mcp_codes=(
+                    frozenset({server_code})
+                    if override_changed and not installed
+                    else frozenset()
+                ),
+            )
+
+    def get_mcp_overrides(self, *, bot_id: str, owner_id: str) -> dict[str, dict]:
+        with self._db.orm_session() as session:
+            return bot_mcp_configs.get_all(
+                session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+            )
+
     def uninstall_mcp(
         self, *, bot_id: str, owner_id: str, server_code: str,
         platform_default_codes: frozenset[str],
@@ -323,12 +395,52 @@ class McpSkillSetControlPlaneCommands:
                 session, bot_id=bot_id, owner_id=owner_id,
                 env=get_current_env(), server_codes={server_code},
             ) > 0
+            override_removed = (
+                bot_mcp_configs.delete(
+                    session, bot_id=bot_id, owner_id=owner_id,
+                    env=get_current_env(),
+                    server_codes={server_code},
+                )
+                > 0
+            )
             session.flush()
             return DesiredStateMutation(
-                {}, changed, old,
+                {},
+                changed or override_removed,
+                old,
                 mcp_codes=frozenset({server_code}) if changed else frozenset(),
+                updated_mcp_codes=(
+                    frozenset({server_code}) if override_removed else frozenset()
+                ),
             )
 
     def list_installed_mcps(self, *, bot_id: str, owner_id: str, engine_type: str | None = None) -> set[str]:
         with self._db.orm_session() as session:
             return self._mcp_installations(session, bot_id, owner_id)
+
+    def set_managed_mcp_codes(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        server_codes: set[str],
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> set[str]:
+        managed: set[str] = set()
+        with self._db.orm_session() as session:
+            for server_code in sorted(server_codes):
+                try:
+                    self._require_not_set_managed(
+                        session,
+                        set_ids=self._mcp_referencing_set_ids(
+                            session, server_code=server_code
+                        ),
+                        bot_id=bot_id,
+                        owner_id=owner_id,
+                        engine_type=engine_type,
+                        default_engine_types=default_engine_types,
+                    )
+                except SkillSetControlPlaneConflictError:
+                    managed.add(server_code)
+        return managed

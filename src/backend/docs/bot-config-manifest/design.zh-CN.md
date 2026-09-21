@@ -290,8 +290,11 @@ token**（类 GitLab 的 Project/Deploy Token，天生单仓库有效）；托�
 只适合一次性场景）都不需要凭证引用。v1 注入方式仅支持请求头；query 参数
 型、mTLS 列入 v2 评估（开放问题 O8）。
 
-**MCP 凭证永不进 manifest**：manifest 只写 `server_code` 引用平台 MCP
-注册表；凭证照现状由平台持有、compose 时按 `McpServerRef` 现有机制内联。
+**MCP 敏感凭证永不进 manifest**：`api_key` 仍由平台的 user config 持有并在
+compose 时按 `McpServerRef` 既有机制内联。Manifest 可以为已登记 `server_code`
+声明 Bot 级 `url`、非敏感明文 `headers`、`endpoint_env`、
+`transport_protocol`；这些值持久化在独立的 `ac_bot_mcp_config`，不改写
+`ac_user_mcp_config`。
 
 ## 5. 能力模型与版本化
 

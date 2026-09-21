@@ -654,13 +654,19 @@ class SkillSetService:
                 "[project_mcps] timing stage=resolve_device bot_id=%s duration_ms=%.3f",
                 self.bot_id, (time.perf_counter() - started) * 1000,
             )
-        if not await self.sync_mcp_delivery(
-            claimed=claimed, released=released, device_sync=device_sync
+        if claimed and not await self.sync_mcp_delivery(
+            claimed=claimed, released=frozenset(), device_sync=device_sync
         ):
             return False
-        return await self.sync_mcp_desired_state(
+        if not await self.sync_mcp_desired_state(
             server_codes=declared, device_sync=device_sync
-        )
+        ):
+            return False
+        if released and not await self.sync_mcp_delivery(
+            claimed=frozenset(), released=released, device_sync=device_sync
+        ):
+            return False
+        return True
 
     async def sync_mcp_delivery(
         self, *, claimed: frozenset[str], released: frozenset[str],

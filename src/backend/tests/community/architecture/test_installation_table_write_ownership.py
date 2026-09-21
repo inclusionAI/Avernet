@@ -1,13 +1,14 @@
-"""The Installation tables are written only from ``tables/``, via the UoW.
+"""Capability desired-state tables are written only from ``tables/``, via the UoW.
 
 ``ac_bot_skill_installation`` / ``ac_bot_mcp_installation`` are the single
-source of truth for a Bot's active capabilities. A second writer is how the
+source of truth for a Bot's active capabilities; ``ac_bot_mcp_config`` owns
+its explicit MCP overrides. A second writer is how the
 two-authorities defect returns: a row written or deleted outside the UoW's
 transaction is silently undone by the next flush or command. So:
 
   1. **Write ownership.** Only ``core/repository/implementations/
      skill_center/tables/`` may construct or delete rows of the two
-     Installation models. Everything else may read them.
+     desired-state models. Everything else may read them.
   2. **Reach.** The ``tables`` modules are imported only by the UoW
      composition modules — no service or adapter calls them directly, so
      every write runs under a UoW transaction.
@@ -29,7 +30,7 @@ _THIS_FILE = pathlib.Path(__file__).resolve()
 _BACKEND_ROOT = _THIS_FILE.parents[3]
 _AGENTCLAW_ROOT = _BACKEND_ROOT / "src" / "agentclaw"
 
-_MODELS = {"BotSkillInstallation", "BotMCPInstallation"}
+_MODELS = {"BotSkillInstallation", "BotMCPInstallation", "BotMCPConfig"}
 
 #: The table-command package — the writes' one home.
 _TABLES_DIR = (
@@ -84,7 +85,7 @@ def _writes(tree: ast.AST) -> list[str]:
     return found
 
 
-def test_installation_tables_are_written_only_from_the_tables_modules():
+def test_capability_desired_state_tables_are_written_only_from_tables_modules():
     violations: list[str] = []
     for path, relative in _python_files():
         if relative.startswith(_TABLES_DIR):
@@ -97,7 +98,7 @@ def test_installation_tables_are_written_only_from_the_tables_modules():
         for write in _writes(ast.parse(source)):
             violations.append(f"{relative}: {write}")
     assert not violations, (
-        "Installation-table writes outside tables/ (route them through the "
+        "Capability desired-state writes outside tables/ (route them through the "
         "UoW):\n" + "\n".join(violations)
     )
 
