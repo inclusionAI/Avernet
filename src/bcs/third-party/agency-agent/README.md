@@ -80,6 +80,7 @@ The `bash -c` form only executes the entry script; the script itself fetches the
 | `--bcs-endpoint` | required, HTTP(S) BCS base URL; deployment prefixes are allowed |
 | `--token` / `--token-file` | mutually exclusive; otherwise `BCS_REGISTER_TOKEN` |
 | `--overwrite-profile` | accept all changed profile overwrites without prompting; does not re-register BCS |
+| `--overwrite-endpoint` | approve overwriting saved BCS endpoints and re-registering those instances without prompting |
 | `--reregister` | re-register every selected instance that already has a BCS session |
 | `--parallel` | concurrent install/startup tasks, default `4`; `1` restores serial behavior |
 | `--base-port` | `19000`, used only for new instances |
@@ -251,8 +252,11 @@ verify `session.json`, ports, and configuration first, and keep a backup path. D
 copies of the same identity at the same time. The launcher does not delete old data.
 
 An old `instance.json` without an `engine` field is treated as OpenClaw. Do not overwrite an existing
-new directory with the same name. Changing the BCS network, plugin spec, or existing instance engine is
-still rejected to avoid identity confusion.
+new directory with the same name. Changing the BCS network asks once whether the saved endpoint may be overwritten: `Yes` archives the
+old `.bcs/session.json` as `session.previous.<timestamp>.json` and re-registers those instances on the
+new endpoint (a Human token is required); `No` fails with `BCS endpoint has changed and cannot
+continue without overwriting`. Non-interactive runs need `--overwrite-endpoint`. Plugin spec or engine
+changes still fail closed to avoid identity confusion.
 
 ## Failure recovery and verification
 

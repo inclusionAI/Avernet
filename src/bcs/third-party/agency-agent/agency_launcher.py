@@ -75,6 +75,7 @@ def arguments() -> argparse.Namespace:
     credentials.add_argument('--token', help='Human/User registration token, as in install.sh')
     credentials.add_argument('--token-file', type=Path, help='registration token file; otherwise BCS_REGISTER_TOKEN')
     parser.add_argument('--overwrite-profile', action='store_true', help='accept all changed profile overwrites without prompting')
+    parser.add_argument('--overwrite-endpoint', action='store_true', help='overwrite saved BCS endpoint settings and re-register affected instances without prompting')
     parser.add_argument('--reregister', action='store_true', help='re-register every selected instance that already has a BCS session')
     parser.add_argument('--state-dir', type=Path, default=Path.home() / '.avernet/bcs/agency-agent',
                         help='dedicated persistent directory (default: ~/.avernet/bcs/agency-agent; instances go under <engine>)')
@@ -119,6 +120,7 @@ class LaunchPlan:
     port: int
     record: dict | None
     existing_session: dict | None
+    endpoint_changed: bool = False
     overwrite: bool = False
     reregister: bool = False
 
@@ -167,9 +169,11 @@ def prepare_plans(args, profiles, root: Path, ws_url: str, registration_proof: s
         if record:
             if record.get('engine', 'openclaw') != args.engine:
                 raise ValueError(f'{profile.instance_id}: saved engine differs; refusing to reuse its state')
-            expected = {'profile_path': profile.path, 'bcs_url': ws_url, 'plugin': args.bcn_plugin}
-            if any(record.get(key) != value for key, value in expected.items()):
-                raise ValueError(f'{profile.instance_id}: endpoint or plugin changed; use a new --state-dir')
+            if record.get('profile_path') != profile.path:
+                raise ValueError(f'{profile.instance_id}: saved profile path differs; refusing to reuse its state')
+            if record.get('plugin') != args.bcn_plugin:
+                raise ValueError(f'{profile.instance_id}: BCN plugin changed; use the saved --bcn-plugin '
+                                 'spec or choose a new --state-dir')
             port = record['port']
         else:
             if state.exists():
@@ -180,18 +184,62 @@ def prepare_plans(args, profiles, root: Path, ws_url: str, registration_proof: s
             if port > 65515:
                 raise ValueError('not enough Gateway ports for the selected profiles')
             occupied.append(port)
-        session = load_session(state, ws_url) if (state / '.bcs/session.json').exists() else None
+        endpoint_changed = bool(record) and record.get('bcs_url') != ws_url
+        session = None
+        if (state / '.bcs/session.json').exists() and not endpoint_changed:
+            session = load_session(state, ws_url)
         if (state / 'registration.pending.json').exists():
             raise ValueError(f'{profile.instance_id}: registration outcome unknown; '
                              'recover credentials or reconcile registration.pending.json before retrying')
         if (state / 'bcs-reregistration.pending.json').exists():
             raise ValueError(f'{profile.instance_id}: BCS re-registration outcome unknown; '
                              'recover credentials or reconcile bcs-reregistration.pending.json before retrying')
-        if session is None and not registration_proof:
+        if session is None and not endpoint_changed and not registration_proof:
             raise ValueError('new instances require --token, --token-file or BCS_REGISTER_TOKEN')
         port_available(port)
-        plans.append(LaunchPlan(profile, state, port, record, session))
+        plans.append(LaunchPlan(profile, state, port, record, session, endpoint_changed))
     return plans
+
+
+def resolve_endpoint_changes(plans: list[LaunchPlan], args, ws_url: str,
+                             registration_proof: str) -> None:
+    """Confirm once whether endpoint-mismatched instances may be rebased.
+
+    Declining is fail-closed: nothing is written, installed or registered.
+    Approving archives the old session and treats the instance as a new
+    registration on the current endpoint, keeping port, profile and workspace.
+    """
+    changed = [plan for plan in plans if plan.endpoint_changed]
+    if not changed:
+        return
+    if args.overwrite_endpoint:
+        overwrite = True
+    elif interactive_input():
+        report('\nA saved BCS endpoint differs from --bcs-endpoint:', 'warning')
+        for plan in changed:
+            report(f'  {plan.profile.name}: {plan.record.get("bcs_url")} -> {ws_url}', 'warning')
+        overwrite = ask_yes_no('Overwrite the saved endpoint configuration '
+                               'and re-register these instances?')
+    else:
+        overwrite = False
+    if not overwrite:
+        raise ValueError('BCS endpoint has changed and cannot continue without overwriting the '
+                         'saved configuration; confirm the overwrite interactively, pass '
+                         '--overwrite-endpoint, or run with the original --bcs-endpoint')
+    if not registration_proof:
+        raise ValueError('overwriting the endpoint re-registers Bots; provide '
+                         '--token, --token-file or BCS_REGISTER_TOKEN')
+    stamp = str(time.time_ns())
+    for plan in changed:
+        session_path = plan.state / '.bcs/session.json'
+        if session_path.exists():
+            backup = plan.state / '.bcs' / f'session.previous.{stamp}.json'
+            write_json(backup, read_json(session_path))
+            session_path.unlink()
+        pending = plan.state / 'bcs-onboard-last-response.json'
+        pending.unlink(missing_ok=True)
+        plan.existing_session = None
+        plan.endpoint_changed = False
 
 
 def choose_profile_actions(plans: list[LaunchPlan], args, registration_proof: str) -> None:
@@ -350,6 +398,7 @@ def run(args) -> None:
             report('Launch cancelled; no instances were changed.', 'warning')
             return
         plans = prepare_plans(args, profiles, engine_root, ws_url, registration_proof)
+        resolve_endpoint_changes(plans, args, ws_url, registration_proof)
         choose_profile_actions(plans, args, registration_proof)
         runtime = OpenClaw(executable)
         try:

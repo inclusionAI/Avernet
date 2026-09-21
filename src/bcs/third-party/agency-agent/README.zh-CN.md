@@ -136,6 +136,7 @@ Continue launching all 12 agents? [y/N]
 | `--bcs-endpoint` | 必填，HTTP(S) BCS 根地址，可带部署路径前缀 |
 | `--token` / `--token-file` | 互斥；省略时使用 `BCS_REGISTER_TOKEN` |
 | `--overwrite-profile` | 自动同意覆盖所有发生变化的本地 profile；**不**重新注册 BCS |
+| `--overwrite-endpoint` | 自动同意覆盖保存的 BCS endpoint 并重新注册受影响实例 |
 | `--reregister` | 自动同意重新注册所有已有 session 的选中实例 |
 | `--parallel` | 同时执行的安装/启动任务数，默认 `4`；`1` 退回串行 |
 | `--base-port` | `19000`，只为新实例分配端口 |
@@ -297,7 +298,10 @@ BCS Bot；请将原来的实例目录复制/移动到新目录结构中对应 en
 有回退路径；不要在同一身份的新旧副本同时运行。脚本不会删除旧数据。
 
 缺少 engine 字段的旧 `instance.json` 按 OpenClaw 解释；已有相同名称的新目录时
-不要覆盖。改变 BCS 网络、插件 spec 或已有实例引擎仍会拒绝启动，避免误用身份。
+不要覆盖。检测到 BCS 网络改变时会统一询问一次是否覆盖：回答 `Yes` 会把旧 `.bcs/session.json` 备份为
+`session.previous.<timestamp>.json`，并在新 endpoint 下重新注册（需要 Human token）；回答 `No`
+则报错 `BCS endpoint has changed and cannot continue without overwriting`，不会改写任何文件。
+非交互模式需要显式传 `--overwrite-endpoint`。插件 spec 或实例 engine 改变仍会拒绝启动，避免误用身份。
 
 ## 故障恢复与验证
 

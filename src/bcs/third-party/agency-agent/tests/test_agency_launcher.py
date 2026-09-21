@@ -310,14 +310,99 @@ class LauncherTest(LauncherFixture):
         snapshot = next(self.state.glob('*/profile.md'))
         self.assertNotIn('Changed role.', snapshot.read_text())
 
-    def test_changed_endpoint_does_not_reuse_credentials(self):
+    NEW_ENDPOINT_MESSAGE = 'BCS endpoint has changed and cannot continue without overwriting'
+
+    def move_saved_endpoint(self, pattern, fake_url='ws://old-network.example/ws/bot'):
+        record_path = next(self.state.glob(pattern + '/instance.json'))
+        record = json.loads(record_path.read_text())
+        record['bcs_url'] = fake_url
+        record_path.write_text(json.dumps(record))
+        return record_path
+
+    def test_changed_endpoint_decline_fails_without_any_side_effect(self):
         proc = self.launch(['engineering/backend'])
         self.wait_ready(proc)
         self.stop_process(proc)
-        previous_calls = self.calls.read_text()
-        self.failed_run(['engineering/backend'], ['--bcs-endpoint', self.endpoint + '/another-network'])
-        self.assertEqual(self.calls.read_text(), previous_calls)
+        self.move_saved_endpoint('backend-*')
+        session_path = next(self.state.glob('backend-*/.bcs/session.json'))
+        session_before = session_path.read_bytes()
+        previous_calls = self.calls.read_bytes()
+        files_before = {path: path.relative_to(self.state).as_posix() for path in self.state.rglob('*')}
+        contents_before = {relative: (self.state / relative).read_bytes()
+                           for relative in files_before.values()
+                           if (self.state / relative).is_file()}
+
+        proc, master = self.launch_interactive(['engineering/backend'], ['n'])
+        output = self.read_interactive_until(proc, master, marker=self.NEW_ENDPOINT_MESSAGE.encode(),
+                                             timeout=6)
+        proc.wait(timeout=5)
+        self.stop_interactive(proc, master)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('Overwrite the saved endpoint configuration', output)
+        self.assertIn(self.NEW_ENDPOINT_MESSAGE, output)
+        self.assertEqual(session_path.read_bytes(), session_before)
+        self.assertEqual(self.calls.read_bytes(), previous_calls)
         self.assertEqual(len(self.registrations), 1)
+        self.assertEqual(list(self.state.glob('backend-*/.bcs/session.previous.*.json')), [])
+        files_after = {path.relative_to(self.state).as_posix(): path
+                       for path in self.state.rglob('*') if path.is_file()}
+        self.assertEqual(set(contents_before), set(files_after))
+        for relative, path in files_after.items():
+            self.assertEqual(path.read_bytes(), contents_before[relative],
+                             f'decline must not write {relative}')
+
+    def test_changed_endpoint_yes_reregisters_only_affected_instances(self):
+        proc = self.launch()
+        self.wait_ready(proc)
+        self.stop_process(proc)
+        self.move_saved_endpoint('backend-*')
+        reviewer_session_path = next(self.state.glob('reviewer-*/.bcs/session.json'))
+        reviewer_session = json.loads(reviewer_session_path.read_text())
+
+        proc, master = self.launch_interactive(None, ['y', 'n'])
+        output = self.read_interactive_until(proc, master)
+        self.stop_interactive(proc, master)
+        self.assertEqual(proc.returncode, 0, output)
+        self.assertIn('Overwrite the saved endpoint configuration', output)
+        self.assertEqual(len(self.registrations), 3, 'only the endpoint-mismatched instance re-registers')
+        changed_backups = list(self.state.glob('backend-*/.bcs/session.previous.*.json'))
+        self.assertEqual(len(changed_backups), 1)
+        self.assertEqual(json.loads(changed_backups[0].read_text())['bot_uuid'], 'bot-1')
+        self.assertEqual(json.loads(next(self.state.glob('backend-*/.bcs/session.json')).read_text())['bot_uuid'], 'bot-3')
+        self.assertEqual(json.loads(reviewer_session_path.read_text()), reviewer_session,
+                         'an unchanged session must not be touched')
+        self.assertNotIn('bot-token-', output)
+        self.assertEqual(len(list(self.state.glob('*/stopped'))), 2)
+
+    def test_changed_endpoint_overwrite_flag_works_noninteractively(self):
+        proc = self.launch(['engineering/backend'])
+        self.wait_ready(proc)
+        self.stop_process(proc)
+        self.move_saved_endpoint('backend-*')
+        result = self.failed_run(['engineering/backend'])
+        self.assertIn('--overwrite-endpoint', result.stderr)
+        self.assertEqual(len(self.registrations), 1)
+
+        proc = self.launch(['engineering/backend'], ['--overwrite-endpoint'])
+        self.wait_ready(proc)
+        self.stop_process(proc)
+        self.assertEqual(len(self.registrations), 2)
+        session = json.loads(next(self.state.glob('backend-*/.bcs/session.json')).read_text())
+        self.assertEqual(session['bot_uuid'], 'bot-2')
+        self.assertTrue(session['bcs_url'].startswith('ws://127.0.0.1'))
+        self.assertEqual(list(self.state.glob('backend-*/.bcs/session.previous.*.json')) == [], False)
+
+    def test_endpoint_overwrite_requires_registration_token(self):
+        proc = self.launch(['engineering/backend'])
+        self.wait_ready(proc)
+        self.stop_process(proc)
+        self.move_saved_endpoint('backend-*')
+        self.env.pop('BCS_REGISTER_TOKEN')
+        session_path = next(self.state.glob('backend-*/.bcs/session.json'))
+        session_before = session_path.read_bytes()
+        result = self.failed_run(['engineering/backend'], ['--overwrite-endpoint'])
+        self.assertIn('token', result.stderr.lower())
+        self.assertEqual(session_path.read_bytes(), session_before)
 
     def test_concurrent_launcher_is_refused_without_disturbing_first(self):
         proc = self.launch(['engineering/backend'])
