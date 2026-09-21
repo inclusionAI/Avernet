@@ -95,6 +95,7 @@ def format_task_node_business_instruction(
                 "7. 根据搜索返回的真实字段，由 Skill 判断 HIT_SINGLE、HIT_MULTI_BOTS 或 MISS。向 callback/report 上报 event_type=DISPATCH_RESULT，payload 使用 outcome、run_mode、driver_bot_id、next_relay_bots；协作群 driver 必须属于 next_relay_bots，当前棒不进入下一棒群，Human 默认作为 observer。MISS 必须提供 miss_reason。",
                 f"8. HIT_SINGLE/HIT_MULTI_BOTS 后 POST {backend}/api/v1/collaboration/tasks/dispatch，传 task_id、origin_node_id、target_node_id、holder_id、relay_turn、唯一 dispatch_id。dispatch 是最后一步：必须先满足 target_node_id 来自 PLAN_RESULT 原始响应且不等于 origin_node_id、同一 target_node_id 的 DISPATCH_RESULT 已 HTTP 200、relay_turn 未过期且属于当前 origin。缺少任一前置变量时停止等待恢复，不得用 root/task_id 猜测 target，也不得直接调用 /dispatch。只有 HTTP 200 才算交接成功；MISS 自动发布 BBS。",
                 "BBS 认领者执行完成后也从第1步开始，继续同一接力闭环。只允许使用本指令明确列出的 context、callback/report、search、dispatch、BBS claim 五个端点；404 时必须校验路径和 task_id/node_id，不得换近似 URL 继续探测。任一接口失败时不得伪造成功；在 failure_reason 记录真实原因。",
+                "用户可见文案本地化：DECLINED、capability_mismatch 等内部枚举/失败码只用于 API 请求和排障，不得原样回复给用户。若能力不匹配，面向用户只说明「当前 Bot 能力不匹配，未执行本节点业务子项，将转交更合适的 Bot 接续执行」；若未找到候选，则说明「未找到能力匹配的 Bot，任务已发布到广场等待认领」。",
                 OUTPUT_LANGUAGE_CONSTRAINT,
             ]
         )

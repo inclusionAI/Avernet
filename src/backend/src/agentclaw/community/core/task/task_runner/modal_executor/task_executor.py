@@ -217,6 +217,17 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
         config = graph.extend_props.get("execution_config", {}) if graph is not None else {}
         return config.get("orchestration_mode") == "relay" or self._skill_report_enabled()
 
+    def _relay_execution_enabled(self, task_id: str) -> bool:
+        """Return whether the task graph is in distributed Relay mode."""
+        if self._graph is None:
+            return False
+        try:
+            snapshot = self._graph.query_task_dashboard(task_id)
+        except Exception:  # noqa: BLE001 graph unavailable means it cannot be Relay here
+            return False
+        config = (getattr(snapshot, "extend_props", None) or {}).get("execution_config") or {}
+        return isinstance(config, dict) and config.get("orchestration_mode") == "relay"
+
     def _singlebot_2_group_enabled(self, task_id: str) -> bool:
         """singlebot_2_group 旁路开关(默认 True):single_bot 改建"二人 chat 群"(driver bot + 人类观察者,不发言)。
         从 ``graph.extend_props["execution_config"]`` 读;graph 不可用/缺键 → True(默认走旁路);显式 False → 老链路。"""
@@ -361,6 +372,7 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
             extend_props={
                 "manager_bot_id": driver_bot,
                 "dynamic_task_node_protocol": True,
+                "relay_execution": self._relay_execution_enabled(node.task_id),
                 "loop_task_id": loop_task_id,
                 # manager_worker 群在 form_coop_group 统一生成业务节点协议；这里仅透传
                 # 原始节点事实，避免 single_bot 和 multi_bot 产生两份不同的任务指令。

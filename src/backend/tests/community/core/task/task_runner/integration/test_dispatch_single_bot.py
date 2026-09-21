@@ -351,6 +351,8 @@ def test_prompt_formatter_relay_mode_injects_event_protocol_only():
     assert "PLAN_RESULT" in prompt and "DISPATCH_RESULT" in prompt
     assert "严禁回到中心化的 status/output/acceptance_result 节点终态回调" in prompt
     assert "EXECUTION_RESULT 成功当作本棒结束" in prompt
+    assert "用户可见文案本地化" in prompt
+    assert "当前 Bot 能力不匹配，未执行本节点业务子项，将转交更合适的 Bot 接续执行" in prompt
     assert '"status": "SUCCESS"' not in prompt
     assert "唯一允许的节点回投" not in prompt
     assert "收到 HTTP 200 后立即停止，不得再次 POST" not in prompt
@@ -599,6 +601,22 @@ def test_dispatch_single_bot_2_group_bypass_creates_two_person_group():
     assert poller.registered == []  # 默认 Push(skill_report),singlebot_2_group 不注册 Pull poller
     flip = [p for p in graph.patches if p.run_mode == "coop_group"]
     assert flip and flip[0].extend_props_patch.get("actual_run_mode") == "single_bot"
+
+
+def test_dispatch_single_bot_2_group_uses_relay_protocol_in_relay_mode():
+    """Relay HIT_SINGLE converts to a human-observer group but still uses Relay baton protocol."""
+    exe, bot, bcs, poller, graph = _exe2(execution_config={"orchestration_mode": "relay"})
+    ok = _run(exe.dispatch([_node("drv", {"assignee_owner_id": "35983"})]))
+
+    assert ok == [True]
+    assert bot.sent == []
+    context = bcs.created[0].context
+    assert "【分布式接力闭环】" in context
+    assert '"event_type": "EXECUTION_RESULT"' in context
+    assert "PLAN_RESULT" in context and "DISPATCH_RESULT" in context
+    assert "【业务节点执行协议】" not in context
+    assert '"status": "SUCCESS"' not in context
+    assert "唯一允许的节点回投" not in context
 
 
 def test_dispatch_single_bot_2_group_disabled_falls_back_to_send():
