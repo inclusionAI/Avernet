@@ -47,6 +47,7 @@ def with_orm_session[
 ](func: Callable[P, R]) -> Callable[P, R]:
     """Decorator that injects sync ORM session into self._session."""
 
+    import logging
     import time
 
     from secbaas.community.logger import get_logger
@@ -56,15 +57,18 @@ def with_orm_session[
     @wraps(func)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> R:
         t0 = time.monotonic()
+        perf_debug = _perf_logger.isEnabledFor(logging.DEBUG)
         try:
             with self._database.orm_session() as session:
                 token = _active_sessions.set(
                     {**_active_sessions.get({}), id(self): session}
                 )
                 try:
+                    # conn_id 仅供 perf 日志：非 DEBUG 级别时跳过
+                    # session.connection()，避免为打点付出取连接开销。
                     conn_id = (
                         id(session.connection().connection)
-                        if session.is_active
+                        if perf_debug and session.is_active
                         else "N/A"
                     )
                     session_start = time.monotonic()
@@ -74,16 +78,19 @@ def with_orm_session[
                     _active_sessions.reset(token)
             total_end = time.monotonic()
 
-            _perf_logger.info(
-                "%s,%s,conn=%s,acquire=%.2fms,query=%.2fms,commit=%.2fms,total=%.2fms",
-                type(self).__name__,
-                func.__name__,
-                conn_id,
-                (session_start - t0) * 1000,
-                (query_end - session_start) * 1000,
-                (total_end - query_end) * 1000,
-                (total_end - t0) * 1000,
-            )
+            # perf 明细降为 DEBUG 且仅在启用时格式化：全量 INFO 打点
+            # （字符串格式化 + handler + 落盘）在 CPU 火焰图上占 ~8%。
+            if perf_debug:
+                _perf_logger.debug(
+                    "%s,%s,conn=%s,acquire=%.2fms,query=%.2fms,commit=%.2fms,total=%.2fms",
+                    type(self).__name__,
+                    func.__name__,
+                    conn_id,
+                    (session_start - t0) * 1000,
+                    (query_end - session_start) * 1000,
+                    (total_end - query_end) * 1000,
+                    (total_end - t0) * 1000,
+                )
             return result
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000

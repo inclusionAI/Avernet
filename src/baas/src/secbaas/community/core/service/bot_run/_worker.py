@@ -516,8 +516,7 @@ class BotRequestWorker:
             # callback 自身需幂等（PostRunCallback 协议要求）。
             if not callback_sent and post_run_callback is not None:
                 logger.info(
-                    "[BotRequestWorker] assured callback on exception path "
-                    "run_id=%s",
+                    "[BotRequestWorker] assured callback on exception path run_id=%s",
                     record.run_id,
                 )
                 try:
