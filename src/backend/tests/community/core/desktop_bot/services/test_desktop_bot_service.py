@@ -377,6 +377,14 @@ class TestCreate:
             "ext": {"passport": {"agent_code": "ac-existing"}},
         }
         mocks["bot_repo"].get_by_id_and_owner.return_value = existing
+        mocks["binding_repo"].get_by_id.return_value = MagicMock(
+            id=20,
+            device_id="bu-existing",
+            entity_id="u001",
+            entity_type="staff",
+            device_provider="baas",
+            status="ACTIVE",
+        )
 
         result = service.create_after_authorization(
             bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
@@ -545,6 +553,74 @@ class TestCreate:
         assert reuse.kwargs["expected_callback_token"] == first_binding_props[
             "callback_token"
         ]
+
+    def test_retry_reuses_released_binding_when_poller_and_unlink_fail(self):
+        service, mocks = _make_service_with_mocks()
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-existing"
+        }
+        mocks["baas"].post_bots_api.side_effect = [
+            {"bot_uuid": "bu-resumed", "publish_id": 91},
+            {"bot_uuid": "bu-resumed", "publish_id": 91},
+        ]
+        mocks["binding_repo"].insert_binding.return_value = 41
+        mocks["bot_repo"].update_by_owner.side_effect = [
+            {},
+            RuntimeError("unlink failed"),
+        ]
+        service._start_publish_polling.side_effect = RuntimeError("poller failed")
+
+        with pytest.raises(DesktopBotServiceError, match="local write failed"):
+            service.create_after_authorization(
+                bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+                user_id="u001",
+                machine_id="m-002",
+            )
+
+        inserted_bot = dict(
+            mocks["bot_repo"].insert_with_initial_skill_layout.call_args.args[0]
+        )
+        retained_bot = {
+            **inserted_bot,
+            "binding_id": 41,
+            "device_id": "bu-resumed",
+            "status": "PENDING",
+        }
+        first_binding_props = dict(
+            mocks["binding_repo"].insert_binding.call_args.kwargs["device_props"]
+        )
+        released_binding = MagicMock(
+            id=41,
+            entity_id="u001",
+            entity_type="staff",
+            device_id="bu-resumed",
+            device_provider="baas",
+            env="dev",
+            status="RELEASED",
+            device_props=first_binding_props,
+        )
+        mocks["bot_repo"].get_by_id_and_owner.return_value = retained_bot
+        mocks["bot_repo"].update_by_owner.side_effect = None
+        mocks["bot_repo"].update_by_owner.return_value = retained_bot
+        mocks["binding_repo"].get_by_id.return_value = released_binding
+        mocks["binding_repo"].get_released_binding.return_value = released_binding
+        mocks[
+            "binding_repo"
+        ].reuse_released_baas_desktop_binding_if_matches.return_value = True
+        service._start_publish_polling.side_effect = None
+
+        result = service.create_after_authorization(
+            bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+            user_id="u001",
+            machine_id="m-002",
+        )
+
+        assert result["binding_id"] == 41
+        assert mocks["baas"].post_bots_api.call_count == 2
+        assert mocks["binding_repo"].insert_binding.call_count == 1
+        mocks[
+            "binding_repo"
+        ].reuse_released_baas_desktop_binding_if_matches.assert_called_once()
 
     def test_concurrent_provisional_desktop_create_returns_in_progress(self):
         service, mocks = _make_service_with_mocks()
@@ -1642,6 +1718,12 @@ class TestPublishPolling:
         mocks["binding_repo"].update_status.assert_not_called()
 
     def test_current_restart_success_commits_before_projection(self, poll_service):
+        from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
+        from agentclaw.community.core.events.types import BaasPublishCompletedEvent
+        from agentclaw.community.core.skills_pool.reconcile_task import (
+            SkillsPoolReconcileWakeupListener,
+        )
+
         service, mocks = poll_service()
         service._query_publish_status = MagicMock(return_value="SUCCESS")
         service._trigger_device_alive = MagicMock(return_value=True)
@@ -1652,24 +1734,73 @@ class TestPublishPolling:
         mocks["bot_repo"].get_by_id_and_owner.return_value = {
             "bot_id": "desktop_bot_001",
             "owner_id": "u001",
-            "ext": {"publish_id": "current-publish"},
+            "ext": {"publish_id": "1001"},
         }
         mocks["binding_repo"].transition_baas_restart_terminal.return_value = True
-
-        service._poll_publish_progress(
-            publish_id="current-publish",
-            binding_id="1",
-            bot_id="desktop_bot_001",
-            owner_id="u001",
+        mocks["binding_repo"].get_by_id.return_value = MagicMock(
+            id=1,
             device_id="BOT-pool",
-            restart_publish_id="current-publish",
+            entity_id="u001",
+            entity_type="staff",
+            device_provider="baas",
+            env="dev",
+            status="ACTIVE",
+            device_props={"restart_publish_id": "1001"},
         )
+        mocks["bot_repo"].get_by_binding_id.return_value = {
+            "bot_id": "desktop_bot_001",
+            "owner_id": "u001",
+            "bot_type": "desktop",
+        }
+        queue = MagicMock()
+        queue.enqueue.side_effect = [RuntimeError("queue unavailable"), None]
+        listener = SkillsPoolReconcileWakeupListener(
+            binding_repository=mocks["binding_repo"],
+            bot_repository=mocks["bot_repo"],
+            task_queue_service=queue,
+        )
+        completed: list[BaasPublishCompletedEvent] = []
+        reset_event_bus()
+        get_event_bus().subscribe(BaasPublishCompletedEvent, completed.append)
+        get_event_bus().subscribe(
+            BaasPublishCompletedEvent,
+            listener.handle,
+            required=True,
+        )
+
+        try:
+            service._poll_publish_progress(
+                publish_id="1001",
+                binding_id="1",
+                bot_id="desktop_bot_001",
+                owner_id="u001",
+                device_id="BOT-pool",
+                restart_publish_id="1001",
+            )
+        finally:
+            reset_event_bus()
 
         transition = mocks[
             "binding_repo"
         ].transition_baas_restart_terminal.call_args
         assert transition.kwargs["status"] == "ACTIVE"
-        assert transition.kwargs["publish_id"] == "current-publish"
+        assert transition.kwargs["publish_id"] == "1001"
+        completion = BaasPublishCompletedEvent(
+            binding_id=1,
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            publish_id=1001,
+            publish_kind="restart",
+        )
+        assert completed == [completion, completion]
+        assert queue.enqueue.call_count == 2
+        payload = queue.enqueue.call_args.args[1]
+        assert payload["source"] == "baas_publish_completed"
+        assert payload["signal_identity"] == {
+            "binding_id": 1,
+            "publish_id": 1001,
+            "publish_kind": "restart",
+        }
         service._trigger_device_alive.assert_not_called()
         service._request_runtime_projection_after_reconnect.assert_called_once_with(
             bot_id="desktop_bot_001",

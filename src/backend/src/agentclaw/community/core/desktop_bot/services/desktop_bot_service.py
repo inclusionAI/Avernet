@@ -38,8 +38,11 @@ from agentclaw.community.core.devices.protocols import (
     LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
     LayoutInitializationConfirmationProtocol,
 )
-from agentclaw.community.core.events.bus import get_event_bus
-from agentclaw.community.core.events.types import RuntimeProjectionRequestedEvent
+from agentclaw.community.core.events.bus import RequiredEventDeliveryError, get_event_bus
+from agentclaw.community.core.events.types import (
+    BaasPublishCompletedEvent,
+    RuntimeProjectionRequestedEvent,
+)
 from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
@@ -1012,27 +1015,59 @@ class DesktopBotService(DesktopBotServiceProtocol):
         existing = self._bot_repo.get_by_id_and_owner(bot_id=bot_id, owner_id=user_id)
         if isinstance(existing, dict):
             if existing.get("device_id") and existing.get("binding_id"):
-                self._skill_set_factory.initialize_installations(
-                    bot_id=bot_id, owner_id=user_id, bot=existing
+                retained_binding = self._binding_repo.get_by_id(
+                    binding_id=int(existing["binding_id"])
                 )
-                ext = existing.get("ext") or {}
-                if isinstance(ext, str):
-                    try:
-                        ext = json.loads(ext)
-                    except json.JSONDecodeError:
-                        ext = {}
-                passport = ext.get("passport") if isinstance(ext, dict) else {}
-                agent_code = (
-                    passport.get("agent_code", "")
-                    if isinstance(passport, dict)
-                    else ""
-                )
-                return {
-                    "bot_uuid": existing.get("device_id", ""),
-                    "binding_id": existing.get("binding_id"),
-                    "bot_id": bot_id,
-                    "agent_code": agent_code,
-                }
+                if retained_binding is None:
+                    raise DesktopBotServiceError(
+                        "Desktop bot retained binding was not found: "
+                        f"bot_id={bot_id} binding_id={existing['binding_id']}"
+                    )
+                retained_status = str(retained_binding.status or "").upper()
+                if retained_status == DeviceBindingStatus.RELEASED.value:
+                    logger.info(
+                        "[DesktopBotService.create_after_authorization] "
+                        "retrying released retained binding: bot_id=%s binding_id=%s",
+                        bot_id,
+                        existing["binding_id"],
+                    )
+                elif retained_status == DeviceBindingStatus.STOPPED.value:
+                    raise DesktopBotServiceError(
+                        "Desktop bot retained binding is stopped: "
+                        f"bot_id={bot_id} binding_id={existing['binding_id']}"
+                    )
+                else:
+                    if (
+                        retained_binding.device_provider != "baas"
+                        or retained_binding.device_id != existing.get("device_id")
+                        or retained_binding.entity_id != user_id
+                        or retained_binding.entity_type != "staff"
+                    ):
+                        raise DesktopBotServiceError(
+                            "Desktop bot retained binding does not match its owner/context: "
+                            f"bot_id={bot_id} binding_id={existing['binding_id']}"
+                        )
+                    self._skill_set_factory.initialize_installations(
+                        bot_id=bot_id, owner_id=user_id, bot=existing
+                    )
+                    ext = existing.get("ext") or {}
+                    if isinstance(ext, str):
+                        try:
+                            ext = json.loads(ext)
+                        except json.JSONDecodeError:
+                            ext = {}
+                    passport = ext.get("passport") if isinstance(ext, dict) else {}
+                    agent_code = (
+                        passport.get("agent_code", "")
+                        if isinstance(passport, dict)
+                        else ""
+                    )
+                    return {
+                        "bot_uuid": existing.get("device_id", ""),
+                        "binding_id": existing.get("binding_id"),
+                        "bot_id": bot_id,
+                        "agent_code": agent_code,
+                    }
 
         passport_info = self._passport.query_agent_passport(
             bot_id=bot_id, owner_workno=user_id
@@ -1953,6 +1988,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
         final_status = "FAILED"
         layout_watchdog_dispatched = False
         terminal_persistence_pending = False
+        restart_completion_pending: BaasPublishCompletedEvent | None = None
 
         logger.info(
             "[DesktopBotService._poll_publish_progress] start polling "
@@ -1963,6 +1999,20 @@ class DesktopBotService(DesktopBotServiceProtocol):
         try:
             while (time.monotonic() - start_time) < poll_timeout:
                 time.sleep(self._POLL_INTERVAL_SECONDS)
+
+                if restart_completion_pending is not None:
+                    try:
+                        get_event_bus().publish(restart_completion_pending)
+                    except RequiredEventDeliveryError:
+                        logger.exception(
+                            "[DesktopBotService._poll_publish_progress] "
+                            "required restart completion hand-off failed; will retry: "
+                            "bot_id=%s publish_id=%s",
+                            bot_id,
+                            publish_id,
+                        )
+                        continue
+                    return
 
                 if restart_tracking is not None:
                     (
@@ -2086,6 +2136,24 @@ class DesktopBotService(DesktopBotServiceProtocol):
                                 owner_id=owner_id,
                                 binding_id=binding_id,
                             )
+                            restart_completion_pending = BaasPublishCompletedEvent(
+                                binding_id=int(binding_id),
+                                bot_id=bot_id,
+                                owner_id=owner_id,
+                                publish_id=int(restart_publish_id),
+                                publish_kind="restart",
+                            )
+                            try:
+                                get_event_bus().publish(restart_completion_pending)
+                            except RequiredEventDeliveryError:
+                                logger.exception(
+                                    "[DesktopBotService._poll_publish_progress] "
+                                    "required restart completion hand-off failed; "
+                                    "will retry: bot_id=%s publish_id=%s",
+                                    bot_id,
+                                    publish_id,
+                                )
+                                continue
                             return
                         if transition is _DesktopTerminalTransitionStatus.SUPERSEDED:
                             return
@@ -2151,6 +2219,15 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     publish_id,
                     restart_tracking is not None,
                     observe_only,
+                )
+                return
+            if restart_completion_pending is not None:
+                logger.error(
+                    "[DesktopBotService._poll_publish_progress] restart completion "
+                    "hand-off could not be delivered before timeout: "
+                    "bot_id=%s publish_id=%s",
+                    bot_id,
+                    publish_id,
                 )
                 return
             if terminal_persistence_pending:
