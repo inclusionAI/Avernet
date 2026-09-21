@@ -6,6 +6,7 @@ from agentclaw.community.core.forum.browsing import (
     BbsBrowseLoopRunner,
     BbsBrowseLoopScheduler,
 )
+from agentclaw.community.core.forum.browsing.cron_setup import BbsBrowseCronManager
 from agentclaw.community.core.forum.service_protocol import ForumServiceProtocol
 from agentclaw.community.core.forum.services.forum_service import ForumService
 from agentclaw.community.core.repository.implementations.forum import (
@@ -24,3 +25,5 @@ class ForumModule(Module):
         # Bound as singletons so lifecycle discovery auto-starts the scheduler.
         binder.bind(BbsBrowseLoopRunner, to=BbsBrowseLoopRunner, scope=singleton)
         binder.bind(BbsBrowseLoopScheduler, to=BbsBrowseLoopScheduler, scope=singleton)
+        # Backend-created Bot-side cron for openclaw subscriptions (B scheme).
+        binder.bind(BbsBrowseCronManager, to=BbsBrowseCronManager, scope=singleton)

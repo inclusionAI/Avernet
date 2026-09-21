@@ -42,6 +42,8 @@ from agentclaw.community.core.forum.models import (
     MAX_SEARCH_KEYWORD_LENGTH,
 )
 from agentclaw.community.core.forum.browsing import BbsBrowseLoopRunner
+from agentclaw.community.core.forum.browsing import BbsBrowseLoopScheduler
+from agentclaw.community.core.forum.browsing.cron_setup import BbsBrowseCronManager
 from agentclaw.community.core.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     BROWSE_MODE_OPENCLAW,
@@ -205,15 +207,32 @@ async def upsert_subscription_internal(
     request: Request,
     response: Response,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+    cron_manager: BbsBrowseCronManager = Injected(BbsBrowseCronManager),
+    scheduler: BbsBrowseLoopScheduler = Injected(BbsBrowseLoopScheduler),
 ) -> Envelope[SubscriptionItem]:
-    """加入/更新一个 Bot 的「逛论坛」订阅（默认 framework）。"""
+    """加入/更新一个 Bot 的「逛论坛」订阅，并装配其定时触发。
+
+    openclaw(B)：后端按固定名 upsert 该 Bot 的 `*/30` OpenClaw cron（payload 固定）。
+    framework(A)：后端 APScheduler 注册该 Bot 的 `*/30` job。
+    画 mode 之间切换时，卸下旧 mode 的触发再装新 mode 的，保证任意时刻只有一份触发。
+    """
+    old = service.get_subscription(bot_id=bot_id)
     result = service.upsert_subscription(
         bot_id=bot_id,
         owner_user_id=body.owner_user_id,
         mode=body.mode,
         note=body.note,
     )
-    payload = SubscriptionItem.from_record(result.subscription)
+    sub = result.subscription
+    if sub.mode == BROWSE_MODE_OPENCLAW:
+        await cron_manager.ensure_cron(bot_id=bot_id, owner_user_id=body.owner_user_id)
+        if old is not None and old.mode == BROWSE_MODE_FRAMEWORK:
+            scheduler.unregister_bot(bot_id)
+    else:
+        scheduler.register_bot(bot_id=bot_id)
+        if old is not None and old.mode == BROWSE_MODE_OPENCLAW:
+            await cron_manager.remove_cron(bot_id=bot_id, owner_user_id=body.owner_user_id)
+    payload = SubscriptionItem.from_record(sub)
     response.status_code = 201 if result.created else 200
     return created(payload, request) if result.created else envelope(payload, request)
 
@@ -238,8 +257,16 @@ async def delete_subscription_internal(
     bot_id: BotIdPath,
     request: Request,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+    cron_manager: BbsBrowseCronManager = Injected(BbsBrowseCronManager),
+    scheduler: BbsBrowseLoopScheduler = Injected(BbsBrowseLoopScheduler),
 ) -> Envelope[SubscriptionDeleted]:
-    """退出逛论坛订阅（不存在也返回 deleted=false，幂等）。"""
+    """退出逛论坛订阅（不存在也返回 deleted=false，幂等）；同时卸下定时触发。"""
+    sub = service.get_subscription(bot_id=bot_id)
+    if sub is not None:
+        if sub.mode == BROWSE_MODE_OPENCLAW:
+            await cron_manager.remove_cron(bot_id=bot_id, owner_user_id=sub.owner_user_id)
+        else:
+            scheduler.unregister_bot(bot_id=bot_id)
     deleted = service.delete_subscription(bot_id=bot_id)
     return envelope(SubscriptionDeleted(deleted=deleted), request)
 

@@ -79,8 +79,11 @@ def _feed_item(*, topic_id: str, my_reply_count: int, topic_type: str = "DISCUSS
 
 
 @pytest.mark.asyncio
-async def test_upsert_subscription_returns_201_when_created():
+async def test_upsert_subscription_creates_framework_registers_scheduler():
     class Service:
+        def get_subscription(self, **kwargs):
+            return None  # new subscription
+
         def upsert_subscription(self, **kwargs):
             assert kwargs == {
                 "bot_id": "bot-a",
@@ -91,28 +94,40 @@ async def test_upsert_subscription_returns_201_when_created():
             return BrowseSubscriptionUpsertResult(subscription=_record(), created=True)
 
     response = Response()
+    cron_manager = _FakeCronManager()
+    scheduler = _FakeScheduler()
     payload = await upsert_subscription_internal(
         body=UpsertSubscriptionRequest(owner_user_id="111111", mode="framework"),
         bot_id="bot-a",
         request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         response=response,
         service=Service(),
+        cron_manager=cron_manager,
+        scheduler=scheduler,
     )
     assert response.status_code == 201
     assert payload.data is not None and payload.data.bot_id == "bot-a"
+    # framework create -> register scheduler job; no Bot-side cron
+    assert scheduler.registered == ["bot-a"]
+    assert cron_manager.ensures == [] and cron_manager.removes == []
 
 
 @pytest.mark.asyncio
-async def test_upsert_subscription_returns_200_when_replaced():
+async def test_upsert_subscription_openclaw_ensures_cron():
     class Service:
+        def get_subscription(self, **kwargs):
+            return None  # brand-new join (created path)
+
         def upsert_subscription(self, **kwargs):
             assert kwargs["mode"] == "openclaw"
             return BrowseSubscriptionUpsertResult(
                 subscription=_record(mode="openclaw", note="self cron"),
-                created=False,
+                created=True,
             )
 
     response = Response()
+    cron_manager = _FakeCronManager()
+    scheduler = _FakeScheduler()
     payload = await upsert_subscription_internal(
         body=UpsertSubscriptionRequest(
             owner_user_id="111111", mode="openclaw", note="self cron"
@@ -121,10 +136,73 @@ async def test_upsert_subscription_returns_200_when_replaced():
         request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         response=response,
         service=Service(),
+        cron_manager=cron_manager,
+        scheduler=scheduler,
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert isinstance(payload.data, SubscriptionItem)
     assert payload.data.mode == "openclaw" and payload.data.note == "self cron"
+    # openclaw create -> backend upserts the fixed-name cron; no scheduler job
+    assert cron_manager.ensures == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
+    assert scheduler.registered == [] and scheduler.unregistered == []
+
+
+@pytest.mark.asyncio
+async def test_upsert_subscription_switch_framework_to_openclaw_unregisters_scheduler():
+    class Service:
+        def get_subscription(self, **kwargs):
+            return _record(mode="framework")  # old framework sub
+
+        def upsert_subscription(self, **kwargs):
+            return BrowseSubscriptionUpsertResult(
+                subscription=_record(mode="openclaw"),
+                created=False,
+            )
+
+    cron_manager = _FakeCronManager()
+    scheduler = _FakeScheduler()
+    response = Response()
+    await upsert_subscription_internal(
+        body=UpsertSubscriptionRequest(owner_user_id="111111", mode="openclaw"),
+        bot_id="bot-a",
+        request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-subscription"),
+        response=response,
+        service=Service(),
+        cron_manager=cron_manager,
+        scheduler=scheduler,
+    )
+    assert response.status_code == 200
+    assert cron_manager.ensures == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
+    assert scheduler.unregistered == ["bot-a"]
+
+
+@pytest.mark.asyncio
+async def test_upsert_subscription_switch_openclaw_to_framework_removes_cron():
+    class Service:
+        def get_subscription(self, **kwargs):
+            return _record(mode="openclaw")  # old openclaw sub
+
+        def upsert_subscription(self, **kwargs):
+            return BrowseSubscriptionUpsertResult(
+                subscription=_record(mode="framework"),
+                created=False,
+            )
+
+    cron_manager = _FakeCronManager()
+    scheduler = _FakeScheduler()
+    response = Response()
+    await upsert_subscription_internal(
+        body=UpsertSubscriptionRequest(owner_user_id="111111", mode="framework"),
+        bot_id="bot-a",
+        request=_request("POST", "/api/v1/bots/bot-a/bbs/browse-subscription"),
+        response=response,
+        service=Service(),
+        cron_manager=cron_manager,
+        scheduler=scheduler,
+    )
+    assert response.status_code == 200
+    assert scheduler.registered == ["bot-a"]
+    assert cron_manager.removes == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
 
 
 @pytest.mark.asyncio
@@ -157,18 +235,72 @@ async def test_get_subscription_raises_not_found_when_missing():
 
 
 @pytest.mark.asyncio
-async def test_delete_subscription_returns_deleted_flag():
+async def test_delete_subscription_openclaw_removes_cron():
     class Service:
+        def get_subscription(self, **kwargs):
+            return _record(mode="openclaw")
+
         def delete_subscription(self, **kwargs):
             assert kwargs == {"bot_id": "bot-a"}
             return True
 
+    cron_manager = _FakeCronManager()
+    scheduler = _FakeScheduler()
     payload = await delete_subscription_internal(
         bot_id="bot-a",
         request=_request("DELETE", "/api/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
+        cron_manager=cron_manager,
+        scheduler=scheduler,
     )
     assert payload.data is not None and payload.data.deleted is True
+    assert cron_manager.removes == [{"bot_id": "bot-a", "owner_user_id": "111111"}]
+    assert scheduler.unregistered == []
+
+
+@pytest.mark.asyncio
+async def test_delete_subscription_framework_unregisters_scheduler():
+    class Service:
+        def get_subscription(self, **kwargs):
+            return _record(mode="framework")
+
+        def delete_subscription(self, **kwargs):
+            return True
+
+    cron_manager = _FakeCronManager()
+    scheduler = _FakeScheduler()
+    payload = await delete_subscription_internal(
+        bot_id="bot-a",
+        request=_request("DELETE", "/api/v1/bots/bot-a/bbs/browse-subscription"),
+        service=Service(),
+        cron_manager=cron_manager,
+        scheduler=scheduler,
+    )
+    assert payload.data is not None and payload.data.deleted is True
+    assert scheduler.unregistered == ["bot-a"]
+    assert cron_manager.removes == []
+
+
+@pytest.mark.asyncio
+async def test_delete_subscription_missing_subscription_still_idempotent():
+    class Service:
+        def get_subscription(self, **kwargs):
+            return None
+
+        def delete_subscription(self, **kwargs):
+            return False
+
+    cron_manager = _FakeCronManager()
+    scheduler = _FakeScheduler()
+    payload = await delete_subscription_internal(
+        bot_id="bot-a",
+        request=_request("DELETE", "/api/v1/bots/bot-a/bbs/browse-subscription"),
+        service=Service(),
+        cron_manager=cron_manager,
+        scheduler=scheduler,
+    )
+    assert payload.data is not None and payload.data.deleted is False
+    assert cron_manager.removes == [] and scheduler.unregistered == []
 
 
 @pytest.mark.asyncio
@@ -226,6 +358,36 @@ async def test_get_subscription_by_bot_reviews_under_read_router():
         service=Service(),
     )
     assert payload.data is not None and payload.data.bot_id == "bot-a"
+
+
+class _FakeCronManager:
+    """Records ensure_cron/remove_cron calls."""
+
+    def __init__(self) -> None:
+        self.ensures: list[dict[str, str]] = []
+        self.removes: list[dict[str, str]] = []
+
+    async def ensure_cron(self, *, bot_id, owner_user_id):
+        self.ensures.append({"bot_id": bot_id, "owner_user_id": owner_user_id})
+        return {"success": True}
+
+    async def remove_cron(self, *, bot_id, owner_user_id):
+        self.removes.append({"bot_id": bot_id, "owner_user_id": owner_user_id})
+        return None
+
+
+class _FakeScheduler:
+    """Records register_bot/unregister_bot calls."""
+
+    def __init__(self) -> None:
+        self.registered: list[str] = []
+        self.unregistered: list[str] = []
+
+    def register_bot(self, bot_id):
+        self.registered.append(bot_id)
+
+    def unregister_bot(self, bot_id):
+        self.unregistered.append(bot_id)
 
 
 # ---------------------------------------------------------------------------
