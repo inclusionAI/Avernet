@@ -6,6 +6,8 @@ import { createMonitoringRuntime, type MonitoringRuntime } from "../services/mon
 const MAX_BYTES = 128 * 1024;
 const scoped = (req: Request) => /^\/(?:internal\/monitoring|monitoring)(?:\/|$)/.test(req.path);
 const statusCodes = { INVALID_EVENT: 400,
+  TARGET_UNRESOLVED: 409, TARGET_AMBIGUOUS: 409, TARGET_BINDING_CONFLICT: 409,
+  UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_ENROLLED: 409, ALREADY_ENROLLED: 409, ENROLLMENT_NOT_IMPLEMENTED: 501,
   EVENT_CONFLICT: 409, PAYLOAD_TOO_LARGE: 413, NOT_READY: 503, BOT_NOT_FOUND: 404 } as const;
 export const monitoringErrorResponse: ErrorRequestHandler = (error, req, res, next) => {
   if (!scoped(req)) { next(error); return; }
@@ -58,13 +60,33 @@ export function createMonitoringRouter(runtime: MonitoringRuntime = createMonito
   router.post("/internal/monitoring/bot-checks", async (req, res) => {
     res.json(await runtime.service!.reportCheck(req.body));
   });
-  const requireClawInsightAdmin = (req: Request, res: Response, next: NextFunction): void => {
-    if (req.isClawInsightAdmin !== true) {
-      res.status(403).json({ error: "Forbidden", message: "ClawInsight admin permission required" });
-      return;
-    }
+  const requireClawInsightAdmin = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    const user = await principal(req);
+    if (!user.isAuthenticated || !user.staffId) throw new MonitoringError('UNAUTHENTICATED', '请先登录。');
+    if (!user.isClawInsightAdmin) throw new MonitoringError('FORBIDDEN', '需要监控管理员权限。');
     next();
   };
+  // New UI reads have their own host-verified identity path. Legacy reads remain admin-only.
+  const principal = async (req: Request) => {
+    if (!runtime.browser || !runtime.principal) throw new MonitoringError("NOT_READY", "监控认证和目录尚未装配。");
+    return runtime.principal(req);
+  };
+  router.get("/monitoring/bot-options", async (req, res) => {
+    const user = await principal(req);
+    res.json(await runtime.browser!.options(user, req.query));
+  });
+  router.get("/monitoring/targets/:botRef/status", async (req, res) => {
+    const user = await principal(req);
+    res.json(await runtime.browser!.status(user, String(req.params.botRef), req.query));
+  });
+  router.get("/monitoring/targets/:botRef/diagnoses", async (req, res) => {
+    const user = await principal(req);
+    res.json(await runtime.browser!.diagnoses(user, String(req.params.botRef), req.query));
+  });
+  router.post("/monitoring/enrollments", json({ limit: '4kb', inflate: false }), async (req, res) => {
+    const user = await principal(req);
+    await runtime.browser!.enroll(user, req.body);
+  });
   router.use("/monitoring", requireClawInsightAdmin);
   router.get("/monitoring/bots", async (req, res) => {
     if (Object.keys(req.query).length) throw new MonitoringError("INVALID_EVENT", "不支持此查询参数。");

@@ -1,0 +1,17 @@
+/* Diagnosis footer only. Record column layout lives in monitoring-records.css. */
+.insight-monitoring .list-footer{flex-wrap:wrap;gap:12px 20px}
+.insight-monitoring .record-pagination{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-left:auto;min-width:0}
+.insight-monitoring .page-buttons{display:flex;align-items:center;gap:4px}
+.insight-monitoring .record-pagination .page-btn,.insight-monitoring .page-jump button{display:inline-flex;align-items:center;justify-content:center;height:30px;min-width:30px;padding:0 8px;border:1px solid #e1e6ee;border-radius:5px;background:#fff;color:#627086;font-size:11px;line-height:1;white-space:nowrap}
+.insight-monitoring .record-pagination button:hover:not(:disabled){border-color:#9cb9ef;color:#2463eb;background:#f6f9ff}
+.insight-monitoring .record-pagination .page-btn[aria-current="page"]{border-color:#2463eb;background:#edf3ff;color:#2463eb;font-weight:600}
+.insight-monitoring .record-pagination button:disabled{color:#b7bfcb;background:#fafbfc;border-color:#edf0f5;cursor:not-allowed}
+.insight-monitoring .record-pagination select,.insight-monitoring .page-jump input{height:30px;border:1px solid #e1e6ee;border-radius:5px;background:#fff;color:#627086;font-size:11px;padding:0 6px}
+.insight-monitoring .page-jump{display:flex;align-items:center;gap:6px;margin:0;white-space:nowrap}
+.insight-monitoring .page-jump input{width:44px;text-align:center;font-variant-numeric:tabular-nums}
+.insight-monitoring .page-jump input:disabled{background:#fafbfc}
+.insight-monitoring .page-position{white-space:nowrap;font-variant-numeric:tabular-nums;color:#7e899a}
+.insight-monitoring .page-jump-error{flex-basis:100%;text-align:right;font-size:11px;color:#bb454e}
+.insight-monitoring .page-jump input[aria-invalid="true"]{border-color:#ce6470}
+.insight-monitoring .record-pagination button:focus-visible,.insight-monitoring .record-pagination input:focus-visible,.insight-monitoring .record-pagination select:focus-visible{outline:2px solid #7da4f9;outline-offset:2px}
+@media(max-width:760px){.insight-monitoring .record-pagination{margin-left:0;justify-content:flex-start;gap:8px}.insight-monitoring .record-pagination .page-number{display:none}.insight-monitoring .page-jump-error{text-align:left}.insight-monitoring .list-footer{padding:14px 16px}}

@@ -48,7 +48,7 @@ export default function InsightCenter() {
   const viewportRef = useInsightViewport();
   const [params, setParams] = useSearchParams();
   const { user } = useClientUser();
-  const canViewMonitoring = user?.isClawInsightAdmin === true;
+  const canViewMonitoring = Boolean(user?.userId);
   const monitoring = params.get("module") === "monitoring" && canViewMonitoring;
   const select = (value: boolean) => {
     const next = new URLSearchParams(params);
@@ -66,7 +66,7 @@ export default function InsightCenter() {
         </nav>
       </div>
     </aside>
-    <div className="insight-content" role="region" aria-label="效果中心内容" tabIndex={0}>{monitoring ? <MonitoringPanel /> : <GovernanceCenter />}</div>
+    <div className="insight-content" role="region" aria-label="效果中心内容" tabIndex={0}>{monitoring ? <MonitoringPanel key={`${user?.userId}:${user?.isClawInsightAdmin}`} isAdmin={user?.isClawInsightAdmin === true} /> : <GovernanceCenter />}</div>
   </div>;
 }
 

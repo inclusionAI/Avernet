@@ -7,6 +7,7 @@ import { mysqlDialect, zdasDialect } from "@avernet/clawweb-shared/server/db/dia
 import { initializeMonitoringSqlite, renderMonitoringDdl } from "../schema.js";
 import { MonitoringRepository } from "../../../repositories/monitoring-repository.js";
 import { parseDiagnosis, parseQuery, parseCheck } from "../validation.js";
+import { resolved, testTarget } from "./identity-fixtures.js";
 import { database } from "./test-database.js";
 const fixture = (name: string) =>
   JSON.parse(
@@ -24,8 +25,8 @@ beforeEach(async () => {
   repo = new MonitoringRepository(db);
 }, 30000);
 afterEach(async () => { await db?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); vi.restoreAllMocks(); });
-const insert = (event = alert) => repo.insertDiagnosis(parseDiagnosis(event, event.eventId), now);
-const list = (query = {}, bot = "mock-bot-te") => repo.listDiagnoses(bot, parseQuery(query));
+const insert = (event = alert) => repo.insertDiagnosis(resolved(parseDiagnosis(event, event.eventId)), now);
+const list = (query = {}, bot = "mock-bot-te") => repo.listDiagnoses(testTarget(bot), parseQuery(query));
 describe("monitoring real SQL persistence (no HTTP listener)", () => {
   it("filters before pagination and derives choices independently of selected filters", async () => {
     for (let i = 0; i < 25; i++) await insert({ ...alert, eventId: `filter-${i}`, diagnosisId: `filter-${i}`, businessProblemCategory: "外部服务异常", businessProblemSubtype: i % 2 ? "请求超时" : "数据获取失败" });
@@ -48,7 +49,7 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
     await initializeMonitoringSqlite(db);
     expect((await list()).total).toBe(1);
     const tables = await db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
-    expect(tables.map(row => row.name)).toEqual(["insight_monitoring_bot_checks", "insight_monitoring_diagnoses"]);
+    expect(tables.map(row => row.name)).toEqual(["insight_monitoring_bot_check", "insight_monitoring_diagnose"]);
   });
   it("refuses local initialization on a managed database without executing DDL", async () => {
     const exec = vi.fn();
@@ -64,21 +65,21 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
     expect((await list()).total).toBe(2);
   });
   it("discovers persisted checks and diagnoses across connections without caching the roster", async () => {
-    expect(await repo.listBots()).toEqual([]);
+    expect(await repo.listTargets()).toEqual([]);
     await insert({ ...alert, botId: "diagnosis-only" });
     const check = parseCheck({ schemaVersion: "claw-monitoring/bot-check/v1", botId: "check-only", engine: "OC",
       checkedAt: new Date(now).toISOString(), lastSuccessfulCheckAt: null, status: "HEALTHY" }, now);
-    await repo.applyCheck(check, now);
+    await repo.applyCheck(resolved(check), now);
     const otherDb = database(join(dir, "db.sqlite3"));
     try {
       const other = new MonitoringRepository(otherDb);
-      expect(await other.listBots()).toEqual([{ botId: "check-only" }, { botId: "diagnosis-only" }]);
+      expect(await other.listTargets()).toEqual([testTarget("check-only"), testTarget("diagnosis-only")]);
       // The second connection writes both a duplicate identity and new case-sensitive identities.
-      await other.applyCheck({ ...check, botId: "diagnosis-only" }, now);
-      for (const botId of ["Case", "case"]) await other.applyCheck({ ...check, botId }, now);
-      const expected = ["Case", "case", "check-only", "diagnosis-only"].map(botId => ({ botId }));
-      expect(await repo.listBots()).toEqual(expected);
-      expect(await other.listBots()).toEqual(expected);
+      await other.applyCheck(resolved({ ...check, botId: "diagnosis-only" }), now);
+      for (const botId of ["Case", "case"]) await other.applyCheck(resolved({ ...check, botId }), now);
+      const expected = ["Case", "case", "check-only", "diagnosis-only"].map(testTarget);
+      expect(await repo.listTargets()).toEqual(expected);
+      expect(await other.listTargets()).toEqual(expected);
     } finally { await otherDb.close(); }
   });
   it("deduplicates concurrent writes, normalizes timezones and rejects conflicts", async () => {
@@ -99,6 +100,18 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
     expect((await list({ page: "3" })).items).toHaveLength(5);
     expect(await list({ decision: "ALERT", page: "99" })).toMatchObject({ total: 13, items: [], counts: { all: 25, pass: 12 } });
   });
+  it("serves pages beyond five with stable ordering and honest out-of-range metadata", async () => {
+    for (let i = 0; i < 125; i++) {
+      const eventId = `page-${String(i).padStart(3, "0")}`;
+      await insert({ ...alert, eventId, diagnosisId: eventId });
+    }
+    const sixth = await list({ page: "6", pageSize: "20" });
+    expect(sixth).toMatchObject({ page: 6, pageSize: 20, total: 125, totalPages: 7 });
+    expect(sixth.items).toHaveLength(20);
+    expect(sixth.items[0].diagnosisId).toBe("page-024");
+    expect((await list({ page: "7", pageSize: "20" })).items).toHaveLength(5);
+    expect(await list({ page: "2147483647", pageSize: "50" })).toMatchObject({ page: 2147483647, total: 125, totalPages: 3, items: [] });
+  });
   it("uses Beijing bounds and nulls-last ordering", async () => {
     for (const [i, time] of [null, "2026-09-08T15:59:59.999Z", "2026-09-08T16:00:00Z", "2026-09-09T15:59:59.999Z", "2026-09-09T16:00:00Z"].entries()) await insert({ ...alert, eventId: `t-${i}`, diagnosisId: `t-${i}`, occurredAt: time });
     expect((await list()).items.at(-1)?.occurredAt).toBeNull();
@@ -111,27 +124,44 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
   });
   it("keeps the newest concurrent BotCheck and rejects equal-time conflict", async () => {
     const checks = Array.from({ length: 20 }, (_, i) => parseCheck({ schemaVersion: "claw-monitoring/bot-check/v1", botId: "mock-bot-te", engine: "TE", checkedAt: new Date(now - i * 1000).toISOString(), lastSuccessfulCheckAt: null, status: "HEALTHY" }, now));
-    await Promise.all(checks.map(c => repo.applyCheck(c, now)));
-    expect((await repo.readStatus("mock-bot-te")).check?.checkedAt).toBe(checks[0].checkedAt);
-    expect(await repo.applyCheck(checks[0], now)).toBe(false);
-    await expect(repo.applyCheck({ ...checks[0], status: "ERROR" }, now)).rejects.toMatchObject({ code: "EVENT_CONFLICT" });
+    await Promise.all(checks.map(c => repo.applyCheck(resolved(c), now)));
+    expect((await repo.readStatus(testTarget("mock-bot-te"))).check?.checkedAt).toBe(checks[0].checkedAt);
+    expect(await repo.applyCheck(resolved(checks[0]), now)).toBe(false);
+    await expect(repo.applyCheck(resolved({ ...checks[0], status: "ERROR" }), now)).rejects.toMatchObject({ code: "EVENT_CONFLICT" });
   });
   it("fails closed on noop/missing indexes/write failure and recovers", async () => {
-    await expect(new MonitoringRepository({ ...db, dbType: "noop" } as IDatabase).readStatus("x")).rejects.toMatchObject({ code: "NOT_READY" });
-    await db.exec("DROP INDEX idx_monitor_diag_bot_time");
+    await expect(new MonitoringRepository({ ...db, dbType: "noop" } as IDatabase).readStatus(testTarget("x"))).rejects.toMatchObject({ code: "NOT_READY" });
+    await db.exec("DROP INDEX idx_monitor_diag_target_time");
     await expect(insert()).rejects.toMatchObject({ code: "NOT_READY" });
-    await db.exec("CREATE INDEX idx_monitor_diag_bot_time ON insight_monitoring_diagnoses(bot_id, occurred_at_ms, event_id)");
+    await db.exec("CREATE INDEX idx_monitor_diag_target_time ON insight_monitoring_diagnose(bot_id, entity_id, env, occurred_at_ms, event_id)");
     expect(await insert()).toBe(true);
     const exec = vi.spyOn(db, "exec").mockRejectedValue(new Error("write unavailable"));
     await expect(insert(pass)).rejects.toMatchObject({ code: "NOT_READY" }); exec.mockRestore();
-    await db.exec("DROP TABLE insight_monitoring_diagnoses");
+    await db.exec("DROP TABLE insight_monitoring_diagnose");
     await expect(list()).rejects.toMatchObject({ code: "NOT_READY" });
+  });
+  it.each(['bot_id', 'bot_id, entity_id', 'bot_id, env'])('rejects a stricter UNIQUE (%s) without executing migrations', async columns => {
+    await db.exec(`CREATE UNIQUE INDEX unintended_identity ON insight_monitoring_bot_check (${columns})`);
+    const exec = vi.spyOn(db, 'exec');
+    await expect(repo.readStatus(testTarget('default'))).rejects.toMatchObject({ code: 'NOT_READY' });
+    expect(exec).not.toHaveBeenCalled();
+  });
+  it('requires the full ordered target/time index and entity column, never recreating them', async () => {
+    await db.exec('DROP INDEX idx_monitor_diag_target_time');
+    await db.exec('CREATE INDEX idx_monitor_diag_target_time ON insight_monitoring_diagnose(bot_id, env, entity_id, occurred_at_ms, event_id)');
+    const exec = vi.spyOn(db, 'exec');
+    await expect(repo.readStatus(testTarget('default'))).rejects.toMatchObject({ code: 'NOT_READY' });
+    expect(exec).not.toHaveBeenCalled(); exec.mockRestore();
+    await db.exec('DROP INDEX idx_monitor_diag_target_time');
+    await db.exec('CREATE INDEX idx_monitor_diag_target_time ON insight_monitoring_diagnose(bot_id, entity_id, env, occurred_at_ms, event_id)');
+    await db.exec('ALTER TABLE insight_monitoring_bot_check RENAME COLUMN entity_id TO missing_entity');
+    await expect(repo.readStatus(testTarget('default'))).rejects.toMatchObject({ code: 'NOT_READY' });
   });
   it.each([mysqlDialect, zdasDialect])("renders reviewed monitoring types without changing legacy VARCHAR policy ($name)", dialect => {
     const sql = renderMonitoringDdl(dialect).join("\n");
     expect(sql).toContain("VARCHAR(255)"); expect(sql).toContain("CHARACTER SET latin1 COLLATE latin1_bin");
     expect(sql).toContain("utf8mb4"); expect(sql).toContain("AUTO_INCREMENT");
-    expect(sql).toContain("(bot_id, decision, occurred_at_ms, event_id)");
+    expect(sql).toContain("(bot_id, entity_id, env, decision, occurred_at_ms, event_id)");
     expect(sql).not.toContain("unixepoch"); expect(sql).not.toContain("VARCHAR(190)");
     expect(dialect.renderDdl("CREATE TABLE IF NOT EXISTS legacy (name VARCHAR(255))")).toContain("VARCHAR(190)");
   });

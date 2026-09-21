@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "global.d.ts",
+    "web/styles.d.ts",
+    "preview/**/*.ts",
+    "preview/**/*.tsx"
+  ],
+  "exclude": [
+    "**/__tests__/**",
+    "node_modules",
+    "dist"
+  ]
+}

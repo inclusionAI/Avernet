@@ -1,10 +1,10 @@
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
 
-export const DIAGNOSES_TABLE = "insight_monitoring_diagnoses";
-export const CHECKS_TABLE = "insight_monitoring_bot_checks";
+export const DIAGNOSES_TABLE = "insight_monitoring_diagnose";
+export const CHECKS_TABLE = "insight_monitoring_bot_check";
 const diagnosisColumns: Record<string, [string, boolean]> = {
   id: ["BIGINT", false], event_id: ["VARCHAR(128)", false], schema_version: ["VARCHAR(64)", false],
-  bot_id: ["VARCHAR(128)", false], engine: ["VARCHAR(2)", false], session_key: ["VARCHAR(1024)", true],
+  bot_id: ["VARCHAR(128)", false], entity_id: ["VARCHAR(128)", false], env: ["VARCHAR(20)", false], engine: ["VARCHAR(2)", false], session_key: ["VARCHAR(1024)", true],
   session_id: ["VARCHAR(255)", true], trace_id: ["VARCHAR(255)", true], occurred_at_ms: ["BIGINT", true],
   diagnosed_at_ms: ["BIGINT", false], decision: ["VARCHAR(16)", false], tc_fault_label: ["VARCHAR(128)", true],
   confidence_json: ["VARCHAR(32)", true], business_problem_category: ["VARCHAR(128)", true],
@@ -13,7 +13,7 @@ const diagnosisColumns: Record<string, [string, boolean]> = {
   gmt_create: ["TIMESTAMP", false], gmt_modified: ["TIMESTAMP", false],
 };
 const checkColumns: Record<string, [string, boolean]> = {
-  id: ["BIGINT", false], bot_id: ["VARCHAR(128)", false], engine: ["VARCHAR(2)", false],
+  id: ["BIGINT", false], bot_id: ["VARCHAR(128)", false], entity_id: ["VARCHAR(128)", false], env: ["VARCHAR(20)", false], engine: ["VARCHAR(2)", false],
   checked_at_ms: ["BIGINT", false], last_successful_check_at_ms: ["BIGINT", true], status: ["VARCHAR(16)", false],
   received_at_ms: ["BIGINT", false], gmt_create: ["TIMESTAMP", false], gmt_modified: ["TIMESTAMP", false],
 };
@@ -24,14 +24,14 @@ function assert(condition: unknown): asserts condition {
 export async function verifyMonitoringSchema(db: IDatabase): Promise<void> {
   assert(db.dbType !== "noop");
   for (const [table, expected, indexes] of [
-    [DIAGNOSES_TABLE, diagnosisColumns, [[true, ["event_id"]], [false, ["bot_id", "occurred_at_ms", "event_id"]],
-      [false, ["bot_id", "decision", "occurred_at_ms", "event_id"]]]],
-    [CHECKS_TABLE, checkColumns, [[true, ["bot_id"]]]],
+    [DIAGNOSES_TABLE, diagnosisColumns, [[true, ["event_id"]], [false, ["bot_id", "entity_id", "env", "occurred_at_ms", "event_id"]],
+      [false, ["bot_id", "entity_id", "env", "decision", "occurred_at_ms", "event_id"]]]],
+    [CHECKS_TABLE, checkColumns, [[true, ["bot_id", "entity_id", "env"]]]],
   ] as [string, Record<string, [string, boolean]>, [boolean, string[]][]][]) {
     const sqlite = db.dbType === "sqlite";
     const columns = sqlite ? await db.query(`PRAGMA table_info(${table})`) : await db.query(
       `SELECT COLUMN_NAME AS name, DATA_TYPE AS data_type, CHARACTER_MAXIMUM_LENGTH AS max_length,
-       IS_NULLABLE AS nullable, COLLATION_NAME AS collation, COLUMN_KEY AS column_key, EXTRA AS extra
+       IS_NULLABLE AS nullable, COLLATION_NAME AS collation, COLUMN_KEY AS column_key, EXTRA AS extra, COLUMN_DEFAULT AS column_default
        FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`, [table]);
     for (const [name, [type, nullable]] of Object.entries(expected)) {
       const column = columns.find((c) => c.name === name);
@@ -40,6 +40,10 @@ export async function verifyMonitoringSchema(db: IDatabase): Promise<void> {
       const actualType = sqlite ? String(column.type).toUpperCase() : `${String(column.data_type).toUpperCase()}${column.max_length != null && type.startsWith("VARCHAR") ? `(${column.max_length})` : ""}`;
       assert(actualType === expectedType);
       assert((sqlite ? !(Number(column.notnull) || Number(column.pk)) : column.nullable === "YES") === nullable);
+      if (["entity_id", "env"].includes(name)) {
+        assert((sqlite ? column.dflt_value : column.column_default) == null);
+        if (!sqlite) assert(column.collation === "utf8mb4_bin");
+      }
       if (name === "id") assert(sqlite ? Number(column.pk) === 1 : column.column_key === "PRI" && String(column.extra).includes("auto_increment"));
       if (!sqlite && ["event_id", "bot_id"].includes(name)) assert(column.collation === "latin1_bin");
     }
@@ -51,7 +55,7 @@ export async function verifyMonitoringSchema(db: IDatabase): Promise<void> {
         const safeName = String(index.name).replaceAll("'", "''");
         const info = (await db.query(`PRAGMA index_xinfo('${safeName}')`)).filter((c) => Number(c.key) === 1);
         actualIndexes.push({ unique: !!index.unique, columns: info.map((c) => String(c.name)),
-          binary: info.filter((c) => ["event_id", "bot_id"].includes(String(c.name))).every((c) => c.coll === "BINARY"), full: !index.partial });
+          binary: info.filter((c) => ["event_id", "bot_id", "entity_id", "env"].includes(String(c.name))).every((c) => c.coll === "BINARY"), full: !index.partial });
       }
       // Index collation alone is insufficient: WHERE bot_id uses the column's own collation.
       const [ddl] = await db.query<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", [table]);
@@ -64,6 +68,11 @@ export async function verifyMonitoringSchema(db: IDatabase): Promise<void> {
       for (const row of list) groups.set(String(row.name), [...(groups.get(String(row.name)) ?? []), row]);
       actualIndexes = [...groups.values()].map((rows) => ({ unique: Number(rows[0].non_unique) === 0,
         columns: rows.map((r) => String(r.column_name)), binary: true, full: rows.every((r) => r.sub_part == null) }));
+    }
+    if (table === CHECKS_TABLE) {
+      // Any proper subset UNIQUE of target identity is stricter than the supported identity.
+      assert(!actualIndexes.some(i => i.unique && i.columns.length > 0 && i.columns.length < 3
+        && i.columns.every(c => ["bot_id", "entity_id", "env"].includes(c))));
     }
     for (const [unique, names] of indexes) {
       assert(actualIndexes.some((index) => index.unique === unique && index.binary && index.full

@@ -1,5 +1,7 @@
 # ClawInsight：Agent 监控自愈设计 Spec
 
+> 后续 Bot 搜索、三字段身份及分页的目标契约见 [v2.1 最终 Spec](./clawinsight-monitoring-bot-search.md)；分批实现与验证状态见 [实施记录](./clawinsight-monitoring-implementation.md)。最终 Spec 不代表本分支已全部实现。
+
 本文是 ClawInsight「Agent 监控自愈」模块的公开设计文档，描述功能定位、接口语义、数据模型、运行时装配约定、页面交互与验收标准。与具体部署环境相关的内部配置、审批与验证记录不属于本文范围。
 
 ## 1. 功能定位
@@ -78,7 +80,7 @@ ClawWeb Host → /api/insight/v1 → monitoring Router
 - 未知 Bot 的 status/diagnoses 返回 404；合法新 Bot 的 POST 不报名单类错误。
 - `engine` 校验为 OC/TE；身份由全局 `botId` 标识，不引入 `(botId, engine)` 复合身份。
 - 暂停来自最新有效 BotCheck 的 PAUSED 状态，直到新检查替换。
-- 状态新鲜度固定为 300 秒：当前时间距最新 `checkedAt` 超过阈值显示 UNKNOWN；`lastSuccessfulCheckAt` 仅保留真实成功时间。
+- 状态直接返回最新已持久化 BotCheck 的 `status`，不因 `checkedAt` 距今较久而改为 UNKNOWN；没有检查记录时才回退为 UNKNOWN。状态表示最近一次上报结果，不承诺监控进程此刻在线。`checkedAt` 继续用于乱序写入保护与幂等校验；`lastSuccessfulCheckAt` 仅保留真实成功时间。
 
 数据库连接沿用既有 `DATABASE_MODE` 配置。
 
@@ -171,7 +173,7 @@ bot_id / event_id 的比较与排序采用 ASCII 二进制语义（SQLite BINARY
 ### 7.1 后端语义
 
 - bots 从检查和诊断表读取去重并集，按 botId 排序。
-- status 的 diagnosisCount 为该 Bot 全部已存诊断数，不受页面日期影响；检查过期默认 UNKNOWN。
+- status 的 diagnosisCount 为该 Bot 全部已存诊断数，不受页面日期影响；状态沿用最新已持久化检查的 status，不按时间过期；没有检查记录时为 UNKNOWN。
 - 日期为北京时间自然日，结束日转换为下一天零点的半开区间；任一日期过滤排除 occurredAt=null，全部时间 null 排最后。
 - page / pageSize / keyword / decision / counts / total 严格遵守公共契约；数据库分页。
 - 同时间按 event_id ASCII 倒序；显式 CASE / null 排序保证各方言一致。

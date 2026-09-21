@@ -33,6 +33,7 @@ vi.mock('../monitoring/MonitoringPanel', () => ({ default: () => <div>MONITORING
 import InsightCenter from '../index'
 
 beforeEach(() => {
+  mocks.user.userId = 'dev_local'
   mocks.user.isAdmin = false
   mocks.user.isClawInsightAdmin = false
   mocks.overview.mockClear()
@@ -92,15 +93,15 @@ describe('Insight monitoring module navigation', () => {
   })
 })
 
-describe('Monitoring allowlist boundary', () => {
-  it.each([false, undefined])('hides navigation and ignores a monitoring deep link for flag %s', (flag) => {
+describe('Monitoring member navigation boundary', () => {
+  it.each([false, undefined])('allows authenticated members with admin flag %s', (flag) => {
     mocks.user.isAdmin = true
     mocks.user.isClawInsightAdmin = flag
     render(<MemoryRouter initialEntries={['/insight?module=monitoring']}><InsightCenter /></MemoryRouter>)
-    expect(screen.queryByRole('button', { name: 'Agent 监控自愈' })).not.toBeInTheDocument()
-    expect(screen.queryByText('MONITORING_CONTENT')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Agent 监控自愈' })).toBeInTheDocument()
+    expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Agent 治理' })).toBeInTheDocument()
-    expect(screen.getByText('OVERVIEW_CONTENT:mine')).toBeInTheDocument()
+    expect(mocks.overview).not.toHaveBeenCalled()
   })
   it('permits a monitoring-only member without generic admin privileges', () => {
     mocks.user.isClawInsightAdmin = true
@@ -108,4 +109,11 @@ describe('Monitoring allowlist boundary', () => {
     expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
     expect(mocks.overview).not.toHaveBeenCalled()
   })
+  it('does not expose the module to an unidentified browser user', () => {
+    mocks.user.userId = ''
+    render(<MemoryRouter initialEntries={['/insight?module=monitoring']}><InsightCenter /></MemoryRouter>)
+    expect(screen.queryByText('MONITORING_CONTENT')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Agent 监控自愈' })).not.toBeInTheDocument()
+  })
+
 })

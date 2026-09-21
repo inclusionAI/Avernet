@@ -1,0 +1,14 @@
+/* Match the host Tailwind base and typography; never shipped in the module. */
+@import 'tailwindcss' source(none);
+@source './*.tsx';
+@source '../web';
+body { margin:0; font-family:system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+#root { min-height:100vh; }
+.no-scrollbar { scrollbar-width:none; }
+.no-scrollbar::-webkit-scrollbar { display:none; }
+/* Fixture controls are separate from the product header/sidebar and collapsed. */
+.preview-tools { position:fixed; right:12px; bottom:8px; z-index:5; color:#647084; font-size:11px; }
+.preview-tools summary { cursor:pointer; padding:4px 8px; border:1px solid #e1e6ee; border-radius:5px; background:#fff; }
+.preview-tools[open] { padding:12px; border:1px solid #e1e6ee; border-radius:8px; background:#fff; box-shadow:0 4px 20px #20324e14; }
+.preview-tools p { margin:8px 0; }
+.preview-tools a { display:block; padding:5px 0; color:#2463eb; }

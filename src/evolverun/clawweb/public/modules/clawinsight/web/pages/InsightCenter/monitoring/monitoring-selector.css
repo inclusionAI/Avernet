@@ -1,0 +1,49 @@
+/* Accepted V6 picker. No unmonitored-only borders, hidden avatars or inline join actions. */
+.insight-monitoring .bot-trigger { min-width: 230px; text-align: left; }
+.insight-monitoring .trigger-text { display: flex; flex-direction: column; min-width: 0; gap: 4px; }
+.insight-monitoring .trigger-text strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insight-monitoring .trigger-text .mono { font-size: 10px; color: #8190a4; overflow: hidden; text-overflow: ellipsis; }
+.insight-monitoring .bot-picker { width: 520px; max-width: calc(100vw - 80px); padding: 16px; box-sizing: border-box; z-index: 50; overflow: auto; overscroll-behavior: contain; }
+.insight-monitoring .picker-heading { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+.insight-monitoring .bot-search { display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid #dce3ee; border-radius: 7px; }
+.insight-monitoring .bot-search input { flex: 1; width: 0; border: 0; outline: 0; background: transparent; font: inherit; font-size: 12px; }
+.insight-monitoring .bot-search:focus-within { outline: 2px solid #9bbafa; }
+.insight-monitoring .scope-switch { display: flex; gap: 12px; margin-top: 12px; }
+.insight-monitoring .scope-switch button { padding: 5px 2px; font-size: 12px; color: #7b879b; }
+.insight-monitoring .scope-switch button[aria-pressed="true"] { color: #2463eb; box-shadow: 0 2px #2463eb; }
+.insight-monitoring .summary-period { color: #7b899d; font-size: 10px; margin: 12px 0 9px; }
+.insight-monitoring .bot-candidates { display: flex; flex-direction: column; gap: 6px; max-height: min(300px, 40dvh); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 2px; }
+.insight-monitoring .bot-card { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-height: 108px; flex-shrink: 0; padding: 10px 12px; text-align: left; border: 1px solid #e2e7ef; border-radius: 8px; background: white; }
+.insight-monitoring .bot-card:hover { background: #f8faff; border-color: #abc3f2; }
+.insight-monitoring .bot-card.selected { background: #f7faff; border-color: #4b7ef3; box-shadow: 0 0 0 1px #4b7ef315; }
+.insight-monitoring .bot-card .bot-glyph { flex-shrink: 0; background: #f0f3f9; color: #6b82a6; }
+.insight-monitoring .candidate-content { flex: 1; min-width: 0; }
+.insight-monitoring .candidate-heading { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.insight-monitoring .candidate-heading strong { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insight-monitoring .candidate-id { display: block; font-size: 11px; margin-top: 3px; color: #8290a4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insight-monitoring .candidate-owner { display: block; font-size: 11px; margin-top: 3px; color: #788498; }
+.insight-monitoring .enrollment-badge { flex-shrink: 0; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #f0f2f5; color: #7c8798; }
+.insight-monitoring .enrollment-badge.healthy { color: #618273; background: #f0f5f3; }
+.insight-monitoring .enrollment-badge.error { color: #b64b30; background: #fff0eb; }
+.insight-monitoring .candidate-summary { display: flex; gap: 12px; margin-top: 7px; font-size: 11px; color: #708098; line-height: 16px; }
+.insight-monitoring .candidate-summary b { color: #3e506b; font-weight: 600; font-variant-numeric: tabular-nums; }
+.insight-monitoring .candidate-summary .has-alert, .insight-monitoring .candidate-summary .has-alert b { color: #b65338; }
+.insight-monitoring .picker-footer { border-top: 1px solid #edf0f5; padding-top: 10px; margin-top: 10px; font-size: 10px; color: #99a3b1; }
+.insight-monitoring .empty-search, .insight-monitoring .load-bots { padding: 14px; text-align: center; font-size: 12px; color: #708098; }
+.insight-monitoring .enrollment-panel { padding: 42px 24px 32px; text-align: center; min-height: 310px; border: 1px solid #e1e6ee; border-radius: 12px; background: white; }
+.insight-monitoring .enrollment-art { display: grid; place-items: center; width: 60px; height: 60px; margin: 0 auto 20px; border-radius: 17px; background: #f0f3f9; color: #6b82a6; }
+.insight-monitoring .enrollment-panel h2 { font-size: 17px; color: #38475d; }
+.insight-monitoring .enrollment-panel p { font-size: 12px; color: #7a8799; line-height: 1.8; }
+.insight-monitoring .enrollment-identity { margin: 14px auto 19px; overflow-wrap: anywhere; }
+.insight-monitoring .enroll-primary { padding: 9px 18px; border-radius: 7px; background: #2463eb; color: white; font-size: 13px; }
+.insight-monitoring .join-dialog { box-sizing: border-box; width: 360px; max-width: calc(100vw - 40px); padding: 24px; border: 1px solid #dfe5ee; border-radius: 12px; color: #29394f; box-shadow: 0 20px 80px #182a4430; }
+.insight-monitoring .join-dialog::backdrop { background: #24355145; }
+.insight-monitoring .join-dialog h2 { font-size: 18px; }
+.insight-monitoring .join-actions { display: flex; justify-content: flex-end; margin-top: 25px; }
+.insight-monitoring .join-actions button { padding: 8px 18px; background: #2463eb; color: white; border-radius: 6px; }
+@media (max-width: 760px) {
+  .insight-monitoring .bot-picker { width: min(520px, calc(100vw - 64px)); left: 0; padding: 13px; }
+  .insight-monitoring .candidate-summary { gap: 8px; font-size: 10px; flex-wrap: wrap; }
+}
+
+.insight-monitoring .candidate-env { display: inline-block; margin-left: 8px; padding: 0 5px; border-radius: 3px; background: #f0f3f9; color: #596b86; font-size: 10px; }

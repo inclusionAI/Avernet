@@ -25,4 +25,23 @@ describe('monitoring read API', () => {
     expect(monitoringErrorText({ name: 'TimeoutError' })).toContain('超时');
     expect(monitoringErrorText(new Error('private-secret'))).toContain('加载失败');
   });
+  it('uses opaque target references and explicit Beijing windows for the new APIs', () => {
+    const dates = { startDate: '2026-09-09', endDate: '2026-09-10' };
+    const signal = new AbortController().signal;
+    monitoringApi.options('mine', 'default & name', dates, 'signed-cursor', signal);
+    let params = new URL(fetchJson.mock.lastCall![0], 'http://localhost').searchParams;
+    expect(params.get('start')).toBe(String(Date.parse('2026-09-09T00:00:00+08:00')));
+    expect(params.get('end')).toBe(String(Date.parse('2026-09-11T00:00:00+08:00')));
+    expect(params.get('q')).toBe('default & name'); expect(params.get('cursor')).toBe('signed-cursor');
+    expect(params.has('ownerId')).toBe(false);
+    monitoringApi.targetDiagnoses('opaque/ref', { ...dates, decision: 'ALL', keyword: '', page: 18, pageSize: 50 }, signal);
+    expect(fetchJson.mock.lastCall![0]).toContain('/targets/opaque%2Fref/diagnoses?');
+    params = new URL(fetchJson.mock.lastCall![0], 'http://localhost').searchParams;
+    expect(params.has('startDate')).toBe(false); expect(params.get('page')).toBe('18');
+    monitoringApi.targetStatus('opaque', { startDate: '', endDate: '' }, signal);
+    expect(fetchJson.mock.lastCall![0]).toContain('start=all&end=all');
+    monitoringApi.enroll('opaque', signal);
+    expect(fetchJson.mock.lastCall![1]).toMatchObject({ method: 'POST', body: '{"botRef":"opaque"}', signal });
+  });
+
 });
