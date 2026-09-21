@@ -207,6 +207,18 @@ async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
     assert!(text.contains("bot-driver") && text.contains("bot-observer") && text.contains("已排队"));
     assert!(text.contains("/abort") && text.contains("/cacel"));
     assert!(!text.contains("context-only"));
+    let failed_row = &admitted.deliveries[1];
+    let running = service.transition(DeliveryTransitionCommand { delivery_id: failed_row.delivery_id.clone(), expected_state_version: failed_row.state.state_version,
+        event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend,
+        now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
+    }).await.unwrap();
+    let failed = service.transition(DeliveryTransitionCommand { delivery_id: running.delivery_id.clone(), expected_state_version: running.state.state_version,
+        event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::Failed,
+        now_ms: now, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
+    }).await.unwrap();
+    assert_eq!(failed.last_error_code.as_deref(), Some("bot_terminal_error"));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(channel.outbound().await.len(), 1, "a terminal chat error has its own safe channel feedback and must not also emit a generic delivery hint");
     let row = &admitted.deliveries[0];
     service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
         event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,

@@ -11,8 +11,8 @@ mod human_input_notification;
 mod terminal_notification;
 pub mod visibility;
 
-use std::collections::{HashSet, VecDeque};
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -63,6 +63,15 @@ const FORWARD_SENDER_IDENTITY_CONFIG: &str = "forward_sender_identity";
 /// via chat.send.
 const GROUP_CONTEXT_DELIVERY_CONFIG: &str = "group_context_delivery";
 
+/// Provider-local streaming state is scoped to one card-producing run.
+#[derive(Hash, Eq, PartialEq)]
+struct OutboundDeliveryKey {
+    binding_id: String,
+    im_conversation_id: String,
+    run_id: String,
+}
+type OutboundDeliveryLocks = HashMap<OutboundDeliveryKey, Weak<Mutex<()>>>;
+
 enum HumanInputActivation {
     Active,
     Unchanged,
@@ -89,6 +98,7 @@ pub struct BcsChannelService {
     binding_admin_lock: Mutex<()>,
     state_machine_session_resolution_lock: Mutex<()>,
     chat_session_resolution_lock: Mutex<()>,
+    outbound_delivery_locks: Mutex<OutboundDeliveryLocks>,
     session_reset_tracker: commands::SessionResetTracker,
 }
 
@@ -142,6 +152,7 @@ impl BcsChannelService {
             binding_admin_lock: Mutex::new(()),
             state_machine_session_resolution_lock: Mutex::new(()),
             chat_session_resolution_lock: Mutex::new(()),
+            outbound_delivery_locks: Mutex::new(HashMap::new()),
             session_reset_tracker: commands::SessionResetTracker::new(DEFAULT_INBOUND_DEDUP_LIMIT),
         }
     }

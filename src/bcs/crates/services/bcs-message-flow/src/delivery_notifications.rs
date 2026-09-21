@@ -44,6 +44,8 @@ fn hint(row: &PersistedMessageDelivery, now: i64) -> Option<(&'static str, &'sta
             "停止结果暂时无法确认，该 Bot 在本会话中的后续请求已暂停",
         )),
         Status::Cancelling => Some(("cancelling", "正在停止处理")),
+        Status::Failed if row.last_error_code.as_deref()
+            == Some(crate::managed_delivery::BOT_TERMINAL_ERROR_CODE) => None,
         Status::Failed => Some(("failed", "处理失败")),
         Status::Cancelled => Some(("cancelled", "消息已取消")),
         Status::Expired => Some(("expired", "排队消息已过期")),

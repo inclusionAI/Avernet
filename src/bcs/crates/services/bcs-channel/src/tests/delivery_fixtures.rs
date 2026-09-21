@@ -393,6 +393,8 @@ pub(super) struct RecordingDelivery {
     pub(super) events: Mutex<Vec<ChannelOutboundEvent>>,
     pub(super) fail_error: Mutex<Option<String>>,
     pub(super) call_error_account_ref: Mutex<Option<String>>,
+    pub(super) gate: Mutex<Option<Arc<Semaphore>>>,
+    pub(super) entered: AtomicU64,
 }
 
 #[async_trait]
@@ -405,6 +407,13 @@ impl ChannelDeliveryPort for RecordingDelivery {
         &self,
         event: ChannelOutboundEvent,
     ) -> ServiceResult<ChannelDeliveryResult> {
+        self.entered.fetch_add(1, Ordering::SeqCst);
+        if let Some(gate) = self.gate.lock().await.clone() {
+            gate.acquire()
+                .await
+                .expect("delivery gate must remain open")
+                .forget();
+        }
         if self
             .call_error_account_ref
             .lock()

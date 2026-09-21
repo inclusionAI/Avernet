@@ -1,5 +1,34 @@
 use super::*;
 
+impl BcsChannelService {
+    async fn outbound_delivery_guard(
+        &self,
+        binding_id: &str,
+        im_conversation_id: &str,
+        run_id: &str,
+    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        if run_id.trim().is_empty() {
+            return None;
+        }
+        let key = OutboundDeliveryKey {
+            binding_id: binding_id.to_string(),
+            im_conversation_id: im_conversation_id.to_string(),
+            run_id: run_id.to_string(),
+        };
+        let lock = {
+            let mut locks = self.outbound_delivery_locks.lock().await;
+            locks.retain(|_, lock| lock.strong_count() > 0);
+            let lock = locks
+                .get(&key)
+                .and_then(Weak::upgrade)
+                .unwrap_or_else(|| Arc::new(Mutex::new(())));
+            locks.insert(key, Arc::downgrade(&lock));
+            lock
+        };
+        Some(lock.lock_owned().await)
+    }
+}
+
 #[async_trait]
 impl ChannelService for BcsChannelService {
     async fn handle_inbound(&self, mut msg: InboundMessage) -> Result<(), ChannelInboundError> {
@@ -420,6 +449,9 @@ impl ChannelService for BcsChannelService {
                 text_len = msg.text.as_deref().map(|text| text.chars().count()).unwrap_or(0),
                 "channel outbound: selected"
             );
+            let _delivery_guard = self
+                .outbound_delivery_guard(&binding.id, &im_conversation_id, &msg.run_id)
+                .await;
             let result = match delivery
                 .deliver_event(ChannelOutboundEvent {
                     binding_ref,

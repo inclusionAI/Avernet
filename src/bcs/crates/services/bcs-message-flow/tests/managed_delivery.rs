@@ -236,6 +236,18 @@ async fn instrumentation_counts_only_committed_nonduplicate_events() -> Result<(
 }
 
 #[tokio::test]
+async fn bot_terminal_failure_records_a_distinct_error_code() -> Result<(), Box<dyn std::error::Error>> {
+    let service = ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new()));
+    let queued = service.admit(admit("bot-terminal-error", DeliveryType::Send)).await?.deliveries.remove(0);
+    let running = service.transition(transition(&queued, Event::StartSend)).await?;
+    let failed = service.transition(transition(&running, Event::Failed)).await?;
+
+    assert_eq!(failed.state.status, Status::Failed);
+    assert_eq!(failed.last_error_code.as_deref(), Some("bot_terminal_error"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn safe_retry_preserves_identity_and_context_but_rotates_the_attempt()
 -> Result<(), Box<dyn std::error::Error>> {
     let service =

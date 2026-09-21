@@ -15,6 +15,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 use tracing::Instrument;
 
+pub(crate) const BOT_TERMINAL_ERROR_CODE: &str = "bot_terminal_error";
+
 // Once persistence starts, cancellation of the caller must not release the Bot
 // guard while an async DB driver is still committing. Return guards on success
 // so the caller also retains its existing notification ordering.
@@ -267,6 +269,9 @@ impl ManagedMessageDelivery {
             && matches!(original.state.status, Status::Unknown | Status::CancelUnknown)
         {
             primary.last_error_code = Some("unknown_ttl_expired".into());
+        }
+        if event == Event::Failed {
+            primary.last_error_code = Some(BOT_TERMINAL_ERROR_CODE.into());
         }
         if manual {
             let metadata = primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}));
