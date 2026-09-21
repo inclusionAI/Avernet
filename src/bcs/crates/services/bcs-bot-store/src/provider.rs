@@ -9,9 +9,6 @@ pub use memory_bot_storage::MemoryBotProviderStore;
 #[path = "provider_binding_projection.rs"]
 mod binding_projection;
 pub use binding_projection::ProviderBindingProjection;
-#[path = "provider_bot_backfill.rs"]
-mod bot_backfill;
-pub use bot_backfill::ProviderBotBackfillReport;
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;

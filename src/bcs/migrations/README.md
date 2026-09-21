@@ -8,8 +8,9 @@ identity, connection mode, webhook metadata and environment-scoped uniqueness;
 they do not create a separate registration table. Gateway writes retain the
 existing binding projection; upstream writes do not create bindings.
 Apply remote DDL before new server code; SQLite bootstrap migrates automatically.
-Follow the [fenced backfill and rollout guide](../docs/provider-bot-storage-migration.md)
-to migrate existing bindings before switching the delivery read source.
+Follow the [rollout prerequisites](../docs/provider-bot-storage-migration.md).
+Historical data correction must complete through a separate reviewed work order
+before switching the delivery read source; no dedicated backfill tool is shipped.
 
 The user confirmed PR #2358 has never been deployed and approved consolidating
 its draft DB changes. Only this PR's unreleased slots are changed; upstream's

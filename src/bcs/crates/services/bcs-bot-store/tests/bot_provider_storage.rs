@@ -24,35 +24,17 @@ fn caps() -> BotCapabilities {
 }
 
 #[tokio::test]
-async fn backfill_rejects_missing_providers_and_partial_membership() {
-    let db = sqlite().await;
-    let env = bcs_config::resolve_env_str();
-    db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, name) VALUES ('orphan', ?, 'Orphan')", vec![env.as_str().into()])).await.unwrap();
-    db.execute(DbStatement::with_params("INSERT INTO bcs_provider_bot_bindings (bot_uuid, env, provider_id, provider_bot_ref) VALUES ('orphan', ?, 'missing-provider', 'ref')", vec![env.as_str().into()])).await.unwrap();
-    db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, name, provider_bot_ref) VALUES ('partial', ?, 'Partial', 'dangling-ref')", vec![env.as_str().into()])).await.unwrap();
-    let store = DbProviderStore::sqlite(db);
-    let report = store.backfill_provider_bots(false, false).await.unwrap();
-    assert!(report.issues.iter().any(|issue| issue.contains("orphan") && issue.contains("Provider")));
-    assert!(report.issues.iter().any(|issue| issue.contains("partial") && issue.contains("metadata")));
-    assert!(store.backfill_provider_bots(true, true).await.is_err());
-}
-
-#[tokio::test]
-async fn backfill_preserves_registered_upstream_without_a_binding() {
+async fn upstream_registration_preserves_identity_without_a_binding() {
     let db = sqlite().await;
     let store = DbProviderStore::sqlite(db.clone());
     let original = record("upstream", BotConnectionMode::Plugin);
     store.create_provider_bot(original.clone(), caps(), "alice", "test-upstream-runtime").await.unwrap();
-    let report = store.backfill_provider_bots(true, true).await.unwrap();
-    assert_eq!(report.memberships_to_backfill + report.ordinary_modes_to_backfill, 0);
-    assert!(report.issues.is_empty());
     assert_eq!(store.get_provider_bot("upstream").await.unwrap(), Some(original));
     assert!(store.get_binding_by_bot_uuid("upstream").await.unwrap().is_none());
     let rows = db.query(DbStatement::new("SELECT created_by, session_token, connection_mode FROM bcs_bots WHERE bot_uuid = 'upstream'")).await.unwrap();
     assert_eq!(rows[0].get_string("connection_mode").unwrap().as_deref(), Some("plugin"));
     assert_eq!(rows[0].get_string("created_by").unwrap().as_deref(), Some("alice"));
     assert_eq!(rows[0].get_string("session_token").unwrap().as_deref(), Some("test-upstream-runtime"));
-    assert_eq!(store.backfill_provider_bots(false, false).await.unwrap().memberships_to_backfill, 0);
 }
 
 
@@ -138,33 +120,4 @@ async fn read_source_is_explicit_and_does_not_change_gateway_writes() {
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, name) VALUES ('unmigrated', ?, 'Old')", vec![env.into()])).await.unwrap();
     assert!(legacy.get_binding_by_bot_uuid("unmigrated").await.unwrap().is_none());
     assert!(bots.get_binding_by_bot_uuid("unmigrated").await.is_err());
-}
-
-#[tokio::test]
-async fn audited_backfill_is_explicit_repeatable_and_blocks_state_mismatches() {
-    let db = sqlite().await;
-    let env = bcs_config::resolve_env_str();
-    for id in ["old-gateway", "ordinary"] {
-        db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, name, session_token) VALUES (?, ?, ?, ?)", vec![id.into(), env.as_str().into(), id.into(), format!("test-{id}-runtime").into()])).await.unwrap();
-    }
-    db.execute(DbStatement::with_params("INSERT INTO bcs_provider_bot_bindings (bot_uuid, env, provider_id, provider_bot_ref, disabled) VALUES ('old-gateway', ?, 'provider-a', 'old-gateway', 1)", vec![env.as_str().into()])).await.unwrap();
-    let store = DbProviderStore::sqlite(db.clone());
-    let report = store.backfill_provider_bots(false, false).await.unwrap();
-    assert!(!report.issues.is_empty());
-    assert!(store.backfill_provider_bots(true, true).await.is_err());
-    db.execute(DbStatement::new("UPDATE bcs_provider_bot_bindings SET disabled = 0")).await.unwrap();
-    let report = store.backfill_provider_bots(false, false).await.unwrap();
-    assert!(report.issues.is_empty());
-    assert_eq!(report.memberships_to_backfill, 1);
-    assert_eq!(report.ordinary_modes_to_backfill, 1);
-    assert!(store.get_provider_bot("old-gateway").await.unwrap().is_none());
-    assert!(store.backfill_provider_bots(true, false).await.is_err());
-    store.backfill_provider_bots(true, true).await.unwrap();
-    assert_eq!(store.get_provider_bot("old-gateway").await.unwrap().unwrap().connection_mode, BotConnectionMode::Gateway);
-    assert_eq!(store.get_connection_mode("ordinary").await.unwrap(), Some(BotConnectionMode::Plugin));
-    let report = store.backfill_provider_bots(false, false).await.unwrap();
-    assert!(report.issues.is_empty());
-    assert_eq!(report.memberships_to_backfill + report.ordinary_modes_to_backfill, 0);
-    let rows = db.query(DbStatement::new("SELECT session_token FROM bcs_bots WHERE bot_uuid = 'old-gateway'")).await.unwrap();
-    assert_eq!(rows[0].get_string("session_token").unwrap().as_deref(), Some("test-old-gateway-runtime"));
 }

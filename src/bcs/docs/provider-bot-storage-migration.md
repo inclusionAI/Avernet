@@ -38,54 +38,34 @@ Legacy Provider Bot list/discovery scopes remain gateway-only; this change does 
 add an upstream membership-list API. Existing Provider-admin plugin registration
 keeps its credential behavior; scoped token registration returns real Bot tokens.
 
-## Expand, fence, backfill, validate, switch
+## Schema expansion and read-source prerequisites
 
-1. Back up the database and retain a recoverable pre-upgrade snapshot. Apply
-   MySQL migration **029** (`029_bot_provider_storage.sql`) using the normal
-   migration tooling. SQLite bootstrap applies version **030**. Earlier upstream migration
-   names, numbers and checksums must remain unchanged. Existing rows start with
-   nullable migration-state fields; new ordinary Bots explicitly store `plugin`.
-2. Keep `binding` reads while deploying the dual-write code. Do not enable new
-   cross-mode registration while old writers remain. Before the backfill, stop or
-   fence **every** writer for the target environment, including old binaries,
-   admin scripts, registration and lifecycle mutation paths. The CLI assertion
-   below is an operator confirmation, not an automatic distributed lock.
-3. Run the audit from `src/bcs` against an already-expanded database. `SERVER_ENV`
-   must match the existing data; `--env` is an additional assertion, not a selector
-   that bypasses configured environment isolation. Example for a local database:
+Apply MySQL migration **029** (`029_bot_provider_storage.sql`) before new server
+code; SQLite bootstrap applies **030**. Earlier upstream migration names, numbers
+and checksums remain frozen. New ordinary Bots explicitly store `plugin`, but
+existing rows can retain nullable migration-state fields.
 
-   ```sh
-   SERVER_ENV=local cargo run --locked -p bcs --example provider_bot_backfill -- \
-     --sqlite /absolute/path/to/bcs.db --env local
-   ```
+Historical data correction is a separate, reviewed deployment work order.
+The repository ships no dedicated backfill command, report type or DB operation,
+and server startup does not infer historical Provider membership. The correction
+rules and execution checklist are maintained outside the product repository for
+the deployment work order; no live data correction is performed by this change.
 
-   MySQL uses `--mysql-config /absolute/path/to/protected-mysql.toml` instead of
-   `--sqlite`. The file contains the existing `MysqlDbConfig` format; keep secrets
-   out of command arguments, source control and logs. The utility never prints it.
-4. Resolve every audit issue and rerun. The audit reports orphan Bots/bindings,
-   missing Providers, partial metadata, duplicate refs and binding/Bot lifecycle
-   mismatches. It does not guess
-   whether an old `disabled` binding should delete an active Bot. Operators must
-   choose the intended lifecycle state and reconcile it explicitly. No automatic
-   cleanup, token rotation, ownership changes or tombstone resurrection occurs.
-5. With all writers still fenced, append `--apply --writers-fenced` to the same
-   command. Any audit issue blocks the whole apply; checked updates share one SQL
-   transaction. Run another audit and require empty `issues` and zero remaining
-   backfill counts before resuming only dual-write-capable writers. Repeat for
-   every data environment.
-6. Verify representative legacy gateways, upstream Provider Bots, ordinary Bots,
-   webhook inheritance/overrides and deleted Bots. Then switch to
-   `bot_connection_mode` and restart the affected instances. Validate WS rejection
-   for gateways, upstream WS reconnect, HTTP routing and Provider callbacks. The
-   switch is configuration-driven at process assembly, not a live hot reload.
+Keep `binding` reads until the work order has reconciled and validated the target
+environment. Gate any switch to `bot_connection_mode` on an issue-free audit,
+complete mode/affiliation data, preserved Bot credentials/owners/lifecycle,
+consistent gateway projections and representative runtime verification. Missing
+historical affiliation must not be guessed from credentials or display names.
 
-The utility copies gateway identity/override/timestamps from legacy bindings.
-Ordinary unmigrated Bots become upstream; existing Bot-owned Provider metadata
-is validated and preserved. Old plugin registrations without durable Provider
-metadata or a binding have no recoverable affiliation evidence. Reconcile those
-identities through verified Provider-admin registration before relying on complete
-membership reporting. Backfill does not change or duplicate Bot credentials and
-does not use their values as affiliation evidence.
+The work order owns environment selection, backups, writer fencing, audited
+target rows, database-specific execution and rollback. Stop or fence every writer
+before correction; do not enable new cross-mode registration while old writers
+remain. Resume only dual-write-capable writers after validation.
+
+Verify legacy gateways, Provider upstream Bots, ordinary Bots, webhook
+inheritance/overrides and deleted Bots before changing the read-source setting.
+The switch requires a restart; it is not a live hot reload. An empty fresh
+database normally has no historical rows to correct.
 
 ## Rollback and limitations
 
@@ -95,16 +75,15 @@ does not use their values as affiliation evidence.
   maintain Bot affiliation or synchronized lifecycle and can invalidate the new
   invariants. Fence writes and use a separately reviewed reconciliation/snapshot
   plan for a binary rollback. Never drop the new columns as a routine rollback.
-- No production migration is performed by development tests. SQLite migration,
-  backfill, rollback-on-failure and runtime contracts are locally testable. Real
+- No production migration is performed by development tests. SQLite schema,
+  normal transaction rollback and runtime contracts are locally testable. Real
   MySQL full-chain migration/conformance and deployment-scale cutover must be
   verified on a disposable/staging MySQL instance before production rollout.
-- The backfill loads one environment's relevant rows in memory and applies one
-  transaction. Size the maintenance window and DB locks using a staging copy;
-  it is not an online, unbounded-data migration worker.
+- Data-correction execution, capacity/lock planning and its evidence belong to
+  the separate work order; product tests do not certify those deployment steps.
 - Existing Provider caches retain their 30-second cross-instance visibility
   limit. Local successful writes invalidate their binding cache; restart/drain
   instances during cutover. No new distributed cache-coherence guarantee is added.
 - This PR has never been deployed. Its discarded registration-table draft is
-  removed from the migration chain and backfill code; no cleanup/drop migration
+  removed from the migration chain; no cleanup/drop migration
   or compatibility table is required. Fresh databases never create it.

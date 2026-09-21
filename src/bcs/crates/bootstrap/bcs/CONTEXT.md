@@ -138,8 +138,9 @@ alongside Provider and Bot metadata repositories; gateway readiness policy stays
 in ProviderRegistrationCore. All assembly paths inject one binding projection
 selected by provider_http.downlink_detection_source (binding by default, or
 bot_connection_mode). The switch changes reads only; gateway writes remain dual.
-The explicit provider_bot_backfill example requires an audit and writer fencing;
-startup applies additive schema but never guesses/backfills historical membership.
+Historical membership correction is a separate deployment work order; no
+dedicated correction executable or DB operation is shipped. Startup applies
+additive schema but never guesses/backfills historical membership.
 
 ## Tests
 

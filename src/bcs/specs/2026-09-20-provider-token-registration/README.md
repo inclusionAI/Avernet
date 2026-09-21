@@ -99,11 +99,13 @@ does not change membership or write policy.
   SQLite applies version 030 on bootstrap. Earlier upstream migrations stay frozen.
   This PR has never been deployed; its unused registration-table draft and
   compatibility reader are removed, not retained or followed by a drop migration.
-- Follow the [fenced migration and read-source rollout](../../docs/provider-bot-storage-migration.md).
-  Schema expansion alone does not backfill membership. Legacy binding reads remain
-  the default; switch only after every environment passes the audit.
+- Follow the [read-source rollout prerequisites](../../docs/provider-bot-storage-migration.md).
+  Schema expansion alone does not backfill membership. Historical correction is
+  a separate reviewed work order; no dedicated backfill DB method or command is
+  shipped. Legacy binding reads remain the default; switch only after correction
+  and validation have completed for every target environment.
 - Memory Provider metadata is process-local. Durable restart guarantees require
-  SQLite/MySQL; the backfill utility applies only to durable SQL storage.
+  SQLite/MySQL; historical correction concerns durable SQL storage only.
 - Rollback of the read-source setting preserves dual writes. An old binary is
   not automatically safe after new upstream memberships or lifecycle changes.
 - Contract propagation: domain v2 codec, Service API DTO/core/repo traits, application

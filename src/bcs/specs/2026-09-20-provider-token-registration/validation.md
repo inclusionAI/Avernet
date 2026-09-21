@@ -21,6 +21,27 @@ DDL and compatibility reader are removed entirely; no drop migration or recovery
 shim is retained. Only Bot metadata is added, as MySQL 029 / SQLite 030. Earlier
 upstream migrations are unchanged.
 
+### Dedicated backfill removal (2026-09-21)
+
+The dedicated backfill DB method, report type, standalone example and exclusive
+tests are removed at the user's request. Normal Bot registration, metadata and
+gateway projection writes, schema migrations and read-source validation remain.
+The upstream registration test still checks persisted identity, ownership and
+runtime credentials without a binding. Earlier backfill test results below are
+historical evidence, not evidence of a currently shipped correction tool.
+
+Historical correction rules, audits, writer fencing, acceptance and rollback
+are handed off to the user's personal knowledge base for a separate work order.
+No live database was accessed or corrected and no correction ticket was created.
+The user authorized commit and push with `--no-verify` to the existing PR head;
+the PR description is unchanged.
+
+Before integrating the concurrent connection-mode follow-up, the affected Bot
+and store suites passed **308 tests, zero failed, 4 ignored**. Library/example
+compilation passed, and the four selected registration/config/webhook/OpenAPI
+integration suites passed **14 tests, zero failed**. Final post-rebase results
+are recorded separately after rerunning these checks.
+
 ### Unused draft cleanup verification (2026-09-21)
 
 The final cleanup removes the unused SQL files, migration registration, legacy
@@ -112,12 +133,13 @@ cargo run --offline --locked -p bcs-admin --quiet -- \
   1,000 lines remain intact per the user's explicit no-splitting instruction;
   size-driven extractions were reverted. No size allowlist was changed, and a
   source-size CI gate may therefore still reject these existing files.
-- Backfill requires writer fencing, an issue-free audit and a staging rehearsal.
+- The separate correction work order requires writer fencing, an issue-free
+  audit and a staging rehearsal; no dedicated backfill operation is shipped.
   The configuration switch is restart-based. Read-source rollback is supported;
   rolling back to arbitrary old writer binaries is not automatically safe.
 
 See [the rollout and rollback guide](../../docs/provider-bot-storage-migration.md)
-for migration commands, legacy affiliation gaps, lifecycle reconciliation and
+for schema/read-source prerequisites, legacy affiliation gaps and
 the unreleased-draft cleanup scope. CLI packaging and bridge startup remain
 outside this storage follow-up.
 
