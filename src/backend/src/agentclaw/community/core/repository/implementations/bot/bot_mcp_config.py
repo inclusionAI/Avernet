@@ -7,7 +7,7 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.core.models.mcp import BotMCPConfig, BotMCPInstallation
+from agentclaw.community.core.models.mcp import BotMCPConfig
 from agentclaw.community.core.repository.protocols.bot import (
     BotMCPConfigRepositoryProtocol,
 )
@@ -65,19 +65,3 @@ class BotMCPConfigRepository(BotMCPConfigRepositoryProtocol):
                 .all()
             )
             return {str(row.bot_id): json.loads(row.config) for row in rows}
-
-    def list_installed_bot_ids(
-        self, *, owner_id: str, server_code: str
-    ) -> list[str]:
-        with self._db.orm_session() as session:
-            rows = (
-                session.query(BotMCPInstallation.bot_id)
-                .filter(
-                    BotMCPInstallation.owner_id == owner_id,
-                    BotMCPInstallation.server_code == server_code,
-                    BotMCPInstallation.env == get_current_env(),
-                )
-                .order_by(BotMCPInstallation.bot_id)
-                .all()
-            )
-            return [str(row.bot_id) for row in rows]

@@ -8,7 +8,8 @@ from agentclaw.community.di.config import McpRuntimeCredentialsConfig
 
 
 def _service(
-    *, repo=None, bot_config_repo=None, center=None, credentials=None, resolver=None
+    *, repo=None, bot_config_repo=None, center=None, credentials=None, resolver=None,
+    capability_reader=None
 ):
     if bot_config_repo is None:
         bot_config_repo = MagicMock()
@@ -18,6 +19,7 @@ def _service(
         bot_mcp_config_repo=bot_config_repo,
         mcp_center=center or MagicMock(),
         bot_repo=MagicMock(),
+        capability_reader=capability_reader or MagicMock(),
         mcp_runtime_credentials=credentials or McpRuntimeCredentialsConfig(),
         secret_resolver=resolver or MagicMock(),
     )
@@ -205,9 +207,11 @@ class TestMCPConfigServiceValidateHeaders:
         bot_configs.list_by_owner_and_server_code.return_value = {
             "bot-1": {"transport_protocol": "STREAMABLE_HTTP"}
         }
-        bot_configs.list_installed_bot_ids.return_value = ["bot-1"]
         bot_repo = MagicMock()
+        bot_repo.list_live_bot_ids_by_owner.return_value = ["bot-1"]
         bot_repo.get_by_id_and_owner.return_value = {"active_engine": "openclaw"}
+        capability_reader = MagicMock()
+        capability_reader.effective_mcp_server_codes.return_value = frozenset({"mcp.test"})
         user_repo = MagicMock()
         user_repo.get_by_user_and_server_code.return_value = None
         svc = MCPConfigService(
@@ -215,6 +219,7 @@ class TestMCPConfigServiceValidateHeaders:
             bot_mcp_config_repo=bot_configs,
             mcp_center=center,
             bot_repo=bot_repo,
+            capability_reader=capability_reader,
             mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
             secret_resolver=MagicMock(),
         )
@@ -245,9 +250,11 @@ class TestMCPConfigServiceValidateHeaders:
         bot_configs.list_by_owner_and_server_code.return_value = {
             "bot-1": {"endpoint_env": "PROD", "transport_protocol": "SSE"}
         }
-        bot_configs.list_installed_bot_ids.return_value = ["bot-1"]
         bot_repo = MagicMock()
+        bot_repo.list_live_bot_ids_by_owner.return_value = ["bot-1"]
         bot_repo.get_by_id_and_owner.return_value = {"active_engine": "openclaw"}
+        capability_reader = MagicMock()
+        capability_reader.effective_mcp_server_codes.return_value = frozenset({"mcp.test"})
         user_repo = MagicMock()
         user_repo.get_by_user_and_server_code.return_value = None
         svc = MCPConfigService(
@@ -255,6 +262,7 @@ class TestMCPConfigServiceValidateHeaders:
             bot_mcp_config_repo=bot_configs,
             mcp_center=center,
             bot_repo=bot_repo,
+            capability_reader=capability_reader,
             mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
             secret_resolver=MagicMock(),
         )
@@ -284,8 +292,8 @@ class TestMCPConfigServiceValidateHeaders:
         bot_configs.list_by_owner_and_server_code.return_value = {
             "deleted-bot": {"transport_protocol": "STREAMABLE_HTTP"}
         }
-        bot_configs.list_installed_bot_ids.return_value = ["deleted-bot"]
         bot_repo = MagicMock()
+        bot_repo.list_live_bot_ids_by_owner.return_value = ["deleted-bot"]
         bot_repo.get_by_id_and_owner.return_value = None
         user_repo = MagicMock()
         user_repo.get_by_user_and_server_code.return_value = None
@@ -294,6 +302,7 @@ class TestMCPConfigServiceValidateHeaders:
             bot_mcp_config_repo=bot_configs,
             mcp_center=center,
             bot_repo=bot_repo,
+            capability_reader=MagicMock(),
             mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
             secret_resolver=MagicMock(),
         )
@@ -320,9 +329,11 @@ class TestMCPConfigServiceValidateHeaders:
         }
         bot_configs = MagicMock()
         bot_configs.list_by_owner_and_server_code.return_value = {}
-        bot_configs.list_installed_bot_ids.return_value = ["teclaw-bot"]
         bot_repo = MagicMock()
+        bot_repo.list_live_bot_ids_by_owner.return_value = ["teclaw-bot"]
         bot_repo.get_by_id_and_owner.return_value = {"active_engine": "teclaw"}
+        capability_reader = MagicMock()
+        capability_reader.effective_mcp_server_codes.return_value = frozenset({"mcp.test"})
         user_repo = MagicMock()
         user_repo.get_by_user_and_server_code.return_value = None
         svc = MCPConfigService(
@@ -330,6 +341,7 @@ class TestMCPConfigServiceValidateHeaders:
             bot_mcp_config_repo=bot_configs,
             mcp_center=center,
             bot_repo=bot_repo,
+            capability_reader=capability_reader,
             mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
             secret_resolver=MagicMock(),
         )
@@ -345,6 +357,113 @@ class TestMCPConfigServiceValidateHeaders:
 
         assert result["valid"] is True
 
+    def test_validate_user_update_checks_default_only_effective_consumer(self):
+        center = MagicMock()
+        center.get_mcp_detail.return_value = {
+            "serverCode": "mcp.test",
+            "runMode": "REMOTE",
+            "endpoints": [
+                {
+                    "env": "PROD",
+                    "networkType": "OFFICE",
+                    "transportProtocol": "SSE",
+                }
+            ],
+        }
+        bot_configs = MagicMock()
+        bot_configs.list_by_owner_and_server_code.return_value = {}
+        bot_repo = MagicMock()
+        bot_repo.list_live_bot_ids_by_owner.return_value = ["default-only-bot"]
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "default-only-bot",
+            "owner_id": "user1",
+            "active_engine": "openclaw",
+            "env": "dev",
+        }
+        capability_reader = MagicMock()
+        capability_reader.effective_mcp_server_codes.return_value = frozenset(
+            {"mcp.test"}
+        )
+        user_repo = MagicMock()
+        user_repo.get_by_user_and_server_code.return_value = {
+            "extra_config": {
+                "endpoint_env": "PROD",
+                "transport_protocol": "SSE",
+            }
+        }
+        svc = MCPConfigService(
+            user_mcp_config_repo=user_repo,
+            bot_mcp_config_repo=bot_configs,
+            mcp_center=center,
+            bot_repo=bot_repo,
+            capability_reader=capability_reader,
+            mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
+            secret_resolver=MagicMock(),
+        )
+
+        result = svc.validate_user_config_update(
+            user_id="user1",
+            server_code="mcp.test",
+            api_key=None,
+            headers=None,
+            endpoint_env="PRE",
+            transport_protocol=None,
+        )
+
+        assert result["valid"] is False
+        assert "default-only-bot" in result["error"]
+
+    def test_validate_user_update_skips_live_bot_that_does_not_consume_mcp(self):
+        center = MagicMock()
+        center.get_mcp_detail.return_value = {
+            "serverCode": "mcp.test",
+            "runMode": "REMOTE",
+            "endpoints": [
+                {
+                    "env": "PROD",
+                    "networkType": "OFFICE",
+                    "transportProtocol": "SSE",
+                }
+            ],
+        }
+        bot_configs = MagicMock()
+        bot_configs.list_by_owner_and_server_code.return_value = {}
+        bot_repo = MagicMock()
+        bot_repo.list_live_bot_ids_by_owner.return_value = ["unrelated-bot"]
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "unrelated-bot",
+            "owner_id": "user1",
+            "active_engine": "openclaw",
+            "env": "dev",
+        }
+        capability_reader = MagicMock()
+        capability_reader.effective_mcp_server_codes.return_value = frozenset(
+            {"mcp.other"}
+        )
+        user_repo = MagicMock()
+        user_repo.get_by_user_and_server_code.return_value = None
+        svc = MCPConfigService(
+            user_mcp_config_repo=user_repo,
+            bot_mcp_config_repo=bot_configs,
+            mcp_center=center,
+            bot_repo=bot_repo,
+            capability_reader=capability_reader,
+            mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
+            secret_resolver=MagicMock(),
+        )
+
+        result = svc.validate_user_config_update(
+            user_id="user1",
+            server_code="mcp.test",
+            api_key=None,
+            headers=None,
+            endpoint_env="PRE",
+            transport_protocol=None,
+        )
+
+        assert result["valid"] is True
+        capability_reader.effective_mcp_server_codes.assert_called_once()
+
     def test_validate_user_update_does_not_blame_preexisting_center_drift(self):
         center = MagicMock()
         center.get_mcp_detail.return_value = {
@@ -358,9 +477,11 @@ class TestMCPConfigServiceValidateHeaders:
         bot_configs.list_by_owner_and_server_code.return_value = {
             "bot-1": {"transport_protocol": "STREAMABLE_HTTP"}
         }
-        bot_configs.list_installed_bot_ids.return_value = ["bot-1"]
         bot_repo = MagicMock()
+        bot_repo.list_live_bot_ids_by_owner.return_value = ["bot-1"]
         bot_repo.get_by_id_and_owner.return_value = {"active_engine": "openclaw"}
+        capability_reader = MagicMock()
+        capability_reader.effective_mcp_server_codes.return_value = frozenset({"mcp.test"})
         user_repo = MagicMock()
         user_repo.get_by_user_and_server_code.return_value = None
         svc = MCPConfigService(
@@ -368,6 +489,7 @@ class TestMCPConfigServiceValidateHeaders:
             bot_mcp_config_repo=bot_configs,
             mcp_center=center,
             bot_repo=bot_repo,
+            capability_reader=capability_reader,
             mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
             secret_resolver=MagicMock(),
         )

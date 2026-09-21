@@ -70,10 +70,3 @@ class BotMCPConfigRepositoryProtocol(Protocol):
     ) -> dict[str, dict[str, Any]]:
         """Return Bot overrides affected by one user-level config update."""
         ...
-
-    @abstractmethod
-    def list_installed_bot_ids(
-        self, *, owner_id: str, server_code: str
-    ) -> list[str]:
-        """Return every Bot whose desired state currently installs this MCP."""
-        ...

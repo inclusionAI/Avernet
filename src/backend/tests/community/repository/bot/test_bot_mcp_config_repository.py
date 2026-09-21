@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.models.mcp import BotMCPConfig, BotMCPInstallation
+from agentclaw.community.core.models.mcp import BotMCPConfig
 from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import (
     BotMCPConfigRepository,
 )
@@ -20,7 +20,6 @@ class _Database:
     def __init__(self) -> None:
         engine = create_engine("sqlite:///:memory:")
         BotMCPConfig.__table__.create(engine)
-        BotMCPInstallation.__table__.create(engine)
         self._sessions = sessionmaker(bind=engine)
 
     @contextmanager
@@ -47,14 +46,6 @@ def _insert(db: _Database, *, tenant: str, bot_id: str, owner_id: str) -> None:
                 env=get_current_env(),
             )
         )
-        session.add(
-            BotMCPInstallation(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                server_code="mcp.weather",
-                env=get_current_env(),
-            )
-        )
 
 
 def test_reads_are_owner_bot_and_tenant_scoped() -> None:
@@ -70,9 +61,6 @@ def test_reads_are_owner_bot_and_tenant_scoped() -> None:
         assert repo.list_by_owner_and_server_code(
             owner_id="owner", server_code="mcp.weather"
         ) == {"bot-a": {"headers": {"X-Project": "tenant-a"}}}
-        assert repo.list_installed_bot_ids(
-            owner_id="owner", server_code="mcp.weather"
-        ) == ["bot-a"]
         assert repo.get_by_bot_and_server_code(
             bot_id="bot-b", owner_id="owner", server_code="mcp.weather"
         ) is None

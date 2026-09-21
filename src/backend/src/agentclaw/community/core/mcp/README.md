@@ -7,6 +7,7 @@ MCP (Model Context Protocol) domain — config, auth, and sync for MCP servers b
 ```yaml
 purpose: "MCP (Model Context Protocol) domain — config, auth, and sync for MCP servers bound to bots/devices."
 provides:
+  - "EffectiveMCPStateReaderProtocol"
   - "MCPConfigService"
   - "MCPAuthService"
   - "MCPSyncService"

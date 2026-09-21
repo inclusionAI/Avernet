@@ -12,6 +12,9 @@ from agentclaw.community.core.skills_pool.repository.models import (
 from agentclaw.community.core.skills_pool.types import SkillLayout
 from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion, DefaultSkillsetSkillExclusion
 from agentclaw.community.core.repository.implementations.skill_center.skill import SkillSetRepository
+from agentclaw.community.core.repository.implementations.skill_center.mcp_default_exclusion import (
+    MCPDefaultExclusionReader,
+)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.avernet_tenant_guard import CrossTenantInsertError
 
@@ -204,3 +207,28 @@ def test_default_exclusion_repository_upserts_by_current_tenant(db):
         with avernet_tenant_scope(tenant):
             assert repository.get_excluded_mcps("user-1", "bot-1", 7) == ["mcp.a"]
             assert repository.get_excluded_skills("user-1", "bot-1", 7) == [42]
+
+
+def test_mcp_default_exclusion_reader_is_owner_bot_and_tenant_scoped(db):
+    repository = SkillSetRepository(db)
+    reader = MCPDefaultExclusionReader(db)
+    for tenant, server_code in (
+        ("tenant-a", "mcp.a"),
+        ("tenant-b", "mcp.b"),
+    ):
+        with avernet_tenant_scope(tenant):
+            assert repository.add_default_mcp_exclusion(
+                "user-1", "bot-1", 7, server_code
+            )
+    with avernet_tenant_scope("tenant-a"):
+        assert repository.add_default_mcp_exclusion(
+            "other-owner", "bot-1", 7, "mcp.other-owner"
+        )
+        assert repository.add_default_mcp_exclusion(
+            "user-1", "other-bot", 7, "mcp.other-bot"
+        )
+
+    with avernet_tenant_scope("tenant-a"):
+        assert reader.list_excluded_server_codes(
+            bot_id="bot-1", owner_id="user-1"
+        ) == frozenset({"mcp.a"})

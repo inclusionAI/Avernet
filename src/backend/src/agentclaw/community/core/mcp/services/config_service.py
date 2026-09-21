@@ -12,6 +12,9 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotMCPConfigRepositoryProtocol,
     UserMCPConfigRepository,
 )
+from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
+    EffectiveMCPStateReaderProtocol,
+)
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.log import get_logger
@@ -35,6 +38,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
         bot_mcp_config_repo: BotMCPConfigRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         bot_repo: BotRepository,
+        capability_reader: EffectiveMCPStateReaderProtocol,
         mcp_runtime_credentials: McpRuntimeCredentialsConfig,
         secret_resolver: SecretResolver,
     ) -> None:
@@ -42,6 +46,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
         self.bot_mcp_config_repo = bot_mcp_config_repo
         self.mcp_center = mcp_center
         self._bot_repo = bot_repo
+        self._capability_reader = capability_reader
         self._mcp_runtime_credentials = mcp_runtime_credentials
         self._secret_resolver = secret_resolver
         self._secret_values: dict[str, str] = {}
@@ -153,11 +158,12 @@ class MCPConfigService(MCPConfigServiceProtocol):
     ) -> dict[str, Any]:
         """Reject a user-default update that invalidates an existing Bot override.
 
-        Validation is read-only and runs before the user row is written. Each
-        installed Bot is checked with its own engine policy and optional
-        override. Only a candidate that turns a currently valid Bot invalid is
-        rejected; pre-existing Center drift is not misreported as caused by
-        this update.
+        Validation runs before the user row is written. Each live Bot that
+        effectively consumes the MCP is checked with its own engine policy and
+        optional override. This includes explicit Installation, platform
+        Default, and installed-Skill dependency supply. Only a candidate that
+        turns a currently valid Bot invalid is rejected; pre-existing Center
+        drift is not misreported as caused by this update.
         """
         try:
             detail = self.mcp_center.get_mcp_detail(server_code)
@@ -189,15 +195,19 @@ class MCPConfigService(MCPConfigServiceProtocol):
         overrides = self.bot_mcp_config_repo.list_by_owner_and_server_code(
             owner_id=user_id, server_code=server_code
         )
-        bot_ids = self.bot_mcp_config_repo.list_installed_bot_ids(
-            owner_id=user_id, server_code=server_code
-        )
+        bot_ids = self._bot_repo.list_live_bot_ids_by_owner(user_id)
         for bot_id in bot_ids:
             bot = self._bot_repo.get_by_id_and_owner(bot_id, user_id)
             if bot is None:
                 # Lifecycle cleanup is best-effort across historical rows. A
                 # stale override for a deleted Bot must not block the owner's
                 # otherwise valid user-default update.
+                continue
+            if server_code not in self._capability_reader.effective_mcp_server_codes(
+                bot_id=bot_id,
+                owner_id=user_id,
+                bot=bot,
+            ):
                 continue
             override = overrides.get(bot_id, {})
             engine_type = bot.get("active_engine") or bot.get("engine")

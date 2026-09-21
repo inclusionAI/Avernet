@@ -119,6 +119,7 @@ provides:
   - SourceCredentialRepository
   - CapabilityDesiredStateRepositoryProtocol
   - CapabilityDesiredStateRepository
+  - MCPDefaultExclusionReaderProtocol
   - SkillEditorRequestRepositoryProtocol
   # spaces / market_favorites
   - SpaceRepositoryProtocol
