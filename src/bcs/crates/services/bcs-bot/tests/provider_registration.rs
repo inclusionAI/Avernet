@@ -231,6 +231,106 @@ async fn gateway_rejects_disabled_downlink_credential_before_writes() {
     assert_gateway_not_ready(CredentialRead::Disabled).await;
 }
 
+async fn disable_downlink(f: &Fixture) {
+    let provider = f.providers.get_provider(&f.provider).await.unwrap().unwrap();
+    assert!(!provider.disabled);
+    let mut config: serde_json::Value = serde_json::from_str(&provider.config).unwrap();
+    config["downlink"]["enabled"] = serde_json::json!(false);
+    let config = config.to_string();
+    f.providers
+        .update_provider_metadata(&f.provider, None, Some(&config), provider.updated_at + 1)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn gateway_rejects_disabled_downlink_before_credentials_or_writes() {
+    for auth_mode in [
+        ProviderAuthMode::StaticBearer,
+        ProviderAuthMode::ProviderAdmin,
+        ProviderAuthMode::AgentPass,
+    ] {
+        let credentials = ReadinessCredentials::new(CredentialRead::Error);
+        let f = fixture_with_auth(
+            Some("https://shared.example.com/hook"),
+            false,
+            Some(credentials.clone()),
+            auth_mode,
+        )
+        .await;
+        disable_downlink(&f).await;
+
+        assert!(matches!(
+            f.core.register(request(&f, ProviderRegistrationMode::Gateway)).await,
+            Err(ServiceError::InvalidOperation { message, .. })
+                if message == "gateway requires enabled downlink"
+        ));
+        assert_eq!(credentials.reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(f
+            .membership
+            .get_provider_bot_by_ref(&f.provider, "stable-ref")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(f
+            .providers
+            .list_bindings_by_provider(&f.provider)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+}
+
+#[tokio::test]
+async fn disabled_downlink_preserves_issuance_and_upstream_registration() {
+    for auth_mode in [
+        ProviderAuthMode::StaticBearer,
+        ProviderAuthMode::ProviderAdmin,
+        ProviderAuthMode::AgentPass,
+    ] {
+        let credentials = ReadinessCredentials::new(CredentialRead::Error);
+        let f = fixture_with_auth(
+            Some("https://shared.example.com/hook"),
+            false,
+            Some(credentials.clone()),
+            auth_mode,
+        )
+        .await;
+        disable_downlink(&f).await;
+
+        assert_eq!(
+            f.core.authorize(&f.provider, "alice").await.unwrap(),
+            vec![ProviderRegistrationMode::Plugin, ProviderRegistrationMode::Gateway]
+        );
+        let registered = f
+            .core
+            .register(request(&f, ProviderRegistrationMode::Plugin))
+            .await
+            .unwrap();
+        let membership = f
+            .membership
+            .get_provider_bot_by_ref(&f.provider, "stable-ref")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(membership.bot_uuid, registered.record.bot_uuid);
+        assert_eq!(membership.connection_mode, ProviderRegistrationMode::Plugin);
+        assert!(registered.effective_webhook_url.is_none());
+        assert!(f
+            .providers
+            .list_bindings_by_provider(&f.provider)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(matches!(
+            f.registry.resolve_delivery_target(&registered.record.bot_uuid).await.unwrap(),
+            BotDeliveryTarget::WebSocket { .. }
+        ));
+        assert_eq!(credentials.reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+}
+
 #[tokio::test]
 async fn gateway_rejects_empty_downlink_secret_before_writes() {
     for secret in ["", " \t"] {
