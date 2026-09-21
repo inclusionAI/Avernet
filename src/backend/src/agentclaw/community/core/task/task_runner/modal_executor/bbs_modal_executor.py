@@ -60,6 +60,15 @@ def _trajectory_node_id(execution_graph, target_node_id: str | None) -> str:
     return str(target_node_id or execution_graph.task_id)
 
 
+def _trajectory_node(execution_graph, target_node_id: str | None):
+    node_id = _trajectory_node_id(execution_graph, target_node_id)
+    return next(
+        (node for node in getattr(execution_graph, "tasks", []) or []
+         if str(getattr(node, "node_id", "")) == node_id),
+        None,
+    )
+
+
 def _emit_bbs_trajectory(
     task_context_service,
     execution_graph,
@@ -69,11 +78,20 @@ def _emit_bbs_trajectory(
     exception: Exception | None = None,
     details: dict[str, Any] | None = None,
     error_msg: str | None = None,
+    boost_reason: str | None = None,
 ) -> None:
     """Write BBS milestones/errors through the task-context trajectory facade."""
     if task_context_service is None:
         return
     task_id = str(execution_graph.task_id)
+    node = _trajectory_node(execution_graph, target_node_id)
+    node_status = getattr(node, "status", None)
+    run_info = getattr(node, "run_info", None)
+    extend_props = getattr(run_info, "extend_props", None) or {}
+    try:
+        attempt = int(extend_props.get("harness_retries", 0) or 0)
+    except (TypeError, ValueError):
+        attempt = 0
     ext_info: dict[str, Any] = {"execution_mode": "bbs", "phase": "bbs_modal"}
     if details:
         ext_info.update(details)
@@ -96,6 +114,11 @@ def _emit_bbs_trajectory(
             error_type=error_type,
             error_msg=error_msg,
             ext_info=ext_info,
+            status_from=node_status,
+            status_to=node_status,
+            attempt=attempt,
+            boost_reason=boost_reason or action_result,
+            now_ms=int(time.time() * 1000),
         )
     except Exception as exc:  # noqa: BLE001 trajectory is observational only
         logger.warning(
@@ -118,6 +141,7 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
     task_id = execution_graph.task_id
     _emit_bbs_trajectory(
         task_context_service, execution_graph, target_node_id, "bbs_entered",
+        boost_reason="进入BBS模态",
     )
     if bcn is None or bot is None:
         logger.error("[task][bbs_mode] skip: bcn/bot 缺失 task=%s", task_id)
@@ -144,6 +168,7 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
     _emit_bbs_trajectory(
         task_context_service, execution_graph, target_node_id,
         "bbs_bid_broadcast", details={"candidate_count": len(entries)},
+        boost_reason="广播竞价",
     )
     # Phase 1: bid (并发评估,3分钟超时)
     try:
@@ -276,6 +301,7 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
         task_context_service, execution_graph, target_node_id,
         "bbs_execution_started",
         details={"winner_bot_id": winner_bot_id, "execution_mode": actual_run_mode},
+        boost_reason=f"竞价胜出，开始执行。竞价胜出的bot是{winner_bot_id}，胜出原因是{winner.get("relay_reason")}",
     )
     try:
         logger.info("[task][bbs_mode] begin_rely_task, task_id=%s, msg=%s", task_id, msg)

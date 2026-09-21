@@ -547,6 +547,13 @@ def test_notify_records_bbs_milestones_in_trajectory():
     assert all(event[2] == "execute" for event in trajectory.events)
     assert trajectory.events[1][3]["ext_info"]["candidate_count"] == 1
     assert trajectory.events[2][3]["ext_info"]["winner_bot_id"] == "A"
+    for _, node_id, _, kwargs in trajectory.events:
+        assert node_id == "t-trajectory"
+        assert kwargs["status_from"] == Status.HUNG
+        assert kwargs["status_to"] == Status.HUNG
+        assert kwargs["attempt"] == 0
+        assert kwargs["boost_reason"]
+        assert kwargs["now_ms"] > 0
 
 
 def test_notify_records_execution_exception_in_trajectory():
@@ -569,3 +576,8 @@ def test_notify_records_execution_exception_in_trajectory():
     assert event["error_type"] == "unclassified"
     assert event["error_msg"] == "dispatch failed"
     assert event["ext_info"]["exception_type"] == "RuntimeError"
+    assert event["status_from"] == Status.HUNG
+    assert event["status_to"] == Status.HUNG
+    assert event["attempt"] == 0
+    assert event["boost_reason"] == "bbs_execution_failed"
+    assert event["now_ms"] > 0
