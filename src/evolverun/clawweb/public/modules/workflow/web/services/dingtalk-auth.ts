@@ -34,6 +34,15 @@ export type DingTalkAuthCodeResult =
   | { ok: true; authCode: string }
   | { ok: false; error: string }
 
+async function loadPackagedDingTalkApi(): Promise<DingTalkApi | undefined> {
+  try {
+    const module = await import('dingtalk-jsapi') as unknown as DingTalkApi & { default?: DingTalkApi }
+    return module.default ?? module
+  } catch {
+    return undefined
+  }
+}
+
 export async function loadDingTalkConfig(): Promise<DingTalkPublicConfig> {
   const res = await fetch('/api/approval/auth/dingtalk/config')
   const body = await res.json().catch(() => ({})) as Partial<DingTalkPublicConfig> & { message?: string }
@@ -52,11 +61,11 @@ function failureMessage(error: DingTalkFailure): string {
   return typeof error === 'string' ? error : '获取钉钉授权码失败'
 }
 
-export function requestDingTalkAuthCode(config: DingTalkPublicConfig): Promise<DingTalkAuthCodeResult> {
+export async function requestDingTalkAuthCode(config: DingTalkPublicConfig): Promise<DingTalkAuthCodeResult> {
+  const api = window.dd ?? await loadPackagedDingTalkApi()
   return new Promise((resolve) => {
-    const api = window.dd
     if (!api) {
-      resolve({ ok: false, error: '非钉钉环境' })
+      resolve({ ok: false, error: '钉钉 JSAPI 加载失败' })
       return
     }
     let settled = false

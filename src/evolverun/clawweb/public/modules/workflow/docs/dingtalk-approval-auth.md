@@ -11,8 +11,9 @@ is never an authorization credential.
    `corpId`. The application secret is not exposed.
 2. The page calls `dd.requestAuthCode({ clientId, corpId })`. The legacy
    `dd.runtime.permission.requestAuthCode` call remains a client-side fallback
-   for older DingTalk containers. The `dd` API is supplied by the DingTalk
-   container; the workflow package does not bundle a private or internal SDK.
+   for older DingTalk containers. The page prefers a container-supplied `dd`
+   object and dynamically loads the public MIT-licensed `dingtalk-jsapi`
+   package when the WebView does not inject one.
 3. The page sends the returned `authCode` in
    `POST /api/approval/:id/resolve`.
 4. The server exchanges that code for a DingTalk `userId`, then checks that
