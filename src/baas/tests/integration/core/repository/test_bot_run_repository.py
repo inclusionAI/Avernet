@@ -249,9 +249,7 @@ class TestBotRunRepositoryProtocol:
 
     # ── 5b. update_aborted ──
 
-    def test_update_aborted(
-        self, bot_run_repository: BotRunRepository, db_transaction
-    ):
+    def test_update_aborted(self, bot_run_repository: BotRunRepository, db_transaction):
         run_id = _generate_uuid()
 
         bot_run_repository.insert_run(
