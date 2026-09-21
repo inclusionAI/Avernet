@@ -1,5 +1,3 @@
-import dingTalkJsApi from 'dingtalk-jsapi'
-
 export type DingTalkPublicConfig = {
   clientId: string
   corpId: string
@@ -56,7 +54,11 @@ function failureMessage(error: DingTalkFailure): string {
 
 export function requestDingTalkAuthCode(config: DingTalkPublicConfig): Promise<DingTalkAuthCodeResult> {
   return new Promise((resolve) => {
-    const api = window.dd ?? (dingTalkJsApi as unknown as DingTalkApi)
+    const api = window.dd
+    if (!api) {
+      resolve({ ok: false, error: '非钉钉环境' })
+      return
+    }
     let settled = false
     const finish = (result: DingTalkAuthCodeResult) => {
       if (settled) return

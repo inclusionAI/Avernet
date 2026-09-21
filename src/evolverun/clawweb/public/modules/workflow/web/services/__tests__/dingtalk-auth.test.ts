@@ -8,6 +8,11 @@ afterEach(() => {
 })
 
 describe('requestDingTalkAuthCode', () => {
+  it('fails closed when the DingTalk container API is unavailable', async () => {
+    await expect(requestDingTalkAuthCode({ clientId: 'app-key', corpId: 'ding-corp' }))
+      .resolves.toEqual({ ok: false, error: '非钉钉环境' })
+  })
+
   it('uses the current H5 API with clientId and corpId', async () => {
     window.dd = {
       ready: (callback) => callback(),
