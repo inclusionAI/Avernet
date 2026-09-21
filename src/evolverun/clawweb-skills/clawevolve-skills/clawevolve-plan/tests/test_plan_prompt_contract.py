@@ -29,8 +29,10 @@ def test_direct_goal_json_prompt_keeps_version_specific_skill_layout(monkeypatch
     assert example["discovery"]["merged_targets"] == ["skills"]
     assert example["discovery"]["reference_files"] == []
     assert example["discovery"]["planned_deliverables"][0]["path"] == "skills/new-skill/SKILL.md"
-    assert "必须先构造 Python dict" not in prompt
-    assert "不生成或运行Python/shell脚本" in prompt
+    assert "构造 Python dict" in prompt
+    assert "json.dump" in prompt
+    assert str(args["output_path"]) in prompt
+    assert "最终回复只写 `direct_goal candidate written`" in prompt
     assert "few-shot" not in prompt and "早安" not in prompt
     assert "schema_version" not in example
     assert "goal_digest" not in example
@@ -42,7 +44,7 @@ def test_direct_goal_json_prompt_keeps_version_specific_skill_layout(monkeypatch
 
 
 @pytest.mark.parametrize("version", [None, "internalversion", "openversion"])
-def test_response_only_correction_is_validated_and_saved(monkeypatch, tmp_path, version):
+def test_file_artifact_is_validated_and_saved(monkeypatch, tmp_path, version):
     workspace = make_workspace(tmp_path)
     input_dir = workspace / "clawevolve_results/EV-1/plan/input"
     if version is None:
@@ -67,13 +69,12 @@ def test_response_only_correction_is_validated_and_saved(monkeypatch, tmp_path, 
                 payload["discovery"]["schema_version"] = "model-owned-invalid"
                 payload["discovery"]["workspace_root"] = "/model-owned-invalid"
             payload.pop("original_goal", None)
-        else:
-            assert "Build a Python dict" not in kwargs["message"]
-            assert "Do not write files" in kwargs["message"]
-            assert "few-shot" not in kwargs["message"]
-            assert "validate it with Python" not in kwargs["message"]
+        kwargs["output_path"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["output_path"].write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
         return SimpleNamespace(status="success", elapsed_seconds=0.1,
-                               response_text=json.dumps(payload, ensure_ascii=False), stdout_text="", diagnostics={})
+                               response_text="direct_goal candidate written", stdout_text="", diagnostics={})
     monkeypatch.setattr("clawevolve_plan.direct_goal.service.run_openclaw_agent_message", agent)
     result = build_direct_goal_plan(goal=GOAL, task_id="EV-1", bot_id="bot-direct", input_dir=input_dir)
     assert len(prompts) == 1
@@ -104,10 +105,14 @@ def test_correction_schema_omits_program_owned_fields(monkeypatch, tmp_path):
                 payload.pop(key, None)
             payload["discovery"].pop("schema_version", None)
             payload["discovery"].pop("workspace_root", None)
+        kwargs["output_path"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["output_path"].write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
         return SimpleNamespace(
             status="success",
             elapsed_seconds=0.1,
-            response_text=json.dumps(payload, ensure_ascii=False),
+            response_text="direct_goal candidate written",
             stdout_text="",
             diagnostics={},
         )
@@ -121,7 +126,7 @@ def test_correction_schema_omits_program_owned_fields(monkeypatch, tmp_path):
 
     assert len(prompts) == 2
     schema_text = prompts[1].split("Canonical schema example:\n", 1)[1].rsplit(
-        "\n\nReturn the corrected JSON", 1
+        "\n\nRewrite ", 1
     )[0]
     schema = json.loads(schema_text)
     assert not {
