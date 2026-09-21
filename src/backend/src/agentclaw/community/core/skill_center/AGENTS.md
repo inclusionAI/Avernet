@@ -58,6 +58,7 @@ Space 管理资产：Router → Draft / Grant / Lease / Publication / Offline
 | 不可变已发布版本、发布过程 | 同文件 `ac_skill_version`、`ac_skill_publication_attempt`；Version 与 Attempt 是不同对象 |
 | 异步市场引用 | `community/core/models/skill_center_reference.py` 的 batch/item 两张表 |
 | Bot 生效身份 | `ac_bot_skill_installation`、`ac_bot_mcp_installation`；行存在表示 active，不能当作“安装过但停用”的历史记录 |
+| Bot MCP 显式覆盖 | `ac_bot_mcp_config`；仅保存 Manifest 显式字段，缺失字段继续继承 user config / Center default |
 | Set、成员和 Default exclusion | 组织/规则事实，由 UoW 物化到 Installation；不是第二套有效态读取算法 |
 | Runtime 文件、软链、MCP 配置 | 设备投影结果，不是 DB Desired State；存储内容存在也不等于 Skill 已激活 |
 

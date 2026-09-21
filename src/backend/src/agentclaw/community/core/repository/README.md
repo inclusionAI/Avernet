@@ -114,6 +114,8 @@ provides:
   - RenderScreenRepository
   - TemplateRepository
   - UserMCPConfigRepository
+  - BotMCPConfigRepositoryProtocol
+  - BotMCPConfigRepository
   - SourceCredentialRepository
   - CapabilityDesiredStateRepositoryProtocol
   - CapabilityDesiredStateRepository

@@ -47,6 +47,18 @@ class DirectActivationServiceProtocol(Protocol):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
+    async def set_mcp_override(
+        self,
+        *,
+        server_code: str,
+        config: dict | None,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        project: bool = True,
+    ) -> dict[str, Any]: ...
+
+    @abstractmethod
     async def deactivate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
@@ -59,6 +71,21 @@ class DirectActivationServiceProtocol(Protocol):
         """The Bot's active MCP server codes — the query twin of the commands
         above, answered by the capability state reader (which flushes first)."""
         ...
+
+    @abstractmethod
+    def get_mcp_overrides(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, dict]: ...
+
+    @abstractmethod
+    def set_managed_mcp_codes(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        server_codes: set[str],
+    ) -> set[str]: ...
 
     @abstractmethod
     def platform_default_mcp_codes(

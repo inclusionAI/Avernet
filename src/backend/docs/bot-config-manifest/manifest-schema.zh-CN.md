@@ -515,41 +515,54 @@ manifest:
 
 ```yaml
 mcp:
-  - server_code: github          # 平台 MCP 注册表引用（必填，且是唯一的字段）
+  - server_code: github          # MCP Center 注册项（必填）
+    config:                      # 可选；仅覆盖这个 Bot
+      url: https://bot.example.com/mcp
+      headers:
+        X-Project: alpha
+      endpoint_env: PRE
+      transport_protocol: STREAMABLE_HTTP
 ```
 
-- **一个条目就是一个注册表引用，没有别的字段。**只接受注册表引用；**凭证永不
-  出现在 manifest**（design §4.5）。
+- `server_code` 必须是 MCP Center 已登记且当前租户有权使用的 MCP；Manifest
+  不能用 URL 注册一个新 MCP，也不能声明任意 stdio 启动命令。
+- `config` 是封闭对象，只允许 `url`、`headers`、`endpoint_env`、
+  `transport_protocol`。一期仅允许非敏感明文 Header，不支持 `api_key` 或
+  secret 引用。
+- `url` 必须是绝对 `http`/`https` URL。它替换最终连接地址，但 transport 仍
+  来自 Center 端点选择。后端生成的 server 静态配置不继承 user `api_key`、
+  user/default Header 或平台托管 Secret；只保留同一条目显式声明的非敏感
+  Header。容器级 mcporter `headerPolicies` 仍会按 host 动态生效，不受单条
+  `config.headers` 控制。
+- `endpoint_env` 仅允许 `PROD`/`PRE`；`transport_protocol` 仅允许 `SSE`/
+  `STREAMABLE_HTTP`。后端按两者的**组合**查询 Center 元数据；Manifest 显式
+  指定的协议不存在时失败，不沿用旧设备链路的 fallback。
+- `headers` 是 Bot 级完整覆盖字段：省略时继承 user config；提供时替换 user
+  headers；`headers: {}` 显式屏蔽 user headers。平台默认/托管 Header 仍在最终层
+  合并，Manifest 与托管 Header 同名（大小写不敏感）时拒绝。
+- Center 标记为 LOCAL/stdio 的 MCP 可以只凭 `server_code` 安装，但拒绝非空
+  `config`。
 - 校验：`server_code` 必须存在于注册表且租户有权限（复用现有
-  `check_mcp_permission` 逻辑）。
+  `check_mcp_permission` 逻辑）；结构校验在保存时完成，Center/权限/端点组合校验
+  在 dry-run/apply 时完成。
 - apply 动作是**收敛这个 bot 的已启用 server 集合**——也正是 §3.2 给这个类目
   定义的区域：声明了但未启用的启用，已启用但不再声明的停用，已经一致的记
-  `unchanged`。经既有的 per-bot 启用服务（`DirectActivationService` →
-  `ac_bot_mcp_installation`）完成。
+  `unchanged`；配置变化记 `updated`。安装关系与 Bot override 在同一个 Desired
+  State 事务中写入 `ac_bot_mcp_installation` 和 `ac_bot_mcp_config`，随后按既有
+  best-effort 语义投影到设备。
+- 配置逐字段优先级为 `Manifest Bot override > user config > Center/default`。
+  只有 Manifest 显式字段写入 Bot override；删除 MCP、`mcp: []` 或从条目移除
+  `config` 时，同步删除对应 override。省略整个 `mcp` 类别仍是 no-op。
 
-#### `config` 已从 v1 移除（W4 评审结论）
-
-本节早先写着 `config: { … }  # 可选，per-bot 配置，形状同现有 MCP config API`。
-**那两句不可能同时为真**，而这个字段已被删除、写入时按名拒绝（与已废弃的
-`cli_tools.entrypoints` 同样处理）。
-
-- **那个 API 不是 per-bot 的。**它写 `ac_user_mcp_config`，键为
-  `(user_id, server_code)`，且写入路径会调用
-  `sync_mcp_detail_to_all_bots`——**扇出到该 owner 名下的每一个 bot**。于是
-  「应用某一个 bot 的 manifest」会改掉他所有 bot 的 MCP 配置：这个影响范围是
-  别的类目都没有的，§3.2 的「区域逐类目定义」也从未授权它。
-- **它装的正是凭证。**`api_key` 与 `custom_headers` 是它的载荷，而 design §4.5
-  规定凭证不得进入 manifest。
-- **真正 per-bot 的那个东西已经被覆盖了**：`ac_bot_mcp_installation`，也就是
-  §3.2 说的「已启用的 server 集合」。
-
-所以账号级的 MCP 配置（api_key / headers / endpoint_env / transport_protocol）
-仍然通过既有的公开端点管理，它本来就是账号级的：
+账号级 MCP 配置仍通过既有公开端点管理，并作为未被 Bot override 覆盖字段的默认值：
 
 ```text
 GET  /openapi/v1/bots/mcp/servers/{server_code}/config
 PUT  /openapi/v1/bots/mcp/servers/{server_code}/config
 ```
+
+更新 user config 前会先用候选值解析该 owner 已有的 Bot override；任一 Bot 的
+最终环境/协议组合变为无效时，整次 user config 更新在写库前失败。
 
 **留作后续（可加性，不破坏兼容）：**`ac_bot_mcp_call_config` 的 `call_type`
 （`owner` / `caller`）是另一个确实 per-bot 的 MCP 事实，端点为

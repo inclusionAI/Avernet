@@ -74,6 +74,8 @@ def convert_to_device_format(
         custom_headers: Optional[Dict[str, str]] = None,
         endpoint_env: str = "PROD",
         transport_protocol: Optional[str] = None,
+        url_override: Optional[str] = None,
+        strict_transport_protocol: bool = False,
 ) -> DeviceMCPConfig:
     """将 MCP market 数据转换为设备格式"""
     server_code = mcp_data.get("server_code") or mcp_data.get("serverCode")
@@ -144,6 +146,11 @@ def convert_to_device_format(
                         ep = candidate
                         break
                 if ep is None:
+                    if strict_transport_protocol:
+                        raise Exception(
+                            f"MCP服务器 {server_code} 在{endpoint_env}环境没有可用的 "
+                            f"{transport_protocol} 端点"
+                        )
                     logger.warning("[convert_to_device_format] User preferred %s not available for %s, falling back to first available endpoint", transport_protocol, server_code)
                     ep = valid_endpoints[0]
             else:
@@ -159,6 +166,9 @@ def convert_to_device_format(
             transport = "http" if protocol == "STREAMABLE_HTTP" else "sse"
 
             logger.info("[convert_to_device_format] Selected %s endpoint for %s: %s (protocol=%s)", endpoint_env, server_code, url, protocol)
+
+        if url_override:
+            url = url_override
 
         if url and url_api_key:
             key_name, key_value = url_api_key

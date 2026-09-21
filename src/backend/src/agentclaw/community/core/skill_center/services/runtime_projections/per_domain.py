@@ -226,6 +226,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
             # default policy or a Skill dependency still supplies without any
             # Set claiming it.
             claimed = scope.claimed_mcp & codes
+            claimed = claimed | (scope.updated_mcp & codes)
             released = scope.released_mcp - codes
             if claimed != scope.claimed_mcp or released != scope.released_mcp:
                 logger.info(

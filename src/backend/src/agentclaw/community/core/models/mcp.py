@@ -1,7 +1,7 @@
 """
 MCP 相关 ORM 模型定义（新架构源码所在地）。
 
-- ``UserMCPConfig`` 由 mcp 模块拥有。
+- ``UserMCPConfig`` / ``BotMCPConfig`` 由 mcp 模块拥有。
 - ``SkillSetMCPServer`` 由 skill_center 模块拥有（表关联定义）。
 """
 from sqlalchemy import BigInteger, Column, String, Text, DateTime, ForeignKey, Integer, UniqueConstraint, func
@@ -107,6 +107,38 @@ class BotMCPInstallation(Base):
 
 
 register_avernet_tenant_guard(BotMCPInstallation)
+
+
+class BotMCPConfig(Base):
+    """Bot-scoped MCP connection overrides declared by its Manifest."""
+
+    __tablename__ = "ac_bot_mcp_config"
+
+    id = Column(_UNSIGNED_BIGINT, primary_key=True, autoincrement=True)
+    bot_id = Column(String(100), nullable=False, index=True)
+    owner_id = Column(String(128), nullable=False, index=True)
+    server_code = Column(String(256), nullable=False, index=True)
+    config = Column(Text, nullable=False)
+    env = Column(String(50), nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_created = Column(DateTime, server_default=func.now(), nullable=False)
+    gmt_modified = Column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "owner_id",
+            "bot_id",
+            "server_code",
+            name="uk_bot_mcp_config",
+        ),
+    )
+
+
+register_avernet_tenant_guard(BotMCPConfig)
 
 
 class UserMCPConfig(Base):

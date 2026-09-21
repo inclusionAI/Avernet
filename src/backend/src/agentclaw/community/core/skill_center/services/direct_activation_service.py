@@ -226,6 +226,43 @@ class DirectActivationService(DirectActivationServiceProtocol):
         )
         return result
 
+    async def set_mcp_override(
+        self,
+        *,
+        server_code: str,
+        config: dict | None,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        project: bool = True,
+    ) -> dict[str, Any]:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        platform_default_codes = self._platform_default_codes(bot, server_code)
+        self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
+        result = await self._flow.apply(
+            bot=bot,
+            bot_id=bot_id,
+            engine_type=bot_engine_type(bot),
+            runtime_required=project,
+            mutation=lambda: self._repository.set_mcp_override(
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                server_code=server_code,
+                config=config,
+                platform_default_codes=platform_default_codes,
+                engine_type=bot_engine_type(bot),
+                default_engine_types=bot_default_engine_types(bot),
+            ),
+            scope_from_result=mcp_claim_scope,
+        )
+        self._audit(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            actor_id=actor_id,
+            action="mcp_direct_configure",
+        )
+        return result
+
     async def deactivate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
@@ -261,6 +298,31 @@ class DirectActivationService(DirectActivationServiceProtocol):
             self._reader.active_mcp_server_codes(
                 bot_id=bot_id, owner_id=str(bot["owner_id"]), bot=bot
             )
+        )
+
+    def get_mcp_overrides(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, dict]:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        return self._repository.get_mcp_overrides(
+            bot_id=bot_id, owner_id=str(bot["owner_id"])
+        )
+
+    def set_managed_mcp_codes(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        server_codes: set[str],
+    ) -> set[str]:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        return self._repository.set_managed_mcp_codes(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            server_codes=server_codes,
+            engine_type=bot_engine_type(bot),
+            default_engine_types=bot_default_engine_types(bot),
         )
 
     def platform_default_mcp_codes(

@@ -45,6 +45,26 @@ def test_preferred_transport_protocol_falls_back():
     assert cfg.url == "http://e"
 
 
+def test_manifest_transport_protocol_does_not_fall_back():
+    with pytest.raises(Exception, match="没有可用的 SSE"):
+        convert_to_device_format(
+            {
+                "server_code": "x",
+                "run_mode": "REMOTE",
+                "endpoints": [
+                    {
+                        "url": "http://e",
+                        "networkType": "INTERNET",
+                        "env": "PROD",
+                        "transportProtocol": "STREAMABLE_HTTP",
+                    }
+                ],
+            },
+            transport_protocol="SSE",
+            strict_transport_protocol=True,
+        )
+
+
 def test_authorization_api_key_appended_to_url():
     cfg = convert_to_device_format(
         {"server_code": "x", "run_mode": "REMOTE",
@@ -53,6 +73,30 @@ def test_authorization_api_key_appended_to_url():
         api_key="authorization=Bearer tok",
     )
     assert cfg.url == "http://e?authorization=Bearer tok"
+
+
+def test_manifest_url_override_replaces_selected_endpoint_but_keeps_transport():
+    cfg = convert_to_device_format(
+        {
+            "server_code": "x",
+            "run_mode": "REMOTE",
+            "endpoints": [
+                {
+                    "url": "http://center",
+                    "networkType": "INTERNET",
+                    "env": "PRE",
+                    "transportProtocol": "STREAMABLE_HTTP",
+                }
+            ],
+        },
+        endpoint_env="PRE",
+        transport_protocol="STREAMABLE_HTTP",
+        url_override="https://custom.example/mcp",
+        api_key="authorization=Bearer tok",
+    )
+
+    assert cfg.transport == "http"
+    assert cfg.url == "https://custom.example/mcp?authorization=Bearer tok"
 
 
 def test_stdio_configs_as_json_string():

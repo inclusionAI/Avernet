@@ -377,6 +377,26 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         inputs: list[McpComposeInput] = []
         for md, detail_failure in self._enrich_mcp_details(svc, raw):
             server_code = md.get("server_code") or md.get("serverCode") or ""
+            bot_override = self._mcp_config_service.get_bot_override(
+                bot_id=req.bot_id,
+                owner_id=req.user_id,
+                server_code=server_code,
+            )
+            if bot_override:
+                verdict = self._mcp_config_service.validate_bot_override(
+                    user_id=req.user_id,
+                    server_code=server_code,
+                    config=bot_override,
+                    engine_type=req.engine_type,
+                )
+                if not verdict.get("valid"):
+                    raise McporterComposeError(
+                        f"MCP {server_code or '<no server_code>'}: persisted Bot "
+                        f"override is no longer valid: {verdict.get('error') or 'unknown error'}"
+                    )
+                current_detail = verdict.get("mcp_data")
+                if isinstance(current_detail, dict):
+                    md = current_detail
             stdio = self._stdio_launch_for(server_code, md, req.engine_type)
             if stdio is None and detail_failure is not None:
                 # Remote server we could not resolve. Fail here, at the point the
@@ -397,6 +417,8 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     user_id=req.user_id,
                     mcp_data=md,
                     engine_type=req.engine_type,
+                    bot_id=req.bot_id,
+                    owner_id=req.user_id,
                 )
             )
             inputs.append(
@@ -406,6 +428,15 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     headers=headers,
                     endpoint_env=endpoint_env,
                     transport_protocol=transport,
+                    url_override=(bot_override or {}).get("url"),
+                    strict_transport_protocol=bool(
+                        bot_override
+                        and transport
+                        and (
+                            "endpoint_env" in bot_override
+                            or "transport_protocol" in bot_override
+                        )
+                    ),
                     network_priority=network_priority,
                     stdio=stdio,
                 )

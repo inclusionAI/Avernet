@@ -68,4 +68,12 @@ internal_dependencies:
 
 ### Change impact
 
-MCP config changes propagate to running engines via the sync plugins; misconfiguration here yields broken tool access on bots without a clear error.
+MCP config changes resolve per Bot: explicit `ac_bot_mcp_config` fields override
+the owner's `ac_user_mcp_config`, then Center/default values fill the remainder.
+They propagate to running engines through `DeviceSync`; the same resolver is used
+for restart/whole-artifact composition. Contract changes therefore affect Manifest
+apply, user-config fan-out, every DeviceSync implementation, and OCB's ARCA adapter.
+
+A custom Bot URL does not inherit static user/default/managed credentials in the
+server entry. Container-wide mcporter `headerPolicies` remain host-matched runtime
+policy, however; this core module neither emits nor disables them per server.

@@ -36,7 +36,7 @@ async def _no_redeliver(ctx) -> None:
 
 
 def _ports() -> MaterialiserPorts:
-    return MaterialiserPorts(*([None] * 9))
+    return MaterialiserPorts(*([None] * 11))
 
 
 def test_on_arca_the_script_is_the_only_pre_container_construct() -> None:

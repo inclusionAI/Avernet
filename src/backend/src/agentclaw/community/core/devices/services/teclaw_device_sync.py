@@ -196,6 +196,8 @@ class TeclawDeviceSyncService(DeviceSync):
         custom_headers: dict[str, str] | None = None,
         endpoint_env: str = "PROD",
         transport_protocol: str | None = None,
+        url_override: str | None = None,
+        strict_transport_protocol: bool = False,
     ) -> bool:
         return self._compose_and_deliver(caller="sync_single_mcp")["success"]
 

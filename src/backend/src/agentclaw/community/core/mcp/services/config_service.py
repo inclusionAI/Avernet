@@ -8,7 +8,10 @@ from typing import Any, Optional
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
+from agentclaw.community.core.repository.protocols.bot import (
+    BotMCPConfigRepositoryProtocol,
+    UserMCPConfigRepository,
+)
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.log import get_logger
@@ -29,12 +32,14 @@ class MCPConfigService(MCPConfigServiceProtocol):
     def __init__(
         self,
         user_mcp_config_repo: UserMCPConfigRepository,
+        bot_mcp_config_repo: BotMCPConfigRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         bot_repo: BotRepository,
         mcp_runtime_credentials: McpRuntimeCredentialsConfig,
         secret_resolver: SecretResolver,
     ) -> None:
         self.user_mcp_config_repo = user_mcp_config_repo
+        self.bot_mcp_config_repo = bot_mcp_config_repo
         self.mcp_center = mcp_center
         self._bot_repo = bot_repo
         self._mcp_runtime_credentials = mcp_runtime_credentials
@@ -81,6 +86,13 @@ class MCPConfigService(MCPConfigServiceProtocol):
             "transport_protocol": extra_config.get("transport_protocol"),
         }
 
+    def get_bot_override(
+        self, *, bot_id: str, owner_id: str, server_code: str
+    ) -> dict[str, Any] | None:
+        return self.bot_mcp_config_repo.get_by_bot_and_server_code(
+            bot_id=bot_id, owner_id=owner_id, server_code=server_code
+        )
+
     def validate_headers_for_mcp(
         self, server_code: str, headers: dict[str, str]
     ) -> dict[str, Any]:
@@ -103,6 +115,182 @@ class MCPConfigService(MCPConfigServiceProtocol):
                     "error": f"Header 值过长，键: {key}",
                 }
 
+        return {"valid": True, "error": None}
+
+    def validate_bot_override(
+        self,
+        *,
+        user_id: str,
+        server_code: str,
+        config: dict[str, Any] | None,
+        engine_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate one Manifest override against current MCP Center metadata."""
+        detail = self.mcp_center.get_mcp_detail(server_code)
+        if not detail:
+            return {"valid": False, "error": "MCP 服务不存在"}
+        inherited_config = self.get_user_unified_config(user_id, server_code) or {}
+        result = self._validate_effective_config(
+            server_code=server_code,
+            detail=detail,
+            config=config or {},
+            inherited_config=inherited_config,
+            engine_type=engine_type,
+        )
+        if result["valid"]:
+            result["mcp_data"] = detail
+        return result
+
+    def validate_user_config_update(
+        self,
+        *,
+        user_id: str,
+        server_code: str,
+        api_key: str | None,
+        headers: dict[str, str] | None,
+        endpoint_env: str | None,
+        transport_protocol: str | None,
+    ) -> dict[str, Any]:
+        """Reject a user-default update that invalidates an existing Bot override.
+
+        Validation is read-only and runs before the user row is written. Each
+        installed Bot is checked with its own engine policy and optional
+        override. Only a candidate that turns a currently valid Bot invalid is
+        rejected; pre-existing Center drift is not misreported as caused by
+        this update.
+        """
+        try:
+            detail = self.mcp_center.get_mcp_detail(server_code)
+        except Exception as exc:  # noqa: BLE001 - dependency status, not config conflict
+            return {
+                "valid": False,
+                "kind": "center_unavailable",
+                "error": f"无法从 MCP Center 完成配置校验: {type(exc).__name__}",
+            }
+        if not detail:
+            return {
+                "valid": False,
+                "kind": "center_unavailable",
+                "error": "无法从 MCP Center 完成配置校验",
+            }
+
+        current = self.get_user_unified_config(user_id, server_code) or {}
+        candidate = {
+            "api_key": api_key if api_key is not None else current.get("api_key"),
+            "headers": headers if headers is not None else current.get("headers", {}),
+            "endpoint_env": endpoint_env
+            if endpoint_env is not None
+            else current.get("endpoint_env", "PROD"),
+            "transport_protocol": transport_protocol
+            if transport_protocol is not None
+            else current.get("transport_protocol"),
+        }
+
+        overrides = self.bot_mcp_config_repo.list_by_owner_and_server_code(
+            owner_id=user_id, server_code=server_code
+        )
+        bot_ids = self.bot_mcp_config_repo.list_installed_bot_ids(
+            owner_id=user_id, server_code=server_code
+        )
+        for bot_id in bot_ids:
+            bot = self._bot_repo.get_by_id_and_owner(bot_id, user_id)
+            if bot is None:
+                # Lifecycle cleanup is best-effort across historical rows. A
+                # stale override for a deleted Bot must not block the owner's
+                # otherwise valid user-default update.
+                continue
+            override = overrides.get(bot_id, {})
+            engine_type = bot.get("active_engine") or bot.get("engine")
+            before = self._validate_effective_config(
+                server_code=server_code,
+                detail=detail,
+                config=override,
+                inherited_config=current,
+                engine_type=engine_type,
+            )
+            after = self._validate_effective_config(
+                server_code=server_code,
+                detail=detail,
+                config=override,
+                inherited_config=candidate,
+                engine_type=engine_type,
+            )
+            if before["valid"] and not after["valid"]:
+                return {
+                    "valid": False,
+                    "kind": "new_bot_conflict",
+                    "error": f"Bot {bot_id}: {after['error']}",
+                }
+        return {"valid": True, "error": None}
+
+    def _validate_effective_config(
+        self,
+        *,
+        server_code: str,
+        detail: dict[str, Any],
+        config: dict[str, Any],
+        inherited_config: dict[str, Any],
+        engine_type: str | None,
+    ) -> dict[str, Any]:
+        if not config and (detail.get("runMode") or detail.get("run_mode")) == "LOCAL":
+            return {"valid": True, "error": None}
+        run_mode = detail.get("runMode") or detail.get("run_mode", "REMOTE")
+        if run_mode == "LOCAL":
+            return {"valid": False, "error": "LOCAL MCP 不支持远程连接 config"}
+
+        declared_headers = config.get("headers", {})
+        if declared_headers:
+            managed = {
+                name.lower()
+                for name in self._mcp_runtime_credentials.header_secrets.get(
+                    server_code, {}
+                )
+            }
+            conflicts = sorted(
+                name for name in declared_headers if name.lower() in managed
+            )
+            if conflicts:
+                return {
+                    "valid": False,
+                    "error": f"Header 由平台托管，Manifest 不可覆盖: {', '.join(conflicts)}",
+                }
+
+        endpoint_env = config.get(
+            "endpoint_env", inherited_config.get("endpoint_env", "PROD")
+        )
+        protocol = config.get(
+            "transport_protocol", inherited_config.get("transport_protocol")
+        )
+        endpoints = detail.get("endpoints") or []
+        if isinstance(endpoints, str):
+            try:
+                endpoints = json.loads(endpoints)
+            except json.JSONDecodeError:
+                endpoints = []
+        allowed_networks = {"OFFICE", "INTERNET"}
+        if engine_type == "teclaw":
+            allowed_networks.add("INTRANET")
+        matching_env = [
+            ep
+            for ep in endpoints
+            if ep.get("env") == endpoint_env
+            and ep.get("networkType") in allowed_networks
+        ]
+        if not matching_env:
+            return {
+                "valid": False,
+                "error": f"MCP 在 {endpoint_env} 环境没有可用端点",
+            }
+        strict_selection = (
+            "endpoint_env" in config or "transport_protocol" in config
+        )
+        if strict_selection and protocol and not any(
+            ep.get("transportProtocol") == protocol for ep in matching_env
+        ):
+            return {
+                "valid": False,
+                "error": f"MCP 在 {endpoint_env} 环境没有可用的 {protocol} 端点",
+            }
         return {"valid": True, "error": None}
 
     def update_user_unified_config(
@@ -196,6 +384,8 @@ class MCPConfigService(MCPConfigServiceProtocol):
         endpoint_env: Optional[str] = None,
         transport_protocol: Optional[str] = None,
         engine_type: Optional[str] = None,
+        bot_id: str | None = None,
+        owner_id: str | None = None,
     ) -> tuple[Optional[str], dict[str, str], str, Optional[str]]:
         """根据用户配置与默认值构建合并后的 MCP 同步参数。
 
@@ -240,6 +430,33 @@ class MCPConfigService(MCPConfigServiceProtocol):
 
         user_headers = custom_headers if custom_headers is not None else extra_config.get("headers", {})
 
+        bot_override: dict[str, Any] | None = None
+        # A Bot override is the highest configuration source. Missing keys
+        # inherit; an explicit empty headers map deliberately blocks user
+        # headers while retaining platform defaults below.
+        if bot_id is not None and owner_id is not None:
+            bot_override = self.bot_mcp_config_repo.get_by_bot_and_server_code(
+                bot_id=bot_id, owner_id=owner_id, server_code=server_code
+            )
+            if bot_override:
+                if "headers" in bot_override:
+                    user_headers = bot_override["headers"]
+                if "endpoint_env" in bot_override:
+                    _endpoint_env = bot_override["endpoint_env"]
+                if "transport_protocol" in bot_override:
+                    _transport_protocol = bot_override["transport_protocol"]
+
+        # An arbitrary Manifest URL is outside the Center endpoint's trust
+        # boundary. Never redirect inherited user credentials, default auth
+        # headers, or platform-managed secrets to it. The only headers allowed
+        # on that URL are the non-sensitive literals explicitly declared next
+        # to it in the same Bot override.
+        custom_url = bool(bot_override and "url" in bot_override)
+        if custom_url:
+            _api_key = None
+            config_headers = {}
+            user_headers = bot_override.get("headers", {})
+
         # 当 api_key 是 x-ling-auth 格式时，需要把默认 headers 里的同名 key 删掉，
         # 否则设备端会收到两个冲突的 authorization header。
         if _api_key and "=" in _api_key:
@@ -255,13 +472,14 @@ class MCPConfigService(MCPConfigServiceProtocol):
         # Platform-managed headers are the final authority.  Header names are
         # case-insensitive, so discard every differently-cased user/default key
         # before inserting the configured canonical spelling.
-        for header_name, value in self._managed_headers(server_code).items():
-            merged_headers = {
-                key: existing
-                for key, existing in merged_headers.items()
-                if key.lower() != header_name.lower()
-            }
-            merged_headers[header_name] = value
+        if not custom_url:
+            for header_name, value in self._managed_headers(server_code).items():
+                merged_headers = {
+                    key: existing
+                    for key, existing in merged_headers.items()
+                    if key.lower() != header_name.lower()
+                }
+                merged_headers[header_name] = value
 
         return _api_key, merged_headers, _endpoint_env, _transport_protocol
 

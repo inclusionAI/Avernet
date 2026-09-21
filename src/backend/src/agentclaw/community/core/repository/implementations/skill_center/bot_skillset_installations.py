@@ -20,6 +20,7 @@ from agentclaw.community.core.repository.implementations.skill_center.default_sk
     global_default_scope,
 )
 from agentclaw.community.core.repository.implementations.skill_center.tables import (
+    bot_mcp_configs,
     default_exclusions,
     mcp_installations,
     skill_installations,
@@ -279,6 +280,10 @@ class BotSkillSetInstallations:
                 )
             if allow_uninstall:
                 mcp_installations.uninstall(
+                    session, bot_id=bot_id, owner_id=owner_id, env=env,
+                    server_codes=plan.mcps_to_uninstall & installed_mcps,
+                )
+                bot_mcp_configs.delete(
                     session, bot_id=bot_id, owner_id=owner_id, env=env,
                     server_codes=plan.mcps_to_uninstall & installed_mcps,
                 )

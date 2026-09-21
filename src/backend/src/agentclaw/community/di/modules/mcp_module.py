@@ -43,7 +43,10 @@ from agentclaw.community.core.mcp.services.auth_service import MCPAuthService
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.market_service import MCPMarketService
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
-from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
+from agentclaw.community.core.repository.protocols.bot import (
+    BotMCPConfigRepositoryProtocol,
+    UserMCPConfigRepository,
+)
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.log import get_logger
@@ -51,6 +54,9 @@ from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository as UnifiedUserMCPConfigRepository
+from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import (
+    BotMCPConfigRepository,
+)
 
 
 logger = get_logger()
@@ -80,6 +86,11 @@ class McpModule(Module):
         binder.bind(
             UserMCPConfigRepository,
             to=UnifiedUserMCPConfigRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            BotMCPConfigRepositoryProtocol,
+            to=BotMCPConfigRepository,
             scope=singleton,
         )
         # ``MCPAuthPlugin`` is bound per-profile (corp=Prod, community=permissive,

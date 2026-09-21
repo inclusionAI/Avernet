@@ -19,6 +19,7 @@ from agentclaw.community.core.models.skill import (
     SkillSetSkill,
 )
 from agentclaw.community.core.models.mcp import (
+    BotMCPConfig,
     BotMCPInstallation,
     SkillSetMCPServer,
 )
@@ -82,6 +83,20 @@ def test_purge_bot_installations_is_exactly_owner_bot_env_scoped() -> None:
                 BotMCPInstallation(
                     owner_id="other", bot_id="default", server_code="mcp.other", env="dev"
                 ),
+                BotMCPConfig(
+                    owner_id="owner",
+                    bot_id="default",
+                    server_code="mcp.mine",
+                    config='{"headers":{"X-Test":"mine"}}',
+                    env="dev",
+                ),
+                BotMCPConfig(
+                    owner_id="other",
+                    bot_id="default",
+                    server_code="mcp.other",
+                    config='{"headers":{"X-Test":"other"}}',
+                    env="dev",
+                ),
             ]
         )
 
@@ -97,6 +112,7 @@ def test_purge_bot_installations_is_exactly_owner_bot_env_scoped() -> None:
         assert [row.owner_id for row in session.query(BotMCPInstallation)] == [
             "other"
         ]
+        assert [row.owner_id for row in session.query(BotMCPConfig)] == ["other"]
 
 
 def test_legacy_scope_resolution_returns_only_ordinary_set_address() -> None:
@@ -853,6 +869,207 @@ def test_direct_mcp_mutations_name_only_the_code_they_changed():
     assert unchanged_uninstall.mcp_codes == frozenset()
 
 
+def test_direct_mcp_override_is_atomic_with_installation_and_can_be_cleared():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    override = {
+        "headers": {},
+        "endpoint_env": "PRE",
+        "transport_protocol": "STREAMABLE_HTTP",
+    }
+
+    created = repository.set_mcp_override(
+        bot_id="bot",
+        owner_id="owner",
+        server_code="mcp.weather",
+        config=override,
+        platform_default_codes=frozenset(),
+    )
+
+    assert created.changed is True
+    assert created.mcp_codes == frozenset({"mcp.weather"})
+    assert created.updated_mcp_codes == frozenset()
+    assert repository.get_mcp_overrides(bot_id="bot", owner_id="owner") == {
+        "mcp.weather": override
+    }
+
+    updated = repository.set_mcp_override(
+        bot_id="bot",
+        owner_id="owner",
+        server_code="mcp.weather",
+        config={"url": "https://override.example/mcp"},
+        platform_default_codes=frozenset(),
+    )
+    assert updated.changed is True
+    assert updated.mcp_codes == frozenset()
+    assert updated.updated_mcp_codes == frozenset({"mcp.weather"})
+
+    cleared = repository.set_mcp_override(
+        bot_id="bot",
+        owner_id="owner",
+        server_code="mcp.weather",
+        config=None,
+        platform_default_codes=frozenset(),
+    )
+    assert cleared.updated_mcp_codes == frozenset({"mcp.weather"})
+    with db.orm_session() as session:
+        assert session.query(BotMCPInstallation).count() == 1
+        assert session.query(BotMCPConfig).count() == 0
+
+
+def test_direct_mcp_uninstall_removes_the_bot_override():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    repository.set_mcp_override(
+        bot_id="bot",
+        owner_id="owner",
+        server_code="mcp.weather",
+        config={"headers": {"X-Project": "alpha"}},
+        platform_default_codes=frozenset(),
+    )
+
+    result = repository.uninstall_mcp(
+        bot_id="bot",
+        owner_id="owner",
+        server_code="mcp.weather",
+        platform_default_codes=frozenset(),
+    )
+
+    with db.orm_session() as session:
+        assert session.query(BotMCPInstallation).count() == 0
+        assert session.query(BotMCPConfig).count() == 0
+    assert result.updated_mcp_codes == frozenset({"mcp.weather"})
+
+
+def test_set_managed_mcp_codes_reports_active_skill_set_ownership():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(
+            name="tools",
+            user_id="owner",
+            bolt_id="bot",
+            engine_type="openclaw",
+            is_active=True,
+            env="dev",
+        )
+        session.add(skill_set)
+        session.flush()
+        session.add(
+            SkillSetMCPServer(
+                skill_set_id=skill_set.id,
+                server_code="mcp.owned",
+                name="owned",
+                env="dev",
+            )
+        )
+
+    assert CapabilityDesiredStateRepository(db).set_managed_mcp_codes(
+        bot_id="bot",
+        owner_id="owner",
+        server_codes={"mcp.owned", "mcp.free"},
+        engine_type="openclaw",
+    ) == {"mcp.owned"}
+
+
+def test_deactivating_a_set_removes_its_mcp_override_with_installation():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(
+            name="tools",
+            user_id="owner",
+            bolt_id="bot",
+            engine_type="openclaw",
+            is_active=True,
+            env="dev",
+        )
+        session.add(skill_set)
+        session.flush()
+        session.add_all(
+            [
+                SkillSetMCPServer(
+                    skill_set_id=skill_set.id,
+                    server_code="mcp.owned",
+                    name="owned",
+                    env="dev",
+                ),
+                BotMCPInstallation(
+                    bot_id="bot",
+                    owner_id="owner",
+                    server_code="mcp.owned",
+                    env="dev",
+                ),
+                BotMCPConfig(
+                    bot_id="bot",
+                    owner_id="owner",
+                    server_code="mcp.owned",
+                    config='{"headers":{"X-Test":"1"}}',
+                    env="dev",
+                ),
+            ]
+        )
+
+    CapabilityDesiredStateRepository(db).set_skill_set_active(
+        bot_id="bot",
+        owner_id="owner",
+        set_id=str(skill_set.id),
+        active=False,
+        engine_type="openclaw",
+    )
+
+    with db.orm_session() as session:
+        assert session.query(BotMCPInstallation).count() == 0
+        assert session.query(BotMCPConfig).count() == 0
+
+
+def test_flush_removes_override_for_an_inactive_set_member():
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(
+            name="tools",
+            user_id="owner",
+            bolt_id="bot",
+            engine_type="openclaw",
+            is_active=False,
+            env="dev",
+        )
+        session.add(skill_set)
+        session.flush()
+        session.add_all(
+            [
+                SkillSetMCPServer(
+                    skill_set_id=skill_set.id,
+                    server_code="mcp.stale",
+                    name="stale",
+                    env="dev",
+                ),
+                BotMCPInstallation(
+                    bot_id="bot",
+                    owner_id="owner",
+                    server_code="mcp.stale",
+                    env="dev",
+                ),
+                BotMCPConfig(
+                    bot_id="bot",
+                    owner_id="owner",
+                    server_code="mcp.stale",
+                    config='{"url":"https://stale.example/mcp"}',
+                    env="dev",
+                ),
+            ]
+        )
+
+    CapabilityDesiredStateRepository(db).flush_installations(
+        bot_id="bot",
+        owner_id="owner",
+        env="dev",
+        engine_type="openclaw",
+    )
+
+    with db.orm_session() as session:
+        assert session.query(BotMCPInstallation).count() == 0
+        assert session.query(BotMCPConfig).count() == 0
+
+
 def test_skill_set_control_plane_sql_only_adds_owner_scoped_mcp_installation():
     sql_path = (
         Path(__file__).parents[4]
@@ -872,6 +1089,24 @@ def test_skill_set_control_plane_sql_only_adds_owner_scoped_mcp_installation():
     assert "ac_skill_set_create_idempotency" not in sql
     assert "ALTER TABLE ac_skill_set_skill" not in sql
     assert "ALTER TABLE ac_skill_set_mcp" not in sql
+
+
+def test_bot_mcp_config_sql_is_owner_bot_tenant_and_env_scoped():
+    sql_path = (
+        Path(__file__).parents[4]
+        / "src"
+        / "agentclaw"
+        / "community"
+        / "core"
+        / "skill_center"
+        / "sql"
+        / "2026_09_21_bot_mcp_config.sql"
+    )
+    sql = sql_path.read_text(encoding="utf-8")
+
+    assert "CREATE TABLE IF NOT EXISTS ac_bot_mcp_config" in sql
+    assert "config TEXT NOT NULL" in sql
+    assert "(avernet_tenant, env, owner_id, bot_id, server_code)" in sql
 
 
 def test_skill_set_name_is_unique_for_bot_across_engines():

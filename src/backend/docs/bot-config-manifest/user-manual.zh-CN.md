@@ -93,7 +93,7 @@
 | `resources` | ✅ | ✅ | ✅ |
 | `skills` | ❌ 拒（skill 是一个包，不是一段文本） | ✅（**强制 `digest`**） | ✅ |
 | `cli_tools` | ❌ 拒（它是一个可执行文件） | ✅（**强制 `digest`**） | ✅（**不需要** `digest`） |
-| `mcp` | —— 它不取源，只写 `server_code` | | |
+| `mcp` | —— 它不取源；写 `server_code` 与可选 Bot `config` | | |
 | `engine_config` | —— 没有物化器，整个类别被拒 | | |
 
 **`from`（命名源）不是第三列。**一个命名源声明一个协议，生效的是那个协议
@@ -871,21 +871,33 @@ resources:
 
 ```yaml
 mcp:
-  - server_code: mcp.ant.homistudio.meetmcp   # 就这一个字段
+  - server_code: mcp.ant.homistudio.meetmcp
+    config:                                    # 可选；仅作用于这个 Bot
+      endpoint_env: PRE
+      transport_protocol: STREAMABLE_HTTP
+      url: https://meeting-bot.example.com/mcp
+      headers:
+        X-Project: meeting-assistant
 ```
 
-- **只接受平台 MCP 注册表引用**，不接受任意 URL。
-- **一个条目只有 `server_code`。**早先的草案有一个可选的 `config`，已经删掉并在
-  写入时按名拒绝：它被定义成「per-bot 配置，形状同现有 MCP config API」，而那个
-  API 是**账号级**的（键 `(user_id, server_code)`，写入还会扇出到你名下所有
-  bot），装的又正好是 `api_key` / headers 这类凭证。详见
-  `manifest-schema.zh-CN.md` §3.1。
-- **凭证永不进清单**：需要 `api_key` 的 server，配置照旧走现有统一配置存储——
-  `GET`/`PUT /openapi/v1/bots/mcp/servers/{server_code}/config`，它本来就是账号级的。
-  必需配置缺失时该条目记 `failed` 并给出明确错误。
+- `server_code` 只接受 MCP Center 已登记且有权限的条目；`config.url` 只是这个 Bot
+  的连接地址覆盖，不会注册新 MCP。
+- `config` 只允许 `url`、`headers`、`endpoint_env`、`transport_protocol`。
+  Header 一期只放非敏感明文；`api_key` 仍通过既有账号级配置端点管理。
+- 配置逐字段优先级：Manifest Bot override > user config > Center/default。
+  `headers` 省略表示继承 user headers，`headers: {}` 表示屏蔽 user headers；平台
+  托管 Header 始终保留且不能被 Manifest 覆盖。
+- `endpoint_env` 与 `transport_protocol` 会按 Center 的同一个端点组合校验。
+  Manifest 显式协议不存在时 apply 失败，不会偷偷 fallback。自定义 URL 只替换
+  地址，transport 仍来自该选择结果；后端静态 server 配置不继承 user
+  `api_key`、user/default Header 或平台托管 Secret，只保留同条目显式 Header。
+  容器级 mcporter `headerPolicies` 仍会按 host 动态生效，当前不能由单个 Manifest
+  条目关闭。
+- LOCAL/stdio MCP 可以只写 `server_code`，但不能携带非空远程 `config`。
 - apply = 校验注册表存在 + 租户有权限（复用现有权限检查）→ **把这个 bot 的已启用
   server 集合收敛到声明**：声明了没启用的启用，启用了不再声明的**停用**（包括你
-  在界面上手工开的），已经一致的记 `unchanged`。
+  在界面上手工开的），配置改变记 `updated`，已经一致的记 `unchanged`。安装关系与
+  Bot override 同事务保存，随后按既有 best-effort 语义投影。
 
 ### 5.5 `script` — 命令式长尾（仅 ARCA 系）
 
@@ -2347,7 +2359,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` / `IDENTITY.md` 写入即拒** | identity 文件集合（减保留名单） |
 | `skills` | `name` | 标识符，不含位置信息 | active skill set |
 | `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套；**来源只能是内联 `source` URL 或 `content`** | **仅被声明的 `path` 子树** |
-| `mcp` | `server_code` | 平台注册表引用；**条目只有这一个字段** | 已启用的 server 集合 |
+| `mcp` | `server_code` | 平台注册表引用；可选封闭 Bot `config` | 已启用的 server 集合及显式 Bot override |
 | `engine_config` | `config` 对象 | **未开放**（附录 C） | 被声明的顶层键 |
 | `cli_tools` | `name` | 命令名，同 bot 内唯一；**字母或数字开头，只含字母数字与 `.` `_` `-`，≤128**；来源是 `oss` 或 git 声明（内联 `source` 或 `from`）；**非 git 源 `digest` 强制**，git 源以 commit SHA 钉扎、写 `digest` 反而被拒 | 清单下发的工具集合（含用 `…/cli-tools` API 装的） |
 | `script` | `body` | 仅 ARCA 系 | —— |

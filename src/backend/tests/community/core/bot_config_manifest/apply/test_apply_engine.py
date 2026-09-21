@@ -8,6 +8,7 @@ the fakes count their calls and the tests read those counts.
 from __future__ import annotations
 
 from datetime import datetime
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
@@ -59,16 +60,22 @@ from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStor
 _arca_steps = ArcaDelivery(lambda: None).steps_for
 
 
-
-def _engine(scripts=None, activations=None, auth=None):
+def _engine(scripts=None, activations=None, auth=None, mcp_config=None):
     """The W4-shaped engine: mcp + script over their fakes (these tests are
     the engine's contract, not the two fetch-consuming categories' — those
     have their own materialiser files)."""
+    if mcp_config is None:
+        mcp_config = MagicMock()
+        mcp_config.validate_bot_override.return_value = {
+            "valid": True,
+            "error": None,
+        }
     return ApplyOrchestrator(
         build_materialisers(
             script_service=scripts or FakeStartupScriptService(),
             activation_service=activations or FakeActivationService(),
             mcp_auth_service=auth or FakeMcpAuth(),
+            mcp_config_service=mcp_config,
             identity_service=FakeIdentityService(),
             upload_service=FakeSkillUploadService(),
             capability_reader=FakeCapabilityReader(),
@@ -308,6 +315,143 @@ async def test_a_declared_category_removes_what_it_does_not_declare():
     assert _outcomes(report) == {"keep": EntryOutcome.UNCHANGED}
 
 
+@pytest.mark.asyncio
+async def test_mcp_config_change_is_updated_and_reapplying_is_unchanged():
+    activations = FakeActivationService(installed={"gh"})
+    activations.mcp_overrides["gh"] = {"headers": {"X-Project": "old"}}
+    document = """schema_version: 1
+manifest:
+  mcp:
+    - server_code: gh
+      config:
+        headers:
+          X-Project: new
+"""
+    engine = _engine(activations=activations)
+
+    first = await _apply(engine, document)
+    second = await _apply(engine, document)
+
+    assert _outcomes(first) == {"gh": EntryOutcome.UPDATED}
+    assert _outcomes(second) == {"gh": EntryOutcome.UNCHANGED}
+    assert activations.configured == [("gh", {"headers": {"X-Project": "new"}})]
+
+
+@pytest.mark.asyncio
+async def test_bare_mcp_entry_clears_an_existing_bot_override():
+    activations = FakeActivationService(installed={"gh"})
+    activations.mcp_overrides["gh"] = {"url": "https://old.example/mcp"}
+
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: gh\n",
+    )
+
+    assert _outcomes(report) == {"gh": EntryOutcome.UPDATED}
+    assert activations.configured == [("gh", None)]
+
+
+@pytest.mark.asyncio
+async def test_new_bare_mcp_entry_also_clears_an_orphan_override():
+    activations = FakeActivationService()
+    activations.mcp_overrides["gh"] = {"url": "https://orphan.example/mcp"}
+
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: gh\n",
+    )
+
+    assert _outcomes(report) == {"gh": EntryOutcome.CREATED}
+    assert activations.installed == {"gh"}
+    assert activations.configured == [("gh", None)]
+    assert activations.mcp_overrides == {}
+
+
+@pytest.mark.asyncio
+async def test_header_name_case_only_change_is_unchanged():
+    activations = FakeActivationService(installed={"gh"})
+    activations.mcp_overrides["gh"] = {"headers": {"X-Project": "same"}}
+
+    report = await _apply(
+        _engine(activations=activations),
+        """schema_version: 1
+manifest:
+  mcp:
+    - server_code: gh
+      config:
+        headers:
+          x-project: same
+""",
+    )
+
+    assert _outcomes(report) == {"gh": EntryOutcome.UNCHANGED}
+    assert activations.configured == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_center_config_validation_fails_category_before_any_write():
+    activations = FakeActivationService()
+    config_service = MagicMock()
+    config_service.validate_bot_override.return_value = {
+        "valid": False,
+        "error": "MCP 在 PRE 环境没有可用的 SSE 端点",
+    }
+
+    report = await _apply(
+        _engine(activations=activations, mcp_config=config_service),
+        """schema_version: 1
+manifest:
+  mcp:
+    - server_code: first
+      config:
+        endpoint_env: PRE
+        transport_protocol: SSE
+    - server_code: second
+""",
+    )
+
+    assert report.status is ApplyStatus.FAILED
+    assert activations.writes == 0
+
+
+@pytest.mark.asyncio
+async def test_set_managed_config_refusal_prevents_earlier_mcp_write():
+    activations = FakeActivationService(installed={"owned"})
+    activations.set_managed = {"owned"}
+
+    report = await _apply(
+        _engine(activations=activations),
+        """schema_version: 1
+manifest:
+  mcp:
+    - server_code: new-first
+    - server_code: owned
+      config:
+        headers:
+          X-Project: value
+""",
+    )
+
+    assert report.status is ApplyStatus.FAILED
+    assert activations.writes == 0
+    assert "new-first" not in activations.installed
+
+
+@pytest.mark.asyncio
+async def test_set_managed_removal_refusal_happens_before_any_write():
+    activations = FakeActivationService(installed={"keep", "owned"})
+    activations.set_managed = {"owned"}
+
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: keep\n",
+    )
+
+    assert report.status is ApplyStatus.FAILED
+    assert activations.writes == 0
+    assert activations.installed == {"keep", "owned"}
+
+
 # ── per-category area ───────────────────────────────────────────────────────
 
 
@@ -511,7 +655,7 @@ async def test_a_raising_materialiser_is_reported_as_written_nothing():
     """
 
     class ExplodingActivation(FakeActivationService):
-        async def activate_mcp(self, **kwargs):
+        async def set_mcp_override(self, **kwargs):
             raise RuntimeError("device unreachable")
 
     activations = ExplodingActivation()
@@ -611,7 +755,8 @@ async def test_the_ordinary_server_still_applies_when_no_default_is_declared():
         "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: ordinary\n",
     )
 
-    assert activations.activated == ["ordinary"]
+    assert activations.installed == {"ordinary"}
+    assert activations.configured == [("ordinary", None)]
     assert report.categories[0].aborted is False
 
 
@@ -737,7 +882,7 @@ async def test_an_abort_during_the_write_says_the_area_may_have_changed():
     async def _explode(**_kwargs):
         raise RuntimeError("the activation service is down")
 
-    activations.activate_mcp = _explode
+    activations.set_mcp_override = _explode
 
     report = await _apply(
         _engine(activations=activations),
@@ -800,6 +945,7 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
             script_service=FakeStartupScriptService(),
             activation_service=activation,
             mcp_auth_service=FakeMcpAuth(),
+            mcp_config_service=object(),
             identity_service=identity,
             upload_service=uploads,
             capability_reader=reader,

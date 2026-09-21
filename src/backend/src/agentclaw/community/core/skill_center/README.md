@@ -309,9 +309,11 @@ materialized-only set again.
 
 Installation (`ac_bot_skill_installation` / `ac_bot_mcp_installation`) is the
 single source of truth for a Bot's active capabilities, and four seams keep it
-that way:
+that way. `ac_bot_mcp_config` is the adjacent desired-state fact for explicit
+Bot MCP connection overrides; installation and one MCP override change share
+the same UoW transaction.
 
-- **One writer.** Each Installation/exclusion table's SQL lives in exactly one
+- **One writer.** Each Installation/exclusion/Bot-MCP-config table's SQL lives in exactly one
   command module under
   `core/repository/implementations/skill_center/tables/`; only the
   `CapabilityDesiredStateRepository` unit of work composes them. An

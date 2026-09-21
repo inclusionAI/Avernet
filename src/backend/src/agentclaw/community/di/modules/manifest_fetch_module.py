@@ -68,6 +68,9 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.core.mcp.mcp_config_service_protocol import (
+    MCPConfigServiceProtocol,
+)
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageValidator,
 )
@@ -657,6 +660,7 @@ class ManifestFetchModule(Module):
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         activation_service_provider: Callable[[], DirectActivationServiceProtocol],
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
+        mcp_config_service_provider: Callable[[], MCPConfigServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
@@ -681,6 +685,7 @@ class ManifestFetchModule(Module):
                 script_service=script_service_provider(),
                 activation_service=PlatformActivation(activation_service_provider()),
                 mcp_auth_service=mcp_auth_service_provider(),
+                mcp_config_service=mcp_config_service_provider(),
                 identity_service=PlatformIdentity(store),
                 upload_service=PlatformSkillPackageUpload(
                     store,
@@ -730,6 +735,7 @@ class ManifestFetchModule(Module):
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         activation_service_provider: Callable[[], DirectActivationServiceProtocol],
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
+        mcp_config_service_provider: Callable[[], MCPConfigServiceProtocol],
         identity_service_provider: Callable[[], IdentityFilePort],
         upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
@@ -775,6 +781,7 @@ class ManifestFetchModule(Module):
                 script_service=script_service_provider(),
                 activation_service=DeviceActivation(activation_service_provider()),
                 mcp_auth_service=mcp_auth_service_provider(),
+                mcp_config_service=mcp_config_service_provider(),
                 identity_service=DeviceIdentity(identity_service_provider()),
                 upload_service=DeviceSkillPackageUpload(upload_service_provider()),
                 capability_reader=capability_reader_provider(),

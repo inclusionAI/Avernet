@@ -691,6 +691,9 @@ class FakeActivationService:
     ) -> None:
         self.installed = set(installed or ())
         self.platform_defaults = set(platform_defaults or ())
+        self.set_managed: set[str] = set()
+        self.mcp_overrides: dict[str, dict] = {}
+        self.configured: list[tuple[str, dict | None]] = []
         self.governed_skills = set(governed_skills or ())
         self.activated: list[str] = []
         self.deactivated: list[str] = []
@@ -711,6 +714,21 @@ class FakeActivationService:
     ) -> frozenset[str]:
         return frozenset(self.platform_defaults)
 
+    def get_mcp_overrides(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, dict]:
+        return dict(self.mcp_overrides)
+
+    def set_managed_mcp_codes(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        server_codes: set[str],
+    ) -> set[str]:
+        return set(server_codes) & self.set_managed
+
     async def activate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
@@ -721,6 +739,26 @@ class FakeActivationService:
         self.installed.add(server_code)
         return {}
 
+    async def set_mcp_override(
+        self,
+        *,
+        server_code: str,
+        config: dict | None,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        project: bool = True,
+    ) -> dict[str, Any]:
+        self.projections.append(project)
+        self._refuse_if_platform_owned(server_code)
+        self.installed.add(server_code)
+        self.configured.append((server_code, config))
+        if config:
+            self.mcp_overrides[server_code] = dict(config)
+        else:
+            self.mcp_overrides.pop(server_code, None)
+        return {}
+
     async def deactivate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
@@ -729,6 +767,7 @@ class FakeActivationService:
         self._refuse_if_platform_owned(server_code)
         self.deactivated.append(server_code)
         self.installed.discard(server_code)
+        self.mcp_overrides.pop(server_code, None)
         return {}
 
     async def activate_skill(
@@ -764,6 +803,7 @@ class FakeActivationService:
         return (
             len(self.activated)
             + len(self.deactivated)
+            + len(self.configured)
             + len(self.skill_activations)
             + len(self.skill_deactivations)
         )
@@ -816,6 +856,11 @@ class FakeMcpAuth:
             # The documented outage sentinel: advisory "yes" with no level.
             return {"has_permission": True, "access_level": None}
         return {"has_permission": True, "access_level": "PUBLIC"}
+
+
+class FakeMcpConfigService:
+    def validate_bot_override(self, **_kwargs) -> dict[str, Any]:
+        return {"valid": True, "error": None}
 
 
 def make_context(
@@ -1023,6 +1068,7 @@ def device_port_bundle(
     script_service=None,
     activation_service=None,
     mcp_auth_service=None,
+    mcp_config_service=None,
     identity_service=None,
     upload_service=None,
     capability_reader=None,
@@ -1067,6 +1113,7 @@ def device_port_bundle(
             activation_service or FakeActivationService()
         ),
         mcp_auth_service=mcp_auth_service or FakeMcpAuth(),
+        mcp_config_service=mcp_config_service or FakeMcpConfigService(),
         identity_service=DeviceIdentity(identity_service or FakeIdentityService()),
         upload_service=DeviceSkillPackageUpload(
             upload_service or FakeSkillUploadService()

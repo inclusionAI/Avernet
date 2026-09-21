@@ -23,6 +23,7 @@ from agentclaw.community.core.mcp.config_flow import (
 from agentclaw.community.core.mcp.errors import (
     McpConfigValueError,
     McpHeadersInvalidError,
+    McpMarketUnavailableError,
     McpServerNotFoundError,
     McpSyncFailedError,
 )
@@ -32,6 +33,7 @@ def _config_service(*, existing=None):
     m = MagicMock()
     m.get_user_unified_config.return_value = existing
     m.validate_headers_for_mcp.return_value = {"valid": True, "error": None}
+    m.validate_user_config_update.return_value = {"valid": True, "error": None}
     # update returns the *prior* config (None when the row was newly created).
     m.update_user_unified_config.return_value = None
     return m
@@ -157,6 +159,33 @@ def test_invalid_headers_raise_before_any_write():
     cfg.validate_headers_for_mcp.return_value = {"valid": False, "error": "bad"}
     with pytest.raises(McpHeadersInvalidError):
         _write(cfg=cfg, headers={"": "x"})
+    cfg.update_user_unified_config.assert_not_called()
+
+
+def test_bot_override_conflict_raises_before_any_write():
+    cfg = _config_service()
+    cfg.validate_user_config_update.return_value = {
+        "valid": False,
+        "error": "Bot bot-1 在 PRE 环境没有可用的 STREAMABLE_HTTP 端点",
+    }
+
+    with pytest.raises(McpConfigValueError, match="bot-1"):
+        _write(cfg=cfg, endpoint_env="PRE")
+
+    cfg.update_user_unified_config.assert_not_called()
+
+
+def test_center_validation_unavailable_is_not_reported_as_config_conflict():
+    cfg = _config_service()
+    cfg.validate_user_config_update.return_value = {
+        "valid": False,
+        "kind": "center_unavailable",
+        "error": "无法从 MCP Center 完成配置校验",
+    }
+
+    with pytest.raises(McpMarketUnavailableError):
+        _write(cfg=cfg)
+
     cfg.update_user_unified_config.assert_not_called()
 
 
