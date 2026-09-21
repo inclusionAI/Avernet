@@ -23,6 +23,9 @@ use bcs_service_api::{ServiceError, ServiceResult};
 // SQL constants
 // ---------------------------------------------------------------------------
 
+#[path = "mysql_history_window.rs"]
+pub(crate) mod history_window;
+
 const SELECT_COLS: &str = "message_id, group_id, session_id, session_seq, env, \
     sender_id, sender_type, message_type, content, client_msg_id, status, \
     owner_bot_id, visibility_domain, audience_kind, audience_actor_ids_json, created_at, run_id";
@@ -434,6 +437,39 @@ fn row_to_message(row: &bcs_db_api::DbRow) -> Result<PersistedMessage, MessageRe
 
 #[async_trait]
 impl MessageRepoPort for MySqlMessageStore {
+    async fn resolve_history_window_start(&self, session: &str, anchor: i64, limit: u64) -> Result<i64, MessageRepoError> {
+        self.history_window_start(session, anchor, limit).await
+    }
+    async fn get_state_machine_messages_by_keys(
+        &self, session: &str, keys: &[String],
+    ) -> Result<Vec<PersistedMessage>, MessageRepoError> {
+        let mut messages = std::collections::BTreeMap::new();
+        for chunk in keys.chunks(200) {
+            // Separate ID/client-key lookups; the latter uses existing session indexes.
+            for column in ["message_id", "client_msg_id"] {
+                let mut params = vec![self.env.as_str().into(), session.into()];
+                params.extend(chunk.iter().map(|key| DbValue::from(key.as_str())));
+                let sql = format!("SELECT {SELECT_COLS} FROM bcs_messages \
+                    WHERE env = ? AND session_id = ? AND {column} IN ({}) \
+                    AND message_type IN ('state_machine_panel', 'state_machine_human_input_prompt', \
+                    'state_machine_human_input_response', 'state_machine_output') LIMIT 401",
+                    vec!["?"; chunk.len()].join(","));
+                let rows = self.db.query(DbStatement::with_params(sql, params)).await
+                    .map_err(|error| MessageRepoError::StorageError(error.to_string()))?;
+                if rows.len() > 400 {
+                    return Err(MessageRepoError::StorageError("too many duplicate StateMachine producer keys".into()));
+                }
+                for row in rows {
+                    let message = row_to_message(&row)?;
+                    messages.insert(message.message_id.clone(), message);
+                }
+            }
+        }
+        let mut messages: Vec<_> = messages.into_values().collect();
+        messages.sort_by_key(|message| message.session_seq);
+        Ok(messages)
+    }
+
     async fn run_chat_segments(&self, session: &str, sender: &str, run: &str) -> Result<Vec<PersistedMessage>, MessageRepoError> {
         let rows = self.db.query(DbStatement::with_params(
             "SELECT * FROM bcs_messages WHERE env = ? AND session_id = ? AND sender_id = ? AND run_id = ? AND message_type = 'chat' ORDER BY session_seq",
@@ -588,14 +624,20 @@ impl MessageRepoPort for MySqlMessageStore {
         let limit = query.limit as usize;
 
         let mut params: Vec<DbValue> = vec![
+            DbValue::from(self.env.as_str()),
             DbValue::from(query.group_id.clone()),
             DbValue::from(query.session_id.clone()),
         ];
         let mut conditions = vec![
+            "env = ?".to_string(),
             "group_id = ?".to_string(),
             "session_id = ?".to_string(),
             "message_type <> 'run_reply'".to_string(),
         ];
+
+        if !query.human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
+            conditions.push("message_type <> 'state_machine_human_input_prompt'".into());
+        }
 
         if let Some(cursor) = query.cursor {
             conditions.push("created_at < ?".to_string());
@@ -639,8 +681,7 @@ impl MessageRepoPort for MySqlMessageStore {
         }
 
         if let Some(visible_from) = query.visible_from_seq {
-            conditions.push("session_seq >= ?".to_string());
-            params.push(DbValue::from(visible_from));
+            history_window::filter(&mut conditions, &mut params, visible_from);
         }
 
         if let Some(human_view) = query.human_view.as_ref()
@@ -707,6 +748,41 @@ impl MessageRepoPort for MySqlMessageStore {
             next_cursor,
             has_more,
         })
+    }
+
+    async fn list_state_machine_history(
+        &self, group_id: &str, session_id: &str, human_view: Option<HumanMessageView>,
+        before: Option<(u64, i64)>, limit: u32,
+    ) -> Result<MessagePage, MessageRepoError> {
+        if !(1..=1_000).contains(&limit) {
+            return Err(MessageRepoError::StorageError("history limit must be between 1 and 1000".into()));
+        }
+        let mut conditions = vec!["env = ?", "group_id = ?", "session_id = ?",
+            "message_type IN ('state_machine_panel', 'state_machine_output', 'state_machine_human_input_prompt', 'state_machine_human_input_response')"];
+        let mut params: Vec<DbValue> = vec![self.env.as_str().into(), group_id.into(), session_id.into()];
+        if let Some(view) = human_view.as_ref().filter(|v| v.scope == bcs_domain::MessageViewScope::Participant) {
+            conditions.push(match self.flavor {
+                DbSqlFlavor::Mysql => "visibility_domain = 'state_machine' AND (audience_kind = 'public' OR (audience_kind = 'directed' AND JSON_CONTAINS(audience_actor_ids_json, JSON_QUOTE(?))))",
+                DbSqlFlavor::Sqlite => "visibility_domain = 'state_machine' AND (audience_kind = 'public' OR (audience_kind = 'directed' AND EXISTS (SELECT 1 FROM json_each(audience_actor_ids_json) WHERE value = ?)))",
+            });
+            params.push(view.actor_id.as_str().into());
+        } else {
+            conditions.push("message_type <> 'state_machine_human_input_prompt'");
+        }
+        if let Some((at, seq)) = before {
+            conditions.push("(created_at < ? OR (created_at = ? AND session_seq < ?))");
+            params.extend([at.into(), at.into(), seq.into()]);
+        }
+        params.push((u64::from(limit) + 1).into());
+        let rows = self.db.query(DbStatement::with_params(format!(
+            "SELECT {SELECT_COLS} FROM bcs_messages WHERE {} ORDER BY created_at DESC, session_seq DESC LIMIT ?", conditions.join(" AND ")
+        ), params)).await.map_err(|e| MessageRepoError::StorageError(e.to_string()))?;
+        let has_more = rows.len() > limit as usize;
+        let messages = rows.iter().take(limit as usize)
+            .map(|row| row_to_message(row).map(super::history_projection))
+            .collect::<Result<Vec<_>, _>>()?;
+        let next_cursor = if has_more { messages.last().map(|m| (m.created_at, m.session_seq)) } else { None };
+        Ok(MessagePage { messages, has_more, next_cursor })
     }
 
     async fn get_messages_by_ids(&self, session_id: &str, ids: &[String]) -> Result<Vec<PersistedMessage>, MessageRepoError> {
@@ -809,8 +885,11 @@ impl MessageRepoPort for MySqlMessageStore {
         }
 
         if let Some(visible_from) = visible_from_seq {
-            conditions.push("session_seq >= ?".to_string());
-            params.push(DbValue::from(visible_from));
+            history_window::filter(&mut conditions, &mut params, visible_from);
+        }
+
+        if !human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
+            conditions.push("message_type <> 'state_machine_human_input_prompt'".into());
         }
 
         if let Some(human_view) = human_view.as_ref()
@@ -911,11 +990,17 @@ mod tests {
     #[derive(Default)]
     struct CapturingDb {
         executed: Mutex<Vec<DbStatement>>,
+        queried: Mutex<Vec<DbStatement>>,
+        fail_queries: std::sync::atomic::AtomicBool,
     }
 
     #[async_trait]
     impl DbPlugin for CapturingDb {
-        async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+            self.queried.lock().await.push(statement);
+            if self.fail_queries.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(DbError::InvalidInput("injected query failure".into()));
+            }
             Ok(Vec::new())
         }
 
@@ -958,6 +1043,30 @@ mod tests {
         async fn health_check(&self) -> DbResult<DbHealth> {
             Ok(DbHealth::healthy())
         }
+    }
+
+    #[tokio::test]
+    async fn canonical_history_lookup_bounds_batches_and_stops_on_failure() {
+        let db = Arc::new(CapturingDb::default());
+        let repo = MySqlMessageStore::new(db.clone(), "history-env".into());
+        for count in [0_usize, 1, 200, 201, 450] {
+            db.queried.lock().await.clear();
+            let keys = (0..count).map(|i| format!("key-{i}")).collect::<Vec<_>>();
+            repo.get_state_machine_messages_by_keys("session", &keys).await.unwrap();
+            let queries = db.queried.lock().await;
+            assert_eq!(queries.len(), 2 * count.div_ceil(200));
+            for query in queries.iter() {
+                assert!(query.params().len() <= 202);
+                assert!(query.sql().contains("LIMIT 401"));
+                assert_eq!(query.params()[0], DbValue::from("history-env"));
+                assert_eq!(query.params()[1], DbValue::from("session"));
+            }
+        }
+        db.queried.lock().await.clear();
+        db.fail_queries.store(true, std::sync::atomic::Ordering::Relaxed);
+        let keys = (0..450).map(|i| format!("key-{i}")).collect::<Vec<_>>();
+        assert!(repo.get_state_machine_messages_by_keys("session", &keys).await.is_err());
+        assert_eq!(db.queried.lock().await.len(), 1);
     }
 
     #[tokio::test]

@@ -2337,6 +2337,7 @@ impl Default for BcsServerState {
             session_file_service.clone(),
             pending_messages,
             config.session_files.share.history_attachment_ttl_seconds,
+            config.state_machine_history.read_source == bcs_config_api::StateMachineHistoryReadSource::Messages,
         );
         let system_message: Arc<dyn bcs_service_api::SystemMessageService> = {
             let dispatcher = SystemMessageDispatcherImpl::builder()
@@ -2432,6 +2433,8 @@ impl Default for BcsServerState {
             .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
             .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
+            .with_history_persistence(config.state_machine_history.persistence_enabled)
+            .with_history_read_source(config.state_machine_history.read_source)
             .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
             .with_callback_url_guard(outbound_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
@@ -3545,6 +3548,7 @@ fn create_group_message_history_service(
     session_file: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
     pending_messages: Arc<dyn bcs_service_api::PendingGroupMessagePort>,
     history_attachment_ttl: u64,
+    persisted_state_machine_history: bool,
 ) -> Arc<dyn GroupMessageHistoryService> {
     let websocket_request: Arc<dyn GroupHistoryBotRequestPort> =
         Arc::new(BootstrapGroupHistoryBotRequestPort { bot_connections });
@@ -3571,7 +3575,7 @@ fn create_group_message_history_service(
         default_page_limit,
         max_page_limit,
         history_attachment_ttl,
-    ))
+    ).with_persisted_state_machine_history(persisted_state_machine_history))
 }
 
 fn maybe_wrap_bot_delivery(
@@ -3734,6 +3738,7 @@ impl BcsServer {
         gateway_principal_verifier: Arc<dyn PrincipalVerifier>,
         allow_local_eventing_endpoints: bool,
     ) -> Self {
+        config.state_machine_history.validate().expect("State-machine history configuration must be valid");
         let invite_token_secret = resolve_invite_token_secret(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         // Create service implementations (synchronous, in-memory mode)
@@ -3932,6 +3937,7 @@ impl BcsServer {
             session_file_service.clone(),
             pending_messages,
             config.session_files.share.history_attachment_ttl_seconds,
+            config.state_machine_history.read_source == bcs_config_api::StateMachineHistoryReadSource::Messages,
         );
         let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
             config.async_chat_run_max_entries,
@@ -4024,6 +4030,8 @@ impl BcsServer {
             .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
             .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
             .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
+            .with_history_persistence(config.state_machine_history.persistence_enabled)
+            .with_history_read_source(config.state_machine_history.read_source)
             .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
             .with_callback_url_guard(callback_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
@@ -4288,6 +4296,7 @@ impl BcsServer {
     ) -> crate::Result<Self> {
         use bcs_service_api::BotRegistryCoreService;
 
+        config.state_machine_history.validate().map_err(crate::BcsError::InvalidConfig)?;
         let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
         let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
@@ -4770,6 +4779,7 @@ impl BcsServer {
             session_file_service.clone(),
             pending_messages,
             config.session_files.share.history_attachment_ttl_seconds,
+            config.state_machine_history.read_source == bcs_config_api::StateMachineHistoryReadSource::Messages,
         );
         let a2a_run_store: Arc<bcs_message_flow::a2a_chat::ChatRunStore> =
             if config.async_chat_run_store == "persistent" {
@@ -4886,6 +4896,8 @@ impl BcsServer {
                 .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
                 .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
                 .with_loop_execution_enabled(config.collaboration.loop_execution_enabled)
+            .with_history_persistence(config.state_machine_history.persistence_enabled)
+            .with_history_read_source(config.state_machine_history.read_source)
                 .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
                 .with_callback_url_guard(outbound_url_guard.clone())
                 .with_session_channel_outbound(session_channel_outbound)

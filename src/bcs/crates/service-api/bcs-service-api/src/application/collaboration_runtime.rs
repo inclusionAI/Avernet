@@ -918,6 +918,14 @@ pub trait CollaborationRuntimeService: Send + Sync {
         ))
     }
 
+    /// Replay local immutable history checkpoints, including terminal Runs.
+    /// Cursor contains both Run and operation key; never performs network delivery.
+    async fn recover_state_machine_history(&self, cursor: Option<String>, limit: usize)
+        -> Result<StateMachineProgressionRecoveryPage, CollaborationRuntimeError> {
+        let _ = (cursor, limit);
+        Err(CollaborationRuntimeError::InvalidRequest("history recovery is not configured".into()))
+    }
+
     /// Retire unfinished dispatch/Chat work and Node leases for terminal Runs.
     /// Independent bounded cursor; no compilation, delivery or result changes.
     async fn cleanup_state_machine_terminal_work(&self, after_run_id: Option<String>, limit: usize)

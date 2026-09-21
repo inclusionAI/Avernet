@@ -2868,33 +2868,39 @@ async fn single_node_run_completes_session_with_bot_final_text() {
         .expect("history")
         .expect("state-machine history");
     assert_eq!(history.messages.len(), 2);
-    assert_eq!(history.messages[0].sender, "bcs_state_machine");
-    assert_eq!(history.messages[0].message_type, GroupMessageType::Bot);
-    assert_eq!(history.messages[0].role, MessageRole::Assistant);
+    assert_eq!(history.messages[1].sender, "bcs_state_machine");
+    assert_eq!(history.messages[1].message_type, GroupMessageType::Bot);
+    assert_eq!(history.messages[1].role, MessageRole::Assistant);
     assert_eq!(
-        history.messages[0].bot_name.as_deref(),
+        history.messages[1].bot_name.as_deref(),
         Some("BCS State Machine")
     );
-    assert!(history.messages[0].content.contains("<AixUI"));
-    assert!(history.messages[0].content.contains("type=\"panel\""));
-    assert!(history.messages[0].content.contains("params='"));
+    assert!(history.messages[1].content.contains("<AixUI"));
+    assert!(history.messages[1].content.contains("type=\"panel\""));
+    assert!(history.messages[1].content.contains("params='"));
     assert!(
-        history.messages[0]
+        history.messages[1]
             .content
             .contains(&format!("\"runId\":\"{}\"", started.view.run.run_id))
     );
-    assert_eq!(history.messages[1].sender, "driver-bot");
-    assert_eq!(history.messages[1].bot_name.as_deref(), Some("Driver"));
-    assert_eq!(history.messages[1].role, MessageRole::Assistant);
-    assert_eq!(history.messages[1].message_type, GroupMessageType::Bot);
-    assert_eq!(history.messages[1].content, "final answer");
+    assert_eq!(history.messages[0].sender, "driver-bot");
+    assert_eq!(history.messages[0].bot_name.as_deref(), Some("Driver"));
+    assert_eq!(history.messages[0].role, MessageRole::Assistant);
+    assert_eq!(history.messages[0].message_type, GroupMessageType::Bot);
+    assert_eq!(history.messages[0].content, "final answer");
     assert_eq!(
-        history.messages[1]
+        history.messages[0]
             .metadata
             .as_ref()
             .and_then(|metadata| metadata["state_machine"]["event"].as_str()),
         Some("output")
     );
+    let latest = runtime.get_state_machine_session_history(&started.view.run.session_id, 1, None)
+        .await.unwrap().unwrap();
+    assert_eq!(latest.messages.len(), 1);
+    assert_eq!(latest.messages[0].content, "final answer");
+    assert_eq!(latest.next_before, Some(latest.messages[0].timestamp));
+
 }
 
 #[tokio::test]
@@ -5803,3 +5809,9 @@ runtime:
 "#
     .to_string()
 }
+
+#[path = "runtime_progression/history_identity.rs"]
+mod history_identity;
+
+#[path = "runtime_progression/history_persistence.rs"]
+mod history_persistence;

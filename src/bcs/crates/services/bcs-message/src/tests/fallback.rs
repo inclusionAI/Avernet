@@ -433,3 +433,31 @@ async fn manager_worker_human_worker_view_keeps_public_opening_message_after_cut
     assert!(contents.contains(&"a-only"));
     assert!(!contents.contains(&"b-only"));
 }
+
+#[tokio::test]
+async fn messages_mode_keeps_ordinary_fallback_but_uses_only_frozen_workflow_rows() {
+    let mut native = fallback_message("unpersisted workflow body");
+    native.id = "native-workflow".into();
+    native.metadata = Some(serde_json::json!({"state_machine": {"event": "output", "run_id": "run", "node_id": "n", "attempt": 0}}));
+    let (service, repo, _, fallback, sid) = service_fixture(GroupStrategy::ManagerWorker,
+        0, u64::MAX, vec![fallback_message("ordinary legacy chat"), native]).await;
+    let service = service.with_persisted_state_machine_history(true);
+    let before = service.get_session_history(session_cmd("group-1", &sid, None)).await.unwrap();
+    assert_eq!(before.messages.len(), 1);
+    assert_eq!(before.messages[0].content, "ordinary legacy chat");
+    repo.append_message_with_id("frozen-output".into(), NewMessage {
+        group_id: "group-1".into(), session_id: sid.clone(), sender_id: "deleted-bot".into(), sender_type: SenderType::Bot,
+        message_type: bcs_domain::STATE_MACHINE_OUTPUT_MESSAGE_TYPE.into(),
+        content: serde_json::json!({"text": "frozen output", "bot_name": "Frozen name", "metadata": {"state_machine": {"run_id": "run", "node_id": "n", "attempt": 0}}}),
+        client_msg_id: Some("history-key".into()), created_at: 2, run_id: "run".into(), owner_bot_id: None,
+        visibility_domain: bcs_domain::MessageVisibilityDomain::StateMachine,
+        audience: Some(bcs_domain::MessageAudience::FullOnly),
+    }).await.unwrap();
+    let after = service.get_session_history(session_cmd("group-1", &sid, None)).await.unwrap();
+    assert_eq!(after.messages.len(), 2);
+    assert_eq!(after.messages[0].content, "frozen output");
+    assert_eq!(after.messages[0].bot_name.as_deref(), Some("Frozen name"));
+    assert!(after.messages[0].run_id.is_empty());
+    assert_eq!(after.messages[1].content, "ordinary legacy chat");
+    assert_eq!(fallback.session_calls().await, 2);
+}

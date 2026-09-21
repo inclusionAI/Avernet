@@ -401,3 +401,22 @@ BotRegistryCoreService/BotRepoPort add fail-closed `create_registration_if_absen
 for this flow. It is atomic, preserves existing active/deleted identities and
 never uses upsert semantics; existing registration methods remain unchanged.
 Memory and persistent stores implement it, with race, tombstone and failure tests.
+
+StateMachine history canonical lookup resolves physical IDs and stored legacy client
+keys within one environment/Session before audience or pagination filters. SQL
+uses chunks of at most 200 keys with two bounded result queries per chunk; unknown
+implementations return an error, not an incomplete authorized history page.
+
+MessageRepoPort also provides `list_state_machine_history`: an env/group/Session
+scoped, audience-filtered page of persisted StateMachine entries, bounded to
+1..1000 plus lookahead. Full/Bot excludes Human prompts; Participant sees public
+and explicitly directed rows only. Unsupported adapters fail rather than
+returning an empty successful page. The runtime history facade selects this
+port in messages mode before accessing any workflow repository. Authorization
+and ordinary-chat history policies remain at their existing boundaries.
+
+`resolve_history_window_start` resolves the ordinary Chat window at a fixed
+physical sequence anchor. New durable projections do not consume positions;
+legacy rows and missing ordinary positions do. Store/query failures propagate,
+and audience/owner filtering remains independent. No schema changes or window
+initialization API is required.

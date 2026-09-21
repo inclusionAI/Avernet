@@ -297,6 +297,12 @@ recommend_min_score = 0.1
 # Message History Configuration
 # =============================================================================
 
+[state_machine_history]
+# Persist StateMachine messages while retaining runtime-based history reads.
+# Uses the existing schema; no migration or participant-window initialization is required.
+persistence_enabled = true
+read_source = "runtime"
+
 # Message history storage configuration
 [message_history]
 # Groups created at or after this timestamp (ms) use the new message store path.

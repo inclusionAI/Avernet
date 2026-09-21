@@ -151,13 +151,11 @@ pub(super) fn persisted_to_group_message(
     pm: bcs_domain::PersistedMessage,
     bot_name: Option<String>,
 ) -> GroupMessage {
-    let uses_stable_client_message_id = matches!(
-        pm.message_type.as_str(),
-        STATE_MACHINE_PANEL_MESSAGE_TYPE
-            | STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE
-            | STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE
-            | SESSION_OPENING_MESSAGE_TYPE
-    );
+    if let Some(mut message) = bcs_domain::state_machine_history::project_state_machine_message(&pm) {
+        message.bot_name = message.bot_name.or(bot_name);
+        return message;
+    }
+    let uses_stable_client_message_id = pm.message_type == SESSION_OPENING_MESSAGE_TYPE;
     let message_id = if uses_stable_client_message_id {
         pm.client_msg_id
             .clone()
@@ -165,20 +163,12 @@ pub(super) fn persisted_to_group_message(
     } else {
         pm.message_id.clone()
     };
-    let is_persisted_bcs_ui = matches!(
-        pm.message_type.as_str(),
-        STATE_MACHINE_PANEL_MESSAGE_TYPE
-            | STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE
-            | SESSION_OPENING_MESSAGE_TYPE
-    );
+    let is_persisted_bcs_ui = pm.message_type == SESSION_OPENING_MESSAGE_TYPE;
     let bcs_bot_name = is_persisted_bcs_ui.then(|| {
         pm.content
             .get("bot_name")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or_else(|| match pm.message_type.as_str() {
-                SESSION_OPENING_MESSAGE_TYPE => BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
-                _ => BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
-            })
+            .unwrap_or(BCS_SESSION_OPENING_MESSAGE_SENDER_NAME)
             .to_string()
     });
     let (role, metadata, content_str, attachments) = match pm.message_type.as_str() {
@@ -197,9 +187,7 @@ pub(super) fn persisted_to_group_message(
             let (text, attachments) = extract_text_and_attachments(&pm.content);
             (role, None, text, attachments)
         }
-        STATE_MACHINE_PANEL_MESSAGE_TYPE
-        | STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE
-        | SESSION_OPENING_MESSAGE_TYPE => {
+        SESSION_OPENING_MESSAGE_TYPE => {
             let text = pm
                 .content
                 .get("text")
@@ -208,22 +196,6 @@ pub(super) fn persisted_to_group_message(
                 .to_string();
             let metadata = pm.content.get("metadata").cloned();
             (MessageRole::Assistant, metadata, text, None)
-        }
-        STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE | bcs_domain::STATE_MACHINE_OUTPUT_MESSAGE_TYPE => {
-            let text = pm
-                .content
-                .get("text")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let metadata = pm.content.get("metadata").cloned();
-            let role = match (pm.message_type.as_str(), pm.sender_type) {
-                (STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE, _) => MessageRole::User,
-                (_, bcs_domain::SenderType::Human) => MessageRole::User,
-                (_, bcs_domain::SenderType::Bot) => MessageRole::Assistant,
-                (_, bcs_domain::SenderType::System) => MessageRole::System,
-            };
-            (role, metadata, text, None)
         }
         "tool_call" => {
             let metadata = build_tool_call_metadata(&pm.content);

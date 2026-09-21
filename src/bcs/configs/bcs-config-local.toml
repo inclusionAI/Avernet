@@ -218,6 +218,11 @@ profile_id = "default"
 recommend_top_k = 10
 recommend_min_score = 0.1
 
+[state_machine_history]
+# Persist StateMachine messages while retaining runtime-based history reads.
+persistence_enabled = true
+read_source = "runtime"
+
 # Message history storage configuration. Defaults below match the upstream
 # example so local development exercises the new message store path.
 [message_history]

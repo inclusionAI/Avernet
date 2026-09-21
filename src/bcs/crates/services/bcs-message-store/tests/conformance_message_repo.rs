@@ -78,3 +78,12 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
     .expect("seed contract session");
     db
 }
+
+#[path = "support/history_identity.rs"]
+mod history_identity;
+
+#[path = "support/history_window.rs"]
+mod history_window;
+
+#[path = "support/history_read.rs"]
+mod history_read;

@@ -120,3 +120,4 @@ pub use invite::{InviteTargetType, InviteTokenPayload, InviteTokenError, encode 
 pub use register::{RegisterTokenPayload, RegisterTokenError, encode as register_token_encode, decode_and_verify as register_token_decode_and_verify};
 pub use session_file::{FileStatus, SessionFile, new_file_id};
 pub use share::{ShareTokenError, ShareTokenPayload, share_token_decode_and_verify, share_token_encode};
+pub mod state_machine_history;

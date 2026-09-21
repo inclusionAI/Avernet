@@ -605,6 +605,8 @@ fn default_group_session_ws_signing_key_secret() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BcsConfig {
+    #[serde(default)]
+    pub state_machine_history: bcs_config_api::StateMachineHistoryConfig,
     /// Address to bind to.
     #[serde(default = "default_bind")]
     pub bind: String,
@@ -1167,6 +1169,7 @@ fn validate_http_base_url(value: &str, field_name: &str) -> Result<(), String> {
 impl Default for BcsConfig {
     fn default() -> Self {
         Self {
+            state_machine_history: Default::default(),
             bind: default_bind(),
             port: default_port(),
             bots_base_dir: PathBuf::from("/bots"),
@@ -1667,6 +1670,9 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    config.state_machine_history.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e)) as Box<dyn std::error::Error>
+    })?;
     config.collaboration.fixed_loop_limits.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1743,6 +1749,19 @@ fn validate_eventing_environment_policy(
 mod tests {
     use super::*;
     use secrecy::ExposeSecret;
+
+    #[test]
+    fn history_configuration_round_trip_and_messages_persistence_gate() {
+        let mut config = BcsConfig::default();
+        config.state_machine_history.persistence_enabled = true;
+        let loaded: BcsConfig = serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
+        assert!(loaded.state_machine_history.persistence_enabled);
+        assert!(validate_loaded_config(&loaded).is_ok());
+        config.state_machine_history.read_source = bcs_config_api::StateMachineHistoryReadSource::Messages;
+        assert!(validate_loaded_config(&config).is_ok());
+        config.state_machine_history.persistence_enabled = false;
+        assert!(validate_loaded_config(&config).unwrap_err().to_string().contains("read_source=messages"));
+    }
 
     #[test]
     fn only_group_message_delivery_is_ready_and_all_flows_default_off() {

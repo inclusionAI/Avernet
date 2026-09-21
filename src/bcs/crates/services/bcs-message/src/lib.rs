@@ -8,11 +8,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::info;
 
+#[cfg(test)]
+use bcs_domain::{BCS_STATE_MACHINE_MESSAGE_SENDER_NAME, STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE};
 use bcs_domain::{
-    ActorKind, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+    ActorKind, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
     HumanMessageView, MessageAttachment, MessageOwnerFilter, MessageQuery, MessageViewScope,
-    SESSION_OPENING_MESSAGE_TYPE, STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE,
-    STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE, STATE_MACHINE_PANEL_MESSAGE_TYPE, Session,
+    SESSION_OPENING_MESSAGE_TYPE,
+    STATE_MACHINE_PANEL_MESSAGE_TYPE, STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE, Session,
 };
 use bcs_service_api::{
     BotRegistryCoreService, CallerContext, Group, GroupCoreService, GroupHistoryCommand,
@@ -42,6 +44,7 @@ pub struct MessageService {
     default_page_limit: u32,
     max_page_limit: u32,
     history_attachment_ttl: u64,
+    persisted_state_machine_history: bool,
 }
 
 pub enum ManagerWorkerHistoryView {
@@ -100,7 +103,13 @@ impl MessageService {
             default_page_limit,
             max_page_limit,
             history_attachment_ttl,
+            persisted_state_machine_history: false,
         }
+    }
+
+    pub fn with_persisted_state_machine_history(mut self, enabled: bool) -> Self {
+        self.persisted_state_machine_history = enabled;
+        self
     }
 
     /// Chat and ManagerWorker use independent cutoffs for the new message store path.
@@ -202,6 +211,7 @@ impl MessageService {
     ///   §5.2 new-participant cutoff for the viewer's `bot_uuid`, or `None`
     ///   when no viewer / no recorded messages.
     pub fn compute_session_history_query(
+        current_msg_seq: i64,
         group: &Group,
         session: &Session,
         view_bot_id: Option<&str>,
@@ -225,7 +235,7 @@ impl MessageService {
             let visible_from_seq = match view_bot_id {
                 Some(view_bot_id) => Self::compute_visible_from_seq(
                     session.participant_join_seq.as_ref(),
-                    session.current_msg_seq,
+                    current_msg_seq,
                     view_bot_id,
                     new_participant_visible_limit,
                 ),
@@ -404,6 +414,10 @@ impl GroupMessageHistoryService for MessageService {
                 for pm in page.messages.into_iter().filter(|message| {
                     !hide_opening_message || !matches!(message.message_type.as_str(), SESSION_OPENING_MESSAGE_TYPE | bcs_domain::CHAT_ERROR_MESSAGE_TYPE)
                 }) {
+                    if let Some(message) = bcs_domain::state_machine_history::project_state_machine_message(&pm) {
+                        result.push(message);
+                        continue;
+                    }
                     let bot_name = match bot_names.entry(pm.sender_id.clone()) {
                         std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                         std::collections::hash_map::Entry::Vacant(e) => {
@@ -535,12 +549,28 @@ impl GroupMessageHistoryService for MessageService {
         if use_new_path {
             let sess = session.as_ref().unwrap();
             let limit = self.effective_limit(cmd.limit);
-            let (legacy_owner_filter, visible_from_seq) = Self::compute_session_history_query(
+            let needs_current_window = cmd.view_bot_id.as_deref().is_some_and(|actor|
+                sess.participant_join_seq.as_ref().and_then(|map| map.get(actor)).and_then(serde_json::Value::as_i64).is_none());
+            let current_seq = if needs_current_window
+                && group_opt.as_ref().unwrap().group_strategy != GroupStrategy::ManagerWorker {
+                self.message_repo.get_current_seq(&sess.id).await
+                    .map_err(|error| GroupUseCaseError::Service(ServiceError::InternalError(error.to_string())))?
+            } else { 0 };
+            let (legacy_owner_filter, mut visible_from_seq) = Self::compute_session_history_query(
+                current_seq,
                 group_opt.as_ref().unwrap(),
                 sess,
                 cmd.view_bot_id.as_deref(),
                 self.new_participant_visible_limit,
             )?;
+            if visible_from_seq.is_some() && group_opt.as_ref().unwrap().group_strategy == GroupStrategy::Chat {
+                let anchor = cmd.view_bot_id.as_deref()
+                    .and_then(|actor| sess.participant_join_seq.as_ref()?.get(actor)?.as_i64())
+                    .unwrap_or(current_seq);
+                visible_from_seq = Some(self.message_repo.resolve_history_window_start(
+                    &sess.id, anchor, self.new_participant_visible_limit,
+                ).await.map_err(|error| GroupUseCaseError::Service(ServiceError::InternalError(error.to_string())))?);
+            }
             let owner_filter = if human_view
                 .as_ref()
                 .is_some_and(|view| view.scope == MessageViewScope::Participant)
@@ -633,6 +663,10 @@ impl GroupMessageHistoryService for MessageService {
                 for pm in page.messages.into_iter().filter(|message| {
                     !hide_opening_message || !matches!(message.message_type.as_str(), SESSION_OPENING_MESSAGE_TYPE | bcs_domain::CHAT_ERROR_MESSAGE_TYPE)
                 }) {
+                    if let Some(message) = bcs_domain::state_machine_history::project_state_machine_message(&pm) {
+                        result.push(message);
+                        continue;
+                    }
                     let bot_name = match bot_names.entry(pm.sender_id.clone()) {
                         std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                         std::collections::hash_map::Entry::Vacant(e) => {
@@ -741,6 +775,25 @@ impl GroupMessageHistoryService for MessageService {
                 })?;
             let mut persisted_anchors = panel_page.messages;
             let mut persisted_anchors_have_more = panel_page.has_more;
+            if self.persisted_state_machine_history {
+                // Keep ordinary legacy transcripts, but StateMachine content
+                // comes only from durable rows, including before the chat cutoff.
+                fallback_result.messages.retain(|message| message.metadata.as_ref()
+                    .and_then(bcs_domain::state_machine_history::StateMachineHistoryKey::from_metadata).is_none());
+                for kind in [bcs_domain::STATE_MACHINE_OUTPUT_MESSAGE_TYPE,
+                    STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE] {
+                    let page = self.message_repo.query_messages(MessageQuery {
+                        group_id: cmd.group_id.clone(), session_id: session_id.clone(),
+                        cursor: cmd.before, limit, keyword: None, sender_id: None,
+                        message_type: Some(kind.into()), owner_filter: owner_filter.clone(),
+                        time_range: None, visible_from_seq: None, human_view: human_view.clone(),
+                    }).await.map_err(|error| GroupUseCaseError::Service(
+                        ServiceError::InternalError(format!("message repo StateMachine history error: {error}"))
+                    ))?;
+                    persisted_anchors_have_more |= page.has_more;
+                    persisted_anchors.extend(page.messages);
+                }
+            }
             if !hide_opening_message {
                 let opening_page = self
                     .message_repo

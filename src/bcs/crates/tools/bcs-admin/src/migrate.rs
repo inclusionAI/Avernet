@@ -982,3 +982,7 @@ mod human_input_index_mysql_tests;
 #[cfg(test)]
 #[path = "migrate_mysql_chain_tests.rs"]
 mod mysql_chain_tests;
+
+#[cfg(test)]
+#[path = "migrate_history_window_tests.rs"]
+mod history_window_tests;

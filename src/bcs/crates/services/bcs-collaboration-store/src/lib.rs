@@ -30,6 +30,8 @@ use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
 mod judge;
+mod history;
+use bcs_service_api::port::repo::collaboration_history::*;
 mod opening;
 mod dispatch;
 mod publication;
@@ -80,6 +82,7 @@ fn snapshot_column(row: &DbRow, column: &str) -> ServiceResult<Option<String>> {
 
 #[derive(Debug, Default, Clone)]
 struct StoreInner {
+    history_messages: BTreeMap<String, StateMachineHistoryCheckpoint>,
     definitions: BTreeMap<(String, i32), CollaborationDefinition>,
     definition_sources: BTreeMap<(String, i32), DefinitionSourceRecord>,
     run_snapshots: BTreeMap<String, StateMachineRunSnapshot>,
@@ -363,6 +366,14 @@ impl GroupRuntimeBindingRepoPort for MemoryCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MemoryCollaborationStore {
+    async fn accept_history_message(&self, command: AcceptStateMachineHistory) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> {
+        let checkpoint = history::checkpoint("memory", command.payload.clone())?;
+        Ok(self.commit_eventful_transition(StateMachineEventfulTransition::AcceptHistory(command)).await?.then_some(checkpoint))
+    }
+    async fn get_history_message(&self, id: &StateMachineHistoryIdentity) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> { self.history_get(id).await }
+    async fn list_history_messages_pending(&self, after: Option<&StateMachineHistoryCursor>, limit: usize) -> ServiceResult<StateMachineHistoryPage> { self.history_page(after, limit).await }
+    async fn confirm_history_message(&self, checkpoint: &StateMachineHistoryCheckpoint, at: u64) -> ServiceResult<()> { self.history_confirm(checkpoint, at).await }
+
     async fn list_terminal_runs_for_cleanup(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.terminal_cleanup_candidates(after, limit).await }
     async fn cleanup_terminal_run_checkpoints(&self, run: &str, limit: usize) -> ServiceResult<usize> { self.cleanup_terminal_work(run, limit).await }
     async fn fail_missing_startup(&self, command: bcs_service_api::FailStateMachineStartup) -> ServiceResult<bool> { self.fail_startup_gap(command).await }
@@ -1106,6 +1117,7 @@ fn state_machine_transition_events(
     transition: &StateMachineEventfulTransition,
 ) -> Vec<bcs_service_api::port::repo::AppendEventRecord> {
     match transition {
+        StateMachineEventfulTransition::AcceptHistory(command) => command.event.iter().cloned().collect(),
         StateMachineEventfulTransition::FinishJudge(command) => command.event.iter().cloned().collect(),
         StateMachineEventfulTransition::StartRun { events, .. } => events.clone(),
         StateMachineEventfulTransition::StartBotNode { event, .. }
@@ -1121,6 +1133,7 @@ fn apply_memory_state_machine_transition(
     transition: &StateMachineEventfulTransition,
 ) -> ServiceResult<bool> {
     match transition {
+        StateMachineEventfulTransition::AcceptHistory(command) => history::accept_memory(inner, command),
         StateMachineEventfulTransition::FinishJudge(command) => judge::finish_memory(inner, command),
         StateMachineEventfulTransition::StartRun {
             run_id,
@@ -1978,6 +1991,14 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MySqlCollaborationStore {
+    async fn accept_history_message(&self, command: AcceptStateMachineHistory) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> {
+        let checkpoint = history::checkpoint(&self.env, command.payload.clone())?;
+        Ok(self.commit_eventful_transition(StateMachineEventfulTransition::AcceptHistory(command)).await?.then_some(checkpoint))
+    }
+    async fn get_history_message(&self, id: &StateMachineHistoryIdentity) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> { self.history_get(id).await }
+    async fn list_history_messages_pending(&self, after: Option<&StateMachineHistoryCursor>, limit: usize) -> ServiceResult<StateMachineHistoryPage> { self.history_page(after, limit).await }
+    async fn confirm_history_message(&self, checkpoint: &StateMachineHistoryCheckpoint, at: u64) -> ServiceResult<()> { self.history_confirm(checkpoint, at).await }
+
     async fn list_terminal_runs_for_cleanup(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.terminal_cleanup_candidates(after, limit).await }
     async fn cleanup_terminal_run_checkpoints(&self, run: &str, limit: usize) -> ServiceResult<usize> { self.cleanup_terminal_work(run, limit).await }
     async fn fail_missing_startup(&self, command: bcs_service_api::FailStateMachineStartup) -> ServiceResult<bool> { self.fail_startup_gap(command).await }
@@ -2040,6 +2061,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let mut steps = Vec::new();
         let events = state_machine_transition_events(&transition);
         match &transition {
+            StateMachineEventfulTransition::AcceptHistory(command) => { steps.extend(history::accept_sql(self, command)?); }
             StateMachineEventfulTransition::FinishJudge(command) => {
                 steps.extend(judge::finish_sql(self, command)?);
             }

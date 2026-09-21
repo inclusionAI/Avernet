@@ -5,6 +5,9 @@
 GET/PUT /admin/message-delivery/policy allow authenticated Human identities from the configured auth boundary to manage environment-wide policy. Explicit Bot/Provider/service credentials never fall back to local mock Human identity. The old version-prefixed route has no alias; ServiceKey permissions for other APIs are unchanged.
 
 - HTTP delivery adapter for BCS.
+- Legacy session history and the V1 Session facade use the same pure domain
+  StateMachine merge: durable identity wins, results are newest first, and
+  workflow Run IDs remain in metadata instead of chat-round grouping fields.
 - State Machine start/get/rerun, node, graph and pending-Human routes preserve
   the runtime's saved Loop metadata/context. Responses keep the legacy shape
   with optional additive fields; node path IDs remain opaque execution IDs.
@@ -38,6 +41,12 @@ GET/PUT /admin/message-delivery/policy allow authenticated Human identities from
 - `services/*` concrete crates except temporary compile shims recorded in this document
 
 ## Configuration
+
+- Bootstrap injects the same `state_machine_history.read_source` into both
+  history entry points. `messages` reads frozen content from MessageRepo only;
+  Session/Group authorization still applies. Missing old outputs are omitted,
+  with no workflow/Bot-history fallback or read-time backfill. Ordinary mixed
+  chat retains its existing cutoff policy. Configuration changes require restart.
 
 - Route registration, auth adapter wiring, and service handles are injected by bootstrap.
 - Handlers in this crate must not read env or choose concrete service implementations.

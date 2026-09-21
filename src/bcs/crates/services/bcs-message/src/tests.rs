@@ -261,6 +261,8 @@ impl MessageRepoPort for CountingMessageRepo {
         self.inner.get_message_by_id(session_id, message_id).await
     }
 
+    async fn resolve_history_window_start(&self, session: &str, anchor: i64, limit: u64) -> Result<i64, MessageRepoError> { self.inner.resolve_history_window_start(session, anchor, limit).await }
+
     async fn get_current_seq(&self, session_id: &str) -> Result<i64, MessageRepoError> {
         self.inner.get_current_seq(session_id).await
     }

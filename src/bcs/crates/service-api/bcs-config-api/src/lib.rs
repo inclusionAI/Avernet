@@ -985,3 +985,6 @@ impl Default for SqliteConfig {
 
 #[cfg(test)]
 mod tests;
+
+pub mod state_machine_history;
+pub use state_machine_history::{StateMachineHistoryConfig, StateMachineHistoryReadSource};

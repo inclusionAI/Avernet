@@ -322,7 +322,7 @@ pub struct PersistedMessage {
 }
 
 /// Input for appending a new message.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewMessage {
     pub group_id: String,
     pub session_id: String,

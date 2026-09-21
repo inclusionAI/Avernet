@@ -97,6 +97,8 @@ async fn check_full_mysql_chain(db: &dyn DbPlugin, global: &MigrateGlobalArgs) -
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
         assert_eq!(versions, (1..=29).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
+        assert_history_lookup_plans(db).await?;
+        history_window_tests::verify_history_windows(global).await?;
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
         assert!(report.contains("applied_versions=0\npending_versions=0"), "{report}");
@@ -176,6 +178,35 @@ async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
         let rows = db.query(DbStatement::with_params("SELECT column_name AS column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?", vec![DbValue::from(table)])).await?;
         let actual = rows.iter().map(|row| db_get_column::<String>(row, "column_name")).collect::<bcs_db_api::DbResult<Vec<_>>>()?;
         for column in columns { assert!(actual.iter().any(|actual| actual == column), "missing {table}.{column}"); }
+    }
+    Ok(())
+}
+
+async fn assert_history_lookup_plans(db: &dyn DbPlugin) -> Result<()> {
+    // Populate a growing mixed Session so EXPLAIN cannot succeed vacuously on
+    // an empty table. The enclosing test owns and drops this isolated schema.
+    for start in (0..5_000).step_by(200) {
+        let values = (start..start + 200).map(|i| format!(
+            "('history-plan-{i}', 'history-plan-group', 'history-plan-session', {i}, 'test', 'bot', 'bot', \
+            '{}', '{{\"text\":\"output\"}}', 'key-{i}', {i}, 'workflow')",
+            if i % 10 == 0 { "state_machine_output" } else { "chat" })).collect::<Vec<_>>().join(",");
+        db.execute(DbStatement::new(format!("INSERT INTO bcs_messages \
+            (message_id, group_id, session_id, session_seq, env, sender_id, sender_type, message_type, content, client_msg_id, created_at, run_id) \
+            VALUES {values}"))).await?;
+    }
+    db.query(DbStatement::new("ANALYZE TABLE bcs_messages")).await?;
+    for count in [1, 200] {
+        for (column, prefix) in [("message_id", "history-plan-"), ("client_msg_id", "key-")] {
+            let mut params = vec![DbValue::from("test"), DbValue::from("history-plan-session")];
+            params.extend((0..count).map(|i| DbValue::from(format!("{prefix}{i}"))));
+            let rows = db.query(DbStatement::with_params(format!("EXPLAIN SELECT * FROM bcs_messages \
+                WHERE env = ? AND session_id = ? AND {column} IN ({}) \
+                AND message_type IN ('state_machine_panel', 'state_machine_human_input_prompt', \
+                'state_machine_human_input_response', 'state_machine_output') LIMIT 401", vec!["?"; count].join(",")), params)).await?;
+            let index = db_get_column::<String>(&rows[0], "key")?;
+            assert!(!index.is_empty());
+            println!("history identity lookup: column={column} keys={count} index={index} rows={}", db_get_column::<i64>(&rows[0], "rows")?);
+        }
     }
     Ok(())
 }

@@ -3,6 +3,9 @@
 ## Provides
 
 - `SessionServiceImpl`, the transport-agnostic BCN V1 Session facade.
+- StateMachine/ordinary-history merging uses the shared domain identity and
+  newest-first projection. Durable messages take precedence across legacy IDs;
+  workflow metadata does not group distinct outputs into a single chat round.
 - `GroupSessionConnectionServiceImpl`, which authorizes session access before
   issuing a session-scoped Workbench WebSocket token, verifies that token into
   an immutable connection binding, and revalidates the exact bound Session at
@@ -22,6 +25,7 @@
 ## Allowed dependencies
 
 - `service-api/*`
+- Pure domain history identity/projection helpers in `contracts/bcs-domain`
 - Utility crates such as `async-trait` and `serde_json`
 
 ## Forbidden dependencies
@@ -32,6 +36,12 @@
 - Direct environment or transport access
 
 ## Configuration
+
+- Bootstrap injects the same `state_machine_history.read_source` into both
+  history entry points. `messages` reads frozen content from MessageRepo only;
+  Session/Group authorization still applies. Missing old outputs are omitted,
+  with no workflow/Bot-history fallback or read-time backfill. Ordinary mixed
+  chat retains its existing cutoff policy. Configuration changes require restart.
 
 - The composition root injects Session and connection-token service
   implementations.

@@ -5,6 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use bcs_domain::state_machine_history::{merge_state_machine_history, physical_message_id, project_state_machine_message};
 use bcs_domain::{
     BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
     CollaborationDefinition, CollaborationDefinitionRef, CollaborationRuntimeDefinition, Group,
@@ -13,7 +14,7 @@ use bcs_domain::{
     MessageVisibilityDomain, NewMessage, OpeningMessage, OpeningMessageRenderContext,
     OpeningMessageScope, Participant, ParticipantMode, ParticipantRole, RenderedOpeningMessage,
     ResolvedParticipant, ResolvedParticipantBinding, RuntimeParticipantBinding,
-    STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE, STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType,
+    STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType,
     Session, StateMachineAssignee, StateMachineDeliveryCorrelation, StateMachineNodeKind,
     StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
@@ -132,7 +133,15 @@ enum JudgeEvaluationResult {
     Failed(String, Value),
 }
 
+#[path = "runtime_message_history.rs"]
+mod message_history;
+
+#[path = "runtime_history_query.rs"]
+mod history_query;
+
 pub struct CollaborationRuntime {
+    history_persistence_enabled: bool,
+    history_read_source: bcs_config_api::StateMachineHistoryReadSource,
     loop_instrumentation: Option<Arc<dyn bcs_service_api::StateMachineLoopInstrumentationHook>>,
     fixed_loop_limits: bcs_config_api::FixedLoopLimits,
     loop_execution_enabled: bool,
@@ -167,6 +176,13 @@ enum ResolvedDefinitionSource {
 }
 
 impl CollaborationRuntime {
+    pub fn with_history_persistence(mut self, enabled: bool) -> Self { self.history_persistence_enabled = enabled; self }
+
+    pub fn with_history_read_source(mut self, source: bcs_config_api::StateMachineHistoryReadSource) -> Self {
+        self.history_read_source = source;
+        self
+    }
+
     pub fn new(
         definitions: Arc<dyn StateMachineDefinitionRepoPort>,
         bindings: Arc<dyn GroupRuntimeBindingRepoPort>,
@@ -178,6 +194,8 @@ impl CollaborationRuntime {
         judge: Arc<dyn JudgeEvaluatorPort>,
     ) -> Self {
         Self {
+            history_persistence_enabled: false,
+            history_read_source: Default::default(),
             loop_instrumentation: None,
             fixed_loop_limits: bcs_config_api::FixedLoopLimits::default(),
             loop_execution_enabled: false,
@@ -658,7 +676,9 @@ impl CollaborationRuntime {
             started_at_ms: now,
             timeout_deadline_ms: deadline,
         };
-        let marked = match event {
+        let marked = if self.history_persistence_enabled {
+            self.activate_human_with_history(compiled, run, &node_run, command, event).await?
+        } else { match event {
             Some(event) => {
                 self.runs
                     .commit_eventful_transition(StateMachineEventfulTransition::StartHumanNode {
@@ -672,6 +692,7 @@ impl CollaborationRuntime {
                     .mark_human_node_running_if_run_active(command)
                     .await?
             }
+        }
         };
         if !marked {
             return Ok(());
@@ -1414,16 +1435,41 @@ impl CollaborationRuntime {
                 None
             }
         };
-        let saved_outputs = if let Some(repo) = self.message_repo.as_ref() {
-            let ids = nodes.iter().filter(|node| node.artifact_text.is_some())
-                .flat_map(|node| [output_message_id(node), output_message_key(node)])
-                .collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>();
-            repo.get_messages_by_ids(&run.session_id, &ids).await
-                .map_err(message_history_error)?.into_iter()
-                .map(|message| (message.message_id.clone(), message)).collect::<BTreeMap<_, _>>()
+        let panel_key = format!("{}:000-panel", run.run_id);
+        let saved_messages = if let Some(repo) = self.message_repo.as_ref() {
+            let mut keys = BTreeSet::from([panel_key.clone(), physical_message_id(&panel_key)]);
+            for node in &nodes {
+                if node.artifact_text.is_some() {
+                    keys.extend([output_message_id(node), output_message_key(node)]);
+                }
+                if node.started_at.is_some() && state_machine.nodes.get(&node.node_id)
+                    .is_some_and(|definition| definition.kind == StateMachineNodeKind::HumanInput) {
+                    let prompt = format!("{}:{}:{}:human-input-prompt", run.run_id, node.node_id, node.attempt);
+                    keys.extend([physical_message_id(&prompt), prompt]);
+                }
+            }
+            let saved = repo.get_state_machine_messages_by_keys(&run.session_id, &keys.into_iter().collect::<Vec<_>>())
+                .await.map_err(message_history_error)?;
+            let mut by_key = BTreeMap::new();
+            for message in saved {
+                if message.group_id != run.group_id || message.run_id != run.run_id {
+                    return Err(CollaborationRuntimeError::Conflict("history identity mismatch".into()));
+                }
+                if let Some(key) = &message.client_msg_id {
+                    by_key.entry(key.clone()).or_insert_with(|| message.clone());
+                }
+                by_key.entry(message.message_id.clone()).or_insert(message);
+            }
+            by_key
         } else { BTreeMap::new() };
         let mut messages = Vec::new();
-        messages.push(self.state_machine_panel_message(run).await?);
+        if let Some(saved) = saved_messages.get(&panel_key).or_else(|| saved_messages.get(&physical_message_id(&panel_key))) {
+            if human_view.is_none_or(|view| view.allows(saved)) {
+                messages.extend(project_state_machine_message(saved));
+            }
+        } else {
+            messages.push(self.state_machine_panel_message(run).await?);
+        }
         for node in nodes {
             let node_definition = state_machine.nodes.get(&node.node_id).ok_or_else(|| {
                 CollaborationRuntimeError::NodeNotFound {
@@ -1431,7 +1477,12 @@ impl CollaborationRuntime {
                     node_id: node.node_id.clone(),
                 }
             })?;
-            if node_definition.kind == StateMachineNodeKind::HumanInput
+            let prompt_key = format!("{}:{}:{}:human-input-prompt", run.run_id, node.node_id, node.attempt);
+            if let Some(saved) = saved_messages.get(&prompt_key).or_else(|| saved_messages.get(&physical_message_id(&prompt_key))) {
+                if human_view.is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant && view.allows(saved)) {
+                    messages.extend(project_state_machine_message(saved));
+                }
+            } else if node_definition.kind == StateMachineNodeKind::HumanInput
                 && node.started_at.is_some()
                 && human_view
                     .is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant)
@@ -1472,10 +1523,17 @@ impl CollaborationRuntime {
                             &pending,
                             &prompt_actor_ids,
                         )),
-                        run_id: run.run_id.clone(),
+                        run_id: String::new(),
                         attachments: None,
                     });
                 }
+            }
+            if let Some(saved) = saved_messages.get(&output_message_id(&node))
+                .or_else(|| saved_messages.get(&output_message_key(&node))) {
+                if human_view.is_none_or(|view| view.allows(saved)) {
+                    messages.push(stored_output_message(saved)?);
+                }
+                continue;
             }
             if let Some(view) = human_view
                 && view.scope == bcs_domain::MessageViewScope::Participant
@@ -1492,16 +1550,6 @@ impl CollaborationRuntime {
                 else {
                     continue;
                 };
-                if let Some(saved) = saved_outputs.get(&output_message_id(&node))
-                    .or_else(|| saved_outputs.get(&output_message_key(&node))) {
-                    if saved.group_id != run.group_id || saved.run_id != run.run_id {
-                        return Err(CollaborationRuntimeError::Conflict("output history identity mismatch".into()));
-                    }
-                    if human_view.is_none_or(|view| view.allows(saved)) {
-                        messages.push(stored_output_message(saved)?);
-                    }
-                    continue;
-                }
                 messages.push(GroupMessage {
                     id: if compiled.execution_plan.is_some() { output_message_id(&node) } else { output_message_key(&node) },
                     timestamp: node.completed_at.unwrap_or(run.updated_at),
@@ -1952,6 +2000,7 @@ impl CollaborationRuntime {
             "failed attempt has no saved failure action; legacy failures cannot be recovered".into(),
         ))?;
         let node = failure.node;
+        self.preserve_node_history(compiled, group, run, &node).await?;
         let error = node.error.ok_or_else(|| {
             CollaborationRuntimeError::InvalidRequest("failed attempt has no saved error".into())
         })?;
@@ -2321,6 +2370,7 @@ impl CollaborationRuntime {
             }
             nodes = self.runs.list_node_runs(run_id).await?;
         }
+        if self.history_persistence_enabled { self.repair_existing_history(&run).await?; }
         self.runs.supersede_inactive_node_dispatches(run_id).await?;
         let covered_human_nodes = if let Some(outbound) = self.session_channel_outbound.as_ref() {
             if !self.progression_run_is_active(run_id).await? { return Ok(()); }
@@ -2337,10 +2387,16 @@ impl CollaborationRuntime {
         for node in &nodes {
             if node.status == StateMachineNodeStatus::Running && node.assignee_bot_id.is_none() && node.artifact_text.is_none()
                 && !covered_human_nodes.contains(&node.node_id) {
+                self.preserve_node_history(&compiled, &group, &run, node).await?;
                 self.resume_human_ready(&compiled, &run, &node.node_id).await?;
             }
         }
         if !self.progression_run_is_active(run_id).await? { return Ok(()); }
+        nodes = self.runs.list_node_runs(run_id).await?;
+        for node in nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Running
+            && node.artifact_text.is_some() && !node_uses_judge(&compiled, &node.node_id)) {
+            self.resume_accepted_history_output(&compiled, &group, &run, node).await?;
+        }
         nodes = self.runs.list_node_runs(run_id).await?;
         let judging = nodes.iter().filter(|node| node.status == StateMachineNodeStatus::Running
             && node.artifact_text.is_some() && node_uses_judge(&compiled, &node.node_id))
@@ -3445,9 +3501,15 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let group = self.groups.get(&run.group_id).await.ok_or_else(|| {
             CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", run.group_id))
         })?;
+        self.preserve_node_history(&compiled, &group, &run, &node).await?;
         if node_definition.judge.is_some() {
-            if !self.runs.begin_node_judging(&run.run_id, &cmd.node_id, node.attempt,
-                content, Some(cmd.caller_actor_id)).await? {
+            let accepted = if self.history_persistence_enabled || self.has_history_output(&run, &node).await? {
+                self.accept_output_history(&compiled, &group, &run, &node, &content, Some(&cmd.caller_actor_id), true).await?
+            } else {
+                self.runs.begin_node_judging(&run.run_id, &cmd.node_id, node.attempt,
+                    content, Some(cmd.caller_actor_id)).await?
+            };
+            if !accepted {
                 return Err(CollaborationRuntimeError::Conflict("human Judge input is already fixed".into()));
             }
             match self.resume_judging(&compiled, &group, &run, &cmd.node_id, node.attempt).await? {
@@ -3461,17 +3523,17 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 .ok_or_else(|| CollaborationRuntimeError::RunNotFound(run.run_id.clone()))?;
             return Ok(RespondHumanNodeOutcome { node, run });
         }
-        if !self
-            .runs
-            .record_human_response_if_running(
+        let accepted = if self.history_persistence_enabled || self.has_history_output(&run, &node).await? {
+            self.accept_output_history(&compiled, &group, &run, &node, &content, Some(&cmd.caller_actor_id), false).await?
+        } else { self.runs.record_human_response_if_running(
                 &run.run_id,
                 &cmd.node_id,
                 node.attempt,
                 content.clone(),
                 cmd.caller_actor_id.clone(),
             )
-            .await?
-        {
+            .await? };
+        if !accepted {
             return Err(CollaborationRuntimeError::Conflict(
                 "human node is no longer accepting responses".to_string(),
             ));
@@ -3842,6 +3904,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         limit: u64,
         before: Option<u64>,
     ) -> Result<Option<SessionHistoryResult>, CollaborationRuntimeError> {
+        if self.history_read_source == bcs_config_api::StateMachineHistoryReadSource::Messages {
+            return self.message_store_history(session_id, limit, before, None).await;
+        }
         if limit == 0 {
             return Err(CollaborationRuntimeError::InvalidRequest(
                 "history limit must be greater than 0".to_string(),
@@ -3864,11 +3929,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     .await?,
             );
         }
-        messages.sort_by(|left, right| {
-            left.timestamp
-                .cmp(&right.timestamp)
-                .then_with(|| left.id.cmp(&right.id))
-        });
+        let persisted = self.persisted_history_attempts(&group.id, session_id, limit, before, None).await?;
+        messages = merge_state_machine_history(persisted, messages, u64::MAX);
         let messages = apply_message_window(messages, limit, before);
         let next_before = messages.iter().map(|message| message.timestamp).min();
         Ok(Some(SessionHistoryResult {
@@ -3887,6 +3949,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         before: Option<u64>,
         human_view: HumanMessageView,
     ) -> Result<Option<SessionHistoryResult>, CollaborationRuntimeError> {
+        if self.history_read_source == bcs_config_api::StateMachineHistoryReadSource::Messages {
+            return self.message_store_history(session_id, limit, before, Some(human_view)).await;
+        }
         if human_view.scope == bcs_domain::MessageViewScope::Full {
             return self
                 .get_state_machine_session_history(session_id, limit, before)
@@ -3914,82 +3979,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     .await?,
             );
         }
-        if let Some(message_repo) = self.message_repo.as_ref() {
-            let mut seen_message_ids = messages
-                .iter()
-                .map(|message| message.id.clone())
-                .collect::<HashSet<_>>();
-            let page = message_repo
-                .query_messages(MessageQuery {
-                    group_id: group.id.clone(),
-                    session_id: session_id.to_string(),
-                    cursor: before,
-                    limit: 1_000,
-                    keyword: None,
-                    sender_id: None,
-                    message_type: None,
-                    owner_filter: MessageOwnerFilter::Any,
-                    time_range: None,
-                    visible_from_seq: None,
-                    human_view: Some(human_view.clone()),
-                })
-                .await
-                .map_err(|error| {
-                    CollaborationRuntimeError::Internal(ServiceError::InternalError(format!(
-                        "state-machine participant history load failed: {error}"
-                    )))
-                })?;
-            messages.extend(page.messages.into_iter().filter_map(|message| {
-                (message.visibility_domain == Some(MessageVisibilityDomain::StateMachine)
-                    && seen_message_ids.insert(
-                        message
-                            .client_msg_id
-                            .clone()
-                            .unwrap_or_else(|| message.message_id.clone()),
-                    ))
-                .then(|| {
-                    let is_human_response =
-                        message.message_type == STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE
-                            || (message.message_type == bcs_domain::STATE_MACHINE_OUTPUT_MESSAGE_TYPE && message.sender_type == SenderType::Human);
-                    let bot_name = message
-                        .content
-                        .get("bot_name")
-                        .and_then(Value::as_str)
-                        .map(str::to_string);
-                    let metadata = message.content.get("metadata").cloned();
-                    GroupMessage {
-                        id: message.client_msg_id.clone().unwrap_or(message.message_id),
-                        timestamp: message.created_at,
-                        sender: message.sender_id,
-                        content: message
-                            .content
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .map(str::to_string)
-                            .unwrap_or_else(|| match message.content {
-                                Value::String(value) => value,
-                                value => value.to_string(),
-                            }),
-                        message_type: GroupMessageType::Bot,
-                        bot_name,
-                        role: if is_human_response {
-                            MessageRole::User
-                        } else {
-                            MessageRole::Assistant
-                        },
-                        history_meta: None,
-                        metadata,
-                        run_id: message.run_id,
-                        attachments: None,
-                    }
-                })
-            }));
-        }
-        messages.sort_by(|left, right| {
-            left.timestamp
-                .cmp(&right.timestamp)
-                .then_with(|| left.id.cmp(&right.id))
-        });
+        let persisted = self.persisted_history_attempts(&group.id, session_id, limit, before, Some(human_view)).await?;
+        messages = merge_state_machine_history(persisted, messages, u64::MAX);
         let messages = apply_message_window(messages, limit, before);
         let next_before = messages.iter().map(|message| message.timestamp).min();
         Ok(Some(SessionHistoryResult {
@@ -4246,8 +4237,15 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             ChatEventState::Final => {
                 let text = extract_text(&cmd.event_payload).unwrap_or_default();
                 let artifact_len = text.len();
-                if node_uses_judge(&compiled, &correlation.node_id) {
-                    if self.runs.begin_node_judging(&run.run_id, &correlation.node_id,
+                let accepted_node = node.as_ref().ok_or_else(|| CollaborationRuntimeError::InvalidRequest("accepted node missing".into()))?;
+                self.preserve_node_history(&compiled, &group, &run, accepted_node).await?;
+                let judging = node_uses_judge(&compiled, &correlation.node_id);
+                let preserve_acceptance = self.history_persistence_enabled || self.has_history_output(&run, accepted_node).await?;
+                if preserve_acceptance && !self.accept_output_history(&compiled, &group, &run, accepted_node, &text, None, judging).await? {
+                    return Ok(HandleBotTerminalEventOutcome { consumed: true, view: self.run_view(&run.run_id).await? });
+                }
+                if judging {
+                    if preserve_acceptance || self.runs.begin_node_judging(&run.run_id, &correlation.node_id,
                         correlation.attempt, text, None).await? {
                         self.resume_judging(&compiled, &group, &run, &correlation.node_id, correlation.attempt).await?;
                     }
@@ -4519,6 +4517,11 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         Ok(processed)
     }
 
+    async fn recover_state_machine_history(&self, cursor: Option<String>, limit: usize)
+        -> Result<bcs_service_api::StateMachineProgressionRecoveryPage, CollaborationRuntimeError> {
+        self.recover_history_page(cursor, limit).await
+    }
+
     async fn recover_state_machine_progression(
         &self,
         after_run_id: Option<String>,
@@ -4558,8 +4561,15 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let mut page = bcs_service_api::StateMachineProgressionRecoveryPage { scanned: ids.len(),
             next_run_id: if ids.len() == limit { ids.last().cloned() } else { None }, ..Default::default() };
         for run_id in ids {
-            match self.runs.cleanup_terminal_run_checkpoints(&run_id, 32).await {
-                Ok(_) => page.reconciled += 1,
+            let result = async {
+                self.runs.cleanup_terminal_run_checkpoints(&run_id, 32).await?;
+                if self.history_persistence_enabled {
+                    if let Some(run) = self.runs.get_run(&run_id).await? { self.repair_existing_history(&run).await?; }
+                }
+                Ok::<_, CollaborationRuntimeError>(())
+            }.await;
+            match result {
+                Ok(()) => page.reconciled += 1,
                 Err(error) => page.failures.push(bcs_service_api::StateMachineProgressionRecoveryFailure { run_id, error: error.to_string() }),
             }
         }
@@ -6365,15 +6375,10 @@ fn single_quoted_json_attr(value: String) -> String {
 }
 
 fn apply_message_window(
-    messages: Vec<GroupMessage>,
-    limit: u64,
-    before: Option<u64>,
+    messages: Vec<GroupMessage>, limit: u64, before: Option<u64>,
 ) -> Vec<GroupMessage> {
-    messages
-        .into_iter()
-        .filter(|message| before.map_or(true, |before| message.timestamp < before))
-        .take(limit as usize)
-        .collect()
+    let messages = messages.into_iter().filter(|message| before.is_none_or(|timestamp| message.timestamp < timestamp)).collect();
+    merge_state_machine_history(Vec::new(), messages, limit)
 }
 
 fn final_output_text(

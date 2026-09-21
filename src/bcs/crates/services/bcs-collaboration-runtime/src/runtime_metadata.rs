@@ -1,6 +1,6 @@
 use super::*;
 use bcs_domain::STATE_MACHINE_OUTPUT_MESSAGE_TYPE;
-use sha2::{Digest, Sha256};
+use bcs_domain::state_machine_history;
 
 impl CollaborationRuntime {
     pub(super) fn prepare_node_event(
@@ -21,6 +21,9 @@ impl CollaborationRuntime {
     pub(super) async fn persist_node_output(
         &self, compiled: &CompiledStateMachine, group: &Group, run: &StateMachineRun, node: &StateMachineNodeRun,
     ) -> Result<(), CollaborationRuntimeError> {
+        if self.history_persistence_enabled || self.has_history_output(run, node).await? {
+            return self.preserve_node_history(compiled, group, run, node).await;
+        }
         // Preserve the pre-Loop v1 synthetic-history path.
         if compiled.execution_plan.is_none() { return Ok(()); }
         let execution = crate::definition::execution_metadata_for_node(compiled, &node.node_id)?;
@@ -65,13 +68,11 @@ impl CollaborationRuntime {
 }
 
 pub(super) fn output_message_id(node: &StateMachineNodeRun) -> String {
-    let key = output_message_key(node);
-    // MySQL bcs_messages.message_id is VARCHAR(64). Preserve existing short IDs.
-    if key.len() <= 64 { key } else { format!("{:x}", Sha256::digest(key.as_bytes())) }
+    physical_message_id(&output_message_key(node))
 }
 
 pub(super) fn output_message_key(node: &StateMachineNodeRun) -> String {
-    format!("{}:{}:{}:1-output", node.run_id, node.node_id, node.attempt)
+    state_machine_history::output_message_key(&node.run_id, &node.node_id, node.attempt)
 }
 
 pub(super) fn message_history_error(error: bcs_service_api::port::repo::MessageRepoError) -> CollaborationRuntimeError {
@@ -79,14 +80,9 @@ pub(super) fn message_history_error(error: bcs_service_api::port::repo::MessageR
 }
 
 pub(super) fn stored_output_message(message: &bcs_domain::PersistedMessage) -> Result<GroupMessage, CollaborationRuntimeError> {
-    let content = message.content.get("text").and_then(Value::as_str).ok_or_else(||
-        CollaborationRuntimeError::InvalidRequest("stored output has no text".into()))?;
-    let metadata = message.content.get("metadata").cloned().ok_or_else(||
-        CollaborationRuntimeError::InvalidRequest("stored output has no metadata".into()))?;
-    Ok(GroupMessage {
-        id: message.message_id.clone(), timestamp: message.created_at, sender: message.sender_id.clone(),
-        content: content.into(), message_type: GroupMessageType::Bot, bot_name: None,
-        role: if message.sender_type == SenderType::Human { MessageRole::User } else { MessageRole::Assistant },
-        history_meta: None, metadata: Some(metadata), run_id: String::new(), attachments: None,
-    })
+    if message.content.get("text").and_then(Value::as_str).is_none() || message.content.get("metadata").is_none() {
+        return Err(CollaborationRuntimeError::InvalidRequest("stored output has no text or metadata".into()));
+    }
+    project_state_machine_message(message).ok_or_else(||
+        CollaborationRuntimeError::InvalidRequest("stored output has an unexpected message type".into()))
 }

@@ -104,3 +104,27 @@ to one transaction. Memory is test/development storage, not restart durability.
 - `cargo test --manifest-path src/bcs/Cargo.toml -p bcs-message-store`
 - Shared delivery contract runs against Memory and migrated SQLite. Remote
   MySQL/OceanBase execution additionally requires a configured test database.
+
+StateMachine canonical history lookup uses physical IDs and stored client keys,
+scoped to environment/Session and excluding published chat. Each 200-key chunk
+uses two scoped queries with LIMIT 401; more than 400 matches is an explicit
+duplicate-data error. Empty lookups issue no query; failures stop subsequent
+chunks. No schema/index additions: client-key queries use existing Session/type
+indexes and may scan more rows than the returned limit. Memory/SQLite
+contracts cover identities, isolation, 200/201/450-key costs and error paths.
+
+`list_state_machine_history` scopes one bounded SELECT to environment, group and
+Session. It filters four StateMachine history types and audience before LIMIT,
+excludes prompts for Full/Bot views, and orders by created_at/session_seq. The
+limit is 1..1000 plus one lookahead row; its composite cursor is internal. Public
+HTTP before remains an exclusive millisecond timestamp. It reads no Run, Node,
+definition or checkpoint and never fetches Bot-native history or writes rows.
+Published chat results remain in the ordinary history query.
+
+Ordinary Chat window resolution retains physical join anchors and skips only
+StateMachine rows with history_schema_version=1. Legacy rows and ordinary gaps
+still consume positions. Indexed scans return at most 512 sequence/marker pairs
+per query, with a 16384 supplemental-row budget; budget or DB failures propagate.
+The application receives no bodies; SQL still reads/parses candidate content
+JSON. No counters, initialization tasks, or write transactions are used. Supplemental positions/markers must be retained for
+the lifetime of the Session. Audience checks remain independent of this marker.

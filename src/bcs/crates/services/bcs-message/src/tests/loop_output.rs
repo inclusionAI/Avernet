@@ -1,5 +1,17 @@
 use super::*;
 
+#[test]
+fn consumer_history_fixture_matches_actual_wire_projection() {
+    let cases: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/state_machine_history.json"
+    )).unwrap();
+    for case in cases.as_array().unwrap() {
+        let stored = serde_json::from_value(case["stored"].clone()).unwrap();
+        let wire = serde_json::to_value(persisted_to_group_message(stored, None)).unwrap();
+        assert_eq!(wire, case["wire"]);
+    }
+}
+
 #[tokio::test]
 async fn chat_loop_outputs_preserve_content_role_identity_and_execution_metadata() {
     let (service, repo, sessions, _, session_id) =
@@ -28,7 +40,8 @@ async fn chat_loop_outputs_preserve_content_role_identity_and_execution_metadata
     assert_eq!(history.messages.len(), 2);
     for message in history.messages {
         assert_eq!(message.id, format!("stored-{}", message.sender));
-        assert_eq!(message.run_id, "sm-loop");
+        assert!(message.run_id.is_empty());
+        assert!(message.history_meta.is_none());
         assert_eq!(message.metadata, Some(metadata.clone()));
         assert_eq!(message.bot_name, None);
         if message.sender == "human-1" {

@@ -1,3 +1,5 @@
+#[path = "support/history_contract.rs"]
+mod history_contract;
 #[path = "support/recovery_gap_contract.rs"]
 mod recovery_gap_contract;
 #[path = "support/terminal_cleanup_contract.rs"]

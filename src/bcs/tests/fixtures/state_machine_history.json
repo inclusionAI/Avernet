@@ -1,0 +1,437 @@
+[
+  {
+    "stored": {
+      "message_id": "workflow:000-panel",
+      "group_id": "group",
+      "session_id": "session",
+      "session_seq": 1,
+      "sender_id": "bcs_state_machine",
+      "sender_type": "bot",
+      "message_type": "state_machine_panel",
+      "content": {
+        "text": "bcs_state_machine panel 0",
+        "metadata": {
+          "state_machine": {
+            "run_id": "workflow",
+            "event": "panel"
+          }
+        }
+      },
+      "client_msg_id": "workflow:000-panel",
+      "owner_bot_id": null,
+      "visibility_domain": "state_machine",
+      "audience": {
+        "kind": "public"
+      },
+      "status": "normal",
+      "created_at": 100,
+      "run_id": "workflow"
+    },
+    "wire": {
+      "id": "workflow:000-panel",
+      "timestamp": 100,
+      "sender": "bcs_state_machine",
+      "content": "bcs_state_machine panel 0",
+      "message_type": "bot",
+      "role": "assistant",
+      "metadata": {
+        "state_machine": {
+          "run_id": "workflow",
+          "event": "panel"
+        }
+      },
+      "bot_name": "BCS State Machine"
+    }
+  },
+  {
+    "stored": {
+      "message_id": "workflow:review-a:0:human-input-prompt",
+      "group_id": "group",
+      "session_id": "session",
+      "session_seq": 2,
+      "sender_id": "bcs_state_machine",
+      "sender_type": "bot",
+      "message_type": "state_machine_human_input_prompt",
+      "content": {
+        "text": "bcs_state_machine review-a 0",
+        "metadata": {
+          "state_machine": {
+            "run_id": "workflow",
+            "event": "human_input_prompt",
+            "node_id": "review-a",
+            "attempt": 0
+          }
+        }
+      },
+      "client_msg_id": "workflow:review-a:0:human-input-prompt",
+      "owner_bot_id": null,
+      "visibility_domain": "state_machine",
+      "audience": {
+        "kind": "public"
+      },
+      "status": "normal",
+      "created_at": 101,
+      "run_id": "workflow"
+    },
+    "wire": {
+      "id": "workflow:review-a:0:human-input-prompt",
+      "timestamp": 101,
+      "sender": "bcs_state_machine",
+      "content": "bcs_state_machine review-a 0",
+      "message_type": "bot",
+      "role": "assistant",
+      "metadata": {
+        "state_machine": {
+          "run_id": "workflow",
+          "event": "human_input_prompt",
+          "node_id": "review-a",
+          "attempt": 0
+        }
+      },
+      "bot_name": "BCS State Machine"
+    }
+  },
+  {
+    "stored": {
+      "message_id": "workflow:review-a:0:1-output",
+      "group_id": "group",
+      "session_id": "session",
+      "session_seq": 3,
+      "sender_id": "reviewer-a",
+      "sender_type": "human",
+      "message_type": "state_machine_human_input_response",
+      "content": {
+        "text": "reviewer-a review-a 0",
+        "metadata": {
+          "state_machine": {
+            "run_id": "workflow",
+            "event": "human_input_response",
+            "node_id": "review-a",
+            "attempt": 0
+          }
+        }
+      },
+      "client_msg_id": "workflow:review-a:0:1-output",
+      "owner_bot_id": null,
+      "visibility_domain": "state_machine",
+      "audience": {
+        "kind": "public"
+      },
+      "status": "normal",
+      "created_at": 102,
+      "run_id": "workflow"
+    },
+    "wire": {
+      "id": "workflow:review-a:0:1-output",
+      "timestamp": 102,
+      "sender": "reviewer-a",
+      "content": "reviewer-a review-a 0",
+      "message_type": "bot",
+      "role": "user",
+      "metadata": {
+        "state_machine": {
+          "run_id": "workflow",
+          "event": "human_input_response",
+          "node_id": "review-a",
+          "attempt": 0
+        }
+      }
+    }
+  },
+  {
+    "stored": {
+      "message_id": "workflow:review-b:0:1-output",
+      "group_id": "group",
+      "session_id": "session",
+      "session_seq": 4,
+      "sender_id": "reviewer-b",
+      "sender_type": "human",
+      "message_type": "state_machine_output",
+      "content": {
+        "text": "reviewer-b review-b 0",
+        "metadata": {
+          "state_machine": {
+            "run_id": "workflow",
+            "event": "output",
+            "node_id": "review-b",
+            "attempt": 0
+          }
+        }
+      },
+      "client_msg_id": "workflow:review-b:0:1-output",
+      "owner_bot_id": null,
+      "visibility_domain": "state_machine",
+      "audience": {
+        "kind": "public"
+      },
+      "status": "normal",
+      "created_at": 103,
+      "run_id": "workflow"
+    },
+    "wire": {
+      "id": "workflow:review-b:0:1-output",
+      "timestamp": 103,
+      "sender": "reviewer-b",
+      "content": "reviewer-b review-b 0",
+      "message_type": "bot",
+      "role": "user",
+      "metadata": {
+        "state_machine": {
+          "run_id": "workflow",
+          "event": "output",
+          "node_id": "review-b",
+          "attempt": 0
+        }
+      }
+    }
+  },
+  {
+    "stored": {
+      "message_id": "workflow:review-a:1:1-output",
+      "group_id": "group",
+      "session_id": "session",
+      "session_seq": 5,
+      "sender_id": "reviewer-a",
+      "sender_type": "human",
+      "message_type": "state_machine_output",
+      "content": {
+        "text": "reviewer-a review-a 1",
+        "metadata": {
+          "state_machine": {
+            "run_id": "workflow",
+            "event": "output",
+            "node_id": "review-a",
+            "attempt": 1
+          }
+        }
+      },
+      "client_msg_id": "workflow:review-a:1:1-output",
+      "owner_bot_id": null,
+      "visibility_domain": "state_machine",
+      "audience": {
+        "kind": "public"
+      },
+      "status": "normal",
+      "created_at": 104,
+      "run_id": "workflow"
+    },
+    "wire": {
+      "id": "workflow:review-a:1:1-output",
+      "timestamp": 104,
+      "sender": "reviewer-a",
+      "content": "reviewer-a review-a 1",
+      "message_type": "bot",
+      "role": "user",
+      "metadata": {
+        "state_machine": {
+          "run_id": "workflow",
+          "event": "output",
+          "node_id": "review-a",
+          "attempt": 1
+        }
+      }
+    }
+  },
+  {
+    "stored": {
+      "message_id": "5605c6d6ad803da9fb89633debe8472e48f778dc828263566fa95f47ae3887d8",
+      "group_id": "group",
+      "session_id": "session",
+      "session_seq": 6,
+      "sender_id": "worker",
+      "sender_type": "bot",
+      "message_type": "state_machine_output",
+      "content": {
+        "text": "worker loop-node-1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 0",
+        "metadata": {
+          "state_machine": {
+            "run_id": "workflow",
+            "event": "output",
+            "node_id": "loop-node-1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "attempt": 0,
+            "execution": {
+              "definition_node_id": "draft",
+              "loop_id": "review-loop",
+              "iteration": 1,
+              "max_iterations": 2
+            }
+          }
+        }
+      },
+      "client_msg_id": "workflow:loop-node-1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:0:1-output",
+      "owner_bot_id": null,
+      "visibility_domain": "state_machine",
+      "audience": {
+        "kind": "public"
+      },
+      "status": "normal",
+      "created_at": 105,
+      "run_id": "workflow"
+    },
+    "wire": {
+      "id": "5605c6d6ad803da9fb89633debe8472e48f778dc828263566fa95f47ae3887d8",
+      "timestamp": 105,
+      "sender": "worker",
+      "content": "worker loop-node-1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 0",
+      "message_type": "bot",
+      "role": "assistant",
+      "metadata": {
+        "state_machine": {
+          "run_id": "workflow",
+          "event": "output",
+          "node_id": "loop-node-1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "attempt": 0,
+          "execution": {
+            "definition_node_id": "draft",
+            "loop_id": "review-loop",
+            "iteration": 1,
+            "max_iterations": 2
+          }
+        }
+      }
+    }
+  },
+  {
+    "stored": {
+      "message_id": "6c05982fd1c09f423fa8967aff887c4aa4ec24bf076a9115885d035a6ca45820",
+      "group_id": "group",
+      "session_id": "session",
+      "session_seq": 7,
+      "sender_id": "worker",
+      "sender_type": "bot",
+      "message_type": "state_machine_output",
+      "content": {
+        "text": "worker loop-node-2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 0",
+        "metadata": {
+          "state_machine": {
+            "run_id": "workflow",
+            "event": "output",
+            "node_id": "loop-node-2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "attempt": 0,
+            "execution": {
+              "definition_node_id": "draft",
+              "loop_id": "review-loop",
+              "iteration": 2,
+              "max_iterations": 2
+            }
+          }
+        }
+      },
+      "client_msg_id": "workflow:loop-node-2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx:0:1-output",
+      "owner_bot_id": null,
+      "visibility_domain": "state_machine",
+      "audience": {
+        "kind": "public"
+      },
+      "status": "normal",
+      "created_at": 106,
+      "run_id": "workflow"
+    },
+    "wire": {
+      "id": "6c05982fd1c09f423fa8967aff887c4aa4ec24bf076a9115885d035a6ca45820",
+      "timestamp": 106,
+      "sender": "worker",
+      "content": "worker loop-node-2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 0",
+      "message_type": "bot",
+      "role": "assistant",
+      "metadata": {
+        "state_machine": {
+          "run_id": "workflow",
+          "event": "output",
+          "node_id": "loop-node-2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "attempt": 0,
+          "execution": {
+            "definition_node_id": "draft",
+            "loop_id": "review-loop",
+            "iteration": 2,
+            "max_iterations": 2
+          }
+        }
+      }
+    }
+  },
+  {
+    "stored": {
+      "message_id": "chat-a",
+      "group_id": "group",
+      "session_id": "session",
+      "session_seq": 8,
+      "sender_id": "worker",
+      "sender_type": "bot",
+      "message_type": "chat",
+      "content": "ordinary one",
+      "client_msg_id": "chat-a",
+      "owner_bot_id": null,
+      "visibility_domain": "chat",
+      "audience": null,
+      "status": "normal",
+      "created_at": 107,
+      "run_id": "ordinary-round"
+    },
+    "wire": {
+      "id": "chat-a",
+      "timestamp": 107,
+      "sender": "worker",
+      "content": "ordinary one",
+      "message_type": "bot",
+      "role": "assistant",
+      "run_id": "ordinary-round"
+    }
+  },
+  {
+    "stored": {
+      "message_id": "chat-b",
+      "group_id": "group",
+      "session_id": "session",
+      "session_seq": 9,
+      "sender_id": "worker",
+      "sender_type": "bot",
+      "message_type": "chat",
+      "content": "ordinary two",
+      "client_msg_id": "chat-b",
+      "owner_bot_id": null,
+      "visibility_domain": "chat",
+      "audience": null,
+      "status": "normal",
+      "created_at": 108,
+      "run_id": "ordinary-round"
+    },
+    "wire": {
+      "id": "chat-b",
+      "timestamp": 108,
+      "sender": "worker",
+      "content": "ordinary two",
+      "message_type": "bot",
+      "role": "assistant",
+      "run_id": "ordinary-round"
+    }
+  },
+  {
+    "stored": {
+      "message_id": "state-machine-result:workflow",
+      "group_id": "group",
+      "session_id": "session",
+      "session_seq": 10,
+      "sender_id": "worker",
+      "sender_type": "bot",
+      "message_type": "chat",
+      "content": "published result",
+      "client_msg_id": "state-machine-result:workflow",
+      "owner_bot_id": null,
+      "visibility_domain": "chat",
+      "audience": null,
+      "status": "normal",
+      "created_at": 109,
+      "run_id": "publication-round"
+    },
+    "wire": {
+      "id": "state-machine-result:workflow",
+      "timestamp": 109,
+      "sender": "worker",
+      "content": "published result",
+      "message_type": "bot",
+      "role": "assistant",
+      "run_id": "publication-round"
+    }
+  }
+]
