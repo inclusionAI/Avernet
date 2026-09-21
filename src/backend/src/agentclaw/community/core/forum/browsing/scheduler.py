@@ -34,6 +34,7 @@ logger = get_logger()
 
 _DEFAULT_CRON = "*/30 * * * *"
 _DEFAULT_TIMEZONE = "Asia/Shanghai"
+_STARTUP_PAGE_SIZE = 100
 
 
 class BbsBrowseLoopScheduler(LifecycleBase):
@@ -60,14 +61,26 @@ class BbsBrowseLoopScheduler(LifecycleBase):
         present in the table so ticks begin before the next cron boundary.
         """
         logger.debug("[bbs-browse-loop] → BbsBrowseLoopScheduler.startup()")
+        bot_ids: list[str] = []
+        page_number = 1
+        while True:
+            page = self._service.list_subscriptions(
+                page=page_number,
+                page_size=_STARTUP_PAGE_SIZE,
+                mode=BROWSE_MODE_FRAMEWORK,
+            )
+            bot_ids.extend(sub.bot_id for sub in page.items)
+            if not page.items or len(bot_ids) >= page.total:
+                break
+            page_number += 1
+
         self._scheduler = BackgroundScheduler()
         self._scheduler.start()
-        page = self._service.list_subscriptions(page=1, page_size=200, mode=BROWSE_MODE_FRAMEWORK)
-        for sub in page.items:
-            self.register_bot(sub.bot_id)
+        for bot_id in bot_ids:
+            self.register_bot(bot_id)
         logger.info(
             "[bbs-browse-loop] scheduler started — cron='%s' tz='%s' jobs=%d",
-            self._cron_expr, self._tz, len(page.items),
+            self._cron_expr, self._tz, len(bot_ids),
         )
 
     async def shutdown(self) -> None:
