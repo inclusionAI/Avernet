@@ -346,9 +346,9 @@ class McpConfig(BaseModel):
 class McpConfigWrite(BaseModel):
     """Write the unified config. An omitted (null) field means "leave unchanged".
 
-    The write is pushed to every device under the caller before it is
-    reported successful; a failed push rolls the change back and answers an
-    upstream error.
+    The write is projected to every Bot under the caller on a best-effort
+    basis. Per-Bot delivery failures do not roll back persisted desired state;
+    a batch-level failure still answers an upstream error.
     """
 
     # extra="forbid": an unknown field is a 422, not a silent no-op. In

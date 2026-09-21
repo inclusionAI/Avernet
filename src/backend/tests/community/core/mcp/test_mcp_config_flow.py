@@ -189,10 +189,10 @@ def test_center_validation_unavailable_is_not_reported_as_config_conflict():
     cfg.update_user_unified_config.assert_not_called()
 
 
-# ── write: rollback on sync failure ─────────────────────────────────
+# ── write: rollback only on batch-level sync failure ─────────────────
 
 
-def test_sync_failure_rolls_back_update_and_raises():
+def test_batch_sync_failure_rolls_back_update_and_raises():
     # The row existed before this call → update returns the prior config.
     prior = {"api_key": "old", "headers": {}, "endpoint_env": "PROD"}
     cfg = _config_service()
@@ -205,7 +205,7 @@ def test_sync_failure_rolls_back_update_and_raises():
     assert kw["old_config"] == prior
 
 
-def test_sync_failure_after_create_rolls_back_as_delete():
+def test_batch_sync_failure_after_create_rolls_back_as_delete():
     # New row → update returns None → rollback receives None → delete path.
     cfg = _config_service()
     cfg.update_user_unified_config.return_value = None
@@ -216,12 +216,29 @@ def test_sync_failure_after_create_rolls_back_as_delete():
     assert kw["old_config"] is None
 
 
+def test_per_bot_delivery_failures_are_returned_without_rollback():
+    cfg = _config_service()
+    sync = _sync_service(
+        success=True,
+        sync_results=[
+            {
+                "bot_id": "offline-bot",
+                "synced": False,
+                "reason": "设备离线",
+                "error": "No active device for binding=42",
+            }
+        ],
+    )
+
+    result = _write(cfg=cfg, sync=sync)
+
+    assert result.sync_results == sync.sync_mcp_detail_to_all_bots.return_value["sync_results"]
+    cfg.rollback_unified_config.assert_not_called()
+
+
 def test_sync_raising_also_rolls_back_and_raises_sync_failure():
-    # The sync service contracts to return a failure dict, but if the push
-    # raises instead the freshly written row must still be rolled back — a
-    # stored-but-unpushed credential would violate the atomic write-and-push
-    # contract. The exception surfaces as McpSyncFailedError like any other
-    # push failure, so each surface maps it with the row already restored.
+    # Per-Bot errors are returned as outcomes. An exception is therefore a
+    # batch-level service/dependency fault and must roll the row back.
     prior = {"api_key": "old", "headers": {}, "endpoint_env": "PROD"}
     cfg = _config_service()
     cfg.update_user_unified_config.return_value = prior
