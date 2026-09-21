@@ -133,7 +133,7 @@ pub(crate) fn classify(event: &StreamEvent) -> IngestKind {
                 IngestKind::Pipeline { event_type: "agent".to_string(), state: AppState::Delta }
             }
             AgentData::Error { .. } => IngestKind::Terminal {
-                event_type: "agent".to_string(),
+                event_type: "chat.event".to_string(),
                 state: AppState::Error,
             },
             AgentData::Unknown { stream, .. } => {
@@ -211,6 +211,27 @@ mod tests {
                 assert_eq!(state, AppState::ToolCallStart);
             }
             _ => panic!("expected pipeline"),
+        }
+    }
+
+    #[test]
+    fn classify_agent_error_is_chat_terminal() {
+        let ev = bcs_protocol::stream::parse_stream_event(
+            "agent",
+            json!({
+                "runId": "r",
+                "seq": 3,
+                "stream": "error",
+                "errorCode": "MODEL_ERROR",
+                "errorMessage": "model failed"
+            }),
+        );
+        match classify(&ev) {
+            IngestKind::Terminal { event_type, state } => {
+                assert_eq!(event_type, "chat.event");
+                assert_eq!(state, AppState::Error);
+            }
+            _ => panic!("expected terminal"),
         }
     }
 

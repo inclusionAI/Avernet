@@ -2135,6 +2135,65 @@ fn chat_event_state_slug(state: &ChatEventState) -> &'static str {
 fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str, recv_ms: u64) -> Value {
     match event {
         StreamEvent::Agent(agent) => {
+            if let bcs_protocol::stream::AgentData::Error { raw } = &agent.data {
+                let error_message = raw
+                    .get("errorMessage")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let mut message = raw.get("message").cloned().and_then(|mut raw_message| {
+                    if let Some(object) = raw_message.as_object_mut() {
+                        object.entry("timestamp").or_insert_with(|| {
+                            Value::from(agent.ts.unwrap_or(recv_ms))
+                        });
+                    }
+                    match serde_json::from_value(raw_message) {
+                        Ok(parsed) => Some(parsed),
+                        Err(error) => {
+                            warn!(
+                                run_id,
+                                %error,
+                                "agent error message did not match MessageContent; body omitted"
+                            );
+                            None
+                        }
+                    }
+                });
+                if !message_has_text(&message) {
+                    if let Some(text) = error_message
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty())
+                    {
+                        message = Some(assistant_text_message(text));
+                    }
+                }
+                return serde_json::to_value(ChatEventPayload {
+                    run_id: run_id.to_string(),
+                    bcs_group_id: group_id.to_string(),
+                    state: WireChatState::Error,
+                    message,
+                    delta_text: None,
+                    usage: None,
+                    stop_reason: None,
+                    error_message,
+                    error_kind: raw
+                        .get("errorKind")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    error_code: raw
+                        .get("errorCode")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    tool_call_id: None,
+                    tool_name: None,
+                    args: None,
+                    result: None,
+                    is_error: None,
+                    success: None,
+                    routing: None,
+                })
+                .unwrap_or(Value::Null);
+            }
             let stream = match &agent.data {
                 bcs_protocol::stream::AgentData::Tool(_) => AgentStream::Tool,
                 bcs_protocol::stream::AgentData::Thinking(_) => AgentStream::Thinking,
@@ -2158,13 +2217,21 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str, recv_m
                     AgentStream::Assistant
                 }
             };
-            // data is opaque to BCS: reuse the frame's `data` sub-object when
-            // present, else the whole raw frame.
-            let data = agent
+            // Preserve the raw frame (including provider extensions), then
+            // overlay typed tool fields so canonical aliases such as
+            // toolName/arguments reach message flow as name/args.
+            let mut data = agent
                 .raw
                 .get("data")
                 .cloned()
                 .unwrap_or_else(|| agent.raw.clone());
+            if let bcs_protocol::stream::AgentData::Tool(tool) = &agent.data {
+                if let (Some(raw), Ok(Value::Object(normalized))) =
+                    (data.as_object_mut(), serde_json::to_value(tool))
+                {
+                    raw.extend(normalized);
+                }
+            }
             let payload = AgentEventPayload {
                 run_id: run_id.to_string(),
                 bcs_group_id: group_id.to_string(),
@@ -2214,7 +2281,11 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str, recv_m
                         }
                     }
                 }
-                None => None,
+                None => chat.content.as_deref().map(|content| MessageContent {
+                    role: "assistant".to_string(),
+                    content: vec![ContentBlock::text(content)],
+                    timestamp: chat.ts.unwrap_or(recv_ms),
+                }),
             };
             if matches!(chat.state, ChatState::Error) && !message_has_text(&message) {
                 if let Some(error_message) = chat
@@ -2233,7 +2304,11 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str, recv_m
                 message,
                 // Forward the frame's incremental delta so BCS can accumulate
                 // segments itself instead of re-deriving from cumulative message.
-                delta_text: chat.delta_text.clone(),
+                delta_text: chat.delta_text.clone().or_else(|| {
+                    matches!(chat.state, ChatState::Delta)
+                        .then(|| chat.content.clone())
+                        .flatten()
+                }),
                 usage: None,
                 stop_reason: chat.stop_reason.clone(),
                 error_message: chat.error_message.clone(),
@@ -3082,6 +3157,89 @@ mod sse_loop_tests {
             assert!((before..=after).contains(&timestamp));
             assert_eq!(events[0].2["message"]["content"][0]["text"], "final without deltas");
         }
+    }
+
+    #[tokio::test]
+    async fn canonical_chat_content_projects_to_message_and_delta_text() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: chat\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"ts\":1786260001000,\"state\":\"delta\",\"content\":\"working \"}\n\n\
+event: chat\ndata: {\"runId\":\"engine-run\",\"seq\":2,\"ts\":1786260002000,\"state\":\"final\",\"content\":\"working done\"}\n\n";
+
+        assert!(run_sse_text_for_test(
+            sse,
+            "bcn-run-content",
+            "grp-1",
+            "bot-1",
+            &flow,
+        )
+        .await);
+
+        let events = recording.snapshot();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0, "chat.event");
+        assert_eq!(events[0].1, ChatEventState::Delta);
+        assert_eq!(events[0].2["delta_text"], "working ");
+        assert_eq!(events[0].2["message"]["content"][0]["text"], "working ");
+        assert_eq!(events[0].2["message"]["timestamp"], 1786260001000_u64);
+        assert_eq!(events[1].0, "chat.event");
+        assert_eq!(events[1].1, ChatEventState::Final);
+        assert_eq!(events[1].2["message"]["content"][0]["text"], "working done");
+        assert_eq!(events[1].2["message"]["timestamp"], 1786260002000_u64);
+    }
+
+    #[tokio::test]
+    async fn canonical_tool_aliases_are_normalized_without_dropping_raw_fields() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: agent\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"stream\":\"tool\",\"phase\":\"start\",\"toolCallId\":\"tc-1\",\"toolName\":\"mcp__bcs__call\",\"arguments\":{\"intent\":\"task.create\"},\"providerExtension\":\"kept\"}\n\n\
+event: agent\ndata: {\"runId\":\"engine-run\",\"seq\":2,\"stream\":\"tool\",\"phase\":\"result\",\"toolCallId\":\"tc-1\",\"toolName\":\"mcp__bcs__call\",\"isError\":false,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n\n";
+
+        assert!(!run_sse_text_for_test(
+            sse,
+            "bcn-run-tool",
+            "grp-1",
+            "bot-1",
+            &flow,
+        )
+        .await);
+
+        let events = recording.snapshot();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].1, ChatEventState::ToolCallStart);
+        assert_eq!(events[0].2["data"]["name"], "mcp__bcs__call");
+        assert_eq!(events[0].2["data"]["args"]["intent"], "task.create");
+        assert_eq!(events[0].2["data"]["providerExtension"], "kept");
+        assert_eq!(events[1].1, ChatEventState::ToolCallEnd);
+        assert_eq!(events[1].2["data"]["name"], "mcp__bcs__call");
+        assert_eq!(events[1].2["data"]["isError"], false);
+        assert_eq!(events[1].2[TASK_INTENT_ELIGIBLE_KEY], true);
+    }
+
+    #[tokio::test]
+    async fn agent_error_projects_to_chat_error_terminal() {
+        let recording = Arc::new(RecordingFlow::default());
+        let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+        let sse = "event: agent\ndata: {\"runId\":\"engine-run\",\"seq\":1,\"ts\":1786260001000,\"stream\":\"error\",\"errorCode\":\"MODEL_ERROR\",\"errorKind\":\"provider_error\",\"errorMessage\":\"model failed\"}\n\n";
+
+        assert!(run_sse_text_for_test(
+            sse,
+            "bcn-run-error",
+            "grp-1",
+            "bot-1",
+            &flow,
+        )
+        .await);
+
+        let events = recording.snapshot();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "chat.event");
+        assert_eq!(events[0].1, ChatEventState::Error);
+        assert_eq!(events[0].2["state"], "error");
+        assert_eq!(events[0].2["errorCode"], "MODEL_ERROR");
+        assert_eq!(events[0].2["errorKind"], "provider_error");
+        assert_eq!(events[0].2["errorMessage"], "model failed");
+        assert_eq!(events[0].2["message"]["content"][0]["text"], "model failed");
     }
 
     #[test]
