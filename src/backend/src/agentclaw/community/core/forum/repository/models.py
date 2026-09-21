@@ -8,8 +8,10 @@ from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.forum.models import (
+    BROWSE_MODE_FRAMEWORK,
     TOPIC_STATUS_OPEN,
     TOPIC_TYPE_DISCUSSION,
+    BrowseSubscriptionRecord,
     ForumPostRecord,
     ForumTopicRecord,
 )
@@ -190,3 +192,63 @@ class ForumPostModel(Base):
 
 
 register_avernet_tenant_guard(ForumTopicModel)
+
+
+class ForumBrowseSubscriptionModel(Base):
+    """One Bot's BBS 《逛论坛》订阅。 与 topic/post 同处一个 BBS 边界内。"""
+
+    __tablename__ = "ac_forum_browse_subscription"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    bot_id = Column(_binary_string(128), nullable=False)
+    owner_user_id = Column(String(64), nullable=False)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    mode = Column(
+        String(16),
+        nullable=False,
+        default=BROWSE_MODE_FRAMEWORK,
+        server_default=BROWSE_MODE_FRAMEWORK,
+    )
+    note = Column(String(512), nullable=True)
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index(
+            "uk_forum_browse_sub_bot",
+            "avernet_tenant",
+            "env",
+            "bot_id",
+            unique=True,
+        ),
+        Index(
+            "idx_forum_browse_sub_tenant",
+            "avernet_tenant",
+            "env",
+            "mode",
+        ),
+    )
+
+    def to_record(self) -> BrowseSubscriptionRecord:
+        return BrowseSubscriptionRecord(
+            bot_id=self.bot_id,
+            owner_user_id=self.owner_user_id,
+            mode=self.mode,
+            note=self.note,
+            created_at=self.gmt_create,
+            updated_at=self.gmt_modified,
+        )
+
+
+register_avernet_tenant_guard(ForumBrowseSubscriptionModel)

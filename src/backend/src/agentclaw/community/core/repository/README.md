@@ -17,7 +17,7 @@ puts them here rather than there.
 
 ## Domains
 
-Thirteen domains, mirrored on both sides. A domain is the consumer seam, not
+Fifteen domains, mirrored on both sides. A domain is the consumer seam, not
 the table: single-repository domains merge into the sibling that shares their
 consumer, so `protocols/<domain>.py` and `implementations/<domain>/` always name
 the same thing.
@@ -35,6 +35,7 @@ the same thing.
 | `devices` | device bindings |
 | `publishing` | service_bot |
 | `config` | system_config, common_config |
+| `forum` | BBS Topic/Post writes and minimal reads |
 | `spaces` | spaces and space membership |
 | `market_favorites` | space-scoped market favorites |
 | `work_orders` | approval work orders and recipient notifications |
@@ -112,6 +113,8 @@ provides:
   - CapabilityDesiredStateRepositoryProtocol
   - CapabilityDesiredStateRepository
   - SkillEditorRequestRepositoryProtocol
+  # forum
+  - ForumRepositoryProtocol
   # spaces / market_favorites
   - SpaceRepositoryProtocol
   - MarketFavoriteRepositoryProtocol
@@ -199,6 +202,8 @@ provides:
   - BotCliToolRepository
   - BotStartupScriptRepository
   - CollaboratorRepository
+  # forum
+  - ForumRepository
   # spaces / market_favorites
   - SpaceRepository
   - MarketFavoriteRepository
@@ -273,6 +278,8 @@ internal_dependencies:
   - agentclaw.community.core.economy
   - agentclaw.community.core.execution_identity
   - agentclaw.community.core.expert_chat
+  - agentclaw.community.core.errors
+  - agentclaw.community.core.forum
   - agentclaw.community.core.harness
   - agentclaw.community.core.quality
   - agentclaw.community.core.service_bot

@@ -6,15 +6,22 @@ import uuid
 from datetime import datetime, timezone
 
 from injector import inject
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.errors import Conflict, NotFound
 from agentclaw.community.core.forum.models import (
+    AUTHOR_TYPE_BOT,
+    BROWSE_MODE_FRAMEWORK,
     TOPIC_STATUS_OPEN,
     TOPIC_TYPE_DISCUSSION,
     TOPIC_TYPE_NOTICE,
     TOPIC_TYPE_POLL,
+    BrowseFeedPage,
+    BrowseFeedTopicRecord,
+    BrowseSubscriptionPage,
+    BrowseSubscriptionRecord,
+    BrowseSubscriptionUpsertResult,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -22,6 +29,7 @@ from agentclaw.community.core.forum.models import (
     ForumTopicRecord,
 )
 from agentclaw.community.core.forum.repository.models import (
+    ForumBrowseSubscriptionModel,
     ForumPostModel,
     ForumTopicModel,
 )
@@ -326,3 +334,185 @@ class ForumRepository(ForumRepositoryProtocol):
                 .one_or_none()
             )
             return row.to_record() if row is not None else None
+
+    # ------------------------------------------------------------------
+    # BBS Browse Loop — subscription + actor-aware feed
+    # ------------------------------------------------------------------
+
+    _FEED_PREVIEW_LENGTH = 500
+    _FEED_EXCLUDE_TYPES = (TOPIC_TYPE_POLL, TOPIC_TYPE_NOTICE)
+
+    def upsert_subscription(
+        self,
+        *,
+        bot_id: str,
+        owner_user_id: str,
+        mode: str = BROWSE_MODE_FRAMEWORK,
+        note: str | None = None,
+    ) -> BrowseSubscriptionUpsertResult:
+        # Determine current subscription first (outside the write tx) to compute
+        # whether this is a create or an in-place update.
+        existing = self.get_subscription(bot_id)
+        now = datetime.now(timezone.utc)
+        with self._transaction() as db:
+            if existing is not None:
+                row = (
+                    db.query(ForumBrowseSubscriptionModel)
+                    .filter(
+                        ForumBrowseSubscriptionModel.bot_id == bot_id,
+                        ForumBrowseSubscriptionModel.env == get_current_env(),
+                        ForumBrowseSubscriptionModel.avernet_tenant
+                        == get_current_avernet_tenant(),
+                    )
+                    .one()
+                )
+                row.mode = mode
+                row.note = note
+                row.gmt_modified = now
+                db.flush()
+                return BrowseSubscriptionUpsertResult(
+                    subscription=row.to_record(), created=False
+                )
+            row = ForumBrowseSubscriptionModel(
+                bot_id=bot_id,
+                owner_user_id=owner_user_id,
+                mode=mode,
+                note=note,
+                env=get_current_env(),
+                avernet_tenant=get_current_avernet_tenant(),
+                gmt_create=now,
+                gmt_modified=now,
+            )
+            db.add(row)
+            db.flush()
+            return BrowseSubscriptionUpsertResult(
+                subscription=row.to_record(), created=True
+            )
+
+    def get_subscription(self, bot_id: str) -> BrowseSubscriptionRecord | None:
+        with self._db.orm_session() as db:
+            row = (
+                db.query(ForumBrowseSubscriptionModel)
+                .filter(
+                    ForumBrowseSubscriptionModel.bot_id == bot_id,
+                    ForumBrowseSubscriptionModel.env == get_current_env(),
+                    ForumBrowseSubscriptionModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            return row.to_record() if row is not None else None
+
+    def list_subscriptions(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        mode: str | None = None,
+    ) -> BrowseSubscriptionPage:
+        with self._db.orm_session() as db:
+            query = db.query(ForumBrowseSubscriptionModel).filter(
+                ForumBrowseSubscriptionModel.env == get_current_env(),
+                ForumBrowseSubscriptionModel.avernet_tenant
+                == get_current_avernet_tenant(),
+            )
+            if mode is not None:
+                query = query.filter(ForumBrowseSubscriptionModel.mode == mode)
+            total = query.count()
+            rows = (
+                query.order_by(
+                    ForumBrowseSubscriptionModel.gmt_create.desc(),
+                    ForumBrowseSubscriptionModel.id.desc(),
+                )
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return BrowseSubscriptionPage(
+                total=total, items=tuple(row.to_record() for row in rows)
+            )
+
+    def delete_subscription(self, bot_id: str) -> bool:
+        with self._transaction() as db:
+            deleted = (
+                db.query(ForumBrowseSubscriptionModel)
+                .filter(
+                    ForumBrowseSubscriptionModel.bot_id == bot_id,
+                    ForumBrowseSubscriptionModel.env == get_current_env(),
+                    ForumBrowseSubscriptionModel.avernet_tenant
+                    == get_current_avernet_tenant(),
+                )
+                .delete(synchronize_session=False)
+            )
+            return bool(deleted)
+
+    def list_browse_feed(
+        self,
+        *,
+        bot_id: str,
+        status: str | None,
+        topic_type: str | None,
+        offset: int,
+        limit: int,
+    ) -> BrowseFeedPage:
+        # A correlated subquery counts this Bot's replies per Topic; POLL/NOTICE
+        # topics the actor already replied to are excluded from the feed.
+        with self._db.orm_session() as db:
+            reply_count_subq = func.coalesce(
+                (
+                    db.query(func.count(ForumPostModel.id))
+                    .filter(
+                        ForumPostModel.topic_id == ForumTopicModel.topic_id,
+                        ForumPostModel.author_type == AUTHOR_TYPE_BOT,
+                        ForumPostModel.author_id == bot_id,
+                    )
+                    .correlate(ForumTopicModel)
+                    .scalar_subquery()
+                ),
+                0,
+            ).label("my_reply_count")
+
+            query = db.query(ForumTopicModel, reply_count_subq).filter(
+                ForumTopicModel.env == get_current_env(),
+                ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+            )
+            if status is not None:
+                query = query.filter(ForumTopicModel.status == status)
+            if topic_type is not None:
+                query = query.filter(ForumTopicModel.topic_type == topic_type)
+            # DISCUSSION is always returned; POLL/NOTICE only when not yet replied.
+            query = query.filter(
+                or_(
+                    ForumTopicModel.topic_type.notin_(self._FEED_EXCLUDE_TYPES),
+                    reply_count_subq == 0,
+                )
+            )
+            total = query.count()
+            rows = (
+                query.order_by(
+                    ForumTopicModel.gmt_create.desc(), ForumTopicModel.id.desc()
+                )
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            items = tuple(self._feed_record_from_row(row) for row in rows)
+            return BrowseFeedPage(total=total, items=items)
+
+    @staticmethod
+    def _feed_record_from_row(row) -> BrowseFeedTopicRecord:
+        topic, my_reply_count = row
+        body_preview = (topic.body or "")[:ForumRepository._FEED_PREVIEW_LENGTH]
+        return BrowseFeedTopicRecord(
+            topic_id=topic.topic_id,
+            author_type=topic.author_type,
+            author_id=topic.author_id,
+            title=topic.title,
+            body_preview=body_preview,
+            body_truncated=len(topic.body or "") > ForumRepository._FEED_PREVIEW_LENGTH,
+            status=topic.status,
+            topic_type=topic.topic_type,
+            created_at=topic.gmt_create,
+            updated_at=topic.gmt_modified,
+            my_reply_count=int(my_reply_count or 0),
+        )

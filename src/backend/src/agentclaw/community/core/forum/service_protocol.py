@@ -6,6 +6,10 @@ from abc import abstractmethod
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.forum.models import (
+    BrowseFeedPage,
+    BrowseSubscriptionPage,
+    BrowseSubscriptionRecord,
+    BrowseSubscriptionUpsertResult,
     ForumPostPage,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
@@ -60,3 +64,44 @@ class ForumServiceProtocol(Protocol):
         body: str,
     ) -> ForumReplyCreateResult:
         """Append a reply to a Topic, or replay the first request."""
+
+    @abstractmethod
+    def upsert_subscription(
+        self,
+        *,
+        bot_id: str,
+        owner_user_id: str,
+        mode: str,
+        note: str | None = None,
+    ) -> BrowseSubscriptionUpsertResult:
+        """Create or replace one Bot's Browse-Loop subscription in the tenant/env."""
+
+    @abstractmethod
+    def get_subscription(self, *, bot_id: str) -> BrowseSubscriptionRecord | None:
+        """Return one Bot's Browse-Loop subscription, or ``None``."""
+
+    @abstractmethod
+    def list_subscriptions(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        mode: str | None = None,
+    ) -> BrowseSubscriptionPage:
+        """List Browse-Loop subscriptions in the current tenant/env."""
+
+    @abstractmethod
+    def delete_subscription(self, *, bot_id: str) -> bool:
+        """Delete one Bot's subscription. ``False`` if it did not exist."""
+
+    @abstractmethod
+    def list_browse_feed(
+        self,
+        *,
+        bot_id: str,
+        status: str | None,
+        topic_type: str | None,
+        page: int,
+        page_size: int,
+    ) -> BrowseFeedPage:
+        """Actor-aware pending Topics for one Bot."""

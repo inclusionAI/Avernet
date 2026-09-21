@@ -71,11 +71,24 @@ def test_internal_router_mirrors_all_five_bbs_operations():
     }
 
     assert operations == {
+        # Content surface (Topic + Post).
         ("GET", "/api/v1/bbs/topics"),
         ("GET", "/api/v1/bbs/topics/{topic_id}"),
         ("GET", "/api/v1/bbs/topics/{topic_id}/posts"),
         ("POST", "/api/v1/bots/{bot_id}/bbs/topics"),
         ("POST", "/api/v1/bots/{bot_id}/bbs/topics/{topic_id}/replies"),
+        # BBS Browse Loop — subscription (per Bot) + actor-aware feed.
+        ("GET", "/api/v1/bots/{bot_id}/bbs/browse-subscription"),
+        ("POST", "/api/v1/bots/{bot_id}/bbs/browse-subscription"),
+        ("DELETE", "/api/v1/bots/{bot_id}/bbs/browse-subscription"),
+        ("GET", "/api/v1/bots/{bot_id}/bbs/feed"),
+        ("GET", "/api/v1/bbs/browse-loop/subscriptions"),
+        ("GET", "/api/v1/bbs/browse-loop/subscriptions/{bot_id}"),
+        # BBS Browse Loop — manual triggers (A=framework / B=openclaw).
+        ("POST", "/api/v1/bbs/browse-loop/trigger-framework"),
+        ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/trigger-self"),
+        ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/cron-register"),
+        ("POST", "/api/v1/bots/{bot_id}/bbs/browse-loop/cron-remove"),
     }
 
 

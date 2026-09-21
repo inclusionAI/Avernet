@@ -7,8 +7,14 @@ from injector import inject
 from agentclaw.community.core.errors import NotFound, ValidationError
 from agentclaw.community.core.forum.models import (
     AUTHOR_TYPES,
+    BROWSE_MODES,
+    BrowseFeedPage,
+    BrowseSubscriptionPage,
+    BrowseSubscriptionRecord,
+    BrowseSubscriptionUpsertResult,
     MAX_AUTHOR_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
+    MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH,
     MAX_BODY_LENGTH,
     MAX_ID_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
@@ -203,3 +209,82 @@ class ForumService(ForumServiceProtocol):
             or page_size > 100
         ):
             raise ValidationError("page_size must be between 1 and 100")
+
+    # ------------------------------------------------------------------
+    # BBS Browse Loop — subscription + feed service glue
+    # ------------------------------------------------------------------
+
+    def upsert_subscription(
+        self,
+        *,
+        bot_id: str,
+        owner_user_id: str,
+        mode: str,
+        note: str | None = None,
+    ) -> BrowseSubscriptionUpsertResult:
+        normalized_bot_id = self._required_text(bot_id, "bot_id", MAX_AUTHOR_ID_LENGTH)
+        normalized_owner = self._required_text(owner_user_id, "owner_user_id", 64)
+        normalized_mode = self._browse_mode(mode)
+        normalized_note = (
+            None
+            if note is None
+            else self._optional_text(note, "note", MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH)
+        )
+        return self._repository.upsert_subscription(
+            bot_id=normalized_bot_id,
+            owner_user_id=normalized_owner,
+            mode=normalized_mode,
+            note=normalized_note,
+        )
+
+    def get_subscription(self, *, bot_id: str) -> BrowseSubscriptionRecord | None:
+        normalized = self._required_text(bot_id, "bot_id", MAX_AUTHOR_ID_LENGTH)
+        return self._repository.get_subscription(normalized)
+
+    def list_subscriptions(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        mode: str | None = None,
+    ) -> BrowseSubscriptionPage:
+        normalized_mode = None if mode is None else self._browse_mode(mode)
+        self._pagination(page, page_size)
+        return self._repository.list_subscriptions(
+            offset=(page - 1) * page_size,
+            limit=page_size,
+            mode=normalized_mode,
+        )
+
+    def delete_subscription(self, *, bot_id: str) -> bool:
+        normalized = self._required_text(bot_id, "bot_id", MAX_AUTHOR_ID_LENGTH)
+        return self._repository.delete_subscription(normalized)
+
+    def list_browse_feed(
+        self,
+        *,
+        bot_id: str,
+        status: str | None,
+        topic_type: str | None,
+        page: int,
+        page_size: int,
+    ) -> BrowseFeedPage:
+        normalized_bot_id = self._required_text(bot_id, "bot_id", MAX_AUTHOR_ID_LENGTH)
+        normalized_status = self._topic_status(status)
+        normalized_topic_type = self._topic_type(topic_type)
+        self._pagination(page, page_size)
+        return self._repository.list_browse_feed(
+            bot_id=normalized_bot_id,
+            status=normalized_status,
+            topic_type=normalized_topic_type,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+
+    @classmethod
+    def _browse_mode(cls, value: str) -> str:
+        normalized = cls._required_text(value, "mode", MAX_AUTHOR_TYPE_LENGTH).lower()
+        if normalized not in BROWSE_MODES:
+            allowed = ", ".join(sorted(BROWSE_MODES))
+            raise ValidationError(f"mode must be one of: {allowed}")
+        return normalized

@@ -75,3 +75,61 @@ class ForumTopicCreateResult:
 class ForumReplyCreateResult:
     post: ForumPostRecord
     created: bool
+
+# ---------------------------------------------------------------------------
+# BBS Browse Loop — "逛论坛" 订阅与 actor-aware feed
+# ---------------------------------------------------------------------------
+
+BROWSE_MODE_FRAMEWORK = "framework"
+BROWSE_MODE_OPENCLAW = "openclaw"
+BROWSE_MODES = frozenset({BROWSE_MODE_FRAMEWORK, BROWSE_MODE_OPENCLAW})
+
+MAX_BROWSE_SUBSCRIPTION_NOTE_LENGTH = 512
+MAX_BROWSE_FEED_LIMIT = 100
+
+
+@dataclass(frozen=True)
+class BrowseSubscriptionRecord:
+    """One Bot's opt-in to the BBS Browse Loop."""
+
+    bot_id: str
+    owner_user_id: str
+    mode: str
+    note: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class BrowseSubscriptionPage:
+    total: int
+    items: tuple[BrowseSubscriptionRecord, ...]
+
+
+@dataclass(frozen=True)
+class BrowseSubscriptionUpsertResult:
+    subscription: BrowseSubscriptionRecord
+    created: bool
+
+
+@dataclass(frozen=True)
+class BrowseFeedTopicRecord:
+    """One pending Topic for an actor, with how many replies it has from it."""
+
+    topic_id: str
+    author_type: str
+    author_id: str
+    title: str
+    body_preview: str
+    body_truncated: bool
+    status: str
+    topic_type: str
+    created_at: datetime
+    updated_at: datetime
+    my_reply_count: int
+
+
+@dataclass(frozen=True)
+class BrowseFeedPage:
+    total: int
+    items: tuple[BrowseFeedTopicRecord, ...]
