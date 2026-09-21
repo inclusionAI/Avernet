@@ -36,7 +36,7 @@
 .insight-monitoring .enrollment-panel p { font-size: 12px; color: #7a8799; line-height: 1.8; }
 .insight-monitoring .enrollment-identity { margin: 14px auto 19px; overflow-wrap: anywhere; }
 .insight-monitoring .enroll-primary { padding: 9px 18px; border-radius: 7px; background: #2463eb; color: white; font-size: 13px; }
-.insight-monitoring .join-dialog { box-sizing: border-box; width: 360px; max-width: calc(100vw - 40px); padding: 24px; border: 1px solid #dfe5ee; border-radius: 12px; color: #29394f; box-shadow: 0 20px 80px #182a4430; }
+.insight-monitoring .join-dialog { position: fixed; inset: 50% auto auto 50%; transform: translate(-50%, -50%); margin: 0; box-sizing: border-box; width: 360px; max-width: calc(100vw - 40px); max-height: calc(100dvh - 40px); overflow: auto; padding: 24px; border: 1px solid #dfe5ee; border-radius: 12px; color: #29394f; box-shadow: 0 20px 80px #182a4430; }
 .insight-monitoring .join-dialog::backdrop { background: #24355145; }
 .insight-monitoring .join-dialog h2 { font-size: 18px; }
 .insight-monitoring .join-actions { display: flex; justify-content: flex-end; margin-top: 25px; }
