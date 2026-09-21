@@ -32,7 +32,7 @@ class EngineLayoutTest(LauncherFixture):
         legacy.mkdir(parents=True)
         (legacy / 'instance.json').write_text('{"engine":"openclaw"}')
         result = self.failed_run(['engineering/backend'])
-        self.assertIn('migrate-layout.sh', result.stderr)
+        self.assertIn('move the instance into <state-dir>/<engine>', result.stderr)
         self.assertEqual(self.registrations, [])
         self.assertFalse(self.calls.exists())
         self.assertTrue((legacy / 'instance.json').exists())

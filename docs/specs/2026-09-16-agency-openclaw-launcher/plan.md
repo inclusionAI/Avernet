@@ -223,15 +223,10 @@ checkout; instances and runtime locks belong under `<root>/<engine>/`. Profile
 choices and re-registration must never inspect or mutate sibling engine state.
 Only OpenClaw execution is supported; other engine data must remain untouched.
 
-- [x] Write failing isolation/layout and offline migration tests, then update the
-  launcher and fixture roots without changing registration wire contracts.
-- [x] Add a self-contained migration utility with preview/apply, source/target
-  locking, collision rejection, credential preservation, path rebasing, backups
-  and port-conflict handling. No remote registration or model calls.
-- [x] Run tests and preview migration of both previous roots (`~/.bcs/agency` and
-  `~/.avernet/bcs/third-party`), then migrate the user's idle instances locally.
-- [x] Verify original/new session bytes and protected content, plugin receipt and
-  session-index paths; update documentation with results and rollback locations.
+- [x] Write isolation/layout tests and update launcher fixture roots without
+  changing registration wire contracts. A follow-up user decision removes the
+  shipped migration utility; startup still refuses flat legacy roots to prevent
+  duplicate BCS identities, with manual migration documented.
 
 ### Verification and local migration outcome (2026-09-21)
 
@@ -241,17 +236,7 @@ Only OpenClaw execution is supported; other engine data must remain untouched.
 - Engine isolation tests prove an unrelated codex record/session/lock remains
   untouched through OpenClaw profile overwrite and re-registration. Flat legacy
   roots fail closed instead of silently creating duplicate engine identities.
-- Offline migration tests cover preview, two-source consolidation, byte-identical
-  credentials, protected content, managed metadata rebasing, collisions, live
-  ports/locks, malformed metadata, commit rollback, shared cache and idempotence.
-- Applied the user-authorized offline migration locally: five finance and two
-  engineering OpenClaw instances moved into the new engine-scoped layout. Original
-  trees were retained in a private migration backup; no credentials or runtime
-  backup artifacts are included in this repository.
-- Duplicate engineering ports were reassigned from 19000/19020 to 19100/19120;
-  finance ports remained 19000..19080 in steps of 20. No BCS identities changed.
-- Compared all original and migrated file signatures: only managed instance,
-  runtime config, plugin receipt and session-index JSON changed. Every session
-  file stayed byte-identical. All seven actual OpenClaw config validations passed,
-  and source snapshots match the shared checkout. Re-preview reports zero pending
-  migrations. No Gateway was started and no remote BCS/model calls were made.
+- A migration utility was implemented, tested, and used locally for the user's
+  existing idle instances, then removed from the repository by user request before
+  submission. Existing user data and backups remain outside the repository; the
+  shipped tool now documents manual migration only.

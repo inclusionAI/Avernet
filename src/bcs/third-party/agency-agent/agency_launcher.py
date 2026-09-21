@@ -336,7 +336,7 @@ def run(args) -> None:
         registration_proof = os.environ.get('BCS_REGISTER_TOKEN', '').strip()
     root = args.state_dir.expanduser().resolve()
     if any(root.glob('*/instance.json')):
-        raise ValueError('legacy flat instance layout detected; run migrate-layout.sh before launching')
+        raise ValueError('legacy flat instance layout detected; move the instance into <state-dir>/<engine>/ or choose a different state directory')
     if args.agency_dir is None:
         # Serialize only shared checkout setup, not the lifetime of another engine.
         with state_lock(root):

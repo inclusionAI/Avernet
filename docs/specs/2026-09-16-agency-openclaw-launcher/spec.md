@@ -42,12 +42,9 @@ plugin install-instructions are allowed.
   content, selection order or random IDs). Restarts, a switch between qualified
   suffix spellings, and profile-to-team selection reuse the same workspace,
   session and assigned port. Record the engine in instance metadata; old records
-  with no engine field mean OpenClaw. Refuse old flat instance roots at startup;
-  use offline `migrate-layout.sh` with preview/apply to move authorized old state.
-  Migration stages verified copies, retains original-tree backups and a private
-  journal, preserves BCS session bytes, rebases managed runtime paths and resolves
-  port conflicts. Active locks/ports, ambiguous pending state and destination
-  identity conflicts fail closed. No network requests or registrations are made.
+  with no engine field mean OpenClaw. Refuse old flat instance roots at startup
+  and require a manual, externally backed-up move into the engine-scoped layout;
+  no migration utility or automatic state conversion is shipped.
 - `--model-config` defaults to `~/.openclaw/openclaw.json` and supplies JSON
   `models` and `agents.defaults.model`
   (optionally `agents.defaults.models`). No other channel, plugin, environment,

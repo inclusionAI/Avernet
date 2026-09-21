@@ -156,7 +156,6 @@ pending 仍是警告，不会让其余已认证连接失败。
         engineering-backend-architect-<hash>/
       codex/                                # 引擎布局预留，当前不支持启动 Codex
         ...                                 # 不被 OpenClaw 操作扫描或修改
-      .migration-backups/                   # 迁移时保留的原目录与私有清单
 ```
 
 首次从 `https://github.com/msitarzewski/agency-agents.git` 浅克隆仓库，之后复用，
@@ -249,57 +248,16 @@ BCS 侧实际发一条任务验证角色回复。
 
 旧命令须更新为 `--overwrite-profile`、`--reregister` 和 `team/profile`。
 `--state-dir` 现在指**共享根目录**，而不是直接存放实例的引擎目录；即使显式传入，
-也会使用 `<state-dir>/<engine>/`。启动器检测到旧平铺实例会拒绝启动并提示迁移，
-避免不小心注册重复 Bot。
+也会使用 `<state-dir>/<engine>/`。
 
-提供独立的、**完全离线**的 `migrate-layout.sh`，默认扫描下列平铺旧目录：
+本目录不提供自动迁移脚本。检测到旧平铺实例目录时会停止启动，避免误创建重复
+BCS Bot；请将原来的实例目录复制/移动到新目录结构中对应 engine 下（例如
+`~/.bcs/agency/<agent>` → `~/.avernet/bcs/agency-agent/openclaw/<agent>`），并先
+核对 `session.json`、端口和配置无误后再启动。可以先用 `git status`/文件备份确认
+有回退路径；不要在同一身份的新旧副本同时运行。脚本不会删除旧数据。
 
-- `~/.avernet/bcs/third-party`
-- `~/.bcs/agency`
-- `~/.local/share/avernet/agency`
-
-```bash
-# 只读预览：列出目标目录和端口调整，不搬动实例
-./migrate-layout.sh
-
-# 显式执行：保留完整原目录为备份，随后切换到新引擎目录
-./migrate-layout.sh --apply
-
-# 自定义来源/目标，--source-dir 可重复
-./migrate-layout.sh --source-dir /path/to/legacy \
-  --state-dir /path/to/new-root --engine openclaw --apply
-```
-
-迁移要求旧启动器和 Gateway 已停止；会检查原目录锁、目标引擎锁及 Gateway 端口，
-不会主动杀死用户进程。只迁移 OpenClaw（含无 engine 字段的旧记录），不碰其他
-引擎数据。目标同名实例冲突、待处理的 pending 文件、无效元数据都会阻止迁移，
-不会合并或覆盖两份不同身份。
-
-迁移先在临时目录复制并逐文件校验，再修正工作区/Agent 路径、插件安装记录、
-会话索引及受影响的符号链接。`session.json` **字节不变**，不调用 `/register`，
-不重置 Bot 身份、不改变角色正文、记忆或对话历史。合并旧目录时遇到重复端口，
-为后迁移的实例分配新的空闲端口并同步配置；改变本机端口不会更换 BCS 身份。
-
-成功后原实例完整保存在：
-
-```text
-<state-dir>/.migration-backups/<timestamp>/
-  manifest.json
-  000-<original-instance>/
-  001-<original-instance>/
-```
-
-私有清单记录原路径、目标路径、备份路径和端口调整，不含明文 token。备份目录
-内含真实凭证，须保密。原共享 Git 缓存保留不删除；新共享缓存优先复制第一个旧
-目录的仓库，不从网络拉取内容。异常时工具会尝试恢复已搬动的原目录，记录
-`rolled_back`；若掉电或进程被强杀，依据清单人工核对恢复，不盲目重跑。
-
-**人工回退：**先停止新启动器及相关 Gateway，根据 `manifest.json` 将备份目录
-恢复到原 `source` 路径；新目标目录先归档而不是覆盖。备份中的配置和端口均为
-原值，配合旧版本启动器使用。不要让同一身份的新旧副本同时运行。
-
-迁移不会自动启用 Codex 或 Claude Code 引擎；它们的目录隔离已预留，但启动器
-仍只支持 `--engine openclaw`。
+缺少 engine 字段的旧 `instance.json` 按 OpenClaw 解释；已有相同名称的新目录时
+不要覆盖。改变 BCS 网络、插件 spec 或已有实例引擎仍会拒绝启动，避免误用身份。
 
 ## 故障恢复与验证
 
