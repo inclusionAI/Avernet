@@ -189,7 +189,12 @@ class DeviceBindingRepository(Protocol):
         bot_ext_patch: dict[str, Any],
         binding_props_patch: dict[str, Any],
     ) -> bool:
-        """Persist Desktop restart only while its prior identity is current."""
+        """Persist an accepted Desktop restart while prior identity is current.
+
+        An explicit user restart may move a ``PENDING``, ``ACTIVE``, or
+        ``FAILED`` BaaS binding to ``PENDING``. Released or stopped bindings
+        remain terminal and must not be revived.
+        """
         ...
 
     @abstractmethod

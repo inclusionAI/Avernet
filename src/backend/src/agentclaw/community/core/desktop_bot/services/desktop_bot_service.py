@@ -1016,13 +1016,17 @@ class DesktopBotService(DesktopBotServiceProtocol):
 
         agent_code = passport_info.get("agent_code", "")
 
+        # Bot persistence uses the owner id, while the Desktop BaaS wire has
+        # always used the staff-scoped entity id.  Keep that wire identity
+        # authoritative over provisional persistence and caller dictionaries
+        # so retries preserve the original BaaS idempotency key.
         full_bot = {
-            "entity_id": f"staff_{user_id}",
-            "entity_type": "staff",
             "active_engine": engine_type or DEFAULT_ENGINE_TYPE,
             **(existing or {}),
             **bot,
             "bot_id": bot_id,
+            "entity_id": f"staff_{user_id}",
+            "entity_type": "staff",
         }
 
         if not migration_path:

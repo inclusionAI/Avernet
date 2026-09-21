@@ -14,6 +14,7 @@ from agentclaw.community.plugin_api.models import BotModel
 
 _PENDING = "PENDING"
 _ACTIVE = "ACTIVE"
+_FAILED = "FAILED"
 
 
 def _normalize_isolation_level(value: str) -> str:
@@ -142,7 +143,7 @@ class BaasDesktopRestartRepositoryMixin:
                 if (
                     binding is None
                     or binding.device_provider != "baas"
-                    or binding.status not in {_PENDING, _ACTIVE}
+                    or binding.status not in {_PENDING, _ACTIVE, _FAILED}
                 ):
                     db.rollback()
                     return False

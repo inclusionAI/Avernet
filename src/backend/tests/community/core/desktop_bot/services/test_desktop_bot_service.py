@@ -439,6 +439,49 @@ class TestCreate:
         assert credentials["client_id"] == "persisted-client"
         assert credentials["token"] == "persisted-token"
 
+    def test_provisional_retry_reuses_initial_baas_request_identity(self):
+        service, mocks = _make_service_with_mocks()
+        mocks["passport"].query_agent_passport.return_value = {
+            "agent_code": "ac-existing"
+        }
+        mocks["baas"].post_bots_api.side_effect = [
+            {"bot_uuid": "bu-resumed", "publish_id": 91},
+            {"bot_uuid": "bu-resumed", "publish_id": 91},
+        ]
+        mocks["binding_repo"].insert_binding.side_effect = [
+            RuntimeError("binding write failed"),
+            20,
+        ]
+
+        with pytest.raises(DesktopBotServiceError, match="local write failed"):
+            service.create_after_authorization(
+                bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+                user_id="u001",
+                machine_id="m-002",
+            )
+
+        first_payload = mocks["baas"].post_bots_api.call_args_list[0].kwargs[
+            "payload"
+        ]
+        inserted = dict(
+            mocks["bot_repo"].insert_with_initial_skill_layout.call_args.args[0]
+        )
+        mocks["bot_repo"].get_by_id_and_owner.return_value = inserted
+
+        result = service.create_after_authorization(
+            bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+            user_id="u001",
+            machine_id="m-002",
+        )
+
+        second_payload = mocks["baas"].post_bots_api.call_args_list[1].kwargs[
+            "payload"
+        ]
+        assert result["bot_uuid"] == "bu-resumed"
+        assert first_payload["request_id"] == second_payload["request_id"]
+        assert first_payload["config"]["entity_id"] == "staff_u001"
+        assert second_payload["config"]["entity_id"] == "staff_u001"
+
     def test_concurrent_provisional_desktop_create_returns_in_progress(self):
         service, mocks = _make_service_with_mocks()
         mocks["bot_repo"].get_by_id_and_owner.return_value = {
@@ -1130,6 +1173,31 @@ class TestRestart:
         mocks["binding_repo"].update_device_props.assert_not_called()
         mocks["binding_repo"].update_status.assert_not_called()
         assert mock_start_poll.call_args.kwargs["observe_only"] is True
+
+    @patch(
+        "agentclaw.community.core.desktop_bot.services.desktop_bot_service."
+        "DesktopBotService._start_publish_polling"
+    )
+    def test_explicit_restart_tracks_new_publish_from_failed_binding(
+        self, mock_start_poll
+    ):
+        service, mocks = _make_service_with_mocks()
+        _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")
+        binding = mocks["binding_repo"].get_by_id.return_value
+        binding.status = "FAILED"
+        binding.device_props = {"restart_publish_id": "16"}
+        bot = mocks["bot_repo"].get_by_id_and_owner.return_value
+        bot["status"] = "FAILED"
+        mocks["baas"].restart_bot.return_value = {"publish_id": 17}
+        mocks["baas"].approve_publish.return_value = {"status": "SUCCESS"}
+
+        result = service.restart(bot_id="desktop_bot_001", user_id="u001")
+
+        assert result["status"] == "PENDING"
+        prepared = mocks["binding_repo"].prepare_baas_desktop_restart.call_args
+        assert prepared.kwargs["expected_publish_id"] == "16"
+        assert prepared.kwargs["binding_props_patch"]["restart_publish_id"] == "17"
+        assert "observe_only" not in mock_start_poll.call_args.kwargs
 
     def test_restart_no_publish_id_skips_approve(self):
         service, mocks = _make_service_with_mocks()

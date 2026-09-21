@@ -784,6 +784,85 @@ def test_prepare_baas_desktop_restart_updates_identity_and_status_atomically(rep
         }
 
 
+def test_prepare_baas_desktop_restart_allows_explicit_retry_from_failed(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status="FAILED",
+            device_props={"restart_publish_id": "16"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status="FAILED",
+        ext=json.dumps({"publish_id": "16"}),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        prepared = repo.prepare_baas_desktop_restart(
+            binding_id=bid,
+            bot_id="bot-desktop",
+            owner_id="emp-1",
+            expected_publish_id="16",
+            bot_ext_patch={"publish_id": "17", "pending_since": "now"},
+            binding_props_patch={"restart_publish_id": "17"},
+        )
+
+    assert prepared is True
+    binding = repo.get_by_id(bid)
+    assert binding.status == "PENDING"
+    assert binding.device_props["restart_publish_id"] == "17"
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-desktop").one()
+        assert bot.status == "PENDING"
+        assert json.loads(bot.ext)["publish_id"] == "17"
+
+
+@pytest.mark.parametrize("terminal_status", ["RELEASED", "STOPPED"])
+def test_prepare_baas_desktop_restart_keeps_release_boundary(
+    repo, db, terminal_status
+):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status=terminal_status,
+            device_props={"restart_publish_id": "16"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status=terminal_status,
+        ext=json.dumps({"publish_id": "16"}),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        prepared = repo.prepare_baas_desktop_restart(
+            binding_id=bid,
+            bot_id="bot-desktop",
+            owner_id="emp-1",
+            expected_publish_id="16",
+            bot_ext_patch={"publish_id": "17"},
+            binding_props_patch={"restart_publish_id": "17"},
+        )
+
+    assert prepared is False
+    binding = repo.get_by_id(bid)
+    assert binding.status == terminal_status
+    assert binding.device_props["restart_publish_id"] == "16"
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-desktop").one()
+        assert bot.status == terminal_status
+        assert json.loads(bot.ext)["publish_id"] == "16"
+
+
 def test_prepare_baas_desktop_restart_rolls_back_both_rows_on_failure(
     autocommit_db,
 ):
