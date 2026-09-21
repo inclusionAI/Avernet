@@ -1,11 +1,18 @@
 """BbsBrowseLoopScheduler — APScheduler-driven per-Bot `*/30` cron (mode=framework).
 
+The subscription (`ac_forum_browse_subscription` with ``mode=framework``) IS
+the opt-in: a Bot subscribes once and the backend owns a `*/30` APScheduler
+job that pushes one Browse message to it on every tick. No env gate — the
+scheduler starts at app boot and registers a job for every existing
+framework-mode subscription. New subscriptions added at runtime are picked up
+via :meth:`register_bot` (wired in the subscription endpoints); deletes via
+:meth:`unregister_bot`. ``mode=openclaw`` is the OpenClaw-self-cron path and
+never goes through this scheduler.
+
 Pattern mirrors ``TaskDiscoveryScheduler`` (BackgroundScheduler in a thread,
-``asyncio.run`` at tick). Defaults to OFF: the scheduler is bound for lifecycle
-discovery but only installs jobs when ``BBS_BROWSE_LOOP_AUTO_START_FRAMEWORK``
-is ``true``. Subscriptions added/removed at runtime are registered on a
-best-effort basis via :meth:`register_bot` / :meth:`unregister_bot`; future
-phase wiring can call them from the subscription endpoints.
+``asyncio.run`` at tick). Cron expr / timezone are overridable via
+``BBS_BROWSE_LOOP_CRON`` / ``BBS_BROWSE_LOOP_TIMEZONE`` (verification can set
+``*/1 * * * *`` to shorten intervals; restore `*/30 * * * *` afterwards).
 """
 
 from __future__ import annotations
@@ -27,11 +34,10 @@ logger = get_logger()
 
 _DEFAULT_CRON = "*/30 * * * *"
 _DEFAULT_TIMEZONE = "Asia/Shanghai"
-_AUTO_START_ENV = "BBS_BROWSE_LOOP_AUTO_START_FRAMEWORK"
 
 
 class BbsBrowseLoopScheduler(LifecycleBase):
-    """Per-Bot */30 cron driving A-mode Browse pushes."""
+    """Per-Bot */30 cron driving A-mode Browse pushes — autostart, no env gate."""
 
     @inject
     def __init__(
@@ -46,18 +52,16 @@ class BbsBrowseLoopScheduler(LifecycleBase):
         self._tz = os.environ.get("BBS_BROWSE_LOOP_TIMEZONE", _DEFAULT_TIMEZONE)
 
     async def startup(self) -> None:
-        """Lifecycle hook — start scheduler if env enables auto-start."""
+        """Lifecycle hook — always start scheduler and register existing framework subs.
+
+        Subscribing (`ac_forum_browse_subscription` row with mode=framework) is
+        the opt-in. No env gate here; the scheduler starts unconditionally at
+        app boot and registers a `*/30` job for each framework-mode subscription
+        present in the table so ticks begin before the next cron boundary.
+        """
         logger.debug("[bbs-browse-loop] → BbsBrowseLoopScheduler.startup()")
-        enabled = os.environ.get(_AUTO_START_ENV, "false").strip().lower()
-        if enabled not in ("true", "1", "yes", "on"):
-            logger.info(
-                "[bbs-browse-loop] framework cron disabled (%s != true)", _AUTO_START_ENV
-            )
-            self._scheduler = BackgroundScheduler()
-            return
         self._scheduler = BackgroundScheduler()
         self._scheduler.start()
-        # Restore jobs for all existing framework-mode subscriptions.
         page = self._service.list_subscriptions(page=1, page_size=200, mode=BROWSE_MODE_FRAMEWORK)
         for sub in page.items:
             self.register_bot(sub.bot_id)
@@ -75,7 +79,7 @@ class BbsBrowseLoopScheduler(LifecycleBase):
             logger.info("[bbs-browse-loop] scheduler stopped")
 
     def register_bot(self, bot_id: str) -> None:
-        """Add (or refresh) the `*/30` job for one Bot. No-op when disabled."""
+        """Add (or refresh) the `*/30` job for one Bot. No-op before startup."""
         if self._scheduler is None:
             return
         self._scheduler.add_job(
@@ -87,7 +91,7 @@ class BbsBrowseLoopScheduler(LifecycleBase):
         )
 
     def unregister_bot(self, bot_id: str) -> None:
-        """Remove the job for one Bot. No-op if absent or scheduler disabled."""
+        """Remove the job for one Bot. No-op if absent or before startup."""
         if self._scheduler is None:
             return
         try:
