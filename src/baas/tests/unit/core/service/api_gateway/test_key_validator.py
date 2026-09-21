@@ -190,3 +190,87 @@ class TestVerifySync:
 
         args, kwargs = repo.get_by_prefix_and_status.call_args
         assert kwargs.get("env") == "prod"
+
+
+# ==================== 缓存行为 ====================
+
+
+class TestVerifyCache:
+    async def test_second_verify_hits_cache(self, validator, repo):
+        """同一 key 二次验证命中缓存：不再查库、不再跑 PBKDF2。"""
+        repo.get_by_prefix_and_status.return_value = _make_record()
+
+        with patch(
+            "secbaas.community.core.service.api_gateway._key_gen.APIKeyGenerator.verify_key",
+            return_value=True,
+        ) as mock_verify:
+            first = await validator.verify("xK9mP2nQ1234567890123456789012345")
+            second = await validator.verify("xK9mP2nQ1234567890123456789012345")
+
+        assert first is second
+        assert repo.get_by_prefix_and_status.call_count == 1
+        assert mock_verify.call_count == 1
+
+    async def test_negative_result_cached(self, validator, repo):
+        """查不到记录的失败结果也走缓存：二次验证不再查库。"""
+        repo.get_by_prefix_and_status.return_value = None
+
+        assert await validator.verify("xK9mP2nQ1234567890123456789012345") is None
+        assert await validator.verify("xK9mP2nQ1234567890123456789012345") is None
+
+        assert repo.get_by_prefix_and_status.call_count == 1
+
+    async def test_verify_sync_shares_cache_with_verify(self, validator, repo):
+        """verify 与 verify_sync 共享同一份缓存。"""
+        repo.get_by_prefix_and_status.return_value = _make_record()
+
+        with patch(
+            "secbaas.community.core.service.api_gateway._key_gen.APIKeyGenerator.verify_key",
+            return_value=True,
+        ):
+            first = await validator.verify("xK9mP2nQ1234567890123456789012345")
+            second = validator.verify_sync("xK9mP2nQ1234567890123456789012345")
+
+        assert first is second
+        assert repo.get_by_prefix_and_status.call_count == 1
+
+    async def test_expired_entry_refetches_from_repository(self, validator, repo):
+        """缓存过期后重新查库，不返回陈旧结果。"""
+        repo.get_by_prefix_and_status.return_value = _make_record()
+
+        with (
+            patch(
+                "secbaas.community.core.service.api_gateway._key_gen.APIKeyGenerator.verify_key",
+                return_value=True,
+            ),
+            patch(
+                "secbaas.community.core.service.api_gateway._key_validator.time"
+            ) as fake_time,
+        ):
+            # 第一次 put 时 monotonic()=0（expires=60），
+            # 二次 get 时 =100 已过期 → miss → 重新查库后再 put
+            fake_time.monotonic.side_effect = [0.0, 100.0, 100.0]
+            first = await validator.verify("xK9mP2nQ1234567890123456789012345")
+            second = await validator.verify("xK9mP2nQ1234567890123456789012345")
+
+        assert first is not None
+        assert second is not None
+        assert repo.get_by_prefix_and_status.call_count == 2
+
+
+class TestTTLCache:
+    def test_put_evicts_oldest_beyond_max_entries(self):
+        """超过容量上限时淘汰最旧条目。"""
+        from secbaas.community.core.service.api_gateway._key_validator import (
+            _MISS,
+            _TTLCache,
+        )
+
+        cache = _TTLCache(max_entries=2)
+        cache.put("a", 1, ttl=60)
+        cache.put("b", 2, ttl=60)
+        cache.put("c", 3, ttl=60)
+
+        assert cache.get("a") is _MISS
+        assert cache.get("b") == 2
+        assert cache.get("c") == 3

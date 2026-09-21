@@ -443,9 +443,7 @@ async def test_executor_send_persistence_failure_marks_failed_and_reraises():
     repo.update_result.assert_called_once()
     # S4: update_error 被显式调用，消息包含 "result persistence failed"
     assert repo.update_error.called
-    s4_call_msgs = [
-        c[0][1] for c in repo.update_error.call_args_list if len(c[0]) >= 2
-    ]
+    s4_call_msgs = [c[0][1] for c in repo.update_error.call_args_list if len(c[0]) >= 2]
     assert any("result persistence failed" in msg for msg in s4_call_msgs)
     assert any("simulated 1064" in msg for msg in s4_call_msgs)
 
