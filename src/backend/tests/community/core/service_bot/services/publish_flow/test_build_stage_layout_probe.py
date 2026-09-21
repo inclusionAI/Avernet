@@ -151,7 +151,7 @@ async def test_filesystem_producer_receives_one_fresh_observation() -> None:
 
     assert result.status == PublishStatus.BUILT
     projector.project.assert_awaited_once_with(
-        bot_id="b1", owner_id="u1", scope=ProjectionScope.everything()
+        bot_id="b1", owner_id="u1", scope=ProjectionScope(skills=True)
     )
     probe.probe_bot.assert_awaited_once_with(
         bot_id="b1", user_id="u1", engine="openclaw"
