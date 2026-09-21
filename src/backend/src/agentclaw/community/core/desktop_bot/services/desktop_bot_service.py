@@ -84,6 +84,12 @@ class _DesktopLayoutConfirmationStatus(StrEnum):
     SUPERSEDED = "superseded"
 
 
+class _DesktopTerminalTransitionStatus(StrEnum):
+    COMMITTED = "committed"
+    RETRY = "retry"
+    SUPERSEDED = "superseded"
+
+
 def _generate_request_id(
     bot_id: str,
     entity_id: str,
@@ -1915,6 +1921,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
         start_time = time.monotonic()
         final_status = "FAILED"
         layout_watchdog_dispatched = False
+        terminal_persistence_pending = False
 
         logger.info(
             "[DesktopBotService._poll_publish_progress] start polling "
@@ -1976,17 +1983,27 @@ class DesktopBotService(DesktopBotServiceProtocol):
                             publish_id,
                         )
                         return
-                    (
-                        layout_status,
-                        watchdog_dispatched,
-                    ) = self._confirm_desktop_layout_initialization(
-                        publish_id=publish_id,
-                        binding_id=binding_id,
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        device_id=device_id,
-                        dispatch_watchdog=not layout_watchdog_dispatched,
-                    )
+                    try:
+                        (
+                            layout_status,
+                            watchdog_dispatched,
+                        ) = self._confirm_desktop_layout_initialization(
+                            publish_id=publish_id,
+                            binding_id=binding_id,
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            device_id=device_id,
+                            dispatch_watchdog=not layout_watchdog_dispatched,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "[DesktopBotService._poll_publish_progress] "
+                            "layout confirmation failed transiently; will retry: "
+                            "bot_id=%s publish_id=%s",
+                            bot_id,
+                            publish_id,
+                        )
+                        continue
                     layout_watchdog_dispatched |= watchdog_dispatched
                     if layout_status == _DesktopLayoutConfirmationStatus.PENDING:
                         continue
@@ -2000,6 +2017,25 @@ class DesktopBotService(DesktopBotServiceProtocol):
                         )
                         return
                     if layout_status == _DesktopLayoutConfirmationStatus.FAILED:
+                        if restart_publish_id is not None:
+                            transition = (
+                                self._transition_desktop_restart_failed_if_current(
+                                    binding_id=binding_id,
+                                    bot_id=bot_id,
+                                    owner_id=owner_id,
+                                    publish_id=restart_publish_id,
+                                )
+                            )
+                            if transition is (
+                                _DesktopTerminalTransitionStatus.COMMITTED
+                            ):
+                                return
+                            if transition is (
+                                _DesktopTerminalTransitionStatus.SUPERSEDED
+                            ):
+                                return
+                            terminal_persistence_pending = True
+                            continue
                         final_status = "FAILED"
                         break
                     final_status = "ACTIVE"
@@ -2014,13 +2050,25 @@ class DesktopBotService(DesktopBotServiceProtocol):
 
                 if status == "FAILED":
                     if restart_publish_id is not None:
-                        self._transition_desktop_restart_failed_if_current(
+                        transition = self._transition_desktop_restart_failed_if_current(
                             binding_id=binding_id,
                             bot_id=bot_id,
                             owner_id=owner_id,
                             publish_id=restart_publish_id,
                         )
-                        return
+                        if transition is _DesktopTerminalTransitionStatus.COMMITTED:
+                            return
+                        if transition is _DesktopTerminalTransitionStatus.SUPERSEDED:
+                            logger.info(
+                                "[DesktopBotService._poll_publish_progress] "
+                                "failed publish superseded; stopping: "
+                                "bot_id=%s publish_id=%s",
+                                bot_id,
+                                publish_id,
+                            )
+                            return
+                        terminal_persistence_pending = True
+                        continue
                     if observe_only:
                         logger.warning(
                             "[DesktopBotService._poll_publish_progress] "
@@ -2051,11 +2099,29 @@ class DesktopBotService(DesktopBotServiceProtocol):
                     observe_only,
                 )
                 return
+            if terminal_persistence_pending:
+                logger.error(
+                    "[DesktopBotService._poll_publish_progress] terminal "
+                    "restart status could not be persisted before timeout: "
+                    "bot_id=%s publish_id=%s",
+                    bot_id,
+                    publish_id,
+                )
+                return
 
         except Exception as e:
             logger.error(
                 "[DesktopBotService._poll_publish_progress] unexpected error: %s", e,
             )
+            if restart_publish_id is not None:
+                logger.error(
+                    "[DesktopBotService._poll_publish_progress] guarded restart "
+                    "poll aborted without lifecycle writes: bot_id=%s "
+                    "publish_id=%s",
+                    bot_id,
+                    publish_id,
+                )
+                return
             final_status = "FAILED"
 
         # while 循环结束后，判断是轮询超时还是明确的 BaaS FAILED
@@ -2203,24 +2269,34 @@ class DesktopBotService(DesktopBotServiceProtocol):
         bot_id: str,
         owner_id: str,
         publish_id: str,
-    ) -> bool:
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+    ) -> _DesktopTerminalTransitionStatus:
+        try:
+            bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        except Exception:
+            logger.exception(
+                "[DesktopBotService] restart failure Bot lookup failed: "
+                "bot_id=%s publish_id=%s",
+                bot_id,
+                publish_id,
+            )
+            return _DesktopTerminalTransitionStatus.RETRY
         if bot is None:
-            return False
-        current_ext = bot.get("ext") or {}
-        if not isinstance(current_ext, dict):
-            return False
+            return _DesktopTerminalTransitionStatus.RETRY
+        raw_ext = bot.get("ext")
+        if raw_ext is not None and not isinstance(raw_ext, dict):
+            return _DesktopTerminalTransitionStatus.RETRY
+        current_ext = raw_ext if isinstance(raw_ext, dict) else {}
         failed_ext = dict(current_ext)
         failed_ext["start_status"] = "FAILED"
         try:
-            return self._binding_repo.transition_baas_restart_terminal(
+            committed = self._binding_repo.transition_baas_restart_terminal(
                 binding_id=int(binding_id),
                 bot_id=bot_id,
                 owner_id=owner_id,
                 publish_id=publish_id,
                 request_id=None,
                 status="FAILED",
-                expected_bot_ext=current_ext,
+                expected_bot_ext=raw_ext,
                 bot_ext=failed_ext,
             )
         except Exception:
@@ -2230,7 +2306,22 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 bot_id,
                 publish_id,
             )
-            return False
+            return _DesktopTerminalTransitionStatus.RETRY
+        if committed:
+            return _DesktopTerminalTransitionStatus.COMMITTED
+        try:
+            binding = self._binding_repo.get_by_id(int(binding_id))
+        except Exception:
+            logger.exception(
+                "[DesktopBotService] restart identity recheck failed: "
+                "bot_id=%s publish_id=%s",
+                bot_id,
+                publish_id,
+            )
+            return _DesktopTerminalTransitionStatus.RETRY
+        if self._restart_identity_matches(binding, publish_id):
+            return _DesktopTerminalTransitionStatus.RETRY
+        return _DesktopTerminalTransitionStatus.SUPERSEDED
 
     def _query_publish_status(self, publish_id: str) -> str:
         """查询单次 publish 进度，返回 status 字符串。"""

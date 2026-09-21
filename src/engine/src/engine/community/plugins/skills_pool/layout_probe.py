@@ -411,21 +411,14 @@ def inspect_runtime_layout(
         RuntimeLayoutContext(home=home),
     )
     if engine == "openclaw":
-        try:
-            active_marker_present = (
-                layout.active_marker.exists() or layout.active_marker.is_symlink()
-            )
-        except OSError:
-            active_marker_present = False
-        if active_marker_present:
-            steady = inspect_openclaw_steady_active(
-                layout=layout,
-                expected_contract_version=expected_contract_version,
-                repo_is_mounted=repo_is_mounted,
-                center_is_mounted=center_is_mounted,
-            )
-            if steady is not None:
-                return steady
+        steady = inspect_openclaw_steady_active(
+            layout=layout,
+            expected_contract_version=expected_contract_version,
+            repo_is_mounted=repo_is_mounted,
+            center_is_mounted=center_is_mounted,
+        )
+        if steady is not None:
+            return steady
     try:
         marker_stat = layout.marker.stat()
     except (FileNotFoundError, NotADirectoryError):

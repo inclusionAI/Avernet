@@ -6,6 +6,7 @@ import pytest
 from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
     DesktopBotService,
     DesktopBotServiceError,
+    _DesktopLayoutConfirmationStatus,
     _format_datetime,
     _generate_request_id,
     _to_device_display_status,
@@ -1445,6 +1446,62 @@ class TestPublishPolling:
             status="FAILED",
         )
 
+    def test_superseded_restart_layout_failure_cannot_overwrite_new_publish(
+        self, poll_service
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._trigger_device_alive = MagicMock(return_value=True)
+        service._confirm_desktop_layout_initialization = MagicMock(
+            return_value=(_DesktopLayoutConfirmationStatus.FAILED, False)
+        )
+        mocks["binding_repo"].transition_baas_restart_terminal.return_value = False
+        mocks["binding_repo"].get_by_id.return_value = MagicMock(
+            status="PENDING",
+            device_props={"restart_publish_id": "newer-publish"},
+        )
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop_bot_001",
+            "owner_id": "u001",
+            "ext": {"publish_id": "newer-publish"},
+        }
+
+        service._poll_publish_progress(
+            publish_id="older-publish",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-pool",
+            restart_publish_id="older-publish",
+        )
+
+        mocks["binding_repo"].update_status.assert_not_called()
+        service._trigger_device_alive.assert_not_called()
+
+    def test_restart_confirmation_exception_retries_without_unguarded_failure_write(
+        self, poll_service
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="SUCCESS")
+        service._confirm_desktop_layout_initialization = MagicMock(
+            side_effect=[
+                RuntimeError("DB temporarily unavailable"),
+                (_DesktopLayoutConfirmationStatus.SUPERSEDED, False),
+            ]
+        )
+
+        service._poll_publish_progress(
+            publish_id="older-publish",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-pool",
+            restart_publish_id="older-publish",
+        )
+
+        assert service._confirm_desktop_layout_initialization.call_count == 2
+        mocks["binding_repo"].update_status.assert_not_called()
+
     def test_poll_failed_updates_status_to_failed(self, poll_service):
         service, mocks = poll_service()
 
@@ -1493,6 +1550,72 @@ class TestPublishPolling:
         )
 
         mocks["binding_repo"].transition_baas_restart_terminal.assert_called_once()
+        mocks["binding_repo"].update_status.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "first_result",
+        (False, RuntimeError("DB temporarily unavailable")),
+    )
+    def test_current_restart_failure_retries_terminal_persistence(
+        self, poll_service, first_result
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="FAILED")
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop_bot_001",
+            "owner_id": "u001",
+            "ext": {"publish_id": "current-publish"},
+        }
+        mocks["binding_repo"].get_by_id.return_value = MagicMock(
+            status="PENDING",
+            device_props={"restart_publish_id": "current-publish"},
+        )
+        mocks["binding_repo"].transition_baas_restart_terminal.side_effect = [
+            first_result,
+            True,
+        ]
+
+        service._poll_publish_progress(
+            publish_id="current-publish",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-pool",
+            restart_publish_id="current-publish",
+        )
+
+        assert (
+            mocks["binding_repo"].transition_baas_restart_terminal.call_count
+            == 2
+        )
+        mocks["binding_repo"].update_status.assert_not_called()
+
+    def test_restart_failure_preserves_null_ext_as_cas_baseline(
+        self, poll_service
+    ):
+        service, mocks = poll_service()
+        service._query_publish_status = MagicMock(return_value="FAILED")
+        mocks["bot_repo"].get_by_id_and_owner.return_value = {
+            "bot_id": "desktop_bot_001",
+            "owner_id": "u001",
+            "ext": None,
+        }
+        mocks["binding_repo"].transition_baas_restart_terminal.return_value = True
+
+        service._poll_publish_progress(
+            publish_id="current-publish",
+            binding_id="1",
+            bot_id="desktop_bot_001",
+            owner_id="u001",
+            device_id="BOT-pool",
+            restart_publish_id="current-publish",
+        )
+
+        transition_call = (
+            mocks["binding_repo"].transition_baas_restart_terminal.call_args
+        )
+        assert transition_call.kwargs["expected_bot_ext"] is None
+        assert transition_call.kwargs["bot_ext"] == {"start_status": "FAILED"}
         mocks["binding_repo"].update_status.assert_not_called()
 
     @patch("time.sleep", return_value=None)
