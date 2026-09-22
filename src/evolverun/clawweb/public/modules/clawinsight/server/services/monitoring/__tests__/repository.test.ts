@@ -67,7 +67,7 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
   it("discovers persisted checks and diagnoses across connections without caching the roster", async () => {
     expect(await repo.listTargets()).toEqual([]);
     await insert({ ...alert, botId: "diagnosis-only" });
-    const check = parseCheck({ schemaVersion: "claw-monitoring/bot-check/v1", botId: "check-only", engine: "OC",
+    const check = parseCheck({ schemaVersion: "claw-monitoring/bot-check/v2", entityId: "001234", env: "test", botId: "check-only", engine: "OC",
       checkedAt: new Date(now).toISOString(), lastSuccessfulCheckAt: null, status: "HEALTHY" }, now);
     await repo.applyCheck(resolved(check), now);
     const otherDb = database(join(dir, "db.sqlite3"));
@@ -123,11 +123,11 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
     expect((await list({ keyword: "%' OR 1=1 --" })).total).toBe(0);
   });
   it("keeps the newest concurrent BotCheck and rejects equal-time conflict", async () => {
-    const checks = Array.from({ length: 20 }, (_, i) => parseCheck({ schemaVersion: "claw-monitoring/bot-check/v1", botId: "mock-bot-te", engine: "TE", checkedAt: new Date(now - i * 1000).toISOString(), lastSuccessfulCheckAt: null, status: "HEALTHY" }, now));
+    const checks = Array.from({ length: 20 }, (_, i) => parseCheck({ schemaVersion: "claw-monitoring/bot-check/v2", entityId: "001234", env: "test", botId: "mock-bot-te", engine: "TE", checkedAt: new Date(now - i * 1000).toISOString(), lastSuccessfulCheckAt: null, status: "HEALTHY" }, now));
     await Promise.all(checks.map(c => repo.applyCheck(resolved(c), now)));
     expect((await repo.readStatus(testTarget("mock-bot-te"))).check?.checkedAt).toBe(checks[0].checkedAt);
     expect(await repo.applyCheck(resolved(checks[0]), now)).toBe(false);
-    await expect(repo.applyCheck(resolved({ ...checks[0], status: "ERROR" }), now)).rejects.toMatchObject({ code: "EVENT_CONFLICT" });
+    await expect(repo.applyCheck(resolved({ ...checks[0], status: "ERROR" }), now)).rejects.toMatchObject({ code: "CHECK_CONFLICT" });
   });
   it("fails closed on noop/missing indexes/write failure and recovers", async () => {
     await expect(new MonitoringRepository({ ...db, dbType: "noop" } as IDatabase).readStatus(testTarget("x"))).rejects.toMatchObject({ code: "NOT_READY" });

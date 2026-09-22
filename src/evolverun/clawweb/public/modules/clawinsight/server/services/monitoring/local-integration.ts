@@ -6,7 +6,7 @@ import { targetKey } from './target.js';
 export function createLocalMonitoringIntegration(): MonitoringIntegration {
   const scope = { tenant: 'local-demo', allowedTargetEnvs: ['local'] };
   const bots: DirectoryBot[] = ['mock-bot-te', 'mock-bot-oc', 'mock-bot-not-enrolled'].map((botId, index) => ({
-    directoryId: String(3 - index), botId, entityId: 'local-demo', env: 'local',
+    directoryId: String(3 - index), activeEngine: botId === 'mock-bot-oc' ? 'openclaw' : 'teclaw', botId, entityId: 'local-demo', env: 'local',
     ownerId: 'local-demo', ownerName: 'Local demo', botName: botId,
   }));
   return {

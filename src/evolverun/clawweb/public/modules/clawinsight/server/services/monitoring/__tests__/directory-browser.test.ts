@@ -31,18 +31,18 @@ async function bot(t: MonitoringTarget, owner = t.entityId, name = '默认 Bot',
     [t.botId, t.entityId, t.env, owner, name, '姓名', tenant, deleted]);
 }
 async function check(t = a, status = 'HEALTHY', offset = 0, engine = 'TE') {
-  const wire = parseCheck({ schemaVersion: 'claw-monitoring/bot-check/v1', botId: t.botId, engine,
+  const wire = parseCheck({ schemaVersion: 'claw-monitoring/bot-check/v2', ...t, engine,
     checkedAt: new Date(now + offset).toISOString(), lastSuccessfulCheckAt: null, status }, now + Math.max(offset, 0));
   return repo.applyCheck({ target: t, wire }, now + Math.max(offset, 0));
 }
 async function diagnosis(t = a, eventId = 'event-1', patch = {}) {
-  const wire = parseDiagnosis({ ...fixture, botId: t.botId, eventId, diagnosisId: eventId, ...patch }, eventId);
+  const wire = parseDiagnosis({ ...fixture, ...t, eventId, diagnosisId: eventId, ...patch }, eventId);
   return repo.insertDiagnosis({ target: t, wire }, now);
 }
 beforeEach(async () => {
   db = database(':memory:'); await initializeMonitoringSqlite(db);
   await db.exec(`CREATE TABLE ac_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT, entity_id TEXT, env TEXT,
-    owner_id TEXT, bot_name TEXT, owner_name TEXT, avernet_tenant TEXT, is_delete INTEGER)`);
+    active_engine TEXT DEFAULT 'teclaw', owner_id TEXT, bot_name TEXT, owner_name TEXT, avernet_tenant TEXT, is_delete INTEGER)`);
   repo = new MonitoringRepository(db); directory = new SqlMonitoringBotDirectory(db, true);
 });
 afterEach(async () => { await db.close(); vi.restoreAllMocks(); });
@@ -55,7 +55,7 @@ describe('compound monitoring identity with real SQL', () => {
     expect((await repo.summaries([a,b,prod], window)).map(s => s?.status)).toEqual(['HEALTHY','PAUSED','HEALTHY']);
     for (const t of [a,b,prod]) expect((await repo.listDiagnoses(t, parseQuery({}))).total).toBe(1);
     expect(await repo.listTargets()).toHaveLength(3);
-    await expect(check(a, 'ERROR', -1000, 'OC')).rejects.toMatchObject({ code: 'EVENT_CONFLICT' });
+    await expect(check(a, 'ERROR', -1000, 'OC')).rejects.toMatchObject({ code: 'CHECK_CONFLICT' });
     await expect(diagnosis(b, 'e0')).rejects.toMatchObject({ code: 'EVENT_CONFLICT' });
   });
   it('counts typed engine/session identity, missing IDs and occurrence window, not trace IDs', async () => {
@@ -73,17 +73,20 @@ describe('compound monitoring identity with real SQL', () => {
     await db.exec('DELETE FROM insight_monitoring_bot_check WHERE entity_id = ?', ['002']);
     expect(await repo.summaries([b], window)).toEqual([null]);
   });
-  it('preserves v1 alias ACK and event idempotency but rejects ambiguous bare IDs without writes', async () => {
+  it('uses explicit v2 identities even when legacy read aliases are configured', async () => {
     await bot(a); await bot(b);
     const resolver = createTargetResolver(directory, scope, [{ reportedBotId: 'instance-001', target: a }]);
     const service = createMonitoringService(repo, resolver, () => now);
-    const wire = { ...fixture, botId: 'instance-001' };
-    expect(await service.reportDiagnosis(wire, wire.eventId)).toMatchObject({ eventId: wire.eventId, duplicate: false });
-    expect(await service.reportDiagnosis(wire, wire.eventId)).toMatchObject({ eventId: wire.eventId, duplicate: true });
-    expect(await service.bots()).toEqual({ items: [{ botId: 'instance-001' }] });
-    await expect(service.reportDiagnosis({ ...wire, botId: 'default' }, wire.eventId)).rejects.toMatchObject({ code: 'TARGET_AMBIGUOUS' });
-    await expect(service.reportDiagnosis({ ...wire, botId: 'missing' }, wire.eventId)).rejects.toMatchObject({ code: 'TARGET_UNRESOLVED' });
+    const wire = { ...fixture, ...a };
+    expect(await service.reportDiagnosis(wire, wire.eventId)).toMatchObject({ ...a, eventId: wire.eventId, duplicate: false });
+    expect(await service.reportDiagnosis(wire, wire.eventId)).toMatchObject({ ...a, eventId: wire.eventId, duplicate: true });
+    expect(await service.bots()).toEqual({ items: [a] });
+    const exact = vi.spyOn(directory, 'exact');
+    await expect(service.reportDiagnosis({ ...wire, botId: 'instance-001' }, wire.eventId)).rejects.toMatchObject({ code: 'BOT_IDENTITY_UNAVAILABLE' });
+    await expect(service.reportDiagnosis({ ...wire, botId: 'missing' }, wire.eventId)).rejects.toMatchObject({ code: 'BOT_IDENTITY_UNAVAILABLE' });
+    expect(exact).not.toHaveBeenCalled();
     expect((await repo.readStatus(a)).count).toBe(1); expect((await repo.readStatus(b)).count).toBe(0);
+    // Legacy read aliases do not participate in write resolution.
     await db.exec('DELETE FROM ac_bots WHERE owner_id = ?', ['002']);
     await expect(resolver.resolve('default')).rejects.toMatchObject({ code: 'TARGET_BINDING_CONFLICT' });
     expect(() => createTargetResolver(directory, scope, [

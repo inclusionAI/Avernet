@@ -1,5 +1,11 @@
 import { MonitoringError, type MonitoringTarget } from './contracts.js';
-import { id } from './validation.js';
+// Shared ID syntax lives below DTO validation to avoid a target/validator import cycle.
+export function id(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(value)) {
+    throw new MonitoringError('INVALID_EVENT', 'ID 格式错误。');
+  }
+  return value;
+}
 
 export function target(input: MonitoringTarget): MonitoringTarget {
   const valid = (s: unknown, max: number): s is string => typeof s === 'string'

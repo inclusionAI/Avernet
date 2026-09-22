@@ -20,7 +20,7 @@ async function send(path: string, body: Record<string, unknown>) {
 let first: Record<string, unknown> | undefined;
 for (let i = 0; i < 30; i++) {
   const source = fixtures[i % fixtures.length];
-  const event = { ...source, eventId: `mock-${batch}-${i}`, diagnosisId: `mock-${batch}-${i}`,
+  const event = { ...source, entityId: "local-demo", env: "local", eventId: `mock-${batch}-${i}`, diagnosisId: `mock-${batch}-${i}`,
     occurredAt: source.occurredAt === null ? null : new Date(now - i * 60000).toISOString(), diagnosedAt: new Date(now).toISOString() };
   first ??= event;
   const ack = await send("diagnosis-events", event);
@@ -29,7 +29,7 @@ for (let i = 0; i < 30; i++) {
 const duplicate = await send("diagnosis-events", first!);
 if (duplicate.stored !== true || duplicate.duplicate !== true) throw new Error("Duplicate ACK not confirmed");
 for (const [botId, engine] of [["mock-bot-te", "TE"], ["mock-bot-oc", "OC"]]) {
-  await send("bot-checks", { schemaVersion: CHECK_VERSION, botId, engine, checkedAt: new Date(now).toISOString(),
+  await send("bot-checks", { schemaVersion: CHECK_VERSION, entityId: "local-demo", env: "local", botId, engine, checkedAt: new Date(now).toISOString(),
     lastSuccessfulCheckAt: new Date(now).toISOString(), status: "HEALTHY" });
 }
 const response = await fetch(`${base}/monitoring/bots/mock-bot-te/diagnoses?page=2&pageSize=10`, { signal: AbortSignal.timeout(10000) });

@@ -1,13 +1,13 @@
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
-import { CHECK_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
+import { CHECK_VERSION, DIAGNOSIS_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
   type DiagnosisPage, type DiagnosisQuery, type MonitoringStore, type MonitoringTarget, type ResolvedReport, type MonitoringWindow } from "../services/monitoring/contracts.js";
 import { parseCheck, parseDiagnosis } from "../services/monitoring/validation.js";
 import { CHECKS_TABLE, DIAGNOSES_TABLE, verifyMonitoringSchema } from "./monitoring-schema-check.js";
 
-import { target, targetParams, targetWhere } from '../services/monitoring/target.js';
+import { target, targetKey, targetParams, targetWhere } from '../services/monitoring/target.js';
 import { readMonitoringSummaries } from './monitoring-summaries.js';
 const fields = {
-  schemaVersion: "schema_version", eventId: "event_id", botId: "bot_id", engine: "engine", sessionKey: "session_key",
+  entityId: "entity_id", env: "env", schemaVersion: "schema_version", eventId: "event_id", botId: "bot_id", engine: "engine", sessionKey: "session_key",
   sessionId: "session_id", traceId: "trace_id", occurredAt: "occurred_at_ms", diagnosedAt: "diagnosed_at_ms",
   decision: "decision", tcFaultLabel: "tc_fault_label", confidence: "confidence_json",
   businessProblemCategory: "business_problem_category", businessProblemSubtype: "business_problem_subtype",
@@ -27,6 +27,8 @@ function iso(value: unknown): string | null {
 function eventFromRow(row: Row): DiagnosisEvent {
   const event: Record<string, unknown> = {};
   for (const [key, col] of Object.entries(fields)) event[key] = row[col];
+  // Read-only projection of historical v1 rows; HTTP validators still reject v1.
+  if (event.schemaVersion === "claw-monitoring/diagnosis-event/v1") event.schemaVersion = DIAGNOSIS_VERSION;
   event.diagnosisId = row.event_id;
   event.occurredAt = iso(row.occurred_at_ms);
   event.diagnosedAt = iso(row.diagnosed_at_ms);
@@ -37,7 +39,7 @@ function eventFromRow(row: Row): DiagnosisEvent {
   return parseDiagnosis(event, String(row.event_id));
 }
 function checkFromRow(row: Row): BotCheck {
-  return parseCheck({ schemaVersion: CHECK_VERSION, botId: row.bot_id, engine: row.engine,
+  return parseCheck({ schemaVersion: CHECK_VERSION, botId: row.bot_id, entityId: row.entity_id, env: row.env, engine: row.engine,
     checkedAt: iso(row.checked_at_ms), lastSuccessfulCheckAt: iso(row.last_successful_check_at_ms), status: row.status }, integer(row.checked_at_ms));
 }
 function item(event: DiagnosisEvent): DiagnosisItem {
@@ -48,7 +50,7 @@ function isDuplicate(error: unknown): boolean {
   const e = error as { code?: string; errno?: number };
   return e?.code === "SQLITE_CONSTRAINT_UNIQUE" || e?.code === "ER_DUP_ENTRY" || e?.errno === 1062;
 }
-function conflict(): never { throw new MonitoringError("EVENT_CONFLICT", "同一编号或检查时间已有不同内容，未覆盖原记录。"); }
+function conflict(code: "EVENT_CONFLICT" | "CHECK_CONFLICT" = "EVENT_CONFLICT"): never { throw new MonitoringError(code, "同一编号或检查时间已有不同内容，未覆盖原记录。"); }
 
 /** Single-statement reads provide a consistent snapshot. Writes are autocommitted atomic statements.
  * No async BEGIN on the shared SQLite connection, and no process-local lock masquerading as deduplication.
@@ -62,7 +64,7 @@ export class MonitoringRepository implements MonitoringStore {
       await this.ready;
       return await fn();
     } catch (error) {
-      if (error instanceof MonitoringError && error.code === "EVENT_CONFLICT") throw error;
+      if (error instanceof MonitoringError && ["EVENT_CONFLICT", "CHECK_CONFLICT"].includes(error.code)) throw error;
       this.ready = null;
       throw new MonitoringError("NOT_READY", "监控存储暂不可用或表结构不兼容。");
     }
@@ -91,7 +93,8 @@ export class MonitoringRepository implements MonitoringStore {
   }
   async insertDiagnosis(input: ResolvedReport<DiagnosisEvent>, receivedAt: number): Promise<boolean> {
     const resolved = target(input.target);
-    const event = { ...parseDiagnosis(input.wire, input.wire.eventId), botId: resolved.botId };
+    const event = parseDiagnosis(input.wire, input.wire.eventId);
+    if (targetKey(event) !== targetKey(resolved)) throw new MonitoringError("INVALID_IDENTITY", "上报与解析身份不一致。");
     return this.run(async () => {
       const values = Object.keys(fields).map((name) => {
         const value = event[name as keyof typeof fields];
@@ -101,22 +104,23 @@ export class MonitoringRepository implements MonitoringStore {
         return value;
       });
       try {
-        const result = await this.db.exec(`INSERT INTO ${DIAGNOSES_TABLE} (${columns.join(", ")}, entity_id, env, received_at_ms)
-          VALUES (${[...values, resolved.entityId, resolved.env, receivedAt].map(() => "?").join(", ")})`, [...values, resolved.entityId, resolved.env, receivedAt]);
+        const result = await this.db.exec(`INSERT INTO ${DIAGNOSES_TABLE} (${columns.join(", ")}, received_at_ms)
+          VALUES (${[...values, receivedAt].map(() => "?").join(", ")})`, [...values, receivedAt]);
         if (result.affectedRows !== 1) throw new Error("Insert did not persist");
         return true;
       } catch (error) {
         if (!isDuplicate(error)) throw error;
-        const [row] = await this.db.query(`SELECT ${columns.join(", ")}, entity_id, env FROM ${DIAGNOSES_TABLE} WHERE event_id = ?`, [event.eventId]);
+        const [row] = await this.db.query(`SELECT ${columns.join(", ")} FROM ${DIAGNOSES_TABLE} WHERE event_id = ?`, [event.eventId]);
         if (!row) throw new Error("Duplicate not yet visible");
-        if (row.entity_id !== resolved.entityId || row.env !== resolved.env || JSON.stringify(eventFromRow(row)) !== JSON.stringify(event)) conflict();
+        if (row.schema_version !== event.schemaVersion || row.entity_id !== resolved.entityId || row.env !== resolved.env || JSON.stringify(eventFromRow(row)) !== JSON.stringify(event)) conflict();
         return false;
       }
     });
   }
   async applyCheck(input: ResolvedReport<BotCheck>, receivedAt: number): Promise<boolean> {
     const resolved = target(input.target);
-    const check = { ...parseCheck(input.wire, receivedAt), botId: resolved.botId };
+    const check = parseCheck(input.wire, receivedAt);
+    if (targetKey(check) !== targetKey(resolved)) throw new MonitoringError("INVALID_IDENTITY", "上报与解析身份不一致。");
     return this.run(async () => {
       const checkedMs = Date.parse(check.checkedAt), successMs = check.lastSuccessfulCheckAt === null ? null : Date.parse(check.lastSuccessfulCheckAt);
       // CAS retries resolve concurrent inserts/updates across processes using the unique key and old timestamp.
@@ -131,11 +135,11 @@ export class MonitoringRepository implements MonitoringStore {
             return true;
           } catch (error) { if (isDuplicate(error)) continue; throw error; }
         }
-        if (row.engine !== check.engine) conflict();
+        if (row.engine !== check.engine) conflict("CHECK_CONFLICT");
         const previous = integer(row.checked_at_ms);
         if (previous > checkedMs) return false;
         if (previous === checkedMs) {
-          if (JSON.stringify(checkFromRow(row)) !== JSON.stringify(check)) conflict();
+          if (JSON.stringify(checkFromRow(row)) !== JSON.stringify(check)) conflict("CHECK_CONFLICT");
           return false;
         }
         const result = await this.db.exec(`UPDATE ${CHECKS_TABLE} SET engine = ?, checked_at_ms = ?,

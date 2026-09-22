@@ -14,7 +14,7 @@ export async function createPreviewApp() {
   const db = new SqliteDatabase(new Database(':memory:'));
   await initializeMonitoringSqlite(db);
   await db.exec(`CREATE TABLE ac_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT, entity_id TEXT, env TEXT,
-    bot_name TEXT, owner_id TEXT, owner_name TEXT, avernet_tenant TEXT, is_delete INTEGER DEFAULT 0)`);
+    active_engine TEXT DEFAULT 'teclaw', bot_name TEXT, owner_id TEXT, owner_name TEXT, avernet_tenant TEXT, is_delete INTEGER DEFAULT 0)`);
   const scope = { tenant: 'teamclaw', allowedTargetEnvs: ['dev', 'prod'] };
   const repo = new MonitoringRepository(db);
   const now = Date.now();
@@ -23,11 +23,11 @@ export async function createPreviewApp() {
     await db.exec('INSERT INTO ac_bots (bot_id,entity_id,env,bot_name,owner_id,owner_name,avernet_tenant) VALUES (?,?,?,?,?,?,?)',
       [botId, entityId, env, name, entityId, entityId === '001234' ? '林小满' : '陈雨', scope.tenant]);
     const target = { botId, entityId, env };
-    if (status) await repo.applyCheck({ target, wire: parseCheck({ schemaVersion: 'claw-monitoring/bot-check/v1', botId,
+    if (status) await repo.applyCheck({ target, wire: parseCheck({ schemaVersion: 'claw-monitoring/bot-check/v2', ...target,
       engine: 'TE', status, checkedAt: new Date(now).toISOString(), lastSuccessfulCheckAt: new Date(now).toISOString() }, now) }, now);
     for (let i = 0; i < count; i++) {
       const eventId = `preview-${entityId}-${botId}-${env}-${i}`;
-      const wire = parseDiagnosis({ ...fixture, botId, eventId, diagnosisId: eventId,
+      const wire = parseDiagnosis({ ...fixture, ...target, eventId, diagnosisId: eventId,
         sessionId: `session-${entityId}-${Math.floor(i / 2)}`, traceId: `trace-${eventId}`,
         decision: i % 3 === 0 ? 'ALERT' : 'PASS',
         confidence: i % 3 === 0 ? 0.86 : null,

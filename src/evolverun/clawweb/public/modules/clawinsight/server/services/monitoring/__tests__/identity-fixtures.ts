@@ -1,15 +1,17 @@
 import type { MonitoringTarget, ResolvedReport } from '../contracts.js';
 import type { MonitoringBotDirectory, MonitoringTargetResolver } from '../directory-contracts.js';
 import type { MonitoringIntegration } from '../monitoring-runtime.js';
-/** Explicit synthetic identity for v1 transport regressions only. Production never infers these values. */
+/** Explicit synthetic identity for v2 transport regressions only. Production never infers these values. */
 export const testTarget = (botId: string): MonitoringTarget => ({ botId, entityId: '001234', env: 'test' });
 export const resolved = <T extends { botId: string }>(wire: T): ResolvedReport<T> => ({ wire, target: testTarget(wire.botId) });
 export const fixtureResolver: MonitoringTargetResolver = {
-  resolve: async botId => testTarget(botId), legacyId: async target => target.botId,
+  resolveIdentity: async target => target,
+  resolveReport: async ({ botId, entityId, env }) => ({ botId, entityId, env }),
+  resolve: async botId => testTarget(botId),
 };
 export const fixtureDirectory: MonitoringBotDirectory = {
-  exact: async botId => [{ ...testTarget(botId), directoryId: '1', botName: botId, ownerId: '001234', ownerName: null }],
-  get: async target => ({ ...target, directoryId: '1', botName: target.botId, ownerId: '001234', ownerName: null }),
+  exact: async botId => [{ ...testTarget(botId), directoryId: '1', activeEngine: 'teclaw', botName: botId, ownerId: '001234', ownerName: null }],
+  get: async target => ({ ...target, directoryId: '1', activeEngine: target.botId === 'mock-bot-oc' || /^bot-0\d$|^bot-1[0-6]$/.test(target.botId) ? 'openclaw' : 'teclaw', botName: target.botId, ownerId: '001234', ownerName: null }),
   search: async () => ({ items: [], hasMore: false }),
 };
 export const fixtureIntegration: MonitoringIntegration = {

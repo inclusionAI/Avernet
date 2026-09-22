@@ -28,15 +28,24 @@ export function createTargetResolver(directory: MonitoringBotDirectory, scope: D
     }
     return resolved;
   };
+  const lookup = async (identity: MonitoringTarget) => {
+    const requested = target(identity);
+    const bot = await directory.get(requested, scope);
+    if (!bot || targetKey(bot) !== targetKey(requested) || !scope.allowedTargetEnvs.includes(bot.env)) {
+      throw new MonitoringError('BOT_IDENTITY_UNAVAILABLE', '监控目标不可用。');
+    }
+    return bot;
+  };
   return {
-    resolve,
-    async legacyId(t) {
-      const wire = byTarget.get(targetKey(t)) ?? t.botId;
-      try { return targetKey(await resolve(wire)) === targetKey(t) ? wire : null; }
-      catch (e) {
-        if (e instanceof MonitoringError && ['TARGET_UNRESOLVED', 'TARGET_AMBIGUOUS', 'TARGET_BINDING_CONFLICT'].includes(e.code)) return null;
-        throw e;
+    async resolveIdentity(identity) { return target(await lookup(identity)); },
+    async resolveReport(identity, engine) {
+      const bot = await lookup(identity);
+      // Engine is a property of the unique match, never a fourth identity dimension.
+      if (bot.activeEngine !== (engine === "OC" ? "openclaw" : "teclaw")) {
+        throw new MonitoringError("INVALID_EVENT", "上报引擎与目标不一致。");
       }
+      return target(bot);
     },
+    resolve,
   };
 }

@@ -20,7 +20,7 @@ const fixture = (name: string) =>
   );
 const alert = fixture("alert"), pass = fixture("pass"), unresolved = fixture("unresolved");
 const now = Date.parse("2026-09-10T09:00:00Z");
-const check = { schemaVersion: "claw-monitoring/bot-check/v1", botId: "mock-bot-te", engine: "TE",
+const check = { schemaVersion: "claw-monitoring/bot-check/v2", entityId: "001234", env: "test", botId: "mock-bot-te", engine: "TE",
   checkedAt: new Date(now).toISOString(), lastSuccessfulCheckAt: new Date(now).toISOString(), status: "HEALTHY" };
 let db: IDatabase, dir: string, url: string;
 let server: ReturnType<express.Application["listen"]> | undefined;
@@ -87,10 +87,10 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
   ])("discovers 26 bots from real writes without a restart or configuration: %j", async (legacy) => {
     await stop(); env = legacy; await start();
     expect((await call("/monitoring/bots")).body).toEqual({ items: [] });
-    const expected: { botId: string }[] = [];
+    const expected: { botId: string; entityId: string; env: string }[] = [];
     for (let i = 0; i < 26; i++) {
       const botId = `bot-${String(i).padStart(2, "0")}`, engine = i < 17 ? "OC" : "TE";
-      expected.push({ botId });
+      expected.push({ botId, entityId: "001234", env: "test" });
       expect((await post({ ...check, botId, engine }, "bot-checks")).status).toBe(200);
       const eventId = `event-${i}`;
       expect((await post({ ...alert, botId, engine, eventId, diagnosisId: eventId })).status).toBe(201);
@@ -119,13 +119,13 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
       expect((await post({ ...check, checkedAt: new Date(clock).toISOString(), status: "PAUSED" }, "bot-checks")).status).toBe(200);
       clock += 300001;
       expect((await call("/monitoring/bots/mock-bot-te/status")).body.status).toBe("PAUSED");
-      expect((await call("/monitoring/bots")).body.items).toEqual([{ botId: check.botId }]);
+      expect((await call("/monitoring/bots")).body.items).toEqual([{ botId: check.botId, entityId: check.entityId, env: check.env }]);
     },
   );
   it("discovers historical diagnosis-only bots and keeps case-sensitive identities", async () => {
     await post({ ...alert, botId: "Case" });
     expect((await post({ ...check, botId: "case" }, "bot-checks")).status).toBe(200);
-    expect((await call("/monitoring/bots")).body.items).toEqual([{ botId: "Case" }, { botId: "case" }]);
+    expect((await call("/monitoring/bots")).body.items).toEqual(["Case", "case"].map(botId => ({ botId, entityId: "001234", env: "test" })));
     expect((await call("/monitoring/bots/Case/status")).body).toMatchObject({ status: "UNKNOWN", diagnosisCount: 1 });
     expect((await get("never-reported")).status).toBe(404);
   });

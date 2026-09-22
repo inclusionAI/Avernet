@@ -1,6 +1,6 @@
 /** Service API: CV reports immutable events; the UI reads projections. No transport dependencies. */
-export const DIAGNOSIS_VERSION = "claw-monitoring/diagnosis-event/v1";
-export const CHECK_VERSION = "claw-monitoring/bot-check/v1";
+export const DIAGNOSIS_VERSION = "claw-monitoring/diagnosis-event/v2";
+export const CHECK_VERSION = "claw-monitoring/bot-check/v2";
 export type Engine = "OC" | "TE";
 export type Decision = "ALERT" | "PASS" | "UNRESOLVED";
 export type CheckStatus = "HEALTHY" | "ERROR" | "UNKNOWN" | "PAUSED";
@@ -10,6 +10,8 @@ export type DiagnosisEvent = {
   eventId: string;
   diagnosisId: string;
   botId: string;
+  entityId: string;
+  env: string;
   engine: Engine;
   sessionKey: string | null;
   sessionId: string | null;
@@ -29,6 +31,8 @@ export type DiagnosisEvent = {
 export type BotCheck = {
   schemaVersion: typeof CHECK_VERSION;
   botId: string;
+  entityId: string;
+  env: string;
   engine: Engine;
   checkedAt: string;
   lastSuccessfulCheckAt: string | null;
@@ -53,8 +57,8 @@ export type DiagnosisPage = {
 export type BotStatus = {
   botId: string; status: CheckStatus; lastSuccessfulCheckAt: string | null; diagnosisCount: number;
 };
-export type DiagnosisAck = { accepted: true; stored: true; eventId: string; duplicate: boolean };
-export type CheckAck = { accepted: true; botId: string; applied: boolean };
+export type DiagnosisAck = MonitoringTarget & { accepted: true; stored: true; eventId: string; duplicate: boolean };
+export type CheckAck = MonitoringTarget & { accepted: true; applied: boolean };
 export type MonitoringTarget = { botId: string; entityId: string; env: string };
 export type ResolvedReport<T> = { wire: T; target: MonitoringTarget };
 export type MonitoringWindow = { startMs: number | null; endMs: number | null };
@@ -67,7 +71,7 @@ export type MonitoringSummary = {
 export interface MonitoringStore {
   /** Targets with a persisted bot-check; diagnosis-only targets are excluded. */
   listCheckedTargets(): Promise<MonitoringTarget[]>;
-  /** Distinct persisted bot IDs from both checks and diagnoses, ordered by botId. */
+  /** Distinct persisted triplets from both checks and diagnoses, ordered by botId/entityId/env. */
   listTargets(): Promise<MonitoringTarget[]>;
   summaries(targets: readonly MonitoringTarget[], window: MonitoringWindow): Promise<(MonitoringSummary | null)[]>;
   insertDiagnosis(event: ResolvedReport<DiagnosisEvent>, receivedAt: number): Promise<boolean>;
@@ -76,13 +80,14 @@ export interface MonitoringStore {
   listDiagnoses(target: MonitoringTarget, query: DiagnosisQuery): Promise<DiagnosisPage>;
 }
 export interface MonitoringApi {
-  bots(): Promise<{ items: { botId: string }[] }>;
+  bots(): Promise<{ items: MonitoringTarget[] }>;
   reportDiagnosis(input: unknown, key: string | undefined): Promise<DiagnosisAck>;
   reportCheck(input: unknown): Promise<CheckAck>;
   status(botId: string): Promise<BotStatus>;
   diagnoses(botId: string, query: Record<string, unknown>): Promise<DiagnosisPage>;
 }
-export type MonitoringErrorCode = "INVALID_EVENT"
+export type MonitoringErrorCode = "INVALID_EVENT" | "INVALID_IDENTITY"
+  | "BOT_IDENTITY_UNAVAILABLE" | "BOT_IDENTITY_AMBIGUOUS" | "CHECK_CONFLICT"
   | "TARGET_UNRESOLVED" | "TARGET_AMBIGUOUS" | "TARGET_BINDING_CONFLICT"
   | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_ENROLLED" | "ALREADY_ENROLLED" | "ENROLLMENT_NOT_IMPLEMENTED"
   | "EVENT_CONFLICT" | "PAYLOAD_TOO_LARGE" | "NOT_READY" | "BOT_NOT_FOUND";

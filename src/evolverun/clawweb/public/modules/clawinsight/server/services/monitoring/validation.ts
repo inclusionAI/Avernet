@@ -2,6 +2,8 @@ import {
   CHECK_VERSION, DIAGNOSIS_VERSION, MonitoringError,
   type BotCheck, type DiagnosisEvent, type DiagnosisQuery,
 } from "./contracts.js";
+import { id, target } from "./target.js";
+export { id } from "./target.js";
 
 export function invalid(message = "上报字段不符合契约。"): never {
   throw new MonitoringError("INVALID_EVENT", message);
@@ -10,10 +12,6 @@ export function record(input: unknown, allowed: readonly string[]): Record<strin
   if (!input || typeof input !== "object" || Array.isArray(input)) invalid();
   const value = input as Record<string, unknown>;
   if (Object.keys(value).some((key) => !allowed.includes(key))) invalid("包含未约定的字段。");
-  return value;
-}
-export function id(value: unknown): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(value)) invalid("ID 格式错误。");
   return value;
 }
 export function oneOf<T extends string>(value: unknown, values: readonly T[]): T {
@@ -43,13 +41,20 @@ export function timestamp(value: unknown): string {
   if (!/^\d{4}-/.test(iso)) invalid();
   return iso;
 }
-const diagnosisKeys = ["schemaVersion", "eventId", "diagnosisId", "botId", "engine", "sessionKey", "sessionId", "traceId",
+function reportIdentity(v: Record<string, unknown>, version: string) {
+  if (v.schemaVersion !== version) throw new MonitoringError("INVALID_IDENTITY", "上报身份或版本无效。");
+  try {
+    return target({ botId: v.botId as string, entityId: v.entityId as string, env: v.env as string });
+  } catch { throw new MonitoringError("INVALID_IDENTITY", "上报身份或版本无效。"); }
+}
+const diagnosisKeys = ["entityId", "env", "schemaVersion", "eventId", "diagnosisId", "botId", "engine", "sessionKey", "sessionId", "traceId",
   "occurredAt", "diagnosedAt", "decision", "tcFaultLabel", "confidence", "businessProblemCategory",
   "businessProblemSubtype", "systemDiagnosis", "businessDiagnosis", "handlerName", "humanIntervention"];
 export function parseDiagnosis(input: unknown, key: string | undefined): DiagnosisEvent {
   const v = record(input, diagnosisKeys);
+  const identity = reportIdentity(v, DIAGNOSIS_VERSION);
   const eventId = id(v.eventId);
-  if (v.schemaVersion !== DIAGNOSIS_VERSION || id(v.diagnosisId) !== eventId || key !== eventId) invalid();
+  if (id(v.diagnosisId) !== eventId || key !== eventId) invalid();
   const engine = oneOf(v.engine, ["OC", "TE"]);
   const decision = oneOf(v.decision, ["ALERT", "PASS", "UNRESOLVED"]);
   const confidence = v.confidence ?? null;
@@ -63,7 +68,7 @@ export function parseDiagnosis(input: unknown, key: string | undefined): Diagnos
   if ([sessionKey, sessionId, traceId].some((s) => s !== null && !s.trim()) || (engine === "TE" && !traceId)) invalid();
   if (typeof v.humanIntervention !== "boolean") invalid();
   return {
-    schemaVersion: DIAGNOSIS_VERSION, eventId, diagnosisId: eventId, botId: id(v.botId), engine,
+    schemaVersion: DIAGNOSIS_VERSION, eventId, diagnosisId: eventId, ...identity, engine,
     sessionKey, sessionId, traceId, occurredAt: v.occurredAt == null ? null : timestamp(v.occurredAt),
     diagnosedAt: timestamp(v.diagnosedAt), decision, tcFaultLabel, confidence,
     businessProblemCategory: nullableText(v.businessProblemCategory, 128),
@@ -73,12 +78,13 @@ export function parseDiagnosis(input: unknown, key: string | undefined): Diagnos
   };
 }
 export function parseCheck(input: unknown, now: number): BotCheck {
-  const v = record(input, ["schemaVersion", "botId", "engine", "checkedAt", "lastSuccessfulCheckAt", "status"]);
-  if (v.schemaVersion !== CHECK_VERSION || !("lastSuccessfulCheckAt" in v)) invalid();
+  const v = record(input, ["schemaVersion", "botId", "entityId", "env", "engine", "checkedAt", "lastSuccessfulCheckAt", "status"]);
+  const identity = reportIdentity(v, CHECK_VERSION);
+  if (!("lastSuccessfulCheckAt" in v)) invalid();
   const checkedAt = timestamp(v.checkedAt);
   const lastSuccessfulCheckAt = v.lastSuccessfulCheckAt === null ? null : timestamp(v.lastSuccessfulCheckAt);
   if (Date.parse(checkedAt) > now + 300_000 || (lastSuccessfulCheckAt !== null && Date.parse(lastSuccessfulCheckAt) > Date.parse(checkedAt))) invalid();
-  return { schemaVersion: CHECK_VERSION, botId: id(v.botId), engine: oneOf(v.engine, ["OC", "TE"]),
+  return { schemaVersion: CHECK_VERSION, ...identity, engine: oneOf(v.engine, ["OC", "TE"]),
     checkedAt, lastSuccessfulCheckAt, status: oneOf(v.status, ["HEALTHY", "ERROR", "UNKNOWN", "PAUSED"]) };
 }
 export function parseQuery(input: Record<string, unknown>): DiagnosisQuery {

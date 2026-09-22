@@ -5,7 +5,7 @@ import { createMonitoringRuntime, type MonitoringRuntime } from "../services/mon
 
 const MAX_BYTES = 128 * 1024;
 const scoped = (req: Request) => /^\/(?:internal\/monitoring|monitoring)(?:\/|$)/.test(req.path);
-const statusCodes = { INVALID_EVENT: 400,
+const statusCodes = { INVALID_EVENT: 400, INVALID_IDENTITY: 400, BOT_IDENTITY_UNAVAILABLE: 403, BOT_IDENTITY_AMBIGUOUS: 409, CHECK_CONFLICT: 409,
   TARGET_UNRESOLVED: 409, TARGET_AMBIGUOUS: 409, TARGET_BINDING_CONFLICT: 409,
   UNAUTHENTICATED: 401, FORBIDDEN: 403, NOT_ENROLLED: 409, ALREADY_ENROLLED: 409, ENROLLMENT_NOT_IMPLEMENTED: 501,
   EVENT_CONFLICT: 409, PAYLOAD_TOO_LARGE: 413, NOT_READY: 503, BOT_NOT_FOUND: 404 } as const;
@@ -18,8 +18,11 @@ export const monitoringErrorResponse: ErrorRequestHandler = (error, req, res, ne
       ? new MonitoringError("INVALID_EVENT", "JSON 格式或编码无效。")
       : new MonitoringError("NOT_READY", "监控服务暂不可用。");
   res.set("Cache-Control", "no-store");
+  const reporting = req.path.startsWith("/internal/monitoring");
+  const code = ["INVALID_IDENTITY", "BOT_IDENTITY_UNAVAILABLE", "BOT_IDENTITY_AMBIGUOUS"].includes(failure.code)
+    ? failure.code : `MONITORING_${failure.code}`;
   res.status(statusCodes[failure.code]).json({ error: {
-    code: `MONITORING_${failure.code}`, message: failure.message, requestId: randomUUID(),
+    code, ...(reporting ? {} : { message: failure.message }), requestId: randomUUID(),
   } });
 };
 

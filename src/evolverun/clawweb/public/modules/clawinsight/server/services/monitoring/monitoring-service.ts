@@ -1,4 +1,4 @@
-import { MonitoringError, type MonitoringApi, type MonitoringStore } from "./contracts.js";
+import { MonitoringError, type MonitoringApi, type MonitoringStore, type MonitoringTarget } from "./contracts.js";
 import type { MonitoringTargetResolver } from "./directory-contracts.js";
 import { id, parseCheck, parseDiagnosis, parseQuery } from "./validation.js";
 
@@ -13,22 +13,25 @@ export function createMonitoringService(
   }
   return {
     async bots() {
-      const ids: string[] = [];
-      for (const target of await store.listTargets()) {
-        const wireId = await resolver.legacyId(target);
-        if (wireId !== null) ids.push(wireId);
+      // Reapply trusted directory scope without collapsing same-name defaults or using aliases.
+      const items: MonitoringTarget[] = [];
+      for (const identity of await store.listTargets()) {
+        try { items.push(await resolver.resolveIdentity(identity)); }
+        catch (error) {
+          if (!(error instanceof MonitoringError) || error.code !== "BOT_IDENTITY_UNAVAILABLE") throw error;
+        }
       }
-      return { items: [...new Set(ids)].sort().map(botId => ({ botId })) };
+      return { items };
     },
     async reportDiagnosis(input, key) {
       const event = parseDiagnosis(input, key);
-      const inserted = await store.insertDiagnosis({ wire: event, target: await resolver.resolve(event.botId) }, now());
-      return { accepted: true, stored: true, eventId: event.eventId, duplicate: !inserted };
+      const inserted = await store.insertDiagnosis({ wire: event, target: await resolver.resolveReport(event, event.engine) }, now());
+      return { accepted: true, stored: true, eventId: event.eventId, botId: event.botId, entityId: event.entityId, env: event.env, duplicate: !inserted };
     },
     async reportCheck(input) {
       const receivedAt = now();
       const check = parseCheck(input, receivedAt);
-      return { accepted: true, botId: check.botId, applied: await store.applyCheck({ wire: check, target: await resolver.resolve(check.botId) }, receivedAt) };
+      return { accepted: true, botId: check.botId, entityId: check.entityId, env: check.env, applied: await store.applyCheck({ wire: check, target: await resolver.resolveReport(check, check.engine) }, receivedAt) };
     },
     async status(botId) {
       const { check, count } = await observedBot(botId);

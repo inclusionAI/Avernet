@@ -15,7 +15,7 @@ export function createMonitoringMockScenario(batch: string, now: number) {
       const decision = (['ALERT', 'PASS', 'UNRESOLVED'] as const)[i % 3];
       const id = `${bot.botId}-${i}`;
       events.push({ schemaVersion: DIAGNOSIS_VERSION, eventId: id, diagnosisId: id,
-        botId: bot.botId, engine: bot.engine,
+        botId: bot.botId, entityId: "local-demo", env: "local", engine: bot.engine,
         sessionKey: bot.engine === 'OC' ? `agent:main:mock:${i}` : null,
         sessionId: bot.engine === 'TE' ? `mock-session-${Math.floor(i / 3)}` : null,
         traceId: bot.engine === 'TE' ? `mock-trace-${i}` : null,
@@ -33,7 +33,7 @@ export function createMonitoringMockScenario(batch: string, now: number) {
     }
   }
   const checks: BotCheck[] = bots.map((bot, i) => ({ schemaVersion: CHECK_VERSION,
-    botId: bot.botId, engine: bot.engine,
+    botId: bot.botId, entityId: "local-demo", env: "local", engine: bot.engine,
     checkedAt: iso(now - (i === 2 ? 3600000 : 0)),
     lastSuccessfulCheckAt: iso(now - (i === 0 ? 0 : 3600000)),
     status: i === 3 ? 'PAUSED' : i === 1 ? 'ERROR' : 'HEALTHY',

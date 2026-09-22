@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "claw-monitoring/diagnosis-event/v1",
+  "schemaVersion": "claw-monitoring/diagnosis-event/v2",
   "eventId": "mock-diag-oc-unresolved-003",
   "diagnosisId": "mock-diag-oc-unresolved-003",
   "botId": "mock-bot-oc",
@@ -17,5 +17,7 @@
   "systemDiagnosis": "诊断模型暂不可用，无法生成有效结论。",
   "businessDiagnosis": null,
   "handlerName": null,
-  "humanIntervention": false
+  "humanIntervention": false,
+  "entityId": "001234",
+  "env": "test"
 }

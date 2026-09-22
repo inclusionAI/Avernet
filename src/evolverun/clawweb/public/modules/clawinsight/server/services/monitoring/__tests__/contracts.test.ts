@@ -16,7 +16,7 @@ const fixture = (name: string) =>
   );
 const alert = fixture("alert");
 const now = Date.parse("2026-09-10T09:00:00Z");
-const check = { schemaVersion: CHECK_VERSION, botId: "mock-bot-te", engine: "TE", checkedAt: new Date(now).toISOString(),
+const check = { schemaVersion: CHECK_VERSION, entityId: "001234", env: "test", botId: "mock-bot-te", engine: "TE", checkedAt: new Date(now).toISOString(),
   lastSuccessfulCheckAt: new Date(now).toISOString(), status: "HEALTHY" };
 afterEach(() => { vi.unstubAllEnvs(); });
 function store(): MonitoringStore {
@@ -88,7 +88,7 @@ describe("monitoring service and configuration", () => {
     await expect(api.reportDiagnosis({ ...alert, botId: "new-bot" }, alert.eventId)).resolves.toMatchObject({ accepted: true });
     vi.mocked(repo.insertDiagnosis).mockClear();
     await expect(api.reportDiagnosis({ ...alert, engine: "OTHER" }, alert.eventId)).rejects.toMatchObject({ code: "INVALID_EVENT" });
-    await expect(api.reportCheck({ ...check, botId: "bad/id" })).rejects.toMatchObject({ code: "INVALID_EVENT" });
+    await expect(api.reportCheck({ ...check, botId: "bad/id" })).rejects.toMatchObject({ code: "INVALID_IDENTITY" });
     await expect(api.status("unknown")).rejects.toMatchObject({ code: "BOT_NOT_FOUND" });
     await expect(api.diagnoses("unknown", {})).rejects.toMatchObject({ code: "BOT_NOT_FOUND" });
     expect(repo.insertDiagnosis).not.toHaveBeenCalled();
@@ -113,7 +113,7 @@ describe("monitoring service and configuration", () => {
     const repo = store(); const api = createMonitoringService(repo, fixtureResolver);
     expect(await api.bots()).toEqual({ items: [] });
     vi.mocked(repo.listTargets).mockResolvedValue([testTarget("new-bot")]);
-    expect(await api.bots()).toEqual({ items: [{ botId: "new-bot" }] });
+    expect(await api.bots()).toEqual({ items: [testTarget("new-bot")] });
     expect(repo.listTargets).toHaveBeenCalledTimes(2);
   });
   it("never turns a failed storage operation into success", async () => {

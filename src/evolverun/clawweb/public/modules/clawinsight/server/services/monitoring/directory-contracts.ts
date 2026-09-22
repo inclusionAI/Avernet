@@ -1,4 +1,4 @@
-import type { DiagnosisPage, MonitoringSummary, MonitoringTarget, MonitoringWindow } from './contracts.js';
+import type { Engine, DiagnosisPage, MonitoringSummary, MonitoringTarget, MonitoringWindow } from './contracts.js';
 
 /** Plugin API: host-verified identity. No request fields are trusted by the domain service. */
 export type MonitoringPrincipal = {
@@ -6,7 +6,7 @@ export type MonitoringPrincipal = {
   tenant: string; allowedTargetEnvs: readonly string[];
 };
 export type DirectoryScope = { tenant: string; allowedTargetEnvs: readonly string[] };
-export type DirectoryBot = MonitoringTarget & { directoryId: string; botName: string; ownerId: string; ownerName: string | null };
+export type DirectoryBot = MonitoringTarget & { directoryId: string; activeEngine: string; botName: string; ownerId: string; ownerName: string | null };
 export type BotScope = 'mine' | 'monitored' | 'all';
 export type DirectorySearch = {
   principal: MonitoringPrincipal; scope: BotScope; q: string; limit: number; after: string | null;
@@ -17,10 +17,15 @@ export interface MonitoringBotDirectory {
   get(target: MonitoringTarget, scope: DirectoryScope): Promise<DirectoryBot | null>;
   search(query: DirectorySearch): Promise<{ items: DirectoryBot[]; hasMore: boolean }>;
 }
+/** Legacy read locators only; never used to interpret v2 reports. */
 export type LegacyReportBinding = { reportedBotId: string; target: MonitoringTarget };
 export interface MonitoringTargetResolver {
+  /** Exact scoped identity for the monitoring roster. */
+  resolveIdentity(identity: MonitoringTarget): Promise<MonitoringTarget>;
+  /** v2 writes: exact identity only; never aliases or bare-ID resolution. */
+  resolveReport(identity: MonitoringTarget, engine: Engine): Promise<MonitoringTarget>;
+  /** Existing read-only legacy routes. Not used by report handlers. */
   resolve(reportedBotId: string): Promise<MonitoringTarget>;
-  legacyId(target: MonitoringTarget): Promise<string | null>;
 }
 /** Opaque references are identifiers, NOT capabilities. ACL is reapplied on every read. */
 export interface MonitoringReferences {

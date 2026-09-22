@@ -18,7 +18,7 @@ export class SqlMonitoringBotDirectory implements MonitoringBotDirectory {
   }
   private async rows(where: string[], params: unknown[], limit: number): Promise<DirectoryBot[]> {
     try {
-      const rows = await this.db.query(`SELECT CAST(id AS ${this.db.dbType === 'sqlite' ? 'TEXT' : 'CHAR'}) AS directory_id, bot_name, bot_id, entity_id, env, owner_id, owner_name
+      const rows = await this.db.query(`SELECT CAST(id AS ${this.db.dbType === 'sqlite' ? 'TEXT' : 'CHAR'}) AS directory_id, active_engine, bot_name, bot_id, entity_id, env, owner_id, owner_name
         FROM ac_bots WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ?`, [...params, limit]);
       return rows.map(this.decode);
     } catch { throw new MonitoringError('NOT_READY', 'Bot 目录暂不可用或目录数据不完整。'); }
@@ -26,7 +26,7 @@ export class SqlMonitoringBotDirectory implements MonitoringBotDirectory {
   private decode(row: Row): DirectoryBot {
     if (!/^\d+$/.test(String(row.directory_id)) || typeof row.owner_id !== 'string' || !row.owner_id.trim()) throw new Error('Invalid directory row');
     return { ...target({ botId: row.bot_id as string, entityId: row.entity_id as string, env: row.env as string }),
-      directoryId: String(row.directory_id), botName: typeof row.bot_name === 'string' && row.bot_name.trim() ? row.bot_name : '未命名 Bot',
+      directoryId: String(row.directory_id), activeEngine: String(row.active_engine ?? ''), botName: typeof row.bot_name === 'string' && row.bot_name.trim() ? row.bot_name : '未命名 Bot',
       ownerId: row.owner_id, ownerName: row.owner_name == null ? null : String(row.owner_name) };
   }
   async exact(botId: string, scope: DirectoryScope): Promise<DirectoryBot[]> {
@@ -41,7 +41,7 @@ export class SqlMonitoringBotDirectory implements MonitoringBotDirectory {
       where.push(`${this.exactColumn(column)} = ?`); params.push(value);
     }
     const rows = await this.rows(where, params, 2);
-    if (rows.length > 1) throw new MonitoringError('NOT_READY', '目录目标不唯一。');
+    if (rows.length > 1) throw new MonitoringError('BOT_IDENTITY_AMBIGUOUS', '目录目标不唯一。');
     return rows[0] ?? null;
   }
   async search(query: DirectorySearch) {

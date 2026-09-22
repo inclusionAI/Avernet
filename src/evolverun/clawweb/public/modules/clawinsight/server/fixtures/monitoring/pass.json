@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "claw-monitoring/diagnosis-event/v1",
+  "schemaVersion": "claw-monitoring/diagnosis-event/v2",
   "eventId": "mock-diag-te-pass-002",
   "diagnosisId": "mock-diag-te-pass-002",
   "botId": "mock-bot-te",
@@ -17,5 +17,7 @@
   "systemDiagnosis": "本轮工具调用正常完成。",
   "businessDiagnosis": "用户发布的新查询任务已完成。",
   "handlerName": null,
-  "humanIntervention": false
+  "humanIntervention": false,
+  "entityId": "001234",
+  "env": "test"
 }

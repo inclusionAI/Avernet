@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "claw-monitoring/diagnosis-event/v1",
+  "schemaVersion": "claw-monitoring/diagnosis-event/v2",
   "eventId": "mock-diag-te-alert-001",
   "diagnosisId": "mock-diag-te-alert-001",
   "botId": "mock-bot-te",
@@ -17,5 +17,7 @@
   "systemDiagnosis": "数据查询工具返回空响应，本轮数据获取失败。",
   "businessDiagnosis": "用户要求重试此前未完成的数据查询，本次重试仍未取得结果。",
   "handlerName": null,
-  "humanIntervention": true
+  "humanIntervention": true,
+  "entityId": "001234",
+  "env": "test"
 }
