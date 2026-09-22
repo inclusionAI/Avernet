@@ -465,12 +465,8 @@ class WorkerProfileContentService:
         # 🔧 Step 1: 删除向量（如果 indexer 可用）
         if self._vector_indexer:
             logger.info("[ProfileService] Vector indexer available, deleting vectors for %s", profile_key)
-            try:
-                deleted_count = self._vector_indexer.delete_by_profile(profile_key)
-                logger.info("[ProfileService] Vectors deleted for %s: count=%d", profile_key, deleted_count)
-            except Exception as e:
-                logger.error("[ProfileService] Failed to delete vectors for %s: %s", profile_key, e, exc_info=True)
-                # 向量删除失败不应影响主流程
+            deleted_count = self._vector_indexer.delete_by_profile(profile_key)
+            logger.info("[ProfileService] Vectors deleted for %s: count=%d", profile_key, deleted_count)
         else:
             logger.warning("[ProfileService] Vector indexer NOT available, skipping vector deletion for %s", profile_key)
 

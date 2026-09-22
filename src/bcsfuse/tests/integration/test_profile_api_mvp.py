@@ -313,6 +313,25 @@ class TestWorkerProfileContentService:
         content = service.get_profile("wrk_test", "default")
         assert content is None
 
+    def test_delete_profile_preserves_record_when_vector_cleanup_fails(self, store):
+        class FailingVectorIndexer:
+            def delete_by_profile(self, profile_key):
+                raise RuntimeError(f"vector cleanup failed for {profile_key}")
+
+        WorkerProfileContentService(store).register_or_update_profile(
+            "wrk_test",
+            "default",
+        )
+        service = WorkerProfileContentService(
+            store,
+            vector_indexer=FailingVectorIndexer(),
+        )
+
+        with pytest.raises(RuntimeError, match="vector cleanup failed"):
+            service.delete_profile("wrk_test", "default")
+
+        assert service.get_profile("wrk_test", "default") is not None
+
 
 # ============================================================================
 # Integration Tests

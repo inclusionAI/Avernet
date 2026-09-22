@@ -6,7 +6,7 @@ use bcs_bot::core::{BotCore, ProviderCore};
 use bcs_bot_store::MemoryBotRepo;
 use bcs_bot_store::provider::MemoryProviderStore;
 use bcs_service_api::{
-    BotCatalogCleanupPort, BotRegistryCoreService, ChannelBindingCleanupPort,
+    BotCapabilities, BotCatalogCleanupPort, BotRegistryCoreService, ChannelBindingCleanupPort,
     DeleteProviderBotCommand,
     ProviderAuthMode, ProviderBotBindingRepoPort, ProviderBotCoreService,
     ProviderCredentialRepoPort, ProviderManagementService, ProviderRepoPort,
@@ -17,6 +17,7 @@ use tokio::sync::Mutex;
 
 struct TestContext {
     management: ProviderManagement,
+    registry: Arc<dyn BotRegistryCoreService>,
     cleanup: Arc<RecordingCleanup>,
     catalog_cleanup: Arc<RecordingCatalogCleanup>,
     _temp_dir: tempfile::TempDir,
@@ -89,17 +90,56 @@ fn test_context() -> TestContext {
     let management = ProviderManagement::new(
         provider_core.clone(),
         provider_bot_core,
-        registry,
+        registry.clone(),
         Arc::new(NoopRelationCoreService),
     )
     .with_channel_binding_cleanup(cleanup.clone())
     .with_bot_catalog_cleanup(catalog_cleanup.clone());
     TestContext {
         management,
+        registry,
         cleanup,
         catalog_cleanup,
         _temp_dir: temp_dir,
     }
+}
+
+#[tokio::test]
+async fn unbound_legacy_delete_retries_catalog_cleanup_after_transient_failure() {
+    let ctx = test_context();
+    let (provider_id, admin_token) = register_provider(&ctx).await;
+    let bot_uuid = "legacy:11111111";
+    ctx.registry
+        .register_with_owner_and_token(
+            bot_uuid.to_string(),
+            BotCapabilities::default(),
+            "11111111",
+            "test-runtime-token",
+        )
+        .await
+        .expect("register legacy bot without provider binding");
+    *ctx.catalog_cleanup.fail.lock().await = true;
+    let command = DeleteProviderBotCommand {
+        allow_unbound_owner_suffixed_bot: true,
+        ..delete_command(&provider_id, &admin_token, bot_uuid)
+    };
+
+    let first = ctx.management.delete_provider_bot(command.clone()).await;
+    assert!(first.is_err());
+    assert!(ctx.registry.get(bot_uuid).await.is_some());
+
+    *ctx.catalog_cleanup.fail.lock().await = false;
+    let retried = ctx
+        .management
+        .delete_provider_bot(command)
+        .await
+        .expect("retry must reach catalog cleanup for the tombstoned legacy bot");
+
+    assert_eq!(retried.bot_uuid, bot_uuid);
+    assert_eq!(
+        ctx.catalog_cleanup.deleted_bot_ids.lock().await.as_slice(),
+        &[bot_uuid.to_string()]
+    );
 }
 
 async fn register_provider(ctx: &TestContext) -> (String, String) {
