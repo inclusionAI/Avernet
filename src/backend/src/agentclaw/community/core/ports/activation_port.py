@@ -1,8 +1,8 @@
 """The activation write path, named by what the caller needs of it.
 
 An outbound port (see this package's README): the ``mcp`` and ``skills``
-materialisers record desired state through six methods of the activation
-service, and this names exactly those — so the objects a delivery strategy
+materialisers record desired state through ordinary reads/writes plus narrow
+Manifest Direct-claim commands, and this names exactly those — so the objects a delivery strategy
 hands ``build_materialisers`` are typed by what is called rather than ``Any``.
 
 **What it deliberately omits is ``project``.** ``DirectActivationServiceProtocol``
@@ -50,6 +50,12 @@ class ActivationPort(Protocol):
     ) -> dict[str, dict]: ...
 
     @abstractmethod
+    def manifest_direct_mcp_codes(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        server_codes: set[str],
+    ) -> set[str]: ...
+
+    @abstractmethod
     def set_managed_mcp_codes(
         self,
         *,
@@ -88,6 +94,30 @@ class ActivationPort(Protocol):
     @abstractmethod
     async def deactivate_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ) -> Any: ...
+
+    @abstractmethod
+    async def claim_manifest_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        apply_id: str | None,
+    ) -> Any: ...
+
+    @abstractmethod
+    async def remove_manifest_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        apply_id: str | None, remove_inactive_memberships: bool,
+    ) -> Any: ...
+
+    @abstractmethod
+    async def claim_manifest_mcp(
+        self, *, server_code: str, config: dict | None, bot_id: str,
+        owner_id: str, actor_id: str, apply_id: str | None,
+    ) -> Any: ...
+
+    @abstractmethod
+    async def remove_manifest_mcp(
+        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        apply_id: str | None,
     ) -> Any: ...
 
 

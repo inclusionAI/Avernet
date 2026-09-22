@@ -1,4 +1,4 @@
-"""File router — dispatches every endpoint through ``EngineManager.file``.
+"""File router — count uses the shared counter; other endpoints use engine files.
 
 Path translation + on-disk operations live in the engine's
 ``file`` plugin (e.g. ``engines/openclaw/file.OpenClawFileService`` rewrites
@@ -57,7 +57,8 @@ async def count_files(
     correlation = file_count_request_id.set(request_id)
     try:
         warning = check_capability(Capability.FILE_LIST)
-        result = await _file_plugin().count_files(path)
+        result = await EngineManager.get_instance().file_counter.count_files(path)
+        data = {"path": result.path, "file_count": result.file_count, "elapsed_ms": result.elapsed_ms}
     except asyncio.CancelledError:
         fields.update(status="cancelled", error_code="cancelled", elapsed_ms=int((time.monotonic() - started) * 1000))
         log.info("engine.file_count.failure", extra={"fields": redact_fields(fields)})
@@ -71,7 +72,6 @@ async def count_files(
     except Exception:  # noqa: BLE001 — sanitized stable boundary error only
         pass
     else:
-        data = {"path": result.path, "file_count": result.file_count, "elapsed_ms": result.elapsed_ms}
         fields.update(status="success", response=data, elapsed_ms=int((time.monotonic() - started) * 1000))
         log.info("engine.file_count.response", extra={"fields": redact_fields(fields)})
         return ApiResponse(success=True, data=data, warning=warning)

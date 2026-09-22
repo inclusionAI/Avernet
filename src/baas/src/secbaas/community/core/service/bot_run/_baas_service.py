@@ -780,6 +780,7 @@ class BaasBotService(BotService):
         *,
         session_id: str,
         binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
     ) -> None:
         """Best-effort 通知 engine 中止 session。
 
@@ -792,7 +793,7 @@ class BaasBotService(BotService):
         """
         try:
             conn_info = await self._resolve_ws_connection_for_binding(
-                binding_info, session_id, context=None
+                binding_info, session_id, context=context
             )
         except Exception as e:
             logger.warning(

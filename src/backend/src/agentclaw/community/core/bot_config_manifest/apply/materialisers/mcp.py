@@ -1,35 +1,14 @@
-"""``mcp`` → ``DirectActivationService``. Converges installation + Bot config.
+"""Materialise the Manifest's complete explicit MCP snapshot as Direct claims.
 
-**The entry shape.** ``identity`` is ``server_code``; optional ``config`` is a
-closed Bot-scoped connection override. This category fetches no content::
+Every declared server converts ordinary SkillSet supply to Direct, or combines a
+Default/platform exclusion with a Direct Installation. Its closed ``config`` is
+the complete Bot override and commits atomically with that Installation.
 
-    manifest:
-      mcp:
-        - server_code: gh
-          config:
-            endpoint_env: PRE
-            transport_protocol: STREAMABLE_HTTP
-        - server_code: slack
-
-An entry reaches ``resolve`` with the normalized config preserved. A category
-declared empty (``mcp: []``) deactivates every server the manifest owns.
-
-The area this overwrites is the enabled-server set for this category —
-"the enabled-server set" — the MCP servers active on *this bot*, stored in
-``ac_bot_mcp_installation`` and keyed ``(bot_id, owner_id, env, server_code)``.
-Declared and not active ⇒ activated. Active and no longer declared ⇒
-deactivated. A changed or removed override ⇒ ``updated``. Matching installation
-and override ⇒ ``unchanged``, and nothing is called.
-
-**Nothing here writes account-scoped MCP configuration.** Explicit values go to
-``ac_bot_mcp_config`` in the same Desired-State transaction as the installation.
-``ac_user_mcp_config`` remains the inherited default and is never mutated by a
-Manifest apply.
-
-**Deactivating servers a user turned on through the UI is intended**, and is the
-cost §3.2 accepted when it made a declared category overwrite its area. It is
-called out in the route's docstring because the first person surprised by it
-will be a real user.
+Omitted explicit supply and Bot overrides are removed. Skill dependencies remain
+derived: they are not inserted into the Installation table, do not appear in
+``removed``, and stale Bot overrides are cleared with an ``updated`` report row.
+Source-only conversion can therefore report ``unchanged`` while
+``requires_write`` performs the internal transition.
 """
 from __future__ import annotations
 
@@ -42,6 +21,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
     CategoryPlan,
+    ConfirmedPartialWriteError,
     Intent,
     Materialiser,
     PlannedEntry,
@@ -56,6 +36,15 @@ from agentclaw.community.core.mcp.mcp_config_service_protocol import (
     MCPConfigServiceProtocol,
 )
 from agentclaw.community.core.ports.activation_port import ActivationPort
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.errors import (
+    ManifestDesiredStateCommittedError,
+)
+from agentclaw.community.core.skill_center.mcp_dependency_scope import (
+    mcp_dependency_codes,
+)
 
 
 def _comparison_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -92,58 +81,22 @@ class McpMaterialiser(Materialiser):
         activation_service: ActivationPort,
         mcp_auth_service: MCPAuthServiceProtocol,
         mcp_config_service: MCPConfigServiceProtocol,
+        capability_reader: BotCapabilityStateReaderProtocol,
     ) -> None:
         self._activation = activation_service
         # The *same* permission service ``DirectActivationService`` consults, so
         # the answer here cannot diverge from the answer the write would get.
         self._mcp_auth = mcp_auth_service
         self._mcp_config = mcp_config_service
+        self._reader = capability_reader
 
     async def resolve(
         self, ctx: ApplyContext, entries: Sequence[dict[str, Any]]
     ) -> ResolveResult:
-        """Check every declared ``server_code`` **before** anything is written.
-
-        The permission check has to happen here rather than being left to
-        ``activate_mcp``, which performs its own. If it were left there, a
-        declaration of ``{A, B}`` where B is not permitted would activate A and
-        *then* fail — and under overwrite a half-written set is a deletion of
-        the rest. Checking up front is what makes the category all-or-nothing.
-
-        The check itself is reused, not copied: the same
-        ``check_mcp_permission_detail`` call, and the same **fail-closed**
-        reading of its answer that ``DirectActivationService._require_mcp_permission``
-        applies. That endpoint is advisory and fail-open during an upstream
-        outage — an empty ``access_level`` is its documented outage sentinel —
-        and a desired-state write must not act on that.
-
-        Permission is not the only way the write can refuse, and asking about
-        only one of them is what made the all-or-nothing claim above untrue.
-        ``activate_mcp`` and ``deactivate_mcp`` *also* refuse a code the Bot's
-        engine/template policy owns, raising
-        ``SkillSetControlPlaneConflictError`` from a guard that runs before the
-        permission check. So a declaration of ``{A, B}`` where A is permitted and
-        B is a platform default passed resolve, activated A for real, and then
-        raised on B — leaving the category half-written and reported aborted.
-        Both refusals are now asked here, before anything is written.
-        """
+        """Validate every explicit MCP before the category writes anything."""
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
         seen: set[str] = set()
-        platform_owned = self._platform_owned(ctx)
-        declared_codes = {
-            entry.get("server_code")
-            for entry in entries
-            if isinstance(entry.get("server_code"), str)
-            and entry.get("server_code")
-        }
-        set_managed = self._activation.set_managed_mcp_codes(
-            bot_id=ctx.bot_id,
-            owner_id=ctx.owner_id,
-            actor_id=ctx.actor_id,
-            server_codes=declared_codes,
-        )
-
         for index, entry in enumerate(entries):
             server_code = entry.get("server_code") if isinstance(entry, dict) else None
             if not isinstance(server_code, str) or not server_code:
@@ -165,30 +118,6 @@ class McpMaterialiser(Materialiser):
                 continue
             seen.add(server_code)
 
-            if server_code in platform_owned:
-                # Refused rather than accepted as a no-op. It *is* active, so
-                # "already satisfied" is tempting — but the manifest does not
-                # control it, and pretending otherwise would turn the
-                # declaration into a real install the day the platform stopped
-                # making it a default. The author is told instead.
-                failures.append(
-                    ResolveFailure(
-                        server_code,
-                        "this MCP server is a platform default for this bot: it "
-                        "is managed by engine/template policy, not by a "
-                        "manifest, and is enabled without being declared",
-                    )
-                )
-                continue
-            if server_code in set_managed:
-                failures.append(
-                    ResolveFailure(
-                        server_code,
-                        "this MCP server is managed by a SkillSet and cannot be "
-                        "configured directly by a manifest",
-                    )
-                )
-                continue
             if not self._permitted(ctx, server_code):
                 failures.append(
                     ResolveFailure(
@@ -259,49 +188,49 @@ class McpMaterialiser(Materialiser):
     async def plan(
         self, ctx: ApplyContext, intents: Sequence[Intent]
     ) -> CategoryPlan:
-        """Diff the declared set against what is actually installed.
-
-        The installed set is narrowed by the codes the platform owns before the
-        diff, so a platform default can never become a removal. Overwrite reads
-        an absent entry as "remove it", but that reading only makes sense for
-        entries the manifest could have declared — and a platform default is one
-        this materialiser refuses in ``resolve``. Leaving it in would mean every
-        apply on such a bot called ``deactivate_mcp`` on a code the policy
-        refuses, failing a category for something no author could fix from the
-        document.
-
-        A default is normally absent from ``ac_bot_mcp_installation`` (it is code
-        policy, not installation provenance), so this is usually a no-op. It
-        stops being one when a bot's ``active_engine`` or ``template_type``
-        changes and turns an ordinary installed server into a default.
-        """
-        current = set(
+        """Plan public outcomes separately from required source/config writes."""
+        installed = set(
             self._activation.list_installed_mcps(
                 bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
             )
-        ) - self._platform_owned(ctx)
+        )
+        platform_owned = set(self._platform_owned(ctx))
         declared = {intent.identity for intent in intents}
+        overrides = self._activation.get_mcp_overrides(
+            bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
+        )
+        dependency_codes = ctx.capability_state.final_skill_dependency_codes
+        if dependency_codes is None:
+            resolved: set[str] = set()
+            for asset in self._reader.active_skill_assets(
+                bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
+            ):
+                resolved.update(
+                    mcp_dependency_codes(
+                        getattr(asset, "mcp_dependencies", ()) or ()
+                    )
+                )
+            dependency_codes = frozenset(resolved)
+        effective_current = installed | platform_owned | set(dependency_codes)
+        current = installed | platform_owned | set(overrides)
         set_managed = self._activation.set_managed_mcp_codes(
             bot_id=ctx.bot_id,
             owner_id=ctx.owner_id,
             actor_id=ctx.actor_id,
             server_codes=current | declared,
         )
-        if set_managed:
-            raise ValueError(
-                "Manifest cannot directly manage SkillSet-owned MCP servers: "
-                + ", ".join(sorted(set_managed))
-            )
-        overrides = self._activation.get_mcp_overrides(
-            bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
+        manifest_direct = self._activation.manifest_direct_mcp_codes(
+            bot_id=ctx.bot_id,
+            owner_id=ctx.owner_id,
+            actor_id=ctx.actor_id,
+            server_codes=current | declared,
         )
-
         planned = tuple(
             PlannedEntry(
                 intent,
                 (
                     EntryOutcome.CREATED.value
-                    if intent.identity not in current
+                    if intent.identity not in effective_current
                     else (
                         EntryOutcome.UNCHANGED.value
                         if _comparison_config(overrides.get(intent.identity))
@@ -309,57 +238,112 @@ class McpMaterialiser(Materialiser):
                         else EntryOutcome.UPDATED.value
                     )
                 ),
+                requires_write=(
+                    intent.identity not in installed
+                    or (
+                        intent.identity in set_managed | platform_owned
+                        and intent.identity not in manifest_direct
+                    )
+                    or _comparison_config(overrides.get(intent.identity))
+                    != _comparison_config(intent.value)
+                ),
             )
             for intent in intents
         )
-        # Sorted so a report — and a test — reads deterministically.
-        removals = tuple(sorted(current - declared))
-        return CategoryPlan(entries=planned, removals=removals)
+        removal_writes = tuple(sorted(current - declared))
+        removals = tuple(sorted(set(removal_writes) - set(dependency_codes)))
+        retained = sorted(set(removal_writes) & set(dependency_codes))
+        retained_entries = tuple(
+            PlannedEntry(
+                Intent(
+                    server_code,
+                    None,
+                    note=(
+                        "explicit MCP supply and Bot override are removed; the "
+                        "server remains available as a final Skill dependency"
+                    ),
+                ),
+                EntryOutcome.UPDATED.value,
+                requires_write=True,
+            )
+            for server_code in retained
+        )
+        return CategoryPlan(
+            entries=(*planned, *retained_entries),
+            removals=removals,
+            removal_writes=removal_writes,
+        )
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
     ) -> Sequence[EntryResult]:
-        """Activate what is missing, deactivate what is no longer declared.
-
-        An ``unchanged`` entry calls nothing — that absence is what proves
-        convergence, rather than an equal-looking result.
-        """
+        """Apply Direct conversions, overrides, and dependency-aware cleanup."""
         results: list[EntryResult] = []
-        for planned in plan.entries:
-            if planned.outcome == EntryOutcome.UNCHANGED.value:
+        confirmed_write = False
+        try:
+            for planned in plan.entries:
+                if not planned.requires_write:
+                    results.append(
+                        EntryResult(
+                            self.construct,
+                            planned.intent.identity,
+                            EntryOutcome.UNCHANGED,
+                        )
+                    )
+                    continue
+                # Retained dependency cleanup is executed with removals below,
+                # once, so it can keep its explanatory report row.
+                if planned.intent.identity in (
+                    plan.removal_writes if plan.removal_writes is not None else ()
+                ):
+                    results.append(
+                        EntryResult(
+                            self.construct,
+                            planned.intent.identity,
+                            EntryOutcome(planned.outcome),
+                            note=planned.intent.note,
+                        )
+                    )
+                    continue
+                await self._activation.claim_manifest_mcp(
+                    server_code=planned.intent.identity,
+                    config=planned.intent.value,
+                    bot_id=ctx.bot_id,
+                    owner_id=ctx.owner_id,
+                    actor_id=ctx.actor_id,
+                    apply_id=ctx.apply_id,
+                )
+                confirmed_write = True
                 results.append(
                     EntryResult(
                         self.construct,
                         planned.intent.identity,
-                        EntryOutcome.UNCHANGED,
+                        EntryOutcome(planned.outcome),
                     )
                 )
-                continue
-            # One UoW owns installation and override convergence. Even a newly
-            # installed bare entry must pass ``config=None`` so a historical
-            # orphan override cannot survive and silently regain effect.
-            await self._activation.set_mcp_override(
-                server_code=planned.intent.identity,
-                config=planned.intent.value,
-                bot_id=ctx.bot_id,
-                owner_id=ctx.owner_id,
-                actor_id=ctx.actor_id,
-            )
-            results.append(
-                EntryResult(
-                    self.construct,
-                    planned.intent.identity,
-                    EntryOutcome(planned.outcome),
-                )
-            )
 
-        for server_code in plan.removals:
-            await self._activation.deactivate_mcp(
-                server_code=server_code,
-                bot_id=ctx.bot_id,
-                owner_id=ctx.owner_id,
-                actor_id=ctx.actor_id,
+            removal_writes = (
+                plan.removal_writes
+                if plan.removal_writes is not None
+                else plan.removals
             )
+            for server_code in removal_writes:
+                await self._activation.remove_manifest_mcp(
+                    server_code=server_code,
+                    bot_id=ctx.bot_id,
+                    owner_id=ctx.owner_id,
+                    actor_id=ctx.actor_id,
+                    apply_id=ctx.apply_id,
+                )
+                confirmed_write = True
+        except Exception as exc:
+            if confirmed_write or isinstance(
+                exc, ManifestDesiredStateCommittedError
+            ):
+                raise ConfirmedPartialWriteError(
+                    "MCP replacement stopped after a durable write"
+                ) from None
+            raise
 
         return tuple(results)
 

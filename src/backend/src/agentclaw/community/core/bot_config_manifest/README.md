@@ -362,15 +362,20 @@ guarantee holds for documents that never met the validator — writing through
 `IdentityService` with the router's own coordinates
 (`identity_coords_from_record`, resolved in core for exactly this consumer);
 "removal" is an empty write because the domain's own contract is that absent
-and empty are one state. `skills` overwrites the **active skill set**, narrowed
-by the Set-governed members (`BotCapabilityStateReader.member_skill_ids` — the
-write refuses them, so the plan refuses to plan them; the same narrowing `mcp`
-applies to platform defaults): a skill one of the bot's Sets supplies is
-neither declarable nor removable, a first apply uploads (the fetched zip
-validated by the upload path's own `SkillPackageValidator`, tar.gz/subpath
-unpacked by the guarded unpacker and re-packed canonically) and activates
-through `DirectActivationService`, and convergence is observed through W11
-receipts — an active name plus a store-served pin writes nothing.
+and empty are one state. `skills` is the complete effective Skill snapshot and
+the complete Bot-owned Local asset snapshot. Every declaration writes the full
+validated package and becomes a Direct claim; ordinary memberships are removed
+and Default supply is excluded. Omitted effective Skills are removed, and
+omitted active or inactive Local packages are physically deleted while shared
+Repo/Center assets remain. `mcp` is the complete explicit MCP snapshot: every
+declaration becomes Direct with its complete Bot override, while the final
+runtime closure also retains derived MCP dependencies of the final Skills.
+Those dependencies are the persisted scanner metadata on Skill rows: Local
+package replacement preserves them, and a newly uploaded Local row starts with
+none. Manifest Apply does not infer MCP identity from arbitrary package text or
+introduce a dependency preflight.
+Default exclusion plus Installation is the persisted Direct shape and survives
+read repair; source-only conversions remain externally `unchanged`.
 
 ## Creating a bot from a manifest (W13, #1696)
 
@@ -686,9 +691,9 @@ consumes:
   - "BotConfigManifestRepositoryProtocol (core.repository) — persistence for the one table"
   - "BotConfigManifestApplyRepositoryProtocol / BotConfigManifestApplyLockRepositoryProtocol (core.repository) — the apply record and its serialization lock"
   - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the `script` materialiser's only write"
-  - "ActivationPort (core.ports) — the outbound port the `mcp` and `skills` materialisers write through: the activation service's six methods without `project`, because choosing whether a write projects is the delivery strategy's call, not a materialiser's. Both implementations live in apply/activation_delegates.py"
-  - "SkillPackageUploadPort (core.ports) — the outbound port the `skills` materialiser installs packages through: the Service API's two apply-relevant methods, without the directory-upload route's `upload_local_skill_files`. DeviceSkillPackageUpload wraps LocalSkillUploadServiceProtocol (the same entry point the raw-zip router path takes, W5); PlatformSkillPackageUpload writes the store instead"
-  - "BotCapabilityStateReaderProtocol (core.skill_center.capability_state_contract) — the flush-then-read active-set the `skills` materialiser enumerates its area from and narrows removals by (W5; the core contract module — not the api/ façade that re-exports it, which core deliberately does not depend on)"
+  - "ActivationPort (core.ports) — the outbound port for ordinary Direct operations plus Manifest-only Direct claim/remove commands; the two delegates pin the delivery family's project choice"
+  - "SkillPackageUploadPort (core.ports) — complete Local package replace and physical delete; it deliberately has no installed-digest probe because declarations always overwrite"
+  - "BotCapabilityStateReaderProtocol (core.skill_center.capability_state_contract) — active capability state plus the complete Bot-owned Local catalog used for retryable cleanup"
   - "SkillPackageValidator (core.skill_center.skill_package) — the manual-upload package gate the `skills` materialiser validates fetched bytes with, so an installed skill is an uploaded one (W5)"
   - "ManifestContentServiceProtocol.latest_receipt — the per-source receipt lookup the entry fetch pipeline asks (W5)"
   - "MCPAuthServiceProtocol (api) — the same permission check DirectActivationService consults, asked up front so a category is all-or-nothing"
@@ -732,7 +737,10 @@ internal_dependencies:
   - agentclaw.community.core.ports.activation_port  # ActivationPort — the outbound port both apply-side activation delegates declare
   - agentclaw.community.core.ports.skill_package_upload_port  # SkillPackageUploadPort — the outbound port both upload implementations declare
   - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the activation Service API both delegates wrap and forward `project` to
+  - agentclaw.community.core.skill_center.errors  # internal committed-write marker used to distinguish FAILED from confirmed PARTIAL
+  - agentclaw.community.core.skill_center.local_skill_delete_service_protocol  # device-backed physical Local cleanup
   - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # the upload road a manifest skill travels (W5)
+  - agentclaw.community.core.skill_center.mcp_dependency_scope  # final Skill dependency closure shared with the MCP wave
   - agentclaw.community.core.skill_center.skill_package  # the manual-upload package gate, reused per fetched skill (W5)
   - agentclaw.community.core.task_queue  # applying runs as a queue task, not a daemon thread (W13) — the queue module imports the DI container at module scope, so TaskQueueService is a TYPE_CHECKING-only annotation behind a lazy provider
   - agentclaw.community.core.workspace.constants

@@ -1,7 +1,9 @@
-"""Event listener: 自动为 is_hosted_24x7 的应用 Coding Bot 创建定时任务。
+"""Event listener: 自动为 is_hosted_24x7 的 aicoding Coding Bot 创建定时任务。
 
-订阅 DeviceActivatedEvent，在设备激活后检查 Bot 的 template_config，
-如果 is_hosted_24x7 == 1 且为应用 Coding Bot，则自动创建 cron 定时任务。
+订阅 DeviceActivatedEvent，在设备激活后将 aicoding 引擎的 Bot 交给
+CronAutoSetupService；由 service 读取 template ext 判定
+``is_hosted_24x7 == 1``（不再以 template_type=applicationCoding 为门禁，
+模板工厂 bot 如 mcptestpq 同样走此链路）。
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ _AICODING_ENGINE_ALIASES = {"aicoding", "claude_code", "claude-code", "claudecod
 
 
 class CronAutoSetupListener(LifecycleBase):
-    """DeviceActivatedEvent listener that auto-creates 7×24 cron tasks for applicationCoding bots.
+    """DeviceActivatedEvent listener that auto-creates 7×24 cron tasks for aicoding-engine bots.
 
     Subscribes ``self._handle`` to the event bus in ``startup()``.
     Replaces the bare ``handle_device_activated_for_cron`` function form
@@ -88,27 +90,27 @@ class CronAutoSetupListener(LifecycleBase):
                 )
                 return
 
-            # 2. 检查是否为应用 Coding Bot
+            # 2. 检查是否为 aicoding 引擎 Bot（is_hosted_24x7 / dima_space_id
+            #    在 template ext 里，bot 记录不带，由 service 读取后判定）
             active_engine = bot.get("active_engine", "")
             template_type = bot.get("template_type", "")
             is_aicoding_engine = active_engine in _AICODING_ENGINE_ALIASES
-            is_app_coding = template_type == "applicationCoding"
             logger.info(
                 "[cron_auto_setup_listener] bot %s check: engine=%s, template_type=%s, "
-                "is_aicoding=%s, is_app_coding=%s",
-                bot_id, active_engine, template_type, is_aicoding_engine, is_app_coding,
+                "is_aicoding=%s",
+                bot_id, active_engine, template_type, is_aicoding_engine,
             )
-            if not (is_aicoding_engine and is_app_coding):
+            if not is_aicoding_engine:
                 logger.info(
-                    "[cron_auto_setup_listener] bot %s is not an applicationCoding bot "
-                    "(engine=%s, template_type=%s), skipping",
-                    bot_id, active_engine, template_type,
+                    "[cron_auto_setup_listener] bot %s is not an aicoding-engine bot "
+                    "(engine=%s), skipping",
+                    bot_id, active_engine,
                 )
                 return
 
             # 3. 异步执行 cron 自动创建
             logger.info(
-                "[cron_auto_setup_listener] bot %s is applicationCoding, triggering cron setup",
+                "[cron_auto_setup_listener] bot %s is aicoding-engine, triggering cron setup",
                 bot_id,
             )
             self._schedule_cron_setup(bot_id, owner_id, owner_name)

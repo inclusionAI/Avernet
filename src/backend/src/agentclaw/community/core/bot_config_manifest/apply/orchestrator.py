@@ -33,6 +33,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
     CategoryPlan,
+    ConfirmedPartialWriteError,
     Materialiser,
     ResolveResult,
 )
@@ -292,6 +293,7 @@ class ApplyOrchestrator:
                 cause=None,
                 reason=f"write failed: {exc}",
                 partially_written=True,
+                confirmed_partial=isinstance(exc, ConfirmedPartialWriteError),
             )
 
         return CategoryResult(
@@ -309,6 +311,7 @@ class ApplyOrchestrator:
         cause: ResolveResult | None,
         reason: str | None,
         partially_written: bool = False,
+        confirmed_partial: bool = False,
     ) -> CategoryResult:
         """The category was not written. Report every entry, blame precisely.
 
@@ -366,6 +369,7 @@ class ApplyOrchestrator:
             removals=(),
             aborted=True,
             partially_written=partially_written,
+            confirmed_partial=confirmed_partial,
         )
 
     def _projected(

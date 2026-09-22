@@ -34,7 +34,10 @@ async def _stop(process: asyncio.subprocess.Process) -> None:
     })
 
 
-async def count_files(root: Path, path: str) -> dict:
+async def count_files(
+    root: Path, path: str, *, allowed_roots: tuple[Path, ...] | None = None,
+) -> dict:
+    """Run the shared scanner; omitted roots retain the legacy OpenClaw boundary."""
     started = time.monotonic()
     if not path.strip() or "\x00" in path or len(path) > 4096:
         raise FileCountError("invalid_path")
@@ -48,6 +51,7 @@ async def count_files(root: Path, path: str) -> dict:
             # 以下为安全注释COSEC：固定 Python worker + argv，无 shell、eval 或用户可选命令。
             spawn = asyncio.create_task(asyncio.create_subprocess_exec(
                 sys.executable, _WORKER, str(root), path,
+                *([json.dumps([str(item) for item in allowed_roots])] if allowed_roots is not None else []),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             ))
             process = await asyncio.shield(spawn)

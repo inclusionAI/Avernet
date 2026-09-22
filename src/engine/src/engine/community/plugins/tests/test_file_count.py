@@ -396,3 +396,12 @@ async def test_terminate_exit_race_is_reaped(monkeypatch):
     monkeypatch.setattr(process, "terminate", exit_race)
     await scanner._stop(process)
     assert process.returncode is not None
+
+
+@pytest.mark.parametrize("roots", [(), ("relative",), ("/",), ("/safe/../outside",)])
+def test_worker_rejects_invalid_explicit_boundaries(tmp_path, roots):
+    from pathlib import Path
+    from engine.community.plugins.file_count_worker import count, ScanError
+
+    with pytest.raises(ScanError, match="path_forbidden"):
+        count(str(tmp_path.resolve()), ".", allowed_roots=tuple(Path(root) for root in roots))

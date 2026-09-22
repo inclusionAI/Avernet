@@ -322,19 +322,32 @@ class McpSkillSetControlPlaneCommands:
     ) -> DesiredStateMutation:
         """Atomically install one direct MCP and replace its Bot override."""
         with self._db.transactional_orm_session() as session:
-            require_direct_mcp_control_allowed(
-                server_code=server_code,
-                platform_default_codes=platform_default_codes,
-            )
-            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
-            self._require_not_set_managed(
+            manifest_direct = self._manifest_direct_mcp_in_session(
                 session,
-                set_ids=self._mcp_referencing_set_ids(session, server_code=server_code),
                 bot_id=bot_id,
                 owner_id=owner_id,
+                server_code=server_code,
+                platform_default_codes=platform_default_codes,
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
             )
+            if not manifest_direct:
+                require_direct_mcp_control_allowed(
+                    server_code=server_code,
+                    platform_default_codes=platform_default_codes,
+                )
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            if not manifest_direct:
+                self._require_not_set_managed(
+                    session,
+                    set_ids=self._mcp_referencing_set_ids(
+                        session, server_code=server_code
+                    ),
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    engine_type=engine_type,
+                    default_engine_types=default_engine_types,
+                )
             installed = mcp_installations.install(
                 session,
                 bot_id=bot_id,
@@ -376,21 +389,32 @@ class McpSkillSetControlPlaneCommands:
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
-            require_direct_mcp_control_allowed(
-                server_code=server_code,
-                platform_default_codes=platform_default_codes,
-            )
-            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
-            self._require_not_set_managed(
+            manifest_direct = self._manifest_direct_mcp_in_session(
                 session,
-                set_ids=self._mcp_referencing_set_ids(
-                    session, server_code=server_code
-                ),
                 bot_id=bot_id,
                 owner_id=owner_id,
+                server_code=server_code,
+                platform_default_codes=platform_default_codes,
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
             )
+            if not manifest_direct:
+                require_direct_mcp_control_allowed(
+                    server_code=server_code,
+                    platform_default_codes=platform_default_codes,
+                )
+            old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            if not manifest_direct:
+                self._require_not_set_managed(
+                    session,
+                    set_ids=self._mcp_referencing_set_ids(
+                        session, server_code=server_code
+                    ),
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    engine_type=engine_type,
+                    default_engine_types=default_engine_types,
+                )
             changed = mcp_installations.uninstall(
                 session, bot_id=bot_id, owner_id=owner_id,
                 env=get_current_env(), server_codes={server_code},

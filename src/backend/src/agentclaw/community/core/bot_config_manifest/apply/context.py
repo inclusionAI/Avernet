@@ -13,7 +13,7 @@ container at import time.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.budget import (  # noqa: F401
@@ -25,6 +25,13 @@ from agentclaw.community.core.bot_config_manifest.apply.source_session import (
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
 )
+
+
+@dataclass
+class CapabilityApplyState:
+    """The one cross-category fact Skills hands to the later MCP wave."""
+
+    final_skill_dependency_codes: frozenset[str] | None = None
 
 @dataclass(frozen=True)
 class ApplyContext:
@@ -134,6 +141,7 @@ class ApplyContext:
     #: entries loudly
     #: rather than fetching anonymously.
     source_session: Optional[SourceSession] = None
+    capability_state: CapabilityApplyState = field(default_factory=CapabilityApplyState)
 
 
-__all__ = ["ApplyContext"]
+__all__ = ["ApplyContext", "CapabilityApplyState"]

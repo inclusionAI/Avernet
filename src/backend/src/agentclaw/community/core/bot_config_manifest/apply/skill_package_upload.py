@@ -1,9 +1,8 @@
 """The device-backed ``SkillPackageUploadPort``: the manual-upload road (W5).
 
-``LocalSkillUploadService`` is a domain service with its own Service API and
-HTTP routes; the apply engine is one caller among several. This is the apply
-engine's view of it — the two methods the ``skills`` materialiser calls, and
-not the third.
+``LocalSkillUploadService`` and ``LocalSkillDeleteService`` are domain services
+with their own Service APIs and HTTP routes. This adapter exposes only the
+complete-package replace and physical-delete operations Manifest Apply needs.
 
 **The narrowing is the whole job.** ``upload_local_skill_files`` converts a
 browser-selected directory into a package; during an apply the package arrives
@@ -19,7 +18,7 @@ port and the skill row they record.
 """
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional
+from typing import Any
 
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
@@ -27,12 +26,15 @@ from agentclaw.community.core.ports.skill_package_upload_port import (
 from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.core.skill_center.local_skill_delete_service_protocol import (
+    LocalSkillDeleteServiceProtocol,
+)
 
 
 class DeviceSkillPackageUpload(SkillPackageUploadPort):
     """The ARCA upload road: package files onto the bot's device.
 
-    Two methods. What a call looks like from the ``skills`` materialiser::
+    The complete-package write looks like::
 
         await port.upload_local_skill(
             bot_id="bot_42", owner_id="usr_owner",
@@ -40,21 +42,19 @@ class DeviceSkillPackageUpload(SkillPackageUploadPort):
             package=b"PK\x03\x04...",     # the validated canonical zip
         )                                   # -> the service's result dict
 
-        await port.installed_package_digest(
-            bot=ctx.bot, bot_id="bot_42", owner_id="usr_owner",
-            name="code-review",             # the skill's manifest name
-        )   # -> "sha256:9f86d081..." when that skill is installed,
-            #    None when it is not — which the materialiser reads as
-            #    "nothing to compare", so the entry is written.
-
     Bound as ``MaterialiserPorts.upload_service`` for the ARCA family. Its
     platform-managed counterpart is ``PlatformSkillPackageUpload`` in
     ``managed_files/ports.py``; unlike the activation delegates, the two share
     no body — only the port and the skill row they record.
     """
 
-    def __init__(self, inner: LocalSkillUploadServiceProtocol) -> None:
+    def __init__(
+        self,
+        inner: LocalSkillUploadServiceProtocol,
+        delete_service: LocalSkillDeleteServiceProtocol | None = None,
+    ) -> None:
         self._inner = inner
+        self._delete = delete_service
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
@@ -63,12 +63,24 @@ class DeviceSkillPackageUpload(SkillPackageUploadPort):
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id, package=package
         )
 
-    async def installed_package_digest(
-        self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str, name: str
-    ) -> Optional[str]:
-        return await self._inner.installed_package_digest(
-            bot=bot, bot_id=bot_id, owner_id=owner_id, name=name
+    async def delete_local_skill(
+        self, *, skill_id: str, name: str, bot_id: str, owner_id: str,
+        actor_id: str,
+    ) -> None:
+        if self._delete is None:
+            fallback = getattr(self._inner, "delete_local_skill", None)
+            if fallback is None:
+                raise RuntimeError("Local Skill deletion service is not configured")
+            await fallback(
+                skill_id=skill_id,
+                name=name,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                actor_id=actor_id,
+            )
+            return
+        await self._delete.delete_local_skill(
+            skill_id=skill_id, owner_id=owner_id, user_id=actor_id
         )
-
 
 __all__ = ["DeviceSkillPackageUpload"]

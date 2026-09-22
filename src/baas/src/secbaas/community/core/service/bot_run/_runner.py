@@ -721,7 +721,9 @@ class BotRunner:
         metadata = record.metadata or {}
 
         try:
-            binding_info = await self._binding_resolver.resolve_binding(
+            # 使用统一 binding 解析入口；lifecycle_stage 由 metadata[bot_options]
+            # 自动提取，与正常 deliver_message/chat 路径保持一致。
+            binding_info = await self._resolve_binding(
                 bot_id=bot_id, metadata=metadata
             )
         except Exception as e:
@@ -741,10 +743,19 @@ class BotRunner:
             return
 
         bot_service = self._bot_service_selector.select(binding_info)
+        # 重建 BotChatContext，把 run 记录中的 tenant/app_id 等传下去，
+        # 避免 service 层 resolve WS 连接时 tenant 为空导致 BotNotFoundError。
+        run_context = BotChatContext.from_api_key(
+            api_key_prefix=record.api_key_prefix,
+            app_id=metadata.get("app_id", ""),
+            app_type=metadata.get("app_type", "UNKNOWN"),
+            tenant=metadata.get("tenant", ""),
+        )
         try:
             await bot_service.abort(
                 session_id=session_id,
                 binding_info=binding_info,
+                context=run_context,
             )
             logger.info(
                 "[runner.abort] engine abort sent: run_id=%s session_id=%s",

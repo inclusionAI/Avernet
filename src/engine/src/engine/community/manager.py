@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from engine.community.core.cli_tools.protocol import CliToolsService
     from engine.community.core.default_config.protocol import DefaultConfigService
     from engine.community.core.file.protocol import FileService
+    from engine.community.core.file.count_protocol import FileCountService
     from engine.community.core.mcp.protocol import MCPService
     from engine.community.core.models.protocol import ModelsService
     from engine.community.core.node.protocol import NodeService
@@ -366,6 +367,20 @@ class EngineManager:
                 self._engine, Capability.DEFAULT_CONFIG_GET,
             )
         return dc
+
+    @property
+    def file_counter(self) -> FileCountService:
+        """Compose shared counting from the active runtime's configured layout.
+
+        Independent of engine FileService implementations, including legacy
+        downstream engines. Resolve on access so engine switches cannot retain
+        another runtime's allowed roots.
+        """
+        from engine.community.config import load_file_count_roots
+        from engine.community.plugins.local_file_count import LocalFileCountService
+
+        root, allowed_roots = load_file_count_roots(self.current())
+        return LocalFileCountService(root, allowed_roots)
 
     @property
     def file(self) -> FileService:

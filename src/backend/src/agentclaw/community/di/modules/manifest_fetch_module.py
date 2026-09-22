@@ -68,6 +68,9 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.core.skill_center.local_skill_delete_service_protocol import (
+    LocalSkillDeleteServiceProtocol,
+)
 from agentclaw.community.core.mcp.mcp_config_service_protocol import (
     MCPConfigServiceProtocol,
 )
@@ -410,6 +413,15 @@ class ManifestFetchModule(Module):
     @singleton
     @provider
     @inject
+    def manifest_skill_delete_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], LocalSkillDeleteServiceProtocol]:
+        """The physical Local package cleanup seam used by Manifest replace."""
+        return lambda: injector.get(LocalSkillDeleteServiceProtocol)
+
+    @singleton
+    @provider
+    @inject
     def manifest_capability_reader_factory(
         self, injector: Injector
     ) -> Callable[[], BotCapabilityStateReaderProtocol]:
@@ -741,6 +753,7 @@ class ManifestFetchModule(Module):
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
+        delete_service_provider: Callable[[], LocalSkillDeleteServiceProtocol],
         resource_service_provider: Callable[[], ResourceFilePort],
         cli_tool_service_factory: CliToolServiceFactory,
         teclaw_bindings: TeclawPlatformBindings,
@@ -783,7 +796,9 @@ class ManifestFetchModule(Module):
                 mcp_auth_service=mcp_auth_service_provider(),
                 mcp_config_service=mcp_config_service_provider(),
                 identity_service=DeviceIdentity(identity_service_provider()),
-                upload_service=DeviceSkillPackageUpload(upload_service_provider()),
+                upload_service=DeviceSkillPackageUpload(
+                    upload_service_provider(), delete_service_provider()
+                ),
                 capability_reader=capability_reader_provider(),
                 package_validator=package_validator_provider(),
                 entry_fetcher=entry_fetcher_provider(),
