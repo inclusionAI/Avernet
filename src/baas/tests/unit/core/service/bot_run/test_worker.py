@@ -1607,11 +1607,13 @@ async def test_bot_runner_abort_propagates_to_bot_service(repo, queue):
             *,
             session_id: str,
             binding_info: Any,
+            context: Any = None,
         ) -> None:
             self.calls.append(
                 {
                     "session_id": session_id,
                     "binding_info": binding_info,
+                    "context": context,
                 }
             )
 
@@ -1691,11 +1693,13 @@ def _make_bot_runner_for_abort(
             *,
             session_id: str,
             binding_info: Any,
+            context: Any = None,
         ) -> None:
             self.calls.append(
                 {
                     "session_id": session_id,
                     "binding_info": binding_info,
+                    "context": context,
                 }
             )
             if service_abort_side_effect is not None:
