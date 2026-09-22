@@ -474,11 +474,16 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
         // just recreated. A deletion that starts after this check performs its
         // own catalog cleanup, so every ordering leaves the worker deleted.
         if !bot_is_active(self.registry.as_ref(), &request.bot_uuid).await {
-            if let Err(error) = fuse_client.delete_worker(&request.bot_uuid).await {
+            if !bcs_fusion::delete_worker_with_retry(
+                &self.bcsfuse_config,
+                &fuse_client,
+                &request.bot_uuid,
+            )
+            .await
+            {
                 tracing::error!(
                     bot_id = %request.bot_uuid,
-                    error = %error,
-                    "Failed to remove worker recreated by racing visibility sync"
+                    "Failed to remove worker recreated by racing visibility sync after retries"
                 );
             }
         }

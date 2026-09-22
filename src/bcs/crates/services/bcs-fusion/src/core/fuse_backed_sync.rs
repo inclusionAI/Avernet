@@ -187,6 +187,42 @@ pub async fn sync_worker_availability_with_retry(
     AvailabilitySyncOutcome::Failed
 }
 
+/// Delete a worker with the same bounded retry policy used by lifecycle sync.
+pub async fn delete_worker_with_retry(
+    config: &BcsFuseConfig,
+    client: &FuseClient,
+    bot_id: &str,
+) -> bool {
+    for attempt in 0..MAX_SYNC_RETRIES {
+        match client.delete_worker(bot_id).await {
+            Ok(()) => return true,
+            Err(error) => {
+                tracing::warn!(
+                    bot_id = %bot_id,
+                    attempt = attempt + 1,
+                    error = %error,
+                    "Worker deletion failed, retrying"
+                );
+                if attempt + 1 < MAX_SYNC_RETRIES {
+                    let backoff = Duration::from_millis(
+                        config
+                            .sync_retry_base_ms
+                            .saturating_mul(2u64.pow(attempt.min(5))),
+                    )
+                    .min(MAX_SYNC_BACKOFF);
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    }
+    tracing::error!(
+        bot_id = %bot_id,
+        retries = MAX_SYNC_RETRIES,
+        "Worker deletion exhausted retries"
+    );
+    false
+}
+
 /// Build bcsfuse `contents` map from bot context files.
 fn build_contents_from_context(ctx: &ContextBotSummary) -> HashMap<String, String> {
     let mut contents = HashMap::new();
@@ -388,6 +424,50 @@ mod tests {
         let outcome =
             sync_worker_availability_with_retry(&config, &client, "missing", "protected").await;
         assert_eq!(outcome, AvailabilitySyncOutcome::WorkerNotFound);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn delete_worker_with_retry_recovers_from_transient_failure()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let server_attempts = attempts.clone();
+        tokio::spawn(async move {
+            for status in ["500 Internal Server Error", "200 OK"] {
+                let (mut socket, _) = listener.accept().await.expect("accept request");
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0u8; 2048];
+                socket.read(&mut buf).await.expect("read request");
+                server_attempts.fetch_add(1, Ordering::SeqCst);
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                );
+                socket
+                    .write_all(response.as_bytes())
+                    .await
+                    .expect("write response");
+            }
+        });
+        let config = BcsFuseConfig {
+            enabled: true,
+            url: format!("http://127.0.0.1:{port}"),
+            sync_timeout_ms: 500,
+            sync_retry_base_ms: 0,
+            ..Default::default()
+        };
+        let client = FuseClient::new(&config)?;
+
+        let deleted = delete_worker_with_retry(&config, &client, "bot:owner").await;
+
+        assert!(deleted);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
         Ok(())
     }
 

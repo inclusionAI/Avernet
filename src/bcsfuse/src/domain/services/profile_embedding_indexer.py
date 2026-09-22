@@ -766,7 +766,7 @@ class ProfileEmbeddingIndexer:
             )
 
             if matching_ids:
-                self._profile_store.delete_embeddings(matching_ids)
+                self._profile_store.delete(matching_ids)
                 logger.info(
                     "[ProfileEmbeddingIndexer] Deleted %d vectors for %s",
                     len(matching_ids), profile_key

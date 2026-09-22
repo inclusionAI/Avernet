@@ -176,6 +176,15 @@ class InMemoryVectorStore:
 
         return count
 
+    def update_payload_by_worker(self, worker_id: str, payload: Dict) -> int:
+        """Update metadata for every vector owned by a worker."""
+        count = 0
+        for vec_id, metadata in self._metadata.items():
+            if metadata.get("worker_id") == worker_id:
+                self._metadata[vec_id] = {**metadata, **payload}
+                count += 1
+        return count
+
     def delete_by_profile(self, worker_id: str, profile_id: str) -> int:
         """
         Delete all vectors for a specific profile.
