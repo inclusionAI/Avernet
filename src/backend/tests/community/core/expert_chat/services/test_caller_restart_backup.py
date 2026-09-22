@@ -1,5 +1,5 @@
 """Mandatory caller-container restart precondition integration."""
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -10,21 +10,17 @@ from tests.community.core.expert_chat.services.test_expert_chat_instance_service
 
 @pytest.mark.asyncio
 async def test_caller_upgrade_backup_failure_keeps_target_and_never_upgrades():
-    from contextlib import asynccontextmanager
 
     svc, instances, _, _, bots, bindings, build, *_ = _make_service()
     bots.get_by_id_and_owner.return_value = {
         'bot_id': BOT_ID, 'owner_id': OWNER_ID, 'active_engine': 'aicoding'}
     seen = []
 
-    @asynccontextmanager
-    async def guard(*, bot, device_id):
+    async def guard(*, bot, device_id, target_runtime):
         seen.append(device_id)
         raise RuntimeError('backup failed')
-        yield  # pragma: no cover
 
-    svc._bot_service.instance_restart_guard = guard
-    with pytest.raises(ConnectionError, match='backup failed'):
+    with patch('agentclaw.community.core.expert_chat.services.expert_chat_instance_service.prepare_instance_restart', side_effect=guard), pytest.raises(ConnectionError, match='backup failed'):
         await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
                                      owner_id=OWNER_ID, migration_path='/artifact')
     assert seen == [BOT_UUID]
@@ -36,28 +32,24 @@ async def test_caller_upgrade_backup_failure_keeps_target_and_never_upgrades():
 
 @pytest.mark.asyncio
 async def test_caller_legacy_guard_returns_then_original_upgrade_runs():
-    from contextlib import asynccontextmanager
 
     svc, _, _, _, bots, _, build, *_ = _make_service()
     bots.get_by_id_and_owner.return_value = {
         'bot_id': BOT_ID, 'owner_id': OWNER_ID, 'active_engine': 'claude_code'}
     order = []
 
-    @asynccontextmanager
-    async def guard(*, bot, device_id):
+    async def guard(*, bot, device_id, target_runtime):
         assert device_id == BOT_UUID
         order.append('legacy-allowed')
-        yield
-        order.append('released')
 
     async def upgrade(**kw):
         assert kw['bot_uuid'] == BOT_UUID
         order.append('upgrade')
         return {'publish_id': 77}
 
-    svc._bot_service.instance_restart_guard = guard
     build.upgrade_async = AsyncMock(side_effect=upgrade)
-    result = await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
-                                         owner_id=OWNER_ID, migration_path='/artifact')
+    with patch('agentclaw.community.core.expert_chat.services.expert_chat_instance_service.prepare_instance_restart', side_effect=guard):
+        result = await svc._upgrade_container(bot_uuid=BOT_UUID, bot_id=BOT_ID,
+                                             owner_id=OWNER_ID, migration_path='/artifact')
     assert result == {'bot_uuid': BOT_UUID, 'publish_id': 77}
-    assert order == ['legacy-allowed', 'upgrade', 'released']
+    assert order == ['legacy-allowed', 'upgrade']

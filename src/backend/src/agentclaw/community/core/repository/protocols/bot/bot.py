@@ -13,7 +13,6 @@ from abc import abstractmethod
 from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
-    from datetime import datetime
     from agentclaw.community.core.bot_management.render_screen.models import (
         RenderScreenRecord,
     )
@@ -473,18 +472,8 @@ class BotRestartLockRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def renew(self, env: str, entity_id: str, bot_id: str, lock_token: str) -> bool:
-        """Renew on the database clock iff token still owns the restart lease."""
-        ...
-
-    @abstractmethod
-    def release(
-        self, env: str, entity_id: str, bot_id: str, lock_token: str,
-        *, expected_created_at: datetime | None = None,
-    ) -> bool:
+    def release(self, env: str, entity_id: str, bot_id: str, lock_token: str) -> bool:
         """Release the lock by hard-deleting the row — only if it's still ours.
-
-        expected_created_at fences a stale-reaper against concurrent renewal.
 
         Compare-and-delete: ``DELETE WHERE (env, entity_id, bot_id) matches AND
         lock_token = :lock_token``. The token guard prevents deleting a row that

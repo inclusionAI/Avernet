@@ -10,7 +10,7 @@ attribute fails CI rather than only at endpoint call time.
 """
 from __future__ import annotations
 
-from typing import Any, AsyncContextManager, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -80,14 +80,6 @@ class BotServiceProtocol(Protocol):
     def update_bot_ext(self, *args: Any, **kwargs: Any) -> Any: ...
 
     def delete_bot(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def instance_restart_guard(self, *, bot: dict, device_id: str) -> AsyncContextManager[None]:
-        """Mandatory engine precondition; keep target lock through replacement submission.
-
-        The target is a published/caller container, never the source Bot binding.
-        Failure aborts replacement; source Bot state is not mutated.
-        """
-        ...
 
     def restart_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 

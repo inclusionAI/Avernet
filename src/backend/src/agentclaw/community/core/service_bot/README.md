@@ -136,16 +136,3 @@ bounded orphan that the in-flight `PENDING` op makes observable.
 there is no client-side approve call in this pipeline. Approval workflows for
 publish/unpublish (owner `should_approval`) are a separate concern handled by
 `PublishApprovalService`, whose AGREED callback enqueues a durable trigger task.
-
-
-### Coding-runtime restart precondition
-
-Published restart delegates its mandatory precondition to
-`BotServiceProtocol.instance_restart_guard` inside the durable issue callback
-(and before either retirement branch). Workflow adoption does not run the
-precondition again against a replacement. The aicoding strategy alone owns
-legacy/mount/backup policy; a failure must precede upgrade, retirement, or binding
-release. `BaasServiceProtocol.exec_command_on_device` exposes the existing PaaS
-command endpoint for physically pinned lifecycle commands. The caller must
-resolve device IDs from the authorized target Bot inventory, not request input.
-No new server endpoint, schema, frontend or Relay API is added.

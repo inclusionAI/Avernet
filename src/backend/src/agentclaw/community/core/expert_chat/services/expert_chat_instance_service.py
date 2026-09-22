@@ -27,6 +27,8 @@ stands alone and is wired into the DI graph for callers to inject.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
+
 import asyncio
 import traceback
 from typing import Any, Dict, Optional
@@ -668,20 +670,20 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
             else None
         )
         try:
-            async with self._bot_service.instance_restart_guard(bot=bot_info, device_id=bot_uuid):
-                result = await self._bot_build_service.upgrade_async(
-                    bot_uuid=bot_uuid,
-                    bot=bot_info,
-                    user_id=owner_id,
-                    migration_path=migration_path,
-                    device_count=1,
-                    publish_stage=PublishStage.ONLINE,
-                    version=str(version),
-                    docker_image=docker_image,
-                    ext_info=ext_info,
-                    extra_envs=skills_env,
-                    template_config=sandbox_template_config,
-                )
+            await prepare_instance_restart(bot=bot_info, device_id=bot_uuid, target_runtime=self._baas)
+            result = await self._bot_build_service.upgrade_async(
+                bot_uuid=bot_uuid,
+                bot=bot_info,
+                user_id=owner_id,
+                migration_path=migration_path,
+                device_count=1,
+                publish_stage=PublishStage.ONLINE,
+                version=str(version),
+                docker_image=docker_image,
+                ext_info=ext_info,
+                extra_envs=skills_env,
+                template_config=sandbox_template_config,
+            )
             logger.info(
                 "[ExpertChatInstance] upgrade_async succeeded: bot_uuid=%s",
                 bot_uuid,

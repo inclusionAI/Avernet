@@ -11,10 +11,24 @@ import time
 import uuid
 from typing import Any, Callable
 
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
+
 ENTRY = '/opt/agentclaw/bin/restart_backup'
 POLL_SECONDS = 2
 # Covers runtime termination (330s) plus archive budget (900s) and exec overhead.
 DEADLINE_SECONDS = 1500
+
+
+class RestartBackupError(RuntimeError):
+    def __init__(self, reason: str, message: str):
+        super().__init__(message)
+        self.reason = reason
+
+
+def error_reason(error):
+    return getattr(error, 'reason', 'timeout' if isinstance(error, TimeoutError) else 'transport_error')
 
 
 def command(action: str, operation: str) -> str:
@@ -48,65 +62,94 @@ def parse_result(result: Any, operation: str) -> dict[str, Any]:
     # Never infer success from empty/malformed output or a missing exit code.
     exit_code = result.get('exit_code') if isinstance(result, dict) else getattr(result, 'exit_code', None)
     if exit_code != 0:
-        raise RuntimeError('重启备份执行失败；旧沙箱未销毁，请检查容器备份日志')
+        raise RestartBackupError('exec_failed', '重启备份执行失败；旧沙箱未销毁，请检查容器备份日志')
     try:
         stdout = result.get('stdout') if isinstance(result, dict) else result.stdout
         value = json.loads(stdout.strip())
     except (AttributeError, ValueError, TypeError) as error:
-        raise RuntimeError('重启备份结果无效，禁止销毁旧沙箱') from error
+        raise RestartBackupError('invalid_response', '重启备份结果无效，禁止销毁旧沙箱') from error
     if not isinstance(value, dict) or value.get('version') != 1 or value.get('operation_id') != operation:
-        raise RuntimeError('重启备份操作不匹配，禁止销毁旧沙箱')
+        raise RestartBackupError('operation_mismatch', '重启备份操作不匹配，禁止销毁旧沙箱')
     if value.get('status') not in {'legacy', 'not_mounted', 'running', 'committed', 'failed'}:
-        raise RuntimeError('未知的重启备份状态，禁止销毁旧沙箱')
+        raise RestartBackupError('unknown_status', '未知的重启备份状态，禁止销毁旧沙箱')
     return value
 
 
-def prepare_backup(*, execute: Callable[[str], Any],
-                   renew_lease: Callable[[], bool], on_preparing: Callable[[], None],
-                   operation_id: str | None = None) -> None:
-    operation = operation_id or uuid.uuid4().hex
-    deadline = time.monotonic() + DEADLINE_SECONDS
-    action = 'start'
-    instance_boot = None
-    preparing = False
+def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
+                   bot_id: str, target_id: str) -> Callable[[], None]:
+    """Wait outside the legacy restart lock; return a short receipt verifier."""
+    started = time.monotonic()
+    deadline = started + DEADLINE_SECONDS
+    action, boot, last_status = 'start', None, None
+    last_log = started
 
-    def require_lease():
-        if renew_lease() is not True:
-            raise RuntimeError('重启锁已失效，禁止销毁旧沙箱')
+    def log(phase, status, *, level='info', error_type='-', generation='-', reason='-'):
+        getattr(logger, level)(
+            "event=aicoding_restart_backup phase=%s status=%s bot_id=%s "
+            "target_id=%s operation_id=%s elapsed_ms=%s generation_id=%s error_type=%s reason=%s",
+            phase, status, bot_id, target_id, operation_id,
+            int((time.monotonic() - started) * 1000), generation, error_type, reason,
+        )
 
-    while True:
-        require_lease()
-        value = parse_result(execute(command(action, operation)), operation)
-        status = value['status']
-        if status == 'legacy':
-            if action != 'start':
-                raise RuntimeError('重启备份脚本在执行期间消失')
-            require_lease()
-            return
-        boot = value.get('boot_id')
-        if not isinstance(boot, str) or not boot or (instance_boot is not None and instance_boot != boot):
-            raise RuntimeError('备份期间实例身份发生变化，禁止销毁')
-        instance_boot = boot
-        if status == 'not_mounted':
-            if action != 'start':
-                raise RuntimeError('备份期间挂载状态发生变化')
-            require_lease()
-            return
-        if not preparing:
-            on_preparing()
-            preparing = True
-        if status == 'committed':
-            event = value.get('backup')
-            if not isinstance(event, dict) or event.get('status') != 'success' or not event.get('generation_id') or event.get('operation_id') != operation:
-                raise RuntimeError('缺少有效的最终备份凭据，禁止销毁')
-            require_lease()
-            return
-        if status == 'failed':
-            raise RuntimeError('强制备份失败，旧沙箱已保留；请检查 restart backup 日志后重试')
-        if time.monotonic() >= deadline:
-            raise RuntimeError('强制备份结果尚未确认，旧沙箱已保留；禁止超时放行')
-        time.sleep(POLL_SECONDS)
-        action = 'status'
+    def receipt(value):
+        event = value.get('backup')
+        if (not isinstance(event, dict) or event.get('status') != 'success'
+                or not event.get('generation_id') or event.get('operation_id') != operation_id):
+            raise RestartBackupError('invalid_receipt', '缺少有效的最终备份凭据，禁止销毁')
+        return event['generation_id']
+
+    log('probe', 'started')
+    try:
+        while True:
+            value = parse_result(execute(command(action, operation_id)), operation_id)
+            status = value['status']
+            if status == 'legacy':
+                if action != 'start':
+                    raise RestartBackupError('helper_disappeared', '重启备份脚本在执行期间消失')
+            else:
+                current_boot = value.get('boot_id')
+                if not isinstance(current_boot, str) or not current_boot or (boot and boot != current_boot):
+                    raise RestartBackupError('instance_changed', '备份期间实例身份发生变化，禁止销毁')
+                boot = current_boot
+            if status == 'not_mounted' and action != 'start':
+                raise RestartBackupError('mount_changed', '备份期间挂载状态发生变化')
+            generation = receipt(value) if status == 'committed' else '-'
+            if status in {'legacy', 'not_mounted', 'committed'}:
+                log('prepared', status, generation=generation, reason={
+                    'legacy': 'helper_absent', 'not_mounted': 'no_live_binds',
+                    'committed': 'receipt_valid'}[status])
+                break
+            if status == 'failed':
+                raise RestartBackupError('backup_failed', '强制备份失败，旧沙箱保留；请检查容器备份日志')
+            now = time.monotonic()
+            if now >= deadline:
+                raise TimeoutError('强制备份结果未确认，禁止超时放行')
+            if status != last_status or now - last_log >= 60:
+                log('wait', status)
+                last_status, last_log = status, now
+            time.sleep(POLL_SECONDS)
+            action = 'status'
+    except Exception as error:
+        # Do not log raw command, stdout/stderr or exception text (may contain credentials).
+        log('prepare', 'blocked', level='error', error_type=type(error).__name__, reason=error_reason(error))
+        raise
+
+    def verify():
+        try:
+            # An absent helper is re-probed read-only; never start work on a
+            # replacement container while holding the legacy short-lived lock.
+            check_action = 'start' if status == 'not_mounted' else 'status'
+            current = parse_result(execute(command(check_action, operation_id)), operation_id)
+            if current['status'] != status or (boot and current.get('boot_id') != boot):
+                raise RestartBackupError('receipt_stale', '备份后实例或挂载状态变化，禁止使用旧凭据重启')
+            if status == 'committed' and receipt(current) != generation:
+                raise RestartBackupError('generation_changed', '备份凭据变化，禁止销毁')
+            log('verify', 'allowed', generation=generation)
+        except Exception as error:
+            log('verify', 'blocked', level='error', error_type=type(error).__name__, reason=error_reason(error))
+            raise
+
+    return verify
 
 
 def _live_targets(state):
@@ -132,40 +175,54 @@ def _live_targets(state):
 
 
 class AicodingRestartBackupMixin:
-    def prepare_restart(self, ctx, *, binding_id, device_service, bot_repository, renew_lease,
-                        device_id=None, target_runtime=None):
-        """One implementation for aicoding/claude_code and all restart entrypoints."""
-        if device_id is not None:
-            if target_runtime is None:
-                raise RuntimeError("Missing published/caller target runtime")
-            targets = _live_targets(target_runtime.get_bot(bot_uuid=device_id))
-            for physical_id in targets:
-                # Pin every command to the same physical container. Bot-level
-                # dispatch could otherwise back up a different replica per poll.
-                prepare_backup(
-                    execute=lambda cmd, target=physical_id: target_runtime.exec_command_on_device(
-                        paas_device_id=target, cmd=cmd),
-                    operation_id=uuid.uuid5(uuid.NAMESPACE_URL, "restart:" + device_id + ":" + physical_id).hex,
-                    renew_lease=renew_lease, on_preparing=lambda: None,
+    def prepare_restart(self, ctx, *, binding_id=None, device_service=None,
+                        bot_repository=None, device_id=None, target_runtime=None):
+        """Only coding engines probe runtime; no generic lifecycle/status changes."""
+        try:
+            if device_id is not None:
+                targets = _live_targets(target_runtime.get_bot(bot_uuid=device_id))
+                logger.info(
+                    "event=aicoding_restart_backup phase=resolve bot_id=%s target_id=%s target_count=%s",
+                    ctx.bot_id, device_id, len(targets),
                 )
-            if targets and set(_live_targets(target_runtime.get_bot(bot_uuid=device_id))) != set(targets):
-                raise RuntimeError("备份期间目标容器清单变化，禁止替换")
-        elif binding_id is not None:
-            def mark_preparing():
-                if not bot_repository.update_by_owner(ctx.bot_id, ctx.owner_id, {"status": "PENDING"}):
-                    raise RuntimeError("Cannot persist restart backup state")
+                checks = [prepare_backup(
+                    execute=lambda cmd, target=physical: target_runtime.exec_command_on_bot(
+                        bot_uuid=device_id, paas_device_id=target, cmd=cmd),
+                    operation_id=uuid.uuid5(uuid.NAMESPACE_URL, 'restart:' + device_id + ':' + physical).hex,
+                    bot_id=ctx.bot_id, target_id=physical,
+                ) for physical in targets]
 
-            try:
-                binding = device_service.get_device(binding_id=binding_id)
-                target = binding.get('device_id') if isinstance(binding, dict) else getattr(binding, 'device_id', None)
-                if not target:
-                    raise RuntimeError("无法定位当前旧实例，禁止跳过重启备份")
-                prepare_backup(
-                    execute=lambda cmd: device_service.exec_shell_new(device_id=target, shell_cmd=cmd),
-                    renew_lease=renew_lease, on_preparing=mark_preparing,
-                )
-            except Exception:
-                # Never clear binding; stale workers must not overwrite new state.
-                if renew_lease() is True:
-                    bot_repository.update_by_owner(ctx.bot_id, ctx.owner_id, {"status": "FAILED"})
-                raise
+                def verify():
+                    if set(_live_targets(target_runtime.get_bot(bot_uuid=device_id))) != set(targets):
+                        logger.error("event=aicoding_restart_backup phase=verify status=blocked "
+                                     "reason=target_changed bot_id=%s target_id=%s", ctx.bot_id, device_id)
+                        raise RestartBackupError('target_changed', '备份期间目标容器清单变化，禁止替换')
+                    for check in checks:
+                        check()
+                return verify
+            if binding_id is None:
+                logger.info("event=aicoding_restart_backup phase=skip reason=no_binding bot_id=%s", ctx.bot_id)
+                return lambda: None
+            binding = device_service.get_device(binding_id=binding_id)
+            target = binding.get('device_id') if isinstance(binding, dict) else getattr(binding, 'device_id', None)
+            if not isinstance(target, str) or not target:
+                raise RestartBackupError('missing_device', '无法定位当前旧实例，禁止跳过重启备份')
+            check = prepare_backup(
+                execute=lambda cmd: device_service.exec_shell_new(device_id=target, shell_cmd=cmd),
+                operation_id=uuid.uuid5(uuid.NAMESPACE_URL, 'restart:' + target).hex,
+                bot_id=ctx.bot_id, target_id=target,
+            )
+
+            def verify():
+                current = bot_repository.get_by_id_and_owner(ctx.bot_id, ctx.owner_id)
+                if not isinstance(current, dict) or current.get('binding_id') != binding_id:
+                    logger.error("event=aicoding_restart_backup phase=verify status=blocked "
+                                 "reason=binding_changed bot_id=%s binding_id=%s", ctx.bot_id, binding_id)
+                    raise RestartBackupError('binding_changed', '备份后绑定已变化，禁止替换其他容器')
+                check()
+            return verify
+        except Exception as error:
+            logger.error("event=aicoding_restart_backup phase=precondition status=blocked "
+                         "bot_id=%s binding_id=%s target_id=%s error_type=%s reason=%s",
+                         ctx.bot_id, binding_id, device_id, type(error).__name__, error_reason(error))
+            raise

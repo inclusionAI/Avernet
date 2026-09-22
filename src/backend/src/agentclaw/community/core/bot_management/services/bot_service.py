@@ -16,8 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
-from .instance_restart import InstanceRestartMixin
-
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.bot_management.capabilities import (
     can_join_bcn_as_provider,
@@ -328,7 +326,7 @@ def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
     return f"{date_part}_{random_part}"
 
 
-class BotService(InstanceRestartMixin, BotServiceProtocol):
+class BotService(BotServiceProtocol):
     """Bot service for managing bot lifecycle."""
 
     def __init__(
@@ -979,10 +977,7 @@ class BotService(InstanceRestartMixin, BotServiceProtocol):
             # already reaped+reacquired, the token won't match and this is a
             # no-op — the acquire below then fails and we suppress, instead of
             # stealing their fresh lock.
-            self._restart_lock_repo.release(
-                env, entity_id, bot_id, stale.lock_token,
-                expected_created_at=stale.gmt_create,
-            )
+            self._restart_lock_repo.release(env, entity_id, bot_id, stale.lock_token)
 
         return self._restart_lock_repo.acquire(env, entity_id, bot_id, holder_user_id)
 
@@ -4819,6 +4814,21 @@ class BotService(InstanceRestartMixin, BotServiceProtocol):
             source_provider=current_device_provider,
         )
 
+        # Engines prepare outside the existing short-lived lock. The returned
+        # verifier is checked under that lock immediately before replacement.
+        restart_ctx, restart_strategy = resolve_provisioning(
+            bot_id=bot_id, owner_id=str(bot.get("owner_id") or user_id),
+            bot_type=str(bot.get("bot_type") or ""), active_engine=bot.get("active_engine"),
+            template_type=bot.get("template_type"), template_config=None,
+        )
+        try:
+            verify_restart = restart_strategy.prepare_restart(
+                restart_ctx, binding_id=binding_id,
+                device_service=self._device_service_provider(), bot_repository=self._repository,
+            )
+        except Exception as error:
+            raise BotServiceError(str(error)) from error
+
         # Idempotency guard: acquire the per-bot restart lock. If a restart is
         # already in progress, suppress this duplicate and return the current
         # in-progress bot — the frontend is already polling on PENDING, so this
@@ -4859,21 +4869,7 @@ class BotService(InstanceRestartMixin, BotServiceProtocol):
         lock_key = (env, entity_id, bot_id, lock.lock_token)
         handed_off = False
         try:
-            # Mandatory lifecycle preconditions are distinct from best-effort
-            # extra-config hooks. Engines own policy; failures abort BEFORE
-            # either provider can release/update the current instance.
-            restart_ctx, restart_strategy = resolve_provisioning(
-                bot_id=bot_id, owner_id=str(bot.get("owner_id") or user_id),
-                bot_type=str(bot.get("bot_type") or ""),
-                active_engine=bot.get("active_engine"),
-                template_type=bot.get("template_type"), template_config=None,
-            )
-            restart_strategy.prepare_restart(
-                restart_ctx, binding_id=binding_id,
-                device_service=self._device_service_provider(),
-                bot_repository=self._repository,
-                renew_lease=lambda: self._restart_lock_repo.renew(*lock_key),
-            )
+            verify_restart()
             if bot.get("bot_type") == "service" and not self.is_teclaw_bot(
                 bot.get("active_engine")
             ):

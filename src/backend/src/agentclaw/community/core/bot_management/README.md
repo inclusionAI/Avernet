@@ -103,66 +103,34 @@ so background completion does not depend on request identity context. Jobs queue
 before this field was introduced remain readable and fall back to their `user_id`.
 This requires no database migration and does not backfill historical Bot rows.
 
-## Mandatory restart precondition (coding runtime, v1)
+## Coding-engine restart precondition
 
-`EngineProvisioningStrategy.prepare_restart` is a mandatory lifecycle hook under
-an acquired restart lease, before either release/start or BaaS update. Unlike
-`apply_restart_extra_configs`, its failures propagate and MUST NOT detach the
-old binding. The default implementation is a no-op. The aicoding strategy owns
-the runtime entrypoint, versioned result validation and polling for both aicoding
-and claude_code; BotService contains no runtime path, command or mount policy.
-The platform DeviceService router chooses ARCA/BaaS command execution.
+`EngineProvisioningStrategy.prepare_restart` defaults to a side-effect-free
+verifier. Only aicoding/claude_code implement helper probing, legacy/no-mount
+skips, backup polling, and receipt/instance verification in
+`engines/aicoding/restart_backup.py`. Preparation returns a short verifier:
+ordinary Bot restart waits BEFORE its existing 120-second lock, then verifies
+binding and receipt UNDER that lock before stop/update. No lock repository,
+BotService Service API, or generic status/retry policy is changed. Backup failure
+preserves the old binding and status. The runtime serializes backup workers and
+keeps writers stopped; successful preparation does not itself authorize deletion.
 
-The runtime contract is `/opt/agentclaw/bin/restart_backup start|status <operation>`:
-JSON version 1, operation identity, container identity and explicit completion
-receipt. Only confirmed legacy script absence or confirmed no canonical bind
-mounts can bypass backup. Errors/timeouts never permit destruction. See
-`aixcoding-docker-scripts/docs/restart-backup-contract.md` in the companion repo
-for root/admin ownership, rollout invariant and mandatory Linux/provider tests.
+Published restart and caller upgrade use thin engine dispatch. Published hooks
+run only inside restart's issue/retirement branches, not ordinary publication
+or workflow adoption. Existing caller creation/reuse/poll paths are unchanged.
+BaaS's existing command API accepts an optional physical target resolved from the
+authorized inventory; omitted means unchanged bot-level dispatch. The strategy
+checks all live targets, pins polls, and rechecks inventory before replacement.
+These checks do not replace existing provider workflow/concurrency semantics.
 
-The lock repository's `renew` refreshes the DB-clock lease for long backups;
-`release(expected_created_at=...)` prevents stale reaping from deleting a lease
-renewed after the stale read. Existing release callers retain token-only behavior.
+Logs use `event=aicoding_restart_backup`, with phase, outcome/reason, Bot/target,
+operation ID, duration and generation. Wait logs are throttled to state changes
+or once per minute. Raw commands, output and exception messages are not logged
+by the strategy. Runtime failure/unknown state never authorizes replacement.
+Legacy absence is confirmed, not inferred from permission/transport errors.
 
-Propagation: concrete coding strategies and the shared restart caller, unified
-lock repository and its test implementations, the runtime scripts, both platform
-exec providers. No frontend or Relay HTTP contract is changed. The HTTP adapter
-offloads the synchronous service to its thread pool so backup polling does not
-block the server event loop. This is NOT a new durable asynchronous restart queue:
-long-request/gateway behavior and process-death recovery require staging validation.
-
-
-### Published and caller targets
-
-`BotServiceProtocol.instance_restart_guard(bot, device_id)` is an asynchronous
-context manager: it resolves the same `prepare_restart` engine hook and holds a
-target-specific fenced lease through backup and replacement submission. Its
-adapter lives in `services/instance_restart.py`; all runtime/mount/legacy policy
-remains in `engines/aicoding/restart_backup.py`. The explicit target is the
-publish-stage/caller bot UUID, never the source Bot binding. Source Bot state is
-not updated. Ordinary Bot restart continues to own its existing status writes.
-
-Published restart calls the guard inside the durable runner's issue callback,
-not before workflow adoption. Both retirement branches are guarded as well.
-Caller calls it only when upgrading an existing instance (including automatic
-version upgrades); first creation, connection reuse and polling are unchanged.
-Confirmed RELEASED targets need no backup; query errors are not proof of release.
-Legacy targets with confirmed helper absence continue the original upgrade.
-Permission/exec/protocol failures do not count as legacy absence.
-
-A deterministic per-target runtime operation ID resumes an interrupted backup
-without starting competing workers. The runtime's `/run` must be new after actual
-replacement. Failed operations remain fail-closed pending runtime recovery.
-Published/caller execution pins commands to each physical `provider_device_id`
-from BaaS's target device inventory, then rechecks that inventory before allowing
-replacement. Historical RELEASED/STOPPED devices need no script; every remaining
-legacy container is probed independently. A malformed/unresolvable inventory is
-not permission to destroy. `BaasServiceProtocol.exec_command_on_device` wraps the
-existing PaaS command endpoint; it adds no server-side API. Local tests do not
-prove provider inventory accuracy or Linux/NAS behavior.
-
-Propagation: the BotService Service API gains `instance_restart_guard`; published
-restart and caller upgrade consume it. No new DB schema, frontend or Relay HTTP
-API is introduced. Backup runs outside the event loop. Cancellation during
-preparation retains the lease until its worker finishes and never proceeds to
-replacement on behalf of the cancelled request.
+Propagation: the engine hook, the three restart consumers and the optional BaaS
+command parameter; no frontend, Relay HTTP or database migration. Targeted unit,
+entrypoint and architecture tests cover this contract. Linux root/admin, PaaS
+routing and NAS behavior still require staging validation with the paired
+container scripts. Failed runtime operations remain fail-closed pending recovery.

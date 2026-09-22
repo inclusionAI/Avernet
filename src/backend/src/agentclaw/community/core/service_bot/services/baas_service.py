@@ -25,8 +25,6 @@ import re
 import time
 
 import httpx
-
-from .device_commands import DeviceCommandsMixin
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasNoActiveDevicesError,
     BaasServiceError,
@@ -389,7 +387,7 @@ class BotConfig:
         return result
 
 
-class BaasService(DeviceCommandsMixin):  # pragma: no cover
+class BaasService:  # pragma: no cover
     """BaaS 服务 - 与 BaaS 层 API 交互。
 
     负责 BaaS 层相关的 API 调用，如创建 Bot 等。所有依赖由
@@ -1595,6 +1593,7 @@ class BaasService(DeviceCommandsMixin):  # pragma: no cover
         cmd: str,
         env: dict[str, str] | None = None,
         timeout_seconds: int = 30,
+        paas_device_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute a shell command inside a BaaS bot container.
 
@@ -1606,6 +1605,8 @@ class BaasService(DeviceCommandsMixin):  # pragma: no cover
             cmd: Shell command to execute.
             env: Optional environment variables dict.
             timeout_seconds: Command execution timeout (default 30s).
+            paas_device_id: Optional physical target resolved from the authorized
+                bot inventory. Omitted preserves existing bot-level dispatch.
 
         Returns:
             ``{"exit_code": int, "stdout": str, "stderr": str,
@@ -1616,7 +1617,7 @@ class BaasService(DeviceCommandsMixin):  # pragma: no cover
         """
         logger.info(
             "[BaasService.exec_command_on_bot] bot_uuid=%s cmd=%.120s timeout=%s",
-            bot_uuid, cmd, timeout_seconds,
+            bot_uuid, cmd if paas_device_id is None else "<physical-command>", timeout_seconds,
         )
 
         payload: dict[str, Any] = {
@@ -1626,9 +1627,16 @@ class BaasService(DeviceCommandsMixin):  # pragma: no cover
         if env:
             payload["env"] = env
 
+        path = f"/api/v1/bots/{self._tenant}/{bot_uuid}/execute-command"
+        if paas_device_id is not None:
+            from urllib.parse import quote
+            if not paas_device_id:
+                raise ValueError("paas_device_id must not be empty")
+            path = f"/api/v1/paas/devices/{quote(paas_device_id, safe='@')}/commands"
+            payload.pop("timeout_seconds")  # Existing PaaS command schema.
         try:
             response = self._http.post(
-                f"/api/v1/bots/{self._tenant}/{bot_uuid}/execute-command",
+                path,
                 json=payload,
                 timeout=float(timeout_seconds + 10),
             )
@@ -1641,7 +1649,10 @@ class BaasService(DeviceCommandsMixin):  # pragma: no cover
                     f"BaaS exec_command error: {response_data.get('message', 'Unknown error')}"
                 )
 
-            return response_data.get("data", {})
+            data = response_data.get("data", {})
+            if paas_device_id is not None and not isinstance(data, dict):
+                raise BaasServiceError("Invalid physical command result")
+            return data
 
         except httpx.HTTPStatusError as e:
             logger.error(

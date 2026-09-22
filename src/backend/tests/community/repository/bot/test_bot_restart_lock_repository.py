@@ -129,23 +129,3 @@ def test_get_if_stale_judges_db_side(repo):
     assert repo.get_if_stale("dev", "ent_c", "bot_c3", 0) is not None
     # Absent row → None regardless of TTL.
     assert repo.get_if_stale("dev", "ent_c", "missing", 0) is None
-
-
-def test_renew_requires_current_token(repo):
-    record = repo.acquire("dev", "ent", "bot", "owner")
-    assert not repo.renew("dev", "ent", "bot", "wrong")
-    assert repo.renew("dev", "ent", "bot", record.lock_token)
-    assert repo.get_if_stale("dev", "ent", "bot", 120) is None
-
-
-def test_stale_reaper_cannot_delete_renewed_lease(repo):
-    from datetime import datetime
-    record = repo.acquire("dev", "ent", "bot", "owner")
-    with repo._db.orm_session() as session:
-        session.query(BotRestartLockModel).update({"gmt_create": datetime(2000, 1, 1)})
-    stale = repo.get_if_stale("dev", "ent", "bot", 120)
-    assert stale is not None
-    assert repo.renew("dev", "ent", "bot", record.lock_token)
-    assert not repo.release("dev", "ent", "bot", record.lock_token,
-                            expected_created_at=stale.gmt_create)
-    assert repo.get("dev", "ent", "bot") is not None

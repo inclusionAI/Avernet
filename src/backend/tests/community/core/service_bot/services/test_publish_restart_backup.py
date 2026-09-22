@@ -1,5 +1,5 @@
 """Mandatory published-instance restart precondition integration."""
-from unittest.mock import Mock
+from unittest.mock import Mock, AsyncMock, patch
 
 import pytest
 
@@ -10,7 +10,6 @@ from tests.community.core.service_bot.services.test_publish_crash_windows import
 
 @pytest.mark.asyncio
 async def test_restart_backup_failure_never_issues_or_releases_published_target():
-    from contextlib import asynccontextmanager
 
     ledger = _ledger()
     baas = FakeBaas()
@@ -21,14 +20,11 @@ async def test_restart_backup_failure_never_issues_or_releases_published_target(
     svc._release_binding = Mock()
     targets = []
 
-    @asynccontextmanager
-    async def guard(*, bot, device_id):
+    async def guard(*, bot, device_id, target_runtime):
         targets.append(device_id)
         raise RuntimeError('backup failed')
-        yield  # pragma: no cover
 
-    svc._bot_service.instance_restart_guard = guard
-    with pytest.raises(RuntimeError, match='backup failed'):
+    with patch('agentclaw.community.core.service_bot.services.publish_flow.restart_mixin.prepare_instance_restart', side_effect=guard), pytest.raises(RuntimeError, match='backup failed'):
         await svc.execute_restart(1, 'online', 'operator')
     assert targets == ['BOT-live']
     build.upgrade_async.assert_not_called()
@@ -50,9 +46,10 @@ async def test_restart_adopted_workflow_does_not_backup_replacement_again():
     record = _record(PublishStatus.SUCCESS.value)
     record.ext['binding'] = {'online': 42}
     svc = _restart_flow(ledger, baas, build, record)
-    _crash_before_record(ledger)
-    with pytest.raises(RuntimeError):
+    with patch('agentclaw.community.core.service_bot.services.publish_flow.restart_mixin.prepare_instance_restart', new_callable=AsyncMock) as guard:
+        _crash_before_record(ledger)
+        with pytest.raises(RuntimeError):
+            await svc.execute_restart(1, 'online', 'operator')
+        guard.assert_called_once()
         await svc.execute_restart(1, 'online', 'operator')
-    svc._bot_service.instance_restart_guard.assert_called_once()
-    await svc.execute_restart(1, 'online', 'operator')
-    svc._bot_service.instance_restart_guard.assert_called_once()
+        guard.assert_called_once()

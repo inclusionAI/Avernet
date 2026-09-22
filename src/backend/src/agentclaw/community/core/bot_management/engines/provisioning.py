@@ -239,19 +239,18 @@ class EngineProvisioningStrategy(ABC):
         """
 
     def prepare_restart(
-        self, ctx: BotProvisioningContext, *, binding_id: int | None,
-        device_service: Any, bot_repository: Any, renew_lease: Callable[[], bool],
-        device_id: str | None = None,
-        target_runtime: Any = None,
-    ) -> None:
-        """Mandatory engine precondition under the restart lock, before release/update.
+        self, ctx: BotProvisioningContext, *, binding_id: int | None = None,
+        device_service: Any = None, bot_repository: Any = None,
+        device_id: str | None = None, target_runtime: Any = None,
+    ) -> Callable[[], None]:
+        """Prepare an engine-owned restart; default is side-effect-free.
 
-        Default: no-op. Any exception MUST abort restart without detaching the
-        old binding. Explicit device_id targets a published/caller instance and must
-        not mutate the source Bot repository; binding_id/bot_repository are None
-        in that mode. Implementations may use platform exec, never transport
-        logic in BotService. renew_lease returns False when ownership is lost.
+        Return a short verifier to call immediately before replacement, under
+        the caller's existing lock when applicable. Preparation may wait; the
+        verifier must not poll. Failures prohibit replacement. No generic state,
+        lease or retry semantics are changed by this hook.
         """
+        return lambda: None
 
     @abstractmethod
     def apply_restart_extra_configs(

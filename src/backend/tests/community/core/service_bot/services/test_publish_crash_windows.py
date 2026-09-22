@@ -11,7 +11,7 @@ Group B lands the release-leg cases (first release); later groups extend this fi
 per operation.
 """
 import copy
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock
 
@@ -181,7 +181,6 @@ def _flow(*, ledger, baas, build_service, publish_service=None):
     )
     # ARCA delivery (no config_artifact) → compose_live no-ops to (delivery, None).
     svc._ext_state.owner_id = Mock(return_value="u1")
-    svc._bot_service.instance_restart_guard = Mock(side_effect=lambda **kw: nullcontext())
     return svc
 
 

@@ -1,6 +1,8 @@
 """Bot restart (re-deploy) operations, mixed into PublishFlowService."""
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
+
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationKind,
     PublishOperationState,
@@ -369,10 +371,10 @@ class RestartMixin:
                 # e.g. an external BaaS deletion) so no destroy is issued.
                 destroy_publish_id = None
                 if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
-                    async with self._bot_service.instance_restart_guard(bot=bot, device_id=bot_uuid):
-                        destroy_publish_id = self._build_service.retire_superseded_bot(
-                            bot_uuid, operator=operator
-                        )
+                    await prepare_instance_restart(bot=bot, device_id=bot_uuid, target_runtime=self._baas_service)
+                    destroy_publish_id = self._build_service.retire_superseded_bot(
+                        bot_uuid, operator=operator
+                    )
                 self._release_binding(
                     binding_id, destroy_publish_id=destroy_publish_id
                 )
@@ -408,24 +410,24 @@ class RestartMixin:
                 )
 
         async def _issue():
-            async with self._bot_service.instance_restart_guard(bot=bot, device_id=bot_uuid):
-                return await self._build_service.upgrade_async(
-                    bot_uuid=bot_uuid,
-                    bot=bot,
-                    user_id=publish_record.owner_id,
-                    device_count=1,
-                    migration_path=migration_path,
-                    publish_stage=stage_enum,
-                    version=version,
-                    delivery=delivery,
-                    ext_info={
-                        "skills_manifest": publish_record.ext["skills_manifest"]
-                    } if publish_record.ext.get("skills_manifest") is not None else None,
-                    extra_envs=skills_env,
-                    docker_image=image_pin.docker_image,
-                    template_config=service_publish_template_config(bot),
-                    in_place=in_place,
-                )
+            await prepare_instance_restart(bot=bot, device_id=bot_uuid, target_runtime=self._baas_service)
+            return await self._build_service.upgrade_async(
+                bot_uuid=bot_uuid,
+                bot=bot,
+                user_id=publish_record.owner_id,
+                device_count=1,
+                migration_path=migration_path,
+                publish_stage=stage_enum,
+                version=version,
+                delivery=delivery,
+                ext_info={
+                    "skills_manifest": publish_record.ext["skills_manifest"]
+                } if publish_record.ext.get("skills_manifest") is not None else None,
+                extra_envs=skills_env,
+                docker_image=image_pin.docker_image,
+                template_config=service_publish_template_config(bot),
+                in_place=in_place,
+            )
         # NOTE: transient errors out of the atom are NOT caught + failed here. A
         # genuine crash leaves the op non-terminal so the durable task retry
         # re-runs and the SAME op resumes → adopt-by-query (existing bot).
@@ -461,10 +463,10 @@ class RestartMixin:
             # destroy needed → destroy_publish_id=None).
             destroy_publish_id = None
             if e.error_code == "DEVICE_NOT_FOUND":
-                async with self._bot_service.instance_restart_guard(bot=bot, device_id=bot_uuid):
-                    destroy_publish_id = self._build_service.retire_superseded_bot(
-                        bot_uuid, operator=operator
-                    )
+                await prepare_instance_restart(bot=bot, device_id=bot_uuid, target_runtime=self._baas_service)
+                destroy_publish_id = self._build_service.retire_superseded_bot(
+                    bot_uuid, operator=operator
+                )
             self._release_binding(
                 binding_id, destroy_publish_id=destroy_publish_id
             )

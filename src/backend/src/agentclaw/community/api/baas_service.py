@@ -113,10 +113,6 @@ class BaasServiceProtocol(Protocol):
         """Open a bot's working folder on the device side."""
         ...
 
-    def exec_command_on_device(self, *, paas_device_id: str, cmd: str) -> dict[str, Any]:
-        """Execute on an authorized physical container, never load-balanced."""
-        ...
-
     def exec_command_on_bot(
         self,
         *,
@@ -124,8 +120,9 @@ class BaasServiceProtocol(Protocol):
         cmd: str,
         env: dict[str, str] | None = None,
         timeout_seconds: int = 30,
+        paas_device_id: str | None = None,
     ) -> dict[str, Any]:
-        """Execute a shell command inside a BaaS bot container."""
+        """Execute on a bot; optional physical target must come from its inventory."""
         ...
 
     def get_publish_progress(

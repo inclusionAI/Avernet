@@ -1,4 +1,3 @@
-from contextlib import nullcontext
 import copy
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -168,7 +167,6 @@ def _pf(*args, **kw):
         reader.overrides_for_stage.return_value = {}
         kw["channel_overrides_reader"] = reader
     svc = PublishFlowService(*args, **kw)
-    svc._bot_service.instance_restart_guard = Mock(side_effect=lambda **kw: nullcontext())
 
     # Unit tests commonly replace get_latest_ext with a focused stub. Preserve
     # that seam while supplying the exact-snapshot API used by status+ext CAS.
