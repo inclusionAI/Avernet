@@ -94,6 +94,18 @@ def test_execute_persists_task_info_row(repo):
     assert row.task_spec["context"]["title"] == "T"
     assert row.task_spec["goal"]["acceptances"] == [{"id": "ac1", "description": "acc"}]
 
+def test_execute_records_submitting_session_on_root(repo):
+    request = _request()
+    request.execution_config["main_session_id"] = "main-session"
+    facade = _service(repo, task_id="execute-session-tid")
+
+    result = _exec(facade, request)
+
+    assert result.success is True
+    graph = facade.get_task_dashboard("execute-session-tid")
+    root = next(node for node in graph.tasks if node.node_id == graph.task_id)
+    assert root.run_info.extend_props["session_id"] == "main-session"
+
 
 
 def test_task_info_status_follows_root_status(repo):

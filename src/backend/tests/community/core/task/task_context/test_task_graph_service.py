@@ -135,6 +135,55 @@ class TestInitializeGraph:
         with pytest.raises(GraphAlreadyInitializedError):
             svc.initialize_graph(_task_info("t1"))
 
+    def test_main_session_seeds_root_session(self, svc: TaskGraphService):
+        info = _task_info("t-session")
+        info.execution_config["main_session_id"] = "session-initial"
+
+        graph = svc.initialize_graph(info)
+
+        assert graph.tasks[0].run_info.extend_props["session_id"] == "session-initial"
+
+    def test_missing_main_session_does_not_create_root_session(
+        self, svc: TaskGraphService
+    ):
+        graph = svc.initialize_graph(_task_info("t-no-session"))
+
+        assert "session_id" not in graph.tasks[0].run_info.extend_props
+
+    def test_report_can_override_initial_root_session(self, svc: TaskGraphService):
+        info = _task_info("t-session-override")
+        info.execution_config["main_session_id"] = "session-initial"
+        graph = svc.initialize_graph(info)
+
+        svc.update_task_node_info(
+            _patch(
+                "t-session-override",
+                "t-session-override",
+                extend_props_patch={"session_id": "session-reported"},
+            )
+        )
+
+        node = svc._get_node(graph, "t-session-override")
+        assert node.run_info.extend_props["session_id"] == "session-reported"
+
+    def test_report_without_session_keeps_initial_root_session(
+        self, svc: TaskGraphService
+    ):
+        info = _task_info("t-session-keep")
+        info.execution_config["main_session_id"] = "session-initial"
+        graph = svc.initialize_graph(info)
+
+        svc.update_task_node_info(
+            _patch(
+                "t-session-keep",
+                "t-session-keep",
+                extend_props_patch={"execution_decision": "ACCEPTED"},
+            )
+        )
+
+        node = svc._get_node(graph, "t-session-keep")
+        assert node.run_info.extend_props["session_id"] == "session-initial"
+
 
 # ===== add_task_nodes 触发条件 + 护栏 =====
 class TestAddTaskNodes:

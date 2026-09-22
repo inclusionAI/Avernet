@@ -18,7 +18,6 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskInfoRepositoryProtocol,
 )
 from agentclaw.community.core.task.domain.errors import (
-    GraphAlreadyInitializedError,
     GraphVersionConflictError,
     GraphIntegrityError,
     NodeNotFoundError,
@@ -44,7 +43,6 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
     TaskSpec,
     TaskSummary,
-    TaskRuntimeProfile,
 )
 from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 from agentclaw.community.core.task.task_context import task_graph_support
@@ -432,47 +430,7 @@ class TaskGraphService:
     # ===== 4 核心写/读 =====
     def initialize_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
         """建图首帧(全局 RUNNING,只含根节点 PENDING);幂等:同 task_id 重复调抛冲突。"""
-        task_id = task_info.task_id
-        with self._lock_for(task_id):
-            if task_id in self._graphs:
-                raise GraphAlreadyInitializedError(f"task_id={task_id} 图已存在")
-            run_id = self._next_run_id()
-            # 任务从建图开始计时。根节点仍保持 PENDING,但其 start_time 代表
-            # 任务创建/执行图初始化时间,不能等到后续进入 RUNNING 才补写。
-            started_at = int(time.time() * 1000)
-            root = TaskNode(
-                node_id=task_id,
-                task_id=task_id,
-                status=Status.PENDING,
-                task_spec=task_info.task_spec,
-                run_info=RuntimeInfo(start_time=started_at),
-                node_run_graph=None,  # type: ignore[arg-type]  回填见下
-            )
-            graph = TaskExecutionGraph(
-                run_id=run_id,
-                loop_round=0,
-                status=Status.RUNNING,
-                tasks=[root],
-                relations=[],
-                task_id=task_id,
-            )
-            root.node_run_graph = graph  # 回填循环引用(in-memory)
-            graph.extend_props["execution_config"] = dict(task_info.execution_config)
-            graph.extend_props["runtime_profile"] = (
-                TaskRuntimeProfile.from_execution_config(
-                    task_info.execution_config
-                ).to_dict()
-            )
-            graph.extend_props["source_type"] = task_info.source_type
-            graph.extend_props["owner_bot_id"] = task_info.owner_bot_id
-            graph.extend_props["owner_user_id"] = task_info.owner_user_id
-            graph.extend_props["gaps"] = []
-            self._graphs[task_id] = graph
-            if self._graph_repo is not None:
-                self._graph_versions[task_id] = self._graph_repo.create_graph(
-                    graph, runtime_status=Status.PENDING
-                )
-            return graph
+        return task_graph_support.initialize_graph(self, task_info)
 
     def add_task_nodes(
         self,

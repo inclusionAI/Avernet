@@ -12,6 +12,7 @@ import uuid
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import (
+    GraphAlreadyInitializedError,
     NodeNotFoundError,
     TaskNotFoundError,
     TaskStateError,
@@ -27,6 +28,8 @@ from agentclaw.community.core.task.domain.models import (
     TaskContext,
     TaskExecutionGraph,
     TaskGraphPatch,
+    TaskInfo,
+    TaskRuntimeProfile,
     TaskNode,
     TaskNodePatch,
     TaskNodeQueryCriteria,
@@ -40,6 +43,58 @@ DEFAULT_MAX_LOOP = 3
 DEFAULT_MAX_PLAN_ROUND = 3
 DEFAULT_BBS_MAX_DEPTH = 3
 MAX_GRAPH_VERSION_RETRIES = 3
+
+
+def initialize_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
+    """Build the first graph frame and persist its root runtime identity."""
+    task_id = task_info.task_id
+    with self._lock_for(task_id):
+        if task_id in self._graphs:
+            raise GraphAlreadyInitializedError(f"task_id={task_id} 图已存在")
+        run_id = self._next_run_id()
+        # The graph starts measuring time at task creation. The root remains
+        # PENDING, while its start_time records initialization time.
+        started_at = int(time.time() * 1000)
+        main_session_id = task_info.execution_config.get("main_session_id")
+        root_extend_props: dict[str, Any] = {}
+        if isinstance(main_session_id, str) and main_session_id.strip():
+            root_extend_props["session_id"] = main_session_id
+        root = TaskNode(
+            node_id=task_id,
+            task_id=task_id,
+            status=Status.PENDING,
+            task_spec=task_info.task_spec,
+            run_info=RuntimeInfo(
+                start_time=started_at,
+                extend_props=root_extend_props,
+            ),
+            node_run_graph=None,  # type: ignore[arg-type]
+        )
+        graph = TaskExecutionGraph(
+            run_id=run_id,
+            loop_round=0,
+            status=Status.RUNNING,
+            tasks=[root],
+            relations=[],
+            task_id=task_id,
+        )
+        root.node_run_graph = graph
+        graph.extend_props["execution_config"] = dict(task_info.execution_config)
+        graph.extend_props["runtime_profile"] = (
+            TaskRuntimeProfile.from_execution_config(
+                task_info.execution_config
+            ).to_dict()
+        )
+        graph.extend_props["source_type"] = task_info.source_type
+        graph.extend_props["owner_bot_id"] = task_info.owner_bot_id
+        graph.extend_props["owner_user_id"] = task_info.owner_user_id
+        graph.extend_props["gaps"] = []
+        self._graphs[task_id] = graph
+        if self._graph_repo is not None:
+            self._graph_versions[task_id] = self._graph_repo.create_graph(
+                graph, runtime_status=Status.PENDING
+            )
+        return graph
 
 
 def load_action_logs(self, graph: TaskExecutionGraph, *, limit: int = 200) -> None:
