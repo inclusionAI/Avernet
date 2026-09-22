@@ -148,6 +148,11 @@ RuntimeInfo.actual_goal
 
 RuntimeInfo.output / acceptance_result
 = 当前 Bot 针对 actual_goal 的真实产出和局部验收事实。
+
+报告、尽调、方案、材料、文档类 RuntimeInfo.output 契约:
+  {"result": "<完整 Markdown 全文>"}
+result 是最终交付物全文，不得退化为标题列表、摘要或状态说明；
+未形成交付物时必须表达为 DECLINED 或局部 acceptance_result.gaps。
 ```
 
 ### 2.3 TaskContext
@@ -286,8 +291,9 @@ Common envelope:
 Rules:
 
 ```text
-ACCEPTED → actual_goal and acceptance_result are required; output is the real business result.
+ACCEPTED → actual_goal and acceptance_result are required; output is the real deliverable, not a summary.
 DECLINED → actual_goal=null, output={}, acceptance_result=null; failure_reason=capability_mismatch.
+Document/report deliverables use output={"result":"<full Markdown text>"}.
 ```
 
 Graph persists only the current node execution facts and grants the current Relay holder a planning authority.
@@ -307,6 +313,8 @@ Rules:
 gaps != [] → next_task_spec is required; Graph creates exactly one next TaskNode with empty RuntimeInfo.
 gaps == [] → next_task_spec must be null; current node becomes SUCCESS and graph becomes DONE.
 ```
+
+On Relay completion, Graph populates the graph-level read aggregate `output` from accepted node outputs. It does not rewrite any predecessor/root RuntimeInfo; this aggregate is for the dashboard and task panel.
 
 With gaps, Graph atomically persists gaps, transitions the current node to DONE, creates one target node, increments Relay loop state and issues dispatch authority.
 
@@ -335,6 +343,10 @@ HIT_MULTI_BOTS:
   run_mode=coop_group
   driver_bot_id belongs to next_relay_bots.
   driver_bot_id is the next group Manager and unique Relay Holder.
+
+Current-holder guard:
+  neither driver_bot_id nor next_relay_bots may contain the current holder Bot.
+  If filtering the current holder leaves no real candidate, report MISS and publish BBS.
 
 MISS:
   run_mode=bbs
@@ -444,7 +456,7 @@ Effective coverage requires role coverage **and** Skill/tool evidence. A tool or
 
 ### Step 3 — Execute only actual_goal
 
-The Bot produces only real output and a local acceptance result for actual_goal. Required tools being unavailable cannot be replaced by model memory.
+The Bot produces only real output and a local acceptance result for actual_goal. For document/report deliverables, output is `{"result":"<full Markdown text>"}`. Required tools being unavailable cannot be replaced by model memory, and an unavailable-tool explanation is not a deliverable.
 
 ### Step 4 — Report execution fact
 
@@ -488,6 +500,7 @@ For `coop_group`:
 - driver_bot_id is selected from next_relay_bots;
 - driver_bot_id is group Manager and next unique Relay Holder;
 - other next_relay_bots are workers;
+- neither driver_bot_id nor next_relay_bots selects the current holder;
 - original Human is added as observer;
 - target node assignee is driver_bot_id; created group_id is runtime infrastructure metadata.
 ```
@@ -526,7 +539,7 @@ RUNNING --PLAN_RESULT with gaps--> DONE + one new PENDING baton
 RUNNING --PLAN_RESULT with no gaps--> SUCCESS + graph DONE
 ```
 
-No Relay action may change predecessor/root execution state.
+No Relay action may change predecessor/root execution state. Terminal completion only writes the graph-level output aggregate; predecessor/root RuntimeInfo stays immutable.
 
 ### 6.2 Centralized
 

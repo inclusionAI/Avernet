@@ -223,8 +223,14 @@ def _plan_and_select(
             payload={
                 "outcome": "HIT_SINGLE",
                 "run_mode": "single_bot",
-                "driver_bot_id": "research-bot",
-                "next_relay_bots": ["research-bot"],
+                "driver_bot_id": (
+                    "research-bot" if event_suffix == "1" else f"research-bot-{event_suffix}"
+                ),
+                "next_relay_bots": (
+                    ["research-bot"]
+                    if event_suffix == "1"
+                    else [f"research-bot-{event_suffix}"]
+                ),
             },
         )
     )
@@ -389,7 +395,7 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
             node_id=final_step,
             event_type="EXECUTION_RESULT",
             event_id="exec-3",
-            holder_id="research-bot",
+            holder_id="research-bot-2",
             progress_reason="最终一棒产出完成，检查根验收标准",
             payload=_accepted({"final": "complete"}),
         )
@@ -400,7 +406,7 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
             node_id=final_step,
             event_type="PLAN_RESULT",
             event_id="plan-3",
-            holder_id="research-bot",
+            holder_id="research-bot-2",
             relay_turn=third["relay_turn"],
             progress_reason="根目标已全部满足",
             payload={"gaps": [], "next_task_spec": None},
@@ -413,6 +419,59 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
         Status.SUCCESS,
     ]
     assert final.status == Status.DONE
+    assert final.output == {
+        "relay-task": {"summary": "首轮结论"},
+        research_step: {"recommendation": "进入市场"},
+        final_step: {"final": "complete"},
+    }
+    for task_node in final.tasks:
+        assert set(task_node.task_spec.to_dict()) == {"context", "goal"}
+
+
+def test_relay_dispatch_rejects_current_holder_as_next_relay_bot() -> None:
+    service, graph_service = _service()
+    _run(service.execute(_request()))
+    turn = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="EXECUTION_RESULT",
+            event_id="exec-self-dispatch",
+            holder_id="main-bot:owner-1",
+            progress_reason="首棒完成，规划下一棒",
+            payload=_accepted({"summary": "首轮结论"}),
+        )
+    )["relay_turn"]
+    planned = _run(
+        service.report_task_event(
+            task_id="relay-task",
+            node_id="relay-task",
+            event_type="PLAN_RESULT",
+            event_id="plan-self-dispatch",
+            holder_id="main-bot:owner-1",
+            relay_turn=turn,
+            progress_reason="存在下一棒缺口",
+            payload={"gaps": ["补齐市场研究 gap"], "next_task_spec": _child_spec()},
+        )
+    )
+    with pytest.raises(TaskStateError, match="current holder"):
+        _run(
+            service.report_task_event(
+                task_id="relay-task",
+                node_id=planned["target_node_id"],
+                event_type="DISPATCH_RESULT",
+                event_id="search-self-dispatch",
+                holder_id="main-bot:owner-1",
+                relay_turn=turn,
+                progress_reason="候选 Bot 能力与下一节点目标匹配",
+                payload={
+                    "outcome": "HIT_SINGLE",
+                    "run_mode": "single_bot",
+                    "driver_bot_id": "main-bot",
+                    "next_relay_bots": ["main-bot"],
+                },
+            )
+        )
 
 
 def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_reset() -> (
@@ -1175,7 +1234,7 @@ class TestRelayTrajectory:
                 node_id=step2,
                 event_type="EXECUTION_RESULT",
                 event_id="exec-3",
-                holder_id="research-bot",
+                holder_id="research-bot-2",
                 progress_reason="最终完成",
                 payload=_accepted({"final": "complete"}),
             )
@@ -1186,7 +1245,7 @@ class TestRelayTrajectory:
                 node_id=step2,
                 event_type="PLAN_RESULT",
                 event_id="plan-final",
-                holder_id="research-bot",
+                holder_id="research-bot-2",
                 relay_turn=exec3["relay_turn"],
                 progress_reason="根目标完成",
                 payload={"gaps": []},
@@ -1220,7 +1279,7 @@ class TestRelayTrajectory:
             for record in records
             if record.action_result == "plan_result"
         ]
-        assert plan_holders == ["main-bot", "research-bot", "research-bot"]
+        assert plan_holders == ["main-bot", "research-bot", "research-bot-2"]
 
     def test_callback_events_are_correlated_without_leaking_turn(self):
         service, _graph, repo = _service_with_traj()

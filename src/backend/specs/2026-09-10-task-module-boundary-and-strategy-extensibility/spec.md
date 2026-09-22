@@ -77,6 +77,8 @@
 - [ ] Relay `PLAN_RESULT` 的 `gaps` 非空时必须携带唯一 `next_task_spec`；GAP 为空时不得携带下一棒，并完成任务。
 - [ ] Relay 的下一棒节点由 Graph 生成 `node_id`，初始 `runtime_info` 为空；Skill 不预填下一棒 `actual_goal`。
 - [ ] Relay 当前棒仅修改当前节点与图级 Relay 控制事实；不得修改任何前序节点或根节点的 `status`、`actual_goal`、`output`、`acceptance_result`、`assignee` 或 `run_mode`。
+- [ ] Relay 文档/报告类 `RuntimeInfo.output` 使用 `{"result":"<完整 Markdown 全文>"}` 承载最终交付物，不得退化为标题、摘要或状态说明；任务完成时图级 `output` 仅做只读汇总，不回写任何前序/root RuntimeInfo。
+- [ ] Relay `DISPATCH_RESULT` 的 `driver_bot_id` 与 `next_relay_bots` 均不得选择当前 holder；过滤当前 holder 后无其它候选时必须 MISS 并转 BBS。
 - [ ] Relay 协作群决策包含 `driver_bot_id` 和 `next_relay_bots`；`driver_bot_id` 必须属于 `next_relay_bots`，并作为下一棒群 Manager、唯一 Relay Holder 和节点 assignee。
 - [ ] 当前棒 Bot 默认不加入下一棒协作群；Human 默认以 observer 身份加入下一棒协作群。
 - [ ] Relay BBS claim 是目标 BBS 节点级 claim；BBS Bot 认领后执行相同 Relay 闭环，不能触发中心化根节点或父子收敛。

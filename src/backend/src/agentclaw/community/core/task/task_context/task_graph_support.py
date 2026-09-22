@@ -51,6 +51,32 @@ def load_action_logs(self, graph: TaskExecutionGraph, *, limit: int = 200) -> No
         node.run_info.action_log = list(grouped.get(node.node_id, []))
 
 
+def _relay_output_value(output: dict[str, Any]) -> Any:
+    """Project a Relay node output to its graph-level aggregate value."""
+    if not output:
+        return None
+    if len(output) == 1:
+        for key in ("result", "markdown"):
+            value = output.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+    return dict(output)
+
+
+def _relay_graph_output(graph: TaskExecutionGraph) -> dict[str, Any]:
+    """Aggregate accepted Relay outputs without mutating any prior node."""
+    output: dict[str, Any] = {}
+    for node in graph.tasks:
+        runtime = node.run_info
+        decision = str(runtime.extend_props.get("execution_decision") or "").upper()
+        if decision != "ACCEPTED":
+            continue
+        value = _relay_output_value(runtime.output)
+        if value is not None:
+            output[node.node_id] = value
+    return output
+
+
 def query_task_dashboard(
     self, task_id: str, node_id: str | None = None
 ) -> TaskExecutionGraph:
@@ -560,6 +586,9 @@ def apply_relay_plan_result(
                 )
             origin.status = Status.SUCCESS
             origin.run_info.end_time = now
+            # Relay completion is a read-side graph aggregate. Prior batons are
+            # immutable; only the graph output is populated for the task panel.
+            graph.output = _relay_graph_output(graph)
             graph.status = Status.DONE
             return (
                 {

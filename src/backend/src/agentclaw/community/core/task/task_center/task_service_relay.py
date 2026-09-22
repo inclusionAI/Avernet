@@ -665,6 +665,16 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
             or payload.get("assignee")
             or (next_bots[0] if next_bots else "")
         ).strip()
+        holder_base = str(holder_id).partition(":")[0]
+        selected_bases = {
+            item.partition(":")[0]
+            for item in [driver, *next_bots]
+            if item.partition(":")[0]
+        }
+        if holder_base and holder_base in selected_bases:
+            raise TaskStateError(
+                "relay dispatch cannot select the current holder as the next relay bot"
+            )
         if outcome == "HIT_SINGLE":
             if not next_bots and driver:
                 next_bots = [driver]
