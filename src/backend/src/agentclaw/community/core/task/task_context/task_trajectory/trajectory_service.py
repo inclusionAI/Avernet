@@ -596,7 +596,10 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         ``Status`` import at module top (``centralized_support``) is runtime —
         ``Status.RUNNING`` is compared against node.status as-is.
         """
+        logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin")
+
         if self._graph is None or self._bcs is None:
+            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, graph or bcs is none")
             return None  # 探测未接线(轻量 DI / 未部署 BCS)→ 无 RUNNING 会话段
         try:
             graph = self._graph.query_task_dashboard(task_id)
@@ -608,6 +611,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             return None
         running = [n for n in getattr(graph, "tasks", []) if n.status == Status.RUNNING]
         if not running:
+            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, running is none")
             return None
         # 卡得最久的排最前(总摘录预算耗尽时优先保留最"病"的节点)
         now_ms = int(time.time() * 1000)
@@ -640,13 +644,16 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 )
                 continue
             try:
+                logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin get bcs msgs")
                 msgs = await self._bcs.get_session_messages(sid, limit=limit)
+                logger.info("[task][trajectory], collect_trajectory_event_session_msgs, finish get bcs msgs")
             except Exception as ex:  # noqa: BLE001  单节点 BCS 失败 → 跳过,不拖垮其余
                 logger.warning(
                     "[task][trajectory] collect_trajectory_event_session_msgs, 会话明细拉取失败,跳过 task=%s node=%s session=%s: %s: %s",
                     task_id, node.node_id, sid, type(ex).__name__, ex,
                 )
                 continue
+
             if not msgs:
                 logger.info(
                     "[task][trajectory] collect_trajectory_event_session_msgs, 会话明细为空,跳过 task=%s node=%s session=%s",
