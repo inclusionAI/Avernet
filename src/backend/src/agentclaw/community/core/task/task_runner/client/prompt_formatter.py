@@ -271,3 +271,91 @@ class _RunnerContextBuilder(TaskContextBuilder):
 
     def build(self, task_id: str, node_id: str) -> dict[str, Any]:
         return self._runner._build_context(task_id, node_id)  # integration 内聚访问
+
+
+def format_benchmark_prompt(task_spec: dict[str, Any]) -> str:
+    """Construct a prompt message from task_spec JSON for benchmark_execute.
+
+    Takes the raw task_spec dict (as received in TaskInfoRequestDTO.task_spec)
+    and builds a structured prompt to send directly to the bot via
+    OpenApiBotPort.send_message — bypassing the normal engine dispatch flow.
+
+    Fields (all optional, missing fields are simply skipped):
+    - metadata.title / metadata.instruction
+    - context.background / context.extend_props
+    - goal.objective / goal.acceptances
+    """
+    metadata = task_spec.get("metadata") or {}
+    context = task_spec.get("context") or {}
+    goal = task_spec.get("goal") or {}
+    extend_props = context.get("extend_props") or {}
+
+    parts: list[str] = []
+
+    # Title
+    title = metadata.get("title") or ""
+    if title:
+        parts.append(f"# {title}")
+
+    # Instruction (the core prompt for the bot)
+    instruction = metadata.get("instruction") or ""
+    if instruction:
+        parts.append(f"## 执行指令\n{instruction}")
+
+    # Background
+    background = context.get("background") or ""
+    if background:
+        parts.append(f"## 任务背景\n{background}")
+
+    # Goal / objective
+    objective = goal.get("objective") or ""
+    if objective:
+        parts.append(f"## 任务目标\n{objective}")
+
+    # Acceptance criteria
+    acceptances = goal.get("acceptances") or []
+    if acceptances:
+        acc_lines = []
+        for acc in acceptances:
+            acc_id = acc.get("id") or ""
+            # Request DTO uses "acceptance", response DTO uses "description"
+            acc_desc = acc.get("acceptance") or acc.get("description") or ""
+            acc_lines.append(f"- [{acc_id}] {acc_desc}")
+        parts.append("## 验收标准\n" + "\n".join(acc_lines))
+
+    # Key abilities from extend_props
+    key_abilities = extend_props.get("key_abilities") or []
+    if key_abilities:
+        parts.append("## 关键能力要求\n" + "\n".join(f"- {a}" for a in key_abilities))
+
+    # Chain order (handoff sequence) from extend_props
+    chain_order = extend_props.get("chain_order") or []
+    if chain_order:
+        chain_lines = []
+        for step in chain_order:
+            step_num = step.get("step") or ""
+            name = step.get("name") or ""
+            rationale = step.get("rationale") or ""
+            modality_type = step.get("modality_type") or ""
+            chain_lines.append(
+                f"### 步骤 {step_num}: {name}"
+                + (f" (类型: {modality_type})" if modality_type else "")
+                + (f"\n{rationale}" if rationale else "")
+            )
+        parts.append("## 交接链路\n" + "\n".join(chain_lines))
+
+    # Benchmark task ID
+    benchmark_task_id = extend_props.get("benchmark_task_id") or ""
+    if benchmark_task_id:
+        parts.append(f"**Benchmark 任务 ID**: {benchmark_task_id}")
+
+    # Business type
+    business_type = extend_props.get("business_type") or ""
+    if business_type:
+        parts.append(f"**任务类型**: {business_type}")
+
+    # Constraints
+    parts.append(NO_WEB_SEARCH_CONSTRAINT)
+    parts.append(OUTPUT_LANGUAGE_CONSTRAINT)
+
+    return "/task [TASK-LOOP-EVALUATION] " + "\n\n".join(parts)
