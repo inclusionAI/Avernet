@@ -304,13 +304,15 @@ class BaasDesktopLifecycleRepositoryMixin:
                     timeout_seconds=_DATA_INIT_TRIGGER_CLAIM_TIMEOUT_SECONDS,
                 )
                 data_init_status = bot_ext.get("data_init_status")
-                in_progress_is_stale = (
+                data_init_is_stale = (
                     data_init_status == "in_progress"
-                    and claim_is_expired
                     and _utc_timestamp_expired(
                         bot_ext.get("data_init_started_at"),
                         timeout_seconds=_DATA_INIT_TRIGGER_CLAIM_TIMEOUT_SECONDS,
                     )
+                )
+                in_progress_is_stale = data_init_is_stale and (
+                    not claim_is_current or claim_is_expired
                 )
                 if (
                     bot is None

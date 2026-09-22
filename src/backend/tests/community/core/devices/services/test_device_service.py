@@ -948,7 +948,11 @@ class TestReportDeviceAlive:
         repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = (
             DataInitTriggerClaim("claim-17", False)
         )
-        service = _make_service(repo=repo)
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "ext": {"skills_layout": "pool"}
+        }
+        service = _make_service(repo=repo, bot_query=bot_query)
         service._sync_bot_config_when_device_active = MagicMock()
         service._trigger_data_init_on_device_ready = MagicMock()
 
@@ -975,6 +979,36 @@ class TestReportDeviceAlive:
             startup_identity="17",
         )
         reset_event_bus()
+
+    def test_legacy_baas_alive_retries_data_init_without_pool_confirmation(self):
+        record = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={"callback_token": "tok123"},
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = record
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "ext": {"skills_layout": "legacy"}
+        }
+        service = _make_service(repo=repo, bot_query=bot_query)
+        service._trigger_data_init_on_device_ready = MagicMock()
+
+        service.report_device_alive(
+            device_id=record.device_id,
+            token="tok123",
+        )
+
+        repo.claim_baas_desktop_data_init_trigger_if_ready.assert_not_called()
+        service._trigger_data_init_on_device_ready.assert_called_once_with(
+            device_id=record.device_id,
+            record=record,
+            claimed_startup_identity=None,
+            claim_token=None,
+            resume_stale_in_progress=False,
+        )
 
     def test_non_pool_alive_does_not_trigger_data_init_readiness(self):
         record = _make_record(
@@ -1017,7 +1051,11 @@ class TestReportDeviceAlive:
             RuntimeError("claim write unavailable"),
             DataInitTriggerClaim("claim-17", False),
         ]
-        service = _make_service(repo=repo)
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "ext": {"skills_layout": "pool"}
+        }
+        service = _make_service(repo=repo, bot_query=bot_query)
         service._trigger_data_init_on_device_ready = MagicMock()
 
         for _ in range(2):

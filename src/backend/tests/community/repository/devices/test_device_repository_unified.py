@@ -841,6 +841,14 @@ def test_desktop_data_init_expired_claim_is_fenced_during_takeover(repo):
         startup_identity="17",
         claim_token=second_claim.claim_token,
     ) is True
+    third_claim = repo.claim_baas_desktop_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    )
+    assert third_claim is not None
+    assert third_claim.resume_stale_in_progress is True
+    assert third_claim.claim_token != second_claim.claim_token
 
 
 def test_desktop_data_init_trigger_claim_waits_for_active_bot(repo):

@@ -1174,10 +1174,9 @@ class DeviceService:
                 DeviceBindingStatus.ACTIVE.value,
             }
         ):
-            self.trigger_data_init_on_device_ready(
+            self._retry_data_init_on_device_alive(
                 device_id=device_id,
                 binding_id=record.id,
-                require_pool_confirmation=True,
             )
 
         updated_record = self._repo.get_by_id(record.id)
@@ -1772,6 +1771,39 @@ class DeviceService:
         except Exception as exc:
             logger.warning(
                 "data_init_trigger readiness check failed: "
+                f"device_id={device_id} binding_id={binding_id} exc={exc}",
+                exc_info=True,
+            )
+
+    def _retry_data_init_on_device_alive(
+        self,
+        *,
+        device_id: str,
+        binding_id: int,
+    ) -> None:
+        """Retry data-init with the confirmation policy persisted on the Bot."""
+        try:
+            bot = self._bot_query.get_by_binding_id(binding_id)
+            if bot is None:
+                return
+            ext = bot.get("ext") or {}
+            if isinstance(ext, str):
+                import json as _json
+
+                try:
+                    ext = _json.loads(ext)
+                except _json.JSONDecodeError:
+                    ext = {}
+            if not isinstance(ext, dict):
+                ext = {}
+            self.trigger_data_init_on_device_ready(
+                device_id=device_id,
+                binding_id=binding_id,
+                require_pool_confirmation=ext.get("skills_layout") == "pool",
+            )
+        except Exception as exc:
+            logger.warning(
+                "data_init_trigger alive retry failed: "
                 f"device_id={device_id} binding_id={binding_id} exc={exc}",
                 exc_info=True,
             )
