@@ -35,20 +35,6 @@ def file_count_contract(tmp_path, monkeypatch):
     (root / ".service_bot_publish_ignore").write_text("workspace/test_ignore\n")
     monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", str(root / "workspace"))
 
-    class CountEngine(BaseEngine):
-        name = "openclaw"
-        version = "1.0.0"
-
-        @property
-        def capabilities(self):
-            return EngineCapabilities(supported={Capability.FILE_LIST})
-
-    registry = EngineRegistry()
-    registry.register(CountEngine)
-    EngineManager.reset_instance()
-    manager = EngineManager(CountEngine.name, registry=registry)
-    manager._active_engine = CountEngine()
-    manager._active_engine._file = OpenClawFileAdapter(
     file_adapter = OpenClawFileAdapter(
         OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter()),
     )
