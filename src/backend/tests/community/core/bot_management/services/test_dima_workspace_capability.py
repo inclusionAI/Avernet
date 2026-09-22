@@ -7,7 +7,48 @@ from agentclaw.community.core.bot_management.services.aicoding.dima_workspace_ca
 
 
 class TestHasDimaWorkspaceEnabled:
-    """has_dima_workspace_enabled: 读取 bot_template_config.capabilities.dima_workspace。"""
+    """has_dima_workspace_enabled: 扁平 capabilities.dima_workspace 优先，嵌套兜底。"""
+
+    # ── 扁平形态：模板工厂快照约定（capabilities 在根部） ──────────────
+
+    def test_true_when_flat_bool_true(self):
+        assert has_dima_workspace_enabled(
+            {"capabilities": {"dima_workspace": True}}
+        ) is True
+
+    def test_true_when_flat_string_true(self):
+        assert has_dima_workspace_enabled(
+            {"capabilities": {"dima_workspace": "true"}}
+        ) is True
+
+    def test_false_when_flat_bool_false(self):
+        assert has_dima_workspace_enabled(
+            {"capabilities": {"dima_workspace": False}}
+        ) is False
+
+    def test_false_when_flat_missing_key(self):
+        assert has_dima_workspace_enabled(
+            {"capabilities": {"enable_bcn_network": True}}
+        ) is False
+
+    def test_flat_capabilities_is_sole_truth_source(self):
+        """根部 capabilities 存在时是唯一事实源：缺 dima_workspace 即 False，不再看嵌套。"""
+        assert has_dima_workspace_enabled(
+            {
+                "capabilities": {"other": True},
+                "bot_template_config": {"capabilities": {"dima_workspace": True}},
+            }
+        ) is False
+
+    def test_flat_false_wins_over_nested_true(self):
+        assert has_dima_workspace_enabled(
+            {
+                "capabilities": {"dima_workspace": False},
+                "bot_template_config": {"capabilities": {"dima_workspace": True}},
+            }
+        ) is False
+
+    # ── 嵌套形态：bot_template_config.capabilities.dima_workspace（兼容兜底） ──
 
     def test_true_when_bool_true(self):
         assert has_dima_workspace_enabled(
