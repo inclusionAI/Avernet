@@ -735,3 +735,90 @@ def test_trajectory_display_html_analysis_time_and_output_prettified():
     assert "「根因链」" in r.text  # 结论内容完整呈现
     # ③ 无“北京时间”字样
     assert "北京时间" not in r.text
+
+
+@pytest.mark.unit
+def test_html_content_is_a_subset_of_json_payload():
+    """内容不变式:HTML 页展示的**每个数据点**必须能在同请求的 JSON payload 里取到
+    (HTML ⊆ JSON——HTML 只是同一个 TrajectoryEventDTO 的人类视图)。用全字段填充的双
+    事件轨迹同时取两态,逐字段断言:唯一允许的形态变换 = 时间(ms → 墙钟)、output 转
+    indent JSON、session_msgs 转 `role | content` 行、状态用 `A → B`。——先 html_escape 再比对。"""
+    import html as _html
+
+    analysis = json.dumps({
+        "analysis_type": "tc_bot",
+        "analysis_executor": "bot-analyst",
+        "final_status": "FAILED",
+        "error_category": "execution_error",
+        "boost_reason": "策略=search 选中=botA",
+        "failure_reason": "node c5 工具调用失败,重试耗尽后 HUNG",
+        "analysis_output": "「过程复盘」\n任务第二轮出现工具报错。",
+        "analysis_input": "events=2",
+        "gmt_create": 1790077434283,
+    }, ensure_ascii=False)
+    ev_rich = TrajectoryEvent(
+        task_id="t1", node_id="c5",
+        action_type=TrajectoryActionType.EXECUTE,
+        action_result="failed", attempt=2,
+        gmt_create=1790077434000, gmt_modified=1790077434100,
+        action_input="执行请求原文:调用 search 工具",
+        status_from="RUNNING", status_to="FAILED",
+        error_type="underlying_interface_error",
+        error_msg="search tool returned 500",
+        boost_reason="第二轮选 botA 复执",
+        holder_id="bot-a",
+        output={"result": "done", "steps": 3},
+        session_msgs=[{"role": "user", "content": "run the job"},
+                      {"role": "assistant", "content": "tool failed: boom"}],
+    )
+    ev_min = TrajectoryEvent(
+        task_id="t1", node_id="t1",
+        action_type=TrajectoryActionType.SUBMIT,
+        action_result="success", attempt=0,
+        gmt_create=1790077000000, gmt_modified=1790077000000,
+        action_input="目标: 完成市场分析\n验收: 给出结论",
+    )
+    traj = TaskTrajectory(task_id="t1", gmt_create=1790077434283,
+                          gmt_modified=1790077434283,
+                          timeline=[ev_min, ev_rich], analysis=analysis)
+    stub = _StubTrajectoryService(trajectory=traj)
+    c = _build_client(stub)
+    r_json = c.get("/openapi/v1/collaboration/tasks/trajectory", params={"task_id": "t1"})
+    r_html = c.get("/openapi/v1/collaboration/tasks/trajectory",
+                   params={"task_id": "t1", "display": "html"})
+    assert r_json.status_code == 200 and r_html.status_code == 200
+    page = r_html.text
+    data = r_json.json()["data"]
+
+    def _Bij(time_val):  # ms → 墙钟(与 _fmt_time 同变换)
+        return __import__("agentclaw.community.adapters.http.task.trajectory_html",
+                          fromlist=["_fmt_time"])._fmt_time(int(time_val))
+
+    # 轨迹级
+    assert _html.escape(data["task_id"]) in page
+    assert _Bij(data["gmt_create"]) in page and _Bij(data["gmt_modified"]) in page
+    # 事件级:JSON 里的每个字段值(经其已知展示变换)在 HTML 可见
+    for ev in data["timeline"]:
+        for key in ("task_id", "node_id", "action_type", "action_result",
+                    "action_input", "error_type", "error_msg",
+                    "boost_reason", "holder_id", "status_to"):
+            val = ev.get(key)
+            if val:
+                assert _html.escape(val) in page, f"{key}={val} 未在 HTML 展示"
+        ev_mine = next(t for t in (ev_min, ev_rich) if t.node_id == ev["node_id"])
+        assert (_Bij(ev["gmt_create"])) in page, "事件时间未展示"
+        if ev.get("status_from") and ev.get("status_to"):
+            assert f'{ev["status_from"]} → {ev["status_to"]}' in page
+        if ev.get("output"):
+            rendered = json.dumps(ev_mine.output, ensure_ascii=False, indent=2)
+            assert _html.escape(rendered) in page, "output 未展示"
+        if ev.get("session_msgs"):
+            for m in ev_mine.session_msgs:
+                assert _html.escape(f"{m['role']} | {m['content']}") in page
+    # 分析:JSON analysis 字符串内的每个字段值在 HTML 的总体分析区可见
+    parsed = json.loads(data["analysis"])
+    for key in ("analysis_type", "analysis_executor", "final_status", "error_category",
+                "boost_reason", "failure_reason", "analysis_output"):
+        assert _html.escape(str(parsed[key])) in page, f"analysis.{key} 未在 HTML 展示"
+    assert _Bij(parsed["gmt_create"]) in page, "分析时间未(格式化)展示"
+    assert _html.escape(parsed["analysis_input"])[:20] in page  # 折叠摘要截断
