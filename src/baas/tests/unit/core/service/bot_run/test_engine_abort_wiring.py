@@ -12,7 +12,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from secbaas.community.api.bot_runtime import BotBindingInfo, WsConnectionInfo
+from secbaas.community.api.bot_runtime import (
+    BotBindingInfo,
+    BotChatContext,
+    WsConnectionInfo,
+)
 from secbaas.community.core.service.bot_run._async_chat_client import (
     AsyncChatClient,
     NotConnectedError,
@@ -114,6 +118,47 @@ async def test_baas_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
     ws_client.chat_abort.assert_awaited_once_with(
         session_key="sess-1",
     )
+
+
+async def test_baas_bot_service_abort_uses_context_tenant(
+    binding_info: BotBindingInfo,
+):
+    """context.tenant 被透传到 WS resolver，避免 tenant 为空导致 BotNotFound。"""
+    pool = MagicMock()
+    ws_client = MagicMock()
+    ws_client.chat_abort = AsyncMock(return_value={"ok": True})
+    pool.get = AsyncMock(return_value=ws_client)
+
+    resolver = MagicMock()
+    resolver.dispatch_bot_ws_conn_info = AsyncMock(return_value=_conn_info())
+
+    session_service = MagicMock()
+    service = BaasBotService(
+        config=BaasBotServiceConfig(),
+        client_pool=pool,
+        wss_resolver=resolver,
+        session_service=session_service,
+        engine_adapter_registry=BotEngineAdapterRegistry({}),
+        eval_consistency_check=NoopEvalConsistencyCheck(),
+    )
+
+    no_tenant_binding = replace(binding_info, device_props={})
+    context = BotChatContext.from_api_key(
+        api_key_prefix="key-1",
+        app_id="app-1",
+        app_type="baas",
+        tenant="run-tenant",
+    )
+
+    await service.abort(
+        session_id="sess-1",
+        binding_info=no_tenant_binding,
+        context=context,
+    )
+
+    resolver.dispatch_bot_ws_conn_info.assert_awaited_once()
+    call_kw = resolver.dispatch_bot_ws_conn_info.await_args.kwargs
+    assert call_kw["tenant"] == "run-tenant"
 
 
 async def test_baas_bot_service_abort_logs_on_resolution_failure(

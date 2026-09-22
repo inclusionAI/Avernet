@@ -226,6 +226,7 @@ class BotService(Protocol):
         *,
         session_id: str,
         binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
     ) -> None:
         """Best-effort 通知 engine 中止 session。
 

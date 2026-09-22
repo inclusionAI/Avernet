@@ -1783,6 +1783,102 @@ class TestHandleTaskException:
         await asyncio.sleep(0.1)
 
 
+# ==================== Tests: abort ====================
+
+
+class TestRunnerAbort:
+    @pytest.mark.asyncio
+    async def test_abort_passes_context_with_tenant_from_run_metadata(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        mock_bot_service,
+        arca_binding_data,
+    ):
+        """BotRunner.abort 从 run 记录重建 context 并传给 service.abort，
+        避免 tenant 为空导致 resolve WS 连接失败。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        mock_bot_service.abort = AsyncMock()
+
+        record = MagicMock()
+        record.bot_id = f"{BOT_ID}:{ENTITY_ID}"
+        record.api_key_prefix = API_KEY_PREFIX
+        record.metadata = {
+            "app_id": "owner123",
+            "app_type": "baas",
+            "tenant": "run-tenant",
+        }
+        mock_run_repo.get_by_run_id.return_value = record
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.abort(session_id="sess-1", run_id="run-1")
+
+        mock_bot_service.abort.assert_awaited_once()
+        call_kw = mock_bot_service.abort.call_args.kwargs
+        assert call_kw["session_id"] == "sess-1"
+        ctx = call_kw["context"]
+        assert isinstance(ctx, BotChatContext)
+        assert ctx.api_key_prefix == API_KEY_PREFIX
+        assert ctx.app_id == "owner123"
+        assert ctx.app_type == "baas"
+        assert ctx.tenant == "run-tenant"
+
+    @pytest.mark.asyncio
+    async def test_abort_noop_when_run_not_found(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        mock_bot_service,
+    ):
+        """BotRunner.abort 在 run 记录不存在时直接返回。"""
+        mock_bot_service.abort = AsyncMock()
+        mock_run_repo.get_by_run_id.return_value = None
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.abort(session_id="sess-1", run_id="run-1")
+
+        mock_bot_service.abort.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_abort_resolves_eval_binding_from_metadata(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        mock_bot_service,
+        arca_binding_data,
+    ):
+        """eval 阶段 run 的 abort 应从 metadata 提取 lifecycle_stage/default_tag，
+        并透传给 binding 解析，避免按 online 阶段查不到 binding。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        mock_bot_service.abort = AsyncMock()
+
+        record = MagicMock()
+        record.bot_id = f"{BOT_ID}:{ENTITY_ID}"
+        record.api_key_prefix = API_KEY_PREFIX
+        record.metadata = {
+            "app_id": "owner123",
+            "app_type": "baas",
+            "tenant": "run-tenant",
+            "bot_options": {"lifecycle_stage": "eval"},
+            "default_tag": "eval-tag-1",
+        }
+        mock_run_repo.get_by_run_id.return_value = record
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.abort(session_id="sess-1", run_id="run-1")
+
+        mock_bot_service.abort.assert_awaited_once()
+        mock_bot_service_plugin.get_binding.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            stage="eval",
+            default_tag="eval-tag-1",
+        )
+
+
 # ==================== Tests: get_result ====================
 
 
