@@ -99,6 +99,7 @@ from agentclaw.community.core.bot_startup_script.protocols import (
 )
 from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServiceProtocol
 from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
+from agentclaw.community.core.skill_center.local_skill_delete_service_protocol import LocalSkillDeleteServiceProtocol
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
@@ -134,6 +135,7 @@ class ManifestDeliveryModule(Module):
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
+        delete_service_provider: Callable[[], LocalSkillDeleteServiceProtocol],
         resource_service_provider: Callable[[], ResourceFilePort],
         cli_tool_service_factory: CliToolServiceFactory,
     ) -> DevicePorts:
@@ -170,7 +172,9 @@ class ManifestDeliveryModule(Module):
                 mcp_auth_service=mcp_auth_service_provider(),
                 mcp_config_service=mcp_config_service_provider(),
                 identity_service=DeviceIdentity(identity_service_provider()),
-                upload_service=DeviceSkillPackageUpload(upload_service_provider()),
+                upload_service=DeviceSkillPackageUpload(
+                    upload_service_provider(), delete_service_provider()
+                ),
                 capability_reader=capability_reader_provider(),
                 package_validator=package_validator_provider(),
                 entry_fetcher=entry_fetcher_provider(),

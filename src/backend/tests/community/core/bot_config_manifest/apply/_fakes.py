@@ -469,6 +469,7 @@ class FakeSkillUploadService:
         # never touches this: the fake models "installed" the way the real
         # service does — only a completed upload/replace publishes.
         self.installed: dict[str, bytes] = {}
+        self.deleted: list[str] = []
         self._next_id = 100
 
     async def upload_local_skill(
@@ -503,6 +504,14 @@ class FakeSkillUploadService:
             "skill": {**record, "active": False},
             "actor_id": actor_id,
         }
+
+    async def delete_local_skill(
+        self, *, skill_id: str, name: str, bot_id: str, owner_id: str,
+        actor_id: str,
+    ) -> None:
+        self.deleted.append(skill_id)
+        self.rows.pop(name, None)
+        self.installed.pop(name, None)
 
     async def installed_package_digest(
         self, *, bot, bot_id: str, owner_id: str, name: str
@@ -560,9 +569,19 @@ class FakeCapabilityReader:
         self,
         assets: list[Any] | None = None,
         member_ids: set[int] | None = None,
+        local_assets: list[Any] | None = None,
     ) -> None:
         self.assets = tuple(assets or ())
         self.member_ids = frozenset(member_ids or ())
+        self.local_assets = tuple(
+            local_assets
+            if local_assets is not None
+            else [
+                asset
+                for asset in self.assets
+                if str(getattr(asset, "git_path", "")).startswith("local://")
+            ]
+        )
         self.asset_reads: list[dict[str, Any]] = []
 
     def active_skill_assets(self, *, bot_id: str, owner_id: str, bot=None):
@@ -572,10 +591,23 @@ class FakeCapabilityReader:
     def member_skill_ids(self, *, bot):
         return self.member_ids
 
+    def local_skill_assets(self, *, bot_id: str, owner_id: str, bot=None):
+        return self.local_assets
 
-def skill_asset(skill_id: int, name: str, git_path: str = "local://x"):
+
+def skill_asset(
+    skill_id: int,
+    name: str,
+    git_path: str = "local://x",
+    mcp_dependencies: tuple[object, ...] = (),
+):
     """One active-skill asset, the RegisteredSkillAsset shape."""
-    return SimpleNamespace(skill_id=skill_id, name=name, git_path=git_path)
+    return SimpleNamespace(
+        skill_id=skill_id,
+        name=name,
+        git_path=git_path,
+        mcp_dependencies=mcp_dependencies,
+    )
 
 
 def build_skill_zip(name: str, *, extra: list[tuple[str, bytes]] | None = None) -> bytes:
@@ -693,6 +725,7 @@ class FakeActivationService:
         self.platform_defaults = set(platform_defaults or ())
         self.set_managed: set[str] = set()
         self.mcp_overrides: dict[str, dict] = {}
+        self.manifest_direct_mcps: set[str] = set()
         self.configured: list[tuple[str, dict | None]] = []
         self.governed_skills = set(governed_skills or ())
         self.activated: list[str] = []
@@ -718,6 +751,12 @@ class FakeActivationService:
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, dict]:
         return dict(self.mcp_overrides)
+
+    def manifest_direct_mcp_codes(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        server_codes: set[str],
+    ) -> set[str]:
+        return set(server_codes) & self.manifest_direct_mcps
 
     def set_managed_mcp_codes(
         self,
@@ -767,6 +806,7 @@ class FakeActivationService:
         self._refuse_if_platform_owned(server_code)
         self.deactivated.append(server_code)
         self.installed.discard(server_code)
+        self.manifest_direct_mcps.discard(server_code)
         self.mcp_overrides.pop(server_code, None)
         return {}
 
@@ -789,6 +829,54 @@ class FakeActivationService:
         self.installed_skills.discard(int(skill_id))
         self.skill_deactivations.append(int(skill_id))
         return {"id": skill_id, "changed": True}
+
+    async def claim_manifest_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        apply_id: str | None, project: bool = True,
+    ) -> dict[str, Any]:
+        self.projections.append(project)
+        self.governed_skills.discard(int(skill_id))
+        self.installed_skills.add(int(skill_id))
+        self.skill_activations.append(int(skill_id))
+        return {"id": skill_id, "changed": True}
+
+    async def remove_manifest_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        apply_id: str | None, remove_inactive_memberships: bool,
+        project: bool = True,
+    ) -> dict[str, Any]:
+        self.projections.append(project)
+        self.installed_skills.discard(int(skill_id))
+        self.governed_skills.discard(int(skill_id))
+        self.skill_deactivations.append(int(skill_id))
+        return {"id": skill_id, "changed": True}
+
+    async def claim_manifest_mcp(
+        self, *, server_code: str, config: dict | None, bot_id: str,
+        owner_id: str, actor_id: str, apply_id: str | None,
+        project: bool = True,
+    ) -> dict[str, Any]:
+        self.projections.append(project)
+        self.set_managed.discard(server_code)
+        self.installed.add(server_code)
+        self.manifest_direct_mcps.add(server_code)
+        self.configured.append((server_code, config))
+        if config:
+            self.mcp_overrides[server_code] = dict(config)
+        else:
+            self.mcp_overrides.pop(server_code, None)
+        return {}
+
+    async def remove_manifest_mcp(
+        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        apply_id: str | None, project: bool = True,
+    ) -> dict[str, Any]:
+        self.projections.append(project)
+        self.deactivated.append(server_code)
+        self.installed.discard(server_code)
+        self.manifest_direct_mcps.discard(server_code)
+        self.mcp_overrides.pop(server_code, None)
+        return {}
 
     def _refuse_if_platform_owned(self, server_code: str) -> None:
         if server_code in self.platform_defaults:

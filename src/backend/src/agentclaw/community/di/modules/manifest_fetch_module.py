@@ -73,6 +73,9 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.core.skill_center.local_skill_delete_service_protocol import (
+    LocalSkillDeleteServiceProtocol,
+)
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageValidator,
 )
@@ -377,6 +380,15 @@ class ManifestFetchModule(Module):
         uploaded one are one thing, not two alike ones.
         """
         return lambda: injector.get(LocalSkillUploadServiceProtocol)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_skill_delete_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], LocalSkillDeleteServiceProtocol]:
+        """The physical Local package cleanup seam used by Manifest replace."""
+        return lambda: injector.get(LocalSkillDeleteServiceProtocol)
 
     @singleton
     @provider

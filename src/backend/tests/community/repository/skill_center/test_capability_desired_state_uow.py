@@ -324,15 +324,16 @@ def test_default_only_sync_materializes_defaults_without_repairing_ordinary_hist
     )
 
     assert plan.skills_to_install == frozenset({default_skill.id})
-    assert plan.skills_to_uninstall == frozenset({excluded_skill.id})
+    assert plan.skills_to_uninstall == frozenset()
     assert plan.mcps_to_install == frozenset({"mcp.default", "mcp.shared"})
-    assert plan.mcps_to_uninstall == frozenset({"mcp.excluded"})
+    assert plan.mcps_to_uninstall == frozenset()
     with db.orm_session() as session:
         assert {row.skill_id for row in session.query(BotSkillInstallation).all()} == {
-            default_skill.id, shared_skill.id, direct_skill.id, former_default_skill.id,
+            default_skill.id, excluded_skill.id, shared_skill.id,
+            direct_skill.id, former_default_skill.id,
         }
         assert {row.server_code for row in session.query(BotMCPInstallation).all()} == {
-            "mcp.default", "mcp.shared",
+            "mcp.default", "mcp.excluded", "mcp.shared",
         }
 
     assert repository.sync_default_installations(
@@ -1821,7 +1822,7 @@ def test_repair_survives_a_concurrent_listing_winning_the_same_insert():
         } == {1, 2}
 
 
-def test_flush_removes_an_excluded_members_installation_row():
+def test_flush_preserves_exclusion_plus_skill_installation_as_direct():
     """Exclusion deactivates the member — the flush takes its row away.
 
     An excluded Default-Set member still belongs to the Set (it is NOT handed
@@ -1873,11 +1874,11 @@ def test_flush_removes_an_excluded_members_installation_row():
     # Absent from the listing, claimed inactive, and its stray Installation
     # row removed; the kept member gains the row it was missing.
     assert bridge.member_skill_ids == frozenset({2})
-    assert bridge.skills_to_uninstall == frozenset({1})
+    assert bridge.skills_to_uninstall == frozenset()
     with db.orm_session() as session:
         assert {
             row.skill_id for row in session.query(BotSkillInstallation).all()
-        } == {2}
+        } == {1, 2}
 
 
 def test_an_active_ordinary_set_outranks_a_default_exclusion():
@@ -2400,7 +2401,7 @@ def test_flush_gives_and_takes_mcp_rows_with_set_activation():
         } == {"missing-mcp", "direct-mcp"}
 
 
-def test_flush_removes_an_excluded_default_mcp_members_row():
+def test_flush_preserves_exclusion_plus_mcp_installation_as_direct():
     """Default-Set MCP exclusion deactivates the member, like skills."""
     db = _Database()
     with db.transactional_orm_session() as session:
@@ -2447,11 +2448,11 @@ def test_flush_removes_an_excluded_default_mcp_members_row():
     plan = _bridge(db)
 
     assert plan.mcps_to_install == frozenset({"kept-mcp"})
-    assert plan.mcps_to_uninstall == frozenset({"excluded-mcp"})
+    assert plan.mcps_to_uninstall == frozenset()
     with db.orm_session() as session:
         assert {
             row.server_code for row in session.query(BotMCPInstallation).all()
-        } == {"kept-mcp"}
+        } == {"kept-mcp", "excluded-mcp"}
 
 
 def test_a_default_set_member_cannot_join_an_ordinary_set():
@@ -3599,3 +3600,261 @@ def test_center_default_exclusion_uses_published_version_dependencies():
 
     assert excluded.mcp_codes == frozenset({"mcp.center-default"})
     assert restored.mcp_codes == frozenset({"mcp.center-default"})
+
+
+# ── Manifest Direct claims ─────────────────────────────────────────────
+
+
+def test_manifest_mcp_claim_detaches_ordinary_membership_and_keeps_direct_installation():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(
+            name="ordinary", user_id="owner", bolt_id="bot",
+            engine_type="openclaw", is_active=True, env="dev",
+        )
+        session.add(skill_set)
+        session.flush()
+        session.add_all([
+            SkillSetMCPServer(
+                skill_set_id=skill_set.id, server_code="mcp.convert",
+                name="convert", env="dev",
+            ),
+            BotMCPInstallation(
+                bot_id="bot", owner_id="owner",
+                server_code="mcp.convert", env="dev",
+            ),
+        ])
+
+    result = repository.claim_manifest_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.convert",
+        config={"headers": {}}, platform_default_codes=frozenset(),
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+
+    assert result.changed is True
+    assert result.source_transitions == (("skill_set", "direct"),)
+    with db.orm_session() as session:
+        assert session.query(SkillSetMCPServer).count() == 0
+        assert [row.server_code for row in session.query(BotMCPInstallation)] == [
+            "mcp.convert"
+        ]
+        assert session.query(BotMCPConfig).one().config == '{"headers":{}}'
+
+
+def test_manifest_mcp_claim_turns_default_supply_into_exclusion_plus_installation():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, _skill = _seed_default_with_member(db)
+
+    result = repository.claim_manifest_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.member",
+        config=None, platform_default_codes=frozenset(),
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+
+    assert result.changed is True
+    assert result.source_transitions == (("default", "direct"),)
+    with db.orm_session() as session:
+        exclusion = session.query(DefaultSkillsetMcpExclusion).one()
+        assert exclusion.skill_set_id == default.id
+        assert [row.server_code for row in session.query(BotMCPInstallation)] == [
+            "mcp.member"
+        ]
+        assert session.query(SkillSetMCPServer).count() == 1
+    repository.flush_installations(
+        bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw",
+        default_engine_types=("openclaw",),
+    )
+    with db.orm_session() as session:
+        assert [row.server_code for row in session.query(BotMCPInstallation)] == [
+            "mcp.member"
+        ]
+
+
+def test_manifest_mcp_removal_keeps_default_exclusion_and_does_not_restore_supply():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    _default, _skill = _seed_default_with_member(db)
+    repository.claim_manifest_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.member",
+        config=None, platform_default_codes=frozenset(),
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+
+    removed = repository.remove_manifest_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.member",
+        platform_default_codes=frozenset(), engine_type="openclaw",
+        default_engine_types=("openclaw",),
+    )
+
+    assert removed.changed is True
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetMcpExclusion).count() == 1
+        assert session.query(BotMCPInstallation).count() == 0
+    plan = repository.flush_installations(
+        bot_id="bot", owner_id="owner", env="dev",
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+    assert "mcp.member" not in plan.mcps_to_install
+
+
+def test_ordinary_update_and_remove_can_manage_an_existing_manifest_direct_mcp():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    _seed_default_with_member(db)
+    repository.claim_manifest_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.member",
+        config=None, platform_default_codes=frozenset(),
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+
+    updated = repository.set_mcp_override(
+        bot_id="bot", owner_id="owner", server_code="mcp.member",
+        config={"headers": {}}, platform_default_codes=frozenset(),
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+    removed = repository.uninstall_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.member",
+        platform_default_codes=frozenset(), engine_type="openclaw",
+        default_engine_types=("openclaw",),
+    )
+
+    assert updated.changed is True
+    assert removed.changed is True
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetMcpExclusion).count() == 1
+        assert session.query(BotMCPInstallation).count() == 0
+        assert session.query(BotMCPConfig).count() == 0
+
+
+def test_default_exclusion_plus_install_is_not_direct_with_ordinary_membership():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, _skill = _seed_default_with_member(db)
+    with db.transactional_orm_session() as session:
+        ordinary = SkillSet(
+            name="ordinary", user_id="owner", bolt_id="bot",
+            engine_type="openclaw", is_active=True, env="dev",
+        )
+        session.add(ordinary)
+        session.flush()
+        session.add_all([
+            SkillSetMCPServer(
+                skill_set_id=ordinary.id, server_code="mcp.member",
+                name="member", env="dev",
+            ),
+            DefaultSkillsetMcpExclusion(
+                user_id="owner", bot_id="bot", skill_set_id=default.id,
+                server_code="mcp.member",
+            ),
+        ])
+
+    assert repository.manifest_direct_mcp_exists(
+        bot_id="bot", owner_id="owner", server_code="mcp.member",
+        platform_default_codes=frozenset(), engine_type="openclaw",
+        default_engine_types=("openclaw",),
+    ) is False
+    with pytest.raises(SkillSetControlPlaneConflictError):
+        repository.uninstall_mcp(
+            bot_id="bot", owner_id="owner", server_code="mcp.member",
+            platform_default_codes=frozenset(), engine_type="openclaw",
+            default_engine_types=("openclaw",),
+        )
+
+    removed = repository.remove_manifest_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.member",
+        platform_default_codes=frozenset(), engine_type="openclaw",
+        default_engine_types=("openclaw",),
+    )
+    assert removed.source_transitions == (("skill_set", "none"),)
+
+
+def test_manifest_skill_claim_replaces_same_name_membership_with_local_direct_claim():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(
+            name="draft", user_id="owner", bolt_id="bot",
+            engine_type="openclaw", is_active=False, env="dev",
+        )
+        shared = Skill(name="same-name", git_path="git://shared", env="dev")
+        unrelated = Skill(name="unrelated", git_path="git://unrelated", env="dev")
+        local = Skill(
+            name="same-name", git_path="local://same-name", user_id="owner",
+            bolt_id="bot", env="dev",
+        )
+        session.add_all([skill_set, shared, unrelated, local])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(skill_set_id=skill_set.id, skill_id=shared.id, env="dev"),
+            SkillSetSkill(
+                skill_set_id=skill_set.id, skill_id=unrelated.id, env="dev"
+            ),
+        ])
+
+    result = repository.claim_manifest_skill(
+        bot_id="bot", owner_id="owner", skill_id=str(local.id),
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+
+    assert result.changed is True
+    assert result.source_transitions == (("skill_set", "direct"),)
+    with db.orm_session() as session:
+        assert {row.skill_id for row in session.query(SkillSetSkill)} == {
+            unrelated.id
+        }
+        assert {row.skill_id for row in session.query(BotSkillInstallation)} == {
+            local.id
+        }
+
+
+def test_manifest_skill_claim_excludes_the_current_center_default_version():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, env="dev",
+        )
+        current = Skill(
+            name="same-name", git_path="center://same-uuid",
+            skill_uuid="same-uuid", version=2, status="PUBLISHED", env="dev",
+        )
+        local = Skill(
+            name="same-name", git_path="local://same-name", user_id="owner",
+            bolt_id="bot", env="dev",
+        )
+        session.add_all([default, current, local])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(
+                skill_set_id=default.id,
+                skill_id=999,
+                skill_uuid="same-uuid",
+                env="dev",
+            ),
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=current.id, env="dev"
+            ),
+        ])
+
+    repository.claim_manifest_skill(
+        bot_id="bot", owner_id="owner", skill_id=str(local.id),
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+
+    with db.orm_session() as session:
+        exclusion = session.query(DefaultSkillsetSkillExclusion).one()
+        assert exclusion.skill_id == current.id
+        assert {row.skill_id for row in session.query(BotSkillInstallation)} == {
+            local.id
+        }
+    repository.flush_installations(
+        bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw",
+        default_engine_types=("openclaw",),
+    )
+    with db.orm_session() as session:
+        assert {row.skill_id for row in session.query(BotSkillInstallation)} == {
+            local.id
+        }

@@ -243,3 +243,7 @@ _避免使用_: 用户 MCP 配置、最终运行时配置
 **有效 MCP 配置（Effective MCP Configuration）**:
 针对一个 Bot 和一个 MCP，将 Bot 覆盖、用户配置、MCP Center 元数据及平台规则解析后得到的运行时连接配置。
 _避免使用_: Manifest 原文、MCP 安装关系
+
+**Manifest Direct claim**:
+Manifest Apply 将显式 Skill 或 MCP 转换后的 Bot 级直接声明。普通 SkillSet membership 会被移除；Default/platform 供应以 exclusion 抑制，并与 Installation 共同表达 Direct 状态。该状态由现有事实推断，不是持久化 provenance。
+_避免使用_: managed-by-Manifest、Manifest 持续所有权

@@ -18,6 +18,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
+    ManifestDesiredStateCommittedError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
@@ -37,11 +38,20 @@ class _Repository:
         self.uninstall_mcp_calls: list[dict] = []
         self.install_skill_calls: list[dict] = []
         self.uninstall_skill_calls: list[dict] = []
+        self.manifest_mcp_claim_calls: list[dict] = []
+        self.manifest_mcp_remove_calls: list[dict] = []
+        self.manifest_skill_claim_calls: list[dict] = []
+        self.manifest_skill_remove_calls: list[dict] = []
         self.restore_calls: list[dict] = []
 
     #: Dependencies the Skill under test declares, mirrored onto the mutation
     #: result the way the real repository fills it under the row lock.
     skill_mcp_codes: frozenset[str] = frozenset()
+    manifest_direct = False
+    manifest_transitions: tuple[tuple[str, str], ...] = ()
+
+    def manifest_direct_mcp_exists(self, **_kwargs) -> bool:
+        return self.manifest_direct
 
     def _mutation(self) -> DesiredStateMutation:
         return DesiredStateMutation({}, True, CapabilityDesiredState(set(), {}, {}))
@@ -70,6 +80,34 @@ class _Repository:
     def uninstall_skill(self, **kwargs) -> DesiredStateMutation:
         self.uninstall_skill_calls.append(kwargs)
         return self._skill_mutation()
+
+    def claim_manifest_mcp(self, **kwargs) -> DesiredStateMutation:
+        self.manifest_mcp_claim_calls.append(kwargs)
+        return replace(
+            self._mutation(),
+            mcp_codes=frozenset({kwargs["server_code"]}),
+            source_transitions=self.manifest_transitions,
+        )
+
+    def remove_manifest_mcp(self, **kwargs) -> DesiredStateMutation:
+        self.manifest_mcp_remove_calls.append(kwargs)
+        return replace(
+            self._mutation(),
+            mcp_codes=frozenset({kwargs["server_code"]}),
+            source_transitions=self.manifest_transitions,
+        )
+
+    def claim_manifest_skill(self, **kwargs) -> DesiredStateMutation:
+        self.manifest_skill_claim_calls.append(kwargs)
+        return replace(
+            self._skill_mutation(), source_transitions=self.manifest_transitions
+        )
+
+    def remove_manifest_skill(self, **kwargs) -> DesiredStateMutation:
+        self.manifest_skill_remove_calls.append(kwargs)
+        return replace(
+            self._skill_mutation(), source_transitions=self.manifest_transitions
+        )
 
     def restore_desired_state(self, **kwargs) -> None:
         self.restore_calls.append(kwargs)
@@ -234,6 +272,10 @@ class _PlatformDefaultMcpPolicy:
             )
         return self.codes
 
+    def server_codes_for(self, bot: dict) -> frozenset[str]:
+        self.bots.append(bot)
+        return self.codes
+
 
 def _service(
     *,
@@ -343,12 +385,27 @@ async def test_platform_default_mcp_refuses_direct_control(method_name: str):
             actor_id="true-owner",
             server_code="mcp.policy",
         )
-
     assert policy.bots[0]["bot_id"] == "bot-1"
     assert repository.install_mcp_calls == []
     assert repository.uninstall_mcp_calls == []
     assert mcp_center.calls == []
 
+
+@pytest.mark.asyncio
+async def test_existing_manifest_direct_platform_mcp_can_be_removed_normally():
+    repository = _Repository()
+    repository.manifest_direct = True
+    service = _service(
+        repository=repository,
+        platform_default_mcp_policy=_PlatformDefaultMcpPolicy("mcp.policy"),
+    )
+
+    await service.deactivate_mcp(
+        bot_id="bot-1", owner_id="true-owner", actor_id="true-owner",
+        server_code="mcp.policy",
+    )
+
+    assert repository.uninstall_mcp_calls[0]["server_code"] == "mcp.policy"
 
 @pytest.mark.asyncio
 async def test_mcp_commands_refuse_a_non_collaborating_actor():
@@ -711,6 +768,68 @@ async def test_record_only_mcp_activation_writes_desired_state_on_a_pending_bot(
         actor_id="true-owner", project=False,
     )
     assert [c["server_code"] for c in repository.uninstall_mcp_calls] == ["github"]
+
+
+@pytest.mark.asyncio
+async def test_manifest_claim_logs_safe_source_transition(monkeypatch):
+    repository = _Repository()
+    repository.manifest_transitions = (("skill_set", "direct"),)
+    info = MagicMock()
+    monkeypatch.setattr(
+        "agentclaw.community.core.skill_center.services."
+        "direct_activation_service.logger.info",
+        info,
+    )
+    service = DirectActivationService(
+        repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
+        _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
+        _PlatformDefaultMcpPolicy(), MagicMock(),
+    )
+
+    result = await service.claim_manifest_mcp(
+        server_code="github",
+        config={"headers": {"Authorization": "must-not-be-logged"}},
+        bot_id="bot-1",
+        owner_id="true-owner",
+        actor_id="true-owner",
+        apply_id="apply-1",
+        project=False,
+    )
+
+    assert "source_transitions" not in result
+    format_string, *arguments = info.call_args.args
+    rendered = format_string % tuple(arguments)
+    assert "from_source=skill_set" in rendered
+    assert "to_source=direct" in rendered
+    assert "apply_id=apply-1" in rendered
+    assert "must-not-be-logged" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_manifest_command_marks_a_post_commit_audit_failure():
+    class _FailingAudit(_Audit):
+        def insert(self, _data) -> None:
+            raise RuntimeError("audit backend unavailable")
+
+    repository = _Repository()
+    service = DirectActivationService(
+        repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
+        _Authorization(), _FailingAudit(), _McpCenter(allowed=True), _Reader(),
+        _PlatformDefaultMcpPolicy(), MagicMock(),
+    )
+
+    with pytest.raises(ManifestDesiredStateCommittedError):
+        await service.claim_manifest_mcp(
+            server_code="github",
+            config=None,
+            bot_id="bot-1",
+            owner_id="true-owner",
+            actor_id="true-owner",
+            apply_id="apply-1",
+            project=False,
+        )
+
+    assert repository.manifest_mcp_claim_calls
 
 
 @pytest.mark.asyncio

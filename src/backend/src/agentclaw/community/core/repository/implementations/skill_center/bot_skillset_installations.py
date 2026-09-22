@@ -345,6 +345,12 @@ class BotSkillSetInstallations:
         excluded_mcps: set[str] = set()
         ordinary_active_skills: set[int] = set()
         ordinary_active_mcps: set[str] = set()
+        installed_skills = skill_installations.installed_ids(
+            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+        )
+        installed_mcps = mcp_installations.installed_codes(
+            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+        )
         for row in bot_sets:
             skill_ids = set_member_skill_ids(
                 self._scope, session, skill_set_id=int(row.id)
@@ -368,9 +374,9 @@ class BotSkillSetInstallations:
                 )
             )
             default_skills |= skill_ids - excluded_skill_ids
-            excluded_skills |= skill_ids & excluded_skill_ids
+            excluded_skills |= (skill_ids & excluded_skill_ids) - installed_skills
             default_mcps |= mcp_codes - excluded_mcp_codes
-            excluded_mcps |= mcp_codes & excluded_mcp_codes
+            excluded_mcps |= (mcp_codes & excluded_mcp_codes) - installed_mcps
         return InstallationFlushPlan(
             member_skill_ids=frozenset(default_skills),
             skills_to_install=frozenset(default_skills),
@@ -399,6 +405,12 @@ class BotSkillSetInstallations:
         inactive_skills: set[int] = set()
         active_mcps: set[str] = set()
         inactive_mcps: set[str] = set()
+        installed_skills = skill_installations.installed_ids(
+            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+        )
+        installed_mcps = mcp_installations.installed_codes(
+            session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
+        )
         for row in self._bot_sets(
             session,
             bot_id=bot_id,
@@ -426,7 +438,8 @@ class BotSkillSetInstallations:
                 # excluded member stays the Set's, is absent from the listing,
                 # and must not hold an Installation row.
                 if member_id in excluded:
-                    inactive_skills.add(member_id)
+                    if member_id not in installed_skills:
+                        inactive_skills.add(member_id)
                     continue
                 members.add(member_id)
                 (active_skills if set_is_active else inactive_skills).add(member_id)
@@ -441,7 +454,8 @@ class BotSkillSetInstallations:
                 self._scope, session, skill_set_id=int(row.id)
             ):
                 if server_code in excluded_mcps:
-                    inactive_mcps.add(server_code)
+                    if server_code not in installed_mcps:
+                        inactive_mcps.add(server_code)
                     continue
                 (active_mcps if set_is_active else inactive_mcps).add(server_code)
         return InstallationFlushPlan(
