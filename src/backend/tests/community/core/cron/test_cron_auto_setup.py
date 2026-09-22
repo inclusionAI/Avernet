@@ -289,7 +289,7 @@ class TestExtractWorkflowName:
 class TestCronAutoSetupService:
     """Tests for CronAutoSetupService class with constructor injection."""
 
-    def _create_service(self, template_data=None, relay_methods=None):
+    def _create_service(self, template_data=None, relay_methods=None, hosted_ws=None):
         """Create a service with mocked dependencies."""
         mock_template_repo = MagicMock()
         mock_template_repo.get_by_bot_id.return_value = template_data
@@ -305,6 +305,7 @@ class TestCronAutoSetupService:
         service = CronAutoSetupService(
             template_repository=mock_template_repo,
             cron_relay_service=mock_relay,
+            hosted_workspace_service=hosted_ws,
         )
         return service, mock_template_repo, mock_relay
 
@@ -348,7 +349,7 @@ class TestCronAutoSetupService:
 
     @pytest.mark.asyncio
     async def test_skip_when_no_dima_space_id(self):
-        """is_hosted_24x7 == 1 但无 dima_space_id → 跳过创建定时任务。"""
+        """is_hosted_24x7 == 1 但无 dima_space_id，且托管服务不可用 → 跳过。"""
         service, mock_repo, mock_relay = self._create_service(
             template_data={"ext": {"is_hosted_24x7": 1, "trigger_frequency": "daily"}}
         )
@@ -358,13 +359,70 @@ class TestCronAutoSetupService:
 
     @pytest.mark.asyncio
     async def test_skip_when_dima_space_id_empty(self):
-        """is_hosted_24x7 == 1 但 dima_space_id 为空字符串 → 跳过创建定时任务。"""
+        """is_hosted_24x7 == 1 但 dima_space_id 为空字符串，且托管服务不可用 → 跳过。"""
         service, mock_repo, mock_relay = self._create_service(
             template_data={"ext": {"is_hosted_24x7": 1, "dima_space_id": ""}}
         )
         result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
         assert result is None
         mock_relay.forward_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ensure_dima_space_id_when_missing(self):
+        """无 dima_space_id 但托管服务补建成功 → 用补建的空间 ID 创建 cron。"""
+        mock_hosted_ws = MagicMock()
+        mock_hosted_ws.ensure_hosted_workspace.return_value = "W_ENSURED"
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={"name": "TestBot", "ext": {"is_hosted_24x7": 1, "trigger_frequency": "daily"}},
+            hosted_ws=mock_hosted_ws,
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+
+        mock_hosted_ws.ensure_hosted_workspace.assert_called_once_with("bot1", "user1")
+        assert result is not None
+        body = mock_relay.forward_request.call_args.kwargs["body"]
+        assert "space:W_ENSURED" in body["command"]
+
+    @pytest.mark.asyncio
+    async def test_skip_when_ensure_dima_space_id_not_eligible(self):
+        """补建抛错（如未开通 dima_workspace 托管能力）→ 跳过，不创建 cron。"""
+        mock_hosted_ws = MagicMock()
+        mock_hosted_ws.ensure_hosted_workspace.side_effect = RuntimeError("not eligible")
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={"ext": {"is_hosted_24x7": 1, "trigger_frequency": "daily"}},
+            hosted_ws=mock_hosted_ws,
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+        assert result is None
+        mock_relay.forward_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skip_when_ensure_dima_space_id_returns_none(self):
+        """补建返回 None（开通失败）→ 跳过，不创建 cron。"""
+        mock_hosted_ws = MagicMock()
+        mock_hosted_ws.ensure_hosted_workspace.return_value = None
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={"ext": {"is_hosted_24x7": 1, "trigger_frequency": "daily"}},
+            hosted_ws=mock_hosted_ws,
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+        assert result is None
+        mock_relay.forward_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ensure_not_called_when_dima_space_id_present(self):
+        """已有 dima_space_id → 不触发补建，直接用已有空间 ID。"""
+        mock_hosted_ws = MagicMock()
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={"name": "TestBot", "ext": {"is_hosted_24x7": 1, "dima_space_id": "W_EXISTING"}},
+            hosted_ws=mock_hosted_ws,
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+
+        mock_hosted_ws.ensure_hosted_workspace.assert_not_called()
+        assert result is not None
+        body = mock_relay.forward_request.call_args.kwargs["body"]
+        assert "space:W_EXISTING" in body["command"]
 
     @pytest.mark.asyncio
     async def test_create_cron_when_hosted_24x7_with_dima_space_id(self):
