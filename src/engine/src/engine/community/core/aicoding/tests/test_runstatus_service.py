@@ -993,31 +993,38 @@ async def test_get_session_pull_requests_empty_outputs_returns_empty_list() -> N
 
 
 async def test_get_session_issues_success_and_sort() -> None:
-    """issue outputs 使用 --kind issue，返回字段透传并按 at 倒序。"""
+    """issue 数据从 aix run list 的 workItem 构建，并保持原有 issue 结构。"""
     plugin = FakeBashPlugin()
     plugin.add(
-        "aix run output list --kind issue",
+        "aix run list",
         WORKSPACE,
         BashExecResult(
-            stdout=_pr_outputs_payload(
+            stdout=_runs_payload(
                 [
                     {
+                        "id": "r-old",
                         "runId": "r-old",
-                        "kind": "issue",
-                        "provider": "generic",
-                        "url": "https://issues.example.com/work-items/1",
-                        "title": "old issue",
-                        "at": 1_000,
                         "projectDir": PROJECT_DIR,
+                        "startedAtUnixMs": 1_000,
+                        "updatedAtUnixMs": 1_000,
                     },
                     {
+                        "id": "r-new",
                         "runId": "r-new",
-                        "kind": "issue",
-                        "provider": "generic",
-                        "url": "https://issues.example.com/work-items/2",
-                        "title": "new issue",
-                        "at": 2_000,
                         "projectDir": PROJECT_DIR,
+                        "startedAtUnixMs": 2_000,
+                        "updatedAtUnixMs": 2_000,
+                        "workItem": {
+                            "provider": "dima",
+                            "site": "alipay",
+                            "type": "req",
+                            "id": "2026091700119169408",
+                            "url": (
+                                "https://project.alipay.com/space/W26001130350/"
+                                "requirement?workItemView=2300100000022&"
+                                "openWorkItemId=2026091700119169408&status=pipeline"
+                            ),
+                        },
                     },
                 ]
             ),
@@ -1029,9 +1036,58 @@ async def test_get_session_issues_success_and_sort() -> None:
     service = _make_service(plugin)
     items = await service.get_session_issues(SESSION_ID)
 
-    assert [o["runId"] for o in items] == ["r-new", "r-old"]
-    assert items[0]["provider"] == "generic"
-    assert "--kind issue" in plugin.calls[0][0]
+    assert items == [
+        {
+            "runId": "r-new",
+            "kind": "issue",
+            "provider": "dima",
+            "url": (
+                "https://project.alipay.com/space/W26001130350/"
+                "requirement?workItemView=2300100000022&"
+                "openWorkItemId=2026091700119169408&status=pipeline"
+            ),
+            "title": None,
+            "at": 2_000,
+            "projectDir": PROJECT_DIR,
+        }
+    ]
+    assert "aix run list --filter" in plugin.calls[0][0]
+    assert "--json" in plugin.calls[0][0]
+
+
+async def test_get_session_issues_500_when_cmd_fails() -> None:
+    """issue 查询改用 run list 后，命令失败仍保持 500 错误语义。"""
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "aix run list",
+        WORKSPACE,
+        BashExecResult(stdout="", stderr="aix internal error", exit_code=1),
+    )
+    service = _make_service(plugin)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await service.get_session_issues(SESSION_ID)
+
+    assert excinfo.value.status_code == 500
+    assert "aix run list failed" in excinfo.value.detail
+    assert "aix internal error" in excinfo.value.detail
+
+
+async def test_get_session_issues_500_on_bad_json() -> None:
+    """run list 返回非法 JSON 时，issue 接口仍返回 500。"""
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "aix run list",
+        WORKSPACE,
+        BashExecResult(stdout="not-json", stderr="", exit_code=0),
+    )
+    service = _make_service(plugin)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await service.get_session_issues(SESSION_ID)
+
+    assert excinfo.value.status_code == 500
+    assert "Failed to parse aix output" in excinfo.value.detail
 
 
 async def test_get_session_pull_requests_500_when_cmd_fails() -> None:
