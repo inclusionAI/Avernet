@@ -1,5 +1,6 @@
 """Tests for DefaultPublishService."""
 
+from contextlib import contextmanager
 from datetime import datetime
 from typing import cast
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -239,6 +240,80 @@ class TestPublishCreation:
         assert create_call["extra_config"] is None
         assert create_call["template_uuid"] is None
         assert create_call["modifier"] == "user1"
+
+    @pytest.mark.asyncio
+    async def test_create_publish_lock_not_acquired_raises_conflict(self):
+        """A publish rejected by the per-bot lock surfaces as PublishConflictError."""
+        from secbaas.community.api.publish_manage import PublishConflictError
+
+        mock_bot = MagicMock()
+        mock_bot.id = 1
+        mock_bot.bot_uuid = "BOT-locked"
+
+        lock_context = MagicMock()
+        lock_context.acquired = False
+
+        @contextmanager
+        def _denied_lock(*_args, **_kwargs):
+            yield lock_context
+
+        _publish_service_instance._lock_service = MagicMock()
+        _publish_service_instance._lock_service.try_lock = _denied_lock
+        _publish_service_instance._bot_service.get_bot = AsyncMock(
+            return_value=mock_bot
+        )
+
+        with pytest.raises(PublishConflictError, match="concurrently"):
+            await _publish_service_instance.create_publish(
+                tenant="test_tenant",
+                bot_id=1,
+                publish_type=PublishType.UPDATE,
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_publish_update_clone_conflict_raises(self):
+        """A concurrent PENDING clone surfaces as PublishConflictError."""
+        from secbaas.community.api.publish_manage import PublishConflictError
+        from secbaas.community.core.repository.bot import BotRecordConflictError
+
+        mock_bot = MagicMock()
+        mock_bot.id = 1
+        mock_bot.replica_desired = 1
+        mock_bot.bot_uuid = "BOT-race"
+
+        mock_publish = MagicMock()
+        mock_publish.id = 1
+        mock_publish.bot_id = 1
+        mock_publish.publish_type = "UPDATE"
+        mock_publish.status = "PENDING"
+        mock_publish.extra_config = {}
+        mock_publish.creator = "user1"
+        mock_publish.modifier = "user1"
+        mock_publish.gmt_create = datetime.now()
+        mock_publish.gmt_modified = datetime.now()
+
+        _publish_service_instance._bot_service.get_bot = AsyncMock(
+            return_value=mock_bot
+        )
+        _publish_service_instance._bot_repo = MagicMock()
+        _publish_service_instance._bot_repo.try_insert_pending_bot.side_effect = (
+            BotRecordConflictError("PENDING bot record already exists")
+        )
+        _publish_service_instance._publish_repo = MagicMock()
+        _publish_service_instance._publish_repo.now.return_value = datetime.now()
+        _publish_service_instance._publish_repo.get_active_by_bot_id.return_value = None
+        _publish_service_instance._publish_repo.insert_publish.return_value = 1
+
+        with pytest.raises(PublishConflictError, match="already exists"):
+            await _publish_service_instance.create_publish(
+                tenant="test_tenant",
+                bot_id=1,
+                publish_type=PublishType.UPDATE,
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+            )
 
     @pytest.mark.asyncio
     async def test_create_publish_restart_type(self):

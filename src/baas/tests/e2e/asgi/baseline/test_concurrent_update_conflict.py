@@ -47,7 +47,13 @@ async def _update_bot_config(api: APITestHelper, bot_uuid: str) -> tuple[int, di
 
 
 async def _get_bot_records_by_uuid(api: APITestHelper, bot_uuid: str) -> list[dict]:
-    """All non-deleted bot records for a bot_uuid."""
+    """Visible (non-soft-deleted) bot records for a bot_uuid.
+
+    ``detail-by-uuid`` lists via ``list_by_bot_uuid``, which filters
+    ``is_deleted == 0``. A soft-deleted source bot therefore disappears from
+    this list — the corruption symptom this module guards against — rather than
+    appearing with ``is_deleted != 0``.
+    """
     resp = await api.client.get(
         f"{api.bot_url(bot_uuid)}/detail-by-uuid",
         params=api.params(),
@@ -89,19 +95,32 @@ class TestConcurrentUpdateConflict:
             ids = {r["id"] for r in records}
 
             assert source_bot_id in ids, (
-                f"source bot id={source_bot_id} was deleted by a concurrent "
-                f"request; surviving records={ids}"
+                f"source bot id={source_bot_id} was soft-deleted by a concurrent "
+                f"request and is no longer listed; visible records={ids}"
             )
 
-            for r in records:
-                assert r["is_deleted"] == 0, (
-                    f"bot id={r['id']} must not be soft-deleted"
+            cloned = [r for r in records if r["id"] != source_bot_id]
+            assert len(cloned) <= 1, (
+                f"at most one UPDATE clone may be created, found {len(cloned)}: "
+                f"{[r['id'] for r in cloned]}"
+            )
+            for r in cloned:
+                assert r["status"] == "PENDING", (
+                    f"clone id={r['id']} should be PENDING, got {r['status']}"
                 )
 
             pending = [r for r in records if r["status"] == "PENDING"]
             assert len(pending) <= 1, (
                 f"at most one PENDING clone may survive, found {len(pending)}: "
                 f"{[r['id'] for r in pending]}"
+            )
+
+            source_records = [r for r in records if r["id"] == source_bot_id]
+            assert len(source_records) == 1, (
+                f"source bot id={source_bot_id} must appear exactly once"
+            )
+            assert source_records[0]["bot_uuid"] == bot_uuid, (
+                "source bot uuid must be unchanged"
             )
         finally:
             await cleanup_bot(api, bot_uuid)
@@ -133,6 +152,19 @@ class TestConcurrentUpdateConflict:
             )
             assert None not in publish_ids, (
                 f"successful UPDATE must expose a publish_id, got {publish_ids}"
+            )
+
+            conflict_count = sum(1 for sc, _ in results if sc == 409)
+            assert conflict_count == 0, (
+                f"same-type concurrent UPDATEs must be idempotent (no 409), "
+                f"got {conflict_count} conflicts"
+            )
+
+            records = await _get_bot_records_by_uuid(api, bot_uuid)
+            clones = [r for r in records if r["status"] == "PENDING"]
+            assert len(clones) <= 1, (
+                f"idempotent UPDATEs must not create extra clones, "
+                f"found {len(clones)} PENDING records"
             )
         finally:
             await cleanup_bot(api, bot_uuid)

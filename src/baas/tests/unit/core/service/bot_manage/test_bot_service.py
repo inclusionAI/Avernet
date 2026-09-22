@@ -472,6 +472,25 @@ class TestCreateBotRecord:
                 operator="op",
             )
 
+    @pytest.mark.asyncio
+    async def test_create_bot_record_conflict_raises_publish_conflict(
+        self, mock_bot_repo, bot_crud_service
+    ):
+        """A concurrent UPDATE already holding the PENDING slot surfaces as a conflict."""
+        from secbaas.community.api.publish_manage import PublishConflictError
+        from secbaas.community.core.repository.bot import BotRecordConflictError
+
+        mock_bot_repo.try_insert_pending_bot.side_effect = BotRecordConflictError(
+            "PENDING bot record already exists"
+        )
+
+        with pytest.raises(PublishConflictError, match="concurrent UPDATE"):
+            await bot_crud_service.create_bot_record(
+                tenant="test-tenant",
+                source_bot_id=1,
+                operator="op",
+            )
+
 
 # ==================== Test create_bot ====================
 
