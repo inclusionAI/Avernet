@@ -5,6 +5,7 @@ use std::time::Duration;
 use crate::FuseClientError;
 use crate::types::*;
 use bcs_config_api::BcsFuseConfig;
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 
 /// HTTP client for bcsfuse service.
 ///
@@ -30,12 +31,21 @@ impl std::fmt::Debug for FuseClient {
 impl FuseClient {
     /// Create a new FuseClient from config.
     pub fn new(config: &BcsFuseConfig) -> Result<Self, FuseClientError> {
+        let mut headers = HeaderMap::new();
+        if let Some(token) = config.auth_token() {
+            let mut value = HeaderValue::from_str(&format!("Bearer {token}"))
+                .map_err(|_| FuseClientError::InvalidAuthToken)?;
+            value.set_sensitive(true);
+            headers.insert(AUTHORIZATION, value);
+        }
         let fusion_client = reqwest::Client::builder()
             .timeout(Duration::from_millis(config.fusion_timeout_ms))
+            .default_headers(headers.clone())
             .build()
             .map_err(FuseClientError::HttpClient)?;
         let sync_client = reqwest::Client::builder()
             .timeout(Duration::from_millis(config.sync_timeout_ms))
+            .default_headers(headers)
             .build()
             .map_err(FuseClientError::HttpClient)?;
 
@@ -44,6 +54,38 @@ impl FuseClient {
             fusion_client,
             sync_client,
         })
+    }
+
+    fn worker_not_found_response(status: reqwest::StatusCode, body: &str) -> bool {
+        if status != reqwest::StatusCode::NOT_FOUND {
+            return false;
+        }
+        serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .is_some_and(|value| {
+                value
+                    .pointer("/detail/code")
+                    .or_else(|| value.pointer("/code"))
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|code| code == "WORKER_NOT_FOUND")
+            })
+    }
+
+    async fn require_worker_operation_success(
+        response: reqwest::Response,
+        worker_id: &str,
+    ) -> Result<(), FuseClientError> {
+        let status = response.status();
+        let body = response.text().await?;
+        if Self::worker_not_found_response(status, &body) {
+            return Err(FuseClientError::WorkerNotFound(worker_id.to_string()));
+        }
+        if !status.is_success() {
+            return Err(FuseClientError::HttpError(format!(
+                "HTTP status {status}; body: {body}"
+            )));
+        }
+        Ok(())
     }
 
     /// Create a client for tests and conformance checks without external IO.
@@ -103,18 +145,17 @@ impl FuseClient {
         availability: &str,
     ) -> Result<(), FuseClientError> {
         bcs_observability::observe_result("fuse.set_worker_availability", async {
-            let url = format!("{}/api/v1/workers/{}/availability", self.base_url, worker_id);
+            let url = format!(
+                "{}/api/v1/workers/{}/availability",
+                self.base_url, worker_id
+            );
             let response = self
                 .sync_client
                 .put(&url)
                 .json(&serde_json::json!({"availability": availability}))
                 .send()
                 .await?;
-            if response.status() == reqwest::StatusCode::NOT_FOUND {
-                return Err(FuseClientError::WorkerNotFound(worker_id.to_string()));
-            }
-            response.error_for_status()?;
-            Ok(())
+            Self::require_worker_operation_success(response, worker_id).await
         })
         .await
     }
@@ -124,11 +165,10 @@ impl FuseClient {
         bcs_observability::observe_result("fuse.delete_worker", async {
             let url = format!("{}/api/v1/workers/{}", self.base_url, worker_id);
             let response = self.sync_client.delete(&url).send().await?;
-            if response.status() == reqwest::StatusCode::NOT_FOUND {
-                return Ok(());
+            match Self::require_worker_operation_success(response, worker_id).await {
+                Err(FuseClientError::WorkerNotFound(_)) => Ok(()),
+                result => result,
             }
-            response.error_for_status()?;
-            Ok(())
         })
         .await
     }
@@ -371,21 +411,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_worker_availability_uses_lightweight_endpoint(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn set_worker_availability_uses_lightweight_endpoint()
+    -> Result<(), Box<dyn std::error::Error>> {
         let (url, request_rx) = mock_server_capture_once("200 OK", "{}").await?;
-        let client = FuseClient::for_test_with_url(url)?;
-        client.set_worker_availability("bot:owner", "protected").await?;
+        let mut config = BcsFuseConfig {
+            url,
+            ..BcsFuseConfig::default()
+        };
+        config.set_resolved_authorization("test-token".to_string());
+        let client = FuseClient::new(&config)?;
+        client
+            .set_worker_availability("bot:owner", "protected")
+            .await?;
         let request = request_rx.await?;
         assert!(request.starts_with("PUT /api/v1/workers/bot:owner/availability HTTP/1.1"));
+        assert!(request.contains("authorization: Bearer test-token"));
         assert!(request.contains(r#"{"availability":"protected"}"#));
         Ok(())
     }
 
     #[tokio::test]
-    async fn set_worker_availability_reports_missing_worker(
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let (url, _) = mock_server_capture_once("404 Not Found", "").await?;
+    async fn set_worker_availability_reports_missing_worker()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let body = r#"{"detail":{"code":"WORKER_NOT_FOUND","message":"missing"}}"#;
+        let (url, _) = mock_server_capture_once("404 Not Found", body).await?;
         let client = FuseClient::for_test_with_url(url)?;
         let error = client
             .set_worker_availability("missing", "public")
@@ -398,13 +447,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_worker_is_idempotent_for_missing_worker(
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let (url, request_rx) = mock_server_capture_once("404 Not Found", "").await?;
+    async fn delete_worker_is_idempotent_for_missing_worker()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let body = r#"{"detail":{"code":"WORKER_NOT_FOUND","message":"missing"}}"#;
+        let (url, request_rx) = mock_server_capture_once("404 Not Found", body).await?;
         let client = FuseClient::for_test_with_url(url)?;
         client.delete_worker("bot:owner").await?;
         let request = request_rx.await?;
         assert!(request.starts_with("DELETE /api/v1/workers/bot:owner HTTP/1.1"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn delete_worker_rejects_an_unstructured_route_404()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (url, _) =
+            mock_server_capture_once("404 Not Found", r#"{"detail":"Not Found"}"#).await?;
+        let client = FuseClient::for_test_with_url(url)?;
+
+        let error = client
+            .delete_worker("bot:owner")
+            .await
+            .expect_err("a missing endpoint must not look like an idempotent delete");
+
+        assert!(matches!(error, FuseClientError::HttpError(_)));
         Ok(())
     }
 }

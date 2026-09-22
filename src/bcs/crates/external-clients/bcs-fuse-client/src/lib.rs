@@ -25,6 +25,10 @@ pub enum FuseClientError {
     #[error("HTTP client build error: {0}")]
     HttpClient(reqwest::Error),
 
+    /// Configured bcsfuse Bearer credential cannot be encoded as an HTTP header.
+    #[error("invalid bcsfuse authentication token")]
+    InvalidAuthToken,
+
     /// Worker not found.
     #[error("Worker not found: {0}")]
     WorkerNotFound(String),

@@ -1853,6 +1853,7 @@ mod gateway_principal_tests {
         let mut config = BcsConfig::default();
         config.auth_sdk.secret_key_secret = Some("auth".into());
         config.llm.api_key_secret = Some("llm".into());
+        config.bcsfuse.authorization_ref = Some("bcsfuse".into());
         config.invite.token_secret_secret = Some("invite".into());
         config.session_files.share.token_secret_secret = Some("share".into());
         let mut account = config.dingtalk_accounts.first().cloned().unwrap_or_default();
@@ -1877,6 +1878,7 @@ mod gateway_principal_tests {
         config.auth.oauth = Some(OAuthSettings { providers, ..OAuthSettings::default() });
         let access = InMemorySecretAccess::with_entries([
             ("auth", String::new(), "auth-value".into()), ("llm", String::new(), "llm-value".into()),
+            ("bcsfuse", String::new(), "bcsfuse-value".into()),
             ("invite", String::new(), "invite-value".into()), ("share", String::new(), "share-value".into()),
             ("ding", String::new(), "ding-value".into()), ("logger", String::new(), "logger-value".into()),
             ("oauth", String::new(), "oauth-value".into()), ("human", String::new(), "human-value".into()),
@@ -1884,6 +1886,7 @@ mod gateway_principal_tests {
         resolve_config_secrets(&mut config, &access).await.unwrap();
         assert_eq!(config.auth_sdk.secret_key.as_deref(), Some("auth-value"));
         assert_eq!(config.llm.api_key.as_ref().map(|v| v.expose_secret().as_str()), Some("llm-value"));
+        assert_eq!(config.bcsfuse.auth_token(), Some("bcsfuse-value"));
         assert_eq!(config.invite.token_secret.as_deref(), Some("invite-value"));
         assert_eq!(config.session_files.share.token_secret.as_deref(), Some("share-value"));
         assert_eq!(config.dingtalk_accounts[0].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("ding-value"));
@@ -6808,6 +6811,15 @@ pub async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretA
     if let Some(value) = resolve_secret_value(config.llm.api_key_secret.as_deref(), access, "llm.api_key_secret").await? {
         config.llm.api_key = Some(Secret::new(value));
         config.llm.api_key_env = None;
+    }
+    if let Some(value) = resolve_secret_value(
+        config.bcsfuse.authorization_ref.as_deref(),
+        access,
+        "bcsfuse.authorization_ref",
+    )
+    .await?
+    {
+        config.bcsfuse.set_resolved_authorization(value);
     }
     if config.invite.token_secret_secret.as_deref().is_some_and(|v| !v.trim().is_empty()) {
         config.invite.token_secret = resolve_token_secret_secret(config.invite.token_secret_secret.as_deref(), access, "invite.token_secret_secret").await?;

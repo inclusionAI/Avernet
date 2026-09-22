@@ -285,6 +285,8 @@ client_secret = "replace-with-github-client-secret"
 [bcsfuse]
 enabled = false
 url = "https://bcsfuse.example.com"
+# Secret-provider key containing the same value as BCSFuse's BCSFUSE_AUTH_TOKEN.
+# authorization_ref = "bcsfuse-auth"
 fusion_timeout_ms = 120000
 sync_timeout_ms = 10000
 # Base backoff between worker-sync retry attempts; doubles per attempt.

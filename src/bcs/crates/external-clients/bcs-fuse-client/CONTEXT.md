@@ -9,7 +9,7 @@
 ## Consumes
 
 - `bcs-config-api` for `BcsFuseConfig`.
-- HTTP endpoint, timeout, and profile settings supplied by bootstrap or service wiring.
+- HTTP endpoint, timeout, optional Bearer credential, and profile settings supplied by bootstrap or service wiring.
 
 ## Allowed dependencies
 

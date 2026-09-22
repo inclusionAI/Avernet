@@ -1,5 +1,6 @@
 //! bcsfuse integration configuration.
 
+use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 
 /// bcsfuse integration configuration.
@@ -12,6 +13,15 @@ pub struct BcsFuseConfig {
     /// bcsfuse service URL (e.g., "http://127.0.0.1:8765").
     #[serde(default = "default_url")]
     pub url: String,
+
+    /// Secret-provider key containing the BCSFuse Bearer credential.
+    #[serde(default)]
+    pub authorization_ref: Option<String>,
+
+    /// Bearer credential resolved by bootstrap from `authorization_ref`.
+    #[serde(skip)]
+    #[doc(hidden)]
+    pub resolved_authorization: Option<Secret<String>>,
 
     /// Timeout for fusion API calls in milliseconds (LLM-backed, needs longer timeout).
     #[serde(default = "default_fusion_timeout")]
@@ -75,6 +85,8 @@ impl Default for BcsFuseConfig {
         Self {
             enabled: false,
             url: default_url(),
+            authorization_ref: None,
+            resolved_authorization: None,
             fusion_timeout_ms: default_fusion_timeout(),
             sync_timeout_ms: default_sync_timeout(),
             sync_retry_base_ms: default_sync_retry_base(),
@@ -82,5 +94,19 @@ impl Default for BcsFuseConfig {
             recommend_top_k: default_recommend_top_k(),
             recommend_min_score: default_recommend_min_score(),
         }
+    }
+}
+
+impl BcsFuseConfig {
+    /// Bearer credential used for service-to-service bcsfuse requests.
+    pub fn auth_token(&self) -> Option<&str> {
+        self.resolved_authorization
+            .as_ref()
+            .map(|token| token.expose_secret().as_str())
+    }
+
+    /// Store credential material resolved by bootstrap's secret provider.
+    pub fn set_resolved_authorization(&mut self, value: String) {
+        self.resolved_authorization = Some(value.into());
     }
 }

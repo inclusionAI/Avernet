@@ -372,7 +372,7 @@ mod tests {
             socket.read(&mut buf).await.expect("read request");
             socket
                 .write_all(
-                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    b"HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: 58\r\nConnection: close\r\n\r\n{\"detail\":{\"code\":\"WORKER_NOT_FOUND\",\"message\":\"missing\"}}",
                 )
                 .await
                 .expect("write response");
