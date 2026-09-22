@@ -304,6 +304,7 @@ class _Storage:
 class _Factory:
     def local_skill_package_storage_for_locator(self, **kwargs):
         assert kwargs["locator"] == "weekly-report"
+        assert kwargs["skill_name"] == "weekly-report"
         return _Storage()
 
 
@@ -369,6 +370,22 @@ async def test_local_content_and_parameters_use_one_skill_id_resolver() -> None:
         parameters={"region": "cn"},
     ) == {"region": "cn"}
     assert parameters.parameters.saved == ("weekly-report", {"region": "cn"})
+
+
+@pytest.mark.asyncio
+async def test_invalid_recorded_local_locator_maps_to_storage_failure() -> None:
+    service, _parameters, _reader = _asset_service()
+
+    class _RejectingFactory:
+        def local_skill_package_storage_for_locator(self, **_kwargs):
+            raise ValueError("Local Skill cleanup locator escapes skills-local")
+
+    service._skill_service_factory = _RejectingFactory()
+
+    with pytest.raises(LocalSkillStorageError):
+        await service.get_content(
+            skill_id="42", bot_id="bot", owner_id="owner", user_id="owner"
+        )
 
 
 @pytest.mark.asyncio
@@ -659,6 +676,7 @@ async def test_local_readme_uses_persisted_owner_to_disambiguate_default_bot():
             {
                 "1": {
                     "id": "1",
+                    "name": "owned",
                     "git_path": "local://owned",
                     "bolt_id": "default",
                     "user_id": "owner",
@@ -759,7 +777,14 @@ async def test_skill_only_readme_masks_missing_public_repo_content():
 async def test_skill_only_readme_returns_string_content():
     service = SkillQueryService(
         _ReadmeSkillRepository(
-            {"1": {"git_path": "local://x", "bolt_id": "bot", "user_id": "owner"}}
+            {
+                "1": {
+                    "name": "x",
+                    "git_path": "local://x",
+                    "bolt_id": "bot",
+                    "user_id": "owner",
+                }
+            }
         ),
         _ReadmeBotRepository(
             {"entity_id": "e", "owner_id": "owner", "active_engine": "x"}
@@ -780,7 +805,14 @@ async def test_skill_only_readme_returns_string_content():
 async def test_skill_only_readme_tries_readme_fallback_and_decodes_bytes():
     service = SkillQueryService(
         _ReadmeSkillRepository(
-            {"1": {"git_path": "local://x", "bolt_id": "bot", "user_id": "owner"}}
+            {
+                "1": {
+                    "name": "x",
+                    "git_path": "local://x",
+                    "bolt_id": "bot",
+                    "user_id": "owner",
+                }
+            }
         ),
         _ReadmeBotRepository(
             {"entity_id": "e", "owner_id": "owner", "active_engine": "x"}
@@ -802,7 +834,14 @@ async def test_skill_only_readme_tries_readme_fallback_and_decodes_bytes():
 async def test_skill_only_readme_masks_empty_local_files():
     service = SkillQueryService(
         _ReadmeSkillRepository(
-            {"1": {"git_path": "local://x", "bolt_id": "bot", "user_id": "owner"}}
+            {
+                "1": {
+                    "name": "x",
+                    "git_path": "local://x",
+                    "bolt_id": "bot",
+                    "user_id": "owner",
+                }
+            }
         ),
         _ReadmeBotRepository(
             {"entity_id": "e", "owner_id": "owner", "active_engine": "x"}

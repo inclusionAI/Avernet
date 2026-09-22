@@ -63,6 +63,9 @@ from agentclaw.community.plugin_api.local_skill_storage import LocalSkillStorage
 from agentclaw.community.core.skill_center.skill_parameter_service_factory_protocol import SkillParameterServiceFactoryProtocol
 from agentclaw.community.core.skill_center.skill_service_factory_protocol import SkillServiceFactoryProtocol
 from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import SkillSetServiceFactoryProtocol
+from agentclaw.community.core.workspace.skill_layout import (
+    legacy_local_locator_roots,
+)
 
 if TYPE_CHECKING:
     # Runtime-keyed device dispatchers and the workspace path factory are
@@ -533,8 +536,9 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
         is_desktop: bool,
         is_teclaw: bool,
         locator: str,
+        skill_name: str,
     ) -> LocalSkillPackageStorage:
-        """Re-open an existing internal Local package locator for cleanup."""
+        """Resolve one recorded locator to its current package storage."""
         service = self.create(
             entity_id=entity_id,
             bot_owner_id=owner_id,
@@ -542,14 +546,15 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
             engine_type=engine_type,
         )
         local_dir = service.local_dir
+        runtime_engine = resolve_runtime_engine_for_bot(
+            bot_id,
+            owner_id,
+            override=engine_type,
+            bot_repo=self._bot_repo,
+        )
+        accepted_roots = (local_dir,)
         if not service.runtime_uses_pool_paths:
-            runtime_engine = resolve_runtime_engine_for_bot(
-                bot_id,
-                owner_id,
-                override=engine_type,
-                bot_repo=self._bot_repo,
-            )
-            local_dir = self._path_factory.get_bot_skills_local_dir(
+            current_address_root = self._path_factory.get_bot_skills_local_dir(
                 entity_id,
                 bot_id,
                 runtime_engine or "openclaw",
@@ -557,27 +562,57 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
                 is_desktop=is_desktop,
                 is_teclaw=is_teclaw,
             )
-            local_dir = self.resolve_local_skill_root(runtime_engine or "openclaw", local_dir)
+            local_dir = self.resolve_local_skill_root(
+                runtime_engine or "openclaw", current_address_root
+            )
+            accepted_roots = (local_dir,)
+            claude_code_address_root = (
+                self._path_factory.get_bot_skills_local_dir(
+                    entity_id,
+                    bot_id,
+                    "claude_code",
+                    entity_type,
+                    is_desktop=is_desktop,
+                    is_teclaw=is_teclaw,
+                )
+                if runtime_engine == "aicoding"
+                else current_address_root
+            )
+            if not is_teclaw:
+                accepted_roots = legacy_local_locator_roots(
+                    runtime_engine or "openclaw",
+                    canonical_root=local_dir,
+                    current_address_root=current_address_root,
+                    claude_code_address_root=claude_code_address_root,
+                )
+        if (
+            not skill_name
+            or skill_name in {".", ".."}
+            or "/" in skill_name
+            or "\\" in skill_name
+        ):
+            raise ValueError("Local Skill cleanup locator escapes skills-local")
+        if any(part in {".", ".."} for part in locator.split("/")):
+            raise ValueError("Local Skill cleanup locator escapes skills-local")
         resolved_locator = Path(locator)
         if not resolved_locator.is_absolute():
             if resolved_locator.parts[:1] == (local_dir.name,):
                 resolved_locator = local_dir.parent / resolved_locator
             else:
                 resolved_locator = local_dir / resolved_locator
-        resolved_base = local_dir.resolve()
-        resolved_candidate = resolved_locator.resolve()
-        try:
-            relative_locator = resolved_candidate.relative_to(resolved_base)
-        except ValueError as exc:
-            raise ValueError(
-                "Local Skill cleanup locator escapes skills-local"
-            ) from exc
-        if not relative_locator.parts:
+        def absolute(path: Path) -> Path:
+            return path if path.is_absolute() else Path.cwd() / path
+
+        resolved_candidate = absolute(resolved_locator)
+        resolved_roots = tuple(absolute(root) for root in accepted_roots)
+        if resolved_candidate in resolved_roots:
             raise ValueError("Local Skill cleanup locator must name a package")
-        # Keep the original path form for the device adapter (notably Teclaw's
-        # relative ``skills-local`` namespace), after lexical containment has
-        # been proven against an absolute normalized base.
-        resolved_locator = local_dir / relative_locator
+        accepted_packages = {
+            absolute(root / skill_name) for root in accepted_roots
+        }
+        if resolved_candidate not in accepted_packages:
+            raise ValueError("Local Skill cleanup locator escapes skills-local")
+        resolved_locator = local_dir / skill_name
         local_skill_path_adapter = service._local_skill_path_adapter
         if is_teclaw and not service.runtime_uses_pool_paths:
             local_skill_path_adapter = to_local_skill_engine_path

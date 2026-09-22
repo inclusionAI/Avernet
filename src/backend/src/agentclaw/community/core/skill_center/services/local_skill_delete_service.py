@@ -99,6 +99,7 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
                 bot_id=bot_id,
                 is_teclaw=is_teclaw,
                 locator=locator,
+                skill_name=str(skill["name"]),
             )
             try:
                 package_deleted = await package.delete()
@@ -127,17 +128,22 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
         bot_id: str,
         is_teclaw: bool,
         locator: str,
+        skill_name: str,
     ):
-        return self._skill_service_factory.local_skill_package_storage_for_locator(
-            entity_id=str(bot["entity_id"]),
-            owner_id=owner_id,
-            bot_id=bot_id,
-            engine_type=bot.get("active_engine"),
-            entity_type=str(bot.get("entity_type") or "staff"),
-            is_desktop=bot.get("bot_type") == "desktop",
-            is_teclaw=is_teclaw,
-            locator=locator,
-        )
+        try:
+            return self._skill_service_factory.local_skill_package_storage_for_locator(
+                entity_id=str(bot["entity_id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=is_teclaw,
+                locator=locator,
+                skill_name=skill_name,
+            )
+        except Exception as exc:
+            raise LocalSkillStorageError() from exc
 
     def _is_teclaw(self, *, bot_id: str, owner_id: str) -> bool:
         try:
