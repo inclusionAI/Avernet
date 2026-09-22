@@ -1,11 +1,12 @@
 use super::*;
 use bcs_service_api::port::repo::collaboration_history::StateMachineHistoryIdentity;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 #[derive(Default)]
 struct HistoryMessages {
     inner: MemoryMessageRepo,
     fail: AtomicU8,
+    writes: AtomicUsize,
 }
 #[async_trait]
 impl MessageRepoPort for HistoryMessages {
@@ -17,8 +18,9 @@ impl MessageRepoPort for HistoryMessages {
         id: String,
         m: NewMessage,
     ) -> Result<PersistedMessage, MessageRepoError> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
         let mode = self.fail.load(Ordering::SeqCst);
-        if mode == 1 && m.message_type == "state_machine_output" {
+        if (mode == 1 && m.message_type == "state_machine_output") || (mode == 5 && m.message_type == "chat") {
             return Err(MessageRepoError::StorageError(
                 "injected history write failure".into(),
             ));
@@ -412,6 +414,10 @@ async fn terminal_cancel_does_not_discard_pending_output_or_replay_delivery() {
         .await
         .unwrap();
     h.messages.fail.store(0, Ordering::SeqCst);
+    let cleanup = h.runtime.cleanup_state_machine_terminal_work(None, 32).await.unwrap();
+    assert!(cleanup.failures.is_empty());
+    assert!(h.store.list_unrepaired_history_runs(&[run.run_id.clone()]).await.unwrap().is_empty());
+    assert_eq!(pending(&h).await, 1, "opening repair never confirms pending node output");
     h.restart(false);
     assert_eq!(
         h.runtime
@@ -654,6 +660,13 @@ async fn local_opening_and_delivered_publication_repair_never_acknowledges_netwo
     // A missing local projection is repaired from original producer payloads.
     h.messages = Arc::new(HistoryMessages::default());
     h.restart(true);
+    h.messages.fail.store(5, Ordering::SeqCst);
+    let failed = h.runtime.cleanup_state_machine_terminal_work(None, 32).await.unwrap();
+    assert_eq!(failed.failures.len(), 1);
+    assert_eq!(h.store.list_unrepaired_history_runs(&[run.run_id.clone()]).await.unwrap(), vec![run.run_id.clone()]);
+    assert_eq!(h.messages.get_current_seq(&run.session_id).await.unwrap(), 1);
+    h.messages.fail.store(0, Ordering::SeqCst);
+    h.restart(true);
     let page = h
         .runtime
         .cleanup_state_machine_terminal_work(None, 32)
@@ -668,10 +681,13 @@ async fn local_opening_and_delivered_publication_repair_never_acknowledges_netwo
         h.messages.get_current_seq(&run.session_id).await.unwrap(),
         2
     );
-    h.runtime
-        .cleanup_state_machine_terminal_work(None, 32)
-        .await
-        .unwrap();
+    let writes = h.messages.writes.load(Ordering::SeqCst);
+    h.restart(true);
+    for _ in 0..3 {
+        let page = h.runtime.cleanup_state_machine_terminal_work(None, 32).await.unwrap();
+        assert!(page.failures.is_empty());
+    }
+    assert_eq!(h.messages.writes.load(Ordering::SeqCst), writes, "completed repair must not probe or append messages on later sweeps");
     assert_eq!(
         h.messages.get_current_seq(&run.session_id).await.unwrap(),
         2

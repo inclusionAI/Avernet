@@ -600,9 +600,8 @@ impl CollaborationRuntime {
         &self,
         run: &StateMachineRun,
     ) -> Result<(), CollaborationRuntimeError> {
-        let Some(repo) = self.message_repo.as_ref() else {
-            return Ok(());
-        };
+        let repo = self.message_repo.as_ref().ok_or_else(||
+            CollaborationRuntimeError::InvalidRequest("history message repository missing".into()))?;
         if let Some(opening) = self.runs.get_run_opening(&run.run_id).await? {
             let rendered = self.opening_from_payload(run, &opening.payload)?;
             let key = opening.payload.client_msg_id;

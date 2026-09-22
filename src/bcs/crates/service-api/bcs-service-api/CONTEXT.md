@@ -420,3 +420,9 @@ physical sequence anchor. New durable projections do not consume positions;
 legacy rows and missing ordinary positions do. Store/query failures propagate,
 and audience/owner filtering remains independent. No schema changes or window
 initialization API is required.
+
+StateMachineRunRepoPort batches at most 32 Run IDs to find missing terminal
+history-repair confirmations. Memory and SQL stores retain a completion marker
+only after opening/publication rows are repaired successfully. Later cleanup
+sweeps, including after restart, skip those source/message reads. Node-history
+Pending recovery and network delivery acknowledgements remain independent.

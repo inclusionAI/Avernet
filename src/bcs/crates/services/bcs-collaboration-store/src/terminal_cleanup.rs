@@ -6,7 +6,30 @@ fn terminal(status: StateMachineRunStatus) -> bool {
     matches!(status, StateMachineRunStatus::Completed | StateMachineRunStatus::Failed | StateMachineRunStatus::Aborted)
 }
 
+fn repair_key(run: &str) -> String { format!("smrun:{run}:history-repair") }
+fn validate_repair_batch(runs: &[String]) -> ServiceResult<()> {
+    if runs.len() > 32 || runs.iter().any(String::is_empty) {
+        return Err(ServiceError::InternalError("history repair lookup requires at most 32 nonempty Run IDs".into()));
+    }
+    Ok(())
+}
+
 impl MemoryCollaborationStore {
+    pub(super) async fn unrepaired_history_runs(&self, runs: &[String]) -> ServiceResult<Vec<String>> {
+        validate_repair_batch(runs)?;
+        let inner = self.inner.read().await;
+        Ok(runs.iter().filter(|run| !inner.repaired_history_runs.contains(*run)).cloned().collect())
+    }
+
+    pub(super) async fn confirm_history_repair(&self, run: &str, _at: u64) -> ServiceResult<()> {
+        let mut inner = self.inner.write().await;
+        if !inner.runs.get(run).is_some_and(|run| terminal(run.status)) {
+            return Err(ServiceError::Conflict("history repair requires a terminal Run".into()));
+        }
+        inner.repaired_history_runs.insert(run.into());
+        Ok(())
+    }
+
     pub(super) async fn terminal_cleanup_candidates(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> {
         let inner = self.inner.read().await;
         Ok(inner.runs.range::<str, _>((after.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded), std::ops::Bound::Unbounded))
@@ -36,6 +59,39 @@ fn db_error(error: DbError) -> ServiceError { ServiceError::InternalError(format
 const TERMINAL: &str = "r.status IN ('completed', 'failed', 'aborted') AND r.record_status = 'active'";
 
 impl MySqlCollaborationStore {
+    pub(super) async fn unrepaired_history_runs(&self, runs: &[String]) -> ServiceResult<Vec<String>> {
+        validate_repair_batch(runs)?;
+        if runs.is_empty() { return Ok(Vec::new()); }
+        let mut params = vec![DbValue::from(self.env.as_str())];
+        params.extend(runs.iter().map(|run| DbValue::from(repair_key(run))));
+        let rows = self.db.query(DbStatement::with_params(format!(
+            "SELECT aggregate_id FROM bcs_collaboration_delivery_checkpoints WHERE env = ? \
+             AND operation_key IN ({}) AND aggregate_kind = 'state_machine_run' \
+             AND operation_kind = 'history_repair' AND status = 'delivered' AND delivered_at_ms IS NOT NULL",
+            vec!["?"; runs.len()].join(", ")), params)).await.map_err(db_error)?;
+        let repaired = rows.iter().map(|row| db_get_column::<String>(row, "aggregate_id"))
+            .collect::<Result<BTreeSet<_>, _>>().map_err(db_error)?;
+        Ok(runs.iter().filter(|run| !repaired.contains(*run)).cloned().collect())
+    }
+
+    pub(super) async fn confirm_history_repair(&self, run: &str, at: u64) -> ServiceResult<()> {
+        let suffix = match self.flavor {
+            DbSqlFlavor::Mysql => "ON DUPLICATE KEY UPDATE operation_key = operation_key",
+            DbSqlFlavor::Sqlite => "ON CONFLICT(env, operation_key) DO NOTHING",
+        };
+        let result = self.db.execute(DbStatement::with_params(format!(
+            "INSERT INTO bcs_collaboration_delivery_checkpoints \
+             (env, operation_key, aggregate_kind, aggregate_id, operation_kind, payload_json, status, created_at_ms, delivered_at_ms) \
+             SELECT ?, ?, 'state_machine_run', r.run_id, 'history_repair', '{{\"schema_version\":1}}', 'delivered', ?, ? \
+             FROM bcs_state_machine_runs r WHERE r.env = ? AND r.run_id = ? AND {TERMINAL} {suffix}"),
+            vec![self.env.as_str().into(), repair_key(run).into(), at.into(), at.into(), self.env.as_str().into(), run.into()],
+        )).await.map_err(db_error)?;
+        if result.affected_rows == 0 && !self.unrepaired_history_runs(&[run.into()]).await?.is_empty() {
+            return Err(ServiceError::Conflict("history repair requires a terminal Run".into()));
+        }
+        Ok(())
+    }
+
     pub(super) async fn terminal_cleanup_candidates(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> {
         if limit == 0 { return Ok(Vec::new()); }
         let mut ids = Vec::new();

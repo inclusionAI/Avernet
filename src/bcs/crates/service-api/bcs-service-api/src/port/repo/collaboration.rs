@@ -283,6 +283,16 @@ pub trait StateMachineRunRepoPort: Send + Sync {
     async fn confirm_history_message(&self, _checkpoint: &StateMachineHistoryCheckpoint, _at: u64) -> ServiceResult<()> {
         Err(crate::ServiceError::InternalError("history confirmation unavailable".into()))
     }
+    /// Return requested Run IDs lacking a durable local-history repair marker.
+    /// At most 32 IDs per call; batch lookup, no message or source payload reads.
+    async fn list_unrepaired_history_runs(&self, _run_ids: &[String]) -> ServiceResult<Vec<String>> {
+        Err(crate::ServiceError::InternalError("history repair lookup unavailable".into()))
+    }
+    /// Confirm opening/publication repair only after local writes succeed and
+    /// the Run is terminal. Does not acknowledge network IO or node history.
+    async fn confirm_terminal_history_repair(&self, _run: &str, _at: u64) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("history repair confirmation unavailable".into()))
+    }
 
     /// Bounded, exclusive Run-ID page of Completed/Failed/Aborted active records.
     /// This walks indexed terminal history, without loading snapshots or payloads.

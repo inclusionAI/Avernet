@@ -275,6 +275,8 @@ Completed 后的原 `persist_node_output` 改为确认或补齐同一逻辑消�
 
 即使 Run 已终态或消息下游发送失败，既有恢复流程遇到已经确定且按原规则应出现在历史中的 opening / published result，仍应校验并补齐本地消息。不存在可信原 payload 时报告缺失，不能用今天的定义或配置重新渲染；本次不为此额外遍历全部旧 Run。
 
+终态清理每页批量检查修复完成标记，只对未确认的 Run 执行上述本地修复。成功后在现有 checkpoint 表记录 `operation_kind=history_repair`，仅保存 Run 级完成标记，不复制消息 payload、不确认网络投递或节点 Pending。写入或确认失败时仍可重试；成功标记跨重启保留，后续扫描不再读取该 Run 的原 payload 或探测消息，也不承担已确认后被外部删除消息的巡检。
+
 ## 8. 可见性与展示一致性
 
 ### 8.1 权限与消息展示
@@ -444,7 +446,9 @@ T03 的 SQLite DB Plugin 计数测试记录：无事件的接受命令为一个�
 - 不在数据库事务或 Session 锁内进行 Bot / IM / judge 等外部网络 IO。
 - 新追加对 `current_msg_seq` 的锁竞争、普通聊天共享连接池和持续失败时的恢复负载，必须进行代表性查询计数及并发验证。
 
-T03 Pending 扫描每页一条索引查询，最多返回 100 份 payload；串行投影，不为每条 checkpoint 回查 Run / Node / 定义。原有 opening / Delivered publication 的本地核对接入既有活跃恢复与终态清理页（每页最多 32 个 Run），每个 Run 最多增加两次原 checkpoint 查询及两次幂等消息核对，不持锁调用网络。取消 T04 不移除这些故障恢复能力，也不将其扩展为全部旧消息的回填扫描。
+T03 Pending 扫描每页一条索引查询，最多返回 100 份 payload；串行投影，不为每条 checkpoint 回查 Run / Node / 定义。原有 opening / Delivered publication 的本地核对接入既有活跃恢复与终态清理页。终态页最多 32 个 Run，仅增加一次基于现有 checkpoint 主键的批量标记查询；已确认 Run 不再读取 Run、原 checkpoint payload 或 messages。未确认 Run 首次修复或失败重试才读取来源并幂等补写，成功后每个 Run 写入一条完成标记；并发重复确认至多多一次批量主键复核。原有终态清理成本保持不变，不持锁调用网络。取消 T04 不移除这些故障恢复能力，也不将其扩展为全部旧消息的回填扫描。
+
+终态修复验证：Runtime / Store 测试覆盖部分消息写入失败、标记写入失败、并发确认、跨重启跳过及节点 Pending 独立恢复。SQLite 最大 32 个 Run 的查询计数为一条查询、至多 32 行；真实 MySQL Text / Prepared 契约通过。隔离 MySQL 8.4 中放入 5,000 条标记后，1 / 32 个 key 的 EXPLAIN 均使用现有 PRIMARY，预计读取 1 / 32 行；此验证不代表共享生产负载下的吞吐结论。
 
 T05 的状态机正文页只执行一次 MessageRepo SELECT，按环境 / Group / Session、消息类型和受众在 LIMIT 前过滤。内部最多 1,000 条加一条 lookahead，OpenAPI 保持原 100 条上限；Legacy 未指定 limit 时最多返回 1,000 条。查询从 Session 获取 group_id 后直接读取 messages，不批查 Run、不按消息回查 Bot 名称。内部复合游标仍只在 HTTP 暴露原有排他毫秒 before；同毫秒分页边界限制未改变。
 

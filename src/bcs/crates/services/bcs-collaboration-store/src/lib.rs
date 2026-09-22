@@ -83,6 +83,7 @@ fn snapshot_column(row: &DbRow, column: &str) -> ServiceResult<Option<String>> {
 #[derive(Debug, Default, Clone)]
 struct StoreInner {
     history_messages: BTreeMap<String, StateMachineHistoryCheckpoint>,
+    repaired_history_runs: BTreeSet<String>,
     definitions: BTreeMap<(String, i32), CollaborationDefinition>,
     definition_sources: BTreeMap<(String, i32), DefinitionSourceRecord>,
     run_snapshots: BTreeMap<String, StateMachineRunSnapshot>,
@@ -374,6 +375,8 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
     async fn list_history_messages_pending(&self, after: Option<&StateMachineHistoryCursor>, limit: usize) -> ServiceResult<StateMachineHistoryPage> { self.history_page(after, limit).await }
     async fn confirm_history_message(&self, checkpoint: &StateMachineHistoryCheckpoint, at: u64) -> ServiceResult<()> { self.history_confirm(checkpoint, at).await }
 
+    async fn list_unrepaired_history_runs(&self, runs: &[String]) -> ServiceResult<Vec<String>> { self.unrepaired_history_runs(runs).await }
+    async fn confirm_terminal_history_repair(&self, run: &str, at: u64) -> ServiceResult<()> { self.confirm_history_repair(run, at).await }
     async fn list_terminal_runs_for_cleanup(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.terminal_cleanup_candidates(after, limit).await }
     async fn cleanup_terminal_run_checkpoints(&self, run: &str, limit: usize) -> ServiceResult<usize> { self.cleanup_terminal_work(run, limit).await }
     async fn fail_missing_startup(&self, command: bcs_service_api::FailStateMachineStartup) -> ServiceResult<bool> { self.fail_startup_gap(command).await }
@@ -1999,6 +2002,8 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
     async fn list_history_messages_pending(&self, after: Option<&StateMachineHistoryCursor>, limit: usize) -> ServiceResult<StateMachineHistoryPage> { self.history_page(after, limit).await }
     async fn confirm_history_message(&self, checkpoint: &StateMachineHistoryCheckpoint, at: u64) -> ServiceResult<()> { self.history_confirm(checkpoint, at).await }
 
+    async fn list_unrepaired_history_runs(&self, runs: &[String]) -> ServiceResult<Vec<String>> { self.unrepaired_history_runs(runs).await }
+    async fn confirm_terminal_history_repair(&self, run: &str, at: u64) -> ServiceResult<()> { self.confirm_history_repair(run, at).await }
     async fn list_terminal_runs_for_cleanup(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.terminal_cleanup_candidates(after, limit).await }
     async fn cleanup_terminal_run_checkpoints(&self, run: &str, limit: usize) -> ServiceResult<usize> { self.cleanup_terminal_work(run, limit).await }
     async fn fail_missing_startup(&self, command: bcs_service_api::FailStateMachineStartup) -> ServiceResult<bool> { self.fail_startup_gap(command).await }

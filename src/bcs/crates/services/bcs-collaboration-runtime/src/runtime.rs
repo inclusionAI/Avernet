@@ -4558,13 +4558,19 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let limit = limit.min(32);
         if limit == 0 { return Ok(Default::default()); }
         let ids = self.runs.list_terminal_runs_for_cleanup(after_run_id.as_deref(), limit).await?;
+        let history_repairs = if self.history_persistence_enabled {
+            self.runs.list_unrepaired_history_runs(&ids).await?
+        } else { Vec::new() };
         let mut page = bcs_service_api::StateMachineProgressionRecoveryPage { scanned: ids.len(),
             next_run_id: if ids.len() == limit { ids.last().cloned() } else { None }, ..Default::default() };
         for run_id in ids {
             let result = async {
                 self.runs.cleanup_terminal_run_checkpoints(&run_id, 32).await?;
-                if self.history_persistence_enabled {
-                    if let Some(run) = self.runs.get_run(&run_id).await? { self.repair_existing_history(&run).await?; }
+                if history_repairs.contains(&run_id) {
+                    if let Some(run) = self.runs.get_run(&run_id).await? {
+                        self.repair_existing_history(&run).await?;
+                        self.runs.confirm_terminal_history_repair(&run_id, bcs_protocol::now_ms()).await?;
+                    }
                 }
                 Ok::<_, CollaborationRuntimeError>(())
             }.await;

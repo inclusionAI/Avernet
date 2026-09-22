@@ -458,6 +458,50 @@ pub(super) async fn provider_output_contract(store: &dyn StateMachineRunRepoPort
 }
 
 #[tokio::test]
+async fn terminal_history_repair_is_batched_durable_and_retries_failed_confirmation() {
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let path = std::env::temp_dir().join(format!("bcs-history-repair-{}-{stamp}.sqlite", std::process::id()));
+    let ids = (0..32).map(|i| format!("repair-{i:02}")).collect::<Vec<_>>();
+    {
+        let inner = Arc::new(LocalSqliteDbPlugin::new_file(&path).unwrap());
+        bootstrap_migrations::run_sqlite_migrations(inner.as_ref()).await.unwrap();
+        let db = Arc::new(HistoryCostDb { inner: inner.clone(), calls: Mutex::new(Vec::new()) });
+        let store = MySqlCollaborationStore::sqlite(db.clone(), "test".into());
+        for id in &ids {
+            let mut run = test_run(); run.run_id = id.clone(); run.status = StateMachineRunStatus::Completed;
+            store.create_run(run, Vec::new()).await.unwrap();
+        }
+        db.calls.lock().await.clear();
+        assert_eq!(store.list_unrepaired_history_runs(&ids).await.unwrap(), ids);
+        assert_eq!(&*db.calls.lock().await, &[("query", 0)]);
+        for id in &ids[..16] { store.confirm_terminal_history_repair(id, 200).await.unwrap(); }
+        db.calls.lock().await.clear();
+        assert_eq!(store.list_unrepaired_history_runs(&ids).await.unwrap(), ids[16..]);
+        assert_eq!(&*db.calls.lock().await, &[("query", 16)], "one primary-key batch, no Run or producer reads");
+        inner.execute(DbStatement::new("CREATE TRIGGER reject_history_repair BEFORE INSERT ON bcs_collaboration_delivery_checkpoints WHEN NEW.operation_kind='history_repair' BEGIN SELECT RAISE(ABORT,'injected repair confirmation failure'); END")).await.unwrap();
+        assert!(store.confirm_terminal_history_repair(&ids[16], 200).await.is_err());
+        assert_eq!(store.list_unrepaired_history_runs(&ids).await.unwrap(), ids[16..]);
+        inner.execute(DbStatement::new("DROP TRIGGER reject_history_repair")).await.unwrap();
+        for id in &ids[16..] { store.confirm_terminal_history_repair(id, 200).await.unwrap(); }
+    }
+    {
+        let inner = Arc::new(LocalSqliteDbPlugin::new_file(&path).unwrap());
+        let db = Arc::new(HistoryCostDb { inner, calls: Mutex::new(Vec::new()) });
+        let store = MySqlCollaborationStore::sqlite(db.clone(), "test".into());
+        assert!(store.list_unrepaired_history_runs(&ids).await.unwrap().is_empty());
+        assert_eq!(&*db.calls.lock().await, &[("query", 32)], "completed Runs need one bounded marker lookup after restart");
+        db.calls.lock().await.clear();
+        assert!(store.list_unrepaired_history_runs(&[]).await.unwrap().is_empty());
+        assert!(store.list_unrepaired_history_runs(&vec!["run".into(); 33]).await.is_err());
+        assert!(db.calls.lock().await.is_empty());
+        let other = MySqlCollaborationStore::sqlite(db, "other".into());
+        assert_eq!(other.list_unrepaired_history_runs(&ids).await.unwrap(), ids);
+        assert!(other.confirm_terminal_history_repair(&ids[0], 300).await.is_err());
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
 async fn sqlite_provider_outputs_accept_the_persisted_dispatch_phase() {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     bootstrap_migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
