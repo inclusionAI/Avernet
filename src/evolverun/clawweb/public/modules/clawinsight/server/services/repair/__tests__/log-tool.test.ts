@@ -213,7 +213,7 @@ describe("RepairLogTool query safety", () => {
     expect(antlogs.search).not.toHaveBeenCalled();
   });
 
-  it("uses explicit Repair defaults and excludes clawweb from both default and allowed sources", async () => {
+  it("defaults to Backend while keeping BCN explicit and excludes clawweb", async () => {
     const selected = selectRepairLogSources([
       { name: "后端", app: "agentclaw", defaultEnabled: true },
       { name: "ARCA", app: "arcaagentclaw", defaultEnabled: true },
@@ -224,7 +224,7 @@ describe("RepairLogTool query safety", () => {
     ]);
     expect(selected).toEqual({
       allowedSourceNames: ["后端", "ARCA", "BCN", "secbaas"],
-      defaultSourceNames: ["后端", "BCN"],
+      defaultSourceNames: ["后端"],
     });
     const antlogs = collector([]);
     const tool = new RepairLogTool(
@@ -235,7 +235,9 @@ describe("RepairLogTool query safety", () => {
 
     await tool.search(context, { identifiers: ["botId"] });
 
-    expect(antlogs.search).toHaveBeenCalledWith(expect.objectContaining({ sources: ["后端", "BCN"] }));
+    expect(antlogs.search).toHaveBeenCalledWith(expect.objectContaining({ sources: ["后端"] }));
+    await tool.search(context, { identifiers: ["botId"], sources: ["BCN"] });
+    expect(antlogs.search).toHaveBeenLastCalledWith(expect.objectContaining({ sources: ["BCN"] }));
     await expect(tool.search(context, { identifiers: ["botId"], sources: ["clawweb"] }))
       .rejects.toMatchObject({ code: "invalid_log_sources" });
   });
@@ -249,7 +251,7 @@ describe("RepairLogTool query safety", () => {
 
     expect(selected).toEqual({
       allowedSourceNames: ["BCN"],
-      defaultSourceNames: ["BCN"],
+      defaultSourceNames: [],
     });
   });
 

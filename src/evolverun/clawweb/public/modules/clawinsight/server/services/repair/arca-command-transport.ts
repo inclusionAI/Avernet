@@ -16,7 +16,7 @@ export interface ArcaConnectionProvider {
     sandboxId: string;
     arcaInstanceId?: string;
     ttlSeconds: number;
-  }): Promise<{ target: string; token: string }>;
+  }): Promise<{ target: string; token: string; localOwnerIdentity?: { cookie: string; userId: string } }>;
 }
 
 export interface SecretValueProvider {
@@ -180,16 +180,26 @@ export class ArcaCommandTransport {
     command: string;
   }): Promise<ArcaCommandResult> {
     const sandboxId = normalizeArcaSandboxId(input.sandboxId);
-    const connection = validateArcaProxyConnection(
-      await this.options.connectionProvider.getConnection({
-        environment: input.environment,
-        bindingId: input.bindingId,
-        sandboxId,
-        arcaInstanceId: input.arcaInstanceId,
-        ttlSeconds: this.tokenTtlSeconds,
-      }),
+    const resolved = await this.options.connectionProvider.getConnection({
+      environment: input.environment,
+      bindingId: input.bindingId,
       sandboxId,
-    );
+      arcaInstanceId: input.arcaInstanceId,
+      ttlSeconds: this.tokenTtlSeconds,
+    });
+    const connection = validateArcaProxyConnection(resolved, sandboxId);
+    // Only the explicit local Owner provider supplies this transient identity.
+    // MIST connections continue to send just their target-scoped token.
+    const localOwner = resolved.localOwnerIdentity;
+    const localHeaders: Record<string, string> = {};
+    if (localOwner) {
+      if (!localOwner.cookie?.trim() || !localOwner.userId?.trim()
+        || /[\r\n\0]/u.test(localOwner.cookie + localOwner.userId)) {
+        throw new RepairError(401, "repair_ocb_identity_required", "本地 ARCA 请求缺少有效 Owner 登录身份");
+      }
+      localHeaders.Cookie = localOwner.cookie;
+      localHeaders["x-user-id"] = localOwner.userId;
+    }
     const endpoint = new URL(
       `/proxypass/${connection.target}/arca/api/v1/sandbox/${encodeURIComponent(sandboxId)}/terminal/exec_command`,
       this.baseUrls[input.environment],
@@ -199,7 +209,9 @@ export class ArcaCommandTransport {
     try {
       const response = await fetch(endpoint, {
         method: "POST",
+        ...(localOwner ? { redirect: "manual" as const } : {}),
         headers: {
+          ...localHeaders,
           Accept: "application/json",
           "Content-Type": "application/json",
           "x-proxypass-token": connection.token,
@@ -208,6 +220,9 @@ export class ArcaCommandTransport {
         body: JSON.stringify({ command: input.command }),
         signal: controller.signal,
       });
+      if (localOwner && response.status >= 300 && response.status < 400) {
+        throw new RepairError(401, "repair_ocb_identity_rejected", "本地 ARCA 登录身份失效，请刷新登录后重试");
+      }
       const body = await response.json().catch(() => ({})) as ArcaTerminalResponse;
       if (body.buserviceErrorCode === "USER_NOT_LOGIN") {
         throw new RepairError(502, "repair_arca_proxy_rejected", "ARCA 代理拒绝了短期连接凭据");

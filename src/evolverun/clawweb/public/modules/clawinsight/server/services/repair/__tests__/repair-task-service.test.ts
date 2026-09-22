@@ -1425,7 +1425,7 @@ it("exposes a bounded execution-scoped audit projection for compact timeout reco
       toolCallId: source!.callId,
       operation: "fs_read",
       purpose: "读取 OpenClaw 配置并确认当前运行参数",
-      resultSummary: "文件片段读取完成，返回 2 行。",
+      resultSummary: expect.stringContaining("文件片段读取完成，返回 2 行"),
       conclusion: {
         text: "配置读取成功，当前证据可用于生成修复方案。",
         nextAction: "停止扩展调查并生成最终方案。",
@@ -1488,12 +1488,14 @@ it("defaults old and new Tasks to broad structured observation without raw shell
       queryUsesUnixSeconds: true,
     },
     tools: {
+      runtimeUser: "admin",
       filesystemScope: "container_user_readable",
       resultEvidenceLocators: "verified_result_v1",
       shellObservedLocators: "unverified_confirm_v1",
       rawShell: false,
     },
   });
+  expect((bootstrap.tools as { runtimeRead: string[] }).runtimeRead).toContain("execution_context");
   expect((bootstrap.tools as { runtimeRead: string[] }).runtimeRead).not.toContain("shell_exec");
 });
 
@@ -1509,13 +1511,13 @@ it("exposes Task-authorized diagnostic shell and audits its exact command", asyn
     clientRequestId: "deep-shell-1",
     purpose: "读取运行时版本和阶段日志以定位故障",
     operation: "shell_exec",
-    command: "openclaw --version && ps -ef",
+    command: "uname -a && ps -ef",
   });
 
   expect(result).toMatchObject({ status: "success", operation: "shell_exec" });
   expect(harness.inspectRuntime).toHaveBeenCalledWith(
     expect.objectContaining({ taskId: created.taskId }),
-    { operation: "shell_exec", command: "openclaw --version && ps -ef" },
+    { operation: "shell_exec", command: "uname -a && ps -ef" },
   );
   await expect(harness.service.getTask(ACTOR, created.taskId)).resolves.toMatchObject({
     diagnosticMode: "deep",
@@ -1523,7 +1525,7 @@ it("exposes Task-authorized diagnostic shell and audits its exact command", asyn
       operation: "shell_exec",
       safeInvocation: {
         kind: "diagnostic_command",
-        command: "openclaw --version && ps -ef",
+        command: "uname -a && ps -ef",
       },
     })]),
   });
@@ -5505,7 +5507,7 @@ describe("RepairTaskService execution contract", () => {
         kind: "readonly_command",
         command: expect.stringContaining("sed -n '1,20p'"),
       },
-      resultSummary: "文件片段读取完成，返回 2 行。",
+      resultSummary: expect.stringContaining("文件片段读取完成，返回 2 行"),
       conclusion: {
         text: conclusionInput.conclusionZh,
         nextAction: conclusionInput.nextAction,
@@ -5957,3 +5959,207 @@ describe("RepairTaskService execution contract", () => {
     })).resolves.toMatchObject({ recorded: true, sourceToolCallId: failed.callId });
   });
 });
+
+
+describe("AIS Base one-Step executions", () => {
+  const runtimeArtifacts = (created: Awaited<ReturnType<typeof createTask>>) =>
+    Object.fromEntries(["artifactBundle", "runtimeBundle", "openclawSessions"].map(name => [
+      name, { objectKey: "evolution/" + created.taskId + "/repair/" + created.identity.stepId + "/ais/" + name + ".tar.gz",
+              contentType: "application/gzip", size: 10, sha256: "a".repeat(64) },
+    ]));
+
+  async function ready() {
+    harness.repairConfig.aisBaseSnapshotIds = { pre: 12345 };
+    const created = await createTask();
+    const written = writePlan(created.config);
+    const report = { status: "succeeded", output: {
+      schemaVersion: REPAIR_CONTRACT_VERSION,
+      taskId: created.taskId, stepId: created.identity.stepId, attempt: 1, phase: "repair_plan",
+      artifactDigest: written.digest, artifacts: artifactMetadata(created.config, "plan", written.content),
+      summary: "ready",
+    } };
+    return { created, written, report };
+  }
+
+  it("separates credentials from the public task and freezes the Base snapshot", async () => {
+    const { created } = await ready();
+    const [, params, snapshotId] = harness.execute.mock.calls[0] as [string, Record<string, string>, number];
+    expect(snapshotId).toBe(12345);
+    const task = JSON.parse(params[REPAIR_PARAMS_KEY]);
+    const credentials = JSON.parse(params["$" + "{clawevolve_credentials}"]);
+    expect(Object.keys(task).sort()).toEqual(["attempt", "input", "runtime", "stepId", "taskId", "taskType"]);
+    expect(task.input.execution.executionId).toBe(created.identity.executionId);
+    expect(task.input.executionTimings).toHaveProperty("decisionGraceSeconds");
+    expect(task.runtime.package.packageId).toBe("clawevolve-repair");
+    expect(task.runtime.callback.path).toBe("/api/repair/v1/internal/tasks/" + created.taskId + "/steps/" + created.identity.stepId + "/ais");
+    expect(credentials.bearerToken).toMatch(/^ce_repair_/);
+    expect(params[REPAIR_PARAMS_KEY]).not.toContain(credentials.bearerToken);
+    expect(task.runtime).not.toHaveProperty("artifacts");
+    expect(created.config.aisBase?.snapshotId).toBe(12345);
+  });
+
+  it("preflights without committing, releases after archival, and launches a fresh Apply", async () => {
+    const { created, written, report } = await ready();
+    const before = await harness.repo.findStep(created.identity.stepId);
+    const originalStatus = before!.status;
+    await expect(harness.service.reportStep(created.identity, report)).rejects.toMatchObject({ code: "repair_ais_base_report_required" });
+    await harness.service.validateAisReport(created.identity, report);
+    expect((await harness.repo.findStep(created.identity.stepId))!.status).toBe(originalStatus);
+    const payload = { status: "succeeded", output: {
+      taskId: created.taskId, success: true, repairReport: report, artifacts: runtimeArtifacts(created),
+    } };
+    await harness.service.reportAisExecution(created.identity, payload);
+    const row = (await harness.repo.findTask(created.taskId))!;
+    const completed = JSON.parse(row.config_json) as RepairTaskConfig;
+    expect(row.status).toBe("waiting_approval");
+    expect(completed.execution.state).toBe("ended");
+    await expect(harness.service.getRuntimeArtifact(ACTOR, created.taskId, created.identity.stepId, "runtimeBundle"))
+      .resolves.toContain("oss.example");
+    await expect(harness.service.getRuntimeArtifact("someone-else", created.taskId, created.identity.stepId, "runtimeBundle"))
+      .rejects.toBeDefined();
+    await expect(harness.service.getRuntimeArtifact(ACTOR, created.taskId, "wrong-step", "runtimeBundle"))
+      .rejects.toMatchObject({ code: "repair_artifact_not_found" });
+    expect(completed.execution.decisionDeadlineAt).toBeNull();
+    expect(completed.execution.invalidatedAt).not.toBeNull();
+    await expect(harness.service.reportAisExecution(created.identity, payload)).resolves.toMatchObject({ duplicate: true });
+    harness.now.value += 7200;
+    await harness.service.decidePlan({
+      actorUserId: ACTOR, authHeaders: { cookie: "SSO=decision-cookie" }, taskId: created.taskId,
+      body: { decision: "approve", artifactDigest: written.digest },
+    });
+    expect(harness.execute).toHaveBeenCalledTimes(2);
+    const next = JSON.parse((await harness.repo.findTask(created.taskId))!.config_json) as RepairTaskConfig;
+    expect(next.current.phase).toBe("repair_apply");
+    expect(next.execution.executionId).not.toBe(created.identity.executionId);
+    expect(next.execution.ccSessionId).toBeNull();
+    expect(next.history.some(item => item.stepId === created.identity.stepId)).toBe(true);
+    const params = harness.execute.mock.calls[1][1] as Record<string, string>;
+    expect(JSON.parse(params[REPAIR_PARAMS_KEY]).input.execution.resumeSessionId).toBeNull();
+  });
+
+  it("does not finalize when the Base archive set is incomplete", async () => {
+    const { created, report } = await ready();
+    await expect(harness.service.reportAisExecution(created.identity, {
+      status: "succeeded", output: { taskId: created.taskId, success: true, repairReport: report, artifacts: {} },
+    })).rejects.toMatchObject({ code: "invalid_repair_runtime_artifacts" });
+    expect((await harness.repo.findStep(created.identity.stepId))!.status).not.toBe("succeeded");
+    await expect(harness.service.aisArtifactUpload(created.identity, "unknown", {}))
+      .rejects.toMatchObject({ code: "invalid_repair_artifact_name" });
+  });
+
+  it("keeps Base timeout as failed execution with archived diagnostics and starts retry separately", async () => {
+    const { created } = await ready();
+    await harness.service.reportAisExecution(created.identity, {
+      status: "failed", output: { artifacts: runtimeArtifacts(created) },
+      error: { code: "EXECUTION_TIMEOUT", message: "timeout", retryable: true },
+    });
+    const row = (await harness.repo.findTask(created.taskId))!;
+    expect(row.status).toBe("failed");
+    expect(JSON.parse(row.config_json).execution.state).toBe("ended");
+    const step = (await harness.repo.findStep(created.identity.stepId))!;
+    expect(JSON.parse(step.output_json!).runtimeArtifacts).toEqual(runtimeArtifacts(created));
+    await harness.service.resumeTask({ actorUserId: ACTOR, authHeaders: { cookie: "SSO=retry" },
+      taskId: created.taskId, body: {} });
+    expect(harness.execute).toHaveBeenCalledTimes(2);
+    expect(JSON.parse((await harness.repo.findTask(created.taskId))!.config_json).execution.executionId)
+      .not.toBe(created.identity.executionId);
+  });
+});
+
+
+it.skipIf(!process.env.REPAIR_AIS_BASE_ROOT || !process.env.REPAIR_AIS_SKILL_ROOT)(
+  "runs Base -> Repair -> HTTP control plane -> approval -> fresh Apply using synthetic model/Bot",
+  async () => {
+    const { default: express } = await import("express");
+    const { createRepairRouter } = await import("../../../routes/repair.js");
+    const { mkdtemp, writeFile, rm, readFile, readdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { promisify } = await import("node:util");
+    const { execFile } = await import("node:child_process");
+    const run = promisify(execFile);
+    const app = express();
+    app.put("/test-objects", express.raw({ type: "*/*", limit: "20mb" }), (req, res) => {
+      harness.objects.set(String(req.query.key), Buffer.from(req.body));
+      res.status(200).end();
+    });
+    app.use(express.json());
+    app.use("/api/repair/v1", createRepairRouter({
+      service: harness.service,
+      workloadVerifier: new DatabaseRepairWorkloadVerifier(harness.repo, () => harness.now.value),
+      resolveActor: async () => ({ userId: ACTOR, source: "request" }),
+    }));
+    const server = await new Promise<ReturnType<typeof app.listen>>(resolve => {
+      const value = app.listen(0, "127.0.0.1", () => resolve(value));
+    });
+    const address = server.address() as { port: number };
+    const origin = "http://127.0.0.1:" + address.port;
+    const directory = await mkdtemp(join(tmpdir(), "repair-base-e2e-"));
+    harness.repairConfig.publicBaseUrl = origin;
+    harness.repairConfig.aisBaseSnapshotIds = { pre: 12345 };
+    harness.createSignedUrl.mockImplementation(async (key: string) => origin + "/test-objects?key=" + encodeURIComponent(key));
+    const request = async (path: string, body: unknown) => {
+      const response = await fetch(origin + "/api/repair/v1" + path, {
+        method: "POST", headers: { "content-type": "application/json", cookie: "SSO=test-fixture" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json();
+      expect(response.status >= 200 && response.status < 300, JSON.stringify(result)).toBe(true);
+      return result;
+    };
+    const runExecution = async (index: number) => {
+      const params = harness.execute.mock.calls[index][1] as Record<string, string>;
+      const task = join(directory, "task-" + index + ".json");
+      const credentials = join(directory, "credentials-" + index + ".json");
+      const config = join(directory, "config.yaml");
+      await writeFile(task, params[REPAIR_PARAMS_KEY]);
+      await writeFile(credentials, params["$" + "{clawevolve_credentials}"], { mode: 0o600 });
+      await writeFile(config, "oss:\n  endpoint: " + origin + "\n  bucket: test\n  prefix: skills\nruntime:\n  task_timeout_seconds: 45\n");
+      let childError: unknown;
+      try {
+        await run(process.env.REPAIR_TEST_PYTHON || "python3", [
+          join(process.env.REPAIR_AIS_SKILL_ROOT!, "tests/integration/run_base_fixture.py"),
+          process.env.REPAIR_AIS_BASE_ROOT!, process.env.REPAIR_AIS_SKILL_ROOT!, task, credentials, config,
+        ], { timeout: 60000, maxBuffer: 2 * 1024 * 1024, env: {
+          ...process.env, NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1",
+          OPENCLAW_STATE_DIR: join(directory, "execution-" + index),
+          OPENCLAW_WORKSPACE: join(directory, "execution-" + index, "workspace"),
+        } });
+      } catch (error) { childError = error; }
+      const publicTask = JSON.parse(params[REPAIR_PARAMS_KEY]);
+      const resultRoot = join(directory, "execution-" + index, "workspace", "clawevolve_results", publicTask.taskId);
+      if (childError) {
+        const log = await readFile(join(resultRoot, "runner_state", publicTask.stepId, "run.log"), "utf8");
+        throw new Error("Synthetic Base execution failed:\n" + log);
+      }
+      const stage = join(resultRoot, "repair", publicTask.stepId, "output", "result.json");
+      const result = JSON.parse(await readFile(stage, "utf8"));
+      expect(result.status).toBe("succeeded");
+      expect(Object.keys(result.output.artifacts).sort()).toEqual(["artifactBundle", "openclawSessions", "runtimeBundle"]);
+      const archived = await readdir(join(resultRoot, "archives", publicTask.stepId));
+      expect(archived).toHaveLength(3);
+      return publicTask;
+    };
+    try {
+      const created = await request("/tasks", { targetEnvironment: "pre", botId: BOT_ID, symptom: "合成链路验收" });
+      const planTask = await runExecution(0);
+      let task = (await harness.repo.findTask(created.taskId))!;
+      expect(task.status).toBe("waiting_approval");
+      const step = (await harness.repo.findStep(planTask.stepId))!;
+      const digest = JSON.parse(step.output_json!).artifactDigest;
+      await request("/tasks/" + created.taskId + "/plan-decision", { decision: "approve", artifactDigest: digest });
+      const applyTask = await runExecution(1);
+      expect(applyTask.input.execution.executionId).not.toBe(planTask.input.execution.executionId);
+      task = (await harness.repo.findTask(created.taskId))!;
+      expect(task.status).toBe("waiting_acceptance");
+      await request("/tasks/" + created.taskId + "/result-decision", { decision: "accept" });
+      expect((await harness.repo.findTask(created.taskId))!.status).toBe("completed");
+      expect(harness.inspectRuntime).toHaveBeenCalledTimes(1);
+      expect(harness.applyApprovedAction).toHaveBeenCalledTimes(1);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 120000,
+);

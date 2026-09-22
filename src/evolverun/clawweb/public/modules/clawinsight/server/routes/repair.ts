@@ -134,6 +134,18 @@ export function createRepairRouter(deps: RepairRouterDeps): Router {
     }
   }));
 
+  router.get("/tasks/:taskId/steps/:stepId/runtime-artifacts/:name", asyncHandler(async (req, res) => {
+    const actor = await actorOrResponse(deps, req, res);
+    if (!actor) return;
+    res.set("Cache-Control", "private, no-store");
+    try {
+      res.redirect(302, await service.getRuntimeArtifact(
+        actor.userId, String(req.params.taskId), String(req.params.stepId), String(req.params.name),
+        req.isClawEvolveAdmin === true,
+      ));
+    } catch (error) { sendRepairError(res, error); }
+  }));
+
   router.get("/tasks/:taskId/steps/:stepId/plan", asyncHandler(async (req, res) => {
     const actor = await actorOrResponse(deps, req, res);
     if (!actor) return;
@@ -278,6 +290,23 @@ export function createRepairRouter(deps: RepairRouterDeps): Router {
     } catch (error) {
       sendRepairError(res, error);
     }
+  }));
+
+  router.post("/internal/tasks/:taskId/steps/:stepId/ais/validate-report", asyncHandler(async (req, res) => {
+    try { res.json(await service.validateAisReport(await workload(deps, req), req.body ?? {})); }
+    catch (error) { sendRepairError(res, error); }
+  }));
+  router.post("/internal/tasks/:taskId/steps/:stepId/ais/report", asyncHandler(async (req, res) => {
+    try { res.json(await service.reportAisExecution(await workload(deps, req), req.body ?? {})); }
+    catch (error) { sendRepairError(res, error); }
+  }));
+  router.post("/internal/tasks/:taskId/steps/:stepId/ais/heartbeat", asyncHandler(async (req, res) => {
+    try { res.json(await service.heartbeat(await workload(deps, req), req.body ?? {})); }
+    catch (error) { sendRepairError(res, error); }
+  }));
+  router.post("/internal/tasks/:taskId/steps/:stepId/ais/artifacts/:name/upload-url", asyncHandler(async (req, res) => {
+    try { res.json(await service.aisArtifactUpload(await workload(deps, req), String(req.params.name), req.body ?? {})); }
+    catch (error) { sendRepairError(res, error); }
   }));
 
   router.post("/internal/tasks/:taskId/steps/:stepId/report", asyncHandler(async (req, res) => {

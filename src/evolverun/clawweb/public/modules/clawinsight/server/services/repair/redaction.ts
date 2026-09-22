@@ -7,6 +7,16 @@ const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const CN_PHONE = /(?<!\d)1[3-9]\d{9}(?!\d)/g;
 const CN_ID = /(?<!\d)\d{17}[0-9Xx](?!\d)/g;
 const BUSINESS_BODY_KEY = /^(?:prompt|prompts|content|contents|messages?|instruction|instructions|user[_-]?input|assistant[_-]?output|conversation|document|documents)$/i;
+const TECHNICAL_DIGEST_KEYS = new Set([
+  "artifactDigest",
+  "baseZipSha256",
+  "distSha256",
+  "patchSha256",
+  "sourceTreeSha256",
+  "treeSha256",
+  "zipSha256",
+]);
+const SHA256_VALUE = /^[a-f0-9]{64}$/i;
 const INLINE_BUSINESS_BODY = /\b(prompt|content|instruction|input|output|user[_-]?input|assistant[_-]?output)\b\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n]*)/gi;
 const RAW_SECRET_LITERAL = /\b(?:sk-[A-Za-z0-9_-]{12,}|ce_repair_[A-Za-z0-9_-]{20,})\b/u;
 const RAW_SECRET_LITERAL_GLOBAL = /\b(?:sk-[A-Za-z0-9_-]{12,}|ce_repair_[A-Za-z0-9_-]{20,})\b/gu;
@@ -118,6 +128,8 @@ export function redactValue(value: unknown, depth = 0): unknown {
       ? "[REDACTED]"
       : BUSINESS_BODY_KEY.test(key)
         ? "[REDACTED_BUSINESS_BODY]"
+        : TECHNICAL_DIGEST_KEYS.has(key) && typeof child === "string" && SHA256_VALUE.test(child)
+          ? child
         : redactValue(child, depth + 1),
   ]));
 }
