@@ -66,20 +66,19 @@ class YuqueConfig:
 class BcnConfig:
     """BCN (Bot Coordination Network) host + provider credentials (the ``bcn``
     user_config block).
-    ``base_url`` is the prod BCN host and ``base_url_pre`` overrides it when
-    env=='pre'. The ``provider_*`` pairs are the claude_code down-link Provider
-    credentials, keyed by env (prod / pre); only those two envs register to a real BCN.
+    ``base_url`` is the BCN host for THIS deployment and ``provider_id`` /
+    ``provider_admin_token`` the claude_code down-link Provider credentials it
+    registers with — one canonical value each, supplied by the deployment
+    overlay SOFAPy merges before this config is read (no in-process
+    prod/pre selection).
     Neutral empty defaults — the community build embeds no BCN host or provider
     credentials. Empty host ⇒ BCN calls degrade; empty provider id / token ⇒
     ``register_provider_bot`` skips.
     """
 
     base_url: str = ""
-    base_url_pre: str = ""
-    provider_id_prod: str = ""
-    provider_id_pre: str = ""
-    provider_admin_token_prod: str = ""
-    provider_admin_token_pre: str = ""
+    provider_id: str = ""
+    provider_admin_token: str = ""
 
 
 # ── Task runner dispatch (community, public) ────────────────────────────
@@ -99,17 +98,16 @@ class OpenApiBotConfig:
     """``openapi_bot`` block — BaaS Open API single-bot dispatch (task ``single_bot``).
     Drives the community ``OpenApiBotAdapter`` (Bearer ``api_key`` against
     ``/openapi/v1/messages`` + ``/api/v1/api-keys/<prefix>/allowed-bots``).
-    ``base_url`` / ``base_url_pre`` are env-aware hosts (non-secret), selected
-    per ``get_current_env()`` — mirrors the ``bcn`` block convention
-    (``base_url``=prod, ``base_url_pre``=pre). ``api_key_secret`` is the LITERAL
+    ``base_url`` is the host (non-secret) of the BaaS Open API this deployment
+    talks to — one canonical value, supplied by the deployment overlay (mirrors
+    the ``bcn`` block convention). ``api_key_secret`` is the LITERAL
     Bearer ``api_key`` (env-injected, no Mist in the community build); empty
     -> the OpenApiBotPort stays None (fail-closed; ``single_bot`` dispatch
     degrades). ``api_key_prefix`` is the optional allowed-bots grant path
     segment; empty -> the adapter falls back to ``api_key[:10]``.
     """
 
-    base_url: str = ""  # env-aware resolved prod host
-    base_url_pre: str = ""  # env-aware pre host
+    base_url: str = ""  # BaaS Open API host for this deployment
     api_key_secret: str = ""  # LITERAL Bearer api_key (no Mist in community)
     api_key_prefix: str = ""
 
@@ -123,24 +121,21 @@ class BcsClientConfig:
     (Bearer ``provider_admin_token``); this block feeds the coordination plane
     (HMAC, group/session lifecycle) consumed by the coop-group task runner. The
     ``provider_id`` / ``provider_admin_token`` pair REUSES the ``bcn`` block
-    identity (env-aware) for the task-mode roster path — empty bcn -> provider_id
+    identity for the task-mode roster path — empty bcn -> provider_id
     empty -> roster degrades (HMAC group creation still works).
 
     ``token_secret`` / ``secret_secret`` are the LITERAL HMAC key/secret
     (env-injected, no Mist in the community build); BOTH required or the port
     stays None (fail-closed; ``coop_group`` degrades, ``single_bot``
-    unaffected). ``task_callback_url`` / ``task_callback_url_pre`` are
-    env-aware callback hosts (the endpoint BCS posts task results back to) —
-    non-secret, stay literal in YAML; empty -> the callback URL is not
-    surfaced (callback off).
+    unaffected). ``task_callback_url`` is the callback host (the endpoint BCS
+    posts task results back to) for this deployment — non-secret, stays literal
+    in YAML; empty -> the callback URL is not surfaced (callback off).
     """
 
-    base_url: str = ""  # prod BCS coordinator host
-    base_url_pre: str = ""  # pre BCS coordinator host
+    base_url: str = ""  # BCS coordinator host for this deployment
     token_secret: str = ""  # LITERAL HMAC key (no Mist in community)
     secret_secret: str = ""  # LITERAL HMAC secret (no Mist in community)
-    task_callback_url: str = ""  # prod task-result callback host (BCS -> endpoint)
-    task_callback_url_pre: str = ""  # pre task-result callback host (BCS -> endpoint)
+    task_callback_url: str = ""  # task-result callback host (BCS -> endpoint)
 
 
 @dataclass(frozen=True)
@@ -178,9 +173,9 @@ class BcsBindingConfig:
 class GatewayConfig:
     """Public API gateway host (the ``gateway`` user_config block).
 
-    ``base_url`` is the prod gateway and ``base_url_pre`` overrides it when
-    env=='pre'. Held as an ``https://`` origin; the one consumer rewrites the
-    scheme when it publishes a WebSocket URL.
+    ``base_url`` is the gateway this deployment fronts — one canonical value,
+    supplied by the deployment overlay. Held as an ``https://`` origin; the one
+    consumer rewrites the scheme when it publishes a WebSocket URL.
 
     This is the host an external tenant is given, which is why it is separate
     from ``agentclawproxy``: the engine proxy stays the internal hop behind the
@@ -192,19 +187,17 @@ class GatewayConfig:
     """
 
     base_url: str = ""
-    base_url_pre: str = ""
 
 
 @dataclass(frozen=True)
 class GatewayEndpoint:
-    """The gateway origin selected for the environment this process runs in.
+    """The gateway origin this deployment publishes.
 
-    :class:`GatewayConfig` holds both hosts; this holds the one that applies.
-    Separate because the choice is environment-driven wiring, which belongs to
-    the composition root — a core service reading ``SERVER_ENV`` for itself
-    would put deployment selection inside domain logic (``AGENTS.md``: raw
-    environment access belongs in configuration loading, bootstrap, composition
-    roots, or tests).
+    :class:`GatewayConfig` is the yaml-shaped block; this is the resolved
+    endpoint the connection endpoint injects. Separate because a deployment
+    detail belongs to the composition root, not to domain logic — the value now
+    comes straight from the deployment overlay SOFAPy merged (no in-process
+    ``SERVER_ENV`` selection).
 
     Empty when this deployment fronts no gateway.
     """
@@ -457,14 +450,12 @@ class DeviceAllocationConfig:
 class BcsFuseConfig:
     """BCSFuse client config — backend's outbound URL for talking to BCS.
 
-    Env-aware (``base_url_pre`` overrides ``base_url`` when env=='pre').
     The ``base_url`` default is neutral (empty) — each deploy supplies its own
     via the ``bcsfuse`` yaml block (corp env overlays / community overlay).
     Empty = bot-discovery inert (OSS-0 #3).
     """
 
     base_url: str = ""
-    base_url_pre: str = ""
     worker_id_with_owner: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -474,13 +465,12 @@ class EcbConfig:
     """ECB (knowledge-graph) client config — backend's outbound URL for the
     bot-init downstream sync (the ``ecb`` user_config block).
 
-    Env-aware (``base_url_pre`` overrides ``base_url`` when env=='pre'). Neutral
-    empty default — each deploy supplies its own via the ``ecb`` yaml block.
-    Empty = the ECB leg of the downstream sync degrades (retry/fallback wrap).
+    Neutral empty default — each deploy supplies its own via the ``ecb`` yaml
+    block. Empty = the ECB leg of the downstream sync degrades (retry/fallback
+    wrap).
     """
 
     base_url: str = ""
-    base_url_pre: str = ""
     resource_ready_base_url: str = ""
     resource_ready_timeout_seconds: float = 10.0
     resource_ready_worker_threads: int = 2
@@ -497,7 +487,6 @@ class BaasConfig:
     # via the ``baas`` yaml block. Empty template uuids = "not configured" (the
     # consumers raise a clear error), tenant is a neutral placeholder — OSS-0 #3.
     api_base_url: str = "http://localhost:8888"
-    api_base_url_pre: str = "http://localhost:8888"
     tenant: str = "default"
     template_uuid: str = ""
     desktop_template_uuid: str = ""
@@ -584,7 +573,6 @@ class MasaAgentEvalConfig:
     """MasaAgentEval API 配置 — 评测服务外部调用。"""
 
     base_url: str = "http://localhost:8080"
-    base_url_pre: str = "http://localhost:8080"
 
 
 # ── Coding-workspace hosting ─────────────────────────────────────────────
@@ -610,7 +598,6 @@ class WorkspaceHostingConfig:
     # Neutral defaults; corp env overlays supply real aixcore hosts via the
     # ``dima`` yaml block (OSS-0 #3).
     aixcore_base_url: str = ""
-    aixcore_base_url_pre: str = ""
     # Staff IDs auto-added as workspace admins after a bot workspace is created.
     # Neutral empty default — no employee IDs ship in community source (data-
     # leak guard, enforced by test_shipped_config_no_corp_identifiers). The real
@@ -949,9 +936,8 @@ class EconomyGovernanceConfig:
     # (OSS-0 #3). Empty ⇒ the deep link carries no preview host (feature-off).
     tc_card_preview_url: str = ""
     # Backend card-callback URL for the TC-card React component's fetch POST.
-    # Env-aware: pre/prod point at different callback endpoints.
-    # Source: YAML ``economy_governance.iframe_callback_url`` (corp overlay) or
-    # ``economy_governance.iframe_callback_url_pre`` (pre-env).
+    # Source: YAML ``economy_governance.iframe_callback_url`` — one canonical
+    # value per deployment, supplied by the overlay SOFAPy merges.
     # Empty ⇒ the detailLink carries no callbackUrl (feedback form non-functional).
     iframe_callback_url: str = ""
 

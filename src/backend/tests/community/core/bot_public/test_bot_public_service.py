@@ -56,7 +56,7 @@ def _make_service(
         skill_set_service_factory=skill_set_service_factory or MagicMock(),
         device_context_resolver_factory=lambda: resolver,
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
-        bcsfuse_config=bcsfuse_config or MagicMock(base_url="", base_url_pre=""),
+        bcsfuse_config=bcsfuse_config or MagicMock(base_url=""),
         catalog_metadata_service=catalog_metadata_service or MagicMock(),
     )
 
@@ -717,7 +717,7 @@ class TestPublicBotUnpublish:
         updated = {**bot, "public": "0"}
         bot_repo.update_by_owner.return_value = updated
 
-        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test"))
         result = svc.public_bot("bot1", "owner1", "0", "caller", "0", _make_operator())
 
         assert result["public"] == "0"
@@ -775,7 +775,7 @@ class TestPublicBotBCSFuseSync:
         response.status = 200
         mock_urlopen.return_value = response
 
-        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test"))
         result = svc.public_bot("bot1", "owner1", "1", "caller", "0", _make_operator())
 
         assert result["public"] == "1"
@@ -804,7 +804,6 @@ class TestPublicBotBCSFuseSync:
             bot_repository=bot_repo,
             bcsfuse_config=MagicMock(
                 base_url="http://bcsfuse.test",
-                base_url_pre="http://bcsfuse.pre.test",
                 worker_id_with_owner=True,
             ),
         )
@@ -827,7 +826,7 @@ class TestPublicBotBCSFuseSync:
         response.status = 200
         mock_urlopen.return_value = response
 
-        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test"))
         result = svc.public_bot("bot1", "owner1", "0", "caller", "0", _make_operator())
 
         assert result["public"] == "0"
@@ -845,7 +844,7 @@ class TestPublicBotBCSFuseSync:
         bot_repo.get_by_id_and_owner.return_value = bot
         bot_repo.update_by_owner.return_value = {**bot, "public": "1"}
 
-        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test"))
         result = svc.public_bot("bot1", "owner1", "1", "caller", "0", _make_operator())
 
         assert result["public"] == "1"
@@ -1057,7 +1056,6 @@ class TestHandlePublicApprovalCallback:
             bot_repository=bot_repo,
             bcsfuse_config=MagicMock(
                 base_url="http://bcsfuse.test",
-                base_url_pre="http://bcsfuse.pre.test",
                 worker_id_with_owner=True,
             ),
         )
@@ -1087,7 +1085,7 @@ class TestHandlePublicApprovalCallback:
         })
         bot_repo.get_by_id_and_owner.return_value = bot
         bot_repo.update_by_owner.return_value = {**bot}
-        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test"))
 
         with (
             patch.object(svc, "_sync_access_mode_and_relations_or_raise"),

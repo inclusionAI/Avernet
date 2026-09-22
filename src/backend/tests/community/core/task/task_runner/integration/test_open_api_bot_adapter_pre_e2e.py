@@ -27,7 +27,7 @@ send_message(POST /openapi/v1/messages,Bearer,拿 message_id=run_id)→ 轮询 g
 
 # 预发接入默认
 
-- BASE_URL 默认预发 host ``https://agentclaw-pre.alipay.com``(对齐 corp overlay ``openapi_bot.base_url_pre``),
+- BASE_URL 默认预发 host ``https://agentclaw-pre.alipay.com``(对齐预发 overlay 的 ``openapi_bot.base_url``),
   填了 ``AVERNET_PRE_OPENAPI_BASE_URL`` 则覆盖。
 - api_key_prefix 留空 → adapter 回落 ``api_key[:_DEFAULT_KEY_PREFIX_LEN]``(本仓库 = 8);
   预发 key ``xQNGQIaa...`` 前 8 位即真实路径段,故默认即可对齐。若某 key 真实 prefix ≠ 前 8 位,显式传

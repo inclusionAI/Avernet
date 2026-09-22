@@ -2,14 +2,15 @@
 
 Covers:
 - WorkspaceHostingClient.query_staff_department: 正常查询、API 返回失败、网络异常、data 为字符串
-- WorkspaceHostingClient.__init__: 环境区分选择 aixcore_base_url（prod vs pre/dev）
+- WorkspaceHostingClient.__init__: 直接读部署 overlay 给定的 aixcore_base_url
 - WorkspaceHostingService.create_workspace_for_bot: 动态查询 department_id、查询失败兜底、
   已有 dima_space_id 跳过创建
 """
 from __future__ import annotations
 
+import dataclasses
 import json
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock
 
 from injector import Injector, InstanceProvider, singleton
 
@@ -40,7 +41,6 @@ _TEST_ADMIN_MEMBER_STAFF_IDS = (
 def _make_config(
     *,
     aixcore_base_url: str = "https://aixcore.teamclaw.com",
-    aixcore_base_url_pre: str = "https://aixcore-pre.teamclaw.com",
     admin_member_staff_ids: tuple[str, ...] = _TEST_ADMIN_MEMBER_STAFF_IDS,
 ) -> WorkspaceHostingConfig:
     """Build a WorkspaceHostingConfig with sensible test defaults."""
@@ -51,7 +51,6 @@ def _make_config(
         tenant="test",
         timeout=10,
         aixcore_base_url=aixcore_base_url,
-        aixcore_base_url_pre=aixcore_base_url_pre,
         admin_member_staff_ids=admin_member_staff_ids,
     )
 
@@ -93,47 +92,29 @@ def _make_workspace_service(
     injector.binder.bind(WorkspaceHostingService, to=WorkspaceHostingService, scope=singleton)
     return injector.get(WorkspaceHostingService)
 
-# ── WorkspaceHostingClient.__init__ 环境区分 ────────────────────────────────────────
+# ── WorkspaceHostingClient.__init__ aixcore host ────────────────────────────────
 
 
-class TestWorkspaceHostingClientInitEnvRouting:
-    """WorkspaceHostingClient.__init__ 根据环境选择 aixcore_base_url。"""
+class TestWorkspaceHostingClientInitAixcoreHost:
+    """WorkspaceHostingClient.__init__ 直接读部署 overlay 给定的 aixcore_base_url。"""
 
-    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="prod")
-    def test_prod_env_uses_aixcore_base_url(self, mock_env):
-        cfg = _make_config(
-            aixcore_base_url="https://aixcore.teamclaw.com",
-            aixcore_base_url_pre="https://aixcore-pre.teamclaw.com",
-        )
+    @pytest.mark.parametrize("env", ["prod", "pre", "dev"])
+    def test_every_env_uses_the_configured_aixcore_base_url(self, monkeypatch, env):
+        monkeypatch.setenv("SERVER_ENV", env)
+        cfg = _make_config(aixcore_base_url="https://aixcore.teamclaw.com")
         client = WorkspaceHostingClient(cfg)
         assert client.aixcore_base_url == "https://aixcore.teamclaw.com"
 
-    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="pre")
-    def test_pre_env_uses_aixcore_base_url_pre(self, mock_env):
-        cfg = _make_config(
-            aixcore_base_url="https://aixcore.teamclaw.com",
-            aixcore_base_url_pre="https://aixcore-pre.teamclaw.com",
-        )
-        client = WorkspaceHostingClient(cfg)
-        assert client.aixcore_base_url == "https://aixcore-pre.teamclaw.com"
-
-    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="dev")
-    def test_dev_env_uses_aixcore_base_url_pre(self, mock_env):
-        cfg = _make_config(
-            aixcore_base_url="https://aixcore.teamclaw.com",
-            aixcore_base_url_pre="https://aixcore-pre.teamclaw.com",
-        )
-        client = WorkspaceHostingClient(cfg)
-        assert client.aixcore_base_url == "https://aixcore-pre.teamclaw.com"
-
-    @patch("agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_client.get_current_env", return_value="prod")
-    def test_strips_trailing_slash(self, mock_env):
-        cfg = _make_config(
-            aixcore_base_url="https://aixcore.teamclaw.com/",
-            aixcore_base_url_pre="https://aixcore-pre.teamclaw.com/",
-        )
+    def test_strips_trailing_slash(self):
+        cfg = _make_config(aixcore_base_url="https://aixcore.teamclaw.com/")
         client = WorkspaceHostingClient(cfg)
         assert not client.aixcore_base_url.endswith("/")
+
+    def test_config_has_no_legacy_env_suffixed_field(self):
+        """Guard: ``aixcore_base_url_pre`` is gone for good (SOFAPy 1.3 overlays)."""
+        fields = {f.name for f in dataclasses.fields(WorkspaceHostingConfig)}
+        assert "aixcore_base_url_pre" not in fields
+        assert "aixcore_base_url" in fields
 
 
 # ── WorkspaceHostingClient.query_staff_department ────────────────────────────────────

@@ -22,13 +22,11 @@ from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
 # Down-link provider config the tests assert on. In production this comes from
 # the ``bcn`` yaml block (corp env overlays); here it is injected directly.
-# provider_id_* are non-sensitive identifiers; the admin tokens are fake.
+# provider_id is a non-sensitive identifier; the admin token is fake.
 _TEST_BCN_CONFIG = BcnConfig(
     base_url="http://fake-bcn:21000",
-    provider_id_prod="prv_4b7fce5b",
-    provider_id_pre="prv_40354c8a",
-    provider_admin_token_prod="test-bcn-token-prod",
-    provider_admin_token_pre="test-bcn-token-pre",
+    provider_id="prv_40354c8a",
+    provider_admin_token="test-bcn-token",
 )
 
 
@@ -90,7 +88,7 @@ class TestRegisterProviderBotEnvSelection:
         "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
         return_value="pre",
     )
-    def test_pre_env_uses_pre_provider_credentials(self, _mock_env, service, http):
+    def test_pre_env_uses_the_configured_provider_credentials(self, _mock_env, service, http):
         http.set_response("post", _ok_response(200, {
             "bot_uuid": "u1",
             "provider_id": "prv_40354c8a",
@@ -108,7 +106,7 @@ class TestRegisterProviderBotEnvSelection:
         call = http.calls_to("post")[0]
         assert call.args[0] == "/providers/prv_40354c8a/bots"
         assert call.kwargs["headers"]["Authorization"] == (
-            "Bearer test-bcn-token-pre"
+            "Bearer test-bcn-token"
         )
         assert call.kwargs["headers"]["Content-Type"] == "application/json"
         payload = call.kwargs["json"]
@@ -156,7 +154,7 @@ class TestRegisterProviderBotEnvSelection:
         "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
         return_value="prod",
     )
-    def test_prod_env_uses_prod_provider_credentials(self, _mock_env, service, http):
+    def test_prod_env_uses_the_configured_provider_credentials(self, _mock_env, service, http):
         http.set_response("post", _ok_response(
             200, {"bot_uuid": "u2", "bot_runtime_token": "tok-prod"}
         ))
@@ -169,9 +167,9 @@ class TestRegisterProviderBotEnvSelection:
         )
 
         call = http.calls_to("post")[0]
-        assert call.args[0] == "/providers/prv_4b7fce5b/bots"
+        assert call.args[0] == "/providers/prv_40354c8a/bots"
         assert call.kwargs["headers"]["Authorization"] == (
-            "Bearer test-bcn-token-prod"
+            "Bearer test-bcn-token"
         )
 
     @patch(
@@ -181,10 +179,8 @@ class TestRegisterProviderBotEnvSelection:
     def test_pre_env_missing_token_skipped_no_http_call(self, _mock_env, http):
         config = BcnConfig(
             base_url="http://fake-bcn:21000",
-            provider_id_prod="prv_4b7fce5b",
-            provider_id_pre="prv_40354c8a",
-            provider_admin_token_prod="test-bcn-token-prod",
-            provider_admin_token_pre="",
+            provider_id="prv_40354c8a",
+            provider_admin_token="",
         )
         service = BcnService(
             http_client=http,
@@ -320,7 +316,7 @@ class TestDeleteProviderBot:
         "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
         return_value="pre",
     )
-    def test_pre_env_uses_pre_provider_credentials(self, _mock_env, service, http):
+    def test_pre_env_uses_the_configured_provider_credentials(self, _mock_env, service, http):
         http.set_response("delete", _ok_response(204, {}))
 
         result = service.delete_provider_bot(
@@ -334,7 +330,7 @@ class TestDeleteProviderBot:
         call = http.calls_to("delete")[0]
         assert call.args[0] == "/providers/prv_40354c8a/bots/20260611_d5v7rui3:100000"
         assert call.kwargs["headers"]["Authorization"] == (
-            "Bearer test-bcn-token-pre"
+            "Bearer test-bcn-token"
         )
 
     @patch(

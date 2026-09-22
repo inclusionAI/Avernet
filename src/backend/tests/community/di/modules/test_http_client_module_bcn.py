@@ -1,22 +1,22 @@
 """BCN HttpClient host selection."""
 from __future__ import annotations
 
+import dataclasses
+
+import pytest
+
 from agentclaw.community.di import config as cfg
 from agentclaw.community.di.modules.http_client_module import HttpClientModule
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BAAS, QUALIFIER_BCN
 from agentclaw.community.plugins.http_client import HttpxClient
 
 
-def test_bcn_http_client_prod_uses_base_url(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "agentclaw.community.di.modules.http_client_module.get_current_env",
-        lambda: "prod",
-    )
+@pytest.mark.parametrize("env", ["prod", "pre", "dev"])
+def test_bcn_http_client_uses_the_configured_base_url(monkeypatch, env) -> None:
+    """The deployment overlay picked the host — the process env cannot change it."""
+    monkeypatch.setenv("SERVER_ENV", env)
     client = HttpClientModule().bcn_http_client(
-        cfg.BcnConfig(
-            base_url="https://bcn.example.test",
-            base_url_pre="https://bcn-pre.example.test",
-        ),
+        cfg.BcnConfig(base_url="https://bcn.example.test"),
         cfg.HttpClientPoolConfig(),
     )
 
@@ -24,31 +24,26 @@ def test_bcn_http_client_prod_uses_base_url(monkeypatch) -> None:
     assert client._base_url == "https://bcn.example.test"
 
 
-def test_bcn_http_client_pre_uses_base_url_pre(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "agentclaw.community.di.modules.http_client_module.get_current_env",
-        lambda: "pre",
+def test_bcn_config_has_no_legacy_env_suffixed_fields() -> None:
+    """Guard: the pre/prod field pairs are gone for good (SOFAPy 1.3 overlays)."""
+    fields = {f.name for f in dataclasses.fields(cfg.BcnConfig)}
+    assert fields.isdisjoint(
+        {
+            "base_url_pre",
+            "provider_id_prod",
+            "provider_id_pre",
+            "provider_admin_token_prod",
+            "provider_admin_token_pre",
+        }
     )
-    client = HttpClientModule().bcn_http_client(
-        cfg.BcnConfig(
-            base_url="https://bcn.example.test",
-            base_url_pre="https://bcn-pre.example.test",
-        ),
-        cfg.HttpClientPoolConfig(),
-    )
-
-    assert isinstance(client, HttpxClient)
-    assert client._base_url == "https://bcn-pre.example.test"
+    assert {"base_url", "provider_id", "provider_admin_token"} <= fields
 
 
 # ── transport policy resolution ──────────────────────────────────────────────
 
 
 def _bcn() -> cfg.BcnConfig:
-    return cfg.BcnConfig(
-        base_url="https://bcn.example.test",
-        base_url_pre="https://bcn-pre.example.test",
-    )
+    return cfg.BcnConfig(base_url="https://bcn.example.test")
 
 
 def test_shared_defaults_reach_the_constructed_client() -> None:

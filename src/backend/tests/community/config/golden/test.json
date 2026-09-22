@@ -109,7 +109,6 @@
     },
     "baas": {
       "api_base_url": "http://localhost:8888",
-      "api_base_url_pre": "http://localhost:8888",
       "default_ttl_minutes": 10080,
       "desktop_template_uuid": "",
       "desktop_ttl_minutes": 0,
@@ -121,15 +120,11 @@
     },
     "bcn": {
       "base_url": "",
-      "base_url_pre": "",
-      "provider_admin_token_pre": "",
-      "provider_admin_token_prod": "",
-      "provider_id_pre": "",
-      "provider_id_prod": ""
+      "provider_admin_token": "",
+      "provider_id": ""
     },
     "bcsfuse": {
       "base_url": "",
-      "base_url_pre": "",
       "raw": {},
       "worker_id_with_owner": false
     },
@@ -176,7 +171,6 @@
     },
     "ecb": {
       "base_url": "",
-      "base_url_pre": "",
       "resource_ready_base_url": "",
       "resource_ready_dedupe_max_entries": 10000,
       "resource_ready_dedupe_ttl_seconds": 3600.0,
@@ -185,8 +179,7 @@
       "resource_ready_worker_threads": 2
     },
     "gateway": {
-      "base_url": "",
-      "base_url_pre": ""
+      "base_url": ""
     },
     "http_client_pool": {
       "defaults": {
@@ -209,8 +202,7 @@
       "secret_name": ""
     },
     "masa_agent_eval": {
-      "base_url": "http://localhost:8080",
-      "base_url_pre": "http://localhost:8080"
+      "base_url": "http://localhost:8080"
     },
     "oss_to_nas": {
       "nas_root": "./data/nas",
@@ -267,7 +259,6 @@
       "access_secret": "",
       "admin_member_staff_ids": [],
       "aixcore_base_url": "",
-      "aixcore_base_url_pre": "",
       "base_url": "",
       "tenant": "default",
       "timeout": 30

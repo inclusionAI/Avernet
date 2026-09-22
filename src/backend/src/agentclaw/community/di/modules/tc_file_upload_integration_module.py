@@ -35,7 +35,6 @@ from agentclaw.community.plugins.community.tc_resource_ready import (
 from agentclaw.community.plugins.local.tc_resource_ready import (
     LocalTcResourceReadyPublisher,
 )
-from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 _SINGLEBOX_LOCAL_AUTH = "singlebox-tc-file-service-token-local"
@@ -87,11 +86,7 @@ class TcFileUploadIntegrationModule(Module):
     ) -> TcResourceReadyPublisherPlugin:
         if self._local:
             return LocalTcResourceReadyPublisher()
-        base_url = ecb_config.resource_ready_base_url or (
-            ecb_config.base_url_pre
-            if get_current_env() == "pre"
-            else ecb_config.base_url
-        )
+        base_url = ecb_config.resource_ready_base_url or ecb_config.base_url
         return HttpTcResourceReadyPublisher(
             base_url=base_url,
             authorization_value=auth_config.value,

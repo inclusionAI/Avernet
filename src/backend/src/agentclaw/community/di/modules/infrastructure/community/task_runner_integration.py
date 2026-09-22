@@ -15,10 +15,10 @@ the real Bearer api_key / HMAC key+secret, mirroring how the corp
   (``/groups`` + ``/sessions``).
 - ``BcsTokenProvider`` (callback route base_url) overrides ``TaskModule``'s
   default ``LocalBcsTokenProvider`` so the task-result callback base_url points
-  to the configured ``bcs_client.task_callback_url[_pre]`` (not localhost).
+  to the configured ``bcs_client.task_callback_url`` (not localhost).
 
 Resolution rules (fail-closed literal credentials):
-- missing block / empty env-resolved ``base_url`` / empty ``api_key_secret``
+- missing block / empty ``base_url`` / empty ``api_key_secret``
   (openapi) or ``token_secret`` / ``secret_secret`` (bcs) -> port ``None``
   (fail-closed; ``task_service``'s ``injector.get(...)`` returns ``None`` and
   degrades dispatch without raising).
@@ -161,38 +161,16 @@ class BcsBotTokenServiceProvider:
             return None
 
 
-def _env_select(prod: str, pre: str) -> str:
-    """Env-aware pair selector — pre env -> ``pre`` value, else ``prod`` value.
-
-    ``get_current_env()`` normalizes prepub->pre / gray->prod.
-    """
-    from agentclaw.community.utils.env_utils import get_current_env
-
-    return pre if get_current_env() == "pre" else prod
-
-
-def _env_base_url(cfg: OpenApiBotConfig | BcsClientConfig) -> str:
-    """Select the env-resolved base url from a task config block."""
-    return _env_select(cfg.base_url, cfg.base_url_pre)
-
-
 def _resolve_bcn_provider_identity(bcn_cfg: BcnConfig) -> tuple[str, str]:
-    """Env-resolve the BCS provider management identity reused from the bcn block.
+    """The BCS provider management identity reused from the ``bcn`` block.
 
-    One BCS provider per env: prod -> bcn.provider_id_prod /
-    provider_admin_token_prod, pre/prepub -> ..._pre. Other envs (dev) ->
-    ("", "") (roster degrades). Mirrors ``BcnService._get_provider_config`` env
-    selection but only the env switch (an empty provider_id is dealt with by
+    One BCS provider per deployment: the overlay SOFAPy merged supplies the
+    ``provider_id`` / ``provider_admin_token`` this backend registers with, so
+    there is nothing to select here. Unconfigured -> ("", "") and the roster
+    degrades (an empty provider_id is dealt with by
     ``BcsHttpAdapter.list_bots_by_task_modes`` itself).
     """
-    from agentclaw.community.utils.env_utils import get_current_env
-
-    env = get_current_env()
-    if env == "prod":
-        return bcn_cfg.provider_id_prod, bcn_cfg.provider_admin_token_prod
-    if env == "pre":
-        return bcn_cfg.provider_id_pre, bcn_cfg.provider_admin_token_pre
-    return "", ""
+    return bcn_cfg.provider_id, bcn_cfg.provider_admin_token
 
 
 class TaskRunnerIntegrationModule(Module):
@@ -212,9 +190,8 @@ class TaskRunnerIntegrationModule(Module):
     def openapi_bot(self) -> OpenApiBotConfig:
         """Read the ``openapi_bot`` block -> ``OpenApiBotConfig``.
 
-        Stores the raw env-aware host pair (``base_url``=prod, ``base_url_pre``
-        =pre); per-env selection happens in ``_env_base_url`` below. Hosts are
-        non-secret and stay literal in YAML. ``api_key_secret`` is the LITERAL
+        Stores the host this deployment's overlay supplies (``base_url``);
+        hosts are non-secret and stay literal in YAML. ``api_key_secret`` is the LITERAL
         Bearer api_key (env-injected, no Mist in the community build) — NOT a
         credential name. Missing block -> all empty -> port None (fail-closed;
         unconfigured community singlebox/CI degrades).
@@ -222,7 +199,6 @@ class TaskRunnerIntegrationModule(Module):
         block = _block("openapi_bot")
         return OpenApiBotConfig(
             base_url=block.get("base_url", ""),
-            base_url_pre=block.get("base_url_pre", ""),
             api_key_secret=block.get("api_key_secret", ""),
             api_key_prefix=block.get("api_key_prefix", ""),
         )
@@ -232,20 +208,18 @@ class TaskRunnerIntegrationModule(Module):
     def bcs_client(self) -> BcsClientConfig:
         """Read the ``bcs_client`` block -> ``BcsClientConfig``.
 
-        Stores the raw env-aware host pair; per-env selection in ``_env_base_url``.
+        Stores the host this deployment's overlay supplies (``base_url``).
         ``token_secret`` / ``secret_secret`` are the LITERAL HMAC key/secret
         (env-injected, no Mist); BOTH required or the port stays None
-        (fail-closed). ``task_callback_url`` / ``task_callback_url_pre`` env-aware
-        callback hosts (empty -> callback off).
+        (fail-closed). ``task_callback_url`` is the callback host
+        (empty -> callback off).
         """
         block = _block("bcs_client")
         return BcsClientConfig(
             base_url=block.get("base_url", ""),
-            base_url_pre=block.get("base_url_pre", ""),
             token_secret=block.get("token_secret", ""),
             secret_secret=block.get("secret_secret", ""),
             task_callback_url=block.get("task_callback_url", ""),
-            task_callback_url_pre=block.get("task_callback_url_pre", ""),
         )
 
     @singleton
@@ -295,7 +269,7 @@ class TaskRunnerIntegrationModule(Module):
         # api_key_secret is read as the LITERAL Bearer api_key (not a Mist name);
         # must be a real BaaS Open API key value; empty -> fail-closed None.
         api_key = cfg.api_key_secret
-        base_url = _env_base_url(cfg)
+        base_url = cfg.base_url
         if not base_url or not api_key:
             logger.warning(
                 "[task][community-task] openapi_bot not configured "
@@ -324,7 +298,7 @@ class TaskRunnerIntegrationModule(Module):
     ) -> BcsClientPort:
         token = cfg.token_secret
         secret = cfg.secret_secret
-        base_url = _env_base_url(cfg)
+        base_url = cfg.base_url
         if not base_url or not token or not secret:
             logger.warning(
                 "[task][community-task] bcs_client not configured "
@@ -339,7 +313,7 @@ class TaskRunnerIntegrationModule(Module):
             secret=secret,
             provider_id=provider_id,
             provider_admin_token=provider_admin_token,
-            task_callback_url=_env_select(cfg.task_callback_url, cfg.task_callback_url_pre),
+            task_callback_url=cfg.task_callback_url,
         )
         logger.info(
             "[task][community-task] bcs_client 端口装配 OK -> BcsHttpAdapter base_url=%s provider_id=%s",
@@ -367,7 +341,7 @@ class TaskRunnerIntegrationModule(Module):
         fallback ingest. HMAC creds (token/secret) stay on ``bcs_client_port``;
         this provider only serves the bare GET run-detail/DAG callback route.
         """
-        base_url = _env_base_url(cfg)
+        base_url = cfg.base_url
         provider_id, provider_admin_token = _resolve_bcn_provider_identity(bcn_cfg)
         return BcsTokenProviderImpl(
             base_url=base_url,
@@ -375,7 +349,7 @@ class TaskRunnerIntegrationModule(Module):
             secret=cfg.secret_secret,
             provider_id=provider_id,
             provider_admin_token=provider_admin_token,
-            task_callback_url=_env_select(cfg.task_callback_url, cfg.task_callback_url_pre),
+            task_callback_url=cfg.task_callback_url,
         )
 
     @singleton
@@ -392,9 +366,9 @@ class TaskRunnerIntegrationModule(Module):
         401:**driver-bot Bearer 让 BCS caller 校署通过、放行 ``human_<owner>`` observer 入群**,
         与 task_executor P1 inject_observers 行为对齐(adapt 自 ocb corp,community 无 corp 前缀)。
 
-        Query 用 ``get_current_env()`` (prod|gray→prod / pre→pre)scope,与 ``_env_base_url`` /
-        ``_resolve_bcn_provider_identity`` 同源 env,选到与 ``bcs_client`` 同环境 onboard 的
-        ``(bot_uuid, env)`` 行。
+        Query 用 ``get_current_env()`` (prod|gray→prod / pre→pre)scope 选行:``bcs_bots``
+        按 ``(bot_uuid, env)`` 存 onboard 结果,这是按行筛选而非选配置,故仍读进程 env
+        (``base_url`` / provider 身份已由部署 overlay 给定,不再在此选择)。
 
         Resolver 失败(库无 ``bcs_bots`` 表 / 查无行 / 查询抛错)→ 返 None → task_executor 不发
         Bearer,降级 HMAC 匿名 no-sub 建群分支,不阻断。本 module 未装的 profile(singlebox/test)

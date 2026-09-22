@@ -209,14 +209,14 @@ class TestTriggerMemoryInitYuquePayload:
             side_effect=fake_post,
         ):
             # memoryOS endpoint is deployment config (WorkspaceHostingConfig,
-            # passed in). env=="pre" ⇒ the _pre value is used.
+            # passed in) — one host, supplied by the deployment overlay.
             trigger_memory_initialization(
                 bot_id="b1",
                 bot_name="n",
                 user_id="u",
                 template_config=template_config,
                 cookie="c=1",
-                aixcore_base_url_pre="https://aixcore.example.com",
+                aixcore_base_url="https://aixcore.example.com",
             )
         return captured.get("payload", {})
 
@@ -271,7 +271,7 @@ class TestTriggerMemoryInitYuquePayload:
                 user_id="u",
                 template_config={"yuque_kb_repos": [{"url": "https://a"}]},
                 cookie="c=1",
-                # aixcore_base_url / _pre left at default "" → skip.
+                # aixcore_base_url left at default "" → skip.
             )
 
         assert called["post"] is False
@@ -356,7 +356,7 @@ class TestTemplateFactoryKnowledgeAliases:
                 user_id="u",
                 template_config=template_config,
                 cookie="c=1",
-                aixcore_base_url_pre="https://aixcore.example.com",
+                aixcore_base_url="https://aixcore.example.com",
             )
         return captured.get("payload", {})
 

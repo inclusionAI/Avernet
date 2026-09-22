@@ -45,22 +45,9 @@ class BotDiscoverService(BotDiscoverServiceProtocol):
         self._bot_repository = bot_repository
         self._bcsfuse_config = bcsfuse_config
         self._catalog_metadata_service = catalog_metadata_service
-        self._bcsfuse_base_url = self._resolve_bcsfuse_base_url()
-
-    def _resolve_bcsfuse_base_url(self) -> str:
-        """Pick BCSFuse base URL from typed config (pre vs default)."""
-        from agentclaw.community.utils.env_utils import get_current_env
-
-        env = get_current_env()
-        if env == "pre" and self._bcsfuse_config.base_url_pre:
-            logger.info(
-                f"[BotDiscover] pre 环境，使用 BCSFuse base_url_pre: {self._bcsfuse_config.base_url_pre}"
-            )
-            return self._bcsfuse_config.base_url_pre
-
-        # base_url default carries the legacy hardcoded prod fallback
-        # (see BcsFuseConfig docstring), so this always returns a URL.
-        return self._bcsfuse_config.base_url
+        # The deployment overlay supplies the one BCSFuse host this backend
+        # talks to; empty leaves discovery inert (see BcsFuseConfig docstring).
+        self._bcsfuse_base_url = bcsfuse_config.base_url
 
     def search_by_keyword(
         self,

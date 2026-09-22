@@ -64,25 +64,21 @@ def _get_provider_config(
 ) -> Optional[Dict[str, str]]:
     """Return the BCN provider config for ``env``, or None when there is none.
 
-    claude_code 下行链路仅 prod / pre 两个环境注册到真实 BCN；provider_id 与
-    provider_admin_token 均来自 :class:`BcnConfig`（各 corp env overlay 提供，
-    社区构建默认空）。任一为空视作未配置（返回 None），``register_provider_bot``
+    claude_code 下行链路仅 prod / pre 两个环境注册到真实 BCN——这是行为开关
+    (dev 不注册)，不是选配置：``provider_id`` 与 ``provider_admin_token`` 各只有
+    一个值，由部署 overlay 提供（社区构建默认空），直接读
+    :class:`BcnConfig`。任一为空视作未配置（返回 None），``register_provider_bot``
     据此跳过（与旧 dev 路径一致）。
     """
-    if env == "prod":
-        provider_id = config.provider_id_prod
-        provider_admin_token = config.provider_admin_token_prod
-    elif env == "pre":
-        provider_id = config.provider_id_pre
-        provider_admin_token = config.provider_admin_token_pre
-    else:
+    if env not in ("prod", "pre"):
         logger.info(
             "[BcnService._get_provider_config] env=%s unsupported for "
             "provider credentials",
             env,
         )
         return None
-    provider_admin_token = (provider_admin_token or "").strip()
+    provider_id = config.provider_id
+    provider_admin_token = (config.provider_admin_token or "").strip()
     if not provider_id or not provider_admin_token:
         logger.info(
             "[BcnService._get_provider_config] env=%s missing provider config "
@@ -641,12 +637,12 @@ class BcnService:
 
         ``GET /providers/{provider_id}/bots/by-task-modes`` ——与 register/switch/attributes
         provider-bot 同套鉴权:仅 ``Authorization: Bearer {provider_admin_token}``，``provider_id``
-        在 path，复用 ``_get_provider_config`` 解析的统一 provider 身份(BcnConfig prod/pre)。与其它
+        在 path，复用 ``_get_provider_config`` 解析的统一 provider 身份(BcnConfig)。与其它
         BcnService 方法一致直接返回 BCN 响应原结构(``{"items": [...]}`` 取 ``items``)。
 
         ``claim``/``dream`` 为 ``None`` 表示该开关不过滤(不下发 query)；``match`` 为 any|all。
         ``visibility``、``status``、``user_visibility`` 为 ``None`` 表示不按对应
-        返回字段过滤；环境由 ``get_current_env`` 自动选择 pre/prod provider。
+        返回字段过滤；provider 身份直接读 ``BcnConfig``(部署 overlay 已给定)。
         非 prod/pre 或凭据空时抛 :class:`BcnServiceError`(BBS 调用方按 fail-open 处理)。
         """
         env = get_current_env()

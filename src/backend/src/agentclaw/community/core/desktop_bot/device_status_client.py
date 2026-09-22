@@ -38,21 +38,10 @@ class DeviceStatusClient:
 
     @classmethod
     def from_baas_config(cls, baas_config: Any) -> "DeviceStatusClient":
-        """Build from ``BaasConfig``, selecting the env-appropriate base URL.
-
-        Single home for the pre/prod base-URL choice so the DI provider that
-        constructs this leaf doesn't re-derive it.
-        """
-        # Local import: env_utils is a leaf util, but importing it at module
-        # top would pull env plumbing into every status-mapping consumer.
-        from agentclaw.community.utils.env_utils import get_current_env
-
-        base = (
-            baas_config.api_base_url_pre
-            if get_current_env() == "pre"
-            else baas_config.api_base_url
+        """Build from ``BaasConfig`` — the host its overlay supplies."""
+        return cls(
+            baas_api_base=baas_config.api_base_url, tenant=baas_config.tenant
         )
-        return cls(baas_api_base=base, tenant=baas_config.tenant)
 
     def query_device_status(self, device_id: str) -> dict[str, Any]:
         """Query BaaS device-status for one bot.

@@ -14,11 +14,8 @@
     },
     "bcn": {
       "base_url": "${BCS_URL}",
-      "base_url_pre": "${BCS_URL}",
-      "provider_admin_token_pre": "${BCS_ADMIN_TOKEN}",
-      "provider_admin_token_prod": "${BCS_ADMIN_TOKEN}",
-      "provider_id_pre": "${BCS_PROVIDER_ID}",
-      "provider_id_prod": "${BCS_PROVIDER_ID}"
+      "provider_admin_token": "${BCS_ADMIN_TOKEN}",
+      "provider_id": "${BCS_PROVIDER_ID}"
     },
     "bcs": {
       "base_url": "${BCS_URL:-}",
@@ -28,10 +25,8 @@
     },
     "bcs_client": {
       "base_url": "${BCS_URL:-}",
-      "base_url_pre": "${BCS_URL:-}",
       "secret_secret": "${secret_secret:-}",
       "task_callback_url": "${BACKEND_URL:-}",
-      "task_callback_url_pre": "${BACKEND_URL:-}",
       "token_secret": "${token_secret:-}"
     },
     "bcsfuse": {
@@ -95,8 +90,7 @@
       "max_connections": 100
     },
     "gateway": {
-      "base_url": "${GATEWAY_URL:-}",
-      "base_url_pre": "${GATEWAY_URL_PRE:-}"
+      "base_url": "${GATEWAY_URL:-}"
     },
     "git_sync": {
       "bolt_shared_dir_name": "bolt_shared",
@@ -130,8 +124,7 @@
     "openapi_bot": {
       "api_key_prefix": "${api_key_prefix:-}",
       "api_key_secret": "${api_key_secret:-}",
-      "base_url": "${BASS_URL:-}",
-      "base_url_pre": "${BASS_URL:-}"
+      "base_url": "${BASS_URL:-}"
     },
     "openclaw": {
       "skills_repo_url": ""
@@ -181,7 +174,6 @@
     },
     "baas": {
       "api_base_url": "${BASS_URL:-}",
-      "api_base_url_pre": "http://localhost:8888",
       "default_ttl_minutes": 10080,
       "desktop_template_uuid": "",
       "desktop_ttl_minutes": 0,
@@ -193,15 +185,11 @@
     },
     "bcn": {
       "base_url": "${BCS_URL}",
-      "base_url_pre": "${BCS_URL}",
-      "provider_admin_token_pre": "${BCS_ADMIN_TOKEN}",
-      "provider_admin_token_prod": "${BCS_ADMIN_TOKEN}",
-      "provider_id_pre": "${BCS_PROVIDER_ID}",
-      "provider_id_prod": "${BCS_PROVIDER_ID}"
+      "provider_admin_token": "${BCS_ADMIN_TOKEN}",
+      "provider_id": "${BCS_PROVIDER_ID}"
     },
     "bcsfuse": {
       "base_url": "${BCS_FUSE_URL:-}",
-      "base_url_pre": "",
       "raw": {
         "base_url": "${BCS_FUSE_URL:-}"
       },
@@ -250,7 +238,6 @@
     },
     "ecb": {
       "base_url": "${ECB_URL:-}",
-      "base_url_pre": "",
       "resource_ready_base_url": "",
       "resource_ready_dedupe_max_entries": 10000,
       "resource_ready_dedupe_ttl_seconds": 3600.0,
@@ -259,8 +246,7 @@
       "resource_ready_worker_threads": 2
     },
     "gateway": {
-      "base_url": "${GATEWAY_URL:-}",
-      "base_url_pre": "${GATEWAY_URL_PRE:-}"
+      "base_url": "${GATEWAY_URL:-}"
     },
     "http_client_pool": {
       "defaults": {
@@ -283,8 +269,7 @@
       "secret_name": "LLM_AUTH_TOKEN"
     },
     "masa_agent_eval": {
-      "base_url": "http://localhost:8080",
-      "base_url_pre": "http://localhost:8080"
+      "base_url": "http://localhost:8080"
     },
     "oss_to_nas": {
       "nas_root": "./data/nas",
@@ -341,7 +326,6 @@
       "access_secret": "",
       "admin_member_staff_ids": [],
       "aixcore_base_url": "",
-      "aixcore_base_url_pre": "",
       "base_url": "",
       "tenant": "default",
       "timeout": 30

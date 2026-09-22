@@ -28,12 +28,11 @@ def publication(monkeypatch):
         },
         "friend_check_in_strategy": "OPEN",
     }
-    config = MagicMock(base_url="http://bcsfuse.test", base_url_pre="", worker_id_with_owner=True)
+    config = MagicMock(base_url="http://bcsfuse.test", worker_id_with_owner=True)
     service = _make_service(bcn_service=bcn, bcsfuse_config=config)
     http = MagicMock()
     http.return_value.__enter__.return_value.status = 200
     monkeypatch.setattr(f"{MODULE}.urlopen", http)
-    monkeypatch.setattr(f"{MODULE}.get_current_env", lambda: "prod")
     return service, bcn, http
 
 

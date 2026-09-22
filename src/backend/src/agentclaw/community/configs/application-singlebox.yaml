@@ -163,15 +163,9 @@ user_config:
     scene_code: "default"
     endpoint: "https://xhuntercore-pre.teamclaw.com"
 
-  daas_sdk_config_prod:
-    partner_id: "a2dd39c227"
-    scene_code: "default"
-    endpoint: "https://xhuntercore-prod.teamclaw.com"
-
 # MasaAgentEval API 配置（评测服务）— singlebox 本地 mock
   masa_agent_eval:
     base_url: "http://127.0.0.1:9999"
-    base_url_pre: "http://127.0.0.1:9999"
 
   # ── DingTalk 通用配置（与 BCS bcs-config-*.toml [[dingtalk_accounts]] 对齐） ──
   # singlebox 用 AI coding 应用凭证联调钉钉发送
@@ -256,7 +250,6 @@ user_config:
     timeout: 30
     # Relocated from di/config.py neutral defaults (C1).
     aixcore_base_url: "https://aixcore.teamclaw.com"
-    aixcore_base_url_pre: "https://aixcore-pre.teamclaw.com"
 
   # OSS↔NAS mount roots — relocated from di/config.py neutral defaults (C1).
   oss_mount_root: "/aidesktop"
