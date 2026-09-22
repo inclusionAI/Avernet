@@ -545,3 +545,51 @@ def test_trajectory_display_html_renders_enriched_node_output():
     assert r.status_code == 200
     assert "节点产出" in r.text
     assert "html-n1-done" in r.text
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_groups_events_by_subtask_block():
+    """HTML 时间线按子任务区块化:同一 (task_id,node_id) 的事件归同一区块
+    (区块序 = 该子任务首条事件出现序),不同区块左色条颜色不同。"""
+    import re
+
+    # 交错时序:n1 plan@1000 → n2 plan@1500 → n1 execute@2000 → n1 verify@2500。
+    # 分组后 n1 的 3 条全部落在 n1 区块内(verify 紧跟其后),n2 自成 1 条区块。
+    def _n(node_id: str, action: TrajectoryActionType, ms: int) -> TrajectoryEvent:
+        return TrajectoryEvent(
+            task_id="t1", node_id=node_id, action_type=action,
+            action_result="success", attempt=0, gmt_create=ms, gmt_modified=ms,
+        )
+
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=2500, gmt_modified=2500,
+        timeline=[
+            _n("n1", TrajectoryActionType.PLAN, 1000),
+            _n("n2", TrajectoryActionType.PLAN, 1500),
+            _n("n1", TrajectoryActionType.EXECUTE, 2000),
+            _n("n1", TrajectoryActionType.VERIFY, 2500),
+        ],
+        analysis=None,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    text = r.text
+
+    # 两个子任务区块
+    assert text.count('class="node-block"') == 2
+    # n1 区块 3 条、n2 区块 1 条(区块副标题带事件数)
+    assert "· 事件 3" in text and "· 事件 1" in text
+    # 区块顺序 = 首条事件出现序:n1(@1000) 在 n2(@1500) 之前
+    assert text.index("· 事件 3") < text.index("· 事件 1")
+    # 分组完整性:时序上排在 n2 之后的 n1 verify 卡片仍在 n1 区块内
+    # (n2 区块头之前)——即 n1 的全部事件没有被 n2 切开
+    assert text.index(">verify</span>") < text.index("· 事件 1")
+    # 不同区块不同颜色(循环色板)
+    colors = re.findall(
+        r'class="node-block" style="border-left:4px solid (#[0-9a-f]{6});"', text
+    )
+    assert len(colors) == 2 and colors[0] != colors[1]

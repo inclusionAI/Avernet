@@ -34,6 +34,20 @@ _ACTION_THEME: dict[str, str] = {
     "relay": "#db2777",       # 品红 — 分布式接力(orchestration_mode==relay)
 }
 
+# 子任务区块色板(按区块出现顺序循环):同一子任务(task_id+node_id)的事件归入同一
+# 区块,不同区块左色条/标题取不同颜色,目测即分。8 色与 action 主题色错开饱和度
+# 优先辨识度;区块数超过色板即循环(>8 个子任务时颜色复用,边界无碍)。
+_NODE_BLOCK_PALETTE: tuple[str, ...] = (
+    "#2563eb",  # 蓝
+    "#7c3aed",  # 紫
+    "#0891b2",  # 青
+    "#16a34a",  # 绿
+    "#ea580c",  # 橙
+    "#db2777",  # 品红
+    "#ca8a04",  # 暗金
+    "#0d9488",  # 蓝绿
+)
+
 # 被视为"失败/异常"的 action_result —— 徽章标红(仅视觉,不影响语义)。
 _FAILURE_RESULTS: frozenset[str] = frozenset(
     {"failed", "miss", "dispatch_exception", "no_result", "form_group_failed",
@@ -178,6 +192,41 @@ def _render_event(ev: "object") -> str:
     return "".join(parts)
 
 
+def _render_timeline_grouped(timeline: list) -> str:
+    """把时间线按**子任务区块**渲染:同一 ``(task_id, node_id)`` 的全部事件归入
+    一个区块,区块按该子任务**首条事件的出现顺序**排列(区块内部仍按原时间序);
+    不同区块用循环色板标不同颜色(左色条 + 标题),目测即分。
+
+    分组不改动事件卡片的既有渲染(``_render_event`` 原样复用,含各自的 action
+    主题色条/产出折叠块);``node_id`` 为空的事件防御性归入 "(无节点)" 区块。
+    """
+    if not timeline:
+        return '<p class="empty">时间线为空(该任务尚无轨迹事件,或 task_id 不存在)。</p>'
+
+    # 有序分组:插入顺序 = 首条事件出现顺序(timeline 本身已按 gmt_create 升序)
+    blocks: dict[tuple[str, str], list] = {}
+    for ev in timeline:
+        task_id = str(getattr(ev, "task_id", "") or "")
+        node_id = str(getattr(ev, "node_id", "") or "")
+        blocks.setdefault((task_id, node_id), []).append(ev)
+
+    parts: list[str] = []
+    for idx, ((task_id, node_id), events) in enumerate(blocks.items()):
+        color = _NODE_BLOCK_PALETTE[idx % len(_NODE_BLOCK_PALETTE)]
+        label = html.escape(node_id or "(无节点)")
+        parts.append(
+            f'<div class="node-block" style="border-left:4px solid {color};">'
+            f'<div class="nb-head">'
+            f'<span class="nb-node" style="color:{color};border-color:{color}55;'
+            f'background:{color}1f;">{label}</span>'
+            f'<span class="nb-sub">task {html.escape(task_id)} · 事件 {len(events)}</span>'
+            f"</div>"
+        )
+        parts.extend(_render_event(ev) for ev in events)
+        parts.append("</div>")
+    return "".join(parts)
+
+
 def _render_analysis(analysis_raw: str | None, *, do_analysis: bool) -> str:
     """渲染总体分析块(boost/failure_reason 等)。解析失败或无分析 → 降级提示。"""
     parsed = _parse_analysis(analysis_raw)
@@ -229,9 +278,7 @@ def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = Fals
     gmt_create = getattr(dto, "gmt_create", None)
     gmt_modified = getattr(dto, "gmt_modified", None)
 
-    events_html = "".join(_render_event(ev) for ev in timeline) if timeline else (
-        '<p class="empty">时间线为空(该任务尚无轨迹事件,或 task_id 不存在)。</p>'
-    )
+    events_html = _render_timeline_grouped(timeline)
 
     head = f"""<!doctype html>
 <html lang="zh">
@@ -263,6 +310,13 @@ def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = Fals
   details.a-input pre {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
                          padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 12px; }}
   .timeline h2 {{ font-size: 15px; color: #334155; margin: 8px 0 12px; }}
+  .node-block {{ background: #fff; border: 1px solid #e2e8f0; border-left-width: 4px;
+                border-radius: 10px; padding: 12px 14px 8px; margin-bottom: 16px; }}
+  .nb-head {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+              margin-bottom: 10px; font-size: 13px; }}
+  .nb-node {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700;
+              font-size: 13px; padding: 2px 10px; border-radius: 999px; border: 1px solid; }}
+  .nb-sub {{ color: #94a3b8; font-size: 12px; }}
   .event {{ background: #fff; border: 1px solid #e2e8f0; border-left-width: 4px;
             border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }}
   .ev-head {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }}
