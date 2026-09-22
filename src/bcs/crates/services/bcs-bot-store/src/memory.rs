@@ -93,7 +93,8 @@ pub struct MemoryBotRepo {
     /// Channel binding index: (channel, binding_key) -> bot_uuid
     /// Derived from bot capabilities for fast lookup.
     binding_channel_index: RwLock<HashMap<(String, String), String>>,
-    /// Process-local runtime info, e.g. client_kind from bot.connect.
+    /// Process-local runtime info, including the active negotiated client kind
+    /// and server-owned coordination profile.
     bot_info_overrides: RwLock<HashMap<(String, String), String>>,
     /// Base directory for bot files (from BCS_DATA_DIR).
     bots_base_dir: PathBuf,
@@ -768,7 +769,7 @@ impl BotRepoPort for MemoryBotRepo {
             return;
         }
 
-        if key == "client_kind" {
+        if key == "client_kind" || key == "coordination_profile" {
             self.bot_info_overrides
                 .write()
                 .await
@@ -789,6 +790,19 @@ impl BotRepoPort for MemoryBotRepo {
             .await
             .get(&(bot_id.to_string(), key.to_string()))
             .cloned()
+    }
+
+    async fn set_bot_info(&self, bot_id: &str, key: &str, value: Option<String>) {
+        if let Some(value) = value {
+            self.add_bot_info(bot_id, key, value).await;
+            return;
+        }
+        if key == "client_kind" || key == "coordination_profile" {
+            self.bot_info_overrides
+                .write()
+                .await
+                .remove(&(bot_id.to_string(), key.to_string()));
+        }
     }
 
     async fn list_active(&self) -> Vec<RegisteredBot> {

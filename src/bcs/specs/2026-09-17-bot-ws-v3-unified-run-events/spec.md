@@ -57,7 +57,7 @@ BCS 当前存在两套语义相近、结构不同的运行时事件协议：
 | MCP tool result -> task intent | 不支持 | 不支持 | 支持 |
 | Provider/WS 共用 golden fixtures | 否 | 否 | 是 |
 
-服务端将最大协议版本从 2 提升到 3，最小版本保持 1。连接建立后，协议版本固定在该连接上下文中，后续事件不得自行声明或切换版本。
+服务端将最大协议版本从 2 提升到 3，最小版本保持 1。连接建立后，协议版本固定在该连接上下文中，后续事件不得自行声明或切换版本。未提交 `protocol_version` 的历史客户端固定按 V2 协商；V3 必须显式请求，避免服务端新增版本改变旧客户端语义。
 
 V3 采用严格解析：
 
@@ -216,6 +216,7 @@ thinking 是运行时可观测事件，不作为 task intent 输入。
 
 - final 是 chat 的终态，不再通过 WS 专属字段或事件名表达。
 - 相同 run 只能接受一次有效 final；重复 final 按幂等规则忽略并记录。
+- seq 在业务处理成功后才提交；处理失败必须释放预留，使客户端可使用相同 seq 重试。
 - tool event 不复用 `chat.state=tool_call_end`，避免同一语义存在两种模型。
 
 ### 5.5 Interaction
@@ -295,7 +296,7 @@ coordination profile 由 BCS 服务端管理，至少包含：
 - coordination tool 的 exact canonical name；
 - 支持的 coordination call versions。
 
-客户端在 connect 中可以声明 `clientKind`，但不能上传或覆盖 tool allowlist。BCS 根据已注册配置解析该 kind；未知 kind 默认关闭 task intent。
+客户端在 connect 中可以声明 `clientKind`，但不能上传或覆盖 tool allowlist。BCS 根据已注册配置解析该 kind；未知 kind 默认关闭 task intent。connect 声明也不能创建或覆盖 bot 的 server-owned coordination profile；声明与已注册 profile 不匹配时，task intent 必须 fail closed。
 
 connect 成功响应应返回协商后的能力，例如：
 

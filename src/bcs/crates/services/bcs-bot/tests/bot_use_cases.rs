@@ -1534,6 +1534,85 @@ async fn bot_runtime_connection_service_manages_streaming_lifecycle() {
 }
 
 #[tokio::test]
+async fn streaming_client_kind_requires_server_profile_and_is_replaced_on_reconnect() {
+    let fixture = RegistryFixture::new();
+    let service = fixture.service();
+
+    let untrusted = service
+        .connect_streaming(BotRuntimeConnectCommand {
+            caller_actor_id: None,
+            token: None,
+            bot_id: Some("profile-bot".to_string()),
+            protocol_version: Some(3),
+            client_kind: Some("native_mcp".to_string()),
+        })
+        .await
+        .expect("initial connect");
+    assert_eq!(untrusted.negotiated_client_kind, None);
+    assert_eq!(
+        fixture.registry.get_bot_info("profile-bot", "client_kind").await,
+        None
+    );
+
+    service
+        .disconnect_streaming(BotRuntimeDisconnectCommand {
+            bot_id: "profile-bot".to_string(),
+        })
+        .await
+        .expect("disconnect untrusted connection");
+    fixture
+        .registry
+        .add_bot_info(
+            "profile-bot",
+            "coordination_profile",
+            "native_mcp".to_string(),
+        )
+        .await;
+
+    let trusted = service
+        .connect_streaming(BotRuntimeConnectCommand {
+            caller_actor_id: None,
+            token: Some(untrusted.token.clone()),
+            bot_id: Some("profile-bot".to_string()),
+            protocol_version: Some(3),
+            client_kind: Some("native_mcp".to_string()),
+        })
+        .await
+        .expect("trusted reconnect");
+    assert_eq!(trusted.negotiated_client_kind.as_deref(), Some("native_mcp"));
+    assert_eq!(
+        fixture.registry.get_bot_info("profile-bot", "client_kind").await.as_deref(),
+        Some("native_mcp")
+    );
+
+    service
+        .disconnect_streaming(BotRuntimeDisconnectCommand {
+            bot_id: "profile-bot".to_string(),
+        })
+        .await
+        .expect("disconnect trusted connection");
+    assert_eq!(
+        fixture.registry.get_bot_info("profile-bot", "client_kind").await,
+        None
+    );
+    let omitted = service
+        .connect_streaming(BotRuntimeConnectCommand {
+            caller_actor_id: None,
+            token: Some(trusted.token),
+            bot_id: Some("profile-bot".to_string()),
+            protocol_version: Some(3),
+            client_kind: None,
+        })
+        .await
+        .expect("reconnect without client profile");
+    assert_eq!(omitted.negotiated_client_kind, None);
+    assert_eq!(
+        fixture.registry.get_bot_info("profile-bot", "client_kind").await,
+        None
+    );
+}
+
+#[tokio::test]
 async fn update_status_echoes_payload_without_retaining_it() {
     let fixture = RegistryFixture::new();
     let service = fixture.service();

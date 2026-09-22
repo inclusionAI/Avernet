@@ -230,17 +230,17 @@ while True:
 
 | 字段 | 方向 | 说明 |
 | --- | --- | --- |
-| `protocol_version`（请求） | 引擎 → BCN | 引擎期望的协议版本（可选，缺省默认当前版本） |
+| `protocol_version`（请求） | 引擎 → BCN | 引擎期望的协议版本（可选；缺省保持 V2 兼容默认值，V3 必须显式请求） |
 | `protocol_version`（响应） | BCN → 引擎 | 本次连接协商后的协议版本 |
 | `min_supported_version` | BCN → 引擎 | BCN 支持的最低协议版本 |
 | `capabilities` | BCN → 引擎 | 本连接启用的能力。V3 客户端必须检查 `unified_run_events` 与 `canonical_session_id` |
 | `deprecation` | BCN → 引擎 | 版本废弃通知（可选，仅当协商版本即将下线时出现） |
 
 `client_kind` 用于选择服务端已识别的客户端 profile，不是客户端自行声明权限
-的入口。只有确实实现可信 native MCP 协作合约的接入方才能使用
-`native_mcp`。BCN 仅在 V3 与该可信 profile 同时协商成功时启用
-`tool_result_task_intent`；普通或未知 client kind 仍可使用其他 V3 Run Event，
-但该能力返回 `false`。
+的入口。`native_mcp` 必须与该 Bot 的服务端 `coordination_profile` 匹配，
+connect 请求不能创建或覆盖该 profile。BCN 仅在 V3 与该可信 profile 同时
+协商成功时启用 `tool_result_task_intent`；普通、未知或未登记的 client kind
+仍可使用其他 V3 Run Event，但该能力返回 `false`。
 
 版本升级策略：
 + 新增可选字段或可选方法 → 不递增版本号（JSON 天然忽略未知字段）

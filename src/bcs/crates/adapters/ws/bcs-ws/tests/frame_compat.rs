@@ -38,6 +38,7 @@ use tracing_subscriber::prelude::*;
 #[derive(Default)]
 struct RecordingMessageFlow {
     bot_events: Mutex<Vec<BotEventCommand>>,
+    fail_bot_event_once: std::sync::atomic::AtomicBool,
     task_dispatches: Mutex<Vec<TaskDispatchCommand>>,
     task_messages: Mutex<Vec<TaskMessageCommand>>,
     task_completes: Mutex<Vec<TaskCompleteCommand>>,
@@ -52,6 +53,7 @@ struct RecordingBotRuntime {
     delivery_target: Mutex<Option<BotDeliveryTarget>>,
     reject_status_update: std::sync::atomic::AtomicBool,
     fail_disconnect: std::sync::atomic::AtomicBool,
+    trust_native_mcp: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -377,6 +379,15 @@ impl BotRuntimeConnectionService for RecordingBotRuntime {
         command: BotRuntimeConnectCommand,
     ) -> Result<BotRuntimeConnectOutcome, BotUseCaseError> {
         self.connect_count.fetch_add(1, Ordering::Relaxed);
+        let negotiated_client_kind = match command.client_kind {
+            Some(kind)
+                if kind.eq_ignore_ascii_case("native_mcp")
+                    && !self.trust_native_mcp.load(Ordering::Relaxed) =>
+            {
+                None
+            }
+            other => other,
+        };
         let bot_uuid = command
             .bot_id
             .unwrap_or_else(|| "generated-bot".to_string());
@@ -384,6 +395,7 @@ impl BotRuntimeConnectionService for RecordingBotRuntime {
             is_new: true,
             bot_uuid,
             token: command.token.unwrap_or_else(|| "test-token".to_string()),
+            negotiated_client_kind,
         })
     }
 
@@ -530,6 +542,11 @@ impl MessageFlowService for RecordingMessageFlow {
     }
 
     async fn handle_bot_event(&self, cmd: BotEventCommand) -> ServiceResult<BotEventOutcome> {
+        if self.fail_bot_event_once.swap(false, Ordering::Relaxed) {
+            return Err(ServiceError::InternalError(
+                "injected bot event failure".to_string(),
+            ));
+        }
         self.bot_events.lock().await.push(cmd);
         Ok(BotEventOutcome {
             bot_deliveries: vec![],
@@ -881,8 +898,89 @@ async fn bot_connect_and_status_frames_are_compatible() {
 }
 
 #[tokio::test]
+async fn bot_connect_without_version_stays_on_v2_compatibility_default() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered_bot_id = None;
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-default",
+        "bot.connect",
+        Some(serde_json::json!({"bot_id": "bot-default"})),
+    ));
+
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+
+    let connected = recv_response(&mut rx).await;
+    assert!(connected.ok);
+    assert_eq!(connected.payload.unwrap()["protocol_version"], 2);
+    assert_eq!(
+        state
+            .dispatch_state
+            .bot_connections
+            .protocol("bot-default")
+            .await
+            .expect("connected protocol")
+            .protocol_version,
+        2
+    );
+}
+
+#[tokio::test]
+async fn bot_v3_native_mcp_declaration_does_not_self_authorize_task_intent() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered_bot_id = None;
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-untrusted-profile",
+        "bot.connect",
+        Some(serde_json::json!({
+            "bot_id": "bot-untrusted-profile",
+            "protocol_version": 3,
+            "client_kind": "native_mcp"
+        })),
+    ));
+
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+
+    let connected = recv_response(&mut rx).await;
+    assert!(connected.ok);
+    let payload = connected.payload.unwrap();
+    assert_eq!(payload["protocol_version"], 3);
+    assert_eq!(payload["capabilities"]["unified_run_events"], true);
+    assert_eq!(payload["capabilities"]["tool_result_task_intent"], false);
+    assert_eq!(
+        state
+            .dispatch_state
+            .bot_connections
+            .protocol("bot-untrusted-profile")
+            .await
+            .expect("connected protocol")
+            .client_kind,
+        None
+    );
+}
+
+#[tokio::test]
 async fn bot_v3_connect_negotiates_canonical_events_and_validates_run_sequence() {
     let state = new_state();
+    state
+        .bot_runtime
+        .trust_native_mcp
+        .store(true, Ordering::Relaxed);
     let (tx, mut rx) = mpsc::channel(8);
     let mut registered_bot_id = None;
 
@@ -1069,6 +1167,142 @@ async fn bot_v3_agent_error_is_adapted_to_terminal_chat_error() {
     assert_eq!(events[0].event_payload["state"], "error");
     assert_eq!(events[0].event_payload["errorCode"], "MODEL_ERROR");
     assert_eq!(events[0].event_payload["errorMessage"], "model failed");
+}
+
+#[tokio::test]
+async fn bot_v3_releases_sequence_when_business_processing_fails() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered_bot_id = None;
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-v3-retry",
+        "bot.connect",
+        Some(serde_json::json!({
+            "bot_id": "bot-v3-retry",
+            "protocol_version": 3
+        })),
+    ));
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
+    state
+        .bot_run_context
+        .put_context(BotRunContext {
+            run_id: "run-v3-retry".to_string(),
+            bot_id: "bot-v3-retry".to_string(),
+            group_id: "group-1".to_string(),
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+    let event = BcsFrame::Event(EventFrame::new(
+        "chat",
+        Some(serde_json::json!({
+            "runId": "run-v3-retry",
+            "sessionId": "group-1:abcdef12",
+            "seq": 1,
+            "ts": 123,
+            "state": "delta",
+            "content": "retry me"
+        })),
+        Some(1),
+    ));
+    let encoded = serde_json::to_string(&event).unwrap();
+    state
+        .message_flow
+        .fail_bot_event_once
+        .store(true, Ordering::Relaxed);
+
+    let first = dispatch_frame(
+        &state.dispatch_state,
+        &encoded,
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await;
+    assert!(first.is_err());
+    dispatch_frame(
+        &state.dispatch_state,
+        &encoded,
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .expect("same sequence should be retryable after processing failure");
+    assert_eq!(state.message_flow.bot_events.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn bot_v3_duplicate_terminal_frame_is_idempotent() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered_bot_id = None;
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-v3-terminal",
+        "bot.connect",
+        Some(serde_json::json!({
+            "bot_id": "bot-v3-terminal",
+            "protocol_version": 3
+        })),
+    ));
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
+    state
+        .bot_run_context
+        .put_context(BotRunContext {
+            run_id: "run-v3-terminal".to_string(),
+            bot_id: "bot-v3-terminal".to_string(),
+            group_id: "group-1".to_string(),
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+    let event = BcsFrame::Event(EventFrame::new(
+        "chat",
+        Some(serde_json::json!({
+            "runId": "run-v3-terminal",
+            "sessionId": "group-1:abcdef12",
+            "seq": 1,
+            "ts": 123,
+            "state": "final",
+            "content": "done"
+        })),
+        Some(1),
+    ));
+    let encoded = serde_json::to_string(&event).unwrap();
+
+    dispatch_frame(
+        &state.dispatch_state,
+        &encoded,
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+    dispatch_frame(
+        &state.dispatch_state,
+        &encoded,
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .expect("duplicate terminal frame should be ignored");
+    assert_eq!(state.message_flow.bot_events.lock().await.len(), 1);
 }
 
 #[tokio::test]

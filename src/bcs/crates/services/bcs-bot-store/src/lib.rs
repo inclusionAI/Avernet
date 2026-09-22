@@ -237,7 +237,8 @@ pub struct PersistentBotRepo {
     token_to_bot: RwLock<HashMap<String, String>>,
     /// Channel binding index: (channel, binding_key) -> bot_uuid.
     binding_channel_index: Arc<RwLock<HashMap<(String, String), String>>>,
-    /// Process-local runtime info, e.g. client_kind from bot.connect.
+    /// Process-local runtime info, including the active negotiated client kind
+    /// and server-owned coordination profile.
     bot_info_overrides: RwLock<HashMap<(String, String), String>>,
 
     // Layer 2: Database
@@ -1496,14 +1497,13 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn add_bot_info(&self, bot_id: &str, key: &str, value: String) {
-        // 目前仅支持 "agent_token"（复用 capabilities.agent_token 存储，仅内存）。
-        // 后期需要其他字段时，应在 RegisteredBotInner 上新增一个 HashMap 内存对象
-        // 来承载任意 key/value，而不是继续往 capabilities 上加字段。
-        if key != "agent_token" && key != "client_kind" {
+        // Agent credentials reuse capabilities; runtime/profile metadata stays
+        // in the dedicated process-local override map.
+        if key != "agent_token" && key != "client_kind" && key != "coordination_profile" {
             tracing::warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, key = %key, "add_bot_info: unrecognized key, ignoring");
             return;
         }
-        if key == "client_kind" {
+        if key == "client_kind" || key == "coordination_profile" {
             let bots = self.bots.read().await;
             if !bots.contains_key(bot_id) {
                 return;
@@ -1522,7 +1522,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn get_bot_info(&self, bot_id: &str, key: &str) -> Option<String> {
-        if key == "client_kind" {
+        if key == "client_kind" || key == "coordination_profile" {
             return self
                 .bot_info_overrides
                 .read()
@@ -1537,6 +1537,19 @@ impl BotRepoPort for PersistentBotRepo {
                 .and_then(|bot| bot.capabilities.agent_token.clone());
         }
         None
+    }
+
+    async fn set_bot_info(&self, bot_id: &str, key: &str, value: Option<String>) {
+        if let Some(value) = value {
+            self.add_bot_info(bot_id, key, value).await;
+            return;
+        }
+        if key == "client_kind" || key == "coordination_profile" {
+            self.bot_info_overrides
+                .write()
+                .await
+                .remove(&(bot_id.to_string(), key.to_string()));
+        }
     }
 
     async fn list_active(&self) -> Vec<RegisteredBot> {

@@ -244,7 +244,7 @@ The first frame after connection must be `bot.connect`.
 
 | Field | Direction | Description |
 | --- | --- | --- |
-| `protocol_version` in request | Engine -> BCN | Protocol version expected by the engine. Optional; defaults to the current version. |
+| `protocol_version` in request | Engine -> BCN | Protocol version expected by the engine. Optional; omission stays on the V2 compatibility default. V3 must be requested explicitly. |
 | `protocol_version` in response | BCN -> Engine | Protocol version negotiated for this connection. |
 | `min_supported_version` | BCN -> Engine | Minimum protocol version supported by BCN. |
 | `capabilities` | BCN -> Engine | Features enabled for this connection. V3 clients must verify `unified_run_events` and `canonical_session_id`. |
@@ -254,8 +254,10 @@ The first frame after connection must be `bot.connect`.
 authorization claim. Use `native_mcp` only when the integration implements the
 trusted native MCP coordination contract. BCN enables
 `tool_result_task_intent` only when both V3 and that trusted profile are
-negotiated. Unknown or ordinary client kinds can use all other V3 run events,
-but receive `tool_result_task_intent: false`.
+negotiated against the Bot's server-owned `coordination_profile`. A connect
+request cannot create or replace that profile. Unknown, unregistered, or
+ordinary client kinds can use all other V3 run events, but receive
+`tool_result_task_intent: false`.
 
 Versioning policy:
 

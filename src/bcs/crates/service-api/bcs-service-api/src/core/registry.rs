@@ -148,9 +148,16 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// Set an in-memory extension field on a bot record by key.
     /// Process-local, non-persisted.
     ///
-    /// 目前仅支持 `"agent_token"` 这一个 key。后期若需要支持其他字段，
-    /// 应在 bot 记录上新增一个内存 HashMap 对象来承载任意 key/value。
+    /// Supported runtime keys include `"agent_token"`, the negotiated
+    /// `"client_kind"`, and the server-owned `"coordination_profile"`.
     async fn add_bot_info(&self, _bot_id: &str, _key: &str, _value: String) {}
+
+    /// Replace or clear one process-local runtime extension field.
+    async fn set_bot_info(&self, bot_id: &str, key: &str, value: Option<String>) {
+        if let Some(value) = value {
+            self.add_bot_info(bot_id, key, value).await;
+        }
+    }
 
     /// Read an in-memory extension field set via [`add_bot_info`](Self::add_bot_info).
     async fn get_bot_info(&self, _bot_id: &str, _key: &str) -> Option<String> {

@@ -106,6 +106,23 @@ async fn persistent_bot_repo_add_bot_info_overwrites_previous_value() {
 }
 
 #[tokio::test]
+async fn persistent_bot_repo_replaces_and_clears_runtime_client_kind() {
+    let registry = create_persistent_bot_repo().await;
+    registry.register("bot-1".to_string(), test_caps()).await.unwrap();
+
+    registry
+        .set_bot_info("bot-1", "client_kind", Some("native_mcp".to_string()))
+        .await;
+    assert_eq!(
+        registry.get_bot_info("bot-1", "client_kind").await.as_deref(),
+        Some("native_mcp")
+    );
+
+    registry.set_bot_info("bot-1", "client_kind", None).await;
+    assert_eq!(registry.get_bot_info("bot-1", "client_kind").await, None);
+}
+
+#[tokio::test]
 async fn persistent_bot_repo_add_bot_info_does_not_leak_to_get_agent_credentials_code() {
     let registry = create_persistent_bot_repo().await;
     registry.register("bot-1".to_string(), test_caps()).await.unwrap();

@@ -8,10 +8,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_protocol::stream::TASK_INTENT_ELIGIBLE_KEY;
 use bcs_protocol::{
-    AgentEventPayload, AgentStream, BCS_MIN_SUPPORTED_VERSION, BCS_PROTOCOL_VERSION, BcsFrame,
-    BotConnectCapabilities, BotConnectParams as WireBotConnectParams, BotConnectResponse,
-    BotStatus as WsBotStatus, BotStatusParams, ChatEventPayload, ChatEventState, ErrorShape,
-    EventFrame, RequestFrame, ResponseFrame, RouteSelectorWire,
+    AgentEventPayload, AgentStream, BCS_DEFAULT_PROTOCOL_VERSION, BCS_MIN_SUPPORTED_VERSION,
+    BCS_PROTOCOL_VERSION, BcsFrame, BotConnectCapabilities,
+    BotConnectParams as WireBotConnectParams, BotConnectResponse, BotStatus as WsBotStatus,
+    BotStatusParams, ChatEventPayload, ChatEventState, ErrorShape, EventFrame, RequestFrame,
+    ResponseFrame, RouteSelectorWire,
 };
 use bcs_service_api::{
     BotEventCommand, BotRunContextPort, BotRuntimeConnectCommand, BotRuntimeConnectionService,
@@ -349,7 +350,9 @@ async fn handle_bot_connect(
     })?;
 
     // Protocol version negotiation
-    let requested_version = params.protocol_version.unwrap_or(BCS_PROTOCOL_VERSION);
+    let requested_version = params
+        .protocol_version
+        .unwrap_or(BCS_DEFAULT_PROTOCOL_VERSION);
     if requested_version < BCS_MIN_SUPPORTED_VERSION || requested_version > BCS_PROTOCOL_VERSION {
         send_error(
             tx,
@@ -370,7 +373,7 @@ async fn handle_bot_connect(
         }
     }
 
-    let client_kind = normalize_client_kind(params.client_kind);
+    let requested_client_kind = normalize_client_kind(params.client_kind);
     let result = state
         .bot_runtime
         .connect_streaming(BotRuntimeConnectCommand {
@@ -378,7 +381,7 @@ async fn handle_bot_connect(
             token: params.token,
             bot_id: params.bot_id,
             protocol_version: Some(requested_version),
-            client_kind: client_kind.clone(),
+            client_kind: requested_client_kind,
         })
         .await
         .map_err(map_bot_use_case_error)?;
@@ -397,13 +400,15 @@ async fn handle_bot_connect(
     // Update registered_bot_id
     *registered_bot_id = Some(result.bot_uuid.clone());
 
+    let negotiated_client_kind = result.negotiated_client_kind.clone();
+
     state
         .bot_connections
         .connect_with_protocol(
             result.bot_uuid.clone(),
             tx.clone(),
             requested_version,
-            client_kind.clone(),
+            negotiated_client_kind.clone(),
         )
         .await;
 
@@ -421,7 +426,7 @@ async fn handle_bot_connect(
         deprecation: None,
         capabilities: Some(BotConnectCapabilities::for_connection(
             requested_version,
-            client_kind.as_deref(),
+            negotiated_client_kind.as_deref() == Some("native_mcp"),
         )),
         env: Some(env_map),
     };
@@ -936,6 +941,15 @@ async fn handle_event_frame(
         }
     }
 
+    let terminal_fingerprint = if is_v3
+        && is_terminal_bot_event(&event_type, &event_state, is_final)
+    {
+        serde_json::to_string(&(&event_type, &event_payload)).ok()
+    } else {
+        None
+    };
+    let mut reserved_v3_seq = None;
+
     let (real_group_id, mut bcs_session_id) = if is_v3 {
         let session_id = v3_session_id
             .as_deref()
@@ -957,6 +971,21 @@ async fn handle_event_frame(
                 "V3 event run/session identity mismatch".into(),
             ));
         }
+        if let Some(fingerprint) = terminal_fingerprint.as_deref() {
+            if state
+                .bot_connections
+                .is_terminal_replay(&bot_id, &run_id, seq, fingerprint)
+                .await
+            {
+                info!(
+                    bot_id = %bot_id,
+                    run_id = %run_id,
+                    seq,
+                    "Ignoring idempotent V3 terminal replay"
+                );
+                return Ok(());
+            }
+        }
         if context.terminal || context.deadline_ms <= bcs_protocol::now_ms() {
             return Err(BotWsDispatchError::InvalidFrameFormat(
                 "V3 event run is terminal or expired".into(),
@@ -964,13 +993,14 @@ async fn handle_event_frame(
         }
         if !state
             .bot_connections
-            .accept_run_event_seq(&bot_id, &run_id, seq)
+            .reserve_run_event_seq(&bot_id, &run_id, seq)
             .await
         {
             return Err(BotWsDispatchError::InvalidFrameFormat(
                 "V3 event seq is duplicate or regressed".into(),
             ));
         }
+        reserved_v3_seq = Some(seq);
         (context.group_id, Some(session_id.to_string()))
     } else {
         let explicit_session_id = event_payload.get("bcs_session_id").and_then(|v| v.as_str());
@@ -1017,19 +1047,29 @@ async fn handle_event_frame(
         }
     }
 
-    if state
+    let delivery_correlation = state
         .collaboration_runtime
         .lookup_delivery_correlation(&run_id)
         .await
         .map_err(|error| {
             BotWsDispatchError::ServiceError(ServiceError::InternalError(error.to_string()))
-        })?
-        .is_some()
-    {
-        let terminal = matches!(
-            event_state,
-            ChatEventState::Final | ChatEventState::Aborted | ChatEventState::Error
-        ) || event_type == "agent" && is_final;
+        });
+    let delivery_correlation = match delivery_correlation {
+        Ok(correlation) => correlation,
+        Err(error) => {
+            return finish_v3_sequence(
+                state,
+                &bot_id,
+                &run_id,
+                reserved_v3_seq,
+                terminal_fingerprint,
+                Err(error),
+            )
+            .await;
+        }
+    };
+    if delivery_correlation.is_some() {
+        let terminal = is_terminal_bot_event(&event_type, &event_state, is_final);
         info!(
             bot_id = %bot_id,
             run_id = %run_id,
@@ -1038,10 +1078,10 @@ async fn handle_event_frame(
             response_span_skip_reason = "collaboration_runtime",
             "Bot response tracing skipped"
         );
-        state
+        let result = state
             .collaboration_runtime
             .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
-                bot_id,
+                bot_id: bot_id.clone(),
                 run_id: run_id.clone(),
                 event_type: event_type.clone(),
                 event_payload: event_payload.clone(),
@@ -1051,11 +1091,19 @@ async fn handle_event_frame(
             .await
             .map_err(|error| {
                 BotWsDispatchError::ServiceError(ServiceError::InternalError(error.to_string()))
-            })?;
-        if terminal {
+            });
+        if result.is_ok() && terminal {
             state.run_channels.unregister(&run_id).await;
         }
-        return Ok(());
+        return finish_v3_sequence(
+            state,
+            &bot_id,
+            &run_id,
+            reserved_v3_seq,
+            terminal_fingerprint,
+            result.map(|_| ()),
+        )
+        .await;
     }
 
     let trace_parent = if event_type == "chat.event" {
@@ -1063,7 +1111,7 @@ async fn handle_event_frame(
     } else {
         None
     };
-    if let Some(trace_parent) = trace_parent {
+    let dispatch_result = if let Some(trace_parent) = trace_parent {
         info!(
             bot_id = %bot_id,
             run_id = %run_id,
@@ -1096,7 +1144,7 @@ async fn handle_event_frame(
             Ok::<(), BotWsDispatchError>(())
         }
         .instrument(span)
-        .await?;
+        .await
     } else {
         if event_type == "chat.event" {
             info!(
@@ -1119,10 +1167,62 @@ async fn handle_event_frame(
             &event_state,
             is_final,
         )
-        .await?;
-    }
+        .await
+    };
 
-    Ok(())
+    finish_v3_sequence(
+        state,
+        &bot_id,
+        &run_id,
+        reserved_v3_seq,
+        terminal_fingerprint,
+        dispatch_result,
+    )
+    .await
+}
+
+fn is_terminal_bot_event(
+    event_type: &str,
+    event_state: &ChatEventState,
+    is_final: bool,
+) -> bool {
+    matches!(
+        event_state,
+        ChatEventState::Final | ChatEventState::Aborted | ChatEventState::Error
+    ) || event_type == "agent" && is_final
+}
+
+async fn finish_v3_sequence(
+    state: &BotDispatchState,
+    bot_id: &str,
+    run_id: &str,
+    reserved_seq: Option<u64>,
+    terminal_fingerprint: Option<String>,
+    result: Result<()>,
+) -> Result<()> {
+    let Some(seq) = reserved_seq else {
+        return result;
+    };
+    if result.is_ok() {
+        if !state
+            .bot_connections
+            .commit_run_event_seq(bot_id, run_id, seq, terminal_fingerprint)
+            .await
+        {
+            warn!(
+                bot_id,
+                run_id,
+                seq,
+                "V3 event succeeded after its connection sequence state was removed"
+            );
+        }
+    } else {
+        state
+            .bot_connections
+            .release_run_event_seq(bot_id, run_id, seq)
+            .await;
+    }
+    result
 }
 
 fn record_ws_bot_response_trace(

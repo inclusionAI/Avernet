@@ -18,6 +18,8 @@ pub use bcs_domain::GROUP_ID_PREFIX;
 pub const BCS_PROTOCOL_VERSION: u32 = 3;
 /// Minimum protocol version still accepted.
 pub const BCS_MIN_SUPPORTED_VERSION: u32 = 1;
+/// Stable compatibility default for clients that predate explicit negotiation.
+pub const BCS_DEFAULT_PROTOCOL_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // Frame layer (mirrors OpenClaw frames.py)
@@ -241,7 +243,7 @@ pub struct BotConnectParams {
     pub bot_id: Option<String>,
 
     /// Protocol version requested by the client.
-    /// Omitted or None → server defaults to BCS_PROTOCOL_VERSION.
+    /// Omitted or None → server defaults to BCS_DEFAULT_PROTOCOL_VERSION.
     #[serde(default)]
     pub protocol_version: Option<u32>,
 
@@ -268,14 +270,11 @@ pub struct BotConnectCapabilities {
 }
 
 impl BotConnectCapabilities {
-    pub fn for_connection(protocol_version: u32, client_kind: Option<&str>) -> Self {
+    pub fn for_connection(protocol_version: u32, tool_result_task_intent: bool) -> Self {
         let unified_run_events = protocol_version >= 3;
-        let native_mcp = client_kind
-            .map(str::trim)
-            .is_some_and(|kind| kind.eq_ignore_ascii_case("native_mcp"));
         Self {
             unified_run_events,
-            tool_result_task_intent: unified_run_events && native_mcp,
+            tool_result_task_intent: unified_run_events && tool_result_task_intent,
             canonical_session_id: unified_run_events,
         }
     }

@@ -838,11 +838,17 @@ impl BotRuntimeConnectionService for Bot {
             self.validate_connect_bot_id(bot_id).await?;
         }
 
+        let requested_client_kind = client_kind
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_ascii_lowercase());
+
         let params = BotConnectParams {
             token,
             bot_id,
             protocol_version,
-            client_kind: client_kind.clone(),
+            client_kind: None,
         };
         let result = self
             .registry
@@ -855,17 +861,31 @@ impl BotRuntimeConnectionService for Bot {
                 .set_protocol_version(&result.bot_uuid, version)
                 .await;
         }
-        if let Some(client_kind) = client_kind
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            self.registry
-                .add_bot_info(&result.bot_uuid, "client_kind", client_kind.to_string())
-                .await;
-        }
+        let server_profile = self
+            .registry
+            .get_bot_info(&result.bot_uuid, "coordination_profile")
+            .await
+            .map(|value| value.trim().to_ascii_lowercase());
+        let negotiated_client_kind = match requested_client_kind {
+            Some(kind)
+                if kind == "native_mcp"
+                    && server_profile.as_deref() != Some("native_mcp") =>
+            {
+                None
+            }
+            other => other,
+        };
+        self.registry
+            .set_bot_info(
+                &result.bot_uuid,
+                "client_kind",
+                negotiated_client_kind.clone(),
+            )
+            .await;
 
-        Ok(BotRuntimeConnectOutcome::from_connect_result(result))
+        let mut outcome = BotRuntimeConnectOutcome::from_connect_result(result);
+        outcome.negotiated_client_kind = negotiated_client_kind;
+        Ok(outcome)
     }
 
     async fn update_runtime_status(
@@ -897,6 +917,12 @@ impl BotRuntimeConnectionService for Bot {
         &self,
         command: BotRuntimeDisconnectCommand,
     ) -> Result<(), BotUseCaseError> {
+        // Clear the active profile before releasing the streaming slot. Once
+        // the slot is released a reconnect may negotiate a new profile, which
+        // an older connection's cleanup must never erase.
+        self.registry
+            .set_bot_info(&command.bot_id, "client_kind", None)
+            .await;
         self.registry.disconnect_streaming(&command.bot_id).await;
         Ok(())
     }

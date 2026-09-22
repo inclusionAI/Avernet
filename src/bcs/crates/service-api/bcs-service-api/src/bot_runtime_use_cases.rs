@@ -22,6 +22,9 @@ pub struct BotRuntimeConnectOutcome {
     pub is_new: bool,
     pub bot_uuid: String,
     pub token: String,
+    /// Server-negotiated runtime profile. This is never copied directly from
+    /// the untrusted `bot.connect` declaration.
+    pub negotiated_client_kind: Option<String>,
 }
 
 impl BotRuntimeConnectOutcome {
@@ -30,6 +33,7 @@ impl BotRuntimeConnectOutcome {
             is_new: result.is_new,
             bot_uuid: result.bot_uuid,
             token: result.token,
+            negotiated_client_kind: None,
         }
     }
 }

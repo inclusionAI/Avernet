@@ -74,6 +74,7 @@ impl BotRuntimeConnectionService for MockBotRuntime {
             is_new: true,
             bot_uuid,
             token: command.token.unwrap_or_else(|| "tok".to_string()),
+            negotiated_client_kind: None,
         })
     }
 

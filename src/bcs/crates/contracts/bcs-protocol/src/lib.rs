@@ -64,7 +64,8 @@ pub use http::{
 pub use principal::{AdminActor, BotActor, CallerContext, HumanActor, IntegrationClient};
 pub use ws::protocol;
 pub use ws::{
-    AgentEventPayload, AgentStream, BCS_MIN_SUPPORTED_VERSION, BCS_PROTOCOL_VERSION, BcsFrame,
+    AgentEventPayload, AgentStream, BCS_DEFAULT_PROTOCOL_VERSION, BCS_MIN_SUPPORTED_VERSION,
+    BCS_PROTOCOL_VERSION, BcsFrame,
     BotConnectCapabilities, BotConnectParams, BotConnectResponse, BotStatus, BotStatusParams,
     ChannelInfo, ChannelSource,
     ChatAbortParams, ChatAbortResult, ChatEventPayload, ChatEventRouting, ChatEventState,
