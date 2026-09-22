@@ -549,3 +549,22 @@ def load_claude_code_file_roots() -> tuple[Path, ...]:
 def load_claude_code_skills_root() -> Path:
     """Active Skill discovery directory from the existing Engine layout."""
     return _claude_code_file_layout(Path.home()).active_root
+
+
+def load_file_count_roots(engine: str) -> tuple[Path, tuple[Path, ...]]:
+    """Canonical relative-path root and explicit scan boundaries for the runtime.
+
+    Claude Code's configured cwd is an additional absolute-address root, not
+    the base for relative paths. Unknown layouts fail closed.
+    """
+    from engine.community.kernel.file_count import FileCountError
+
+    if engine == "claude_code":
+        root = _claude_code_file_layout(Path.home()).pool_root.parent.parent
+        return root, load_claude_code_file_roots()
+    if engine == "openclaw":
+        from engine.community.plugin_api.workspace_root import workspace_root
+
+        root = workspace_root().parent
+        return root, (root, root.parent / "openclawExt")
+    raise FileCountError("unsupported")
