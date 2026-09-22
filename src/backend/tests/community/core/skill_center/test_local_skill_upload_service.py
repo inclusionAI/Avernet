@@ -569,13 +569,17 @@ class _ConcurrentRepo(_ReplacementRepo):
 
 
 class _ReplacementFactory(_Factory):
-    def __init__(self, filesystem):
+    def __init__(self, filesystem, *, aliases=None):
         super().__init__(filesystem)
         self.locator_calls: list[dict] = []
+        self.aliases = aliases or {}
 
-    def local_skill_package_storage_for_locator(self, *, locator, **kwargs):
+    def local_skill_package_storage_for_locator(self, *, locator, skill_name, **kwargs):
         self.locator_calls.append({"locator": locator, **kwargs})
-        return _Storage(self._filesystem, locator)
+        canonical = str(self.local_dir / skill_name)
+        if locator != canonical and self.aliases.get(locator) != canonical:
+            raise ValueError("Local Skill cleanup locator escapes skills-local")
+        return _Storage(self._filesystem, canonical)
 
 
 class _DiskStorageFactory(_ReplacementFactory):
@@ -585,9 +589,12 @@ class _DiskStorageFactory(_ReplacementFactory):
         directory, _ = super().local_skill_package_storage(**kwargs)
         return directory, LocalSkillPackageStorage(self._filesystem, directory)
 
-    def local_skill_package_storage_for_locator(self, *, locator, **kwargs):
+    def local_skill_package_storage_for_locator(self, *, locator, skill_name, **kwargs):
         self.locator_calls.append({"locator": locator, **kwargs})
-        return LocalSkillPackageStorage(self._filesystem, locator)
+        canonical = str(self.local_dir / skill_name)
+        if locator != canonical and self.aliases.get(locator) != canonical:
+            raise ValueError("Local Skill cleanup locator escapes skills-local")
+        return LocalSkillPackageStorage(self._filesystem, canonical)
 
 
 class _ReplacementRuntime:
@@ -1234,6 +1241,41 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert not any("replacement-" in path for path in filesystem.files)
     assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
         _skill_md(description="new description")
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_fallback_replace_preserves_an_aliased_recorded_locator():
+    canonical = "/private/skills-local/upload-skill"
+    historical = (
+        "/aidesktop/owner/bot/claude_code/workspace/skills/skills-local/upload-skill"
+    )
+    filesystem = _Filesystem()
+    filesystem.files[f"{canonical}/SKILL.md"] = b"old"
+    old = {**_existing_skill(active=False), "git_path": f"local://{historical}"}
+    repo = _ReplacementRepo([old])
+    factory = _ReplacementFactory(
+        filesystem,
+        aliases={historical: canonical},
+    )
+
+    result = await _replacement_service(
+        filesystem,
+        repo,
+        _ReplacementRuntime([True]),
+        factory=factory,
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
+    )
+
+    assert result["skill"]["git_path"] == f"local://{historical}"
+    assert repo.atomic_replacements[0]["old_locator"] == historical
+    assert repo.atomic_replacements[0]["new_locator"] == historical
+    assert filesystem.files[f"{canonical}/SKILL.md"] == _skill_md(
+        description="new description"
     )
 
 

@@ -390,6 +390,7 @@ def test_coding_template_pool_paths_use_aicoding_physical_layout(
         is_desktop=False,
         is_teclaw=False,
         locator="replacement",
+        skill_name="replacement",
     )
     expected = "/home/admin/.aicoding/workspace/skills-pool/skills-local/replacement"
     assert local_directory == expected

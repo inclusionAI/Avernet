@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 from agentclaw.community.core.workspace.runtime_identity import (
     uses_aicoding_runtime,
@@ -104,6 +105,34 @@ def pool_paths_for_engine(engine: str) -> PoolPaths:
     raise ValueError(f"engine Pool layout not implemented: {engine}")
 
 
+def legacy_local_locator_roots(
+    runtime_engine: str,
+    *,
+    canonical_root: Path,
+    current_address_root: Path,
+    claude_code_address_root: Path,
+) -> tuple[Path, ...]:
+    """Return exact roots accepted for a recorded Legacy Local locator.
+
+    AICoding superseded the historical Claude Code filesystem namespace while
+    existing ``local://`` identities remained stable.  Both Host/NAS and
+    Engine address views therefore remain readable for that runtime only.
+    Other runtimes retain their single canonical root.
+    """
+
+    roots = [canonical_root]
+    if runtime_engine == "aicoding":
+        roots.extend(
+            (
+                current_address_root,
+                claude_code_address_root,
+                Path(AICodingPoolPaths().legacy_local),
+                Path(ClaudeCodePoolPaths().legacy_local),
+            )
+        )
+    return tuple(dict.fromkeys(roots))
+
+
 __all__ = [
     "AICodingPoolPaths",
     "ClaudeCodePoolPaths",
@@ -111,6 +140,7 @@ __all__ = [
     "HermesPoolPaths",
     "OpenClawPoolPaths",
     "PoolPaths",
+    "legacy_local_locator_roots",
     "pool_paths_for_engine",
     "runtime_layout_engine_for_bot",
 ]

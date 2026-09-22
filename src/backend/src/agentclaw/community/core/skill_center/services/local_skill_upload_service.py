@@ -508,17 +508,15 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         """
         old_locator = str(skill["git_path"])[len("local://") :]
         version_dir = f".{name}.replacement-{uuid4().hex}"
-        canonical_locator, canonical = (
-            self._skill_service_factory.local_skill_package_storage(
-                entity_id=str(bot["entity_id"]),
-                owner_id=owner_id,
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                entity_type=str(bot.get("entity_type") or "staff"),
-                is_desktop=bot.get("bot_type") == "desktop",
-                is_teclaw=is_teclaw,
-                name=name,
-            )
+        _, canonical = self._skill_service_factory.local_skill_package_storage(
+            entity_id=str(bot["entity_id"]),
+            owner_id=owner_id,
+            bot_id=bot_id,
+            engine_type=bot.get("active_engine"),
+            entity_type=str(bot.get("entity_type") or "staff"),
+            is_desktop=bot.get("bot_type") == "desktop",
+            is_teclaw=is_teclaw,
+            name=name,
         )
         _, staged = self._skill_service_factory.local_skill_package_storage(
             entity_id=str(bot["entity_id"]),
@@ -531,24 +529,27 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             name=name,
             directory_name=version_dir,
         )
-        old_storage = (
-            self._skill_service_factory.local_skill_package_storage_for_locator(
-                entity_id=str(bot["entity_id"]),
-                owner_id=owner_id,
-                bot_id=bot_id,
-                engine_type=bot.get("active_engine"),
-                entity_type=str(bot.get("entity_type") or "staff"),
-                is_desktop=bot.get("bot_type") == "desktop",
-                is_teclaw=is_teclaw,
-                locator=old_locator,
+        try:
+            old_storage = (
+                self._skill_service_factory.local_skill_package_storage_for_locator(
+                    entity_id=str(bot["entity_id"]),
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    engine_type=bot.get("active_engine"),
+                    entity_type=str(bot.get("entity_type") or "staff"),
+                    is_desktop=bot.get("bot_type") == "desktop",
+                    is_teclaw=is_teclaw,
+                    locator=old_locator,
+                    skill_name=name,
+                )
             )
-        )
+        except Exception as exc:
+            raise LocalSkillStorageError() from exc
         has_old_package = await old_storage.exists()
-        # Replacement is defined only for the stable layout-owned locator.
-        # It must never migrate ``git_path`` or manufacture a new package for a
-        # metadata row whose old bytes are already missing: either case would
-        # leave no authoritative old package to restore on failure.
-        if old_locator != canonical_locator or not has_old_package:
+        # Factory resolution proves that the recorded locator identifies this
+        # stable layout-owned package.  It may be a supported historical alias,
+        # but missing bytes still cannot be manufactured from metadata.
+        if not has_old_package:
             raise LocalSkillStorageError()
         backup = None
         old_metadata = {
@@ -585,7 +586,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 owner_id=owner_id,
                 bot_id=bot_id,
                 old_locator=old_locator,
-                new_locator=canonical_locator,
+                new_locator=old_locator,
                 description=description,
             )
             if replaced is None:
@@ -650,7 +651,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             "skill": {
                 **skill,
                 "description": description,
-                "git_path": f"local://{canonical_locator}",
+                "git_path": skill["git_path"],
                 "user_id": owner_id,
             },
             "actor_id": actor_id,

@@ -14,3 +14,17 @@ class SkillServiceFactoryProtocol(Protocol):
     """Service API for minting per-request SkillService instances."""
 
     def create(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def local_skill_package_storage_for_locator(
+        self,
+        *,
+        entity_id: str,
+        owner_id: str,
+        bot_id: str,
+        engine_type: str | None,
+        entity_type: str,
+        is_desktop: bool,
+        is_teclaw: bool,
+        locator: str,
+        skill_name: str,
+    ) -> Any: ...
