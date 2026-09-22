@@ -2,6 +2,10 @@
 #[path = "migrate_group_notify_contract.rs"]
 mod group_notify_contract;
 
+#[cfg(test)]
+#[path = "../../../bootstrap/bcs/src/migrations.rs"]
+mod migration_chain_migrations;
+
 use super::*;
 use std::sync::Arc;
 use bcs_config_api::mysql::MysqlConnectionConfig;
@@ -91,6 +95,27 @@ async fn full_mysql_migration_chain_applies_and_preserves_history() -> Result<()
     result
 }
 
+/// The group-notify contract verification is dialect-independent Store
+/// behavior over the migrated `bcs_groups` chain. Running it non-ignored on a
+/// SQLite-backed migrated chain keeps these lines exercised in every CI run;
+/// the ignored MySQL chain test adds the MySQL-compatible evidence on top with
+/// the exact same verification body.
+#[tokio::test]
+async fn sqlite_migration_chain_backs_the_group_notify_contract() -> Result<()> {
+    use bcs_db_local::LocalSqliteDbPlugin;
+    use bcs_group_store::MySqlGroupStore as ChainMySqlGroupStore;
+
+    let db: Arc<dyn DbPlugin> =
+        Arc::new(LocalSqliteDbPlugin::new().context("open sqlite db")?);
+    migration_chain_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .context("apply the sqlite migration chain")?;
+    group_notify_contract::verify(Arc::clone(&db), |db, env| {
+        ChainMySqlGroupStore::sqlite(Arc::clone(db), env.to_string())
+    })
+    .await
+}
+
 async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArgs) -> Result<()> {
     let migrated_db = Arc::clone(&db);
     let db: &dyn DbPlugin = db.as_ref();
@@ -113,7 +138,10 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         assert_eq!(chain_history(db).await?, records);
 
         println!("[phase 2/3] Group Store human-notify contract on the migrated chain");
-        group_notify_contract::verify(migrated_db.clone()).await?;
+        group_notify_contract::verify(migrated_db.clone(), |db, env| {
+            bcs_group_store::MySqlGroupStore::new(Arc::clone(db), env.to_string())
+        })
+        .await?;
 
         // A completed historical prefix upgrades normally without rewriting its
         // records. The old IF NOT EXISTS spelling has the same DDL result here;

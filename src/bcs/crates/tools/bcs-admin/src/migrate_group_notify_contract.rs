@@ -4,6 +4,12 @@
 //! ignored `full_mysql_migration_chain_applies_and_preserves_history` test
 //! (CI: `.github/workflows/unit-tests.yml`) because static SQL parsing is not
 //! a substitute for Store behavior on a MySQL-compatible backend.
+//!
+//! The same verification body also runs NON-ignored against a SQLite-backed
+//! migration chain (`sqlite_migration_chain_backs_the_group_notify_contract`
+//! in `migrate_mysql_chain_tests.rs`): the contract is dialect-independent,
+//! so the SQLite run pins Group-notify Store behavior in every CI run while
+//! the MySQL run adds chain-specific evidence.
 
 use super::*;
 use bcs_domain::{Participant, ParticipantRole};
@@ -17,10 +23,6 @@ use bcs_test_support::contract::group_human_notify::group_human_notify_contract;
 
 const ENV: &str = "test";
 
-fn mysql_store(db: &Arc<dyn DbPlugin>, env: &str) -> MySqlGroupStore {
-    MySqlGroupStore::new(Arc::clone(db), env.to_string())
-}
-
 fn contract_group(id: &str, driver: &str) -> Group {
     Group::new(
         id,
@@ -29,7 +31,15 @@ fn contract_group(id: &str, driver: &str) -> Group {
     )
 }
 
-pub(super) async fn verify(db: Arc<dyn DbPlugin>) -> Result<()> {
+/// Run the whole notify-contract verification against `db`. `build_store`
+/// constructs the dialect-specific Store (`MySqlGroupStore::new` for the
+/// MySQL chain, `MySqlGroupStore::sqlite` for the SQLite chain) so every
+/// read in this body is a cold read over the shared database.
+pub(super) async fn verify<F>(db: Arc<dyn DbPlugin>, build_store: F) -> Result<()>
+where
+    F: Fn(&Arc<dyn DbPlugin>, &str) -> MySqlGroupStore + Copy,
+{
+    let mysql_store = |db: &Arc<dyn DbPlugin>, env: &str| build_store(db, env);
     // Shared three-mode / cold-read / policy-read contract. The reader factory
     // must build a NEW store over the same database on every call so every
     // read is a cold read that proves persistence, not cache state.
@@ -48,7 +58,7 @@ pub(super) async fn verify(db: Arc<dyn DbPlugin>) -> Result<()> {
     mysql_store(&db, ENV)
         .upsert(mutable_group.clone())
         .await
-        .context("seed MySQL mutable Group row")?;
+        .context("seed mutable Group row")?;
     let reader = mysql_store(&db, ENV);
     reader
         .patch_mutable_fields(
@@ -78,7 +88,7 @@ pub(super) async fn verify(db: Arc<dyn DbPlugin>) -> Result<()> {
     writer
         .upsert(eventful_group.clone())
         .await
-        .context("seed MySQL eventful Group row")?;
+        .context("seed eventful Group row")?;
     let committed = writer
         .commit_eventful_mutation(CommitGroupEventfulMutation {
             group_id: eventful_group.id.clone(),
