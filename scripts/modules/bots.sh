@@ -1008,16 +1008,7 @@ bots_dynamic_start_openclaw() {
         log_info "${name} manual model credential is present for gateway startup."
     fi
 
-    # Inject BCS session token and bot_uuid so BCN plugin tool handlers
-    # (e.g. group-context-handler) can authenticate against BCS HTTP API.
-    local bcn_session_file="${profile_dir}/.bcs/session.json"
-    local bcs_authz bcn_bot_uuid
-    bcs_authz="$(bots_session_token "$bcn_session_file")"
-    bcn_bot_uuid="$(bots_session_bot_uuid "$bcn_session_file")"
-
     # 以下为安全注释COSEC：仅向子进程传递环境中的凭据；生成的 Bot 配置保留 SecretRef。
-    BCN_BOT_TOKEN="$bcs_authz" \
-    BCN_BOT_UUID="$bcn_bot_uuid" \
     NODE_TLS_REJECT_UNAUTHORIZED=0 \
     BCS_IGNORE_CREDENTIALS=1 \
     OPENCLAW_GATEWAY_TOKEN="" \
