@@ -1312,16 +1312,17 @@ class TestSyncMcpDetailToAllBots:
         service.sync_mcp_details = AsyncMock(return_value={"success": True})
 
         result = await service.sync_mcp_detail_to_all_bots(
-            user_id="u1", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
+            user_id="caller", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
             entity_id="100", entity_type="staff", target_bot_ids=["bot1"],
+            target_bot_owners={"bot1": "team-owner"},
         )
 
         assert result["sync_results"] == [{
             "bot_id": "bot1", "synced": True, "reason": "RUNTIME_DRIFT", "error": None,
         }]
-        service.refresh_mcp_scope.assert_awaited_once()
+        assert service.refresh_mcp_scope.call_args.kwargs["user_id"] == "team-owner"
         service.sync_mcp_details.assert_awaited_once_with(
-            user_id="u1", entity_id="100", bot_id="bot1",
+            user_id="team-owner", entity_id="100", bot_id="bot1",
             entity_type="staff", engine_type="openclaw", active_only=True,
         )
 

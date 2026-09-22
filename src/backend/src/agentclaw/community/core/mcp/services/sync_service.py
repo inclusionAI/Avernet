@@ -612,11 +612,11 @@ class MCPSyncService(MCPSyncServiceProtocol):
                             bot_id, server_code,
                         )
                         scope = await self.refresh_mcp_scope(
-                            user_id=user_id, entity_id=entity_id, bot_id=bot_id,
+                            user_id=bot_owner_id, entity_id=entity_id, bot_id=bot_id,
                             entity_type=entity_type, engine_type=effective_engine_type,
                         )
                         details = await self.sync_mcp_details(
-                            user_id=user_id, entity_id=entity_id, bot_id=bot_id,
+                            user_id=bot_owner_id, entity_id=entity_id, bot_id=bot_id,
                             entity_type=entity_type, engine_type=effective_engine_type,
                             active_only=True,
                         ) if scope.get("success") else None
