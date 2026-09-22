@@ -511,8 +511,10 @@ def test_trajectory_display_html_renders_beijing_time():
         params={"task_id": "t1", "display": "html"},
     )
     assert r.status_code == 200
-    assert "2023-11-15 06:13:20 北京时间" in r.text
-    assert "22:13:20 北京时间" not in r.text   # not the UTC wall-clock
+    # 时区仍是北京(UTC+8)换算的墙钟,但不再带“北京时间”字样
+    assert "2023-11-15 06:13:20" in r.text
+    assert "22:13:20" not in r.text   # not the UTC wall-clock
+    assert "北京时间" not in r.text    # 字样按需求移除
 
 
 @pytest.mark.unit
@@ -696,3 +698,40 @@ def test_trajectory_display_html_renders_session_msgs_block():
     assert "节点会话 · 最近消息 2 条" in r.text
     assert "user | run the job" in r.text
     assert "assistant | tool failed: boom" in r.text
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_analysis_time_and_output_prettified():
+    """总体分析展示要求:①分析时间由 ms epoch 转为日历时间(不再裸露毫秒数);
+    ②结论汇总是 pre-wrap 卡片(保留换行分段,不再挤在一行 a-row)。
+    HMAC 时间字段与事件线均不再出现“北京时间”字样。"""
+    analysis = json.dumps({
+        "analysis_type": "tc_bot",
+        "analysis_executor": "bot-analyst",
+        "final_status": "FAILED",
+        "error_category": "execution_error",
+        "failure_reason": "node c5 工具调用失败,重试耗尽后 HUNG",
+        "analysis_output": "「过程复盘」\n任务先规划后派发,第二轮出现工具报错。\n「根因链」\nnode c5 的 search 工具连续返回 500。",
+        "gmt_create": 1790077434283,
+    }, ensure_ascii=False)
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
+        action_result="failed", attempt=0, gmt_create=1000, gmt_modified=1000,
+    )
+    traj = TaskTrajectory(task_id="t1", gmt_create=1000, gmt_modified=1000,
+                          timeline=[ev], analysis=analysis)
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    # ① 分析时间转换(1790077434283 → 北京时间日历)
+    assert "1790077434283" not in r.text.split("结论汇总")[0]
+    import re
+    assert re.search(r"分析时间.*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", r.text)
+    # ② 结论汇总卡片在 pre-wrap 块中(不再 a-row 行)
+    assert 'class="a-output"' in r.text
+    assert "「根因链」" in r.text  # 结论内容完整呈现
+    # ③ 无“北京时间”字样
+    assert "北京时间" not in r.text

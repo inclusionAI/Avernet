@@ -742,9 +742,11 @@ class _FakeNode:
     ``run_info.output``(产出富化)."""
 
     def __init__(self, *, node_id: str, status: Status, extend_props: dict | None = None,
-                 start_time: int | None = None, output: dict | None = None) -> None:
+                 start_time: int | None = None, output: dict | None = None,
+                 task_spec=None) -> None:
         self.node_id = node_id
         self.status = status
+        self.task_spec = task_spec
         self.run_info = RuntimeInfo(
             start_time=start_time,
             output=dict(output or {}),
@@ -1310,6 +1312,52 @@ async def test_do_analysis_returns_timeline_with_fresh_session_msgs():
     # fresh(本回合实拉)胜过 ext_info 快照
     assert result.timeline[0].session_msgs == fresh
     assert result.timeline[0].session_msgs != stale
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_submit_goal_replaces_digest_on_first_event():
+    """首条 submit 事件的 action_input 读时富化为 TaskSpec 的 goal(目标+验收),
+    不再展示 SHA-256 task_spec_digest;非 submit 首事件/无根 spec 保持原值。"""
+    from agentclaw.community.core.task.domain.models import (
+        AcceptanceCriteria, Context, Goal, TaskSpec,
+    )
+
+    spec = TaskSpec(
+        context=Context(background="bg", title="T"),
+        goal=Goal(objective="完成市场分析", acceptances=[
+            AcceptanceCriteria(id="a1", description="给出结论"),
+            AcceptanceCriteria(id="a2", description="引用数据来源"),
+        ]),
+    )
+    graph = _FakeGraph([
+        _FakeNode(node_id="t1", status=Status.DONE, task_spec=spec),
+    ])
+    timeline = [
+        _make_event(node_id="t1", action_type=TrajectoryActionType.SUBMIT,
+                     gmt_create=1000, action_input="42992fc6f776c8806e16d240f41fb0d9fc3797fb63ffe2313c46a557e07df24"),
+        _make_event(node_id="t1", action_type=TrajectoryActionType.PLAN, gmt_create=2000),
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(events=[]), _FakeAnalyzer(), None,
+                                graph=graph)
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    assert result.timeline[0].action_input == (
+        "目标: 完成市场分析\n验收: 给出结论 / 引用数据来源"
+    )
+    assert "42992fc6" not in (result.timeline[0].action_input or "")
+
+    # graph 未接线 → 保留原 digest(展示旁路降级)
+    timeline2 = [
+        _make_event(node_id="t1", action_type=TrajectoryActionType.SUBMIT,
+                    gmt_create=1000, action_input="deadbeef"),
+    ]
+    traj2 = _make_trajectory(task_id="t1", timeline=timeline2)
+    svc2 = TaskTrajectoryService(_FakeAssembler(traj2), _FakeRepo(events=[]), _FakeAnalyzer(), None)
+    out2 = await svc2.get_trajectory("t1", do_analysis=False)
+    assert out2.timeline[0].action_input == "deadbeef"
 
 
 @pytest.mark.asyncio

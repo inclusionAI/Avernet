@@ -67,13 +67,13 @@ _BEIJING_TZ = timezone(timedelta(hours=8))  # Asia/Shanghai
 
 
 def _fmt_time(ms: int | None) -> str:
-    """ms epoch → ``YYYY-MM-DD HH:MM:SS 北京时间``(UTC+8;None → ``-``)。"""
+    """ms epoch → ``YYYY-MM-DD HH:MM:SS``(北京时区 UTC+8 换算,但不带“北京时间”字样;
+    None → ``-``)。"""
     if not ms:
         return "-"
     try:
-        return (
-            datetime.fromtimestamp(ms / 1000, tz=_BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
-            + " 北京时间"
+        return datetime.fromtimestamp(ms / 1000, tz=_BEIJING_TZ).strftime(
+            "%Y-%m-%d %H:%M:%S"
         )
     except (OverflowError, OSError, ValueError):
         return f"{ms}ms"
@@ -171,13 +171,15 @@ def _render_event(ev: "object") -> str:
             )
         parts.append("</div>")
 
-    # action_input(可折叠;防长文本撑爆页面)
+    # action_input(可折叠;防长文本撑爆页面)。submit 事件在读时被富化为 TaskSpec 的
+    # goal(服务层 _attach_node_outputs),摘要标注换成“任务目标”;其余动作保持原 label。
     if action_input:
         preview = str(action_input)
         if len(preview) > 80:
             preview = preview[:80] + "…"
+        label = "任务目标 · goal" if action_type == "submit" else "action_input"
         parts.append('<details class="ev-input">')
-        parts.append(f'<summary>action_input · <code>{html.escape(preview)}</code></summary>')
+        parts.append(f'<summary>{label} · <code>{html.escape(preview)}</code></summary>')
         parts.append(f'<pre>{html.escape(str(action_input))}</pre>')
         parts.append("</details>")
 
@@ -253,8 +255,9 @@ def _render_analysis(analysis_raw: str | None, *, do_analysis: bool) -> str:
             note = "未分析(do_analysis=false;调 ?do_analysis=true 触发 bot 总体分析)。"
         return f'<section class="analysis analysis-empty"><h2>总体分析</h2><p>{html.escape(note)}</p></section>'
 
-    def _field(label: str, key: str) -> str:
-        val = parsed.get(key)
+    # 先渲染单行短字段(类型/执行者/时间/枚举结论)——分析时间(ms epoch)经 _fmt_time
+    # 转为可读日历时间,不再裸露 1790077434283。
+    def _short(label: str, val) -> str:
         if not val:
             return ""
         return (
@@ -262,18 +265,26 @@ def _render_analysis(analysis_raw: str | None, *, do_analysis: bool) -> str:
             f'<span class="a-value">{html.escape(str(val))}</span></div>'
         )
 
-    body = "".join(
-        [
-            _field("分析执行者类型", "analysis_type"),
-            _field("执行者", "analysis_executor"),
-            _field("最终执行状态 (final_status)", "final_status"),
-            _field("错误类型 (error_category)", "error_category"),
-            _field("推进理由 (boost_reason)", "boost_reason"),
-            _field("失败根因 (failure_reason)", "failure_reason"),
-            _field("结论汇总", "analysis_output"),
-            _field("分析时间", "gmt_create"),
-        ]
-    )
+    fs, fe = parsed.get("final_status"), parsed.get("error_category")
+    time_ms = parsed.get("gmt_create")
+    body_rows = [
+        _short("分析执行者类型", parsed.get("analysis_type")),
+        _short("执行者", parsed.get("analysis_executor")),
+        _short("最终执行状态 (final_status)", fs if fs else None),
+        _short("错误类型 (error_category)", fe if fe else None),
+        _short("推进理由 (boost_reason)", parsed.get("boost_reason")),
+        _short("失败根因 (failure_reason)", parsed.get("failure_reason")),
+        _short("分析时间", _fmt_time(int(time_ms)) if time_ms else None),
+    ]
+    body = "".join(row for row in body_rows if row)
+    # 结论汇总(analysis_output):大模型的结构化长文本——pre-wrap 卡片排版,保留换行
+    # (指令要求「过程复盘」→「根因链」→…分段书写),不再挤在一行 a-row 里。
+    a_output = parsed.get("analysis_output")
+    if a_output:
+        body += (
+            '<div class="a-section"><span class="a-label">结论汇总</span>'
+            f'<div class="a-output">{html.escape(str(a_output))}</div></div>'
+        )
     # analysis_input 是喂给分析器的结构化摘要,折叠
     a_input = parsed.get("analysis_input")
     if a_input:
@@ -324,6 +335,11 @@ def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = Fals
   .a-label {{ flex: 0 0 180px; color: #64748b; }}
   .a-value {{ flex: 1; word-break: break-word; }}
   .a-value:empty::after {{ content: "—"; color: #cbd5e1; }}
+  .a-section {{ margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }}
+  .a-section .a-label {{ color: #64748b; font-size: 13px; font-weight: 600; }}
+  .a-output {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+               padding: 12px 14px; font-size: 13px; line-height: 1.7; color: #0f172a;
+               white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }}
   details.a-input {{ margin-top: 10px; font-size: 13px; }}
   details.a-input pre {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
                          padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 12px; }}

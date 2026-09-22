@@ -593,21 +593,58 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             )
             return
         outputs: dict[str, dict] = {}
+        root_spec = None
         for node in getattr(graph, "tasks", []):
             out = getattr(node.run_info, "output", None)
             if isinstance(out, dict) and out:
                 outputs[node.node_id] = out
-        if not outputs:
+            if node.node_id == trajectory.task_id:
+                root_spec = getattr(node, "task_spec", None)
+        if outputs:
+            last_seen: set[str] = set()
+            for ev in reversed(trajectory.timeline):
+                node_id = ev.node_id
+                if node_id in last_seen:
+                    continue  # 该节点更早的事件:production 只挂最后一条
+                last_seen.add(node_id)
+                out = outputs.get(node_id)
+                if out:
+                    ev.output = dict(out)
+        self._attach_submit_goal(trajectory, root_spec)
+
+    def _attach_submit_goal(self, trajectory: TaskTrajectory, root_spec) -> None:
+        """把 timeline **第一条 submit 事件**的 ``action_input`` 富化为 TaskSpec 的
+        goal 提示文本(展示层语义;DB 行仍存 task_spec_digest 指纹,不落库)。
+
+        需求:首条 submit 的 action_input 原是 SHA-256 task_spec_digest,页面上无排查
+        价值——读时改为呈现根节点 TaskSpec 的目标(objective + 验收标准)。仅当首条
+        事件 action_type=="submit" 且根 spec 存在时替换;其余情况保持原值。观测旁路:
+        任何失败静默保持原样(决策 #14 精神)。
+        """
+        try:
+            if not trajectory.timeline or root_spec is None:
+                return
+            first = trajectory.timeline[0]
+            if str(getattr(first.action_type, "value", first.action_type)) != "submit":
+                return
+            goal = getattr(root_spec, "goal", None)
+            if goal is None:
+                return
+            objective = str(getattr(goal, "objective", "") or "")
+            acceptances = [
+                str(getattr(a, "description", "") or a)
+                for a in (getattr(goal, "acceptances", None) or [])
+            ]
+            lines = []
+            if objective:
+                lines.append(f"目标: {objective}")
+            if acceptances:
+                lines.append("验收: " + " / ".join(a for a in acceptances if a))
+            text = "\n".join(lines).strip()
+            if text:
+                first.action_input = text
+        except Exception:  # noqa: BLE001  展示富化失败 → 保留原 digest
             return
-        last_seen: set[str] = set()
-        for ev in reversed(trajectory.timeline):
-            node_id = ev.node_id
-            if node_id in last_seen:
-                continue  # 该节点更早的事件:production 只挂最后一条
-            last_seen.add(node_id)
-            out = outputs.get(node_id)
-            if out:
-                ev.output = dict(out)
 
     # ------------------------------------------------------------------
     # 会话明细物化 + 未结束节点异常研判 — timeline 之外的"执行侧现场"
