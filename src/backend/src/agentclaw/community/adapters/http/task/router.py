@@ -50,6 +50,12 @@ from agentclaw.community.core.errors import InternalError
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import Status
+from agentclaw.community.core.task.domain.models import TaskOpResult
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
+from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
+from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
+    format_benchmark_prompt,
+)
 from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
 from agentclaw.community.core.task.task_discovery.scheduler import TaskDiscoveryScheduler
 
@@ -84,6 +90,53 @@ async def execute_task_internal(
     task_request = task_info_request_from_dto(body)
     result = await service.execute(task_request)
     return envelope(op_result_to_dto(result), request)
+
+
+@router.post("/benchmark_execute", response_model=Envelope[TaskOpResultDTO])
+@envelope_errors
+async def benchmark_execute_task_internal(
+    body: TaskInfoRequestDTO,
+    request: Request,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+    bot_port: OpenApiBotPort = Injected(OpenApiBotPort),  # noqa: B008
+) -> Envelope[TaskOpResultDTO]:
+    """Benchmark 执行(内部副本,不经 spanner)。记录 task_id + 直接给 bot 发消息。
+
+    与公开面 ``/openapi/v1/collaboration/tasks/benchmark_execute`` 同逻辑,供内部调用方(bot/服务间)使用。"""
+    # 1. 记录任务(持久化 + 初始化图 + 后台 on_execute)
+    task_request = task_info_request_from_dto(body)
+    result = await service.execute(task_request)
+
+    # 2. 构造 prompt 并直接发给 bot
+    task_spec_dict = body.task_spec.model_dump()
+    prompt = format_benchmark_prompt(task_spec_dict)
+    bot_identity = compose_bot_identity(body.owner_bot_id, body.owner_user_id)
+
+    extend_props = dict(result.extend_props or {})
+    if bot_port is not None:
+        try:
+            await bot_port.ensure_grant(bot_identity)
+            sent = await bot_port.send_message(
+                bot_id=bot_identity,
+                message=prompt,
+                metadata={"biz_task_id": result.task_id, "benchmark": True},
+            )
+            extend_props["benchmark_run_id"] = sent.run_id
+            extend_props["benchmark_session_id"] = sent.session_id
+            extend_props["benchmark_send"] = "ok"
+        except Exception as exc:  # noqa: BLE001 发送失败不阻塞 execute 记录
+            extend_props["benchmark_send"] = f"error: {exc}"
+    else:
+        extend_props["benchmark_send"] = "skip"
+
+    enriched = TaskOpResult(
+        task_id=result.task_id,
+        success=result.success,
+        error=result.error,
+        run_id=result.run_id,
+        extend_props=extend_props,
+    )
+    return envelope(op_result_to_dto(enriched), request)
 
 
 @router.get("/trajectory", response_model=Envelope[TaskTrajectoryDTO])
