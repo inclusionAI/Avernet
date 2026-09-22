@@ -140,6 +140,7 @@ pub mod http_adapter;
 pub mod agent_identity;
 mod identity_wiring;
 pub mod lifecycle;
+mod ws_leadership;
 pub mod metrics;
 pub mod migrations;
 mod message_delivery_wiring;

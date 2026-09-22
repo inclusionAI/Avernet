@@ -36,6 +36,7 @@ static NEXT_SCOPE_CHANGE_LEASE_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default)]
 pub struct WorkbenchConnectionRegistry {
+    pub connection_epoch: crate::shared::connection_epoch::ConnectionEpoch,
     sessions: RwLock<HashMap<String, Vec<FrontendConnection>>>,
     bot_query: RwLock<Option<Arc<dyn BotQueryService>>>,
     scope_change_barriers: Mutex<HashSet<(String, String, u64)>>,
@@ -57,6 +58,7 @@ impl WorkbenchConnectionRegistry {
 
     pub fn with_bot_query(bot_query: Arc<dyn BotQueryService>) -> Self {
         Self {
+            connection_epoch: Default::default(),
             sessions: RwLock::new(HashMap::new()),
             bot_query: RwLock::new(Some(bot_query)),
             scope_change_barriers: Mutex::new(HashSet::new()),

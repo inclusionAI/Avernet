@@ -591,3 +591,46 @@ async fn reconnect_sender_survives_old_cleanup_after_runtime_slot_release() {
         .await.unwrap().unwrap().unwrap().into_text().unwrap();
     assert_eq!(delivered, "new-sender-survived");
 }
+
+#[tokio::test]
+async fn leadership_loss_closes_registered_and_unregistered_bot_sockets() {
+    let (addr, registry, runtime) = start_test_server().await;
+    let mut registered = connect_bot(addr, "leader-bot").await;
+    let (mut unregistered, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws/bot")).await.unwrap();
+    registry.connection_epoch.set_accepting(false);
+    // Even a socket accepted after demotion must not stay on the follower.
+    let (mut late, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws/bot")).await.unwrap();
+    for ws in [&mut registered, &mut unregistered, &mut late] {
+        let message = tokio::time::timeout(Duration::from_secs(2), ws.next()).await.unwrap().unwrap().unwrap();
+        let Message::Close(Some(frame)) = message else { panic!("expected leadership close, got {message:?}") };
+        assert_eq!(u16::from(frame.code), 1012);
+        assert_eq!(frame.reason, "leadership_lost");
+    }
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while runtime.disconnects.lock().await.is_empty() { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    assert!(!registry.is_connected("leader-bot").await);
+    assert_eq!(*runtime.disconnects.lock().await, vec!["leader-bot"]);
+    registry.connection_epoch.set_accepting(true);
+    let mut replacement = connect_bot(addr, "leader-bot").await;
+    assert!(registry.is_connected("leader-bot").await);
+    replacement.close(None).await.unwrap();
+}
+
+#[tokio::test]
+async fn leadership_close_does_not_wait_for_application_disconnect_cleanup() {
+    let (addr, registry, runtime) = start_test_server().await;
+    let mut socket = connect_bot(addr, "slow-cleanup").await;
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    *runtime.disconnect_gate.lock().await = Some((entered.clone(), resume.clone()));
+    registry.connection_epoch.set_accepting(false);
+    tokio::time::timeout(Duration::from_secs(2), entered.notified()).await.unwrap();
+    let message = tokio::time::timeout(Duration::from_secs(2), socket.next()).await.unwrap().unwrap().unwrap();
+    assert!(matches!(message, Message::Close(Some(ref frame)) if u16::from(frame.code) == 1012));
+    assert!(runtime.disconnects.lock().await.is_empty(), "cleanup is still blocked");
+    resume.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while runtime.disconnects.lock().await.is_empty() { tokio::task::yield_now().await; }
+    }).await.unwrap();
+}

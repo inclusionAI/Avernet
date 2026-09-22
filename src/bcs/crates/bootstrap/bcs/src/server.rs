@@ -5445,6 +5445,7 @@ impl BcsServer {
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
 
         self.initialize_lifecycle().await?;
+        let ws_leadership = crate::ws_leadership::start(self.state.clone()).await;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
         let state_machine_progression_handle = Arc::new(Mutex::new(self.spawn_state_machine_progression_scanner()));
         let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
@@ -5519,6 +5520,7 @@ impl BcsServer {
         // Axum spawns the signal future; it must not keep recovery alive if
         // the server future itself is cancelled before receiving a signal.
         let shutdown_progression = Arc::downgrade(&state_machine_progression_handle);
+        let shutdown_ws = ws_leadership.stop_handle();
 
         let serve_result = axum::serve(
             listener,
@@ -5538,6 +5540,7 @@ impl BcsServer {
                 }
 
                 info!("Shutdown signal received, gracefully shutting down...");
+                shutdown_ws.cancel();
 
                 if let Some(progression) = shutdown_progression.upgrade() {
                     progression.lock().await.shutdown().await;
@@ -5583,6 +5586,7 @@ impl BcsServer {
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
 
         self.initialize_lifecycle().await?;
+        let ws_leadership = crate::ws_leadership::start(self.state.clone()).await;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
         let state_machine_progression_handle = self.spawn_state_machine_progression_scanner();
         let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
@@ -5598,7 +5602,8 @@ impl BcsServer {
         let metrics = self.state.metrics.clone();
 
         let handle = tokio::spawn(async move {
-            // Keep recovery alive for the server lifetime, including random-port tests.
+            // Keep supervision alive for the server lifetime, including random-port tests.
+            let _ws_leadership = ws_leadership;
             let mut state_machine_progression_handle = state_machine_progression_handle;
             let result = axum::serve(
                 listener,

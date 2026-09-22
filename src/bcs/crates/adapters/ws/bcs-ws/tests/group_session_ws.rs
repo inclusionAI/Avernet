@@ -95,6 +95,10 @@ impl GroupSessionConnectionService for RecordingConnectionService {
 }
 
 fn app(service: Arc<RecordingConnectionService>) -> axum::Router {
+    app_with_registry(service, Arc::new(WorkbenchConnectionRegistry::new()))
+}
+
+fn app_with_registry(service: Arc<RecordingConnectionService>, registry: Arc<WorkbenchConnectionRegistry>) -> axum::Router {
     let services = Services::noop();
     let dispatch_state = Arc::new(WebDispatchState {
         message_flow: services.message_flow,
@@ -102,14 +106,20 @@ fn app(service: Arc<RecordingConnectionService>) -> axum::Router {
         workbench_sessions: services.workbench_sessions,
         interactions: Arc::new(NoopInteractionService),
         group_session_connections: Some(service.clone()),
-        frontend_connections: Arc::new(WorkbenchConnectionRegistry::new()),
+        frontend_connections: registry,
         run_channels: Arc::new(RunChannelManager::new()),
     });
     group_session_websocket_router(
         service,
-        dispatch_state,
+        dispatch_state.clone(),
         Arc::new(NoopWsLifecycleInstrumentationHook),
-    )
+    ).route("/ws", axum::routing::get(move |ws: axum::extract::ws::WebSocketUpgrade| {
+        let state = dispatch_state.clone();
+        async move { ws.on_upgrade(move |socket| bcs_ws::web::handle_client_connection(
+            socket, state, bcs_ws::web::WorkbenchConnectionAuth::UserBound { actor_id: None },
+            Arc::new(NoopWsLifecycleInstrumentationHook),
+        )) }
+    }))
 }
 
 async fn start(
@@ -239,4 +249,39 @@ async fn valid_token_upgrades_and_connect_uses_the_immutable_verified_binding() 
 
     socket.close(None).await.expect("close WebSocket");
     handle.abort();
+}
+
+#[tokio::test]
+async fn leadership_loss_closes_session_workbench_and_late_sockets() {
+    let service = Arc::new(RecordingConnectionService::new(VerifyMode::Valid));
+    let registry = Arc::new(WorkbenchConnectionRegistry::new());
+    let app = app_with_registry(service, registry.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+    let url = format!("ws://{addr}{PATH}?token=opaque");
+    let (mut socket, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    socket.send(Message::Text(json!({"type":"req", "id":"connect", "method":"connect",
+        "params":{"group_id":"group-a", "session_id":"session-a"}}).to_string().into())).await.unwrap();
+    let response = socket.next().await.unwrap().unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(response.to_text().unwrap()).unwrap()["ok"], true);
+    assert_eq!(registry.connection_count("session-a").await, 1);
+    let (mut legacy, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws")).await.unwrap();
+    registry.connection_epoch.set_accepting(false);
+    let (mut late, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    for ws in [&mut socket, &mut legacy, &mut late] {
+        let message = tokio::time::timeout(std::time::Duration::from_secs(2), ws.next()).await.unwrap().unwrap().unwrap();
+        let Message::Close(Some(frame)) = message else { panic!("expected leadership close, got {message:?}") };
+        assert_eq!(u16::from(frame.code), 1012);
+        assert_eq!(frame.reason, "leadership_lost");
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while registry.connection_count("session-a").await != 0 { tokio::task::yield_now().await; }
+    }).await.expect("demotion removes session subscriptions");
+    registry.connection_epoch.set_accepting(true);
+    let (mut replacement, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    replacement.send(Message::Text(json!({"type":"req", "id":"ping", "method":"ping"}).to_string().into())).await.unwrap();
+    assert!(matches!(replacement.next().await.unwrap().unwrap(), Message::Text(_)));
+    replacement.close(None).await.unwrap();
+    server.abort();
 }

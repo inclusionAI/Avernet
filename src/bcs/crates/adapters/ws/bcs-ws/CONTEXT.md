@@ -67,3 +67,20 @@ and pending abort/one-shot responses retain their existing handling.
 
 - `cargo test --package bcs-ws --manifest-path src/bcs/Cargo.toml`
 - `cargo check --workspace --all-targets --manifest-path src/bcs/Cargo.toml`
+
+## Leadership change close contract
+
+Bootstrap drives transport-only `ConnectionEpoch` gates on the Bot and Workbench
+registries. Every handler subscribes before processing frames, including sockets
+which never register and session-bound Workbench sockets. Cancellation stops new
+frame dispatch and independently interrupts the outbound writer, even if its
+business queue is full. The writer attempts WebSocket Close **1012** with reason
+`leadership_lost`, bounded to one second. Normal disconnect/subscription cleanup
+still runs; an already executing application call finishes before handler cleanup
+(no unsafe cancellation of a partly completed registration).
+
+This is a retryable transport interruption, not `bot.kicked`, token expiry or
+credential revocation. Clients retain credentials and use their existing
+reconnect/backoff policy through the master-routing ingress. Promotion creates a
+fresh epoch and never revives cancelled sockets. There is no cross-replica
+forwarding or replay guarantee for in-flight messages. API/frame DTOs are unchanged.

@@ -30,6 +30,7 @@ pub async fn handle_connection(
     agent_token: Option<String>,
     agent_code_header: Option<String>,
 ) {
+    let leadership_shutdown = state.bot_connections.connection_epoch.subscribe();
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (client_tx, mut client_rx) = mpsc::channel::<String>(256);
 
@@ -42,10 +43,24 @@ pub async fn handle_connection(
 
     // Write loop: send frames from channel to WebSocket
     let write_send_error = send_error_seen.clone();
+    let write_shutdown = leadership_shutdown.clone();
     let mut write_handle = tokio::spawn(async move {
-        while let Some(msg) = client_rx.recv().await {
+        loop {
+            let msg = tokio::select! {
+                biased;
+                _ = write_shutdown.cancelled() => break,
+                msg = client_rx.recv() => match msg {
+                    Some(msg) => msg,
+                    None => break,
+                },
+            };
             let close_after_send = should_close_after_sending_bot_frame(&msg);
-            if ws_tx.send(Message::Text(msg.into())).await.is_err() {
+            let sent = tokio::select! {
+                biased;
+                _ = write_shutdown.cancelled() => break,
+                sent = ws_tx.send(Message::Text(msg.into())) => sent,
+            };
+            if sent.is_err() {
                 debug!("WebSocket send error, connection likely closed");
                 write_send_error.store(true, Ordering::Relaxed);
                 break;
@@ -55,7 +70,15 @@ pub async fn handle_connection(
             }
         }
         // Send close message when done
-        let _ = ws_tx.send(Message::Close(None)).await;
+        if write_shutdown.is_cancelled() {
+            // Drop the receiver first so concurrent senders immediately observe a
+            // closed channel (delivery reported as failed) instead of enqueuing
+            // into a socket that is already closing for leadership loss.
+            drop(client_rx);
+            crate::shared::leadership_close::close_for_leadership_change(&mut ws_tx).await;
+        } else {
+            let _ = ws_tx.send(Message::Close(None)).await;
+        }
     });
 
     // Track registered bot_id for cleanup
@@ -67,6 +90,12 @@ pub async fn handle_connection(
     // Read loop: process incoming frames
     loop {
         let msg_result = tokio::select! {
+            biased;
+            _ = leadership_shutdown.cancelled() => {
+                close_reason = WsCloseReason::ServerClose;
+                info!(reason = "leadership_lost", "Closing WebSocket on non-leader");
+                break;
+            }
             _ = &mut write_handle => break,
             next = ws_rx.next() => match next {
                 Some(message) => message,
@@ -261,6 +290,12 @@ pub async fn handle_connection(
     }
 
     // Stop the write loop
+    if leadership_shutdown.is_cancelled() {
+        // The writer sends a retryable close independently of registry cleanup.
+        if !write_handle.is_finished() {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), &mut write_handle).await;
+        }
+    }
     write_handle.abort();
     metrics_hook
         .closed(

@@ -157,3 +157,24 @@ additive schema but never guesses/backfills historical membership.
 Eventing bootstrap resolves optional idle polling ceilings to the existing base
 intervals, and supplies both limits to EventingLifecycle. Old configurations keep
 fixed polling. Larger ceilings require deployment latency validation.
+
+## WebSocket leadership supervision
+
+`BcsServer` owns one shutdown-bound `ws_leadership` task after lifecycle
+initialization, both for production and random-port servers. It observes the
+existing `LeaderElectionPort::is_leader` once per second (sleep after each query,
+one-second query timeout, no concurrent checks). A positive result enables
+Bot and Workbench connection epochs; an explicit follower result cancels both.
+Startup remains closed until leadership is confirmed. Subsequent errors/timeouts
+retain the previous state and log warnings at most every 30 seconds. This is not
+new election or distributed fencing: deployment must route reconnects to the
+current master, and unavailable election observations cannot guarantee demotion
+latency. An in-flight application operation is not rolled back on cancellation.
+
+No DB schema or per-connection leadership lookup is added. There is at most one
+extra election-port call per second per process; the public standalone
+implementation is memory-only. The deployment-specific implementation determines
+whether this call hits storage and must be checked during deployment validation.
+Bot disconnect follows the existing local runtime cleanup, preserving credentials;
+it does not write persistent Bot metadata. Connection cancellation wakes O(N)
+local socket tasks, but does not scan database rows or issue N election queries.
