@@ -445,7 +445,7 @@ class LauncherTest(LauncherFixture):
         self.stop_process(proc)
         self.state_root = home / '.avernet/bcs/agency-agent'
         self.state = self.state_root / 'openclaw'
-        self.assertTrue((self.state_root / 'agency-agent/engineering/backend.md').is_file())
+        self.assertTrue((self.state_root / 'agency-agents/engineering/backend.md').is_file())
         config = json.loads(next(self.state.glob('backend-*/openclaw.json')).read_text())
         self.assertEqual(config['agents']['defaults']['model']['primary'], 'demo/test')
         self.assertEqual(list(config['channels']), ['bcs'])
@@ -470,7 +470,7 @@ class LauncherTest(LauncherFixture):
                                 timeout=15, check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('clone', result.stderr.lower())
-        self.assertFalse((self.state_root / 'agency-agent').exists())
+        self.assertFalse((self.state_root / 'agency-agents').exists())
         self.assertEqual(self.registrations, [])
         self.assertFalse(self.calls.exists())
         self.assertNotIn('unsafe-server-output', result.stdout + result.stderr)
@@ -478,7 +478,7 @@ class LauncherTest(LauncherFixture):
         proc = self.launch(['engineering/backend'], omit=('--agency-dir',))
         self.wait_ready(proc)
         self.stop_process(proc)
-        self.assertTrue((self.state_root / 'agency-agent/.git').is_dir())
+        self.assertTrue((self.state_root / 'agency-agents/.git').is_dir())
 
     def test_missing_default_model_fails_before_clone_or_registration(self):
         home = self.setup_defaults()
@@ -501,7 +501,7 @@ class LauncherTest(LauncherFixture):
 
     def test_existing_non_repository_cache_is_not_overwritten(self):
         self.setup_defaults()
-        cache = self.state_root / 'agency-agent'
+        cache = self.state_root / 'agency-agents'
         cache.mkdir(parents=True)
         (cache / 'keep.txt').write_text('existing user data')
         result = subprocess.run(self.command(['engineering/backend'], omit=('--agency-dir',)),

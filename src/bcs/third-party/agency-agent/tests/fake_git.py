@@ -23,7 +23,7 @@ elif args[0] == '-C' and args[2:] == ['rev-parse', '--show-toplevel']:
         sys.exit(1)
     print(str(Path(args[1]).resolve()))
 elif args[0] == '-C' and args[2:] == ['remote', 'get-url', 'origin']:
-    print('https://github.com/msitarzewski/agency-agents.git')
+    print(os.environ.get('FAKE_GIT_ORIGIN', 'https://github.com/msitarzewski/agency-agents.git'))
 else:
     print('unexpected git operation', file=sys.stderr)
     sys.exit(2)

@@ -19,6 +19,7 @@ class WorkspaceOverwriteTest(unittest.TestCase):
             args = SimpleNamespace(
                 agency_dir=Path(temporary),
                 engine='openclaw',
+                lang='en',
                 bcn_plugin='@avernet-plugin/openclaw-channel-bcn@1.0.23',
             )
             model = {'model': {'primary': 'demo/test'}, 'models': {}}

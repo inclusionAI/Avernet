@@ -72,10 +72,11 @@ The `bash -c` form only executes the entry script; the script itself fetches the
 | Option | Default / meaning |
 | --- | --- |
 | `--engine` | `openclaw`; only supported value |
+| `--lang` | `en` (default) or `zh`; selects the profile repository and isolates checkouts/instances per language |
 | `--profile TEAM/PROFILE` | repeatable; one role, optional `.md` suffix |
 | `--team TEAM` | repeatable; every agent in the team; overlaps with profiles are deduplicated |
-| `--agency-dir` | local checkout; defaults to cloning/reusing `<state-dir>/agency-agent` |
-| `--state-dir` | `~/.avernet/bcs/agency-agent`, shared root; instances live under `<state-dir>/<engine>` |
+| `--agency-dir` | local checkout; defaults to cloning/reusing `<state-dir>/agency-agents` (`agency-agents-zh` for `--lang zh`) |
+| `--state-dir` | `~/.avernet/bcs/agency-agent`, shared root; instances live under `<state-dir>/<engine>` (`<engine>-zh` for `--lang zh`) |
 | `--model-config` | `~/.openclaw/openclaw.json`, read-only extraction of model settings |
 | `--bcs-endpoint` | required, HTTP(S) BCS base URL; deployment prefixes are allowed |
 | `--token` / `--token-file` | mutually exclusive; otherwise `BCS_REGISTER_TOKEN` |
@@ -130,24 +131,42 @@ error for already authenticated connections.
 
 ## Persistent layout and reuse
 
+### Profile languages (`--lang`)
+
+Profiles are available in English from [agency-agents](https://github.com/msitarzewski/agency-agents)
+(`--lang en`, default) and in Chinese from
+[agency-agents-zh](https://github.com/jnMetaCode/agency-agents-zh) (`--lang zh`). The two languages are
+fully isolated: each gets its own read-only checkout (`agency-agents` / `agency-agents-zh`), its own
+instance scope (`openclaw` / `openclaw-zh`), its own BCS Bot identities, sessions, workspaces and
+memory. The same relative profile launched in both languages produces two independent instances with
+two independent Bots, and their Gateway ports are reserved across language scopes so both stacks can
+run concurrently. `instance.json` records the language; a saved instance whose language no longer
+matches the requested one is never silently reused.
+
 Default layout:
 
 ```text
 ~/.avernet/
   bcs/
     agency-agent/
-      agency-agent/                         # shared read-only agency-agents Git checkout
+      agency-agents/                        # shared read-only en checkout (agency-agents)
+      agency-agents-zh/                     # shared read-only zh checkout (agency-agents-zh)
       openclaw/
         .launcher.lock                      # per-engine lock only
         engineering-sre-<stable-path-hash>/ # isolated OpenClaw instance
         engineering-backend-architect-<hash>/
+      openclaw-zh/                          # isolated scope for --lang zh instances
+        .launcher.lock
+        ...
       codex/                                # reserved for future engines; currently unsupported
 ```
 
-On first use the launcher shallow-clones `https://github.com/msitarzewski/agency-agents.git` into
-`~/.avernet/bcs/agency-agent/agency-agent`, then reuses it without auto-pulling. The clone is written
-to a temporary directory first and moved into place only after success. If you pass `--agency-dir`, no
-Git operation is performed and no second checkout is made.
+On first use the launcher shallow-clones the repository for the selected `--lang`
+(`https://github.com/msitarzewski/agency-agents.git` for `en`,
+`https://github.com/jnMetaCode/agency-agents-zh.git` for `zh`) into the matching language-scoped
+directory under `~/.avernet/bcs/agency-agent/`, then reuses it without auto-pulling. The clone is
+written to a temporary directory first and moved into place only after success. If you pass
+`--agency-dir`, no Git operation is performed and no second checkout is made.
 
 Instance directory names are derived from the normalized repository-relative profile path, not from
 timestamps, randomness, content hashes, or selection order. **The engine directory provides the

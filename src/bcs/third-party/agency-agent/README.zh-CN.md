@@ -128,10 +128,11 @@ Continue launching all 12 agents? [y/N]
 | 参数 | 默认值 / 含义 |
 | --- | --- |
 | `--engine` | `openclaw`，目前只接受这个值 |
+| `--lang` | `en`（默认）或 `zh`；选择角色仓库语言，缓存与实例按语言隔离 |
 | `--profile TEAM/PROFILE` | 可重复，选择一个角色；允许 `.md` 后缀 |
 | `--team TEAM` | 可重复，选择团队全部角色；与 profile 合并去重 |
-| `--agency-dir` | 指定本地仓库；省略时首次克隆/之后复用 `<state-dir>/agency-agent` |
-| `--state-dir` | `~/.avernet/bcs/agency-agent`，共享根目录；实例位于 `<state-dir>/<engine>` |
+| `--agency-dir` | 指定本地仓库；省略时首次克隆/之后复用 `<state-dir>/agency-agents`（`--lang zh` 时为 `agency-agents-zh`） |
+| `--state-dir` | `~/.avernet/bcs/agency-agent`，共享根目录；实例位于 `<state-dir>/<engine>`（`--lang zh` 时为 `<engine>-zh`） |
 | `--model-config` | `~/.openclaw/openclaw.json`，只读提取模型配置 |
 | `--bcs-endpoint` | 必填，HTTP(S) BCS 根地址，可带部署路径前缀 |
 | `--token` / `--token-file` | 互斥；省略时使用 `BCS_REGISTER_TOKEN` |
@@ -184,24 +185,40 @@ pending 仍是警告，不会让其余已认证连接失败。
 
 ## 持久化目录与复用
 
+### Profile 语言（`--lang`）
+
+Profile 有两个来源：英文版 [agency-agents](https://github.com/msitarzewski/agency-agents)
+（`--lang en`，默认）和中文版 [agency-agents-zh](https://github.com/jnMetaCode/agency-agents-zh)
+（`--lang zh`）。两种语言完全隔离：各自的只读缓存目录（`agency-agents` / `agency-agents-zh`）、
+各自的实例作用域（`openclaw` / `openclaw-zh`）、各自独立的 BCS Bot 身份、session、workspace
+和记忆。同一个相对路径的 profile 在两种语言下各启动一次，会得到两个互不相干的实例和 Bot；
+端口会跨语言作用域预留，两套实例可以同时运行。`instance.json` 会记录语言；已保存实例的语言
+与本次请求不一致时拒绝复用，不会静默串用。
+
 默认目录结构：
 
 ```text
 ~/.avernet/
   bcs/
     agency-agent/
-      agency-agent/                         # agency-agents Git 仓库缓存，共享只读来源
+      agency-agents/                        # 英文 agency-agents Git 仓库缓存，共享只读来源
+      agency-agents-zh/                     # 中文 agency-agents-zh Git 仓库缓存，共享只读来源
       openclaw/
         .launcher.lock                      # 仅限制同一引擎的启动器
         engineering-sre-<stable-path-hash>/ # OpenClaw 独立实例
         engineering-backend-architect-<hash>/
+      openclaw-zh/                          # --lang zh 实例的隔离作用域
+        .launcher.lock
+        ...
       codex/                                # 引擎布局预留，当前不支持启动 Codex
         ...                                 # 不被 OpenClaw 操作扫描或修改
 ```
 
-首次从 `https://github.com/msitarzewski/agency-agents.git` 浅克隆仓库，之后复用，
-不自动 pull。克隆先写临时目录，成功后才放入固定位置；失败不会保留半成品仓库。
-显式指定 `--agency-dir` 时不执行 Git 操作，也不复制一份新仓库。
+首次启动时按所选 `--lang` 浅克隆对应仓库（`en` 为
+`https://github.com/msitarzewski/agency-agents.git`，`zh` 为
+`https://github.com/jnMetaCode/agency-agents-zh.git`）到对应语言目录，之后复用，不自动
+pull。克隆先写临时目录，成功后才放入固定位置；失败不会保留半成品仓库。显式指定
+`--agency-dir` 时不执行 Git 操作，也不复制一份新仓库。
 
 实例目录名由**规范化后的仓库相对路径**决定，保留原有稳定的路径 hash 算法，
 不使用随机数、时间戳、内容 hash 或选择顺序作为目录名。**引擎由父目录隔离**，

@@ -20,8 +20,11 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from agency_console import report
 
 PLUGIN_ID = 'openclaw-channel-bcn'
-# Public bootstrap source explicitly chosen for the agency launcher.
-AGENCY_REPOSITORY = 'https://github.com/msitarzewski/agency-agents.git'
+# Public bootstrap sources explicitly chosen for the agency launcher, by profile language.
+AGENCY_REPOSITORIES = {
+    'en': 'https://github.com/msitarzewski/agency-agents.git',
+    'zh': 'https://github.com/jnMetaCode/agency-agents-zh.git',
+}
 
 
 def private_dir(path: Path) -> None:
@@ -274,24 +277,32 @@ def run_git(executable: str, args: list[str], root: Path) -> str:
     return stdout.strip()
 
 
-def ensure_agency_checkout(root: Path) -> Path:
-    """Atomically create the default checkout; never pull or overwrite a cache."""
+def checkout_dir_name(lang: str) -> str:
+    """Language-scoped cache directory, named after the repository it holds."""
+    return 'agency-agents' if lang == 'en' else f'agency-agents-{lang}'
+
+
+def ensure_agency_checkout(root: Path, lang: str = 'en') -> Path:
+    """Atomically create the language-scoped default checkout; never pull or overwrite a cache."""
     executable = shutil.which('git')
     if not executable:
         raise ValueError('git is required to clone/reuse the default repository; or supply --agency-dir')
-    destination = root / 'agency-agent'
+    repository = AGENCY_REPOSITORIES.get(lang)
+    if repository is None:
+        raise ValueError(f'unsupported profile language: {lang}')
+    destination = root / checkout_dir_name(lang)
     if destination.is_symlink():
         raise ValueError('agency-agents cache must not be a symlink; supply --agency-dir instead')
     if destination.exists():
         top = run_git(executable, ['-C', str(destination), 'rev-parse', '--show-toplevel'], root)
         origin = run_git(executable, ['-C', str(destination), 'remote', 'get-url', 'origin'], root)
-        if Path(top).resolve() != destination.resolve() or origin != AGENCY_REPOSITORY:
+        if Path(top).resolve() != destination.resolve() or origin != repository:
             raise ValueError('existing agency-agents cache is not the expected repository; supply --agency-dir')
         return destination
-    report('Cloning agency-agents into the state directory (first use only)...')
+    report(f'Cloning agency-agents ({lang}) into the state directory (first use only)...')
     with tempfile.TemporaryDirectory(prefix='.agency-clone-', dir=root) as temporary:
         checkout = Path(temporary) / 'checkout'
-        run_git(executable, ['clone', '--depth', '1', '--', AGENCY_REPOSITORY, str(checkout)], root)
+        run_git(executable, ['clone', '--depth', '1', '--', repository, str(checkout)], root)
         checkout.rename(destination)
     private_dir(destination)
     return destination
