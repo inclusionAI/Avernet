@@ -1,3 +1,5 @@
+// @vitest-environment node
+// The MIST composition loads local gRPC proto files through Node file URLs.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OcbOwnerArcaConnectionProvider } from "../ocb-owner-arca-connection-provider.js";
 import { ArcaCommandTransport, DirectArcaConnectionProvider } from "../arca-command-transport.js";
