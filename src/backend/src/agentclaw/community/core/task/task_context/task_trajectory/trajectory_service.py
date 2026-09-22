@@ -602,7 +602,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             graph = self._graph.query_task_dashboard(task_id)
         except Exception as ex:  # noqa: BLE001  图读失败 → 探测整体降级
             logger.warning(
-                "[task][trajectory] RUNNING 探测图读失败 task=%s: %s: %s",
+                "[task][trajectory] collect_trajectory_event_session_msgs, RUNNING 探测图读失败 task=%s: %s: %s",
                 task_id, type(ex).__name__, ex,
             )
             return None
@@ -635,7 +635,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             sid = (node.run_info.extend_props or {}).get("session_id")
             if not sid or not isinstance(sid, str):
                 logger.warning(
-                    "[task][trajectory] RUNNING 节点无 session_id,跳过探测 task=%s node=%s",
+                    "[task][trajectory] collect_trajectory_event_session_msgs, RUNNING 节点无 session_id,跳过探测 task=%s node=%s",
                     task_id, node.node_id,
                 )
                 continue
@@ -643,13 +643,13 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 msgs = await self._bcs.get_session_messages(sid, limit=limit)
             except Exception as ex:  # noqa: BLE001  单节点 BCS 失败 → 跳过,不拖垮其余
                 logger.warning(
-                    "[task][trajectory] 会话明细拉取失败,跳过 task=%s node=%s session=%s: %s: %s",
+                    "[task][trajectory] collect_trajectory_event_session_msgs, 会话明细拉取失败,跳过 task=%s node=%s session=%s: %s: %s",
                     task_id, node.node_id, sid, type(ex).__name__, ex,
                 )
                 continue
             if not msgs:
                 logger.info(
-                    "[task][trajectory] 会话明细为空,跳过 task=%s node=%s session=%s",
+                    "[task][trajectory] collect_trajectory_event_session_msgs, 会话明细为空,跳过 task=%s node=%s session=%s",
                     task_id, node.node_id, sid,
                 )
                 continue
@@ -683,7 +683,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         if not briefs:
             return None
         logger.info(
-            "[task][trajectory] RUNNING 会话探测完成 task=%s briefs=%d",
+            "[task][trajectory] collect_trajectory_event_session_msgs, RUNNING 会话探测完成 task=%s briefs=%d",
             task_id, len(briefs),
         )
         return briefs
