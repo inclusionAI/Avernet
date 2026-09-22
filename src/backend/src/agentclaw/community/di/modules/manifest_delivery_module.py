@@ -136,10 +136,22 @@ class ManifestDeliveryModule(Module):
         other purpose — a wiring decision made by a component rather than by
         the root that wires it.
 
-        A thunk rather than a value, so what the qualifier names is the *unbuilt*
-        bundle: every provider behind it reaches the device graph, and a bundle
-        built at boot would resolve that graph at boot. It is called once per
-        apply.
+        A thunk rather than a value, so what the qualifier names is the
+        *unbuilt* bundle. Building one walks the device graph — activation to
+        the skill-query service to the device context resolver to
+        ``DeviceService``, which reads the workspace config — and that walk must
+        not happen while the app is still wiring: ``discover_lifecycle_participants``
+        resolves **every** binding at startup to find the ``Lifecycle``
+        implementors, and swallows whatever raises. A bundle bound as a value
+        would be constructed there, in that walk, on every boot, with any
+        failure silently skipped. Bound as a thunk, that same walk gets the
+        closure, calls nothing, and moves on.
+
+        The apply service calls it once per apply. That the wrappers are rebuilt
+        each time is incidental rather than required — the services behind them
+        are singletons and none of them holds per-apply state — but it is the
+        cheapest deferral that keeps the graph out of boot, and it means no two
+        applies share a bundle.
         """
         def device_ports() -> MaterialiserPorts:
             return MaterialiserPorts(
