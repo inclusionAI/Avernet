@@ -117,7 +117,7 @@ def svc():
     m.list_bots_by_owner_bot_pairs.return_value = {"total": 1, "items": [BOT]}
     m.check_bot_name_exists.return_value = True
     m.update_bot.return_value = {**BOT, "bot_name": "Renamed"}
-    m.restart_bot.return_value = {**BOT, "status": "PENDING"}
+    m.restart_bot_async = AsyncMock(return_value={**BOT, "status": "PENDING"})
     m.delete_bot.return_value = True
     m.check_create_bot_preflight.return_value = None
     m.create_bot.return_value = BOT
@@ -1817,7 +1817,7 @@ def test_restart_desktop_bot_is_rejected(client, svc):
     svc.get_bot.return_value = {**BOT, "bot_type": "desktop"}
     resp = client.post("/openapi/v1/bots/b1/restart")
     assert resp.status_code == 409
-    svc.restart_bot.assert_not_called()
+    svc.restart_bot_async.assert_not_called()
 
 
 def test_non_desktop_lifecycle_operations_still_work(client, svc):
@@ -1825,7 +1825,7 @@ def test_non_desktop_lifecycle_operations_still_work(client, svc):
     _ok(client.delete("/openapi/v1/bots/b1"))
     svc.delete_bot.assert_called_once_with("b1", "u1")
     _ok(client.post("/openapi/v1/bots/b1/restart"))
-    svc.restart_bot.assert_called_once()
+    svc.restart_bot_async.assert_called_once()
 
 
 # ----- round-6 review regressions ------------------------------------------
@@ -2048,7 +2048,7 @@ def test_service_bot_restart_is_still_allowed(client, svc):
     """Only deletion is refused — restart does not touch the publication."""
     svc.get_bot.return_value = {**BOT, "bot_type": "service"}
     _ok(client.post("/openapi/v1/bots/b1/restart"))
-    svc.restart_bot.assert_called_once()
+    svc.restart_bot_async.assert_called_once()
 
 
 def test_personal_bot_delete_is_unaffected(client, svc):
@@ -2314,7 +2314,7 @@ def test_startup_script_writes_never_touch_a_running_container(
     client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo new"})
     client.delete("/openapi/v1/bots/b1/startup-script")
 
-    svc.restart_bot.assert_not_called()
+    svc.restart_bot_async.assert_not_called()
 
 
 def test_startup_script_get_and_put_agree_about_a_desktop_bot(

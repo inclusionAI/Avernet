@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -66,7 +66,7 @@ def _bind_bot(app):
     svc.update_bot.return_value = {**MOCK_BOT_ITEM, "bot_name": "updated-bot"}
     svc.delete_bot.return_value = True
     svc.check_bot_name_exists.return_value = False
-    svc.restart_bot.return_value = {"bot_id": "bot_test_001", "status": "RESTARTING"}
+    svc.restart_bot_async = AsyncMock(return_value={"bot_id": "bot_test_001", "status": "RESTARTING"})
     # create_flow asks the service whether this is the owner's first bot, and the
     # response contract types passport.is_first_bot as a boolean.
     svc.is_first_bot.return_value = True
