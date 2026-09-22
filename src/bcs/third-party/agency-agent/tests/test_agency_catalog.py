@@ -1,6 +1,7 @@
 """Standalone CLI, selection and persistent-directory contracts."""
 import json
 import shutil
+import stat
 import subprocess
 import sys
 import unittest
@@ -23,6 +24,27 @@ class AgencyCatalogTest(LauncherFixture):
         output = self.wait_ready(proc) + self.stop_process(proc)
         self.assertEqual(proc.returncode, 0, output)
         self.assertEqual(len(self.registrations), 1)
+
+    def test_bash_entry_point_scrubs_inline_token_from_every_process(self):
+        bundle = self.root / 'standalone'
+        shutil.copytree(SCRIPT_DIR, bundle, ignore=shutil.ignore_patterns('__pycache__'))
+        command = self.command(['engineering/backend'], ['--token', 'argument-sensitive'])
+        command = ['bash', str(bundle / 'launch-agency.sh'), *command[2:]]
+        proc = subprocess.Popen(command, env=dict(self.env, AGENCY_PYTHON=sys.executable),
+                                cwd=self.root, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.addCleanup(self.stop_process, proc)
+        self.wait_ready(proc)
+        # Parent wrappers (uv run, AGENCY_PYTHON) keep their own argv: none may hold the token.
+        ps = subprocess.run(['ps', '-A', '-o', 'command'],
+                            capture_output=True, text=True, timeout=10, check=True)
+        output = self.stop_process(proc)
+        self.assertEqual(proc.returncode, 0, output)
+        self.assertNotIn('argument-sensitive', ps.stdout)
+        token_file = self.state_root / '.token'
+        self.assertEqual(token_file.read_text().strip(), 'argument-sensitive')
+        self.assertEqual(stat.S_IMODE(token_file.stat().st_mode), 0o600)
+        self.assertEqual(self.registrations[0]['token'], ['argument-sensitive'])
 
     def test_only_openclaw_engine_is_accepted_before_side_effects(self):
         for engine in ('codex', 'claude-code', 'unknown'):
