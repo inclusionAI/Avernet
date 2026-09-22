@@ -26,6 +26,16 @@ uv run --with pytest --with pyyaml --with jsonschema \
 collaboration API. Domain models and resource path items live in separate YAML
 fragments so a domain can evolve without creating one monolithic file.
 
+`GET /api/v1/collaboration/bots/me` is an internal Agent identity self lookup,
+defined in `v1/internal/bot-self.yaml`. BCS verifies the Bearer token itself;
+Gateway identity chains and a registered Bot Principal are not prerequisites.
+The response reports `registered` with a safe Bot projection or `unregistered`
+with `bot: null`. It never creates a Bot, uses an identity selector, exposes
+credentials, or converts verification/storage failures into an absent
+registration. Every response carries `Cache-Control: no-store`. See the
+[implementation spec](../specs/2026-09-22-bot-self-lookup/spec.md) for isolation,
+legacy nullable fields, error handling, and database cost.
+
 The current public OpenAPI contract contains 72 approved operations: 67
 collaboration operations below `/openapi/v1/collaboration/**` and 5 auth
 operations below `/openapi/v1/auth/**`. Collaboration operations span Bot,

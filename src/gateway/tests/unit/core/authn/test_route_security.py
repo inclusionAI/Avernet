@@ -13,6 +13,20 @@ from gateway.community.spi.authn import Presence, PrincipalType
 _CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 
 
+def test_shipped_config_defers_internal_bot_self_authentication_to_bcs() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    path = "/api/v1/collaboration/bots/me"
+
+    assert security.resolve("GET", path) == {}
+    for method, sibling in (
+        ("POST", path),
+        ("GET", "/api/v1/collaboration/bots/mine"),
+        ("GET", "/openapi/v1/collaboration/bots/me"),
+    ):
+        assert security.resolve(method, sibling)
+
+
 def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
     """Both identities optional on the wide rule, and both *declared*.
 

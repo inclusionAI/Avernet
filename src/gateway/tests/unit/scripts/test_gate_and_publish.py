@@ -88,8 +88,8 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
     assert public_document["openapi"] == "3.1.0"
     assert internal_document["openapi"] == "3.1.0"
     assert public_operations == 72
-    assert internal_operations == 21
-    assert public_operations + internal_operations == 93
+    assert internal_operations == 22
+    assert public_operations + internal_operations == 94
     assert all(
         path.startswith("/openapi/v1/collaboration/")
         or path.startswith("/openapi/v1/auth/")

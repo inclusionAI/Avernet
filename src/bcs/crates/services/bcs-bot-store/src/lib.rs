@@ -45,6 +45,7 @@ pub mod memory;
 pub mod provider;
 pub mod provider_cache;
 mod registration_create;
+mod agent_registration;
 
 #[cfg(test)]
 #[path = "../tests/unit/heartbeat.rs"]
@@ -1142,6 +1143,12 @@ impl BotMetricsSnapshotPort for PersistentBotRepo {
 
 #[async_trait]
 impl BotRepoPort for PersistentBotRepo {
+    async fn find_agent_registration(
+        &self, agent_code: &str,
+    ) -> ServiceResult<Option<bcs_service_api::types::AgentBotRegistration>> {
+        self.load_agent_registration(agent_code).await
+    }
+
     async fn try_load_token(&self, bot_id: &str) -> ServiceResult<Option<String>> {
         self.load_registration_token(bot_id).await
     }

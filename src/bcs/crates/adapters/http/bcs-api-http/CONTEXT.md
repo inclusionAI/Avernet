@@ -2,6 +2,12 @@
 
 ## Provides
 
+- Internal-only `GET /api/v1/collaboration/bots/me`, outside Gateway Principal
+  and invite-code middleware. It passes only a parsed Bearer token to
+  `BotSelfService`, which requires Agent identity authentication. Success and error
+  responses use V1 envelopes and `Cache-Control: no-store`; DTOs explicitly
+  include only verified agent_code and safe persisted Bot metadata.
+
 - State Machine Run/Node/Graph/PendingHuman responses and Session creation retain
   the runtime's saved Loop execution mapping/context. The adapter preserves
   opaque node IDs and static loop routes without reconstructing metadata.

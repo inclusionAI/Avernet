@@ -5281,7 +5281,11 @@ impl BcsServer {
             ws_lifecycle_hook(&self.state),
         );
         let oauth_state = self.build_full_oauth_route_state();
-        let mut openapi_v1 = self.state.openapi_v1.clone();
+        let mut openapi_v1 = self.state.openapi_v1.clone()
+            .with_bot_self_service(Arc::new(bcs_app_bot::BotSelfServiceImpl::new(
+                crate::agent_identity::build_agent_identity_port()?,
+                self.state.services.registry.clone(),
+            )));
         if let (Some(auth_service), Some(public_base_url)) =
             (oauth_state.clone(), self.openapi_auth_public_base_url())
         {

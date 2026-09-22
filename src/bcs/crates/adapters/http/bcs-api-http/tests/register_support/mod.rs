@@ -295,7 +295,11 @@ impl FriendshipService for NoopFriendshipService {
 }
 
 pub(crate) fn test_router(service: Arc<dyn RegisterService>) -> axum::Router {
-    router(ApiState::new(
+    router(test_state(service))
+}
+
+pub(crate) fn test_state(service: Arc<dyn RegisterService>) -> ApiState {
+    ApiState::new(
         Arc::new(NoopGroupService),
         Arc::new(NoopSessionService),
         Arc::new(NoopSessionMessageService),
@@ -303,5 +307,5 @@ pub(crate) fn test_router(service: Arc<dyn RegisterService>) -> axum::Router {
         service,                         // register slot (5th service)
         Arc::new(NoopFriendshipService), // friendship slot
         Arc::new(HeaderVerifier { caller: caller() }),
-    ))
+    )
 }

@@ -18,6 +18,7 @@ pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
 
 #[derive(Clone)]
 pub struct ApiState {
+    pub bot_self_service: Option<Arc<dyn bcs_service_api::application::v1::BotSelfService>>,
     pub auth_service: Option<Arc<dyn ApplicationAuthService>>,
     pub auth_public_base_url: String,
     pub bot_service: Option<Arc<dyn BotService>>,
@@ -54,6 +55,7 @@ impl ApiState {
         principal_verifier: Arc<dyn PrincipalVerifier>,
     ) -> Self {
         Self {
+            bot_self_service: None,
             auth_service: None,
             auth_public_base_url: "http://127.0.0.1/openapi/v1/auth".to_string(),
             bot_service: None,
@@ -87,6 +89,14 @@ impl ApiState {
     ) -> Self {
         self.auth_service = Some(service);
         self.auth_public_base_url = public_base_url;
+        self
+    }
+
+    pub fn with_bot_self_service(
+        mut self,
+        service: Arc<dyn bcs_service_api::application::v1::BotSelfService>,
+    ) -> Self {
+        self.bot_self_service = Some(service);
         self
     }
 

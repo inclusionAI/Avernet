@@ -579,6 +579,12 @@ impl BotRegistryCoreService for BotCore {
         self.repo.find_bot_by_agent_code(agent_code).await
     }
 
+    async fn find_agent_registration(
+        &self, agent_code: &str,
+    ) -> ServiceResult<Option<bcs_service_api::types::AgentBotRegistration>> {
+        self.repo.find_agent_registration(agent_code).await
+    }
+
     async fn find_bot_by_binding_channel(
         &self,
         channel: &str,

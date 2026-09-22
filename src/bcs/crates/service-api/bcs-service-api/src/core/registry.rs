@@ -482,6 +482,16 @@ pub trait BotRegistryCoreService: Send + Sync {
         None
     }
 
+    /// Read an authoritative registration for a verified Agent in the current
+    /// BCN environment, excluding deleted/non-Bot records. Offline/disabled
+    /// Bots remain registered. Multiple matches are Conflict; read or decode
+    /// failures are errors, never absence. No token or runtime state is exposed.
+    async fn find_agent_registration(
+        &self, _agent_code: &str,
+    ) -> ServiceResult<Option<crate::types::AgentBotRegistration>> {
+        Err(ServiceError::InternalError("Agent registration lookup is not configured".into()))
+    }
+
     /// Find a bot by its channel binding.
     /// Returns bot_id if found.
     async fn find_bot_by_binding_channel(

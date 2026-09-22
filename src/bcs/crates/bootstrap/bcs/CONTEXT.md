@@ -2,6 +2,11 @@
 
 ## Provides
 
+- Composition of the internal Bot self facade with the shared registry Core and
+  deployment-owned `AgentIdentityFactoryRegistration` verifier. Public builds
+  without a registered verifier fail closed; multiple verifiers fail startup.
+  SDK types and private endpoints stay in the internal deployment workspace.
+
 - Fixed Loop metrics use the existing `prometheus-metrics` feature and enabled
   MetricsRuntime. All three CollaborationRuntime assembly paths inject the same
   `StateMachineLoopInstrumentationHook` implementation; disabled metrics leave

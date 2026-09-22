@@ -2,6 +2,15 @@
 
 ## Provides
 
+- Internal `BotSelfService` authenticates Agent identity tokens through `AgentIdentityPort`
+  before `BotRegistryCoreService::find_agent_registration`. The identity port
+  exposes only verified `agent_code` and closed credential-free errors. The
+  repository lookup is authoritative, environment-scoped, read-only and fallible;
+  ambiguous mappings conflict, and only absence means unregistered. The shared
+  `AgentBotRegistration` projection never contains credentials. The centralized
+  `contract::bot_self` harness and HTTP/application/SQLite conformance entries
+  cover consumers; deployment-owned SDK verification remains outside this tree.
+
 MessageFlowService exposes a Human-scoped latest-queued cancellation command for
 IM adapters. It selects only the caller's newest canonical IM source in the
 requested Session and cancels only still-unsent Send deliveries; active work

@@ -2,6 +2,10 @@
 
 ## Provides
 
+- `BotCore::find_agent_registration` exposes the repository's authoritative,
+  fallible Agent registration projection without runtime hydration or writes.
+  The V1 self facade calls it only after trusted Agent identity verification.
+
 - Authenticated provider coordination callbacks share reference claims with stream intake.
 - Bot service implementations for BCS, including the independent Bot
   control-plane Core.

@@ -16,6 +16,17 @@ use crate::types::{
 /// separate port before treating this as a narrow persistence-only repository.
 #[async_trait]
 pub trait BotRepoPort: Send + Sync {
+    /// Authoritative, read-only Agent registration lookup in the current BCN
+    /// environment. Ignore process-local cache/heartbeat and Bot enabled state;
+    /// exclude tombstones and non-Bot actors. Return Conflict on ambiguity and
+    /// preserve storage/decoding failures. Provider fields reflect persisted
+    /// affiliation (both null when absent), never credential payloads.
+    async fn find_agent_registration(
+        &self, _agent_code: &str,
+    ) -> ServiceResult<Option<crate::types::AgentBotRegistration>> {
+        Err(crate::types::ServiceError::InternalError("Agent registration lookup is not configured".into()))
+    }
+
     /// Atomically create a registration identity only if no active OR deleted
     /// record exists. Existing rows, capabilities and credentials are untouched.
     /// Returns true only when created, false when already present. Read/write

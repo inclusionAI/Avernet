@@ -328,6 +328,8 @@ user_config:
       user: optional
       app: optional
       bot: optional
+    # BCS verifies Agent identity here, including agents with no Bot registration.
+    "GET /api/v1/collaboration/bots/me": {}
     "/api/v1/collaboration/sessions/{session_id}/files/**":
       user: optional
       app: optional

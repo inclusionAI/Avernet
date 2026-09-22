@@ -5,12 +5,14 @@
 //! layers.
 
 pub mod bot_control_plane;
+pub mod agent_registration;
 pub mod error;
 pub mod event;
 pub mod provider_registration;
 
 pub use bcs_domain::*;
 pub use bot_control_plane::*;
+pub use agent_registration::*;
 pub use error::{ServiceError, ServiceResult};
 pub use event::*;
 

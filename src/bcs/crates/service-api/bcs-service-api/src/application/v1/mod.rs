@@ -7,6 +7,7 @@
 pub mod auth;
 pub mod authorization;
 pub mod bot;
+pub mod bot_self;
 pub mod collaboration_definition;
 pub mod collaboration_template;
 pub mod error;
@@ -31,6 +32,7 @@ pub use authorization::{
     require_human, select_principal,
 };
 pub use bot::*;
+pub use bot_self::*;
 pub use collaboration_definition::*;
 pub use collaboration_template::*;
 pub use error::*;

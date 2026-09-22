@@ -2,6 +2,18 @@
 
 ## Provides
 
+`find_agent_registration` reads current-environment nondeleted Bot rows directly,
+independent of cache, heartbeat and enabled state. One query returns at most two
+rows; ambiguity is a conflict and read/decoding failures remain errors. Bot
+Provider affiliation is authoritative, with legacy binding metadata used only
+when both affiliation columns are null. Name/summary and unaffiliated Provider
+fields may be null. No writes, tokens, cache population or schema changes occur.
+SQLite conformance verifies isolation, errors and bounded query/row counts.
+The dedicated agent_code takes precedence; historical JSON agent_code is used
+only when that column is null. Both sources participate in conflict detection.
+The legacy branch can examine unbackfilled rows; LIMIT bounds rows returned,
+not total database work. No automatic backfill or migration is introduced.
+
 Bot/Provider repository implementations own SQL and process-local caching.
 DbProviderStore caches binding presence (including negative results), Provider
 records and by-kind credentials with bounded 30-second TTL caches. Successful

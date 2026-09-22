@@ -99,3 +99,15 @@ fn production_sources_use_only_the_application_service_api_boundary() {
         "HTTP adapter must call only bcs_service_api::application: {offenders:?}"
     );
 }
+
+#[test]
+fn public_workspace_never_depends_on_internal_agentpass_implementation() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    for file in ["Cargo.toml", "Cargo.lock"] {
+        let source = fs::read_to_string(workspace.join(file)).expect("read public workspace metadata");
+        for private_dependency in ["bcs-internal", "bcs-auth-agentpass", "agent-acm-sdk"] {
+            assert!(!source.contains(private_dependency),
+                "public workspace must not depend on {private_dependency}");
+        }
+    }
+}

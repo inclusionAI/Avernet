@@ -458,6 +458,8 @@ dependencies = [
  "bcs-bot",
  "bcs-bot-store",
  "bcs-config",
+ "bcs-db-api",
+ "bcs-db-local",
  "bcs-domain",
  "bcs-friend",
  "bcs-service-api",

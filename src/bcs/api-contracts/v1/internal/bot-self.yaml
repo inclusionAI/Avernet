@@ -1,0 +1,165 @@
+BotSelfPath:
+  get:
+    operationId: get_bot_self
+    tags: ["Collaboration / Bots"]
+    summary: Read the authenticated Agent's Bot registration.
+    description: >-
+      BCS verifies Authorization Bearer with its injected Agent identity verifier before
+      reading registration. Gateway identity chains and signed Principal are not
+      required. The trusted agent_code is the only lookup identity; caller-supplied
+      bot_id, agent_code, provider_id, or other identity selectors are ignored.
+      A valid Agent may be unregistered. Token refresh does not change registration
+      when agent_code stays the same. The read selects persisted, non-deleted,
+      non-Human Bot rows in the current BCN environment; offline or disabled Bots
+      remain registered. Multiple matches return 409. Authentication or persistence
+      failures never become unregistered. No Bot is created or modified and no
+      raw identity, runtime, or Provider token is returned. Every response is
+      Cache-Control no-store.
+    x-avernet-security: {}
+    security:
+      - AgentIdentityBearer: []
+    responses:
+      "200":
+        description: Trusted Agent identity and its current registration, which may be absent.
+        headers:
+          Cache-Control:
+            $ref: "#/NoStoreHeader"
+        content:
+          application/json:
+            schema:
+              $ref: "#/BotSelfEnvelope"
+      "401":
+        description: Missing, malformed, invalid, or expired Agent identity Bearer token.
+        x-error-codes: [unauthenticated]
+        headers:
+          Cache-Control:
+            $ref: "#/NoStoreHeader"
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: The authenticated identity is not the required Agent identity.
+        x-error-codes: [forbidden]
+        headers:
+          Cache-Control:
+            $ref: "#/NoStoreHeader"
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: The trusted agent_code matches multiple active Bot registrations.
+        x-error-codes: [agent_registration_conflict]
+        headers:
+          Cache-Control:
+            $ref: "#/NoStoreHeader"
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        description: Registration storage is unavailable or persisted data cannot be decoded.
+        x-error-codes: [internal_error]
+        headers:
+          Cache-Control:
+            $ref: "#/NoStoreHeader"
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "502":
+        description: Agent identity verification is unavailable or the identity resolver failed.
+        x-error-codes: [agent_identity_unavailable]
+        headers:
+          Cache-Control:
+            $ref: "#/NoStoreHeader"
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+
+NoStoreHeader:
+  description: Identity and registration responses must not be cached.
+  schema:
+    type: string
+    const: no-store
+
+AgentIdentity:
+  type: object
+  additionalProperties: false
+  required: [agent_code]
+  properties:
+    agent_code:
+      type: string
+      minLength: 1
+      description: Stable Agent identity obtained only from successful server-side verification.
+
+BotRegistration:
+  type: object
+  additionalProperties: false
+  required: [bot_id, name, summary, provider_id, provider_bot_ref]
+  properties:
+    bot_id:
+      type: string
+      minLength: 1
+    name:
+      type: [string, "null"]
+      description: Persisted display name; null when absent on a legacy Bot.
+    summary:
+      type: [string, "null"]
+      description: Persisted summary; null when absent on a legacy Bot.
+    provider_id:
+      type: [string, "null"]
+      description: Persisted Provider affiliation; null together with provider_bot_ref for a legacy unaffiliated Bot.
+    provider_bot_ref:
+      type: [string, "null"]
+      description: Persisted identity within the Provider; null together with provider_id for a legacy unaffiliated Bot.
+  oneOf:
+    - properties:
+        provider_id: {type: string}
+        provider_bot_ref: {type: string}
+    - properties:
+        provider_id: {type: "null"}
+        provider_bot_ref: {type: "null"}
+
+BotSelfResult:
+  oneOf:
+    - type: object
+      additionalProperties: false
+      required: [registration_status, identity, bot]
+      properties:
+        registration_status:
+          type: string
+          const: registered
+        identity:
+          $ref: "#/AgentIdentity"
+        bot:
+          $ref: "#/BotRegistration"
+    - type: object
+      additionalProperties: false
+      required: [registration_status, identity, bot]
+      properties:
+        registration_status:
+          type: string
+          const: unregistered
+        identity:
+          $ref: "#/AgentIdentity"
+        bot:
+          type: "null"
+
+BotSelfEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+      const: 20000
+    message:
+      type: string
+      const: OK
+    data:
+      $ref: "#/BotSelfResult"
+    request_id:
+      $ref: ../shared.yaml#/RequestId

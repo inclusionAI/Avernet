@@ -19,7 +19,8 @@ pub fn protected_router() -> Router<ApiState> {
 pub fn public_router() -> Router<ApiState> {
     Router::new().nest(
         "/api/v1/collaboration",
-        routes::session_file::public_router().merge(routes::manifest::public_router()),
+        routes::session_file::public_router().merge(routes::manifest::public_router())
+            .merge(routes::bot_self::router()),
     )
 }
 

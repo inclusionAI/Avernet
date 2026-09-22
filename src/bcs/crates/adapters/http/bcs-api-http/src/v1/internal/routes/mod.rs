@@ -5,3 +5,4 @@ pub mod collaboration_run;
 pub mod manifest;
 pub mod session_file;
 pub mod invite_code;
+pub mod bot_self;

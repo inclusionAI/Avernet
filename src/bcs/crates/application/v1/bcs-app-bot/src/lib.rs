@@ -1,5 +1,8 @@
 //! Versioned Bot control-plane application facade for the BCN V1 API.
 
+mod bot_self;
+pub use bot_self::BotSelfServiceImpl;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 

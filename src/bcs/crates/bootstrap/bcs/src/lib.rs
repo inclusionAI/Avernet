@@ -135,6 +135,7 @@ mod error;
 mod eventing_wiring;
 mod friend_connect_notification;
 pub mod http_adapter;
+pub mod agent_identity;
 mod identity_wiring;
 pub mod lifecycle;
 pub mod metrics;
