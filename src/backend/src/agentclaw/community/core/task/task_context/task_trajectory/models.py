@@ -150,6 +150,8 @@ class TrajectoryAnalysis:
     gmt_create: int                           # 分析产出时间(ms epoch)
     boost_reason: str | None = None           # 派发“为何选该执行者”(末条 DISPATCH 派生)
     failure_reason: str | None = None         # 失败根因(末条 terminal 事件派生)
+    final_status: str | None = None           # 大模型判定:任务是否最终执行成功(SUCCESS/FAILED/HUNG/RUNNING/UNKNOWN)
+    error_category: str | None = None         # 大模型判定:失败错误类型(execution_error/dispatch_error/plan_error/interface_error/timeout_error/acceptance_error/unknown;成功为 None)
     timeline_version: str | None = None       # 分析时 timeline 指纹(sha256:事件数+逐条 id:gmt_create 正序;由 service backfill 前盖戳,do_analysis 依它做增量幂等)
 
 

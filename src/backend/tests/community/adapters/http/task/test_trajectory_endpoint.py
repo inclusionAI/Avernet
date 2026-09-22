@@ -596,3 +596,34 @@ def test_trajectory_display_html_groups_events_by_subtask_block():
         r'class="node-block" style="border-left:4px solid (#[0-9a-f]{6});"', text
     )
     assert len(colors) == 2 and colors[0] != colors[1]
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_renders_final_status_and_error_category():
+    """总体分析块渲染大模型判断的新两字段:最终执行状态 + 错误类型分类。"""
+    analysis = json.dumps({
+        "analysis_type": "tc_bot",
+        "analysis_executor": "bot-analyst",
+        "final_status": "FAILED",
+        "error_category": "execution_error",
+        "failure_reason": "bot 工具执行抛错",
+        "analysis_output": "模态执行报错导致任务失败",
+    }, ensure_ascii=False)
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
+        action_result="failed", attempt=0, gmt_create=1000, gmt_modified=1000,
+    )
+    traj = TaskTrajectory(
+        task_id="t1", gmt_create=1000, gmt_modified=1000,
+        timeline=[ev], analysis=analysis,
+    )
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    assert "最终执行状态 (final_status)" in r.text
+    assert "FAILED" in r.text
+    assert "错误类型 (error_category)" in r.text
+    assert "execution_error" in r.text

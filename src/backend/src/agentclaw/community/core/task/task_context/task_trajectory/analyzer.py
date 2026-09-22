@@ -800,13 +800,15 @@ class TaskTrajectoryAnalyzer:
         ext_info_brief = _build_ext_info_brief(trajectory.timeline, ext_info_lookup)
 
         instruction = """
-分析这个任务轨迹，并返回一个 JSON 对象，其中必须且仅包含以下三个扁平字符串字段（不要把任何对象/数组作为字段值进行嵌套）：
+分析这个任务轨迹，并返回一个 JSON 对象，其中必须且仅包含以下五个扁平字符串字段（不要把任何对象/数组作为字段值进行嵌套）：
 
 analysis_output（必填，字符串）：整体的人类可读分析/结论文本（必须是扁平字符串，不是结构化对象）；
 boost_reason（可选，字符串或 null）：调度理由摘要（包括 strategy / decision_mode / candidates / JOIN drops，基于 ext_info_brief 提取）；
-failure_reason（可选，字符串或 null）：失败的根本原因；如果任务成功，则填 null。
+failure_reason（可选，字符串或 null）：失败的根本原因；如果任务成功，则填 null；
+final_status（必填，字符串）：请判断该任务当前是否最终执行成功，取值只能是以下之一："SUCCESS"（已成功通过验收并收口）、"FAILED"（最终失败）、"HUNG"（挂起/卡死，需人介入，含已升级 BBS 广场未认领）、"RUNNING"（仍在执行中，尚未终态）、"UNKNOWN"（现有信息不足以判断）。请综合 timeline 的末条终态事件、错误事件与（若存在）running_sessions 现场作出判断，不要凭猜测；
+error_category（当 final_status 为 FAILED 或 HUNG 时必填，其他情况为 null，字符串或 null）：若最终不成功，请归类错误类型，取值只能是以下之一："execution_error"（模态执行报错：bot/工具执行失败、输出不可解析、协作群执行异常）、"dispatch_error"（派发错误：搜推无匹配候选、派发投递失败、FORM_GROUP 失败、JOIN 全被滤除）、"plan_error"（分解规划失败：plan 解析/调用失败、gap 未分解、规划轮耗尽）、"interface_error"（底层接口/传输报错：BCS/引擎接口异常）、"timeout_error"（超时类：SLA 超时、派发卡死、执行超时不上报结果导致棒回广场或节点 HUNG）、"acceptance_error"（验收未通过：执行完成但未达验收标准）、"unknown"（无法归类）。归类时优先采信决定性事件（如 sla_timeout/执行超时不上报 → timeout_error；miss/bbs_return 归因到派发无果 → dispatch_error；accept_fail → acceptance_error；interface_error → interface_error）。
 输出必须是严格合法的 JSON（能被 json.loads 直接解析）：所有字符串值内部出现的英文双引号必须转义为 \\"；引用工具名、报错原文、字段名时优先改用中文引号「」，避免裸引号；字符串值内不要出现未转义的换行或控制字符。
-请将这三个字段保持为彼此独立的顶层扁平字符串；任何结构化拆解内容都应写进 analysis_output 的字符串正文中，不要写成嵌套 JSON。ext_info_brief 字段包含调度理由摘要、RESET SLA 指标，以及 interface_error 事件中的“为何”信号——请使用这些信息来填写 boost_reason / failure_reason。如果 ext_info_brief 中缺少某个键，表示该信号不存在，不是 null。
+请将这五个字段保持为彼此独立的顶层扁平字符串；任何结构化拆解内容都应写进 analysis_output 的字符串正文中，不要写成嵌套 JSON。ext_info_brief 字段包含调度理由摘要、RESET SLA 指标，以及 interface_error 事件中的“为何”信号——请使用这些信息来填写 boost_reason / failure_reason。如果 ext_info_brief 中缺少某个键，表示该信号不存在，不是 null。
 若消息中存在 running_sessions 字段，它列出当前仍为 RUNNING 状态的节点(task_id+node_id)及其执行会话的最近消息摘录(elapsed_ms 为已运行毫秒数，内容可能截断，不含完整上下文)——这是轨迹事件之外从执行现场(BCS 会话)抓取的补充线索。请结合 elapsed_ms 判断各节点的卡住程度，重点检查这些会话是否出现：工具调用报错、执行已完成但未主动上报结果、长时间无新进展等问题；若发现，请把结论写入 analysis_output，必要时在 failure_reason 中给出根因。running_sessions 缺失只表示当前没有可获得会话明细的 RUNNING 节点，不代表任务没有其他问题。
         """
 
@@ -906,6 +908,16 @@ failure_reason（可选，字符串或 null）：失败的根本原因；如果�
         failure_reason = parsed.get("failure_reason")
         if failure_reason is not None and not isinstance(failure_reason, str):
             failure_reason = str(failure_reason)
+        # 大模型最终状态判断 + 失败错误类型分类(指令合同的新两字段)。缺省容忍:
+        # 老 bot/方案B降级响应可能不带(→ None,不 504——与结构化 analysis_output
+        # coerce 同精神);只做大小写/空白规整,不校验枚举值(bot 给出词表外的值
+        # 原样保留,操作者可看到实际判断)。
+        final_status = parsed.get("final_status")
+        if final_status is not None:
+            final_status = str(final_status).strip().upper() or None
+        error_category = parsed.get("error_category")
+        if error_category is not None:
+            error_category = str(error_category).strip().lower() or None
         return TrajectoryAnalysis(
             analysis_type=AnalysisType.TC_BOT,
             analysis_executor=analysis_executor,
@@ -914,6 +926,8 @@ failure_reason（可选，字符串或 null）：失败的根本原因；如果�
             gmt_create=int(time.time() * 1000),
             boost_reason=boost_reason,
             failure_reason=failure_reason,
+            final_status=final_status,
+            error_category=error_category,
         )
 
 

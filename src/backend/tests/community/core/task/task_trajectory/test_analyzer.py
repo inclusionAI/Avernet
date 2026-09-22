@@ -1483,3 +1483,49 @@ def test_analyzer_is_bound_in_di_module():
     assert analyzer._config.tc_bot_timeout_seconds == 180.0
     # Singleton: resolving twice returns the same instance.
     assert injector.get(TaskTrajectoryAnalyzer) is analyzer
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_parses_final_status_and_error_category():
+    """指令合同新两字段:大模型对任务最终成败的判断 + 失败错误类型分类,
+    透传进 TrajectoryAnalysis(final_status 大写规整/error_category 小写规整)。"""
+    bot = _FakeBot(content=json.dumps({
+        "analysis_output": "任务最终失败:执行模态报错",
+        "final_status": " failed ",
+        "error_category": "Execution_Error",
+        "failure_reason": "bot 工具执行抛错",
+    }, ensure_ascii=False))
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    trajectory = _traj([
+        _ev(TrajectoryActionType.SUBMIT, action_result="success"),
+        _terminal_failed(),
+    ])
+    ta = await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    assert ta.final_status == "FAILED"
+    assert ta.error_category == "execution_error"
+
+    # instruction 明确要求 final_status/error_category 两个新字段
+    msg = bot.last_call["message"]
+    assert "final_status" in msg and "error_category" in msg
+    assert "execution_error" in msg and "dispatch_error" in msg and "timeout_error" in msg
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_tolerates_missing_final_status_and_error_category():
+    """老 bot / 方案B降级响应可能只回中三字段——新两字段缺省 None,不 504。"""
+    bot = _FakeBot(content=_bot_analysis_content(analysis_output="老协议结论"))
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    trajectory = _traj([
+        _ev(TrajectoryActionType.SUBMIT, action_result="success"),
+        _terminal_success(),
+    ])
+    ta = await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    assert ta.analysis_output == "老协议结论"
+    assert ta.final_status is None
+    assert ta.error_category is None

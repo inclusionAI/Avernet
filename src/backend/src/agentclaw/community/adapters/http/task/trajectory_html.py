@@ -254,6 +254,8 @@ def _render_analysis(analysis_raw: str | None, *, do_analysis: bool) -> str:
         [
             _field("分析执行者类型", "analysis_type"),
             _field("执行者", "analysis_executor"),
+            _field("最终执行状态 (final_status)", "final_status"),
+            _field("错误类型 (error_category)", "error_category"),
             _field("推进理由 (boost_reason)", "boost_reason"),
             _field("失败根因 (failure_reason)", "failure_reason"),
             _field("结论汇总", "analysis_output"),

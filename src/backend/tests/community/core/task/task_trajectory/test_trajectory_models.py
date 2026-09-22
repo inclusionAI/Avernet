@@ -200,6 +200,8 @@ def test_trajectory_analysis_constructs_with_none_defaults():
     assert ta.failure_reason is None
     assert ta.gmt_create == 5
     assert ta.timeline_version is None
+    assert ta.final_status is None
+    assert ta.error_category is None
 
 
 def test_trajectory_analysis_has_no_event_list():
@@ -209,7 +211,7 @@ def test_trajectory_analysis_has_no_event_list():
     assert field_names == {
         "analysis_type", "analysis_executor", "analysis_input",
         "analysis_output", "boost_reason", "failure_reason", "gmt_create",
-        "timeline_version",
+        "timeline_version", "final_status", "error_category",
     }
 
 
