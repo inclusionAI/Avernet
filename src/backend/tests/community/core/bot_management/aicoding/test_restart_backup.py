@@ -116,6 +116,35 @@ async def test_other_engine_instance_does_not_probe_or_lock():
     assert not runtime.mock_calls
 
 
+def test_active_empty_inventory_fails_closed():
+    runtime = Mock()
+    runtime.get_bot.return_value = {'status': 'ACTIVE', 'devices': []}
+    with pytest.raises(RuntimeError, match='清单为空'):
+        AicodingProvisioningStrategy('aicoding')._prepare_restart(
+            BotProvisioningContext(
+                bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+            ),
+            device_id='caller-uuid', target_runtime=runtime,
+        )
+
+
+def test_operation_id_is_fresh_per_restart_request():
+    ctx = BotProvisioningContext(
+        bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+    )
+    runtime = Mock()
+    runtime.get_bot.return_value = {
+        'status': 'ACTIVE',
+        'devices': [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}],
+    }
+    with patch.object(backup, 'prepare_backup', side_effect=lambda **kwargs: Mock()) as prepared:
+        strategy = AicodingProvisioningStrategy('aicoding')
+        strategy._prepare_restart(ctx, device_id='caller-uuid', target_runtime=runtime)
+        strategy._prepare_restart(ctx, device_id='caller-uuid', target_runtime=runtime)
+    ids = [call.kwargs['operation_id'] for call in prepared.call_args_list]
+    assert len(ids) == 2 and ids[0] != ids[1]
+
+
 @pytest.mark.asyncio
 async def test_instance_targets_are_pinned_and_inventory_is_rechecked():
     runtime = Mock()
@@ -504,3 +533,46 @@ def test_async_service_contract_matches_implementation():
     actual = BotService.restart_bot_async
     assert inspect.iscoroutinefunction(expected) and inspect.iscoroutinefunction(actual)
     assert list(inspect.signature(expected).parameters) == list(inspect.signature(actual).parameters)
+
+
+@pytest.mark.asyncio
+async def test_http_restart_preserves_lifecycle_callback_signature():
+    calls = []
+
+    def restart(*, bot_id, user_id):
+        calls.append((bot_id, user_id))
+        return {'status': 'PENDING'}
+
+    result = await AicodingProvisioningStrategy('aicoding').execute_restart(
+        None, restart, bot_id='bot', user_id='owner',
+    )
+    assert result == {'status': 'PENDING'}
+    assert calls == [('bot', 'owner')]
+
+
+@pytest.mark.asyncio
+async def test_durable_restart_key_is_consumed_by_coding_strategy():
+    runtime = Mock()
+    runtime.get_bot.return_value = {
+        'status': 'ACTIVE',
+        'devices': [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}],
+    }
+    bot = {'bot_id': 'b', 'owner_id': 'o', 'active_engine': 'aicoding'}
+    with patch.object(backup, 'prepare_backup', side_effect=lambda **kwargs: Mock()) as prepared:
+        for key in ['restart:publish-1:prod', 'restart:publish-1:prod', 'restart:publish-2:prod']:
+            await prepare_instance_restart(
+                bot=bot, device_id='target', target_runtime=runtime, restart_key=key,
+            )
+    ids = [call.kwargs['operation_id'] for call in prepared.call_args_list]
+    assert ids[0] == ids[1]
+    assert ids[0] != ids[2]
+
+
+@pytest.mark.asyncio
+async def test_other_engine_ignores_durable_restart_key():
+    runtime = Mock()
+    await prepare_instance_restart(
+        bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': 'openclaw'},
+        device_id='target', target_runtime=runtime, restart_key='restart:publish:prod',
+    )
+    assert not runtime.mock_calls

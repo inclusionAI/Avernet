@@ -574,14 +574,19 @@ def resolve_restart_strategy(bot):
     )
 
 
-async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime: Any) -> None:
+async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime: Any,
+                                  operation_id: str | None = None,
+                                  restart_key: str | None = None) -> None:
     """Dispatch only; engine contracts own preconditions and execution mode.
 
     Published/caller paths hold no restart lock, so the engine-owned async
     adapter runs the returned verifier inline (coding offloads both phases).
     """
     ctx, strategy = resolve_restart_strategy(bot)
-    await strategy.prepare_restart_async(ctx, device_id=device_id, target_runtime=target_runtime)
+    await strategy.prepare_restart_async(
+        ctx, device_id=device_id, target_runtime=target_runtime,
+        operation_id=operation_id, restart_key=restart_key
+    )
 
 
 __all__ = [

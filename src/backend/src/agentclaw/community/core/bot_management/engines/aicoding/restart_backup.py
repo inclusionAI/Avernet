@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shlex
 import time
 import uuid
@@ -174,7 +175,18 @@ def _live_targets(state):
         if not isinstance(physical_id, str) or not physical_id:
             raise RuntimeError("无法定位目标物理容器，禁止随机选择实例备份")
         targets[physical_id] = device
+    if not targets:
+        raise RuntimeError("目标容器清单为空，禁止跳过重启备份")
     return targets
+
+
+def _operation_id(value, restart_key=None):
+    if value is None:
+        return (uuid.uuid5(uuid.NAMESPACE_URL, restart_key).hex
+                if restart_key is not None else uuid.uuid4().hex)
+    if not isinstance(value, str) or not re.fullmatch(r'[a-f0-9]{32}', value):
+        raise ValueError('operation_id must be a 32-character lowercase hex string')
+    return value
 
 
 class AicodingRestartBackupMixin:
@@ -189,6 +201,9 @@ class AicodingRestartBackupMixin:
         """
         if device_service_provider is not None and kwargs.get('binding_id') is not None:
             kwargs['device_service'] = device_service_provider()
+        kwargs['operation_id'] = _operation_id(
+            kwargs.get('operation_id'), kwargs.pop('restart_key', None)
+        )
         return self._prepare_restart(ctx, target_runtime_provider=target_runtime_provider, **kwargs)
 
     async def prepare_restart_async(self, ctx, **kwargs):
@@ -197,12 +212,16 @@ class AicodingRestartBackupMixin:
             await asyncio.to_thread(verify)
 
     async def execute_restart(self, ctx, restart, **kwargs):
+        # Keep the existing lifecycle callback signature unchanged. The coding
+        # precondition generates a fresh operation id in prepare_restart.
         return await asyncio.to_thread(restart, **kwargs)
 
     def _prepare_restart(self, ctx, *, binding_id=None, device_service=None,
-                        bot_repository=None, device_id=None, target_runtime=None, target_runtime_provider=None):
+                        bot_repository=None, device_id=None, target_runtime=None,
+                        target_runtime_provider=None, operation_id=None):
         """Only coding engines probe runtime; no generic lifecycle/status changes."""
         try:
+            operation_id = _operation_id(operation_id)
             if device_id is not None:
                 targets = _live_targets(target_runtime.get_bot(bot_uuid=device_id))
                 logger.info(
@@ -211,7 +230,7 @@ class AicodingRestartBackupMixin:
                 )
                 checks = [prepare_backup(
                     execute=lambda cmd, target=physical: _execute_physical(target_runtime, target, cmd),
-                    operation_id=uuid.uuid5(uuid.NAMESPACE_URL, 'restart:' + device_id + ':' + physical).hex,
+                    operation_id=operation_id,
                     bot_id=ctx.bot_id, target_id=physical,
                 ) for physical in targets]
 
@@ -235,7 +254,8 @@ class AicodingRestartBackupMixin:
                 # Existing BaaS inventory/POST contracts also work for FAILED
                 # bindings; no change to the ordinary DeviceService exec gate.
                 check = self._prepare_restart(
-                    ctx, device_id=target, target_runtime=target_runtime_provider())
+                    ctx, device_id=target, target_runtime=target_runtime_provider(),
+                    operation_id=operation_id)
             else:
                 if _field(binding, 'status') in {'FAILED', 'STOPPED'}:
                     # Legacy ARCA's physical sandbox ID is already persisted.
@@ -252,7 +272,7 @@ class AicodingRestartBackupMixin:
                         return device_service.exec_shell_new(device_id=target, shell_cmd=cmd)
                 check = prepare_backup(
                     execute=execute,
-                    operation_id=uuid.uuid5(uuid.NAMESPACE_URL, 'restart:' + target).hex,
+                    operation_id=operation_id,
                     bot_id=ctx.bot_id, target_id=target,
                 )
 
