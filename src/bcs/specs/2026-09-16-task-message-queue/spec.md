@@ -94,7 +94,7 @@ Send；结果会在 Manager lane 可用后独立启动下一轮。
 同一个终态 CAS 中生成 TaskResult；不要求 Worker 再发一次回调。Unknown/CancelUnknown
 不产生异常结果。原 assignment_intent_id 和短任务摘要保存在既有 task 元数据中，
 失败/中断使用短文本回传，Cancelled 在 ledger 中单独分类。具体通知规则见
-`docs/specs/2026-09-22-manager-worker-status-notifications/spec.md`。
+`src/bcs/specs/2026-09-22-manager-worker-status-notifications/spec.md`。
 
 Worker 终态事务同时完成：
 
