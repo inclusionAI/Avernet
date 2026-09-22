@@ -14,11 +14,15 @@ from src.domain.models.worker import (
     WorkerState,
     WorkerType,
 )
+from src.interfaces.api.dependencies.worker_dependencies import (
+    get_worker_profile_content_service,
+)
 
 
 def test_authenticated_product_route_deletes_worker_without_admin_routes(monkeypatch):
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "runtime")
+    monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
     monkeypatch.delenv("BCSFUSE_EXPOSE_ADMIN", raising=False)
     app = create_opensource_app(mode="test")
     workers = app.state.context.registry.get("worker_registry_store")
@@ -39,6 +43,9 @@ def test_authenticated_product_route_deletes_worker_without_admin_routes(monkeyp
     original_delete = workers.delete
 
     class ProfileService:
+        def has_vector_cleanup(self):
+            return True
+
         def list_profiles(self, worker_id):
             assert worker_id == "bot:owner"
             return SimpleNamespace(items=[SimpleNamespace(profile_id="default")])
@@ -83,6 +90,7 @@ def test_authenticated_product_route_deletes_worker_without_admin_routes(monkeyp
 def test_profile_cleanup_failure_preserves_worker_for_retry(monkeypatch):
     monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
     monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "runtime")
+    monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
     app = create_opensource_app(mode="test")
     workers = app.state.context.registry.get("worker_registry_store")
     workers.create(
@@ -100,6 +108,9 @@ def test_profile_cleanup_failure_preserves_worker_for_retry(monkeypatch):
     )
 
     class FailingProfileService:
+        def has_vector_cleanup(self):
+            return True
+
         def list_profiles(self, worker_id):
             raise RuntimeError(f"profile cleanup failed for {worker_id}")
 
@@ -113,3 +124,57 @@ def test_profile_cleanup_failure_preserves_worker_for_retry(monkeypatch):
 
     assert response.status_code == 500
     assert workers.get_by_id("bot:owner") is not None
+
+
+def test_missing_vector_cleanup_preserves_worker_for_retry(monkeypatch):
+    monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "runtime")
+    monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
+    app = create_opensource_app(mode="test")
+    workers = app.state.context.registry.get("worker_registry_store")
+    workers.create(
+        Worker(
+            id="bot:owner",
+            type=WorkerType.BOT,
+            responsibilities=[],
+            capabilities=[],
+            identity=WorkerIdentity(name="Bot", handle="@bot:owner"),
+            state=WorkerState(
+                availability=Availability.PROTECTED,
+                trust_level=TrustLevel.UNVERIFIED,
+            ),
+        )
+    )
+
+    class ProfileServiceWithoutVectorCleanup:
+        def has_vector_cleanup(self):
+            return False
+
+    monkeypatch.setattr(
+        lifecycle_routes,
+        "_get_profile_service",
+        ProfileServiceWithoutVectorCleanup,
+    )
+
+    with TestClient(app) as client:
+        response = client.delete(
+            "/api/v1/workers/bot:owner",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "VECTOR_CLEANUP_UNAVAILABLE"
+    assert workers.get_by_id("bot:owner") is not None
+
+
+def test_profile_cleanup_uses_registered_vector_providers(monkeypatch):
+    monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
+    app = create_opensource_app(mode="test")
+
+    service = get_worker_profile_content_service()
+
+    assert service.has_vector_cleanup()
+    assert (
+        service._profile_store.vector_store
+        is app.state.context.registry.get("vector_store")
+    )

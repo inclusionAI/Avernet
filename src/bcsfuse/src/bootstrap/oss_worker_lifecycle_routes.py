@@ -43,6 +43,14 @@ async def delete_worker(worker_id: str, request: Request) -> dict:
 
     try:
         profile_service = _get_profile_service()
+        if not profile_service.has_vector_cleanup():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "VECTOR_CLEANUP_UNAVAILABLE",
+                    "message": "worker vector cleanup provider not available",
+                },
+            )
         profiles = profile_service.list_profiles(worker_id)
         for profile in profiles.items:
             profile_service.delete_profile(worker_id, profile.profile_id)

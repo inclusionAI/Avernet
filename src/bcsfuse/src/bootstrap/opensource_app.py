@@ -26,6 +26,10 @@ def create_opensource_app(mode: str = None) -> FastAPI:
 
     # Build application context
     context = build_application_context(mode=mode)
+    # Initialize the provider graph before background startup work can access
+    # it. ApplicationContext lazy initialization is not thread-safe, and two
+    # first readers could otherwise build different store instances.
+    _ = context.registry
 
     # CRITICAL: Share application context with fusion_dependencies to avoid
     # Qdrant embedded client lock errors (OPENCORE-P1 Phase F fix)
@@ -132,12 +136,15 @@ def create_opensource_app(mode: str = None) -> FastAPI:
     # DO NOT import from src.interfaces.api.* because it triggers:
     # __init__.py -> app.py -> recommend_routes.py -> drm_resource.py -> Layotto init
     try:
-        include_oss_business_routes(app)
         from src.bootstrap.oss_worker_lifecycle_routes import (
             router as worker_lifecycle_router,
         )
 
+        # Register the authenticated lifecycle DELETE before the legacy R3
+        # worker router, which exposes the same path with best-effort cleanup.
+        # Starlette resolves duplicate routes in registration order.
         app.include_router(worker_lifecycle_router)
+        include_oss_business_routes(app)
         logger.info("[OSS App] OSS business routes mounted successfully")
     except Exception as e:
         # Log but don't fail - OSS routes are optional

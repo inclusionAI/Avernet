@@ -11,7 +11,9 @@ use bcs_http::state::{
 use bcs_secret::DefaultSecretService;
 use bcs_secret_local::{EnvSecretAccess, NoopSecretAccess};
 use bcs_service_api::port::secret::SecretAccessPort;
-use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort, SecretService};
+use bcs_service_api::{
+    BotRegistryCoreService, ChatRunCleanupPort, ChatRunEventPort, SecretService,
+};
 use bcs_services_container::Services;
 use bcs_ws::bot::BotConnectionRegistry;
 use bcs_ws::shared::RunChannelManager;
@@ -114,6 +116,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
             fuse_client: state.fuse_client.clone(),
             bcsfuse_config: config.bcsfuse.clone(),
             bots_base_dir: config.bots_base_dir.clone(),
+            registry: state.services.registry.clone(),
         }))
         .with_group_request_config(
             config.bcs_endpoint.clone(),
@@ -369,6 +372,22 @@ struct BootstrapVisibilitySyncPort {
     fuse_client: Option<Arc<FuseClient>>,
     bcsfuse_config: bcs_fuse_client::BcsFuseConfig,
     bots_base_dir: std::path::PathBuf,
+    registry: Arc<dyn BotRegistryCoreService>,
+}
+
+async fn bot_is_active(registry: &dyn BotRegistryCoreService, bot_id: &str) -> bool {
+    match registry.try_get(bot_id).await {
+        Ok(Some(_)) => true,
+        Ok(None) => false,
+        Err(error) => {
+            tracing::warn!(
+                bot_id,
+                error = %error,
+                "Cannot verify Bot lifecycle state; skipping BCSFuse fallback sync"
+            );
+            false
+        }
+    }
 }
 
 #[async_trait]
@@ -398,6 +417,14 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
                     "Worker missing during availability sync; falling back to full sync"
                 );
             }
+        }
+
+        if !bot_is_active(self.registry.as_ref(), &request.bot_uuid).await {
+            tracing::info!(
+                bot_id = %request.bot_uuid,
+                "Bot was deleted before BCSFuse fallback sync; worker will not be recreated"
+            );
+            return;
         }
 
         let bot_context = match bcs_fusion::load_bot_context(&self.bots_base_dir, &request.bot_uuid)
@@ -441,6 +468,20 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
             &sync_req,
         )
         .await;
+
+        // Deletion may race the full sync after the pre-check. If it won in
+        // BCS while the remote sync was in flight, remove any worker the sync
+        // just recreated. A deletion that starts after this check performs its
+        // own catalog cleanup, so every ordering leaves the worker deleted.
+        if !bot_is_active(self.registry.as_ref(), &request.bot_uuid).await {
+            if let Err(error) = fuse_client.delete_worker(&request.bot_uuid).await {
+                tracing::error!(
+                    bot_id = %request.bot_uuid,
+                    error = %error,
+                    "Failed to remove worker recreated by racing visibility sync"
+                );
+            }
+        }
     }
 }
 
@@ -465,6 +506,20 @@ mod tests {
     use tokio::sync::Mutex;
     use tracing::{Instrument, info_span, instrument::WithSubscriber};
     use tracing_subscriber::prelude::*;
+
+    #[tokio::test]
+    async fn deleted_bot_is_not_eligible_for_bcsfuse_fallback_sync() {
+        let registry = bcs_bot::BotCore::new();
+        registry
+            .register("bot-deleted".to_string(), Default::default())
+            .await
+            .expect("register bot");
+        assert!(bot_is_active(&registry, "bot-deleted").await);
+
+        assert!(registry.soft_delete("bot-deleted").await);
+
+        assert!(!bot_is_active(&registry, "bot-deleted").await);
+    }
 
     fn test_secret_factory(
         provider_config: bcs_config_api::SecretProviderConfig,

@@ -74,6 +74,10 @@ class WorkerProfileContentService:
         self._runtime_state_store = runtime_state_store
         self._profile_store = profile_store
 
+    def has_vector_cleanup(self) -> bool:
+        """Return whether profile deletion can also remove searchable vectors."""
+        return self._vector_indexer is not None
+
     def register_or_update_profile(
         self,
         worker_id: str,

@@ -358,11 +358,10 @@ def get_worker_profile_content_service():
     Returns:
         WorkerProfileContentService 实例
     """
-    from src.infra.embedding.config.embedding_settings import EmbeddingSettings
-    from src.infra.config.data_paths import resolve_data_path
     from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
+    from src.infra.config.data_paths import resolve_data_path
+    from src.infra.embedding.config.embedding_settings import EmbeddingSettings
     from src.infra.indexing.profile_embedding_store import ProfileEmbeddingStore
-    from src.infra.embedding.providers.real_provider import RealEmbeddingProvider
 
     # R15-E FIX: Use store from ProviderRegistry if available (runtime mode)
     # QDRANT_SINGLETON_FIX: Use shared _app_context instead of build_application_context()
@@ -389,48 +388,70 @@ def get_worker_profile_content_service():
         content_store = SQLiteWorkerProfileContentStore(db_path)
         logger.info("[Open-Core] SQLite Profile Content Store initialized")
 
-    # 创建 Vector Indexer（用于删除向量）
+    # Build the deletion indexer from the providers selected by bootstrap. This
+    # keeps lifecycle cleanup on the same vector store used by recommendation,
+    # including deployments whose embedding settings come from YAML.
     vector_indexer = None
     profile_store = None
+    app_context = None
     try:
-        settings = EmbeddingSettings()
-        if settings.is_configured():
-            embedding_provider = RealEmbeddingProvider(settings=settings)
+        from src.interfaces.api.dependencies.fusion_dependencies import get_app_context
 
-            # QDRANT_SINGLETON_FIX: Get shared vector_store from app context to avoid lock conflicts
-            # QDRANT_SINGLETON_FIX: Use shared _app_context instead of build_application_context()
+        app_context = get_app_context()
+        if app_context is not None:
+            shared_vector_store = app_context.registry.get("vector_store")
+            embedding_provider = app_context.registry.get("embedding_provider")
+        else:
             shared_vector_store = None
-            try:
-                from src.interfaces.api.dependencies.fusion_dependencies import get_app_context
-                app_context = get_app_context()
-                if app_context is not None and app_context.registry.has("vector_store"):
-                    shared_vector_store = app_context.registry.get("vector_store")
-                    logger.info("[LOCAL_QDRANT_SINGLETON] component=ProfileEmbeddingStore(worker_content_svc) "
-                              f"vector_store_id={id(shared_vector_store)} "
-                              f"storage_path={getattr(shared_vector_store, 'path', 'N/A')} "
-                              f"source=registry")
-                else:
-                    logger.warning("[LOCAL_QDRANT_SINGLETON] component=ProfileEmbeddingStore(worker_content_svc) "
-                                 "app_context not available or vector_store not in registry")
-            except Exception as e:
-                logger.error("[LOCAL_QDRANT_SINGLETON] component=ProfileEmbeddingStore(worker_content_svc) "
-                           f"failed to get app context: {e}")
+            embedding_provider = None
 
-            # Open-core always uses local mode (no ZDAS/Database dependency)
+        if shared_vector_store is not None and embedding_provider is not None:
             profile_store = ProfileEmbeddingStore(
-                dimension=settings.dimension,
-                index_type="local",  # Always local for open-core
+                dimension=getattr(shared_vector_store, "dimension", 4096),
+                index_type="local",
                 db_path=resolve_data_path("data/vector_store.db"),
-                database=None,  # No database for open-core
+                database=None,
                 datasource_name="agentclaw_ds",
-                vector_store=shared_vector_store,  # QDRANT_SINGLETON_FIX: Pass shared vector_store
+                vector_store=shared_vector_store,
             )
             vector_indexer = ProfileEmbeddingIndexer(
                 embedding_provider=embedding_provider,
                 profile_store=profile_store,
             )
-    except Exception:
-        pass  # 向量索引器创建失败不影响主流程
+            logger.info(
+                "[Open-Core] Profile vector cleanup initialized from ProviderRegistry"
+            )
+    except Exception as error:
+        logger.warning(
+            "[Open-Core] Failed to initialize profile vector cleanup from ProviderRegistry: %s",
+            error,
+        )
+
+    # CLI/dev callers without an application context retain the environment-
+    # configured fallback. Product lifecycle deletion rejects a missing indexer.
+    if vector_indexer is None and app_context is None:
+        try:
+            from src.infra.embedding.providers.real_provider import RealEmbeddingProvider
+
+            settings = EmbeddingSettings()
+            if settings.is_configured():
+                embedding_provider = RealEmbeddingProvider(settings=settings)
+                profile_store = ProfileEmbeddingStore(
+                    dimension=settings.dimension,
+                    index_type="local",
+                    db_path=resolve_data_path("data/vector_store.db"),
+                    database=None,
+                    datasource_name="agentclaw_ds",
+                )
+                vector_indexer = ProfileEmbeddingIndexer(
+                    embedding_provider=embedding_provider,
+                    profile_store=profile_store,
+                )
+        except Exception as error:
+            logger.warning(
+                "[Open-Core] Failed to initialize environment profile vector cleanup: %s",
+                error,
+            )
 
     from src.application.services.worker_profile_content_service import WorkerProfileContentService
     return WorkerProfileContentService(
