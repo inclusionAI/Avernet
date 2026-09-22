@@ -1,5 +1,6 @@
 """Coding-only restart preconditions, receipt fencing, and sanitized logs."""
 import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -27,6 +28,7 @@ def prepare(execute):
 
 @pytest.mark.parametrize('status', ['legacy', 'not_mounted'])
 def test_confirmed_no_backup_returns_verifier(status, caplog):
+    caplog.set_level(logging.INFO, logger=backup.logger.name)
     execute = Mock(return_value=response(status))
     verify = prepare(execute)
     assert execute.call_count == 1
@@ -38,6 +40,7 @@ def test_confirmed_no_backup_returns_verifier(status, caplog):
 
 
 def test_poll_and_short_verification_require_matching_receipt(caplog):
+    caplog.set_level(logging.INFO, logger=backup.logger.name)
     committed = response('committed', backup={
         'status': 'success', 'generation_id': 'g1', 'operation_id': OPERATION})
     execute = Mock(side_effect=[response('running'), response('running'), committed, committed])
@@ -52,6 +55,7 @@ def test_poll_and_short_verification_require_matching_receipt(caplog):
     SimpleNamespace(exit_code=0, stdout='secret-output'), response('failed'),
     response('committed'), response('skipped')])
 def test_failed_or_unknown_results_block_and_do_not_log_raw_output(result, caplog):
+    caplog.set_level(logging.INFO, logger=backup.logger.name)
     with pytest.raises(RuntimeError):
         prepare(Mock(return_value=result))
     assert 'phase=prepare status=blocked' in caplog.text
@@ -75,6 +79,7 @@ def test_new_container_cannot_use_previous_receipt():
 
 
 def test_timeout_never_allows_replacement(caplog):
+    caplog.set_level(logging.INFO, logger=backup.logger.name)
     with patch.object(backup, 'DEADLINE_SECONDS', 0), pytest.raises(TimeoutError):
         prepare(Mock(return_value=response('running')))
     assert 'error_type=TimeoutError' in caplog.text
@@ -187,6 +192,7 @@ def test_original_lock_and_binding_survive_backup_failure(phase, provider):
 
 
 def test_wait_logs_are_throttled_but_keep_progress(caplog):
+    caplog.set_level(logging.INFO, logger=backup.logger.name)
     now = [0]
     committed = response('committed', backup={
         'status': 'success', 'generation_id': 'g1', 'operation_id': OPERATION})
@@ -317,6 +323,7 @@ def test_missing_helper_after_new_capability_install_is_not_legacy(marker):
 @pytest.mark.parametrize('provider', ['arca', 'baas'])
 @pytest.mark.parametrize('binding_status', ['ACTIVE', 'PENDING', 'FAILED', 'STOPPED'])
 def test_old_coding_bot_without_new_script_completes_original_restart(engine, provider, binding_status, caplog):
+    caplog.set_level(logging.INFO, logger=backup.logger.name)
     from tests.community.core.bot_management.services.test_bot_service_restart_idempotency import (
         FakeRestartLockRepo, _make_service, _make_bot, _stateful_bot_repository,
     )
