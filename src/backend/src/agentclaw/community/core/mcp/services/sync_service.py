@@ -141,9 +141,6 @@ class MCPSyncService(MCPSyncServiceProtocol):
             self._mcp_provider_cached = self._mcp_provider_factory()
         return self._mcp_provider_cached
 
-    # ------------------------------------------------------------------
-    # 配置层面 —— 推送 MCP 详细配置到设备
-    # ------------------------------------------------------------------
     async def sync_mcp_details(
         self,
         user_id: str,
@@ -385,9 +382,6 @@ class MCPSyncService(MCPSyncServiceProtocol):
 
         return {"success": True}
 
-    # ------------------------------------------------------------------
-    # 权限层面 —— 刷新白名单与许可证
-    # ------------------------------------------------------------------
     async def refresh_mcp_scope(
         self,
         user_id: str,
@@ -526,6 +520,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         endpoint_env: Optional[str] = None,
         transport_protocol: Optional[str] = None,
         target_bot_ids: list[str] | None = None,
+        target_bot_owners: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Project one persisted user config to its effective consumers."""
         control_plane_selected = target_bot_ids is not None
@@ -585,6 +580,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         semaphore = asyncio.Semaphore(_USER_CONFIG_FANOUT_CONCURRENCY)
 
         async def _sync_one(bot_id: str) -> dict[str, Any]:
+            bot_owner_id = (target_bot_owners or {}).get(bot_id, user_id)
             async with semaphore:
                 try:
                     ctx = await asyncio.to_thread(
@@ -622,10 +618,12 @@ class MCPSyncService(MCPSyncServiceProtocol):
                         details = await self.sync_mcp_details(
                             user_id=user_id, entity_id=entity_id, bot_id=bot_id,
                             entity_type=entity_type, engine_type=effective_engine_type,
+                            active_only=True,
                         ) if scope.get("success") else None
                         target_synced = await self._sync_mcp_detail(
                             plugin=plugin,
                             user_id=user_id,
+                            bot_owner_id=bot_owner_id,
                             bot_id=bot_id,
                             mcp_data=mcp_data,
                             api_key=api_key,
@@ -658,6 +656,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
                     sync_success = await self._sync_mcp_detail(
                         plugin=plugin,
                         user_id=user_id,
+                        bot_owner_id=bot_owner_id,
                         bot_id=bot_id,
                         mcp_data=mcp_data,
                         api_key=api_key,
@@ -836,6 +835,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         *,
         plugin: DeviceSync,
         user_id: str,
+        bot_owner_id: Optional[str] = None,
         bot_id: str,
         mcp_data: dict[str, Any],
         api_key: Optional[str] = None,
@@ -872,7 +872,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         bot_override = await asyncio.to_thread(
             self.mcp_config_service.get_bot_override,
             bot_id=bot_id,
-            owner_id=user_id,
+            owner_id=bot_owner_id or user_id,
             server_code=server_code,
         )
         if bot_override:

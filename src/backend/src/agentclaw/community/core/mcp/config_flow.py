@@ -214,6 +214,7 @@ async def write_unified_config(
     # MCP. ``None`` retains compatibility with an out-of-tree implementation
     # of the config service until it adopts the enriched result.
     affected_bot_ids = candidate.get("affected_bot_ids")
+    affected_bot_owners = candidate.get("affected_bot_owners")
 
     old_config = config_service.update_user_unified_config(
         user_id=user_id,
@@ -243,6 +244,7 @@ async def write_unified_config(
             endpoint_env=endpoint_env,
             transport_protocol=normalized_tp,
             target_bot_ids=affected_bot_ids,
+            target_bot_owners=affected_bot_owners,
         )
     except Exception as exc:
         # Per-Bot delivery errors are converted to sync_results by the batch

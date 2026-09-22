@@ -1320,7 +1320,30 @@ class TestSyncMcpDetailToAllBots:
             "bot_id": "bot1", "synced": True, "reason": "RUNTIME_DRIFT", "error": None,
         }]
         service.refresh_mcp_scope.assert_awaited_once()
-        service.sync_mcp_details.assert_awaited_once()
+        service.sync_mcp_details.assert_awaited_once_with(
+            user_id="u1", entity_id="100", bot_id="bot1",
+            entity_type="staff", engine_type="openclaw", active_only=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_targeted_team_bot_reads_its_owner_override(self):
+        plugin = _make_plugin()
+        resolver, dispatcher, _ = _make_resolver_and_dispatcher(plugin=plugin)
+        config = MagicMock()
+        config.get_bot_override.return_value = None
+        config.build_mcp_sync_payload.return_value = (None, {}, "PROD", None)
+        service = _make_sync_service(
+            resolver=resolver, dispatcher=dispatcher, mcp_config_service=config,
+            bot_repository=MagicMock(),
+        )
+
+        await service.sync_mcp_detail_to_all_bots(
+            user_id="caller", server_code="mcp.x", mcp_data={"server_code": "mcp.x"},
+            entity_id="team-42", entity_type="team", target_bot_ids=["bot1"],
+            target_bot_owners={"bot1": "team-owner"},
+        )
+
+        assert config.get_bot_override.call_args.kwargs["owner_id"] == "team-owner"
 
     @pytest.mark.asyncio
     async def test_bot_without_device_is_skipped(self):

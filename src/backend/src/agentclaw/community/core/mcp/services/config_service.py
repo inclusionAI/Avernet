@@ -194,13 +194,19 @@ class MCPConfigService(MCPConfigServiceProtocol):
             else current.get("transport_protocol"),
         }
 
-        overrides = self.bot_mcp_config_repo.list_by_owner_and_server_code(
-            owner_id=user_id, server_code=server_code
+        owner_bots = self._candidate_bots(
+            user_id=user_id, entity_id=None, entity_type=None
         )
-        affected_bot_ids: list[str] = []
-        for bot in self._candidate_bots(
+        entity_bots = self._candidate_bots(
             user_id=user_id, entity_id=entity_id, entity_type=entity_type
-        ):
+        )
+        delivery_bot_ids = {str(bot["bot_id"]) for bot in entity_bots}
+        candidates = {str(bot["bot_id"]): bot for bot in owner_bots}
+        candidates.update({str(bot["bot_id"]): bot for bot in entity_bots})
+        overrides_by_owner: dict[str, dict[str, dict[str, Any]]] = {}
+        affected_bot_ids: list[str] = []
+        affected_bot_owners: dict[str, str] = {}
+        for bot in candidates.values():
             bot_id = str(bot["bot_id"])
             bot_owner_id = str(bot.get("owner_id") or user_id)
             if server_code not in self._capability_reader.effective_mcp_server_codes(
@@ -209,10 +215,12 @@ class MCPConfigService(MCPConfigServiceProtocol):
                 bot=bot,
             ):
                 continue
-            # This is the runtime-equivalent control-plane decision.  Keep it
-            # with validation so the subsequent delivery fan-out does not
-            # enumerate every Bot again or ask unrelated devices for state.
-            affected_bot_ids.append(bot_id)
+            overrides = overrides_by_owner.get(bot_owner_id)
+            if overrides is None:
+                overrides = self.bot_mcp_config_repo.list_by_owner_and_server_code(
+                    owner_id=bot_owner_id, server_code=server_code
+                )
+                overrides_by_owner[bot_owner_id] = overrides
             override = overrides.get(bot_id, {})
             engine_type = bot.get("active_engine") or bot.get("engine")
             before = self._validate_effective_config(
@@ -235,10 +243,14 @@ class MCPConfigService(MCPConfigServiceProtocol):
                     "kind": "new_bot_conflict",
                     "error": f"Bot {bot_id}: {after['error']}",
                 }
+            if bot_id in delivery_bot_ids:
+                affected_bot_ids.append(bot_id)
+                affected_bot_owners[bot_id] = bot_owner_id
         return {
             "valid": True,
             "error": None,
             "affected_bot_ids": affected_bot_ids,
+            "affected_bot_owners": affected_bot_owners,
         }
 
     def _candidate_bots(
