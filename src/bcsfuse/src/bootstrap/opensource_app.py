@@ -133,6 +133,11 @@ def create_opensource_app(mode: str = None) -> FastAPI:
     # __init__.py -> app.py -> recommend_routes.py -> drm_resource.py -> Layotto init
     try:
         include_oss_business_routes(app)
+        from src.bootstrap.oss_worker_lifecycle_routes import (
+            router as worker_lifecycle_router,
+        )
+
+        app.include_router(worker_lifecycle_router)
         logger.info("[OSS App] OSS business routes mounted successfully")
     except Exception as e:
         # Log but don't fail - OSS routes are optional

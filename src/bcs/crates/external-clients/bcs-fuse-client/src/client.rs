@@ -103,7 +103,7 @@ impl FuseClient {
         availability: &str,
     ) -> Result<(), FuseClientError> {
         bcs_observability::observe_result("fuse.set_worker_availability", async {
-            let url = format!("{}/v1/workers/{}/availability", self.base_url, worker_id);
+            let url = format!("{}/api/v1/workers/{}/availability", self.base_url, worker_id);
             let response = self
                 .sync_client
                 .put(&url)
@@ -122,7 +122,7 @@ impl FuseClient {
     /// Delete a worker. Missing workers are treated as an idempotent success.
     pub async fn delete_worker(&self, worker_id: &str) -> Result<(), FuseClientError> {
         bcs_observability::observe_result("fuse.delete_worker", async {
-            let url = format!("{}/v1/workers/{}", self.base_url, worker_id);
+            let url = format!("{}/api/v1/workers/{}", self.base_url, worker_id);
             let response = self.sync_client.delete(&url).send().await?;
             if response.status() == reqwest::StatusCode::NOT_FOUND {
                 return Ok(());
@@ -377,7 +377,7 @@ mod tests {
         let client = FuseClient::for_test_with_url(url)?;
         client.set_worker_availability("bot:owner", "protected").await?;
         let request = request_rx.await?;
-        assert!(request.starts_with("PUT /v1/workers/bot:owner/availability HTTP/1.1"));
+        assert!(request.starts_with("PUT /api/v1/workers/bot:owner/availability HTTP/1.1"));
         assert!(request.contains(r#"{"availability":"protected"}"#));
         Ok(())
     }
@@ -404,7 +404,7 @@ mod tests {
         let client = FuseClient::for_test_with_url(url)?;
         client.delete_worker("bot:owner").await?;
         let request = request_rx.await?;
-        assert!(request.starts_with("DELETE /v1/workers/bot:owner HTTP/1.1"));
+        assert!(request.starts_with("DELETE /api/v1/workers/bot:owner HTTP/1.1"));
         Ok(())
     }
 }
