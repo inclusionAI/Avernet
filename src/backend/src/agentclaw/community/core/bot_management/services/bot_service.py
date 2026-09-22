@@ -24,7 +24,6 @@ from agentclaw.community.core.bot_management.capabilities import (
 )
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AICODING_ENGINE_TYPE,
-    CLAUDE_CODE_ENGINE_TYPE,
 )
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_restart_strategy,

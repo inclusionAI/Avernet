@@ -15,6 +15,7 @@ internal router does.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request
@@ -1057,7 +1058,10 @@ async def restart_bot(
     """
     _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id))
 
-    bot = await bot_service.restart_bot_async( bot_id=bot_id, user_id=owner_id)
+    restart_async = getattr(bot_service, "restart_bot_async", None)
+    bot = (await restart_async(bot_id=bot_id, user_id=owner_id)
+           if inspect.iscoroutinefunction(getattr(type(bot_service), "restart_bot_async", None))
+           else bot_service.restart_bot(bot_id=bot_id, user_id=owner_id))
     # The result carries the base record, so a collaborator restarting a
     # shared bot gets it without the owner's template snapshot (`_to_bot`).
     return envelope(
