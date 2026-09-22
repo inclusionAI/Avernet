@@ -3088,7 +3088,7 @@ mod tests {
         let human_friends = svc.list_friends("human_1").await.expect("human friends");
         assert_eq!(human_friends.len(), 1);
         assert_eq!(human_friends[0].actor_id, "x:appr");
-        svc.revoke_friend("x:appr", "human_1").await.expect("bot removes friend");
+        svc.revoke_friend("x:appr", "human_1", None).await.expect("bot removes friend");
         assert!(svc.list_friends("x:appr").await.expect("bot friends").is_empty());
         assert!(svc.list_friends("human_1").await.expect("human friends").is_empty());
     }
@@ -3113,7 +3113,7 @@ mod tests {
         }).await.unwrap();
         assert_eq!(bots.total, 0);
         assert!(bots.items.is_empty());
-        svc.revoke_friend("x:paged", "human_1").await.unwrap();
+        svc.revoke_friend("x:paged", "human_1", None).await.unwrap();
         let empty = svc.list_friends_paginated("x:paged", query).await.unwrap();
         assert_eq!(empty.total, 1);
         assert!(empty.items.is_empty());

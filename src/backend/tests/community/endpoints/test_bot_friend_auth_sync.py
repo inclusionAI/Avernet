@@ -39,7 +39,8 @@ def _principal() -> str:
     )
 
 
-init_principal_verifier_config(_Resolver(), "friend-auth-endpoint-test-key", strict=False)
+def _boot_verifier(_world) -> None:
+    init_principal_verifier_config(_Resolver(), "friend-auth-endpoint-test-key", strict=False)
 
 
 class _SyncService:
@@ -48,6 +49,7 @@ class _SyncService:
 
 
 def _seed_sync_service(world) -> None:
+    _boot_verifier(world)
     world.injector.binder.bind(
         FriendAuthSyncServiceProtocol,
         to=_SyncService(),
@@ -84,6 +86,7 @@ def sync_happy():
     method="POST",
     path=_PATH,
     scenario="err_invalid_body",
+    seed=_boot_verifier,
     input=CaseInput(headers=_HEADERS, json_body={}),
     expect=ExpectError(status=422),
 )
