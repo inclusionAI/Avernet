@@ -206,7 +206,13 @@ class TestRouter:
             },
         )
         assert response.status_code == 409, response.text
-        assert svc.callback.calls == []
+        # 拒绝即录(record_relay_callback_error 通道,error_phase=reject_legacy_relay_result)
+        assert [call[0] for call in svc.callback.calls] == ["relay_error"]
+        rejected = svc.callback.calls[0][1]
+        assert rejected["task_id"] == "t1"
+        assert rejected["node_id"] == "c1"
+        assert rejected["error_phase"] == "reject_legacy_relay_result"
+        assert "EXECUTION_RESULT" in rejected["error_msg"]
 
     def test_task_level_legacy_callback_rejected_for_relay_task(self, client):
         client, svc = client
@@ -216,7 +222,11 @@ class TestRouter:
             json=_body(task_id="t1", status="COMPLETED", is_success=True),
         )
         assert response.status_code == 409, response.text
-        assert svc.callback.calls == []
+        # 拒绝即录(node 锚回 task_id 根)
+        assert [call[0] for call in svc.callback.calls] == ["relay_error"]
+        rejected = svc.callback.calls[0][1]
+        assert rejected["task_id"] == "t1"
+        assert rejected["error_phase"] == "reject_legacy_relay_result"
 
     def test_typed_relay_event_accepted_for_relay_task(self, task_client):
         client, svc = task_client

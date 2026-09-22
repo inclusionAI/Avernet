@@ -53,8 +53,8 @@ class _FakeTrajectoryService:
         self.get_calls: list[tuple[str, bool]] = []
         self.emit_event_calls: list[dict] = []
 
-    async def get_trajectory(self, task_id, *, do_analysis=False):
-        self.get_calls.append((task_id, do_analysis))
+    async def get_trajectory(self, task_id, *, do_analysis=False, force_analysis=False):
+        self.get_calls.append((task_id, do_analysis, force_analysis))
         if self._raise_exc is not None:
             raise self._raise_exc
         return self._trajectory
@@ -86,7 +86,7 @@ def test_get_trajectory_read_relays_args_and_returns_inner_result():
     inner = _FakeTrajectoryService(trajectory=_trajectory())
     svc = TaskContextService(trajectory_service=inner)
     result = _run(svc.get_trajectory("t1", do_analysis=False))
-    assert inner.get_calls == [("t1", False)]
+    assert inner.get_calls == [("t1", False, False)]
     assert result is inner._trajectory
 
 
@@ -95,7 +95,7 @@ def test_get_trajectory_analysis_relays_do_analysis_true():
     inner = _FakeTrajectoryService()
     svc = TaskContextService(trajectory_service=inner)
     _run(svc.get_trajectory("t9", do_analysis=True))
-    assert inner.get_calls == [("t9", True)]
+    assert inner.get_calls == [("t9", True, False)]
 
 
 @pytest.mark.unit
@@ -107,7 +107,7 @@ def test_get_trajectory_not_configured_error_propagates_without_swallow():
     svc = TaskContextService(trajectory_service=inner)
     with pytest.raises(TrajectoryAnalysisNotConfiguredError):
         _run(svc.get_trajectory("t1", do_analysis=True))
-    assert inner.get_calls == [("t1", True)]
+    assert inner.get_calls == [("t1", True, False)]
 
 
 @pytest.mark.unit

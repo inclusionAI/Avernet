@@ -306,8 +306,10 @@ class TaskTrajectoryServiceProtocol(Protocol):
         task_id: str,
         *,
         do_analysis: bool = False,
+        force_analysis: bool = False,
     ) -> TaskTrajectory:
-        """Read the trajectory for ``task_id``; optionally trigger bot analysis."""
+        """Read the trajectory for ``task_id``; optionally trigger bot analysis
+        (``force_analysis=True`` 强制重跑,跳过 timeline 版本号幂等快路径)。"""
         ...
 
     def emit_trajectory_event(
@@ -387,6 +389,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         task_id: str,
         *,
         do_analysis: bool = False,
+        force_analysis: bool = False,
     ) -> TaskTrajectory:
         """Read the trajectory for ``task_id``; optionally trigger bot analysis.
 
@@ -412,19 +415,30 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         not configured (AND analysis stale/absent) →
         ``TrajectoryAnalysisNotConfiguredError`` (503).
         """
+        # force_analysis=True 隐含执行分析(即便 do_analysis 未传);并对 _do_analysis
+        # 说"跳过快路径"——忽略 timeline 版本号比对,强制重跑 bot + 重新回填盖戳。
+        if force_analysis:
+            do_analysis = True
         if not do_analysis:
             trajectory = self._assembler.assemble(task_id)
             self._attach_node_outputs(trajectory)
             return trajectory
-        return await self._do_analysis(task_id)
+        return await self._do_analysis(task_id, force_analysis=force_analysis)
 
     # ------------------------------------------------------------------
     # do_analysis=True orchestration
     # ------------------------------------------------------------------
 
-    async def _do_analysis(self, task_id: str) -> TaskTrajectory:
-        """Assemble → (timeline 版本与持久分析戳一致则直接返回) → build ext_info_lookup
-        → analyze → stamp timeline_version → backfill → return."""
+    async def _do_analysis(
+        self, task_id: str, *, force_analysis: bool = False,
+    ) -> TaskTrajectory:
+        """Assemble → (非强制且 timeline 版本与持久分析戳一致则直接返回) → build
+        ext_info_lookup → analyze → stamp timeline_version → backfill → return。
+
+        ``force_analysis=True``:完全跳过版本号幂等快路径——即使指纹与持久戳一致
+        也重新调 bot + 回填盖戳(供 bot 换代/强刷结论场景;语义与清空 head analysis
+        等价,但不依赖写库复位)。"""
+        _forced = bool(force_analysis)
         # 1. Assemble the timeline (read-side; no DB write beyond the head UPSERT
         #    which preserves existing analysis/gmt_modified).
         trajectory = self._assembler.assemble(task_id)
@@ -458,7 +472,8 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         #    stamp → mismatch → re-analyzes exactly once, then carries the
         #    stamp. ``fingerprint=None`` (records read failed) never matches.
         if (
-            trajectory.analysis
+            not _forced
+            and trajectory.analysis
             and fingerprint is not None
             and _persisted_timeline_version(trajectory.analysis) == fingerprint
         ):

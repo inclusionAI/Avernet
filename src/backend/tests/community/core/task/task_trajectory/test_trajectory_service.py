@@ -374,6 +374,49 @@ async def test_do_analysis_reruns_legacy_analysis_without_timeline_version():
     assert result.analysis == repo.backfill_calls[0][1]
 
 
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_force_analysis_overrides_version_match_fast_path():
+    """force_analysis=true:即使重算指纹与持久戳**完全一致**(默认会跳过 bot 的快路径),
+    也强制重跑 bot 并重新回填盖戳——"不管 do_analysis 内部的版本判断逻辑"。"""
+    records = [_make_record(node_id="n1", action_type="dispatch", attempt=0, gmt_create_ms=1000)]
+    stamp = _timeline_fingerprint(records)
+    persisted = json.dumps({"timeline_version": stamp}, ensure_ascii=False)
+    analysis = _make_analysis()
+    analyzer = _FakeAnalyzer(analysis=analysis)
+    repo = _FakeRepo(events=records)
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory(analysis=persisted)), repo, analyzer, config,
+    )
+
+    result = await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
+
+    # 版本一致也被强跑:bot 调了、重新回填、返回新分析
+    assert analyzer.calls == 1
+    assert len(repo.backfill_calls) == 1
+    assert result.analysis == repo.backfill_calls[0][1]
+    assert json.loads(repo.backfill_calls[0][1])["timeline_version"] == stamp
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_force_analysis_true_implies_do_analysis():
+    """force_analysis=true 自身即触发分析(不必再传 do_analysis=true):等价于强制执行的
+    do_analysis;默认(false)时 do_analysis 不受影响。"""
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo()
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+    )
+
+    result = await svc.get_trajectory("t1", force_analysis=True)
+
+    assert analyzer.calls == 1
+    assert result.analysis == repo.backfill_calls[0][1]
+
+
 @pytest.mark.unit
 def test_timeline_fingerprint_unit():
     """The fingerprint is deterministic across input order, sorts by ``id``,

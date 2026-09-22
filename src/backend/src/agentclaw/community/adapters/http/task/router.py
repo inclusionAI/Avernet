@@ -94,6 +94,11 @@ async def get_task_trajectory_internal(
     do_analysis: Annotated[
         bool, Query(description="是否触发 bot 总体分析(默认关闭)")
     ] = False,
+    force_analysis: Annotated[
+        bool,
+        Query(description="强制重跑分析,默认 false:忽略 timeline 版本号幂等判断,"
+                          "即使版本未变也重新调 bot 并回填(do_analysis 的前门旁路)"),
+    ] = False,
     display: Annotated[
         str | None,
         Query(description="展示形式:html=返回人类可读的 HTML 轨迹页;省略或其它值=默认 JSON envelope"),
@@ -108,7 +113,9 @@ async def get_task_trajectory_internal(
 
     display=html:返回自包含 HTML 轨迹页(FastAPI 对 ``HTMLResponse`` 返回值跳过 ``response_model``
     序列化,与默认 ``Envelope[TaskTrajectoryDTO]`` JSON 形态并存;错误仍走 ``envelope_errors`` 的 JSON)。"""
-    trajectory = await service.get_trajectory(task_id, do_analysis=do_analysis)
+    trajectory = await service.get_trajectory(
+        task_id, do_analysis=do_analysis, force_analysis=force_analysis
+    )
     dto = trajectory_to_dto(trajectory)
     if display == "html":
         return HTMLResponse(render_trajectory_html(dto, do_analysis=do_analysis))

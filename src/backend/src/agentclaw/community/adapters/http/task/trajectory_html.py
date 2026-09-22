@@ -376,7 +376,8 @@ def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = Fals
 </div>
 <footer>
   默认 JSON: 去掉 <code>?display=html</code> &nbsp;·&nbsp;
-  触发分析: 加 <code>&amp;do_analysis=true</code>
+  触发分析: 加 <code>&amp;do_analysis=true</code> &nbsp;·&nbsp;
+  强制重跑: 再加 <code>&amp;force_analysis=true</code>
 </footer>
 </body>
 </html>"""
