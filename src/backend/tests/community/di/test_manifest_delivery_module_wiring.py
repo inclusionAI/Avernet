@@ -2,18 +2,18 @@
 
 The composition root no longer turns the deployment's
 :class:`TeclawDeliveryMode` into a strategy by looking it up in a table. It has
-one provider per mode, each contributing its own row to the
-:data:`DeliveryStrategies` multibinding only when the deployment
-named its mode. That moves two guarantees the retired table's import-time
+a binding per strategy, and one provider per mode that contributes its
+strategy to the :data:`DeliveryStrategies` map only when the deployment named
+that mode. That moves two guarantees the retired table's import-time
 exhaustiveness check used to give onto this file, asserted over the real graph
 instead:
 
 * every member of the enum names a strategy — a mode a deployment can write
   into its yaml and nothing can build is "the surface accepts what it cannot
   run", the rule this feature is built around;
-* exactly one teclaw strategy is bound, so the two providers can never both be
-  effective and leave which row won to the order the module happens to install
-  its providers in.
+* exactly one teclaw strategy reaches the family map, so the two providers can
+  never both be effective and leave which row won to the order the module
+  happens to install its providers in.
 
 The mode is rebound on the injector rather than written into a yaml overlay
 because it is the config object's value that every provider here reads, and the
@@ -37,10 +37,10 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
 )
 from agentclaw.community.di import config as cfg
 
-#: The strategy each mode is expected to bind. One row per mode, and the test
-#: below asserts the enum has no member this table misses — so adding a mode
-#: without wiring it a provider fails here rather than at the first apply on a
-#: deployment that set it.
+#: The strategy each mode is expected to put in the family map. One row per
+#: mode, and the test below asserts the enum has no member this table misses —
+#: so adding a mode without wiring it a provider fails here rather than at the
+#: first apply on a deployment that set it.
 _EXPECTED = {
     TeclawDeliveryMode.PLATFORM: TeclawPlatformDelivery,
     TeclawDeliveryMode.DEVICE: TeclawDeviceDelivery,
@@ -70,9 +70,9 @@ def test_the_deployments_mode_names_the_teclaw_strategy(test_injector, mode) -> 
     strategies = _strategies(test_injector, mode)
 
     assert isinstance(strategies[EngineFamily.TECLAW], _EXPECTED[mode])
-    # Not merely "the expected class is in there": the other shape must not be
-    # bound at all, on any key, or the map's teclaw row would depend on which
-    # provider the module installed last.
+    # Not merely "the expected class is in there": no other row may hold a
+    # teclaw shape either, or which one a teclaw bot got would depend on the
+    # order the module happened to install its providers in.
     others = [s for f, s in strategies.items() if f is not EngineFamily.TECLAW]
     assert not any(
         isinstance(s, (TeclawPlatformDelivery, TeclawDeviceDelivery)) for s in others
@@ -144,27 +144,33 @@ def test_the_two_port_bundles_are_not_the_same_binding(test_injector) -> None:
 
 
 @pytest.mark.parametrize("mode", list(TeclawDeliveryMode))
-def test_the_shape_the_mode_did_not_name_is_never_constructed(
-    test_injector, monkeypatch, mode
-) -> None:
-    """Not selected out of two built ones: only one is built.
+def test_the_family_map_carries_the_bound_strategy_object(test_injector, mode) -> None:
+    """Each strategy is a binding; the mode decides which one the map names.
 
-    This is what the per-mode providers buy over a provider that took the mode
-    and branched. The unselected shape cannot be handed to anything by accident
-    because it does not exist, and the collaborators behind it — the
-    store-backed bundle, or the ARCA-side one — are never asked for on a
-    deployment that does not deliver that way.
+    Both teclaw shapes are bound on either mode — a binding is resolvable by
+    definition, and the startup lifecycle walk constructs every one of them — so
+    what the per-mode providers decide is which *bound object* becomes the
+    family's answer. Asserted by identity: the row is the very object the graph
+    holds for that class, not a second one assembled for the map.
     """
-    built: list[type] = []
-    for cls in (TeclawPlatformDelivery, TeclawDeviceDelivery):
-        original = cls.__init__
+    strategies = _strategies(test_injector, mode)
 
-        def record(self, *args, _cls=cls, _original=original, **kwargs):
-            built.append(_cls)
-            _original(self, *args, **kwargs)
+    assert strategies[EngineFamily.TECLAW] is test_injector.get(_EXPECTED[mode])
+    assert strategies[EngineFamily.ARCA] is test_injector.get(ArcaDelivery)
 
-        monkeypatch.setattr(cls, "__init__", record)
 
-    _strategies(test_injector, mode)
+@pytest.mark.parametrize("mode", list(TeclawDeliveryMode))
+def test_the_shape_the_mode_did_not_name_never_reaches_an_apply(
+    test_injector, mode
+) -> None:
+    """It stays resolvable by name and never becomes the family's answer.
 
-    assert built == [_EXPECTED[mode]]
+    That is the guarantee the apply path actually rests on: an apply asks
+    :class:`DeliveryStrategyFactory` for a bot's family, so a shape that is not
+    in the map cannot be handed to one however many bindings exist.
+    """
+    unnamed = next(cls for m, cls in _EXPECTED.items() if m is not mode)
+    strategies = _strategies(test_injector, mode)
+
+    assert not isinstance(strategies[EngineFamily.TECLAW], unnamed)
+    assert isinstance(test_injector.get(unnamed), unnamed)

@@ -22,13 +22,21 @@ lookup.
 
 **The teclaw mode is two providers, not a switch.** A deployment runs one of
 two teclaw shapes (:class:`TeclawDeliveryMode`), and each has a provider that
-contributes its strategy only when the deployment named its own mode and an
-empty mapping otherwise. So the mode is read where the shape it names is
-built, no provider is handed a mode to branch on, and the shape that was not
-selected is never constructed. The two contribute to one binding —
-:data:`DeliveryStrategies` — because injector merges a map multibinding across
-providers, which is what makes "one provider per strategy" something a single
-mapping-valued binding can be assembled out of at all.
+contributes its strategy to the family map only when the deployment named its
+own mode, an empty mapping otherwise. So no strategy is handed a mode to branch
+on and no provider assembles the shape it selects: it takes the bound one.
+
+Both shapes are *bound* on either mode — a binding is resolvable by definition,
+and ``discover_lifecycle_participants`` constructs every one of them at startup
+anyway — so what the mode decides is which of them the family map carries, and
+therefore which one an apply can reach. Nothing should resolve a strategy class
+by name: :class:`DeliveryStrategyFactory` is the seam, and its map holds the one
+row per family that the deployment actually runs.
+
+The two rows contribute to one binding — :data:`DeliveryStrategies` — because
+injector merges a map multibinding across providers, which is what makes "one
+provider per strategy" something a single mapping-valued binding can be
+assembled out of at all.
 
 Coverage — every mode naming a strategy, which the selection table this
 replaced checked at import — is asserted over the real graph, for every member
@@ -257,81 +265,102 @@ class ManifestDeliveryModule(Module):
             resolve=resolve, dispatch=dispatch, not_bound=DeviceNotBoundError
         )
 
-    # ── one provider per bound strategy ────────────────────────────────────
+    # ── one provider per strategy ──────────────────────────────────────────
+
+    @singleton
+    @provider
+    @inject
+    def manifest_arca_delivery(self, device_ports: DevicePorts) -> ArcaDelivery:
+        """The container family's strategy: ``script`` before the container,
+        every other construct after it, through the device-backed bundle."""
+        return ArcaDelivery(device_ports)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_teclaw_platform_delivery(
+        self, platform_ports: PlatformPorts, redeliver: Redeliver
+    ) -> TeclawPlatformDelivery:
+        """The artifact family delivering through platform state (W8, spec D-3).
+
+        Both collaborators are bindings of their own, so this provider names
+        what the shape needs and constructs nothing else. Its constructor
+        *requires* the redeliver, which is what makes "platform-managed with
+        nothing to be platform-managed with" unexpressible.
+        """
+        return TeclawPlatformDelivery(ports=platform_ports, redeliver=redeliver)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_teclaw_device_delivery(
+        self,
+        device_ports: DevicePorts,
+        cli_tool_service_factory: CliToolServiceFactory,
+    ) -> TeclawDeviceDelivery:
+        """The artifact family delivering the way it did before W8.
+
+        ARCA's own bundle, with W9's teclaw-bound CLI service substituted in, so
+        a teclaw bot never gets the ARCA delivery port for a category that is
+        always platform-managed. The substitution is a thunk over the same
+        factory ARCA's bundle takes its own binding from, not a second
+        component: which binding a key names is that factory's answer, and this
+        is the caller that needs the teclaw one.
+
+        Its constructor does not take a redeliver and this provider does not
+        ask for one, which is why a device-backed deployment cannot redeliver by
+        accident.
+        """
+        return TeclawDeviceDelivery(
+            ports=device_ports,
+            cli_tool_service=lambda: cli_tool_service_factory("teclaw"),
+        )
+
+    # ── which of them each family delivers through ─────────────────────────
 
     @singleton
     @multiprovider
     @inject
     def manifest_arca_delivery_strategy(
-        self, device_ports: DevicePorts
+        self, arca: ArcaDelivery
     ) -> DeliveryStrategies:
-        """The ARCA row: the device-backed bundle, and nothing else to decide.
-
-        No mode is consulted here — the switch is a teclaw-only fact, and a
-        deployment cannot run ARCA any other way.
-        """
-        return {EngineFamily.ARCA: ArcaDelivery(device_ports)}
+        """The ARCA row. No mode is consulted — the switch is a teclaw-only
+        fact, and a deployment cannot run ARCA any other way."""
+        return {EngineFamily.ARCA: arca}
 
     @singleton
     @multiprovider
     @inject
     def manifest_teclaw_platform_delivery_strategy(
         self,
-        platform_ports: PlatformPorts,
-        redeliver: Redeliver,
+        platform: TeclawPlatformDelivery,
         manifest_config: cfg.BotConfigManifestConfig,
     ) -> DeliveryStrategies:
-        """The teclaw row a ``PLATFORM`` deployment runs — and nothing on a
+        """The teclaw row on a ``PLATFORM`` deployment — and nothing on a
         ``DEVICE`` one.
 
-        The artifact is the delivery: store-backed ports, and one
-        whole-artifact redeliver closing the apply. Both arrive bound, so this
-        provider selects rather than assembles.
-
         An empty mapping when the deployment is not this mode, which is how a
-        provider says "not me" to a map multibinding: the strategy is not
-        built, so nothing downstream can be handed it, and the sibling
-        provider's row is the one that lands.
+        provider says "not me" to a map multibinding: the strategy stays bound
+        for anything that asks for it by name, and does not become the family's
+        answer, so the sibling provider's row is the one an apply reaches.
         """
         if manifest_config.teclaw_delivery_mode is not TeclawDeliveryMode.PLATFORM:
             return {}
-        return {
-            EngineFamily.TECLAW: TeclawPlatformDelivery(
-                ports=platform_ports, redeliver=redeliver
-            )
-        }
+        return {EngineFamily.TECLAW: platform}
 
     @singleton
     @multiprovider
     @inject
     def manifest_teclaw_device_delivery_strategy(
         self,
-        device_ports: DevicePorts,
-        cli_tool_service_factory: CliToolServiceFactory,
+        device: TeclawDeviceDelivery,
         manifest_config: cfg.BotConfigManifestConfig,
     ) -> DeliveryStrategies:
-        """The teclaw row a ``DEVICE`` deployment runs — and nothing on a
-        ``PLATFORM`` one.
-
-        The shape teclaw ran before W8: ARCA's own bundle, with W9's
-        teclaw-bound CLI service substituted in, so a teclaw bot never gets the
-        ARCA delivery port for a category that is always platform-managed. The
-        substitution is a thunk over the same factory ARCA's bundle takes its
-        own binding from, not a second component: which binding a key names is
-        the factory's answer, and this is the caller that needs the teclaw one.
-
-        It never sees the redeliver — its constructor does not take one, and
-        this provider does not ask for it — which is why a device-backed
-        deployment cannot redeliver by accident.
-        """
+        """The teclaw row on a ``DEVICE`` deployment — and nothing on a
+        ``PLATFORM`` one. The sibling above records how the empty row reads."""
         if manifest_config.teclaw_delivery_mode is not TeclawDeliveryMode.DEVICE:
             return {}
-        return {
-            EngineFamily.TECLAW: TeclawDeviceDelivery(
-                ports=device_ports,
-                cli_tool_service=lambda: cli_tool_service_factory("teclaw"),
-            )
-        }
+        return {EngineFamily.TECLAW: device}
 
     # ── the lookup over them ───────────────────────────────────────────────
 

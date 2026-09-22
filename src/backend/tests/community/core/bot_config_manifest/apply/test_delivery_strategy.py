@@ -328,11 +328,11 @@ async def test_only_the_platform_shape_closes_an_apply() -> None:
 def test_a_strategy_reaches_its_ports_no_earlier_than_the_first_apply() -> None:
     """Constructing one resolves nothing behind it.
 
-    Both bundles are thunks, which is what lets the composition root bind a
-    strategy at boot although every port behind it reaches the device or the
-    object-store graph. The shape a deployment did not name is never built at
-    all — asserted over the real graph in the DI wiring suite — and the one it
-    did build stays this cheap until an apply runs.
+    Both bundles are thunks, which is what lets the composition root bind every
+    strategy at boot although every port behind them reaches the device or the
+    object-store graph — including the teclaw shape this deployment does not
+    deliver through, which is bound and simply never reaches the family map.
+    Whichever one an apply gets stays this cheap until that apply runs.
     """
     reached: list[str] = []
 

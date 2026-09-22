@@ -29,11 +29,12 @@ container, through the same device-backed ports ARCA uses. That is
 :class:`TeclawDeliveryMode`, read once from
 ``user_config.bot_config_manifest.teclaw_platform_managed`` (default off) by
 :func:`teclaw_delivery_mode_from_config`. The composition root binds each of
-the two through a provider of its own, and a provider builds nothing unless the
-deployment named *its* mode — so what the graph ends up holding is one built
-strategy and no mode.
+the two through a provider of its own, and a third provider per mode puts *one*
+of them in the family map :class:`DeliveryStrategyFactory` is built over — so
+the strategy an apply can reach is settled by the deployment, and no strategy
+holds the mode that settled it.
 
-That is the whole of the mode's life: a yaml scalar, one provider of two, an
+That is the whole of the mode's life: a yaml scalar, one row of two, an
 object. No strategy carries it as a field and nothing re-reads it per apply,
 because the answer cannot change while the process runs — a deployment-time
 fact is settled at deployment time, and a component that held it would have to
