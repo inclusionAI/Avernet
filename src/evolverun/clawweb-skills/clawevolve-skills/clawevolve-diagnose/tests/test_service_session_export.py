@@ -229,7 +229,7 @@ def test_service_export_calls_public_api_and_freezes_one_source_file(
     assert acquisition["entries"][0]["rawPath"] == str(raw_path)
 
 
-def test_service_export_resolves_multiple_explicit_selectors(
+def test_service_analysis_resolves_multiple_explicit_selectors_without_llm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     exports = {
@@ -238,28 +238,39 @@ def test_service_export_resolves_multiple_explicit_selectors(
     }
     requested: list[str] = []
 
-    def request_json(url: str, *, method: str, body=None, headers=None):
+    created_bodies: list[dict] = []
+
+    def request_json(url: str, *, method: str, body=None, headers=None, **_kwargs):
         if method == "POST":
             identifier = body["sessionIdentifier"]
             requested.append(identifier)
-            return {"apiVersion": "session-export/v1", "exportId": f"SE-{len(requested)}", "status": "succeeded", "exportScope": "single"}
-        index = int(url.split("/SE-", 1)[1].split("?", 1)[0]) - 1
+            created_bodies.append(body)
+            assert url == "https://clawweb.example/api/session-analyses"
+            assert headers == {"X-User-Id": "197444"}
+            return {"analysisId": f"SA-{len(requested)}", "status": "running", "aisJobId": "AIS-1"}
+        index = int(url.split("/SA-", 1)[1].split("/", 1)[0]) - 1
         identifier = requested[index]
         content = exports[identifier]
         resolved = "s1" if identifier == "session-id-1" else "s2"
+        artifact = {
+            "objectKey": f"evolution/SA-{index + 1}/session-analysis/attempt-1/{resolved}.jsonl",
+            "contentType": "application/x-ndjson",
+            "size": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        if url.endswith("/download-url"):
+            return {"url": f"https://oss.example/{identifier}.jsonl", "filename": f"{resolved}.jsonl"}
         return {
-            "apiVersion": "session-export/v1", "exportId": f"SE-{index + 1}", "status": "succeeded", "exportScope": "single",
-            "target": {"userId": "197444", "botId": "bot-1", "stage": "service"},
-            "resolution": {"inputType": "session_id" if index == 0 else "session_key", "resolvedSessionIds": [resolved], "fileCount": 1},
-            "artifact": {"downloadUrl": f"https://oss.example/{identifier}.jsonl", "contentType": "application/x-ndjson", "size": len(content), "sha256": hashlib.sha256(content).hexdigest()},
+            "analysisId": f"SA-{index + 1}", "status": "completed", "mode": "ANALYZE_SINGLE",
+            "llmAnalysis": False, "result": {"sessionId": resolved, "artifacts": {"raw": artifact}},
         }
 
-    def download_artifact(*, initial_url: str, destination: Path, **_kwargs) -> None:
-        identifier = initial_url.rsplit("/", 1)[1].removesuffix(".jsonl")
+    def download_artifact(*, url: str, destination: Path, **_kwargs) -> None:
+        identifier = url.rsplit("/", 1)[1].removesuffix(".jsonl")
         destination.write_bytes(exports[identifier])
 
     monkeypatch.setattr(service_export, "_request_json", request_json)
-    monkeypatch.setattr(service_export, "_download_artifact", download_artifact)
+    monkeypatch.setattr(service_export, "_download_signed_artifact", download_artifact)
     acquired = acquire_exported_sessions(
         clawweb_url="https://clawweb.example", task_id="EV-1", step_id="STEP-1",
         source_user_id="197444", source_bot_id="bot-1", download_network="office",
@@ -268,6 +279,9 @@ def test_service_export_resolves_multiple_explicit_selectors(
     )
 
     assert requested == ["session-id-1", "agent:main:two"]
+    assert all(body["mode"] == "ANALYZE_SINGLE" for body in created_bodies)
+    assert all(body["llmAnalysis"] is False for body in created_bodies)
+    assert all("llmModel" not in body and "question" not in body for body in created_bodies)
     assert [row.session_id for row in acquired.rows] == ["s1", "s2"]
     manifest = json.loads((tmp_path / "task" / "input" / "session-source" / "acquisition-manifest.json").read_text())
     assert manifest["selectedCount"] == 2

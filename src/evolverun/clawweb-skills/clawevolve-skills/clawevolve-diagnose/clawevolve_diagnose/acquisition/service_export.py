@@ -58,77 +58,160 @@ def acquire_exported_sessions(
 ) -> ServiceSessionAcquisition:
     """Acquire service-Bot sessions through ClawWeb's public export API."""
 
-    selectors = [("session_identifier", value) for value in (session_identifiers or [])]
+    selectors = list(session_identifiers or [])
     source_dir = input_dir / "session-source"
-    if not selectors:
-        return _acquire_exported_sessions_once(
+    if selectors:
+        return _acquire_sessions_via_analysis(
             clawweb_url=clawweb_url,
             task_id=task_id,
             step_id=step_id,
             source_user_id=source_user_id,
             source_bot_id=source_bot_id,
-            download_network=download_network,
             source_dir=source_dir,
-            max_sessions=max_sessions,
-            since=since,
-            until=until,
             timeout_seconds=timeout_seconds,
             parse_content=parse_content,
-            export_scope="bot",
-            session_identifier="",
-            selector_hash="",
+            session_identifiers=selectors,
         )
+    return _acquire_exported_sessions_once(
+        clawweb_url=clawweb_url,
+        task_id=task_id,
+        step_id=step_id,
+        source_user_id=source_user_id,
+        source_bot_id=source_bot_id,
+        download_network=download_network,
+        source_dir=source_dir,
+        max_sessions=max_sessions,
+        since=since,
+        until=until,
+        timeout_seconds=timeout_seconds,
+        parse_content=parse_content,
+        export_scope="bot",
+        session_identifier="",
+        selector_hash="",
+    )
 
+
+def _acquire_sessions_via_analysis(
+    *,
+    clawweb_url: str,
+    task_id: str,
+    step_id: str,
+    source_user_id: str,
+    source_bot_id: str,
+    source_dir: Path,
+    timeout_seconds: int,
+    parse_content: bool,
+    session_identifiers: list[str],
+) -> ServiceSessionAcquisition:
+    """Acquire explicit service Sessions through no-LLM Session Analysis."""
+
+    base_url = str(clawweb_url or "").rstrip("/")
+    source_user_id = str(source_user_id or "").strip()
+    source_bot_id = str(source_bot_id or "").strip()
+    if not base_url or not source_user_id or not source_bot_id:
+        raise ServiceSessionExportError("service session analysis requires ClawWeb and source identity")
     if source_dir.exists():
         shutil.rmtree(source_dir)
     selectors_dir = source_dir / "selectors"
     selectors_dir.mkdir(parents=True, exist_ok=True)
+    headers = {"X-User-Id": source_user_id}
     rows: list[SessionRow] = []
     seen_session_ids: set[str] = set()
     selector_entries: list[dict[str, Any]] = []
-    export_ids: list[str] = []
-    for index, (selector_type, selector) in enumerate(selectors):
+    analysis_ids: list[str] = []
+    collection_endpoint = f"{base_url}/api/session-analyses"
+
+    for index, selector in enumerate(session_identifiers):
         selector_hash = hashlib.sha256(selector.encode("utf-8")).hexdigest()
-        acquired = _acquire_exported_sessions_once(
-            clawweb_url=clawweb_url,
-            task_id=task_id,
-            step_id=step_id,
-            source_user_id=source_user_id,
-            source_bot_id=source_bot_id,
-            download_network=download_network,
-            source_dir=selectors_dir / f"{index:02d}-{selector_hash[:12]}",
-            max_sessions=1,
-            since="",
-            until="",
-            timeout_seconds=timeout_seconds,
-            parse_content=parse_content,
-            export_scope="single",
-            session_identifier=selector,
-            selector_hash=selector_hash,
+        selector_dir = selectors_dir / f"{index:02d}-{selector_hash[:12]}"
+        raw_dir = selector_dir / "raw-sessions"
+        sessions_dir = selector_dir / "sessions"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        created = _request_json(
+            collection_endpoint,
+            method="POST",
+            body={
+                "taskName": f"{task_id} Diagnose Session Input",
+                "mode": "ANALYZE_SINGLE",
+                "botId": source_bot_id,
+                "targetUserId": source_user_id,
+                "stage": "service",
+                "sessionIdentifier": selector,
+                "sessionLookbackDays": None,
+                "llmAnalysis": False,
+                "llmUseDefault": True,
+            },
+            headers=headers,
+            attempts=1,
         )
-        resolved_ids = acquired.source_metadata.get("resolved_session_ids") or []
-        if not acquired.rows or not resolved_ids:
+        analysis_id = str(created.get("analysisId") or "").strip()
+        if not analysis_id:
+            raise ServiceSessionExportError("SESSION_ANALYSIS_INVALID_RESPONSE: missing analysisId")
+        analysis_ids.append(analysis_id)
+        detail_endpoint = f"{collection_endpoint}/{urllib.parse.quote(analysis_id, safe='')}"
+        deadline = time.monotonic() + max(1, int(timeout_seconds))
+        detail = _request_json(detail_endpoint, method="GET", headers=headers)
+        while str(detail.get("status") or "").lower() not in {"completed", "succeeded", "failed", "canceled"}:
+            if time.monotonic() >= deadline:
+                raise ServiceSessionExportError("SESSION_ANALYSIS_TIMEOUT")
+            time.sleep(POLL_SECONDS)
+            detail = _request_json(detail_endpoint, method="GET", headers=headers)
+        if str(detail.get("status") or "").lower() not in {"completed", "succeeded"}:
             raise ServiceSessionExportError(
-                f"SESSION_EXPORT_SELECTOR_NOT_FOUND: type={selector_type}, hash={selector_hash[:12]}"
+                f"SESSION_ANALYSIS_FAILED: hash={selector_hash[:12]} error={str(detail.get('error') or '')[:300]}"
             )
-        export_id = str(acquired.source_metadata.get("export_id") or "")
-        if export_id:
-            export_ids.append(export_id)
+        result = detail.get("result") if isinstance(detail.get("result"), dict) else {}
+        artifacts = result.get("artifacts") if isinstance(result.get("artifacts"), dict) else {}
+        artifact_name = "raw" if isinstance(artifacts.get("raw"), dict) else "trajectory"
+        artifact = artifacts.get(artifact_name) if isinstance(artifacts.get(artifact_name), dict) else {}
+        resolved_session_id = str(result.get("sessionId") or "").strip()
+        if not resolved_session_id or not artifact:
+            raise ServiceSessionExportError(
+                f"SESSION_ANALYSIS_INVALID_RESULT: hash={selector_hash[:12]}"
+            )
+        expected_sha = str(artifact.get("sha256") or "").lower()
+        expected_size = _optional_int(artifact.get("size"))
+        if not re.fullmatch(r"[a-f0-9]{64}", expected_sha) or expected_size is None:
+            raise ServiceSessionExportError("SESSION_ANALYSIS_INVALID_ARTIFACT")
+        download = _request_json(
+            f"{detail_endpoint}/artifacts/{artifact_name}/download-url",
+            method="GET",
+            headers=headers,
+        )
+        download_url = str(download.get("url") or "")
+        if not download_url:
+            raise ServiceSessionExportError("SESSION_ANALYSIS_INVALID_DOWNLOAD_URL")
+        with tempfile.TemporaryDirectory(prefix=f"clawevolve-session-analysis-{_safe_name(task_id)}-") as tmp_text:
+            source = Path(tmp_text) / "session.jsonl"
+            _download_signed_artifact(
+                url=download_url,
+                destination=source,
+                expected_sha256=expected_sha,
+                expected_size=expected_size,
+            )
+            acquired_rows, _, _ = _persist_single_session_export(
+                source=source,
+                sessions_dir=sessions_dir,
+                raw_sessions_dir=raw_dir,
+                resolved_session_ids=[resolved_session_id],
+                source_bot_id=source_bot_id,
+                parse_content=parse_content,
+            )
         selector_entries.append({
-            "type": selector_type,
             "hash": selector_hash,
-            "resolutionInputType": acquired.source_metadata.get("resolution_input_type") or "",
-            "resolvedSessionIds": list(resolved_ids),
+            "analysisId": analysis_id,
+            "resolvedSessionIds": [resolved_session_id],
+            "artifact": artifact_name,
         })
-        for row in acquired.rows:
-            if row.session_id in seen_session_ids:
-                continue
-            seen_session_ids.add(row.session_id)
-            rows.append(row)
+        for row in acquired_rows:
+            if row.session_id not in seen_session_ids:
+                seen_session_ids.add(row.session_id)
+                rows.append(row)
 
     manifest = {
         "schemaVersion": "clawevolve.explicit-session-acquisition.v1",
-        "sourceMode": "service_export",
+        "sourceMode": "service_session_analysis",
         "selectedCount": len(rows),
         "selectors": selector_entries,
     }
@@ -137,10 +220,10 @@ def acquire_exported_sessions(
         rows=rows,
         source_bot_id=source_bot_id,
         source_metadata={
-            "source": "clawweb_session_export",
-            "source_mode": "service_export",
+            "source": "clawweb_session_analysis",
+            "source_mode": "service_session_analysis",
             "selection_mode": "explicit",
-            "export_ids": export_ids,
+            "analysis_ids": analysis_ids,
             "artifacts": {
                 "acquisition_manifest": str(source_dir / "acquisition-manifest.json"),
                 "selectors_dir": str(selectors_dir),
@@ -458,6 +541,7 @@ def _request_json(
     method: str,
     body: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    attempts: int = HTTP_ATTEMPTS,
 ) -> dict[str, Any]:
     data = None if body is None else json.dumps(body, separators=(",", ":")).encode("utf-8")
     secret = str((body or {}).get("sessionIdentifier") or "")
@@ -470,7 +554,7 @@ def _request_json(
 
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     last_error = ""
-    for attempt in range(1, HTTP_ATTEMPTS + 1):
+    for attempt in range(1, attempts + 1):
         request = urllib.request.Request(
             url,
             data=data,
@@ -490,9 +574,44 @@ def _request_json(
                 break
         except Exception as exc:  # noqa: BLE001 - bounded retry at network boundary.
             last_error = safe_error(f"{type(exc).__name__}: {exc}")
-        if attempt < HTTP_ATTEMPTS:
+        if attempt < attempts:
             time.sleep(HTTP_RETRY_SECONDS)
     raise ServiceSessionExportError(f"SESSION_EXPORT_API_FAILED: {last_error}")
+
+
+def _download_signed_artifact(
+    *,
+    url: str,
+    destination: Path,
+    expected_sha256: str,
+    expected_size: int,
+) -> None:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with opener.open(urllib.request.Request(url, method="GET"), timeout=300) as response:  # noqa: S310
+            with destination.open("wb") as output:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    digest.update(chunk)
+                    size += len(chunk)
+    except Exception as exc:  # noqa: BLE001 - signed URL boundary.
+        raise ServiceSessionExportError(
+            f"SESSION_ANALYSIS_DOWNLOAD_FAILED: {type(exc).__name__}: {exc}"
+        ) from exc
+    if size != expected_size:
+        raise ServiceSessionExportError(
+            f"SESSION_ANALYSIS_SIZE_MISMATCH: expected={expected_size} actual={size}"
+        )
+    actual_sha = digest.hexdigest()
+    if actual_sha != expected_sha256:
+        raise ServiceSessionExportError(
+            f"SESSION_ANALYSIS_SHA256_MISMATCH: expected={expected_sha256} actual={actual_sha}"
+        )
 
 
 def _download_artifact(
