@@ -8,6 +8,7 @@ use crate::types::{
 use std::collections::BTreeMap;
 
 use super::AppendEventRecord;
+use super::collaboration_history::*;
 use super::collaboration_dispatch::*;
 use super::collaboration_publication::*;
 use super::collaboration_terminal_im::*;
@@ -116,6 +117,7 @@ pub enum CreateStateMachineRerunOutcome {
 
 #[derive(Debug, Clone)]
 pub enum StateMachineEventfulTransition {
+    AcceptHistory(AcceptStateMachineHistory),
     /// Commit the fenced Judge result, terminal Node, audit and optional public
     /// completion Event in one local transaction. Input is read from the Node.
     FinishJudge(FinishStateMachineJudge),
@@ -268,6 +270,30 @@ pub trait GroupRuntimeBindingRepoPort: Send + Sync {
 
 #[async_trait]
 pub trait StateMachineRunRepoPort: Send + Sync {
+    /// Return the committed immutable fact without re-reading the normal write.
+    async fn accept_history_message(&self, _command: AcceptStateMachineHistory) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> {
+        Err(crate::ServiceError::InternalError("atomic history acceptance unavailable".into()))
+    }
+    async fn get_history_message(&self, _identity: &StateMachineHistoryIdentity) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> {
+        Ok(None)
+    }
+    async fn list_history_messages_pending(&self, _after: Option<&StateMachineHistoryCursor>, _limit: usize) -> ServiceResult<StateMachineHistoryPage> {
+        Err(crate::ServiceError::InternalError("history checkpoint scan unavailable".into()))
+    }
+    async fn confirm_history_message(&self, _checkpoint: &StateMachineHistoryCheckpoint, _at: u64) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("history confirmation unavailable".into()))
+    }
+    /// Return requested Run IDs lacking a durable local-history repair marker.
+    /// At most 32 IDs per call; batch lookup, no message or source payload reads.
+    async fn list_unrepaired_history_runs(&self, _run_ids: &[String]) -> ServiceResult<Vec<String>> {
+        Err(crate::ServiceError::InternalError("history repair lookup unavailable".into()))
+    }
+    /// Confirm opening/publication repair only after local writes succeed and
+    /// the Run is terminal. Does not acknowledge network IO or node history.
+    async fn confirm_terminal_history_repair(&self, _run: &str, _at: u64) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("history repair confirmation unavailable".into()))
+    }
+
     /// Bounded, exclusive Run-ID page of Completed/Failed/Aborted active records.
     /// This walks indexed terminal history, without loading snapshots or payloads.
     async fn list_terminal_runs_for_cleanup(&self, _after: Option<&str>, _limit: usize) -> ServiceResult<Vec<String>> {

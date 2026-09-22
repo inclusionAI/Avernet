@@ -891,6 +891,9 @@ pub trait CollaborationRuntimeService: Send + Sync {
         ))
     }
 
+    /// Process one bounded candidate batch. Partial progress returns its count;
+    /// a batch with candidate errors and no progress returns an error so the
+    /// scheduler can back off instead of treating a failure as an idle scan.
     async fn process_expired_node_timeouts(
         &self,
         limit: usize,
@@ -913,6 +916,14 @@ pub trait CollaborationRuntimeService: Send + Sync {
         Err(CollaborationRuntimeError::InvalidRequest(
             "State-machine progression recovery is not configured".into(),
         ))
+    }
+
+    /// Replay local immutable history checkpoints, including terminal Runs.
+    /// Cursor contains both Run and operation key; never performs network delivery.
+    async fn recover_state_machine_history(&self, cursor: Option<String>, limit: usize)
+        -> Result<StateMachineProgressionRecoveryPage, CollaborationRuntimeError> {
+        let _ = (cursor, limit);
+        Err(CollaborationRuntimeError::InvalidRequest("history recovery is not configured".into()))
     }
 
     /// Retire unfinished dispatch/Chat work and Node leases for terminal Runs.

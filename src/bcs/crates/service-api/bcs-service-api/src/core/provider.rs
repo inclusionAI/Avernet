@@ -109,8 +109,25 @@ pub trait ProviderCoreService: Send + Sync {
     ) -> ServiceResult<ProviderRecord>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderBotDeletion {
+    pub bot_uuid: String,
+    pub deleted: bool,
+}
+
 #[async_trait]
 pub trait ProviderBotCoreService: Send + Sync {
+    /// Delete a Bot-owned Provider identity (upstream or gateway), after Provider
+    /// admin authorization. SQL gateway deletion also disables its projection.
+    /// None means no Bot metadata identity is available; callers may use the
+    /// existing authorized legacy binding path. Errors must never fall back.
+    async fn delete_registered_provider_bot(
+        &self, provider_id: &str, provider_admin_token: &str, provider_bot_ref: &str,
+    ) -> ServiceResult<Option<ProviderBotDeletion>> {
+        let _ = (provider_id, provider_admin_token, provider_bot_ref);
+        Ok(None)
+    }
+
     /// Update only the routing override; identities and capabilities remain unchanged.
     async fn update_provider_bot_webhook(
         &self,

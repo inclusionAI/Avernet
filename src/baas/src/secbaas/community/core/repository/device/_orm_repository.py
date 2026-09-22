@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Any
 
+from secbaas.community.api.device_manage import DeviceStatus
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
 from secbaas.community.logger import get_logger
 
@@ -519,6 +520,42 @@ class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
         )
         result = int(result)
         log.info("[device:update_status_by_device_uuid] result: %s rows", result)
+        return result
+
+    @with_orm_session
+    def prepare_device_for_reprovision(
+        self,
+        device_uuid: str,
+        tenant: str,
+        env: str,
+        modifier: str | None = None,
+    ) -> int:
+        from sqlalchemy import func as sa_func
+
+        values: dict[str, Any] = {
+            "status": DeviceStatus.PENDING.value,
+            "provider_type": None,
+            "provider_device_id": None,
+            "provider_device_props": None,
+            "err_msg": None,
+            "gmt_modified": sa_func.now(),
+        }
+        if modifier is not None:
+            values["modifier"] = modifier
+
+        result = (
+            self._session.query(DeviceModel)
+            .filter(
+                DeviceModel.device_uuid == device_uuid,
+                DeviceModel.tenant == tenant,
+                DeviceModel.env == env,
+                DeviceModel.is_deleted == 0,
+                DeviceModel.status != DeviceStatus.RELEASED.value,
+            )
+            .update(values, synchronize_session=False)
+        )
+        result = int(result)
+        log.info("[device:prepare_device_for_reprovision] result: %s rows", result)
         return result
 
     @with_orm_session

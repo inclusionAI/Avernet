@@ -54,7 +54,7 @@ class BotRunRepository(Protocol):
 
         Args:
             run_id: 运行ID
-            status: 新状态 (PENDING/RUNNING/COMPLETED/FAILED)
+            status: 新状态 (PENDING/RUNNING/COMPLETED/FAILED/ABORTED)
         """
         ...
 
@@ -79,6 +79,15 @@ class BotRunRepository(Protocol):
         Args:
             run_id: 运行ID
             error: 错误信息
+        """
+        ...
+
+    def update_aborted(self, run_id: str, reason: str) -> None:
+        """更新为已主动取消状态
+
+        Args:
+            run_id: 运行ID
+            reason: 取消原因
         """
         ...
 

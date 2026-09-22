@@ -218,6 +218,12 @@ impl FriendCoreService for FriendCore {
                     );
                 }
             }
+
+            // NOTE: the BCS→backend friend-auth-sync revoke trigger (Task 11d)
+            // now lives in `ConnectService::revoke_friend` (the HTTP unfriend
+            // path, which has the inbound principal). This FriendCore
+            // `remove_friendship` path is not the front-end revoke path, so no
+            // friend-auth-sync trigger fires here.
         }
 
         if removed {

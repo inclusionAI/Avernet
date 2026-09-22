@@ -1042,13 +1042,15 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
             .query(
                 "count_queued_human_input_requests",
                 DbStatement::with_params(
-                    "SELECT request_id FROM bcs_human_input_requests \
+                    "SELECT COUNT(*) AS queued_count FROM bcs_human_input_requests \
                      WHERE reply_scope_key = ? AND status = 'queued'",
                     vec![DbValue::from(reply_scope_key)],
                 ),
             )
             .await?;
-        Ok(rows.len())
+        let row = rows.first().ok_or_else(|| ServiceError::InternalError("missing HumanInput queue count".into()))?;
+        usize::try_from(row_u64(row, "queued_count")?)
+            .map_err(|_| ServiceError::InternalError("HumanInput queue count overflow".into()))
     }
 
     async fn close_for_run_node(

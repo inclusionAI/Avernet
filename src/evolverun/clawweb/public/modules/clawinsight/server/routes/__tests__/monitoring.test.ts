@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { request } from "node:http";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { database } from "../../services/monitoring/__tests__/test-database.js";
+import { fixtureIntegration } from "../../services/monitoring/__tests__/identity-fixtures.js";
 import { createMonitoringRuntime } from "../../services/monitoring/monitoring-runtime.js";
 import { createInsightRouter } from "../insight.js";
 
@@ -24,6 +25,7 @@ const check = { schemaVersion: "claw-monitoring/bot-check/v1", botId: "mock-bot-
 let db: IDatabase, dir: string, url: string;
 let server: ReturnType<express.Application["listen"]> | undefined;
 let clock: number;
+let principal = { staffId: '001234', isAuthenticated: true, isClawInsightAdmin: true, tenant: 'test', allowedTargetEnvs: ['test'] };
 let env: Record<string, string | undefined>;
 let clawInsightAdmin: boolean | undefined = true;
 async function start(parent = true, defaultFactory = false, getDb = () => db, unassembled = false) {
@@ -31,7 +33,7 @@ async function start(parent = true, defaultFactory = false, getDb = () => db, un
   app.use((req, _res, next) => { req.isClawInsightAdmin = clawInsightAdmin; next(); });
   if (parent) app.use(express.json({ limit: "10mb" }));
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
-  const runtime = unassembled ? { service: null } : createMonitoringRuntime(getDb, () => clock);
+  const runtime = unassembled ? { service: null } : createMonitoringRuntime(getDb, () => clock, { ...fixtureIntegration, principal: async () => principal });
   app.use("/api/insight/v1", defaultFactory ? createInsightRouter(null) : createInsightRouter(null, { monitoring: runtime }));
   server = await new Promise<ReturnType<express.Application["listen"]>>((resolve, reject) => {
     const s = app.listen(0, "127.0.0.1", (error?: Error) => error ? reject(error) : resolve(s));
@@ -55,6 +57,7 @@ async function post(event: Record<string, unknown>, path = "diagnosis-events", h
 async function get(bot = "mock-bot-te", query = "") { return call(`/monitoring/bots/${bot}/diagnoses${query}`); }
 beforeEach(async () => {
   clock = now;
+  principal = { staffId: '001234', isAuthenticated: true, isClawInsightAdmin: true, tenant: 'test', allowedTargetEnvs: ['test'] };
   clawInsightAdmin = true;
   env = {};
   dir = mkdtempSync(join(tmpdir(), "monitoring-contract-"));
@@ -98,7 +101,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     expect((await call("/monitoring/bots")).body).toEqual({ items: expected });
   });
   it.each([undefined, "", "0", "-1", "invalid", "1.5", " 300 ", "1", "600", "9007199254740992"])(
-    "keeps GET/POST available and uses fixed freshness despite stale env %s", async (seconds) => {
+    "keeps GET/POST available and preserves stored status despite stale env %s", async (seconds) => {
       await stop(); env.CLAWWEB_MONITORING_STALE_SECONDS = seconds; await start();
       expect(await call("/monitoring/bots")).toMatchObject({ status: 200, body: { items: [] } });
       expect((await post(check, "bot-checks")).status).toBe(200);
@@ -107,9 +110,10 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
       expect((await call("/monitoring/bots/mock-bot-te/status")).body.status).toBe("HEALTHY");
       clock++;
       expect(await call("/monitoring/bots/mock-bot-te/status")).toMatchObject({ status: 200,
-        body: { status: "UNKNOWN", lastSuccessfulCheckAt: check.lastSuccessfulCheckAt } });
-      // Freshness uses checkedAt, not the last successful check. A fresh ERROR stays visible.
+        body: { status: "HEALTHY", lastSuccessfulCheckAt: check.lastSuccessfulCheckAt } });
+      // An explicitly reported ERROR stays visible even without another check.
       expect((await post({ ...check, checkedAt: new Date(clock).toISOString(), status: "ERROR" }, "bot-checks")).status).toBe(200);
+      clock += 7 * 86400000;
       expect((await call("/monitoring/bots/mock-bot-te/status")).body.status).toBe("ERROR");
       clock++;
       expect((await post({ ...check, checkedAt: new Date(clock).toISOString(), status: "PAUSED" }, "bot-checks")).status).toBe(200);
@@ -139,6 +143,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
   });
   it.each([false, undefined])("protects all browser reads for flag %s but allows both internal reports", async (flag) => {
     clawInsightAdmin = flag;
+    principal.isClawInsightAdmin = flag === true;
     expect((await post(alert)).status).toBe(201);
     expect((await post(check, "bot-checks")).status).toBe(200);
     for (const path of ["/monitoring/bots", "/monitoring/bots/mock-bot-te/status", "/monitoring/bots/mock-bot-te/diagnoses"]) {
@@ -149,6 +154,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     // Governance keeps its existing readiness behavior, not the monitoring role guard.
     expect((await call("/overview")).status).toBe(503);
     clawInsightAdmin = true;
+    principal.isClawInsightAdmin = true;
     for (const path of ["/monitoring/bots", "/monitoring/bots/mock-bot-te/status", "/monitoring/bots/mock-bot-te/diagnoses"]) {
       expect((await call(path)).status).toBe(200);
     }
@@ -161,7 +167,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     expect(body.items.map((x: { humanIntervention: boolean }) => x.humanIntervention)).toEqual([false, true]);
     expect(body.items[0]).not.toHaveProperty("notificationStatus");
     for (const field of ["schemaVersion", "eventId", "engine"]) expect(body.items[0]).not.toHaveProperty(field);
-    expect((await db.query("SELECT event_id FROM insight_monitoring_diagnoses")).length).toBe(3);
+    expect((await db.query("SELECT event_id FROM insight_monitoring_diagnose")).length).toBe(3);
     expect((await get("mock-bot-oc")).body.items[0].occurredAt).toBeNull();
   });
   it("deduplicates 20 concurrent requests and refuses changed content", async () => {
@@ -210,7 +216,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     }
     expect((await get("mock-bot-te", `?keyword=${encodeURIComponent("%' OR 1=1 --")}`)).body.total).toBe(0);
   });
-  it("reports fresh/no-conversation checks, expires status and prevents out-of-order overwrite", async () => {
+  it("reports fresh/no-conversation checks, preserves status and prevents out-of-order overwrite", async () => {
     expect((await post(check, "bot-checks")).body.applied).toBe(true);
     expect((await post(check, "bot-checks")).body.applied).toBe(false);
     expect((await post({ ...check, status: "ERROR" }, "bot-checks")).status).toBe(409);
@@ -219,13 +225,13 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     await Promise.all(versions.slice(1).map((c) => post(c, "bot-checks")));
     expect((await call("/monitoring/bots/mock-bot-te/status")).body.status).toBe("HEALTHY");
     clock += 300001;
-    expect((await call("/monitoring/bots/mock-bot-te/status")).body).toMatchObject({ status: "UNKNOWN", lastSuccessfulCheckAt: check.lastSuccessfulCheckAt });
+    expect((await call("/monitoring/bots/mock-bot-te/status")).body).toMatchObject({ status: "HEALTHY", lastSuccessfulCheckAt: check.lastSuccessfulCheckAt });
   });
   it("atomically selects the newest of concurrent first checks", async () => {
     const responses = await Promise.all(Array.from({ length: 20 }, (_, i) => post({ ...check,
       checkedAt: new Date(now - i * 1000).toISOString(), lastSuccessfulCheckAt: null }, "bot-checks")));
     expect(responses.every((r) => r.status === 200)).toBe(true);
-    const rows = await db.query("SELECT * FROM insight_monitoring_bot_checks");
+    const rows = await db.query("SELECT * FROM insight_monitoring_bot_check");
     expect(rows).toHaveLength(1);
     expect(Number(rows[0].checked_at_ms)).toBe(now);
   });
@@ -262,14 +268,14 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     expect((await post(check, "bot-checks", { Authorization: "Bearer legacy-other" })).status).toBe(200);
   });
   it("fails closed on missing table, missing index and actual write failures", async () => {
-    await db.exec("DROP INDEX idx_monitor_diag_bot_time");
+    await db.exec("DROP INDEX idx_monitor_diag_target_time");
     expect((await post(alert)).status).toBe(503);
     expect((await get()).status).toBe(503);
-    await db.exec("CREATE INDEX idx_monitor_diag_bot_time ON insight_monitoring_diagnoses (bot_id, occurred_at_ms, event_id)");
+    await db.exec("CREATE INDEX idx_monitor_diag_target_time ON insight_monitoring_diagnose (bot_id, entity_id, env, occurred_at_ms, event_id)");
     expect((await post(alert)).status).toBe(201);
     const exec = vi.spyOn(db, "exec").mockRejectedValue(new Error("write denied"));
     expect((await post(pass)).status).toBe(503); exec.mockRestore();
-    await db.exec("DROP TABLE insight_monitoring_diagnoses");
+    await db.exec("DROP TABLE insight_monitoring_diagnose");
     expect((await get()).status).toBe(503);
   });
   it("still rejects explicitly unassembled monitoring without blaming removed configuration", async () => {
@@ -319,5 +325,40 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     // The default factory uses getRepositories(); no initialized shared DB must never fake an ACK.
     expect((await post(alert)).status).toBe(503);
     expect((await call("/overview")).status).toBe(503);
+  });
+});
+
+
+describe('monitoring browser HTTP identity and enrollment boundary', () => {
+  beforeEach(() => { principal.isClawInsightAdmin = false; });
+  it('does not grant legacy reads from a forged host role flag', async () => {
+    clawInsightAdmin = true;
+    expect((await call('/monitoring/bots')).status).toBe(403);
+  });
+  it('allows members without the legacy admin flag, rejects scope escalation and ignores forged headers', async () => {
+    clawInsightAdmin = false;
+    expect((await call('/monitoring/bot-options')).status).toBe(200);
+    expect((await call('/monitoring/bot-options?scope=all')).status).toBe(403);
+    expect((await call('/monitoring/bots')).status).toBe(403);
+    principal.isAuthenticated = false;
+    const denied = await call('/monitoring/bot-options', { headers: { 'X-User-Id': '001234', Authorization: 'Bearer fake' } });
+    expect(denied).toMatchObject({ status: 401, body: { error: { code: 'MONITORING_UNAUTHENTICATED' } }, cache: 'no-store' });
+  });
+  it('returns the exact 501 placeholder without writes and reauthorizes every detail request', async () => {
+    const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
+    const ref = createMonitoringReferences().encode({ botId: 'mock-bot-te', entityId: '001234', env: 'test' }, 'test');
+    const path = `/monitoring/targets/${ref}`;
+    const enroll = () => call('/monitoring/enrollments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botRef: ref }) });
+    expect((await call(`${path}/status`)).body).toMatchObject({ enrollmentState: 'NOT_ENROLLED', monitoring: null });
+    expect((await call(`${path}/diagnoses`)).status).toBe(409);
+    const exec = vi.spyOn(db, 'exec');
+    expect(await enroll()).toMatchObject({ status: 501, body: { error: { code: 'MONITORING_ENROLLMENT_NOT_IMPLEMENTED' } } });
+    expect(exec).not.toHaveBeenCalled();
+    await post(check, 'bot-checks');
+    expect((await enroll()).status).toBe(409);
+    expect((await call(`${path}/status`)).body.enrollmentState).toBe('ENROLLED');
+    principal.staffId = 'other';
+    for (const suffix of ['/status', '/diagnoses']) expect((await call(path + suffix)).status).toBe(404);
+    expect((await enroll()).status).toBe(404);
   });
 });

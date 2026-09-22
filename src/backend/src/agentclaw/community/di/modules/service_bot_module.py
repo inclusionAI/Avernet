@@ -30,6 +30,8 @@ from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeP
 
 from typing import Annotated, Callable
 from agentclaw.community.api.publish_ignore_service import PublishIgnoreServiceProtocol
+from agentclaw.community.api.build_ignore_service import BuildIgnoreServiceProtocol
+from agentclaw.community.core.repository.protocols.build_ignore import BuildIgnoreRepositoryProtocol
 from agentclaw.community.plugin_api.publish_ignore_runtime import PublishIgnoreRuntime
 
 from injector import Binder, Injector, Module, inject, provider, singleton
@@ -187,6 +189,24 @@ logger = get_logger()
 
 class ServiceBotModule(Module):
     """Production bindings for service_bot."""
+
+    @singleton
+    @provider
+    def build_ignore_repository(self, injector: Injector) -> BuildIgnoreRepositoryProtocol:
+        from agentclaw.community.core.repository.implementations.build_ignore import BuildIgnoreRepository
+        from agentclaw.community.plugin_api.database import DatabasePlugin
+
+        return BuildIgnoreRepository(injector.get(DatabasePlugin))
+
+    @singleton
+    @provider
+    def build_ignore_service(self, injector: Injector) -> BuildIgnoreServiceProtocol:
+        from agentclaw.community.core.service_bot.services.build_ignore_service import BuildIgnoreService
+        from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import CollaboratorServiceProtocol
+
+        return BuildIgnoreService(injector.get(BotRepository), injector.get(CollaboratorServiceProtocol),
+                                  injector.get(BuildIgnoreRepositoryProtocol), injector.get(EngineSandboxRegistry),
+                                  env_utils.get_current_env())
 
     @singleton
     @provider
@@ -369,6 +389,7 @@ class ServiceBotModule(Module):
     @inject
     def bot_build_service(
         self,
+        build_ignore_repository: BuildIgnoreRepositoryProtocol,
         device_service: DeviceService,
         baas_service: BaasService,
         path_factory: WorkspacePathFactory,
@@ -383,6 +404,8 @@ class ServiceBotModule(Module):
     ) -> BotBuildService:
         """Construct ``BotBuildService`` with sandbox registry support."""
         return BotBuildService(
+            build_ignore_repository=build_ignore_repository,
+            env=env_utils.get_current_env(),
             device_service=device_service,
             baas_service=baas_service,
             path_factory=path_factory,

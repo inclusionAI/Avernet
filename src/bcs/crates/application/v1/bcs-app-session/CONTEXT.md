@@ -3,6 +3,9 @@
 ## Provides
 
 - `SessionServiceImpl`, the transport-agnostic BCN V1 Session facade.
+- StateMachine/ordinary-history merging uses the shared domain identity and
+  newest-first projection. Durable messages take precedence across legacy IDs;
+  workflow metadata does not group distinct outputs into a single chat round.
 - `GroupSessionConnectionServiceImpl`, which authorizes session access before
   issuing a session-scoped Workbench WebSocket token, verifies that token into
   an immutable connection binding, and revalidates the exact bound Session at
@@ -22,6 +25,7 @@
 ## Allowed dependencies
 
 - `service-api/*`
+- Pure domain history identity/projection helpers in `contracts/bcs-domain`
 - Utility crates such as `async-trait` and `serde_json`
 
 ## Forbidden dependencies
@@ -32,6 +36,19 @@
 - Direct environment or transport access
 
 ## Configuration
+
+- Bootstrap injects `state_machine_history.persistence_enabled` and
+  `message_history.state_machine_cutoff_timestamp` into both history entry points.
+  Enabled Sessions with original `created_at >= cutoff` read frozen content from
+  MessageRepo only; the StateMachine facade keeps its runtime source for older
+  Sessions or disabled persistence. The cutoff defaults to 0; selected message
+  reads never fall back or backfill. In Chat/ManagerWorker, ordinary history keeps
+  its own cutoff and owner filters. Full/Bot views never gain a runtime merge:
+  an already-selected ordinary MessageRepo path remains unchanged. Participant
+  views use the StateMachine facade for their existing scoped snapshot merge.
+  If ordinary history uses native fallback, the StateMachine cutoff controls
+  replacing its workflow entries with durable rows. Authorization is unchanged.
+  Configuration changes require restart; the removed `read_source` is rejected.
 
 - The composition root injects Session and connection-token service
   implementations.

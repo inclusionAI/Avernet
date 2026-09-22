@@ -607,7 +607,24 @@ SessionMessagesPath:
       "200":
         description: >-
           Messages visible to the selected Session Participant, ordered by
-          legacy history semantics. Omitting view_bot_id selects the
+          legacy history semantics. StateMachine history returns the newest
+          messages first. Panel, prompt and node output entries keep workflow
+          identity in metadata.state_machine;
+          they omit top-level run_id and historyMeta round grouping. Ordinary
+          chat and separately published results retain their existing grouping.
+          Both HTTP APIs read StateMachine content from messages when
+          state_machine_history.persistence_enabled is true and the Session's
+          original created_at is at or after message_history.state_machine_cutoff_timestamp
+          (UTC epoch milliseconds, default 0). Older Sessions or disabled
+          persistence retain the existing source. In mixed Chat/ManagerWorker sessions,
+          Full/Bot views retain the ordinary history cutoff and owner filters; an
+          existing MessageRepo path does not gain a runtime merge. Participant views
+          apply the StateMachine cutoff to their existing scoped snapshot merge.
+          Selected message reads return only persisted entries, without runtime
+          fallback or read-time backfill. Audience
+          filtering precedes pagination. The before timestamp remains exclusive,
+          so a page boundary within one millisecond can skip tied entries.
+          Omitting view_bot_id selects the
           authenticated Human Participant; creator or manager status does
           not create an implicit manager view. The success Envelope data is
           the same GroupMessage array returned by the legacy API. When

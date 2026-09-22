@@ -81,9 +81,14 @@ in a comment, rather than an exception to the rule.
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
+  - BuildIgnoreRepository
+  - BuildIgnoreRepositoryProtocol
   - BotCommonConfigRepository
   - BotCommonConfigRepositoryProtocol
   - DigitalEmployeeRepository
+  # bot_message_feedback
+  - BotMessageFeedbackRepository
+  - BotMessageFeedbackRepositoryProtocol
   # Contracts — protocols/<domain>.py. This is the surface domain services
   # import at runtime for DI; a change here is a change to their constructors.
   # bot
@@ -251,6 +256,7 @@ consumes:
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.kernel.build_ignore
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam
   - agentclaw.community.plugin_api.models
@@ -260,6 +266,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_chat
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management
+  - agentclaw.community.core.bot_message_feedback  # BotMessageFeedback ORM model + record DTO used by the repository
   - agentclaw.community.core.bot_public
   - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.bot_startup_script

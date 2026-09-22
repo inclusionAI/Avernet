@@ -1,6 +1,7 @@
 //! Ephemeral, best-effort IM hints. Durable status queries remain authoritative.
 //! No notification replay, outbox, or per-message background task is created.
 use crate::BcsMessageFlow;
+use bcs_channel_api::{DeliveryReactionEvent, DeliveryReactionState};
 use bcs_domain::{
     DeliveryType, ParticipantRole,
     message_delivery::{MessageDeliveryStatus as Status, PersistedMessageDelivery},
@@ -9,21 +10,40 @@ use bcs_service_api::OutboundMessage;
 use bcs_service_api::{ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint};
 use std::{collections::BTreeMap, sync::Weak, time::Duration};
 
+const IM_QUEUED_HINT_DELAY_MS: i64 = 10_000;
+// Each attempt may wait two seconds on repository/provider I/O. Return to the
+// select loop after one attempt so committed state changes keep draining.
+const MAX_IM_DELIVERY_ATTEMPTS_PER_TICK: usize = 1;
+
 #[derive(Default)]
 struct PendingHint {
     rows: BTreeMap<String, PersistedMessageDelivery>,
     sent: Vec<&'static str>,
+    reaction: Option<DeliveryReactionState>,
 }
 
-fn hint(row: &PersistedMessageDelivery, now: i64) -> Option<(&'static str, &'static str)> {
-    use bcs_domain::message_delivery::DeliveryWaitReason;
+fn reaction(entry: &PendingHint, now: i64) -> Option<DeliveryReactionState> {
+    if entry.rows.values().any(|row| row.state.status == Status::Queued) {
+        return entry.rows.values().any(|row| {
+            row.state.status == Status::Queued
+                && now.saturating_sub(row.created_at_ms) >= IM_QUEUED_HINT_DELAY_MS
+        }).then_some(DeliveryReactionState::Queued);
+    }
+    if entry.rows.values().any(|row| matches!(row.state.status, Status::Dispatching | Status::Running)) {
+        return (entry.reaction == Some(DeliveryReactionState::Queued))
+            .then_some(DeliveryReactionState::Processing);
+    }
+    if entry.rows.values().any(|row| row.state.status == Status::Expired) {
+        return Some(DeliveryReactionState::Expired);
+    }
+    if entry.reaction.is_some() && entry.rows.values().all(terminal) {
+        return Some(DeliveryReactionState::Clear);
+    }
+    None
+}
+
+fn hint(row: &PersistedMessageDelivery) -> Option<(&'static str, &'static str)> {
     match row.state.status {
-        Status::Queued if row.wait_reason == Some(DeliveryWaitReason::BotOffline) => {
-            Some(("offline", "服务正在恢复，短暂等待 Bot 重新连接"))
-        }
-        Status::Queued if now.saturating_sub(row.created_at_ms) >= 2_000 => {
-            Some(("queued", "消息已排队，正在等待该 Bot 的处理名额"))
-        }
         Status::Unknown => Some((
             "unknown",
             "处理状态暂时无法确认，该 Bot 在本会话中的后续请求已暂停",
@@ -33,9 +53,11 @@ fn hint(row: &PersistedMessageDelivery, now: i64) -> Option<(&'static str, &'sta
             "停止结果暂时无法确认，该 Bot 在本会话中的后续请求已暂停",
         )),
         Status::Cancelling => Some(("cancelling", "正在停止处理")),
+        Status::Failed if row.last_error_code.as_deref()
+            == Some(crate::managed_delivery::BOT_TERMINAL_ERROR_CODE) => None,
         Status::Failed => Some(("failed", "处理失败")),
         Status::Cancelled => Some(("cancelled", "消息已取消")),
-        Status::Expired => Some(("expired", "排队消息已过期")),
+        Status::Expired => None,
         Status::RejectedCapacity => {
             Some(("rejected_capacity", "该 Bot 队列已满，本次请求未被接收"))
         }
@@ -85,16 +107,27 @@ pub async fn run(
             _ = tick.tick() => {
                 let Some(flow) = flow.upgrade() else { return; };
                 let now = chrono::Utc::now().timestamp_millis();
+                let mut delivery_attempts = 0;
                 for entry in pending.values_mut() {
+                    if delivery_attempts < MAX_IM_DELIVERY_ATTEMPTS_PER_TICK {
+                        if let Some(state) = reaction(entry, now).filter(|state| Some(*state) != entry.reaction) {
+                            delivery_attempts += 1;
+                            let rows: Vec<_> = entry.rows.values().collect();
+                            let result = tokio::time::timeout(Duration::from_secs(2), publish_reaction(&flow, &rows, state)).await;
+                            if !matches!(result, Ok(Ok(()))) { tracing::warn!(state = state.as_str(), "delivery IM reaction failed; not replaying an ambiguous external write"); }
+                            entry.reaction = Some(state);
+                        }
+                    }
                     let mut grouped: BTreeMap<&'static str, (&'static str, Vec<&PersistedMessageDelivery>)> = BTreeMap::new();
                     for row in entry.rows.values() {
-                        if let Some((key, text)) = hint(row, now) {
+                        if let Some((key, text)) = hint(row) {
                             if !entry.sent.contains(&key) {
                                 grouped.entry(key).or_insert_with(|| (text, Vec::new())).1.push(row);
                             }
                         }
                     }
-                    if grouped.is_empty() { continue; }
+                    if grouped.is_empty() || delivery_attempts >= MAX_IM_DELIVERY_ATTEMPTS_PER_TICK { continue; }
+                    delivery_attempts += 1;
                     // One aggregated hint per source message and notification batch.
                     let rows: Vec<_> = grouped.values().flat_map(|(_, rows)| rows.iter().copied()).collect();
                     let text = grouped.values().map(|(text, rows)| format!("{}：{}", rows.iter().map(|r| r.target_bot_id.as_str()).collect::<Vec<_>>().join("、"), text)).collect::<Vec<_>>().join("\n");
@@ -103,7 +136,12 @@ pub async fn run(
                     if !matches!(result, Ok(Ok(()))) { tracing::warn!("delivery IM hint failed; not replaying an ambiguous external write"); }
                     entry.sent.extend(keys);
                 }
-                pending.retain(|_, entry| !entry.rows.values().all(terminal));
+                pending.retain(|_, entry| {
+                    if !entry.rows.values().all(terminal) { return true; }
+                    let reaction_pending = reaction(entry, now).is_some_and(|state| Some(state) != entry.reaction);
+                    let hint_pending = entry.rows.values().filter_map(hint).any(|(key, _)| !entry.sent.contains(&key));
+                    reaction_pending || hint_pending
+                });
             }
         }
     }
@@ -203,4 +241,60 @@ async fn publish(
         text: Some(text), raw_payload: serde_json::json!({"state":"delivery_status", "message_id":row.source_message_id}),
         render_hint: ChannelRenderHint::Render, source_im_message_id: Some(source.into()), source_is_channel: false,
     }).await.map_err(|_| bcs_service_api::ServiceError::InternalError("delivery IM notification failed".into()))
+}
+
+async fn publish_reaction(
+    flow: &BcsMessageFlow,
+    rows: &[&PersistedMessageDelivery],
+    state: DeliveryReactionState,
+) -> bcs_service_api::ServiceResult<()> {
+    let (Some(channel), Some(repository), Some(row)) =
+        (flow.channel.get(), flow.message_repo.as_ref(), rows.first())
+    else {
+        return Ok(());
+    };
+    let message = repository
+        .get_message_by_id(&row.session_id, &row.source_message_id)
+        .await
+        .map_err(|_| {
+            bcs_service_api::ServiceError::InternalError("delivery source lookup failed".into())
+        })?;
+    let Some(message) = message else {
+        return Ok(());
+    };
+    if message.owner_bot_id.is_some() {
+        return Ok(());
+    }
+    let Some(source) = message
+        .content
+        .get("source_im_message_id")
+        .and_then(|value| value.as_str())
+    else {
+        return Ok(());
+    };
+    channel
+        .try_outbound(OutboundMessage {
+            group_id: row.group_id.clone(),
+            bcs_session_id: row.session_id.clone(),
+            run_id: row.run_id.clone().unwrap_or_default(),
+            sender_actor_id: row.target_bot_id.clone(),
+            sender_role: ParticipantRole::Driver,
+            sender_label: "BCS".into(),
+            kind: ChannelOutboundEventKind::System,
+            purpose: ChannelOutboundPurpose::Conversation,
+            text: None,
+            raw_payload: serde_json::to_value(DeliveryReactionEvent::new(
+                state,
+                row.source_message_id.clone(),
+            ))?,
+            render_hint: ChannelRenderHint::IgnoreByDefault,
+            source_im_message_id: Some(source.into()),
+            source_is_channel: false,
+        })
+        .await
+        .map_err(|_| {
+            bcs_service_api::ServiceError::InternalError(
+                "delivery IM reaction notification failed".into(),
+            )
+        })
 }

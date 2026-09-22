@@ -15,6 +15,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 use tracing::Instrument;
 
+pub(crate) const BOT_TERMINAL_ERROR_CODE: &str = "bot_terminal_error";
+
 // Once persistence starts, cancellation of the caller must not release the Bot
 // guard while an async DB driver is still committing. Return guards on success
 // so the caller also retains its existing notification ordering.
@@ -139,7 +141,7 @@ impl ManagedMessageDelivery {
         let primary = self.repo.get_delivery(&command.delivery_id).await?.ok_or(ManagedDeliveryError::NotFound)?;
         if primary.target_bot_id != owner { return Err(ManagedDeliveryError::Conflict); }
         let mut rows = vec![primary.clone()];
-        if primary.state.kind == DeliveryType::Send && matches!(command.event, Event::CancelRequested | Event::Completed | Event::Failed | Event::Aborted | Event::PreparationFailed | Event::QueueExpired | Event::DefinitelyNotSent { .. } | Event::ResolveNotSent | Event::ResolveStopped) {
+        if primary.state.kind == DeliveryType::Send && matches!(command.event, Event::CancelRequested | Event::Completed | Event::Failed | Event::TransportRejected | Event::Aborted | Event::PreparationFailed | Event::QueueExpired | Event::DefinitelyNotSent { .. } | Event::ResolveNotSent | Event::ResolveStopped) {
             rows.extend(self.repo.lookup(DeliveryLookup::Bound(primary.delivery_id.clone())).await?);
             if !primary.state.may_have_been_sent || matches!(command.event, Event::DefinitelyNotSent { .. } | Event::ResolveNotSent) {
                 rows.extend(self.repo.lookup(DeliveryLookup::Successor { bot: primary.target_bot_id.clone(), session: primary.session_id.clone(), after_seq: primary.source_session_seq, exclude: primary.delivery_id.clone(), now_ms: command.now_ms }).await?);
@@ -267,6 +269,9 @@ impl ManagedMessageDelivery {
             && matches!(original.state.status, Status::Unknown | Status::CancelUnknown)
         {
             primary.last_error_code = Some("unknown_ttl_expired".into());
+        }
+        if event == Event::Failed {
+            primary.last_error_code = Some(BOT_TERMINAL_ERROR_CODE.into());
         }
         if manual {
             let metadata = primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}));

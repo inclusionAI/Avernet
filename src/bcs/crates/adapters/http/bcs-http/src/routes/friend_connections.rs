@@ -97,7 +97,10 @@ pub async fn accept_friend_request(
     Path(id): Path<String>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
     let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
-    let edge_ids = state.connect.approve(&id, &caller).await?;
+    let edge_ids = state
+        .connect
+        .approve(&id, &caller, Some(request_auth_headers(&headers)))
+        .await?;
     Ok(Json(envelope(&AcceptFriendRequestResponse { edge_ids })))
 }
 
@@ -179,7 +182,10 @@ pub async fn revoke_friend(
     let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
     // Body optional (bcs-cli sends empty POSTs). The service now returns the
     // actual revoked edge_ids (B4c) rather than a count.
-    let revoked_edges = state.connect.revoke_friend(&caller, &actor).await?;
+    let revoked_edges = state
+        .connect
+        .revoke_friend(&caller, &actor, Some(request_auth_headers(&headers)))
+        .await?;
     Ok(Json(envelope(&RevokeFriendResponse { revoked_edges })))
 }
 

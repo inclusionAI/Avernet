@@ -46,6 +46,8 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from agentclaw.community.api.build_ignore_service import BuildIgnoreServiceProtocol
+from agentclaw.community.core.service_bot.services.build_ignore_service import BuildIgnoreService
 
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
@@ -147,6 +149,9 @@ from agentclaw.community.api.tc_resource_ready_observer import (
 )
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
+)
+from agentclaw.community.api.bot_message_feedback_service import (
+    BotMessageFeedbackServiceProtocol,
 )
 from agentclaw.community.api.repository_catalog_service import (
     RepositoryCatalogServiceProtocol,
@@ -282,6 +287,7 @@ from agentclaw.community.core.skill_center.services.draft_edit_lease_service imp
     DraftEditLeaseService,
 )
 from agentclaw.community.core.market_favorites.services import MarketFavoriteService
+from agentclaw.community.core.bot_message_feedback.service import BotMessageFeedbackService
 from agentclaw.community.core.tc_file_upload_integrations.coordinator import (
     TcResourceReadyCoordinator,
 )
@@ -306,6 +312,7 @@ from agentclaw.community.core.spaces.services import (
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (BuildIgnoreServiceProtocol, BuildIgnoreService),
     (BotCommonConfigServiceProtocol, BotCommonConfigService),
     (ExpertChatInstanceServiceProtocol, ExpertChatInstanceService),
     (BotAppGrantServiceProtocol, BotAppGrantService),
@@ -352,6 +359,7 @@ _PAIRS = [
     (SpaceAccessServiceProtocol, SpaceAccessService),
     (SpaceMemberServiceProtocol, SpaceMemberService),
     (MarketFavoriteServiceProtocol, MarketFavoriteService),
+    (BotMessageFeedbackServiceProtocol, BotMessageFeedbackService),
     (ServicePublicationFacadeProtocol, ServicePublicationFacade),
     (ServiceEditLockServiceProtocol, ServiceEditLockService),
     (ServiceArtifactLineageReaderProtocol, ServiceArtifactLineageReader),

@@ -19,7 +19,9 @@
   saved startup/dispatch/progression (including HumanInput request recovery), terminal Session completion, terminal IM and terminal checkpoint cleanup pages with the existing leader
   election, each bounded to 32 candidates per tick with independent cursors.
   Demotion cancels all four active pages and resets their cursors; shutdown aborts
-  the task. Opening/dispatch checkpoints and Node failure/Judge state require MySQL 028 / SQLite 029 before the
+  the task and waits for its exit before managed delivery and service lifecycles
+  shut down. The final server cleanup uses the same idempotent stop operation.
+  Opening/dispatch checkpoints and Node failure/Judge state require MySQL 028 / SQLite 029 before the
   new runtime starts. Session and terminal IM scans use the MySQL 028 / SQLite 029 cursor indexes.
   SQLite 029 contains the complete Loop and checkpoint schema and is the final
   migration in this PR. It supports fresh databases and upgrades from 028;
@@ -138,6 +140,14 @@ reverse order; disabled Eventing injects a capability-disabled application
 service and registers no worker lifecycle.
 It selects concrete V1 application facades and injects their Gateway Principal
 verifier, but does not own request-time business policy.
+Provider-scoped registration receives the shared Provider credential repository
+alongside Provider and Bot metadata repositories; gateway readiness policy stays
+in ProviderRegistrationCore. All assembly paths inject one binding projection
+selected by provider_http.downlink_detection_source (binding by default, or
+bot_connection_mode). The switch changes reads only; gateway writes remain dual.
+Historical membership correction is a separate deployment work order; no
+dedicated correction executable or DB operation is shipped. Startup applies
+additive schema but never guesses/backfills historical membership.
 
 ## Tests
 

@@ -10,6 +10,9 @@ from agentclaw.community.api.tc_resource_ready_observer import (
     TcResourceReadyObserverProtocol,
 )
 from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.repository.protocols.platform import (
     SessionResourceRepositoryProtocol,
 )
@@ -119,5 +122,8 @@ class TcFileUploadIntegrationModule(Module):
         self,
         repository: SessionResourceRepositoryProtocol,
         token_vault: TokenVault,
+        device_binding_repository: DeviceBindingRepository,
     ) -> TcResourceContextService:
-        return TcResourceContextService(repository, token_vault)
+        return TcResourceContextService(
+            repository, token_vault, device_binding_repository
+        )

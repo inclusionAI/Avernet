@@ -17,6 +17,8 @@ from secbaas.community.core.service.scheduler import (
     ExpireSandboxTimerTaskConfig,
     FileTransferPoller,
     FileTransferPollerConfig,
+    PublishRetrySweepConfig,
+    PublishRetrySweepTask,
 )
 from secbaas.community.core.utils.env_utils import get_current_env
 
@@ -66,6 +68,8 @@ class CoreTaskContainer(containers.DeclarativeContainer):
     bot_device_rel_repo = providers.Dependency()
     arca_ttl_schedule_repository = providers.Dependency()
     system_config_service = providers.Dependency()
+    publish_service = providers.Dependency()
+    publish_record_repository = providers.Dependency()
 
     # ── DeviceTtlTimer task ──────────────────────────────────────────────────
 
@@ -105,6 +109,27 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         lock_service=distributed_lock_service,
         queue_repo=bot_run_queue_repository,
         lock_repo=distributed_lock_repository,
+    )
+
+    # ── PublishRetrySweep task ───────────────────────────────────────────────
+
+    publish_retry_sweep_config = providers.Singleton(
+        PublishRetrySweepConfig,
+        enabled=config.publish_retry_sweep.enabled,
+        lock_name=config.publish_retry_sweep.lock_name,
+        lock_expire_seconds=config.publish_retry_sweep.lock_expire_seconds,
+        cron_interval_seconds=config.publish_retry_sweep.cron_interval_seconds,
+        attempt_timeout_seconds=config.publish_retry_sweep.attempt_timeout_seconds,
+        batch_limit=config.publish_retry_sweep.batch_limit,
+        dry_run=config.publish_retry_sweep.dry_run,
+    )
+
+    publish_retry_sweep_task = providers.Singleton(
+        PublishRetrySweepTask,
+        config=publish_retry_sweep_config,
+        lock_service=distributed_lock_service,
+        record_repo=publish_record_repository,
+        publish_service=publish_service,
     )
 
     # ── FileTransferPoller task ────────────────────────────────────────────────

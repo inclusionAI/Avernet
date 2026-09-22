@@ -1,12 +1,44 @@
 use super::*;
 
+impl BcsChannelService {
+    async fn outbound_delivery_guard(
+        &self,
+        binding_id: &str,
+        im_conversation_id: &str,
+        run_id: &str,
+    ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        if run_id.trim().is_empty() {
+            return None;
+        }
+        let key = OutboundDeliveryKey {
+            binding_id: binding_id.to_string(),
+            im_conversation_id: im_conversation_id.to_string(),
+            run_id: run_id.to_string(),
+        };
+        let lock = {
+            let mut locks = self.outbound_delivery_locks.lock().await;
+            locks.retain(|_, lock| lock.strong_count() > 0);
+            let lock = locks
+                .get(&key)
+                .and_then(Weak::upgrade)
+                .unwrap_or_else(|| Arc::new(Mutex::new(())));
+            locks.insert(key, Arc::downgrade(&lock));
+            lock
+        };
+        Some(lock.lock_owned().await)
+    }
+}
+
 #[async_trait]
 impl ChannelService for BcsChannelService {
     async fn handle_inbound(&self, mut msg: InboundMessage) -> Result<(), ChannelInboundError> {
         msg.conversation_type = normalize_required(&msg.conversation_type, "conversation_type")
             .map_err(|error| invalid_inbound(error))?
             .to_string();
-        if msg.conversation_type == "2" && !msg.is_at_bot {
+        if msg.conversation_type == "2"
+            && !msg.is_at_bot
+            && commands::parse_channel_command(&msg.text).is_none()
+        {
             info!(
                 channel_type = %msg.channel_type,
                 account_ref = %msg.account_ref,
@@ -417,6 +449,9 @@ impl ChannelService for BcsChannelService {
                 text_len = msg.text.as_deref().map(|text| text.chars().count()).unwrap_or(0),
                 "channel outbound: selected"
             );
+            let _delivery_guard = self
+                .outbound_delivery_guard(&binding.id, &im_conversation_id, &msg.run_id)
+                .await;
             let result = match delivery
                 .deliver_event(ChannelOutboundEvent {
                     binding_ref,
@@ -507,6 +542,7 @@ impl ChannelService for BcsChannelService {
             .validate_config(&cmd.config)
             .map_err(provider_error)?;
         validate_group_chat_session_config(&cmd.config)?;
+        validate_group_context_delivery_config(&cmd.config)?;
         validate_forward_sender_identity_config(&target, &cmd.config)?;
         let binding_id = (self.new_id)();
         if matches!(&target, BindingTarget::Bot { .. }) {
@@ -643,6 +679,7 @@ impl ChannelService for BcsChannelService {
         let provider = self.provider_for(&binding.channel_type)?;
         provider.validate_config(&config).map_err(provider_error)?;
         validate_group_chat_session_config(&config)?;
+        validate_group_context_delivery_config(&config)?;
         validate_forward_sender_identity_config(&binding.target, &config)?;
         self.bindings.set_config(id, config).await?;
         Ok(())

@@ -18,7 +18,7 @@ import {
 import { adminAuthMiddleware } from "@avernet/clawweb-shared/server/middleware/admin-auth";
 import { AdminUserRepository } from "@avernet/clawweb-shared/server/repositories/admin-user-repository";
 import type { ClawWebBootstrap } from "./bootstrap.js";
-import { createAuthMeHandler } from "./auth-me.js";
+import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 
 export function createClawWebBootstrap(): ClawWebBootstrap {
   return {
@@ -62,7 +62,14 @@ export function createClawWebBootstrap(): ClawWebBootstrap {
       app.use("/api/insight/v1", createInsightRouter(insight.service));
       // Approval API: user-facing (GET/POST /api/approval/:id/...) and internal (POST /api/approval-cards/...)
       const approvalCardRepo = new ApprovalCardRepository(db);
-      app.use("/api/approval", createApprovalRouter(db));
+      app.use("/api/approval", createApprovalRouter(db, {
+        resolveSessionIdentity: async (request) => {
+          const identity = resolveAuthMeIdentity(request, { environment: context.environment });
+          return identity
+            ? { ok: true, userId: identity.userId }
+            : { ok: false, error: "未登录或登录状态已失效" };
+        },
+      }));
       app.use("/api/approval-cards", createInternalApprovalCardsRouter(approvalCardRepo));
       const staticDir = resolve(dirname(fileURLToPath(import.meta.url)), "../web");
       if (existsSync(staticDir)) {

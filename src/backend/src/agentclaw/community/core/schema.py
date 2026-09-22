@@ -44,6 +44,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.skill_center.orm  # noqa: F401  ac_default_skillset_*
     import agentclaw.community.core.access.sqlite_models  # noqa: F401  ac_access_control_policy / ac_user_info
     import agentclaw.community.core.service_bot.repository.models  # noqa: F401  ac_bot_publish
+    import agentclaw.community.core.service_bot.repository.build_ignore  # noqa: F401  ac_bot_build_ignore
     import agentclaw.community.core.bot_public.repository.models  # noqa: F401  ac_bot_friend
     import agentclaw.community.core.expert_chat.sqlite_models  # noqa: F401  ac_expert_chat_bot_sessions
     import agentclaw.community.core.devices.repository.models  # noqa: F401  ac_entity_device_binding
@@ -71,6 +72,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.user_list.models  # noqa: F401  ac_entity_user_list
     import agentclaw.community.core.spaces.repository.models  # noqa: F401  ac_space / ac_space_member
     import agentclaw.community.core.market_favorites.repository.models  # noqa: F401  ac_market_favorite
+    import agentclaw.community.core.bot_message_feedback.models  # noqa: F401  ac_bot_message_feedback
     import agentclaw.community.core.work_orders.repository.models  # noqa: F401  ac_work_order / ac_work_order_notification
 
 

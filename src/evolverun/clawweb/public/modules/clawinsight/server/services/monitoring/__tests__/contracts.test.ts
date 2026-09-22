@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fixtureResolver, resolved, testTarget } from "./identity-fixtures.js";
 import { createMonitoringService } from "../monitoring-service.js";
 import { parseCheck, parseDiagnosis, parseQuery, timestamp } from "../validation.js";
 import { CHECK_VERSION, type MonitoringStore } from "../contracts.js";
@@ -19,7 +20,7 @@ const check = { schemaVersion: CHECK_VERSION, botId: "mock-bot-te", engine: "TE"
   lastSuccessfulCheckAt: new Date(now).toISOString(), status: "HEALTHY" };
 afterEach(() => { vi.unstubAllEnvs(); });
 function store(): MonitoringStore {
-  return { listBots: vi.fn().mockResolvedValue([]), insertDiagnosis: vi.fn().mockResolvedValue(true), applyCheck: vi.fn().mockResolvedValue(true),
+  return { summaries: vi.fn(), listCheckedTargets: vi.fn().mockResolvedValue([]), listTargets: vi.fn().mockResolvedValue([]), insertDiagnosis: vi.fn().mockResolvedValue(true), applyCheck: vi.fn().mockResolvedValue(true),
     readStatus: vi.fn().mockResolvedValue({ check: null, count: 0 }), listDiagnoses: vi.fn() };
 }
 describe("monitoring contract validation", () => {
@@ -75,15 +76,15 @@ describe("monitoring contract validation", () => {
 describe("monitoring service and configuration", () => {
   it("invokes storage with normalized event and stable receive time", async () => {
     const repo = store();
-    const api = createMonitoringService(repo, 300, () => now);
+    const api = createMonitoringService(repo, fixtureResolver, () => now);
     expect(await api.reportDiagnosis(alert, alert.eventId)).toMatchObject({ duplicate: false, stored: true });
-    expect(repo.insertDiagnosis).toHaveBeenCalledWith(parseDiagnosis(alert, alert.eventId), now);
+    expect(repo.insertDiagnosis).toHaveBeenCalledWith(resolved(parseDiagnosis(alert, alert.eventId)), now);
     expect(await api.reportCheck(check)).toMatchObject({ applied: true });
-    expect(repo.applyCheck).toHaveBeenCalledWith(parseCheck(check, now), now);
+    expect(repo.applyCheck).toHaveBeenCalledWith(resolved(parseCheck(check, now)), now);
   });
   it("accepts new bots but still rejects invalid engines and IDs before storage", async () => {
     const repo = store();
-    const api = createMonitoringService(repo, 300, () => now);
+    const api = createMonitoringService(repo, fixtureResolver, () => now);
     await expect(api.reportDiagnosis({ ...alert, botId: "new-bot" }, alert.eventId)).resolves.toMatchObject({ accepted: true });
     vi.mocked(repo.insertDiagnosis).mockClear();
     await expect(api.reportDiagnosis({ ...alert, engine: "OTHER" }, alert.eventId)).rejects.toMatchObject({ code: "INVALID_EVENT" });
@@ -93,30 +94,32 @@ describe("monitoring service and configuration", () => {
     expect(repo.insertDiagnosis).not.toHaveBeenCalled();
     expect(repo.applyCheck).not.toHaveBeenCalled();
   });
-  it("expires old checks, keeps last successful time and honors reported pause", async () => {
+  it.each(["HEALTHY", "ERROR", "UNKNOWN", "PAUSED"])("preserves persisted %s regardless of check age", async (status) => {
     const repo = store();
-    vi.mocked(repo.readStatus).mockResolvedValue({ check: parseCheck(check, now), count: 3 });
+    vi.mocked(repo.readStatus).mockResolvedValue({ check: parseCheck({ ...check, status }, now), count: 3 });
     let clock = now;
-    const api = createMonitoringService(repo, 300, () => clock);
-    expect((await api.status(alert.botId)).status).toBe("HEALTHY");
-    clock += 300001;
-    expect(await api.status(alert.botId)).toMatchObject({ status: "UNKNOWN", diagnosisCount: 3, lastSuccessfulCheckAt: check.lastSuccessfulCheckAt });
-    vi.mocked(repo.readStatus).mockResolvedValue({ check: parseCheck({ ...check, status: "PAUSED" }, now), count: 3 });
-    expect((await api.status(alert.botId)).status).toBe("PAUSED");
+    const api = createMonitoringService(repo, fixtureResolver, () => clock);
+    for (const age of [0, 300001, 7 * 86400000]) {
+      clock = now + age;
+      expect(await api.status(alert.botId)).toMatchObject({ status, diagnosisCount: 3, lastSuccessfulCheckAt: check.lastSuccessfulCheckAt });
+    }
+  });
+  it("uses UNKNOWN when diagnoses exist but no check has been reported", async () => {
+    const repo = store();
     vi.mocked(repo.readStatus).mockResolvedValue({ check: null, count: 3 });
-    expect(await api.status(alert.botId)).toMatchObject({ status: "UNKNOWN", diagnosisCount: 3, lastSuccessfulCheckAt: null });
+    expect(await createMonitoringService(repo, fixtureResolver).status(alert.botId)).toMatchObject({ status: "UNKNOWN", diagnosisCount: 3, lastSuccessfulCheckAt: null });
   });
   it("reads discovered bots from storage on every call", async () => {
-    const repo = store(); const api = createMonitoringService(repo, 300);
+    const repo = store(); const api = createMonitoringService(repo, fixtureResolver);
     expect(await api.bots()).toEqual({ items: [] });
-    vi.mocked(repo.listBots).mockResolvedValue([{ botId: "new-bot" }]);
+    vi.mocked(repo.listTargets).mockResolvedValue([testTarget("new-bot")]);
     expect(await api.bots()).toEqual({ items: [{ botId: "new-bot" }] });
-    expect(repo.listBots).toHaveBeenCalledTimes(2);
+    expect(repo.listTargets).toHaveBeenCalledTimes(2);
   });
   it("never turns a failed storage operation into success", async () => {
     const repo = store();
     vi.mocked(repo.insertDiagnosis).mockRejectedValue(new Error("offline"));
-    const api = createMonitoringService(repo, 300);
+    const api = createMonitoringService(repo, fixtureResolver);
     await expect(api.reportDiagnosis(alert, alert.eventId)).rejects.toThrow("offline");
   });
   it("assembles without a DB; unavailable storage fails requests, not Host startup", async () => {

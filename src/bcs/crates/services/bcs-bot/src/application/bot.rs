@@ -722,6 +722,7 @@ impl BotManagementService for Bot {
                 "provider_bindings repo not configured".to_string(),
             ))
         })?;
+        bot_core.validate_provider_switch_membership(&bot_id, &provider_id, &provider_bot_ref, &owner_staff_no).await?;
         let existing = bindings.get_binding_by_bot_uuid(&bot_id).await?;
         let webhook_url = existing.as_ref()
             .filter(|b| b.provider_id == provider_id && b.provider_bot_ref == provider_bot_ref)

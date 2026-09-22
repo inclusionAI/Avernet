@@ -24,6 +24,7 @@ fn channel_meta_uses_inbound_channel_type_as_source() {
             context_projection: "group",
             state_machine_trigger: false,
             new_session_per_message: false,
+            group_context_delivery: None,
         },
         &msg,
     );
@@ -135,6 +136,136 @@ async fn try_outbound_system_bypasses_visibility_for_synthetic_sender() -> TestR
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].im_conversation_id, "conv_a");
     assert_eq!(events[0].kind, ChannelOutboundEventKind::System);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn try_outbound_serializes_provider_delivery_by_binding_conversation_and_run() -> TestResult {
+    let harness = TestHarness::new(manager_group("group_1")).await?;
+    harness
+        .binding_repo
+        .create(active_binding(
+            "binding_1",
+            "robot_1",
+            BindingTarget::Group {
+                group_id: "group_1".to_string(),
+            },
+            Visibility::FullTranscript,
+        ))
+        .await?;
+    harness
+        .session_repo
+        .create(
+            "group_1",
+            NewSessionParams {
+                id: Some("group_1:00000001".to_string()),
+                session_kind: SessionKind::Chat,
+                ..Default::default()
+            },
+        )
+        .await?;
+    harness
+        .conversation_repo
+        .upsert(bcs_domain::ConversationSessionMap {
+            binding_id: "binding_1".to_string(),
+            im_conversation_id: "conv_a".to_string(),
+            im_conversation_type: "2".to_string(),
+            session_scope: SessionScope::Conversation,
+            im_user_id: None,
+            bcs_session_id: "group_1:00000001".to_string(),
+            last_active_at: 1,
+        })
+        .await?;
+
+    let delivery = harness.delivery.clone();
+    let gate = Arc::new(Semaphore::new(0));
+    *delivery.gate.lock().await = Some(gate.clone());
+    let service = Arc::new(harness.service);
+    let first = {
+        let service = service.clone();
+        tokio::spawn(async move {
+            service
+                .try_outbound(outbound(
+                    "group_1:00000001",
+                    ParticipantRole::Worker,
+                    false,
+                ))
+                .await
+        })
+    };
+    timeout(Duration::from_secs(1), async {
+        while delivery.entered.load(Ordering::SeqCst) < 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    let second = {
+        let service = service.clone();
+        tokio::spawn(async move {
+            service
+                .try_outbound(outbound(
+                    "group_1:00000001",
+                    ParticipantRole::Worker,
+                    false,
+                ))
+                .await
+        })
+    };
+    assert!(
+        timeout(Duration::from_millis(50), async {
+            while delivery.entered.load(Ordering::SeqCst) < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_err(),
+        "the second provider call for the same tuple must wait for the first"
+    );
+
+    gate.add_permits(1);
+    timeout(Duration::from_secs(1), async {
+        while delivery.entered.load(Ordering::SeqCst) < 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    gate.add_permits(1);
+    first.await??;
+    second.await??;
+    assert_eq!(delivery.events.lock().await.len(), 2);
+
+    let baseline = delivery.entered.load(Ordering::SeqCst);
+    let distinct_gate = Arc::new(Semaphore::new(0));
+    *delivery.gate.lock().await = Some(distinct_gate.clone());
+    let spawn_distinct_run = |run_id: &'static str| {
+        let service = service.clone();
+        tokio::spawn(async move {
+            let mut message = outbound(
+                "group_1:00000001",
+                ParticipantRole::Worker,
+                false,
+            );
+            message.run_id = run_id.to_string();
+            service.try_outbound(message).await
+        })
+    };
+    let third = spawn_distinct_run("run_2");
+    let fourth = spawn_distinct_run("run_3");
+    let distinct_runs_entered = timeout(Duration::from_secs(1), async {
+        while delivery.entered.load(Ordering::SeqCst) < baseline + 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .is_ok();
+    distinct_gate.add_permits(2);
+    third.await??;
+    fourth.await??;
+    assert!(
+        distinct_runs_entered,
+        "different run ids must not share a binding/conversation delivery lock"
+    );
 
     Ok(())
 }

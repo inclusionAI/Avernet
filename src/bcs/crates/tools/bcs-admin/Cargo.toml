@@ -23,6 +23,9 @@ sha2 = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+bcs-service-api = { workspace = true }
+bcs-message-store = { workspace = true }
+bcs-session-store = { workspace = true }
 bcs-config-api = { workspace = true }
 mysql_async = { workspace = true }
 tempfile = { workspace = true }

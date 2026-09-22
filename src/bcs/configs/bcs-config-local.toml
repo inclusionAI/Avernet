@@ -218,11 +218,16 @@ profile_id = "default"
 recommend_top_k = 10
 recommend_min_score = 0.1
 
+[state_machine_history]
+# Persist StateMachine messages; enabled with no cutoff reads all Sessions from messages.
+persistence_enabled = true
+
 # Message history storage configuration. Defaults below match the upstream
 # example so local development exercises the new message store path.
 [message_history]
 cutoff_timestamp = 1782360000000
 manager_worker_cutoff_timestamp = 1783180800000
+state_machine_cutoff_timestamp = 1790064000000
 new_participant_visible_limit = 100000000
 
 # Default page size when the caller does not specify a limit.

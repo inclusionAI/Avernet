@@ -41,6 +41,13 @@ pub enum MessageRepoError {
 /// Message history persistence port.
 #[async_trait]
 pub trait MessageRepoPort: Send + Sync + 'static {
+    /// Resolve the ordinary Chat join window in physical sequence positions.
+    /// Supplemental StateMachine projections do not consume a slot; missing
+    /// legacy positions still do. The anchor is fixed before paging starts.
+    async fn resolve_history_window_start(&self, _session: &str, _anchor: i64, _limit: u64) -> Result<i64, MessageRepoError> {
+        Err(MessageRepoError::StorageError("history window resolution is not configured".into()))
+    }
+
     /// Internal reconstruction read: exact env/session/sender/run, chat only,
     /// ordered by session_seq. Includes legacy string bodies, excludes summaries
     /// and tool records. Implementations must not substitute a limited history page.
@@ -55,6 +62,16 @@ pub trait MessageRepoPort: Send + Sync + 'static {
         for id in ids { if let Some(message) = self.get_message_by_id(session_id, id).await? { messages.push(message); } }
         Ok(messages)
     }
+    /// Canonical StateMachine records by physical ID or stored legacy client key.
+    /// Scope to this environment/session; do not apply audience, time or page filters.
+    /// Return earliest session_seq first; published chat results are excluded.
+    async fn get_state_machine_messages_by_keys(
+        &self, session_id: &str, keys: &[String],
+    ) -> Result<Vec<PersistedMessage>, MessageRepoError> {
+        let _ = (session_id, keys);
+        Err(MessageRepoError::StorageError("StateMachine canonical history lookup unavailable".into()))
+    }
+
     /// The same store instance owns canonical message/delivery transactions.
     /// None denotes a legacy implementation that cannot host durable queues.
     fn delivery_repository(self: std::sync::Arc<Self>) -> Option<std::sync::Arc<dyn super::message_delivery::MessageDeliveryRepoPort>> {
@@ -88,6 +105,19 @@ pub trait MessageRepoPort: Send + Sync + 'static {
 
     /// Query messages with cursor-based pagination and optional filters.
     async fn query_messages(&self, query: MessageQuery) -> Result<MessagePage, MessageRepoError>;
+
+    /// StateMachine panel/prompt/output history, without consulting workflow data.
+    /// Filter Session/environment, audience and prompt display before LIMIT;
+    /// published chat results remain in ordinary history. Full/Bot hides prompts.
+    /// Newest first by (created_at, session_seq), exclusive composite cursor,
+    /// bounded to 1..=1000 rows plus one lookahead. Preserve legacy stored IDs.
+    async fn list_state_machine_history(
+        &self, group_id: &str, session_id: &str, human_view: Option<HumanMessageView>,
+        before: Option<(u64, i64)>, limit: u32,
+    ) -> Result<MessagePage, MessageRepoError> {
+        let _ = (group_id, session_id, human_view, before, limit);
+        Err(MessageRepoError::StorageError("StateMachine history reads are not configured".into()))
+    }
 
     /// Get a single message by its global unique id.
     async fn get_message_by_id(

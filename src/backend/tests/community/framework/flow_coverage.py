@@ -198,6 +198,11 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "service conformance, and architecture tests in this change; drain when "
         "singlebox has a signed /openapi/v1 principal flow for the new routes."
     ),
+    "bot_message_feedback": (
+        "New bot output message feedback module. Covered by endpoint, service, "
+        "repository and architecture tests; drain when a real singlebox flow "
+        "exercises the feedback submission end-to-end."
+    ),
     "approval": _EXEMPT_REASON,
     "auth": _EXEMPT_REASON,
     "bot_public": _EXEMPT_REASON,

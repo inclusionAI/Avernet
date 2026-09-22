@@ -1218,10 +1218,10 @@ def _insert_with_session(
     return run_id
 
 
-async def test_abort_runs_by_session_marks_failed_force_done_and_cancels_local_task(
+async def test_abort_runs_by_session_marks_aborted_force_done_and_cancels_local_task(
     repo, queue
 ):
-    """RUNNING run -> update_error(FAILED) + force_done + cancel 本机 task."""
+    """RUNNING run -> update_aborted(ABORTED) + force_done + cancel 本机 task."""
     run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
     claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
     assert claimed is not None and claimed.run_id == run_id
@@ -1250,7 +1250,7 @@ async def test_abort_runs_by_session_marks_failed_force_done_and_cancels_local_t
     assert outcome.aborted_run_ids == [run_id]
     assert outcome.had_terminal is False
     assert cancelled.is_set(), "local task must be cancelled"
-    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert repo.get_by_run_id(run_id).status == "ABORTED"
     assert queue.get_by_run_id(run_id).status == "DONE"
     # idempotent: aborted run no longer in find_running_by_bot_session
     assert worker._queue.find_running_by_bot_session("sess-abort", "bot-1") == []
@@ -1269,7 +1269,7 @@ async def test_abort_runs_by_session_pending_record_left_untouched(repo, queue):
     assert outcome.had_terminal is False
     # PENDING 不动，由超时扫描兜底
     assert queue.get_by_run_id(run_id).status == "PENDING"
-    assert repo.get_by_run_id(run_id).status != "FAILED"
+    assert repo.get_by_run_id(run_id).status != "ABORTED"
 
 
 async def test_abort_runs_by_session_no_run_record_returns_aborted_false(repo, queue):
@@ -1351,12 +1351,15 @@ async def test_abort_runs_by_session_engine_notifier_error_swallowed(repo, queue
     outcome = await worker.abort_runs_by_session("sess-abort", "bot-1")
 
     assert outcome.aborted_run_ids == [run_id]
-    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert repo.get_by_run_id(run_id).status == "ABORTED"
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
-async def test_abort_runs_by_session_without_run_repo_skips_update_error(repo, queue):
-    """When run_repository is None, abort still force_done + cancel (best-effort)."""
+async def test_abort_runs_by_session_without_run_repo_skips_update_aborted(repo, queue):
+    """When run_repository is None, abort still force_done + cancel (best-effort).
+
+    No update_aborted call is made because there is no run_repository.
+    """
     run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
     claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
     assert claimed is not None and claimed.run_id == run_id
@@ -1403,7 +1406,7 @@ async def test_abort_runs_by_session_remote_worker_marks_abort_meta(repo, queue)
     assert outcome.aborted_run_ids == [run_id]
     assert outcome.had_terminal is False
     assert queue.get_by_run_id(run_id).status == "DONE"
-    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert repo.get_by_run_id(run_id).status == "ABORTED"
     assert queue.is_abort_requested(run_id) is True
 
 
@@ -1464,7 +1467,7 @@ async def test_abort_runs_by_session_group_chat_other_bot_running_not_killed(
     assert outcome.aborted_run_ids == [run_a]
     # bot-B 的 RUNNING run 不受影响
     assert queue.get_by_run_id(run_b).status == "RUNNING"
-    assert repo.get_by_run_id(run_b).status != "FAILED"
+    assert repo.get_by_run_id(run_b).status not in ("FAILED", "ABORTED")
 
 
 async def test_abort_runs_by_session_group_chat_target_bot_no_running_410_dimension(

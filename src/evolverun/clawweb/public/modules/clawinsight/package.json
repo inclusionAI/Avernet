@@ -29,11 +29,14 @@
   ],
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures && cp -R server/fixtures/. dist/server/fixtures/ && cp web/pages/InsightCenter/monitoring/monitoring.css dist/web/pages/InsightCenter/monitoring/",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures && cp -R server/fixtures/. dist/server/fixtures/ && cp web/pages/InsightCenter/monitoring/*.css dist/web/pages/InsightCenter/monitoring/",
     "test": "vitest run",
     "test:monitoring": "vitest run --config vitest.monitoring.config.ts",
     "monitoring:local": "node dist/server/services/monitoring/local-host.js",
-    "monitoring:mock": "node dist/server/services/monitoring/local-mock.js"
+    "monitoring:mock": "node dist/server/services/monitoring/local-mock.js",
+    "monitoring:preview": "vite --config preview/vite.config.ts",
+    "test:monitoring-preview": "vitest run --config vitest.preview.config.ts",
+    "check:monitoring-preview": "tsc -p tsconfig.preview.json --noEmit"
   },
   "dependencies": {
     "@avernet/clawevolve": "0.2.0",
@@ -65,6 +68,8 @@
     "react-router-dom": "^7.15.1",
     "typescript": "~6.0.2",
     "vitest": "3.2.7",
-    "@vitest/coverage-v8": "3.2.7"
+    "@vitest/coverage-v8": "3.2.7",
+    "@tailwindcss/vite": "^4.3.0",
+    "tailwindcss": "^4.3.0"
   }
 }

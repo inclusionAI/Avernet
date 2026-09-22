@@ -33,6 +33,7 @@ impl CollaborationRuntime {
                 self.runs.release_node_judging(&claim).await?;
                 return Ok(JudgingProgress::Unclaimed);
             }
+            self.preserve_node_history(compiled, group, run, &node).await?;
             let artifact = node.artifact_text.as_deref().ok_or_else(||
                 CollaborationRuntimeError::InvalidRequest("Judging has no persisted artifact".into()))?;
             if definition.kind == StateMachineNodeKind::HumanInput && node.responded_by.is_none() {

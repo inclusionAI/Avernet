@@ -193,6 +193,8 @@ class ApplicationContainer(containers.DeclarativeContainer):
         bot_device_rel_repo=repository.bot_device_rel_repository,
         arca_ttl_schedule_repository=repository.arca_ttl_schedule_repository,
         system_config_service=services.system_config_service,
+        publish_service=services.publish_service,
+        publish_record_repository=repository.publish_record_repository,
     )
 
     cron_lifecycle = providers.Singleton(
@@ -208,6 +210,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             tasks.bot_run_recovery_task,
             tasks.file_transfer_poller_task,
             tasks.expire_sandbox_timer_task,
+            tasks.publish_retry_sweep_task,
         ),
     )
 

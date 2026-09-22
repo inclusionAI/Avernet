@@ -49,19 +49,31 @@ export type DiagnosisPage = {
   problemTypes: { category: string; subtypes: string[] }[];
   counts: DiagnosisCounts; items: DiagnosisItem[];
 };
+/** Latest persisted check status, not monitor liveness; UNKNOWN if no check exists. */
 export type BotStatus = {
   botId: string; status: CheckStatus; lastSuccessfulCheckAt: string | null; diagnosisCount: number;
 };
 export type DiagnosisAck = { accepted: true; stored: true; eventId: string; duplicate: boolean };
 export type CheckAck = { accepted: true; botId: string; applied: boolean };
+export type MonitoringTarget = { botId: string; entityId: string; env: string };
+export type ResolvedReport<T> = { wire: T; target: MonitoringTarget };
+export type MonitoringWindow = { startMs: number | null; endMs: number | null };
+export type MonitoringSummary = {
+  status: CheckStatus; checkedAt: string; lastSuccessfulCheckAt: string | null;
+  diagnosedSessionCount: number | null; unidentifiedSessionDiagnosisCount: number;
+  diagnosisCount: number; alertCount: number;
+};
 /** Plugin API: durable storage. Successful writes mean committed, never merely queued. */
 export interface MonitoringStore {
+  /** Targets with a persisted bot-check; diagnosis-only targets are excluded. */
+  listCheckedTargets(): Promise<MonitoringTarget[]>;
   /** Distinct persisted bot IDs from both checks and diagnoses, ordered by botId. */
-  listBots(): Promise<{ botId: string }[]>;
-  insertDiagnosis(event: DiagnosisEvent, receivedAt: number): Promise<boolean>;
-  applyCheck(check: BotCheck, receivedAt: number): Promise<boolean>;
-  readStatus(botId: string): Promise<{ check: BotCheck | null; count: number }>;
-  listDiagnoses(botId: string, query: DiagnosisQuery): Promise<DiagnosisPage>;
+  listTargets(): Promise<MonitoringTarget[]>;
+  summaries(targets: readonly MonitoringTarget[], window: MonitoringWindow): Promise<(MonitoringSummary | null)[]>;
+  insertDiagnosis(event: ResolvedReport<DiagnosisEvent>, receivedAt: number): Promise<boolean>;
+  applyCheck(check: ResolvedReport<BotCheck>, receivedAt: number): Promise<boolean>;
+  readStatus(target: MonitoringTarget): Promise<{ check: BotCheck | null; count: number }>;
+  listDiagnoses(target: MonitoringTarget, query: DiagnosisQuery): Promise<DiagnosisPage>;
 }
 export interface MonitoringApi {
   bots(): Promise<{ items: { botId: string }[] }>;
@@ -71,6 +83,8 @@ export interface MonitoringApi {
   diagnoses(botId: string, query: Record<string, unknown>): Promise<DiagnosisPage>;
 }
 export type MonitoringErrorCode = "INVALID_EVENT"
+  | "TARGET_UNRESOLVED" | "TARGET_AMBIGUOUS" | "TARGET_BINDING_CONFLICT"
+  | "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_ENROLLED" | "ALREADY_ENROLLED" | "ENROLLMENT_NOT_IMPLEMENTED"
   | "EVENT_CONFLICT" | "PAYLOAD_TOO_LARGE" | "NOT_READY" | "BOT_NOT_FOUND";
 export class MonitoringError extends Error {
   constructor(readonly code: MonitoringErrorCode, message: string) { super(message); }

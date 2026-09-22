@@ -51,6 +51,7 @@ impl InternalBotAttributesService for RecordingSearchPolicyService {
         Err(ApplicationError::internal("patch is not configured"))
     }
 }
+
 fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
     let principal = AuthPrincipal {
         user_id: Some(staff_no.to_string()),

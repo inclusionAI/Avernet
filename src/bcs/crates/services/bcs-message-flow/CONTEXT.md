@@ -26,6 +26,12 @@ exclusivity is implemented; it must never be emulated by a scope-wide abort.
 
 ## Provides
 
+IM queue hints are best-effort and appear only after ten seconds of continued
+Queued state. The Channel `/cacel` command (with `/cancel` compatibility alias)
+cancels the authenticated Human's newest still-unsent IM message in the current
+Session; it never turns a queue cancellation into an abort of running work.
+`/abort` continues through the canonical Bot/session chat-abort path.
+
 The queue runtime treats a complete `BotDeliveryResult { delivered: false }`
 as terminal Failed, releases the Bot/session lane and never retries it. Only an
 explicit DeliveryNotSent result can consume the safe-retry budget. Transport

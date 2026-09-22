@@ -21,13 +21,36 @@ pub enum ProviderAuthMode {
 
 /// How a provider-registered bot connects to BCS. `Gateway` (default) writes a
 /// provider_binding row (HTTP webhook downlink); `Plugin` skips the binding so
-/// the bot connects over WebSocket through a BCN plugin.
+/// the bot connects over WebSocket through a BCN plugin or bridge.
+/// Shared by Provider administration, registration tokens and Bot persistence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderBotConnectionMode {
     #[default]
     Gateway,
     Plugin,
+}
+
+impl ProviderBotConnectionMode {
+    /// Canonical wire and database value; independent of entry-point defaults.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Gateway => "gateway",
+            Self::Plugin => "plugin",
+        }
+    }
+}
+
+impl std::str::FromStr for ProviderBotConnectionMode {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "gateway" => Ok(Self::Gateway),
+            "plugin" => Ok(Self::Plugin),
+            _ => Err("invalid Bot connection mode"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

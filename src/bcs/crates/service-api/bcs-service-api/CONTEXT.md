@@ -2,6 +2,11 @@
 
 ## Provides
 
+MessageFlowService exposes a Human-scoped latest-queued cancellation command for
+IM adapters. It selects only the caller's newest canonical IM source in the
+requested Session and cancels only still-unsent Send deliveries; active work
+remains the separate scoped `chat.abort` contract.
+
 BotDeliveryResult distinguishes a complete downstream rejection
 (`delivered=false`) from an uncertain transport error (`Err`). A rejection is
 terminal and is never retryable by itself; safe retry still requires the
@@ -375,3 +380,51 @@ consumers must rebuild against 0.2.0. Bootstrap maps into the separate
 required.
 
 Provider management supports optional shared endpoints and saved Bot overrides. BotWebhookChange represents unchanged/inherit/set independently of HTTP; resolved BotDeliveryTarget still requires a concrete URL. Repository endpoint updates return persisted bindings or errors.
+
+OpenAPI RegisterService adds optional Provider selection at issuance and mode/ref/
+webhook at redemption. Optional metadata is omitted for legacy v1 responses.
+ProviderRegistrationCoreService owns scoped authorization and strict creation;
+BotProviderRepoPort replaces journal reservation/completion with Bot-owned Provider
+identity, cross-mode uniqueness and gateway-only dual writes. Duplicate scoped refs
+conflict without credential replay; different refs may share a valid register token.
+Shared receipt DTOs live in types (no repo-to-core dependency). Core and repository
+contracts have shared conformance harnesses, including Memory/SQLite implementations.
+No Plugin API changes. Token v2 purpose and mode claims cannot be widened during redemption.
+
+ProviderBotCoreService also owns authorized deletion by Bot Provider/ref metadata
+for both modes. ProviderManagement invokes this core operation before its legacy
+binding fallback and then performs channel cleanup; it never accesses the metadata
+repository directly. A missing metadata identity returns None, but storage and
+authorization errors propagate and must not trigger the fallback.
+
+BotRegistryCoreService/BotRepoPort add fail-closed `create_registration_if_absent`
+for this flow. It is atomic, preserves existing active/deleted identities and
+never uses upsert semantics; existing registration methods remain unchanged.
+Memory and persistent stores implement it, with race, tombstone and failure tests.
+
+StateMachine history canonical lookup resolves physical IDs and stored legacy client
+keys within one environment/Session before audience or pagination filters. SQL
+uses chunks of at most 200 keys with two bounded result queries per chunk; unknown
+implementations return an error, not an incomplete authorized history page.
+
+MessageRepoPort also provides `list_state_machine_history`: an env/group/Session
+scoped, audience-filtered page of persisted StateMachine entries, bounded to
+1..1000 plus lookahead. Full/Bot excludes Human prompts; Participant sees public
+and explicitly directed rows only. Unsupported adapters fail rather than
+returning an empty successful page. The runtime history facade selects this
+port before accessing any workflow repository when history persistence is enabled
+and Session.created_at >= message_history.state_machine_cutoff_timestamp (default 0).
+Older Sessions and disabled persistence keep the runtime path. Authorization
+and ordinary-chat history policies remain at their existing boundaries.
+
+`resolve_history_window_start` resolves the ordinary Chat window at a fixed
+physical sequence anchor. New durable projections do not consume positions;
+legacy rows and missing ordinary positions do. Store/query failures propagate,
+and audience/owner filtering remains independent. No schema changes or window
+initialization API is required.
+
+StateMachineRunRepoPort batches at most 32 Run IDs to find missing terminal
+history-repair confirmations. Memory and SQL stores retain a completion marker
+only after opening/publication rows are repaired successfully. Later cleanup
+sweeps, including after restart, skip those source/message reads. Node-history
+Pending recovery and network delivery acknowledgements remain independent.

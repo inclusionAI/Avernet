@@ -4,6 +4,10 @@
 
 这份文档描述 自建 bot 平台，如何作为一个 Bot Provider 接入 Avernet 的组件之一 ：Bot协作网络（BCN，Bot Coordination Network）。
 
+上行和下行的 token/register 注册见[Provider 注册说明](../specs/2026-09-20-provider-token-registration/README.md)。
+Provider 归属统一存入 `bcs_bots`；下行继续双写 binding，上行不写。
+线上切换到连接模式判断前，先完成[存量迁移、校验与回滚准备](provider-bot-storage-migration.md)。
+
 
 ## 什么时候需要这种接入方式
 
@@ -237,6 +241,19 @@ BCS 下行请求可能重试，Provider 必须避免重复执行同一任务。
 | `chat.inject` | body 中的 `id` |
 | `chat.abort` | body 中的 `id` |
 | `/bot/events` | `X-BCN-Event-Id`，Provider 重试同一事件时应保持不变 |
+
+状态机节点的 body `id` 对应持久化的 `delivery_request_id`，标识某个执行节点的一次 attempt。
+BCS 在调用 Provider 前先保存发送标记。如果进程在持久化投递结果前中断，checkpoint 仍为
+`Delivering`，恢复时将这次 attempt 视为结果未知，不会因租约过期重发，而是等待回调或保存的
+节点超时策略。能够证明尚未发送的请求可以沿用原 ID 恢复；超时后配置的节点重试会创建新 attempt 和新 ID。
+
+如果运行中的进程收到投递错误或拒绝，会记录投递失败，并在该 attempt 仍有效时将节点和 Run
+置为失败。这也包括 ACK 丢失导致的传输错误：Provider 可能已经接收请求，但该路径不会等待
+节点超时。因此 Run 失败不能证明外部操作没有发生，这些行为也不构成外部 exactly-once 保证。
+
+Provider 按 `id` 去重只能保护同一请求，不能自动覆盖新 attempt、Loop 的下次执行或 rerun。
+支付、发布等有副作用的操作还需由 Bot 和 Provider 在实际执行处按稳定的业务操作键保证幂等；
+确认重复执行安全后再配置节点重试。
 
 Provider 需要按 `(provider_bot_ref, session_id)` 维护会话上下文。`chat.inject` 必须写入上下文，但不能触发 bot 推理。
 

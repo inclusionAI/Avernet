@@ -205,6 +205,8 @@ def test_bot_build_service_upgrade_returns_structured_result_for_bot_not_found()
         '{"detail":{"error_code":"BOT_NOT_FOUND","message":"Bot not found or already destroyed: BOT-xxx"}}'
     )
     svc = BotBuildService(
+        build_ignore_repository=Mock(get=Mock(return_value=None)),
+        env="test",
         device_service=Mock(),
         baas_service=baas_service,
         path_factory=Mock(),
@@ -238,6 +240,8 @@ def test_bot_build_service_upgrade_raises_for_other_errors():
     baas_service = Mock()
     baas_service.upgrade_bot.side_effect = Exception('boom')
     svc = BotBuildService(
+        build_ignore_repository=Mock(get=Mock(return_value=None)),
+        env="test",
         device_service=Mock(),
         baas_service=baas_service,
         path_factory=Mock(),

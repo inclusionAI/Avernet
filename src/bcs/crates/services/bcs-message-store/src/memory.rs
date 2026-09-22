@@ -115,6 +115,40 @@ impl MemoryMessageRepo {
 
 #[async_trait]
 impl MessageRepoPort for MemoryMessageRepo {
+    async fn resolve_history_window_start(&self, session: &str, anchor: i64, limit: u64) -> Result<i64, MessageRepoError> {
+        let sessions = self.sessions.read().await;
+        let mut window = super::mysql::history_window::HistoryWindow::new(anchor, limit);
+        if let Some(entry) = sessions.get(session) {
+            for message in entry.messages.iter().rev().filter(|m| m.session_seq <= anchor) {
+                if let Some(start) = window.consume(message.session_seq, bcs_domain::state_machine_history::is_supplemental_history(message))? {
+                    return Ok(start);
+                }
+            }
+        }
+        Ok(window.start())
+    }
+    async fn get_state_machine_messages_by_keys(&self, session_id: &str, keys: &[String]) -> Result<Vec<PersistedMessage>, MessageRepoError> {
+        let sessions = self.sessions.read().await;
+        let mut messages = std::collections::BTreeMap::new();
+        for chunk in keys.chunks(200) {
+            let keys: std::collections::HashSet<_> = chunk.iter().map(String::as_str).collect();
+            for client_key in [false, true] {
+                let found = sessions.get(session_id).into_iter().flat_map(|entry| &entry.messages)
+                    .filter(|m| bcs_domain::state_machine_history::is_state_machine_history_type(&m.message_type)
+                        && (if client_key { m.client_msg_id.as_deref() } else { Some(m.message_id.as_str()) })
+                            .is_some_and(|key| keys.contains(key)))
+                    .take(401).collect::<Vec<_>>();
+                if found.len() > 400 {
+                    return Err(MessageRepoError::StorageError("too many duplicate StateMachine producer keys".into()));
+                }
+                for message in found { messages.insert(message.message_id.clone(), message.clone()); }
+            }
+        }
+        let mut messages: Vec<_> = messages.into_values().collect();
+        messages.sort_by_key(|message| message.session_seq);
+        Ok(messages)
+    }
+
     async fn run_chat_segments(&self, session: &str, sender: &str, run: &str) -> Result<Vec<PersistedMessage>, MessageRepoError> {
         let sessions = self.sessions.read().await;
         let mut rows: Vec<_> = sessions.get(session).into_iter().flat_map(|s| &s.messages)
@@ -204,6 +238,30 @@ impl MessageRepoPort for MemoryMessageRepo {
         Ok(persisted)
     }
 
+    async fn list_state_machine_history(
+        &self, group_id: &str, session_id: &str, human_view: Option<HumanMessageView>,
+        before: Option<(u64, i64)>, limit: u32,
+    ) -> Result<MessagePage, MessageRepoError> {
+        if !(1..=1_000).contains(&limit) {
+            return Err(MessageRepoError::StorageError("history limit must be between 1 and 1000".into()));
+        }
+        let sessions = self.sessions.read().await;
+        let participant = human_view.as_ref().filter(|v| v.scope == bcs_domain::MessageViewScope::Participant);
+        let mut messages: Vec<_> = sessions.get(session_id).into_iter().flat_map(|s| &s.messages)
+            .filter(|m| m.group_id == group_id && bcs_domain::state_machine_history::is_state_machine_history_type(&m.message_type))
+            .filter(|m| match participant {
+                Some(view) => m.visibility_domain == Some(MessageVisibilityDomain::StateMachine) && view.allows(m),
+                None => m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE,
+            })
+            .filter(|m| before.is_none_or(|cursor| (m.created_at, m.session_seq) < cursor))
+            .collect();
+        messages.sort_by(|a, b| (b.created_at, b.session_seq).cmp(&(a.created_at, a.session_seq)));
+        let has_more = messages.len() > limit as usize;
+        messages.truncate(limit as usize);
+        let next_cursor = if has_more { messages.last().map(|m| (m.created_at, m.session_seq)) } else { None };
+        Ok(MessagePage { messages: messages.into_iter().cloned().map(super::history_projection).collect(), has_more, next_cursor })
+    }
+
     async fn query_messages(&self, query: MessageQuery) -> Result<MessagePage, MessageRepoError> {
         let sessions = self.sessions.read().await;
         let entry = match sessions.get(&query.session_id) {
@@ -220,6 +278,10 @@ impl MessageRepoPort for MemoryMessageRepo {
         let limit = query.limit as usize;
         let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply").collect();
 
+        if !query.human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
+            filtered.retain(|m| m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE);
+        }
+
         // Apply cursor (timestamp-based)
         if let Some(cursor) = query.cursor {
             filtered.retain(|m| m.created_at < cursor);
@@ -227,7 +289,7 @@ impl MessageRepoPort for MemoryMessageRepo {
 
         // Apply visible_from_seq
         if let Some(visible_from) = query.visible_from_seq {
-            filtered.retain(|m| m.session_seq >= visible_from);
+            filtered.retain(|m| m.session_seq >= visible_from || bcs_domain::state_machine_history::is_supplemental_history(m));
         }
 
         // Apply keyword filter
@@ -332,8 +394,12 @@ impl MessageRepoPort for MemoryMessageRepo {
         let limit = limit as usize;
         let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply").collect();
 
+        if !human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
+            filtered.retain(|m| m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE);
+        }
+
         if let Some(visible_from) = visible_from_seq {
-            filtered.retain(|m| m.session_seq >= visible_from);
+            filtered.retain(|m| m.session_seq >= visible_from || bcs_domain::state_machine_history::is_supplemental_history(m));
         }
 
         match &owner_filter {

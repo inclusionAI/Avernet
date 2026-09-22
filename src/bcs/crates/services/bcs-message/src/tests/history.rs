@@ -220,7 +220,8 @@ async fn public_state_machine_panel_round_trips_for_participant_chat_history() {
         Some(BCS_STATE_MACHINE_MESSAGE_SENDER_NAME)
     );
     assert_eq!(panel.role, MessageRole::Assistant);
-    assert_eq!(panel.run_id, run_id);
+    assert!(panel.run_id.is_empty());
+    assert_eq!(panel.metadata.as_ref().unwrap()["state_machine"]["run_id"], run_id);
     assert_eq!(
         panel
             .metadata
@@ -453,5 +454,34 @@ async fn session_opening_message_is_visible_to_humans_and_hidden_from_bots() {
         .await
         .expect("bot history");
     assert!(bot_result.messages.is_empty());
+    assert_eq!(fallback.session_calls().await, 0);
+}
+
+#[tokio::test]
+async fn chat_history_without_join_anchor_compensates_new_state_machine_projections() {
+    let (mut service, repo, _sessions, fallback, session_id) =
+        service_fixture(GroupStrategy::Chat, 0, 0, Vec::new()).await;
+    service.new_participant_visible_limit = 5;
+    for n in 1..=10 {
+        append_history(&repo, "group-1", &session_id, "mgr", &format!("ordinary-{n}"), None).await;
+    }
+    for n in 0..25 {
+        repo.append_message_with_id(format!("history-{n}"), NewMessage {
+            group_id: "group-1".into(), session_id: session_id.clone(), sender_id: "mgr".into(),
+            sender_type: SenderType::Bot, message_type: "state_machine_output".into(),
+            content: serde_json::json!({"text":"accepted output","metadata":{"state_machine":{
+                "history_schema_version":1,"run_id":"run","node_id":format!("node-{n}"),"attempt":0,"event":"output"
+            }}}), client_msg_id: None, owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::StateMachine,
+            audience: Some(bcs_domain::MessageAudience::FullOnly), created_at: 2, run_id: "run".into(),
+        }).await.unwrap();
+    }
+    for persisted in [false, true] {
+        service.persisted_state_machine_history = persisted;
+        let result = service.get_session_history(session_cmd("group-1", &session_id, Some("worker-a"))).await.unwrap();
+        let ordinary = result.messages.iter().filter(|m| m.content.starts_with("ordinary-"))
+            .map(|m| m.content.as_str()).collect::<Vec<_>>();
+        assert_eq!(ordinary, ["ordinary-10", "ordinary-9", "ordinary-8", "ordinary-7", "ordinary-6"]);
+    }
     assert_eq!(fallback.session_calls().await, 0);
 }

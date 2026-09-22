@@ -25,7 +25,7 @@ async fn assert_fixed_loop_schema(db: &dyn DbPlugin) -> DbResult<()> {
     for name in ["env", "operation_key", "aggregate_kind", "aggregate_id", "operation_kind", "payload_json", "progress_json", "status", "created_at_ms", "delivered_at_ms", "node_id", "aggregate_attempt", "deadline_ms", "lease_owner", "lease_token", "lease_until_ms", "last_error"] {
         assert!(checkpoint_columns.iter().any(|column| column == name));
     }
-    assert_eq!(current_sqlite_version(db, true).await?, Some(29));
+    assert_eq!(current_sqlite_version(db, true).await?, Some(sqlite_target_version()));
     Ok(())
 }
 
@@ -35,7 +35,7 @@ async fn fixed_loop_runtime_migration_is_applied_on_fresh_bootstrap() -> DbResul
     run_sqlite_migrations(&db).await?;
     run_sqlite_migrations(&db).await?;
     assert_eq!(migration_rows(&db).await?.into_iter().map(|row| row.0).collect::<Vec<_>>(),
-        (1..=29).collect::<Vec<_>>());
+        (1..=sqlite_target_version()).collect::<Vec<_>>());
     assert_fixed_loop_schema(&db).await
 }
 

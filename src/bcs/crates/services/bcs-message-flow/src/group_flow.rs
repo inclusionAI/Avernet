@@ -14,7 +14,8 @@ use bcs_service_api::{
     BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotEventCommand,
     BotEventOutcome, BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope,
     BotRunTransportOwner, BotTerminalObserverPort, CallerContext, ChannelService, ChatAbortCommand,
-    ChatAbortFailure, ChatAbortOutcome, ChatAbortScope, ChatEventState, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+    CancelLatestQueuedMessageCommand, CancelLatestQueuedMessageOutcome, ChatAbortFailure,
+    ChatAbortOutcome, ChatAbortScope, ChatEventState, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     DeliveryBlockContext, DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind,
     DeliveryMetricTarget, DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, Group,
@@ -466,6 +467,13 @@ impl MessageFlowService for BcsMessageFlow {
 
     async fn handle_chat_abort(&self, cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome> {
         handle_chat_abort(self, cmd).await
+    }
+
+    async fn cancel_latest_queued_message(
+        &self,
+        cmd: CancelLatestQueuedMessageCommand,
+    ) -> ServiceResult<CancelLatestQueuedMessageOutcome> {
+        crate::delivery_control::cancel_latest_queued(self, cmd).await
     }
 
     async fn resolve_chat_abort_scope(

@@ -551,3 +551,6 @@ async fn concurrent_loop_rerun_creates_one_child_and_dispatches_its_first_node_o
     assert_eq!(h.delivery.commands.lock().await.len(), 2);
     assert_eq!(serde_json::to_value(h.plan(&run.run_id).await).unwrap(), serde_json::to_value(h.plan(&first.view.run.run_id).await).unwrap());
 }
+
+#[path = "history_loop.rs"]
+mod history_loop;

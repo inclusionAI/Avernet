@@ -207,6 +207,22 @@ pub struct ChatAbortOutcome {
     pub failures: Vec<ChatAbortFailure>,
 }
 
+/// Cancel the newest message from this Human that still has unsent queued
+/// deliveries in the canonical Session. Running work is deliberately outside
+/// this command; callers use `chat.abort` for that distinct operation.
+#[derive(Debug, Clone)]
+pub struct CancelLatestQueuedMessageCommand {
+    pub caller: CallerContext,
+    pub group_id: String,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CancelLatestQueuedMessageOutcome {
+    pub message_id: Option<String>,
+    pub cancelled: Vec<super::message_delivery::DeliveryStatusView>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TaskDispatchCommand {
     pub driver_bot_id: String,
@@ -385,6 +401,12 @@ pub trait MessageFlowService: Send + Sync {
         cmd: GroupCallbackCommand,
     ) -> ServiceResult<GroupCallbackOutcome>;
     async fn handle_chat_abort(&self, cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome>;
+    async fn cancel_latest_queued_message(
+        &self,
+        _cmd: CancelLatestQueuedMessageCommand,
+    ) -> ServiceResult<CancelLatestQueuedMessageOutcome> {
+        Err(service_not_configured("latest queued message cancellation"))
+    }
     async fn resolve_chat_abort_scope(
         &self,
         _group_id: &str,

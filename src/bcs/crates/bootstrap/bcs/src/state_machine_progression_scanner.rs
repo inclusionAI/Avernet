@@ -4,15 +4,32 @@ use std::{sync::Arc, time::Duration};
 
 use bcs_service_api::{CollaborationRuntimeService, LeaderElectionPort};
 use tracing::warn;
+use crate::recovery_backoff::{RecoveryBackoff, when_ready};
 
 const SCAN_INTERVAL: Duration = Duration::from_secs(1);
 const BATCH_SIZE: usize = 32;
 
-pub struct ProgressionRecoveryTask(tokio::task::JoinHandle<()>);
+pub struct ProgressionRecoveryTask(Option<tokio::task::JoinHandle<()>>);
+
+impl ProgressionRecoveryTask {
+    pub(crate) async fn shutdown(&mut self) {
+        if let Some(task) = self.0.as_mut() {
+            task.abort();
+            // Abort only requests cancellation. Join before dependencies drain
+            // so all in-flight recovery futures have actually been dropped.
+            if let Err(error) = task.await {
+                if !error.is_cancelled() {
+                    warn!(target: "state_machine_progression_scanner", %error, "progression scanner stopped unexpectedly");
+                }
+            }
+            self.0 = None;
+        }
+    }
+}
 
 impl Drop for ProgressionRecoveryTask {
     fn drop(&mut self) {
-        self.0.abort();
+        if let Some(task) = &self.0 { task.abort(); }
     }
 }
 
@@ -30,7 +47,7 @@ pub fn spawn(
     election: Arc<dyn LeaderElectionPort>,
     runtime: Arc<dyn CollaborationRuntimeService>,
 ) -> ProgressionRecoveryTask {
-    ProgressionRecoveryTask(tokio::spawn(run(election, runtime, SCAN_INTERVAL, BATCH_SIZE)))
+    ProgressionRecoveryTask(Some(tokio::spawn(run(election, runtime, SCAN_INTERVAL, BATCH_SIZE))))
 }
 
 async fn run(
@@ -43,6 +60,13 @@ async fn run(
     let mut session_cursor = None;
     let mut im_cursor = None;
     let mut cleanup_cursor = None;
+    let mut history_cursor = None;
+    let mut history_due = tokio::time::Instant::now();
+    let mut history_backoff = RecoveryBackoff::new(Duration::from_secs(5));
+    let mut run_backoff = RecoveryBackoff::new(interval);
+    let mut session_backoff = RecoveryBackoff::new(interval);
+    let mut im_backoff = RecoveryBackoff::new(interval);
+    let mut cleanup_backoff = RecoveryBackoff::new(interval);
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
@@ -52,13 +76,16 @@ async fn run(
             session_cursor = None;
             im_cursor = None;
             cleanup_cursor = None;
+            history_cursor = None;
             continue;
         }
-        let run_page = runtime.recover_state_machine_progression(cursor.clone(), batch_size);
-        let session_page = runtime.recover_state_machine_sessions(session_cursor.clone(), batch_size);
-        let im_page = runtime.recover_state_machine_terminal_im(im_cursor.clone(), batch_size);
-        let cleanup_page = runtime.cleanup_state_machine_terminal_work(cleanup_cursor.clone(), batch_size);
-        let scan = async { tokio::join!(run_page, session_page, im_page, cleanup_page) };
+        let run_page = when_ready(run_backoff.ready(), runtime.recover_state_machine_progression(cursor.clone(), batch_size));
+        let session_page = when_ready(session_backoff.ready(), runtime.recover_state_machine_sessions(session_cursor.clone(), batch_size));
+        let im_page = when_ready(im_backoff.ready(), runtime.recover_state_machine_terminal_im(im_cursor.clone(), batch_size));
+        let cleanup_page = when_ready(cleanup_backoff.ready(), runtime.cleanup_state_machine_terminal_work(cleanup_cursor.clone(), batch_size));
+        let history_page = when_ready(history_backoff.ready() && tokio::time::Instant::now() >= history_due,
+            runtime.recover_state_machine_history(history_cursor.clone(), 100));
+        let scan = async { tokio::join!(run_page, session_page, im_page, cleanup_page, history_page) };
         tokio::pin!(scan);
         let result = loop {
             tokio::select! {
@@ -69,6 +96,7 @@ async fn run(
                         session_cursor = None;
                         im_cursor = None;
                         cleanup_cursor = None;
+                        history_cursor = None;
                         break None;
                     }
                 }
@@ -77,49 +105,86 @@ async fn run(
         // Demotion drops the in-flight page. Any completed CAS stays committed;
         // Bot requests with a send marker are not resent. An unsent checkpoint
         // or abandoned Judge lease can be claimed after expiry using saved input.
-        if let Some((runs, sessions, notifications, cleanup)) = result {
-            match cleanup {
-                Ok(page) => {
-                    cleanup_cursor = page.next_run_id;
-                    for failure in page.failures {
-                        warn!(target: "state_machine_progression_scanner", run_id = %failure.run_id,
-                            error = %failure.error, "terminal checkpoint cleanup failed");
+        if let Some((runs, sessions, notifications, cleanup, history)) = result {
+            if let Some(history) = history {
+                history_due = tokio::time::Instant::now() + Duration::from_secs(5);
+                match history {
+                    Ok(page) => {
+                        history_backoff.record_page(page.scanned, !page.failures.is_empty());
+                        history_cursor = page.next_run_id;
+                        for failure in page.failures {
+                            warn!(target: "state_machine_history", run_id = %failure.run_id,
+                                error = %failure.error, "local history recovery failed");
+                        }
                     }
-                }
-                Err(error) => warn!(target: "state_machine_progression_scanner", error = %error, "terminal cleanup page failed"),
-            }
-            match runs {
-                Ok(page) => {
-                    cursor = page.next_run_id;
-                    for failure in page.failures {
-                        warn!(target: "state_machine_progression_scanner", run_id = %failure.run_id,
-                            error = %failure.error, "progression Run recovery failed");
+                    Err(_) => {
+                        history_backoff.record(true);
+                        warn!(target: "state_machine_history", "local history scan failed");
                     }
-                }
-                Err(error) => {
-                    warn!(target: "state_machine_progression_scanner", error = %error, "progression page failed");
                 }
             }
-            match notifications {
-                Ok(page) => {
-                    im_cursor = page.next_run_id;
-                    for failure in page.failures {
-                        warn!(target: "state_machine_progression_scanner", run_id = %failure.run_id,
-                            error = %failure.error, "terminal IM recovery failed");
+            if let Some(cleanup) = cleanup {
+                match cleanup {
+                    Ok(page) => {
+                        cleanup_backoff.record_page(page.scanned, !page.failures.is_empty());
+                        cleanup_cursor = page.next_run_id;
+                        for failure in page.failures {
+                            warn!(target: "state_machine_progression_scanner", run_id = %failure.run_id,
+                                error = %failure.error, "terminal checkpoint cleanup failed");
+                        }
+                    }
+                    Err(error) => {
+                        cleanup_backoff.record(true);
+                        warn!(target: "state_machine_progression_scanner", error = %error, "terminal cleanup page failed");
                     }
                 }
-                Err(error) => warn!(target: "state_machine_progression_scanner", error = %error, "terminal IM page failed"),
             }
-            match sessions {
-                Ok(page) => {
-                    session_cursor = page.next_session_id;
-                    for failure in page.failures {
-                        warn!(target: "state_machine_progression_scanner", session_id = %failure.session_id,
-                            error = %failure.error, "terminal Session recovery failed");
+            if let Some(runs) = runs {
+                match runs {
+                    Ok(page) => {
+                        run_backoff.record_page(page.scanned, !page.failures.is_empty());
+                        cursor = page.next_run_id;
+                        for failure in page.failures {
+                            warn!(target: "state_machine_progression_scanner", run_id = %failure.run_id,
+                                error = %failure.error, "progression Run recovery failed");
+                        }
+                    }
+                    Err(error) => {
+                        run_backoff.record(true);
+                        warn!(target: "state_machine_progression_scanner", error = %error, "progression page failed");
                     }
                 }
-                Err(error) => {
-                    warn!(target: "state_machine_progression_scanner", error = %error, "Session recovery page failed");
+            }
+            if let Some(notifications) = notifications {
+                match notifications {
+                    Ok(page) => {
+                        im_backoff.record_page(page.scanned, !page.failures.is_empty());
+                        im_cursor = page.next_run_id;
+                        for failure in page.failures {
+                            warn!(target: "state_machine_progression_scanner", run_id = %failure.run_id,
+                                error = %failure.error, "terminal IM recovery failed");
+                        }
+                    }
+                    Err(error) => {
+                        im_backoff.record(true);
+                        warn!(target: "state_machine_progression_scanner", error = %error, "terminal IM page failed");
+                    }
+                }
+            }
+            if let Some(sessions) = sessions {
+                match sessions {
+                    Ok(page) => {
+                        session_backoff.record_page(page.scanned, !page.failures.is_empty());
+                        session_cursor = page.next_session_id;
+                        for failure in page.failures {
+                            warn!(target: "state_machine_progression_scanner", session_id = %failure.session_id,
+                                error = %failure.error, "terminal Session recovery failed");
+                        }
+                    }
+                    Err(error) => {
+                        session_backoff.record(true);
+                        warn!(target: "state_machine_progression_scanner", error = %error, "Session recovery page failed");
+                    }
                 }
             }
         }
@@ -153,6 +218,8 @@ mod tests {
         session_calls: Mutex<Vec<Option<String>>>,
         im_calls: Mutex<Vec<Option<String>>>,
         cleanup_calls: Mutex<Vec<Option<String>>>,
+        history_calls: Mutex<Vec<Option<String>>>,
+        history_cancelled: Arc<AtomicUsize>,
         fail_cleanup: AtomicBool,
         cleanup_cancelled: Arc<AtomicUsize>,
         fail_im: AtomicBool,
@@ -170,6 +237,13 @@ mod tests {
 
     #[async_trait]
     impl CollaborationRuntimeService for Runtime {
+        async fn recover_state_machine_history(&self, cursor: Option<String>, limit: usize) -> Result<StateMachineProgressionRecoveryPage, CollaborationRuntimeError> {
+            assert_eq!(limit, 100);
+            self.history_calls.lock().unwrap().push(cursor.clone());
+            if self.blocked { let _cancel = Cancelled(self.history_cancelled.clone()); return std::future::pending().await; }
+            Ok(StateMachineProgressionRecoveryPage { scanned: 1,
+                next_run_id: cursor.is_none().then(|| "history-1".into()), ..Default::default() })
+        }
         async fn cleanup_state_machine_terminal_work(&self, cursor: Option<String>, limit: usize) -> Result<StateMachineProgressionRecoveryPage, CollaborationRuntimeError> {
             assert_eq!(limit, 2); self.cleanup_calls.lock().unwrap().push(cursor.clone());
             if self.blocked { let _cancel = Cancelled(self.cleanup_cancelled.clone()); return std::future::pending().await; }
@@ -226,13 +300,14 @@ mod tests {
     fn start(leader: i8, blocked: bool) -> (Arc<Election>, Arc<Runtime>, ProgressionRecoveryTask) {
         let election = Arc::new(Election { leader: AtomicI8::new(leader), checks: AtomicUsize::new(0) });
         let runtime = Arc::new(Runtime {
+            history_calls: Mutex::new(Vec::new()), history_cancelled: Arc::new(AtomicUsize::new(0)),
             calls: Mutex::new(Vec::new()), session_calls: Mutex::new(Vec::new()), blocked,
             im_calls: Mutex::new(Vec::new()), fail_im: AtomicBool::new(false), im_cancelled: Arc::new(AtomicUsize::new(0)),
             cleanup_calls: Mutex::new(Vec::new()), fail_cleanup: AtomicBool::new(false), cleanup_cancelled: Arc::new(AtomicUsize::new(0)),
             fail_run: AtomicBool::new(false), fail_session: AtomicBool::new(false),
             cancelled: Arc::new(AtomicUsize::new(0)), session_cancelled: Arc::new(AtomicUsize::new(0)),
         });
-        let task = ProgressionRecoveryTask(tokio::spawn(run(election.clone(), runtime.clone(), Duration::from_millis(1), 2)));
+        let task = ProgressionRecoveryTask(Some(tokio::spawn(run(election.clone(), runtime.clone(), Duration::from_millis(1), 2))));
         (election, runtime, task)
     }
 
@@ -251,8 +326,25 @@ mod tests {
             assert!(runtime.session_calls.lock().unwrap().is_empty());
             assert!(runtime.im_calls.lock().unwrap().is_empty());
             assert!(runtime.cleanup_calls.lock().unwrap().is_empty());
+            assert!(runtime.history_calls.lock().unwrap().is_empty());
             drop(task);
         }
+    }
+
+    #[tokio::test]
+    async fn history_uses_bounded_pages_and_five_second_cadence() {
+        let (_, runtime, mut task) = start(1, false);
+        until(|| runtime.history_calls.lock().unwrap().len() == 1).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(runtime.history_calls.lock().unwrap().len(), 1);
+        assert!(runtime.session_calls.lock().unwrap().len() > 2);
+        tokio::time::timeout(Duration::from_secs(6), async {
+            while runtime.history_calls.lock().unwrap().len() < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.unwrap();
+        assert_eq!(&*runtime.history_calls.lock().unwrap(), &[None, Some("history-1".into())]);
+        task.shutdown().await;
     }
 
     #[tokio::test]
@@ -260,6 +352,15 @@ mod tests {
         let (_, runtime, task) = start(1, false);
         until(|| runtime.calls.lock().unwrap().len() >= 3).await;
         assert_eq!(&runtime.calls.lock().unwrap()[..3], &[None, Some("run-2".into()), None]);
+        drop(task);
+    }
+
+    #[tokio::test]
+    async fn candidate_failures_back_off_without_delaying_healthy_pages() {
+        let (_, runtime, task) = start(1, false);
+        // Run pages always report a poison candidate; Session pages succeed.
+        until(|| runtime.session_calls.lock().unwrap().len() >= 20).await;
+        assert!(runtime.calls.lock().unwrap().len() < 10);
         drop(task);
     }
 
@@ -287,7 +388,7 @@ mod tests {
     async fn terminal_im_uses_independent_cursor_and_retries_failed_page() {
         let (_, runtime, task) = start(1, false);
         runtime.fail_im.store(true, Ordering::SeqCst);
-        until(|| runtime.im_calls.lock().unwrap().len() >= 3).await;
+        until(|| runtime.im_calls.lock().unwrap().len() >= 3 && runtime.calls.lock().unwrap().len() >= 3).await;
         assert_eq!(&runtime.im_calls.lock().unwrap()[..3], &[None, None, Some("im-2".into())]);
         assert_eq!(&runtime.calls.lock().unwrap()[..3], &[None, Some("run-2".into()), None]);
         drop(task);
@@ -297,10 +398,33 @@ mod tests {
     async fn terminal_cleanup_uses_independent_cursor_and_retries_failed_page() {
         let (_, runtime, task) = start(1, false);
         runtime.fail_cleanup.store(true, Ordering::SeqCst);
-        until(|| runtime.cleanup_calls.lock().unwrap().len() >= 3).await;
+        until(|| runtime.cleanup_calls.lock().unwrap().len() >= 3 && runtime.calls.lock().unwrap().len() >= 3).await;
         assert_eq!(&runtime.cleanup_calls.lock().unwrap()[..3], &[None, None, Some("cleanup-2".into())]);
         assert_eq!(&runtime.calls.lock().unwrap()[..3], &[None, Some("run-2".into()), None]);
         drop(task);
+    }
+
+    #[tokio::test]
+    async fn shutdown_joins_all_inflight_pages_before_dependencies_can_stop() {
+        let (election, runtime, mut task) = start(1, true);
+        until(|| !runtime.calls.lock().unwrap().is_empty()
+            && !runtime.session_calls.lock().unwrap().is_empty()
+            && !runtime.im_calls.lock().unwrap().is_empty()
+            && !runtime.cleanup_calls.lock().unwrap().is_empty()
+            && !runtime.history_calls.lock().unwrap().is_empty()).await;
+
+        task.shutdown().await;
+        // These are synchronous assertions at the dependency-teardown boundary:
+        // abort-without-join would leave the five page futures alive here.
+        assert_eq!(runtime.cancelled.load(Ordering::SeqCst), 1);
+        assert_eq!(runtime.session_cancelled.load(Ordering::SeqCst), 1);
+        assert_eq!(runtime.im_cancelled.load(Ordering::SeqCst), 1);
+        assert_eq!(runtime.cleanup_cancelled.load(Ordering::SeqCst), 1);
+        assert_eq!(runtime.history_cancelled.load(Ordering::SeqCst), 1);
+        let checks = election.checks.load(Ordering::SeqCst);
+        task.shutdown().await; // The final cleanup path can repeat shutdown.
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        assert_eq!(election.checks.load(Ordering::SeqCst), checks);
     }
 
     #[tokio::test]
@@ -308,13 +432,13 @@ mod tests {
         let (election, runtime, task) = start(1, true);
         until(|| !runtime.calls.lock().unwrap().is_empty()).await;
         election.leader.store(0, Ordering::SeqCst);
-        until(|| runtime.cancelled.load(Ordering::SeqCst) == 1 && runtime.session_cancelled.load(Ordering::SeqCst) == 1 && runtime.im_cancelled.load(Ordering::SeqCst) == 1 && runtime.cleanup_cancelled.load(Ordering::SeqCst) == 1).await;
+        until(|| runtime.cancelled.load(Ordering::SeqCst) == 1 && runtime.session_cancelled.load(Ordering::SeqCst) == 1 && runtime.im_cancelled.load(Ordering::SeqCst) == 1 && runtime.cleanup_cancelled.load(Ordering::SeqCst) == 1 && runtime.history_cancelled.load(Ordering::SeqCst) == 1).await;
         election.leader.store(1, Ordering::SeqCst);
         until(|| runtime.calls.lock().unwrap().len() == 2).await;
         assert_eq!(&*runtime.calls.lock().unwrap(), &[None, None]);
         assert_eq!(&*runtime.session_calls.lock().unwrap(), &[None, None]);
         assert_eq!(&*runtime.cleanup_calls.lock().unwrap(), &[None, None]);
         drop(task);
-        until(|| runtime.cancelled.load(Ordering::SeqCst) == 2 && runtime.session_cancelled.load(Ordering::SeqCst) == 2 && runtime.im_cancelled.load(Ordering::SeqCst) == 2 && runtime.cleanup_cancelled.load(Ordering::SeqCst) == 2).await;
+        until(|| runtime.cancelled.load(Ordering::SeqCst) == 2 && runtime.session_cancelled.load(Ordering::SeqCst) == 2 && runtime.im_cancelled.load(Ordering::SeqCst) == 2 && runtime.cleanup_cancelled.load(Ordering::SeqCst) == 2 && runtime.history_cancelled.load(Ordering::SeqCst) == 2).await;
     }
 }

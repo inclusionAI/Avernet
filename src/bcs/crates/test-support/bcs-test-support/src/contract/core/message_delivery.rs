@@ -55,6 +55,11 @@ pub fn message_delivery_core_service_contract_tests<T: MessageDeliveryCoreServic
     assert!(!duplicate.release_active);
     assert_eq!(duplicate.context_action, DeliveryContextAction::Keep);
     assert!(service.transition(queued, 2, Event::StartSend).is_err());
+
+    let rejected = service.transition(started.state, 2, Event::TransportRejected)?;
+    assert_eq!(rejected.state.status, Status::Failed);
+    assert!(rejected.release_active);
+    assert_eq!(rejected.context_action, DeliveryContextAction::Consume);
     Ok(())
 }
 

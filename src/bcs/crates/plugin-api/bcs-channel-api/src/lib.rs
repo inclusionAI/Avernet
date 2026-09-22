@@ -4,6 +4,12 @@
 //! own protocol-specific config validation, redaction, ingress parsing, stream
 //! lifecycles, and outbound delivery.
 
+mod delivery_reaction;
+
+pub use delivery_reaction::{
+    DELIVERY_REACTION_EVENT_TYPE, DeliveryReactionEvent, DeliveryReactionState,
+};
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

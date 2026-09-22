@@ -1494,32 +1494,13 @@ impl SessionMessageService for SessionServiceImpl {
 // ── projection helpers ────────────────────────────────────────────────
 
 fn merge_participant_state_machine_snapshot(
-    mut persisted: Vec<GroupMessage>,
+    persisted: Vec<GroupMessage>,
     snapshot: Option<Vec<GroupMessage>>,
     limit: u64,
 ) -> Vec<GroupMessage> {
-    let mut seen_ids = persisted
-        .iter()
-        .map(|message| message.id.clone())
-        .collect::<HashSet<_>>();
-    if let Some(snapshot) = snapshot {
-        persisted.extend(
-            snapshot
-                .into_iter()
-                .filter(|message| seen_ids.insert(message.id.clone())),
-        );
-    }
-    persisted.sort_by(|left, right| {
-        right
-            .timestamp
-            .cmp(&left.timestamp)
-            .then_with(|| right.id.cmp(&left.id))
-    });
-    let keep = usize::try_from(limit).unwrap_or(usize::MAX);
-    if persisted.len() > keep {
-        persisted.truncate(keep);
-    }
-    persisted
+    bcs_domain::state_machine_history::merge_state_machine_history(
+        persisted, snapshot.unwrap_or_default(), limit,
+    )
 }
 
 fn project_participant(participant: &Participant) -> SessionParticipant {

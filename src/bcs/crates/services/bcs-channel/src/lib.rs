@@ -1,6 +1,7 @@
 //! Channel(IM bridge) application service implementation.
 
 mod commands;
+mod queue_commands;
 mod runtime_inbound;
 mod human_input;
 mod service;
@@ -10,8 +11,8 @@ mod human_input_notification;
 mod terminal_notification;
 pub mod visibility;
 
-use std::collections::{HashSet, VecDeque};
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -20,10 +21,10 @@ use tracing::{info, warn};
 use bcs_channel_api::{ChannelInboundSink, ChannelProvider, ChannelProviderRegistry};
 use bcs_domain::{
     ActorKind, Attachment, AttachmentType, BindingStatus, BindingTarget, ChannelBinding,
-    ChannelType, ConversationSessionMap, Group, GroupChatScope, GroupKind, GroupStrategy,
-    HumanInputNotificationMode, HumanInputRequest, HumanInputRequestStatus, ImParticipantMap,
-    Participant, ParticipantMode, ParticipantRole, Session, SessionKind, SessionScope,
-    SessionStatus, SystemMessageEvent, Visibility, channel_group_id,
+    ChannelType, ConversationSessionMap, DeliveryType, Group, GroupChatScope, GroupKind,
+    GroupStrategy, HumanInputNotificationMode, HumanInputRequest, HumanInputRequestStatus,
+    ImParticipantMap, Participant, ParticipantMode, ParticipantRole, Session, SessionKind,
+    SessionScope, SessionStatus, SystemMessageEvent, Visibility, channel_group_id,
 };
 use bcs_service_api::application::channel::{
     ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
@@ -55,6 +56,21 @@ const DEFAULT_INBOUND_DEDUP_LIMIT: usize = 4096;
 const CHANNEL_START_STALE_MS: u64 = 30_000;
 const GROUP_CHAT_NEW_SESSION_CONFIG: &str = "group_chat_new_session_per_message";
 const FORWARD_SENDER_IDENTITY_CONFIG: &str = "forward_sender_identity";
+/// Well-known binding config key that overrides the initial `<GroupContext>`
+/// delivery for the session lead: `"send"` (default) or `"inject"` (lead
+/// observes the bootstrap context silently via chat.inject). Only Chat groups
+/// honor the override; ManagerWorker groups keep delivering to the manager
+/// via chat.send.
+const GROUP_CONTEXT_DELIVERY_CONFIG: &str = "group_context_delivery";
+
+/// Provider-local streaming state is scoped to one card-producing run.
+#[derive(Hash, Eq, PartialEq)]
+struct OutboundDeliveryKey {
+    binding_id: String,
+    im_conversation_id: String,
+    run_id: String,
+}
+type OutboundDeliveryLocks = HashMap<OutboundDeliveryKey, Weak<Mutex<()>>>;
 
 enum HumanInputActivation {
     Active,
@@ -82,6 +98,7 @@ pub struct BcsChannelService {
     binding_admin_lock: Mutex<()>,
     state_machine_session_resolution_lock: Mutex<()>,
     chat_session_resolution_lock: Mutex<()>,
+    outbound_delivery_locks: Mutex<OutboundDeliveryLocks>,
     session_reset_tracker: commands::SessionResetTracker,
 }
 
@@ -94,6 +111,7 @@ struct ResolvedInboundContext {
     context_projection: &'static str,
     state_machine_trigger: bool,
     new_session_per_message: bool,
+    group_context_delivery: Option<DeliveryType>,
 }
 
 impl BcsChannelService {
@@ -134,6 +152,7 @@ impl BcsChannelService {
             binding_admin_lock: Mutex::new(()),
             state_machine_session_resolution_lock: Mutex::new(()),
             chat_session_resolution_lock: Mutex::new(()),
+            outbound_delivery_locks: Mutex::new(HashMap::new()),
             session_reset_tracker: commands::SessionResetTracker::new(DEFAULT_INBOUND_DEDUP_LIMIT),
         }
     }
@@ -228,6 +247,7 @@ impl BcsChannelService {
                     .and_then(serde_json::Value::as_bool) == Some(true),
             state_machine_trigger: !is_bot_target
                 && group.group_strategy == GroupStrategy::StateMachine,
+            group_context_delivery: binding_group_context_delivery(&binding.config),
         })
     }
 
@@ -380,7 +400,7 @@ impl BcsChannelService {
                         reason,
                         session_input: session.input.clone(),
                         task_ledger: None,
-                        driver_delivery: None,
+                        driver_delivery: ctx.group_context_delivery,
                     },
                     &session.id,
                     &session.participants,
@@ -604,6 +624,48 @@ fn validate_group_chat_session_config(config: &serde_json::Value) -> Result<(), 
         )));
     }
     Ok(())
+}
+
+fn validate_group_context_delivery_config(
+    config: &serde_json::Value,
+) -> Result<(), ChannelUseCaseError> {
+    match config.get(GROUP_CONTEXT_DELIVERY_CONFIG) {
+        None => Ok(()),
+        Some(serde_json::Value::String(value)) => match value.trim() {
+            "send" | "inject" => Ok(()),
+            _ => Err(ChannelUseCaseError::InvalidParams(format!(
+                "{GROUP_CONTEXT_DELIVERY_CONFIG} must be \"send\" or \"inject\""
+            ))),
+        },
+        Some(_) => Err(ChannelUseCaseError::InvalidParams(format!(
+            "{GROUP_CONTEXT_DELIVERY_CONFIG} must be \"send\" or \"inject\""
+        ))),
+    }
+}
+
+/// Reads the well-known `group_context_delivery` binding config key for the
+/// initial `<GroupContext>` delivery of channel-created sessions. Values are
+/// validated at binding create/update, so malformed values are treated as the
+/// default (send) with a warning here.
+fn binding_group_context_delivery(config: &serde_json::Value) -> Option<DeliveryType> {
+    match config.get(GROUP_CONTEXT_DELIVERY_CONFIG) {
+        None => None,
+        Some(serde_json::Value::String(value)) => match value.trim() {
+            "inject" => Some(DeliveryType::Inject),
+            "send" => Some(DeliveryType::Send),
+            _ => {
+                warn!(
+                    value = value.trim(),
+                    "invalid group_context_delivery binding config; using default send"
+                );
+                None
+            }
+        },
+        Some(_) => {
+            warn!("invalid group_context_delivery binding config; using default send");
+            None
+        }
+    }
 }
 
 fn validate_forward_sender_identity_config(

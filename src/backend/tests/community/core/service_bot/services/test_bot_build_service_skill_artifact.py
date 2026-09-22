@@ -37,6 +37,8 @@ def _make_service(
     whitelist_service = MagicMock()
     whitelist_service.is_bot_feature_enabled.return_value = False
     return BotBuildService(
+        build_ignore_repository=MagicMock(get=MagicMock(return_value=None)),
+        env="test",
         device_service=device_service,
         baas_service=MagicMock(),
         path_factory=MagicMock(),

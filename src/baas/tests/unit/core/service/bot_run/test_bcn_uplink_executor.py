@@ -95,6 +95,8 @@ def _make_terminal(
         repo.update_result(run_id, "answer", {})
     elif terminal == "FAILED":
         repo.update_error(run_id, "boom")
+    elif terminal == "ABORTED":
+        repo.update_aborted(run_id, "aborted by chat.abort")
     # RUNNING：什么都不写（保持 PENDING 非终态）
 
     return run_id
@@ -196,3 +198,39 @@ async def test_completed_event_state_is_final(repo, queue):
     assert len(captured_events) == 1
     assert isinstance(captured_events[0], ChatEvent)
     assert captured_events[0].state == "final"
+
+
+async def test_aborted_sends_uplink(repo, queue):
+    """ABORTED 终态也会触发 uplink 上报。"""
+    client = _FakeUplinkClient()
+    cb = BcnUplinkCallback(client, repo)
+
+    run_id = _make_terminal(repo, queue, terminal="ABORTED")
+    await cb(run_id)
+
+    assert len(client.calls) == 1
+
+
+async def test_aborted_event_state_is_aborted(repo, queue):
+    """ABORTED 终态的 ChatEvent.state 应为 'aborted'，且消息体携带取消原因。"""
+    from secbaas.community.api.bcn import ChatEvent
+
+    captured_events: list = []
+
+    class _CapturingClient(_FakeUplinkClient):
+        async def send_event(self, event, bot_id, event_id=None):
+            captured_events.append(event)
+            return await super().send_event(event, bot_id, event_id)
+
+    client = _CapturingClient()
+    cb = BcnUplinkCallback(client, repo)
+
+    run_id = _make_terminal(repo, queue, terminal="ABORTED")
+    await cb(run_id)
+
+    assert len(captured_events) == 1
+    assert isinstance(captured_events[0], ChatEvent)
+    assert captured_events[0].state == "aborted"
+    assert captured_events[0].run_id == run_id
+    assert captured_events[0].message is not None
+    assert captured_events[0].message.text == "aborted by chat.abort"

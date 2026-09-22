@@ -8,6 +8,7 @@ from tests.community.framework.flow import FlowCase, FlowStep
 
 _RESOURCE_ID = "sr_tc_flow"
 _OWNER_ID = "user_tc_flow"
+_BINDING_OWNER_ID = "bot_owner_tc_flow"
 _BOT_ID = "bot_tc_flow"
 _SESSION_ID = "session_tc_flow"
 _LOCAL_AUTH = "singlebox-tc-file-service-token-local"
@@ -30,18 +31,38 @@ TC_FILE_UPLOAD_INTEGRATION_FLOWS: list[FlowCase] = [
                     "statements": [
                         {
                             "sql": (
+                                "INSERT INTO ac_entity_device_binding ("
+                                "entity_id, entity_type, device_id, device_provider, env, "
+                                "device_props, status, apply_reason, applied_by, "
+                                "gmt_create, gmt_modified"
+                                ") VALUES ("
+                                ":entity_id, 'staff', 'uuid-flow', 'baas', 'dev', '{}', "
+                                "'RELEASED', 'resource context flow seed', :applied_by, "
+                                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                            ),
+                            "params": {
+                                "entity_id": _BINDING_OWNER_ID,
+                                "applied_by": _OWNER_ID,
+                            },
+                        },
+                        {
+                            "sql": (
                                 "INSERT OR REPLACE INTO ac_session_resource ("
-                                "resource_id, owner_id, bot_id, scope_type, scope_key_hash, "
-                                "session_key_hash, engine_type, tenant, bot_uuid, display_name, "
-                                "filename, device_path, workspace_relative_path, transfer_id, "
-                                "status, transfer_api_version, session_key_ciphertext, task_version, "
+                                "resource_id, owner_id, bot_id, binding_id, scope_type, "
+                                "scope_key_hash, session_key_hash, engine_type, tenant, "
+                                "bot_uuid, display_name, filename, device_path, "
+                                "workspace_relative_path, transfer_id, status, "
+                                "transfer_api_version, session_key_ciphertext, task_version, "
                                 "size_bytes, client_content_hash, gmt_create, gmt_modified"
                                 ") VALUES ("
-                                ":resource_id, :owner_id, :bot_id, 'session', :scope_key_hash, "
-                                ":session_key_hash, 'openclaw', 'tenant-singlebox', 'uuid-flow', "
-                                "'note.md', 'note.md', 'workspace/note.md', 'note.md', "
-                                "'transfer-flow', 'ready', 'session_v2', :session_key, 1, 7, "
-                                ":content_hash, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                                ":resource_id, :owner_id, :bot_id, "
+                                "(SELECT id FROM ac_entity_device_binding "
+                                "WHERE device_id = 'uuid-flow' ORDER BY id DESC LIMIT 1), "
+                                "'session', :scope_key_hash, :session_key_hash, 'openclaw', "
+                                "'tenant-singlebox', 'uuid-flow', 'note.md', 'note.md', "
+                                "'workspace/note.md', 'note.md', 'transfer-flow', 'ready', "
+                                "'session_v2', :session_key, 1, 7, :content_hash, "
+                                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                             ),
                             "params": {
                                 "resource_id": _RESOURCE_ID,
@@ -52,7 +73,7 @@ TC_FILE_UPLOAD_INTEGRATION_FLOWS: list[FlowCase] = [
                                 "session_key": _SESSION_ID,
                                 "content_hash": hashlib.sha256(b"content").hexdigest(),
                             },
-                        }
+                        },
                     ]
                 },
                 expect_status=200,
@@ -71,7 +92,13 @@ TC_FILE_UPLOAD_INTEGRATION_FLOWS: list[FlowCase] = [
                 body={"res_id": _RESOURCE_ID},
                 headers={"Authorization": f"Bearer {_LOCAL_AUTH}"},
                 expect_status=200,
-                expect={"code": 0, "data": {"resource_id": _RESOURCE_ID}},
+                expect={
+                    "code": 0,
+                    "data": {
+                        "resource_id": _RESOURCE_ID,
+                        "owner_id": _BINDING_OWNER_ID,
+                    },
+                },
             ),
         ],
     )

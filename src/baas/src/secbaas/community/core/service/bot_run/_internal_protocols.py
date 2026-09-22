@@ -406,7 +406,7 @@ class AbortOutcome:
     """``chat.abort`` 按 (bot_id, session_id) 维度取消 run 的结果。
 
     Attributes:
-        aborted_run_ids: 本次实际取消（标 FAILED + force_done + 本机 task cancel）
+        aborted_run_ids: 本次实际取消（标 ABORTED + force_done + 本机 task cancel）
             的 run_id 列表。空表示目标 bot 在该 session 下无可取消的 RUNNING run。
         had_terminal: 目标 bot 在该 session 下是否存在已终结（DONE）的队列工作项。
             用于区分 410 ``run_terminated``（已终结）与 200 ``{aborted: false}``
@@ -431,8 +431,8 @@ class BotRunAbortSurface(Protocol):
         """取消目标 bot 在该 session 下所有 RUNNING 的 run。
 
         维度收窄到 ``(bot_id, session_id)``，PENDING 不动（由 ``_timeout_scan_once``
-        超时路径兜底）。顺序（与 ``_timeout_scan_once`` 一致）：先 ``update_error``
-        标 FAILED，再 ``queue.force_done(run_id)``，最后对本机 task
+        超时路径兜底）。顺序（与 ``_timeout_scan_once`` 一致）：先 ``update_aborted``
+        标 ABORTED，再 ``queue.force_done(run_id)``，最后对本机 task
         ``running_task.cancel()``。非本机 RUNNING run 无法本机 cancel，由 force_done
         + engine 通知 + 对端超时/心跳兜底（与 timeout 同构）。engine 通知
         （``BotWebsocketClient.chat_abort``）为 best-effort，失败仅记录日志。

@@ -70,6 +70,14 @@ async fn contract(a: &dyn HumanInputRequestRepoPort, b: &dyn HumanInputRequestRe
     assert!(a.mark_active("ack", Some("provider-original"), 200).await.unwrap());
     assert!(!b.begin_notification("ack", 201).await.unwrap());
     assert_eq!(a.get("ack").await.unwrap().unwrap().provider_message_ref.as_deref(), Some("provider-original"));
+    assert_eq!(a.count_queued("scope-ack").await.unwrap(), 0);
+    for index in 0..70 {
+        let mut queued = request(&format!("queued-{index}"));
+        queued.reply_scope_key = "scope-ack".into();
+        a.enqueue(queued).await.unwrap();
+    }
+    assert_eq!(b.count_queued("scope-ack").await.unwrap(), 70);
+    assert_eq!(b.count_queued("scope-absent").await.unwrap(), 0);
 }
 
 async fn sqlite(path: Option<&std::path::Path>) -> Arc<LocalSqliteDbPlugin> {

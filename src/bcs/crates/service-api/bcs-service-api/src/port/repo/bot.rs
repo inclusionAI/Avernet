@@ -16,6 +16,17 @@ use crate::types::{
 /// separate port before treating this as a narrow persistence-only repository.
 #[async_trait]
 pub trait BotRepoPort: Send + Sync {
+    /// Atomically create a registration identity only if no active OR deleted
+    /// record exists. Existing rows, capabilities and credentials are untouched.
+    /// Returns true only when created, false when already present. Read/write
+    /// failures are errors; implementations must never use read-then-upsert.
+    async fn create_registration_if_absent(
+        &self, _bot_id: String, _capabilities: BotCapabilities,
+        _created_by: &str, _token: &str,
+    ) -> ServiceResult<bool> {
+        Err(crate::types::ServiceError::InternalError("atomic registration creation is not configured".into()))
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()>;
 
     async fn register_with_owner_and_token(
@@ -248,6 +259,12 @@ pub trait BotRepoPort: Send + Sync {
     ) -> ServiceResult<()>;
     async fn save_token(&self, bot_id: &str, token: &str) -> ServiceResult<()>;
     async fn load_token(&self, bot_id: &str) -> Option<String>;
+
+    /// Read the current credential without hiding storage failures as absence.
+    /// Missing/deleted identities return None. Legacy load_token is unchanged.
+    async fn try_load_token(&self, _bot_id: &str) -> ServiceResult<Option<String>> {
+        Err(crate::types::ServiceError::InternalError("fallible credential lookup is not configured".into()))
+    }
     async fn find_bot_by_token(&self, token: &str) -> Option<String>;
 
     /// Find a bot by its dedicated `agent_code` column. Returns `bot_uuid` if

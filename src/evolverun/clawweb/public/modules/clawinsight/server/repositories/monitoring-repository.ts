@@ -1,9 +1,11 @@
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
 import { CHECK_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
-  type DiagnosisPage, type DiagnosisQuery, type MonitoringStore } from "../services/monitoring/contracts.js";
-import { id, parseCheck, parseDiagnosis } from "../services/monitoring/validation.js";
+  type DiagnosisPage, type DiagnosisQuery, type MonitoringStore, type MonitoringTarget, type ResolvedReport, type MonitoringWindow } from "../services/monitoring/contracts.js";
+import { parseCheck, parseDiagnosis } from "../services/monitoring/validation.js";
 import { CHECKS_TABLE, DIAGNOSES_TABLE, verifyMonitoringSchema } from "./monitoring-schema-check.js";
 
+import { target, targetParams, targetWhere } from '../services/monitoring/target.js';
+import { readMonitoringSummaries } from './monitoring-summaries.js';
 const fields = {
   schemaVersion: "schema_version", eventId: "event_id", botId: "bot_id", engine: "engine", sessionKey: "session_key",
   sessionId: "session_id", traceId: "trace_id", occurredAt: "occurred_at_ms", diagnosedAt: "diagnosed_at_ms",
@@ -65,17 +67,31 @@ export class MonitoringRepository implements MonitoringStore {
       throw new MonitoringError("NOT_READY", "监控存储暂不可用或表结构不兼容。");
     }
   }
-  async listBots(): Promise<{ botId: string }[]> {
+  async summaries(targets: readonly MonitoringTarget[], window: MonitoringWindow) {
+    return this.run(() => readMonitoringSummaries(this.db, targets.map(target), window));
+  }
+  async listCheckedTargets(): Promise<MonitoringTarget[]> {
+    return this.run(async () => {
+      // Enrollment is defined by a persisted bot-check. Diagnosis-only rows are
+      // intentionally excluded from the browser's monitored scope.
+      const rows = await this.db.query(`SELECT bot_id, entity_id, env FROM ${CHECKS_TABLE}
+        ORDER BY bot_id, entity_id, env`);
+      return rows.map((row) => target({ botId: String(row.bot_id), entityId: String(row.entity_id), env: String(row.env) }));
+    });
+  }
+
+  async listTargets(): Promise<MonitoringTarget[]> {
     return this.run(async () => {
       // Both tables are authoritative: checks discover quiet bots; diagnoses preserve history.
       // UNION deduplicates in one DB snapshot, including records written by other instances.
-      const rows = await this.db.query(`SELECT bot_id FROM ${CHECKS_TABLE}
-        UNION SELECT bot_id FROM ${DIAGNOSES_TABLE} ORDER BY bot_id`);
-      return rows.map((row) => ({ botId: id(row.bot_id) }));
+      const rows = await this.db.query(`SELECT bot_id, entity_id, env FROM ${CHECKS_TABLE}
+        UNION SELECT bot_id, entity_id, env FROM ${DIAGNOSES_TABLE} ORDER BY bot_id, entity_id, env`);
+      return rows.map((row) => target({ botId: String(row.bot_id), entityId: String(row.entity_id), env: String(row.env) }));
     });
   }
-  async insertDiagnosis(input: DiagnosisEvent, receivedAt: number): Promise<boolean> {
-    const event = parseDiagnosis(input, input.eventId);
+  async insertDiagnosis(input: ResolvedReport<DiagnosisEvent>, receivedAt: number): Promise<boolean> {
+    const resolved = target(input.target);
+    const event = { ...parseDiagnosis(input.wire, input.wire.eventId), botId: resolved.botId };
     return this.run(async () => {
       const values = Object.keys(fields).map((name) => {
         const value = event[name as keyof typeof fields];
@@ -85,35 +101,37 @@ export class MonitoringRepository implements MonitoringStore {
         return value;
       });
       try {
-        const result = await this.db.exec(`INSERT INTO ${DIAGNOSES_TABLE} (${columns.join(", ")}, received_at_ms)
-          VALUES (${[...values, receivedAt].map(() => "?").join(", ")})`, [...values, receivedAt]);
+        const result = await this.db.exec(`INSERT INTO ${DIAGNOSES_TABLE} (${columns.join(", ")}, entity_id, env, received_at_ms)
+          VALUES (${[...values, resolved.entityId, resolved.env, receivedAt].map(() => "?").join(", ")})`, [...values, resolved.entityId, resolved.env, receivedAt]);
         if (result.affectedRows !== 1) throw new Error("Insert did not persist");
         return true;
       } catch (error) {
         if (!isDuplicate(error)) throw error;
-        const [row] = await this.db.query(`SELECT ${columns.join(", ")} FROM ${DIAGNOSES_TABLE} WHERE event_id = ?`, [event.eventId]);
+        const [row] = await this.db.query(`SELECT ${columns.join(", ")}, entity_id, env FROM ${DIAGNOSES_TABLE} WHERE event_id = ?`, [event.eventId]);
         if (!row) throw new Error("Duplicate not yet visible");
-        if (JSON.stringify(eventFromRow(row)) !== JSON.stringify(event)) conflict();
+        if (row.entity_id !== resolved.entityId || row.env !== resolved.env || JSON.stringify(eventFromRow(row)) !== JSON.stringify(event)) conflict();
         return false;
       }
     });
   }
-  async applyCheck(input: BotCheck, receivedAt: number): Promise<boolean> {
-    const check = parseCheck(input, receivedAt);
+  async applyCheck(input: ResolvedReport<BotCheck>, receivedAt: number): Promise<boolean> {
+    const resolved = target(input.target);
+    const check = { ...parseCheck(input.wire, receivedAt), botId: resolved.botId };
     return this.run(async () => {
       const checkedMs = Date.parse(check.checkedAt), successMs = check.lastSuccessfulCheckAt === null ? null : Date.parse(check.lastSuccessfulCheckAt);
       // CAS retries resolve concurrent inserts/updates across processes using the unique key and old timestamp.
       for (let attempt = 0; attempt < 8; attempt++) {
-        const [row] = await this.db.query(`SELECT * FROM ${CHECKS_TABLE} WHERE bot_id = ?`, [check.botId]);
+        const [row] = await this.db.query(`SELECT * FROM ${CHECKS_TABLE} WHERE ${targetWhere()}`, targetParams(resolved));
         if (!row) {
           try {
             const result = await this.db.exec(`INSERT INTO ${CHECKS_TABLE}
-              (bot_id, engine, checked_at_ms, last_successful_check_at_ms, status, received_at_ms) VALUES (?, ?, ?, ?, ?, ?)`,
-            [check.botId, check.engine, checkedMs, successMs, check.status, receivedAt]);
+              (bot_id, entity_id, env, engine, checked_at_ms, last_successful_check_at_ms, status, received_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [...targetParams(resolved), check.engine, checkedMs, successMs, check.status, receivedAt]);
             if (result.affectedRows !== 1) throw new Error("Insert did not persist");
             return true;
           } catch (error) { if (isDuplicate(error)) continue; throw error; }
         }
+        if (row.engine !== check.engine) conflict();
         const previous = integer(row.checked_at_ms);
         if (previous > checkedMs) return false;
         if (previous === checkedMs) {
@@ -121,25 +139,28 @@ export class MonitoringRepository implements MonitoringStore {
           return false;
         }
         const result = await this.db.exec(`UPDATE ${CHECKS_TABLE} SET engine = ?, checked_at_ms = ?,
-          last_successful_check_at_ms = ?, status = ?, received_at_ms = ? WHERE bot_id = ? AND checked_at_ms = ?`,
-        [check.engine, checkedMs, successMs, check.status, receivedAt, check.botId, previous]);
+          last_successful_check_at_ms = ?, status = ?, received_at_ms = ? WHERE ${targetWhere()} AND checked_at_ms = ?`,
+        [check.engine, checkedMs, successMs, check.status, receivedAt, ...targetParams(resolved), previous]);
         if (result.affectedRows === 1) return true;
       }
       throw new Error("Concurrent check updates; retry later");
     });
   }
-  async readStatus(botId: string): Promise<{ check: BotCheck | null; count: number }> {
+  async readStatus(input: MonitoringTarget): Promise<{ check: BotCheck | null; count: number }> {
+    const resolved = target(input);
     return this.run(async () => {
       const [row] = await this.db.query(`SELECT counts.diagnosis_count, checks.* FROM
-        (SELECT COUNT(*) AS diagnosis_count FROM ${DIAGNOSES_TABLE} WHERE bot_id = ?) counts
-        LEFT JOIN ${CHECKS_TABLE} checks ON checks.bot_id = ?`, [botId, botId]);
+        (SELECT COUNT(*) AS diagnosis_count FROM ${DIAGNOSES_TABLE} WHERE ${targetWhere()}) counts
+        LEFT JOIN ${CHECKS_TABLE} checks ON ${targetWhere("checks.")}`, [...targetParams(resolved), ...targetParams(resolved)]);
       if (!row) throw new Error("Missing count result");
       return { check: row.bot_id == null ? null : checkFromRow(row), count: integer(row.diagnosis_count) };
     });
   }
-  async listDiagnoses(botId: string, query: DiagnosisQuery): Promise<DiagnosisPage> {
+  async listDiagnoses(input: MonitoringTarget, query: DiagnosisQuery): Promise<DiagnosisPage> {
     return this.run(async () => {
-      const conditions = ["bot_id = ?"], params: unknown[] = [botId];
+      const resolved = target(input);
+      const botId = resolved.botId;
+      const conditions = [targetWhere()], params: unknown[] = targetParams(resolved);
       if (query.startMs !== null) { conditions.push("occurred_at_ms >= ?"); params.push(query.startMs); }
       if (query.endMs !== null) { conditions.push("occurred_at_ms < ?"); params.push(query.endMs); }
       // Facets use only Bot + dates, never the current page or selected type/result/keyword.

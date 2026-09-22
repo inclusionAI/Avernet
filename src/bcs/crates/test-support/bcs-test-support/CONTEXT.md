@@ -9,6 +9,8 @@
   by noop tests and the bootstrap Prometheus adapter's rendered-series tests.
 
 - Shared contract-test harnesses for BCS service and plugin boundaries.
+- Bot-owned Provider metadata, binding-projection and authorized deletion
+  contracts; consumers supply Memory/SQL repositories or Core implementations.
 - Reusable fixtures and helpers for local conformance testing.
 - A single place to host boundary-level test utilities reused across crates.
 - Request-scoped JSON log capture for checking failure diagnostics and correlation,

@@ -3,11 +3,13 @@ import type { Dialect } from "@avernet/clawweb-shared/server/db/dialect";
 
 /** Monitoring-owned DDL. Managed databases are provisioned externally, never by the router. */
 export const monitoringDdl = [
-  `CREATE TABLE IF NOT EXISTS insight_monitoring_diagnoses (
+  `CREATE TABLE IF NOT EXISTS insight_monitoring_diagnose (
   id INTEGER PRIMARY KEY AUTOINCREMENT COMMENT '内部自增主键，不作为页面记录编号',
   event_id VARCHAR(128) CHARACTER SET latin1 COLLATE latin1_bin NOT NULL COMMENT '稳定上报编号，等于公共接口diagnosisId',
   schema_version VARCHAR(64) NOT NULL COMMENT '上报格式版本',
   bot_id VARCHAR(128) CHARACTER SET latin1 COLLATE latin1_bin NOT NULL COMMENT '固定监控Bot的业务ID',
+  entity_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT '目录实体工号',
+  env VARCHAR(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT '目录目标环境',
   engine VARCHAR(2) NOT NULL COMMENT '引擎类型：OC或TE',
   session_key VARCHAR(1024) DEFAULT NULL COMMENT '上游会话键，无可靠值时为空',
   session_id VARCHAR(255) DEFAULT NULL COMMENT '上游真实Session ID',
@@ -27,12 +29,14 @@ export const monitoringDdl = [
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '数据库行创建时间',
   gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '数据库行最后修改时间',
   UNIQUE INDEX uk_monitor_diag_event (event_id),
-  INDEX idx_monitor_diag_bot_time (bot_id, occurred_at_ms, event_id),
-  INDEX idx_monitor_diag_bot_dec_time (bot_id, decision, occurred_at_ms, event_id)
+  INDEX idx_monitor_diag_target_time (bot_id, entity_id, env, occurred_at_ms, event_id),
+  INDEX idx_monitor_diag_target_dec_time (bot_id, entity_id, env, decision, occurred_at_ms, event_id)
 ) COMMENT='Agent监控诊断记录，不保存会话原文和通知状态'`,
-  `CREATE TABLE IF NOT EXISTS insight_monitoring_bot_checks (
+  `CREATE TABLE IF NOT EXISTS insight_monitoring_bot_check (
   id INTEGER PRIMARY KEY AUTOINCREMENT COMMENT '内部自增主键',
-  bot_id VARCHAR(128) CHARACTER SET latin1 COLLATE latin1_bin NOT NULL COMMENT '固定监控Bot的业务ID，每Bot仅一行',
+  bot_id VARCHAR(128) CHARACTER SET latin1 COLLATE latin1_bin NOT NULL COMMENT '固定监控Bot的业务ID，每完整目标仅一行',
+  entity_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT '目录实体工号',
+  env VARCHAR(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT '目录目标环境',
   engine VARCHAR(2) NOT NULL COMMENT '引擎类型：OC或TE',
   checked_at_ms BIGINT NOT NULL COMMENT '本次检查时间，UTC Unix毫秒，用于新旧判断',
   last_successful_check_at_ms BIGINT DEFAULT NULL COMMENT '最近成功检查时间，UTC Unix毫秒',
@@ -40,7 +44,7 @@ export const monitoringDdl = [
   received_at_ms BIGINT NOT NULL COMMENT '最新有效检查上报的服务端接收时间，UTC Unix毫秒',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '数据库行创建时间',
   gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '数据库行最后修改时间',
-  UNIQUE INDEX uk_monitor_check_bot (bot_id)
+  UNIQUE INDEX uk_bot_id_entity_id_env (bot_id, entity_id, env)
 ) COMMENT='Agent监控每Bot最新检查状态，不保存心跳历史'`
 ];
 
@@ -48,7 +52,7 @@ export const monitoringDdl = [
 export function renderMonitoringDdl(dialect: Dialect): string[] {
   return monitoringDdl.map((ddl) => {
     if (dialect.name === "sqlite") {
-      return dialect.renderDdl(ddl.replace(/CHARACTER SET latin1 COLLATE latin1_bin/g, "COLLATE BINARY"));
+      return dialect.renderDdl(ddl.replace(/CHARACTER SET (?:latin1|utf8mb4) COLLATE (?:latin1_bin|utf8mb4_bin)/g, "COLLATE BINARY"));
     }
     if (dialect.name !== "mysql" && dialect.name !== "zdas") throw new Error("Unsupported monitoring DDL dialect");
     // These non-indexed locators must retain the protocol's 255-codepoint capacity.
@@ -62,7 +66,7 @@ export function renderMonitoringDdl(dialect: Dialect): string[] {
 export async function initializeMonitoringSqlite(db: IDatabase): Promise<void> {
   if (db.dbType !== "sqlite") throw new Error("Monitoring local initialization requires SQLite");
   for (const ddl of renderMonitoringDdl(db.dialect)) await db.exec(ddl);
-  for (const table of ["insight_monitoring_diagnoses", "insight_monitoring_bot_checks"]) {
+  for (const table of ["insight_monitoring_diagnose", "insight_monitoring_bot_check"]) {
     await db.exec(`CREATE TRIGGER IF NOT EXISTS trg_${table}_update AFTER UPDATE ON ${table}
       FOR EACH ROW BEGIN UPDATE ${table} SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`);
   }

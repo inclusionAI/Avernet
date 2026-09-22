@@ -62,6 +62,8 @@ async fn exercise(db: Arc<MysqlDbPlugin>) -> Result<(), Box<dyn std::error::Erro
     }
     assert_eq!(serde_json::from_str::<serde_json::Value>(&bcs_db_api::db_get_column::<String>(&legacy, "snapshot_json")?)?, json!({"version": 1}));
     let store = MySqlCollaborationStore::new(db.clone(), "test".into());
+    history_contract::contract(&store).await;
+    history_contract::provider_output_contract(&store, db.as_ref()).await;
     judge_contract::judge_contract(&store, &store).await;
     dispatch_contract::dispatch_contract(&store).await;
     opening_contract::opening_contract(&store).await;
@@ -89,6 +91,7 @@ async fn exercise(db: Arc<MysqlDbPlugin>) -> Result<(), Box<dyn std::error::Erro
     service_rerun_reactivates_once(&store, db.as_ref()).await?;
     snapshot_write_failure_is_visible(&store, db.as_ref()).await?;
     rerun_snapshot_failure_rolls_back_activation(&store, db.as_ref()).await?;
+    batched_nodes::contract(db.as_ref(), &store).await?;
     Ok(())
 }
 

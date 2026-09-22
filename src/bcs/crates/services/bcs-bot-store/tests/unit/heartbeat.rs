@@ -5,6 +5,7 @@ async fn database() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new(
         "CREATE TABLE bcs_bots (
+                connection_mode TEXT DEFAULT 'plugin',
             bot_uuid TEXT NOT NULL, name TEXT, bot_info TEXT, session_token TEXT,
             created_by TEXT, visibility TEXT, status TEXT NOT NULL DEFAULT 'online',
             actor_kind TEXT NOT NULL DEFAULT 'bot', is_deleted INTEGER NOT NULL DEFAULT 0,

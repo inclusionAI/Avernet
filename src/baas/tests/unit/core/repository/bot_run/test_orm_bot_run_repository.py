@@ -286,3 +286,30 @@ class TestUpdateError:
         repository.update_error("run-003", "late error")
 
         mock_session.query.return_value.filter.return_value.update.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestUpdateAborted
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateAborted:
+    def test_sets_aborted_with_reason(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
+        repository.update_aborted("run-001", "aborted by chat.abort")
+
+        mock_session.query.return_value.filter.return_value.update.assert_called_once()
+        call_kwargs = (
+            mock_session.query.return_value.filter.return_value.update.call_args
+        )
+        update_dict = call_kwargs[0][0]
+        assert update_dict["status"] == "ABORTED"
+        assert update_dict["error"] == "aborted by chat.abort"
+        assert "completed_at" in update_dict
+        assert "gmt_modified" in update_dict
+
+    def test_skips_when_already_terminal(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 0
+        repository.update_aborted("run-002", "aborted by chat.abort")
+
+        mock_session.query.return_value.filter.return_value.update.assert_called_once()

@@ -84,6 +84,16 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
         return;
       }
 
+      // Idempotency: if a pending card already exists for this (flow, node),
+      // reuse it instead of inserting a duplicate. This prevents workflow
+      // retries from creating multiple pending approval cards.
+      const existing = await approvalCardRepo.findPendingByFlowNode(flow_id, node_id);
+      if (existing) {
+        apiLog("WRITE", "/approval-cards", { httpStatus: 200, id: existing.id, note: "existing pending card" });
+        res.status(200).json({ success: true, data: { id: existing.id } });
+        return;
+      }
+
       const id = await approvalCardRepo.create({
         flowId: flow_id,
         nodeId: node_id,

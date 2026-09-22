@@ -48,18 +48,7 @@ pub enum ProviderCoordinationModeDto {
 /// provider_binding row (HTTP webhook downlink); `plugin` skips the binding so
 /// the bot connects over WebSocket through a BCN plugin. Unknown value
 /// deserializes to an error → 400. Absent/`None` ⇒ `gateway`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderBotConnectionModeDto {
-    Gateway,
-    Plugin,
-}
-
-impl Default for ProviderBotConnectionModeDto {
-    fn default() -> Self {
-        Self::Gateway
-    }
-}
+pub use bcs_domain::provider::ProviderBotConnectionMode as ProviderBotConnectionModeDto;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderCoordinationConfigDto {

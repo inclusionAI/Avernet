@@ -30,6 +30,8 @@ use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
 mod judge;
+mod history;
+use bcs_service_api::port::repo::collaboration_history::*;
 mod opening;
 mod dispatch;
 mod publication;
@@ -80,6 +82,8 @@ fn snapshot_column(row: &DbRow, column: &str) -> ServiceResult<Option<String>> {
 
 #[derive(Debug, Default, Clone)]
 struct StoreInner {
+    history_messages: BTreeMap<String, StateMachineHistoryCheckpoint>,
+    repaired_history_runs: BTreeSet<String>,
     definitions: BTreeMap<(String, i32), CollaborationDefinition>,
     definition_sources: BTreeMap<(String, i32), DefinitionSourceRecord>,
     run_snapshots: BTreeMap<String, StateMachineRunSnapshot>,
@@ -363,6 +367,16 @@ impl GroupRuntimeBindingRepoPort for MemoryCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MemoryCollaborationStore {
+    async fn accept_history_message(&self, command: AcceptStateMachineHistory) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> {
+        let checkpoint = history::checkpoint("memory", command.payload.clone())?;
+        Ok(self.commit_eventful_transition(StateMachineEventfulTransition::AcceptHistory(command)).await?.then_some(checkpoint))
+    }
+    async fn get_history_message(&self, id: &StateMachineHistoryIdentity) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> { self.history_get(id).await }
+    async fn list_history_messages_pending(&self, after: Option<&StateMachineHistoryCursor>, limit: usize) -> ServiceResult<StateMachineHistoryPage> { self.history_page(after, limit).await }
+    async fn confirm_history_message(&self, checkpoint: &StateMachineHistoryCheckpoint, at: u64) -> ServiceResult<()> { self.history_confirm(checkpoint, at).await }
+
+    async fn list_unrepaired_history_runs(&self, runs: &[String]) -> ServiceResult<Vec<String>> { self.unrepaired_history_runs(runs).await }
+    async fn confirm_terminal_history_repair(&self, run: &str, at: u64) -> ServiceResult<()> { self.confirm_history_repair(run, at).await }
     async fn list_terminal_runs_for_cleanup(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.terminal_cleanup_candidates(after, limit).await }
     async fn cleanup_terminal_run_checkpoints(&self, run: &str, limit: usize) -> ServiceResult<usize> { self.cleanup_terminal_work(run, limit).await }
     async fn fail_missing_startup(&self, command: bcs_service_api::FailStateMachineStartup) -> ServiceResult<bool> { self.fail_startup_gap(command).await }
@@ -1106,6 +1120,7 @@ fn state_machine_transition_events(
     transition: &StateMachineEventfulTransition,
 ) -> Vec<bcs_service_api::port::repo::AppendEventRecord> {
     match transition {
+        StateMachineEventfulTransition::AcceptHistory(command) => command.event.iter().cloned().collect(),
         StateMachineEventfulTransition::FinishJudge(command) => command.event.iter().cloned().collect(),
         StateMachineEventfulTransition::StartRun { events, .. } => events.clone(),
         StateMachineEventfulTransition::StartBotNode { event, .. }
@@ -1121,6 +1136,7 @@ fn apply_memory_state_machine_transition(
     transition: &StateMachineEventfulTransition,
 ) -> ServiceResult<bool> {
     match transition {
+        StateMachineEventfulTransition::AcceptHistory(command) => history::accept_memory(inner, command),
         StateMachineEventfulTransition::FinishJudge(command) => judge::finish_memory(inner, command),
         StateMachineEventfulTransition::StartRun {
             run_id,
@@ -1978,6 +1994,16 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MySqlCollaborationStore {
+    async fn accept_history_message(&self, command: AcceptStateMachineHistory) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> {
+        let checkpoint = history::checkpoint(&self.env, command.payload.clone())?;
+        Ok(self.commit_eventful_transition(StateMachineEventfulTransition::AcceptHistory(command)).await?.then_some(checkpoint))
+    }
+    async fn get_history_message(&self, id: &StateMachineHistoryIdentity) -> ServiceResult<Option<StateMachineHistoryCheckpoint>> { self.history_get(id).await }
+    async fn list_history_messages_pending(&self, after: Option<&StateMachineHistoryCursor>, limit: usize) -> ServiceResult<StateMachineHistoryPage> { self.history_page(after, limit).await }
+    async fn confirm_history_message(&self, checkpoint: &StateMachineHistoryCheckpoint, at: u64) -> ServiceResult<()> { self.history_confirm(checkpoint, at).await }
+
+    async fn list_unrepaired_history_runs(&self, runs: &[String]) -> ServiceResult<Vec<String>> { self.unrepaired_history_runs(runs).await }
+    async fn confirm_terminal_history_repair(&self, run: &str, at: u64) -> ServiceResult<()> { self.confirm_history_repair(run, at).await }
     async fn list_terminal_runs_for_cleanup(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.terminal_cleanup_candidates(after, limit).await }
     async fn cleanup_terminal_run_checkpoints(&self, run: &str, limit: usize) -> ServiceResult<usize> { self.cleanup_terminal_work(run, limit).await }
     async fn fail_missing_startup(&self, command: bcs_service_api::FailStateMachineStartup) -> ServiceResult<bool> { self.fail_startup_gap(command).await }
@@ -2040,6 +2066,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let mut steps = Vec::new();
         let events = state_machine_transition_events(&transition);
         match &transition {
+            StateMachineEventfulTransition::AcceptHistory(command) => { steps.extend(history::accept_sql(self, command)?); }
             StateMachineEventfulTransition::FinishJudge(command) => {
                 steps.extend(judge::finish_sql(self, command)?);
             }
@@ -3637,24 +3664,28 @@ fn build_guarded_node_runs_inserts(
     run_id: &str,
     nodes: &[StateMachineNodeRun],
 ) -> Vec<DbTransactionStep> {
-    nodes
-        .iter()
-        .map(|node| {
-            let sql = "INSERT INTO bcs_state_machine_node_runs \
-                       (env, run_id, node_id, status, attempt, node_timeout_ms, \
-                        timeout_deadline_ms, max_attempts, assignee_bot_id, outcome, responded_by, \
-                        delivery_request_id, bot_delivery_run_id, artifact_text, error_message, \
-                        started_at_ms, completed_at_ms, record_status) \
-                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active' \
-                       WHERE EXISTS ( \
-                         SELECT 1 FROM bcs_state_machine_runs \
-                         WHERE env = ? AND run_id = ? AND record_status = 'active' \
-                       )";
-            let mut params = node_insert_params(env, run_id, node);
-            params.extend([DbValue::from(env), DbValue::from(run_id)]);
-            DbTransactionStep::Execute(DbStatement::with_params(sql, params))
-        })
-        .collect()
+    // 48 * 17 + 2 bind parameters stays below SQLite's legacy 999 limit.
+    // Both dialects accept this derived UNION ALL table; the outer guard is
+    // evaluated once per chunk inside the existing Session-locked transaction.
+    const COLUMNS: &str = "env, run_id, node_id, status, attempt, node_timeout_ms, \
+        timeout_deadline_ms, max_attempts, assignee_bot_id, outcome, responded_by, \
+        delivery_request_id, bot_delivery_run_id, artifact_text, error_message, \
+        started_at_ms, completed_at_ms, record_status";
+    let first_row = COLUMNS.split(", ").enumerate().map(|(index, column)| {
+        format!("{} AS {}", if index == 17 { "'active'" } else { "?" }, column)
+    }).collect::<Vec<_>>().join(", ");
+    nodes.chunks(48).map(|chunk| {
+        let mut rows = vec![format!("SELECT {first_row}")];
+        rows.extend((1..chunk.len()).map(|_| "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active'".into()));
+        let sql = format!("INSERT INTO bcs_state_machine_node_runs ({COLUMNS}) \
+            SELECT batch.* FROM ({}) AS batch WHERE EXISTS ( \
+                SELECT 1 FROM bcs_state_machine_runs \
+                WHERE env = ? AND run_id = ? AND record_status = 'active')", rows.join(" UNION ALL "));
+        let mut params = Vec::with_capacity(chunk.len() * 17 + 2);
+        for node in chunk { params.extend(node_insert_params(env, run_id, node)); }
+        params.extend([DbValue::from(env), DbValue::from(run_id)]);
+        DbTransactionStep::Execute(DbStatement::with_params(sql, params))
+    }).collect()
 }
 
 fn build_node_runs_insert(

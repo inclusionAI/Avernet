@@ -583,6 +583,28 @@ class TestDispatchSendStream:
         assert chunks[0].type == "error"
 
     @pytest.mark.asyncio
+    async def test_stream_run_terminated_aborted(self):
+        d = _make_dispatcher()
+        d._cache_plugin.get.return_value = None
+        run = MagicMock()
+        run.status = "ABORTED"
+        d._run_repository.get_by_run_id.return_value = run
+
+        chunks = []
+        async for c in d.dispatch_send_stream(
+            bot_service=MagicMock(),
+            run_id="run-1",
+            session_id="sess-1",
+            message="hello",
+            binding_info=_make_binding_info(),
+            bot_id="bot-1",
+        ):
+            chunks.append(c)
+        assert len(chunks) == 1
+        assert chunks[0].type == "aborted"
+        assert "ABORTED" in chunks[0].content
+
+    @pytest.mark.asyncio
     async def test_stream_cache_get_exception(self):
         d = _make_dispatcher()
         d._cache_plugin.get.side_effect = RuntimeError("cache error")

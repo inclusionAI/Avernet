@@ -6,6 +6,9 @@ from dataclasses import dataclass
 import re
 
 from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.repository.protocols.platform import (
     SessionResourceRepositoryProtocol,
 )
@@ -27,6 +30,7 @@ class TcResourceContextSnapshot:
     bot_uuid: str
     user_id: str
     bot_id: str
+    owner_id: str
     filename: str
     size_bytes: int
     content_sha256: str | None
@@ -49,6 +53,7 @@ class TcResourceContextSnapshot:
             "bot_uuid": self.bot_uuid,
             "user_id": self.user_id,
             "bot_id": self.bot_id,
+            "owner_id": self.owner_id,
             "filename": self.filename,
             "size_bytes": self.size_bytes,
             "content_sha256": self.content_sha256,
@@ -70,9 +75,11 @@ class TcResourceContextService:
         self,
         repository: SessionResourceRepositoryProtocol,
         token_vault: TokenVault,
+        device_binding_repository: DeviceBindingRepository,
     ) -> None:
         self._repository = repository
         self._token_vault = token_vault
+        self._device_binding_repository = device_binding_repository
 
     def resolve(self, resource_id: str) -> TcResourceContextSnapshot:
         normalized = resource_id.strip() if isinstance(resource_id, str) else ""
@@ -112,6 +119,8 @@ class TcResourceContextService:
         }:
             raise ValueError("resource_context_unsupported_scope")
 
+        owner_id = self._resolve_owner_id(record)
+
         digest = record.client_content_hash
         content_sha256 = (
             digest.lower() if digest and _SHA256.fullmatch(digest) else None
@@ -130,6 +139,7 @@ class TcResourceContextService:
             bot_uuid=record.bot_uuid,
             user_id=record.owner_id,
             bot_id=record.bot_id,
+            owner_id=owner_id,
             filename=record.filename,
             size_bytes=record.size_bytes,
             content_sha256=content_sha256,
@@ -142,3 +152,17 @@ class TcResourceContextService:
             session_revision=max(record.task_version, 1),
             session_active=active,
         )
+
+    def _resolve_owner_id(self, record: SessionResourceRecord) -> str:
+        binding_id = record.binding_id
+        if type(binding_id) is not int or binding_id <= 0:
+            raise ValueError("resource_context_incomplete")
+
+        binding = self._device_binding_repository.get_by_id(binding_id)
+        if binding is None or binding.device_id != record.bot_uuid:
+            raise ValueError("resource_context_incomplete")
+
+        owner_id = binding.entity_id
+        if not isinstance(owner_id, str) or not owner_id.strip():
+            raise ValueError("resource_context_incomplete")
+        return owner_id

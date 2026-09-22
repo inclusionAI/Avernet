@@ -1,3 +1,5 @@
+#[path = "support/history_contract.rs"]
+mod history_contract;
 #[path = "support/recovery_gap_contract.rs"]
 mod recovery_gap_contract;
 #[path = "support/terminal_cleanup_contract.rs"]
@@ -36,6 +38,9 @@ mod bootstrap_migrations;
 
 #[path = "support/real_mysql_fixed_loop.rs"]
 mod real_mysql_fixed_loop;
+
+#[path = "support/batched_nodes.rs"]
+mod batched_nodes;
 
 #[path = "support/failure_contract.rs"]
 mod failure_contract;

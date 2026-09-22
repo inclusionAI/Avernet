@@ -1,0 +1,296 @@
+# Phase 1 implementation validation
+
+## Timestamp-removal follow-up (2026-09-21)
+
+The user authorized removing the two duplicate Provider timestamp columns from
+this unmerged PR's MySQL 029 / SQLite 030, BotProviderRecord and its consumers.
+Bot lifecycle timestamps and legacy binding response timestamps remain. Earlier
+migrations are untouched. Retained draft databases require explicit upgrade or
+recreation; no live database or recorded checksum is modified by this change.
+
+Timestamp/version CAS is removed, with no replacement version or new explicit
+lock. The existing single-binding lock is unchanged. Business-state predicates,
+unique constraints and atomic gateway dual writes remain. Repeated affiliation
+does not rewrite callbacks, and explicit webhook writes use database ordering.
+
+The schema-column and binding-timestamp regressions failed before implementation.
+The focused migration/store/concurrent-webhook run then passed **13 tests, zero
+failed**. The concurrent test forces both requests to read the same Bot snapshot;
+both writes succeed and the resulting Bot/binding callback agrees. Shared
+Memory/SQLite conformance also exercises repeated association, same-value webhook
+updates, stale association rejection and deletion protection.
+
+The user requested `commit --no-verify` and `push --no-verify` while the broader
+local checks continue, so remote CI can start immediately. Broad-suite results
+are not claimed at this publication checkpoint. No PR description edit, new
+backfill command, production data change or independent/subagent review is included.
+
+## Current addendum: Bot-owned Provider storage (2026-09-21)
+
+This follow-up was implemented and validated in an isolated checkout based on
+`5d52048dd29027faf304e57c63114b1902f66095`. It supersedes the historical journal,
+retry/replay, migration-version and file-splitting notes below. Root and parent
+feature checkouts are unchanged. The user subsequently authorized commit and
+push with `--no-verify` directly to PR #2358's head branch,
+`vzvince/Avernet:codex/provider-token-registration`. This authorization does not
+include a PR description edit or production migration.
+
+Provider identity/mode/webhook metadata now resides in `bcs_bots`. Gateway writes
+still maintain the legacy binding projection; upstream writes do not. A typed
+configuration selects binding-based (default) or Bot-mode delivery reads. Runtime
+registration journal reservation/replay is removed; duplicate scoped refs return
+409 and distinct refs can reuse a valid token. Bot/binding SQL writes are atomic,
+but later owner-edge failures or lost responses can require operator repair.
+The user confirmed this PR has never been deployed. Its unused registration-table
+DDL and compatibility reader are removed entirely; no drop migration or recovery
+shim is retained. Only Bot metadata is added, as MySQL 029 / SQLite 030. Earlier
+upstream migrations are unchanged.
+
+### Dedicated backfill removal (2026-09-21)
+
+The dedicated backfill DB method, report type, standalone example and exclusive
+tests are removed at the user's request. Normal Bot registration, metadata and
+gateway projection writes, schema migrations and read-source validation remain.
+The upstream registration test still checks persisted identity, ownership and
+runtime credentials without a binding. Earlier backfill test results below are
+historical evidence, not evidence of a currently shipped correction tool.
+
+Historical correction rules, audits, writer fencing, acceptance and rollback
+are handed off to the user's personal knowledge base for a separate work order.
+No live database was accessed or corrected and no correction ticket was created.
+The user authorized commit and push with `--no-verify` to the existing PR head;
+the PR description is unchanged.
+
+Before integrating the concurrent connection-mode follow-up, the affected Bot
+and store suites passed **308 tests, zero failed, 4 ignored**. Library/example
+compilation passed, and the four selected registration/config/webhook/OpenAPI
+integration suites passed **14 tests, zero failed**. Final post-rebase results
+are recorded separately after rerunning these checks.
+
+### Unused draft cleanup verification (2026-09-21)
+
+The final cleanup removes the unused SQL files, migration registration, legacy
+payload deserializer and recovery logic, test fixtures and retention instructions.
+The fresh-schema path no longer creates an extra registration table. Existing
+Provider bindings remain the supported source for affiliation backfill.
+
+Tests were first observed failing without the extra table and with the corrected
+migration counts. The following final runs then exited successfully:
+
+```sh
+cargo test --offline --locked -p bcs-bot-store -p bcs-admin --quiet
+
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+  -u http_proxy -u https_proxy -u all_proxy \
+  cargo test --offline --locked -p bcs --features test-utils --lib \
+  --test provider_registration_openapi --test provider_registration_config \
+  --test provider_bot_webhook_integration --test openapi_v1_mount --quiet
+
+cargo run --offline --locked -p bcs-admin --quiet -- \
+  db migrate --dialect mysql --check-files
+```
+
+- Store/admin: **161 passed, zero failed, 9 ignored**.
+- Bootstrap and real HTTP/WS integration: **302 passed, zero failed, 5 ignored**.
+- Combined: **463 passed, zero failed, 14 ignored**. Focused reruns are not
+  double-counted. The bootstrap suite includes all 34 migration tests.
+- MySQL static validation: **29 consecutive files**, unchanged baseline checksum.
+  SQLite has **30 consecutive versions**; upgrade/repeat/partial-step tests pass.
+- The upgrade test verifies that Bot expansion creates no new tables and leaves
+  all prior migration-history rows unchanged. Backfill tests use no extra table
+  and preserve existing upstream affiliation, owner and runtime credential.
+- Repository search found no removed table name, obsolete SQL filename or legacy
+  deserializer references. `git diff --check` passed. Every changed source file
+  was counted; none exceeds 1,000 lines and no size-driven split was performed.
+- No live database was changed and no independent reviewer/subagent was used.
+  The user subsequently authorized publishing this cleanup to PR #2358 with
+  `commit --no-verify` and `push --no-verify`. Live MySQL, full Singlebox and
+  full architecture gates were not rerun; the existing limitations below remain.
+
+### Storage consolidation verification before draft cleanup
+
+Run from `src/bcs`, with `CARGO_TARGET_DIR` pointing to a separate temporary build
+directory. Both test commands exited successfully at the pre-cleanup checkpoint:
+
+```sh
+cargo test --offline --locked --no-fail-fast \
+  -p bcs-bot -p bcs-bot-store -p bcs-app-register -p bcs-domain \
+  -p bcs-service-api -p bcs-api-http -p bcs-test-support -p bcs-admin --quiet
+
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+  -u http_proxy -u https_proxy -u all_proxy \
+  cargo test --offline --locked -p bcs --features test-utils --lib \
+  --test provider_registration_openapi --test provider_registration_config \
+  --test provider_bot_webhook_integration --test openapi_v1_mount --quiet
+
+cargo check --offline --locked -p bcs --lib --examples
+cargo run --offline --locked -p bcs-admin --quiet -- \
+  db migrate --dialect mysql --check-files
+```
+
+- Affected modules: **866 passed, zero failed, 10 ignored**.
+- Bootstrap and selected HTTP/WS integration: **302 passed, zero failed,
+  5 ignored**. Loopback server tests ran on the host.
+- Combined: **1,168 passed, zero failed, 15 ignored**; focused reruns are not
+  counted again. Registration HTTP coverage exercises both direction read sources.
+- Compilation and all **30** then-present MySQL migration file checks passed.
+  The subsequent unused-draft cleanup consolidates this PR to MySQL **029** /
+  SQLite **030**; cleanup-specific rerun results are recorded separately below.
+- OpenAPI validated **72 operations**. Store boundaries, port purity,
+  forbidden-symbol and interceptor checks passed, as did `git diff --check`.
+- Regression tests were observed failing before fixes for legacy gateway deletion,
+  Provider switching authorization, backfill evidence validation and application
+  repository access. Shared contracts cover metadata, compatibility bindings and
+  Provider-admin deletion. Review was author self-review, not independent review.
+
+### Remaining verification and rollout limits
+
+- Live MySQL migration/conformance was not run: Docker is installed but its
+  daemon is stopped, and no local server was available. Static checks and SQLite
+  tests are not proof of a live MySQL upgrade.
+- The complete Singlebox coverage/E2E stack was not run.
+- The full architecture gate is not green or complete. Dependency-script,
+  import and trait-naming failures were reproduced in the unchanged parent
+  checkout; the broad conformance discovery build was interrupted. A sandboxed
+  telemetry socket test failed on permissions; the final host bootstrap run
+  passed. No gates or baselines were weakened.
+- All added/modified source line counts were checked. Existing files above
+  1,000 lines remain intact per the user's explicit no-splitting instruction;
+  size-driven extractions were reverted. No size allowlist was changed, and a
+  source-size CI gate may therefore still reject these existing files.
+- The separate correction work order requires writer fencing, an issue-free
+  audit and a staging rehearsal; no dedicated backfill operation is shipped.
+  The configuration switch is restart-based. Read-source rollback is supported;
+  rolling back to arbitrary old writer binaries is not automatically safe.
+
+See [the rollout and rollback guide](../../docs/provider-bot-storage-migration.md)
+for schema/read-source prerequisites, legacy affiliation gaps and
+the unreleased-draft cleanup scope. CLI packaging and bridge startup remain
+outside this storage follow-up.
+
+## Historical Phase 1 and rebase record
+
+The following records describe earlier commits, not the current storage model
+or current publication authorization.
+
+Branch: `codex/provider-token-registration`.
+Original base: freshly fetched `upstream/dev`, commit
+`7d39e392b99d8bf8351b029c3128d97d1c230411`.
+Rebase target: `upstream/dev` commit
+`8aca0d4f6ce61bc8e8ab7334af0b3bdebbfc9e61`; no merge commit.
+
+Only the OpenAPI registration flow is extended. Legacy routes, Provider-admin
+registration, CLI packaging and bridge process startup are not changed.
+
+## Original pre-rebase verification
+
+The final post-review affected-module run passed 826 tests (6 ignored):
+
+```sh
+cd src/bcs
+cargo test --offline -p bcs-domain -p bcs-service-api -p bcs-bot-store \
+  -p bcs-bot -p bcs-app-register -p bcs-api-http -p bcs-test-support --quiet
+```
+
+Bootstrap unit tests and selected real-server integration tests passed another
+282 tests (5 ignored). These tests ran on the host because they bind loopback
+sockets; the new HTTP client explicitly disables environment proxies.
+
+```sh
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+  -u http_proxy -u https_proxy -u all_proxy \
+  cargo test --offline -p bcs --features test-utils --lib \
+  --test provider_registration_openapi --test provider_registration_config \
+  --test openapi_v1_mount --test provider_bot_webhook_integration --quiet
+```
+
+Both final commands exited successfully after the credential-read/readiness fixes
+and formatting. Total: 1,108 passed, 0 failed, 11 ignored. The final shared-harness
+module relocation has an additional focused conformance rerun: 19 passed,
+0 failed (`cargo test --offline -p bcs-bot-store --test conformance_bot_repo
+-p bcs-test-support --quiet`).
+
+Additional successful checks:
+
+- OpenAPI validator: 72 operations validated.
+- Store boundaries, port purity, forbidden-symbol and interceptor-chain checks.
+- HTTP application-boundary tests and Service API contract tests.
+- `git diff --check`.
+
+Regression tests were observed failing before the relevant fixes for deleted
+pending registration resurrection and self-service callback authorization.
+Independent review confirmed the atomic create-only change, shared-bearer
+protection, gateway credential readiness and fallible credential reads. Delayed
+database INSERT/acknowledgement, rotated credentials,
+tombstones, uniqueness and read/write failures have focused tests.
+
+## Post-rebase verification (2026-09-21)
+
+The two main commands above were rerun against the rebased working tree:
+835 affected-module tests passed (6 ignored), and 300 bootstrap/selected HTTP
+integration tests passed (5 ignored). `cargo test --offline -p bcs-admin --quiet`
+passed 26 tests (5 ignored). Total: **1,161 passed, 0 failed, 16 ignored**.
+
+The focused migration run (`cargo test --offline -p bcs --lib migrations::
+--quiet`) additionally passed 33 tests, a subset of the bootstrap run. Two new
+regression tests first failed with the upstream-only migration runner, then
+passed against the earlier registration draft. Its migration-chain coverage
+has since been replaced with Bot metadata expansion, continuous numbering and
+preservation of upstream schema/history without creating an extra table.
+
+`cargo run --offline -p bcs-admin --quiet -- db migrate --dialect mysql
+--check-files` passed for all 29 MySQL files. The real-MySQL full-chain test now
+then expected 29 migrations; it remains ignored locally
+because the host Docker daemon is not running. Static checks are not execution
+evidence for a live MySQL deployment.
+
+OpenAPI validation passed for 72 operations. Store boundaries, port purity,
+forbidden-symbol and interceptor-chain checks, new-test formatting, and
+whitespace checks passed again. All upstream migration
+SQL and the extracted SQLite baseline/schema modules are unchanged. Both renamed
+registration SQL files have the same Git blob hashes as before the rebase.
+
+The fork's remote `dev` was fast-forwarded to upstream commit
+`8aca0d4f6ce61bc8e8ab7334af0b3bdebbfc9e61`. Both remote heads were checked again;
+their tree is `ef9894ee61fc0ec19613ded276ad9ca3e55f597b`, with an empty tree diff.
+Only the feature commit is replayed; no merge commit is introduced. The original
+feature tip is retained locally as
+`codex/provider-token-registration-pre-rebase-20260921`.
+
+## Deployment and known limits
+
+- MySQL has schema/query/driver-error-shape coverage, but no live MySQL run was
+  available. Apply migration 029 before deploying; SQLite runs migration 030.
+- The complete Singlebox coverage/E2E stack has not been run.
+- The full architecture gate is not reported green: its dependency check fails
+  with the host's system Bash (`d` followed by a full-width parenthesis is parsed
+  as an invalid variable), and import checks report existing violations. Both
+  were reproduced in the untouched dev checkout. Gates/baselines were not weakened.
+- Durable partial-registration recovery requires the SQL-backed repository.
+  Memory mode is process-local; cancellation after file publication but before
+  memory publication fails closed on retry instead of blindly restoring a Bot.
+- Self-service gateway callers must inherit the Provider default callback.
+  Provider creator/owners may supply Bot overrides. Independent self-service
+  callbacks require Bot-scoped downlink credentials, outside this phase.
+
+## Unresolved source-size policy
+
+All new source files are below 1,000 lines. Four existing files necessarily
+touched for configuration and trait/composition wiring already exceed
+that limit on dev:
+
+- `crates/bootstrap/bcs/src/config.rs`
+- `crates/bootstrap/bcs/src/server.rs`
+- `crates/services/bcs-bot-store/src/lib.rs`
+- `crates/services/bcs-bot-store/src/memory.rs`
+
+New logic is in separate small modules; these files contain minimal additions.
+This is an outstanding repository-policy issue, **not an approved waiver**. The
+user has been asked whether to approve a narrowly scoped exception with follow-up
+splitting, or include the larger restructuring now. No allowlist was changed.
+
+The original dev checkout is unchanged; implementation work is isolated in its
+worktree. Publication uses `git commit --no-verify` and `git push --no-verify`
+at the user's explicit request. The validation results above were collected
+during implementation; bypassing local hooks does not waive the documented
+source-size issue or replace required CI checks.

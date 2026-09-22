@@ -206,3 +206,9 @@ pub(super) fn finish_sql(store: &MySqlCollaborationStore, command: &FinishStateM
                 DbTransactionParam::value(claim.attempt), DbTransactionParam::value(event_type), DbTransactionParam::value(payload.to_string()), DbTransactionParam::value(command.completed_at_ms)])),
     ])
 }
+
+pub(super) fn accept_history_input(inner: &mut StoreInner, run: &str, id: &str, attempt: i32) {
+    let key = (run.to_owned(), id.to_owned());
+    let token: i64 = inner.judge_leases.get(&key).map_or(0, |lease| lease.token);
+    inner.judge_leases.insert(key, JudgeLease { attempt, owner: None, token, until: None, retired: false });
+}

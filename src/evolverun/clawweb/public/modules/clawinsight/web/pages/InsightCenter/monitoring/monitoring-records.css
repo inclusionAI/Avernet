@@ -1,0 +1,722 @@
+.insight-monitoring .list-columns,.insight-monitoring .record-summary {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 176px 170px 20px;
+  align-items:center;
+  gap:16px
+}
+.insight-monitoring .list-columns {
+  padding:11px 22px;
+  background:#fbfcfd;
+  color:#738096;
+  font-size:12px;
+  border-bottom:1px solid var(--line)
+}
+.insight-monitoring .list-columns .icon {
+  width:12px;
+  height:12px
+}
+.insight-monitoring .record {
+  border-bottom:1px solid var(--line)
+}
+.insight-monitoring .record:last-child {
+  border-bottom:0
+}
+.insight-monitoring .record-summary {
+  width:100%;
+  padding:17px 22px;
+  text-align:left;
+  transition:background .15s;
+  min-height:85px
+}
+.insight-monitoring .record-summary:hover {
+  background:#f9fbff
+}
+.insight-monitoring .record.expanded>.record-summary {
+  background:#f5f8ff
+}
+.insight-monitoring .record-main {
+  min-width:0;
+  display:flex;
+  gap:12px;
+  align-items:flex-start
+}
+.insight-monitoring .decision-symbol {
+  display:grid;
+  place-items:center;
+  width:29px;
+  height:29px;
+  border-radius:9px;
+  margin-top:2px;
+  flex-shrink:0
+}
+.insight-monitoring .decision-symbol .icon {
+  height:15px;
+  width:15px;
+  stroke-width:1.8
+}
+.insight-monitoring .decision-symbol.alert {
+  color:#cb4b55;
+  background:#fff0f0
+}
+.insight-monitoring .decision-symbol.pass {
+  color:#288b70;
+  background:#edf7f3
+}
+.insight-monitoring .decision-symbol.unresolved {
+  color:#b28431;
+  background:#fcf5e8
+}
+.insight-monitoring .record-text {
+  min-width:0;
+  flex:1
+}
+.insight-monitoring .record-title-line {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  min-width:0
+}
+.insight-monitoring .record-title {
+  font-size:14px;
+  font-weight:550;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#364258
+}
+.insight-monitoring .record-session {
+  display:block;
+  font-size:12px;
+  color:#738096;
+  letter-spacing:0;
+  margin-top:6px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.insight-monitoring .record-time {
+  font-size:12px;
+  color:#536176;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap
+}
+.insight-monitoring .record-time .day {
+  color:#738096;
+  font-size:12px;
+  margin-right:7px
+}
+.insight-monitoring .expand-icon {
+  width:14px;
+  height:14px;
+  color:#a3adba;
+  transition:transform .2s
+}
+.insight-monitoring .record.expanded .expand-icon {
+  transform:rotate(180deg);
+  color:#5b7ac0
+}
+
+.insight-monitoring .record-detail {
+  padding:0 22px 23px 63px;
+  background:linear-gradient(#f5f8ff,#fafbfe);
+  animation:monitoring-reveal .18s ease-out
+}
+@keyframes monitoring-reveal {
+  from {
+  opacity:.2;
+  transform:translateY(-3px)
+}
+to {
+  opacity:1;
+  transform:translateY(0)
+}
+
+}
+.insight-monitoring .diagnosis-narratives {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:22px;
+  border-top:1px solid #e6ebf5;
+  padding-top:19px;
+  margin-bottom:22px
+}
+.insight-monitoring .narrative-label {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  font-size:12px;
+  color:#607393;
+  font-weight:600;
+  margin-bottom:8px
+}
+.insight-monitoring .narrative-label .icon {
+  height:14px;
+  width:14px
+}
+.insight-monitoring .narrative p {
+  font-size:13px;
+  color:#475770;
+  line-height:1.9;
+  margin:0;
+  overflow-wrap:anywhere
+}
+.insight-monitoring .detail-grid {
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:17px 20px;
+  margin:0;
+  padding:17px 0;
+  border-top:1px solid #e4eaf3
+}
+.insight-monitoring .detail-grid dt {
+  color:#738096;
+  font-size:12px;
+  margin-bottom:5px
+}
+.insight-monitoring .detail-grid dd {
+  margin:0;
+  font-size:12px;
+  color:#53627b;
+  overflow-wrap:anywhere
+}
+.insight-monitoring .detail-grid .confidence {
+  color:#335d9d;
+  font-weight:600;
+  font-variant-numeric:tabular-nums
+}
+.insight-monitoring .detail-identifiers {
+  border-top:1px solid #e4eaf3;
+  padding-top:14px;
+  display:grid;
+  gap:9px
+}
+.insight-monitoring .id-line {
+  display:grid;
+  grid-template-columns:76px minmax(0,1fr) 22px;
+  gap:9px;
+  align-items:start;
+  font-size:12px;
+  color:#738096
+}
+.insight-monitoring .id-line code {
+  color:#6f7f96;
+  font:12px/1.8 "SFMono-Regular",Consolas,monospace;
+  overflow-wrap:anywhere
+}
+.insight-monitoring .copy-btn {
+  padding:2px;
+  color:#91a0b5
+}
+.insight-monitoring .copy-btn:hover {
+  color:#285fc3
+}
+.insight-monitoring .copy-btn .icon {
+  width:13px;
+  height:13px
+}
+
+.insight-monitoring .list-footer {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  padding:16px 21px;
+  border-top:1px solid var(--line);
+  font-size:12px;
+  color:#738096
+}
+.insight-monitoring .list-footer b {
+  color:#56657c;
+  font-weight:500
+}
+.insight-monitoring .pagination {
+  display:flex;
+  align-items:center;
+  gap:5px
+}
+.insight-monitoring .pagination select {
+  font-size:12px;
+  color:#6a7890;
+  background:white;
+  border:1px solid #e5e9f0;
+  padding:5px 6px;
+  border-radius:5px;
+  margin-right:10px
+}
+.insight-monitoring .page-btn {
+  height:27px;
+  min-width:27px;
+  border-radius:5px;
+  font-size:12px;
+  color:#8995a6
+}
+.insight-monitoring .page-btn:hover:not(:disabled) {
+  background:#f2f5fa
+}
+.insight-monitoring .page-btn.active {
+  color:#3169d4;
+  background:#edf3ff;
+  font-weight:600
+}
+.insight-monitoring .page-btn .icon {
+  width:13px;
+  height:13px
+}
+.insight-monitoring .page-ellipsis {
+  padding:0 3px
+}
+.insight-monitoring .empty-state {
+  padding:72px 20px 78px;
+  text-align:center
+}
+.insight-monitoring .empty-icon {
+  display:grid;
+  place-items:center;
+  width:48px;
+  height:48px;
+  background:#f4f6fa;
+  border:1px solid #e9edf3;
+  border-radius:15px;
+  color:#98a8be;
+  margin:0 auto 17px
+}
+.insight-monitoring .empty-icon .icon {
+  width:23px;
+  height:23px
+}
+.insight-monitoring .empty-state h3 {
+  font-size:13px;
+  font-weight:550;
+  color:#68798f;
+  margin:0 0 8px
+}
+.insight-monitoring .empty-state p {
+  font-size:12px;
+  color:#738096;
+  margin:0
+}
+.insight-monitoring .empty-state button {
+  color:#356bce;
+  font-size:12px;
+  margin-top:15px
+}
+
+@media(min-width:1600px) {
+  .insight-monitoring {
+  padding:40px 44px
+}
+.insight-shell {
+  border-right:1px solid var(--line);
+  border-left:1px solid var(--line)
+}
+.insight-monitoring .record-summary {
+  padding-top:19px;
+  padding-bottom:19px
+}
+
+}
+
+@media(max-width:1150px) {
+  .insight-shell {
+  grid-template-columns:184px minmax(0,1fr)
+}
+.insight-sidebar {
+  padding:28px 12px
+}
+.insight-monitoring {
+  padding:30px 24px
+}
+.insight-side-nav button {
+  font-size:12px;
+  gap:8px;
+  padding:11px 9px
+}
+.insight-workspace-title {
+  margin-left:9px
+}
+.insight-monitoring .control-row {
+  gap:16px;
+  padding:18px
+}
+.insight-monitoring .date-control {
+  min-width:175px;
+  padding-left:16px
+}
+.insight-monitoring .refresh-area {
+  padding-left:16px
+}
+.insight-monitoring .control-button {
+  gap:7px
+}
+.insight-monitoring .selected-id {
+  font-size:12px
+}
+.insight-monitoring .record-summary,.insight-monitoring .list-columns {
+  grid-template-columns:minmax(0,1fr) 156px 140px 15px;
+  gap:12px;
+  padding-left:18px;
+  padding-right:18px
+}
+.insight-monitoring .record-time,.insight-monitoring .record-time .day {
+  font-size:11px
+}
+.insight-monitoring .record-detail {
+  padding-left:59px;
+  padding-right:18px
+}
+.insight-monitoring .records-toolbar {
+  padding-left:18px;
+  padding-right:18px
+}
+.insight-monitoring .result-tabs {
+  gap:15px
+}
+.insight-monitoring .search-box {
+  width:195px
+}
+.insight-monitoring .detail-grid {
+  grid-template-columns:repeat(3,minmax(0,1fr))
+}
+
+}
+
+@media(max-width:900px) {
+  .insight-shell {
+  grid-template-columns:162px minmax(0,1fr)
+}
+.insight-sidebar {
+  padding:25px 8px
+}
+.insight-workspace-title {
+  font-size:14px;
+  gap:7px
+}
+.insight-side-nav button {
+  font-size:12px;
+  gap:7px
+}
+.insight-side-nav .icon {
+  width:15px
+}
+.insight-side-nav .active:after {
+  display:none
+}
+.insight-monitoring {
+  padding:26px 20px
+}
+.insight-monitoring .control-row {
+  gap:12px;
+  flex-wrap:wrap
+}
+.insight-monitoring .control-block.bot {
+  flex-basis:calc(100% - 90px);
+  order:0
+}
+.insight-monitoring .refresh-area {
+  order:1;
+  border:0;
+  padding:0
+}
+.insight-monitoring .date-control {
+  order:2;
+  flex-basis:100%;
+  border-left:0;
+  border-top:1px solid var(--line);
+  padding:12px 0 0;
+  display:flex;
+  align-items:center;
+  gap:20px
+}
+.insight-monitoring .date-control .label {
+  margin:0
+}
+.insight-monitoring .date-menu {
+  right:auto;
+  left:0;
+  max-width:100%
+}
+.insight-monitoring .records-toolbar {
+  align-items:flex-start;
+  flex-direction:column;
+  padding-top:13px;
+  gap:8px
+}
+.insight-monitoring .result-tabs {
+  order:2;
+  min-height:42px;
+  gap:23px
+}
+.insight-monitoring .search-box {
+  order:1;
+  width:100%;
+  padding-top:8px;
+  padding-bottom:8px
+}
+.insight-monitoring .list-columns,.insight-monitoring .record-summary {
+  grid-template-columns:minmax(0,1fr) 156px 140px 15px;
+  gap:8px
+}
+.insight-monitoring .record-detail {
+  padding-left:18px
+}
+.insight-monitoring .diagnosis-narratives {
+  gap:16px
+}
+.insight-monitoring .status-bar {
+  padding:11px 18px;
+  gap:7px
+}
+.insight-monitoring .status-left {
+  gap:9px
+}
+.insight-monitoring .status-left .separator {
+  display:none
+}
+.insight-monitoring .live-refresh {
+  display:none
+}
+.insight-monitoring .detail-grid {
+  grid-template-columns:repeat(2,minmax(0,1fr))
+}
+.insight-monitoring .record-title {
+  font-size:12px
+}
+.insight-monitoring .record-main {
+  gap:9px
+}
+.insight-monitoring .decision-symbol {
+  width:25px;
+  height:25px;
+  border-radius:7px
+}
+.insight-monitoring .record-session {
+  display:block;
+  font-size:11px
+}
+
+}
+
+@media(max-width:650px) {
+  .insight-shell {
+  grid-template-columns:minmax(0,1fr);
+  grid-template-rows:auto minmax(0,1fr)
+}
+.insight-sidebar {
+  padding:12px 16px;
+  background:white;
+  border-right:0;
+  border-bottom:1px solid var(--line)
+}
+.insight-sidebar-inner {
+  position:static;
+  display:flex;
+  align-items:center;
+  gap:16px
+}
+.insight-workspace-title {
+  display:none
+}
+.insight-side-nav {
+  display:flex;
+  gap:6px;
+  width:100%
+}
+.insight-side-nav button {
+  font-size:12px;
+  flex:1;
+  justify-content:center;
+  padding:9px
+}
+.insight-monitoring {
+  padding:25px 16px
+}
+.insight-monitoring .page-heading {
+  margin-bottom:20px
+}
+.insight-monitoring .page-heading h1 {
+  font-size:22px
+}
+.insight-monitoring .page-heading p {
+  font-size:12px
+}
+.insight-monitoring .control-row {
+  padding:16px
+}
+.insight-monitoring .control-block.bot {
+  flex-basis:calc(100% - 90px)
+}
+.insight-monitoring .status-bar {
+  padding:11px 16px
+}
+.insight-monitoring .selected-id {
+  font-size:12px
+}
+.insight-monitoring .bot-menu {
+  width:310px;
+  max-width:calc(100vw - 66px)
+}
+.insight-monitoring .records-title {
+  margin-bottom:11px
+}
+.insight-monitoring .sort-note {
+  font-size:10px
+}
+.insight-monitoring .list-columns {
+  display:none
+}
+.insight-monitoring .record-summary {
+  grid-template-columns:minmax(0,1fr) 14px;
+  padding:16px;
+  gap:9px
+}
+.insight-monitoring .record-main {
+  grid-column:1;
+  grid-row:1;
+  gap:10px
+}
+.insight-monitoring .record-summary>.record-time {
+  grid-column:1;
+  grid-row:3;
+  padding-left:35px;
+  font-size:10px
+}
+.insight-monitoring .record-time .day {
+  display:inline;
+  margin-right:6px
+}
+.insight-monitoring .record-summary>.summary-tc {
+  grid-column:1;
+  grid-row:2;
+  margin-left:35px;
+  font-size:10px
+}
+.insight-monitoring .record-summary>.summary-tc:before {
+  content:"TC 故障标签："
+}
+.insight-monitoring .record-summary>.record-time:before {
+  content:"会话时间："
+}
+.insight-monitoring .record-summary>.expand-icon {
+  grid-column:2;
+  grid-row:1
+}
+.insight-monitoring .record-title {
+  font-size:12px
+}
+.insight-monitoring .record-session {
+  display:block;
+  font-size:10px
+}
+.insight-monitoring .record-detail {
+  padding:0 16px 20px
+}
+.insight-monitoring .diagnosis-narratives {
+  grid-template-columns:1fr;
+  gap:17px
+}
+.insight-monitoring .list-footer {
+  padding:14px 16px;
+  flex-wrap:wrap;
+  gap:12px
+}
+.insight-monitoring .pagination {
+  margin-left:auto
+}
+.insight-monitoring .pagination select {
+  margin-right:5px
+}
+.insight-monitoring .result-tabs {
+  gap:20px;
+  max-width:100%
+}
+.insight-monitoring .id-line {
+  grid-template-columns:62px minmax(0,1fr) 20px
+}
+.insight-monitoring .status-time {
+  font-size:10px
+}
+
+}
+
+@media(prefers-reduced-motion:reduce) {
+  .insight-monitoring *,.insight-monitoring *:before,.insight-monitoring *:after {
+  animation:none!important;
+  transition:none!important;
+  scroll-behavior:auto!important
+}
+
+}
+
+
+.insight-shell { background: #f7f8fa; color: #202938; }
+.insight-content {
+  min-width:0;
+  min-height:0;
+  overflow-y:auto;
+  overscroll-behavior-y:contain;
+  scrollbar-gutter:stable;
+}
+.insight-content:focus-visible { outline:2px solid #8eb1ff; outline-offset:-2px; }
+.insight-sidebar { box-sizing: border-box; min-height:0; }
+.insight-workspace-icon .monitoring-icon, .insight-side-nav .monitoring-icon { width: 18px; height: 18px; flex-shrink: 0; }
+.insight-side-nav button { cursor: pointer; border: 0; }
+.insight-side-nav button:focus-visible { outline: 3px solid #8eb1ff; outline-offset: 2px; }
+.insight-monitoring { background: transparent; }
+.insight-monitoring .monitoring-icon { width: 18px; height: 18px; flex-shrink: 0; }
+.insight-monitoring .status-errors { padding: 0 22px 12px; background: #fafbfd; border-radius: 0 0 12px 12px; }
+.insight-monitoring .error-banner { padding: 12px 18px; background: #fff5f5; color: #a53641; font-size: 13px; overflow-wrap: anywhere; }
+.insight-monitoring .error-banner button { color: inherit; text-decoration: underline; }
+.insight-monitoring .status-errors .error-banner { padding: 0; color: #976411; background: transparent; }
+.insight-monitoring .empty-state p { max-width: 32em; margin: auto; }
+.insight-monitoring .copy-message { font-size: 12px; color: #526d92; margin-top: 10px; }
+.insight-monitoring .record-summary { scroll-margin-top: 70px; }
+.insight-monitoring .control-button:disabled { opacity: .65; }
+.insight-monitoring .date-label { overflow-wrap: anywhere; }
+.insight-monitoring .date-fields input { min-height: 36px; }
+.insight-monitoring .record-detail p { white-space: pre-wrap; }
+.insight-monitoring .monitoring-empty { padding: 36px 20px; text-align: center; color: #647084; }
+@media (max-width: 650px) { .insight-monitoring .result-tabs { gap: 14px; } .insight-monitoring .record-title { font-size: 13px; } }
+.insight-monitoring .next-arrow { transform: rotate(180deg); }
+
+/* Keep summaries compact. Long labels use ellipsis; title and detail retain
+   the full text without allowing it to cover the session time. */
+.insight-monitoring .record-summary>.summary-tc {
+  min-width:0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  line-height:1.6;
+  font-size:12px;
+  color:#536176;
+}
+
+/* Add breathing room without reducing the 160px/140px label text width. */
+@media(min-width:651px) {
+  .insight-monitoring .list-columns>span:nth-child(2),
+  .insight-monitoring .record-summary>.summary-tc {
+    margin-right:16px;
+  }
+}
+
+/* Problem-type filter: scoped toolbar entry and non-modal popover. */
+.insight-monitoring .records-toolbar{gap:12px;flex-wrap:wrap;}
+.insight-monitoring .result-tabs{margin-right:auto;}
+.insight-monitoring .business-filter-anchor{position:relative;min-width:0;}
+.insight-monitoring .business-filter-trigger{display:flex;align-items:center;gap:7px;height:34px;padding:0 10px;border:1px solid #e3e8ef;border-radius:7px;background:#fff;font-size:12px;color:#526176;}
+.insight-monitoring .business-filter-trigger>span{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.insight-monitoring .business-filter-trigger.selected{background:#f0f5ff;color:#2463eb;border-color:#cddcff;}
+.insight-monitoring .business-filter-trigger b{font-size:10px;border-radius:4px;background:#dce8ff;padding:0 4px;}
+.insight-monitoring .business-filter-trigger .icon{width:13px;height:13px;}
+.insight-monitoring .business-filter-popover{position:absolute;right:0;top:43px;width:310px;max-width:calc(100vw - 48px);z-index:50;background:white;border:1px solid #e7ebf1;box-shadow:0 12px 36px #20324e24;border-radius:12px;padding:20px;}
+.insight-monitoring .filter-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;}
+.insight-monitoring .filter-heading strong{font-size:14px;}
+.insight-monitoring .filter-heading button{padding:0;color:#8390a1;}
+.insight-monitoring .business-filter-popover label{display:flex;flex-direction:column;gap:8px;font-size:12px;color:#526176;margin-bottom:16px;}
+.insight-monitoring .business-filter-popover select{width:100%;height:38px;padding:0 10px;border:1px solid #dfe5ed;border-radius:7px;background:white;color:#202938;}
+.insight-monitoring .business-filter-popover select:disabled{background:#f6f7fa;color:#99a1af;}
+.insight-monitoring .filter-actions{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #edf0f5;padding-top:16px;margin-top:20px;}
+.insight-monitoring .filter-actions button{font-size:12px;color:#647084;padding:8px 12px;border-radius:6px;}
+.insight-monitoring .filter-actions .apply{background:#2463eb;color:white;}
+@media(max-width:650px){.insight-monitoring .business-filter-popover{left:0;right:auto;}}
+
+.insight-monitoring .records-panel:has(.business-filter-popover){overflow:visible;}

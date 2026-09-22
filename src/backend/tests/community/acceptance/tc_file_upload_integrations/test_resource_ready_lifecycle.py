@@ -16,7 +16,7 @@ def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _execute_local_sql(client: httpx.Client, statement: dict) -> None:
+def _execute_local_sql(client: httpx.Client, statement: dict) -> dict:
     last_response: httpx.Response | None = None
     for attempt in range(5):
         response = client.post(
@@ -24,13 +24,14 @@ def _execute_local_sql(client: httpx.Client, statement: dict) -> None:
             json={"statements": [statement]},
         )
         if response.status_code == 200:
-            return
+            return response.json()
         last_response = response
         if "SQL statements in progress" not in response.text:
             break
         time.sleep(0.2 * (attempt + 1))
     assert last_response is not None
     assert last_response.status_code == 200, last_response.text
+    return last_response.json()
 
 
 @pytest.mark.acceptance
@@ -38,38 +39,66 @@ def test_resource_ready_event_and_authoritative_context_live(live_backend) -> No
     suffix = uuid.uuid4().hex[:10]
     resource_id = f"sr_tc_{suffix}"
     owner_id = f"user_tc_{suffix}"
+    binding_owner_id = f"bot_owner_tc_{suffix}"
     bot_id = f"bot_tc_{suffix}"
+    bot_uuid = f"uuid-{suffix}"
     session_id = f"session_tc_{suffix}"
     transfer_id = f"transfer_tc_{suffix}"
     content_hash = hashlib.sha256(b"content").hexdigest()
 
     with httpx.Client(base_url=live_backend, timeout=30.0) as client:
+        binding_result = _execute_local_sql(
+            client,
+            {
+                "sql": (
+                    "INSERT INTO ac_entity_device_binding ("
+                    "entity_id, entity_type, device_id, device_provider, env, "
+                    "device_props, status, apply_reason, applied_by, "
+                    "gmt_create, gmt_modified"
+                    ") VALUES ("
+                    ":entity_id, 'staff', :device_id, 'baas', 'dev', '{}', "
+                    "'RELEASED', 'resource context acceptance seed', :applied_by, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
+                    ")"
+                ),
+                "params": {
+                    "entity_id": binding_owner_id,
+                    "device_id": bot_uuid,
+                    "applied_by": owner_id,
+                },
+            },
+        )
+        binding_id = int(binding_result["results"][0]["lastrowid"])
+
         _execute_local_sql(
             client,
             {
                 "sql": (
                     "INSERT INTO ac_session_resource ("
-                    "resource_id, owner_id, bot_id, scope_type, scope_key_hash, "
-                    "session_key_hash, engine_type, tenant, bot_uuid, display_name, "
-                    "filename, device_path, workspace_relative_path, transfer_id, "
-                    "status, transfer_api_version, session_key_ciphertext, task_version, "
+                    "resource_id, owner_id, bot_id, binding_id, scope_type, "
+                    "scope_key_hash, session_key_hash, engine_type, tenant, "
+                    "bot_uuid, display_name, filename, device_path, "
+                    "workspace_relative_path, transfer_id, status, "
+                    "transfer_api_version, session_key_ciphertext, task_version, "
                     "size_bytes, client_content_hash, gmt_create, gmt_modified"
                     ") VALUES ("
-                    ":resource_id, :owner_id, :bot_id, 'session', :scope_key_hash, "
-                    ":session_key_hash, 'openclaw', :tenant, :bot_uuid, :display_name, "
-                    ":filename, :device_path, :workspace_relative_path, :transfer_id, "
-                    "'ready', 'session_v2', :session_key_ciphertext, 3, "
-                    ":size_bytes, :client_content_hash, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
+                    ":resource_id, :owner_id, :bot_id, :binding_id, 'session', "
+                    ":scope_key_hash, :session_key_hash, 'openclaw', :tenant, "
+                    ":bot_uuid, :display_name, :filename, :device_path, "
+                    ":workspace_relative_path, :transfer_id, 'ready', 'session_v2', "
+                    ":session_key_ciphertext, 3, :size_bytes, :client_content_hash, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
                     ")"
                 ),
                 "params": {
                     "resource_id": resource_id,
                     "owner_id": owner_id,
                     "bot_id": bot_id,
+                    "binding_id": binding_id,
                     "scope_key_hash": _hash(session_id),
                     "session_key_hash": _hash(session_id),
                     "tenant": "tenant-singlebox",
-                    "bot_uuid": f"uuid-{suffix}",
+                    "bot_uuid": bot_uuid,
                     "display_name": "note.md",
                     "filename": "note.md",
                     "device_path": "workspace/note.md",
@@ -111,9 +140,10 @@ def test_resource_ready_event_and_authoritative_context_live(live_backend) -> No
                 "deleted": False,
                 "transfer_id": transfer_id,
                 "tenant": "tenant-singlebox",
-                "bot_uuid": f"uuid-{suffix}",
+                "bot_uuid": bot_uuid,
                 "user_id": owner_id,
                 "bot_id": bot_id,
+                "owner_id": binding_owner_id,
                 "filename": "note.md",
                 "size_bytes": 7,
                 "content_sha256": content_hash,

@@ -8,3 +8,8 @@ export { createMonitoringRouter } from "./routes/monitoring.js";
 export { createMonitoringRuntime } from "./services/monitoring/monitoring-runtime.js";
 export type { MonitoringRuntime } from "./services/monitoring/monitoring-runtime.js";
 export type { MonitoringApi, DiagnosisEvent, BotCheck } from "./services/monitoring/contracts.js";
+
+export { configureMonitoringIntegration } from './services/monitoring/monitoring-runtime.js';
+export type { MonitoringIntegration } from './services/monitoring/monitoring-runtime.js';
+export type { MonitoringBotDirectory, MonitoringPrincipal } from './services/monitoring/directory-contracts.js';
+export { SqlMonitoringBotDirectory } from './repositories/monitoring-bot-directory.js';

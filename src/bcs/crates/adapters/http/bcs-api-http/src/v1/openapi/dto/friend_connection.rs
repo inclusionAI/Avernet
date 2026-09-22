@@ -127,13 +127,18 @@ pub struct DeleteFriendConnectionQuery {
 }
 
 impl DeleteFriendConnectionQuery {
-    pub fn into_command(self, caller: AuthenticatedCaller) -> DeleteFriendConnection {
+    pub fn into_command(
+        self,
+        caller: AuthenticatedCaller,
+        request_auth: Option<RequestAuthHeaders>,
+    ) -> DeleteFriendConnection {
         DeleteFriendConnection {
             caller,
             target_actor: FriendConnectionActor {
                 actor_type: self.target_actor_type,
                 id: self.target_actor_id,
             },
+            request_auth,
         }
     }
 }

@@ -12,6 +12,9 @@ from uuid import uuid4
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request
+from agentclaw.community.api.build_ignore_service import BuildIgnoreServiceProtocol
+from agentclaw.community.kernel.build_ignore import BuildIgnoreCommand, BuildIgnoreQuery, BuildIgnoreError
+from agentclaw.community.adapters.http.service_bot.schemas_publish import BuildIgnoreRequest
 from agentclaw.community.api.publish_ignore_service import (
     PublishIgnoreCommand, PublishIgnoreError, PublishIgnoreServiceProtocol,
     PublishIgnoreQuery,
@@ -75,6 +78,41 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 router = APIRouter(prefix="/api/service-bot/publish", tags=["service-bot-publish"])
+
+
+async def _build_ignore_response(value, user, service, *, change):
+    try:
+        handler = service.change if change else service.query
+        result = await handler(value, user.staffId, is_admin=user.staffId in super_admin())
+        return ApiResponse(success=True, data=result)
+    except BuildIgnoreError as exc:
+        code = 403 if exc.code == "permission_denied" else 409
+        return ApiResponse(success=False, message=exc.code, error_code=code)
+    except Exception as exc:
+        logger.warning("backend.build_ignore.http_failure request_id=%s error_type=%s",
+                       value.request_id, type(exc).__name__)
+        return ApiResponse(success=False, message="build_ignore_failed", error_code=500)
+
+
+@router.get("/ops/build-ignore", response_model=ApiResponse)
+async def query_build_ignore(
+    bot_id: str = Query(..., min_length=1, max_length=256),
+    entity_id: str = Query(..., min_length=1, max_length=1024),
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: BuildIgnoreServiceProtocol = Injected(BuildIgnoreServiceProtocol),
+) -> ApiResponse:
+    return await _build_ignore_response(BuildIgnoreQuery(bot_id, entity_id, str(uuid4())),
+                                        user, service, change=False)
+
+
+@router.post("/ops/build-ignore", response_model=ApiResponse)
+async def change_build_ignore(
+    request: BuildIgnoreRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: BuildIgnoreServiceProtocol = Injected(BuildIgnoreServiceProtocol),
+) -> ApiResponse:
+    command = BuildIgnoreCommand(**request.model_dump(), request_id=str(uuid4()))
+    return await _build_ignore_response(command, user, service, change=True)
 
 
 @router.get("/ops/publish-ignore", response_model=ApiResponse)

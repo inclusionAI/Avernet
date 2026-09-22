@@ -3,16 +3,18 @@
 ## Context Boundary
 
 ```yaml
-purpose: Observe authoritative TC resource state and coordinate bounded, best-effort resource-ready publication.
+purpose: Resolve authoritative TC resource context and coordinate bounded, best-effort resource-ready publication.
 provides:
+  - TcResourceContextService
   - TcResourceReadyCoordinator
   - TcResourceReadyObserverProtocol
 consumes:
-  - TcResourceReadyPublisherPlugin
-  - TcResourceContextService
+  - DeviceBindingRepository
   - SessionResourceRecord
+  - TcResourceReadyPublisherPlugin
 internal_dependencies:
   - agentclaw.community.core.bot_management.token_vault
+  - agentclaw.community.core.repository.protocols.devices
   - agentclaw.community.core.repository.protocols.platform
   - agentclaw.community.plugin_api.tc_resource_ready
   - agentclaw.community.core.session_resources
@@ -36,3 +38,8 @@ successful deliveries are deduplicated by a bounded TTL/LRU cache. Scheduling,
 overload, and downstream delivery failures are logged without changing the TC
 API result. There is no durable outbox, retry worker, or restart-safe guarantee
 in this phase.
+
+The internal resource-context response preserves the uploader as `user_id` and
+resolves the Bot `owner_id` from the resource's persisted `binding_id`. The binding
+must exist, identify the same `bot_uuid`, and contain a non-empty `entity_id`.
+Its current lifecycle status is not part of this historical ownership lookup.

@@ -99,6 +99,19 @@ research_gaps ──> finalize       rewrite ──> finalize
 - `writing_loop` 首次执行的 previous_result 为空，已通过的资料评审结果通过普通 upstream output 传入。后续执行只自动携带本 Loop 上一次评审结果，因此评审输出保留完整资料依据与稿件。
 - 资料 exhausted 时生成缺口报告，整个写作 Loop 被跳过；写作 exhausted 时走 rewrite，最终汇总保留未通过状态。
 
+## 恢复与副作用
+
+普通工作流恢复随服务启动，Loop 恢复随 `collaboration.loop_execution_enabled` 开放。
+恢复扫描失败后使用带随机抖动的指数退避，最长 30 秒；非空页全部成功后恢复每秒扫描，
+空的分页尾页保留退避状态，各类扫描独立计时。
+超时扫描每次只处理一批；HumanInput 队列每次最多推进 32 条，并在操作之间检查 1 秒预算，
+剩余请求由后续恢复扫描继续推进。时间预算不强制中断正在发送的消息。
+
+这些模板不提供外部操作 exactly-once：恢复时仍为 `Delivering` 的 Bot 投递不会重发同一 attempt，节点超时后
+是否创建新 attempt 取决于模板重试策略。新 attempt、Loop 下次执行和 rerun 都有不同的投递 ID；
+涉及写入、发布等副作用时，应在 Bot/Provider 实际执行处使用稳定的业务操作键去重。
+参见 [Provider 集成说明](../../docs/bot-provider-integration.zh-CN.md#幂等和-session)。
+
 ## 新增语言
 
 1. 创建目录 `{locale}/`

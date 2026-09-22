@@ -12,7 +12,6 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashSet;
 
 use bcs_domain::{ActorKind, DeliveryType, HumanMessageView, MessageViewScope, SystemMessageEvent};
 use bcs_service_api::{
@@ -1709,29 +1708,13 @@ pub async fn get_session_messages(
 }
 
 fn merge_participant_state_machine_snapshot(
-    mut persisted: Vec<GroupMessage>,
+    persisted: Vec<GroupMessage>,
     snapshot: Option<Vec<GroupMessage>>,
     limit: u64,
 ) -> Vec<GroupMessage> {
-    let mut seen_ids = persisted
-        .iter()
-        .map(|message| message.id.clone())
-        .collect::<HashSet<_>>();
-    if let Some(snapshot) = snapshot {
-        persisted.extend(
-            snapshot
-                .into_iter()
-                .filter(|message| seen_ids.insert(message.id.clone())),
-        );
-    }
-    persisted.sort_by(|left, right| {
-        right
-            .timestamp
-            .cmp(&left.timestamp)
-            .then_with(|| right.id.cmp(&left.id))
-    });
-    persisted.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
-    persisted
+    bcs_domain::state_machine_history::merge_state_machine_history(
+        persisted, snapshot.unwrap_or_default(), limit,
+    )
 }
 
 struct ResolvedSessionHistoryView {

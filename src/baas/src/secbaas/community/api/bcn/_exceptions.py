@@ -106,7 +106,7 @@ class BcnUnauthorizedError(BcnError):
 
 
 class BcnRunTerminatedError(BcnError):
-    """目标 run 已为终态（COMPLETED/FAILED/TIME_OUT/已 abort），不可再次中止。
+    """目标 run 已为终态（COMPLETED/FAILED/TIME_OUT/ABORTED），不可再次中止。
 
     用于 ``chat.abort``：当 session 下对应 run 已终结时返回 410
     ``run_terminated``，与 BCS 侧 ``RunTerminated("run_terminated")`` 410 语义一致。

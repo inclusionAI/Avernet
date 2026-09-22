@@ -14,11 +14,16 @@ class PublishRecordExtraConfig:
 
     Captures device identity metadata at record creation time so the
     device's provider identity is preserved even after the source
-    baas_device record is overwritten by subsequent publishes.
+    baas_device record is overwritten by subsequent publishes. Also carries
+    the per-device publish retry sub-state.
     """
 
     device_uuid: str | None = None
     provider_device_id: str | None = None
+
+    publish_max_retry_times: int = 0
+    publish_retry_count: int = 0
+    attempt_started_at: str | None = None
 
 
 @dataclass(slots=True)

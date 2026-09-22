@@ -39,6 +39,7 @@ use bcs_service_api::application::connect::{
     ConnectResult, ConnectService, ConnectStatus, FriendEntriesPage, FriendListQuery, RequestDirection, RequestsPage,
 };
 use bcs_service_api::port::{
+    FriendAuthSyncAction, FriendAuthSyncCommand, FriendAuthSyncPort,
     FriendConnectNotificationCommand, FriendConnectNotificationKind,
     FriendConnectNotificationPort,
 };
@@ -71,6 +72,8 @@ pub struct DbConnectService {
     bot_config: Arc<dyn BotActorConfigRepoPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
+    /// BCS→backend friend-auth-sync; used by Task 11 triggers (grant/revoke).
+    friend_auth_sync: Arc<dyn FriendAuthSyncPort>,
     env: String,
 }
 
@@ -82,6 +85,7 @@ impl DbConnectService {
         bot_config: Arc<dyn BotActorConfigRepoPort>,
         user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
         friend_connect_notification: Arc<dyn FriendConnectNotificationPort>,
+        friend_auth_sync: Arc<dyn FriendAuthSyncPort>,
         env: String,
     ) -> Self {
         Self {
@@ -91,6 +95,7 @@ impl DbConnectService {
             bot_config,
             user_directory,
             friend_connect_notification,
+            friend_auth_sync,
             env,
         }
     }
@@ -363,6 +368,37 @@ impl ConnectService for DbConnectService {
                             message.as_deref(),
                         )
                         .await?;
+
+                    // 11c: best-effort friend-auth-sync grant trigger (auto-
+                    // approve, human→bot). Principal = the applicant (caller),
+                    // since the auto-approve is decided on visibility/allowlist,
+                    // not a separate owner action.
+                    if caller_kind == ActorKind::Human && target_kind == ActorKind::Bot {
+                        let owner_work_no = self
+                            .owner_work_no_from_bot_config(&to_bot, &self.env)
+                            .await
+                            .unwrap_or_default();
+                        let command = FriendAuthSyncCommand {
+                            env: self.env.clone(),
+                            bot_id: to_bot.to_string(),
+                            owner_work_no,
+                            human_work_no: caller
+                                .strip_prefix("human_")
+                                .unwrap_or(&caller)
+                                .to_string(),
+                            action: FriendAuthSyncAction::Grant,
+                            request_id: request_ids.first().map(|s| s.to_string()),
+                            request_auth: request_auth.clone(),
+                        };
+                        if let Err(err) = self.friend_auth_sync.sync(command).await {
+                            warn!(
+                                error = %err,
+                                bot_id = %to_bot,
+                                "friend-auth-sync grant (auto) failed"
+                            );
+                        }
+                    }
+
                     Ok(ConnectResult {
                         request_ids,
                         edge_ids,
@@ -378,7 +414,12 @@ impl ConnectService for DbConnectService {
         }
     }
 
-    async fn approve(&self, request_id: &str, decider: &str) -> ServiceResult<Vec<u64>> {
+    async fn approve(
+        &self,
+        request_id: &str,
+        decider: &str,
+        request_auth: Option<RequestAuthHeaders>,
+    ) -> ServiceResult<Vec<u64>> {
         let req = self
             .requests
             .get(request_id, &self.env)
@@ -455,6 +496,35 @@ impl ConnectService for DbConnectService {
                         None,
                     )
                     .await?;
+            }
+        }
+
+        // 11b: best-effort friend-auth-sync grant trigger (manual approve,
+        // human→bot). The inbound principal (owner doing the approving) is
+        // forwarded so the backend can authenticate the work-order call.
+        if caller_kind == ActorKind::Human && target_kind == ActorKind::Bot {
+            let owner_work_no = self
+                .owner_work_no_from_bot_config(&to_bot, &self.env)
+                .await
+                .unwrap_or_default();
+            let command = FriendAuthSyncCommand {
+                env: self.env.clone(),
+                bot_id: to_bot.clone(),
+                owner_work_no,
+                human_work_no: caller
+                    .strip_prefix("human_")
+                    .unwrap_or(&caller)
+                    .to_string(),
+                action: FriendAuthSyncAction::Grant,
+                request_id: Some(request_id.to_string()),
+                request_auth: request_auth.clone(),
+            };
+            if let Err(err) = self.friend_auth_sync.sync(command).await {
+                warn!(
+                    error = %err,
+                    bot_id = %to_bot,
+                    "friend-auth-sync grant (manual) failed"
+                );
             }
         }
 
@@ -591,7 +661,12 @@ impl ConnectService for DbConnectService {
             })
     }
 
-    async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<u64>> {
+    async fn revoke_friend(
+        &self,
+        caller: &str,
+        target: &str,
+        request_auth: Option<RequestAuthHeaders>,
+    ) -> ServiceResult<Vec<u64>> {
         // D12 friend edges are `grant_ref_id == target.default` (caller→target)
         // or `grant_ref_id == caller.default` (target→caller, Bot↔Bot). Revoke
         // exactly those friend edges; leave other (profile/rules) edges alone.
@@ -634,6 +709,37 @@ impl ConnectService for DbConnectService {
                     self.edge_grants.revoke_grant(g.edge_id, &self.env).await?;
                     revoked.push(g.edge_id);
                 }
+            }
+        }
+
+        // 11d: best-effort friend-auth-sync revoke trigger (human→bot). The
+        // inbound principal (the user doing the unfriend) is forwarded so the
+        // backend can authenticate the work-order teardown call.
+        let caller_kind = actor_kind_of(caller);
+        let target_kind = actor_kind_of(target);
+        if caller_kind == ActorKind::Human && target_kind == ActorKind::Bot {
+            let owner_work_no = self
+                .owner_work_no_from_bot_config(target, &self.env)
+                .await
+                .unwrap_or_default();
+            let command = FriendAuthSyncCommand {
+                env: self.env.clone(),
+                bot_id: target.to_string(),
+                owner_work_no,
+                human_work_no: caller
+                    .strip_prefix("human_")
+                    .unwrap_or(caller)
+                    .to_string(),
+                action: FriendAuthSyncAction::Revoke,
+                request_id: None,
+                request_auth: request_auth.clone(),
+            };
+            if let Err(err) = self.friend_auth_sync.sync(command).await {
+                warn!(
+                    error = %err,
+                    bot_id = %target,
+                    "friend-auth-sync revoke failed (best-effort)"
+                );
             }
         }
 
@@ -747,6 +853,50 @@ impl ConnectService for DbConnectService {
 // ---- private helpers ------------------------------------------------------
 
 impl DbConnectService {
+    /// Verify `caller` owns `bot_id` (spec §3.2 ownership gate for config
+    /// writes).
+    ///
+    /// Rules (mirrors `docs/CLAUDE.md` "Bot Ownership Verification"):
+    /// - `created_by` present AND matches `caller` → allow.
+    /// - `created_by` present AND differs from `caller` → `Forbidden`.
+    /// - `created_by` absent (legacy bot) → allow (auto-claim; CLAUDE.md).
+    /// - bot not found in this env → `BotNotFound` (so `PUT` on a missing bot
+    ///   surfaces as 404 rather than a misleading 403).
+    async fn verify_ownership(&self, bot_id: &str, caller: &str) -> ServiceResult<()> {
+        match self.bot_config.get(bot_id, &self.env).await {
+            Some(cfg) => match &cfg.created_by {
+                Some(owner) if owner == caller => Ok(()),
+                Some(_) => Err(ServiceError::Forbidden(format!(
+                    "caller '{caller}' does not own bot '{bot_id}'"
+                ))),
+                None => Ok(()), // legacy bot (no created_by) → auto-claim
+            },
+            None => Err(ServiceError::BotNotFound(bot_id.to_string())),
+        }
+    }
+
+    /// Resolve the OWNER work no of `bot` from its `BotActorConfig.created_by`.
+    ///
+    /// `created_by` is normally a bare staff no (e.g. `"85020"`); if a legacy
+    /// or migration-shaped `human_<staff>` value is encountered, the `human_`
+    /// prefix is stripped. Returns `None` when the bot is unknown or has no
+    /// `created_by` (legacy bot) — callers pass `String::new()` downstream so
+    /// the friend-auth-sync backend best-effort fails safely on a missing owner.
+    async fn owner_work_no_from_bot_config(
+        &self,
+        bot: &str,
+        env: &str,
+    ) -> Option<String> {
+        self.bot_config.get(bot, env).await.and_then(|c| {
+            c.created_by.map(|owner| {
+                owner
+                    .strip_prefix("human_")
+                    .unwrap_or(&owner)
+                    .to_string()
+            })
+        })
+    }
+
     async fn resolve_user_department_code(
         &self,
         actor_id: &str,
@@ -1264,7 +1414,9 @@ impl EdgePermissionFriendSyncService for DbConnectService {
             }
         };
 
-        self.revoke_friend(caller, target).await.map(|_| ())
+        // The edge-permission sync path has no inbound HTTP principal; pass
+        // None (the revoke trigger degrades to a best-effort, auth-less call).
+        self.revoke_friend(caller, target, None).await.map(|_| ())
     }
 }
 
@@ -1668,6 +1820,7 @@ mod tests {
             bot_config.clone(),
             None,
             Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+            Arc::new(bcs_service_api::NoopFriendAuthSyncPort),
             env.to_string(),
         )
     }
@@ -1737,6 +1890,7 @@ mod tests {
             bot_config.clone(),
             Some(departments),
             Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
+            Arc::new(bcs_service_api::NoopFriendAuthSyncPort),
             "dev".to_string(),
         )
     }
@@ -1834,6 +1988,7 @@ mod tests {
             bot_config.clone(),
             None,
             notification,
+            Arc::new(bcs_service_api::NoopFriendAuthSyncPort),
             "dev".to_string(),
         )
     }
@@ -1978,7 +2133,7 @@ mod tests {
         assert_eq!(svc.env(), "dev");
 
         let err = svc
-            .approve("missing-request-approve", "decider_1")
+            .approve("missing-request-approve", "decider_1", None)
             .await
             .expect_err("approve missing request should fail");
         assert!(matches!(err, ServiceError::FriendRequestNotFound(_)), "got {err:?}");
@@ -2704,6 +2859,7 @@ mod tests {
             bc.clone(),
             Some(user_directory),
             Arc::new(recorder),
+            Arc::new(bcs_service_api::NoopFriendAuthSyncPort),
             "dev".to_string(),
         );
         // Human applicant (nick 李四) → bot "本地代码专家" (owner 85020); APPROVAL → pending.
@@ -2917,7 +3073,7 @@ mod tests {
         assert_eq!(pending.status, ConnectStatus::Pending);
         let rid = pending.request_ids[0].clone();
 
-        let edge_ids = svc.approve(&rid, "85020").await.expect("approve ok");
+        let edge_ids = svc.approve(&rid, "85020", None).await.expect("approve ok");
         assert_eq!(edge_ids.len(), 1, "Human→Bot approve: 1 edge");
         // Original pending request is now approved + edge_id backfilled.
         let r = rq.get(&rid, "dev").await.expect("request still exists");
@@ -2932,7 +3088,7 @@ mod tests {
         let human_friends = svc.list_friends("human_1").await.expect("human friends");
         assert_eq!(human_friends.len(), 1);
         assert_eq!(human_friends[0].actor_id, "x:appr");
-        svc.revoke_friend("x:appr", "human_1").await.expect("bot removes friend");
+        svc.revoke_friend("x:appr", "human_1", None).await.expect("bot removes friend");
         assert!(svc.list_friends("x:appr").await.expect("bot friends").is_empty());
         assert!(svc.list_friends("human_1").await.expect("human friends").is_empty());
     }
@@ -2957,7 +3113,7 @@ mod tests {
         }).await.unwrap();
         assert_eq!(bots.total, 0);
         assert!(bots.items.is_empty());
-        svc.revoke_friend("x:paged", "human_1").await.unwrap();
+        svc.revoke_friend("x:paged", "human_1", None).await.unwrap();
         let empty = svc.list_friends_paginated("x:paged", query).await.unwrap();
         assert_eq!(empty.total, 1);
         assert!(empty.items.is_empty());
@@ -2981,7 +3137,7 @@ mod tests {
             .expect("manual pending");
         let rid = pending.request_ids[0].clone();
 
-        svc.approve(&rid, "85020").await.expect("approve ok");
+        svc.approve(&rid, "85020", None).await.expect("approve ok");
 
         // The bot's inbox (to_id=x:nodupe) should contain exactly 1 request
         // for this connect (the original, now approved) — not 2.
@@ -3007,7 +3163,7 @@ mod tests {
         assert_eq!(pending.request_ids.len(), 2);
         let fwd_id = pending.request_ids[0].clone();
 
-        let edge_ids = svc.approve(&fwd_id, "owner").await.expect("approve ok");
+        let edge_ids = svc.approve(&fwd_id, "owner", None).await.expect("approve ok");
         assert_eq!(edge_ids.len(), 2, "Bot↔Bot approve: 2 edges");
 
         // BOTH pending requests are now approved (single accept, §4.1).
@@ -3173,7 +3329,7 @@ mod tests {
         assert_eq!(created.edge_ids.len(), 1);
         assert!(eg.has_friend_edge("human_1", "x:unf", "dev").await);
 
-        let n = svc.revoke_friend("human_1", "x:unf").await.expect("revoke ok");
+        let n = svc.revoke_friend("human_1", "x:unf", None).await.expect("revoke ok");
         assert_eq!(n.len(), 1, "Human→Bot: revoked exactly 1 friend edge");
         assert!(!eg.has_friend_edge("human_1", "x:unf", "dev").await);
     }
@@ -3187,7 +3343,7 @@ mod tests {
         svc.create_connect("x:uA", "x:uB", None, None).await.expect("connect");
         assert!(eg.has_friend_edge("x:uA", "x:uB", "dev").await);
 
-        let n = svc.revoke_friend("x:uA", "x:uB").await.expect("revoke ok");
+        let n = svc.revoke_friend("x:uA", "x:uB", None).await.expect("revoke ok");
         assert_eq!(n.len(), 2, "Bot↔Bot: revoked both friend edges");
         assert!(!eg.has_friend_edge("x:uA", "x:uB", "dev").await);
     }
@@ -3216,7 +3372,7 @@ mod tests {
         .await
         .expect("insert writer edge");
 
-        let n = svc.revoke_friend("human_1", "x:keep").await.expect("revoke");
+        let n = svc.revoke_friend("human_1", "x:keep", None).await.expect("revoke");
         assert_eq!(n.len(), 1, "only the friend (default) edge revoked");
         let active = eg.list_active_grants("human_1", "x:keep", "dev").await;
         assert_eq!(active.len(), 1, "writer edge survives");
@@ -3592,7 +3748,7 @@ mod tests {
 
         // Approve, then All from the bot's view: inbox (1 approved) ∪ sent
         // (the bot sent nothing) ⇒ total 1, status approved.
-        svc.approve(&rid, "85020").await.expect("approve");
+        svc.approve(&rid, "85020", None).await.expect("approve");
         let all_bot = svc
             .list_requests("x:sa", RequestDirection::All, None, 1, 20)
             .await

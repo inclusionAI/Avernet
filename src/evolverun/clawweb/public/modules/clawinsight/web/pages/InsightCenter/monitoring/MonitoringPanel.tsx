@@ -1,27 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
-import { monitoringApi, monitoringErrorText } from '../../../api/monitoring';
-import type { BotStatus, DiagnosisPage, MonitoringQuery } from '../../../types/monitoring';
+import { monitoringApi, monitoringErrorCode, monitoringErrorText } from '../../../api/monitoring';
+import type { BotOption, DiagnosisPage, MonitoringQuery } from '../../../types/monitoring';
 import { DiagnosisRecord, decisionLabels as labels, displayTime, timeParts } from './DiagnosisRecord';
 import { beijingDateRange, MonitoringControls } from './MonitoringControls';
 import { MonitoringIcon as Icon } from './MonitoringIcon';
 import './monitoring.css';
 import { ProblemTypeFilter } from './ProblemTypeFilter';
+import { MonitoringEnrollment } from './MonitoringEnrollment';
+import { MonitoringPagination } from './MonitoringPagination';
 
 export { displayTime } from './DiagnosisRecord';
 const initialQuery = (): MonitoringQuery => ({ ...beijingDateRange(1), decision: 'ALL', keyword: '', page: 1, pageSize: 20 });
 const states = { HEALTHY: '监控正常', ERROR: '检查异常', UNKNOWN: '状态未知', PAUSED: '已暂停' };
 
-export default function MonitoringPanel() {
-  const [bots, setBots] = useState<{ botId: string }[]>([]);
-  const [botId, setBotId] = useState('');
-  const [botsError, setBotsError] = useState('');
-  const [botsLoading, setBotsLoading] = useState(true);
+export default function MonitoringPanel({ isAdmin = false }: { isAdmin?: boolean }) {
+  const [selected, setSelected] = useState<BotOption | null>(null);
+  const botRef = selected?.botRef ?? '';
   const [botsRevision, setBotsRevision] = useState(0);
   const [query, setQuery] = useState<MonitoringQuery>(initialQuery);
   const [keywordInput, setKeywordInput] = useState('');
   const [revision, setRevision] = useState(0);
-  const [pageData, setPageData] = useState<DiagnosisPage | null>(null);
-  const [status, setStatus] = useState<BotStatus | null>(null);
+  const [loadedPage, setLoadedPage] = useState<{ key: string; value: DiagnosisPage } | null>(null);
+  const queryKey = JSON.stringify([botRef, query]);
+  // Never render the previous query's rows under the next query's pagination controls.
+  const pageData = loadedPage?.key === queryKey ? loadedPage.value : null;
+  const pageCorrectionUsed = useRef(false);
+  const [status, setStatus] = useState<BotOption | null>(null);
   const [error, setError] = useState('');
   const [statusError, setStatusError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,45 +35,20 @@ export default function MonitoringPanel() {
   const invalidDates = Boolean(query.startDate && query.endDate && query.startDate > query.endDate);
 
   useEffect(() => {
-    let active = true;
-    let controller: AbortController | null = null;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const load = () => {
-      if (document.visibilityState === 'hidden') return;
-      controller?.abort(); clearTimeout(timeout);
-      const current = new AbortController(); controller = current;
-      const live = () => active && controller === current;
-      timeout = setTimeout(() => current.abort(new DOMException('Timeout', 'TimeoutError')), 15000);
-      setBotsLoading(true); setBotsError('');
-      monitoringApi.bots(current.signal).then(result => {
-        if (!live()) return;
-        setBots(result.items);
-        setBotId(selected => result.items.some(bot => bot.botId === selected) ? selected : result.items[0]?.botId ?? '');
-      }).catch(failure => { if (live()) setBotsError(monitoringErrorText(current.signal.reason ?? failure)); })
-        .finally(() => { if (live()) { clearTimeout(timeout); setBotsLoading(false); } });
-    };
-    const visibility = () => {
-      if (document.visibilityState === 'hidden') {
-        controller?.abort(); controller = null; clearTimeout(timeout); setBotsLoading(false);
-      } else load();
-    };
-    load();
-    const interval = setInterval(load, 30000);
-    document.addEventListener('visibilitychange', visibility);
-    return () => { active = false; controller?.abort(); clearTimeout(timeout); clearInterval(interval); document.removeEventListener('visibilitychange', visibility); };
-  }, [botsRevision]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setQuery(current => current.keyword === keywordInput.trim() ? current : { ...current, keyword: keywordInput.trim(), page: 1 }), 300);
+    const timer = setTimeout(() => {
+      if (query.keyword === keywordInput.trim()) return;
+      pageCorrectionUsed.current = false;
+      setQuery(current => ({ ...current, keyword: keywordInput.trim(), page: 1 }));
+    }, 300);
     return () => clearTimeout(timer);
-  }, [keywordInput]);
+  }, [keywordInput, query.keyword]);
 
   // A changed query clears unrelated results. Polling preserves the current page and expanded records.
-  useEffect(() => { setPageData(null); setOpenIds(new Set()); }, [botId, query]);
-  useEffect(() => { setStatus(null); setStatusError(''); setUpdatedAt(null); }, [botId]);
+  useEffect(() => { setLoadedPage(null); setOpenIds(new Set()); }, [botRef, query]);
+  useEffect(() => { setStatus(null); if (botRef) { setStatusError(''); setError(''); } setUpdatedAt(null); }, [botRef]);
 
   useEffect(() => {
-    if (!botId) return;
+    if (!botRef) return;
     let disposed = false;
     let controller: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -81,13 +60,47 @@ export default function MonitoringPanel() {
       const live = () => !disposed && sequence === requestSequence.current;
       timer = setTimeout(() => current.abort(new DOMException('Timeout', 'TimeoutError')), 15000);
       setLoading(true);
-      const statusRequest = monitoringApi.status(botId, current.signal).then(value => {
-        if (live()) { setStatus(value); setStatusError(''); }
-      }).catch(failure => { if (live()) setStatusError(monitoringErrorText(current.signal.reason ?? failure)); });
-      const listRequest = invalidDates ? Promise.resolve() : monitoringApi.diagnoses(botId, query, current.signal).then(value => {
-        if (live()) { setPageData(value); setError(''); setUpdatedAt(new Date().toISOString()); }
-      }).catch(failure => { if (live()) setError(monitoringErrorText(current.signal.reason ?? failure)); });
-      void Promise.all([statusRequest, listRequest]).finally(() => { if (live()) { clearTimeout(timer); setLoading(false); } });
+      const request = async () => {
+        if (invalidDates) return;
+        let value: BotOption;
+        try {
+          value = await monitoringApi.targetStatus(botRef, query, current.signal);
+          if (!live()) return;
+          setStatus(value); setStatusError('');
+          if (value.enrollmentState !== 'ENROLLED') { setLoadedPage(null); setError(''); return; }
+        } catch (failure) {
+          if (live()) {
+            setStatusError(monitoringErrorText(current.signal.reason ?? failure));
+            const code = (failure as { status?: number }).status;
+            if ([401, 403, 404].includes(code ?? 0)) { setSelected(null); setStatus(null); setLoadedPage(null); setOpenIds(new Set()); setBotsRevision(x => x + 1); }
+          }
+          return;
+        }
+        try {
+          const page = await monitoringApi.targetDiagnoses(botRef, query, current.signal);
+          if (!live()) return;
+          if (query.page > Math.max(1, page.totalPages) && !pageCorrectionUsed.current) {
+            pageCorrectionUsed.current = true;
+            setQuery(previous => ({ ...previous, page: Math.max(1, page.totalPages) }));
+            return;
+          }
+          setLoadedPage({ key: queryKey, value: page }); setError(''); setUpdatedAt(new Date().toISOString());
+        } catch (failure) {
+          if (live()) {
+            if ((failure as { status?: number }).status === 409 && monitoringErrorCode(failure) === 'MONITORING_NOT_ENROLLED') {
+              setLoadedPage(null); setOpenIds(new Set()); setError('');
+              setStatus(previous => previous ? { ...previous, enrollmentState: 'NOT_ENROLLED', monitoring: null,
+                capabilities: { canView: true, canRequestEnrollment: true } } : null);
+              setBotsRevision(x => x + 1); return;
+            }
+            setError(monitoringErrorText(current.signal.reason ?? failure));
+            if ([401, 403, 404].includes((failure as { status?: number }).status ?? 0)) {
+              setSelected(null); setStatus(null); setLoadedPage(null); setOpenIds(new Set()); setBotsRevision(x => x + 1);
+            }
+          }
+        }
+      };
+      void request().finally(() => { if (live()) { clearTimeout(timer); setLoading(false); } });
     };
     const visibility = () => {
       if (document.visibilityState === 'hidden') {
@@ -98,38 +111,38 @@ export default function MonitoringPanel() {
     const interval = setInterval(load, 30000);
     document.addEventListener('visibilitychange', visibility);
     return () => { disposed = true; controller?.abort(); clearTimeout(timer); clearInterval(interval); document.removeEventListener('visibilitychange', visibility); };
-  }, [botId, query, revision, invalidDates]);
+  }, [botRef, query, queryKey, revision, invalidDates]);
 
-  const change = (patch: Partial<MonitoringQuery>) => { setError(''); setQuery(current => ({ ...current, ...patch, page: patch.page ?? 1 })); };
+  const change = (patch: Partial<MonitoringQuery>) => { pageCorrectionUsed.current = false; setError(''); setQuery(current => ({ ...current, ...patch, page: patch.page ?? 1 })); };
   const countKey = { ALL: 'all', ALERT: 'alert', PASS: 'pass', UNRESOLVED: 'unresolved' } as const;
-  const pages = pageData?.totalPages ?? 0;
-  const pageNumbers = Array.from({ length: Math.min(5, pages) }, (_, i) => Math.max(1, Math.min(query.page - 2, pages - 4)) + i);
 
   const filtered = Boolean(query.businessProblemCategory || query.businessProblemSubtype || query.startDate || query.endDate || query.keyword || query.decision !== 'ALL');
   const clearFilters = () => { setKeywordInput(''); change({ ...initialQuery(), businessProblemCategory: '', businessProblemSubtype: '', pageSize: query.pageSize }); };
-  const lastCheck = timeParts(status?.lastSuccessfulCheckAt ?? null);
-  const healthClass = statusError ? 'unknown' : status?.status === 'HEALTHY' ? '' : status?.status.toLowerCase() ?? 'unknown';
+  const lastCheck = timeParts(status?.monitoring?.lastSuccessfulCheckAt ?? null);
+  const healthClass = statusError ? 'unknown' : status?.monitoring?.status === 'HEALTHY' ? '' : status?.monitoring?.status.toLowerCase() ?? 'unknown';
   return <div className="insight-monitoring">
     <div className="page-heading"><div><h1>Agent 监控自愈</h1><p>关注运行异常，查看每一次会话诊断。</p></div></div>
-    <MonitoringControls bots={bots} botId={botId} botsLoading={botsLoading} loading={loading} startDate={query.startDate} endDate={query.endDate}
-      onBotChange={id => { setBotId(id); change({}); }} onDatesChange={change}
+    <MonitoringControls selected={selected} isAdmin={isAdmin} revision={botsRevision} loading={loading} startDate={query.startDate} endDate={query.endDate}
+      onBotChange={bot => { if (bot.botRef !== botRef) { setSelected(bot); setStatus(null); change({}); } }} onDatesChange={change}
+      onUnavailable={failure => { ++requestSequence.current; setLoading(false); setSelected(null); setStatus(null); setLoadedPage(null); setOpenIds(new Set()); setStatusError(monitoringErrorText(failure)); }}
       onRefresh={() => { setBotsRevision(x => x + 1); setRevision(x => x + 1); }}>
-      {botId && <>
+      {botRef && <>
         <div className="status-bar" role="region" aria-label="Bot 监控状态">
-          <div className="status-left"><span className={`health ${healthClass}`}><span className="dot" />{statusError ? '状态未更新' : status ? states[status.status] : '状态加载中…'}</span><span className="separator" /><span className="status-time" title={displayTime(status?.lastSuccessfulCheckAt ?? null)}>最近成功检查 {lastCheck ? `${lastCheck.day} ${lastCheck.time}` : '—'}</span></div>
+          <div className="status-left"><span className={`health ${healthClass}`}><span className="dot" />{statusError ? '状态未更新' : status ? status.monitoring ? states[status.monitoring.status] : '未监控' : '状态加载中…'}</span><span className="separator" /><span className="status-time" title={displayTime(status?.monitoring?.lastSuccessfulCheckAt ?? null)}>最近成功检查 {lastCheck ? `${lastCheck.day} ${lastCheck.time}` : '—'}</span></div>
           <span className="live-refresh" title="页面可见时每 30 秒自动刷新"><Icon name="refresh" />{loading ? '正在更新…' : updatedAt ? `更新于 ${timeParts(updatedAt)?.time}` : '每 30 秒刷新'}</span>
         </div>
-        {statusError && <div className="status-errors"><p role="alert" className="error-banner">{statusError}</p></div>}
+        {statusError && <div className="status-errors"><p role="alert" className="error-banner">{statusError}{pageData && ' 当前保留上次结果，尚未更新。'}</p></div>}
       </>}
     </MonitoringControls>
-    {botsError && <p role="alert" className="error-banner">{botsError}</p>}
-    {!botsLoading && !botsError && !bots.length && <p className="monitoring-empty">暂无已上报的监控 Bot。</p>}
-    {botId && <>
+    {!botRef && <p className="monitoring-empty">选择一个 Bot，查看监控状态和诊断结果。</p>}
+    {!botRef && (statusError || error) && <p role="alert" className="error-banner">{statusError || error}</p>}
+    {status?.enrollmentState === 'NOT_ENROLLED' && selected && <MonitoringEnrollment key={botRef} bot={status} onRefresh={() => setRevision(x => x + 1)} />}
+    {botRef && status?.enrollmentState === 'ENROLLED' && <>
       <div className="records-title"><h2>诊断记录</h2><span className="sort-note" title="按会话时间倒序排列，时间未知的记录在最后"><Icon name="sort" />最新会话优先</span></div>
       <section aria-label="诊断记录" className="records-panel" aria-busy={loading}>
         <div className="records-toolbar">
           <div role="group" aria-label="诊断结果筛选" className="result-tabs">{(Object.keys(labels) as (keyof typeof labels)[]).map(value => <button type="button" aria-pressed={query.decision === value} key={value} onClick={() => change({ decision: value })} className={query.decision === value ? 'active' : ''}>{labels[value]} <span className="number">{pageData ? pageData.counts[countKey[value]] : '—'}</span></button>)}</div>
-          <ProblemTypeFilter key={`${botId}:${query.startDate}:${query.endDate}`} options={pageData?.problemTypes ?? []}
+          <ProblemTypeFilter key={`${botRef}:${query.startDate}:${query.endDate}`} options={pageData?.problemTypes ?? []}
             category={query.businessProblemCategory ?? ''} subtype={query.businessProblemSubtype ?? ''}
             onApply={(businessProblemCategory, businessProblemSubtype) => change({ businessProblemCategory, businessProblemSubtype })} />
           <label className="search-box"><Icon name="search" /><input type="search" aria-label="搜索诊断记录" placeholder="搜索 Session Key / Trace ID" maxLength={200} value={keywordInput} onChange={event => setKeywordInput(event.target.value)} />{keywordInput && <button type="button" className="search-clear" aria-label="清空搜索" onClick={() => { setKeywordInput(''); change({ keyword: '' }); }}><Icon name="x" /></button>}</label>
@@ -142,14 +155,8 @@ export default function MonitoringPanel() {
           {pageData?.total === 0 && <div className="empty-state"><span className="empty-icon"><Icon name="empty" /></span><h3>{filtered ? '没有符合当前条件的诊断记录。' : '暂无诊断记录'}</h3><p>{filtered ? '试试调整时间范围、问题类型、诊断结论或搜索关键词。' : '此 Bot 还没有可展示的诊断结果。'}</p>{filtered && <button type="button" onClick={clearFilters}>清空筛选条件</button>}</div>}
           {pageData && pageData.total > 0 && !pageData.items.length && <div className="empty-state"><p>当前页暂无记录。</p><button type="button" onClick={() => change({ page: 1 })}>返回首页</button></div>}
         </div>}
-        <footer className="list-footer">
-          <span aria-live="polite">{pageData?.items.length ? `第 ${(pageData.page - 1) * pageData.pageSize + 1}–${(pageData.page - 1) * pageData.pageSize + pageData.items.length} 条，共 ${pageData.total} 条` : pageData?.total === 0 ? '共 0 条' : '—'}</span>
-          <nav aria-label="诊断记录分页" className="pagination"><select aria-label="每页条数" value={query.pageSize} onChange={event => change({ pageSize: Number(event.target.value) })}>{[10, 20, 50].map(n => <option key={n} value={n}>{n} 条 / 页</option>)}</select>
-            <button type="button" aria-label="上一页" className="page-btn" disabled={loading || query.page <= 1 || !pages} onClick={() => change({ page: query.page - 1 })}><Icon name="arrow" /></button>
-            {pageNumbers.map(n => <button type="button" key={n} aria-label={`第 ${n} 页`} aria-current={query.page === n ? 'page' : undefined} className={`page-btn ${query.page === n ? 'active' : ''}`} onClick={() => change({ page: n })}>{n}</button>)}
-            <button type="button" aria-label="下一页" className="page-btn" disabled={loading || query.page >= pages} onClick={() => change({ page: query.page + 1 })}><Icon name="arrow" className="next-arrow" /></button>
-          </nav>
-        </footer>
+        <MonitoringPagination data={pageData} pageSize={query.pageSize} loading={loading || invalidDates}
+          resetKey={queryKey} onPageChange={page => change({ page })} onPageSizeChange={pageSize => change({ pageSize })} />
       </section>
     </>}
   </div>;

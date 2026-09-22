@@ -29,6 +29,13 @@ from injector import inject
 
 from agentclaw.community.core.channel.channel_service_protocol import ChannelServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.build_ignore import BuildIgnoreRepositoryProtocol
+from agentclaw.community.core.service_bot.services.build_ignore_rules import (
+    extra_root_rules,
+    is_excluded,
+    validate_required_paths,
+)
+from agentclaw.community.kernel.build_ignore import normalize_build_ignore_path
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_bot_engine,
 )
@@ -143,6 +150,8 @@ class BotBuildService:
         common_whitelist_service: "CommonWhiteListService",
         baas_template_resolver: "BaasTemplateResolverProtocol",
         teclaw_template_uuid: str,
+        build_ignore_repository: BuildIgnoreRepositoryProtocol,
+        env: str,
     ):
         """初始化 BotBuildService。
 
@@ -166,6 +175,8 @@ class BotBuildService:
         self._teclaw_template_uuid = teclaw_template_uuid
         self._common_whitelist_service = common_whitelist_service
         self._baas_template_resolver = baas_template_resolver
+        self._build_ignore_repository = build_ignore_repository
+        self._env = env
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
@@ -268,6 +279,37 @@ class BotBuildService:
             build_rsync_excludes_append=rsync_append,
             bot=bot,
         )
+        snapshot_started = time.monotonic()
+        try:
+            ignore_config = self._build_ignore_repository.get(
+                env=self._env, entity_id=entity_id, bot_id=bot_id,
+                engine_type=build_plan.engine_type,
+            )
+        except Exception as exc:
+            logger.error(
+                "build_ignore.snapshot status=failure bot_id=%s entity_id=%s "
+                "engine_type=%s error_type=%s duration_ms=%s",
+                bot_id, entity_id, build_plan.engine_type, type(exc).__name__,
+                int((time.monotonic() - snapshot_started) * 1000),
+            )
+            raise BotBuildServiceError("build_ignore_snapshot_failed") from None
+        # COSEC: revalidate persisted rules before passing them as rsync argv.
+        build_ignore_paths = tuple(
+            normalize_build_ignore_path(path) for path in (ignore_config.paths if ignore_config else ())
+        )
+        validate_required_paths(build_ignore_paths, build_plan)
+        publish_ignore = {
+            "engine_type": build_plan.engine_type,
+            "paths": list(build_ignore_paths),
+            "revision": ignore_config.revision if ignore_config else 0,
+        }
+        logger.info(
+            "build_ignore.snapshot status=success bot_id=%s entity_id=%s "
+            "version=%s engine_type=%s revision=%s rule_count=%s duration_ms=%s",
+            bot_id, entity_id, version_str, build_plan.engine_type,
+            publish_ignore["revision"], len(build_ignore_paths),
+            int((time.monotonic() - snapshot_started) * 1000),
+        )
         shared_corpus_snapshot_paths = self._shared_corpus_snapshot_paths(
             provider=provider,
             build_plan=build_plan,
@@ -328,16 +370,29 @@ class BotBuildService:
             # Step 2: Bot 实例迁移
             # ============================================================
             # 2.1 执行 rsync 迁移
-            migration_success = self._migrate_bot_instance(
-                device_id=device_id,
-                source_dir=source_dir,
-                target_dir=target_dir,
-                version_str=version_str,
-                is_nas=True,
-                nas_storage_id=nas_storage_id,
-                build_plan=build_plan,
-                provider=provider,
-            )
+            transfer_started = time.monotonic()
+            migration_success = False
+            try:
+                migration_success = self._migrate_bot_instance(
+                    device_id=device_id,
+                    source_dir=source_dir,
+                    target_dir=target_dir,
+                    version_str=version_str,
+                    is_nas=True,
+                    nas_storage_id=nas_storage_id,
+                    build_plan=build_plan,
+                    provider=provider,
+                    build_ignore_paths=build_ignore_paths,
+                )
+            finally:
+                logger.info(
+                    "build_ignore.transfer bot_id=%s entity_id=%s version=%s "
+                    "engine_type=%s revision=%s rule_count=%s status=%s duration_ms=%s",
+                    bot_id, entity_id, version_str, engine_type,
+                    publish_ignore["revision"], len(build_ignore_paths),
+                    "success" if migration_success else "failure",
+                    int((time.monotonic() - transfer_started) * 1000),
+                )
 
             # The host-side engine-root rsync is the sole writer of the
             # versioned artifact. It preserves active symlinks and local Skill
@@ -383,6 +438,7 @@ class BotBuildService:
                 "build_target_path": str(target_dir),
                 "mcp_success": mcp_success,
                 "openclaw_configs_success": openclaw_configs_success,
+                "publish_ignore": publish_ignore,
                 "shared_corpus_snapshot_paths": list(
                     shared_corpus_snapshot_paths
                 ),
@@ -984,6 +1040,7 @@ class BotBuildService:
             device_source_root: str | None = None,
             chown: str | None = None,
             timeout_seconds: float | None = None,
+            build_ignore_paths: tuple[str, ...] = (),
     ) -> None:
         if not build_plan or not build_plan.extra_include_files:
             return
@@ -991,6 +1048,8 @@ class BotBuildService:
         for rel_path in build_plan.extra_include_files:
             try:
                 normalized = self._normalize_extra_include_file(rel_path)
+                if is_excluded(normalized, build_ignore_paths):
+                    continue
                 source_file = source_dir / normalized
                 # The service runs as a non-root uid that cannot stat
                 # sandbox-owned files on the NAS merge area (e.g. uid 1000 /
@@ -1178,6 +1237,7 @@ class BotBuildService:
         nas_storage_id: Path | str | None = None,
         build_plan: EngineBuildPlan | None = None,
         provider: EngineSandboxProvider | None = None,
+        build_ignore_paths: tuple[str, ...] = (),
     ) -> bool:
         """Step 2.3: 执行 Bot 实例 rsync 迁移。
 
@@ -1250,6 +1310,7 @@ class BotBuildService:
                 # expose the full repository through a stale bridge.
                 "--delete-excluded",
                 *excludes,
+                *(f"--exclude=/{path}" for path in build_ignore_paths),
                 f"{source_dir}/",
                 f"{target_dir}/",
             ]
@@ -1281,6 +1342,7 @@ class BotBuildService:
                 error_message="rsync extra include file failed",
                 device_id=device_id,
                 device_source_root=device_source_root,
+                build_ignore_paths=build_ignore_paths,
             )
 
             # 额外同步目录：例如 claude_code 需要把 source_dir 同级的 .claude
@@ -1289,7 +1351,7 @@ class BotBuildService:
                 extra_source = source_dir.parent / build_plan.extra_sync_source_relpath
                 extra_target = target_dir / build_plan.extra_sync_target_relpath
 
-                if extra_source.exists():
+                if not is_excluded(build_plan.extra_sync_target_relpath, build_ignore_paths) and extra_source.exists():
                     extra_target.mkdir(parents=True, exist_ok=True)
 
                     extra_cmd = [
@@ -1299,6 +1361,9 @@ class BotBuildService:
                         "--delete",
                         "--delete-excluded",
                         *excludes,
+                        *(f"--exclude=/{path}" for path in extra_root_rules(
+                            build_ignore_paths, build_plan.extra_sync_target_relpath,
+                        )),
                         f"{extra_source}/",
                         f"{extra_target}/",
                     ]

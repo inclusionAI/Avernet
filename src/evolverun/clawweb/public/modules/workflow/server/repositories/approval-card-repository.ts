@@ -126,6 +126,15 @@ export class ApprovalCardRepository {
     );
   }
 
+  /** Find the newest pending approval card by flowId + nodeId. */
+  async findPendingByFlowNode(flowId: string, nodeId: string): Promise<ApprovalCardRow | null> {
+    const rows = await this.db.query<ApprovalCardRow>(
+      "SELECT * FROM approval_cards WHERE flow_id = ? AND node_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+      [flowId, nodeId],
+    );
+    return rows[0] ?? null;
+  }
+
   /** Find all approval cards for a given flow (run), newest first. */
   async findByFlowId(flowId: string): Promise<ApprovalCardRow[]> {
     return this.db.query<ApprovalCardRow>(

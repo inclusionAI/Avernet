@@ -292,8 +292,11 @@ impl BcsChannelService {
         &self,
         reply_scope_key: &str,
     ) -> Result<(), ChannelUseCaseError> {
-        let mut processed = 0;
-        loop {
+        let started = tokio::time::Instant::now();
+        for processed in 0..32 {
+            // Do not cancel an in-flight notification: after its send marker,
+            // cancellation would leave an ambiguous external delivery.
+            if processed > 0 && started.elapsed() >= std::time::Duration::from_secs(1) { break; }
             // The head can belong to a terminal/deleted Run which is no longer
             // in the active-Run page. A waiting Run must be able to release it.
             if let Some(head) = self.human_input_requests.find_occupying_by_scope(reply_scope_key).await? {
@@ -313,14 +316,10 @@ impl BcsChannelService {
             if matches!(self.activate_human_input_request(&next).await?, HumanInputActivation::Active) {
                 return Ok(());
             }
-            processed += 1;
-            if processed == 32 {
-                // Yield between batches, but keep responsibility for draining
-                // this scope: the recovery scanner may be disabled.
-                tokio::task::yield_now().await;
-                processed = 0;
-            }
         }
+        // Queued requests stay durable. The always-on progression scanner calls
+        // recover_human_input_requests for their running nodes and resumes here.
+        Ok(())
     }
 
 }

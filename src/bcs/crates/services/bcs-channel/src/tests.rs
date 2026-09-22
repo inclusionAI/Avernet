@@ -1,4 +1,4 @@
-use super::GROUP_CHAT_NEW_SESSION_CONFIG;
+use super::{GROUP_CHAT_NEW_SESSION_CONFIG, GROUP_CONTEXT_DELIVERY_CONFIG};
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self, Write};
@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Once, OnceLock};
 
 use async_trait::async_trait;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
+use tokio::time::{Duration, timeout};
 
 use bcs_channel_api::{
     ChannelInboundSink, ChannelProvider, ChannelProviderError, ChannelProviderRegistry,
@@ -37,7 +38,8 @@ use bcs_service_api::application::collaboration_runtime::{
 };
 use bcs_service_api::application::group_message::SessionHistoryResult;
 use bcs_service_api::application::message_flow::{
-    BotEventCommand, BotEventOutcome, ChatAbortCommand, ChatAbortOutcome, GroupCallbackCommand,
+    BotEventCommand, BotEventOutcome, CancelLatestQueuedMessageCommand,
+    CancelLatestQueuedMessageOutcome, ChatAbortCommand, ChatAbortOutcome, GroupCallbackCommand,
     GroupCallbackOutcome, GroupChatCommand, GroupChatOutcome, MessageDeliveryResult,
     MessageFlowService, PersistentGroupSendCommand, PersistentGroupSendOutcome,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
@@ -764,6 +766,17 @@ fn new_command(conversation_id: &str, user_id: &str, msg_id: &str) -> InboundMes
 fn group_new_command(conversation_id: &str, user_id: &str, msg_id: &str) -> InboundMessage {
     let mut msg = group_inbound(conversation_id, user_id, Some("张三"), msg_id, true);
     msg.text = "/new".to_string();
+    msg
+}
+
+fn group_command(
+    conversation_id: &str,
+    user_id: &str,
+    msg_id: &str,
+    text: &str,
+) -> InboundMessage {
+    let mut msg = group_inbound(conversation_id, user_id, Some("张三"), msg_id, true);
+    msg.text = text.to_string();
     msg
 }
 

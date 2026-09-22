@@ -18,6 +18,27 @@ code.
 If formatting is accidentally applied beyond the intended files, stop and clean
 the formatter-only diff before continuing.
 
+## Database Access Cost
+
+- For changes to request hot paths, loops, queues, recovery scans or retries,
+  estimate database round trips and rows read/written per operation, including
+  maximum batch size, concurrent work and sustained failures. Trace the actual
+  store/cache implementation; a repository call is not necessarily a DB query.
+- Avoid N+1 queries, fetching full rows just to count them, and repeated scans
+  of growing queues. Prefer bounded pagination, aggregate queries and chunked
+  batch writes within the existing consistency requirements.
+- Check existing caches and their invalidation before adding another cache or
+  removing a read. Preserve freshness, tenant isolation, CAS fencing and durable
+  error handling when reducing database access.
+- Bound work per scan/drain and back off repeated failures. Account for shared
+  connection-pool usage and transaction/lock duration; batching reduces round
+  trips but does not make an arbitrarily large transaction cheap. Avoid holding
+  database transactions or locks across external network delivery.
+- When a change materially affects database load, verify representative normal,
+  maximum-size and failure paths with query-count/batch assertions or focused
+  integration/load tests as appropriate. Describe the access-cost change and
+  validation limits in the PR; do not infer scalability from small unit tests.
+
 ## Freeze Committed Migrations
 
 - Before the first commit/release, group related schema changes that ship

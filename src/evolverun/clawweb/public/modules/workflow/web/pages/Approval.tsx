@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { approvalDisplay, type ApprovalDisplay } from '../../shared/approval-display'
 import { formatDuration } from '../utils/time'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -66,7 +66,6 @@ type ApprovalData = {
   note?: string | null
   detail?: Record<string, unknown>
   isApprover?: boolean
-  empId?: string
 }
 
 type ResolveResult = {
@@ -91,87 +90,24 @@ type StatusResult = {
   resolvedAt: number | null
 }
 
-type DingTalkAuthResult = {
-  ok: boolean
-  userId?: string
-  error?: string
-}
-
-// ── DingTalk JSAPI ─────────────────────────────────────────────────────
-
-declare global {
-  interface Window {
-    dd?: {
-      ready: (callback: () => void) => void
-      runtime: {
-        permission: {
-          requestAuthCode: (params: {
-            corpId: string
-            onSuccess: (result: { code: string }) => void
-            onFail: (err: unknown) => void
-          }) => void
-        }
-      }
-    }
-  }
-}
-
-function getDingTalkUserId(corpId: string): Promise<DingTalkAuthResult> {
-  return new Promise((resolve) => {
-    if (!window.dd?.ready) {
-      resolve({ ok: false, error: '非钉钉环境' })
-      return
-    }
-
-    window.dd.ready(() => {
-      if (!window.dd?.runtime?.permission?.requestAuthCode) {
-        resolve({ ok: false, error: '钉钉 JSAPI 不可用' })
-        return
-      }
-
-      window.dd.runtime.permission.requestAuthCode({
-        corpId,
-        onSuccess: async (result: { code: string }) => {
-          try {
-            const res = await fetch('/api/approval/auth/dingtalk', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ authCode: result.code }),
-            })
-            const data: DingTalkAuthResult = await res.json()
-            resolve(data)
-          } catch {
-            resolve({ ok: false, error: '钉钉认证请求失败' })
-          }
-        },
-        onFail: (err: unknown) => {
-          const msg = err instanceof Error ? err.message : '获取授权码失败'
-          resolve({ ok: false, error: msg })
-        },
-      })
-    })
-
-    setTimeout(() => {
-      resolve({ ok: false, error: '钉钉环境检测超时' })
-    }, 3000)
-  })
-}
-
 // ── API helpers ────────────────────────────────────────────────────────
 
 async function resolveApproval(
   id: number,
-  empId: string,
   action: 'approve' | 'reject',
   comment?: string,
   detail?: Record<string, unknown>,
 ): Promise<ResolveResult> {
-  const res = await fetch(`/api/approval/${id}/resolve`, {
+  const res = await fetch(`/api/approval/${id}/resolve/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ empId, action, comment, detail }),
+    body: JSON.stringify({ action, comment, detail }),
   })
-  return res.json()
+  const body = await res.json() as ResolveResult
+  if (!res.ok) {
+    return { ...body, error: body.message || body.error || `HTTP ${res.status}` }
+  }
+  return body
 }
 
 async function pollStatus(id: number): Promise<StatusResult> {
@@ -559,7 +495,6 @@ function getAvatarColor(name: string): { bg: string; text: string } {
 
 export default function Approval() {
   const { id: idStr } = useParams<{ id: string }>()
-  const [searchParams] = useSearchParams()
 
   const [data, setData] = useState<ApprovalData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -570,14 +505,11 @@ export default function Approval() {
   const [sectionSelection, setSectionSelection] = useState<Record<string, SectionState>>({})
   const [validationError, setValidationError] = useState<string | null>(null)
 
-  const [empId, setEmpId] = useState<string>('')
-  const [identitySource, setIdentitySource] = useState<'dingtalk' | 'url' | 'unknown'>('unknown')
-
   const approvalId = idStr ? parseInt(idStr, 10) : NaN
 
   const isSectionMode = !!data?.sections && data.sections.length > 0
 
-  // ── Identity resolution ──────────────────────────────────────────────
+  // ── Load approval data ───────────────────────────────────────────────
   useEffect(() => {
     if (Number.isNaN(approvalId)) {
       setError('无效的审批 ID')
@@ -586,42 +518,7 @@ export default function Approval() {
     }
 
     let cancelled = false
-
-    async function resolveIdentity() {
-      const corpId = searchParams.get('corpId') ?? ''
-      if (corpId) {
-        const dtResult = await getDingTalkUserId(corpId)
-        if (!cancelled && dtResult.ok && dtResult.userId) {
-          setEmpId(dtResult.userId)
-          setIdentitySource('dingtalk')
-          return
-        }
-      }
-
-      const urlEmpId = searchParams.get('empId') ?? ''
-      if (urlEmpId) {
-        setEmpId(urlEmpId)
-        setIdentitySource('url')
-        return
-      }
-
-      if (!cancelled) {
-        setIdentitySource('unknown')
-      }
-    }
-
-    resolveIdentity()
-    return () => { cancelled = true }
-  }, [approvalId, searchParams])
-
-  // ── Load approval data ───────────────────────────────────────────────
-  useEffect(() => {
-    if (Number.isNaN(approvalId)) return
-
-    let cancelled = false
-    const url = empId
-      ? `/api/approval/${approvalId}?empId=${encodeURIComponent(empId)}`
-      : `/api/approval/${approvalId}`
+    const url = `/api/approval/${approvalId}`
 
     fetch(url)
       .then((res) => {
@@ -666,7 +563,7 @@ export default function Approval() {
         }
       })
     return () => { cancelled = true }
-  }, [approvalId, empId])
+  }, [approvalId])
 
   // Poll status every 3s when pending
   useEffect(() => {
@@ -698,46 +595,15 @@ export default function Approval() {
         setValidationError(null)
       }
 
-      if (!empId) {
-        const corpId = searchParams.get('corpId') ?? ''
-        if (corpId && window.dd?.ready) {
-          setActionLoading(true)
-          const dtResult = await getDingTalkUserId(corpId)
-          if (dtResult.ok && dtResult.userId) {
-            setEmpId(dtResult.userId)
-            setIdentitySource('dingtalk')
-            try {
-              const detail = isSectionMode && data?.sections
-                ? buildDetailPayload(data.sections, sectionSelection)
-                : undefined
-              const res = await resolveApproval(approvalId, dtResult.userId, action, comment || undefined, detail)
-              setResult(res)
-              if (res.ok) {
-                const freshUrl = `/api/approval/${approvalId}?empId=${encodeURIComponent(dtResult.userId)}`
-                const fresh = await (await fetch(freshUrl)).json()
-                setData(fresh)
-              }
-            } catch (err) {
-              setResult({ error: err instanceof Error ? err.message : '操作失败' })
-            } finally {
-              setActionLoading(false)
-            }
-            return
-          }
-        }
-        setResult({ error: '无法获取用户身份，请在钉钉中打开此页面' })
-        return
-      }
-
       setActionLoading(true)
       try {
         const detail = isSectionMode && data?.sections
           ? buildDetailPayload(data.sections, sectionSelection)
           : undefined
-        const res = await resolveApproval(approvalId, empId, action, comment || undefined, detail)
+        const res = await resolveApproval(approvalId, action, comment || undefined, detail)
         setResult(res)
         if (res.ok) {
-          const freshUrl = `/api/approval/${approvalId}?empId=${encodeURIComponent(empId)}`
+          const freshUrl = `/api/approval/${approvalId}`
           const fresh = await (await fetch(freshUrl)).json()
           setData(fresh)
         }
@@ -747,7 +613,7 @@ export default function Approval() {
         setActionLoading(false)
       }
     },
-    [approvalId, empId, comment, searchParams, isSectionMode, data?.sections, sectionSelection],
+    [approvalId, comment, isSectionMode, data?.sections, sectionSelection],
   )
 
   // ── Loading ──────────────────────────────────────────────────────────
@@ -790,7 +656,7 @@ export default function Approval() {
     name: data.approverNames[i] || id,
     approved: data.approvedBy.includes(id),
     rejected: data.rejectedBy.includes(id),
-    isCurrent: id === empId,
+    isCurrent: false,
   }))
 
   const policyLabel: Record<string, string> = {

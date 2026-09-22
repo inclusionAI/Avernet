@@ -178,7 +178,8 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         ``BotRunAbortSurface.abort_runs_by_session`` 取消该 bot 在该 session 下所有
         RUNNING 的 run，并据结果返回：
 
-        - 有可取消 run → 200 ``{aborted: true, aborted_run_ids: [...]}``；
+        - 有可取消 run → 200 ``{aborted: true, aborted_run_ids: [...]}``，
+          run 被标记为 ``ABORTED``；
         - 无可取消 run 但该 bot 维度存在已终结记录 → 抛 ``BcnRunTerminatedError`` (410)
           （重复 abort 同一终态 run 稳定 410，幂等；维度收窄到目标 bot）；
         - 该 bot 在该 session 无任何 run 记录 → 200 ``{aborted: false, aborted_run_ids: []}``

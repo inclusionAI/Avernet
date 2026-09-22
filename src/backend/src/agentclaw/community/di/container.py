@@ -33,6 +33,7 @@ from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModul
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
 from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
+from agentclaw.community.di.modules.bot_friend_auth_module import BotFriendAuthModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
 from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchModule
@@ -66,6 +67,7 @@ from agentclaw.community.di.modules.mcp_runtime_credentials_config_module import
     McpRuntimeCredentialsConfigModule,
 )
 from agentclaw.community.di.modules.mcp_module import McpModule
+from agentclaw.community.di.modules.bot_message_feedback_module import BotMessageFeedbackModule
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.runtime_projection_recovery_module import (
     RuntimeProjectionRecoveryModule,
@@ -154,6 +156,7 @@ def build_injector(
         TaskModule(),
         DevicesModule(),
         McpModule(),
+        BotMessageFeedbackModule(),
         AICodingModule(),
         CronModule(),
         EngineRuntimeModule(),
@@ -168,6 +171,7 @@ def build_injector(
         TcFileUploadIntegrationModule(local=profile is not DeployProfile.CORP),
         SpacesModule(),
         WorkOrdersModule(),
+        BotFriendAuthModule(),
         HarnessModule(),
         BotCollaboratorModule(),
         BotAppGrantModule(),

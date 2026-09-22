@@ -219,6 +219,25 @@ class TestBotRunSqliteOrmEquivalence:
         assert record.completed_at is not None
         assert record.gmt_modified is not None
 
+    def test_update_aborted_sets_gmt_modified(self):
+        repo = get_container().repository.bot_run_repository()
+        run_id = _generate_uuid()
+
+        repo.insert_run(
+            run_id=run_id,
+            bot_id=_generate_uuid(),
+            api_key_prefix="sk-abort",
+            message_long="Abort test",
+            metadata=None,
+        )
+        repo.update_aborted(run_id=run_id, reason="aborted by chat.abort")
+        record = repo.get_by_run_id(run_id)
+        assert record is not None
+        assert record.status == "ABORTED"
+        assert record.error == "aborted by chat.abort"
+        assert record.completed_at is not None
+        assert record.gmt_modified is not None
+
     def test_full_lifecycle(self):
         repo = get_container().repository.bot_run_repository()
         run_id = _generate_uuid()
@@ -249,5 +268,36 @@ class TestBotRunSqliteOrmEquivalence:
         assert r.status == "COMPLETED"
         assert r.result_content_long == "Done."
         assert r.result_extra == {"took_ms": 99}
+        assert r.completed_at is not None
+        assert r.gmt_modified is not None
+
+    def test_full_lifecycle_aborted(self):
+        repo = get_container().repository.bot_run_repository()
+        run_id = _generate_uuid()
+        bot_id = _generate_uuid()
+
+        assert (
+            repo.insert_run(
+                run_id=run_id,
+                bot_id=bot_id,
+                api_key_prefix="sk-life",
+                message_long="Lifecycle abort",
+                metadata={"phase": "equiv"},
+            )
+            == run_id
+        )
+
+        repo.update_status(run_id=run_id, status="RUNNING")
+        r = repo.get_by_run_id(run_id)
+        assert r is not None and r.status == "RUNNING"
+
+        repo.update_aborted(
+            run_id=run_id,
+            reason="aborted by chat.abort",
+        )
+        r = repo.get_by_run_id(run_id)
+        assert r is not None
+        assert r.status == "ABORTED"
+        assert r.error == "aborted by chat.abort"
         assert r.completed_at is not None
         assert r.gmt_modified is not None

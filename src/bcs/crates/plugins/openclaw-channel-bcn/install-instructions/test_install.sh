@@ -43,7 +43,11 @@ STUB
 #!/usr/bin/env bash
 case "$1 $2" in
     "plugins list")
-        printf 'BCS openclaw-channel-bcn enabled\n'
+        if [ "${3:-}" = "--json" ]; then
+            printf '{"plugins":[{"id":"openclaw-channel-bcn","status":"loaded"}]}\n'
+        else
+            printf 'BCS openclaw-channel-bcn enabled\n'
+        fi
         ;;
     "plugins uninstall"|"plugins install"|"gateway restart")
         ;;

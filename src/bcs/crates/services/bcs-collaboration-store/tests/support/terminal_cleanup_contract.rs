@@ -71,6 +71,23 @@ pub(super) async fn terminal_cleanup_contract(store: &dyn StateMachineRunRepoPor
     assert_eq!(store.list_terminal_runs_for_cleanup(page.last().map(String::as_str), 1).await.unwrap(), vec!["cleanup-d-aborted"]);
     assert!(store.list_terminal_runs_for_cleanup(None, 0).await.unwrap().is_empty());
 
+    let repair_ids = vec!["cleanup-b-completed".into(), "cleanup-c-failed".into(), "cleanup-d-aborted".into()];
+    assert_eq!(store.list_unrepaired_history_runs(&repair_ids).await.unwrap(), repair_ids);
+    assert!(store.confirm_terminal_history_repair("cleanup-a-running", 200).await.is_err());
+    assert!(store.confirm_terminal_history_repair("missing-run", 200).await.is_err());
+    for run in &repair_ids {
+        let opening = store.get_run_opening(run).await.unwrap().unwrap();
+        let (first, second) = tokio::join!(store.confirm_terminal_history_repair(run, 200), store.confirm_terminal_history_repair(run, 201));
+        first.unwrap(); second.unwrap();
+        store.cleanup_terminal_run_checkpoints(run, 32).await.unwrap();
+        let saved = store.get_run_opening(run).await.unwrap().unwrap();
+        assert_eq!(saved.payload, opening.payload);
+        assert_eq!(saved.delivered_at_ms, opening.delivered_at_ms);
+    }
+    assert!(store.list_unrepaired_history_runs(&repair_ids).await.unwrap().is_empty());
+    assert!(store.list_unrepaired_history_runs(&[]).await.unwrap().is_empty());
+    assert!(store.list_unrepaired_history_runs(&vec!["run".into(); 33]).await.is_err());
+
     for case in ["pending", "delivering", "delivered", "failed"] {
         let mut run = test_run(); run.run_id = format!("cleanup-publication-{case}"); run.session_id = format!("cleanup-publication-session-{case}");
         run.status = StateMachineRunStatus::Running; run.created_by = Some("bot".into());

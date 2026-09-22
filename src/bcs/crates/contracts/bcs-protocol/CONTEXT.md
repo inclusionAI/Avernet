@@ -15,11 +15,13 @@
 
 ## Consumes
 
-- Serialization crates only.
+- Serialization crates.
+- Pure `bcs-domain` connection-mode values, shared with registration and storage.
 
 ## Allowed dependencies
 
 - Serialization and wire-format helper crates
+- `contracts/bcs-domain` for the shared Provider Bot connection-mode enum
 - No concrete runtime or transport clients
 
 ## Forbidden dependencies

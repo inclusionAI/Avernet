@@ -23,3 +23,15 @@ export type MonitoringQuery = {
   startDate: string; endDate: string; decision: Decision | 'ALL'; keyword: string; businessProblemCategory?: string; businessProblemSubtype?: string;
   page: number; pageSize: number;
 };
+export type BotScope = 'mine' | 'monitored' | 'all';
+export type BotOption = {
+  botRef: string; botName: string; botId: string; ownerId: string; env: string;
+  enrollmentState: 'ENROLLED' | 'NOT_ENROLLED';
+  monitoring: null | {
+    status: BotStatus['status']; checkedAt: string; lastSuccessfulCheckAt: string | null;
+    diagnosedSessionCount: number | null; unidentifiedSessionDiagnosisCount: number;
+    diagnosisCount: number; alertCount: number;
+  };
+  capabilities: { canView: true; canRequestEnrollment: boolean };
+};
+export type BotOptionsPage = { items: BotOption[]; nextCursor: string | null };

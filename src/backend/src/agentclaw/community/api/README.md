@@ -101,6 +101,7 @@ untangling first: `baas_service.py`, `bot_build_service.py`,
 ```yaml
 purpose: "Service API Protocols — transport-agnostic contracts between adapters and core services."
 provides:
+  - BuildIgnoreServiceProtocol
   - "One Protocol per public service / factory"
   - "Structural conformance gate via tests/architecture/test_service_api_conformance.py"
   - BotRuntimeProjectorProtocol
@@ -120,6 +121,7 @@ consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.kernel.build_ignore
   - agentclaw.community.kernel.publish_ignore
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.core.devices.repository.record  # DeviceBindingRecord input for provider-aware token target resolution
@@ -181,6 +183,7 @@ internal_dependencies:
   - agentclaw.community.core.aicoding.workitem_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.workspace_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_app_grant.bot_app_grant_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_message_feedback.service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_chat.bot_chat_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_chat.human_bot_friendship_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_collaborator.collaborator_lock_service_protocol  # Protocol defined in its owning core module, re-exported here

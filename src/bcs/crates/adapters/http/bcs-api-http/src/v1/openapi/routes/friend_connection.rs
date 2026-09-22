@@ -149,14 +149,17 @@ async fn accept_friend_connection_request(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
+    header_map: HeaderMap,
     path: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Path(request_id_path) =
         path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let request_auth = request_auth_headers(&header_map);
     let result = service(&state, &request_id)?
         .accept_friend_connection_request(AcceptFriendConnectionRequest {
             caller,
             request_id: request_id_path,
+            request_auth: Some(request_auth),
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
@@ -231,11 +234,13 @@ async fn delete_friend_connection(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
+    header_map: HeaderMap,
     query: Result<Query<DeleteFriendConnectionQuery>, QueryRejection>,
 ) -> Result<Response, ErrorResponse> {
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let request_auth = request_auth_headers(&header_map);
     let result = service(&state, &request_id)?
-        .delete_friend_connection(query.into_command(caller))
+        .delete_friend_connection(query.into_command(caller, Some(request_auth)))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
