@@ -59,8 +59,19 @@ MCP_USER_CONFIG_FANOUT_FLOWS: list[FlowCase] = [
                         "sync_results": [
                             {"bot_id": "bot-mcp-fanout-a", "synced": True},
                             {"bot_id": "bot-mcp-fanout-b", "synced": True},
-                            {"bot_id": "bot-mcp-fanout-c", "synced": False},
+                            {
+                                "bot_id": "bot-mcp-fanout-c",
+                                "synced": True,
+                                "reason": "RUNTIME_DRIFT",
+                            },
                         ],
+                        "sync_summary": {
+                            "affected_bot_count": 3,
+                            "synced_count": 3,
+                            "offline_count": 0,
+                            "runtime_drift_count": 1,
+                            "failed_count": 0,
+                        },
                     },
                 },
             ),
