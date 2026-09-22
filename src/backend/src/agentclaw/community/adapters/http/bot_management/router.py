@@ -396,10 +396,8 @@ async def restart_bot_for_others(
         target_bot_id = target_bot_id.strip()
 
         # Call service to restart bot
-        result = bot_service.restart_bot(
-            bot_id=target_bot_id,
-            user_id=target_user_id,
-            nick_name=target_user_id,  # Use user_id as nick_name for admin operations
+        result = await bot_service.restart_bot_async(
+            bot_id=target_bot_id, user_id=target_user_id, nick_name=target_user_id
         )
 
         if result.get("restart_in_progress"):
@@ -497,10 +495,8 @@ async def restart_scheduler(
         target_bot_id = data.get("bot_id")
 
         # Call service to restart bot
-        result = bot_service.restart_bot(
-            bot_id=target_bot_id,
-            user_id=target_user_id,
-            nick_name=target_user_id,  # Use user_id as nick_name for admin operations
+        result = await bot_service.restart_bot_async(
+            bot_id=target_bot_id, user_id=target_user_id, nick_name=target_user_id
         )
 
         if result.get("restart_in_progress"):
@@ -2861,11 +2857,9 @@ async def restart_bot(
             # Empty/non-JSON request bodies remain valid for legacy callers.
             extra_configs = None
 
-        result = bot_service.restart_bot(
-            bot_id=bot_id,
-            user_id=resolved_owner_id,
-            nick_name=nick_name,
-            extra_configs=extra_configs,
+        result = await bot_service.restart_bot_async(
+            bot_id=bot_id, user_id=resolved_owner_id,
+            nick_name=nick_name, extra_configs=extra_configs,
         )
 
         if result.get("restart_in_progress"):

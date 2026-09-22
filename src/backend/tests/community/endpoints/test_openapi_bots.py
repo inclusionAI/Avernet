@@ -160,6 +160,9 @@ def _seed_happy_services(world) -> None:
     def delete_bot(_self, *_args, **_kwargs) -> bool:
         return True
 
+    async def restart_bot_async(_self, *args, **kwargs):
+        return restart_bot(_self, *args, **kwargs)
+
     def restart_bot(_self, *_args, **_kwargs):
         return _bot_record()
 
@@ -171,6 +174,7 @@ def _seed_happy_services(world) -> None:
             "update_bot": update_bot,
             "delete_bot": delete_bot,
             "restart_bot": restart_bot,
+            "restart_bot_async": restart_bot_async,
         },
     )
 

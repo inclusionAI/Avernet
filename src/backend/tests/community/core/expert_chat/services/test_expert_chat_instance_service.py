@@ -579,6 +579,7 @@ class TestUpgradeContainer:
     async def test_upgrade_forwards_aligned_envs_from_template_config(self):
         """_upgrade_container forwards publish-aligned extra_envs/template_config/ext_info (recycled container)."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        svc._baas.get_bot.return_value = {'status': 'RELEASED'}
         repo_url = "https://code.example.com/o/r.git"
         template_config = {
             "template_key": "normalcc",

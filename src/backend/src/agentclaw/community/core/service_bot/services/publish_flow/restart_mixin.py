@@ -1,6 +1,8 @@
 """Bot restart (re-deploy) operations, mixed into PublishFlowService."""
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
+
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationKind,
     PublishOperationState,
@@ -369,6 +371,12 @@ class RestartMixin:
                 # e.g. an external BaaS deletion) so no destroy is issued.
                 destroy_publish_id = None
                 if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
+                    await prepare_instance_restart(
+                        bot=bot,
+                        device_id=bot_uuid,
+                        target_runtime=self._baas_service,
+                        restart_key=f'restart:{publish_id}:{stage_enum.value}',
+                    )
                     destroy_publish_id = self._build_service.retire_superseded_bot(
                         bot_uuid, operator=operator
                     )
@@ -407,6 +415,10 @@ class RestartMixin:
                 )
 
         async def _issue():
+            await prepare_instance_restart(
+                bot=bot, device_id=bot_uuid, target_runtime=self._baas_service,
+                restart_key=f'restart:{publish_id}:{stage_enum.value}',
+            )
             return await self._build_service.upgrade_async(
                 bot_uuid=bot_uuid,
                 bot=bot,
@@ -459,6 +471,12 @@ class RestartMixin:
             # destroy needed → destroy_publish_id=None).
             destroy_publish_id = None
             if e.error_code == "DEVICE_NOT_FOUND":
+                await prepare_instance_restart(
+                    bot=bot,
+                    device_id=bot_uuid,
+                    target_runtime=self._baas_service,
+                    restart_key=f'restart:{publish_id}:{stage_enum.value}',
+                )
                 destroy_publish_id = self._build_service.retire_superseded_bot(
                     bot_uuid, operator=operator
                 )

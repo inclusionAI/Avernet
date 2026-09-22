@@ -562,7 +562,35 @@ def resolve_outbound_rule_envelope(
         return None
 
 
+
+def resolve_restart_strategy(bot):
+    """Resolve restart policy through the existing provisioning composition root."""
+    return resolve_provisioning(
+        bot_id=str(bot.get('bot_id') or ''),
+        owner_id=str(bot.get('owner_id') or bot.get('entity_id') or ''),
+        bot_type=str(bot.get('bot_type') or ''),
+        active_engine=bot.get('active_engine') or bot.get('engine_type'),
+        template_type=bot.get('template_type'), template_config=bot.get('template_config'),
+    )
+
+
+async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime: Any,
+                                  operation_id: str | None = None,
+                                  restart_key: str | None = None) -> None:
+    """Dispatch only; engine contracts own preconditions and execution mode.
+
+    Published/caller paths hold no restart lock, so the engine-owned async
+    adapter runs the returned verifier inline (coding offloads both phases).
+    """
+    ctx, strategy = resolve_restart_strategy(bot)
+    await strategy.prepare_restart_async(
+        ctx, device_id=device_id, target_runtime=target_runtime,
+        operation_id=operation_id, restart_key=restart_key
+    )
+
+
 __all__ = [
+    "prepare_instance_restart",
     "AICODING_ENGINE_TYPE",
     "BaasEngineBucketResolver",
     "BaasEngineBucketResolverRegistry",

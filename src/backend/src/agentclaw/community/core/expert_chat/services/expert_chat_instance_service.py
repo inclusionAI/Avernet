@@ -27,6 +27,8 @@ stands alone and is wired into the DI graph for callers to inject.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
+
 import asyncio
 import traceback
 from typing import Any, Dict, Optional
@@ -668,6 +670,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
             else None
         )
         try:
+            await prepare_instance_restart(bot=bot_info, device_id=bot_uuid, target_runtime=self._baas)
             result = await self._bot_build_service.upgrade_async(
                 bot_uuid=bot_uuid,
                 bot=bot_info,
