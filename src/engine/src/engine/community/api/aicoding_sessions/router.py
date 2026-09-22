@@ -59,7 +59,10 @@ from engine.community.api.aicoding_sessions.schemas import (
 from engine.community.api.caps import check_capability
 from engine.community.api.session.router import _session_to_dict
 from engine.community.core.aicoding.models import DiffTreeNode, FileTreeNode
-from engine.community.core.aicoding.runstatus_service import RunStatusService
+from engine.community.core.aicoding.runstatus_service import (
+    AixCommandError,
+    RunStatusService,
+)
 from engine.community.core.aicoding.workspace_service import (
     DEFAULT_FILE_TREE_MAX_DEPTH,
     FilePreviewTooLargeError,
@@ -448,9 +451,8 @@ async def list_session_issues(
 ) -> SessionIssuesResponse:
     """返回 session 工作空间下所有 run 产出的 issue outputs。
 
-    执行 ``aix run output list --kind issue --json --filter <workspace>``，按
-    ``at`` (unix ms) 倒序排列。不做 pull-request / issue 融合，单独返回
-    ``issues`` 列表。
+    执行 ``aix run list --filter <workspace> --json``，从每条 run 的
+    ``workItem`` 元数据构建原有 issue 结构，按 ``at`` (unix ms) 倒序。
     """
     check_capability(Capability.BASH_EXEC)
     service = _runstatus_service()
@@ -458,6 +460,8 @@ async def list_session_issues(
         items = await service.get_session_issues(session_id, cwd)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except AixCommandError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return SessionIssuesResponse(
