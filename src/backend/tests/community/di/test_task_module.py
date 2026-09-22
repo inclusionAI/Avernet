@@ -75,7 +75,7 @@ def test_resolve_api_base_url_uses_bcs_task_callback_origin(monkeypatch):
     monkeypatch.setenv("DEPLOY_PROFILE", "community")
     assert TaskModule._resolve_api_base_url("") == "http://localhost:8888"          # 空 → 兜底
     assert TaskModule._resolve_api_base_url("not a url") == "http://localhost:8888"  # 非法 → 兜底
-    # 真实形态:task_callback_url_pre 可以带 callback 路径，解析时只保留 origin
+    # 真实形态:task_callback_url 可以带 callback 路径，解析时只保留 origin
     assert (
         TaskModule._resolve_api_base_url(
             "https://agentclaw-pre.example.test/api/economy/governance/card-callback"

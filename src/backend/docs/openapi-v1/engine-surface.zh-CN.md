@@ -213,7 +213,7 @@ socket 也是干净的。
   `new WebSocket(url, protocols)` 不接受 header，URL 是它唯一能承载凭据的位置。
   内部 console 打开同一条 socket 用的就是同样的方式。_2026-07-31 更正。_
 - **地址是网关的，不是它背后那一跳的。** 对外发布的 origin 取自 `gateway` 配置块
-  （`base_url` / `base_url_pre`，按环境选择），前缀是
+  （`base_url`，由部署 overlay 给定），前缀是
   `/openapi/v1/bots/messages/ws/{target}{path}`，由网关改写到那一跳上。前面没有网关的部署
   —— 也就是 community 构建的常态 —— 是一个有名字的 upstream 错误，不是 500，
   也不是发布一个没人服务的地址。该前缀位于对外发布的 API 命名空间之内，而不是

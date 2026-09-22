@@ -94,9 +94,7 @@ def test_discover_uses_bcs_visibility_and_not_legacy_backend_public(
     metadata = _Metadata()
     service = BotDiscoverService(
         bot_repository=repo,
-        bcsfuse_config=SimpleNamespace(
-            base_url="http://bcsfuse.test", base_url_pre=None
-        ),
+        bcsfuse_config=SimpleNamespace(base_url="http://bcsfuse.test"),
         catalog_metadata_service=metadata,
     )
     recommendations = [
@@ -193,9 +191,7 @@ def test_discover_derives_viewer_policy_inside_service(
     metadata = _Metadata()
     service = BotDiscoverService(
         bot_repository=repo,
-        bcsfuse_config=SimpleNamespace(
-            base_url="http://bcsfuse.test", base_url_pre=None
-        ),
+        bcsfuse_config=SimpleNamespace(base_url="http://bcsfuse.test"),
         catalog_metadata_service=metadata,
     )
     recommend_calls: list[dict[str, Any]] = []

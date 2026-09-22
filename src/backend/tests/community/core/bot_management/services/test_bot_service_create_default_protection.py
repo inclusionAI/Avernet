@@ -57,7 +57,7 @@ def _make_service() -> BotService:
     svc._bot_publish_repo = MagicMock()
     svc._template_service = MagicMock()
     svc._workspace_hosting_service = MagicMock()
-    svc._workspace_hosting_config = MagicMock(aixcore_base_url="", aixcore_base_url_pre="")
+    svc._workspace_hosting_config = MagicMock(aixcore_base_url="")
     svc._policy_service = None
     return svc
 

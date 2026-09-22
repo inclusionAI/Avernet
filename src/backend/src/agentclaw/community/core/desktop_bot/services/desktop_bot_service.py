@@ -110,11 +110,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
         self._bot_repo = bot_repository
         self._device_service = device_service
         self._skill_set_factory = skill_set_factory
-        self._baas_api_base = (
-            baas_config.api_base_url_pre
-            if get_current_env() == "pre"
-            else baas_config.api_base_url
-        )
+        self._baas_api_base = baas_config.api_base_url
         self._tenant = baas_config.tenant
         self._desktop_template_uuid = baas_config.desktop_template_uuid
         self._desktop_ttl_minutes = getattr(baas_config, "desktop_ttl_minutes", 0)

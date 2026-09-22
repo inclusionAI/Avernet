@@ -74,10 +74,9 @@ class TestAppServicesModule(Module):
                 access_secret=block["access_secret"],
                 tenant=block.get("tenant", "default"),
                 timeout=int(block.get("timeout", 30)),
-                # Neutral fallbacks; the aixcore endpoints come from the dima
-                # block (corp env overlays set them) — OSS-0 #3.
+                # Neutral fallback; the aixcore endpoint comes from the dima
+                # block (each deployment overlay sets it) — OSS-0 #3.
                 aixcore_base_url=block.get("aixcore_base_url", ""),
-                aixcore_base_url_pre=block.get("aixcore_base_url_pre", ""),
                 admin_member_staff_ids=admin_ids,
             )
 
@@ -89,7 +88,6 @@ class TestAppServicesModule(Module):
             tenant="test",
             timeout=30,
             aixcore_base_url="http://localhost:9999",
-            aixcore_base_url_pre="http://localhost:9999",
         )
 
     @singleton

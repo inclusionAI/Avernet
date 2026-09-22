@@ -21,8 +21,8 @@ gated by ``AVERNET_PRE_TASK_E2E=1``;无需起 singlebox,直接打预发:
 复刻参考测的 yaml 协同模板(state_machine):draft → polish → finalize 线性。
 经 ``POST /api/v1/collaboration/tasks/execute`` 提交 yaml 协同模板 + ``participant_bindings``
 → 预发 BCS 收群自动跑状态机 → 终态经回调 POST 回预发本后端
-``/api/v1/collaboration/tasks/callback/report``(预发 ``api_base_url`` = corp overlay
-``economy_governance.iframe_callback_url_pre`` 的 origin)→ ``TaskLoopCallback.report_result``
+``/api/v1/collaboration/tasks/callback/report``(预发 ``api_base_url`` = 预发 overlay
+``economy_governance.iframe_callback_url`` 的 origin)→ ``TaskLoopCallback.report_result``
 → ``on_report`` → 图收敛。用例只做:提交 + 轮询 dashboard 观察 + 校验(与 singlebox 参考测同口径)。
 
 # 预发接入默认(已确认)

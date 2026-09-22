@@ -263,8 +263,8 @@ Rules this endpoint must hold:
   headers, so a URL is the only place it can travel. The internal console opens
   this same socket the same way. _Corrected 2026-07-31._
 - **The address is the gateway's, not the hop behind it.** The published origin
-  comes from the `gateway` config block (`base_url` / `base_url_pre`, selected
-  by env), under an `/openapi/v1/bots/messages/ws/{target}{path}` prefix the gateway
+  comes from the `gateway` config block (`base_url`, supplied by the
+  deployment overlay), under an `/openapi/v1/bots/messages/ws/{target}{path}` prefix the gateway
   rewrites onto that hop. A deployment that fronts no gateway — the community
   build's normal state — is a named upstream error, not a 500 and not a
   published address nothing serves. The prefix sits inside the published API

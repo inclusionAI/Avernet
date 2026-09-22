@@ -2,8 +2,8 @@
 
 Scoped HTTP transport (``baas`` / ``bcn`` / ``general`` / ``masa_agent_eval``).
 Every qualifier binds the real ``HttpxClient`` (the neutral shared impl at
-``plugins/http_client.py``) with base_urls read from the neutral config and
-env-aware ``pre``/``prod`` selection.
+``plugins/http_client.py``) with base_urls read from the neutral config — one
+host per upstream, already selected by the deployment overlay SOFAPy merged.
 
 This module carries no profile-specific dependency, so corp and community share
 it verbatim — it is installed in the profile-independent base list. Only the
@@ -27,7 +27,6 @@ from agentclaw.community.plugin_api.http_client import (
     HttpClient,
 )
 from agentclaw.community.plugins.http_client import HttpxClient
-from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -79,11 +78,7 @@ class HttpClientModule(Module):
     def baas_http_client(
         self, baas: cfg.BaasConfig, pool: cfg.HttpClientPoolConfig
     ) -> Annotated[HttpClient, QUALIFIER_BAAS]:
-        api_base = (
-            baas.api_base_url_pre
-            if get_current_env() == "pre"
-            else baas.api_base_url
-        )
+        api_base = baas.api_base_url
         policy = pool.for_qualifier(QUALIFIER_BAAS)
         _log_binding(QUALIFIER_BAAS, api_base, policy)
         return _client(api_base, policy)
@@ -94,9 +89,9 @@ class HttpClientModule(Module):
     def bcn_http_client(
         self, bcn: cfg.BcnConfig, pool: cfg.HttpClientPoolConfig
     ) -> Annotated[HttpClient, QUALIFIER_BCN]:
-        # BCN has separate pre/prod hosts; sending a pre provider token to the
-        # prod host is rejected as an invalid provider admin token.
-        base_url = bcn.base_url_pre if get_current_env() == "pre" else bcn.base_url
+        # BCN hosts are per-deployment; the overlay pairs this host with the
+        # provider token that host accepts, so both come from the same block.
+        base_url = bcn.base_url
         policy = pool.for_qualifier(QUALIFIER_BCN)
         _log_binding(QUALIFIER_BCN, base_url, policy)
         return _client(base_url, policy)
@@ -124,10 +119,8 @@ class HttpClientModule(Module):
     def masa_agent_eval_http_client(
         self, config: cfg.MasaAgentEvalConfig, pool: cfg.HttpClientPoolConfig
     ) -> Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL]:
-        """MasaAgentEval API client — pre/prod URL selection."""
-        base_url = (
-            config.base_url_pre if get_current_env() == "pre" else config.base_url
-        )
+        """MasaAgentEval API client — host from the deployment overlay."""
+        base_url = config.base_url
         policy = pool.for_qualifier(QUALIFIER_MASA_AGENT_EVAL)
         _log_binding(QUALIFIER_MASA_AGENT_EVAL, base_url, policy)
         return _client(base_url, policy)

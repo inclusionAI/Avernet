@@ -93,7 +93,6 @@ class TestUpdateBotMemoryReinit:
                 template_config=new_config,
                 cookie="test-cookie",
                 aixcore_base_url="",
-                aixcore_base_url_pre="",
             )
 
     def test_no_trigger_when_yuque_unchanged(self, repo, template_svc):

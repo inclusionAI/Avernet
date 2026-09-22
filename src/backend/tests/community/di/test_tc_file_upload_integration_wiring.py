@@ -34,14 +34,9 @@ class _Publisher(TcResourceReadyPublisherPlugin):
         return None
 
 
-def test_composition_root_builds_the_http_adapter_with_typed_limits(monkeypatch):
-    monkeypatch.setattr(
-        "agentclaw.community.di.modules.tc_file_upload_integration_module.get_current_env",
-        lambda: "pre",
-    )
+def test_composition_root_builds_the_http_adapter_with_typed_limits():
     config = EcbConfig(
         base_url="https://prod.example",
-        base_url_pre="https://pre.example",
         resource_ready_base_url="http://127.0.0.1:18991",
         resource_ready_timeout_seconds=3.5,
         resource_ready_worker_threads=1,
