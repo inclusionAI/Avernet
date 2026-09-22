@@ -579,8 +579,11 @@ def test_trajectory_display_html_groups_events_by_subtask_block():
     assert r.status_code == 200
     text = r.text
 
-    # 两个子任务区块
+    # 两个子任务区块,每个区块开头带序号标记(接力任务1/接力任务2,按区块序)
     assert text.count('class="node-block"') == 2
+    assert ">接力任务1<" in text and ">接力任务2<" in text
+    assert text.index(">接力任务1<") < text.index(">接力任务2<")
+    assert ">接力任务3<" not in text
     # n1 区块 3 条、n2 区块 1 条(区块副标题带事件数)
     assert "· 事件 3" in text and "· 事件 1" in text
     # 区块顺序 = 首条事件出现序:n1(@1000) 在 n2(@1500) 之前

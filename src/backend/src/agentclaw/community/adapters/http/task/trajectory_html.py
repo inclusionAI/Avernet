@@ -217,6 +217,8 @@ def _render_timeline_grouped(timeline: list) -> str:
         parts.append(
             f'<div class="node-block" style="border-left:4px solid {color};">'
             f'<div class="nb-head">'
+            f'<span class="nb-idx" style="background:{color}1f;color:{color};'
+            f'border:1px solid {color}55;">接力任务{idx + 1}</span>'
             f'<span class="nb-node" style="color:{color};border-color:{color}55;'
             f'background:{color}1f;">{label}</span>'
             f'<span class="nb-sub">task {html.escape(task_id)} · 事件 {len(events)}</span>'
@@ -314,6 +316,7 @@ def render_trajectory_html(dto: "TaskTrajectoryDTO", *, do_analysis: bool = Fals
                 border-radius: 10px; padding: 12px 14px 8px; margin-bottom: 16px; }}
   .nb-head {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
               margin-bottom: 10px; font-size: 13px; }}
+  .nb-idx {{ font-weight: 700; font-size: 13px; padding: 2px 10px; border-radius: 6px; }}
   .nb-node {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 700;
               font-size: 13px; padding: 2px 10px; border-radius: 999px; border: 1px solid; }}
   .nb-sub {{ color: #94a3b8; font-size: 12px; }}
