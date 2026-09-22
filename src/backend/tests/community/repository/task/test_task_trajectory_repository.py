@@ -327,3 +327,71 @@ def test_list_head_returns_record_for_known_task(db):
     assert isinstance(head, TaskTrajectoryRecord)
     assert head.task_id == "T-1"
     assert head.analysis == '{"x":1}'
+
+
+# ---------------------------------------------------------------------------
+# merge_last_event_ext_info (do_analysis 会话明细物化专用受限 UPDATE)
+# ---------------------------------------------------------------------------
+
+
+def test_merge_last_event_ext_info_merges_into_last_row_preserving_keys(db):
+    """增量合并:session_msgs 写入该子任务**最后一条**事件;既有 ext_info 键原样保留;
+    早期事件行不被触碰。"""
+    repo = TaskTrajectoryRepository(db)
+    repo.insert_event(_event(action_type="dispatch", gmt_create=datetime(2026, 9, 22, 10, 0, 0)))
+    repo.insert_event(_event(action_type="execute", gmt_create=datetime(2026, 9, 22, 11, 0, 0)))
+
+    msgs = [{"role": "user", "content": "run"}]
+    assert repo.merge_last_event_ext_info("T-1", "N-1", "session_msgs", msgs) is True
+
+    records = sorted(
+        repo.list_events_by_task("T-1"),
+        key=lambda r: (r.gmt_create, r.id),
+    )
+    early, last = records[0], records[-1]
+    # 末位行:原键保留 + session_msgs 新增
+    import json as _json
+    ext_last = _json.loads(last.ext_info)
+    assert ext_last["schema_v"] == 1
+    assert ext_last["strategy"] == "direct"
+    assert ext_last["session_msgs"] == msgs
+    # 早期行未被触碰
+    assert "session_msgs" not in _json.loads(early.ext_info)
+
+
+def test_merge_last_event_ext_info_creates_envelope_when_empty(db):
+    """末位行 ext_info 为空 → 建新信封 {"schema_v":1, key: value}。"""
+    repo = TaskTrajectoryRepository(db)
+    repo.insert_event(_event(ext_info=None))
+
+    assert repo.merge_last_event_ext_info("T-1", "N-1", "k", "v") is True
+    import json as _json
+    [only] = repo.list_events_by_task("T-1")
+    assert _json.loads(only.ext_info) == {"schema_v": 1, "k": "v"}
+
+
+def test_merge_last_event_ext_info_missing_node_returns_false(db):
+    """无该子任务事件行 → False(不抛)。"""
+    repo = TaskTrajectoryRepository(db)
+    repo.insert_event(_event())
+    assert repo.merge_last_event_ext_info("T-1", "NOPE", "session_msgs", []) is False
+
+
+def test_merge_last_event_ext_info_unparseable_ext_never_clobbered(db):
+    """末位行 ext_info 非空但不可解析 → 拒绝合并(返回 False),行原样保留。"""
+    repo = TaskTrajectoryRepository(db)
+    repo.insert_event(_event(ext_info="{corrupt"))
+    before = repo.list_events_by_task("T-1")[0].ext_info
+
+    assert repo.merge_last_event_ext_info("T-1", "N-1", "session_msgs", ["x"]) is False
+    assert repo.list_events_by_task("T-1")[0].ext_info == before
+
+
+def test_merge_last_event_ext_info_does_not_touch_gmt_create(db):
+    """gmt_create 不动(它进 do_analysis 的 timeline 指纹;物化不能误触发重分析)。"""
+    repo = TaskTrajectoryRepository(db)
+    repo.insert_event(_event(gmt_create=datetime(2026, 9, 22, 12, 0, 0)))
+    repo.merge_last_event_ext_info("T-1", "N-1", "session_msgs", ["m"])
+
+    [only] = repo.list_events_by_task("T-1")
+    assert only.gmt_create == datetime(2026, 9, 22, 12, 0, 0)

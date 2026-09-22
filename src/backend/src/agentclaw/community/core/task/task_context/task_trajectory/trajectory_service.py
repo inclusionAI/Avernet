@@ -114,10 +114,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("task.trajectory")
 
-# RUNNING 节点会话明细探测的摘录预算(字符):单条消息截断上限 + 全任务所有
-# 节点摘录总上限(超预算即停止消费且标 truncated,防 token 失控)。
-_RUNNING_SESSION_MSG_MAX_CHARS = 600
-_RUNNING_SESSION_TOTAL_MAX_CHARS = 4000
+# 会话明细探测:取最近 N 条 msg(条数上限),内容**不截断**(去掉了单条/总量
+# 字符预算,按需求保留会话原文;N 经 TrajectoryAnalysisConfig.
+# running_session_message_limit 配置,默认 50)。
+_RUNNING_SESSION_DEFAULT_MSG_LIMIT = 50
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +507,9 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         #    组 brief 交给分析 bot(大模型)判"工具调用报错 / 执行完不上报结果"等
         #    timeline 看不到的问题。任一步失败 → 降级跳过该节点(WARNING),不影响
         #    主分析。
-        running_sessions = await self._collect_running_session_briefs(task_id)
+        running_sessions = await self._collect_session_briefs(
+            task_id, records, force_analysis=force_analysis,
+        )
 
         # 6. Call the analyzer (tc_bot executor; synchronous with timeout per
         #    决策 #10). Raises TrajectoryAnalysisError on bot CALL failure/
@@ -599,34 +601,64 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 ev.output = dict(out)
 
     # ------------------------------------------------------------------
-    # RUNNING 节点会话明细探测 — timeline 之外的"执行侧现场"(决策 #14 精神:
-    # 观测旁路,逐步降级,永不抛;探测失败绝不影响主分析)。
+    # 会话明细物化 + 未结束节点异常研判 — timeline 之外的"执行侧现场"
+    # (决策 #14 精神:观测旁路,逐步降级,永不抛;探测失败绝不影响主分析)。
     # ------------------------------------------------------------------
 
-    async def _collect_running_session_briefs(self, task_id: str) -> "list[dict] | None":
-        """Probe the SESSION-side scene of nodes still RUNNING (task_id+node_id).
+    def _last_event_ext_by_node(self, records) -> "dict[str, dict]":
+        """每个 (node_id) 的**最后一条**事件行的 ext_info(解析后 dict;无/损坏 → 空)。
 
-        For each node whose current status is RUNNING (queried from
-        ``task_execution_graph`` — the authoritative live graph, not the
-        trajectory's event-side view), read ``session_id`` from
-        ``run_info.extend_props`` and pull the session's recent messages via
-        ``BcsClientPort.get_session_messages``; the excerpt (role/content pairs,
-        per-message + total budget truncated) goes to the analysis bot as the
-        ``running_sessions`` section — the LLM's cue to look for what the
-        timeline CANNOT show: tool-call errors, 执行已结束但不主动上报结果,
-        长时间无新进展 etc.
+        records 已按 (gmt_create, id) 正序——倒序扫,首见即末位行;解析失败/非 dict
+        视作无 ext_info(缓存判断退化为"未缓存",重新实际查询,不抛)。"""
+        last: dict[str, dict] = {}
+        for rec in reversed(records or []):
+            nid = getattr(rec, "node_id", None)
+            if nid in last:
+                continue
+            raw = getattr(rec, "ext_info", None)
+            if not raw:
+                last[nid] = {}
+                continue
+            try:
+                parsed = json.loads(raw)
+            except (ValueError, TypeError):
+                last[nid] = {}
+                continue
+            last[nid] = parsed if isinstance(parsed, dict) else {}
+        return last
 
-        Guarantees: NEVER raises (every step degrades + WARNING); ``None`` when
-        the probe is disabled (``graph``/``bcs`` unbound), the graph read
-        fails, no node is RUNNING, or every node's brief degraded away. The
-        ``Status`` import at module top (``centralized_support``) is runtime —
-        ``Status.RUNNING`` is compared against node.status as-is.
+    async def _collect_session_briefs(
+        self, task_id: str, records, *, force_analysis: bool = False,
+    ) -> "list[dict] | None":
+        """物化每个子任务的会话明细 + 汇集**未结束**节点的大模型研判原料。
+
+        两段式(需求 2026-09-22):
+
+        ① **物化(全节点,不管有没有完成)**:对每个带 ``session_id`` 的
+           (task_id,node_id) 子任务,取最近 ``limit``(默认 50,内容**不截断**)
+           条 session msgs:末位事件 ``ext_info`` 已带 ``session_msgs`` →
+           **缓存命中,不再实际查询 BCS**;否则带持有者 Bearer 拉取 →
+           ``repo.merge_last_event_ext_info`` 把 ``session_msgs`` **增量合并**
+           进该子任务最后一条事件的 ext_info(只添/更新该键,不覆盖既有其它键)。
+
+           ``force_analysis=True``(强制重跑分析):**缓存旁路**——即使已带
+           session_msgs 也重新实际拉取 BCS,并 merge 覆盖该键为最新内容
+           (与 force 语义一致:一切以当下现场为准)。
+
+        ② **研判原料(仅未结束节点)``running_sessions``**:状态非终态
+           (非 SUCCESS/FAILED/CANCELLED——含 RUNNING/DONE/HUNG 等未收口态)
+           且有 msgs 的节点,组成 brief(node_id/node_status/session_id/
+           elapsed_ms/message_count/messages——原文,不截断)交给分析大模型:
+           结合会话内容判断是否异常——工具调用报错、执行已结束但一直不主动
+           上报结果、长时间无新进展等时间线看不到的问题。
+
+        Guarantees: NEVER raises(逐步降级 + WARNING);graph/bcs 未接线 → None。
         """
         logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin")
 
         if self._graph is None or self._bcs is None:
             logger.info("[task][trajectory], collect_trajectory_event_session_msgs, graph or bcs is none")
-            return None  # 探测未接线(轻量 DI / 未部署 BCS)→ 无 RUNNING 会话段
+            return None  # 探测未接线(轻量 DI / 未部署 BCS)→ 无会话段
         try:
             graph = self._graph.query_task_dashboard(task_id)
         except Exception as ex:  # noqa: BLE001  图读失败 → 探测整体降级
@@ -635,11 +667,12 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 task_id, type(ex).__name__, ex,
             )
             return None
-        running = [n for n in getattr(graph, "tasks", []) if n.status == Status.RUNNING]
-        if not running:
-            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, running is none")
+        nodes = [n for n in getattr(graph, "tasks", []) if
+                 (n.run_info.extend_props or {}).get("session_id")]
+        if not nodes:
+            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, no session nodes")
             return None
-        # 卡得最久的排最前(总摘录预算耗尽时优先保留最"病"的节点)
+        # 已带上 session_id 的全部节点按卡住时长降序:预算/研判优先最"病"的
         now_ms = int(time.time() * 1000)
         def _elapsed_ms(node) -> int:  # noqa: ANN001  domain node;defensive read
             st = getattr(node.run_info, "start_time", None)
@@ -647,81 +680,96 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 return now_ms - int(st) if st is not None else 0
             except (TypeError, ValueError):
                 return 0
-        running.sort(key=_elapsed_ms, reverse=True)
+        nodes.sort(key=_elapsed_ms, reverse=True)
 
-        limit = 50
+        last_ext = self._last_event_ext_by_node(records)
+        limit = _RUNNING_SESSION_DEFAULT_MSG_LIMIT
         try:
             limit = int(
-                getattr(self._config, "running_session_message_limit", 50) or 50
+                getattr(self._config, "running_session_message_limit",
+                        _RUNNING_SESSION_DEFAULT_MSG_LIMIT)
+                or _RUNNING_SESSION_DEFAULT_MSG_LIMIT
             )
         except (TypeError, ValueError):
-            limit = 50
+            limit = _RUNNING_SESSION_DEFAULT_MSG_LIMIT
 
+        _UNFINISHED = {Status.RUNNING, Status.PENDING, Status.PLANNING,
+                       Status.DONE, Status.HUNG}
         briefs: list[dict] = []
-        budget = _RUNNING_SESSION_TOTAL_MAX_CHARS
-        for node in running:
-            if budget <= 0:
-                break  # 总预算耗尽:截断在节点粒度即止(不再拉新会话)
-            sid = (node.run_info.extend_props or {}).get("session_id")
+        for node in nodes:
+            ep = node.run_info.extend_props or {}
+            sid = ep.get("session_id")
             if not sid or not isinstance(sid, str):
-                logger.warning(
-                    "[task][trajectory] collect_trajectory_event_session_msgs, RUNNING 节点无 session_id,跳过探测 task=%s node=%s",
-                    task_id, node.node_id,
-                )
                 continue
-            # 会话历史读口是参与者级 ACL(401 "valid Human identity or Bot token is
-            # required"):服务 HMAC 签名不是会话参与者。带 RUNNING 节点持有者 bot 的
-            # session_token 做 ``Authorization: Bearer``(同 create_group 的 caller
-            # 身份手法),BCS 把 caller 解析成会话内成员 bot。持有者 id 取值序:
-            # relay_holder_id(relay 棒)→ driver_bot_id(协作群 driver)→ assignee
-            # (single_bot;协作群时是 group_id,解析自然 None→裸 HMAC 尝试)。
-            holder_bearer = self._holder_bearer_token(node)
-            try:
-                logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin get bcs msgs holder_bearer=%s",
-                            "yes" if holder_bearer else "hmac-only")
-                msgs = await self._bcs.get_session_messages(
-                    sid, limit=limit, caller_bearer=holder_bearer,
-                )
-                logger.info("[task][trajectory], collect_trajectory_event_session_msgs, finish get bcs msgs")
-            except Exception as ex:  # noqa: BLE001  单节点 BCS 失败 → 跳过,不拖垮其余
-                logger.warning(
-                    "[task][trajectory] collect_trajectory_event_session_msgs, 会话明细拉取失败,跳过 task=%s node=%s session=%s: %s: %s",
-                    task_id, node.node_id, sid, type(ex).__name__, ex,
-                )
-                continue
-
-            if not msgs:
+            cached = (last_ext.get(node.node_id) or {}).get("session_msgs")
+            state = getattr(node.status, "value", node.status)
+            if isinstance(cached, list) and cached and not force_analysis:
+                excerpt = cached           # ①缓存命中:末位事件 ext_info 已有,不再实际查
                 logger.info(
-                    "[task][trajectory] collect_trajectory_event_session_msgs, 会话明细为空,跳过 task=%s node=%s session=%s",
-                    task_id, node.node_id, sid,
+                    "[task][trajectory], collect_trajectory_event_session_msgs,"
+                    " session_msgs 缓存命中 task=%s node=%s msgs=%d",
+                    task_id, node.node_id, len(cached),
                 )
+            else:
+                # 会话历史读口是参与者级 ACL(401 "valid Human identity or Bot
+                # token is required"):服务 HMAC 签名不是会话参与者。带持有者 bot
+                # 的 session_token 做 ``Authorization: Bearer``(同 create_group 的
+                # caller 身份手法);持有者 id 取值序 relay_holder_id → driver_bot_id
+                # → assignee(协作群时是 group_id,解析自然 None→裸 HMAC 尝试)。
+                holder_token = self._holder_bearer_token(node)
+                try:
+                    logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin get bcs msgs holder_bearer=%s",
+                                "yes" if holder_token else "hmac-only")
+                    msgs = await self._bcs.get_session_messages(
+                        sid, limit=limit, caller_bearer=holder_token,
+                    )
+                    logger.info("[task][trajectory], collect_trajectory_event_session_msgs, finish get bcs msgs")
+                except Exception as ex:  # noqa: BLE001  单节点 BCS 失败 → 跳过,不拖垮其余
+                    logger.warning(
+                        "[task][trajectory] collect_trajectory_event_session_msgs, 会话明细拉取失败,跳过 task=%s node=%s session=%s: %s: %s",
+                        task_id, node.node_id, sid, type(ex).__name__, ex,
+                    )
+                    continue
+                if not msgs:
+                    continue
+                excerpt = []
+                for m in msgs:
+                    if not isinstance(m, dict):
+                        continue  # 非预期形态 → 跳过该条(防御)
+                    excerpt.append({
+                        "role": str(m.get("role") or ""),
+                        "content": str(m.get("content") or ""),
+                    })  # 内容不截断(已去掉单条/总量字符预算,原文进库喂模型)
+                if not excerpt:
+                    continue
+                # ①物化:增量合并进该子任务最后一条事件的 ext_info(不覆盖既有键)。
+                try:
+                    merged_ok = self._repo.merge_last_event_ext_info(
+                        task_id, node.node_id, "session_msgs", excerpt,
+                    )
+                    if not merged_ok:
+                        logger.info(
+                            "[task][trajectory] session_msgs 未能合并(该子任务无事件行或 ext_info 不可解析)"
+                            " task=%s node=%s", task_id, node.node_id,
+                        )
+                except Exception as ex:  # noqa: BLE001  物化失败不影响研判
+                    logger.warning(
+                        "[task][trajectory] session_msgs 合并失败(不影响主分析) task=%s node=%s: %s %s",
+                        task_id, node.node_id, type(ex).__name__, ex,
+                    )
+
+            # ②研判原料:仅未结束节点喂模型(msgs 原文)
+            if state not in {s.value for s in _UNFINISHED}:
                 continue
-            excerpt: list[dict] = []
-            truncated = False
-            for m in msgs:
-                if not isinstance(m, dict):
-                    continue  # 非预期形态 → 跳过该条(防御)
-                role = str(m.get("role") or "")
-                content = str(m.get("content") or "")
-                if len(content) > _RUNNING_SESSION_MSG_MAX_CHARS:
-                    content = content[: _RUNNING_SESSION_MSG_MAX_CHARS - 1] + "…"
-                if budget <= 0:
-                    truncated = True
-                    break
-                if len(content) > budget:
-                    content = content[: budget - 1] + "…"
-                    truncated = True
-                budget -= len(content)
-                excerpt.append({"role": role, "content": content})
             if not excerpt:
                 continue
             briefs.append({
                 "node_id": node.node_id,
+                "node_status": str(state),
                 "session_id": sid,
                 "elapsed_ms": _elapsed_ms(node),
-                "message_count": len(msgs),
-                "truncated": truncated,
-                "messages": excerpt,
+                "message_count": len(excerpt),
+                "messages": list(excerpt),
             })
         if not briefs:
             return None

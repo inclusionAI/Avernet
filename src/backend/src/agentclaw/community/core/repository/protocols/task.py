@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, Protocol, Sequence, runtime_checkable
+from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
@@ -498,6 +498,31 @@ class TaskTrajectoryRepositoryProtocol(Protocol):
     supplies datetime on emit, the P4 assembler reads datetime and converts to
     int on read).
     """
+
+    @abstractmethod
+    def merge_last_event_ext_info(
+        self,
+        task_id: str,
+        node_id: str,
+        key: str,
+        value: Any,
+    ) -> bool:
+        """Merge a NEW key-value pair into the ``ext_info`` of the given
+        (task_id, node_id) subtask's **LAST** event row — the only sanctioned
+        UPDATE on the append-only events table (exclusively for the analysis
+        path's session-msgs materialization, ``key="session_msgs"``).
+
+        Merge semantics: the row may already carry a caller's ext_info envelope
+        (``{"schema_v": 1, ...gates' keys...}``) — **never overwrite** it;
+        deserialize → set the new key (this key may be re-set with a fresher
+        value) → serialize back. Row without ext_info → create a fresh envelope
+        ``{"schema_v": 1, key: value}``. Un-mergeable rows (non-empty but
+        un-parseable ext_info) are left UNTOUCHED (return ``False`` — we don't
+        clobber what we can't read); missing (task, node) rows → ``False``.
+        ``gmt_create`` is never touched (it feeds the do_analysis timeline
+        fingerprint); only ``gmt_modify`` advances (harmlessly excluded from the
+        fingerprint). Returns ``True`` when the merge landed."""
+        ...
 
     @abstractmethod
     def insert_event(self, record: "TrajectoryEventRecord") -> "TrajectoryEventRecord":

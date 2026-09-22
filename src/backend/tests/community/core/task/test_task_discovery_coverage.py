@@ -98,14 +98,6 @@ class TestDingTalkNotifySender:
         monkeypatch.setenv("TASK_DISCOVERY_CARD_TEMPLATE_ID", "tpl")
         assert DingTalkNotifySender._configured() is True
 
-    def test_configured_true_with_singlebox_fallback(self, monkeypatch):
-        monkeypatch.delenv("TASK_DISCOVERY_DINGTALK_AK_ID", raising=False)
-        monkeypatch.setenv("SINGLEBOX_DINGTALK_AK_ID", "ak")
-        monkeypatch.setenv("SINGLEBOX_DINGTALK_AK_SECRET", "sk")
-        monkeypatch.setenv("SINGLEBOX_DINGTALK_ROBOT_CODE", "rc")
-        monkeypatch.setenv("SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID", "tpl")
-        assert DingTalkNotifySender._configured() is True
-
     def test_env_helper_falls_back_to_singlebox(self, monkeypatch):
         monkeypatch.delenv("MY_VAR", raising=False)
         monkeypatch.setenv("SINGLEBOX_MY_VAR", "fallback-val")

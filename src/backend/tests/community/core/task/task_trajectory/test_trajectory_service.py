@@ -124,6 +124,7 @@ class _FakeRepo:
         self._events = list(events or [])
         self._head = head
         self.backfill_calls: list[tuple[str, str]] = []
+        self.merge_calls: list[tuple] = []
         self.list_events_calls = 0
 
     def list_events_by_task(self, task_id: str) -> list[TrajectoryEventRecord]:
@@ -145,6 +146,10 @@ class _FakeRepo:
     def backfill_analysis(self, task_id: str, analysis_json: str, *, now=None) -> int:
         self.backfill_calls.append((task_id, analysis_json))
         return 1
+
+    def merge_last_event_ext_info(self, task_id, node_id, key, value) -> bool:
+        self.merge_calls.append((task_id, node_id, key, value))
+        return True
 
 
 def _make_event(
@@ -1034,9 +1039,9 @@ async def test_do_analysis_probe_omniauth_fallback_without_token():
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_do_analysis_probe_truncates_long_messages():
-    """Single messages over the per-message budget and briefs over the total
-    budget are truncated + flagged (token-growth containment)."""
+async def test_do_analysis_probe_keeps_full_message_content():
+    """去掉了单条/总量截断预算:长消息原文完整进 ext_info 物化与研判段(默认最近
+    running_session_message_limit=50 条)。"""
     long = "x" * 5_000
     graph = _FakeGraph([
         _FakeNode(node_id="n-run", status=Status.RUNNING,
@@ -1044,7 +1049,9 @@ async def test_do_analysis_probe_truncates_long_messages():
     ])
     bcs = _FakeBcs(messages_by_session={"sess-1": [{"role": "assistant", "content": long}]})
     analyzer = _FakeAnalyzer(analysis=_make_analysis())
-    repo = _FakeRepo()
+    repo = _FakeRepo(events=[
+        _make_record(node_id="n-run", action_type="execute", attempt=0, gmt_create_ms=1000),
+    ])
     config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
     svc = TaskTrajectoryService(
         _FakeAssembler(_make_trajectory()), repo, analyzer, config,
@@ -1054,9 +1061,151 @@ async def test_do_analysis_probe_truncates_long_messages():
     await svc.get_trajectory("t1", do_analysis=True)
 
     briefs = analyzer.last_running_sessions
-    assert len(briefs) == 1 and briefs[0]["messages"][0]["content"] is not None
-    assert len(briefs[0]["messages"][0]["content"]) <= 600 + 1
-    assert briefs[0]["message_count"] == 1
+    assert briefs[0]["messages"][0]["content"] == long, "原文不截断"
+    # 物化进 ext_info 的也是原文
+    [(_, _, _, merged_value)] = repo.merge_calls
+    assert merged_value[0]["content"] == long
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_force_analysis_repulls_cached_session_msgs():
+    """force_analysis=true 缓存旁路:末位事件 ext_info 已有 session_msgs 也**重新实际
+    拉取** BCS,并用最新内容 merge 覆盖该键(与 force 语义一致:一切以当下现场为准)。"""
+    cached_msgs = [{"role": "user", "content": "stale"}]
+    records = [
+        _make_record(node_id="n1", action_type="execute", attempt=0, gmt_create_ms=1000,
+                     rec_id=1, ext_info=json.dumps({"schema_v": 1, "session_msgs": cached_msgs},
+                                                    ensure_ascii=False)),
+    ]
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=500),
+    ])
+    fresh = [{"role": "user", "content": "fresh-now"}]
+    bcs = _FakeBcs(messages_by_session={"sess-1": fresh})
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo(events=records)
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, bcs=bcs,
+    )
+
+    await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
+
+    # 不吃缓存:BCS 重新拉过
+    assert [c[0] for c in bcs.calls] == ["sess-1"]
+    # merge 用最新内容覆盖 session_msgs 键
+    [(_, _, _, merged_value)] = repo.merge_calls
+    assert merged_value == fresh
+    # 研判段也是最新内容
+    assert analyzer.last_running_sessions[0]["messages"] == fresh
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_do_analysis_session_msgs_cached_skips_bcs_query():
+    """缓存命中:该子任务末位事件 ext_info 已有 session_msgs → 不再实际查 BCS,
+    brief 直接用缓存内容(带 node_status),repo 不再有 merge 调用。"""
+    cached_msgs = [{"role": "user", "content": "cached-1"},
+                   {"role": "assistant", "content": "cached-2"}]
+    records = [
+        _make_record(node_id="n1", action_type="dispatch", attempt=0, gmt_create_ms=1000,
+                     rec_id=1, ext_info=None),
+        # 末位事件(mtime 更大)带 session_msgs 缓存
+        _make_record(node_id="n1", action_type="execute", attempt=0, gmt_create_ms=2000,
+                     rec_id=2, ext_info=json.dumps({"schema_v": 1, "session_msgs": cached_msgs},
+                                                    ensure_ascii=False)),
+    ]
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=500),
+    ])
+    bcs = _FakeBcs(messages_by_session={"sess-1": [{"role": "user", "content": "fresh"}]})
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo(events=records)
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, bcs=bcs,
+    )
+
+    await svc.get_trajectory("t1", do_analysis=True)
+
+    assert bcs.calls == [], "缓存命中就不应实际查询 BCS"
+    assert repo.merge_calls == [], "缓存内容不再重复写库"
+    briefs = analyzer.last_running_sessions
+    assert len(briefs) == 1
+    assert briefs[0]["node_status"] == "RUNNING"
+    assert briefs[0]["messages"] == cached_msgs
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_do_analysis_materializes_msgs_for_finished_node_too():
+    """全节点物化:**已结束**(SUCCESS)子任务也查 msgs 并增量写进末位事件
+    ext_info.session_msgs——但不进 running_sessions 研判段(只喂未结束节点)。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-done", status=Status.SUCCESS,
+                  extend_props={"session_id": "sess-done"}, start_time=500),
+        _FakeNode(node_id="n-hung", status=Status.HUNG,
+                  extend_props={"session_id": "sess-hung"}, start_time=300),
+    ])
+    bcs = _FakeBcs(messages_by_session={
+        "sess-done": [{"role": "user", "content": "done-msg"}],
+        "sess-hung": [{"role": "assistant", "content": "tool error: boom"}],
+    })
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo(events=[])  # 无事件行 → merge 仍被调用(由真 repo 决定落不落)
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, bcs=bcs,
+    )
+
+    await svc.get_trajectory("t1", do_analysis=True)
+
+    # 两个子任务都实际查询了(不管有没有完成)
+    assert {c[0] for c in bcs.calls} == {"sess-done", "sess-hung"}
+    # 物化:每个子任务都尝试 merge("n1","session_msgs",...)
+    assert {(t, n, k) for t, n, k, _ in repo.merge_calls} == {
+        ("t1", "n-done", "session_msgs"), ("t1", "n-hung", "session_msgs"),
+    }
+    # 研判段只喂未结束节点(HUNG 是未收口态,SUCCESS 不进)
+    briefs = analyzer.last_running_sessions
+    assert [b["node_id"] for b in briefs] == ["n-hung"]
+    assert briefs[0]["node_status"] == "HUNG"
+    assert briefs[0]["messages"][0]["content"] == "tool error: boom"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_do_analysis_merge_failure_never_breaks_analysis():
+    """merge 抛错被吞(物化只是旁路):渲染、分析照常完成。"""
+    class _ExplodingRepo(_FakeRepo):
+        def merge_last_event_ext_info(self, task_id, node_id, key, value) -> bool:
+            raise RuntimeError("db down")
+
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=500),
+    ])
+    bcs = _FakeBcs(messages_by_session={"sess-1": [{"role": "user", "content": "x"}]})
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _ExplodingRepo(events=[
+        _make_record(node_id="n1", action_type="dispatch", attempt=0, gmt_create_ms=1000),
+    ])
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, bcs=bcs,
+    )
+
+    result = await svc.get_trajectory("t1", do_analysis=True)
+
+    assert analyzer.calls == 1
+    assert result.analysis is not None
 
 
 # ---------------------------------------------------------------------------

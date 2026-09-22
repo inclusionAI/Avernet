@@ -28,8 +28,9 @@ application-supplied ``gmt_*`` values use the same Asia/Shanghai convention.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from injector import inject
 
@@ -48,6 +49,8 @@ from agentclaw.community.core.task.task_context.task_trajectory.time_utils impor
     storage_now,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
+
+logger = logging.getLogger("task.trajectory.repo")
 
 
 class TaskTrajectoryRepository(TaskTrajectoryRepositoryProtocol):
@@ -103,6 +106,73 @@ class TaskTrajectoryRepository(TaskTrajectoryRepositoryProtocol):
             db.flush()
             db.refresh(row)
             return row.to_record()
+
+    # ------------------------------------------------------------------
+    # merge_last_event_ext_info (受限 UPDATE:do_analysis 会话明细物化专用)
+    # ------------------------------------------------------------------
+
+    def merge_last_event_ext_info(
+        self,
+        task_id: str,
+        node_id: str,
+        key: str,
+        value: Any,
+    ) -> bool:
+        """Merge ``{key: value}`` into the (task_id, node_id) subtask's LAST
+        event row's ``ext_info``(协议文档即契约:增量合并,不覆盖既有键;
+        不可解析的 ext_info 原样保留返回 False)。
+
+        最后一行的锚定:``ORDER BY gmt_create DESC, id DESC`` 的第一行(与组装层的
+        正序排序对偶)。``gmt_create`` 不动(否则误动 do_analysis 的 timeline 指纹);
+        ``gmt_modify`` 经 ORM ``onupdate`` 自然前进(指纹不含 gmt_modify,无碍)。
+        返回 True=合并落库;False=行缺失/ext_info 非空但不可解析(不 clobber)。
+        """
+        import json as _json
+
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self._event_model)
+                .filter(
+                    self._event_model.task_id == task_id,
+                    self._event_model.node_id == node_id,
+                )
+                .order_by(
+                    self._event_model.gmt_create.desc(),
+                    self._event_model.id.desc(),
+                )
+                .first()
+            )
+            if row is None:
+                return False
+            raw = row.ext_info
+            if raw:
+                try:
+                    parsed = _json.loads(raw)
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "[task][trajectory-ext] ext_info 不可解析,拒绝增量合并(防覆盖)"
+                        " task=%s node=%s last_event_id=%s",
+                        task_id, node_id, row.id,
+                    )
+                    return False
+                if not isinstance(parsed, dict):
+                    logger.warning(
+                        "[task][trajectory-ext] ext_info 非 JSON object,拒绝增量合并"
+                        " task=%s node=%s last_event_id=%s",
+                        task_id, node_id, row.id,
+                    )
+                    return False
+            else:
+                parsed = {}  # 无 ext_info → 建新信封
+            merged = dict(parsed)
+            merged[key] = value
+            envelope = dict(merged)
+            if "schema_v" not in envelope:
+                # 与 emit 侧信封约定对齐({"schema_v": 1, **ext_info}_{!r} 是 emitter 包装形态)
+                envelope = {"schema_v": 1, **envelope}
+            row.ext_info = _json.dumps(envelope, ensure_ascii=False)
+            db.flush()
+            return True
 
     # ------------------------------------------------------------------
     # upsert_head (preserve existing analysis/gmt_modified)

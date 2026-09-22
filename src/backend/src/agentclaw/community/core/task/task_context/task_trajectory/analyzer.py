@@ -800,16 +800,62 @@ class TaskTrajectoryAnalyzer:
         ext_info_brief = _build_ext_info_brief(trajectory.timeline, ext_info_lookup)
 
         instruction = """
-分析这个任务轨迹，并返回一个 JSON 对象，其中必须且仅包含以下五个扁平字符串字段（不要把任何对象/数组作为字段值进行嵌套）：
+## 任务和目标
+你是一名资深任务编排系统的故障分析专家(Failure Analysis / RCA)。基于输入的任务执行轨迹数据
+(timeline 事件流 + ext_info 概要 + 未结束节点的会话现场),还原这个任务**从提交到当前状态的完整执行过程**,
+识别过程中的问题,并在任务最终执行异常时找出**根本原因(Root Cause)**——不是罗列表面错误。
 
-analysis_output（必填，字符串）：整体的人类可读分析/结论文本（必须是扁平字符串，不是结构化对象）；
+分析要求:
+1. **过程复盘**:沿时间线分阶段还原:提交(submit)→ 规划(plan/children/gap)→ 派发(dispatch /
+   hit_single / hit_multi / miss / BBS 发布)→ 执行(execute / verify / reset 重试)→ 验收(accept_pass /
+   accept_fail / done)→ 终态(transition)。指出过程中的低效与异常信号:同一节点反复 reset 重试、搜推反复
+   miss、规划轮耗尽、harness 复位、棒回 BBS 广场(bbs_return/bbs_released/legacy_result_rejected)、升级
+   BBS 后长期无人认领等——即使任务最终成功,过程性问题也要写出来。
+2. **失败根因链(RCA,最终异常时必做)**:最终失败/挂起(HUNG/超时/长时间未收口)时,请给出完整的根因推导,
+   并遵守:
+   - **区分症状与根因**:最后一条错误往往只是"结果"(如 sla_timeout、节点 HUNG、任务卡死),不是原因;
+     要沿时间线向前追溯到**最早的、能解释后续全部连锁反应的触发事件**;
+   - **演进链**:明确"最初哪里出错(哪个子任务 node_id、什么动作、什么报错)→ 触发了什么(重试/回退/升级
+     BBS)→ 为什么自愈失败(重试耗尽?候选无果?无人认领?)→ 最终落点";
+   - **定位到节点**:根因必须落到具体 (task_id, node_id) 子任务与决定性事件上,引用事件原文关键信息
+     (error_msg、报错片段、工具名)作为证据;
+   - 若现有信息不足以确定根因,给出最可能的 1-2 个假设及缺少的关键证据,不要编造确定性结论。
+3. **未结束节点的现场研判**:若消息中存在 running_sessions 字段,列出的是当前**尚未结束**
+   (node_status 为 RUNNING/DONE/HUNG/PENDING/PLANNING 等未收口状态,非 SUCCESS/FAILED/CANCELLED)的
+   子任务节点(task_id+node_id)及其执行会话的最近消息原文(elapsed_ms 为已运行毫秒数)——这是轨迹事件之外
+   从执行现场(BCS 会话)抓取的第一手线索,其末位事件的 ext_info 中已持久化 session_msgs 供追溯。请对每个
+   未结束节点结合 node_status 与 elapsed_ms 判断卡住程度,重点检查会话中出现:工具调用报错、执行已完成但一直
+   不主动上报结果、长时间无新进展、重复请求无响应等异常——即使 node_status 不是 RUNNING,只要任务没最终
+   收口,就按会话内容给出异常判断;发现的问题写进 analysis_output,并纳入整体的根因推导(failure_reason
+   给出根因)。running_sessions 缺失只表示当前没有可获得会话明细的未结束节点,不代表任务没有其他问题。
+
+## 输入
+task_id：任务id
+analysis_input: 详细的轨迹数据摘要(事件数 + 各动作类型计数 + ext_info 概要)
+ext_info_brief：调度理由摘要(dispatch rationale)、RESET SLA 指标(elapsed_ms/sla_threshold_ms)、
+  interface_error 事件的"为何"信号、以及节点产出(output)等——请用这些信息填写 boost_reason,并把其中
+  的异常指标纳入根因推导;缺少某个键表示该信号不存在,不是 null。
+timeline_brief：轨迹事件明细(逐条:action_type/action_result/error_type/error_msg/status_to/attempt/output)。
+running_sessions：见上文"未结束节点的现场研判"。
+
+## 输出格式
+返回一个 JSON 对象，其中必须且仅包含以下五个扁平字符串字段（不要把任何对象/数组作为字段值进行嵌套）：
+analysis_output（必填，字符串）：整体的人类可读分析/结论文本。结构建议(扁平字符串内分段书写):
+  「过程复盘」(关键阶段怎么走的,过程中的问题)→「根因链」(异常时:触发→连锁→落点,引用事件/会话证据,
+  定位到 node_id)→「未结束节点研判」(若有)→「建议」(可选,如人工介入/修复方向);
 boost_reason（可选，字符串或 null）：调度理由摘要（包括 strategy / decision_mode / candidates / JOIN drops，基于 ext_info_brief 提取）；
-failure_reason（可选，字符串或 null）：失败的根本原因；如果任务成功，则填 null；
-final_status（必填，字符串）：请判断该任务当前是否最终执行成功，取值只能是以下之一："SUCCESS"（已成功通过验收并收口）、"FAILED"（最终失败）、"HUNG"（挂起/卡死，需人介入，含已升级 BBS 广场未认领）、"RUNNING"（仍在执行中，尚未终态）、"UNKNOWN"（现有信息不足以判断）。请综合 timeline 的末条终态事件、错误事件与（若存在）running_sessions 现场作出判断，不要凭猜测；
-error_category（当 final_status 为 FAILED 或 HUNG 时必填，其他情况为 null，字符串或 null）：若最终不成功，请归类错误类型，取值只能是以下之一："execution_error"（模态执行报错：bot/工具执行失败、输出不可解析、协作群执行异常）、"dispatch_error"（派发错误：搜推无匹配候选、派发投递失败、FORM_GROUP 失败、JOIN 全被滤除）、"plan_error"（分解规划失败：plan 解析/调用失败、gap 未分解、规划轮耗尽）、"interface_error"（底层接口/传输报错：BCS/引擎接口异常）、"timeout_error"（超时类：SLA 超时、派发卡死、执行超时不上报结果导致棒回广场或节点 HUNG）、"acceptance_error"（验收未通过：执行完成但未达验收标准）、"unknown"（无法归类）。归类时优先采信决定性事件（如 sla_timeout/执行超时不上报 → timeout_error；miss/bbs_return 归因到派发无果 → dispatch_error；accept_fail → acceptance_error；interface_error → interface_error）。
+failure_reason（可选，字符串或 null）：失败的**根本原因**(单句收紧的 RCA 结论,带定位:如
+  "node c5 工具 search 调用返回 500 且 3 次 harness 重试均失败,任务于第二轮 SLA 超时后 HUNG 升级 BBS,
+  广场无人认领至终"),不是简单地复述最后一条错误;如果任务成功，则填 null;
+final_status（必填，字符串）：请判断该任务当前是否最终执行成功，取值只能是以下之一："SUCCESS"
+  （已成功通过验收并收口）、"FAILED"（最终失败）、"HUNG"（挂起/卡死，需人介入，含已升级 BBS 广场未认领）、
+  "RUNNING"（仍在执行中，尚未终态）、"UNKNOWN"（现有信息不足以判断）。请综合 timeline 的末条终态事件、
+  错误事件与（若存在）running_sessions 现场作出判断，不要凭猜测;
+error_category（当 final_status 为 FAILED 或 HUNG 时必填，其他情况为 null，字符串或 null）：若最终不成功，请对**根本原因**归类，取值只能是以下之一："execution_error"（模态执行报错：bot/工具执行失败、输出不可解析、协作群执行异常）、"dispatch_error"（派发错误：搜推无匹配候选、派发投递失败、FORM_GROUP 失败、JOIN 全被滤除）、"plan_error"（分解规划失败：plan 解析/调用失败、gap 未分解、规划轮耗尽）、"interface_error"（底层接口/传输报错：BCS/引擎接口异常）、"timeout_error"（超时类：SLA 超时、派发卡死、执行超时不上报结果导致棒回广场或节点 HUNG）、"acceptance_error"（验收未通过：执行完成但未达验收标准）、"unknown"（无法归类）。归类时优先采信决定性事件（如 sla_timeout/执行超时不上报 → timeout_error；miss/bbs_return 归因到派发无果 → dispatch_error；accept_fail → acceptance_error；interface_error → interface_error）——注意按**根因**归类,而非按最终落点归类(如"执行失败→重试耗尽→超时 HUNG"的根因是 execution_error,不是 timeout_error)。
 输出必须是严格合法的 JSON（能被 json.loads 直接解析）：所有字符串值内部出现的英文双引号必须转义为 \\"；引用工具名、报错原文、字段名时优先改用中文引号「」，避免裸引号；字符串值内不要出现未转义的换行或控制字符。
-请将这五个字段保持为彼此独立的顶层扁平字符串；任何结构化拆解内容都应写进 analysis_output 的字符串正文中，不要写成嵌套 JSON。ext_info_brief 字段包含调度理由摘要、RESET SLA 指标，以及 interface_error 事件中的“为何”信号——请使用这些信息来填写 boost_reason / failure_reason。如果 ext_info_brief 中缺少某个键，表示该信号不存在，不是 null。
-若消息中存在 running_sessions 字段，它列出当前仍为 RUNNING 状态的节点(task_id+node_id)及其执行会话的最近消息摘录(elapsed_ms 为已运行毫秒数，内容可能截断，不含完整上下文)——这是轨迹事件之外从执行现场(BCS 会话)抓取的补充线索。请结合 elapsed_ms 判断各节点的卡住程度，重点检查这些会话是否出现：工具调用报错、执行已完成但未主动上报结果、长时间无新进展等问题；若发现，请把结论写入 analysis_output，必要时在 failure_reason 中给出根因。running_sessions 缺失只表示当前没有可获得会话明细的 RUNNING 节点，不代表任务没有其他问题。
+请将这五个字段保持为彼此独立的顶层扁平字符串；任何结构化拆解内容都应写进 analysis_output 的字符串正文中，不要写成嵌套 JSON。
+
+## 本次输入的任务轨迹数据如下
         """
 
         payload: dict[str, Any] = {
