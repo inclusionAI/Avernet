@@ -240,15 +240,24 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         return r.json()
 
     async def get_session_messages(self, session_id: str, *, limit: int = 50,
-                                   since_msg_id: str | None = None) -> list[Any]:
+                                   since_msg_id: str | None = None,
+                                   caller_bot_token: str | None = None) -> list[Any]:
         path = f"/sessions/{session_id}/messages"
         ts = str(int(time.time()))
         headers = self._sign("GET", path, ts)
+        # 会话历史读口有参与者级 ACL(401 "valid Human identity or Bot token is
+        # required for this session history request")——服务 HMAC 签名不是会话参与者。
+        # 参考 create_group 的 caller 身份手法:携带持有者 bot 的 session_token 做
+        # ``Authorization: Bearer``,让 BCS 把 caller 解析成会话内的成员 bot。token
+        # 不打日志(与 create_group 同规约)。
+        if caller_bot_token:
+            headers["Authorization"] = f"Bearer {caller_bot_token}"
         params: dict[str, Any] = {"limit": limit}
         if since_msg_id:
             params["since_msg_id"] = since_msg_id
-        logger.info("[task][bcs_http] >>> get_session_messages GET path=%s base_url=%s limit=%s since=%s",
-                    path, self._t.base_url, limit, since_msg_id)
+        logger.info("[task][bcs_http] >>> get_session_messages GET path=%s base_url=%s limit=%s since=%s caller_identity=%s",
+                    path, self._t.base_url, limit, since_msg_id,
+                    "bearer" if caller_bot_token else "hmac-only")
         _t0 = time.monotonic()
         async with self._client_for_current_loop() as client:
             r = await client.request("GET", path, params=params, headers=headers)

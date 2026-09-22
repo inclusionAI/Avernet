@@ -79,6 +79,9 @@ from agentclaw.community.core.task.task_context.task_context_service import Task
 from agentclaw.community.core.task.task_context.task_graph_service import (  # noqa: E402
     TaskGraphService,
 )
+from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (  # noqa: E402
+    BcsBotTokenProvider,
+)
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
@@ -222,6 +225,18 @@ class TaskPersistenceModule(Module):
                 type(exc).__name__, exc,
             )
             bcs = None
+        # 持有者 bot session_token 解析(方案一:会话历史读口带参与者 Bearer,否则
+        # BCS 401 "valid Human identity or Bot token required")。corp 注入直读
+        # bcs_bots.session_token 的实现;community 默认 Null(恒 None → 裸 HMAC
+        # 尝试,401 再降级);轻量 DI 未绑定 → None 同关。
+        try:
+            bcs_bot_tokens = injector.get(BcsBotTokenProvider)
+        except Exception as exc:  # noqa: BLE001  未装配 provider
+            logger.info(
+                "[task-persistence] BcsBotTokenProvider 未绑定 → 会话历史匿名读取(401 降级):%s: %s",
+                type(exc).__name__, exc,
+            )
+            bcs_bot_tokens = None
         return TaskTrajectoryService(
             assembler=injector.get(TaskTrajectoryAssembler),
             repo=injector.get(TaskTrajectoryRepositoryProtocol),
@@ -229,6 +244,7 @@ class TaskPersistenceModule(Module):
             config=config,
             graph=graph,
             bcs=bcs,
+            bcs_bot_tokens=bcs_bot_tokens,
         )
 
     @singleton

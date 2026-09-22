@@ -105,6 +105,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.task_context.task_graph_service import (
         TaskGraphService,
     )
+    from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+        BcsBotTokenProvider,
+    )
     from agentclaw.community.core.task.task_runner.client.ports import (
         BcsClientPort,
     )
@@ -358,18 +361,26 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         config: "TrajectoryAnalysisConfig | None" = None,
         graph: "TaskGraphService | None" = None,
         bcs: "BcsClientPort | None" = None,
+        bcs_bot_tokens: "BcsBotTokenProvider | None" = None,
     ) -> None:
         """``graph`` + ``bcs`` (the RUNNING-node session probe's collaborators)
         are optional lightweight-DI deps: either unbound/None → the probe is
         DISABLED and do_analysis passes ``running_sessions=None`` (zero
         behavior change vs. the pre-probe service). Full DI wires both via
-        try/except-get fallbacks in ``TaskPersistenceModule``."""
+        try/except-get fallbacks in ``TaskPersistenceModule``.
+
+        ``bcs_bot_tokens`` resolves the RUNNING 节点持有者 bot 的 BCS session_token
+        (``BcsBotTokenProvider``):BCS 会话历史读口有参与者级 ACL(401 "valid Human
+        identity or Bot token is required")——服务 HMAC 签名不是会话参与者;探测带
+        持有者 bot 的 Bearer 才能读到明细。未注入/解析不到 → 裸 HMAC 尝试,401 再
+        按既有路径 WARNING 跳过(降级不阻断主分析)。"""
         self._assembler = assembler
         self._repo = repo
         self._analyzer = analyzer
         self._config = config
         self._graph = graph
         self._bcs = bcs
+        self._bcs_bot_tokens = bcs_bot_tokens
 
     async def get_trajectory(
         self,
@@ -643,9 +654,19 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                     task_id, node.node_id,
                 )
                 continue
+            # 会话历史读口是参与者级 ACL(401 "valid Human identity or Bot token is
+            # required"):服务 HMAC 签名不是会话参与者。带 RUNNING 节点持有者 bot 的
+            # session_token 做 ``Authorization: Bearer``(同 create_group 的 caller
+            # 身份手法),BCS 把 caller 解析成会话内成员 bot。持有者 id 取值序:
+            # relay_holder_id(relay 棒)→ driver_bot_id(协作群 driver)→ assignee
+            # (single_bot;协作群时是 group_id,解析自然 None→裸 HMAC 尝试)。
+            holder_token = self._holder_bearer_token(node)
             try:
-                logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin get bcs msgs")
-                msgs = await self._bcs.get_session_messages(sid, limit=limit)
+                logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin get bcs msgs holder_bearer=%s",
+                            "yes" if holder_token else "hmac-only")
+                msgs = await self._bcs.get_session_messages(
+                    sid, limit=limit, caller_bot_token=holder_token,
+                )
                 logger.info("[task][trajectory], collect_trajectory_event_session_msgs, finish get bcs msgs")
             except Exception as ex:  # noqa: BLE001  单节点 BCS 失败 → 跳过,不拖垮其余
                 logger.warning(
@@ -694,6 +715,33 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             task_id, len(briefs),
         )
         return briefs
+
+    def _holder_bearer_token(self, node) -> "str | None":
+        """解析 RUNNING 节点**持有者 bot** 的 BCS session_token(会话历史读取身份)。
+
+        持有者 id 取值序(都是执行链路落在 extend_props/assignee 上的事实字段):
+        ``relay_holder_id``(relay 当前棒持有 bot)→ ``driver_bot_id``(协作群
+        driver)→ ``run_info.assignee``(single_bot 执行 bot;协作群时该值是
+        group_id——交给 provider 解析,自然 None)。经 ``BcsBotTokenProvider``
+        (corp 读 ``bcs_bots.session_token``,带缓存)取 token;未注入 provider /
+        id 缺失 / 解析失败 → ``None``,调用方回退裸 HMAC(BCS 按 401 拒,走
+        既有 WARNING 降级)。全程防御,永不抛。token 不落日志。
+        """
+        if self._bcs_bot_tokens is None:
+            return None
+        try:
+            ep = node.run_info.extend_props or {}
+            holder = (
+                ep.get("relay_holder_id")
+                or ep.get("driver_bot_id")
+                or getattr(node.run_info, "assignee", None)
+            )
+            logger.info("[task][trajectory], collect_trajectory_event_session_msgs, hold is = %s", holder)
+            if not holder or not isinstance(holder, str):
+                return None
+            return self._bcs_bot_tokens.get_token(holder) or None
+        except Exception:  # noqa: BLE001  身份解析是观测旁路,任何失败回退匿名
+            return None
 
     # ------------------------------------------------------------------
     # Config resolution — optional DI; None when unbound (lightweight injectors)

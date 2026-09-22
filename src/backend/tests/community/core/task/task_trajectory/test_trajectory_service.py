@@ -719,20 +719,38 @@ class _FakeGraph:
 
 
 class _FakeBcs:
-    """Serves ``get_session_messages``; scriptable per-session payloads/failures."""
+    """Serves ``get_session_messages``; scriptable per-session payloads/failures.
+    Records each call as ``(session_id, limit, caller_bot_token)``."""
 
     def __init__(self, *, messages_by_session: dict | None = None,
                  raise_exc: Exception | None = None) -> None:
         self._messages = messages_by_session or {}
         self._raise = raise_exc
-        self.calls: list[tuple[str, int]] = []
+        self.calls: list[tuple[str, int, "str | None"]] = []
 
     async def get_session_messages(self, session_id: str, *, limit: int = 50,
-                                   since_msg_id: str | None = None) -> list:
-        self.calls.append((session_id, limit))
+                                   since_msg_id: str | None = None,
+                                   caller_bot_token: str | None = None) -> list:
+        self.calls.append((session_id, limit, caller_bot_token))
         if self._raise is not None:
             raise self._raise
         return self._messages.get(session_id, [])
+
+
+class _FakeTokenProvider:
+    """Fake ``BcsBotTokenProvider``: scripted bot-uuid → session_token map."""
+
+    def __init__(self, tokens: dict[str, str] | None = None,
+                 raise_exc: Exception | None = None) -> None:
+        self._tokens = tokens or {}
+        self._raise = raise_exc
+        self.requested: list[str] = []
+
+    def get_token(self, bcs_bot_uuid: str) -> str | None:
+        self.requested.append(bcs_bot_uuid)
+        if self._raise is not None:
+            raise self._raise
+        return self._tokens.get(bcs_bot_uuid)
 
 
 def _running_probe_setup(**svc_kwargs):
@@ -784,7 +802,7 @@ async def test_do_analysis_probes_running_sessions_and_passes_to_analyzer():
         {"role": "assistant", "content": "tool failed: boom"},
     ]
     # only the RUNNING node's session was pulled
-    assert [sid for sid, _ in bcs.calls] == ["sess-1"]
+    assert [c[0] for c in bcs.calls] == ["sess-1"]
 
 
 @pytest.mark.asyncio
@@ -876,6 +894,99 @@ async def test_do_analysis_fast_path_skips_probe():
     assert analyzer.calls == 0
     assert graph.query_calls == 0
     assert bcs.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_do_analysis_probe_passes_holder_bearer_token():
+    """方案一(401 修复):会话历史读口有参与者级 ACL——探测经 BcsBotTokenProvider
+    解析 RUNNING 节点持有者 bot 的 session_token,以 caller_bot_token 传入(BCS HTTP
+    层携带 ``Authorization: Bearer``)。持有者 id 取值序 relay_holder_id →
+    driver_bot_id → assignee。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n-relay", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-relay", "relay_holder_id": "bot-holder"},
+                  start_time=500),
+        _FakeNode(node_id="n-group", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-group", "driver_bot_id": "bot-driver"},
+                  start_time=300),
+        _FakeNode(node_id="n-single", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-single"},
+                  start_time=100),
+    ])
+    # n-single 走 assignee 兜底(RuntimeInfo.assignee)
+    for n in graph._nodes:
+        if n.node_id == "n-single":
+            n.run_info.assignee = "bot-exec"
+    bcs = _FakeBcs(messages_by_session={
+        sid: [{"role": "user", "content": "hi"}]
+        for sid in ("sess-relay", "sess-group", "sess-single")
+    })
+    tokens = _FakeTokenProvider(tokens={
+        "bot-holder": "tok-holder", "bot-driver": "tok-driver", "bot-exec": "tok-exec",
+    })
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo()
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, bcs=bcs, bcs_bot_tokens=tokens,
+    )
+
+    await svc.get_trajectory("t1", do_analysis=True)
+
+    by_sid = {c[0]: c[2] for c in bcs.calls}
+    assert by_sid["sess-relay"] == "tok-holder"   # relay_holder_id 优先
+    assert by_sid["sess-group"] == "tok-driver"   # driver_bot_id 次之
+    assert by_sid["sess-single"] == "tok-exec"    # assignee 兜底
+    # 请求了全部三个持有者(顺序按卡住时长降序,不按构造序)
+    assert set(tokens.requested) == {"bot-holder", "bot-driver", "bot-exec"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_do_analysis_probe_omniauth_fallback_without_token():
+    """未注入 provider / 持有者解析不到 token / provider 抛错 → caller_bot_token
+    传 None(裸 HMAC 尝试,BCS 401 时由既有 WARNING 降级)——检测不抛、不阻断。"""
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1", "relay_holder_id": "bot-x"},
+                  start_time=500),
+        _FakeNode(node_id="n2", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-2", "relay_holder_id": "bot-y"},
+                  start_time=400),
+    ])
+    bcs = _FakeBcs(messages_by_session={
+        "sess-1": [{"role": "user", "content": "x"}],
+        "sess-2": [{"role": "user", "content": "y"}],
+    })
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo()
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    # 无 holder id 的 n3 不存在;此处 provider 抛错覆盖最坏分支
+    exploding = _FakeTokenProvider(raise_exc=RuntimeError("db down"))
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), repo, analyzer, config,
+        graph=graph, bcs=bcs, bcs_bot_tokens=exploding,
+    )
+    await svc.get_trajectory("t1", do_analysis=True)
+    assert all(c[2] is None for c in bcs.calls), "provider 抛错 → 回退匿名"
+    assert analyzer.last_running_sessions is not None  # 探测整体不受影响
+
+    # 未注入 provider(默认参数) → None
+    bcs2 = _FakeBcs(messages_by_session={"sess-1": [{"role": "user", "content": "x"}]})
+    svc2 = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), _FakeRepo(),
+        _FakeAnalyzer(analysis=_make_analysis()),
+        TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst"),
+        graph=_FakeGraph([
+            _FakeNode(node_id="n1", status=Status.RUNNING,
+                      extend_props={"session_id": "sess-1", "relay_holder_id": "bot-x"}),
+        ]),
+        bcs=bcs2,
+    )
+    await svc2.get_trajectory("t1", do_analysis=True)
+    assert bcs2.calls[0][2] is None
 
 
 @pytest.mark.asyncio

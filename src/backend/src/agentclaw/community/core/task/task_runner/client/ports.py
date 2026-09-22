@@ -70,8 +70,13 @@ class BcsClientPort(Protocol):
     ) -> str: ...
     async def get_group(self, group_id: str) -> dict[str, Any]: ...
     async def get_session_messages(
-        self, session_id: str, *, limit: int = 50, since_msg_id: str | None = None
+        self, session_id: str, *, limit: int = 50, since_msg_id: str | None = None,
+        caller_bot_token: str | None = None,
     ) -> list[Any]: ...
+    # ``caller_bot_token``:会话历史读口有参与者级 ACL("valid Human identity or
+    # Bot token is required")——服务 HMAC 签名不足。传入持有者 bot 的
+    # session_token 时 HTTP 实现携带 ``Authorization: Bearer``(同 ``create_group``
+    # 的 caller 身份手法);``None`` → 仅服务签名(旧语义,401 由调用方降级)。
     async def start_state_machine_run(
         self,
         group_id: str,
