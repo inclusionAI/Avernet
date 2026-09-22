@@ -357,6 +357,7 @@ async def test_verify_upgrade_preserves_skills_env_and_injects_engine_extra_envs
     assert build_service.upgrade_async.await_args.kwargs["extra_envs"] == {
         "AGENTCLAW_SKILLS_LAYOUT": "pool",
         "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+        "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
         "RELAY_DEFAULT_MODEL": "m1",
     }
 
@@ -1634,6 +1635,7 @@ async def test_restart_and_recreate_preserve_frozen_pool_layout():
     expected = {
         "AGENTCLAW_SKILLS_LAYOUT": "pool",
         "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+        "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
     }
     assert build_service.upgrade_async.await_args.kwargs["extra_envs"] == expected
     assert build_service.release_async.await_args.kwargs["extra_envs"] == expected
@@ -2275,6 +2277,7 @@ async def test_verify_first_release_arca_skips_channel_fetch_and_store():
     assert build_service.release_async.await_args.kwargs["extra_envs"] == {
         "AGENTCLAW_SKILLS_LAYOUT": "pool",
         "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+        "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
     }
     persisted_ext = svc._ext_state.update_status.call_args.kwargs["ext"]
     assert "engine_overrides_by_stage" not in persisted_ext
@@ -2671,6 +2674,7 @@ async def test_execute_rollback_uses_fixed_device_count_one():
     assert upgrade_call.kwargs["extra_envs"] == {
         "AGENTCLAW_SKILLS_LAYOUT": "pool",
         "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+        "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
     }
 
     # Verify the return value

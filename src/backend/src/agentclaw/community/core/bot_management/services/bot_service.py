@@ -104,6 +104,7 @@ from agentclaw.community.core.repository.protocols.skills_pool import (
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayout,
+    SkillLayoutPhase,
 )
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     apply_default_image_to_ext,
@@ -617,6 +618,15 @@ class BotService(BotServiceProtocol):
         return {
             "AGENTCLAW_SKILLS_LAYOUT": SkillLayout.POOL.value,
             "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": contract,
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": (
+                state.phase.value
+                if state.phase
+                in {
+                    SkillLayoutPhase.POOL_INITIALIZING,
+                    SkillLayoutPhase.POOL_ACTIVE,
+                }
+                else "recovery_required"
+            ),
         }
 
     def _extract_engine_runtime_token(

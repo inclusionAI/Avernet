@@ -998,6 +998,7 @@ class TestCredentialsInDeployConfig:
             InitialSkillLayoutSelection,
             RolloutEvidence,
             SkillLayout,
+            SkillLayoutPhase,
         )
 
         service, mocks = _make_service_with_mocks()
@@ -1016,6 +1017,7 @@ class TestCredentialsInDeployConfig:
         mocks["layout_repo"].get.return_value = MagicMock(
             active_layout=SkillLayout.POOL,
             layout_contract_version="skills-pool-p3-v1",
+            phase=SkillLayoutPhase.POOL_INITIALIZING,
         )
         mocks["passport"].query_agent_passport.return_value = {
             "agent_code": "ac-cred-001",
@@ -1047,6 +1049,10 @@ class TestCredentialsInDeployConfig:
         assert (
             credentials["agentclaw_skills_layout_contract_version"]
             == "skills-pool-p3-v1"
+        )
+        assert (
+            credentials["agentclaw_skills_layout_phase"]
+            == "pool_initializing"
         )
 
     def test_credentials_token_is_nonempty(self):
@@ -1300,7 +1306,10 @@ class TestRestart:
         assert "pending_since" in prepared.kwargs["bot_ext_patch"]
 
     def test_pool_restart_updates_layout_wire_and_current_publish_identity(self):
-        from agentclaw.community.core.skills_pool.types import SkillLayout
+        from agentclaw.community.core.skills_pool.types import (
+            SkillLayout,
+            SkillLayoutPhase,
+        )
 
         service, mocks = _make_service_with_mocks()
         _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")
@@ -1318,6 +1327,7 @@ class TestRestart:
         mocks["layout_repo"].get.return_value = MagicMock(
             active_layout=SkillLayout.POOL,
             layout_contract_version="skills-pool-p3-v1",
+            phase=SkillLayoutPhase.POOL_ACTIVE,
         )
         mocks["baas"].post_bots_api.return_value = {"publish_id": 17}
 
@@ -1331,6 +1341,7 @@ class TestRestart:
         assert credentials["agentclaw_skills_layout_contract_version"] == (
             "skills-pool-p3-v1"
         )
+        assert credentials["agentclaw_skills_layout_phase"] == "pool_active"
         prepared = mocks["binding_repo"].prepare_baas_desktop_restart.call_args
         assert prepared.kwargs["bot_ext_patch"]["publish_id"] == "17"
         assert prepared.kwargs["binding_id"] == 1
@@ -1343,6 +1354,7 @@ class TestRestart:
                 "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": (
                     "skills-pool-p3-v1"
                 ),
+                "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
             },
             "layout_confirmed_startup_identity": None,
         }

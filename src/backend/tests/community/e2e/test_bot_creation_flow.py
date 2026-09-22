@@ -297,13 +297,17 @@ class TestBotCreationFlow:
     def test_pool_selection_reaches_device_before_directory_setup(
         self, bot_service, fake_repo, mock_device_service
     ):
-        from agentclaw.community.core.skills_pool.types import SkillLayout
+        from agentclaw.community.core.skills_pool.types import (
+            SkillLayout,
+            SkillLayoutPhase,
+        )
 
         selection = object()
         bot_service._skills_pool_native_creation_policy.select.return_value = selection
         bot_service._skill_layout_repository.get.return_value = MagicMock(
             active_layout=SkillLayout.POOL,
             layout_contract_version="skills-pool-p3-v1",
+            phase=SkillLayoutPhase.POOL_INITIALIZING,
         )
 
         bot_service.create_bot(
@@ -322,6 +326,7 @@ class TestBotCreationFlow:
             extra_envs["AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION"]
             == "skills-pool-p3-v1"
         )
+        assert extra_envs["AGENTCLAW_SKILLS_LAYOUT_PHASE"] == "pool_initializing"
 
     # ==================== 场景 3: update_bot_ext ====================
 

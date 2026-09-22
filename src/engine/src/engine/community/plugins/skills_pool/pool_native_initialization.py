@@ -131,6 +131,7 @@ def initialize_pool_native(
     *,
     engine: str,
     home: Path = Path("/home/admin"),
+    trusted_layout_phase: str | None = None,
 ) -> PoolNativeInitializationEvidence:
     """Establish the minimal Pool roots without Legacy preparation or copying.
 
@@ -143,6 +144,10 @@ def initialize_pool_native(
         raise PoolNativeInitializationError(
             f"Pool-native initialization is unsupported for engine={engine}"
         )
+    if trusted_layout_phase == "recovery_required":
+        raise PoolNativeInitializationError(
+            "persisted Pool layout requires migration recovery"
+        )
     layout = resolve_filesystem_skill_layout(
         LayoutIdentity(engine, LAYOUT_CONTRACT_VERSION),
         RuntimeLayoutContext(home=home),
@@ -153,7 +158,7 @@ def initialize_pool_native(
     elif _path_present(
         layout.ready_marker,
         description="Pool migration preparation marker",
-    ):
+    ) and trusted_layout_phase != "pool_active":
         raise PoolNativeInitializationError(
             "Pool migration preparation requires recovery before native startup"
         )
@@ -199,8 +204,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--engine", required=True)
     parser.add_argument("--home", type=Path, default=Path("/home/admin"))
+    parser.add_argument(
+        "--layout-phase",
+        default=os.environ.get("AGENTCLAW_SKILLS_LAYOUT_PHASE", ""),
+    )
     args = parser.parse_args(argv)
-    evidence = initialize_pool_native(engine=args.engine, home=args.home)
+    evidence = initialize_pool_native(
+        engine=args.engine,
+        home=args.home,
+        trusted_layout_phase=args.layout_phase or None,
+    )
     print(json.dumps(evidence.to_dict(), sort_keys=True, separators=(",", ":")))
     return 0
 

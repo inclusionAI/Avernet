@@ -415,6 +415,7 @@ class TestCreateDeviceSameInstance:
                 token="tok",
                 agentclaw_skills_layout="pool",
                 agentclaw_skills_layout_contract_version="1",
+                agentclaw_skills_layout_phase="pool_active",
             ),
         )
 
@@ -425,6 +426,7 @@ class TestCreateDeviceSameInstance:
             "TOKEN": "tok",
             "AGENTCLAW_SKILLS_LAYOUT": "pool",
             "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "1",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
         }
 
     @pytest.mark.asyncio

@@ -199,6 +199,54 @@ def test_prepared_migration_is_not_promoted_to_native_active(tmp_path: Path) -> 
     assert not (ready_marker.parent / ".pool-active").exists()
 
 
+def test_completed_pool_restart_repairs_active_marker_with_ready_history(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    ready_marker = home / ".openclaw/workspace/skills-pool/.pool-ready"
+    ready_marker.parent.mkdir(parents=True)
+    ready_marker.write_text('{"preparation_id":"completed-1"}')
+    (home / ".openclaw/workspace/skills").mkdir(parents=True)
+
+    evidence = initialize_pool_native(
+        engine="openclaw",
+        home=home,
+        trusted_layout_phase="pool_active",
+    )
+
+    assert evidence.actual_layout == "pool"
+    assert ready_marker.read_text() == '{"preparation_id":"completed-1"}'
+    assert json.loads((ready_marker.parent / ".pool-active").read_text()) == {
+        "activation_state": "active",
+        "engine": "openclaw",
+        "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+    }
+
+
+@pytest.mark.parametrize("filesystem_state", ("empty", "ready", "active"))
+def test_recovery_required_never_enters_native_or_steady(
+    tmp_path: Path,
+    filesystem_state: str,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    pool_root = home / ".openclaw/workspace/skills-pool"
+    if filesystem_state == "ready":
+        pool_root.mkdir(parents=True)
+        (pool_root / ".pool-ready").write_text("{}")
+    elif filesystem_state == "active":
+        initialize_pool_native(engine="openclaw", home=home)
+
+    with pytest.raises(
+        PoolNativeInitializationError,
+        match="requires migration recovery",
+    ):
+        initialize_pool_native(
+            engine="openclaw",
+            home=home,
+            trusted_layout_phase="recovery_required",
+        )
+
+
 def test_legacy_entry_stat_error_is_not_treated_as_absent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

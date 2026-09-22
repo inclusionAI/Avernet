@@ -928,6 +928,7 @@ class TestReportDeviceAlive:
         props = {
             "callback_token": "tok123",
             "restart_publish_id": "17",
+            "envs": {"AGENTCLAW_SKILLS_LAYOUT": "pool"},
         }
         pending = _make_record(
             status=DeviceBindingStatus.PENDING.value,
@@ -948,11 +949,7 @@ class TestReportDeviceAlive:
         repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = (
             DataInitTriggerClaim("claim-17", False)
         )
-        bot_query = MagicMock()
-        bot_query.get_by_binding_id.return_value = {
-            "ext": {"skills_layout": "pool"}
-        }
-        service = _make_service(repo=repo, bot_query=bot_query)
+        service = _make_service(repo=repo)
         service._sync_bot_config_when_device_active = MagicMock()
         service._trigger_data_init_on_device_ready = MagicMock()
 
@@ -989,11 +986,7 @@ class TestReportDeviceAlive:
         repo = MagicMock()
         repo.get_by_device_id.return_value = record
         repo.get_by_id.return_value = record
-        bot_query = MagicMock()
-        bot_query.get_by_binding_id.return_value = {
-            "ext": {"skills_layout": "legacy"}
-        }
-        service = _make_service(repo=repo, bot_query=bot_query)
+        service = _make_service(repo=repo)
         service._trigger_data_init_on_device_ready = MagicMock()
 
         service.report_device_alive(
@@ -1042,6 +1035,7 @@ class TestReportDeviceAlive:
                 "callback_token": "tok123",
                 "restart_publish_id": "17",
                 "layout_confirmed_startup_identity": "17",
+                "envs": {"AGENTCLAW_SKILLS_LAYOUT": "pool"},
             },
         )
         repo = MagicMock()
@@ -1051,11 +1045,7 @@ class TestReportDeviceAlive:
             RuntimeError("claim write unavailable"),
             DataInitTriggerClaim("claim-17", False),
         ]
-        bot_query = MagicMock()
-        bot_query.get_by_binding_id.return_value = {
-            "ext": {"skills_layout": "pool"}
-        }
-        service = _make_service(repo=repo, bot_query=bot_query)
+        service = _make_service(repo=repo)
         service._trigger_data_init_on_device_ready = MagicMock()
 
         for _ in range(2):

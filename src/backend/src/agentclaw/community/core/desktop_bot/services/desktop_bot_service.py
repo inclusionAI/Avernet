@@ -58,6 +58,7 @@ from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     InitialSkillLayoutSelection,
     SkillLayout,
+    SkillLayoutPhase,
 )
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, SUPPORTED_ENGINE_TYPES
 from agentclaw.community.core.errors import NotFound
@@ -1679,6 +1680,9 @@ class DesktopBotService(DesktopBotServiceProtocol):
             "agentclaw_skills_layout_contract_version": (
                 layout.layout_contract_version
             ),
+            "agentclaw_skills_layout_phase": (
+                SkillLayoutPhase.POOL_INITIALIZING.value
+            ),
         }
 
     @staticmethod
@@ -1705,6 +1709,15 @@ class DesktopBotService(DesktopBotServiceProtocol):
         return {
             "agentclaw_skills_layout": SkillLayout.POOL.value,
             "agentclaw_skills_layout_contract_version": contract,
+            "agentclaw_skills_layout_phase": (
+                state.phase.value
+                if state.phase
+                in {
+                    SkillLayoutPhase.POOL_INITIALIZING,
+                    SkillLayoutPhase.POOL_ACTIVE,
+                }
+                else "recovery_required"
+            ),
         }
 
     def _release_desktop_creation_claim(

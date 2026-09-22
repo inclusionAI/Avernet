@@ -41,8 +41,15 @@ class SkillsPoolCapabilityRepositoryMixin:
         from agentclaw.community.core.devices.repository.models import (
             EntityDeviceBinding,
         )
+        from agentclaw.community.core.repository.implementations.devices.guarded_lifecycle import (
+            begin_guarded_transaction,
+        )
 
         with self._database.transactional_orm_session() as session:
+            begin_guarded_transaction(
+                session,
+                purpose="Pool layout confirmation",
+            )
             binding = (
                 session.query(EntityDeviceBinding)
                 .filter(

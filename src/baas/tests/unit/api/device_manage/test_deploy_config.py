@@ -567,6 +567,7 @@ class TestDeviceCredentials:
         assert dc.stage is None
         assert dc.agentclaw_skills_layout is None
         assert dc.agentclaw_skills_layout_contract_version is None
+        assert dc.agentclaw_skills_layout_phase is None
 
     def test_serialization_alias_maps_to_uppercase(self) -> None:
         """model_dump(by_alias=True) produces uppercase keys matching wire format."""
@@ -631,6 +632,7 @@ class TestDeviceCredentials:
             stage="s",
             agentclaw_skills_layout="pool",
             agentclaw_skills_layout_contract_version="1",
+            agentclaw_skills_layout_phase="pool_active",
         )
         dump = dc.model_dump(exclude_none=True, by_alias=True)
         assert dump == {
@@ -645,6 +647,7 @@ class TestDeviceCredentials:
             "STAGE": "s",
             "AGENTCLAW_SKILLS_LAYOUT": "pool",
             "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "1",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
         }
 
     def test_constructor_with_kwargs_accepts_lowercase_names(self) -> None:

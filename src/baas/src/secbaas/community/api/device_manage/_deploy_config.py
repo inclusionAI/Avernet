@@ -84,6 +84,10 @@ class DeviceCredentials(BaseModel):
         default=None,
         serialization_alias="AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION",
     )
+    agentclaw_skills_layout_phase: str | None = Field(
+        default=None,
+        serialization_alias="AGENTCLAW_SKILLS_LAYOUT_PHASE",
+    )
 
 
 class ArcaDeployConfig(BaseModel):
