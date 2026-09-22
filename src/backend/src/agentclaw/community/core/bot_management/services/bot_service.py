@@ -24,9 +24,9 @@ from agentclaw.community.core.bot_management.capabilities import (
 )
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AICODING_ENGINE_TYPE,
-    CLAUDE_CODE_ENGINE_TYPE,
 )
 from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_restart_strategy,
     normalize_engine_type,
     resolve_baas_engine_bucket,
 )
@@ -4616,6 +4616,12 @@ class BotService(BotServiceProtocol):
         logger.info(f"[bot_service.start_bot] Bot {bot_id} start initiated, device allocation in progress")
         return updated_bot
 
+    async def restart_bot_async(self, **kwargs) -> Dict[str, Any]:
+        """HTTP adapter entrypoint; retain the synchronous lifecycle and engine policy."""
+        bot = self.get_bot(kwargs['bot_id'], kwargs['user_id'])
+        ctx, strategy = resolve_restart_strategy(bot)
+        return await strategy.execute_restart(ctx, self.restart_bot, **kwargs)
+
     def restart_bot(
         self,
         bot_id: str,
@@ -4692,19 +4698,19 @@ class BotService(BotServiceProtocol):
 
         # Delegate optional engine-owned restart inputs after lifecycle guards
         # pass and before device allocation consumes persisted configuration.
-        try:
-            from agentclaw.community.core.bot_management.engines import (
-                resolve_provisioning,
-            )
+        from agentclaw.community.core.bot_management.engines import (
+            resolve_provisioning,
+        )
 
-            ctx, strategy = resolve_provisioning(
-                bot_id=bot_id,
-                owner_id=str(bot.get("owner_id") or ""),
-                bot_type=str(bot.get("bot_type") or ""),
-                active_engine=bot.get("active_engine"),
-                template_type=bot.get("template_type"),
-                template_config=None,
-            )
+        ctx, strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=str(bot.get("owner_id") or ""),
+            bot_type=str(bot.get("bot_type") or ""),
+            active_engine=bot.get("active_engine"),
+            template_type=bot.get("template_type"),
+            template_config=None,
+        )
+        try:
             strategy.apply_restart_extra_configs(
                 ctx,
                 extra_configs,
@@ -4819,6 +4825,18 @@ class BotService(BotServiceProtocol):
             source_provider=current_device_provider,
         )
 
+        # Engine precondition (e.g. coding's mounted-data backup) runs BEFORE
+        # the short-lived lock: it may wait far longer than the lock TTL and
+        # must not hold it. It never touches the lock — it returns an optional
+        # verifier to run under the lock below. Failures raise here, before any
+        # lock exists, so no cleanup is needed.
+        verify_restart_backup = strategy.prepare_restart(
+            ctx, binding_id=binding_id,
+            device_service_provider=self._device_service_provider,
+            target_runtime_provider=lambda: self._baas_service_provider(),
+            bot_repository=self._repository,
+        )
+
         # Idempotency guard: acquire the per-bot restart lock. If a restart is
         # already in progress, suppress this duplicate and return the current
         # in-progress bot — the frontend is already polling on PENDING, so this
@@ -4859,6 +4877,11 @@ class BotService(BotServiceProtocol):
         lock_key = (env, entity_id, bot_id, lock.lock_token)
         handed_off = False
         try:
+            # Under-lock verification: the backup must still match the binding
+            # and container identity we are about to replace. On failure the
+            # existing except/finally below releases the lock untouched.
+            if verify_restart_backup is not None:
+                verify_restart_backup()
             if bot.get("bot_type") == "service" and not self.is_teclaw_bot(
                 bot.get("active_engine")
             ):

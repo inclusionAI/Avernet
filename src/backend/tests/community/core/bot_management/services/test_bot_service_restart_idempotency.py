@@ -232,6 +232,12 @@ def _stateful_bot_repository(bot: dict) -> tuple[MagicMock, dict]:
 
 
 class TestRestartGuardOrchestration:
+    @pytest.fixture(autouse=True)
+    def runtime_precondition_boundary(self):
+        # Existing lifecycle tests are independent of the coding runtime contract.
+        with patch("agentclaw.community.core.bot_management.engines.aicoding.restart_backup.AicodingRestartBackupMixin._prepare_restart", return_value=lambda: None):
+            yield
+
 
     def test_teclaw_bot_restart_is_rejected_before_lock_or_device_work(self):
         repo = FakeRestartLockRepo()

@@ -131,6 +131,7 @@ def mock_bot_service():
     svc.update_bot.return_value = BOT_SAMPLE
     svc.delete_bot.return_value = None
     svc.restart_bot.return_value = BOT_SAMPLE
+    svc.restart_bot_async = AsyncMock(return_value=BOT_SAMPLE)
     svc.check_bot_name_exists.return_value = False
     svc.get_engine_paths.return_value = {"openclaw": "/some/path"}
     svc.get_bot_work_path.return_value = "/some/path"
@@ -846,7 +847,7 @@ class TestRestartBot:
         )
 
         assert resp.status_code == 200
-        svc.restart_bot.assert_called_once_with(
+        svc.restart_bot_async.assert_called_once_with(
             bot_id="default",
             user_id="test_user",
             nick_name="Test User",
@@ -862,7 +863,7 @@ class TestRestartBot:
         )
 
         assert resp.status_code == 200
-        svc.restart_bot.assert_called_once_with(
+        svc.restart_bot_async.assert_called_once_with(
             bot_id="default",
             user_id="test_user",
             nick_name="Test User",
@@ -871,19 +872,19 @@ class TestRestartBot:
 
     def test_bot_not_found(self, client):
         tc, svc, _ = client
-        svc.restart_bot.side_effect = BotNotFoundError("nope")
+        svc.restart_bot_async.side_effect = BotNotFoundError("nope")
         resp = tc.post("/api/bots/missing/restart")
         assert resp.json()["error_code"] == 404
 
     def test_service_error(self, client):
         tc, svc, _ = client
-        svc.restart_bot.side_effect = BotServiceError("fail")
+        svc.restart_bot_async.side_effect = BotServiceError("fail")
         resp = tc.post("/api/bots/default/restart")
         assert resp.json()["error_code"] == 500
 
     def test_recycled_bot_returns_conflict(self, client):
         tc, svc, _ = client
-        svc.restart_bot.side_effect = BotInvalidLifecycleStateError(
+        svc.restart_bot_async.side_effect = BotInvalidLifecycleStateError(
             bot_id="default",
             current_status="RECYCLED",
         )
@@ -896,7 +897,7 @@ class TestRestartBot:
 
     def test_rejects_teclaw_bot(self, client):
         tc, svc, _ = client
-        svc.restart_bot.side_effect = BotOperationNotAllowedError(
+        svc.restart_bot_async.side_effect = BotOperationNotAllowedError(
             "teclaw 类型的 Bot 不支持重启"
         )
 
@@ -912,7 +913,7 @@ class TestRestartBot:
 
     def test_activation_in_progress_returns_accepted(self, client):
         tc, svc, _ = client
-        svc.restart_bot.return_value = {
+        svc.restart_bot_async.return_value = {
             **BOT_SAMPLE,
             "status": "REACTIVATING",
             "restart_in_progress": True,
@@ -945,7 +946,7 @@ class TestRestartScheduler:
             "error_code": 403,
             "data": None,
         }
-        svc.restart_bot.assert_not_called()
+        svc.restart_bot_async.assert_not_called()
 
     def test_success(self, admin_client):
         tc, svc, _, _ = admin_client
@@ -955,7 +956,7 @@ class TestRestartScheduler:
         )
         assert resp.status_code == 200
         assert resp.json()["success"] is True
-        svc.restart_bot.assert_called_once_with(
+        svc.restart_bot_async.assert_called_once_with(
             bot_id="default",
             user_id="test_user",
             nick_name="test_user",
@@ -963,7 +964,7 @@ class TestRestartScheduler:
 
     def test_bot_not_found(self, admin_client):
         tc, svc, _, _ = admin_client
-        svc.restart_bot.side_effect = BotNotFoundError("nope")
+        svc.restart_bot_async.side_effect = BotNotFoundError("nope")
         resp = tc.post(
             "/api/bots/restart-scheduler",
             json={"user_id": "test_user", "bot_id": "missing"},
@@ -972,7 +973,7 @@ class TestRestartScheduler:
 
     def test_service_error(self, admin_client):
         tc, svc, _, _ = admin_client
-        svc.restart_bot.side_effect = BotServiceError("fail")
+        svc.restart_bot_async.side_effect = BotServiceError("fail")
         resp = tc.post(
             "/api/bots/restart-scheduler",
             json={"user_id": "test_user", "bot_id": "default"},
@@ -981,7 +982,7 @@ class TestRestartScheduler:
 
     def test_recycled_bot_returns_conflict(self, admin_client):
         tc, svc, _, _ = admin_client
-        svc.restart_bot.side_effect = BotInvalidLifecycleStateError(
+        svc.restart_bot_async.side_effect = BotInvalidLifecycleStateError(
             bot_id="default",
             current_status="RECYCLED",
         )
@@ -996,7 +997,7 @@ class TestRestartScheduler:
 
     def test_rejects_teclaw_bot(self, admin_client):
         tc, svc, _, _ = admin_client
-        svc.restart_bot.side_effect = BotOperationNotAllowedError(
+        svc.restart_bot_async.side_effect = BotOperationNotAllowedError(
             "teclaw 类型的 Bot 不支持重启"
         )
 
@@ -1015,7 +1016,7 @@ class TestRestartScheduler:
 
     def test_activation_in_progress_returns_accepted(self, admin_client):
         tc, svc, _, _ = admin_client
-        svc.restart_bot.return_value = {
+        svc.restart_bot_async.return_value = {
             **BOT_SAMPLE,
             "status": "PENDING",
             "restart_in_progress": True,
@@ -1085,7 +1086,7 @@ class TestRestartForOthers:
 
     def test_rejects_teclaw_bot(self, admin_client):
         tc, svc, _, _ = admin_client
-        svc.restart_bot.side_effect = BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")
+        svc.restart_bot_async.side_effect = BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")
 
         resp = tc.post("/api/bots/restart-for-others", json={"target_user_id": "u1", "target_bot_id": "default"})
 
@@ -1093,7 +1094,7 @@ class TestRestartForOthers:
         assert data["success"] is False
         assert data["error_code"] == 400
         assert data["message"] == "teclaw 类型的 Bot 不支持重启"
-        svc.restart_bot.assert_called_once()
+        svc.restart_bot_async.assert_called_once()
 
     def test_missing_target_user(self, admin_client):
         tc, svc, _, _ = admin_client
@@ -1102,13 +1103,13 @@ class TestRestartForOthers:
 
     def test_bot_not_found(self, admin_client):
         tc, svc, _, _ = admin_client
-        svc.restart_bot.side_effect = BotNotFoundError("nope")
+        svc.restart_bot_async.side_effect = BotNotFoundError("nope")
         resp = tc.post("/api/bots/restart-for-others", json={"target_user_id": "u1", "target_bot_id": "missing"})
         assert resp.json()["error_code"] == 404
 
     def test_recycled_bot_returns_conflict(self, admin_client):
         tc, svc, _, _ = admin_client
-        svc.restart_bot.side_effect = BotInvalidLifecycleStateError(
+        svc.restart_bot_async.side_effect = BotInvalidLifecycleStateError(
             bot_id="default",
             current_status="RECYCLED",
         )
@@ -1123,7 +1124,7 @@ class TestRestartForOthers:
 
     def test_activation_in_progress_returns_accepted(self, admin_client):
         tc, svc, _, _ = admin_client
-        svc.restart_bot.return_value = {
+        svc.restart_bot_async.return_value = {
             **BOT_SAMPLE,
             "status": "REACTIVATING",
             "restart_in_progress": True,
