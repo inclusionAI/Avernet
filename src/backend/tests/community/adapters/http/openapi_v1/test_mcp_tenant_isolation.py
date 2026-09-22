@@ -64,9 +64,9 @@ class _FileSqliteDB:
 def config_service(tmp_path):
     """A real MCPConfigService over the real repo + guard on file SQLite.
 
-    ``mcp_center`` and ``bot_repo`` are not exercised by the read/write config
-    path (headers validation is skipped by passing ``headers=None``), so they
-    are mocks.
+    ``mcp_center`` and ``bot_repo`` are external collaborators, so they are
+    mocks.  The Bot repository explicitly reports an empty inventory because
+    these tests isolate tenant-scoped persistence rather than Bot projection.
     """
     engine = create_engine(
         f"sqlite:///{tmp_path / 'mcp.db'}",
@@ -76,6 +76,9 @@ def config_service(tmp_path):
     repo = UserMCPConfigRepository(_FileSqliteDB(engine))
     bot_config_repo = MagicMock()
     bot_config_repo.list_by_owner_and_server_code.return_value = {}
+    bot_repo = MagicMock()
+    bot_repo.list_live_bot_ids_by_owner.return_value = []
+    bot_repo.list_by_entity.return_value = (0, [])
     center = MagicMock()
     center.get_mcp_detail.return_value = {
         "serverCode": SERVER,
@@ -93,7 +96,7 @@ def config_service(tmp_path):
         user_mcp_config_repo=repo,
         bot_mcp_config_repo=bot_config_repo,
         mcp_center=center,
-        bot_repo=MagicMock(),
+        bot_repo=bot_repo,
         capability_reader=MagicMock(),
         mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
         secret_resolver=MagicMock(),
