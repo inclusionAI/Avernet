@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Optional
 
 import pytest
@@ -25,6 +26,7 @@ from fastapi import HTTPException
 
 from engine.community.core.bash.models import BashExecResult
 from engine.community.core.aicoding.runstatus_service import (
+    AixCommandError,
     IDLE_STATUS,
     RunStatusService,
     SESSION_CACHE_TTL,
@@ -993,44 +995,15 @@ async def test_get_session_pull_requests_empty_outputs_returns_empty_list() -> N
 
 
 async def test_get_session_issues_success_and_sort() -> None:
-    """issue 数据从 aix run list 的 workItem 构建，并保持原有 issue 结构。"""
+    """Map the versioned aix run list workItem fixture to the issue shape."""
+    fixture = Path(__file__).parent / "fixtures" / "aix_run_list_workitem.v1.json"
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+
     plugin = FakeBashPlugin()
     plugin.add(
         "aix run list",
         WORKSPACE,
-        BashExecResult(
-            stdout=_runs_payload(
-                [
-                    {
-                        "id": "r-old",
-                        "runId": "r-old",
-                        "projectDir": PROJECT_DIR,
-                        "startedAtUnixMs": 1_000,
-                        "updatedAtUnixMs": 1_000,
-                    },
-                    {
-                        "id": "r-new",
-                        "runId": "r-new",
-                        "projectDir": PROJECT_DIR,
-                        "startedAtUnixMs": 2_000,
-                        "updatedAtUnixMs": 2_000,
-                        "workItem": {
-                            "provider": "dima",
-                            "site": "alipay",
-                            "type": "req",
-                            "id": "2026091700119169408",
-                            "url": (
-                                "https://project.alipay.com/space/W26001130350/"
-                                "requirement?workItemView=2300100000022&"
-                                "openWorkItemId=2026091700119169408&status=pipeline"
-                            ),
-                        },
-                    },
-                ]
-            ),
-            stderr="",
-            exit_code=0,
-        ),
+        BashExecResult(stdout=json.dumps(payload), stderr="", exit_code=0),
     )
 
     service = _make_service(plugin)
@@ -1040,15 +1013,16 @@ async def test_get_session_issues_success_and_sort() -> None:
         {
             "runId": "r-new",
             "kind": "issue",
-            "provider": "dima",
+            "provider": "work-item",
             "url": (
-                "https://project.alipay.com/space/W26001130350/"
-                "requirement?workItemView=2300100000022&"
-                "openWorkItemId=2026091700119169408&status=pipeline"
+                "https://example.com/work-items/2026091700119169408"
+                "?workItemId=2026091700119169408"
             ),
             "title": None,
             "at": 2_000,
-            "projectDir": PROJECT_DIR,
+            "projectDir": (
+                "/home/admin/.aicoding/workspace/example-session/project"
+            ),
         }
     ]
     assert "aix run list --filter" in plugin.calls[0][0]
@@ -1065,12 +1039,8 @@ async def test_get_session_issues_500_when_cmd_fails() -> None:
     )
     service = _make_service(plugin)
 
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(AixCommandError, match="aix run list failed"):
         await service.get_session_issues(SESSION_ID)
-
-    assert excinfo.value.status_code == 500
-    assert "aix run list failed" in excinfo.value.detail
-    assert "aix internal error" in excinfo.value.detail
 
 
 async def test_get_session_issues_500_on_bad_json() -> None:
@@ -1083,11 +1053,8 @@ async def test_get_session_issues_500_on_bad_json() -> None:
     )
     service = _make_service(plugin)
 
-    with pytest.raises(HTTPException) as excinfo:
+    with pytest.raises(AixCommandError, match="Failed to parse aix output"):
         await service.get_session_issues(SESSION_ID)
-
-    assert excinfo.value.status_code == 500
-    assert "Failed to parse aix output" in excinfo.value.detail
 
 
 async def test_get_session_pull_requests_500_when_cmd_fails() -> None:

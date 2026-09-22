@@ -75,6 +75,10 @@ _PROCESS_STATUS_CACHE: dict[str, tuple[float, str]] = {}
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,128}$")
 
 
+class AixCommandError(RuntimeError):
+    """Raised when an aix CLI command fails or returns an invalid payload."""
+
+
 def _clear_status_cache() -> None:
     """主要供测试调用，避免跨用例污染共享缓存。"""
     _PROCESS_STATUS_CACHE.clear()
@@ -274,7 +278,8 @@ class RunStatusService:
         """返回 session 工作空间下所有 run 关联的工作项数据，按 at 倒序。
 
         接口响应结构保持不变；内部命令从 ``aix run output list --kind issue``
-        改为 ``aix run list --filter <workspace_root>``，并从
+        改为 ``aix run list --filter <workspace_root>``，并按
+        ``docs/arch/aix-run-list-workitem-wire-contract.md`` 中的 v1 契约从
         ``runs[].workItem`` 构造原有 issue 字段。
         """
         workspace_root = WorkspaceService.resolve_workspace(session_id, cwd)
@@ -396,24 +401,20 @@ class RunStatusService:
         """执行严格版 ``aix run list`` 并返回 ``runs`` 列表。
 
         与 :meth:`_aix_run_list` 的差异是这里保留 issue outputs 接口原有的
-        错误语义：命令失败或 JSON 解析失败抛 ``HTTPException(500)``。
+        错误语义：命令失败或 JSON 解析失败抛 :class:`AixCommandError`。
         """
         cmd = f"aix run list --filter {shlex.quote(workspace_root)} --json"
         res = await self._safe_exec(cmd, workspace_root, RUNS_TIMEOUT)
 
         if res is None or res.exit_code != 0:
             stderr = res.stderr if res else "no stderr"
-            raise HTTPException(
-                status_code=500,
-                detail=f"aix run list failed: {stderr}",
-            )
+            raise AixCommandError(f"aix run list failed: {stderr}")
 
         try:
             payload = json.loads(res.stdout) or {}
         except json.JSONDecodeError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to parse aix output: {exc}",
+            raise AixCommandError(
+                f"Failed to parse aix output: {exc}"
             ) from exc
 
         runs = payload.get("runs") or []

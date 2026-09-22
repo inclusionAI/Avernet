@@ -1,0 +1,42 @@
+{
+  "partial": false,
+  "loading": false,
+  "limit": 100,
+  "truncated": false,
+  "runs": [
+    {
+      "runId": "r-old",
+      "id": "r-old",
+      "status": {
+        "kind": "completed",
+        "phase": "step-1",
+        "gateIndex": 0
+      },
+      "startedAtUnixMs": 1000,
+      "updatedAtUnixMs": 1000,
+      "projectDir": "/home/admin/.aicoding/workspace/example-session/project",
+      "sessionId": null
+    },
+    {
+      "runId": "r-new",
+      "id": "r-new",
+      "status": {
+        "kind": "awaitingApproval",
+        "phase": "step-1",
+        "gateIndex": 0
+      },
+      "workflow": "two-phase-hitl-confirm",
+      "startedAtUnixMs": 2000,
+      "updatedAtUnixMs": 3000,
+      "projectDir": "/home/admin/.aicoding/workspace/example-session/project",
+      "sessionId": null,
+      "workItem": {
+        "provider": "work-item",
+        "site": "example",
+        "type": "req",
+        "id": "2026091700119169408",
+        "url": "https://example.com/work-items/2026091700119169408?workItemId=2026091700119169408"
+      }
+    }
+  ]
+}
