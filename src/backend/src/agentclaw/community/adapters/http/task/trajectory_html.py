@@ -190,6 +190,18 @@ def _render_event(ev: "object") -> str:
         parts.append(f"<pre>{html.escape(payload)}</pre>")
         parts.append("</details>")
 
+    # 会话消息(读时富化;仅每个 node 的最后一条事件携带,可折叠;role|content 逐行)
+    session_msgs = getattr(ev, "session_msgs", None)
+    if session_msgs:
+        lines = "\n".join(
+            f"{m.get('role', '?')} | {m.get('content', '')}"
+            for m in session_msgs if isinstance(m, dict)
+        )
+        parts.append('<details class="ev-input">')
+        parts.append(f"<summary>节点会话 · 最近消息 {len(session_msgs)} 条</summary>")
+        parts.append(f"<pre>{html.escape(lines)}</pre>")
+        parts.append("</details>")
+
     parts.append("</div>")
     return "".join(parts)
 

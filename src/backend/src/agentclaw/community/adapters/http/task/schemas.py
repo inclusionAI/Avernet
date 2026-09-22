@@ -942,6 +942,12 @@ class TrajectoryEventDTO(BaseModel):
         description="子任务当前产出(node.run_info.output;读时经 task_execution_graph 富化,"
                     "仅该 node 在 timeline 中的最后一条事件携带,无产出为 None)",
     )
+    session_msgs: list[dict[str, Any]] | None = Field(
+        None,
+        description="子任务会话消息(最近 running_session_message_limit 条,原文;"
+                    "读时自末位事件 ext_info.session_msgs 富化,仅该 node 最后一条事件携带,"
+                    "未物化/无会话为 None)",
+    )
 
 
 class TaskTrajectoryDTO(BaseModel):
@@ -997,6 +1003,7 @@ def trajectory_to_dto(trajectory: "TaskTrajectory") -> TaskTrajectoryDTO:
                 holder_id=ev.holder_id,
                 analysis=ev.analysis,
                 output=ev.output,
+                session_msgs=ev.session_msgs,
             )
             for ev in trajectory.timeline
         ],

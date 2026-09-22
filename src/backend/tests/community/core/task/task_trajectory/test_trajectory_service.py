@@ -1249,6 +1249,71 @@ async def test_get_trajectory_attaches_node_output_to_last_event():
 
 @pytest.mark.asyncio
 @pytest.mark.unit
+async def test_get_trajectory_attaches_session_msgs_to_last_event():
+    """会话消息读时富化(读路径):末位事件 ext_info.session_msgs 挂到该子任务
+    timeline 的最后一条事件;早事件 None;无物化的节点不挂。"""
+    msgs = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "done"}]
+    records = [
+        _make_record(node_id="n1", action_type="dispatch", attempt=0, gmt_create_ms=1000,
+                     rec_id=1, ext_info=None),
+        _make_record(node_id="n1", action_type="execute", attempt=0, gmt_create_ms=2000,
+                     rec_id=2, ext_info=json.dumps({"schema_v": 1, "session_msgs": msgs},
+                                                    ensure_ascii=False)),
+        _make_record(node_id="n2", action_type="plan", attempt=0, gmt_create_ms=3000,
+                     rec_id=3, ext_info=json.dumps({"schema_v": 1, "strategy": "search"},
+                                                   ensure_ascii=False)),
+    ]
+    timeline = [
+        _make_event(node_id="n1", action_type=TrajectoryActionType.PLAN, gmt_create=1000),
+        _make_event(node_id="n1", action_type=TrajectoryActionType.EXECUTE, gmt_create=2000),
+        _make_event(node_id="n2", action_type=TrajectoryActionType.PLAN, gmt_create=3000),
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(events=records), _FakeAnalyzer(), None)
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    n1_events = [e for e in result.timeline if e.node_id == "n1"]
+    assert n1_events[0].session_msgs is None, "早事件不挂"
+    assert n1_events[-1].session_msgs == msgs, "末位事件挂物化过的会话原文"
+    n2_last = [e for e in result.timeline if e.node_id == "n2"][-1]
+    assert n2_last.session_msgs is None, "未物化节点不挂(缺字段=无信号)"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_do_analysis_returns_timeline_with_fresh_session_msgs():
+    """慢路径返回态:本回合刚实拉物化的 session_msgs(fresh map)挂上末位事件,
+    返回的 timeline 可直接在 HTML 展示最新会话(不受早前 ext_info 快照影响)。"""
+    stale = [{"role": "user", "content": "stale"}]
+    records = [
+        _make_record(node_id="n1", action_type="execute", attempt=0, gmt_create_ms=1000,
+                     rec_id=1, ext_info=json.dumps({"schema_v": 1, "session_msgs": stale},
+                                                   ensure_ascii=False)),
+    ]
+    timeline = [_make_event(node_id="n1", action_type=TrajectoryActionType.EXECUTE, gmt_create=1000)]
+    graph = _FakeGraph([
+        _FakeNode(node_id="n1", status=Status.RUNNING,
+                  extend_props={"session_id": "sess-1"}, start_time=500),
+    ])
+    fresh = [{"role": "user", "content": "fresh-now"}]
+    bcs = _FakeBcs(messages_by_session={"sess-1": fresh})
+    analyzer = _FakeAnalyzer(analysis=_make_analysis())
+    repo = _FakeRepo(events=records)
+    config = TrajectoryAnalysisConfig(analysis_bot_id="bot-traj-analyst")
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc = TaskTrajectoryService(_FakeAssembler(traj), repo, analyzer, config,
+                                graph=graph, bcs=bcs)
+
+    result = await svc.get_trajectory("t1", do_analysis=True, force_analysis=True)
+
+    # fresh(本回合实拉)胜过 ext_info 快照
+    assert result.timeline[0].session_msgs == fresh
+    assert result.timeline[0].session_msgs != stale
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_get_trajectory_output_skipped_when_graph_unbound():
     """graph 未接线(4 参轻量构造)→ 不富化也不抛,事件保持 output=None。"""
     timeline = [_make_event(node_id="n1", gmt_create=1000)]

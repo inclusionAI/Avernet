@@ -648,3 +648,51 @@ def test_trajectory_display_html_renders_final_status_and_error_category():
     assert "FAILED" in r.text
     assert "错误类型 (error_category)" in r.text
     assert "execution_error" in r.text
+
+
+@pytest.mark.unit
+def test_trajectory_dto_passes_through_session_msgs_on_last_event():
+    """会话消息读时富化经 DTO 透传为 ``timeline[i].session_msgs``;未携带为 null。"""
+    ev1 = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type=TrajectoryActionType.PLAN,
+        action_result="success", attempt=0, gmt_create=1000, gmt_modified=1000,
+    )
+    ev2 = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
+        action_result="success", attempt=0, gmt_create=2000, gmt_modified=2000,
+        session_msgs=[{"role": "user", "content": "hi"},
+                      {"role": "assistant", "content": "tool failed: boom"}],
+    )
+    traj = TaskTrajectory(task_id="t1", gmt_create=2000, gmt_modified=2000,
+                         timeline=[ev1, ev2], analysis=None)
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get("/openapi/v1/collaboration/tasks/trajectory", params={"task_id": "t1"})
+    assert r.status_code == 200
+    timeline = r.json()["data"]["timeline"]
+    assert timeline[0]["session_msgs"] is None
+    assert timeline[1]["session_msgs"] == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "tool failed: boom"},
+    ]
+
+
+@pytest.mark.unit
+def test_trajectory_display_html_renders_session_msgs_block():
+    """HTML 页在携带会话消息的末位事件下渲染可折叠「节点会话」块(role|content 逐行)。"""
+    ev = TrajectoryEvent(
+        task_id="t1", node_id="n1", action_type=TrajectoryActionType.EXECUTE,
+        action_result="success", attempt=0, gmt_create=1000, gmt_modified=1000,
+        session_msgs=[{"role": "user", "content": "run the job"},
+                      {"role": "assistant", "content": "tool failed: boom"}],
+    )
+    traj = TaskTrajectory(task_id="t1", gmt_create=1000, gmt_modified=1000,
+                         timeline=[ev], analysis=None)
+    c = _build_client(_StubTrajectoryService(trajectory=traj))
+    r = c.get(
+        "/openapi/v1/collaboration/tasks/trajectory",
+        params={"task_id": "t1", "display": "html"},
+    )
+    assert r.status_code == 200
+    assert "节点会话 · 最近消息 2 条" in r.text
+    assert "user | run the job" in r.text
+    assert "assistant | tool failed: boom" in r.text

@@ -422,6 +422,8 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         if not do_analysis:
             trajectory = self._assembler.assemble(task_id)
             self._attach_node_outputs(trajectory)
+            records = self._safe_list_records(task_id)
+            self._attach_session_msgs(trajectory, records)
             return trajectory
         return await self._do_analysis(task_id, force_analysis=force_analysis)
 
@@ -471,6 +473,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         #    analysis persisted before ``timeline_version`` existed carries no
         #    stamp → mismatch → re-analyzes exactly once, then carries the
         #    stamp. ``fingerprint=None`` (records read failed) never matches.
+        self._attach_session_msgs(trajectory, records)  # 快路径返回同样带会话消息(展示用)
         if (
             not _forced
             and trajectory.analysis
@@ -507,7 +510,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         #    组 brief 交给分析 bot(大模型)判"工具调用报错 / 执行完不上报结果"等
         #    timeline 看不到的问题。任一步失败 → 降级跳过该节点(WARNING),不影响
         #    主分析。
-        running_sessions = await self._collect_session_briefs(
+        running_sessions, fresh_session_msgs = await self._collect_session_briefs(
             task_id, records, force_analysis=force_analysis,
         )
 
@@ -545,6 +548,12 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         #    transactional; decision #13 overwrite). Bot-failure path did NOT
         #    reach here (analyzer raised in step 6).
         self._repo.backfill_analysis(task_id, analysis_json)
+
+        # 9b. 返回态富化:本回合实际拉取的 session_msgs 覆盖快照后挂末位事件,
+        #     保证 do_analysis=true 返回的 timeline 也能在 HTML 展示每个子任务的
+        #     最新会话消息。
+        if fresh_session_msgs:
+            self._attach_session_msgs(trajectory, records, fresh_session_msgs)
 
         # 10. Return the TaskTrajectory carrying the fresh analysis. Mutate the
         #    in-memory object (avoids a second DB round-trip); gmt_modified
@@ -629,7 +638,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
 
     async def _collect_session_briefs(
         self, task_id: str, records, *, force_analysis: bool = False,
-    ) -> "list[dict] | None":
+    ) -> "tuple[list[dict] | None, dict[str, list]]":
         """物化每个子任务的会话明细 + 汇集**未结束**节点的大模型研判原料。
 
         两段式(需求 2026-09-22):
@@ -658,7 +667,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
 
         if self._graph is None or self._bcs is None:
             logger.info("[task][trajectory], collect_trajectory_event_session_msgs, graph or bcs is none")
-            return None  # 探测未接线(轻量 DI / 未部署 BCS)→ 无会话段
+            return None, {}  # 探测未接线(轻量 DI / 未部署 BCS)→ 无会话段
         try:
             graph = self._graph.query_task_dashboard(task_id)
         except Exception as ex:  # noqa: BLE001  图读失败 → 探测整体降级
@@ -666,12 +675,12 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 "[task][trajectory] collect_trajectory_event_session_msgs, RUNNING 探测图读失败 task=%s: %s: %s",
                 task_id, type(ex).__name__, ex,
             )
-            return None
+            return None, {}
         nodes = [n for n in getattr(graph, "tasks", []) if
                  (n.run_info.extend_props or {}).get("session_id")]
         if not nodes:
             logger.info("[task][trajectory], collect_trajectory_event_session_msgs, no session nodes")
-            return None
+            return None, {}
         # 已带上 session_id 的全部节点按卡住时长降序:预算/研判优先最"病"的
         now_ms = int(time.time() * 1000)
         def _elapsed_ms(node) -> int:  # noqa: ANN001  domain node;defensive read
@@ -696,6 +705,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         _UNFINISHED = {Status.RUNNING, Status.PENDING, Status.PLANNING,
                        Status.DONE, Status.HUNG}
         briefs: list[dict] = []
+        fresh_msgs: dict[str, list] = {}  # 本次实际拉取的 msgs(node_id → 原文摘录),供返回态 session_msgs 富化
         for node in nodes:
             ep = node.run_info.extend_props or {}
             sid = ep.get("session_id")
@@ -743,6 +753,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 if not excerpt:
                     continue
                 # ①物化:增量合并进该子任务最后一条事件的 ext_info(不覆盖既有键)。
+                fresh_msgs[node.node_id] = excerpt  # 本次实拉内容 → 返回态可用
                 try:
                     merged_ok = self._repo.merge_last_event_ext_info(
                         task_id, node.node_id, "session_msgs", excerpt,
@@ -772,12 +783,57 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 "messages": list(excerpt),
             })
         if not briefs:
-            return None
+            return None, fresh_msgs
         logger.info(
             "[task][trajectory] collect_trajectory_event_session_msgs, RUNNING 会话探测完成 task=%s briefs=%d",
             task_id, len(briefs),
         )
-        return briefs
+        return briefs, fresh_msgs
+
+    def _safe_list_records(self, task_id: str) -> "list | None":
+        """读事件行(读路径富化用);失败 → WARNING + None(富化降级,不影响轨迹本体)。"""
+        try:
+            return self._repo.list_events_by_task(task_id)
+        except Exception as ex:  # noqa: BLE001  富化读失败 → 返回未富化轨迹
+            logger.warning(
+                "[task][trajectory] session_msgs 富化读事件行失败,跳过 task=%s: %s: %s",
+                task_id, type(ex).__name__, ex,
+            )
+            return None
+
+    def _attach_session_msgs(
+        self, trajectory: TaskTrajectory, records, fresh: "dict[str, list] | None" = None,
+    ) -> None:
+        """把每个子任务 (task_id+node_id) 的**会话消息**挂到它在 timeline 中的
+        **最后一条**事件上(读时富化,展示进 HTML/DTO;不落库——持久态由
+        ``merge_last_event_ext_info`` 的 ``session_msgs`` 键承载)。
+
+        来源优先级:``fresh``(本回合 do_analysis 刚实拉的最新内容) > 事件行快照
+        中该子任务末位事件 ``ext_info.session_msgs``(早前物化的缓存)。均无 →
+        不挂(None,缺字段=无信号)。观测旁路:任何失败不抛,不影响轨迹本体返回。
+        """
+        if not trajectory.timeline:
+            return
+        msgs_by_node: dict[str, list] = {}
+        try:
+            for node_id, ext in self._last_event_ext_by_node(records).items():
+                cached = (ext or {}).get("session_msgs")
+                if isinstance(cached, list) and cached:
+                    msgs_by_node[node_id] = cached
+        except Exception:  # noqa: BLE001  records 为 None(读失败)→ 空映射
+            msgs_by_node = {}
+        if fresh:
+            msgs_by_node.update({k: v for k, v in fresh.items() if isinstance(v, list) and v})
+        if not msgs_by_node:
+            return
+        last_seen: set[str] = set()
+        for ev in reversed(trajectory.timeline):
+            if ev.node_id in last_seen:
+                continue  # 更早的事件不挂(只挂末位)
+            last_seen.add(ev.node_id)
+            msgs = msgs_by_node.get(ev.node_id)
+            if msgs:
+                ev.session_msgs = [dict(m) if isinstance(m, dict) else m for m in msgs]
 
     def _holder_bearer_token(self, node) -> "str | None":
         """解析 RUNNING 节点**持有者 bot** 的 BCS session_token(会话历史读取身份)。

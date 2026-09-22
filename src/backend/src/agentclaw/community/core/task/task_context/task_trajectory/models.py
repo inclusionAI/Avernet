@@ -115,6 +115,7 @@ class TrajectoryEvent:
     holder_id: str | None = None              # Relay 当前动作执行人(ext_info 定向投影)
     analysis: str | None = None              # 内嵌 TrajectoryAnalysis JSON(发射时 None)
     output: dict[str, Any] | None = None      # 读时富化:节点当前产出(仅该节点最后一条事件;不落库)
+    session_msgs: list[dict[str, Any]] | None = None  # 读时富化:子任务会话消息(同上;源自末位事件 ext_info.session_msgs,展示/DTO 用,不落库)
 
 
 @dataclass
