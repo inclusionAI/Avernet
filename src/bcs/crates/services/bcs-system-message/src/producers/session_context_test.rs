@@ -406,6 +406,15 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
     assert!(!message_for(manager_id).contains("bcs_task_complete"));
     assert!(message_for(mcporter_worker_id).contains("mcporter call bcs.bcs_send_task_message"));
     for bot_id in [manager_id, mcporter_worker_id] {
+        assert!(message_for(bot_id).contains(
+            "每个 `mcporter call` 必须单独使用一次 shell/exec 工具调用"
+        ));
+        assert!(message_for(bot_id).contains(
+            "需要同时调用多个时，分别发起多个独立工具调用，可以并行执行"
+        ));
+        assert!(message_for(bot_id).contains(
+            "禁止在同一命令、脚本或工具调用中使用 `;`、`&&` 等方式串联多个 `mcporter call`"
+        ));
         assert!(message_for(bot_id).contains("必须保留并回传完整原始输出"));
         assert!(message_for(bot_id).contains(
             "禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理"
