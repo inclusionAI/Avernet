@@ -42,6 +42,8 @@ class MCPConfigServiceProtocol(Protocol):
         headers: dict[str, str] | None,
         endpoint_env: str | None,
         transport_protocol: str | None,
+        entity_id: str | None = None,
+        entity_type: str | None = None,
     ) -> dict[str, Any]: ...
 
     def update_user_unified_config(

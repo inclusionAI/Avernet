@@ -126,6 +126,9 @@ def test_write_success_returns_masked_write_shaped_config():
 
 def test_write_forwards_params_for_merge_and_push():
     cfg = _config_service()
+    cfg.validate_user_config_update.return_value = {
+        "valid": True, "error": None, "affected_bot_ids": ["bot-1"]
+    }
     sync = _sync_service()
     _write(cfg=cfg, sync=sync, endpoint_env=None, api_key=None, headers=None)
     # An omitted field is forwarded as None so config_service merges (not replace).
@@ -134,6 +137,7 @@ def test_write_forwards_params_for_merge_and_push():
     # And the same identity/values reach the device push.
     _, sync_kw = sync.sync_mcp_detail_to_all_bots.call_args
     assert sync_kw["entity_id"] == "u1" and sync_kw["entity_type"] == "staff"
+    assert sync_kw["target_bot_ids"] == ["bot-1"]
 
 
 # ── write: ordering — bad server never reaches the DB ───────────────
