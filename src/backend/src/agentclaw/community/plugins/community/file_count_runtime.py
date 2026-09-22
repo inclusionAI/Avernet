@@ -13,7 +13,7 @@ from agentclaw.community.plugin_api.http_client import HttpClientTimeoutError
 
 logger = get_logger()
 ENDPOINT = "/api/file/count"
-INSTANCE_TIMEOUT_SECONDS = 30
+INSTANCE_TIMEOUT_SECONDS = 150
 ERROR_CODES = {
     400: {"invalid_path", "not_directory"},
     403: {"path_forbidden", "permission_denied"},
@@ -61,7 +61,8 @@ class HttpFileCountRuntime:
                   "instance_id": target, "path": query.path, "file_count": None}
         fields = {**asdict(query), **result, "engine_request_id": query.request_id,
                   "operator_id": operator_id, "method": "GET", "route": ENDPOINT,
-                  "system": "engine", "direction": "outbound", "elapsed_ms": 0}
+                  "system": "engine", "direction": "outbound", "elapsed_ms": 0,
+                  "timeout_seconds": INSTANCE_TIMEOUT_SECONDS}
         logger.info("backend.file_count.engine_request %s", safe_log_fields(fields))
         try:
             async with asyncio.timeout(INSTANCE_TIMEOUT_SECONDS):
