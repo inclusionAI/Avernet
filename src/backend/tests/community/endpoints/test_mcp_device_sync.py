@@ -21,8 +21,11 @@ Coverage of the call chain:
 """
 from __future__ import annotations
 
+from agentclaw.community.core.models.mcp import BotMCPInstallation
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
+from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
 from tests.community.framework.device_seams import (
@@ -53,25 +56,43 @@ class _RecordingPlugin:
         self.single_pushes.append(mcp_data)
         return True
 
+    def sync_all_mcp_servers(self, _mcp_data) -> bool:
+        return True
+
 
 # Sequential endpoint tests — stash the active recording plugin for the assertions.
 _ACTIVE: dict[str, _RecordingPlugin] = {}
 
 
-def _insert_bot(world, bot_id: str) -> None:
+def _insert_bot(
+    world, bot_id: str, *, owner_id: str = _OWNER,
+    entity_id: str = _OWNER, entity_type: str = "staff",
+) -> None:
     world.get(BotRepository).insert(
         {
             "bot_id": bot_id,
             "bot_name": f"Bot {bot_id}",
-            "owner_id": _OWNER,
-            "owner_name": _OWNER,
+            "owner_id": owner_id,
+            "owner_name": owner_id,
             "bot_type": "service",
             "status": "ACTIVE",
-            "entity_id": _OWNER,
-            "entity_type": "staff",
+            "entity_id": entity_id,
+            "entity_type": entity_type,
             "creator_id": _OWNER,
         }
     )
+
+
+def _install_mcp(world, bot_id: str, *, owner_id: str = _OWNER) -> None:
+    with world.get(DatabasePlugin).orm_session() as session:
+        session.add(
+            BotMCPInstallation(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                server_code=_SERVER_CODE,
+                env=get_current_env(),
+            )
+        )
 
 
 def _configure_seams(world, *, has_mcp: bool = True) -> _RecordingPlugin:
@@ -105,6 +126,7 @@ def _configure_seams(world, *, has_mcp: bool = True) -> _RecordingPlugin:
 def _seed_one_bot(world) -> None:
     make_staff_user(world, user_id=_OWNER)
     _insert_bot(world, "bot_mcp_a")
+    _install_mcp(world, "bot_mcp_a")
     _configure_seams(world, has_mcp=True)
 
 
@@ -138,14 +160,20 @@ def mcp_config_one_bot_pushes():
 def _seed_one_bot_without_mcp(world) -> None:
     make_staff_user(world, user_id=_OWNER)
     _insert_bot(world, "bot_mcp_b")
+    _install_mcp(world, "bot_mcp_b")
     _configure_seams(world, has_mcp=False)
 
 
-def _assert_probe_skipped_push(response, world) -> None:
+def _assert_runtime_drift_recovers(response, world) -> None:
     assert response.json().get("success") is True, response.json()
     plugin = _ACTIVE["plugin"]
     assert len(plugin.has_mcp_calls) == 1, plugin.has_mcp_calls
-    assert plugin.single_pushes == [], plugin.single_pushes
+    assert any(
+        item.get("server_code") == _SERVER_CODE
+        for item in plugin.single_pushes
+    ), plugin.single_pushes
+    result = response.json()["data"]["sync_results"]
+    assert result == [{"bot_id": "bot_mcp_b", "synced": True, "reason": "RUNTIME_DRIFT", "error": None, "conn_info": None}]
 
 
 @endpoint_test(
@@ -159,10 +187,10 @@ def _assert_probe_skipped_push(response, world) -> None:
     ),
     seed=_seed_one_bot_without_mcp,
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
-    extra_assertions=(_assert_probe_skipped_push,),
+    extra_assertions=(_assert_runtime_drift_recovers,),
 )
-def mcp_config_device_without_mcp_skips():
-    """Device reports the MCP absent → probe skips the push, still 200."""
+def mcp_config_device_without_mcp_recovers():
+    """A selected MCP absent at runtime triggers full reconciliation."""
 
 
 # ---- happy: two bots under the entity → loop pushes to both ----
@@ -170,6 +198,8 @@ def _seed_two_bots(world) -> None:
     make_staff_user(world, user_id=_OWNER)
     _insert_bot(world, "bot_mcp_c1")
     _insert_bot(world, "bot_mcp_c2")
+    _install_mcp(world, "bot_mcp_c1")
+    _install_mcp(world, "bot_mcp_c2")
     _configure_seams(world, has_mcp=True)
 
 
@@ -194,6 +224,33 @@ def _assert_pushed_to_both_bots(response, world) -> None:
 )
 def mcp_config_two_bots_push_each():
     """Two reachable bots under the entity → the loop pushes to both."""
+
+
+def _seed_team_bot(world) -> None:
+    make_staff_user(world, user_id=_OWNER)
+    _insert_bot(
+        world, "team-mcp-bot", owner_id="team-owner",
+        entity_id="team-42", entity_type="team",
+    )
+    _install_mcp(world, "team-mcp-bot", owner_id="team-owner")
+    _configure_seams(world, has_mcp=True)
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/mcp/user/config",
+    scenario="team_entity_pushes_owned_bot",
+    input=CaseInput(
+        query_params={"entity_id": "team-42", "entity_type": "team"},
+        headers={"x-user-id": _OWNER},
+        json_body={"server_code": _SERVER_CODE, "api_key": _API_KEY},
+    ),
+    seed=_seed_team_bot,
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_pushed_single_mcp,),
+)
+def mcp_config_team_entity_pushes_owned_bot():
+    """A caller config update reaches the team's effective consumer Bot."""
 
 
 # ---- error: invalid endpoint_env → 400 before any sync ----
