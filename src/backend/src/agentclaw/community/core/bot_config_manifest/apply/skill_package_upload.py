@@ -51,7 +51,7 @@ class DeviceSkillPackageUpload(SkillPackageUploadPort):
     def __init__(
         self,
         inner: LocalSkillUploadServiceProtocol,
-        delete_service: LocalSkillDeleteServiceProtocol | None = None,
+        delete_service: LocalSkillDeleteServiceProtocol,
     ) -> None:
         self._inner = inner
         self._delete = delete_service
@@ -67,18 +67,6 @@ class DeviceSkillPackageUpload(SkillPackageUploadPort):
         self, *, skill_id: str, name: str, bot_id: str, owner_id: str,
         actor_id: str,
     ) -> None:
-        if self._delete is None:
-            fallback = getattr(self._inner, "delete_local_skill", None)
-            if fallback is None:
-                raise RuntimeError("Local Skill deletion service is not configured")
-            await fallback(
-                skill_id=skill_id,
-                name=name,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                actor_id=actor_id,
-            )
-            return
         await self._delete.delete_local_skill(
             skill_id=skill_id, owner_id=owner_id, user_id=actor_id
         )

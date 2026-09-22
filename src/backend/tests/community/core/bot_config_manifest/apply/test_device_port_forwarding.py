@@ -109,6 +109,10 @@ _DEVICE_IMPLS = [
     (ActivationPort, DeviceActivation),
     (IdentityFilePort, DeviceIdentity),
     (ResourceFilePort, DeviceResource),
+]
+
+_DEVICE_SURFACES = [
+    *_DEVICE_IMPLS,
     (SkillPackageUploadPort, DeviceSkillPackageUpload),
 ]
 
@@ -162,6 +166,36 @@ async def test_device_delegate_forwards_every_argument(port, impl, method) -> No
         )
 
 
+@pytest.mark.asyncio
+async def test_device_skill_package_port_uses_explicit_upload_and_delete_services() -> None:
+    """Upload and deletion cross two separately declared Service APIs."""
+    upload = _Recorder()
+    upload._async_names = frozenset({"upload_local_skill"})
+    delete = _Recorder()
+    delete._async_names = frozenset({"delete_local_skill"})
+    delegate = DeviceSkillPackageUpload(upload, delete)
+
+    upload_args = _sentinels(SkillPackageUploadPort, "upload_local_skill")
+    await delegate.upload_local_skill(**upload_args)
+    assert upload.calls == [("upload_local_skill", (), upload_args)]
+    assert delete.calls == []
+
+    delete_args = _sentinels(SkillPackageUploadPort, "delete_local_skill")
+    await delegate.delete_local_skill(**delete_args)
+    assert delete.calls == [
+        (
+            "delete_local_skill",
+            (),
+            {
+                "skill_id": delete_args["skill_id"],
+                "owner_id": delete_args["owner_id"],
+                "user_id": delete_args["actor_id"],
+            },
+        )
+    ]
+    assert len(upload.calls) == 1
+
+
 @pytest.mark.parametrize(
     ("impl", "expected"), [(DeviceActivation, True), (PlatformActivation, False)],
     ids=["device projects", "platform records only"],
@@ -193,7 +227,7 @@ async def test_activation_delegate_pins_project(impl, expected, method) -> None:
     )
 
 
-@pytest.mark.parametrize(("port", "impl"), _DEVICE_IMPLS, ids=lambda o: getattr(o, "__name__", str(o)))
+@pytest.mark.parametrize(("port", "impl"), _DEVICE_SURFACES, ids=lambda o: getattr(o, "__name__", str(o)))
 def test_device_delegate_adds_no_surface_of_its_own(port, impl) -> None:
     """A delegate re-exposes the port and nothing else.
 

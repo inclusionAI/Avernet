@@ -1,5 +1,6 @@
 """Backend transport contract against the real Engine file port and filesystem."""
 
+from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import Mock
@@ -13,12 +14,8 @@ from fastapi.testclient import TestClient
 def file_count_contract(tmp_path, monkeypatch):
     repository = Path(__file__).resolve().parents[6]
     monkeypatch.syspath_prepend(str(repository / "src/engine/src"))
-    from engine.community.api.file.router import router
+    from engine.community.api.file import router as file_router
     from engine.community.core.adapters.openclaw.file import OpenClawFileAdapter
-    from engine.community.core.engine.base import BaseEngine
-    from engine.community.core.engine.capability import Capability, EngineCapabilities
-    from engine.community.core.engine.registry import EngineRegistry
-    from engine.community.manager import EngineManager
     from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
     from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 
@@ -52,11 +49,16 @@ def file_count_contract(tmp_path, monkeypatch):
     manager = EngineManager(CountEngine.name, registry=registry)
     manager._active_engine = CountEngine()
     manager._active_engine._file = OpenClawFileAdapter(
+    file_adapter = OpenClawFileAdapter(
         OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter()),
     )
-    EngineManager._instance = manager
+    file_router_module = import_module("engine.community.api.file.router")
+    # This contract owns router -> adapter -> real filesystem behavior. Keep it
+    # independent of the process-wide EngineManager used by other test files.
+    monkeypatch.setattr(file_router_module, "check_capability", lambda _capability: None)
+    monkeypatch.setattr(file_router_module, "_file_plugin", lambda: file_adapter)
     app = FastAPI()
-    app.include_router(router)
+    app.include_router(file_router)
     captured = []
 
     with TestClient(app) as client:
@@ -87,7 +89,6 @@ def file_count_contract(tmp_path, monkeypatch):
         )
         yield NS(runtime=runtime, root=root, directory=directory, captured=captured,
                  binding=lambda provider: FileCountBinding(44, provider, "runtime-device"))
-    EngineManager.reset_instance()
 
 
 @pytest.mark.asyncio
@@ -103,7 +104,7 @@ async def test_real_filesystem_count_across_provider_and_stage(file_count_contra
         ctx.binding(provider), "replica-a",
         FileCountQuery("bot", "entity", stage, path, "contract-request"), "manager",
     )
-    assert result["status"] == "success"
+    assert result["status"] == "success", result
     assert result["file_count"] == 4
     assert result["path"] == path
     assert result["elapsed_ms"] >= 0
