@@ -102,3 +102,67 @@ Create-with-manifest freezes `nick_name` in the durable job's `spec` at submissi
 so background completion does not depend on request identity context. Jobs queued
 before this field was introduced remain readable and fall back to their `user_id`.
 This requires no database migration and does not backfill historical Bot rows.
+
+## Mandatory restart precondition (coding runtime, v1)
+
+`EngineProvisioningStrategy.prepare_restart` is a mandatory lifecycle hook under
+an acquired restart lease, before either release/start or BaaS update. Unlike
+`apply_restart_extra_configs`, its failures propagate and MUST NOT detach the
+old binding. The default implementation is a no-op. The aicoding strategy owns
+the runtime entrypoint, versioned result validation and polling for both aicoding
+and claude_code; BotService contains no runtime path, command or mount policy.
+The platform DeviceService router chooses ARCA/BaaS command execution.
+
+The runtime contract is `/opt/agentclaw/bin/restart_backup start|status <operation>`:
+JSON version 1, operation identity, container identity and explicit completion
+receipt. Only confirmed legacy script absence or confirmed no canonical bind
+mounts can bypass backup. Errors/timeouts never permit destruction. See
+`aixcoding-docker-scripts/docs/restart-backup-contract.md` in the companion repo
+for root/admin ownership, rollout invariant and mandatory Linux/provider tests.
+
+The lock repository's `renew` refreshes the DB-clock lease for long backups;
+`release(expected_created_at=...)` prevents stale reaping from deleting a lease
+renewed after the stale read. Existing release callers retain token-only behavior.
+
+Propagation: concrete coding strategies and the shared restart caller, unified
+lock repository and its test implementations, the runtime scripts, both platform
+exec providers. No frontend or Relay HTTP contract is changed. The HTTP adapter
+offloads the synchronous service to its thread pool so backup polling does not
+block the server event loop. This is NOT a new durable asynchronous restart queue:
+long-request/gateway behavior and process-death recovery require staging validation.
+
+
+### Published and caller targets
+
+`BotServiceProtocol.instance_restart_guard(bot, device_id)` is an asynchronous
+context manager: it resolves the same `prepare_restart` engine hook and holds a
+target-specific fenced lease through backup and replacement submission. Its
+adapter lives in `services/instance_restart.py`; all runtime/mount/legacy policy
+remains in `engines/aicoding/restart_backup.py`. The explicit target is the
+publish-stage/caller bot UUID, never the source Bot binding. Source Bot state is
+not updated. Ordinary Bot restart continues to own its existing status writes.
+
+Published restart calls the guard inside the durable runner's issue callback,
+not before workflow adoption. Both retirement branches are guarded as well.
+Caller calls it only when upgrading an existing instance (including automatic
+version upgrades); first creation, connection reuse and polling are unchanged.
+Confirmed RELEASED targets need no backup; query errors are not proof of release.
+Legacy targets with confirmed helper absence continue the original upgrade.
+Permission/exec/protocol failures do not count as legacy absence.
+
+A deterministic per-target runtime operation ID resumes an interrupted backup
+without starting competing workers. The runtime's `/run` must be new after actual
+replacement. Failed operations remain fail-closed pending runtime recovery.
+Published/caller execution pins commands to each physical `provider_device_id`
+from BaaS's target device inventory, then rechecks that inventory before allowing
+replacement. Historical RELEASED/STOPPED devices need no script; every remaining
+legacy container is probed independently. A malformed/unresolvable inventory is
+not permission to destroy. `BaasServiceProtocol.exec_command_on_device` wraps the
+existing PaaS command endpoint; it adds no server-side API. Local tests do not
+prove provider inventory accuracy or Linux/NAS behavior.
+
+Propagation: the BotService Service API gains `instance_restart_guard`; published
+restart and caller upgrade consume it. No new DB schema, frontend or Relay HTTP
+API is introduced. Backup runs outside the event loop. Cancellation during
+preparation retains the lease until its worker finishes and never proceeds to
+replacement on behalf of the cancelled request.

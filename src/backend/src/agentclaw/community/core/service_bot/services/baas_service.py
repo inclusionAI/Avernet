@@ -25,6 +25,8 @@ import re
 import time
 
 import httpx
+
+from .device_commands import DeviceCommandsMixin
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasNoActiveDevicesError,
     BaasServiceError,
@@ -387,7 +389,7 @@ class BotConfig:
         return result
 
 
-class BaasService:  # pragma: no cover
+class BaasService(DeviceCommandsMixin):  # pragma: no cover
     """BaaS 服务 - 与 BaaS 层 API 交互。
 
     负责 BaaS 层相关的 API 调用，如创建 Bot 等。所有依赖由

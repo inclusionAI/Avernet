@@ -101,8 +101,17 @@ class BotRestartLockRepository(
                 )
                 return None
 
+    def renew(self, env: str, entity_id: str, bot_id: str, lock_token: str) -> bool:
+        """Refresh the lease on the DB clock only while this token owns it."""
+        with self._db.orm_session() as db:
+            return db.query(self._Lock).filter(
+                self._Lock.env == env, self._Lock.entity_id == entity_id,
+                self._Lock.bot_id == bot_id, self._Lock.lock_token == lock_token,
+            ).update({self._Lock.gmt_create: func.now()}, synchronize_session=False) == 1
+
     def release(
-        self, env: str, entity_id: str, bot_id: str, lock_token: str
+        self, env: str, entity_id: str, bot_id: str, lock_token: str,
+        *, expected_created_at: datetime | None = None,
     ) -> bool:
         """释放重启锁（比对令牌后硬删除）。
 
@@ -110,7 +119,7 @@ class BotRestartLockRepository(
         被回收后重新获取的新锁（stale-reaper 与超时后异步释放两种竞态）。
         """
         with self._db.orm_session() as db:
-            result = (
+            query = (
                 db.query(self._Lock)
                 .filter(
                     self._Lock.env == env,
@@ -118,8 +127,12 @@ class BotRestartLockRepository(
                     self._Lock.bot_id == bot_id,
                     self._Lock.lock_token == lock_token,
                 )
-                .delete(synchronize_session=False)
             )
+            # A lease may have been renewed after get_if_stale. A token alone
+            # cannot detect that race because renewal retains the same token.
+            if expected_created_at is not None:
+                query = query.filter(self._Lock.gmt_create == expected_created_at)
+            result = query.delete(synchronize_session=False)
             if result > 0:
                 logger.info(
                     "[restart_lock.release] released, env=%s, entity_id=%s, bot_id=%s, token=%s",

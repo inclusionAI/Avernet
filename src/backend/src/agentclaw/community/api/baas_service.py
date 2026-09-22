@@ -113,6 +113,10 @@ class BaasServiceProtocol(Protocol):
         """Open a bot's working folder on the device side."""
         ...
 
+    def exec_command_on_device(self, *, paas_device_id: str, cmd: str) -> dict[str, Any]:
+        """Execute on an authorized physical container, never load-balanced."""
+        ...
+
     def exec_command_on_bot(
         self,
         *,

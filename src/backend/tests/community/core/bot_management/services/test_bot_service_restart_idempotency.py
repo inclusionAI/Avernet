@@ -94,12 +94,19 @@ class FakeRestartLockRepo:
             return rec
         return None
 
-    def release(self, env, entity_id, bot_id, lock_token):
+    def renew(self, env, entity_id, bot_id, lock_token):
+        rec = self.get(env, entity_id, bot_id)
+        if rec is None or rec.lock_token != lock_token:
+            return False
+        rec.gmt_create = self.now
+        return True
+
+    def release(self, env, entity_id, bot_id, lock_token, *, expected_created_at=None):
         self.release_calls += 1
         key = (env, entity_id, bot_id)
         rec = self.rows.get(key)
         # Compare-and-delete: only remove the row if the token still matches.
-        if rec is not None and rec.lock_token == lock_token:
+        if rec is not None and rec.lock_token == lock_token and (expected_created_at is None or rec.gmt_create == expected_created_at):
             del self.rows[key]
             return True
         return False
@@ -232,6 +239,34 @@ def _stateful_bot_repository(bot: dict) -> tuple[MagicMock, dict]:
 
 
 class TestRestartGuardOrchestration:
+    @pytest.fixture(autouse=True)
+    def runtime_backup_boundary(self):
+        with patch("agentclaw.community.core.bot_management.engines.aicoding.restart_backup.prepare_backup"):
+            yield
+
+    @pytest.mark.parametrize("provider", ["arca", "baas"])
+    def test_mandatory_engine_precondition_blocks_both_destructive_paths(self, provider):
+        lock_repo = FakeRestartLockRepo()
+        device = MagicMock()
+        device.get_device.return_value = {
+            "device_id": "old-instance", "device_provider": provider, "status": "ACTIVE"}
+        bot = _make_bot(active_engine="aicoding", binding_id=42)
+        repository, state = _stateful_bot_repository(bot)
+        svc = _make_service(lock_repo, bot_repository=repository,
+                            device_provider=device, baas_service_provider=lambda: MagicMock())
+        with patch("agentclaw.community.core.bot_management.engines.aicoding.restart_backup.prepare_backup",
+                   side_effect=RuntimeError("backup failed")), \
+             patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start, \
+             patch.object(svc, "_restart_bot_baas") as update:
+            with pytest.raises(BotServiceError, match="backup failed"):
+                svc.restart_bot(bot_id="bot001", user_id="user001")
+        stop.assert_not_called()
+        start.assert_not_called()
+        update.assert_not_called()
+        assert state["binding_id"] == 42
+        assert state["status"] == "FAILED"
+        assert not lock_repo.rows
 
     def test_teclaw_bot_restart_is_rejected_before_lock_or_device_work(self):
         repo = FakeRestartLockRepo()
@@ -772,6 +807,7 @@ class TestRestartGuardOrchestration:
         device_service = MagicMock()
         device_service.get_device.return_value = SimpleNamespace(
             id=42,
+            device_id="old-arca-instance",
             device_provider="arca",
         )
         svc._device_service_provider = lambda: device_service
@@ -875,6 +911,7 @@ class TestRestartGuardOrchestration:
         device_service = MagicMock()
         device_service.get_device.return_value = SimpleNamespace(
             id=42,
+            device_id="old-arca-instance",
             device_provider="arca",
         )
         svc._device_service_provider = lambda: device_service
@@ -1629,7 +1666,8 @@ class TestStaleReaper:
         assert result is None  # suppressed — did not steal the newer lock
         # The reap released using the STALE row's token (fencing), not a blind
         # delete of whatever currently occupies the key.
-        repo.release.assert_called_once_with("dev", "ent", "bot001", "A")
+        repo.release.assert_called_once_with("dev", "ent", "bot001", "A",
+                                            expected_created_at=stale.gmt_create)
         assert repo.acquire.call_count == 2
 
 

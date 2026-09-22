@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from agentclaw.community.core.bot_management.errors import BotTemplateInvalidError
 from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
@@ -236,6 +236,21 @@ class EngineProvisioningStrategy(ABC):
         the wire format instead of ExpertChat branching on engine literals.
         Versioned service-bot formats are documented in
         ``src/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
+        """
+
+    def prepare_restart(
+        self, ctx: BotProvisioningContext, *, binding_id: int | None,
+        device_service: Any, bot_repository: Any, renew_lease: Callable[[], bool],
+        device_id: str | None = None,
+        target_runtime: Any = None,
+    ) -> None:
+        """Mandatory engine precondition under the restart lock, before release/update.
+
+        Default: no-op. Any exception MUST abort restart without detaching the
+        old binding. Explicit device_id targets a published/caller instance and must
+        not mutate the source Bot repository; binding_id/bot_repository are None
+        in that mode. Implementations may use platform exec, never transport
+        logic in BotService. renew_lease returns False when ownership is lost.
         """
 
     @abstractmethod
