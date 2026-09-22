@@ -313,8 +313,20 @@ class DeviceBindingRepository(Protocol):
         binding_id: int,
         device_id: str,
         startup_identity: str,
+    ) -> str | None:
+        """Return a leased claim token once Binding and Bot are ready."""
+        ...
+
+    @abstractmethod
+    def release_baas_desktop_data_init_trigger_if_matches(
+        self,
+        *,
+        binding_id: int,
+        device_id: str,
+        startup_identity: str,
+        claim_token: str,
     ) -> bool:
-        """Claim a confirmed Pool trigger once Binding and Bot are ready."""
+        """Release the matching Pool trigger lease after dispatch failure."""
         ...
 
     @abstractmethod

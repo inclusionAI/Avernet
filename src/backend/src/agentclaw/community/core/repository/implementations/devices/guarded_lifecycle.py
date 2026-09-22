@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import func
 
@@ -18,6 +20,19 @@ from agentclaw.community.plugin_api.models import BotModel
 _PENDING = "PENDING"
 _ACTIVE = "ACTIVE"
 _FAILED = "FAILED"
+_DATA_INIT_TRIGGER_CLAIM_TIMEOUT_SECONDS = 10 * 60
+
+
+def _utc_timestamp_expired(raw: Any, *, timeout_seconds: int) -> bool:
+    if not isinstance(raw, str) or not raw:
+        return False
+    try:
+        timestamp = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return False
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - timestamp).total_seconds() > timeout_seconds
 
 
 def _normalize_isolation_level(value: str) -> str:
@@ -235,8 +250,10 @@ class BaasDesktopLifecycleRepositoryMixin:
         binding_id: int,
         device_id: str,
         startup_identity: str,
-    ) -> bool:
+    ) -> str | None:
         marker_key = "data_init_triggered_startup_identity"
+        token_key = "data_init_trigger_claim_token"
+        claimed_at_key = "data_init_trigger_claimed_at"
         with self._db.orm_session() as db:
             try:
                 begin_guarded_transaction(
@@ -263,10 +280,9 @@ class BaasDesktopLifecycleRepositoryMixin:
                         props.get(LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY) or ""
                     )
                     != startup_identity
-                    or str(props.get(marker_key) or "") == startup_identity
                 ):
                     db.rollback()
-                    return False
+                    return None
                 bot = (
                     db.query(BotModel)
                     .filter(
@@ -278,17 +294,91 @@ class BaasDesktopLifecycleRepositoryMixin:
                     .one_or_none()
                 )
                 bot_ext = load_device_props(bot.ext) if bot is not None else {}
+                claim_is_current = (
+                    str(props.get(marker_key) or "") == startup_identity
+                    and bool(str(props.get(token_key) or ""))
+                )
+                claim_is_expired = claim_is_current and _utc_timestamp_expired(
+                    props.get(claimed_at_key),
+                    timeout_seconds=_DATA_INIT_TRIGGER_CLAIM_TIMEOUT_SECONDS,
+                )
+                data_init_status = bot_ext.get("data_init_status")
+                in_progress_is_stale = (
+                    data_init_status == "in_progress"
+                    and claim_is_expired
+                    and _utc_timestamp_expired(
+                        bot_ext.get("data_init_started_at"),
+                        timeout_seconds=_DATA_INIT_TRIGGER_CLAIM_TIMEOUT_SECONDS,
+                    )
+                )
                 if (
                     bot is None
                     or bot.device_id != device_id
                     or bot.status != _ACTIVE
                     or bot_ext.get("start_status") != "SUCCEEDED"
-                    or bot_ext.get("data_init_status")
-                    not in {"pending_init", "failed"}
+                    or data_init_status not in {"pending_init", "failed", "in_progress"}
+                    or (data_init_status == "in_progress" and not in_progress_is_stale)
+                    or (claim_is_current and not claim_is_expired)
+                ):
+                    db.rollback()
+                    return None
+                claim_token = uuid4().hex
+                props[marker_key] = startup_identity
+                props[token_key] = claim_token
+                props[claimed_at_key] = datetime.now(timezone.utc).isoformat()
+                binding.device_props = json.dumps(props, ensure_ascii=False)
+                binding.gmt_modified = func.now()
+                db.commit()
+                return claim_token
+            except Exception:
+                db.rollback()
+                raise
+
+    def release_baas_desktop_data_init_trigger_if_matches(
+        self,
+        *,
+        binding_id: int,
+        device_id: str,
+        startup_identity: str,
+        claim_token: str,
+    ) -> bool:
+        marker_key = "data_init_triggered_startup_identity"
+        token_key = "data_init_trigger_claim_token"
+        claimed_at_key = "data_init_trigger_claimed_at"
+        with self._db.orm_session() as db:
+            try:
+                begin_guarded_transaction(
+                    db, purpose="BaaS Desktop data-init trigger release"
+                )
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(EntityDeviceBinding.id == binding_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                props = (
+                    load_device_props(binding.device_props)
+                    if binding is not None
+                    else {}
+                )
+                if (
+                    binding is None
+                    or binding.device_id != device_id
+                    or binding.device_provider != "baas"
+                    or binding.status != _ACTIVE
+                    or resolve_startup_identity(props) != startup_identity
+                    or str(
+                        props.get(LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY) or ""
+                    )
+                    != startup_identity
+                    or str(props.get(marker_key) or "") != startup_identity
+                    or str(props.get(token_key) or "") != claim_token
                 ):
                     db.rollback()
                     return False
-                props[marker_key] = startup_identity
+                props.pop(marker_key, None)
+                props.pop(token_key, None)
+                props.pop(claimed_at_key, None)
                 binding.device_props = json.dumps(props, ensure_ascii=False)
                 binding.gmt_modified = func.now()
                 db.commit()

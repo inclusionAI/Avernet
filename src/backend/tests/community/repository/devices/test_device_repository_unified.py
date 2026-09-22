@@ -12,6 +12,7 @@ Protocol surface plus the 3 adopt-prod behavior changes:
 import json
 import time
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from threading import Event, Thread, current_thread
 from unittest.mock import patch
 
@@ -701,7 +702,7 @@ def test_recover_desktop_creation_binding_rejects_foreign_bot_link(repo, db):
     ) is False
 
 
-def test_desktop_data_init_trigger_claim_is_current_and_once(repo):
+def test_desktop_data_init_trigger_claim_is_current_once_and_releasable(repo):
     bid = repo.insert_binding(
         **_binding(
             entity_id="u001",
@@ -733,21 +734,109 @@ def test_desktop_data_init_trigger_claim_is_current_and_once(repo):
         ),
     )
 
+    claim_token = repo.claim_baas_desktop_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    )
+    assert claim_token is not None
     assert repo.claim_baas_desktop_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
+    ) is None
+    assert repo.release_baas_desktop_data_init_trigger_if_matches(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+        claim_token=claim_token,
     ) is True
-    assert repo.claim_baas_desktop_data_init_trigger_if_ready(
+    next_claim_token = repo.claim_baas_desktop_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
-    ) is False
+    )
+    assert next_claim_token is not None
+    assert next_claim_token != claim_token
     assert repo.claim_baas_desktop_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="16",
+    ) is None
+
+
+def test_desktop_data_init_expired_claim_is_fenced_during_takeover(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            status="ACTIVE",
+            device_props={
+                "restart_publish_id": "17",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        status="ACTIVE",
+        env="dev",
+        ext=json.dumps(
+            {
+                "start_status": "SUCCEEDED",
+                "data_init_status": "pending_init",
+            }
+        ),
+    )
+    first_token = repo.claim_baas_desktop_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    )
+    assert first_token is not None
+
+    with repo._db.orm_session() as db:
+        binding = db.query(EntityDeviceBinding).filter_by(id=bid).one()
+        props = json.loads(binding.device_props)
+        stale_at = datetime.now(timezone.utc) - timedelta(minutes=11)
+        props["data_init_trigger_claimed_at"] = stale_at.isoformat()
+        binding.device_props = json.dumps(props)
+        bot = db.query(BotModel).filter_by(binding_id=bid).one()
+        bot.ext = json.dumps(
+            {
+                "start_status": "SUCCEEDED",
+                "data_init_status": "in_progress",
+                "data_init_started_at": stale_at.isoformat(),
+            }
+        )
+
+    second_token = repo.claim_baas_desktop_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    )
+    assert second_token is not None
+    assert second_token != first_token
+    assert repo.release_baas_desktop_data_init_trigger_if_matches(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+        claim_token=first_token,
     ) is False
+    assert repo.release_baas_desktop_data_init_trigger_if_matches(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+        claim_token=second_token,
+    ) is True
 
 
 def test_desktop_data_init_trigger_claim_waits_for_active_bot(repo):
@@ -786,7 +875,7 @@ def test_desktop_data_init_trigger_claim_waits_for_active_bot(repo):
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
-    ) is False
+    ) is None
 
     with repo._db.orm_session() as db:
         db.query(BotModel).filter(BotModel.binding_id == bid).update(
@@ -797,7 +886,7 @@ def test_desktop_data_init_trigger_claim_waits_for_active_bot(repo):
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
-    ) is True
+    ) is not None
 
 
 def test_batch_update_env(repo):

@@ -919,9 +919,12 @@ class TestReportDeviceAlive:
         reset_event_bus()
 
     def test_data_init_readiness_may_arrive_before_or_after_active(self):
+        from agentclaw.community.core.events.bus import reset_event_bus
+
+        reset_event_bus()
         props = {
+            "callback_token": "tok123",
             "restart_publish_id": "17",
-            "layout_confirmed_startup_identity": "17",
         }
         pending = _make_record(
             status=DeviceBindingStatus.PENDING.value,
@@ -931,12 +934,17 @@ class TestReportDeviceAlive:
         active = _make_record(
             status=DeviceBindingStatus.ACTIVE.value,
             device_provider="baas",
-            device_props=props,
+            device_props={
+                **props,
+                "layout_confirmed_startup_identity": "17",
+            },
         )
         repo = MagicMock()
-        repo.get_by_id.side_effect = [pending, active]
-        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = True
+        repo.get_by_device_id.return_value = pending
+        repo.get_by_id.side_effect = [pending, active, active]
+        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = "claim-17"
         service = _make_service(repo=repo)
+        service._sync_bot_config_when_device_active = MagicMock()
         service._trigger_data_init_on_device_ready = MagicMock()
 
         service.trigger_data_init_on_device_ready(
@@ -944,21 +952,194 @@ class TestReportDeviceAlive:
             binding_id=pending.id,
             require_pool_confirmation=True,
         )
-        service.trigger_data_init_on_device_ready(
-            device_id=active.device_id,
-            binding_id=active.id,
-            require_pool_confirmation=True,
+        service.report_device_alive(
+            device_id=pending.device_id,
+            token="tok123",
         )
 
         service._trigger_data_init_on_device_ready.assert_called_once_with(
             device_id=active.device_id,
             record=active,
+            claimed_startup_identity="17",
+            claim_token="claim-17",
         )
         repo.claim_baas_desktop_data_init_trigger_if_ready.assert_called_once_with(
             binding_id=active.id,
             device_id=active.device_id,
             startup_identity="17",
         )
+        reset_event_bus()
+
+    def test_non_pool_alive_does_not_trigger_data_init_readiness(self):
+        record = _make_record(
+            status=DeviceBindingStatus.PENDING.value,
+            device_provider=ARCA_DEVICE_PROVIDER,
+            device_props={"callback_token": "tok123"},
+        )
+        updated = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider=ARCA_DEVICE_PROVIDER,
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = updated
+        service = _make_service(repo=repo)
+        service._sync_bot_config_when_device_active = MagicMock()
+        service.trigger_data_init_on_device_ready = MagicMock()
+
+        service.report_device_alive(
+            device_id=record.device_id,
+            token="tok123",
+        )
+
+        service.trigger_data_init_on_device_ready.assert_not_called()
+
+    def test_pool_data_init_dispatch_failure_releases_claim_for_retry(self):
+        active = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={
+                "restart_publish_id": "17",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+        repo = MagicMock()
+        repo.get_by_id.return_value = active
+        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = "claim-17"
+        repo.release_baas_desktop_data_init_trigger_if_matches.return_value = True
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "desktop-bot",
+            "owner_id": "u001",
+            "entity_id": "u001",
+            "entity_type": "staff",
+            "status": "ACTIVE",
+            "ext": {"data_init_status": "pending_init"},
+        }
+        provider = MagicMock(side_effect=RuntimeError("provider unavailable"))
+        service = _make_service(
+            repo=repo,
+            bot_query=bot_query,
+            data_init_service_provider=provider,
+        )
+
+        for _ in range(2):
+            service.trigger_data_init_on_device_ready(
+                device_id=active.device_id,
+                binding_id=active.id,
+                require_pool_confirmation=True,
+            )
+
+        assert provider.call_count == 2
+        assert (
+            repo.release_baas_desktop_data_init_trigger_if_matches.call_count
+            == 2
+        )
+        repo.release_baas_desktop_data_init_trigger_if_matches.assert_called_with(
+            binding_id=active.id,
+            device_id=active.device_id,
+            startup_identity="17",
+            claim_token="claim-17",
+        )
+
+    def test_pool_data_init_failed_result_releases_claim_for_retry(self):
+        from threading import Event
+
+        active = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={
+                "restart_publish_id": "17",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+        released = Event()
+        repo = MagicMock()
+        repo.get_by_id.return_value = active
+        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = "claim-17"
+        repo.release_baas_desktop_data_init_trigger_if_matches.side_effect = (
+            lambda **_kwargs: released.set() or True
+        )
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "desktop-bot",
+            "owner_id": "u001",
+            "entity_id": "u001",
+            "entity_type": "staff",
+            "status": "ACTIVE",
+            "ext": {"data_init_status": "pending_init"},
+        }
+        data_init_service = MagicMock()
+
+        async def _failed_init(**_kwargs):
+            return {"status": "failed", "message": "retries exhausted"}
+
+        data_init_service.trigger_init.side_effect = _failed_init
+        service = _make_service(
+            repo=repo,
+            bot_query=bot_query,
+            data_init_service_provider=lambda: data_init_service,
+        )
+
+        service.trigger_data_init_on_device_ready(
+            device_id=active.device_id,
+            binding_id=active.id,
+            require_pool_confirmation=True,
+        )
+
+        assert released.wait(timeout=1)
+        repo.release_baas_desktop_data_init_trigger_if_matches.assert_called_once_with(
+            binding_id=active.id,
+            device_id=active.device_id,
+            startup_identity="17",
+            claim_token="claim-17",
+        )
+
+    def test_pool_data_init_stale_in_progress_claim_reaches_service_retry(self):
+        from threading import Event
+
+        active = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={
+                "restart_publish_id": "17",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+        invoked = Event()
+        repo = MagicMock()
+        repo.get_by_id.return_value = active
+        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = "claim-stale"
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "desktop-bot",
+            "owner_id": "u001",
+            "entity_id": "u001",
+            "entity_type": "staff",
+            "status": "ACTIVE",
+            "ext": {"data_init_status": "in_progress"},
+        }
+        data_init_service = MagicMock()
+
+        async def _completed_retry(**_kwargs):
+            invoked.set()
+            return {"status": "completed", "message": "recovered"}
+
+        data_init_service.trigger_init.side_effect = _completed_retry
+        service = _make_service(
+            repo=repo,
+            bot_query=bot_query,
+            data_init_service_provider=lambda: data_init_service,
+        )
+
+        service.trigger_data_init_on_device_ready(
+            device_id=active.device_id,
+            binding_id=active.id,
+            require_pool_confirmation=True,
+        )
+
+        assert invoked.wait(timeout=1)
+        repo.release_baas_desktop_data_init_trigger_if_matches.assert_not_called()
 
     def test_pool_data_init_readiness_rejects_superseded_confirmation(self):
         active = _make_record(

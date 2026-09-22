@@ -1160,6 +1160,13 @@ class DeviceService:
                     exc_info=True,
                 )
 
+            if record.device_provider == BAAS_DEVICE_PROVIDER:
+                self.trigger_data_init_on_device_ready(
+                    device_id=device_id,
+                    binding_id=record.id,
+                    require_pool_confirmation=True,
+                )
+
         updated_record = self._repo.get_by_id(record.id)
         if updated_record is None:
             raise DeviceNotFoundError(f"binding {record.id} not found after update")
@@ -1712,6 +1719,7 @@ class DeviceService:
                 )
                 or ""
             )
+            claim_token = None
             if require_pool_confirmation:
                 if (
                     record.device_provider != BAAS_DEVICE_PROVIDER
@@ -1725,11 +1733,12 @@ class DeviceService:
                         f"confirmed_identity={confirmed_identity}"
                     )
                     return
-                if not self._repo.claim_baas_desktop_data_init_trigger_if_ready(
+                claim_token = self._repo.claim_baas_desktop_data_init_trigger_if_ready(
                     binding_id=binding_id,
                     device_id=device_id,
                     startup_identity=startup_identity,
-                ):
+                )
+                if claim_token is None:
                     logger.info(
                         "data_init_trigger skipped already_claimed_or_not_ready: "
                         f"device_id={device_id} binding_id={binding_id} "
@@ -1739,6 +1748,10 @@ class DeviceService:
             self._trigger_data_init_on_device_ready(
                 device_id=device_id,
                 record=record,
+                claimed_startup_identity=(
+                    startup_identity if require_pool_confirmation else None
+                ),
+                claim_token=claim_token,
             )
         except Exception as exc:
             logger.warning(
@@ -1747,7 +1760,14 @@ class DeviceService:
                 exc_info=True,
             )
 
-    def _trigger_data_init_on_device_ready(self, *, device_id: str, record) -> None:
+    def _trigger_data_init_on_device_ready(
+        self,
+        *,
+        device_id: str,
+        record,
+        claimed_startup_identity: str | None = None,
+        claim_token: str | None = None,
+    ) -> None:
         """当设备自报 SUCCEEDED 时触发 data-init。
 
         由 report_device_status(status=SUCCEEDED) 调用。
@@ -1755,6 +1775,7 @@ class DeviceService:
         start_status=SUCCEEDED（当前回调刚写入）。
         无需轮询 engine health 或等待 warmup。
         """
+        claim_handed_to_worker = False
         try:
             bot = self._bot_query.get_by_binding_id(record.id)
             if bot is None:
@@ -1785,7 +1806,9 @@ class DeviceService:
 
             # 仅在 data_init_status 为 pending_init / failed 时触发
             # null（存量 Bot，未启用 data-init）/ completed / in_progress 跳过
-            if data_init_status not in ("pending_init", "failed"):
+            if data_init_status not in ("pending_init", "failed") and not (
+                data_init_status == "in_progress" and claim_token is not None
+            ):
                 logger.info(
                     f"bot_id={bot_id} data_init_trigger skipped "
                     f"data_init_status={data_init_status}"
@@ -1823,7 +1846,7 @@ class DeviceService:
                 _t_start = _time.time()
                 logger.info(f"bot_id={bot_id} data_init_trigger thread_started")
                 try:
-                    asyncio.run(
+                    result = asyncio.run(
                         data_init_service.trigger_init(
                             bot_id=bot_id,
                             owner_id=owner_id,
@@ -1831,11 +1854,24 @@ class DeviceService:
                             entity_type=entity_type,
                         )
                     )
+                    if result.get("status") != "completed":
+                        self._release_pool_data_init_trigger_claim(
+                            binding_id=record.id,
+                            device_id=device_id,
+                            startup_identity=claimed_startup_identity,
+                            claim_token=claim_token,
+                        )
                     logger.info(
                         f"bot_id={bot_id} data_init_trigger thread_finished "
                         f"total_ms={(_time.time() - _t_start) * 1000:.0f}"
                     )
                 except Exception as run_exc:
+                    self._release_pool_data_init_trigger_claim(
+                        binding_id=record.id,
+                        device_id=device_id,
+                        startup_identity=claimed_startup_identity,
+                        claim_token=claim_token,
+                    )
                     logger.error(
                         f"bot_id={bot_id} data_init_trigger thread_failed exc={run_exc} "
                         f"total_ms={(_time.time() - _t_start) * 1000:.0f}",
@@ -1848,11 +1884,46 @@ class DeviceService:
                 name=f"data-init-{bot_id}",
             )
             thread.start()
+            claim_handed_to_worker = True
 
             logger.info(f"bot_id={bot_id} data_init_trigger dispatched source=status_succeeded thread={thread.name}")
 
         except Exception as e:
             logger.warning(f"bot_id=unknown data_init_trigger failed device_id={device_id} exc={e}", exc_info=True)
+        finally:
+            if claimed_startup_identity is not None and not claim_handed_to_worker:
+                self._release_pool_data_init_trigger_claim(
+                    binding_id=record.id,
+                    device_id=device_id,
+                    startup_identity=claimed_startup_identity,
+                    claim_token=claim_token,
+                )
+
+    def _release_pool_data_init_trigger_claim(
+        self,
+        *,
+        binding_id: int,
+        device_id: str,
+        startup_identity: str | None,
+        claim_token: str | None,
+    ) -> None:
+        if startup_identity is None or claim_token is None:
+            return
+        try:
+            self._repo.release_baas_desktop_data_init_trigger_if_matches(
+                binding_id=binding_id,
+                device_id=device_id,
+                startup_identity=startup_identity,
+                claim_token=claim_token,
+            )
+        except Exception:
+            logger.exception(
+                "data_init_trigger claim release failed: "
+                "device_id=%s binding_id=%s startup_identity=%s",
+                device_id,
+                binding_id,
+                startup_identity,
+            )
 
     # =========================================================================
     # get_device_connection_v2 — 代理/直连组装（公共方法，多个上层模块共用）
