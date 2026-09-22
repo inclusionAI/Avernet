@@ -108,7 +108,9 @@ class DistributedLockService:
         pid = os.getpid()
         thread_id = threading.current_thread().ident
         short_uuid = uuid.uuid4().hex[:8]
-        return f"{hostname}_{pid}_{thread_id}_{short_uuid}"
+        holder_id = f"{hostname}_{pid}_{thread_id}_{short_uuid}"
+        logger.info(f"[generate_holder_id] {holder_id}")
+        return holder_id
 
     def _start_renew_thread(self, context: LockContext) -> None:
         """启动自动续期线程。
