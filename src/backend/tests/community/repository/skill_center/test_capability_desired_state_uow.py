@@ -3633,6 +3633,7 @@ def test_manifest_mcp_claim_detaches_ordinary_membership_and_keeps_direct_instal
     )
 
     assert result.changed is True
+    assert result.source_transitions == (("skill_set", "direct"),)
     with db.orm_session() as session:
         assert session.query(SkillSetMCPServer).count() == 0
         assert [row.server_code for row in session.query(BotMCPInstallation)] == [
@@ -3653,6 +3654,7 @@ def test_manifest_mcp_claim_turns_default_supply_into_exclusion_plus_installatio
     )
 
     assert result.changed is True
+    assert result.source_transitions == (("default", "direct"),)
     with db.orm_session() as session:
         exclusion = session.query(DefaultSkillsetMcpExclusion).one()
         assert exclusion.skill_set_id == default.id
@@ -3755,10 +3757,62 @@ def test_manifest_skill_claim_replaces_same_name_membership_with_local_direct_cl
     )
 
     assert result.changed is True
+    assert result.source_transitions == (("skill_set", "direct"),)
     with db.orm_session() as session:
         assert {row.skill_id for row in session.query(SkillSetSkill)} == {
             unrelated.id
         }
+        assert {row.skill_id for row in session.query(BotSkillInstallation)} == {
+            local.id
+        }
+
+
+def test_manifest_skill_claim_excludes_the_current_center_default_version():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, env="dev",
+        )
+        current = Skill(
+            name="same-name", git_path="center://same-uuid",
+            skill_uuid="same-uuid", version=2, status="PUBLISHED", env="dev",
+        )
+        local = Skill(
+            name="same-name", git_path="local://same-name", user_id="owner",
+            bolt_id="bot", env="dev",
+        )
+        session.add_all([default, current, local])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(
+                skill_set_id=default.id,
+                skill_id=999,
+                skill_uuid="same-uuid",
+                env="dev",
+            ),
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=current.id, env="dev"
+            ),
+        ])
+
+    repository.claim_manifest_skill(
+        bot_id="bot", owner_id="owner", skill_id=str(local.id),
+        engine_type="openclaw", default_engine_types=("openclaw",),
+    )
+
+    with db.orm_session() as session:
+        exclusion = session.query(DefaultSkillsetSkillExclusion).one()
+        assert exclusion.skill_id == current.id
+        assert {row.skill_id for row in session.query(BotSkillInstallation)} == {
+            local.id
+        }
+    repository.flush_installations(
+        bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw",
+        default_engine_types=("openclaw",),
+    )
+    with db.orm_session() as session:
         assert {row.skill_id for row in session.query(BotSkillInstallation)} == {
             local.id
         }

@@ -136,26 +136,30 @@ class DirectActivationService(DirectActivationServiceProtocol):
         skill, bot = self._resolve_skill(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
-        result = await self._flow.apply(
-            bot=bot,
-            bot_id=bot_id,
-            engine_type=bot_engine_type(bot),
-            runtime_required=project,
-            mutation=lambda: self._repository.claim_manifest_skill(
+        mutation_result = None
+
+        def mutation():
+            nonlocal mutation_result
+            mutation_result = self._repository.claim_manifest_skill(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 skill_id=str(skill["id"]),
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
-            ),
+            )
+            return mutation_result
+
+        result = await self._flow.apply(
+            bot=bot,
+            bot_id=bot_id,
+            engine_type=bot_engine_type(bot),
+            runtime_required=project,
+            mutation=mutation,
             scope_from_result=skill_claim_scope,
         )
-        logger.info(
-            "[manifest_apply] direct_claim apply_id=%s bot_id=%s "
-            "capability_type=skill identity=%s",
-            apply_id,
-            bot_id,
-            skill_id,
+        self._log_manifest_source_transitions(
+            apply_id=apply_id, bot_id=bot_id, capability_type="skill",
+            identity=skill_id, mutation=mutation_result,
         )
         self._audit(
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
@@ -177,27 +181,31 @@ class DirectActivationService(DirectActivationServiceProtocol):
         skill, bot = self._resolve_skill(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
-        result = await self._flow.apply(
-            bot=bot,
-            bot_id=bot_id,
-            engine_type=bot_engine_type(bot),
-            runtime_required=project,
-            mutation=lambda: self._repository.remove_manifest_skill(
+        mutation_result = None
+
+        def mutation():
+            nonlocal mutation_result
+            mutation_result = self._repository.remove_manifest_skill(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 skill_id=str(skill["id"]),
                 remove_inactive_memberships=remove_inactive_memberships,
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
-            ),
+            )
+            return mutation_result
+
+        result = await self._flow.apply(
+            bot=bot,
+            bot_id=bot_id,
+            engine_type=bot_engine_type(bot),
+            runtime_required=project,
+            mutation=mutation,
             scope_from_result=skill_release_scope,
         )
-        logger.info(
-            "[manifest_apply] direct_remove apply_id=%s bot_id=%s "
-            "capability_type=skill identity=%s",
-            apply_id,
-            bot_id,
-            skill_id,
+        self._log_manifest_source_transitions(
+            apply_id=apply_id, bot_id=bot_id, capability_type="skill",
+            identity=skill_id, mutation=mutation_result,
         )
         self._audit(
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
@@ -366,12 +374,11 @@ class DirectActivationService(DirectActivationServiceProtocol):
         """Manifest-only conversion to Direct plus complete Bot override."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
-        result = await self._flow.apply(
-            bot=bot,
-            bot_id=bot_id,
-            engine_type=bot_engine_type(bot),
-            runtime_required=project,
-            mutation=lambda: self._repository.claim_manifest_mcp(
+        mutation_result = None
+
+        def mutation():
+            nonlocal mutation_result
+            mutation_result = self._repository.claim_manifest_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 server_code=server_code,
@@ -381,15 +388,20 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 ),
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
-            ),
+            )
+            return mutation_result
+
+        result = await self._flow.apply(
+            bot=bot,
+            bot_id=bot_id,
+            engine_type=bot_engine_type(bot),
+            runtime_required=project,
+            mutation=mutation,
             scope_from_result=mcp_claim_scope,
         )
-        logger.info(
-            "[manifest_apply] direct_claim apply_id=%s bot_id=%s "
-            "capability_type=mcp identity=%s",
-            apply_id,
-            bot_id,
-            server_code,
+        self._log_manifest_source_transitions(
+            apply_id=apply_id, bot_id=bot_id, capability_type="mcp",
+            identity=server_code, mutation=mutation_result,
         )
         self._audit(
             bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
@@ -409,12 +421,11 @@ class DirectActivationService(DirectActivationServiceProtocol):
     ) -> dict[str, Any]:
         """Manifest full-replace removal without restoring inherited supply."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
-        result = await self._flow.apply(
-            bot=bot,
-            bot_id=bot_id,
-            engine_type=bot_engine_type(bot),
-            runtime_required=project,
-            mutation=lambda: self._repository.remove_manifest_mcp(
+        mutation_result = None
+
+        def mutation():
+            nonlocal mutation_result
+            mutation_result = self._repository.remove_manifest_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 server_code=server_code,
@@ -423,15 +434,20 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 ),
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
-            ),
+            )
+            return mutation_result
+
+        result = await self._flow.apply(
+            bot=bot,
+            bot_id=bot_id,
+            engine_type=bot_engine_type(bot),
+            runtime_required=project,
+            mutation=mutation,
             scope_from_result=mcp_release_scope,
         )
-        logger.info(
-            "[manifest_apply] direct_remove apply_id=%s bot_id=%s "
-            "capability_type=mcp identity=%s",
-            apply_id,
-            bot_id,
-            server_code,
+        self._log_manifest_source_transitions(
+            apply_id=apply_id, bot_id=bot_id, capability_type="mcp",
+            identity=server_code, mutation=mutation_result,
         )
         self._audit(
             bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
@@ -539,6 +555,27 @@ class DirectActivationService(DirectActivationServiceProtocol):
         return self._platform_default_mcp_policy.server_codes_for(bot)
 
     # ── Shared ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _log_manifest_source_transitions(
+        *, apply_id: str | None, bot_id: str, capability_type: str,
+        identity: str, mutation: Any,
+    ) -> None:
+        """Emit only persistence-source facts; logging can never fail Apply."""
+        for from_source, to_source in getattr(mutation, "source_transitions", ()):
+            try:
+                logger.info(
+                    "[manifest_apply] source_transition apply_id=%s bot_id=%s "
+                    "capability_type=%s identity=%s from_source=%s to_source=%s",
+                    apply_id,
+                    bot_id,
+                    capability_type,
+                    identity,
+                    from_source,
+                    to_source,
+                )
+            except Exception:  # noqa: BLE001 - audit logging is non-authoritative
+                pass
 
     def _platform_default_codes(
         self, bot: dict, server_code: str

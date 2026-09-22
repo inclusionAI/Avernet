@@ -19,6 +19,9 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
     skill_projection_mcp_dependency_codes,
 )
+from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
+    set_member_skill_ids,
+)
 from agentclaw.community.core.repository.implementations.skill_center.tables import (
     bot_mcp_configs,
     default_exclusions,
@@ -117,12 +120,16 @@ class ManifestDirectClaimCommands:
         """Convert every reachable explicit source into one Direct MCP claim."""
         with self._db.transactional_orm_session() as session:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
+            was_installed = server_code in self._mcp_installations(
+                session, bot_id, owner_id
+            )
             sets = self._bot_sets(
                 session,
                 bot_id=bot_id,
                 owner_id=owner_id,
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
+                locked=True,
             )
             if server_code in platform_default_codes and not any(
                 row.is_default for row in sets
@@ -141,21 +148,33 @@ class ManifestDirectClaimCommands:
             )
             by_set = {int(item.skill_set_id): item for item in memberships}
             changed = False
+            transitions: set[tuple[str, str]] = set()
             for row in sets:
                 membership = by_set.get(int(row.id))
                 if row.is_default:
                     if membership is not None or server_code in platform_default_codes:
-                        changed = default_exclusions.exclude_mcp(
+                        excluded = default_exclusions.exclude_mcp(
                             session,
                             bot_id=bot_id,
                             owner_id=owner_id,
                             set_id=int(row.id),
                             server_code=server_code,
-                        ) or changed
+                        )
+                        changed = excluded or changed
+                        if excluded:
+                            transitions.add(
+                                (
+                                    "platform"
+                                    if server_code in platform_default_codes
+                                    else "default",
+                                    "direct",
+                                )
+                            )
                     continue
                 if membership is not None:
                     session.delete(membership)
                     changed = True
+                    transitions.add(("skill_set", "direct"))
 
             installed = mcp_installations.install(
                 session,
@@ -174,6 +193,8 @@ class ManifestDirectClaimCommands:
             )
             session.flush()
             source_changed = changed
+            if installed and not was_installed and not transitions:
+                transitions.add(("none", "direct"))
             return DesiredStateMutation(
                 {},
                 source_changed or installed or override_changed,
@@ -188,6 +209,7 @@ class ManifestDirectClaimCommands:
                     if override_changed and not installed
                     else frozenset()
                 ),
+                source_transitions=tuple(sorted(transitions)),
             )
 
     def remove_manifest_mcp(
@@ -209,6 +231,7 @@ class ManifestDirectClaimCommands:
                 owner_id=owner_id,
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
+                locked=True,
             )
             if server_code in platform_default_codes and not any(
                 row.is_default for row in sets
@@ -227,21 +250,33 @@ class ManifestDirectClaimCommands:
             )
             by_set = {int(item.skill_set_id): item for item in memberships}
             changed = False
+            transitions: set[tuple[str, str]] = set()
             for row in sets:
                 membership = by_set.get(int(row.id))
                 if row.is_default:
                     if membership is not None or server_code in platform_default_codes:
-                        changed = default_exclusions.exclude_mcp(
+                        excluded = default_exclusions.exclude_mcp(
                             session,
                             bot_id=bot_id,
                             owner_id=owner_id,
                             set_id=int(row.id),
                             server_code=server_code,
-                        ) or changed
+                        )
+                        changed = excluded or changed
+                        if excluded:
+                            transitions.add(
+                                (
+                                    "platform"
+                                    if server_code in platform_default_codes
+                                    else "default",
+                                    "excluded",
+                                )
+                            )
                     continue
                 if row.is_active and membership is not None:
                     session.delete(membership)
                     changed = True
+                    transitions.add(("skill_set", "none"))
 
             removed = mcp_installations.uninstall(
                 session,
@@ -257,6 +292,8 @@ class ManifestDirectClaimCommands:
                 env=get_current_env(),
                 server_codes={server_code},
             ) > 0
+            if removed:
+                transitions.add(("direct", "none"))
             session.flush()
             return DesiredStateMutation(
                 {},
@@ -268,6 +305,7 @@ class ManifestDirectClaimCommands:
                 updated_mcp_codes=(
                     frozenset({server_code}) if override_removed else frozenset()
                 ),
+                source_transitions=tuple(sorted(transitions)),
             )
 
     def claim_manifest_skill(
@@ -302,6 +340,7 @@ class ManifestDirectClaimCommands:
                 .all()
             )
             candidate_ids = {int(skill.id) for skill in same_name}
+            installed_before = self._installations(session, bot_id, owner_id)
             candidate_uuids = {
                 str(skill.skill_uuid) for skill in same_name if skill.skill_uuid
             }
@@ -311,6 +350,7 @@ class ManifestDirectClaimCommands:
                 owner_id=owner_id,
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
+                locked=True,
             )
             identity = [SkillSetSkill.skill_id.in_(candidate_ids)]
             if candidate_uuids:
@@ -327,20 +367,41 @@ class ManifestDirectClaimCommands:
                 else []
             )
             set_by_id = {int(row.id): row for row in sets}
+            default_effective_ids = {
+                int(row.id): (
+                    set_member_skill_ids(
+                        self._scope,
+                        session,
+                        skill_set_id=int(row.id),
+                    )
+                    & candidate_ids
+                )
+                for row in sets
+                if row.is_default
+            }
             changed = False
+            transitions: set[tuple[str, str]] = set()
             for membership in memberships:
                 row = set_by_id[int(membership.skill_set_id)]
                 if row.is_default:
-                    changed = default_exclusions.exclude_skill(
-                        session,
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        set_id=int(row.id),
-                        skill_id=int(membership.skill_id),
-                    ) or changed
+                    resolved_ids = default_effective_ids.get(int(row.id)) or {
+                        int(membership.skill_id)
+                    }
+                    for resolved_id in sorted(resolved_ids):
+                        excluded = default_exclusions.exclude_skill(
+                            session,
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            set_id=int(row.id),
+                            skill_id=resolved_id,
+                        )
+                        changed = excluded or changed
+                        if excluded:
+                            transitions.add(("default", "direct"))
                 else:
                     session.delete(membership)
                     changed = True
+                    transitions.add(("skill_set", "direct"))
 
             removed = skill_installations.uninstall(
                 session,
@@ -356,6 +417,8 @@ class ManifestDirectClaimCommands:
                 env=get_current_env(),
                 skill_id=int(target.id),
             )
+            if installed and int(target.id) not in installed_before and not transitions:
+                transitions.add(("none", "direct"))
             session.flush()
             dependencies: set[str] = set()
             for skill in same_name:
@@ -369,6 +432,7 @@ class ManifestDirectClaimCommands:
                 changed or removed or installed,
                 old,
                 mcp_codes=frozenset(dependencies),
+                source_transitions=tuple(sorted(transitions)),
             )
 
     def remove_manifest_skill(
@@ -398,6 +462,7 @@ class ManifestDirectClaimCommands:
                 owner_id=owner_id,
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
+                locked=True,
             )
             identity = [SkillSetSkill.skill_id == int(skill.id)]
             if skill.skill_uuid:
@@ -415,19 +480,24 @@ class ManifestDirectClaimCommands:
             )
             set_by_id = {int(row.id): row for row in sets}
             changed = False
+            transitions: set[tuple[str, str]] = set()
             for membership in memberships:
                 row = set_by_id[int(membership.skill_set_id)]
                 if row.is_default:
-                    changed = default_exclusions.exclude_skill(
+                    excluded = default_exclusions.exclude_skill(
                         session,
                         bot_id=bot_id,
                         owner_id=owner_id,
                         set_id=int(row.id),
                         skill_id=int(skill.id),
-                    ) or changed
+                    )
+                    changed = excluded or changed
+                    if excluded:
+                        transitions.add(("default", "excluded"))
                 elif row.is_active or remove_inactive_memberships:
                     session.delete(membership)
                     changed = True
+                    transitions.add(("skill_set", "none"))
             removed = skill_installations.uninstall(
                 session,
                 bot_id=bot_id,
@@ -435,6 +505,8 @@ class ManifestDirectClaimCommands:
                 env=get_current_env(),
                 skill_ids={int(skill.id)},
             ) > 0
+            if removed:
+                transitions.add(("direct", "none"))
             dependencies = skill_projection_mcp_dependency_codes(
                 session, skill, allow_unresolvable_center=True
             )
@@ -442,6 +514,7 @@ class ManifestDirectClaimCommands:
             return DesiredStateMutation(
                 {}, changed or removed, old,
                 mcp_codes=dependencies if changed or removed else frozenset(),
+                source_transitions=tuple(sorted(transitions)),
             )
 
 

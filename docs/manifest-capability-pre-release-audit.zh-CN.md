@@ -30,10 +30,13 @@ JOIN ac_skill_set_skill m ON m.skill_set_id = ss.id
 WHERE ss.avernet_tenant = :tenant AND ss.env = :env
 ORDER BY owner_id, bot_id, skill_set_id, m.skill_id;
 
-SELECT user_id AS owner_id, bot_id, skill_set_id, skill_id
-FROM ac_default_skillset_skill_exclusion
-WHERE avernet_tenant = :tenant
-ORDER BY owner_id, bot_id, skill_set_id, skill_id;
+SELECT e.user_id AS owner_id, e.bot_id, e.skill_set_id, e.skill_id
+FROM ac_default_skillset_skill_exclusion e
+JOIN ac_skill_set ss
+  ON ss.id = e.skill_set_id
+ AND ss.avernet_tenant = e.avernet_tenant
+WHERE e.avernet_tenant = :tenant AND ss.env = :env
+ORDER BY owner_id, bot_id, e.skill_set_id, e.skill_id;
 ```
 
 MCP 使用同一维度读取 `ac_bot_mcp_installation`、`ac_bot_mcp_config`、`ac_skill_set_mcp` 与 `ac_default_skillset_mcp_exclusion`。重点标记同一 Bot/Capability 同时存在 ordinary membership、Default exclusion、Installation 或 Bot override 的组合。
@@ -58,6 +61,9 @@ ORDER BY owner_id, bot_id, name, skill_id;
 SELECT e.user_id AS owner_id, e.bot_id, e.skill_set_id,
        e.server_code, i.id AS installation_id, c.id AS override_id
 FROM ac_default_skillset_mcp_exclusion e
+JOIN ac_skill_set ss
+  ON ss.id = e.skill_set_id
+ AND ss.avernet_tenant = e.avernet_tenant
 LEFT JOIN ac_bot_mcp_installation i
   ON i.avernet_tenant = e.avernet_tenant
  AND i.env = :env
@@ -70,7 +76,7 @@ LEFT JOIN ac_bot_mcp_config c
  AND c.owner_id = e.user_id
  AND c.bot_id = e.bot_id
  AND c.server_code = e.server_code
-WHERE e.avernet_tenant = :tenant
+WHERE e.avernet_tenant = :tenant AND ss.env = :env
 ORDER BY owner_id, bot_id, e.server_code;
 ```
 

@@ -345,73 +345,76 @@ class SkillsMaterialiser(Materialiser):
     ) -> Sequence[EntryResult]:
         """Fully write declarations, establish Direct claims, then clean omissions."""
         results: list[EntryResult] = []
-        for planned in plan.entries:
-            package = planned.intent.value
-            uploaded = await self._uploads.upload_local_skill(
-                bot_id=ctx.bot_id,
-                owner_id=ctx.owner_id,
-                actor_id=ctx.actor_id,
-                package=package.canonical_zip,
-            )
-            # The authoritative id: the row this very upload just wrote. The
-            # Manifest-only command detaches ordinary membership or creates a
-            # Default exclusion before establishing the Direct Installation.
-            skill_id = str(uploaded["skill"]["id"])
-            await self._activation.claim_manifest_skill(
-                skill_id=skill_id,
-                bot_id=ctx.bot_id,
-                owner_id=ctx.owner_id,
-                actor_id=ctx.actor_id,
-                apply_id=ctx.apply_id,
-            )
-            results.append(
-                EntryResult(
-                    self.construct,
-                    planned.intent.identity,
-                    EntryOutcome(planned.outcome),
-                    # A keep_last fallback is a fact the report must state.
-                    note=package.note,
+        confirmed_write = False
+        try:
+            for planned in plan.entries:
+                package = planned.intent.value
+                uploaded = await self._uploads.upload_local_skill(
+                    bot_id=ctx.bot_id,
+                    owner_id=ctx.owner_id,
+                    actor_id=ctx.actor_id,
+                    package=package.canonical_zip,
                 )
-            )
-
-        # Removals re-ask the area rather than carrying ids through the plan:
-        # the engine's plan carries identities, materialisers are stateless
-        # across stages by design, and one extra read cannot disagree with
-        # itself the way a cached id can.
-        area = self._assets_for_removal(ctx)
-        for name in plan.removals:
-            asset = area.get(name)
-            if asset is None:
-                # Gone between plan and write — already converged for this
-                # name; there is nothing to deactivate and no error to report.
-                continue
-            is_local = str(asset.git_path or "").startswith("local://")
-            await self._activation.remove_manifest_skill(
-                skill_id=str(asset.skill_id),
-                bot_id=ctx.bot_id,
-                owner_id=ctx.owner_id,
-                actor_id=ctx.actor_id,
-                apply_id=ctx.apply_id,
-                remove_inactive_memberships=is_local,
-            )
-            if is_local:
-                try:
-                    await self._uploads.delete_local_skill(
-                        skill_id=str(asset.skill_id),
-                        name=name,
-                        bot_id=ctx.bot_id,
-                        owner_id=ctx.owner_id,
-                        actor_id=ctx.actor_id,
+                # A returned upload means the complete Local package and row
+                # have committed, even if the following Direct claim fails.
+                confirmed_write = True
+                skill_id = str(uploaded["skill"]["id"])
+                await self._activation.claim_manifest_skill(
+                    skill_id=skill_id,
+                    bot_id=ctx.bot_id,
+                    owner_id=ctx.owner_id,
+                    actor_id=ctx.actor_id,
+                    apply_id=ctx.apply_id,
+                )
+                results.append(
+                    EntryResult(
+                        self.construct,
+                        planned.intent.identity,
+                        EntryOutcome(planned.outcome),
+                        note=package.note,
                     )
-                except Exception as exc:
-                    raise ConfirmedPartialWriteError(
-                        f"Local Skill asset cleanup failed for {name!r}"
-                    ) from exc
-        ctx.capability_state.final_skill_dependency_codes = self._dependency_codes(
-            self._reader.active_skill_assets(
-                bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
-            )
-        )
+                )
+
+            # Re-read identities for removals; the plan deliberately carries
+            # names rather than persistence ids.
+            area = self._assets_for_removal(ctx)
+            for name in plan.removals:
+                asset = area.get(name)
+                if asset is None:
+                    continue
+                is_local = str(asset.git_path or "").startswith("local://")
+                await self._activation.remove_manifest_skill(
+                    skill_id=str(asset.skill_id),
+                    bot_id=ctx.bot_id,
+                    owner_id=ctx.owner_id,
+                    actor_id=ctx.actor_id,
+                    apply_id=ctx.apply_id,
+                    remove_inactive_memberships=is_local,
+                )
+                confirmed_write = True
+                if is_local:
+                    try:
+                        await self._uploads.delete_local_skill(
+                            skill_id=str(asset.skill_id),
+                            name=name,
+                            bot_id=ctx.bot_id,
+                            owner_id=ctx.owner_id,
+                            actor_id=ctx.actor_id,
+                        )
+                    except Exception as exc:
+                        raise ConfirmedPartialWriteError(
+                            f"Local Skill asset cleanup failed for {name!r}: {exc}"
+                        ) from exc
+        except Exception as exc:
+            self._refresh_actual_dependency_codes(ctx)
+            if isinstance(exc, ConfirmedPartialWriteError):
+                raise
+            if confirmed_write:
+                raise ConfirmedPartialWriteError(
+                    f"Skill replacement stopped after a durable write: {exc}"
+                ) from exc
+            raise
+        self._refresh_actual_dependency_codes(ctx)
         return tuple(results)
 
     # ── the package road ────────────────────────────────────────────────────
@@ -573,6 +576,21 @@ class SkillsMaterialiser(Materialiser):
 
     def _assets_for_removal(self, ctx: "ApplyContext") -> dict[str, Any]:
         return {**self._area(ctx), **self._local_assets(ctx)}
+
+    def _refresh_actual_dependency_codes(self, ctx: "ApplyContext") -> None:
+        """Never let a failed write leave the Dry-run projection in context."""
+        ctx.capability_state.final_skill_dependency_codes = None
+        try:
+            assets = self._reader.active_skill_assets(
+                bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
+            )
+        except Exception:
+            # MCP planning will retry the authoritative read and abort safely
+            # if the state still cannot be observed.
+            return
+        ctx.capability_state.final_skill_dependency_codes = self._dependency_codes(
+            assets
+        )
 
     @staticmethod
     def _dependency_codes(assets: Sequence[Any]) -> frozenset[str]:

@@ -21,6 +21,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
     CategoryPlan,
+    ConfirmedPartialWriteError,
     Intent,
     Materialiser,
     PlannedEntry,
@@ -275,60 +276,69 @@ class McpMaterialiser(Materialiser):
     ) -> Sequence[EntryResult]:
         """Apply Direct conversions, overrides, and dependency-aware cleanup."""
         results: list[EntryResult] = []
-        for planned in plan.entries:
-            if not planned.requires_write:
-                results.append(
-                    EntryResult(
-                        self.construct,
-                        planned.intent.identity,
-                        EntryOutcome.UNCHANGED,
+        confirmed_write = False
+        try:
+            for planned in plan.entries:
+                if not planned.requires_write:
+                    results.append(
+                        EntryResult(
+                            self.construct,
+                            planned.intent.identity,
+                            EntryOutcome.UNCHANGED,
+                        )
                     )
+                    continue
+                # Retained dependency cleanup is executed with removals below,
+                # once, so it can keep its explanatory report row.
+                if planned.intent.identity in (
+                    plan.removal_writes if plan.removal_writes is not None else ()
+                ):
+                    results.append(
+                        EntryResult(
+                            self.construct,
+                            planned.intent.identity,
+                            EntryOutcome(planned.outcome),
+                            note=planned.intent.note,
+                        )
+                    )
+                    continue
+                await self._activation.claim_manifest_mcp(
+                    server_code=planned.intent.identity,
+                    config=planned.intent.value,
+                    bot_id=ctx.bot_id,
+                    owner_id=ctx.owner_id,
+                    actor_id=ctx.actor_id,
+                    apply_id=ctx.apply_id,
                 )
-                continue
-            # One UoW owns installation and override convergence. Even a newly
-            # installed bare entry must pass ``config=None`` so a historical
-            # orphan override cannot survive and silently regain effect.
-            if planned.intent.identity in (
-                plan.removal_writes if plan.removal_writes is not None else ()
-            ):
-                # Retained dependency cleanup is executed with the removals
-                # below, once, so it can keep its explanatory report row.
+                confirmed_write = True
                 results.append(
                     EntryResult(
                         self.construct,
                         planned.intent.identity,
                         EntryOutcome(planned.outcome),
-                        note=planned.intent.note,
                     )
                 )
-                continue
-            await self._activation.claim_manifest_mcp(
-                server_code=planned.intent.identity,
-                config=planned.intent.value,
-                bot_id=ctx.bot_id,
-                owner_id=ctx.owner_id,
-                actor_id=ctx.actor_id,
-                apply_id=ctx.apply_id,
-            )
-            results.append(
-                EntryResult(
-                    self.construct,
-                    planned.intent.identity,
-                    EntryOutcome(planned.outcome),
-                )
-            )
 
-        removal_writes = (
-            plan.removal_writes if plan.removal_writes is not None else plan.removals
-        )
-        for server_code in removal_writes:
-            await self._activation.remove_manifest_mcp(
-                server_code=server_code,
-                bot_id=ctx.bot_id,
-                owner_id=ctx.owner_id,
-                actor_id=ctx.actor_id,
-                apply_id=ctx.apply_id,
+            removal_writes = (
+                plan.removal_writes
+                if plan.removal_writes is not None
+                else plan.removals
             )
+            for server_code in removal_writes:
+                await self._activation.remove_manifest_mcp(
+                    server_code=server_code,
+                    bot_id=ctx.bot_id,
+                    owner_id=ctx.owner_id,
+                    actor_id=ctx.actor_id,
+                    apply_id=ctx.apply_id,
+                )
+                confirmed_write = True
+        except Exception as exc:
+            if confirmed_write:
+                raise ConfirmedPartialWriteError(
+                    "MCP replacement stopped after a durable write"
+                ) from exc
+            raise
 
         return tuple(results)
 

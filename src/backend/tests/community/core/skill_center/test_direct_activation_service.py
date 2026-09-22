@@ -37,12 +37,17 @@ class _Repository:
         self.uninstall_mcp_calls: list[dict] = []
         self.install_skill_calls: list[dict] = []
         self.uninstall_skill_calls: list[dict] = []
+        self.manifest_mcp_claim_calls: list[dict] = []
+        self.manifest_mcp_remove_calls: list[dict] = []
+        self.manifest_skill_claim_calls: list[dict] = []
+        self.manifest_skill_remove_calls: list[dict] = []
         self.restore_calls: list[dict] = []
 
     #: Dependencies the Skill under test declares, mirrored onto the mutation
     #: result the way the real repository fills it under the row lock.
     skill_mcp_codes: frozenset[str] = frozenset()
     manifest_direct = False
+    manifest_transitions: tuple[tuple[str, str], ...] = ()
 
     def manifest_direct_mcp_exists(self, **_kwargs) -> bool:
         return self.manifest_direct
@@ -74,6 +79,34 @@ class _Repository:
     def uninstall_skill(self, **kwargs) -> DesiredStateMutation:
         self.uninstall_skill_calls.append(kwargs)
         return self._skill_mutation()
+
+    def claim_manifest_mcp(self, **kwargs) -> DesiredStateMutation:
+        self.manifest_mcp_claim_calls.append(kwargs)
+        return replace(
+            self._mutation(),
+            mcp_codes=frozenset({kwargs["server_code"]}),
+            source_transitions=self.manifest_transitions,
+        )
+
+    def remove_manifest_mcp(self, **kwargs) -> DesiredStateMutation:
+        self.manifest_mcp_remove_calls.append(kwargs)
+        return replace(
+            self._mutation(),
+            mcp_codes=frozenset({kwargs["server_code"]}),
+            source_transitions=self.manifest_transitions,
+        )
+
+    def claim_manifest_skill(self, **kwargs) -> DesiredStateMutation:
+        self.manifest_skill_claim_calls.append(kwargs)
+        return replace(
+            self._skill_mutation(), source_transitions=self.manifest_transitions
+        )
+
+    def remove_manifest_skill(self, **kwargs) -> DesiredStateMutation:
+        self.manifest_skill_remove_calls.append(kwargs)
+        return replace(
+            self._skill_mutation(), source_transitions=self.manifest_transitions
+        )
 
     def restore_desired_state(self, **kwargs) -> None:
         self.restore_calls.append(kwargs)
@@ -734,6 +767,41 @@ async def test_record_only_mcp_activation_writes_desired_state_on_a_pending_bot(
         actor_id="true-owner", project=False,
     )
     assert [c["server_code"] for c in repository.uninstall_mcp_calls] == ["github"]
+
+
+@pytest.mark.asyncio
+async def test_manifest_claim_logs_safe_source_transition(monkeypatch):
+    repository = _Repository()
+    repository.manifest_transitions = (("skill_set", "direct"),)
+    info = MagicMock()
+    monkeypatch.setattr(
+        "agentclaw.community.core.skill_center.services."
+        "direct_activation_service.logger.info",
+        info,
+    )
+    service = DirectActivationService(
+        repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
+        _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
+        _PlatformDefaultMcpPolicy(), MagicMock(),
+    )
+
+    result = await service.claim_manifest_mcp(
+        server_code="github",
+        config={"headers": {"Authorization": "must-not-be-logged"}},
+        bot_id="bot-1",
+        owner_id="true-owner",
+        actor_id="true-owner",
+        apply_id="apply-1",
+        project=False,
+    )
+
+    assert "source_transitions" not in result
+    format_string, *arguments = info.call_args.args
+    rendered = format_string % tuple(arguments)
+    assert "from_source=skill_set" in rendered
+    assert "to_source=direct" in rendered
+    assert "apply_id=apply-1" in rendered
+    assert "must-not-be-logged" not in rendered
 
 
 @pytest.mark.asyncio

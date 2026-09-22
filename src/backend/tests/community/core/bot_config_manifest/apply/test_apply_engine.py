@@ -63,7 +63,7 @@ _arca_steps = ArcaDelivery(lambda: None).steps_for
 
 def _engine(
     scripts=None, activations=None, auth=None, mcp_config=None,
-    uploads=None, reader=None,
+    uploads=None, reader=None, entry_fetcher=None,
 ):
     """The W4-shaped engine: mcp + script over their fakes (these tests are
     the engine's contract, not the two fetch-consuming categories' — those
@@ -84,7 +84,7 @@ def _engine(
             upload_service=uploads or FakeSkillUploadService(),
             capability_reader=reader or FakeCapabilityReader(),
             package_validator=real_validator(),
-            entry_fetcher=_dummy_entry_fetcher(),
+            entry_fetcher=entry_fetcher or _dummy_entry_fetcher(),
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         ),
@@ -987,6 +987,94 @@ async def test_an_abort_during_the_write_says_the_area_may_have_changed():
     assert category.aborted is True
     assert category.partially_written is True
     assert category.as_dict()["partially_written"] is True
+    assert report.status is ApplyStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_a_later_mcp_failure_after_a_committed_claim_reports_partial():
+    activations = FakeActivationService()
+    original_claim = activations.claim_manifest_mcp
+
+    async def _fail_second(**kwargs):
+        if kwargs["server_code"] == "second":
+            raise RuntimeError("second MCP failed")
+        return await original_claim(**kwargs)
+
+    activations.claim_manifest_mcp = _fail_second
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp:\n"
+        "    - server_code: first\n"
+        "    - server_code: second\n",
+    )
+
+    assert report.status is ApplyStatus.PARTIAL
+    assert activations.installed == {"first"}
+    assert report.categories[0].partially_written is True
+
+
+@pytest.mark.asyncio
+async def test_failed_skill_write_refreshes_actual_dependencies_before_mcp():
+    from ._fakes import (
+        FakeObjectCredentials,
+        OSS_AUTH,
+        OSS_BUCKET,
+        build_skill_zip,
+        declared_session,
+        seeded_object_store,
+        skill_asset,
+    )
+
+    key = "skills/new-skill.zip"
+    objects = seeded_object_store({key: build_skill_zip("new-skill")})
+    fetcher = DeclaredSourceResolver(
+        FakeManifestContent(), FakeObjectCredentials(), objects
+    )
+    reader = FakeCapabilityReader(
+        assets=[
+            skill_asset(
+                7,
+                "old-skill",
+                mcp_dependencies=({"code": "mcp.actual"},),
+            )
+        ]
+    )
+    activations = FakeActivationService(installed={"mcp.actual"})
+    activations.mcp_overrides["mcp.actual"] = {
+        "headers": {"X-Stale": "value"}
+    }
+
+    async def _fail_claim(**_kwargs):
+        raise RuntimeError("Direct claim failed after package upload")
+
+    activations.claim_manifest_skill = _fail_claim
+    report = await _apply(
+        _engine(
+            activations=activations,
+            reader=reader,
+            entry_fetcher=fetcher,
+        ),
+        "schema_version: 1\nmanifest:\n"
+        "  skills:\n"
+        "    - name: new-skill\n"
+        "      source:\n"
+        "        protocol: oss\n"
+        f"        bucket: {OSS_BUCKET}\n"
+        f"        key: {key}\n"
+        f"        auth: {OSS_AUTH}\n"
+        "  mcp: []\n",
+        ctx=make_context(source_session=declared_session()),
+    )
+
+    by_construct = {category.construct: category for category in report.categories}
+    skills = by_construct[ManifestCategory.SKILLS]
+    mcp = by_construct[ManifestCategory.MCP]
+    assert skills.aborted is True
+    assert skills.partially_written is True
+    assert mcp.removals == ()
+    assert _outcomes(report)["mcp.actual"] is EntryOutcome.UPDATED
+    assert "Skill dependency" in (mcp.entries[0].note or "")
+    assert report.status is ApplyStatus.PARTIAL
 
 
 @pytest.mark.asyncio
