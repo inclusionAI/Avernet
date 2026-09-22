@@ -576,6 +576,13 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         device_service=device_service,
     )
 
+    distributed_lock_service = providers.Singleton(
+        DistributedLockService,
+        repository=distributed_lock_repository,
+        default_expire_seconds=config.bot_run_queue.session_lock_expire_seconds,
+        renew_interval_seconds=config.bot_run_queue.session_lock_renew_seconds,
+    )
+
     publish_service = providers.Singleton(
         DefaultPublishService,
         bot_repo=bot_repo,
@@ -588,6 +595,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         template_service=device_template_service,
         bot_service=bot_crud_service,
         device_service=device_service,
+        lock_service=distributed_lock_service,
     )
 
     bot_management_service = providers.Singleton(
@@ -683,13 +691,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     )
 
     # ── BotRun queue worker providers ─────────────────────────────────────────
-
-    distributed_lock_service = providers.Singleton(
-        DistributedLockService,
-        repository=distributed_lock_repository,
-        default_expire_seconds=config.bot_run_queue.session_lock_expire_seconds,
-        renew_interval_seconds=config.bot_run_queue.session_lock_renew_seconds,
-    )
 
     bot_qpm_manager = providers.Singleton(
         BotConcurrencyManager,

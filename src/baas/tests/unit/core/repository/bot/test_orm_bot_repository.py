@@ -13,6 +13,7 @@ import pytest
 
 from secbaas.community.core.repository.bot import (
     BotRecord,
+    BotRecordConflictError,
     OrmBotRepository,
 )
 
@@ -644,7 +645,10 @@ class TestInsertBotRecord:
         added_model = mock_session.add.call_args[0][0]
         assert added_model.template_uuid == "TEMPLATE-new"
 
-    def test_clone_with_existing_pending_cleans_up(self, repo, mock_session):
+    def test_live_pending_clone_no_longer_soft_deletes_incumbent(
+        self, repo, mock_session
+    ):
+        """A live PENDING row must never be destroyed by a concurrent clone."""
         source_model, source_record = _make_mock_bot_model(
             id_val=5, bot_uuid="bot-src", name="Source Bot", status="ACTIVE"
         )
@@ -652,35 +656,31 @@ class TestInsertBotRecord:
             id_val=10, bot_uuid="bot-src", status="PENDING"
         )
 
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            source_model
-        )
-        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = pending_model
+        mock_session.query.return_value.filter.return_value.first.side_effect = [
+            source_model,
+            pending_model,
+        ]
+        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
 
         result = repo.insert_bot_record(
             source_bot_id=5, tenant="t1", env="dev", status="PENDING"
         )
 
         assert result is not None
-        repo._rel_repo.soft_delete_by_bot_id.assert_called_once_with(
-            bot_id=10, tenant="t1", env="dev", modifier="system"
-        )
+        repo._rel_repo.soft_delete_by_bot_id.assert_not_called()
 
-    def test_clone_with_existing_pending_handles_rel_error(self, repo, mock_session):
+    def test_clone_with_soft_deleted_pending_revives_row(self, repo, mock_session):
+        """A soft-deleted PENDING row is revived into the UK slot, not duplicated."""
         source_model, source_record = _make_mock_bot_model(
             id_val=5, bot_uuid="bot-src", status="ACTIVE"
-        )
-        pending_model, pending_record = _make_mock_bot_model(
-            id_val=10, bot_uuid="bot-src", status="PENDING"
         )
 
         mock_session.query.return_value.filter.return_value.first.return_value = (
             source_model
         )
-        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = pending_model
-        repo._rel_repo.soft_delete_by_bot_id.side_effect = RuntimeError(
-            "device rel error"
-        )
+        revive_chain = mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value
+        revive_chain.id = 77
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
 
         result = repo.insert_bot_record(
             source_bot_id=5, tenant="t1", env="dev", status="PENDING"
@@ -766,6 +766,68 @@ class TestInsertBotRecord:
 
         added_model = mock_session.add.call_args[0][0]
         assert added_model.modifier == "custom-mod"
+
+
+# ==================== try_insert_pending_bot ====================
+
+
+class TestTryInsertPendingBot:
+    def test_source_not_found_raises_value_error(self, repo, mock_session):
+        mock_session.query.return_value.filter.return_value.first.return_value = None
+
+        with pytest.raises(ValueError, match="Source bot not found"):
+            repo.try_insert_pending_bot(source_bot_id=999, tenant="t1", env="dev")
+
+    def test_live_pending_raises_conflict(self, repo, mock_session):
+        """A concurrent UPDATE that already holds the PENDING slot must win."""
+        source_model, _ = _make_mock_bot_model(
+            id_val=5, bot_uuid="bot-src", status="ACTIVE"
+        )
+        pending_model, _ = _make_mock_bot_model(
+            id_val=10, bot_uuid="bot-src", status="PENDING"
+        )
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            source_model
+        )
+        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = pending_model
+
+        with pytest.raises(BotRecordConflictError, match="already exists"):
+            repo.try_insert_pending_bot(source_bot_id=5, tenant="t1", env="dev")
+
+        mock_session.add.assert_not_called()
+
+    def test_inserts_when_slot_free(self, repo, mock_session):
+        source_model, _ = _make_mock_bot_model(
+            id_val=5, bot_uuid="bot-src", status="ACTIVE"
+        )
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            source_model
+        )
+        mock_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+
+        result = repo.try_insert_pending_bot(source_bot_id=5, tenant="t1", env="dev")
+
+        assert result == 42
+        added_model = mock_session.add.call_args[0][0]
+        assert added_model.status == "PENDING"
+
+    def test_integrity_error_translated_to_conflict(self, repo, mock_session):
+        """The unique key is the final arbiter when the lock is bypassed."""
+        from sqlalchemy.exc import IntegrityError
+
+        source_model, _ = _make_mock_bot_model(
+            id_val=5, bot_uuid="bot-src", status="ACTIVE"
+        )
+        mock_session.query.return_value.filter.return_value.first.side_effect = [
+            source_model,
+            None,
+        ]
+        mock_session.flush.side_effect = IntegrityError(
+            "stmt", {}, Exception("Duplicate entry")
+        )
+
+        with pytest.raises(BotRecordConflictError):
+            repo.try_insert_pending_bot(source_bot_id=5, tenant="t1", env="dev")
 
 
 # ==================== list_bots ====================

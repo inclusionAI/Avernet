@@ -141,7 +141,28 @@ class BotRepository(Protocol):
 
         Copies all fields from the source bot record, overriding status
         and optionally extra_config/name/template_uuid. Returns the new record ID.
-        Used by UPDATE publish to create a PENDING bot record.
+        Does not guard against concurrent clones — use ``try_insert_pending_bot``
+        when the clone must reserve a PENDING slot atomically.
+        """
+        ...
+
+    def try_insert_pending_bot(
+        self,
+        *,
+        source_bot_id: int,
+        tenant: str,
+        env: str,
+        extra_config: dict[str, Any] | None = None,
+        name: str | None = None,
+        template_uuid: str | None = None,
+        modifier: str = "system",
+    ) -> int:
+        """Atomically clone the source bot into a PENDING record.
+
+        Conflict detection and insertion share one transaction. Raises the
+        repository's conflict error when a live PENDING record already exists
+        for the same ``bot_uuid``; the caller must abort rather than delete the
+        incumbent record. Returns the new record ID.
         """
         ...
 

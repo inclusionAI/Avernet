@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from secbaas.community.core.repository.bot import BotRecord
@@ -50,6 +51,7 @@ from secbaas.community.api.publish_manage import (
 )
 from secbaas.community.api.template_manage import DeviceTemplateManageService
 from secbaas.community.core.repository.bot import (
+    BotRecordConflictError,
     BotRepository,
 )
 from secbaas.community.core.repository.bot_device_rel import (
@@ -81,6 +83,42 @@ from ._publish_retry_orchestrator import (
 )
 
 logger = get_logger("core-service")
+
+_BOT_PUBLISH_LOCK_EXPIRE_SECONDS = 300
+
+
+@runtime_checkable
+class PublishLockService(Protocol):
+    """Minimal lock surface required to serialize publish creation per bot."""
+
+    def try_lock(
+        self,
+        lock_name: str,
+        lock_holder: str | None = ...,
+        expire_seconds: int | None = ...,
+        block: bool = ...,
+        block_timeout: float | None = ...,
+    ) -> AbstractContextManager[Any]:
+        """Return a context manager yielding a lock object with ``.acquired``."""
+        ...
+
+
+@dataclass
+class _NoOpLock:
+    acquired: bool = True
+
+
+class _NoOpLockService:
+    """Lock stand-in used when no distributed lock is wired.
+
+    Concurrency safety then rests entirely on the ``baas_bot`` unique key via
+    ``try_insert_pending_bot``; the lock only upgrades the concurrent
+    same-type UPDATE response from a conflict error to the existing publish.
+    """
+
+    @contextmanager
+    def try_lock(self, *_args: Any, **_kwargs: Any) -> Any:
+        yield _NoOpLock()
 
 
 def _extra_config_to_publish_config(
@@ -135,8 +173,10 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         template_service: DeviceTemplateManageService,
         bot_service: BotManageService,
         device_service: DeviceService,
+        lock_service: PublishLockService | None = None,
     ) -> None:
         """Initialize with injected dependencies."""
+        self._lock_service: PublishLockService = lock_service or _NoOpLockService()
         self._bot_repo = bot_repo
         self._device_repo = device_repo
         self._rel_repo = rel_repo
@@ -324,6 +364,36 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     f"tenant={tenant}"
                 )
 
+        lock_name = f"bot:publish:{tenant}:{env}:{bot.bot_uuid}"
+        with self._lock_service.try_lock(
+            lock_name, expire_seconds=_BOT_PUBLISH_LOCK_EXPIRE_SECONDS
+        ) as lock:
+            if not lock.acquired:
+                raise PublishConflictError(
+                    f"Cannot create {publish_type.value} publish for bot "
+                    f"{bot.bot_uuid}: another publish is being created concurrently"
+                )
+            return await self._create_publish_locked(
+                tenant=tenant,
+                bot=bot,
+                bot_id=bot_id,
+                publish_type=publish_type,
+                operator=operator,
+                config=config,
+                env=env,
+            )
+
+    async def _create_publish_locked(
+        self,
+        *,
+        tenant: str,
+        bot: Any,
+        bot_id: int,
+        publish_type: PublishType,
+        operator: str,
+        config: PublishConfig | None,
+        env: str,
+    ) -> PublishResponse:
         # Step 2: Check for concurrent active publish (SVC-PUB-15)
         publish_repo = self._publish_repo
         active_publish = publish_repo.get_active_by_bot_id(
@@ -606,15 +676,26 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     callback_timeout_seconds=config.callback_timeout_seconds,
                     auto_approve_publish=config.auto_approve,
                 )
-            new_bot = await self._bot_service.create_bot_record(
-                tenant=tenant,
-                source_bot_id=bot_id,
-                new_config=new_bot_config,
-                new_template_uuid=config.template_uuid if config else None,
-                operator=operator,
-            )
-            # Store target_bot_id via PublishConfig field for use at completion
-            merge_config["target_bot_id"] = new_bot.id
+            try:
+                new_bot_id = self._bot_repo.try_insert_pending_bot(
+                    source_bot_id=bot_id,
+                    tenant=tenant,
+                    env=env,
+                    extra_config=(
+                        new_bot_config.model_dump(exclude_none=True)
+                        if new_bot_config is not None
+                        else None
+                    ),
+                    name=config.bot_name if config else None,
+                    template_uuid=config.template_uuid if config else None,
+                    modifier=operator,
+                )
+            except BotRecordConflictError as exc:
+                raise PublishConflictError(
+                    f"Cannot create {publish_type.value} publish for bot "
+                    f"{bot.bot_uuid}: a PENDING update record already exists"
+                ) from exc
+            merge_config["target_bot_id"] = new_bot_id
             publish_repo.update_publish(
                 publish_id=publish_id,
                 tenant=tenant,
@@ -624,7 +705,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             )
             logger.info(
                 f"Created PENDING bot record for UPDATE publish: "
-                f"target_bot_id={new_bot.id}, publish_id={publish_id}"
+                f"target_bot_id={new_bot_id}, publish_id={publish_id}"
             )
 
         # Step 5: Create baas_publish_batch records
