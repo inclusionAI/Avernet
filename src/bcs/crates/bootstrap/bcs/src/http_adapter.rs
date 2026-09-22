@@ -382,6 +382,24 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
             return;
         };
 
+        match bcs_fusion::sync_worker_availability_with_retry(
+            &self.bcsfuse_config,
+            &fuse_client,
+            &request.bot_uuid,
+            &request.visibility,
+        )
+        .await
+        {
+            bcs_fusion::AvailabilitySyncOutcome::Updated
+            | bcs_fusion::AvailabilitySyncOutcome::Failed => return,
+            bcs_fusion::AvailabilitySyncOutcome::WorkerNotFound => {
+                tracing::info!(
+                    bot_id = %request.bot_uuid,
+                    "Worker missing during availability sync; falling back to full sync"
+                );
+            }
+        }
+
         let bot_context = match bcs_fusion::load_bot_context(&self.bots_base_dir, &request.bot_uuid)
         {
             Ok(ctx) => ctx,

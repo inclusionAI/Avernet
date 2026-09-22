@@ -113,6 +113,7 @@ use bcs_service_api::port::{
 };
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, BotActor, BotCandidateSearchCoreService,
+    BotCatalogCleanupPort,
     BotControlPlaneCoreService, BotControlPlaneRepoPort, BotDeliveryPort, BotDeliveryTarget,
     BotMetricsSnapshotPort, BotRegistryCoreService, BotRunContextPort, BotTerminalEvent,
     BotTerminalObserverPort, BotTerminalState, CallerContext, CanResolveInteraction,
@@ -127,7 +128,8 @@ use bcs_service_api::{
     OrganizationCoreService, OrganizationManagementService, OrganizationRepoPort,
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderBotEventService,
     ProviderCoreService, ProviderCredentialRepoPort, ProviderManagementService, ProviderRepoPort,
-    ProviderStreamGrayList, RelationCoreService, RoutingCoreService, ServiceResult,
+    NoopBotCatalogCleanupPort, ProviderStreamGrayList, RelationCoreService, RoutingCoreService,
+    ServiceError, ServiceResult,
     SessionChannelDeliveryOutcome, SessionChannelOutboundPort, SessionManagementService,
     StateMachineResultPublishCommand, StateMachineResultPublisherPort, StateMachineTerminalEvent,
     SystemMessageService, WebSendCommand, WsCloseReason, WsErrorKind,
@@ -556,6 +558,34 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
 #[derive(Default)]
 struct DeferredChannelBindingCleanupPort {
     service: OnceLock<Arc<dyn ChannelBindingCleanupPort>>,
+}
+
+struct FuseBotCatalogCleanupPort {
+    client: Arc<FuseClient>,
+}
+
+#[async_trait]
+impl BotCatalogCleanupPort for FuseBotCatalogCleanupPort {
+    async fn delete_bot(&self, bot_id: &str) -> ServiceResult<()> {
+        self.client.delete_worker(bot_id).await.map_err(|error| {
+            ServiceError::InternalError(format!(
+                "failed to delete bot {bot_id} from bcsfuse: {error}"
+            ))
+        })
+    }
+}
+
+fn build_bot_catalog_cleanup(config: &BcsConfig) -> Arc<dyn BotCatalogCleanupPort> {
+    if !config.bcsfuse.enabled {
+        return Arc::new(NoopBotCatalogCleanupPort);
+    }
+    match FuseClient::new(&config.bcsfuse) {
+        Ok(client) => Arc::new(FuseBotCatalogCleanupPort { client: Arc::new(client) }),
+        Err(error) => {
+            warn!(error = %error, "failed to initialize bcsfuse bot catalog cleanup");
+            Arc::new(NoopBotCatalogCleanupPort)
+        }
+    }
 }
 
 impl DeferredChannelBindingCleanupPort {
@@ -1312,6 +1342,7 @@ fn build_provider_services_with_webhook_url_guard(
     webhook_url_guard: OutboundUrlGuard,
     control_plane: Arc<dyn BotControlPlaneCoreService>,
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
+    bot_catalog_cleanup: Arc<dyn BotCatalogCleanupPort>,
 ) -> (
     Arc<dyn ProviderCoreService>,
     Arc<dyn ProviderBotCoreService>,
@@ -1332,7 +1363,8 @@ fn build_provider_services_with_webhook_url_guard(
         registry,
         relation,
     )
-    .with_channel_binding_cleanup(channel_binding_cleanup);
+    .with_channel_binding_cleanup(channel_binding_cleanup)
+    .with_bot_catalog_cleanup(bot_catalog_cleanup);
     if let Some(user_directory) = user_directory {
         provider_management = provider_management.with_user_directory(user_directory);
     }
@@ -2162,6 +2194,7 @@ impl Default for BcsServerState {
                 outbound_url_guard.clone(),
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
+                build_bot_catalog_cleanup(&config),
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -3772,6 +3805,7 @@ impl BcsServer {
                 provider_webhook_url_guard,
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
+                build_bot_catalog_cleanup(&config),
             );
         let (organization_core, organization_management) = memory_organization_services(
             &provider_repos,
@@ -4439,6 +4473,7 @@ impl BcsServer {
                 outbound_url_guard.clone(),
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
+                build_bot_catalog_cleanup(&config),
             );
         let (organization_core, organization_management) = db_organization_services(
             db_plugin.clone(),
@@ -5898,6 +5933,7 @@ mod tests {
                 OutboundUrlGuard::allowing_private_networks_for_tests(),
                 provider_control_plane.clone(),
                 cleanup.clone(),
+                Arc::new(NoopBotCatalogCleanupPort),
             );
 
         let registered = provider_management

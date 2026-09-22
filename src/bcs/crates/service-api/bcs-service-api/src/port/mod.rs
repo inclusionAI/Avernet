@@ -1,5 +1,6 @@
 pub mod coordination_intent;
 pub use coordination_intent::*;
+pub mod bot_catalog_cleanup;
 pub mod bot_connection;
 pub mod bot_terminal_observer;
 pub mod channel_binding_cleanup;
@@ -27,6 +28,7 @@ pub mod session_callback;
 pub mod session_channel_outbound;
 pub mod state_machine_result;
 
+pub use bot_catalog_cleanup::{BotCatalogCleanupPort, NoopBotCatalogCleanupPort};
 pub use bot_connection::{BotConnectionControlPort, KickReason};
 pub use bot_terminal_observer::{
     BotTerminalEvent, BotTerminalObserverPort, BotTerminalState, CompositeBotTerminalObserver,

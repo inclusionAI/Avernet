@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use bcs_config_api::BcsFuseConfig;
-use bcs_fuse_client::{FuseClient, SkillSet, SyncProfileData, SyncWorkerRequest};
+use bcs_fuse_client::{
+    FuseClient, FuseClientError, SkillSet, SyncProfileData, SyncWorkerRequest,
+};
 use bcs_service_api::{ContextBotSummary, Skill};
 
 use super::fuse_backed::build_participant_id;
@@ -18,6 +20,13 @@ const MAX_SYNC_RETRIES: u32 = 10;
 
 /// Maximum backoff between sync retries.
 const MAX_SYNC_BACKOFF: Duration = Duration::from_secs(8);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AvailabilitySyncOutcome {
+    Updated,
+    WorkerNotFound,
+    Failed,
+}
 
 /// Build a `SyncWorkerRequest` from onboard data and bot context.
 pub fn build_sync_request(
@@ -136,6 +145,46 @@ pub async fn sync_worker_with_retry(
         retries = MAX_SYNC_RETRIES,
         "Worker sync exhausted retries, will retry on next onboard/reconnect"
     );
+}
+
+/// Update availability without replacing the worker profile.
+pub async fn sync_worker_availability_with_retry(
+    config: &BcsFuseConfig,
+    client: &FuseClient,
+    bot_id: &str,
+    availability: &str,
+) -> AvailabilitySyncOutcome {
+    for attempt in 0..MAX_SYNC_RETRIES {
+        match client.set_worker_availability(bot_id, availability).await {
+            Ok(()) => return AvailabilitySyncOutcome::Updated,
+            Err(FuseClientError::WorkerNotFound(_)) => {
+                return AvailabilitySyncOutcome::WorkerNotFound;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    bot_id = %bot_id,
+                    availability,
+                    attempt = attempt + 1,
+                    error = %error,
+                    "Worker availability sync failed, retrying"
+                );
+                if attempt + 1 < MAX_SYNC_RETRIES {
+                    let backoff = Duration::from_millis(
+                        config.sync_retry_base_ms.saturating_mul(2u64.pow(attempt.min(5))),
+                    )
+                    .min(MAX_SYNC_BACKOFF);
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    }
+    tracing::error!(
+        bot_id = %bot_id,
+        availability,
+        retries = MAX_SYNC_RETRIES,
+        "Worker availability sync exhausted retries"
+    );
+    AvailabilitySyncOutcome::Failed
 }
 
 /// Build bcsfuse `contents` map from bot context files.
@@ -309,6 +358,37 @@ mod tests {
         });
 
         Ok(format!("http://127.0.0.1:{}", port))
+    }
+
+    #[tokio::test]
+    async fn availability_sync_requests_full_sync_when_worker_is_missing(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept request");
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buf = [0u8; 2048];
+            socket.read(&mut buf).await.expect("read request");
+            socket
+                .write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .expect("write response");
+        });
+        let config = BcsFuseConfig {
+            enabled: true,
+            url: format!("http://127.0.0.1:{port}"),
+            sync_timeout_ms: 500,
+            sync_retry_base_ms: 0,
+            ..Default::default()
+        };
+        let client = FuseClient::new(&config)?;
+        let outcome =
+            sync_worker_availability_with_retry(&config, &client, "missing", "protected").await;
+        assert_eq!(outcome, AvailabilitySyncOutcome::WorkerNotFound);
+        Ok(())
     }
 
     #[tokio::test]

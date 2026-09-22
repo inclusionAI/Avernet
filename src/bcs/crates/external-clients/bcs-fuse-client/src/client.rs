@@ -10,7 +10,7 @@ use bcs_config_api::BcsFuseConfig;
 ///
 /// Uses two `reqwest::Client` instances with different timeouts:
 /// - `fusion_client`: longer timeout for LLM-backed fusion calls
-/// - `sync_client`: shorter timeout for CRUD operations (sync, offline)
+/// - `sync_client`: shorter timeout for worker CRUD operations
 pub struct FuseClient {
     base_url: String,
     /// Longer timeout for LLM-backed fusion (default: 120s).
@@ -94,6 +94,43 @@ impl FuseClient {
 
         Ok(())
             }).await
+    }
+
+    /// Update only the catalog availability for an existing worker.
+    pub async fn set_worker_availability(
+        &self,
+        worker_id: &str,
+        availability: &str,
+    ) -> Result<(), FuseClientError> {
+        bcs_observability::observe_result("fuse.set_worker_availability", async {
+            let url = format!("{}/v1/workers/{}/availability", self.base_url, worker_id);
+            let response = self
+                .sync_client
+                .put(&url)
+                .json(&serde_json::json!({"availability": availability}))
+                .send()
+                .await?;
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                return Err(FuseClientError::WorkerNotFound(worker_id.to_string()));
+            }
+            response.error_for_status()?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Delete a worker. Missing workers are treated as an idempotent success.
+    pub async fn delete_worker(&self, worker_id: &str) -> Result<(), FuseClientError> {
+        bcs_observability::observe_result("fuse.delete_worker", async {
+            let url = format!("{}/v1/workers/{}", self.base_url, worker_id);
+            let response = self.sync_client.delete(&url).send().await?;
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                return Ok(());
+            }
+            response.error_for_status()?;
+            Ok(())
+        })
+        .await
     }
 
     /// Call the fusion API (uses longer timeout — LLM-backed).
@@ -219,6 +256,36 @@ impl FuseClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::oneshot;
+
+    async fn mock_server_capture_once(
+        status: &str,
+        response_body: &str,
+    ) -> Result<(String, oneshot::Receiver<String>), Box<dyn std::error::Error>> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        let status = status.to_string();
+        let response_body = response_body.to_string();
+        let (request_tx, request_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept request");
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buf = [0u8; 2048];
+            let read = socket.read(&mut buf).await.expect("read request");
+            let _ = request_tx.send(String::from_utf8_lossy(&buf[..read]).into_owned());
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+                response_body.len()
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write response");
+        });
+
+        Ok((format!("http://127.0.0.1:{port}"), request_rx))
+    }
 
     /// Spawn a one-shot HTTP/1.1 server that accepts one request and returns
     /// the given body with HTTP 200. Returns the base URL of the mock server.
@@ -300,6 +367,44 @@ mod tests {
 
         let msg = format!("{err}");
         assert!(msg.contains("not-json"), "error message should include raw body: {msg}");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn set_worker_availability_uses_lightweight_endpoint(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (url, request_rx) = mock_server_capture_once("200 OK", "{}").await?;
+        let client = FuseClient::for_test_with_url(url)?;
+        client.set_worker_availability("bot:owner", "protected").await?;
+        let request = request_rx.await?;
+        assert!(request.starts_with("PUT /v1/workers/bot:owner/availability HTTP/1.1"));
+        assert!(request.contains(r#"{"availability":"protected"}"#));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn set_worker_availability_reports_missing_worker(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (url, _) = mock_server_capture_once("404 Not Found", "").await?;
+        let client = FuseClient::for_test_with_url(url)?;
+        let error = client
+            .set_worker_availability("missing", "public")
+            .await
+            .expect_err("missing worker must be distinguishable");
+        assert!(
+            matches!(error, FuseClientError::WorkerNotFound(worker_id) if worker_id == "missing")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn delete_worker_is_idempotent_for_missing_worker(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (url, request_rx) = mock_server_capture_once("404 Not Found", "").await?;
+        let client = FuseClient::for_test_with_url(url)?;
+        client.delete_worker("bot:owner").await?;
+        let request = request_rx.await?;
+        assert!(request.starts_with("DELETE /v1/workers/bot:owner HTTP/1.1"));
         Ok(())
     }
 }

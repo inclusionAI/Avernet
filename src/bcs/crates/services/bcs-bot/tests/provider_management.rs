@@ -6,7 +6,8 @@ use bcs_bot::core::{BotCore, ProviderCore};
 use bcs_bot_store::MemoryBotRepo;
 use bcs_bot_store::provider::MemoryProviderStore;
 use bcs_service_api::{
-    BotRegistryCoreService, ChannelBindingCleanupPort, DeleteProviderBotCommand,
+    BotCatalogCleanupPort, BotRegistryCoreService, ChannelBindingCleanupPort,
+    DeleteProviderBotCommand,
     ProviderAuthMode, ProviderBotBindingRepoPort, ProviderBotCoreService,
     ProviderCredentialRepoPort, ProviderManagementService, ProviderRepoPort,
     RegisterProviderBotCommand, RegisterProviderCommand, ServiceError, ServiceResult,
@@ -17,7 +18,27 @@ use tokio::sync::Mutex;
 struct TestContext {
     management: ProviderManagement,
     cleanup: Arc<RecordingCleanup>,
+    catalog_cleanup: Arc<RecordingCatalogCleanup>,
     _temp_dir: tempfile::TempDir,
+}
+
+#[derive(Default)]
+struct RecordingCatalogCleanup {
+    deleted_bot_ids: Mutex<Vec<String>>,
+    fail: Mutex<bool>,
+}
+
+#[async_trait]
+impl BotCatalogCleanupPort for RecordingCatalogCleanup {
+    async fn delete_bot(&self, bot_id: &str) -> ServiceResult<()> {
+        if *self.fail.lock().await {
+            return Err(ServiceError::InternalError(
+                "catalog cleanup failure injected by test".to_string(),
+            ));
+        }
+        self.deleted_bot_ids.lock().await.push(bot_id.to_string());
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -64,16 +85,19 @@ fn test_context() -> TestContext {
     ));
     let provider_bot_core: Arc<dyn ProviderBotCoreService> = provider_core.clone();
     let cleanup = Arc::new(RecordingCleanup::default());
+    let catalog_cleanup = Arc::new(RecordingCatalogCleanup::default());
     let management = ProviderManagement::new(
         provider_core.clone(),
         provider_bot_core,
         registry,
         Arc::new(NoopRelationCoreService),
     )
-    .with_channel_binding_cleanup(cleanup.clone());
+    .with_channel_binding_cleanup(cleanup.clone())
+    .with_bot_catalog_cleanup(catalog_cleanup.clone());
     TestContext {
         management,
         cleanup,
+        catalog_cleanup,
         _temp_dir: temp_dir,
     }
 }
@@ -148,8 +172,27 @@ async fn delete_provider_bot_cleans_channel_bindings_for_deleted_bot() {
     assert_eq!(outcome.bot_uuid, bot_uuid);
     assert_eq!(
         ctx.cleanup.deleted_bot_ids.lock().await.as_slice(),
+        &[bot_uuid.clone()]
+    );
+    assert_eq!(
+        ctx.catalog_cleanup.deleted_bot_ids.lock().await.as_slice(),
         &[bot_uuid]
     );
+}
+
+#[tokio::test]
+async fn delete_provider_bot_returns_error_when_catalog_cleanup_fails() {
+    let ctx = test_context();
+    let (provider_id, admin_token) = register_provider(&ctx).await;
+    register_provider_bot(&ctx, &provider_id, &admin_token, "bot-ref-1").await;
+    *ctx.catalog_cleanup.fail.lock().await = true;
+
+    let result = ctx
+        .management
+        .delete_provider_bot(delete_command(&provider_id, &admin_token, "bot-ref-1"))
+        .await;
+
+    assert!(result.is_err());
 }
 
 #[tokio::test]
