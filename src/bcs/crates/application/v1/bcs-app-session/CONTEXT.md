@@ -37,11 +37,14 @@
 
 ## Configuration
 
-- Bootstrap injects the same `state_machine_history.read_source` into both
-  history entry points. `messages` reads frozen content from MessageRepo only;
-  Session/Group authorization still applies. Missing old outputs are omitted,
-  with no workflow/Bot-history fallback or read-time backfill. Ordinary mixed
-  chat retains its existing cutoff policy. Configuration changes require restart.
+- Bootstrap injects `state_machine_history.persistence_enabled` and
+  `message_history.state_machine_cutoff_timestamp` into both history entry points.
+  Enabled Sessions with original `created_at >= cutoff` read frozen content from
+  MessageRepo only; older Sessions and disabled persistence use the runtime path.
+  The cutoff defaults to 0. Session/Group authorization still applies; selected
+  message reads never fall back or backfill. One-shot StateMachine history uses
+  this same cutoff; ordinary mixed chat keeps its separate cutoff policy.
+  Configuration changes require restart; the removed `read_source` is rejected.
 
 - The composition root injects Session and connection-token service
   implementations.

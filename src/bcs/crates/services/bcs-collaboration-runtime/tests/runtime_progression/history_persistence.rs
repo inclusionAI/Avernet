@@ -100,6 +100,7 @@ impl HistoryHarness {
         )
         .with_message_repo(messages.clone())
         .with_history_persistence(true)
+        .with_history_cutoff_timestamp(u64::MAX)
         .with_loop_execution();
         Self {
             runtime,
@@ -123,6 +124,7 @@ impl HistoryHarness {
         )
         .with_message_repo(self.messages.clone())
         .with_history_persistence(enabled)
+        .with_history_cutoff_timestamp(u64::MAX)
         .with_loop_execution();
     }
     async fn start(&self, yaml: String, human: bool) -> StateMachineRun {

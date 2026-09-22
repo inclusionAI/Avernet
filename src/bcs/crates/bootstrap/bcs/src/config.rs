@@ -1064,6 +1064,12 @@ pub struct MessageHistoryConfig {
     #[serde(default = "default_manager_worker_message_history_cutoff")]
     pub manager_worker_cutoff_timestamp: u64,
 
+    /// StateMachine history uses messages when persistence is enabled and the
+    /// Session's original created_at is >= this UTC epoch-millisecond cutoff.
+    /// Default: 0 (all Sessions use messages when persistence is enabled).
+    #[serde(default)]
+    pub state_machine_cutoff_timestamp: u64,
+
     /// Max visible history messages for a newly joined participant.
     /// Default: 100.
     #[serde(default = "default_new_participant_visible_limit")]
@@ -1085,6 +1091,7 @@ impl Default for MessageHistoryConfig {
         Self {
             cutoff_timestamp: default_message_history_cutoff(),
             manager_worker_cutoff_timestamp: default_manager_worker_message_history_cutoff(),
+            state_machine_cutoff_timestamp: 0,
             new_participant_visible_limit: default_new_participant_visible_limit(),
             default_page_limit: default_message_page_limit(),
             max_page_limit: default_message_max_page_limit(),
@@ -1670,9 +1677,6 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
-    config.state_machine_history.validate().map_err(|e| {
-        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e)) as Box<dyn std::error::Error>
-    })?;
     config.collaboration.fixed_loop_limits.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1751,16 +1755,21 @@ mod tests {
     use secrecy::ExposeSecret;
 
     #[test]
-    fn history_configuration_round_trip_and_messages_persistence_gate() {
+    fn history_configuration_defaults_and_cutoff_round_trip() {
         let mut config = BcsConfig::default();
+        assert_eq!(config.message_history.state_machine_cutoff_timestamp, 0);
         config.state_machine_history.persistence_enabled = true;
+        config.message_history.state_machine_cutoff_timestamp = 1_790_000_000_000;
         let loaded: BcsConfig = serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
         assert!(loaded.state_machine_history.persistence_enabled);
+        assert_eq!(loaded.message_history.state_machine_cutoff_timestamp, 1_790_000_000_000);
         assert!(validate_loaded_config(&loaded).is_ok());
-        config.state_machine_history.read_source = bcs_config_api::StateMachineHistoryReadSource::Messages;
-        assert!(validate_loaded_config(&config).is_ok());
         config.state_machine_history.persistence_enabled = false;
-        assert!(validate_loaded_config(&config).unwrap_err().to_string().contains("read_source=messages"));
+        assert!(validate_loaded_config(&config).is_ok());
+        let absent: MessageHistoryConfig = toml::from_str("").unwrap();
+        assert_eq!(absent.state_machine_cutoff_timestamp, 0);
+        assert!(toml::from_str::<MessageHistoryConfig>("state_machine_cutoff_timestamp = -1").is_err());
+        assert!(toml::from_str::<MessageHistoryConfig>("state_machine_cutoff_timestamp = \"invalid\"").is_err());
     }
 
     #[test]

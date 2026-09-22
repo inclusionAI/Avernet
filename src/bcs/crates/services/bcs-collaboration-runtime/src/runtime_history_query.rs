@@ -3,7 +3,7 @@ use super::*;
 impl CollaborationRuntime {
     pub(super) async fn message_store_history(
         &self,
-        session_id: &str,
+        session: &Session,
         limit: u64,
         before: Option<u64>,
         human_view: Option<HumanMessageView>,
@@ -13,13 +13,8 @@ impl CollaborationRuntime {
                 "history limit must be greater than 0".into(),
             ));
         }
-        // Session membership is authorized by the application/HTTP entry point.
-        // Resolving its group must not require even the existence of a Run.
-        let Some(session) = self.sessions.get(session_id).await.map_err(|error| {
-            CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
-        })? else {
-            return Ok(None);
-        };
+        // Reuse the Session loaded for cutoff selection; never resolve a Run.
+        let session_id = session.id.as_str();
         let repo = self.message_repo.as_ref().ok_or_else(|| {
             CollaborationRuntimeError::Internal(ServiceError::InternalError(
                 "StateMachine message repository is not configured".into(),

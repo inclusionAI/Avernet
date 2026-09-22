@@ -298,10 +298,9 @@ recommend_min_score = 0.1
 # =============================================================================
 
 [state_machine_history]
-# Persist StateMachine messages while retaining runtime-based history reads.
+# Persist StateMachine messages; enabled with no cutoff reads all Sessions from messages.
 # Uses the existing schema; no migration or participant-window initialization is required.
 persistence_enabled = true
-read_source = "runtime"
 
 # Message history storage configuration
 [message_history]
@@ -314,6 +313,11 @@ cutoff_timestamp = 1782360000000
 # ManagerWorker sessions created at or after this timestamp (ms) use DB history.
 # Default: 2026-07-05 00:00:00 Asia/Shanghai (UTC+8) (1783180800000 ms).
 manager_worker_cutoff_timestamp = 1783180800000
+
+# With persistence enabled, StateMachine sessions created at or after this
+# timestamp (ms) use messages; earlier sessions retain the legacy history path.
+# Default: 0 (all sessions). Example: 2026-09-22 16:00:00 Asia/Shanghai (UTC+8).
+state_machine_cutoff_timestamp = 1790064000000
 
 # Max visible history messages for a newly joined participant.
 # Set to a large value so new participants can see all history messages.

@@ -45,6 +45,7 @@ pub struct MessageService {
     max_page_limit: u32,
     history_attachment_ttl: u64,
     persisted_state_machine_history: bool,
+    state_machine_cutoff_timestamp: u64,
 }
 
 pub enum ManagerWorkerHistoryView {
@@ -104,11 +105,13 @@ impl MessageService {
             max_page_limit,
             history_attachment_ttl,
             persisted_state_machine_history: false,
+            state_machine_cutoff_timestamp: 0,
         }
     }
 
-    pub fn with_persisted_state_machine_history(mut self, enabled: bool) -> Self {
+    pub fn with_persisted_state_machine_history(mut self, enabled: bool, cutoff_timestamp: u64) -> Self {
         self.persisted_state_machine_history = enabled;
+        self.state_machine_cutoff_timestamp = cutoff_timestamp;
         self
     }
 
@@ -775,7 +778,7 @@ impl GroupMessageHistoryService for MessageService {
                 })?;
             let mut persisted_anchors = panel_page.messages;
             let mut persisted_anchors_have_more = panel_page.has_more;
-            if self.persisted_state_machine_history {
+            if self.persisted_state_machine_history && session.created_at >= self.state_machine_cutoff_timestamp {
                 // Keep ordinary legacy transcripts, but StateMachine content
                 // comes only from durable rows, including before the chat cutoff.
                 fallback_result.messages.retain(|message| message.metadata.as_ref()

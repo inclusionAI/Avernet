@@ -612,10 +612,12 @@ SessionMessagesPath:
           identity in metadata.state_machine;
           they omit top-level run_id and historyMeta round grouping. Ordinary
           chat and separately published results retain their existing grouping.
-          The deployment setting state_machine_history.read_source selects the
-          StateMachine content source for both HTTP APIs. In messages mode,
-          only persisted entries are returned; older unpersisted outputs are
-          omitted without runtime fallback or read-time backfill. Audience
+          Both HTTP APIs read StateMachine content from messages when
+          state_machine_history.persistence_enabled is true and the Session's
+          original created_at is at or after message_history.state_machine_cutoff_timestamp
+          (UTC epoch milliseconds, default 0). Older Sessions or disabled
+          persistence use the runtime path. Selected message reads return only
+          persisted entries, without runtime fallback or read-time backfill. Audience
           filtering precedes pagination. The before timestamp remains exclusive,
           so a page boundary within one millisecond can skip tied entries.
           Omitting view_bot_id selects the

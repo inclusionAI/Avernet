@@ -141,7 +141,7 @@ mod history_query;
 
 pub struct CollaborationRuntime {
     history_persistence_enabled: bool,
-    history_read_source: bcs_config_api::StateMachineHistoryReadSource,
+    history_cutoff_timestamp: u64,
     loop_instrumentation: Option<Arc<dyn bcs_service_api::StateMachineLoopInstrumentationHook>>,
     fixed_loop_limits: bcs_config_api::FixedLoopLimits,
     loop_execution_enabled: bool,
@@ -178,8 +178,8 @@ enum ResolvedDefinitionSource {
 impl CollaborationRuntime {
     pub fn with_history_persistence(mut self, enabled: bool) -> Self { self.history_persistence_enabled = enabled; self }
 
-    pub fn with_history_read_source(mut self, source: bcs_config_api::StateMachineHistoryReadSource) -> Self {
-        self.history_read_source = source;
+    pub fn with_history_cutoff_timestamp(mut self, timestamp: u64) -> Self {
+        self.history_cutoff_timestamp = timestamp;
         self
     }
 
@@ -195,7 +195,7 @@ impl CollaborationRuntime {
     ) -> Self {
         Self {
             history_persistence_enabled: false,
-            history_read_source: Default::default(),
+            history_cutoff_timestamp: 0,
             loop_instrumentation: None,
             fixed_loop_limits: bcs_config_api::FixedLoopLimits::default(),
             loop_execution_enabled: false,
@@ -3904,13 +3904,18 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         limit: u64,
         before: Option<u64>,
     ) -> Result<Option<SessionHistoryResult>, CollaborationRuntimeError> {
-        if self.history_read_source == bcs_config_api::StateMachineHistoryReadSource::Messages {
-            return self.message_store_history(session_id, limit, before, None).await;
-        }
         if limit == 0 {
             return Err(CollaborationRuntimeError::InvalidRequest(
                 "history limit must be greater than 0".to_string(),
             ));
+        }
+        if self.history_persistence_enabled {
+            let Some(session) = self.sessions.get(session_id).await.map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
+            })? else { return Ok(None); };
+            if session.created_at >= self.history_cutoff_timestamp {
+                return self.message_store_history(&session, limit, before, None).await;
+            }
         }
         let runs = self.runs.list_runs_by_session_id(session_id).await?;
         let Some(latest_run) = runs.first() else {
@@ -3949,9 +3954,6 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         before: Option<u64>,
         human_view: HumanMessageView,
     ) -> Result<Option<SessionHistoryResult>, CollaborationRuntimeError> {
-        if self.history_read_source == bcs_config_api::StateMachineHistoryReadSource::Messages {
-            return self.message_store_history(session_id, limit, before, Some(human_view)).await;
-        }
         if human_view.scope == bcs_domain::MessageViewScope::Full {
             return self
                 .get_state_machine_session_history(session_id, limit, before)
@@ -3961,6 +3963,14 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             return Err(CollaborationRuntimeError::InvalidRequest(
                 "history limit must be greater than 0".to_string(),
             ));
+        }
+        if self.history_persistence_enabled {
+            let Some(session) = self.sessions.get(session_id).await.map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
+            })? else { return Ok(None); };
+            if session.created_at >= self.history_cutoff_timestamp {
+                return self.message_store_history(&session, limit, before, Some(human_view)).await;
+            }
         }
         let runs = self.runs.list_runs_by_session_id(session_id).await?;
         let Some(latest_run) = runs.first() else {

@@ -3,8 +3,8 @@
 - 日期：2026-09-21
 - 状态：已按最小修改范围重新完成 T01–T03，T05 已实现并通过本轮读取验收；按用户决定移除 T04 历史回填与对账。本轮验证见 [tasks.md](./tasks.md)。
 - 所属模块：BCS
-- 目标：先补齐 StateMachine 消息双写，运行一段时间后通过配置切换为仅从 `bcs_messages` 读取，不回填旧消息。
-- 已确认范围：不增加实时工具事件、流式过程的历史持久化能力；切读后不再展示仅存在于运行来源、未写入 messages 的旧状态机消息。
+- 目标：补齐 StateMachine 消息双写，生产观察后按 Session 创建时间切读；新 Session 仅从 `bcs_messages` 读取，旧 Session 保持原链路，不回填旧消息。
+- 已确认范围：不增加实时工具事件、流式过程的历史持久化能力；命中 messages 的 Session 不补缺或回退，早于切读时间戳的 Session 保留运行来源历史。
 - 实施范围：`src/bcs/`；本文件不授权顺带修改其他模块或仓库根目录的 CI、脚本与配置。
 
 ## 1. 依据与术语
@@ -42,14 +42,14 @@
 
 1. 新产生的范围内消息，在进程重启、节点重试及 Run 结束后仍可恢复。
 2. 同一逻辑消息在重复回调、补偿、并发写入和双来源读取中只出现一次。
-3. 切读后，StateMachine 聊天记录的正文、身份、时间、角色及可见性不依赖 Run、Node、定义快照、投递 checkpoint 或 Bot 原生历史接口。
+3. 命中 messages 的 Session，其 StateMachine 聊天记录正文、身份、时间、角色及可见性不依赖 Run、Node、定义快照、投递 checkpoint 或 Bot 原生历史接口。
 4. 覆盖 StateMachine 群，以及 Chat / ManagerWorker 会话内的一次性 StateMachine Run。
 5. 保留原有会话访问控制、Human 视角隔离、Bot owner 过滤和已有最终结果发布语义。
 6. 允许双写与切读分开发版；双写观察期结束、新查询验证通过后切换，不要求完成旧消息迁移。
 
 “只读 messages”限定为 StateMachine 消息内容的重建。访问接口仍需要 Session、Group 和身份数据进行鉴权；不要求这些数据也迁移到 messages。混合会话中既有普通聊天的原生历史兼容策略不在本次改造范围。
 
-完整持久化保证从目标环境连续启用双写后新接受的消息开始。messages 中已经存在的旧记录继续读取；未落库的旧状态机消息在切读后不展示，不增加运行来源 fallback，也不因等待一段时间而自动补齐。双写启用时间记入发布记录，不新增按时间截断查询的配置或数据字段。
+完整持久化保证从目标环境连续启用双写后新接受的消息开始。配置时间戳按 Session 首次创建时间选择整个会话的读取来源，不按消息时间截断结果。早于时间戳的 Session 保留原查询；命中 messages 的 Session 读取已有记录，未落库内容不回退或补齐。双写启用时间记入发布记录，不新增数据字段。
 
 ### 2.2 非目标
 
@@ -319,7 +319,7 @@ Completed 后的原 `persist_node_output` 改为确认或补齐同一逻辑消�
 
 HTTP 路由只负责协议和鉴权上下文转换；不能在两个 adapter 中各自实现去重或补写。
 
-切读后，StateMachine 记录从 MessageRepo 取得，移除运行来源 fallback。已接受事实的投影失败、格式损坏或存储失败必须可观测，不能悄悄查询 Run / Node 让验收看似通过。切读前未落库的旧消息按第 10 节明确不展示，读取本身不承诺检测不存在的旧记录。切读回滚通过显式配置完成。
+命中 messages 的 Session 从 MessageRepo 取得 StateMachine 记录，空页不回退，存储错误明确返回。已接受事实的投影失败、格式损坏或存储失败必须可观测，不能悄悄查询 Run / Node 让验收看似通过。早于时间戳的 Session 按原链路读取；命中 messages 的 Session 不补缺，读取本身不承诺检测不存在的旧记录。切读回滚通过显式调整时间戳完成。
 
 ### 9.2 返回数据
 
@@ -347,19 +347,20 @@ HTTP 路由只负责协议和鉴权上下文转换；不能在两个 adapter 中
 
 ### 10.1 历史展示边界
 
-不实施 T04，不新增旧消息 `check` / `backfill` 命令或全量迁移报告。双写期间保持 runtime 查询，运行一段时间后通过配置直接切到 messages：
+不实施 T04，不新增旧消息 `check` / `backfill` 命令或全量迁移报告。生产双写观察期显式设置足够靠后的 cutoff 保持原查询；观察后改为已确认完整双写覆盖的起点 T：
 
 1. messages 中已有的 panel、V2 output、旧 Human response、published_result 等记录继续按统一身份和权限读取，不因早于双写启用时间而过滤。
-2. 双写启用前仅存在于 Run / Node / 定义中的旧消息不作批量迁移，切读后不展示。旧 Run 的历史可能只剩部分已落库记录，这是本次接受的行为边界，不要求为了切读补齐。
+2. `Session.created_at < T` 继续原查询，`>= T` 从 messages 读取。旧 Session 在 T 之后继续聊天、重新激活或新增 Run，仍属于旧来源；同一会话不按消息或 Run 时间拆分。T 不得早于所有实例可靠启用双写的时间；命中 messages 的会话若含未落库内容，不作回退或补写。
 3. 连续双写期间新接受的消息仍须完整持久化并可恢复；不能把新写入失败或长期 Pending 当作允许丢弃的旧历史。
 4. T03 的 Pending 恢复、既有 opening / result 本地修复和启用时事实固化保持不变；它们不承诺遍历并恢复全部旧消息。没有窗口初始化或旧消息正文回填。
-5. 双写观察时长由发布安排决定；本次不新增时间开关、自动切读任务或查询时回填。发布记录写明实际启用和切读时间，以及旧消息展示边界。
+5. 双写观察时长由发布安排决定；本次不新增自动切读任务或查询时回填。配置依据 Session 时间分流，观察期不得跨过预设的未来 T。发布记录写明实际启用时间、选定 T 和切读时间，以及旧消息展示边界。
 
 ### 10.2 双写观察与读取验证
 
 - 观察新消息写入、幂等冲突、投影延迟、持续失败及 Pending 恢复，修复新双写路径上的问题，不以等待时间代替故障处理。
 - 在回归场景中验证新消息的正文、发送者、role、时间、Run / Node / attempt、Loop metadata、受众和顺序；消息投影成功确认前仍校验原不可变 payload。
 - 验证同一会话含已落库旧消息、未落库旧消息和双写新增消息时，messages 模式只展示有权访问的已存记录，没有运行来源 fallback，也不补写缺失的旧消息。
+- 验证 Session 创建时间在 T 前、等于 T、T 后的两入口及 Full / Participant 分流；原链路仍保留未落库旧历史。未配置 cutoff 等价于 0，关闭 persistence 始终走原链路。
 - 两套历史接口、Workbench / CLI 消费和 H22 内容来源隔离测试通过；原参与者窗口不受新增投影及恢复影响。
 
 上述验证不要求全环境旧历史完整对账，也不宣告旧历史已全部迁移。等待双写不会使未落库的旧消息自动进入 messages。
@@ -370,18 +371,18 @@ HTTP 路由只负责协议和鉴权上下文转换；不能在两个 adapter 中
 
 | 配置 | 默认值 | 语义 |
 | --- | --- | --- |
-| `state_machine_history.persistence_enabled` | `false` | 启用本提案补齐的可靠消息事实及投影；关闭时仍保留原已有 panel、V2 output、published result 写入 |
-| `state_machine_history.read_source` | `runtime` | `runtime` 使用过渡期统一归并，`messages` 使用消息仓储 |
+| `state_machine_history.persistence_enabled` | `false` | 启用可靠消息事实及投影；开启后按 cutoff 选读，关闭时始终走原链路，并保留已有 panel、V2 output、published result 写入 |
+| `message_history.state_machine_cutoff_timestamp` | `0` | UTC Unix 毫秒；persistence 开启时 `Session.created_at >= T` 读 messages，之前读原链路；未配置即所有 Session 读 messages |
 
-`read_source = messages` 要求 `persistence_enabled = true`，非法组合启动失败。T03 版本尚未实现 messages 读取，因此无论 persistence 配置如何，选择 messages 均明确拒绝启动。配置沿用现有加载机制，修改后须重启兼容版本实例；不新增切读 API 或热更新设施。配置不是成熟度名称；不引入 `phase1`、`v2_history` 等临时契约。
+删除 `state_machine_history.read_source`，不保留别名，旧配置会作为未知字段被拒绝。新部署开启 persistence 且省略 cutoff 时直接使用 messages；存量生产观察必须显式设置未来 cutoff。关闭 persistence 时 cutoff 不参与读取。三处 bootstrap 注入相同规则，StateMachine 群与 Chat / ManagerWorker 一次性状态机均适用；普通消息继续使用原有两项 cutoff，权限和分页不变。配置修改通过实例重启生效，不新增切读 API 或热更新设施。
 
 ### 11.1 发布顺序
 
 1. 部署身份归一化、旧格式适配、两入口排序修正、查询侧窗口补偿及 checkpoint 恢复能力；不执行 DDL 或数据初始化。开启新写入前确认所有读取实例支持新增投影标记，维持默认配置。
 2. 确认所有相关读写实例为兼容版本，按第 7.3 节排空缺少原接受时间的旧 Running / Judging 输入，再开启 persistence。门槛不只覆盖状态机 writer；旧读取实例也会误用物理窗口。旧实例还可能按 Completed 元数据校验新接受态消息，因此禁止旧二进制与新写入模式混跑。
-3. 记录环境的双写启用时间，保持 runtime 读取并连续双写一段时间，按第 10.2 节观察新增消息和故障恢复。旧消息不回填，切读也不依赖全量历史对账报告。
-4. T05 完成、观察期结束且满足下列门槛后，按部署环境将 `read_source` 改为 `messages`，保持 persistence 开启并重启兼容实例。发布说明明确未落库旧消息将不再展示。
-5. 切读稳定、读取回滚期结束后独立清理 runtime 历史来源，不以旧消息已全部迁移为清理前提；不删除工作流调度或流程面板所需运行数据。
+3. 生产环境在开启 persistence 前移除旧 read_source、设置足够靠后的 cutoff，记录双写启用时间；保持原读取并连续双写一段时间，按第 10.2 节观察新增消息和故障恢复。旧消息不回填，切读也不依赖全量历史对账报告。
+4. 观察期结束且满足下列门槛后，将 cutoff 改为已确认所有实例完整双写覆盖的起点 T，保持 persistence 开启并重启实例；所有实例使用相同 T。新 Session 读 messages，旧 Session 原链路继续可用。
+5. 只要还需读取 T 之前的 Session，就保留原查询及其依赖数据。旧路径清理需另行确定历史保留边界，不删除工作流调度或流程面板所需运行数据。
 
 ### 11.2 切读门槛
 
@@ -395,9 +396,9 @@ HTTP 路由只负责协议和鉴权上下文转换；不能在两个 adapter 中
 
 ### 11.3 回滚
 
-优先只将 `read_source` 切回 runtime，保留新写入与恢复，避免扩大数据缺口。回滚后的 runtime 归并必须保留已持久化的旧 attempt 消息。
+优先将 cutoff 调整为足够靠后的时间，恢复原读取并保留双写与恢复。不能通过删除 cutoff 回滚：省略时默认 0，会让所有 Session 读取 messages。回滚后的 runtime 归并必须保留已持久化的旧 attempt 消息。
 
-关闭 persistence 前，先回滚读取并处理 Pending checkpoint；关闭后也不能停止已接受事实的补写。若关闭期间产生新的未落库状态机消息，再次切读时这些消息同样不展示；重新开启不会自动回填，须在发布记录中明确中断时段，并重新观察双写及恢复是否正常。
+关闭 persistence 会同时回到原读取，但不能停止已接受事实的 Pending 补写。若关闭期间产生新的未落库消息，重新开启不会自动回填；必须重新选择完整双写恢复后的 T，使跨中断存续的旧 Session 继续原查询，并重新观察双写与恢复。
 
 不将直接降级旧二进制作为常规回滚：旧版本不理解新历史事实、接受态 payload 和补充投影标记。虽然物理序号及 join_seq 的含义未改变，旧读取算法会将新增投影计入窗口、挤占普通消息。回滚应通过同一兼容版本切回 runtime，不删除消息或改写迁移记录。
 
@@ -450,7 +451,7 @@ T03 Pending 扫描每页一条索引查询，最多返回 100 份 payload；串�
 
 终态修复验证：Runtime / Store 测试覆盖部分消息写入失败、标记写入失败、并发确认、跨重启跳过及节点 Pending 独立恢复。SQLite 最大 32 个 Run 的查询计数为一条查询、至多 32 行；真实 MySQL Text / Prepared 契约通过。隔离 MySQL 8.4 中放入 5,000 条标记后，1 / 32 个 key 的 EXPLAIN 均使用现有 PRIMARY，预计读取 1 / 32 行；此验证不代表共享生产负载下的吞吐结论。
 
-T05 的状态机正文页只执行一次 MessageRepo SELECT，按环境 / Group / Session、消息类型和受众在 LIMIT 前过滤。内部最多 1,000 条加一条 lookahead，OpenAPI 保持原 100 条上限；Legacy 未指定 limit 时最多返回 1,000 条。查询从 Session 获取 group_id 后直接读取 messages，不批查 Run、不按消息回查 Bot 名称。内部复合游标仍只在 HTTP 暴露原有排他毫秒 before；同毫秒分页边界限制未改变。
+Session 分流复用消息读取所需的 Session 元数据：新链路不增加查询，开启双写但命中旧链路时每次请求至多增加一次 Session 点查，不按 Run / Node 查询时间。T05 的状态机正文页只执行一次 MessageRepo SELECT，按环境 / Group / Session、消息类型和受众在 LIMIT 前过滤。内部最多 1,000 条加一条 lookahead，OpenAPI 保持原 100 条上限；Legacy 未指定 limit 时最多返回 1,000 条。查询从 Session 获取 group_id 后直接读取 messages，不批查 Run、不按消息回查 Bot 名称。内部复合游标仍只在 HTTP 暴露原有排他毫秒 before；同毫秒分页边界限制未改变。
 
 混合会话沿用普通聊天查询，Participant 另有一页状态机消息查询并按共享身份归并。旧会话的普通 Bot 原生历史 fallback 保留，但其中状态机历史项被排除，由持久消息补齐；此分支在原 panel / opening 查询之外增加 output 和 Human response 两个有界类型查询，无逐 Run 扫描。隔离 HTTP 测试计数包括鉴权和 Session / Group 元数据，Legacy / OpenAPI 的 Full 请求分别为 5 / 3 次 SQL，Participant 混合请求为 7 / 5 次，测试上限为 8 次；这些数字不代表其他鉴权配置的全部开销。
 
@@ -523,7 +524,7 @@ T03 使用结构化日志提供等价观测：当前页 Pending 数量及最老�
 | H31 | 100 条普通消息后新增 100 条投影，窗口为 100 | 物理序号为 200，查询下界仍为 1；加入前后及缺少 join_seq 的视角可见相同普通消息集合，audience 独立过滤 |
 | H32 | 后续普通追加、历史补写及重复恢复 | 固定物理 join anchor 不移动；仅新增普通消息推进缺少 join_seq 时的窗口，重复追加不占第二个序号 |
 | H33 | 旧 V2 行、删除空号及高密度投影 | 旧行不补标记，普通空号不压缩；512 行有界读取及 16,384 补充投影预算生效，失败明确报错 |
-| H34 | 双写后回滚读取、关闭 / 重开 persistence | runtime / messages 共用窗口补偿，不重写 join_seq、历史标记或消息数据 |
+| H34 | cutoff 前 / 等于 / 后、默认值、读取回滚及关闭 / 重开 persistence | Full / Participant 与两入口分流一致；原链路保留旧历史，命中 messages 不回退；窗口补偿不变 |
 | H35 | 新增投影及原有写入路径事务失败 | 新 prompt / output 不挤占窗口，旧行及 opening / result 保持原语义；失败回滚唯一物理计数器 |
 
 H22 是本需求的核心验收：不仅要查询结果一致，还要证明读取没有调用 Run、Node、definition snapshot、checkpoint 或 Bot 原生历史。流程面板 API 不受此隔离测试约束。
@@ -560,4 +561,4 @@ H22 是本需求的核心验收：不仅要查询结果一致，还要证明读�
 - [OpenAPI Session 历史契约](../../api-contracts/v1/openapi/sessions.yaml)
 - [最终结果消息发布](../../crates/bootstrap/bcs/src/server.rs)
 
-T01–T03 已实现共享身份与投影、runtime 兼容读取、查询侧窗口补偿、接受事实与 checkpoint 的原子提交以及可靠双写和恢复，实际验证与发布限制见 tasks。T04 已移除；T05 已实现 messages-only 查询、配置校验及无回填切读边界。目标环境仍须启用双写、完成观察和发布门禁后再切读，开发验收不替代实际环境的双写观察。公开时间戳分页的同毫秒边界和未落库旧消息的展示范围仍按本 spec 的限制处理。
+T01–T03 已实现共享身份与投影、runtime 兼容读取、查询侧窗口补偿、接受事实与 checkpoint 的原子提交以及可靠双写和恢复，实际验证与发布限制见 tasks。T04 已移除；T05 已实现 messages-only 查询、配置校验及无回填切读边界。存量目标环境仍须显式配置未来 cutoff、启用双写并完成观察和发布门禁后再选择完整双写覆盖的起点 T，开发验收不替代实际环境的双写观察。公开时间戳分页的同毫秒边界和未落库旧消息的展示范围仍按本 spec 的限制处理。

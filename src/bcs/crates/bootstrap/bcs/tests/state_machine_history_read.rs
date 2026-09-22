@@ -5,7 +5,6 @@ use axum::{body::{Body, to_bytes}, http::{HeaderMap, Request, StatusCode, Uri}, 
 use bcs_api_http::{ApiState, PrincipalVerifier, PrincipalVerificationError};
 use bcs_app_session::{SessionServiceImpl, SessionServiceConfig};
 use bcs_auth_api::{AuthError, UserIdentityInfo};
-use bcs_config_api::StateMachineHistoryReadSource;
 use bcs_domain::MessageViewScope;
 use bcs_db_api::{DbPlugin, DbStatement, DbResult, DbRow, DbExecuteResult, DbTransactionStep, DbTransactionStepResult, DbHealth};
 use bcs_db_local::LocalSqliteDbPlugin;
@@ -17,12 +16,12 @@ use bcs_services_container::Services;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-struct ReadOnlyHistoryDb { inner: Arc<dyn DbPlugin>, reads: AtomicUsize }
+struct ReadOnlyHistoryDb { inner: Arc<dyn DbPlugin>, reads: AtomicUsize, allow_workflow: bool }
 #[async_trait]
 impl DbPlugin for ReadOnlyHistoryDb {
     async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
         let sql = statement.sql().to_ascii_lowercase();
-        assert!(!sql.contains("bcs_state_machine") && !sql.contains("bcs_collaboration"), "history accessed workflow storage");
+        assert!(self.allow_workflow || (!sql.contains("bcs_state_machine") && !sql.contains("bcs_collaboration")), "history accessed workflow storage");
         self.reads.fetch_add(1, Ordering::SeqCst);
         self.inner.query(statement).await
     }
@@ -64,7 +63,7 @@ impl PrincipalVerifier for Identity {
     }
 }
 
-fn routers(db: Arc<ReadOnlyHistoryDb>, env: &str, user: &str) -> [Router; 2] {
+fn routers(db: Arc<ReadOnlyHistoryDb>, env: &str, user: &str, cutoff: u64) -> [Router; 2] {
     let mut services = Services::noop();
     let group_repo = Arc::new(bcs_group_store::MySqlGroupStore::sqlite(db.clone(), env.into()));
     let session_repo = Arc::new(bcs_session_store::MySqlSessionStore::sqlite(db.clone(), env.into()));
@@ -75,12 +74,11 @@ fn routers(db: Arc<ReadOnlyHistoryDb>, env: &str, user: &str) -> [Router; 2] {
     services.collaboration_runtime = Arc::new(bcs_collaboration_runtime::CollaborationRuntime::new(
         workflow.clone(), workflow.clone(), workflow.clone(), workflow,
         services.group.clone(), services.session_management.clone(), services.bot_delivery.clone(), Arc::new(UnusedPorts),
-    ).with_message_repo(messages.clone()).with_history_persistence(true)
-        .with_history_read_source(StateMachineHistoryReadSource::Messages));
+    ).with_message_repo(messages.clone()).with_history_persistence(true).with_history_cutoff_timestamp(cutoff));
     services.group_message_history = Arc::new(bcs_message::MessageService::new(
         messages, Arc::new(UnusedPorts), session_repo.clone(), services.group.clone(), services.registry.clone(),
         services.session_files.clone(), Arc::new(UnusedPorts), 0, 0, 100, 50, 100, 600,
-    ).with_persisted_state_machine_history(true));
+    ).with_persisted_state_machine_history(true, cutoff));
     let facade = Arc::new(SessionServiceImpl::new(services.session_launch.clone(), services.session_management.clone(),
         services.group.clone(), services.registry.clone(), services.friend.clone(), services.relation.clone(), session_repo,
         services.group_message_history.clone(), services.collaboration_runtime.clone(), services.system_message.clone(),
@@ -110,9 +108,9 @@ async fn page(app: &Router, prefix: &str, sid: &str, query: &str) -> (StatusCode
     let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), 8 * 1024 * 1024).await.unwrap()).unwrap();
     (status, body)
 }
-async fn verify(db: Arc<dyn DbPlugin>, env: &str, user: &str, sessions: &[String]) {
-    let guarded = Arc::new(ReadOnlyHistoryDb { inner: db, reads: AtomicUsize::new(0) });
-    let apps = routers(guarded.clone(), env, user);
+async fn verify(db: Arc<dyn DbPlugin>, env: &str, user: &str, sessions: &[String], cutoff: u64) {
+    let guarded = Arc::new(ReadOnlyHistoryDb { inner: db, reads: AtomicUsize::new(0), allow_workflow: false });
+    let apps = routers(guarded.clone(), env, user, cutoff);
     let prefixes = ["", "/openapi/v1/collaboration"];
     for sid in sessions {
         let mut reference = None;
@@ -141,7 +139,7 @@ async fn verify(db: Arc<dyn DbPlugin>, env: &str, user: &str, sessions: &[String
             }
         }
     }
-    let outsider = routers(guarded, env, "history-outsider");
+    let outsider = routers(guarded, env, "history-outsider", cutoff);
     for (app, prefix) in outsider.iter().zip(prefixes) {
         let (status, _) = page(app, prefix, &sessions[0], "limit=100").await;
         assert_eq!(status, StatusCode::FORBIDDEN);
@@ -182,7 +180,18 @@ async fn both_http_apis_read_only_messages_for_full_and_participant_views() {
         }
         ids.push(sid);
     }
-    verify(db, "local", "1", &ids).await;
+    let cutoff = sessions.get(&ids[0]).await.unwrap().created_at;
+    verify(db.clone(), "local", "1", &ids, 0).await;
+    verify(db.clone(), "local", "1", &ids, cutoff).await;
+    // Before the cutoff, the pure StateMachine Session still uses its legacy
+    // workflow source. This fixture has persisted messages but no legacy Run.
+    let guarded = Arc::new(ReadOnlyHistoryDb { inner: db, reads: AtomicUsize::new(0), allow_workflow: true });
+    for (app, prefix) in routers(guarded, "local", "1", cutoff + 1).iter().zip(["", "/openapi/v1/collaboration"]) {
+        let (status, body) = page(app, prefix, &ids[0], "limit=100").await;
+        assert_eq!(status, StatusCode::OK);
+        let rows = if prefix.is_empty() { &body } else { &body["data"] }.as_array().unwrap();
+        assert!(rows.is_empty(), "pre-cutoff Session must keep the runtime source in {prefix}");
+    }
 }
 
 #[tokio::test]
@@ -192,5 +201,5 @@ async fn snapshot_messages_http_acceptance() {
     let sessions = std::env::var("BCS_HISTORY_ACCEPTANCE_SESSIONS").expect("comma separated Session IDs").split(',').map(str::to_string).collect::<Vec<_>>();
     let user = std::env::var("BCS_HISTORY_ACCEPTANCE_USER").unwrap_or_else(|_| "001".into());
     let env = std::env::var("BCS_HISTORY_ACCEPTANCE_ENV").unwrap_or_else(|_| "local".into());
-    verify(Arc::new(LocalSqliteDbPlugin::new_file(path).unwrap()), &env, &user, &sessions).await;
+    verify(Arc::new(LocalSqliteDbPlugin::new_file(path).unwrap()), &env, &user, &sessions, 0).await;
 }

@@ -7,6 +7,7 @@ async fn history_dual_write_retains_judge_failed_attempt_after_retry_and_loop_pr
     h.runtime = h
         .runtime
         .with_history_persistence(true)
+        .with_history_cutoff_timestamp(u64::MAX)
         .with_message_repo(messages.clone());
     let run = h.start(loop_yaml(2, true, false, 2), false).await.view.run;
     let plan = h.plan(&run.run_id).await;
@@ -111,10 +112,10 @@ async fn history_dual_write_retains_judge_failed_attempt_after_retry_and_loop_pr
     let identities = |page: &bcs_service_api::SessionHistoryResult| page.messages.iter()
         .map(|m| (m.id.clone(), (m.content.clone(), m.metadata.clone())))
         .collect::<BTreeMap<_, _>>();
-    h.runtime = h.runtime.with_history_read_source(bcs_config_api::StateMachineHistoryReadSource::Messages);
+    h.runtime = h.runtime.with_history_cutoff_timestamp(0);
     let persisted = h.runtime.get_state_machine_session_history(&run.session_id, 100, None).await.unwrap().unwrap();
     assert_eq!(identities(&history), identities(&persisted), "Loop iterations and rejected attempt survive cutover");
-    h.runtime = h.runtime.with_history_read_source(bcs_config_api::StateMachineHistoryReadSource::Runtime);
+    h.runtime = h.runtime.with_history_cutoff_timestamp(u64::MAX);
     let rollback = h.runtime.get_state_machine_session_history(&run.session_id, 100, None).await.unwrap().unwrap();
     assert_eq!(identities(&persisted), identities(&rollback), "rollback retains all attempts");
 }

@@ -1,5 +1,4 @@
 use super::*;
-use bcs_config_api::StateMachineHistoryReadSource;
 use bcs_db_api::{DbPlugin, DbStatement, DbResult, DbRow, DbExecuteResult, DbTransactionStep, DbTransactionStepResult, DbHealth};
 use bcs_collaboration_store::MySqlCollaborationStore;
 
@@ -17,7 +16,6 @@ fn isolated_reader(h: &HistoryHarness) -> CollaborationRuntime {
     CollaborationRuntime::new(forbidden.clone(), forbidden.clone(), forbidden.clone(), forbidden,
         h.groups.clone(), h.sessions.clone(), h.delivery.clone(), noop_judge())
         .with_message_repo(h.messages.clone()).with_history_persistence(true)
-        .with_history_read_source(StateMachineHistoryReadSource::Messages)
 }
 
 fn view() -> HumanMessageView {
@@ -61,4 +59,37 @@ async fn no_backfill_reads_existing_panel_and_omits_unpersisted_old_output() {
     assert_eq!(rows.messages.len(), 1);
     assert!(rows.messages[0].id.ends_with(":000-panel"));
     assert_eq!(h.messages.get_current_seq(&run.session_id).await.unwrap(), seq, "reads never backfill old workflow data");
+}
+
+#[tokio::test]
+async fn cutoff_uses_session_creation_for_all_views_and_keeps_old_history() {
+    let mut h = HistoryHarness::new(noop_judge()).await;
+    h.restart(false);
+    let run = h.start(human_input_yaml(), true).await;
+    h.runtime.respond_human_node(response(&run, "legacy answer")).await.unwrap();
+    let created_at = h.sessions.get(&run.session_id).await.unwrap().unwrap().created_at;
+    let seq = h.messages.get_current_seq(&run.session_id).await.unwrap();
+    for (enabled, cutoff, legacy) in [(true, 0, false), (true, created_at - 1, false),
+        (true, created_at, false), (true, created_at + 1, true), (false, 0, true),
+        (false, created_at + 1, true)] {
+        h.runtime = h.runtime.with_history_persistence(enabled).with_history_cutoff_timestamp(cutoff);
+        for scope in [MessageViewScope::Full, MessageViewScope::Participant] {
+            let mut human = view(); human.scope = scope;
+            let history = h.runtime.get_state_machine_session_history_for_view(
+                &run.session_id, 100, None, human,
+            ).await.unwrap().unwrap();
+            assert_eq!(history.messages.iter().any(|m| m.content == "legacy answer"), legacy,
+                "enabled={enabled}, cutoff={cutoff}, scope={scope:?}");
+            assert_eq!(history.messages.len(), if legacy && scope == MessageViewScope::Participant { 3 } else if legacy { 2 } else { 1 });
+        }
+        let full = h.runtime.get_state_machine_session_history(&run.session_id, 100, None).await.unwrap().unwrap();
+        assert_eq!(full.messages.iter().any(|m| m.content == "legacy answer"), legacy);
+    }
+    assert_eq!(h.messages.get_current_seq(&run.session_id).await.unwrap(), seq, "cutover never backfills");
+    let reader = isolated_reader(&h).with_history_cutoff_timestamp(created_at);
+    assert!(reader.get_state_machine_session_history("missing-session", 100, None).await.unwrap().is_none());
+    h.messages = Arc::new(HistoryMessages::default());
+    let empty = isolated_reader(&h).with_history_cutoff_timestamp(created_at)
+        .get_state_machine_session_history(&run.session_id, 100, None).await.unwrap().unwrap();
+    assert!(empty.messages.is_empty(), "an empty messages page must not fall back to workflow storage");
 }

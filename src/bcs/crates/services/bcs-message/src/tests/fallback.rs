@@ -439,9 +439,13 @@ async fn messages_mode_keeps_ordinary_fallback_but_uses_only_frozen_workflow_row
     let mut native = fallback_message("unpersisted workflow body");
     native.id = "native-workflow".into();
     native.metadata = Some(serde_json::json!({"state_machine": {"event": "output", "run_id": "run", "node_id": "n", "attempt": 0}}));
-    let (service, repo, _, fallback, sid) = service_fixture(GroupStrategy::ManagerWorker,
+    let (service, repo, sessions, fallback, sid) = service_fixture(GroupStrategy::ManagerWorker,
         0, u64::MAX, vec![fallback_message("ordinary legacy chat"), native]).await;
-    let service = service.with_persisted_state_machine_history(true);
+    let created_at = sessions.get(&sid).await.unwrap().created_at;
+    let mut service = service.with_persisted_state_machine_history(true, created_at + 1);
+    let legacy = service.get_session_history(session_cmd("group-1", &sid, None)).await.unwrap();
+    assert!(legacy.messages.iter().any(|m| m.content == "unpersisted workflow body"));
+    service = service.with_persisted_state_machine_history(true, created_at);
     let before = service.get_session_history(session_cmd("group-1", &sid, None)).await.unwrap();
     assert_eq!(before.messages.len(), 1);
     assert_eq!(before.messages[0].content, "ordinary legacy chat");
@@ -459,5 +463,5 @@ async fn messages_mode_keeps_ordinary_fallback_but_uses_only_frozen_workflow_row
     assert_eq!(after.messages[0].bot_name.as_deref(), Some("Frozen name"));
     assert!(after.messages[0].run_id.is_empty());
     assert_eq!(after.messages[1].content, "ordinary legacy chat");
-    assert_eq!(fallback.session_calls().await, 2);
+    assert_eq!(fallback.session_calls().await, 3);
 }

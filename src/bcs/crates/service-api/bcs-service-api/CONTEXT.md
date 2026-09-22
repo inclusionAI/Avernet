@@ -412,7 +412,9 @@ scoped, audience-filtered page of persisted StateMachine entries, bounded to
 1..1000 plus lookahead. Full/Bot excludes Human prompts; Participant sees public
 and explicitly directed rows only. Unsupported adapters fail rather than
 returning an empty successful page. The runtime history facade selects this
-port in messages mode before accessing any workflow repository. Authorization
+port before accessing any workflow repository when history persistence is enabled
+and Session.created_at >= message_history.state_machine_cutoff_timestamp (default 0).
+Older Sessions and disabled persistence keep the runtime path. Authorization
 and ordinary-chat history policies remain at their existing boundaries.
 
 `resolve_history_window_start` resolves the ordinary Chat window at a fixed
