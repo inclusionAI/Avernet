@@ -426,7 +426,7 @@ async fn handle_bot_connect(
         deprecation: None,
         capabilities: Some(BotConnectCapabilities::for_connection(
             requested_version,
-            negotiated_client_kind.as_deref() == Some("native_mcp"),
+            matches!(negotiated_client_kind.as_deref(), Some("native_mcp" | "mcporter_mcp")),
         )),
         env: Some(env_map),
     };
@@ -934,7 +934,8 @@ async fn handle_event_frame(
 
     // This key is internal-only. Legacy clients cannot opt themselves into
     // task intent by smuggling it in their event payload.
-    let task_intent_enabled = is_v3 && connection.client_kind.as_deref() == Some("native_mcp");
+    let task_intent_enabled = is_v3
+        && matches!(connection.client_kind.as_deref(), Some("native_mcp" | "mcporter_mcp"));
     if !task_intent_enabled {
         if let Some(object) = event_payload.as_object_mut() {
             object.remove(TASK_INTENT_ELIGIBLE_KEY);

@@ -109,6 +109,11 @@ Delivery wiring loads DB policy, rejects non-default legacy file policy, and sup
 
 ## Configuration
 
+- `[uplink].allowed_profiles` defaults empty and authorizes fixed MCP profiles
+  for every authenticated WS V3 Bot in the deployment. All Bot runtime assembly
+  paths inject it. Changes require restart; no per-Bot DB migration or management
+  API is introduced. See `docs/bot-integration.md` for the trust boundary.
+
 - This crate owns config file discovery, env parsing, and CLI/bootstrap flags.
 - `allowed_switch_provider_ids` controls backend-only Provider Bot operations,
   including delivery switching and Bot attribute management; an empty list

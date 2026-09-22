@@ -1497,13 +1497,13 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn add_bot_info(&self, bot_id: &str, key: &str, value: String) {
-        // Agent credentials reuse capabilities; runtime/profile metadata stays
+        // Agent credentials reuse capabilities; negotiated runtime metadata stays
         // in the dedicated process-local override map.
-        if key != "agent_token" && key != "client_kind" && key != "coordination_profile" {
+        if key != "agent_token" && key != "client_kind" {
             tracing::warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, key = %key, "add_bot_info: unrecognized key, ignoring");
             return;
         }
-        if key == "client_kind" || key == "coordination_profile" {
+        if key == "client_kind" {
             let bots = self.bots.read().await;
             if !bots.contains_key(bot_id) {
                 return;
@@ -1522,7 +1522,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn get_bot_info(&self, bot_id: &str, key: &str) -> Option<String> {
-        if key == "client_kind" || key == "coordination_profile" {
+        if key == "client_kind" {
             return self
                 .bot_info_overrides
                 .read()
@@ -1544,7 +1544,7 @@ impl BotRepoPort for PersistentBotRepo {
             self.add_bot_info(bot_id, key, value).await;
             return;
         }
-        if key == "client_kind" || key == "coordination_profile" {
+        if key == "client_kind" {
             self.bot_info_overrides
                 .write()
                 .await

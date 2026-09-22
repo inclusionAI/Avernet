@@ -19,6 +19,8 @@ pub mod queued_provider_headers;
 pub mod mysql;
 pub mod redis;
 pub mod redis_route_type;
+pub mod uplink;
+pub use uplink::{UplinkConfig, UplinkProfile};
 
 pub use bcsfuse::BcsFuseConfig;
 pub use fixed_loop::FixedLoopLimits;

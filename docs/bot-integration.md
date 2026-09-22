@@ -251,13 +251,41 @@ The first frame after connection must be `bot.connect`.
 | `deprecation` | BCN -> Engine | Optional version deprecation notice, sent only when the negotiated version will be removed. |
 
 `client_kind` identifies a server-recognized client profile; it is not an
-authorization claim. Use `native_mcp` only when the integration implements the
-trusted native MCP coordination contract. BCN enables
-`tool_result_task_intent` only when both V3 and that trusted profile are
-negotiated against the Bot's server-owned `coordination_profile`. A connect
-request cannot create or replace that profile. Unknown, unregistered, or
-ordinary client kinds can use all other V3 run events, but receive
-`tool_result_task_intent: false`.
+authorization claim. The server ships two fixed MCP profiles, selected with
+`native_mcp` or `mcporter_mcp`. Administrators authorize them in startup TOML:
+
+```toml
+[uplink]
+allowed_profiles = ["native_mcp", "mcporter_mcp"]
+```
+
+The default is `[]` (both disabled). This is a **deployment-wide grant**:
+every authenticated uplink Bot, including a newly connected Bot, may request
+an enabled profile. Enable it only in deployments that trust those runtimes;
+it is not a per-Bot entitlement. Configuration changes require a server restart.
+V3 must be explicitly negotiated together with an allowed profile to enable
+`tool_result_task_intent`. V1/V2, denied and unknown kinds retain this capability
+as `false`. Ordinary plugin/native-tool integrations retain their existing path.
+
+`native_mcp` fixes server `bcs` and exact tool names
+`mcp__bcs__bcs_assign_task`, `mcp__bcs__bcs_send_task_message`, and
+`mcp__bcs__bcs_task_complete`. `mcporter_mcp` fixes command `mcporter` and server
+`bcs`, and parses the unmodified coordination envelope from successful
+`exec`/`bash`/`shell`/`mcporter` tool output (case-insensitive source names).
+It does not use the native MCP name mapping. Both paths require paired tool
+start/result events and the existing run/session, authorization and dedup checks.
+Clients cannot upload tool mappings or commands. The negotiated kind is
+connection-runtime state: reconnect replaces it, omission/disconnect clears it.
+There is no per-Bot profile database field or management API in this phase;
+restart reloads the startup allowlist and reconnect renegotiates it. Provider
+downlink continues to resolve its own Provider coordination configuration.
+
+Manager-worker GroupContext is rendered per recipient using that Bot's negotiated
+profile and manager/worker role, not the deployment allowlist. Enabling both
+profiles does not inject both sets of instructions. Connect before creating the
+session/context: an offline or unnegotiated uplink Bot has no MCP selection and
+uses the legacy fallback. Changing profile on reconnect does not rewrite context
+already delivered to the runtime; start a new session to receive fresh guidance.
 
 Versioning policy:
 

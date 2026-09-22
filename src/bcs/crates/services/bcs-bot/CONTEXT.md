@@ -31,6 +31,12 @@
 
 ## Configuration
 
+- Bootstrap injects `UplinkConfig` into the streaming connection use case.
+  After authentication, explicit V3 requests may select allowed built-in MCP
+  profiles. This is deployment-wide authorization, not per-Bot provisioning.
+  Only the negotiated kind is process-local; reconnect/disconnect clears stale
+  selection. Provider-bound coordination resolution remains Provider-owned.
+
 - Bootstrap injects stores, collaborators, and policy knobs explicitly.
 - This crate must not choose concrete plugins or inspect env directly.
 

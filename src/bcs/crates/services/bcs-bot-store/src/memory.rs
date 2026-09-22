@@ -769,7 +769,7 @@ impl BotRepoPort for MemoryBotRepo {
             return;
         }
 
-        if key == "client_kind" || key == "coordination_profile" {
+        if key == "client_kind" {
             self.bot_info_overrides
                 .write()
                 .await
@@ -797,7 +797,7 @@ impl BotRepoPort for MemoryBotRepo {
             self.add_bot_info(bot_id, key, value).await;
             return;
         }
-        if key == "client_kind" || key == "coordination_profile" {
+        if key == "client_kind" {
             self.bot_info_overrides
                 .write()
                 .await

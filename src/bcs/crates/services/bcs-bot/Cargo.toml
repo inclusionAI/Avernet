@@ -25,6 +25,7 @@ uuid = { workspace = true }
 
 # Workspace crates
 bcs-config     = { workspace = true }
+bcs-config-api = { workspace = true }
 bcs-protocol   = { workspace = true }
 bcs-route-security = { workspace = true }
 bcs-service-api = { workspace = true }

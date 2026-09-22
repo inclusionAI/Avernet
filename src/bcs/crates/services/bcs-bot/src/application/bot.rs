@@ -37,6 +37,7 @@ pub struct Bot {
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     connection_control: Option<Arc<dyn BotConnectionControlPort>>,
     organization: Option<Arc<dyn OrganizationCoreService>>,
+    uplink: bcs_config_api::UplinkConfig,
 }
 
 impl Bot {
@@ -58,7 +59,14 @@ impl Bot {
             user_directory: None,
             connection_control: None,
             organization: None,
+            uplink: Default::default(),
         }
+    }
+
+    /// Inject deployment authorization; profile selection is never persisted per Bot.
+    pub fn with_uplink_config(mut self, uplink: bcs_config_api::UplinkConfig) -> Self {
+        self.uplink = uplink;
+        self
     }
 
     /// Wire the concrete `BotCore` so use cases that need provider-bindings
@@ -861,20 +869,7 @@ impl BotRuntimeConnectionService for Bot {
                 .set_protocol_version(&result.bot_uuid, version)
                 .await;
         }
-        let server_profile = self
-            .registry
-            .get_bot_info(&result.bot_uuid, "coordination_profile")
-            .await
-            .map(|value| value.trim().to_ascii_lowercase());
-        let negotiated_client_kind = match requested_client_kind {
-            Some(kind)
-                if kind == "native_mcp"
-                    && server_profile.as_deref() != Some("native_mcp") =>
-            {
-                None
-            }
-            other => other,
-        };
+        let negotiated_client_kind = self.uplink.negotiate(protocol_version, requested_client_kind);
         self.registry
             .set_bot_info(
                 &result.bot_uuid,

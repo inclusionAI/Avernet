@@ -711,6 +711,7 @@ dependencies = [
  "async-trait",
  "bcs-bot-store",
  "bcs-config",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",

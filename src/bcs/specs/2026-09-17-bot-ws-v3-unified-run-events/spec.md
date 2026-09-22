@@ -279,7 +279,7 @@ bot_id + run_id -> session_id + group_id + ingress + protocol_version
 2. event 是 `agent/tool/result`；
 3. `isError=false`；
 4. tool start/result 能按 `toolCallId` 配对；
-5. `toolName` 精确匹配服务端配置的 coordination tool；
+5. `native_mcp` 的工具名精确匹配内置映射；`mcporter_mcp` 的来源为允许的命令工具；
 6. 该 bot 的 coordination profile 允许此能力；
 7. payload 通过 size、schema、session、run 和 seq 校验；
 8. coordination call 通过已有版本、授权、claim 和幂等校验。
@@ -296,7 +296,21 @@ coordination profile 由 BCS 服务端管理，至少包含：
 - coordination tool 的 exact canonical name；
 - 支持的 coordination call versions。
 
-客户端在 connect 中可以声明 `clientKind`，但不能上传或覆盖 tool allowlist。BCS 根据已注册配置解析该 kind；未知 kind 默认关闭 task intent。connect 声明也不能创建或覆盖 bot 的 server-owned coordination profile；声明与已注册 profile 不匹配时，task intent 必须 fail closed。
+客户端在 connect 中通过 `client_kind` 选择内置 profile，不能上传或覆盖 tool allowlist。
+本阶段不持久化逐 Bot profile，也不提供管理 API。生产来源为启动配置
+`[uplink] allowed_profiles = ["native_mcp", "mcporter_mcp"]`，默认空列表，
+未启用或未知 kind 关闭 task intent；V1/V2 不支持该模式。
+这是部署级授权：所有已认证上行 Bot（含新接入 Bot）均可请求已启用类型，
+不是逐 Bot 授权。管理员只能在信任这些运行时的部署开启；修改配置需重启。
+所有生产/本地服务组装路径将该配置注入 Bot 连接用例，不依赖测试写入元数据。
+
+`native_mcp` 固定 server `bcs` 及 `mcp__bcs__bcs_assign_task`、
+`mcp__bcs__bcs_send_task_message`、`mcp__bcs__bcs_task_complete` 精确映射。
+`mcporter_mcp` 固定 command `mcporter`、server `bcs`，复用命令输出适配：
+`exec`/`bash`/`shell`/`mcporter` 的成功结果保留完整 coordination envelope，
+不复用 native MCP 映射。既有配对、上下文、授权、claim、幂等检查不变。
+普通 `native_tool`/插件及 legacy 保持原路径。协商 kind 是进程内连接状态，
+重连覆盖、省略或断开清除；重启后重新从启动配置协商。Provider 下行配置不变。
 
 connect 成功响应应返回协商后的能力，例如：
 

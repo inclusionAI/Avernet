@@ -1560,14 +1560,9 @@ async fn streaming_client_kind_requires_server_profile_and_is_replaced_on_reconn
         })
         .await
         .expect("disconnect untrusted connection");
-    fixture
-        .registry
-        .add_bot_info(
-            "profile-bot",
-            "coordination_profile",
-            "native_mcp".to_string(),
-        )
-        .await;
+    let service = fixture.service().with_uplink_config(bcs_config_api::UplinkConfig {
+        allowed_profiles: vec![bcs_config_api::UplinkProfile::NativeMcp],
+    });
 
     let trusted = service
         .connect_streaming(BotRuntimeConnectCommand {

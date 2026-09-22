@@ -149,7 +149,7 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// Process-local, non-persisted.
     ///
     /// Supported runtime keys include `"agent_token"`, the negotiated
-    /// `"client_kind"`, and the server-owned `"coordination_profile"`.
+    /// `"client_kind"`. Profile authorization is injected startup configuration.
     async fn add_bot_info(&self, _bot_id: &str, _key: &str, _value: String) {}
 
     /// Replace or clear one process-local runtime extension field.
@@ -188,7 +188,8 @@ pub trait BotRegistryCoreService: Send + Sync {
             .map(|value| value.trim().to_ascii_lowercase());
         match client_kind.as_deref() {
             Some("native_mcp") => return Ok(CoordinationSurface::native_mcp_bcs()),
-            Some("plugin" | "openclaw-channel-bcn" | "deepseek-harness-channel-bcn") => {
+            Some("mcporter_mcp") => return Ok(CoordinationSurface::mcporter_mcp_bcs()),
+            Some("native_tool" | "plugin" | "openclaw-channel-bcn" | "deepseek-harness-channel-bcn") => {
                 return Ok(CoordinationSurface::native_tool());
             }
             _ => {}

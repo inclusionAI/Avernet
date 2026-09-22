@@ -893,6 +893,10 @@ pub struct BcsConfig {
     #[serde(default)]
     pub allowed_switch_provider_ids: Vec<String>,
 
+    /// Deployment-wide, default-closed authorization for built-in WS V3 MCP profiles.
+    #[serde(default)]
+    pub uplink: bcs_config_api::UplinkConfig,
+
     /// Switch for Provider 2.0 SSE gray-list mode.
     /// When false, Provider downlink rolls out to SSE for all Provider 2.0 bots.
     #[serde(default = "default_provider_stream_gray_enabled")]
@@ -1218,6 +1222,7 @@ impl Default for BcsConfig {
             invite: InviteConfig::default(),
             session_files: SessionFilesConfig::default(),
             allowed_switch_provider_ids: Vec::new(),
+            uplink: Default::default(),
             provider_stream_gray_enabled: default_provider_stream_gray_enabled(),
             provider_stream_gray_created_by: Vec::new(),
         }

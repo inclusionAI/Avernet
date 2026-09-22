@@ -51,6 +51,12 @@ dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
 
+[uplink]
+# Default closed. Enabling grants ALL authenticated WS V3 Bots in this deployment
+# access to the selected built-in profiles, not a per-Bot entitlement. Restart to apply.
+# allowed_profiles = ["native_mcp", "mcporter_mcp"]
+allowed_profiles = []
+
 [gateway_principal]
 # Accept tokens minted by either the gateway or the backend (shared key).
 issuers = ["gateway", "backend"]

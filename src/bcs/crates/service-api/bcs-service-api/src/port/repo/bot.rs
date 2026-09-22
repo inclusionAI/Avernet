@@ -79,7 +79,7 @@ pub trait BotRepoPort: Send + Sync {
     /// attributes that do not belong in the persisted capabilities.
     ///
     /// Supported runtime keys include `"agent_token"`, the negotiated
-    /// `"client_kind"`, and the server-owned `"coordination_profile"`.
+    /// `"client_kind"`. Profile authorization is injected startup configuration.
     async fn add_bot_info(&self, _bot_id: &str, _key: &str, _value: String) {}
 
     /// Replace or clear one process-local runtime extension field.

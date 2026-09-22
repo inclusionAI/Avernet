@@ -237,10 +237,37 @@ while True:
 | `deprecation` | BCN → 引擎 | 版本废弃通知（可选，仅当协商版本即将下线时出现） |
 
 `client_kind` 用于选择服务端已识别的客户端 profile，不是客户端自行声明权限
-的入口。`native_mcp` 必须与该 Bot 的服务端 `coordination_profile` 匹配，
-connect 请求不能创建或覆盖该 profile。BCN 仅在 V3 与该可信 profile 同时
-协商成功时启用 `tool_result_task_intent`；普通、未知或未登记的 client kind
-仍可使用其他 V3 Run Event，但该能力返回 `false`。
+的入口。服务端内置 `native_mcp`、`mcporter_mcp` 两类固定 MCP 适配，
+管理员通过启动 TOML 显式授权：
+
+```toml
+[uplink]
+allowed_profiles = ["native_mcp", "mcporter_mcp"]
+```
+
+默认 `[]`，两类均不启用。该开关是**部署级授权**：包括新接入 Bot 在内的
+所有已认证上行 Bot 都可以申请启用的 profile，不是逐 Bot 白名单。
+仅应在信任接入运行时的部署中开启；修改配置后需重启 BCS。
+只有显式协商 V3 且请求的 profile 已启用时，`tool_result_task_intent` 才为
+`true`。V1/V2、未启用和未知 kind 均为 `false`；普通插件/native-tool
+接入继续使用原有路径。
+
+`native_mcp` 固定 MCP server 为 `bcs`，精确工具名为
+`mcp__bcs__bcs_assign_task`、`mcp__bcs__bcs_send_task_message`、
+`mcp__bcs__bcs_task_complete`。`mcporter_mcp` 固定命令 `mcporter` 和
+server `bcs`，从成功的 `exec`/`bash`/`shell`/`mcporter` 工具输出中解析
+完整 coordination envelope（来源工具名不区分大小写），不套用原生 MCP
+工具名映射。两条路径仍须通过 start/result 配对、run/session、授权和幂等校验。
+客户端不能上传工具映射或命令。协商结果仅保存在当前连接运行时，重连时替换，
+省略 kind 或断开时清除。本阶段不新增逐 Bot profile 数据库字段或管理 API；
+重启重新加载启动白名单，Bot 重连后重新协商。Provider 下行仍使用自己的
+Provider coordination 配置，不受此上行开关影响。
+
+Manager-worker 的 GroupContext 按接收 Bot 的已协商 profile 和 manager/worker
+角色分别生成，不按全局白名单生成；同时开启两种类型不会向同一个 Bot 注入
+两套说明。应先连接协商，再创建 session/context：离线或尚未协商的上行 Bot
+没有 MCP 类型信息，仍走 legacy 回退。重连切换类型不会改写运行时已收到的
+上下文；应创建新 session 获取对应的新提示词。
 
 版本升级策略：
 + 新增可选字段或可选方法 → 不递增版本号（JSON 天然忽略未知字段）
