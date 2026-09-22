@@ -1,69 +1,20 @@
-"""``skills`` → local upload + direct activation — the active skill set.
+"""Materialise the Manifest's complete Skill and Bot-owned Local snapshot.
 
-**The entry shape.** ``identity`` for this category is the entry's ``name``,
-which must equal the name in the package's own ``SKILL.md`` front matter.
-Both source spellings are accepted::
+Every declared package is validated and fully written through the normal Local
+package road, then converted to a Direct claim. Ordinary SkillSet memberships
+with the same runtime name are detached; Default supply is excluded. Existing
+effective names report ``updated`` and inactive or absent names report
+``created``—package equality is deliberately not probed.
 
-    manifest:
-      skills:
-        # a named source
-        - name: quality-check
-          from: packages
-          subpath: quality-check     # selects a subtree, then re-packed
-          on_fetch_failure: keep_last
-
-        # an inline source: a declaration object, like every source
-        - name: quality-check
-          source:
-            protocol: oss
-            bucket: team-artifacts
-            key: skills/quality-check.zip
-            auth: oss-prod
-          digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...
-
-An entry reaches ``resolve`` as the raw mapping, e.g.
-``{"name": "quality-check", "source": {"protocol": "oss", "bucket":
-"team-artifacts", "key": "skills/quality-check.zip", "auth": "oss-prod"},
-"digest": "sha256:…"}``.
-
-The area is the one the all-or-nothing rule names: the bot's **active** skill
-set —
-``BotCapabilityStateReader.active_skill_assets`` after its flush, the same
-read the public listing answers from. Declared and not active ⇒ uploaded and
-activated. Active and no longer declared ⇒ deactivated. Active and unchanged
-⇒ no call at all (convergence). A skill one of the bot's SkillSets supplies
-is neither: the write refuses it — the same narrowing the ``mcp``
-materialiser applies to platform-default codes, asked up front so a governed
-skill never becomes a mid-category abort, and never a removal.
-
-**Packages travel the manual-upload road.** A no-subpath zip entry's fetched
-bytes are validated by the same ``SkillPackageValidator`` the router path
-uses, then handed to ``upload_local_skill`` as the canonical zip: an
-installed skill is indistinguishable from an uploaded one because it *is* an
-uploaded one (§3.3). A tar.gz or subpath entry is unpacked by the guarded
-unpacker, its selected subtree re-packed canonically by the same validator.
-The package's own SKILL.md front matter names the skill; a declaration whose
-``name`` disagrees is refused — report identities would otherwise lie about
-what got installed, and the runtime name is unique per bot either way.
-
-Convergence compares **installed content**, not receipts: ``plan`` asks the
-upload service for the digest of the package actually published under the
-skill's name and marks `unchanged` only when it equals this entry's package
-digest. A receipt proves the platform *fetched* the content — a dry run
-files receipts without installing anything, and an aborted apply leaves a
-receipt behind its failed write — so a receipt can never license an
-unchanged verdict; it only dedups the fetch side.
-
-Known corner, recorded rather than hidden: a skill a Set *references* but
-whose skill id the flush's ``member_skill_ids`` excludes (an excluded
-default-set member — the R1 refusal still applies to it) can abort a write
-mid-category. The same class exists for user Sets in the ``mcp`` wave; both
-report honestly as ``partially_written``.
+When the section is present, every omitted effective Skill is removed and every
+omitted Bot-owned Local asset is additionally unreferenced, physically deleted,
+and removed from the catalog. Shared Repo/Center assets are never physically
+deleted. The complete Local catalog, not only active Installations, makes failed
+cleanup discoverable on a later Apply.
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
@@ -81,6 +32,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
     CategoryPlan,
+    ConfirmedPartialWriteError,
     Intent,
     Materialiser,
     PlannedEntry,
@@ -105,6 +57,9 @@ from agentclaw.community.core.ports.skill_package_upload_port import (
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.mcp_dependency_scope import (
+    mcp_dependency_codes,
 )
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,
@@ -173,8 +128,6 @@ class _SkillPackage:
             from_store=False,
             note=None,
         )
-        # .content_digest is derived, not passed:
-        #   "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b..."
 
     On a ``keep_last`` fallback the same object carries the reason, which the
     write puts on the entry's report row::
@@ -188,11 +141,10 @@ class _SkillPackage:
         )
 
     Created by: :meth:`SkillsMaterialiser.resolve`.
-    Consumed by: that materialiser's ``plan`` (``content_digest``) and
-    ``write`` (``canonical_zip``, ``name``, ``note``).
+    Consumed by: that materialiser's ``plan`` and ``write``.
     """
 
-    __slots__ = ("name", "canonical_zip", "content_digest", "from_store", "note")
+    __slots__ = ("name", "canonical_zip", "from_store", "note")
 
     def __init__(
         self,
@@ -207,12 +159,6 @@ class _SkillPackage:
         # A keep_last fallback's reason, surfaced on the report row — see
         # Intent.note for why it travels inside the value.
         self.note = note
-        # sha256 of the canonical zip: THE identity of the content this
-        # entry installs. ``plan`` compares it with the digest of the bytes
-        # actually published under the skill's name — the only honest
-        # unchanged verdict, because a receipt only proves the platform
-        # *fetched* this content, never that it was installed.
-        self.content_digest = "sha256:" + hashlib.sha256(canonical_zip).hexdigest()
         # Whether the platform's own copy (W11) answered for the fetch — a
         # fetch-side fact only (no network was touched); it plays no part in
         # the unchanged verdict.
@@ -266,14 +212,6 @@ class SkillsMaterialiser(Materialiser):
         failures: list[ResolveFailure] = []
         seen: set[str] = set()
 
-        area = {
-            asset.name: asset
-            for asset in self._reader.active_skill_assets(
-                bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
-            )
-        }
-        governed = self._reader.member_skill_ids(bot=ctx.bot)
-
         for index, entry in enumerate(entries):
             name = entry.get("name") if isinstance(entry, dict) else None
             if not isinstance(name, str) or not name:
@@ -289,30 +227,6 @@ class SkillsMaterialiser(Materialiser):
                 )
                 continue
             seen.add(name)
-
-            existing = area.get(name)
-            if existing is not None:
-                if existing.skill_id in governed:
-                    failures.append(
-                        ResolveFailure(
-                            name,
-                            f"skill {name!r} is supplied to this bot by a skill set "
-                            "or the default set: it is managed there, not by a "
-                            "manifest, and a manifest can neither declare it nor "
-                            "remove it",
-                        )
-                    )
-                    continue
-                if not str(existing.git_path or "").startswith("local://"):
-                    failures.append(
-                        ResolveFailure(
-                            name,
-                            f"an active non-local skill is already called {name!r}: "
-                            "runtime skill names are unique per bot, so a local "
-                            "package cannot be installed under its name",
-                        )
-                    )
-                    continue
 
             inline = entry.get("content")
             if isinstance(inline, str):
@@ -400,75 +314,38 @@ class SkillsMaterialiser(Materialiser):
     async def plan(
         self, ctx: "ApplyContext", intents: Sequence[Intent]
     ) -> CategoryPlan:
-        """Classify each intent against the active set; compute removals.
-
-        ``unchanged`` requires the **installed package's digest** to equal
-        this entry's package digest — asked of the upload service, which
-        reads the bytes actually published under the skill's name. The
-        receipt a fetch filed proves the platform *fetched* the content, not
-        that it was installed: a dry run files receipts without installing
-        anything (a pin that moved between applies would never install: the
-        name is active with the OLD package, the receipt matches the NEW
-        pin, and the report would have said SUCCEEDED), and an apply whose
-        write stage aborted leaves its resolve-stage receipts behind it. DNA
-        of the installed state, not memory of the fetch, is the only honest
-        verdict — and `None` (nothing installed, or unreadable) is unknown,
-        never equal: the entry is classed for a full write.
-        """
+        """Classify against effective names and include inactive Local cleanup."""
         area = self._area(ctx)
-        governed = self._reader.member_skill_ids(bot=ctx.bot)
+        local_assets = self._local_assets(ctx)
         declared = {intent.identity for intent in intents}
 
-        planned = []
-        for intent in intents:
-            package = intent.value
-            if intent.identity in area:
-                installed_digest = await self._uploads.installed_package_digest(
-                    bot=ctx.bot,
-                    bot_id=ctx.bot_id,
-                    owner_id=ctx.owner_id,
-                    name=intent.identity,
-                )
-                outcome = (
-                    EntryOutcome.UNCHANGED.value
-                    if installed_digest == package.content_digest
-                    else EntryOutcome.UPDATED.value
-                )
-            else:
-                outcome = EntryOutcome.CREATED.value
-            planned.append(PlannedEntry(intent, outcome))
-
-        # The removal side of the area: what the write would refuse is not
-        # planned for removal — a Set-supplied skill is not the manifest's.
-        removable = {
-            name
-            for name, asset in area.items()
-            if asset.skill_id not in governed
-        }
-        removals = tuple(sorted(removable - declared))
+        planned = [
+            PlannedEntry(
+                intent,
+                (
+                    EntryOutcome.UPDATED.value
+                    if intent.identity in area
+                    else EntryOutcome.CREATED.value
+                ),
+                requires_write=True,
+            )
+            for intent in intents
+        ]
+        removals = tuple(sorted((set(area) | set(local_assets)) - declared))
+        retained_local = [
+            local_assets[name] for name in declared if name in local_assets
+        ]
+        ctx.capability_state.final_skill_dependency_codes = self._dependency_codes(
+            retained_local
+        )
         return CategoryPlan(entries=tuple(planned), removals=removals)
 
     async def write(
         self, ctx: "ApplyContext", plan: CategoryPlan
     ) -> Sequence[EntryResult]:
-        """Upload what is not unchanged, activate what is not active yet.
-
-        An ``unchanged`` entry calls nothing at all — convergence observed as
-        the absence of writes, not equal-looking output. ``created`` activates
-        the id the upload just wrote; ``updated`` does not re-activate (the
-        skill is already in the active set — that is what ``updated`` meant).
-        """
+        """Fully write declarations, establish Direct claims, then clean omissions."""
         results: list[EntryResult] = []
         for planned in plan.entries:
-            if planned.outcome == EntryOutcome.UNCHANGED.value:
-                results.append(
-                    EntryResult(
-                        self.construct,
-                        planned.intent.identity,
-                        EntryOutcome.UNCHANGED,
-                    )
-                )
-                continue
             package = planned.intent.value
             uploaded = await self._uploads.upload_local_skill(
                 bot_id=ctx.bot_id,
@@ -476,15 +353,17 @@ class SkillsMaterialiser(Materialiser):
                 actor_id=ctx.actor_id,
                 package=package.canonical_zip,
             )
-            if planned.outcome == EntryOutcome.CREATED.value:
-                # The authoritative id: the row this very upload just wrote.
-                skill_id = str(uploaded["skill"]["id"])
-                await self._activation.activate_skill(
-                    skill_id=skill_id,
-                    bot_id=ctx.bot_id,
-                    owner_id=ctx.owner_id,
-                    actor_id=ctx.actor_id,
-                )
+            # The authoritative id: the row this very upload just wrote. The
+            # Manifest-only command detaches ordinary membership or creates a
+            # Default exclusion before establishing the Direct Installation.
+            skill_id = str(uploaded["skill"]["id"])
+            await self._activation.claim_manifest_skill(
+                skill_id=skill_id,
+                bot_id=ctx.bot_id,
+                owner_id=ctx.owner_id,
+                actor_id=ctx.actor_id,
+                apply_id=ctx.apply_id,
+            )
             results.append(
                 EntryResult(
                     self.construct,
@@ -499,19 +378,40 @@ class SkillsMaterialiser(Materialiser):
         # the engine's plan carries identities, materialisers are stateless
         # across stages by design, and one extra read cannot disagree with
         # itself the way a cached id can.
-        area = self._area(ctx)
+        area = self._assets_for_removal(ctx)
         for name in plan.removals:
             asset = area.get(name)
             if asset is None:
                 # Gone between plan and write — already converged for this
                 # name; there is nothing to deactivate and no error to report.
                 continue
-            await self._activation.deactivate_skill(
+            is_local = str(asset.git_path or "").startswith("local://")
+            await self._activation.remove_manifest_skill(
                 skill_id=str(asset.skill_id),
                 bot_id=ctx.bot_id,
                 owner_id=ctx.owner_id,
                 actor_id=ctx.actor_id,
+                apply_id=ctx.apply_id,
+                remove_inactive_memberships=is_local,
             )
+            if is_local:
+                try:
+                    await self._uploads.delete_local_skill(
+                        skill_id=str(asset.skill_id),
+                        name=name,
+                        bot_id=ctx.bot_id,
+                        owner_id=ctx.owner_id,
+                        actor_id=ctx.actor_id,
+                    )
+                except Exception as exc:
+                    raise ConfirmedPartialWriteError(
+                        f"Local Skill asset cleanup failed for {name!r}"
+                    ) from exc
+        ctx.capability_state.final_skill_dependency_codes = self._dependency_codes(
+            self._reader.active_skill_assets(
+                bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
+            )
+        )
         return tuple(results)
 
     # ── the package road ────────────────────────────────────────────────────
@@ -662,6 +562,26 @@ class SkillsMaterialiser(Materialiser):
                 bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
             )
         }
+
+    def _local_assets(self, ctx: "ApplyContext") -> dict[str, Any]:
+        return {
+            asset.name: asset
+            for asset in self._reader.local_skill_assets(
+                bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
+            )
+        }
+
+    def _assets_for_removal(self, ctx: "ApplyContext") -> dict[str, Any]:
+        return {**self._area(ctx), **self._local_assets(ctx)}
+
+    @staticmethod
+    def _dependency_codes(assets: Sequence[Any]) -> frozenset[str]:
+        codes: set[str] = set()
+        for asset in assets:
+            codes.update(
+                mcp_dependency_codes(getattr(asset, "mcp_dependencies", ()) or ())
+            )
+        return frozenset(codes)
 
 
 def _under_subpath(member: str, subpath: str | None) -> str | None:

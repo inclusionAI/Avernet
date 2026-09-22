@@ -28,8 +28,7 @@ the promotion step drives its object writes.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-from typing import Any, Mapping, Optional
+from typing import Any, Optional
 
 from agentclaw.community.core.bot_config_manifest.managed_files.store import (
     CATEGORY_IDENTITY,
@@ -50,8 +49,6 @@ from agentclaw.community.core.ports.skill_package_upload_port import (
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.skill_package import (
-    SkillPackageInvalidError,
-    SkillPackageTooLargeError,
     SkillPackageValidator,
 )
 
@@ -224,10 +221,9 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
     same return shape. Activation is not this port's: the materialiser calls
     the activation service with the id this returns.
 
-    ``installed_package_digest`` answers the real service's question the
-    real service's way — the sha256 of the canonical repack of the files
-    actually stored under the name — so an unchanged package plans
-    ``unchanged`` on the second apply and writes nothing.
+    Manifest declarations are full package replacements, so this port exposes
+    no installed-digest probe. Re-applying writes the complete package and
+    reports ``updated`` for an already-effective name.
     """
 
     def __init__(
@@ -250,6 +246,28 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
         return await asyncio.to_thread(
             self._install, bot_id, owner_id, actor_id, validated.name, validated
         )
+
+    async def delete_local_skill(
+        self, *, skill_id: str, name: str, bot_id: str, owner_id: str,
+        actor_id: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._delete_local_skill, skill_id, name, bot_id, owner_id
+        )
+
+    def _delete_local_skill(
+        self, skill_id: str, name: str, bot_id: str, owner_id: str
+    ) -> None:
+        scope = self._scope(OWNER_ENTITY_TYPE, owner_id, bot_id)
+        prefix = _skill_prefix(name)
+        for row in self._store.list(scope, category=CATEGORY_SKILLS):
+            if _under(row.rel_path, prefix):
+                self._store.delete(scope, rel_path=row.rel_path)
+        deleted = self._skills.delete_bot_local_skill(
+            skill_id=skill_id, owner_id=owner_id, bot_id=bot_id
+        )
+        if not deleted:
+            raise RuntimeError("Local Skill record disappeared during deletion")
 
     def _install(self, bot_id: str, owner_id: str, actor_id: str, name: str, validated) -> dict:
         scope = self._scope(OWNER_ENTITY_TYPE, owner_id, bot_id)
@@ -301,34 +319,6 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
             "skill": {**skill, "active": False},
             "actor_id": actor_id,
         }
-
-    async def installed_package_digest(
-        self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str, name: str
-    ) -> Optional[str]:
-        return await asyncio.to_thread(self._digest, bot_id, owner_id, name)
-
-    def _digest(self, bot_id: str, owner_id: str, name: str) -> Optional[str]:
-        scope = self._scope(OWNER_ENTITY_TYPE, owner_id, bot_id)
-        prefix = _skill_prefix(name)
-        files: list[tuple[str, bytes]] = []
-        for row in self._store.list(scope, category=CATEGORY_SKILLS):
-            if not _under(row.rel_path, prefix):
-                continue
-            content = self._store.read(row)
-            if content is None:
-                # A member that vanished between the listing and the read:
-                # unknown, never equal — the write path restores the package
-                # while it is in hand.
-                return None
-            files.append((row.rel_path[len(prefix) + 1 :], content))
-        if not files:
-            return None
-        try:
-            canonical = self._validator.pack_directory(files)
-        except (SkillPackageInvalidError, SkillPackageTooLargeError):
-            return None
-        return "sha256:" + hashlib.sha256(canonical).hexdigest()
-
 
 def _skill_prefix(name: str) -> str:
     return f"{WORKSPACE_NS}/{SKILLS_LOCAL_DIR}/{name}"

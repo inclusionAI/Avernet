@@ -8,6 +8,7 @@ the fakes count their calls and the tests read those counts.
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -60,7 +61,10 @@ from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStor
 _arca_steps = ArcaDelivery(lambda: None).steps_for
 
 
-def _engine(scripts=None, activations=None, auth=None, mcp_config=None):
+def _engine(
+    scripts=None, activations=None, auth=None, mcp_config=None,
+    uploads=None, reader=None,
+):
     """The W4-shaped engine: mcp + script over their fakes (these tests are
     the engine's contract, not the two fetch-consuming categories' — those
     have their own materialiser files)."""
@@ -77,8 +81,8 @@ def _engine(scripts=None, activations=None, auth=None, mcp_config=None):
             mcp_auth_service=auth or FakeMcpAuth(),
             mcp_config_service=mcp_config,
             identity_service=FakeIdentityService(),
-            upload_service=FakeSkillUploadService(),
-            capability_reader=FakeCapabilityReader(),
+            upload_service=uploads or FakeSkillUploadService(),
+            capability_reader=reader or FakeCapabilityReader(),
             package_validator=real_validator(),
             entry_fetcher=_dummy_entry_fetcher(),
             resource_service=FakeResourceFileService(),
@@ -439,7 +443,7 @@ manifest:
 
 
 @pytest.mark.asyncio
-async def test_set_managed_config_refusal_prevents_earlier_mcp_write():
+async def test_set_managed_mcp_is_converted_to_a_direct_claim():
     activations = FakeActivationService(installed={"owned"})
     activations.set_managed = {"owned"}
 
@@ -456,13 +460,75 @@ manifest:
 """,
     )
 
-    assert report.status is ApplyStatus.FAILED
-    assert activations.writes == 0
-    assert "new-first" not in activations.installed
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert _outcomes(report) == {
+        "new-first": EntryOutcome.CREATED,
+        "owned": EntryOutcome.UPDATED,
+    }
+    assert activations.set_managed == set()
+    assert activations.installed == {"new-first", "owned"}
 
 
 @pytest.mark.asyncio
-async def test_set_managed_removal_refusal_happens_before_any_write():
+async def test_source_only_mcp_conversion_reports_unchanged_but_writes():
+    activations = FakeActivationService(installed={"owned"})
+    activations.set_managed = {"owned"}
+
+    engine = _engine(activations=activations)
+    document = "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: owned\n"
+    report = await _apply(engine, document)
+
+    assert _outcomes(report) == {"owned": EntryOutcome.UNCHANGED}
+    assert activations.configured == [("owned", None)]
+    assert activations.set_managed == set()
+    again = await _apply(engine, document)
+    assert _outcomes(again) == {"owned": EntryOutcome.UNCHANGED}
+    assert activations.configured == [("owned", None)]
+
+
+@pytest.mark.asyncio
+async def test_dependency_retained_mcp_clears_explicit_supply_without_removed_report():
+    activations = FakeActivationService(installed={"mcp.dependency"})
+    activations.mcp_overrides["mcp.dependency"] = {
+        "headers": {"X-Stale": "value"}
+    }
+    reader = FakeCapabilityReader(assets=[SimpleNamespace(
+        skill_id=3, name="dependent", git_path="local://dependent",
+        mcp_dependencies=({"code": "mcp.dependency"},),
+    )])
+
+    report = await _apply(
+        _engine(activations=activations, reader=reader),
+        "schema_version: 1\nmanifest:\n  mcp: []\n",
+    )
+
+    category = report.categories[0]
+    assert category.removals == ()
+    assert _outcomes(report) == {"mcp.dependency": EntryOutcome.UPDATED}
+    assert "Skill dependency" in (category.entries[0].note or "")
+    assert activations.deactivated == ["mcp.dependency"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_dependency_becomes_direct_but_reports_unchanged():
+    activations = FakeActivationService()
+    reader = FakeCapabilityReader(assets=[SimpleNamespace(
+        skill_id=3, name="dependent", git_path="local://dependent",
+        mcp_dependencies=({"code": "mcp.dependency"},),
+    )])
+
+    report = await _apply(
+        _engine(activations=activations, reader=reader),
+        "schema_version: 1\nmanifest:\n  mcp:\n"
+        "    - server_code: mcp.dependency\n",
+    )
+
+    assert _outcomes(report) == {"mcp.dependency": EntryOutcome.UNCHANGED}
+    assert activations.installed == {"mcp.dependency"}
+
+
+@pytest.mark.asyncio
+async def test_omitted_active_set_managed_mcp_is_removed_from_explicit_supply():
     activations = FakeActivationService(installed={"keep", "owned"})
     activations.set_managed = {"owned"}
 
@@ -471,9 +537,10 @@ async def test_set_managed_removal_refusal_happens_before_any_write():
         "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: keep\n",
     )
 
-    assert report.status is ApplyStatus.FAILED
-    assert activations.writes == 0
-    assert activations.installed == {"keep", "owned"}
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert activations.deactivated == ["owned"]
+    assert activations.installed == {"keep"}
+    assert report.categories[0].removals == ("owned",)
 
 
 # ── per-category area ───────────────────────────────────────────────────────
@@ -679,7 +746,7 @@ async def test_a_raising_materialiser_is_reported_as_written_nothing():
     """
 
     class ExplodingActivation(FakeActivationService):
-        async def set_mcp_override(self, **kwargs):
+        async def claim_manifest_mcp(self, **kwargs):
             raise RuntimeError("device unreachable")
 
     activations = ExplodingActivation()
@@ -740,7 +807,7 @@ def test_the_report_payload_names_every_field_it_emits():
 
 
 @pytest.mark.asyncio
-async def test_a_platform_default_is_refused_before_anything_is_activated():
+async def test_a_platform_default_is_converted_to_a_direct_claim():
     """The review finding, as its regression test.
 
     ``activate_mcp`` refuses a code the bot's engine/template policy owns, from
@@ -753,21 +820,24 @@ async def test_a_platform_default_is_refused_before_anything_is_activated():
     it did before the fix too, but that it failed *having written nothing*.
     """
     activations = FakeActivationService(platform_defaults={"platform-owned"})
-    report = await _apply(
-        _engine(activations=activations),
+    engine = _engine(activations=activations)
+    document = (
         "schema_version: 1\nmanifest:\n  mcp:\n"
         "    - server_code: ordinary\n"
-        "    - server_code: platform-owned\n",
+        "    - server_code: platform-owned\n"
     )
+    report = await _apply(engine, document)
 
-    assert activations.writes == 0, (
-        "the category was half-written: the ordinary server was activated for "
-        "real before the platform default was refused"
-    )
-    assert activations.installed == set()
-    assert report.categories[0].aborted is True
-    reasons = {entry.identity: entry.reason for entry in report.categories[0].entries}
-    assert "platform default" in (reasons["platform-owned"] or "")
+    assert activations.writes == 2
+    assert activations.installed == {"ordinary", "platform-owned"}
+    assert report.categories[0].aborted is False
+    assert _outcomes(report) == {
+        "ordinary": EntryOutcome.CREATED,
+        "platform-owned": EntryOutcome.UNCHANGED,
+    }
+    configured = list(activations.configured)
+    await _apply(engine, document)
+    assert activations.configured == configured
 
 
 @pytest.mark.asyncio
@@ -785,7 +855,7 @@ async def test_the_ordinary_server_still_applies_when_no_default_is_declared():
 
 
 @pytest.mark.asyncio
-async def test_a_platform_default_is_never_removed_by_omission():
+async def test_a_platform_default_is_excluded_when_omitted():
     """The removal half of the same guard.
 
     Overwrite reads an absent entry as "remove it", but a platform default is
@@ -806,9 +876,9 @@ async def test_a_platform_default_is_never_removed_by_omission():
     )
 
     assert report.categories[0].aborted is False
-    assert activations.deactivated == []
-    assert report.categories[0].removals == ()
-    assert "became-a-default" in activations.installed
+    assert activations.deactivated == ["became-a-default"]
+    assert report.categories[0].removals == ("became-a-default",)
+    assert "became-a-default" not in activations.installed
 
 
 @pytest.mark.asyncio
@@ -854,7 +924,7 @@ async def test_a_declared_empty_category_that_fails_is_not_reported_successful()
     async def _explode(**_kwargs):
         raise RuntimeError("the activation service is down")
 
-    activations.deactivate_mcp = _explode
+    activations.remove_manifest_mcp = _explode
 
     report = await _apply(
         _engine(activations=activations),
@@ -882,7 +952,7 @@ async def test_one_aborted_empty_category_downgrades_an_otherwise_good_apply():
     async def _explode(**_kwargs):
         raise RuntimeError("the activation service is down")
 
-    activations.deactivate_mcp = _explode
+    activations.remove_manifest_mcp = _explode
 
     report = await _apply(
         _engine(activations=activations),
@@ -906,7 +976,7 @@ async def test_an_abort_during_the_write_says_the_area_may_have_changed():
     async def _explode(**_kwargs):
         raise RuntimeError("the activation service is down")
 
-    activations.set_mcp_override = _explode
+    activations.claim_manifest_mcp = _explode
 
     report = await _apply(
         _engine(activations=activations),
@@ -917,6 +987,31 @@ async def test_an_abort_during_the_write_says_the_area_may_have_changed():
     assert category.aborted is True
     assert category.partially_written is True
     assert category.as_dict()["partially_written"] is True
+
+
+@pytest.mark.asyncio
+async def test_failed_local_asset_cleanup_reports_partial_and_no_removal():
+    uploads = FakeSkillUploadService()
+    reader = FakeCapabilityReader(
+        assets=[], local_assets=[SimpleNamespace(
+            skill_id=71, name="stale-local", git_path="local://stale-local",
+            mcp_dependencies=(),
+        )]
+    )
+
+    async def _fail_delete(**_kwargs):
+        raise RuntimeError("storage unavailable")
+
+    uploads.delete_local_skill = _fail_delete
+    report = await _apply(
+        _engine(uploads=uploads, reader=reader),
+        "schema_version: 1\nmanifest:\n  skills: []\n",
+    )
+
+    category = report.categories[0]
+    assert report.status is ApplyStatus.PARTIAL
+    assert category.partially_written is True
+    assert category.removals == ()
 
 
 @pytest.mark.asyncio

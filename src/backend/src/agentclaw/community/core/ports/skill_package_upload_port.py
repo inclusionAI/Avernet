@@ -34,7 +34,7 @@ of resolving to an inherited ``...`` stub that silently returns ``None``.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Mapping, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -49,11 +49,11 @@ class SkillPackageUploadPort(Protocol):
         ...
 
     @abstractmethod
-    async def installed_package_digest(
-        self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str, name: str
-    ) -> Optional[str]:
-        """The digest of the package installed under ``name``, or ``None``."""
+    async def delete_local_skill(
+        self, *, skill_id: str, name: str, bot_id: str, owner_id: str,
+        actor_id: str,
+    ) -> None:
+        """Physically delete one unreferenced Bot-owned Local package and row."""
         ...
-
 
 __all__ = ["SkillPackageUploadPort"]

@@ -39,12 +39,7 @@ from agentclaw.community.core.skill_center.direct_activation_service_protocol im
 
 
 class _DelegatingActivation(ActivationPort):
-    """Forwards the port's six methods to the service, pinning ``project``.
-
-    Six methods: two reads (``list_installed_mcps``,
-    ``platform_default_mcp_codes``) passed through untouched, and four async
-    writes (``activate_mcp``, ``deactivate_mcp``, ``activate_skill``,
-    ``deactivate_skill``) that gain ``project=self._PROJECT``.
+    """Forward reads unchanged and pin every write to ``project``.
 
     ``list_installed_mcps`` answers a ``set[str]`` of server codes, e.g.
     ``{"gh", "old"}``; ``platform_default_mcp_codes`` answers an iterable of
@@ -82,6 +77,21 @@ class _DelegatingActivation(ActivationPort):
     ) -> dict[str, dict]:
         return self._inner.get_mcp_overrides(
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
+        )
+
+    def manifest_direct_mcp_codes(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        server_codes: set[str],
+    ) -> set[str]:
+        return self._inner.manifest_direct_mcp_codes(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            server_codes=server_codes,
         )
 
     def set_managed_mcp_codes(
@@ -149,6 +159,82 @@ class _DelegatingActivation(ActivationPort):
         return await self._inner.deactivate_skill(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id,
             actor_id=actor_id, project=self._PROJECT,
+        )
+
+    async def claim_manifest_skill(
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+    ) -> dict[str, Any]:
+        return await self._inner.claim_manifest_skill(
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            apply_id=apply_id,
+            project=self._PROJECT,
+        )
+
+    async def remove_manifest_skill(
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+        remove_inactive_memberships: bool,
+    ) -> dict[str, Any]:
+        return await self._inner.remove_manifest_skill(
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            apply_id=apply_id,
+            remove_inactive_memberships=remove_inactive_memberships,
+            project=self._PROJECT,
+        )
+
+    async def claim_manifest_mcp(
+        self,
+        *,
+        server_code: str,
+        config: dict | None,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+    ) -> dict[str, Any]:
+        return await self._inner.claim_manifest_mcp(
+            server_code=server_code,
+            config=config,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            apply_id=apply_id,
+            project=self._PROJECT,
+        )
+
+    async def remove_manifest_mcp(
+        self,
+        *,
+        server_code: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        apply_id: str | None,
+    ) -> dict[str, Any]:
+        return await self._inner.remove_manifest_mcp(
+            server_code=server_code,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            apply_id=apply_id,
+            project=self._PROJECT,
         )
 
 

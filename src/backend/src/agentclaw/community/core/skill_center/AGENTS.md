@@ -74,8 +74,8 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - Reader 的 `InstallationReadConfig` 从 `ac_common_config` 按规范化环境读取 `business_code=skill_installation`、`param_code=default_sync_only`。每个环境有独立记录，缺失、禁用、读取失败或非布尔值均 fail-safe 为 `false`（完整同步）；该值在每次 Effective Read 动态读取，因此验收某环境完整 backfill 后可将其单独设为 `true`，也可仅通过 DB 立即回退。旧 YAML 和 `SC_INSTALLATION_DEFAULT_SYNC_ONLY` 环境变量均不生效。该模式仍同步 Default/exclusion，不等于完全取消 DB 补齐。运维 backfill 和新 Bot 的 `initialize_installations` 始终完整执行，不受此读侧配置影响。
 - 普通 Asset、Draft、Version 查询不应为方便而触发 Bot flush。需要回答“Bot 当前应有哪些有效能力”时才使用 Reader。
 - `policies/capability_ownership.py` 统一判定：Set 成员（含 inactive Set 和 excluded Default member）由 Set 控制；Direct-active 能力加入 Set 前先停用；同一 Bot 下只能属于一个 reaching Set（含 Default）。`RESOURCE_DIRECT_ACTIVE` 优先于另一个 Set 冲突。
-- Default member 被 exclusion 后仍属于 Default；重新启用走 un-exclude。Default 选择统一使用 `policies/default_skill_set_selection.py`，保留全局 Default 与 engine/template 兼容规则。
-- Engine/template 的代码型 Default MCP 是显式例外：`policies/platform_default_mcp.py` 管理政策事实，不能将它误认为都存在于 `ac_skill_set_mcp`。有效 MCP 还需合并政策默认项（应用 exclusion）及 active Skill dependencies；沿用 `collect_bot_active_mcps` 的统一入口。Platform Default MCP 拒绝 Direct control。
+- Default member 被 exclusion 后仍属于 Default；普通操作重新启用走 un-exclude。Manifest Apply 的显式声明是唯一例外：exclusion + Installation 表达 Direct claim，Reader/flush 必须保留；该状态移除 Installation 时保留 exclusion，不能恢复历史来源。
+- Engine/template 的代码型 Default MCP 是显式例外：`policies/platform_default_mcp.py` 管理政策事实，不能将它误认为都存在于 `ac_skill_set_mcp`。有效 MCP 还需合并政策默认项（应用 exclusion）及 active Skill dependencies；沿用 `collect_bot_active_mcps` 的统一入口。普通激活仍拒绝 Platform Default MCP；Manifest 可先 exclusion 再建立 Direct Installation，已存在的特殊 Direct 可由普通更新/删除操作管理。
 - `SkillSetManagementService.list_resources()` 对 Default Set 只以当前 AgentPassport 的同一次快照补全已有 MCP 投影的 `name`/`description`，并同时读取 CLI；它不得以 Passport 增删成员、绕过 exclusion，或覆盖普通 Set 写入时固化的 MCP Center 展示快照。Passport 查询失败时保留 MCP 投影并返回空 CLI。
 - 普通技能集添加 MCP 同样必须拒绝目标 Bot 的代码型 Default MCP（按 `server_code`、engine/template/ext-info 判断，不减 exclusion）。Service 严格解析默认 codes，UoW 在写入前重检；返回 `RESOURCE_MANAGED_BY_PLATFORM_POLICY`。此校验不物化 Policy、不清理历史数据；默认集 un-exclude 及普通集移除历史重复成员仍可用。
 - 普通技能集添加远程 MCP 时，Service 在 UoW 写入前以用户有效 `endpoint_env`、transport 偏好和目标 engine 的同一端点选择规则验证 MCP Center detail；没有安全可投递端点时返回 `MCP_NO_COMPATIBLE_SECURE_ENDPOINT`，不得先写 Installation 再依赖 Runtime 投影报错。Runtime compose 仍使用同一选择规则，负责处理元数据在添加后变化或其他写入路径。
@@ -211,6 +211,7 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 ### Asset Deletion
 
 - Asset Deletion 只能删除零引用 Skill；Installation、任意 active/inactive SkillSet Membership、Space Binding/Grant、Draft、Publication Attempt 和 Version 都是 blocker。
+- Manifest `skills` 全量替换是显式的组合命令：它先通过 Manifest 专用 UoW 移除目标 Bot 的 Installation/Membership 或建立 Default exclusion，再调用同一 Local package delete seam；不放宽普通 Asset Deletion 的零引用前置条件。
 - 所有硬删除 primitive 必须先锁 exact Skill，再在同一事务内重检 blocker；不能依赖 Router 或 Service 的一次性预检查，也不能顺手删除 Membership/Installation。
 - Bot 删除是独立生命周期：按 exact `owner_id + bot_id + env` 先清 Skill/MCP Installation，再删 SkillSet，最后删 Bot-owned Skill。`bot_id=default` 不能单独作为删除范围。
 - Git 源消失且存在 blocker 时保留 Skill 和 Desired State，返回 `SOURCE_MISSING_IN_USE`；Runtime 继续使用既有 `MANAGED_SOURCE_MISSING` / `PENDING`，不要新增同义状态。

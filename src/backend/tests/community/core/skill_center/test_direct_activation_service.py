@@ -42,6 +42,10 @@ class _Repository:
     #: Dependencies the Skill under test declares, mirrored onto the mutation
     #: result the way the real repository fills it under the row lock.
     skill_mcp_codes: frozenset[str] = frozenset()
+    manifest_direct = False
+
+    def manifest_direct_mcp_exists(self, **_kwargs) -> bool:
+        return self.manifest_direct
 
     def _mutation(self) -> DesiredStateMutation:
         return DesiredStateMutation({}, True, CapabilityDesiredState(set(), {}, {}))
@@ -234,6 +238,10 @@ class _PlatformDefaultMcpPolicy:
             )
         return self.codes
 
+    def server_codes_for(self, bot: dict) -> frozenset[str]:
+        self.bots.append(bot)
+        return self.codes
+
 
 def _service(
     *,
@@ -343,12 +351,27 @@ async def test_platform_default_mcp_refuses_direct_control(method_name: str):
             actor_id="true-owner",
             server_code="mcp.policy",
         )
-
     assert policy.bots[0]["bot_id"] == "bot-1"
     assert repository.install_mcp_calls == []
     assert repository.uninstall_mcp_calls == []
     assert mcp_center.calls == []
 
+
+@pytest.mark.asyncio
+async def test_existing_manifest_direct_platform_mcp_can_be_removed_normally():
+    repository = _Repository()
+    repository.manifest_direct = True
+    service = _service(
+        repository=repository,
+        platform_default_mcp_policy=_PlatformDefaultMcpPolicy("mcp.policy"),
+    )
+
+    await service.deactivate_mcp(
+        bot_id="bot-1", owner_id="true-owner", actor_id="true-owner",
+        server_code="mcp.policy",
+    )
+
+    assert repository.uninstall_mcp_calls[0]["server_code"] == "mcp.policy"
 
 @pytest.mark.asyncio
 async def test_mcp_commands_refuse_a_non_collaborating_actor():
