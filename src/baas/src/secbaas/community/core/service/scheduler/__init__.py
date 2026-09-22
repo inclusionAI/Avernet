@@ -14,6 +14,8 @@ from ._tasks import (
     FileTransferPoller,
     FileTransferPollerConfig,
     GapDetectionResult,
+    PublishRetrySweepConfig,
+    PublishRetrySweepTask,
     RenewalRunReport,
 )
 
@@ -31,5 +33,7 @@ __all__ = [
     "FileTransferPoller",
     "FileTransferPollerConfig",
     "GapDetectionResult",
+    "PublishRetrySweepConfig",
+    "PublishRetrySweepTask",
     "RenewalRunReport",
 ]

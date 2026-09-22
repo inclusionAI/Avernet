@@ -322,7 +322,9 @@ async def test_recreate_retains_destroy_then_create_order_without_upfs_precheck(
 
     svc._paas_facade.destroy_device.side_effect = destroy
     svc._paas_facade.create_device.side_effect = create
-    monkeypatch.setattr(f"{DS}.device_record_to_response", lambda record: record)
+    monkeypatch.setattr(
+        f"{DS}.device_record_to_response", lambda record, outcome=None: record
+    )
     await getattr(svc, operation)("tenant", "DEVICE-one", "operator")
     assert events == ["destroy", "create"]
     updated = svc._repository.update_device.call_args.kwargs
@@ -348,7 +350,9 @@ async def test_start_merges_existing_metadata_and_template_volume(
     )
     # Stop at the PaaS boundary: this test checks real start-path assembly.
     svc._paas_facade.create_device.side_effect = RuntimeError("test boundary")
-    monkeypatch.setattr(f"{DS}.device_record_to_response", lambda value: value)
+    monkeypatch.setattr(
+        f"{DS}.device_record_to_response", lambda value, outcome=None: value
+    )
     await svc.start_device("tenant", "DEVICE-one", publish_id=7)
     svc._paas_facade.create_device.assert_awaited_once()
     detail = svc._paas_facade.create_device.call_args.kwargs["detail_config"]

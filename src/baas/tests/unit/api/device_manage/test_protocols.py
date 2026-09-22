@@ -35,6 +35,7 @@ class TestDeviceServiceProtocol:
             "stop_device_by_uuid",
             "get_device_info",
             "get_provider_device_props",
+            "prepare_for_reprovision",
         }
         protocol_methods = {
             name

@@ -5,9 +5,11 @@ Enabled via PAAS_MOCK_MODE=true environment variable.
 
 Failure modes (set alongside PAAS_MOCK_MODE=true):
 - PAAS_MOCK_CREATE_FAILURE=true: create_device() raises PaasError(DEVICE_CREATION_FAILED)
+- PAAS_MOCK_CREATE_FAIL_TIMES=N: create_device() fails the first N calls, then succeeds
 - PAAS_MOCK_DESTROY_FAILURE=true: destroy_device() raises PaasError(DEVICE_DESTROY_FAILED)
 - PAAS_MOCK_DEVICE_NOT_FOUND=true: destroy_device() raises PaasError(DEVICE_NOT_FOUND)
 - PAAS_MOCK_HOOK_FAILURE=true: execute_command() returns exit_code=1
+- PAAS_MOCK_HOOK_FAIL_TIMES=N: the first N execute_command() calls fail
 """
 
 import asyncio  # noqa: F401
@@ -15,6 +17,7 @@ import base64
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
@@ -42,6 +45,53 @@ def _is_mock_failure(env_var: str) -> bool:
     return os.environ.get(env_var, "").lower() in ("true", "1", "yes")
 
 
+_FAIL_BUDGET_LOCK = Lock()
+_FAIL_ATTEMPT_COUNTS: dict[str, int] = {}
+
+
+def _failure_budget(env_var: str) -> int:
+    raw = os.environ.get(env_var, "")
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _consume_failure(env_var: str) -> bool:
+    budget = _failure_budget(env_var)
+    if budget <= 0:
+        return False
+    with _FAIL_BUDGET_LOCK:
+        used = _FAIL_ATTEMPT_COUNTS.get(env_var, 0)
+        if used < budget:
+            _FAIL_ATTEMPT_COUNTS[env_var] = used + 1
+            return True
+    return False
+
+
+def reset_failure_counters() -> None:
+    with _FAIL_BUDGET_LOCK:
+        _FAIL_ATTEMPT_COUNTS.clear()
+
+
+def reset_create_failure_counter() -> None:
+    with _FAIL_BUDGET_LOCK:
+        _FAIL_ATTEMPT_COUNTS.pop("PAAS_MOCK_CREATE_FAIL_TIMES", None)
+
+
+def reset_hook_failure_counter() -> None:
+    with _FAIL_BUDGET_LOCK:
+        _FAIL_ATTEMPT_COUNTS.pop("PAAS_MOCK_HOOK_FAIL_TIMES", None)
+
+
+def _consume_create_failure() -> bool:
+    return _consume_failure("PAAS_MOCK_CREATE_FAIL_TIMES")
+
+
+def _consume_hook_failure() -> bool:
+    return _consume_failure("PAAS_MOCK_HOOK_FAIL_TIMES")
+
+
 class MockPaasService(PaasService):
     """Mock PaaS adapter that returns fake successful results.
 
@@ -51,6 +101,7 @@ class MockPaasService(PaasService):
 
     Failure modes (env vars checked at runtime):
     - PAAS_MOCK_HOOK_FAILURE: execute_command() returns exit_code=1
+    - PAAS_MOCK_HOOK_FAIL_TIMES: first N execute_command() calls fail
     - PAAS_MOCK_CREATE_FAILURE: create_device() raises PaasError(DEVICE_CREATION_FAILED)
     - PAAS_MOCK_DESTROY_FAILURE: destroy_device() raises PaasError(DEVICE_DESTROY_FAILED)
     - PAAS_MOCK_DEVICE_NOT_FOUND: destroy_device() raises PaasError(DEVICE_NOT_FOUND)
@@ -116,7 +167,7 @@ class MockPaasService(PaasService):
         )
 
     async def create_device(self, config: DeviceCreateConfig) -> ArcaCreationResult:
-        if _is_mock_failure("PAAS_MOCK_CREATE_FAILURE"):
+        if _is_mock_failure("PAAS_MOCK_CREATE_FAILURE") or _consume_create_failure():
             raise PaasError(
                 ErrorCode.DEVICE_CREATION_FAILED, "mock device creation failure"
             )
@@ -145,7 +196,7 @@ class MockPaasService(PaasService):
         env: dict[str, str] | None = None,
         timeout_seconds: int = 30,
     ) -> CommandResult:
-        if _is_mock_failure("PAAS_MOCK_HOOK_FAILURE"):
+        if _is_mock_failure("PAAS_MOCK_HOOK_FAILURE") or _consume_hook_failure():
             return CommandResult(
                 exit_code=1,
                 stdout="",

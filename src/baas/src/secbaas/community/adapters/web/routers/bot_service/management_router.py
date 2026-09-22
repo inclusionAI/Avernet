@@ -136,6 +136,14 @@ class RestartBotRequest(BaseRequest):
         default=False,
         description="When True, auto-approve all publish stage gates without manual intervention",
     )
+    publish_max_retry_times: int | None = Field(
+        default=None,
+        ge=0,
+        le=3,
+        description=(
+            "Additional full-lifecycle device attempts after a failed publish attempt"
+        ),
+    )
     scope: RestartScope = Field(
         default=RestartScope.ALL,
         description="Restart scope: 'all' (ACTIVE+FAILED) or 'unhealthy' (FAILED only)",
@@ -502,6 +510,7 @@ async def restart_bot(
         request_id=request.request_id,
         scope=request.scope,
         auto_approve_publish=request.auto_approve_publish,
+        publish_max_retry_times=request.publish_max_retry_times,
     )
     return ApiResponse(data=result)
 

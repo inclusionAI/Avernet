@@ -3500,3 +3500,48 @@ class TestUpdateDeviceTeClawAsync:
                     modifier="test_user",
                     publish_id=0,
                 )
+
+
+class TestPrepareForReprovision:
+    def test_returns_true_when_device_reset(self, service, mock_repo, mock_env):
+        mock_repo.prepare_device_for_reprovision.return_value = 1
+
+        result = service.prepare_for_reprovision(
+            tenant="test-tenant", device_uuid="DEVICE-1", modifier="op"
+        )
+
+        assert result is True
+        kwargs = mock_repo.prepare_device_for_reprovision.call_args.kwargs
+        assert kwargs["device_uuid"] == "DEVICE-1"
+        assert kwargs["tenant"] == "test-tenant"
+        assert kwargs["modifier"] == "op"
+
+    def test_returns_false_when_not_resettable(self, service, mock_repo, mock_env):
+        mock_repo.prepare_device_for_reprovision.return_value = 0
+
+        assert (
+            service.prepare_for_reprovision(
+                tenant="test-tenant", device_uuid="DEVICE-1"
+            )
+            is False
+        )
+
+    def test_returns_false_when_repo_reports_negative(
+        self, service, mock_repo, mock_env
+    ):
+        mock_repo.prepare_device_for_reprovision.return_value = -1
+
+        assert (
+            service.prepare_for_reprovision(
+                tenant="test-tenant", device_uuid="DEVICE-1"
+            )
+            is False
+        )
+
+    def test_passes_resolved_env(self, service, mock_repo, mock_env):
+        mock_repo.prepare_device_for_reprovision.return_value = 1
+
+        service.prepare_for_reprovision(tenant="t", device_uuid="DEVICE-1")
+
+        kwargs = mock_repo.prepare_device_for_reprovision.call_args.kwargs
+        assert kwargs["env"] == "test"

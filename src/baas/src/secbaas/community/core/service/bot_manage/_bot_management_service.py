@@ -291,6 +291,7 @@ class DefaultBotManagementService(BotManageService):
                 bot_config.callback_timeout_seconds, self._system_config_repo
             ),
             auto_approve=bot_config.auto_approve_publish,
+            publish_max_retry_times=bot_config.publish_max_retry_times or 0,
         )
         publish = await self._publish_service.create_publish(
             tenant=tenant,
@@ -874,6 +875,10 @@ class DefaultBotManagementService(BotManageService):
                 existing_config.sla_grade = bot_config.sla_grade
             if bot_config.auto_approve_publish is not None:
                 existing_config.auto_approve_publish = bot_config.auto_approve_publish
+            if bot_config.publish_max_retry_times is not None:
+                existing_config.publish_max_retry_times = (
+                    bot_config.publish_max_retry_times
+                )
             existing_config.callback_timeout_seconds = (
                 bot_config.callback_timeout_seconds
             )
@@ -889,6 +894,7 @@ class DefaultBotManagementService(BotManageService):
                 bot_config.callback_timeout_seconds if bot_config is not None else None
             )
             or DEFAULT_CALLBACK_TIMEOUT_SECONDS,
+            publish_max_retry_times=existing_config.publish_max_retry_times or 0,
             target_device_uuids=unique_device_uuids,
         )
         publish = await self._publish_service.create_publish(
@@ -1031,6 +1037,10 @@ class DefaultBotManagementService(BotManageService):
                     stored_config.sla_grade = bot_config.sla_grade
                 if bot_config.auto_approve_publish is not None:
                     stored_config.auto_approve_publish = bot_config.auto_approve_publish
+                if bot_config.publish_max_retry_times is not None:
+                    stored_config.publish_max_retry_times = (
+                        bot_config.publish_max_retry_times
+                    )
                 stored_config.callback_timeout_seconds = (
                     bot_config.callback_timeout_seconds
                 )
@@ -1064,6 +1074,7 @@ class DefaultBotManagementService(BotManageService):
                 )
                 or DEFAULT_CALLBACK_TIMEOUT_SECONDS,
                 auto_approve=stored_config.auto_approve_publish,
+                publish_max_retry_times=stored_config.publish_max_retry_times or 0,
                 template_uuid=template_uuid,
             )
 
@@ -1105,6 +1116,7 @@ class DefaultBotManagementService(BotManageService):
         request_id: str,
         scope: RestartScope = RestartScope.ALL,
         auto_approve_publish: bool = False,
+        publish_max_retry_times: int | None = None,
     ) -> RestartBotResponse:
         """Create RESTART publish for Bot device recycling.
 
@@ -1158,6 +1170,7 @@ class DefaultBotManagementService(BotManageService):
             restart_scope=scope,
             restart_reason="user_initiated",
             auto_approve=auto_approve_publish,
+            publish_max_retry_times=publish_max_retry_times or 0,
         )
 
         # Create publish via PublishService
@@ -1295,6 +1308,8 @@ class DefaultBotManagementService(BotManageService):
                 stored_config.sla_grade = config.sla_grade
             if config.auto_approve_publish is not None:
                 stored_config.auto_approve_publish = config.auto_approve_publish
+            if config.publish_max_retry_times is not None:
+                stored_config.publish_max_retry_times = config.publish_max_retry_times
             stored_config.callback_timeout_seconds = config.callback_timeout_seconds
 
             # Persist merged config to bot record
@@ -1314,6 +1329,7 @@ class DefaultBotManagementService(BotManageService):
                 deploy_config=stored_config.deploy_config,
                 callback_timeout_seconds=config.callback_timeout_seconds
                 or DEFAULT_CALLBACK_TIMEOUT_SECONDS,
+                publish_max_retry_times=stored_config.publish_max_retry_times or 0,
             )
         else:
             # No config change — use existing bot config for device records
@@ -1331,6 +1347,7 @@ class DefaultBotManagementService(BotManageService):
                 callback_timeout_seconds=resolve_callback_timeout(
                     existing_config.callback_timeout_seconds, self._system_config_repo
                 ),
+                publish_max_retry_times=existing_config.publish_max_retry_times or 0,
             )
 
         # Create publish via PublishService

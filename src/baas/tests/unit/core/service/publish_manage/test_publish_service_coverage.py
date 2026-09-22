@@ -1060,6 +1060,9 @@ class TestCreateDeviceRecordsForPublish:
         assert call_kwargs["extra_config"] == {
             "device_uuid": "uuid-abc",
             "provider_device_id": "provider-xyz",
+            "publish_max_retry_times": 0,
+            "publish_retry_count": 0,
+            "attempt_started_at": None,
         }
 
     def test_insert_record_extra_config_with_provider_none(self):
@@ -1089,6 +1092,9 @@ class TestCreateDeviceRecordsForPublish:
         assert call_kwargs["extra_config"] == {
             "device_uuid": "uuid-abc",
             "provider_device_id": None,
+            "publish_max_retry_times": 0,
+            "publish_retry_count": 0,
+            "attempt_started_at": None,
         }
 
     def test_insert_record_extra_config_both_none_is_omitted(self):
@@ -4908,6 +4914,47 @@ class TestGetDeviceDetails:
             assert len(failed) == 1
             assert failed[0].result_status == "FAILED"
 
+    def test_retry_state_surfaced_per_device(self):
+        svc = _make_service()
+        batch = _make_batch_record(id=1, status="RUNNING")
+
+        retrying = MagicMock()
+        retrying.device_id = 10
+        retrying.event_type = "CREATE"
+        retrying.result_status = "PROCESSING"
+        retrying.result_message = None
+        retrying.gmt_create = datetime.now()
+        retrying.extra_config = {"publish_max_retry_times": 3, "publish_retry_count": 2}
+
+        plain = MagicMock()
+        plain.device_id = 11
+        plain.event_type = "CREATE"
+        plain.result_status = "PROCESSING"
+        plain.result_message = None
+        plain.gmt_create = datetime.now()
+        plain.extra_config = {}
+
+        mock_repo = MagicMock()
+        mock_repo.list_by_batch_id.return_value = [retrying, plain]
+        svc._device_repo.get_by_ids.return_value = {
+            10: _make_device(id=10, device_uuid="uuid-10"),
+            11: _make_device(id=11, device_uuid="uuid-11"),
+        }
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            details, _ = svc._get_device_details(
+                [batch], tenant="t", record_repo=mock_repo
+            )
+
+        by_id = {d.device_id: d for d in details[0].devices}
+        assert by_id[10].publish_max_retry_times == 3
+        assert by_id[10].publish_retry_count == 2
+        assert by_id[11].publish_max_retry_times == 0
+        assert by_id[11].publish_retry_count == 0
+
     def test_device_not_found(self):
         svc = _make_service()
         batch = _make_batch_record(id=1, status="COMPLETED")
@@ -5045,3 +5092,267 @@ class TestRetryPublishNotFound:
         ):
             with pytest.raises(PublishNotFoundError):
                 await svc.retry_publish("t", 1, "op", "req-123")
+
+
+class TestBatchRetryPaths:
+    """Cover the retrying branch at each batch failure call site."""
+
+    @pytest.mark.asyncio
+    async def test_create_batch_retries_on_failed_status(self):
+        from secbaas.community.api.device_manage import DeviceStatus
+
+        svc = _make_service()
+        svc._drive_record_attempt = AsyncMock(return_value=True)
+        batch = _make_batch_record()
+        device = _make_device(id=10, status="PENDING")
+        record = MagicMock()
+        record.id = 1
+        record.device_id = 10
+        svc._publish_record_repo.list_by_publish_id_and_batch_id.return_value = [record]
+        svc._device_repo.get_by_ids.return_value = {10: device}
+        failed = MagicMock()
+        failed.status = DeviceStatus.FAILED.value
+        failed.err_msg = "boom"
+        svc._device_service.start_device = AsyncMock(return_value=failed)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            result = await svc._execute_create_batch(
+                "t",
+                1,
+                batch,
+                "op",
+                publish_record=_make_publish_record(),
+                bot_record=_make_bot_record(),
+            )
+
+        svc._drive_record_attempt.assert_awaited_once()
+        assert result.failed_count == 0
+
+    @pytest.mark.asyncio
+    async def test_create_batch_retries_on_exception(self):
+        svc = _make_service()
+        svc._drive_record_attempt = AsyncMock(return_value=True)
+        batch = _make_batch_record()
+        device = _make_device(id=10, status="PENDING")
+        record = MagicMock()
+        record.id = 1
+        record.device_id = 10
+        svc._publish_record_repo.list_by_publish_id_and_batch_id.return_value = [record]
+        svc._device_repo.get_by_ids.return_value = {10: device}
+        svc._device_service.start_device = AsyncMock(side_effect=RuntimeError("kaboom"))
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            result = await svc._execute_create_batch(
+                "t",
+                1,
+                batch,
+                "op",
+                publish_record=_make_publish_record(),
+                bot_record=_make_bot_record(),
+            )
+
+        svc._drive_record_attempt.assert_awaited_once()
+        assert result.failed_count == 0
+
+    @pytest.mark.asyncio
+    async def test_restart_batch_retries_on_exception(self):
+        svc = _make_service()
+        svc._drive_record_attempt = AsyncMock(return_value=True)
+        batch = _make_batch_record()
+        device = _make_device(id=10, status="ACTIVE")
+        record = MagicMock()
+        record.id = 1
+        record.device_id = 10
+        svc._publish_record_repo.list_by_publish_id_and_batch_id.return_value = [record]
+        svc._device_repo.get_by_ids.return_value = {10: device}
+        svc._drain_device = AsyncMock(return_value=None)
+        svc._device_service.restart_device = AsyncMock(
+            side_effect=RuntimeError("restart kaboom")
+        )
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            result = await svc._execute_restart_batch(
+                "t",
+                1,
+                batch,
+                "op",
+                0,
+                publish_record=_make_publish_record(publish_type="RESTART"),
+                bot_record=_make_bot_record(),
+            )
+
+        svc._drive_record_attempt.assert_awaited_once()
+        assert result.failed_count == 0
+
+    @pytest.mark.asyncio
+    async def test_update_batch_retries_on_exception(self):
+        svc = _make_service()
+        svc._drive_record_attempt = AsyncMock(return_value=True)
+        batch = _make_batch_record()
+        device = _make_device(id=10, status="ACTIVE")
+        record = MagicMock()
+        record.id = 1
+        record.device_id = 10
+        svc._publish_record_repo.list_by_publish_id_and_batch_id.return_value = [record]
+        svc._device_repo.get_by_ids.return_value = {10: device}
+        svc._drain_device = AsyncMock(return_value=None)
+        svc._device_service.update_device = AsyncMock(
+            side_effect=RuntimeError("update kaboom")
+        )
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            result = await svc._execute_update_batch(
+                "t",
+                1,
+                batch,
+                0,
+                "op",
+                publish_record=_make_publish_record(publish_type="UPDATE"),
+                bot_record=_make_bot_record(),
+            )
+
+        svc._drive_record_attempt.assert_awaited_once()
+        assert result.failed_count == 0
+
+    @pytest.mark.asyncio
+    async def test_scale_up_retries_on_failed_status(self):
+        from secbaas.community.api.device_manage import DeviceStatus
+
+        svc = _make_service()
+        svc._drive_record_attempt = AsyncMock(return_value=True)
+        batch = _make_batch_record()
+        device = _make_device(id=10, status="PENDING")
+        record = MagicMock()
+        record.id = 1
+        record.device_id = 10
+        svc._publish_record_repo.list_by_publish_id_and_batch_id.return_value = [record]
+        svc._device_repo.get_by_ids.return_value = {10: device}
+        failed = MagicMock()
+        failed.status = DeviceStatus.FAILED.value
+        failed.err_msg = "scale boom"
+        svc._device_service.start_device = AsyncMock(return_value=failed)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            result = await svc._execute_scale_batch(
+                "t",
+                1,
+                batch,
+                "SCALE_UP",
+                "op",
+                publish_record=_make_publish_record(publish_type="SCALE_UP"),
+                bot_record=_make_bot_record(),
+            )
+
+        svc._drive_record_attempt.assert_awaited_once()
+        assert result.failed_count == 0
+
+    @pytest.mark.asyncio
+    async def test_scale_up_retries_on_exception(self):
+        svc = _make_service()
+        svc._drive_record_attempt = AsyncMock(return_value=True)
+        batch = _make_batch_record()
+        device = _make_device(id=10, status="PENDING")
+        record = MagicMock()
+        record.id = 1
+        record.device_id = 10
+        svc._publish_record_repo.list_by_publish_id_and_batch_id.return_value = [record]
+        svc._device_repo.get_by_ids.return_value = {10: device}
+        svc._device_service.start_device = AsyncMock(side_effect=RuntimeError("kaboom"))
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            result = await svc._execute_scale_batch(
+                "t",
+                1,
+                batch,
+                "SCALE_UP",
+                "op",
+                publish_record=_make_publish_record(publish_type="SCALE_UP"),
+                bot_record=_make_bot_record(),
+            )
+
+        svc._drive_record_attempt.assert_awaited_once()
+        assert result.failed_count == 0
+
+
+class TestCallbackRetryBranch:
+    @pytest.mark.asyncio
+    async def test_failed_callback_triggers_retry(self):
+        svc = _make_service()
+        svc._drive_record_attempt = AsyncMock(return_value=True)
+        device = _make_device(id=10)
+        svc._device_repo.get_by_device_uuid.return_value = device
+        record = MagicMock()
+        record.id = 100
+        record.result_status = "PROCESSING"
+        record.batch_id = 5
+        svc._publish_record_repo.get_processing_record_by_device_and_publish.return_value = record
+
+        cb = DeviceCallbackRequest(
+            device_uuid="dev-1",
+            publish_id=1,
+            event_type="start",
+            result_status="FAILED",
+            exit_code=1,
+            stdout="",
+            stderr="hook blew up",
+            tenant="t",
+        )
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            result = await svc.handle_device_callback(cb)
+
+        assert result["status"] == "retrying"
+        svc._drive_record_attempt.assert_awaited_once()
+        svc._publish_record_repo.update_result_if_processing.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failed_callback_without_budget_settles_record(self):
+        svc = _make_service()
+        svc._drive_record_attempt = AsyncMock(return_value=False)
+        device = _make_device(id=10)
+        svc._device_repo.get_by_device_uuid.return_value = device
+        record = MagicMock()
+        record.id = 100
+        record.result_status = "PROCESSING"
+        record.batch_id = None
+        svc._publish_record_repo.get_processing_record_by_device_and_publish.return_value = record
+        svc._publish_record_repo.update_result_if_processing.return_value = True
+
+        cb = DeviceCallbackRequest(
+            device_uuid="dev-1",
+            publish_id=1,
+            event_type="start",
+            result_status="FAILED",
+            exit_code=1,
+            stdout="",
+            stderr="hook blew up",
+            tenant="t",
+        )
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            result = await svc.handle_device_callback(cb)
+
+        assert result["status"] == "processed"
+        svc._publish_record_repo.update_result_if_processing.assert_called_once()

@@ -1,8 +1,9 @@
 """Publish record repository protocol."""
 
+from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
-from ._record import PublishRecordRecord
+from ._record import PublishRecordExtraConfig, PublishRecordRecord
 
 
 @runtime_checkable
@@ -101,6 +102,58 @@ class PublishRecordRepository(Protocol):
     def list_stale_processing_records(
         self, publish_id: int, timeout_seconds: int, tenant: str, env: str
     ) -> list[PublishRecordRecord]: ...
+
+    def try_claim_retry(
+        self,
+        *,
+        record_id: int,
+        tenant: str,
+        env: str,
+        expected_retry_count: int,
+        attempt_started_at: str,
+        modifier: str | None = None,
+    ) -> bool:
+        """Atomically claim the next publish attempt for a record.
+
+        Succeeds only when the record is still PROCESSING and its stored
+        ``publish_retry_count`` still equals ``expected_retry_count``. On success the
+        count is incremented and the attempt timestamp is persisted in
+        extra_config. Returns True when this caller won the claim.
+        """
+        ...
+
+    def get_retry_state(
+        self, record_id: int, tenant: str, env: str
+    ) -> PublishRecordExtraConfig | None:
+        """Read the retry sub-state currently stored on a record."""
+        ...
+
+    def list_stale_processing_records_across_tenants(
+        self, timeout_seconds: int, env: str
+    ) -> list[PublishRecordRecord]:
+        """List stale in-flight records for an environment across all tenants.
+
+        The scheduled sweep has no request tenant, so it cannot filter by one.
+        """
+        ...
+
+    def list_stale_processing_records_all(
+        self, timeout_seconds: int, tenant: str, env: str
+    ) -> list[PublishRecordRecord]:
+        """List in-flight records past their attempt window across all publishes.
+
+        Used by the server-side sweep so timeout-driven retries advance without
+        a client polling for publish progress.
+        """
+        ...
+
+    def database_now(self) -> datetime:
+        """Current database clock.
+
+        Timestamps written with ``func.now()`` share this clock, which may
+        differ from the application host timezone.
+        """
+        ...
 
     def get_latest_processing_record_by_device(
         self, device_id: int, tenant: str, env: str
