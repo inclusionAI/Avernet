@@ -17,7 +17,7 @@ import urllib.request
 
 from .. import logger
 from ..models import SessionRow
-from .sessions import parse_jsonl_file
+from .sessions import parse_jsonl_file, session_locator_from_path
 
 
 EXPORT_API_VERSION = "session-export/v1"
@@ -54,8 +54,120 @@ def acquire_exported_sessions(
     until: str = "",
     timeout_seconds: int = EXPORT_WAIT_TIMEOUT_SECONDS,
     parse_content: bool = True,
+    session_identifiers: list[str] | None = None,
 ) -> ServiceSessionAcquisition:
     """Acquire service-Bot sessions through ClawWeb's public export API."""
+
+    selectors = [("session_identifier", value) for value in (session_identifiers or [])]
+    source_dir = input_dir / "session-source"
+    if not selectors:
+        return _acquire_exported_sessions_once(
+            clawweb_url=clawweb_url,
+            task_id=task_id,
+            step_id=step_id,
+            source_user_id=source_user_id,
+            source_bot_id=source_bot_id,
+            download_network=download_network,
+            source_dir=source_dir,
+            max_sessions=max_sessions,
+            since=since,
+            until=until,
+            timeout_seconds=timeout_seconds,
+            parse_content=parse_content,
+            export_scope="bot",
+            session_identifier="",
+            selector_hash="",
+        )
+
+    if source_dir.exists():
+        shutil.rmtree(source_dir)
+    selectors_dir = source_dir / "selectors"
+    selectors_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[SessionRow] = []
+    seen_session_ids: set[str] = set()
+    selector_entries: list[dict[str, Any]] = []
+    export_ids: list[str] = []
+    for index, (selector_type, selector) in enumerate(selectors):
+        selector_hash = hashlib.sha256(selector.encode("utf-8")).hexdigest()
+        acquired = _acquire_exported_sessions_once(
+            clawweb_url=clawweb_url,
+            task_id=task_id,
+            step_id=step_id,
+            source_user_id=source_user_id,
+            source_bot_id=source_bot_id,
+            download_network=download_network,
+            source_dir=selectors_dir / f"{index:02d}-{selector_hash[:12]}",
+            max_sessions=1,
+            since="",
+            until="",
+            timeout_seconds=timeout_seconds,
+            parse_content=parse_content,
+            export_scope="single",
+            session_identifier=selector,
+            selector_hash=selector_hash,
+        )
+        resolved_ids = acquired.source_metadata.get("resolved_session_ids") or []
+        if not acquired.rows or not resolved_ids:
+            raise ServiceSessionExportError(
+                f"SESSION_EXPORT_SELECTOR_NOT_FOUND: type={selector_type}, hash={selector_hash[:12]}"
+            )
+        export_id = str(acquired.source_metadata.get("export_id") or "")
+        if export_id:
+            export_ids.append(export_id)
+        selector_entries.append({
+            "type": selector_type,
+            "hash": selector_hash,
+            "resolutionInputType": acquired.source_metadata.get("resolution_input_type") or "",
+            "resolvedSessionIds": list(resolved_ids),
+        })
+        for row in acquired.rows:
+            if row.session_id in seen_session_ids:
+                continue
+            seen_session_ids.add(row.session_id)
+            rows.append(row)
+
+    manifest = {
+        "schemaVersion": "clawevolve.explicit-session-acquisition.v1",
+        "sourceMode": "service_export",
+        "selectedCount": len(rows),
+        "selectors": selector_entries,
+    }
+    _write_json(source_dir / "acquisition-manifest.json", manifest)
+    return ServiceSessionAcquisition(
+        rows=rows,
+        source_bot_id=source_bot_id,
+        source_metadata={
+            "source": "clawweb_session_export",
+            "source_mode": "service_export",
+            "selection_mode": "explicit",
+            "export_ids": export_ids,
+            "artifacts": {
+                "acquisition_manifest": str(source_dir / "acquisition-manifest.json"),
+                "selectors_dir": str(selectors_dir),
+            },
+        },
+    )
+
+
+def _acquire_exported_sessions_once(
+    *,
+    clawweb_url: str,
+    task_id: str,
+    step_id: str,
+    source_user_id: str,
+    source_bot_id: str,
+    download_network: str,
+    source_dir: Path,
+    max_sessions: int,
+    since: str = "",
+    until: str = "",
+    timeout_seconds: int = EXPORT_WAIT_TIMEOUT_SECONDS,
+    parse_content: bool = True,
+    export_scope: str,
+    session_identifier: str,
+    selector_hash: str,
+) -> ServiceSessionAcquisition:
+    """Acquire one bot-wide or one explicit service Session export."""
 
     if not task_id or not step_id:
         raise ServiceSessionExportError("service session export requires task_id and step_id")
@@ -70,7 +182,6 @@ def acquire_exported_sessions(
         )
     if download_network not in {"office", "production"}:
         raise ServiceSessionExportError("invalid service session download network")
-    source_dir = input_dir / "session-source"
     if source_dir.exists():
         shutil.rmtree(source_dir)
     raw_sessions_dir = source_dir / "raw-sessions"
@@ -81,11 +192,11 @@ def acquire_exported_sessions(
     # Re-running the same handler Step is idempotent. A user-triggered Continue
     # creates a new Step and therefore a fresh export, so a terminal failed
     # export cannot permanently poison the parent Diagnose task.
-    idempotency_key = (
-        f"clawevolve-diagnose:{task_id}:{step_id}:service-session-export:v1"
-    )
+    idempotency_key = f"clawevolve-diagnose:{task_id}:{step_id}:service-session-export:v1"
+    if selector_hash:
+        idempotency_key = f"{idempotency_key}:{selector_hash}"
     request_body = {
-        "exportScope": "bot",
+        "exportScope": export_scope,
         "target": {
             "userId": source_user_id,
             "botId": source_bot_id,
@@ -94,6 +205,8 @@ def acquire_exported_sessions(
         },
         "requestName": f"{task_id} service session diagnose input",
     }
+    if session_identifier:
+        request_body["sessionIdentifier"] = session_identifier
     logger.info(
         "service session export ensure start",
         task_id=task_id,
@@ -108,7 +221,7 @@ def acquire_exported_sessions(
         body=request_body,
         headers={"Idempotency-Key": idempotency_key},
     )
-    _validate_export_response(created)
+    _validate_export_response(created, export_scope)
     export_id = str(created.get("exportId") or "").strip()
     if not export_id:
         raise ServiceSessionExportError("SESSION_EXPORT_INVALID_RESPONSE: missing exportId")
@@ -122,7 +235,7 @@ def acquire_exported_sessions(
     # without target/artifact/error. Always read the canonical detail resource
     # before interpreting state so same-Step re-entry can resume safely.
     result = _request_json(status_endpoint, method="GET")
-    _validate_export_response(result)
+    _validate_export_response(result, export_scope)
     while str(result.get("status") or "").lower() in {
         "pending",
         "dispatched",
@@ -132,7 +245,7 @@ def acquire_exported_sessions(
             raise ServiceSessionExportError("SESSION_EXPORT_TIMEOUT")
         time.sleep(POLL_SECONDS)
         result = _request_json(status_endpoint, method="GET")
-        _validate_export_response(result)
+        _validate_export_response(result, export_scope)
 
     target = result.get("target") if isinstance(result.get("target"), dict) else {}
     if (
@@ -141,7 +254,9 @@ def acquire_exported_sessions(
         or str(target.get("stage") or "") != "service"
     ):
         raise ServiceSessionExportError("SESSION_EXPORT_SOURCE_MISMATCH")
-    safe_result = _without_download_url(result)
+    safe_result = _redact_selector(
+        _without_download_url(result), session_identifier, selector_hash
+    )
     source_payload = {
         "schemaVersion": SOURCE_SCHEMA,
         "sourceMode": "service_export",
@@ -154,7 +269,10 @@ def acquire_exported_sessions(
         },
         "downloadNetwork": download_network,
         "idempotencyKey": idempotency_key,
-        "request": request_body,
+        "request": {
+            **request_body,
+            **({"sessionIdentifier": f"sha256:{selector_hash}"} if session_identifier else {}),
+        },
         "export": safe_result,
     }
     _write_json(source_dir / "source.json", source_payload)
@@ -203,14 +321,17 @@ def acquire_exported_sessions(
     expected_sha = str(artifact.get("sha256") or "").lower()
     if not download_url or not expected_sha:
         raise ServiceSessionExportError("SESSION_EXPORT_INVALID_ARTIFACT: missing downloadUrl or sha256")
+    content_type = str(artifact.get("contentType") or "")
+    if export_scope == "single" and content_type != "application/x-ndjson":
+        raise ServiceSessionExportError(
+            "SESSION_EXPORT_INVALID_ARTIFACT: single export must be application/x-ndjson"
+        )
 
     with tempfile.TemporaryDirectory(
         prefix=f"clawevolve-session-export-{_safe_name(task_id)}-"
     ) as tmp_text:
         tmp = Path(tmp_text)
-        archive = tmp / "source.tar.gz"
-        extracted = tmp / "extracted"
-        extracted.mkdir()
+        archive = tmp / ("session.jsonl" if export_scope == "single" else "source.tar.gz")
         _download_artifact(
             endpoint=status_endpoint,
             initial_url=download_url,
@@ -218,23 +339,37 @@ def acquire_exported_sessions(
             expected_sha256=expected_sha,
             expected_size=_optional_int(artifact.get("size")),
         )
-        manifest = _safe_extract_and_validate(archive, extracted)
-        _write_json(source_dir / "export-manifest.json", manifest)
-        _persist_raw_sessions(
-            manifest=manifest,
-            extracted=extracted,
-            raw_sessions_dir=raw_sessions_dir,
-        )
-        acquisition = _select_and_persist_sessions(
-            manifest=manifest,
-            extracted=extracted,
-            sessions_dir=sessions_dir,
-            raw_sessions_dir=raw_sessions_dir,
-            max_sessions=max(1, int(max_sessions)),
-            since=since,
-            until=until,
-            parse_content=parse_content,
-        )
+        if export_scope == "single":
+            acquisition = _persist_single_session_export(
+                source=archive,
+                sessions_dir=sessions_dir,
+                raw_sessions_dir=raw_sessions_dir,
+                resolved_session_ids=list((result.get("resolution") or {}).get("resolvedSessionIds") or []),
+                source_bot_id=source_bot_id,
+                parse_content=parse_content,
+            )
+            manifest = acquisition[2]
+            _write_json(source_dir / "export-manifest.json", manifest)
+        else:
+            extracted = tmp / "extracted"
+            extracted.mkdir()
+            manifest = _safe_extract_and_validate(archive, extracted)
+            _write_json(source_dir / "export-manifest.json", manifest)
+            _persist_raw_sessions(
+                manifest=manifest,
+                extracted=extracted,
+                raw_sessions_dir=raw_sessions_dir,
+            )
+            acquisition = (*_select_and_persist_sessions(
+                manifest=manifest,
+                extracted=extracted,
+                sessions_dir=sessions_dir,
+                raw_sessions_dir=raw_sessions_dir,
+                max_sessions=max(1, int(max_sessions)),
+                since=since,
+                until=until,
+                parse_content=parse_content,
+            ), manifest)
     _write_json(source_dir / "acquisition-manifest.json", acquisition[1])
     logger.info(
         "service session acquisition done",
@@ -252,6 +387,8 @@ def acquire_exported_sessions(
             "source": "clawweb_session_export",
             "source_mode": "service_export",
             "export_id": export_id,
+            "resolved_session_ids": list((result.get("resolution") or {}).get("resolvedSessionIds") or []),
+            "resolution_input_type": str((result.get("resolution") or {}).get("inputType") or ""),
             "artifacts": {
                 "source": str(source_dir / "source.json"),
                 "manifest": str(source_dir / "export-manifest.json"),
@@ -263,6 +400,58 @@ def acquire_exported_sessions(
     )
 
 
+def _persist_single_session_export(
+    *,
+    source: Path,
+    sessions_dir: Path,
+    raw_sessions_dir: Path,
+    resolved_session_ids: list[str],
+    source_bot_id: str,
+    parse_content: bool,
+) -> tuple[list[SessionRow], dict[str, Any], dict[str, Any]]:
+    """Freeze one verified NDJSON export without treating it as a Bot archive."""
+
+    resolved_session_id = str(resolved_session_ids[0] if resolved_session_ids else "").strip()
+    if not resolved_session_id:
+        raise ServiceSessionExportError("SESSION_EXPORT_SELECTOR_NOT_FOUND: missing resolved Session ID")
+    filename = _safe_session_filename(resolved_session_id, "session.jsonl")
+    raw_sessions_dir.mkdir(parents=True, exist_ok=True)
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = raw_sessions_dir / filename
+    session_path = sessions_dir / filename
+    shutil.copyfile(source, raw_path, follow_symlinks=False)
+    shutil.copyfile(source, session_path, follow_symlinks=False)
+    parsed = parse_jsonl_file(session_path) if parse_content else []
+    if parsed:
+        row = replace(parsed[0], session_id=resolved_session_id, bot_id=source_bot_id)
+    else:
+        locator = session_locator_from_path(session_path)
+        if locator is None:
+            raise ServiceSessionExportError("SESSION_EXPORT_INVALID_ARTIFACT: invalid Session NDJSON")
+        row = replace(locator, session_id=resolved_session_id, bot_id=source_bot_id)
+    export_manifest = {
+        "schemaVersion": EXPORT_MANIFEST_SCHEMA,
+        "files": [{
+            "archivePath": filename,
+            "sessionId": resolved_session_id,
+            "size": session_path.stat().st_size,
+            "sha256": hashlib.sha256(session_path.read_bytes()).hexdigest(),
+        }],
+    }
+    acquisition_manifest = {
+        "schemaVersion": "clawevolve.session-acquisition.v1",
+        "sourceMode": "service_export",
+        "selectedCount": 1,
+        "contentParsing": "enabled" if parse_content else "disabled",
+        "entries": [{
+            "sessionId": resolved_session_id,
+            "path": str(session_path),
+            "rawPath": str(raw_path),
+        }],
+    }
+    return [row], acquisition_manifest, export_manifest
+
+
 def _request_json(
     url: str,
     *,
@@ -271,6 +460,14 @@ def _request_json(
     headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     data = None if body is None else json.dumps(body, separators=(",", ":")).encode("utf-8")
+    secret = str((body or {}).get("sessionIdentifier") or "")
+    secret_replacement = (
+        f"sha256:{hashlib.sha256(secret.encode('utf-8')).hexdigest()}" if secret else ""
+    )
+
+    def safe_error(value: str) -> str:
+        return value.replace(secret, secret_replacement) if secret else value
+
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     last_error = ""
     for attempt in range(1, HTTP_ATTEMPTS + 1):
@@ -288,11 +485,11 @@ def _request_json(
                 return parsed
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", errors="replace")
-            last_error = f"HTTP {exc.code}: {raw[:500]}"
+            last_error = safe_error(f"HTTP {exc.code}: {raw[:500]}")
             if exc.code < 500 and exc.code not in {408, 429}:
                 break
         except Exception as exc:  # noqa: BLE001 - bounded retry at network boundary.
-            last_error = f"{type(exc).__name__}: {exc}"
+            last_error = safe_error(f"{type(exc).__name__}: {exc}")
         if attempt < HTTP_ATTEMPTS:
             time.sleep(HTTP_RETRY_SECONDS)
     raise ServiceSessionExportError(f"SESSION_EXPORT_API_FAILED: {last_error}")
@@ -582,10 +779,10 @@ def _persist_raw_sessions(
         shutil.copyfile(source, target, follow_symlinks=False)
 
 
-def _validate_export_response(value: dict[str, Any]) -> None:
+def _validate_export_response(value: dict[str, Any], expected_scope: str = "bot") -> None:
     if value.get("apiVersion") != EXPORT_API_VERSION:
         raise ServiceSessionExportError("SESSION_EXPORT_INVALID_API_VERSION")
-    if value.get("exportScope") != "bot":
+    if value.get("exportScope") != expected_scope:
         raise ServiceSessionExportError("SESSION_EXPORT_INVALID_SCOPE")
 
 
@@ -671,6 +868,19 @@ def _without_download_url(result: dict[str, Any]) -> dict[str, Any]:
         artifact.pop("downloadUrl", None)
         artifact.pop("downloadUrlExpiresAt", None)
     return safe
+
+
+def _redact_selector(value: Any, selector: str, selector_hash: str) -> Any:
+    if not selector:
+        return value
+    replacement = f"sha256:{selector_hash}"
+    if isinstance(value, str):
+        return value.replace(selector, replacement)
+    if isinstance(value, list):
+        return [_redact_selector(item, selector, selector_hash) for item in value]
+    if isinstance(value, dict):
+        return {key: _redact_selector(item, selector, selector_hash) for key, item in value.items()}
+    return value
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:

@@ -995,6 +995,7 @@ export const api = {
       taskName: string; remark?: string;
       userId: string; botId: string; botEnv?: string; apiKey?: string; judgeBackend: 'subagent' | 'api'; model: string;
       diagnoseIntent: string; maxSessions: number; sessionSource?: 'local' | 'service_export';
+      sessionFilter?: { mode: 'explicit'; sessionIdentifiers: string[] };
       startDate?: string; endDate?: string; nodeCommandYamls?: Record<string, string>;
       forceMessage?: boolean;
       runtimeMaintenance?: boolean;
@@ -1008,6 +1009,7 @@ export const api = {
       taskName: string; remark?: string;
       userId: string; botId: string; botEnv?: string; apiKey?: string; judgeBackend: 'subagent' | 'api'; model: string;
       diagnoseIntent: string; maxSessions: number; maxRounds: number; sessionSource?: 'local' | 'service_export';
+      sessionFilter?: { mode: 'explicit'; sessionIdentifiers: string[] };
       inputMode?: 'diagnose_goal';
       goal?: string;
       startDate: string; endDate: string; nodeCommandYamls?: Record<string, string>;

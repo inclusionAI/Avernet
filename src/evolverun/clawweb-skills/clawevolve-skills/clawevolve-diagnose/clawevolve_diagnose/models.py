@@ -220,6 +220,7 @@ class RunRequest:
     source_bot_id: str = ""
     source_download_network: str = "office"
     clawweb_url: str = ""
+    session_identifiers: list[str] = field(default_factory=list)
 
 
 @dataclass
