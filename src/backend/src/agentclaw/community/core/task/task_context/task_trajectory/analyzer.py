@@ -354,7 +354,10 @@ def _derive_failure_reason(
         if last.error_msg:
             summary += f": {last.error_msg}"
         return f"unclassified: {summary}"
-    return None
+    # Unreachable in practice: the terminal gate above (_terminal_status) returns
+    # None (→ early return) for an empty timeline, so `timeline` is always
+    # non-empty here. Defensive only.
+    return None  # pragma: no cover
 
 
 def _derive_boost_reason(
@@ -630,8 +633,10 @@ class TaskTrajectoryAnalyzer:
                 "llm analysis executor not wired in first iteration (决策 #11)"
             )
         # Unknown analysis_type — defensive (AnalysisType normalization above
-        # rejects unknowns, but a stray subclass could slip through).
-        raise ValueError(f"unknown analysis_type: {analysis_type!r}")
+        # rejects unknowns, and Python forbids subclassing a member-bearing
+        # enum, so no stray AnalysisType instance can reach this; kept for
+        # future executor additions).
+        raise ValueError(f"unknown analysis_type: {analysis_type!r}")  # pragma: no cover
 
     # ------------------------------------------------------------------
     # rule executor — pure function, deterministic, no IO

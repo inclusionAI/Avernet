@@ -344,7 +344,6 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         # 2. Build ext_info_lookup from the repo's records (the assembler DROPPED
         #    ext_info; the analyzer re-queries via this closure).
         ext_info_lookup = _build_ext_info_lookup(self._repo, task_id)
-        ext_info_lookup = _build_ext_info_lookup(self._repo, task_id)
 
         # 3. Resolve the deployment-configured analysis bot_id (decision #10:
         #    NOT per-request). None → 503 (service capability not ready, fix
@@ -783,9 +782,14 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         if not template_id and not yaml_text and cfg.get("task_type") != "static_plan":
             return None
         if not yaml_text and template_id:
-            # 显式只传 task_type/static_plan_id 未带 yaml → 从仓库 plans 懒加载
+            # 显式只传 task_type/static_plan_id 未带 yaml → 从仓库 plans 懒加载。
+            # plans 仓库固定位于 core/task/task_plan/plans — 本方法被 CentralizedExecutionAdapter
+            # borrow 执行(bbs 重构自 task_center/task_service 同源迁入),锚定 static_plan 模块自身
+            # 定位;沿用 parents[1] 会随宿主文件层级漂移(task_context/task_trajectory 下不再指向
+            # core/task,模板懒加载静默失效 → runtime=None)。
             from pathlib import Path
-            plans_dir = Path(__file__).resolve().parents[1] / "task_plan" / "plans"
+            from agentclaw.community.core.task.task_plan import static_plan as _static_plan_module
+            plans_dir = Path(_static_plan_module.__file__).resolve().parent / "plans"
             plans_path = plans_dir / f"{template_id}.yaml"
             if not plans_path.exists():
                 return None
