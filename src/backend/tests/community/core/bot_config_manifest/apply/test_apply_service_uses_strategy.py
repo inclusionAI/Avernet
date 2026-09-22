@@ -19,12 +19,10 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     DeliveryStrategyFactory,
     EngineFamily,
     MaterialiserPorts,
-    TeclawDeliveryBindings,
     TeclawDeliveryMode,
     TeclawDeviceDelivery,
     TeclawPlatformDelivery,
     family_from_engine_test,
-    teclaw_delivery_for_mode,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply import triggers
@@ -168,14 +166,19 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
     device_ports = device_port_bundle(activation_service=device_activation)
 
     # The composition root's own assembly, over this rig's fakes: the two port
-    # bundles, one teclaw strategy chosen from the mode by the table, and a
-    # lookup over that and ARCA's. What the rig varies is the deployment's
-    # mode — the same and only thing a deployment varies.
-    bindings = TeclawDeliveryBindings(
-        platform_ports=platform_ports,
-        device_ports=device_ports,
-        redeliver=redeliver or no_redeliver,
-        cli_tool_service=lambda: None,
+    # bundles, the teclaw strategy the deployment's mode names, and a lookup
+    # over that and ARCA's. What the rig varies is the deployment's mode — the
+    # same and only thing a deployment varies. In the graph itself each mode has
+    # its own provider and neither can build the other's shape, so the rig
+    # names the shape the effective provider would have built.
+    teclaw = (
+        TeclawPlatformDelivery(
+            ports=platform_ports, redeliver=redeliver or no_redeliver
+        )
+        if mode is TeclawDeliveryMode.PLATFORM
+        else TeclawDeviceDelivery(
+            ports=device_ports, cli_tool_service=lambda: None
+        )
     )
     service = BotConfigManifestApplyService(
         manifest_service=_Manifests(),
@@ -188,7 +191,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None):
             family_of=family_from_engine_test(teclaw_engine_test),
             strategies={
                 EngineFamily.ARCA: ArcaDelivery(device_ports),
-                EngineFamily.TECLAW: teclaw_delivery_for_mode(mode, bindings),
+                EngineFamily.TECLAW: teclaw,
             },
         ),
     )
@@ -218,7 +221,8 @@ def _apply(service, bot, phase):
 def test_the_service_selects_the_strategy_by_engine_alone() -> None:
     """The service asks one question — which family is this bot? — of a seam
     that was fully assembled before it existed. Which teclaw shape sits behind
-    the answer is the deployment's, decided by the mode table above."""
+    the answer is the deployment's, decided by which per-mode provider the
+    composition root found effective — stood in for above."""
     service, _, _ = _world(bot=_TECLAW_BOT, mode=TeclawDeliveryMode.PLATFORM)
     assert isinstance(service.delivery_for_bot(_ARCA_BOT), ArcaDelivery)
     assert isinstance(service.delivery_for_bot(_TECLAW_BOT), TeclawPlatformDelivery)

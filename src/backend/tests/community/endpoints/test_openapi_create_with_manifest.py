@@ -885,11 +885,9 @@ def _stand_in_for_teclaw_platform_managed(world) -> list[str]:
     from agentclaw.community.core.bot_config_manifest.apply.delivery import (
         DeliveryStrategyFactory,
         EngineFamily,
-        TeclawDeliveryBindings,
-        TeclawDeliveryMode,
         TeclawPlatformBindings,
+        TeclawPlatformDelivery,
         family_from_engine_test,
-        teclaw_delivery_for_mode,
     )
     from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
         BotConfigManifestApplyService,
@@ -952,23 +950,18 @@ def _stand_in_for_teclaw_platform_managed(world) -> list[str]:
     )[:max_keys]
     # The deployment's mode is read at boot and this container's is DEVICE, so
     # standing in for a platform-managed deployment means rebuilding the seam
-    # the way the composition root would have under PLATFORM: the same table,
-    # the same bindings, over the store-backed ports the DI graph already
-    # binds. ARCA's row is carried across untouched.
+    # the way the composition root would have under PLATFORM: the shape that
+    # deployment's provider builds, over the store-backed bundle the DI graph
+    # already binds whichever mode is set. ARCA's row is carried across
+    # untouched.
     bindings = world.get(TeclawPlatformBindings)
     arca = applies._strategies.for_family(EngineFamily.ARCA)
     applies._strategies = DeliveryStrategyFactory(
         family_of=family_from_engine_test(lambda engine: engine == "teclaw"),
         strategies={
             EngineFamily.ARCA: arca,
-            EngineFamily.TECLAW: teclaw_delivery_for_mode(
-                TeclawDeliveryMode.PLATFORM,
-                TeclawDeliveryBindings(
-                    platform_ports=bindings.platform_ports,
-                    device_ports=arca.ports,
-                    redeliver=bindings.redeliver,
-                    cli_tool_service=lambda: None,
-                ),
+            EngineFamily.TECLAW: TeclawPlatformDelivery(
+                ports=bindings.platform_ports, redeliver=bindings.redeliver
             ),
         },
     )

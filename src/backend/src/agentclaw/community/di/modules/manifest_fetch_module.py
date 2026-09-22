@@ -12,6 +12,11 @@ file sits at the 1000-line cap; the sofa read itself still happens there,
 through the one public seam (``read_user_config``), while the parsing stays
 with W2's and W11's own pure parsers — the yaml keys and their consumers
 remain defined together.
+
+W8's delivery cluster — the two port bundles, the per-mode strategies and the
+family lookup over them — binds in ``manifest_delivery_module``, for the same
+size reason and because it reads as one thing. The compose-side reader stays
+here, with the store it reads through.
 """
 from __future__ import annotations
 
@@ -90,44 +95,10 @@ from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_pr
     BotConfigManifestServiceProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
-    ArcaDelivery,
-    DeliveryStrategyFactory,
-    EngineFamily,
-    MaterialiserPorts,
-    TeclawDeliveryBindings,
     TeclawPlatformBindings,
-    family_from_engine_test,
-    teclaw_delivery_for_mode,
 )
-from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
-    DeviceActivation,
-    PlatformActivation,
-)
-from agentclaw.community.core.bot_config_manifest.apply.identity_files import (
-    DeviceIdentity,
-)
-from agentclaw.community.core.bot_config_manifest.apply.resource_files import (
-    DeviceResource,
-)
-from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
-    DeviceSkillPackageUpload,
-)
-from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver
-from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
-    PlatformIdentity,
-    PlatformResource,
-    PlatformSkillPackageUpload,
-)
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
-    DirectActivationServiceProtocol,
-)
-from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServiceProtocol
 from agentclaw.community.core.bot_startup_script.protocols import (
     TeclawEngineTestProtocol,
-)
-from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
-    BotStartupScriptServiceProtocol,
 )
 from agentclaw.community.di.modules.config_module import read_user_config
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
@@ -135,9 +106,12 @@ from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 
 #: Which compose-side reader a deployment's delivery mode binds.
 #:
-#: The compose seam's half of the mode, and the same shape as the apply seam's
-#: ``TECLAW_DELIVERY_BY_MODE``: one row per mode, and what the row builds is an
-#: object that already knows the answer. ``PLATFORM`` reads the managed-files
+#: The compose seam's half of the mode: one row per mode, and what the row
+#: builds is an object that already knows the answer. The apply seam settles
+#: the same fact through one provider per mode, in ``manifest_delivery_module``
+#: — a single-valued binding has no such shape, because injector has no
+#: conditional provider for one: two providers of one key would collide, and
+#: the last one installed would win. ``PLATFORM`` reads the managed-files
 #: store and asserts ownership per occasion; ``DEVICE`` owns no compose at all,
 #: which is what the composer did before W8 and what an engine without the
 #: ``ownership`` map still needs. Neither implementation is handed the mode.
@@ -282,9 +256,9 @@ class ManifestFetchModule(Module):
         Bound under the Protocol pair the collector asks through, because the
         deployment's delivery mode decides *which reader* answers: the
         managed-files one, or the reader that owns no compose at all. Selected
-        by table, like the apply seam's strategy, so neither implementation
-        carries the mode. The manifest service is lazy for the cycle reason
-        every other manifest collaborator is.
+        by table, so neither implementation carries the mode. The manifest
+        service is lazy for the cycle reason every other manifest collaborator
+        is.
         """
         return _COMPOSE_READER_BY_MODE[manifest_config.teclaw_delivery_mode](
             store,
@@ -633,7 +607,7 @@ class ManifestFetchModule(Module):
         session through — a fresh map and fresh checkouts every apply."""
         return lambda: injector.get(GitSourceClient)
 
-    # ── W8: the platform-managed teclaw path ───────────────────────────────
+    # ── W13: the creation policy ───────────────────────────────────────────
 
     @singleton
     @provider
@@ -645,162 +619,4 @@ class ManifestFetchModule(Module):
         """
         return cfg.BotCreateWithManifestConfig.from_block(
             read_user_config().get("bot_create_with_manifest") or {}
-        )
-
-    @singleton
-    @provider
-    @inject
-    def manifest_teclaw_platform_bindings(
-        self,
-        injector: Injector,
-        store: ManagedFilesStore,
-        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
-        activation_service_provider: Callable[[], DirectActivationServiceProtocol],
-        mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
-        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
-        package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
-        cli_tool_service_factory: CliToolServiceFactory,
-    ) -> TeclawPlatformBindings:
-        """The store-backed ports and the closing redeliver (W8, spec D-7).
-
-        The three file categories write to the managed-files store instead of
-        a container; activation records without projecting; the closing step
-        hands the running container the whole artifact once. Everything the
-        family shares with ARCA — the script service, the permission check,
-        the capability reader, the validator, the fetch pipeline — is the
-        same object ARCA's ports carry.
-
-        The device graph is resolved lazily and by function-level import for
-        the reason the resource factory above records: it reaches the device
-        dispatcher graph at import time.
-        """
-        def platform_ports() -> MaterialiserPorts:
-            validator = package_validator_provider()
-            return MaterialiserPorts(
-                script_service=script_service_provider(),
-                activation_service=PlatformActivation(activation_service_provider()),
-                mcp_auth_service=mcp_auth_service_provider(),
-                identity_service=PlatformIdentity(store),
-                upload_service=PlatformSkillPackageUpload(
-                    store,
-                    validator=validator,
-                    skill_repository=injector.get(SkillRepository),
-                ),
-                capability_reader=capability_reader_provider(),
-                package_validator=validator,
-                entry_fetcher=entry_fetcher_provider(),
-                resource_service=PlatformResource(store),
-                # W9 is always platform-managed and never consults the switch,
-                # as ``mcp`` does not: the artifact is the delivery on this
-                # family whatever the switch says.
-                cli_tool_service=cli_tool_service_factory("teclaw"),
-            )
-
-        def resolve(bot_id: str, owner_id: str):
-            from agentclaw.community.core.devices.services.device_context_resolver import (
-                DeviceContextResolver,
-            )
-
-            return injector.get(DeviceContextResolver).resolve_for_bot(bot_id, owner_id)
-
-        def dispatch(device):
-            from agentclaw.community.plugin_api.device_sync_dispatcher import (
-                DeviceSyncDispatcher,
-            )
-
-            return injector.get(DeviceSyncDispatcher).dispatch(device)
-
-        from agentclaw.community.core.devices.services.device_context import (
-            DeviceNotBoundError,
-        )
-
-        return TeclawPlatformBindings(
-            platform_ports=platform_ports,
-            redeliver=TeclawRedeliver(
-                resolve=resolve, dispatch=dispatch, not_bound=DeviceNotBoundError
-            ),
-        )
-
-    @singleton
-    @provider
-    @inject
-    def manifest_delivery_strategies(
-        self,
-        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
-        activation_service_provider: Callable[[], DirectActivationServiceProtocol],
-        mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
-        identity_service_provider: Callable[[], IdentityFilePort],
-        upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
-        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
-        package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
-        resource_service_provider: Callable[[], ResourceFilePort],
-        cli_tool_service_factory: CliToolServiceFactory,
-        teclaw_bindings: TeclawPlatformBindings,
-        teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
-        manifest_config: cfg.BotConfigManifestConfig,
-    ) -> DeliveryStrategyFactory:
-        """W8: one built delivery strategy per engine family, and the lookup over them.
-
-        Two things are assembled here, and both used to be assembled elsewhere.
-
-        **The device-backed port bundle.** The sibling of
-        ``manifest_teclaw_platform_bindings``' store-backed bundle, and built
-        the same way: one bundle, in the composition root, where the delegates
-        that wrap each service into its narrow port belong. It was previously
-        assembled inside the apply service, out of ten lazy providers that
-        service held for no other purpose — a wiring decision made by a
-        component rather than by the root that wires it. It stays a thunk
-        rather than a value: every provider behind it reaches the device graph,
-        so a bundle built at boot would resolve that graph at boot. It is
-        called once per apply, exactly as before.
-
-        **The strategies, one per family.** This is the only place the
-        deployment's teclaw delivery mode is consulted. It selects a strategy
-        through ``TECLAW_DELIVERY_BY_MODE`` — a table, so adding or retiring a
-        shape is a row — and what leaves this provider is an object that
-        already knows how it delivers. Nothing downstream holds the mode, asks
-        for it, or branches on it: the apply service takes the factory and
-        looks a bot's family up in it. The mode that is not selected builds
-        nothing; binding both port bundles is free because both are thunks.
-
-        The family key comes from the same engine authority the capability
-        resolver and the CLI-tool surface take, adapted once by
-        ``family_from_engine_test``, so the three cannot disagree about what a
-        bot is.
-        """
-        def device_ports() -> MaterialiserPorts:
-            return MaterialiserPorts(
-                script_service=script_service_provider(),
-                activation_service=DeviceActivation(activation_service_provider()),
-                mcp_auth_service=mcp_auth_service_provider(),
-                identity_service=DeviceIdentity(identity_service_provider()),
-                upload_service=DeviceSkillPackageUpload(upload_service_provider()),
-                capability_reader=capability_reader_provider(),
-                package_validator=package_validator_provider(),
-                entry_fetcher=entry_fetcher_provider(),
-                resource_service=DeviceResource(resource_service_provider()),
-                cli_tool_service=cli_tool_service_factory("arca"),
-            )
-
-        return DeliveryStrategyFactory(
-            family_of=family_from_engine_test(
-                lambda engine: teclaw_engine_test_factory().is_teclaw(engine)
-            ),
-            strategies={
-                EngineFamily.ARCA: ArcaDelivery(device_ports),
-                EngineFamily.TECLAW: teclaw_delivery_for_mode(
-                    manifest_config.teclaw_delivery_mode,
-                    TeclawDeliveryBindings(
-                        platform_ports=teclaw_bindings.platform_ports,
-                        device_ports=device_ports,
-                        redeliver=teclaw_bindings.redeliver,
-                        # W9: the teclaw-bound CLI service, so a teclaw bot
-                        # never gets the ARCA delivery port for a category that
-                        # is always platform-managed.
-                        cli_tool_service=lambda: cli_tool_service_factory("teclaw"),
-                    ),
-                ),
-            },
         )

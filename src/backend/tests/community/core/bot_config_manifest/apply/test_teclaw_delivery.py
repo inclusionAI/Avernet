@@ -6,8 +6,9 @@ plus the record-only activation wrapper.
 
 Each strategy is built with its own collaborators and no mode of its own, so
 "what the deployment chose" is which class the rig names, not an argument
-either class carries. The table that makes that choice is exercised separately,
-in ``test_delivery_strategy``.
+either class carries. Which class a deployment's mode names is a wiring fact,
+exercised separately in
+``tests/community/di/test_manifest_delivery_module_wiring.py``.
 """
 from __future__ import annotations
 
@@ -19,11 +20,8 @@ import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     MaterialiserPorts,
-    TeclawDeliveryBindings,
-    TeclawDeliveryMode,
     TeclawDeviceDelivery,
     TeclawPlatformDelivery,
-    teclaw_delivery_for_mode,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyReport,
@@ -120,39 +118,31 @@ def test_each_strategy_hands_out_its_own_bundle() -> None:
     assert platform.ports().cli_tool_service == "store"
 
 
-def _bindings(redeliver) -> TeclawDeliveryBindings:
-    return TeclawDeliveryBindings(
-        platform_ports=lambda: _ports("store"),
-        device_ports=lambda: _ports("device"),
-        redeliver=redeliver,
-        cli_tool_service=lambda: "teclaw-cli",
-    )
-
-
-def test_the_table_binds_the_platform_ports_and_the_redeliver() -> None:
-    """``PLATFORM`` selects the strategy that carries both."""
+def test_the_platform_shape_carries_the_store_ports_and_the_redeliver() -> None:
+    """Both, and its constructor requires both."""
     redeliver, sync, _ = _redeliver(bound=True)
-    strategy = teclaw_delivery_for_mode(
-        TeclawDeliveryMode.PLATFORM, _bindings(redeliver)
+    strategy = TeclawPlatformDelivery(
+        ports=lambda: _ports("store"), redeliver=redeliver
     )
-    assert isinstance(strategy, TeclawPlatformDelivery)
     assert strategy.ports().upload_service == "store"
     assert _run(strategy.finish(make_context(engine_type="teclaw"), _report())) is None
     assert sync.calls == ["deliver_manifest_apply"]
 
 
-def test_the_device_row_never_sees_the_redeliver_at_all() -> None:
-    """``DEVICE`` selects a strategy whose constructor does not take one.
-
-    The redeliver is still bound — the bundle carries every field both rows
-    could want — and the row that does not need it never reads it, which is why
-    a device-backed deployment cannot redeliver by accident.
-    """
-    redeliver, sync, resolved = _redeliver(bound=True)
-    strategy = teclaw_delivery_for_mode(
-        TeclawDeliveryMode.DEVICE, _bindings(redeliver)
+def test_the_device_shape_cannot_be_handed_a_redeliver_at_all() -> None:
+    """Its constructor does not take one, so a device-backed deployment cannot
+    redeliver by accident — and the provider that builds it is never handed the
+    bundle that holds one."""
+    with pytest.raises(TypeError):
+        TeclawDeviceDelivery(  # type: ignore[call-arg]
+            ports=lambda: _ports("device"),
+            cli_tool_service=lambda: "teclaw-cli",
+            redeliver=_redeliver(bound=True)[0],
+        )
+    strategy = TeclawDeviceDelivery(
+        ports=lambda: _ports("device"), cli_tool_service=lambda: "teclaw-cli"
     )
-    assert isinstance(strategy, TeclawDeviceDelivery)
+    _, sync, resolved = _redeliver(bound=True)
     assert strategy.ports().upload_service == "device"
     assert _run(strategy.finish(make_context(engine_type="teclaw"), _report())) is None
     assert sync.calls == [] and resolved == []

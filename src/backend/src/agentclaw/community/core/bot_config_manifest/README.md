@@ -452,12 +452,15 @@ refs; the collector emits it only while the bot has the skill active.
 still what a deployment writes, and it is still strict about booleans — but it
 is read exactly once, at boot, by `delivery_mode.teclaw_delivery_mode_from_config`,
 which answers a `TeclawDeliveryMode` (`PLATFORM` / `DEVICE`) rather than a
-boolean. The composition root then looks that mode up in two tables —
-`TECLAW_DELIVERY_BY_MODE` for the apply seam, `_COMPOSE_READER_BY_MODE` for the
-compose seam — and binds *one* strategy and *one* reader. The mode is not a
-field on anything built from it, and the shape that was not selected is never
-constructed: a deployment-time fact is settled at deployment time, so no
-component re-decides it per apply, per compose, or per bot.
+boolean. The composition root then binds *one* strategy and *one* reader from
+it: the apply seam has one provider per mode in
+`di/modules/manifest_delivery_module`, each contributing its strategy to the
+`DeliveryStrategies` mapping only when the deployment named its own mode, and
+the compose seam looks the mode up in `_COMPOSE_READER_BY_MODE` (a
+single-valued binding, which injector gives no conditional provider for). The
+mode is not a field on anything built from it, and the shape that was not
+selected is never constructed: a deployment-time fact is settled at deployment
+time, so no component re-decides it per apply, per compose, or per bot.
 
 It stays `DEVICE` until the teclaw engine implements
 the `ownership` map (R-O1/R-O2/R-O3); there, teclaw runs the shape it ran before

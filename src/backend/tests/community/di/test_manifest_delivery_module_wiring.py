@@ -1,0 +1,151 @@
+"""Which delivery strategy each family — and each teclaw mode — is wired to (W8).
+
+The composition root no longer turns the deployment's
+:class:`TeclawDeliveryMode` into a strategy by looking it up in a table. It has
+one provider per mode, each contributing its own row to the
+:data:`DeliveryStrategies` multibinding only when the deployment
+named its mode. That moves two guarantees the retired table's import-time
+exhaustiveness check used to give onto this file, asserted over the real graph
+instead:
+
+* every member of the enum names a strategy — a mode a deployment can write
+  into its yaml and nothing can build is "the surface accepts what it cannot
+  run", the rule this feature is built around;
+* exactly one teclaw strategy is bound, so the two providers can never both be
+  effective and leave which row won to the order the module happens to install
+  its providers in.
+
+The mode is rebound on the injector rather than written into a yaml overlay
+because it is the config object's value that every provider here reads, and the
+point is which strategy comes out of the graph — not how the yaml scalar got
+parsed, which ``delivery_mode``'s own tests cover.
+"""
+from __future__ import annotations
+
+import pytest
+
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    ArcaDelivery,
+    DeliveryStrategies,
+    DeliveryStrategyFactory,
+    DeviceDeliveryBindings,
+    EngineFamily,
+    TeclawDeliveryMode,
+    TeclawDeviceDelivery,
+    TeclawPlatformDelivery,
+)
+from agentclaw.community.di import config as cfg
+
+#: The strategy each mode is expected to bind. One row per mode, and the test
+#: below asserts the enum has no member this table misses — so adding a mode
+#: without wiring it a provider fails here rather than at the first apply on a
+#: deployment that set it.
+_EXPECTED = {
+    TeclawDeliveryMode.PLATFORM: TeclawPlatformDelivery,
+    TeclawDeliveryMode.DEVICE: TeclawDeviceDelivery,
+}
+
+
+def _strategies(test_injector, mode: TeclawDeliveryMode):
+    test_injector.binder.bind(
+        cfg.BotConfigManifestConfig,
+        to=cfg.BotConfigManifestConfig(teclaw_delivery_mode=mode),
+    )
+    return test_injector.get(DeliveryStrategies)
+
+
+def test_every_teclaw_mode_binds_a_strategy() -> None:
+    """The coverage the retired selection table checked at import."""
+    assert set(_EXPECTED) == set(TeclawDeliveryMode)
+
+
+@pytest.mark.parametrize("mode", list(TeclawDeliveryMode))
+def test_the_deployments_mode_names_the_teclaw_strategy(test_injector, mode) -> None:
+    """One provider is effective per mode, and it is the one for that mode.
+
+    Asserted through the injector rather than by reading the module: what
+    matters is the object an apply would be handed.
+    """
+    strategies = _strategies(test_injector, mode)
+
+    assert isinstance(strategies[EngineFamily.TECLAW], _EXPECTED[mode])
+    # Not merely "the expected class is in there": the other shape must not be
+    # bound at all, on any key, or the map's teclaw row would depend on which
+    # provider the module installed last.
+    others = [s for f, s in strategies.items() if f is not EngineFamily.TECLAW]
+    assert not any(
+        isinstance(s, (TeclawPlatformDelivery, TeclawDeviceDelivery)) for s in others
+    )
+
+
+@pytest.mark.parametrize("mode", list(TeclawDeliveryMode))
+def test_every_family_is_bound_whatever_the_mode(test_injector, mode) -> None:
+    """ARCA's row is not the teclaw switch's business, and the factory refuses a
+    family with no strategy — so this is what makes the factory buildable at
+    all."""
+    strategies = _strategies(test_injector, mode)
+
+    assert set(strategies) == set(EngineFamily)
+    assert isinstance(strategies[EngineFamily.ARCA], ArcaDelivery)
+
+
+def test_the_factory_is_handed_the_bound_strategies_and_builds_none(
+    test_injector,
+) -> None:
+    """``manifest_delivery_strategies`` assembles nothing.
+
+    The strategy a bot applies through is *identically* the object the graph
+    bound, and the family adapter comes off its own binding — which is what
+    lets a test swap either without reaching into the factory.
+    """
+    strategies = _strategies(test_injector, TeclawDeliveryMode.DEVICE)
+    factory = test_injector.get(DeliveryStrategyFactory)
+
+    assert factory.for_family(EngineFamily.ARCA) is strategies[EngineFamily.ARCA]
+    assert factory.for_family(EngineFamily.TECLAW) is strategies[EngineFamily.TECLAW]
+    # And the lookup answers off the engine authority the rest of the platform
+    # asks, adapted once at its own binding.
+    assert isinstance(factory.for_engine("teclaw"), TeclawDeviceDelivery)
+    assert isinstance(factory.for_engine("claude_code"), ArcaDelivery)
+    assert isinstance(factory.for_engine(None), ArcaDelivery)
+
+
+def test_the_device_bundle_is_one_binding_both_shapes_read(test_injector) -> None:
+    """ARCA and the device-backed teclaw shape write through the same ports.
+
+    They are two strategies over one bundle, not two bundles that have to agree:
+    the binding is the seam, so a deployment cannot end up with the ``arca``
+    CLI binding on one and something else on the other.
+    """
+    strategies = _strategies(test_injector, TeclawDeliveryMode.DEVICE)
+    bindings = test_injector.get(DeviceDeliveryBindings)
+
+    assert strategies[EngineFamily.ARCA]._ports is bindings.device_ports
+    assert strategies[EngineFamily.TECLAW]._ports is bindings.device_ports
+
+
+@pytest.mark.parametrize("mode", list(TeclawDeliveryMode))
+def test_the_shape_the_mode_did_not_name_is_never_constructed(
+    test_injector, monkeypatch, mode
+) -> None:
+    """Not selected out of two built ones: only one is built.
+
+    This is what the per-mode providers buy over a provider that took the mode
+    and branched. The unselected shape cannot be handed to anything by accident
+    because it does not exist, and the collaborators behind it — the
+    store-backed bundle, or the ARCA-side one — are never asked for on a
+    deployment that does not deliver that way.
+    """
+    built: list[type] = []
+    for cls in (TeclawPlatformDelivery, TeclawDeviceDelivery):
+        original = cls.__init__
+
+        def record(self, *args, _cls=cls, _original=original, **kwargs):
+            built.append(_cls)
+            _original(self, *args, **kwargs)
+
+        monkeypatch.setattr(cls, "__init__", record)
+
+    _strategies(test_injector, mode)
+
+    assert built == [_EXPECTED[mode]]

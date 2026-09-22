@@ -8,10 +8,12 @@ is the delivery; ``TeclawDeviceDelivery`` puts the rest after, because that is
 the shape teclaw ran before W8.
 
 The three are ordinary objects with no mode, switch or flag of their own: a
-deployment's choice is made once, by the tables below — the yaml scalar to a
-``TeclawDeliveryMode``, the mode to a strategy — and by then there is nothing
-left to decide. So these tests name a class where they used to pass an
-argument, and the selection is tested where selection happens.
+deployment's choice is made once — the yaml scalar to a ``TeclawDeliveryMode``
+below, the mode to a strategy by whichever of the composition root's two
+per-mode providers is effective — and by then there is nothing left to decide.
+So these tests name a class where they used to pass an argument, and the
+selection is tested where selection happens:
+``tests/community/di/test_manifest_delivery_module_wiring.py``.
 """
 from __future__ import annotations
 
@@ -26,13 +28,10 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     DeliveryStrategyFactory,
     EngineFamily,
     MaterialiserPorts,
-    TECLAW_DELIVERY_BY_MODE,
-    TeclawDeliveryBindings,
     TeclawDeliveryMode,
     TeclawDeviceDelivery,
     TeclawPlatformDelivery,
     family_from_engine_test,
-    teclaw_delivery_for_mode,
     teclaw_delivery_mode_from_config,
 )
 from agentclaw.community.core.bot_config_manifest.apply.order import (
@@ -323,60 +322,35 @@ async def test_only_the_platform_shape_closes_an_apply() -> None:
     assert len(calls) == 1
 
 
-# ── selecting the teclaw shape: the mode table ────────────────────────────
+# ── what a built strategy has, and has not, reached ───────────────────────
 
 
-def _bindings() -> TeclawDeliveryBindings:
-    return TeclawDeliveryBindings(
-        platform_ports=lambda: _ports("store"),
-        device_ports=lambda: _ports("device"),
-        redeliver=_no_redeliver,
-        cli_tool_service=lambda: "teclaw-cli",
-    )
+def test_a_strategy_reaches_its_ports_no_earlier_than_the_first_apply() -> None:
+    """Constructing one resolves nothing behind it.
 
-
-@pytest.mark.parametrize(
-    "mode,expected,tag",
-    [
-        (TeclawDeliveryMode.PLATFORM, TeclawPlatformDelivery, "store"),
-        (TeclawDeliveryMode.DEVICE, TeclawDeviceDelivery, "device"),
-    ],
-)
-def test_the_mode_table_builds_one_strategy(mode, expected, tag) -> None:
-    strategy = teclaw_delivery_for_mode(mode, _bindings())
-    assert isinstance(strategy, expected)
-    assert strategy.ports().resource_service == tag
-
-
-def test_the_mode_table_is_exhaustive() -> None:
-    """The import-time check in ``delivery.py``, named here.
-
-    A mode a deployment can write into its yaml and nothing can build is "the
-    surface accepts what it cannot run" — and adding a shape is a class and a
-    row, which is the point of a table rather than a branch.
+    Both bundles are thunks, which is what lets the composition root bind a
+    strategy at boot although every port behind it reaches the device or the
+    object-store graph. The shape a deployment did not name is never built at
+    all — asserted over the real graph in the DI wiring suite — and the one it
+    did build stays this cheap until an apply runs.
     """
-    assert set(TECLAW_DELIVERY_BY_MODE) == set(TeclawDeliveryMode)
+    reached: list[str] = []
 
-
-def test_only_the_selected_shape_is_built() -> None:
-    """The unselected row never runs, so it can never be handed to anything.
-
-    The bundle carries both port thunks because the rows share a signature;
-    what proves only one is used is that neither thunk is *called* by selection
-    itself — a strategy reaches its graph on its first apply, not at boot.
-    """
-    built: list[str] = []
-
-    bindings = TeclawDeliveryBindings(
-        platform_ports=lambda: built.append("platform") or _ports("store"),
-        device_ports=lambda: built.append("device") or _ports("device"),
+    platform = TeclawPlatformDelivery(
+        ports=lambda: reached.append("store") or _ports("store"),
         redeliver=_no_redeliver,
-        cli_tool_service=lambda: "teclaw-cli",
     )
-    strategy = teclaw_delivery_for_mode(TeclawDeliveryMode.DEVICE, bindings)
-    assert built == []
-    strategy.ports()
-    assert built == ["device"]
+    device = TeclawDeviceDelivery(
+        ports=lambda: reached.append("device") or _ports("device"),
+        cli_tool_service=lambda: reached.append("cli") or "teclaw-cli",
+    )
+    arca = ArcaDelivery(lambda: reached.append("arca") or _ports("arca"))
+    assert reached == []
+
+    platform.ports()
+    device.ports()
+    arca.ports()
+    assert reached == ["store", "device", "cli", "arca"]
 
 
 # ── the factory: a lookup over built strategies ───────────────────────────

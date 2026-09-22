@@ -36,6 +36,9 @@ from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
 from agentclaw.community.di.modules.bot_friend_auth_module import BotFriendAuthModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
+from agentclaw.community.di.modules.manifest_delivery_module import (
+    ManifestDeliveryModule,
+)
 from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
 from agentclaw.community.di.modules.bot_quota_module import BotQuotaModule
@@ -150,6 +153,7 @@ def build_injector(
         DigitalEmployeeModule(),
         BotQuotaModule(),
         ManifestFetchModule(),
+        ManifestDeliveryModule(),
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),

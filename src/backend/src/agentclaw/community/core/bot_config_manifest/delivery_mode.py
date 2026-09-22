@@ -4,14 +4,14 @@ A leaf: an enum, a yaml key, and the parser between them. It imports nothing
 from the feature, because both of its consumers sit at the edges — the typed
 config cluster in ``di/config.py``, which is imported before almost everything
 else, and the composition root, which turns the mode into the objects that do
-the work (``apply/delivery`` for the apply seam, the managed-files reader for
-the compose seam). Keeping the vocabulary separate from the strategies is what
+the work (one provider per mode for the apply seam, the managed-files reader
+for the compose seam). Keeping the vocabulary separate from the strategies is what
 lets the config cluster name a mode without pulling the apply graph in behind
 it.
 
-**The mode's whole life is three steps:** a yaml scalar, a table row, an
+**The mode's whole life is three steps:** a yaml scalar, one selection, an
 object. It is read once at boot by :func:`teclaw_delivery_mode_from_config`,
-used once per selection table in the composition root, and then gone — no
+used once per seam in the composition root, and then gone — no
 component built from it holds it, and nothing asks for it again. A
 deployment-time fact is settled at deployment time; a component that kept it
 would be re-deciding, on every call and in front of every bot, a decision that
@@ -43,9 +43,9 @@ class TeclawDeliveryMode(StrEnum):
         TeclawDeliveryMode.PLATFORM.value == "platform"
 
     Each names an implementation rather than a setting, which is the point: the
-    composition root looks the mode up in a table
-    (``apply/delivery.TECLAW_DELIVERY_BY_MODE`` for the apply seam, and the
-    compose-reader table beside it) and binds what it finds.
+    composition root binds the apply seam's strategy through the provider that
+    is effective for this mode (``di/modules/manifest_delivery_module``), and
+    the compose seam's reader through the table beside it.
     """
 
     #: The artifact is the delivery: every construct writes platform state,
