@@ -176,8 +176,9 @@ class CronAutoSetupService:
     ) -> Optional[Dict[str, Any]]:
         """为 Bot 自动创建 7×24 托管定时任务。
 
-        判断条件（listener 已保证 active_engine 为 aicoding 或其别名）：
-        1. template ext 中 is_hosted_24x7 == 1
+        入场资格（listener 已按 per-engine 能力位 ``supports_auto_cron_setup``
+        经引擎 registry 放行）后，由本方法读取 template ext 判定：
+        1. is_hosted_24x7 == 1
         2. dima_space_id 存在；缺失时通过 hosted workspace 服务幂等补建
            （applicationCoding，或 capabilities.dima_workspace 显式开启的
            模板工厂 bot 如 mcptestpq），补建失败/不可托管则跳过

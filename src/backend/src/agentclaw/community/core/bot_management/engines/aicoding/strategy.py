@@ -171,6 +171,10 @@ class AicodingProvisioningStrategy(AicodingHostedWorkspaceMixin, EngineProvision
     def engine_type(self) -> str:
         return self._engine_type
 
+    def supports_auto_cron_setup(self) -> bool:
+        """Coding engines opt in to the 7×24 auto-cron capability bit."""
+        return True
+
     def prepare_create(
         self,
         *,

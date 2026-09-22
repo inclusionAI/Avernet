@@ -11,6 +11,7 @@ from .registry import (
     get_engine_provisioning_registry,
     resolve_outbound_rule_envelope,
     resolve_provisioning,
+    supports_auto_cron_setup,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "get_engine_provisioning_registry",
     "resolve_provisioning",
     "resolve_outbound_rule_envelope",
+    "supports_auto_cron_setup",
 ]

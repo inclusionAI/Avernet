@@ -48,6 +48,25 @@ class TestHasDimaWorkspaceEnabled:
             }
         ) is False
 
+    # ── 契约 terminal：扁平键存在但值畸形 → 全关闭，不混入 legacy 嵌套 ─────
+
+    def test_flat_declared_but_none_value_is_false_not_nested_fallback(self):
+        """扁平键存在但值为 None：唯一事实源 → False，禁止 fall-through 到嵌套。"""
+        assert has_dima_workspace_enabled(
+            {
+                "capabilities": None,
+                "bot_template_config": {"capabilities": {"dima_workspace": True}},
+            }
+        ) is False
+
+    def test_flat_declared_but_string_value_is_false_not_nested_fallback(self):
+        assert has_dima_workspace_enabled(
+            {
+                "capabilities": "malformed",
+                "bot_template_config": {"capabilities": {"dima_workspace": True}},
+            }
+        ) is False
+
     # ── 嵌套形态：bot_template_config.capabilities.dima_workspace（兼容兜底） ──
 
     def test_true_when_bool_true(self):

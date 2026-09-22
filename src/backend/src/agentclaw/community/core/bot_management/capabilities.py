@@ -32,6 +32,19 @@ def _capabilities(template_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return capabilities if isinstance(capabilities, dict) else {}
 
 
+def capabilities_node(template_config: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Normalized capabilities node when the factory snapshot declares one.
+
+    Terminal on key presence (per the module contract above): returns the
+    declared node as a dict — falling back to ``{}`` (all-capabilities-off) when
+    the value is present but not a dict — or ``None`` when the key is absent
+    altogether, letting legacy/nested readers apply their own fallbacks.
+    """
+    if not has_declared_capabilities(template_config):
+        return None
+    return _capabilities(template_config)
+
+
 def _bool_capability(
     capabilities: Dict[str, Any],
     flat_key: str,

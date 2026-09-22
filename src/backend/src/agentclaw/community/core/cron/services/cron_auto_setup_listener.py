@@ -1,9 +1,10 @@
-"""Event listener: 自动为 is_hosted_24x7 的 aicoding Coding Bot 创建定时任务。
+"""Event listener: 自动为 is_hosted_24x7 的 7×24 托管 Coding Bot 创建定时任务。
 
-订阅 DeviceActivatedEvent，在设备激活后将 aicoding 引擎的 Bot 交给
-CronAutoSetupService；由 service 读取 template ext 判定
-``is_hosted_24x7 == 1``（不再以 template_type=applicationCoding 为门禁，
-模板工厂 bot 如 mcptestpq 同样走此链路）。
+订阅 DeviceActivatedEvent，在设备激活后按 per-engine 能力位
+（``supports_auto_cron_setup``，经引擎策略 registry 按 ``active_engine`` 解析，
+未注册引擎保守拒绝）放行，交由 CronAutoSetupService 读取 template ext
+判定 ``is_hosted_24x7 == 1``（不再以 template_type=applicationCoding 或引擎
+字符串集合为门禁，模板工厂 bot 如 mcptestpq 同样走此链路）。
 """
 from __future__ import annotations
 
@@ -12,15 +13,13 @@ import asyncio
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.engines import supports_auto_cron_setup
 from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
 from agentclaw.community.core.events.types import DeviceActivatedEvent
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
-
-# aicoding 引擎的已知别名
-_AICODING_ENGINE_ALIASES = {"aicoding", "claude_code", "claude-code", "claudecode"}
 
 
 class CronAutoSetupListener(LifecycleBase):
@@ -90,27 +89,28 @@ class CronAutoSetupListener(LifecycleBase):
                 )
                 return
 
-            # 2. 检查是否为 aicoding 引擎 Bot（is_hosted_24x7 / dima_space_id
-            #    在 template ext 里，bot 记录不带，由 service 读取后判定）
+            # 2. 检查引擎是否声明 7×24 自动 cron 能力位（is_hosted_24x7 /
+            #    dima_space_id 在 template ext 里，bot 记录不带，由 service
+            #    读取后判定）
             active_engine = bot.get("active_engine", "")
-            template_type = bot.get("template_type", "")
-            is_aicoding_engine = active_engine in _AICODING_ENGINE_ALIASES
+            engine_eligible = supports_auto_cron_setup(engine_type=active_engine)
             logger.info(
-                "[cron_auto_setup_listener] bot %s check: engine=%s, template_type=%s, "
-                "is_aicoding=%s",
-                bot_id, active_engine, template_type, is_aicoding_engine,
+                "[cron_auto_setup_listener] bot %s check: engine=%s, "
+                "auto_cron_eligible=%s",
+                bot_id, active_engine, engine_eligible,
             )
-            if not is_aicoding_engine:
+            if not engine_eligible:
                 logger.info(
-                    "[cron_auto_setup_listener] bot %s is not an aicoding-engine bot "
-                    "(engine=%s), skipping",
+                    "[cron_auto_setup_listener] bot %s engine=%s does not "
+                    "support auto-cron setup, skipping",
                     bot_id, active_engine,
                 )
                 return
 
             # 3. 异步执行 cron 自动创建
             logger.info(
-                "[cron_auto_setup_listener] bot %s is aicoding-engine, triggering cron setup",
+                "[cron_auto_setup_listener] bot %s engine supports auto-cron setup, "
+                "triggering cron setup",
                 bot_id,
             )
             self._schedule_cron_setup(bot_id, owner_id, owner_name)

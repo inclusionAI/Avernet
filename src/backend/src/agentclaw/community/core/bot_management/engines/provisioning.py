@@ -322,3 +322,13 @@ class EngineProvisioningStrategy(ABC):
         service layer translates it uniformly (coding engines override).
         """
         raise hosted_workspace_not_eligible_error(ctx)
+
+    # ── 7×24 auto-cron eligibility ────────────────────────────────────
+    # Per-engine capability bit resolved via the composition root
+    # (``engines.registry.supports_auto_cron_setup``): services ask the
+    # registry by ``active_engine`` instead of branching on engine strings.
+    # Default is conservative-deny; engines opt in by overriding.
+
+    def supports_auto_cron_setup(self) -> bool:
+        """Whether this engine's bots are eligible for 7×24 auto-cron setup."""
+        return False
