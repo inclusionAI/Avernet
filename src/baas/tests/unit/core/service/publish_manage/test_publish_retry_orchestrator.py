@@ -786,11 +786,21 @@ class TestRetryAllowedBranches:
     def test_database_now_failure_falls_back_to_host_clock(self):
         svc = _make_service()
         rec = _make_record()
+        svc._provider_supports_retry = MagicMock(return_value=True)
         svc._publish_repo.get_by_id.return_value = _publish()
         svc._publish_record_repo.database_now.side_effect = RuntimeError("db down")
-        assert (
-            svc._retry_allowed(rec, _state(publish_max_retry_times=2), "t", "e") is True
-        )
+
+        with patch(
+            "secbaas.community.core.service.publish_manage"
+            "._publish_retry_orchestrator.naive_cst_now",
+            return_value=datetime(2026, 1, 1, 12, 0, 0),
+        ) as fallback:
+            result = svc._retry_allowed(
+                rec, _state(publish_max_retry_times=2), "t", "e"
+            )
+
+        fallback.assert_called_once()
+        assert result is True
 
     def test_non_dict_extra_config_uses_default_timeout(self):
         svc = _make_service()
