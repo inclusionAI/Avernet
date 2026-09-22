@@ -201,10 +201,12 @@ class TaskContext:
   → 首棒 Skill 基于根 TaskSpec、根 TaskNode 和空 DoneOutput 计算初始 GAP。
 
 当前 Bot 执行完成
-  → EXECUTION_RESULT 持久化当前节点事实。
-  → Bot 重新读取最新 TaskContext。
-  → Skill 使用最新 TaskContext + 当前节点事实重新解析 new_gaps。
-  → PLAN_RESULT 持久化 new_gaps，整体覆盖旧 gaps。
+  → S4 由 EXECUTION_RESULT 持久化当前节点事实。
+  → S5 不重新读取图谱；Skill 将 S1 TaskContext 的 all_done_output 与当前节点 actual_goal/output/acceptance_result 合并。
+  → S5/S6 本地解析 new_gaps 和唯一 next_task_spec（无 GAP 则为 null）。
+  → S7 由 PLAN_RESULT 持久化 new_gaps + next_task_spec，整体覆盖旧 gaps，并按需创建唯一下一棒节点。
+  → 有 GAP 时继续一次 /search 和一次 DISPATCH_RESULT；无 GAP 时停止，不调用 search / DISPATCH_RESULT / dispatch。
+  → 正常有 GAP 链路的 HTTP 上限：GET context ×1、EXECUTION_RESULT ×1、PLAN_RESULT ×1、search ×1、DISPATCH_RESULT ×1、dispatch ×1。S5 不重新 GET context。
 ```
 
 `gaps` 不是节点局部验收的字符串拼接；Skill 必须基于根任务、全部 DoneOutput 与节点局部验收重新推理。只有已接纳的 `PLAN_RESULT(gaps=[])` 才表示根任务已无已知缺口；Graph 不把初始空数组自行解释为完成。

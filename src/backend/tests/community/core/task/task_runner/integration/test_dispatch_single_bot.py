@@ -365,6 +365,27 @@ def test_prompt_formatter_relay_mode_injects_event_protocol_only():
     assert "node_id 必须是 PLAN_RESULT 返回的 target_node_id" in prompt
     assert "HTTP 200 前，不得向用户宣称任务已完成" in prompt
 
+    assert "固定阶段编号 S1-S8" in prompt
+    for stage in (
+        "S1/8 解析任务最新上下文",
+        "S2/8 计算当前GAP",
+        "S3/8 Bot能力匹配",
+        "S4/8 任务执行并统一上报",
+        "S5/8 更新GAP",
+        "S6/8 解析下一棒 TaskNode",
+        "S7/8 搜推并指定执行者",
+        "S8/8 实际交接",
+    ):
+        assert stage in prompt
+    assert prompt.count("GET http://backend/api/v1/collaboration/tasks/t1/context") == 1
+    assert "最小调用与输出契约" in prompt
+    assert "正常有GAP链路最多6次HTTP调用" in prompt
+    assert "无GAP链路不得调用search、DISPATCH_RESULT或dispatch" in prompt
+    assert "禁止步骤0、步骤0确认、S2-S3合并编号或协议章节号" in prompt
+    assert "S2/8" in prompt and "本阶段不调用 HTTP 上报接口" in prompt
+    assert "S5/8 更新GAP：不再重新读取图谱" in prompt
+    assert "S6/8" in prompt and "本阶段不调用 HTTP 上报接口" in prompt
+
 
 def test_static_relay_prompt_waits_for_every_member_and_preserves_markdown():
     """静态协作接力必须在全员完成后唯一汇总，并要求结构化 Markdown 产出。"""

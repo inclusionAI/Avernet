@@ -1,6 +1,6 @@
 # Task 模块边界、统一事实接口与双编排模式
 
-> 本文定义目标架构，不描述当前实现已经具备的行为。它同时支持中心化规划执行与分布式接力执行；Relay 以本文的七步闭环和 API 契约为准。
+> 本文定义目标架构，不描述当前实现已经具备的行为。它同时支持中心化规划执行与分布式接力执行；Relay 以本文的 S1-S8 严格闭环和 API 契约为准。
 
 ## Summary
 
@@ -9,7 +9,7 @@
 两种编排模式共享 TaskSpec、TaskNode、TaskContext、统一 report、候选搜索、Runner 和 BBS 能力，但由不同主体完成规划与交接：
 
 - **中心化规划执行模式**：Graph 的语义事件驱动 Backend `TaskPlanner → TaskDispatcher → TaskRunner`。中心化模式可生成多个节点，并由 Graph 依据依赖关系和子节点状态进行父节点收敛。
-- **分布式接力执行模式（Relay）**：当前 baton Bot / 协作群 Manager 通过 Skill 运行“读取上下文 → 能力匹配 → 执行 → 上报 → GAP 重算 → 规划 → 搜推 → 交接”的严格串行闭环。每次规划最多生成一个下一棒节点；后续节点不得回写前序节点或根节点的运行事实。
+- **分布式接力执行模式（Relay）**：当前 baton Bot / 协作群 Manager 通过 Skill 运行固定 S1-S8：“读取上下文 → 计算 GAP → 能力匹配 → 执行并统一上报 → 更新 GAP → 解析下一棒 → 搜推并指定执行者 → 实际交接”的严格串行闭环。S2/S3/S5/S6 是本地推理，不提前调用上报接口。每次规划最多生成一个下一棒节点；后续节点不得回写前序节点或根节点的运行事实。
 
 任务识别澄清使用 task-loop 的 `task_info` 卡片领域模型。确认后，平台以稳定接口 `init_task_request(task_info, source_context) -> TaskInfoRequest` 创建正式任务；卡片外层的 UI 状态不进入 TaskSpec。
 
@@ -30,7 +30,7 @@
 - `TaskGraphService` 是任务过程事实、图谱状态机、版本、幂等和持久化的唯一所有者。
 - `TaskContext` 是中心化 Planner、Relay Bot、BBS Bot 和恢复流程共用的最新业务上下文。
 - task-loop 的 `task_info` 保持为识别澄清阶段的统一任务草案；确认后的转换接口稳定。
-- Relay 每一棒采用相同的七步执行闭环，严格串行、一次只产生一个下一棒。
+- Relay 每一棒采用相同的 S1-S8 执行闭环，严格串行、一次只产生一个下一棒。
 - `/search` 只做候选检索；`DISPATCH_RESULT` 只记录 Skill 派发决策；`/dispatch` 只做 Runner 实际投递。
 - 单 Bot、协作群和 BBS 都能承接下一棒；协作群默认将任务提交 Human 作为 observer 加入。
 - 中心化与 Relay 复用统一事实边界和 Runner 能力，但不强迫二者共享父子状态收敛策略。
@@ -70,7 +70,10 @@
 
 ### Relay
 
-- [ ] Relay 以 `EXECUTION_RESULT → PLAN_RESULT → /search → DISPATCH_RESULT → /dispatch | BBS claim` 闭环推进；`EXECUTION_RESULT` 成功不是本棒结束。
+- [ ] Relay 以固定 S1-S8 闭环推进：S1 读取上下文、S2 计算 GAP、S3 能力匹配、S4 执行并上报 `EXECUTION_RESULT`、S5 更新 GAP、S6 解析下一棒、S7 `PLAN_RESULT → /search → DISPATCH_RESULT`、S8 `/dispatch | BBS`；`EXECUTION_RESULT` 成功不是本棒结束。
+- [ ] Relay 会话中的执行阶段明细使用 `【S1/8 ...】` 到 `【S8/8 ...】` 连续编号；重试、恢复或接口章节号不得造成步骤编号跳变。
+- [ ] S2/S3/S5/S6 是 Skill 端本地推理，不调用任务 HTTP 上报接口；S4 后可直接基于 S1 上下文与当前节点事实进入 S5，无需再次读取 TaskContext。
+- [ ] Relay 正常有 GAP 链路最多 6 次 HTTP 调用：1 次 context、3 类必要事实上报、1 次 search、1 次 dispatch；无 GAP 链路不得调用 search、DISPATCH_RESULT 或 dispatch。确定性错误只能使用同幂等 ID 原样重试，不得增加进度型或探测型调用。
 - [ ] Relay Bot 的有效覆盖等于“职责/系统角色覆盖 AND Skill/工具事实覆盖”；工具、搜索或通用模型能力不得扩大职责边界。
 - [ ] `actual_goal` 由当前 Bot 本地计算，在 `EXECUTION_RESULT` 中首次持久化；不新增执行范围开始事件。
 - [ ] Relay Skill 依据最新 `TaskContext` 和当前完成节点事实重新计算 `gaps: list[str]`，并通过 `PLAN_RESULT` 让 Graph 持久化最新 GAP 快照。

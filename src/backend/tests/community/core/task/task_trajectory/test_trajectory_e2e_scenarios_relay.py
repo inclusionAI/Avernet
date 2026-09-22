@@ -824,10 +824,10 @@ class TestMixedModalityFullChainConverges:
             event_id="s2", reason=S2_GROUP_REASON,
             payload={
                 "outcome": "HIT_MULTI_BOTS",
-                "bot_ids": ["manager-bot", "member-bot"],
+                "bot_ids": ["manager-bot", "worker-bot"],
                 "collab_mode": "manager_worker",
                 "driver_bot_id": "manager-bot",
-                "next_relay_bots": ["manager-bot", "member-bot"],
+                "next_relay_bots": ["manager-bot", "worker-bot"],
             },
         )
         _dispatch(service, origin=leg1, target=leg2, holder_id="member-bot",
