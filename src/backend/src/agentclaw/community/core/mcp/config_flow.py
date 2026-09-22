@@ -200,6 +200,8 @@ async def write_unified_config(
         headers=headers,
         endpoint_env=endpoint_env,
         transport_protocol=normalized_tp,
+        entity_id=entity_id,
+        entity_type=entity_type,
     )
     if not candidate["valid"]:
         if candidate.get("kind") == "center_unavailable":

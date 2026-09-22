@@ -85,11 +85,13 @@ def config_service(repo):
     }
     bot_config_repo = MagicMock()
     bot_config_repo.list_by_owner_and_server_code.return_value = {}
+    bot_repo = MagicMock()
+    bot_repo.list_by_entity.return_value = (0, [])
     return MCPConfigService(
         user_mcp_config_repo=repo,
         bot_mcp_config_repo=bot_config_repo,
         mcp_center=mcp_center,
-        bot_repo=MagicMock(),
+        bot_repo=bot_repo,
         capability_reader=MagicMock(),
         mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
         secret_resolver=MagicMock(),

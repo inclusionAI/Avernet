@@ -798,3 +798,41 @@ class TestMCPConfigServiceBuildPayload:
 
         assert headers == {}
         resolver.get_secret.assert_not_called()
+
+    def test_validate_user_update_selects_team_entity_with_the_bot_owner(self):
+        center = MagicMock()
+        center.get_mcp_detail.return_value = {
+            "serverCode": "mcp.test",
+            "runMode": "REMOTE",
+            "endpoints": [
+                {"env": "PROD", "networkType": "OFFICE", "transportProtocol": "SSE"}
+            ],
+        }
+        bot_repo = MagicMock()
+        bot_repo.list_by_entity.return_value = (1, [{
+            "bot_id": "team-bot", "owner_id": "team-owner", "active_engine": "openclaw",
+        }])
+        capability_reader = MagicMock()
+        capability_reader.effective_mcp_server_codes.return_value = frozenset({"mcp.test"})
+        bot_configs = MagicMock()
+        bot_configs.list_by_owner_and_server_code.return_value = {}
+        user_repo = MagicMock()
+        user_repo.get_by_user_and_server_code.return_value = None
+        svc = MCPConfigService(
+            user_mcp_config_repo=user_repo,
+            bot_mcp_config_repo=bot_configs,
+            mcp_center=center,
+            bot_repo=bot_repo,
+            capability_reader=capability_reader,
+            mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
+            secret_resolver=MagicMock(),
+        )
+
+        result = svc.validate_user_config_update(
+            user_id="caller", server_code="mcp.test", api_key=None, headers=None,
+            endpoint_env="PROD", transport_protocol="SSE",
+            entity_id="team-42", entity_type="team",
+        )
+
+        assert result["affected_bot_ids"] == ["team-bot"]
+        assert capability_reader.effective_mcp_server_codes.call_args.kwargs["owner_id"] == "team-owner"

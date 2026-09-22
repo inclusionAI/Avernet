@@ -155,6 +155,8 @@ class MCPConfigService(MCPConfigServiceProtocol):
         headers: dict[str, str] | None,
         endpoint_env: str | None,
         transport_protocol: str | None,
+        entity_id: str | None = None,
+        entity_type: str | None = None,
     ) -> dict[str, Any]:
         """Reject a user-default update that invalidates an existing Bot override.
 
@@ -196,17 +198,14 @@ class MCPConfigService(MCPConfigServiceProtocol):
             owner_id=user_id, server_code=server_code
         )
         affected_bot_ids: list[str] = []
-        bot_ids = self._bot_repo.list_live_bot_ids_by_owner(user_id)
-        for bot_id in bot_ids:
-            bot = self._bot_repo.get_by_id_and_owner(bot_id, user_id)
-            if bot is None:
-                # Lifecycle cleanup is best-effort across historical rows. A
-                # stale override for a deleted Bot must not block the owner's
-                # otherwise valid user-default update.
-                continue
+        for bot in self._candidate_bots(
+            user_id=user_id, entity_id=entity_id, entity_type=entity_type
+        ):
+            bot_id = str(bot["bot_id"])
+            bot_owner_id = str(bot.get("owner_id") or user_id)
             if server_code not in self._capability_reader.effective_mcp_server_codes(
                 bot_id=bot_id,
-                owner_id=user_id,
+                owner_id=bot_owner_id,
                 bot=bot,
             ):
                 continue
@@ -241,6 +240,37 @@ class MCPConfigService(MCPConfigServiceProtocol):
             "error": None,
             "affected_bot_ids": affected_bot_ids,
         }
+
+    def _candidate_bots(
+        self,
+        *,
+        user_id: str,
+        entity_id: str | None,
+        entity_type: str | None,
+    ) -> list[dict[str, Any]]:
+        if entity_id is None:
+            bots = []
+            for bot_id in self._bot_repo.list_live_bot_ids_by_owner(user_id):
+                bot = self._bot_repo.get_by_id_and_owner(bot_id, user_id)
+                if bot is not None:
+                    bots.append({**bot, "bot_id": bot_id, "owner_id": user_id})
+            return bots
+
+        bots: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        page = 1
+        while True:
+            total, rows = self._bot_repo.list_by_entity(
+                entity_id=entity_id, entity_type=entity_type, page=page, page_size=100
+            )
+            for bot in rows:
+                bot_id = bot.get("bot_id")
+                if bot_id and bot_id not in seen:
+                    seen.add(bot_id)
+                    bots.append(bot)
+            if not rows or len(bots) >= total:
+                return bots
+            page += 1
 
     def _validate_effective_config(
         self,
