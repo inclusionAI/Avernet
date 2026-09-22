@@ -1369,12 +1369,15 @@ class DeviceService:
             f"{type(self).__name__} does not support multi-instance restart"
         )
 
-    def exec_shell_new(self, device_id: str, shell_cmd: str):
+    def exec_shell_new(self, device_id: str, shell_cmd: str, *, allow_recovery: bool = False):
         """Execute shell command on device and return CommandResult.
 
         Args:
             device_id: 设备 ID
             shell_cmd: 要执行的 shell 命令
+            allow_recovery: Internal recovery callers may also inspect FAILED/STOPPED
+                bindings. The provider still decides whether the container is live;
+                execution/transport errors are never treated as success.
 
         Returns:
             CommandResult 对象，包含 stdout、stderr、exit_code 等字段
@@ -1389,10 +1392,11 @@ class DeviceService:
         if current is None:
             raise DeviceNotFoundError(f"device {device_id} not found")
 
-        if current.status not in [
-            DeviceBindingStatus.ACTIVE.value,
-            DeviceBindingStatus.PENDING.value,
-        ]:
+        if current.status not in (
+            [DeviceBindingStatus.ACTIVE.value, DeviceBindingStatus.PENDING.value]
+            + ([DeviceBindingStatus.FAILED.value, DeviceBindingStatus.STOPPED.value]
+               if allow_recovery else [])
+        ):
             raise InvalidDeviceStatusError("only ACTIVE/PENDING devices can exec_shell_new")
 
         allocated_device = AllocatedDevice(

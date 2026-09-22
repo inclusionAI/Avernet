@@ -15,7 +15,7 @@ import asyncio
 import json
 from typing import Any, List, Literal, Optional
 
-from starlette.concurrency import run_in_threadpool
+from agentclaw.community.core.bot_management.engines.registry import execute_bot_restart
 from fastapi import APIRouter, Query, Request, Response, Depends, Path
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
@@ -397,8 +397,8 @@ async def restart_bot_for_others(
         target_bot_id = target_bot_id.strip()
 
         # Call service to restart bot
-        result = await run_in_threadpool(
-            bot_service.restart_bot,
+        result = await execute_bot_restart(
+            bot_service,
             bot_id=target_bot_id,
             user_id=target_user_id,
             nick_name=target_user_id,  # Use user_id as nick_name for admin operations
@@ -499,8 +499,8 @@ async def restart_scheduler(
         target_bot_id = data.get("bot_id")
 
         # Call service to restart bot
-        result = await run_in_threadpool(
-            bot_service.restart_bot,
+        result = await execute_bot_restart(
+            bot_service,
             bot_id=target_bot_id,
             user_id=target_user_id,
             nick_name=target_user_id,  # Use user_id as nick_name for admin operations
@@ -2864,8 +2864,8 @@ async def restart_bot(
             # Empty/non-JSON request bodies remain valid for legacy callers.
             extra_configs = None
 
-        result = await run_in_threadpool(
-            bot_service.restart_bot,
+        result = await execute_bot_restart(
+            bot_service,
             bot_id=bot_id,
             user_id=resolved_owner_id,
             nick_name=nick_name,

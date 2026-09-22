@@ -89,7 +89,7 @@ def test_binding_change_blocks_without_writing_bot_state(engine):
     ctx = BotProvisioningContext(bot_id='bot', owner_id='owner', bot_type='personal', active_engine=engine)
     receipt_check = Mock()
     with patch.object(backup, 'prepare_backup', return_value=receipt_check):
-        verify = AicodingProvisioningStrategy(engine).prepare_restart(
+        verify = AicodingProvisioningStrategy(engine)._prepare_restart(
             ctx, binding_id=42, device_service=device, bot_repository=repository)
     with pytest.raises(RuntimeError, match='绑定'):
         verify()
@@ -99,7 +99,7 @@ def test_binding_change_blocks_without_writing_bot_state(engine):
 
 def test_default_engine_is_noop():
     device = Mock()
-    DefaultProvisioningStrategy().prepare_restart(None, binding_id=42, device_service=device)()
+    assert DefaultProvisioningStrategy().prepare_restart(None, binding_id=42, device_service=device) is None
     device.get_device.assert_not_called()
 
 
@@ -151,7 +151,7 @@ def test_only_confirmed_absence_is_legacy(capsys):
 @pytest.mark.parametrize('provider', ['arca', 'baas'])
 def test_original_lock_and_binding_survive_backup_failure(phase, provider):
     from tests.community.core.bot_management.services.test_bot_service_restart_idempotency import (
-        FakeRestartLockRepo, _make_service, _make_bot, _stateful_bot_repository, BotServiceError,
+        FakeRestartLockRepo, _make_service, _make_bot, _stateful_bot_repository,
     )
     locks = FakeRestartLockRepo()
     bot = _make_bot(active_engine='aicoding', binding_id=42)
@@ -174,7 +174,7 @@ def test_original_lock_and_binding_survive_backup_failure(phase, provider):
     with patch.object(backup, 'prepare_backup', side_effect=prepare_check), \
          patch.object(svc, 'stop_bot') as stop, patch.object(svc, 'start_bot') as start, \
          patch.object(svc, '_restart_bot_baas') as update:
-        with pytest.raises(BotServiceError, match='backup failed'):
+        with pytest.raises(RuntimeError, match='backup failed'):
             svc.restart_bot(bot_id='bot001', user_id='user001')
     stop.assert_not_called()
     start.assert_not_called()
@@ -193,3 +193,247 @@ def test_wait_logs_are_throttled_but_keep_progress(caplog):
         backup.prepare_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='t')
     assert caplog.text.count('phase=wait status=running') == 2
     assert 'phase=prepared status=committed' in caplog.text
+
+
+@pytest.mark.parametrize('engine', ['openclaw', 'teclaw', 'qoder', 'unknown'])
+@pytest.mark.asyncio
+async def test_http_dispatch_preserves_non_coding_execution_thread(engine):
+    import threading
+    from agentclaw.community.core.bot_management.engines.registry import execute_bot_restart
+    service = Mock()
+    service.get_bot.return_value = {'active_engine': engine}
+    current_thread = threading.get_ident()
+    service.restart_bot.side_effect = lambda **kwargs: threading.get_ident()
+    with patch.object(backup.asyncio, 'to_thread', side_effect=AssertionError('unexpected offload')):
+        assert await execute_bot_restart(service, bot_id='b', user_id='o') == current_thread
+    service.restart_bot.assert_called_once_with(bot_id='b', user_id='o')
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.asyncio
+async def test_coding_execution_keeps_event_loop_available(engine):
+    import asyncio
+    import threading
+    from agentclaw.community.core.bot_management.engines.registry import execute_bot_restart
+    service = Mock()
+    service.get_bot.return_value = {'active_engine': engine}
+    started, release = threading.Event(), threading.Event()
+    current_thread = threading.get_ident()
+
+    def operation(**kwargs):
+        started.set()
+        assert release.wait(5)
+        return threading.get_ident()
+
+    service.restart_bot.side_effect = operation
+    task = asyncio.create_task(execute_bot_restart(service, bot_id='b', user_id='o'))
+    try:
+        for _ in range(100):
+            if started.is_set():
+                break
+            await asyncio.sleep(.01)
+        assert started.is_set() and not task.done()
+    finally:
+        release.set()
+    assert await task != current_thread
+
+
+def test_default_hook_only_acquires_original_lock():
+    lock = object()
+    acquire, release, provider = Mock(return_value=lock), Mock(), Mock()
+    assert DefaultProvisioningStrategy().prepare_restart(
+        None, acquire_lock=acquire, release_lock=release,
+        device_service_provider=provider, binding_id=42) is lock
+    acquire.assert_called_once_with()
+    release.assert_not_called()
+    provider.assert_not_called()
+
+
+@pytest.mark.parametrize('lock_acquired', [True, False])
+def test_single_coding_hook_owns_prepare_acquire_verify_order(lock_acquired):
+    events = []
+    lock = object() if lock_acquired else None
+    ctx = BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding')
+    strategy = AicodingProvisioningStrategy('aicoding')
+
+    def prepare(*args, **kwargs):
+        events.append('prepare')
+        return lambda: events.append('verify')
+
+    def acquire():
+        events.append('acquire')
+        return lock
+
+    release = Mock()
+    with patch.object(strategy, '_prepare_restart', side_effect=prepare):
+        assert strategy.prepare_restart(ctx, acquire_lock=acquire, release_lock=release) is lock
+    assert events == (['prepare', 'acquire', 'verify'] if lock_acquired else ['prepare', 'acquire'])
+    release.assert_not_called()
+
+
+def test_no_binding_does_not_resolve_device_service():
+    ctx = BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding')
+    provider = Mock(side_effect=AssertionError('device provider should not be resolved'))
+    assert AicodingProvisioningStrategy('aicoding').prepare_restart(
+        ctx, binding_id=None, device_service_provider=provider) is None
+
+
+def _run_absent_helper_probe(cmd, *, present_paths=()):
+    """Execute the actual generated probe with the old container filesystem view."""
+    import contextlib
+    import io
+    import os
+    import shlex
+
+    def lstat(path):
+        if path in present_paths:
+            return SimpleNamespace()
+        raise FileNotFoundError(path)
+
+    output = io.StringIO()
+    code = shlex.split(cmd)[-1]
+    with patch.object(os, 'lstat', side_effect=lstat), contextlib.redirect_stdout(output):
+        exec(compile(code, '<old-container-probe>', 'exec'), {})
+    return SimpleNamespace(exit_code=0, stdout=output.getvalue())
+
+
+def test_old_fastdisk_marker_does_not_claim_new_backup_capability():
+    result = _run_absent_helper_probe(backup.command('start', OPERATION),
+                                     present_paths={'/opt/.aicoding/.fastdisk.ready'})
+    assert backup.parse_result(result, OPERATION)['status'] == 'legacy'
+
+
+@pytest.mark.parametrize('marker', ['/opt/agentclaw/restart-backup-v1',
+                                   '/run/agentclaw-restart-backup/barrier'])
+def test_missing_helper_after_new_capability_install_is_not_legacy(marker):
+    with pytest.raises(RuntimeError, match='capability missing'):
+        _run_absent_helper_probe(backup.command('start', OPERATION), present_paths={marker})
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.parametrize('provider', ['arca', 'baas'])
+@pytest.mark.parametrize('binding_status', ['ACTIVE', 'PENDING', 'FAILED', 'STOPPED'])
+def test_old_coding_bot_without_new_script_completes_original_restart(engine, provider, binding_status, caplog):
+    from tests.community.core.bot_management.services.test_bot_service_restart_idempotency import (
+        FakeRestartLockRepo, _make_service, _make_bot, _stateful_bot_repository,
+    )
+    from tests.community.core.devices.services.test_device_service import (
+        _make_service as make_device_service, _make_record,
+    )
+    locks = FakeRestartLockRepo()
+    bot = _make_bot(active_engine=engine, binding_id=42,
+                    status='PENDING' if binding_status == 'PENDING' else 'ACTIVE')
+    repository, _ = _stateful_bot_repository(bot)
+    record = _make_record(id=42, device_id='legacy-container', device_provider=provider,
+                          status=binding_status)
+    device_repo = Mock()
+    device_repo.get_by_id.return_value = device_repo.get_by_device_id.return_value = record
+    device = make_device_service(repo=device_repo)
+    device._exec_shell_new = Mock(side_effect=lambda **kw: _run_absent_helper_probe(kw['shell_cmd']))
+    svc = _make_service(locks, bot_repository=repository, device_provider=device,
+                        baas_service_provider=lambda: Mock())
+    with patch.object(svc, 'stop_bot', return_value=True) as stop, \
+         patch.object(svc, 'start_bot', return_value=bot) as start, \
+         patch.object(svc, '_restart_bot_baas', return_value=bot) as update:
+        assert svc.restart_bot(bot_id='bot001', user_id='user001') == bot
+    assert device._exec_shell_new.call_count == 2
+    assert 'status=legacy' in caplog.text and 'reason=helper_absent' in caplog.text
+    if provider == 'arca':
+        stop.assert_called_once()
+        start.assert_called_once()
+        update.assert_not_called()
+        assert locks.rows  # Original allocation owns the lock hand-off.
+    else:
+        update.assert_called_once()
+        stop.assert_not_called()
+        start.assert_not_called()
+        assert not locks.rows
+
+
+@pytest.mark.parametrize('engine', ['openclaw', 'moltis', 'hermes', 'unknown'])
+@pytest.mark.parametrize('provider', ['arca', 'baas'])
+def test_non_coding_original_restart_never_probes_even_with_coding_template(engine, provider):
+    from tests.community.core.bot_management.services.test_bot_service_restart_idempotency import (
+        FakeRestartLockRepo, _make_service, _make_bot, _stateful_bot_repository,
+    )
+    bot = _make_bot(active_engine=engine, binding_id=42, template_type='personalCoding')
+    repository, _ = _stateful_bot_repository(bot)
+    device = Mock()
+    device.get_device.return_value = {'device_id': 'legacy-container',
+                                     'device_provider': provider, 'status': 'ACTIVE'}
+    device.exec_shell_new.side_effect = AssertionError('non-coding must never probe')
+    svc = _make_service(FakeRestartLockRepo(), bot_repository=repository, device_provider=device,
+                        baas_service_provider=lambda: Mock())
+    with patch.object(svc, 'stop_bot', return_value=True) as stop, \
+         patch.object(svc, 'start_bot', return_value=bot) as start, \
+         patch.object(svc, '_restart_bot_baas', return_value=bot) as update, \
+         patch.object(backup, 'prepare_backup', side_effect=AssertionError('unexpected coding backup')):
+        assert svc.restart_bot(bot_id='bot001', user_id='user001') == bot
+    device.exec_shell_new.assert_not_called()
+    assert update.call_count == (1 if provider == 'baas' else 0)
+    assert stop.call_count == start.call_count == (1 if provider == 'arca' else 0)
+
+
+def test_default_hook_preserves_original_lock_exception():
+    failure = ValueError('original lock failure')
+    with pytest.raises(ValueError) as caught:
+        DefaultProvisioningStrategy().prepare_restart(None, acquire_lock=Mock(side_effect=failure))
+    assert caught.value is failure
+
+
+@pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
+@pytest.mark.asyncio
+async def test_legacy_published_or_caller_instance_without_script_is_allowed(engine):
+    runtime = Mock()
+    runtime.get_bot.return_value = {'devices': [
+        {'provider_device_id': 'physical-legacy', 'status': 'ACTIVE'}]}
+    runtime.exec_command_on_bot.side_effect = lambda **kw: vars(_run_absent_helper_probe(kw['cmd']))
+    await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': engine},
+                                   device_id='instance-legacy', target_runtime=runtime)
+    assert runtime.exec_command_on_bot.call_count == 2
+    assert all(call.kwargs['paas_device_id'] == 'physical-legacy'
+               for call in runtime.exec_command_on_bot.call_args_list)
+
+
+@pytest.mark.parametrize('engine', ['openclaw', 'teclaw', 'hermes', 'moltis', 'unknown', None])
+@pytest.mark.asyncio
+async def test_non_coding_instance_skips_all_backup_dependencies(engine):
+    runtime = Mock()
+    with patch.object(backup, 'prepare_backup', side_effect=AssertionError('unexpected backup')), \
+         patch.object(backup.asyncio, 'to_thread', side_effect=AssertionError('unexpected offload')):
+        await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': engine},
+                                       device_id='target', target_runtime=runtime)
+    assert not runtime.mock_calls
+
+
+@pytest.mark.parametrize('status', ['ACTIVE', 'PENDING', 'FAILED', 'STOPPED', 'RELEASED', 'UNKNOWN'])
+@pytest.mark.parametrize('allow_recovery', [False, True])
+def test_command_recovery_opt_in_preserves_existing_status_gate(status, allow_recovery):
+    from tests.community.core.devices.services.test_device_service import _make_service, _make_record
+    from agentclaw.community.core.devices.errors import InvalidDeviceStatusError
+    repo = Mock()
+    repo.get_by_device_id.return_value = _make_record(status=status)
+    svc = _make_service(repo=repo)
+    svc._exec_shell_new = Mock(return_value='original-result')
+    allowed = status in {'ACTIVE', 'PENDING'} or (allow_recovery and status in {'FAILED', 'STOPPED'})
+    if allowed:
+        assert svc.exec_shell_new('device', 'probe', allow_recovery=allow_recovery) == 'original-result'
+        svc._exec_shell_new.assert_called_once()
+    else:
+        with pytest.raises(InvalidDeviceStatusError):
+            svc.exec_shell_new('device', 'probe', allow_recovery=allow_recovery)
+        svc._exec_shell_new.assert_not_called()
+    repo.update_status.assert_not_called()
+
+
+@pytest.mark.parametrize('allow_recovery', [False, True])
+def test_router_only_forwards_recovery_opt_in_when_requested(allow_recovery):
+    from tests.community.core.devices.services.test_device_service_router import _make_router
+    router, *_ = _make_router()
+    provider = Mock()
+    with patch.object(router, '_get_provider_for_device_id', return_value=provider):
+        router.exec_shell_new('device', 'probe', allow_recovery=allow_recovery)
+    if allow_recovery:
+        provider.exec_shell_new.assert_called_once_with('device', 'probe', allow_recovery=True)
+    else:
+        provider.exec_shell_new.assert_called_once_with('device', 'probe')

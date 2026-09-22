@@ -238,21 +238,20 @@ class EngineProvisioningStrategy(ABC):
         ``src/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
         """
 
-    def prepare_restart(
-        self, ctx: BotProvisioningContext, *, binding_id: int | None = None,
-        device_service: Any = None, bot_repository: Any = None,
-        device_id: str | None = None, target_runtime: Any = None,
-    ) -> Callable[[], None]:
-        """Prepare an engine-owned restart; default is side-effect-free.
+    def prepare_restart(self, ctx: BotProvisioningContext, *, acquire_lock=None,
+                        release_lock=None, **kwargs):
+        """Engine precondition; default only executes the existing lock acquisition.
 
-        Return a short verifier to call immediately before replacement, under
-        the caller's existing lock when applicable. Preparation may wait; the
-        verifier must not poll. Failures prohibit replacement. No generic state,
-        lease or retry semantics are changed by this hook.
+        Coding engines own preparation and verification. On success return the
+        original lock; on failure do not leave a newly acquired lock behind.
+        Instance restarts omit the lock callbacks and default to no operation.
         """
-        return lambda: None
+        return acquire_lock() if acquire_lock is not None else None
 
-    @abstractmethod
+    async def execute_restart(self, operation: Callable[[], Any]) -> Any:
+        """Default preserves inline execution; engines own any blocking wait."""
+        return operation()
+
     def apply_restart_extra_configs(
         self,
         ctx: BotProvisioningContext,

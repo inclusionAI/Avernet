@@ -5,6 +5,7 @@ may omit it. The runtime installs it before enabling canonical data bind mounts.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import shlex
 import time
@@ -33,14 +34,15 @@ def error_reason(error):
 
 def command(action: str, operation: str) -> str:
     # lstat distinguishes ENOENT from EACCES; test -f does not. Inspect the
-    # independent mount-upgrade capability before treating absence as legacy.
+    # rollout-specific installation/barrier before treating absence as legacy.
+    # A fastdisk-ready marker alone does NOT prove this backup helper was installed.
     code = f'''
 import json, os, stat, subprocess
 path = {ENTRY!r}
 try:
     st = os.lstat(path)
 except FileNotFoundError:
-    for marker in ('/opt/.aicoding/.fastdisk.ready', '/run/agentclaw-restart-backup/barrier'):
+    for marker in ('/opt/agentclaw/restart-backup-v1', '/run/agentclaw-restart-backup/barrier'):
         try:
             os.lstat(marker)
         except FileNotFoundError:
@@ -175,7 +177,29 @@ def _live_targets(state):
 
 
 class AicodingRestartBackupMixin:
-    def prepare_restart(self, ctx, *, binding_id=None, device_service=None,
+    async def execute_restart(self, operation):
+        # Only coding restarts may wait for the runtime backup. Never move other
+        # engines' lifecycle work off their original execution path.
+        return await asyncio.to_thread(operation)
+
+    def prepare_restart(self, ctx, *, acquire_lock=None, release_lock=None,
+                        device_service_provider=None, **kwargs):
+        """One lifecycle hook owns wait-before-lock and verify-under-lock."""
+        if device_service_provider is not None and kwargs.get('binding_id') is not None:
+            kwargs['device_service'] = device_service_provider()
+        verify = self._prepare_restart(ctx, **kwargs)
+        lock = acquire_lock() if acquire_lock is not None else None
+        if acquire_lock is not None and lock is None:
+            return None  # Preserve existing duplicate-restart handling.
+        try:
+            verify()
+        except BaseException:
+            if lock is not None:
+                release_lock(lock)
+            raise
+        return lock
+
+    def _prepare_restart(self, ctx, *, binding_id=None, device_service=None,
                         bot_repository=None, device_id=None, target_runtime=None):
         """Only coding engines probe runtime; no generic lifecycle/status changes."""
         try:
@@ -208,7 +232,8 @@ class AicodingRestartBackupMixin:
             if not isinstance(target, str) or not target:
                 raise RestartBackupError('missing_device', '无法定位当前旧实例，禁止跳过重启备份')
             check = prepare_backup(
-                execute=lambda cmd: device_service.exec_shell_new(device_id=target, shell_cmd=cmd),
+                execute=lambda cmd: device_service.exec_shell_new(
+                    device_id=target, shell_cmd=cmd, allow_recovery=True),
                 operation_id=uuid.uuid5(uuid.NAMESPACE_URL, 'restart:' + target).hex,
                 bot_id=ctx.bot_id, target_id=target,
             )

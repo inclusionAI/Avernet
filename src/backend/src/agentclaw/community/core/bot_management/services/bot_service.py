@@ -4687,19 +4687,19 @@ class BotService(BotServiceProtocol):
 
         # Delegate optional engine-owned restart inputs after lifecycle guards
         # pass and before device allocation consumes persisted configuration.
-        try:
-            from agentclaw.community.core.bot_management.engines import (
-                resolve_provisioning,
-            )
+        from agentclaw.community.core.bot_management.engines import (
+            resolve_provisioning,
+        )
 
-            ctx, strategy = resolve_provisioning(
-                bot_id=bot_id,
-                owner_id=str(bot.get("owner_id") or ""),
-                bot_type=str(bot.get("bot_type") or ""),
-                active_engine=bot.get("active_engine"),
-                template_type=bot.get("template_type"),
-                template_config=None,
-            )
+        ctx, strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=str(bot.get("owner_id") or ""),
+            bot_type=str(bot.get("bot_type") or ""),
+            active_engine=bot.get("active_engine"),
+            template_type=bot.get("template_type"),
+            template_config=None,
+        )
+        try:
             strategy.apply_restart_extra_configs(
                 ctx,
                 extra_configs,
@@ -4814,26 +4814,18 @@ class BotService(BotServiceProtocol):
             source_provider=current_device_provider,
         )
 
-        # Engines prepare outside the existing short-lived lock. The returned
-        # verifier is checked under that lock immediately before replacement.
-        restart_ctx, restart_strategy = resolve_provisioning(
-            bot_id=bot_id, owner_id=str(bot.get("owner_id") or user_id),
-            bot_type=str(bot.get("bot_type") or ""), active_engine=bot.get("active_engine"),
-            template_type=bot.get("template_type"), template_config=None,
-        )
-        try:
-            verify_restart = restart_strategy.prepare_restart(
-                restart_ctx, binding_id=binding_id,
-                device_service=self._device_service_provider(), bot_repository=self._repository,
-            )
-        except Exception as error:
-            raise BotServiceError(str(error)) from error
-
         # Idempotency guard: acquire the per-bot restart lock. If a restart is
         # already in progress, suppress this duplicate and return the current
         # in-progress bot — the frontend is already polling on PENDING, so this
         # behaves identically to the first click (no duplicate sandbox/binding).
-        lock = self._try_acquire_restart_lock(env, entity_id, bot_id, user_id)
+        lock = strategy.prepare_restart(
+            ctx, binding_id=binding_id,
+            device_service_provider=self._device_service_provider,
+            bot_repository=self._repository,
+            acquire_lock=lambda: self._try_acquire_restart_lock(env, entity_id, bot_id, user_id),
+            release_lock=lambda acquired: self._restart_lock_repo.release(
+                env, entity_id, bot_id, acquired.lock_token),
+        )
         if lock is None:
             logger.info(
                 "[bot_service.restart_bot] Restart already in progress for bot %s "
@@ -4869,7 +4861,6 @@ class BotService(BotServiceProtocol):
         lock_key = (env, entity_id, bot_id, lock.lock_token)
         handed_off = False
         try:
-            verify_restart()
             if bot.get("bot_type") == "service" and not self.is_teclaw_bot(
                 bot.get("active_engine")
             ):

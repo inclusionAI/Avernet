@@ -633,7 +633,7 @@ class DeviceServiceRouter(DeviceService):
         return service.exec_shell(device_id, shell_cmd)
 
     @override
-    def exec_shell_new(self, device_id: str, shell_cmd: str):
+    def exec_shell_new(self, device_id: str, shell_cmd: str, *, allow_recovery: bool = False):
         """在设备上执行 shell 命令 - 根据 device_id 路由.
 
         Args:
@@ -644,7 +644,7 @@ class DeviceServiceRouter(DeviceService):
             命令执行结果
         """
         service = self._get_provider_for_device_id(device_id)
-        return service.exec_shell_new(device_id, shell_cmd)
+        return service.exec_shell_new(device_id, shell_cmd, **({'allow_recovery': True} if allow_recovery else {}))
 
     @override
     def batch_set_env(self, *, binding_ids: list[int], env: str) -> tuple[int, list[int]]:

@@ -105,15 +105,30 @@ This requires no database migration and does not backfill historical Bot rows.
 
 ## Coding-engine restart precondition
 
-`EngineProvisioningStrategy.prepare_restart` defaults to a side-effect-free
-verifier. Only aicoding/claude_code implement helper probing, legacy/no-mount
-skips, backup polling, and receipt/instance verification in
-`engines/aicoding/restart_backup.py`. Preparation returns a short verifier:
-ordinary Bot restart waits BEFORE its existing 120-second lock, then verifies
-binding and receipt UNDER that lock before stop/update. No lock repository,
-BotService Service API, or generic status/retry policy is changed. Backup failure
-preserves the old binding and status. The runtime serializes backup workers and
-keeps writers stopped; successful preparation does not itself authorize deletion.
+`EngineProvisioningStrategy.prepare_restart` is the single backup-related call
+in ordinary Bot restart. The default invokes the original lock acquisition
+callback and returns its result without probing containers or resolving devices.
+Only aicoding/claude_code implement helper probing, legacy/no-mount skips,
+backup polling, and receipt/instance verification in
+`engines/aicoding/restart_backup.py`. That strategy waits BEFORE acquiring the
+existing 120-second restart lock, verifies binding and receipt UNDER the lock,
+and releases it on verification failure. The original caller still handles
+lock contention, stop/update, allocation and lock hand-off unchanged. No lock
+repository, BotService Service API, or generic status/retry policy is changed.
+Backup failure preserves the old binding and status. Coding probes explicitly
+opt into the existing command API's recovery mode so FAILED/STOPPED bindings
+(which the original restart accepts) are not rejected before the script probe.
+The default command status gate remains ACTIVE/PENDING for all existing callers;
+RELEASED/unknown bindings and transport failures are never silently allowed.
+
+Async HTTP/instance entrypoints select the engine's `execute_restart` policy.
+Its default directly calls the existing synchronous operation on the calling
+thread. Only the coding strategy offloads its blocking backup/lifecycle call;
+routers and the composition root contain no thread-pool implementation. This
+keeps long coding backup polling off the event loop without changing other
+engines' execution context or converting existing synchronous Service APIs.
+The runtime serializes backup workers and keeps writers stopped; successful
+preparation does not itself authorize deletion.
 
 Published restart and caller upgrade use thin engine dispatch. Published hooks
 run only inside restart's issue/retirement branches, not ordinary publication
@@ -128,6 +143,11 @@ operation ID, duration and generation. Wait logs are throttled to state changes
 or once per minute. Raw commands, output and exception messages are not logged
 by the strategy. Runtime failure/unknown state never authorizes replacement.
 Legacy absence is confirmed, not inferred from permission/transport errors.
+An absent helper with neither `/opt/agentclaw/restart-backup-v1` (installed only
+by this rollout) nor the restart barrier is a legacy skip. The pre-existing
+`.fastdisk.ready` marker is not a backup capability marker and cannot by itself
+block an old Bot's restart. This rollout must install the helper before enabling
+canonical fastdisk binds; a missing helper after that installation fails closed.
 
 Propagation: the engine hook, the three restart consumers and the optional BaaS
 command parameter; no frontend, Relay HTTP or database migration. Targeted unit,

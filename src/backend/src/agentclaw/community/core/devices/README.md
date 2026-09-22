@@ -62,3 +62,14 @@ internal_dependencies:
 ### Change impact
 
 Owns the engine/device binding lifecycle. Schema changes (binding table, engine config dir) require migration. Health-probe contract is consumed by Prom-style monitoring outside the repo.
+
+
+### Command execution during recovery
+
+`DeviceServiceProtocol.exec_shell_new(..., allow_recovery=False)` retains the
+ACTIVE/PENDING-only behavior by default. Internal recovery callers can explicitly
+allow FAILED/STOPPED bindings to inspect their still-addressable container before
+replacement. This does not change binding state, permit RELEASED/unknown bindings,
+or suppress provider errors. DeviceServiceRouter forwards the opt-in; provider
+implementations keep the existing command transport. The aicoding restart policy
+is the opt-in caller; other engine restarts and ordinary command callers are unchanged.
