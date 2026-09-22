@@ -547,16 +547,20 @@ class SkillQueryService(SkillQueryServiceProtocol):
         context = self._device_context_resolver_provider().resolve_for_bot(
             str(skill["bolt_id"]), owner_id
         )
-        return self._skill_service_factory.local_skill_package_storage_for_locator(
-            entity_id=str(bot["entity_id"]),
-            owner_id=owner_id,
-            bot_id=str(skill["bolt_id"]),
-            engine_type=bot.get("active_engine"),
-            entity_type=str(bot.get("entity_type") or "staff"),
-            is_desktop=bot.get("bot_type") == "desktop",
-            is_teclaw=context.provider == "teclaw",
-            locator=locator,
-        )
+        try:
+            return self._skill_service_factory.local_skill_package_storage_for_locator(
+                entity_id=str(bot["entity_id"]),
+                owner_id=owner_id,
+                bot_id=str(skill["bolt_id"]),
+                engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=context.provider == "teclaw",
+                locator=locator,
+                skill_name=str(skill["name"]),
+            )
+        except Exception as exc:
+            raise LocalSkillStorageError() from exc
 
     def _require_center_access(
         self, *, skill: dict[str, Any], actor_id: str

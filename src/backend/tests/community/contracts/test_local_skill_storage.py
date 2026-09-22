@@ -74,6 +74,7 @@ def test_creation_and_reopen_use_same_address(resolver, expected):
         is_desktop=False,
         is_teclaw=False,
         locator=locator,
+        skill_name="sample",
     )
     assert reopened.directory == storage.directory
     service = f.create(
@@ -109,8 +110,223 @@ def test_historical_locator_is_not_redirected_to_new_root():
             is_desktop=False,
             is_teclaw=False,
             locator="/home/admin/.openclaw/workspace/skills/skills-local/sample",
+            skill_name="sample",
         )
     f._device_fs_dispatcher.for_bot.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "recorded_root",
+    [
+        "/home/admin/.claude_code/workspace/skills/skills-local",
+        "/home/admin/.aicoding/workspace/skills/skills-local",
+    ],
+)
+def test_aicoding_legacy_engine_view_alias_reopens_current_package(recorded_root):
+    f = factory(ConfiguredLocalSkillStorage())
+    bot = {
+        "bot_id": "b",
+        "entity_id": "u",
+        "entity_type": "staff",
+        "active_engine": "claude_code",
+        "template_type": "aicoding",
+        "bot_type": "personal",
+    }
+    f._bot_repo.get_by_id_and_owner.return_value = bot
+    f._bot_repo.get_by_id.return_value = bot
+    f._path_factory.get_bot_skills_local_dir.side_effect = (
+        lambda _entity_id, _bot_id, engine, *_args, **_kwargs: Path(
+            f"/aidesktop/u/b/{engine}/workspace/skills/skills-local"
+        )
+    )
+
+    current_locator, current = f.local_skill_package_storage(
+        entity_id="u",
+        owner_id="u",
+        bot_id="b",
+        engine_type="claude_code",
+        entity_type="staff",
+        is_desktop=False,
+        is_teclaw=False,
+        name="sample",
+    )
+    reopened = f.local_skill_package_storage_for_locator(
+        entity_id="u",
+        owner_id="u",
+        bot_id="b",
+        engine_type="claude_code",
+        entity_type="staff",
+        is_desktop=False,
+        is_teclaw=False,
+        locator=f"{recorded_root}/sample",
+        skill_name="sample",
+    )
+
+    assert current_locator == (
+        "/aidesktop/u/b/aicoding/workspace/skills/skills-local/sample"
+    )
+    assert reopened.directory == current.directory
+
+
+def test_aicoding_legacy_host_alias_reopens_current_package():
+    f = factory(ConfiguredLocalSkillStorage())
+    bot = {
+        "bot_id": "b",
+        "entity_id": "u",
+        "entity_type": "staff",
+        "active_engine": "aicoding",
+        "bot_type": "personal",
+    }
+    f._bot_repo.get_by_id_and_owner.return_value = bot
+    f._bot_repo.get_by_id.return_value = bot
+    f._path_factory.get_bot_skills_local_dir.side_effect = (
+        lambda _entity_id, _bot_id, engine, *_args, **_kwargs: Path(
+            f"/aidesktop/u/b/{engine}/workspace/skills/skills-local"
+        )
+    )
+
+    _, current = f.local_skill_package_storage(
+        entity_id="u",
+        owner_id="u",
+        bot_id="b",
+        engine_type="aicoding",
+        entity_type="staff",
+        is_desktop=False,
+        is_teclaw=False,
+        name="sample",
+    )
+    reopened = f.local_skill_package_storage_for_locator(
+        entity_id="u",
+        owner_id="u",
+        bot_id="b",
+        engine_type="aicoding",
+        entity_type="staff",
+        is_desktop=False,
+        is_teclaw=False,
+        locator=("/aidesktop/u/b/claude_code/workspace/skills/skills-local/sample"),
+        skill_name="sample",
+    )
+
+    assert reopened.directory == current.directory
+
+
+@pytest.mark.parametrize(
+    ("locator", "skill_name"),
+    [
+        (
+            "/aidesktop/u/other/claude_code/workspace/skills/skills-local/sample",
+            "sample",
+        ),
+        (
+            "/aidesktop/u/b/claude_code/workspace/skills/skills-local/sample",
+            "other-skill",
+        ),
+        (
+            "/aidesktop/u/b/hermes/workspace/skills/skills-local/sample",
+            "sample",
+        ),
+        (
+            "/aidesktop/u/b/aicoding/workspace/skills/skills-local/"
+            "temporary/../sample",
+            "sample",
+        ),
+        (
+            "/aidesktop/u/b/aicoding/workspace/skills/skills-local/..",
+            "..",
+        ),
+    ],
+)
+def test_aicoding_legacy_aliases_remain_exactly_bot_and_skill_scoped(
+    locator, skill_name
+):
+    f = factory(ConfiguredLocalSkillStorage())
+    bot = {
+        "bot_id": "b",
+        "entity_id": "u",
+        "entity_type": "staff",
+        "active_engine": "aicoding",
+        "bot_type": "personal",
+    }
+    f._bot_repo.get_by_id_and_owner.return_value = bot
+    f._bot_repo.get_by_id.return_value = bot
+    f._path_factory.get_bot_skills_local_dir.side_effect = (
+        lambda _entity_id, bot_id, engine, *_args, **_kwargs: Path(
+            f"/aidesktop/u/{bot_id}/{engine}/workspace/skills/skills-local"
+        )
+    )
+
+    with pytest.raises(ValueError, match="escapes skills-local"):
+        f.local_skill_package_storage_for_locator(
+            entity_id="u",
+            owner_id="u",
+            bot_id="b",
+            engine_type="aicoding",
+            entity_type="staff",
+            is_desktop=False,
+            is_teclaw=False,
+            locator=locator,
+            skill_name=skill_name,
+        )
+
+
+def test_aicoding_pool_rejects_a_legacy_claude_code_alias():
+    f = factory(
+        ConfiguredLocalSkillStorage(),
+        pool=(
+            "/home/admin/.claude/skills",
+            "/home/admin/.aicoding/workspace/skills-pool/skills-local",
+            "/home/admin/.aicoding/workspace/skills-pool/skills-repo",
+        ),
+    )
+    bot = {
+        "bot_id": "b",
+        "entity_id": "u",
+        "entity_type": "staff",
+        "active_engine": "aicoding",
+        "bot_type": "personal",
+    }
+    f._bot_repo.get_by_id_and_owner.return_value = bot
+    f._bot_repo.get_by_id.return_value = bot
+
+    with pytest.raises(ValueError, match="escapes skills-local"):
+        f.local_skill_package_storage_for_locator(
+            entity_id="u",
+            owner_id="u",
+            bot_id="b",
+            engine_type="aicoding",
+            entity_type="staff",
+            is_desktop=False,
+            is_teclaw=False,
+            locator=("/home/admin/.claude_code/workspace/skills/skills-local/sample"),
+            skill_name="sample",
+        )
+
+
+def test_teclaw_does_not_inherit_aicoding_legacy_locator_aliases():
+    f = factory(ConfiguredLocalSkillStorage())
+    bot = {
+        "bot_id": "b",
+        "entity_id": "u",
+        "entity_type": "staff",
+        "active_engine": "aicoding",
+        "bot_type": "personal",
+    }
+    f._bot_repo.get_by_id_and_owner.return_value = bot
+    f._bot_repo.get_by_id.return_value = bot
+    f._path_factory.get_bot_skills_local_dir.return_value = Path("skills-local")
+
+    with pytest.raises(ValueError, match="escapes skills-local"):
+        f.local_skill_package_storage_for_locator(
+            entity_id="u",
+            owner_id="u",
+            bot_id="b",
+            engine_type="aicoding",
+            entity_type="staff",
+            is_desktop=False,
+            is_teclaw=True,
+            locator=("/home/admin/.claude_code/workspace/skills/skills-local/sample"),
+            skill_name="sample",
+        )
 
 
 def test_other_runtime_roots_are_unchanged():
@@ -202,6 +418,7 @@ def test_real_factory_consumes_profile_binding_for_create_and_rejection(
             is_desktop=False,
             is_teclaw=False,
             locator=str(tmp_path / "outside/sample"),
+            skill_name="sample",
         )
     resolve.assert_any_call("claude_code", configured)
     device_factory.assert_not_called()
