@@ -87,7 +87,7 @@ def _map_status(resp: httpx.Response) -> None:
         raise BcsServerError(f"{resp.status_code} {resp.text}")
 
 
-class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing + REST); exercised by singlebox/corp acceptance / 联调, not CI LOCAL line coverage
+class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing + REST); exercised by live acceptance / 联调, not CI LOCAL line coverage
     def __init__(self, token: BcsTokenProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
         self._t = token
         self._owns_client = http_client is None
@@ -137,7 +137,7 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
     def task_callback_url(self) -> str:
         """任务回投目标 origin(scheme://netloc):BCS 把 state_machine.* 等事件 POST 回此 origin +
         ``_BCN_EVENT_CALLBACK_PATH``。值由 token provider 经 corp 注入(``CorpBcsTokenProvider.task_callback_url``,
-        env-aware ``bcs_client.task_callback_url[_pre]``);社区/singlebox 默认空 → TaskExecutor 兜底
+        env-aware ``bcs_client.task_callback_url[_pre]``);社区/本地未配置默认空 → TaskExecutor 兜底
         ``api_base_url``(economy_governance 派生)。"""
         return str(getattr(self._t, "task_callback_url", "") or "")
 
@@ -214,7 +214,7 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         data = r.json()
         # 实 BCS 创建群响应键名为 ``id``(``group_detail_to_create_json`` groups.rs:2093 与 v1 legacy
         # v1_group_detail_to_legacy_create_json groups.rs:782 均 ``"id": result.group_id``),
-        # 非早期假设的 ``group_id``。与 ``singlebox_bcs_adapter.create_group`` 对齐取 ``(group_id or id)``,
+        # 非早期假设的 ``group_id``。与 BCS REST 实际响应保持一致,取 ``(group_id or id)``,
         # 缺则带 body 抛 KeyError 便于定位(此前 ``data["group_id"]`` 对预发 BCS 直接 KeyError)。
         group_id = data.get("group_id") or data.get("id")
         if not group_id:
@@ -241,7 +241,7 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
 
     async def get_session_messages(self, session_id: str, *, limit: int = 50,
                                    since_msg_id: str | None = None,
-                                   caller_bot_token: str | None = None) -> list[Any]:
+                                   caller_bearer: str | None = None) -> list[Any]:
         path = f"/sessions/{session_id}/messages"
         ts = str(int(time.time()))
         headers = self._sign("GET", path, ts)
@@ -250,14 +250,14 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         # 参考 create_group 的 caller 身份手法:携带持有者 bot 的 session_token 做
         # ``Authorization: Bearer``,让 BCS 把 caller 解析成会话内的成员 bot。token
         # 不打日志(与 create_group 同规约)。
-        if caller_bot_token:
-            headers["Authorization"] = f"Bearer {caller_bot_token}"
+        if caller_bearer:
+            headers["Authorization"] = f"Bearer {caller_bearer}"
         params: dict[str, Any] = {"limit": limit}
         if since_msg_id:
             params["since_msg_id"] = since_msg_id
         logger.info("[task][bcs_http] >>> get_session_messages GET path=%s base_url=%s limit=%s since=%s caller_identity=%s",
                     path, self._t.base_url, limit, since_msg_id,
-                    "bearer" if caller_bot_token else "hmac-only")
+                    "bearer" if caller_bearer else "hmac-only")
         _t0 = time.monotonic()
         async with self._client_for_current_loop() as client:
             r = await client.request("GET", path, params=params, headers=headers)

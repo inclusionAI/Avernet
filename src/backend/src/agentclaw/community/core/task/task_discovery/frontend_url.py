@@ -58,7 +58,7 @@ class FrontendUrlConfig:
     - community 列: ``user_config.task_discovery`` 块的
       ``frontend_url`` / ``frontend_url_pre`` / ``frontend_url_prod``。
     - corp 列: ``task_discovery_dingtalk`` 块的同名字段（既有 YAML 不动）。
-    - test/singlebox 列: 默认空（下游回落构造默认 localhost）。
+    - test/local 列: 默认空（下游回落构造默认 localhost）。
     """
 
     url: str = ""

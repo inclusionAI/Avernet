@@ -13,21 +13,20 @@ the real Bearer api_key / HMAC key+secret, mirroring how the corp
 - ``BcsClientPort`` <- ``BcsHttpAdapter`` (BCS coordinator, HMAC
   ``X-ECB-Token``/``X-ECB-Signature``) -> task ``coop_group``
   (``/groups`` + ``/sessions``).
-- ``BcsTokenProvider`` (callback route base_url) overrides ``TaskModule``'s
-  default ``LocalBcsTokenProvider`` so the task-result callback base_url points
-  to the configured ``bcs_client.task_callback_url[_pre]`` (not localhost).
+- ``BcsTokenProvider`` (callback route base_url) supplies the deployment's
+  configured ``bcs_client.task_callback_url[_pre]`` instead of a hard-coded
+  localhost host.
 
-Resolution rules (fail-closed literal credentials):
-- missing block / empty env-resolved ``base_url`` / empty ``api_key_secret``
-  (openapi) or ``token_secret`` / ``secret_secret`` (bcs) -> port ``None``
-  (fail-closed; ``task_service``'s ``injector.get(...)`` returns ``None`` and
-  degrades dispatch without raising).
-- all present -> the real adapter is bound to the Port.
+Resolution rules:
+- ``openapi_bot`` requires base_url and the literal Bearer key.
+- ``bcs_client`` requires base_url and both HMAC literals.
+- Missing configuration yields port ``None``; the task service degrades dispatch
+  rather than inventing environment-specific values.
 
-Installed ONLY in the ``community`` deployment profile (see ``profile_modules``)
-— NOT in base, so the corp column (ocb) keeps its own
-``CorpTaskIntegrationModule`` unchanged; the two columns are import-disjoint and
-a community distribution never imports ``agentclaw.corp``.
+Installed by the community and local single-process profiles (see
+``profile_modules``). The corp column keeps its own ``CorpTaskIntegrationModule``;
+the code columns remain import-disjoint. Task business logic never reads the
+deployment profile.
 
 Auth split (do NOT conflate with the ``bcn`` block):
 - ``bcn`` block -> ``BcnService`` (Bearer ``provider_admin_token``, management
@@ -35,6 +34,7 @@ Auth split (do NOT conflate with the ``bcn`` block):
 - ``openapi_bot`` (here) -> ``single_bot`` dispatch (BaaS Open API, Bearer).
 - ``bcs_client`` (here) -> ``coop_group`` coordination (BCS, HMAC).
 """
+
 from __future__ import annotations
 
 import json
@@ -134,7 +134,7 @@ class BcsBotTokenServiceProvider:
     取 ``get_current_env()``(prod|gray→prod / pre→pre)。env 在 ctor 期固化(部署级常量)。
 
     迁移自 ocb corp ``corp_task_integration.py``(community 无 corp 前缀,跨列 import-disjoint)。
-    未装本 module 的 profile(singlebox/test)由 ``task_module`` 降级 ``NullBcsBotTokenProvider``。
+    未安装本 module 的 profile 由 ``task_module`` 降级 ``NullBcsBotTokenProvider``。
     """
 
     _SQL = "SELECT session_token FROM bcs_bots WHERE bot_uuid = :uuid AND env = :env LIMIT 1"
@@ -151,7 +151,8 @@ class BcsBotTokenServiceProvider:
         try:
             with self._db.orm_session() as session:
                 return session.execute(
-                    text(self._SQL), {"uuid": bcs_bot_uuid, "env": self._env},
+                    text(self._SQL),
+                    {"uuid": bcs_bot_uuid, "env": self._env},
                 ).scalar()
         except Exception:  # noqa: BLE101 本地无 bcs_bots 表 / 查询失败 → 降级 None
             logger.error(
@@ -198,11 +199,11 @@ def _resolve_bcn_provider_identity(bcn_cfg: BcnConfig) -> tuple[str, str]:
 class TaskRunnerIntegrationModule(Module):
     """Bind OpenApiBotPort / BcsClientPort to community credential-fed adapters.
 
-    Installed ONLY in the ``community`` deployment profile (see
-    ``profile_modules``); NOT in base, so the corp column keeps its own
-    ``CorpTaskIntegrationModule`` unchanged (the two columns are import-disjoint;
-    a community distribution never imports ``agentclaw.corp``). ``task_service``
-    resolves an unbound port to ``None`` and degrades dispatch without raising.
+    Installed by all profiles that use the community task transport wiring (see
+    ``profile_modules``). The corp column keeps its own
+    ``CorpTaskIntegrationModule``; the code columns remain import-disjoint.
+    ``task_service`` resolves an unbound port to ``None`` and degrades dispatch
+    without raising.
     """
 
     # ── config providers (read user_config blocks -> typed dataclasses) ────
@@ -217,7 +218,7 @@ class TaskRunnerIntegrationModule(Module):
         non-secret and stay literal in YAML. ``api_key_secret`` is the LITERAL
         Bearer api_key (env-injected, no Mist in the community build) — NOT a
         credential name. Missing block -> all empty -> port None (fail-closed;
-        unconfigured community singlebox/CI degrades).
+        unconfigured community/local deployments degrade).
         """
         block = _block("openapi_bot")
         return OpenApiBotConfig(
@@ -260,7 +261,7 @@ class TaskRunnerIntegrationModule(Module):
         the same keys; both shapes decode to the same map. Empty/absent -> empty
         map: a bare boot never expands ``${...}`` (only ``from_file``/``from_yaml``
         with a non-None bindings map and matching placeholders do), so non-merchant
-        plans resolve unchanged and unconfigured community singlebox/CI degrades.
+        plans resolve unchanged and unconfigured community/local deployments degrade.
         A malformed JSON string is logged and treated as empty (degrade, not boot halt).
         """
         raw = _user_config().get("merchant_task_bot_bindings")
@@ -273,14 +274,17 @@ class TaskRunnerIntegrationModule(Module):
                 except (ValueError, TypeError):
                     logger.warning(
                         "[task][bot-bindings] merchant_task_bot_bindings JSON decode failed; "
-                        "static-plan placeholders stay literal (len=%d)", len(text),
+                        "static-plan placeholders stay literal (len=%d)",
+                        len(text),
                     )
                     decoded = {}
                 mapping = decoded if isinstance(decoded, dict) else {}
         elif isinstance(raw, dict):
             mapping = raw
         return MerchantTaskBotBindingsConfig(
-            bot_id_by_role={k: str(v) for k, v in mapping.items() if isinstance(k, str)},
+            bot_id_by_role={
+                k: str(v) for k, v in mapping.items() if isinstance(k, str)
+            },
         )
 
     # ── port providers (construct adapters, bind Ports) ────────────────────
@@ -310,7 +314,8 @@ class TaskRunnerIntegrationModule(Module):
         )
         logger.info(
             "[task][community-task] openapi_bot 端口装配 OK -> OpenApiBotAdapter base_url=%s api_key_prefix=%s",
-            base_url, keys.api_key_prefix or "<none>",
+            base_url,
+            keys.api_key_prefix or "<none>",
         )
         return OpenApiBotAdapter(keys)
 
@@ -339,11 +344,14 @@ class TaskRunnerIntegrationModule(Module):
             secret=secret,
             provider_id=provider_id,
             provider_admin_token=provider_admin_token,
-            task_callback_url=_env_select(cfg.task_callback_url, cfg.task_callback_url_pre),
+            task_callback_url=_env_select(
+                cfg.task_callback_url, cfg.task_callback_url_pre
+            ),
         )
         logger.info(
             "[task][community-task] bcs_client 端口装配 OK -> BcsHttpAdapter base_url=%s provider_id=%s",
-            base_url, provider_id or "<none(roster off)>",
+            base_url,
+            provider_id or "<none(roster off)>",
         )
         return BcsHttpAdapter(token_provider)
 
@@ -358,7 +366,7 @@ class TaskRunnerIntegrationModule(Module):
         """Callback route base_url source (overriding TaskModule default binding).
 
         Same ``bcs_client`` block as ``bcs_client_port`` (env-aware base_url).
-        Overrides ``TaskModule``'s ``LocalBcsTokenProvider`` (last-binding-wins;
+        Replaces the lightweight test fallback (last-binding-wins;
         this module is registered after base in the community profile) so the
         task-result callback base_url points at the community BCS endpoint, not
         localhost. ALWAYS returns a holder (never fail-closed None) — the callback
@@ -375,7 +383,9 @@ class TaskRunnerIntegrationModule(Module):
             secret=cfg.secret_secret,
             provider_id=provider_id,
             provider_admin_token=provider_admin_token,
-            task_callback_url=_env_select(cfg.task_callback_url, cfg.task_callback_url_pre),
+            task_callback_url=_env_select(
+                cfg.task_callback_url, cfg.task_callback_url_pre
+            ),
         )
 
     @singleton
@@ -397,7 +407,7 @@ class TaskRunnerIntegrationModule(Module):
         ``(bot_uuid, env)`` 行。
 
         Resolver 失败(库无 ``bcs_bots`` 表 / 查无行 / 查询抛错)→ 返 None → task_executor 不发
-        Bearer,降级 HMAC 匿名 no-sub 建群分支,不阻断。本 module 未装的 profile(singlebox/test)
+        Bearer,降级 HMAC 匿名 no-sub 建群分支,不阻断。本 module 未安装的 profile
         由 ``task_module`` 降级 ``NullBcsBotTokenProvider`` 兜底,行为同未迁移。
 
         部署前置:driver/worker bot 经 ``BcnService`` onboard 写入 ``bcs_bots.session_token``
@@ -407,5 +417,7 @@ class TaskRunnerIntegrationModule(Module):
         ``env`` 在装配期固化(部署级常量),与 ``bcs_client_port`` 同环境。
         """
         env = get_current_env()
-        logger.info("[task][community-task] bcs_bot_token_provider 端口装配 env=%s", env)
+        logger.info(
+            "[task][community-task] bcs_bot_token_provider 端口装配 env=%s", env
+        )
         return BcsBotTokenServiceProvider(db, env=env)

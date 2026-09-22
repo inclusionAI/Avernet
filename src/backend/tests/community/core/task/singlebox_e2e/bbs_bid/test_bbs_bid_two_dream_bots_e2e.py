@@ -22,7 +22,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 # 前置:怎么让两个 dream bot 进 roster
 
 BCS ``task_dream_mode`` 唯一 setter 是 principal-gated 的 openapi PATCH。本用例经
-``SingleboxBotProvisioner.set_bbs_task_dream_mode``(新加)自铸 gateway principal token
+``LiveTaskBotProvisioner.set_bbs_task_dream_mode``(新加)自铸 gateway principal token
 (HS256/iss=gateway/aud=bcs/kid=bare,principals=[user(subject.id=user_id)]——user_id 即 bot 的 owner
 staff_no,经 BCS ``authorize_bot_management`` 的 owner 匹配放行)PATCH
 ``/openapi/v1/collaboration/bots/{bot_uuid}``。signing key 取 env ``AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE``
@@ -42,6 +42,7 @@ staff_no,经 BCS ``authorize_bot_management`` 的 owner 匹配放行)PATCH
 → live 触发即 ``AttributeError``(单测用 MagicMock.mask)。本仓已给 ``TaskExecutionGraph`` 加 ``task_id``
 (initialize / query_task_dashboard 子树投影透传),使真触发链可用。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -52,8 +53,8 @@ from pathlib import Path
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
-    SingleboxBotProvisioner,
+from tests.community.core.task.support.live_task_bot_provisioner import (
+    LiveTaskBotProvisioner,
 )
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
@@ -65,13 +66,17 @@ _HDRS = {"x-user-id": _USER_ID, "accept": "application/json"}
 
 # skill 目录:本文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/bbs_bid/
 SKILLS_DIR = Path(__file__).resolve().parent / "../skills"
-_PLANNING_SKILL = str(SKILLS_DIR / "planning-arch")   # 确定式规划(单一交付物→[N_architects])
-_SEARCH_SKILL = str(SKILLS_DIR / "search")            # 派发决策表(N_architects→MISS)
-_ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")       # dream bot 中继执行侧(产架构师名册)
+_PLANNING_SKILL = str(
+    SKILLS_DIR / "planning-arch"
+)  # 确定式规划(单一交付物→[N_architects])
+_SEARCH_SKILL = str(SKILLS_DIR / "search")  # 派发决策表(N_architects→MISS)
+_ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")  # dream bot 中继执行侧(产架构师名册)
 # bbs-relay-single-task 在 spec 目录:parents[6]=<repo>/src/backend
 _BBS_SINGLE_TASK_SKILL = str(
     Path(__file__).resolve().parents[6]
-    / "specs" / "2026-08-09-task-goal-driven-bbs-active-relay" / "bbs-relay-single-task"
+    / "specs"
+    / "2026-08-09-task-goal-driven-bbs-active-relay"
+    / "bbs-relay-single-task"
 )
 
 _OWNER_BOT_NAME = "e2e-bbs-bid-owner"
@@ -89,8 +94,11 @@ _DASH_TIMEOUT = 60.0
 async def _get_dashboard(cli: httpx.AsyncClient, task_id: str) -> dict | None:
     """读 dashboard;一次性排队/断网返 None 供外层重试(不直接 fail 用例)。"""
     try:
-        r = await cli.get(f"{_BACKEND}/api/v1/collaboration/tasks/dashboard",
-                          params={"task_id": task_id}, timeout=_DASH_TIMEOUT)
+        r = await cli.get(
+            f"{_BACKEND}/api/v1/collaboration/tasks/dashboard",
+            params={"task_id": task_id},
+            timeout=_DASH_TIMEOUT,
+        )
     except (httpx.TimeoutException, httpx.RequestError) as exc:
         print(f"[dashboard] 读超时/网络异常,稍后重试:{exc!r}")
         return None
@@ -118,7 +126,10 @@ def _execute_body(owner_id: str) -> dict:
             "goal": {
                 "objective": "整理基础架构方向 3 位核心架构师(姓名/角色 + 职责)",
                 "acceptances": [
-                    {"id": "ac_arch", "description": "给出基础架构方向 3 位架构师的姓名/角色 + 职责"},
+                    {
+                        "id": "ac_arch",
+                        "description": "给出基础架构方向 3 位架构师的姓名/角色 + 职责",
+                    },
                 ],
             },
         },
@@ -126,7 +137,11 @@ def _execute_body(owner_id: str) -> dict:
         "owner_user_id": _USER_ID,
         "owner_bot_id": owner_id,
         # task_type=dynamic(LLM 自规划);MAX_DEPTH=1:depth-1 miss 直走 miss_depth_exhausted 升 BBS(不 re-plan 嵌套)
-        "execution_config": {"task_type": "dynamic", "MAX_DEPTH": 1, "BBS_MAX_DEPTH": 3},
+        "execution_config": {
+            "task_type": "dynamic",
+            "MAX_DEPTH": 1,
+            "BBS_MAX_DEPTH": 3,
+        },
     }
 
 
@@ -147,7 +162,7 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
         #    owner ← planning-arch + search(确定式规划/派发:N_architects MISS→升 BBS);
         #    两个 dream bot ← arch-analysis + bbs-relay-single-task(BBS 主动 bid 候选 + 中继执行),
         #    各 onboard_to_bcn + set_bcs_visibility(public) + set_bbs_task_dream_mode(True)(进 dream roster)。
-        prov = SingleboxBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
+        prov = LiveTaskBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
         try:
             owner_id = await prov.create_bot(bot_name=_OWNER_BOT_NAME)
             await prov.install_skills(owner_id, [_PLANNING_SKILL, _SEARCH_SKILL])
@@ -168,14 +183,16 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
                         await fn(bid)
                     except Exception as exc:  # noqa: BLE001 已就绪/竟态 → 跳过
                         print(f"[provision] {meth}({bid}) 跳过:{exc!r}")
-                #await prov.set_bbs_task_dream_mode(bid)  # 进 dream roster;失败即抛(带诊断)
+                # await prov.set_bbs_task_dream_mode(bid)  # 进 dream roster;失败即抛(带诊断)
         finally:
             try:
                 await prov._aclose()
             except Exception:  # noqa: BLE001
                 pass
-        print(f"[provision] owner={owner_id} ← planning-arch+search ; "
-              f"dream_a={dream_a_id} dream_b={dream_b_id} ← arch-analysis+bbs-relay-single-task(+dream_mode)")
+        print(
+            f"[provision] owner={owner_id} ← planning-arch+search ; "
+            f"dream_a={dream_a_id} dream_b={dream_b_id} ← arch-analysis+bbs-relay-single-task(+dream_mode)"
+        )
         dream_ids = {dream_a_id, dream_b_id}
 
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
@@ -183,8 +200,10 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
             #    planning-arch → [N_architects] → search MISS → @MAX_DEPTH=1 miss_depth_exhausted → 升 BBS
             #    → _schedule_bbs_notify → bbs_runner.notify → 两 dream bot bid → 选 winner → claim → dispatch
             #    → winner(bbs-relay-single-task) attach→execute→result → 收口 SUCCESS。
-            r = await cli.post(f"{_BACKEND}/api/v1/collaboration/tasks/execute",
-                               json=_execute_body(owner_id))
+            r = await cli.post(
+                f"{_BACKEND}/api/v1/collaboration/tasks/execute",
+                json=_execute_body(owner_id),
+            )
             r.raise_for_status()
             body = r.json()
             data = body.get("data") or {}
@@ -204,17 +223,24 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
                     continue
                 ep = g.get("extend_props") or {}
                 snap = [
-                    (t.get("node_id"), t.get("status"),
-                     (t.get("run_info") or {}).get("run_mode") or "",
-                     str((t.get("run_info") or {}).get("assignee") or "")[:24])
+                    (
+                        t.get("node_id"),
+                        t.get("status"),
+                        (t.get("run_info") or {}).get("run_mode") or "",
+                        str((t.get("run_info") or {}).get("assignee") or "")[:24],
+                    )
                     for t in g.get("tasks") or []
                 ]
                 if ep.get("bbs_mode") and not escalated_seen:
                     escalated_seen = True
-                    print(f"[escalated] ⭐ MISS→升 BBS! bbs_mode=True loop={g.get('loop_round')} "
-                          f"bbs_owner={ep.get('bbs_owner')} nodes={snap} → 引擎将 bid 两 dream bot")
-                print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
-                      f"bbs_mode={ep.get('bbs_mode')} nodes={snap}")
+                    print(
+                        f"[escalated] ⭐ MISS→升 BBS! bbs_mode=True loop={g.get('loop_round')} "
+                        f"bbs_owner={ep.get('bbs_owner')} nodes={snap} → 引擎将 bid 两 dream bot"
+                    )
+                print(
+                    f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
+                    f"bbs_mode={ep.get('bbs_mode')} nodes={snap}"
+                )
                 if g.get("status") in ("DONE", "HUNG"):
                     break
                 await asyncio.sleep(6.0)
@@ -223,39 +249,71 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
         print(f"[final] graph={g.get('status')} tasks={len(g.get('tasks') or [])}")
         for t in g.get("tasks") or []:
             ri = t.get("run_info") or {}
-            print(f"  - {str(t.get('node_id')):32} {str(t.get('status')):8} "
-                  f"mode={ri.get('run_mode') or '-':11} "
-                  f"assignee={str(ri.get('assignee') or '-')[:24]} "
-                  f"verdict={(ri.get('acceptance_result') or {}).get('verdict')}")
+            print(
+                f"  - {str(t.get('node_id')):32} {str(t.get('status')):8} "
+                f"mode={ri.get('run_mode') or '-':11} "
+                f"assignee={str(ri.get('assignee') or '-')[:24]} "
+                f"verdict={(ri.get('acceptance_result') or {}).get('verdict')}"
+            )
 
-        self.assertEqual(g.get("status"), "SUCCESS",
-                         f"全图未闭环 DONE:status={g.get('status')}"
-                         f"(未升 BBS / dream roster 空 / bid 全失败 / winner 未执行? 看 [snapshot] 定位)")
-        self.assertTrue((g.get("extend_props") or {}).get("bbs_mode"), "未升 BBS(bbs_mode 未置 true)")
+        self.assertEqual(
+            g.get("status"),
+            "SUCCESS",
+            f"全图未闭环 DONE:status={g.get('status')}"
+            f"(未升 BBS / dream roster 空 / bid 全失败 / winner 未执行? 看 [snapshot] 定位)",
+        )
+        self.assertTrue(
+            (g.get("extend_props") or {}).get("bbs_mode"),
+            "未升 BBS(bbs_mode 未置 true)",
+        )
 
         nodes = {t.get("node_id"): t for t in g.get("tasks") or []}
         root = nodes.get(task_id)
         self.assertIsNotNone(root, "根节点(task_id)未出现")
-        self.assertEqual(root.get("status"), "SUCCESS", f"根未 SUCCESS:{root.get('status')}")
+        self.assertEqual(
+            root.get("status"), "SUCCESS", f"根未 SUCCESS:{root.get('status')}"
+        )
 
         # bbs scoped 中继节点:winner 经 bbs-relay-single-task 挂的 run_mode=bbs 节点,assignee ∈ 两 dream bot
-        scoped = [n for n in g.get("tasks") or []
-                  if n.get("node_id") != task_id and (n.get("run_info") or {}).get("run_mode") == "bbs"]
-        self.assertTrue(scoped, "无 run_mode=bbs scoped 中继节点(winner 未 attach/执行? bid 可能未 dispatch)")
-        self.assertEqual(len(scoped), 1, f"应恰 1 个 bbs scoped 中继节点(1 个 winner 执行段):{[(n.get('node_id')) for n in scoped]}")
+        scoped = [
+            n
+            for n in g.get("tasks") or []
+            if n.get("node_id") != task_id
+            and (n.get("run_info") or {}).get("run_mode") == "bbs"
+        ]
+        self.assertTrue(
+            scoped,
+            "无 run_mode=bbs scoped 中继节点(winner 未 attach/执行? bid 可能未 dispatch)",
+        )
+        self.assertEqual(
+            len(scoped),
+            1,
+            f"应恰 1 个 bbs scoped 中继节点(1 个 winner 执行段):{[(n.get('node_id')) for n in scoped]}",
+        )
         sc = scoped[0]
         ri = sc.get("run_info") or {}
-        self.assertEqual(sc.get("status"), "SUCCESS", f"scoped 中继节点未 SUCCESS:{sc.get('status')}")
-        self.assertIn(ri.get("assignee"), dream_ids,
-                      f"scoped assignee 非两 dream bot 之一(bid 未选到 dream bot?):{ri.get('assignee')}")
+        self.assertEqual(
+            sc.get("status"), "SUCCESS", f"scoped 中继节点未 SUCCESS:{sc.get('status')}"
+        )
+        self.assertIn(
+            ri.get("assignee"),
+            dream_ids,
+            f"scoped assignee 非两 dream bot 之一(bid 未选到 dream bot?):{ri.get('assignee')}",
+        )
         ar = ri.get("acceptance_result") or {}
         self.assertEqual(ar.get("verdict"), "DONE", f"scoped 中继段验收未 PASS:{ar}")
-        self.assertTrue(ri.get("output"), "scoped 中继段无最终输出(architects 产出为空)")
+        self.assertTrue(
+            ri.get("output"), "scoped 中继段无最终输出(architects 产出为空)"
+        )
         # claim 已释放(收口后根 bbs_owner 清空)
-        self.assertIsNone((root.get("run_info") or {}).get("extend_props", {}).get("bbs_owner"),
-                           "收口后根 bbs_owner 未释放")
+        self.assertIsNone(
+            (root.get("run_info") or {}).get("extend_props", {}).get("bbs_owner"),
+            "收口后根 bbs_owner 未释放",
+        )
         # recover 清掉了原 MISS 的 HUNG 死分支 N_architects(bbs 接力视为推倒重做)
-        self.assertNotIn("N_architects", nodes, "claim recover 未清 HUNG 死分支 N_architects")
+        self.assertNotIn(
+            "N_architects", nodes, "claim recover 未清 HUNG 死分支 N_architects"
+        )
         print(f"[result] winner={ri.get('assignee')} scoped=DONE/PASS 图=DONE")
 
 

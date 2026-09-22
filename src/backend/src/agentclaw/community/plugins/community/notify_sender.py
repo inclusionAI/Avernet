@@ -11,6 +11,7 @@ Mirrors ``CommunityDRMReader`` (degenerate but real, every flag is unset)
 and ``NoApprovalWorkflow`` (unavailable, tells callers so). Not a
 ``MockSeam`` — bound directly by ``CommunityNotifyModule``.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,10 +33,13 @@ class DingTalkCredentialHolder:
 
     优先级：API holder > YAML holder > env > 空（skip）。
     """
+
     _creds: dict[str, str] = {}
 
     @classmethod
-    def set(cls, ak_id: str, ak_secret: str, robot_code: str, card_template_id: str) -> None:
+    def set(
+        cls, ak_id: str, ak_secret: str, robot_code: str, card_template_id: str
+    ) -> None:
         cls._creds = {
             "ak_id": ak_id,
             "ak_secret": ak_secret,
@@ -59,6 +63,7 @@ class DingTalkYamlHolder:
 
     优先级低于 API holder（运行时注入可覆盖 YAML 配置），高于 env 变量。
     """
+
     _creds: dict[str, str] = {}
 
     @classmethod
@@ -80,7 +85,7 @@ class DingTalkYamlHolder:
 
 
 def _env(name: str, fallback: str = "") -> str:
-    """读取 env，带 SINGLEBOX_* 兼容回退（便于复用 e2e 既有的钉钉凭证）。"""
+    """Read a deployment credential from its configured environment name."""
     return (os.environ.get(name) or os.environ.get(fallback) or "").strip()
 
 
@@ -127,9 +132,8 @@ class DingTalkNotifySender(NotifySenderPlugin):
         ``NotifyMessagesProvider`` 端口(DI alias 到本实例),由 DI 在钉钉凭证就绪时
         绑定本类（凭证缺失则回退到纯 ``CommunityNotifySender``）—— 不把钉钉 SDK
         漏进 ``DiscoveryService``。
-      - 复用 e2e 既有的钉钉凭证 env（``TASK_DISCOVERY_DINGTALK_*``，回退
-        ``SINGLEBOX_DINGTALK_*``）；``card_template_id`` 复用
-        ``TASK_DISCOVERY_CARD_TEMPLATE_ID``（回退 ``SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID``）。
+      - 凭证来自部署配置（``TASK_DISCOVERY_DINGTALK_*`` 与
+        ``TASK_DISCOVERY_CARD_TEMPLATE_ID``），不使用部署 profile 专属回退。
       - corp 钉钉 SDK ``alipay_antdingopensdk_client`` **惰性导入**（在 ``send`` 内），
         未配置凭证时根本不导入；满足 ``send()`` 永不抛异常的 Protocol 约定。
       - 卡片载荷来自 ``NotifyMessage.extra``（``card_template_id`` / ``card_biz_id`` /
@@ -149,7 +153,12 @@ class DingTalkNotifySender(NotifySenderPlugin):
         *,
         channel: str = "markdown",
     ) -> str | None:
-        log.info("[task_discovery] → DingTalkNotifySender.send(title=%r, recipient=%s, channel=%s)", message.title[:80], message.recipient, channel)
+        log.info(
+            "[task_discovery] → DingTalkNotifySender.send(title=%r, recipient=%s, channel=%s)",
+            message.title[:80],
+            message.recipient,
+            channel,
+        )
         # 先照常走 inner 通道（日志/兜底），再额外投递钉钉卡片。两者同时进行。
         msg_id = self._inner.send(message, channel=channel)
         try:
@@ -181,10 +190,10 @@ class DingTalkNotifySender(NotifySenderPlugin):
 
     #: 凭证 key → (env_name, env_fallback) 映射，用于 _configured 诊断日志
     _CRED_KEYS: list[tuple[str, str, str]] = [
-        ("ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID"),
-        ("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", "SINGLEBOX_DINGTALK_AK_SECRET"),
-        ("robot_code", "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "SINGLEBOX_DINGTALK_ROBOT_CODE"),
-        ("card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID"),
+        ("ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", ""),
+        ("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", ""),
+        ("robot_code", "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", ""),
+        ("card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", ""),
     ]
 
     @classmethod
@@ -198,14 +207,13 @@ class DingTalkNotifySender(NotifySenderPlugin):
             return "yaml"
         return "env" if _env(*cls._CRED_KEYS_MAP[key]) else "empty"
 
-    _CRED_KEYS_MAP: dict[str, tuple[str, str]] = {k: (e1, e2) for k, e1, e2 in _CRED_KEYS}
+    _CRED_KEYS_MAP: dict[str, tuple[str, str]] = {
+        k: (e1, e2) for k, e1, e2 in _CRED_KEYS
+    }
 
     @classmethod
     def _configured(cls) -> bool:
-        return all(
-            cls._resolve(k, e1, e2)
-            for k, e1, e2 in cls._CRED_KEYS
-        )
+        return all(cls._resolve(k, e1, e2) for k, e1, e2 in cls._CRED_KEYS)
 
     def _send_dingtalk_card(self, message: NotifyMessage) -> None:
         log.info("[task_discovery] → DingTalkNotifySender._send_dingtalk_card()")
@@ -232,15 +240,17 @@ class DingTalkNotifySender(NotifySenderPlugin):
                 message.title[:80],
             )
             return
-        ak_id = self._resolve("ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID")
-        ak_secret = self._resolve("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", "SINGLEBOX_DINGTALK_AK_SECRET")
-        robot_code = self._resolve("robot_code", "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "SINGLEBOX_DINGTALK_ROBOT_CODE")
-        template_id = self._resolve("card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID")
+        ak_id = self._resolve("ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "")
+        ak_secret = self._resolve("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", "")
+        robot_code = self._resolve(
+            "robot_code", "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", ""
+        )
+        template_id = self._resolve(
+            "card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", ""
+        )
         extra = message.extra or {}
         # account_id 默认用 recipient（owner），可用 env 单独覆盖
-        account_id = _env(
-            "TASK_DISCOVERY_DINGTALK_ACCOUNT_ID", "SINGLEBOX_DINGTALK_ACCOUNT_ID"
-        ) or message.recipient
+        account_id = _env("TASK_DISCOVERY_DINGTALK_ACCOUNT_ID") or message.recipient
         card_biz_id = extra.get("card_biz_id") or f"discover_things_{int(time.time())}"
         # card_data 由 _send_notification 填好（已含 click/session_url/workitem_*…）
         card_data = extra.get("card_data")
@@ -280,8 +290,10 @@ class DingTalkNotifySender(NotifySenderPlugin):
         from alipay_antdingopensdk_client.client import (  # type: ignore[import-not-found]
             Client as AntDingClient,
         )
+
         # alibabacloud-tea 包不提供 Tea.__version__，但 UtilClient 拼 User-Agent 时读它
         import Tea  # type: ignore[import-not-found]
+
         if not hasattr(Tea, "__version__"):
             Tea.__version__ = "0.4.3"
 

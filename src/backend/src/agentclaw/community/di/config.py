@@ -9,6 +9,7 @@ clusters with sub-blocks (e.g. ``arca_sandbox.alt``) that aren't yet
 worth fully typing. The hatch lets us pull the typed extraction work
 forward without blocking on every nested field.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -156,6 +157,7 @@ class MerchantTaskBotBindingsConfig:
     matching ``${...}`` in a plan), so content routing/materialize stays green on a
     bare/CI build (placeholders stay literal) and only a real dispatch degrades.
     """
+
     bot_id_by_role: Mapping[str, str] = field(default_factory=dict)
 
 

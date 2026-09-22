@@ -10,7 +10,7 @@ To keep lifecycle discovery cheap, the constructor only stores the injector and
 resolves the graph repository + task service lazily on first use (the task
 service graph is heavier and only needed once recovery is actually enabled).
 
-Enablement is explicit and off by default so singlebox/test stay deterministic:
+Enablement is explicit and off by default so test/local environments stay deterministic:
 set ``TASK_RECOVERY_ENABLED=1`` (or any truthy value) in the deployment profile
 to activate. Lease/interval/instance identity are likewise environment-driven.
 """

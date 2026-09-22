@@ -1,4 +1,4 @@
-"""singlebox double:静态凭据 + canned context + 收集 sink。"""
+"""Task-runner test doubles: static credentials, canned context, and a collecting sink."""
 from __future__ import annotations
 
 from typing import Any

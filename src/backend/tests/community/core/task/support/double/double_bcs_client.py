@@ -47,7 +47,7 @@ class _DoubleBcsClient:
 
     async def get_session_messages(self, session_id: str, *, limit: int = 50,
                                    since_msg_id: str | None = None,
-                                   caller_bot_token: str | None = None) -> list[Any]:
+                                   caller_bearer: str | None = None) -> list[Any]:
         return []
 
     async def start_state_machine_run(self, group_id, *, definition_yaml, definition_ref,

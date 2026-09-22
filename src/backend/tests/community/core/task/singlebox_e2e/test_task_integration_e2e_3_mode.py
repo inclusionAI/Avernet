@@ -2,7 +2,7 @@
 
 gated by ``SINGLEBOX_TASK_E2E=1``。**协作群需 BCS double**,本地起后端 singlebox 时务必设:
 
-  SINGLEBOX_BCS_DOUBLE=1 SINGLEBOX_TASK_E2E=1 \
+  SINGLEBOX_TASK_E2E=1 \
     src/backend/.venv/bin/python -m pytest \
       tests/community/core/task/singlebox_e2e/test_task_integration_e2e_3_mode.py -s
 
@@ -45,6 +45,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。**协作群需 BCS double**,本地起后端 
 - **3-mode natural**:``planning-arch``(arch 确定式表)+ ``search``(同 integration e2e,表里追加 arch 行),固定 3 子
   (N_tech_stack/N_dual_view/N_architects)+ 按 node_id 查表派发,三模态共存。全程用已有 skill,不新增。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -55,10 +56,27 @@ from pathlib import Path
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
-    SingleboxBotProvisioner,
-    SingleboxEngineAdapter,
+from tests.community.core.task.support.live_task_bot_provisioner import (
+    LiveTaskBotProvisioner,
 )
+from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
+    OpenApiBotAdapter,
+)
+from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
+    ApiKeyProviderImpl,
+)
+
+
+def _openapi_adapter() -> OpenApiBotAdapter:
+    """Return the production OpenAPI bot transport using live deployment values."""
+    return OpenApiBotAdapter(
+        ApiKeyProviderImpl(
+            api_key=os.getenv("api_key_secret", ""),
+            api_key_prefix=os.environ.get("api_key_prefix", ""),
+            base_url=os.environ.get("BASS_URL", "http://localhost:8890"),
+        )
+    )
+
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
@@ -73,16 +91,22 @@ _COOP_BOT_A = "业务架构视角Bot"
 _COOP_BOT_B = "数据架构视角Bot"
 _JY_BOT_NAME = "金庸"
 
-SKILLS_DIR = Path(__file__).parent / "skills"  # 本文件在 singlebox_e2e/ 下,skills 即同级 ./skills
+SKILLS_DIR = (
+    Path(__file__).parent / "skills"
+)  # 本文件在 singlebox_e2e/ 下,skills 即同级 ./skills
 _PLANNING_SKILL = str(SKILLS_DIR / "planning-arch")  # 通用 LLM 规划(非 case 剧本)
-_SEARCH_SKILL = str(SKILLS_DIR / "search")           # 派发决策 storage search(同 integration e2e;表里已加 arch 场景 node_id 行)
-_ACCEPTANCE_SKILL = str(SKILLS_DIR / "acceptance")   # worker / 群成员 自验收
-_ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")      # BBS 那段金庸中继执行侧 mock
+_SEARCH_SKILL = str(
+    SKILLS_DIR / "search"
+)  # 派发决策 storage search(同 integration e2e;表里已加 arch 场景 node_id 行)
+_ACCEPTANCE_SKILL = str(SKILLS_DIR / "acceptance")  # worker / 群成员 自验收
+_ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")  # BBS 那段金庸中继执行侧 mock
 # bbs-relay-pickup skill 落在 spec 目录下(非 src/backend/skills);
 # 本文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/ ,parents[5] = <repo>/src/backend
 _BBS_SKILL = str(
     Path(__file__).resolve().parents[5]
-    / "specs" / "2026-08-09-task-goal-driven-task-runner-bbs" / "bbs-relay-pickup"
+    / "specs"
+    / "2026-08-09-task-goal-driven-task-runner-bbs"
+    / "bbs-relay-pickup"
 )
 
 # 主任务:三份交付物(技术栈概览 + 业务/数据双视角分析 + 架构师名册);planning-arch LLM 自拆 ~3 子。
@@ -119,14 +143,18 @@ def _print_task_details(g: dict | None, task_id: str) -> None:
         print(f"[task-details] task={task_id} (empty dashboard)")
         return
     ep = g.get("extend_props") or {}
-    print(f"[task-details] task={task_id} graph.status={g.get('status')} "
-          f"loop_round={g.get('loop_round')} bbs_mode={ep.get('bbs_mode')} "
-          f"bbs_owner={str(ep.get('bbs_owner') or '-')[:24]} "
-          f"bbs_relay_count={ep.get('bbs_relay_count')} node_count={len(g.get('tasks') or [])}")
+    print(
+        f"[task-details] task={task_id} graph.status={g.get('status')} "
+        f"loop_round={g.get('loop_round')} bbs_mode={ep.get('bbs_mode')} "
+        f"bbs_owner={str(ep.get('bbs_owner') or '-')[:24]} "
+        f"bbs_relay_count={ep.get('bbs_relay_count')} node_count={len(g.get('tasks') or [])}"
+    )
     for t in g.get("tasks") or []:
         ri = t.get("run_info") or {}
-        print(f"  - node={t.get('node_id')} status={t.get('status')} "
-              f"run_mode={ri.get('run_mode') or '-'} assignee={str(ri.get('assignee') or '-')[:40]}")
+        print(
+            f"  - node={t.get('node_id')} status={t.get('status')} "
+            f"run_mode={ri.get('run_mode') or '-'} assignee={str(ri.get('assignee') or '-')[:40]}"
+        )
         if ri.get("extend_props"):
             print(f"      extend_props={ri.get('extend_props')}")
         if ri.get("exec_error"):
@@ -146,12 +174,20 @@ def _signature(g: dict | None) -> tuple:
         return ()
     ep = g.get("extend_props") or {}
     nodes = tuple(
-        (t.get("node_id"), t.get("status"),
-         (t.get("run_info") or {}).get("run_mode"),
-         str((t.get("run_info") or {}).get("assignee") or "")[:24])
+        (
+            t.get("node_id"),
+            t.get("status"),
+            (t.get("run_info") or {}).get("run_mode"),
+            str((t.get("run_info") or {}).get("assignee") or "")[:24],
+        )
         for t in g.get("tasks") or []
     )
-    return (g.get("status"), ep.get("bbs_mode"), str(ep.get("bbs_owner") or "")[:24], nodes)
+    return (
+        g.get("status"),
+        ep.get("bbs_mode"),
+        str(ep.get("bbs_owner") or "")[:24],
+        nodes,
+    )
 
 
 def _execute_body(owner_id: str) -> dict:
@@ -180,9 +216,18 @@ def _execute_body(owner_id: str) -> dict:
                     "产出某某某公司基础架构方向:技术栈概览 + 业务/数据双视角架构分析 + 3 位核心架构师名册"
                 ),
                 "acceptances": [
-                    {"id": "ac1", "acceptance": "给出基础架构方向技术栈概览(计算/存储/网络等层与核心组件)"},
-                    {"id": "ac2", "acceptance": "从业务架构与数据架构双视角深度分析基础架构现状与演进"},
-                    {"id": "ac3", "acceptance": "给出基础架构方向 3 位架构师的姓名/角色 + 职责"},
+                    {
+                        "id": "ac1",
+                        "acceptance": "给出基础架构方向技术栈概览(计算/存储/网络等层与核心组件)",
+                    },
+                    {
+                        "id": "ac2",
+                        "acceptance": "从业务架构与数据架构双视角深度分析基础架构现状与演进",
+                    },
+                    {
+                        "id": "ac3",
+                        "acceptance": "给出基础架构方向 3 位架构师的姓名/角色 + 职责",
+                    },
                 ],
             },
         },
@@ -233,15 +278,21 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         #    技术栈 bot(single_bot 执行者)装 acceptance;
         #    业务/数据双视角 bot(coop_group 两成员)装 acceptance;(命名含「架构」不含「架构师」,见文件头)
         #    金庸(BBS 中继)装 arch-analysis + bbs-relay-pickup。
-        prov = SingleboxBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
+        prov = LiveTaskBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
         owner_id = await prov.create_bot(bot_name=_OWNER_BOT_NAME)
-        await prov.install_skills(owner_id, [_PLANNING_SKILL, _SEARCH_SKILL])  # planning-arch 规划 + search(表驱动派发,同 integration e2e)
+        await prov.install_skills(
+            owner_id, [_PLANNING_SKILL, _SEARCH_SKILL]
+        )  # planning-arch 规划 + search(表驱动派发,同 integration e2e)
         single_id = await prov.create_bot(bot_name=_SINGLE_BOT_NAME)
         await prov.install_skills(single_id, [_ACCEPTANCE_SKILL])
         coop_a_id = await prov.create_bot(bot_name=_COOP_BOT_A)
         await prov.install_skills(coop_a_id, [_ACCEPTANCE_SKILL])
-        await prov.onboard_to_bcn(coop_a_id)  # 入网 BCN:coop_group 成员建群前必须,否则 form_coop_group 404 bot_not_found({bot_id}:{owner} 不在 BCN)
-        await prov.set_bcs_visibility(coop_a_id)  # 设 BCS visibility=public(只此 bot):ensure_reachable 跳过好友校验,否则 protected 撞 403 not friends
+        await prov.onboard_to_bcn(
+            coop_a_id
+        )  # 入网 BCN:coop_group 成员建群前必须,否则 form_coop_group 404 bot_not_found({bot_id}:{owner} 不在 BCN)
+        await prov.set_bcs_visibility(
+            coop_a_id
+        )  # 设 BCS visibility=public(只此 bot):ensure_reachable 跳过好友校验,否则 protected 撞 403 not friends
         coop_b_id = await prov.create_bot(bot_name=_COOP_BOT_B)
         await prov.install_skills(coop_b_id, [_ACCEPTANCE_SKILL])
         await prov.onboard_to_bcn(coop_b_id)  # 同上(协作群两成员都要在 BCN)
@@ -249,13 +300,15 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         jy_id = await prov.create_bot(bot_name=_JY_BOT_NAME)
         await prov.install_skills(jy_id, [_ARCH_SKILL, _BBS_SKILL])
         await prov._aclose()
-        print(f"[provision] owner={owner_id} ← planning-arch+search ; "
-              f"技术栈bot={single_id} ← acceptance ; "
-              f"业务视角bot={coop_a_id}+数据视角bot={coop_b_id} ← acceptance(协作群两成员) ; "
-              f"金庸={jy_id} ← arch-analysis+bbs-relay-pickup")
+        print(
+            f"[provision] owner={owner_id} ← planning-arch+search ; "
+            f"技术栈bot={single_id} ← acceptance ; "
+            f"业务视角bot={coop_a_id}+数据视角bot={coop_b_id} ← acceptance(协作群两成员) ; "
+            f"金庸={jy_id} ← arch-analysis+bbs-relay-pickup"
+        )
 
         # 2) live adapter:用于唤醒金庸自驱 bbs-relay-pickup(真实 LLM 推理)
-        adapter = SingleboxEngineAdapter(backend_base_url=_BACKEND, user_id=_USER_ID)
+        adapter = _openapi_adapter()
 
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
             # 3) POST /api/v1/collaboration/tasks/execute → backend 进程内真实 engine 推进:
@@ -263,7 +316,10 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
             #      技术栈概览 → HIT_SINGLE 技术栈概览Bot(single_bot);
             #      业务+数据双视角 → HIT_MULTI_BOTS [业务架构视角Bot,数据架构视角Bot](coop_group,BCS 拉群);
             #      架构师名册 → MISS → @MAX_DEPTH=1 升 BBS(bbs_mode=True / 根 PLANNING / 图空闲;前两子在跑保根可恢复)。
-            r = await cli.post(f"{_BACKEND}/api/v1/collaboration/tasks/execute", json=_execute_body(owner_id))
+            r = await cli.post(
+                f"{_BACKEND}/api/v1/collaboration/tasks/execute",
+                json=_execute_body(owner_id),
+            )
             r.raise_for_status()
             execute_data = r.json().get("data") or {}
             task_id = execute_data["task_id"]
@@ -279,13 +335,18 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                     await asyncio.sleep(5.0)
                     continue
                 snap = [
-                    (t.get("node_id"), t.get("status"),
-                     (t.get("run_info") or {}).get("run_mode") or "",
-                     str((t.get("run_info") or {}).get("assignee") or "")[:24])
+                    (
+                        t.get("node_id"),
+                        t.get("status"),
+                        (t.get("run_info") or {}).get("run_mode") or "",
+                        str((t.get("run_info") or {}).get("assignee") or "")[:24],
+                    )
                     for t in g.get("tasks") or []
                 ]
-                print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
-                      f"bbs_mode={(g.get('extend_props') or {}).get('bbs_mode')} nodes={snap}")
+                print(
+                    f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
+                    f"bbs_mode={(g.get('extend_props') or {}).get('bbs_mode')} nodes={snap}"
+                )
                 if _signature(g) != last_sig:
                     last_sig = _signature(g)
                     _print_task_details(g, task_id)
@@ -302,9 +363,11 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                     )
                     for _t in g.get("tasks") or []:
                         _ri = _t.get("run_info") or {}
-                        print(f" 已自然升BBS  - {_t.get('node_id'):28} {_t.get('status'):9} "
-                              f"mode={_ri.get('run_mode') or '-':11} "
-                              f"assignee={str(_ri.get('assignee') or '')[:24]}")
+                        print(
+                            f" 已自然升BBS  - {_t.get('node_id'):28} {_t.get('status'):9} "
+                            f"mode={_ri.get('run_mode') or '-':11} "
+                            f"assignee={str(_ri.get('assignee') or '')[:24]}"
+                        )
                     break
                 if g.get("status") == "SUCCESS":
                     break  # 未升 BBS 已闭环(异常路径,留待断言揭出)
@@ -330,7 +393,9 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                     )
                     status = run.get("status")
                     content = (run.get("result") or {}).get("content") or ""
-                    print(f"[wake#{wakes}] status={status} content[:300]={content[:300]!r}")
+                    print(
+                        f"[wake#{wakes}] status={status} content[:300]={content[:300]!r}"
+                    )
                 except Exception as exc:  # noqa: BLE001
                     print(f"[wake#{wakes}] adapter 异常:{exc!r}")
                 # 唤醒后轮询,等接力写回落地 / 图收口 / 图空闲可再唤醒
@@ -341,19 +406,26 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                         await asyncio.sleep(5.0)
                         continue
                     snap = [
-                        (t.get("node_id"), t.get("status"),
-                         (t.get("run_info") or {}).get("run_mode") or "",
-                         str((t.get("run_info") or {}).get("assignee") or "")[:24])
+                        (
+                            t.get("node_id"),
+                            t.get("status"),
+                            (t.get("run_info") or {}).get("run_mode") or "",
+                            str((t.get("run_info") or {}).get("assignee") or "")[:24],
+                        )
                         for t in g.get("tasks") or []
                     ]
-                    print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
-                          f"bbs_owner={nodes_first_ext(g,'bbs_owner')} nodes={snap}")
+                    print(
+                        f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
+                        f"bbs_owner={nodes_first_ext(g, 'bbs_owner')} nodes={snap}"
+                    )
                     if _signature(g) != last_sig:
                         last_sig = _signature(g)
                         _print_task_details(g, task_id)
                     if g.get("status") in ("DONE", "HUNG"):
                         break
-                    busy = any((t.get("status") == "RUNNING") for t in g.get("tasks") or [])
+                    busy = any(
+                        (t.get("status") == "RUNNING") for t in g.get("tasks") or []
+                    )
                     held = (g.get("extend_props") or {}).get("bbs_owner")
                     if not busy and not held:
                         break
@@ -372,70 +444,100 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         except Exception:
             pass
 
-        self.assertEqual(g.get("status"), "SUCCESS", f"全图未闭环 DONE:status={g.get('status')}")
+        self.assertEqual(
+            g.get("status"), "SUCCESS", f"全图未闭环 DONE:status={g.get('status')}"
+        )
         nodes = {t["node_id"]: t for t in g.get("tasks") or []}
         self.assertEqual(nodes[task_id]["status"], "SUCCESS", "根未 SUCCESS")
-        self.assertTrue((g.get("extend_props") or {}).get("bbs_mode"), "图未置 bbs_mode(架构师名册未升 BBS)")
+        self.assertTrue(
+            (g.get("extend_props") or {}).get("bbs_mode"),
+            "图未置 bbs_mode(架构师名册未升 BBS)",
+        )
 
         # 6a) single_bot:技术栈概览子任务真匹配到现成 bot(DONE,assignee=技术栈概览Bot)
         single_nodes = [
-            t for t in g.get("tasks") or []
-            if (t.get("run_info") or {}).get("run_mode") == "single_bot" and t["node_id"] != task_id
+            t
+            for t in g.get("tasks") or []
+            if (t.get("run_info") or {}).get("run_mode") == "single_bot"
+            and t["node_id"] != task_id
         ]
         self.assertGreaterEqual(
-            len(single_nodes), 1,
+            len(single_nodes),
+            1,
             f"无 single_bot 派发节点(技术栈概览子任务未真匹配到技术栈概览Bot;看 owner 派发判 / 候选预查)。"
             f"nodes={[t.get('node_id') for t in g.get('tasks') or []]}",
         )
         for n in single_nodes:
             ri = n.get("run_info") or {}
-            self.assertEqual(n.get("status"), "SUCCESS", f"single_bot 子任务未 SUCCESS:{n.get('node_id')}")
             self.assertEqual(
-                ri.get("assignee"), single_id,
+                n.get("status"),
+                "SUCCESS",
+                f"single_bot 子任务未 SUCCESS:{n.get('node_id')}",
+            )
+            self.assertEqual(
+                ri.get("assignee"),
+                single_id,
                 f"single_bot 非技术栈概览Bot 执行:{n.get('node_id')} assignee={ri.get('assignee')}",
             )
 
         # 6b) coop_group:业务+数据双视角子任务命中协作群(DONE,assignee=grp_ 群 id)
         coop_nodes = [
-            t for t in g.get("tasks") or []
-            if (t.get("run_info") or {}).get("run_mode") == "coop_group" and t["node_id"] != task_id
+            t
+            for t in g.get("tasks") or []
+            if (t.get("run_info") or {}).get("run_mode") == "coop_group"
+            and t["node_id"] != task_id
         ]
         self.assertGreaterEqual(
-            len(coop_nodes), 1,
+            len(coop_nodes),
+            1,
             f"无 coop_group 派发节点(双视角子任务未拉协作群;看 owner 是否判 HIT_MULTI_BOTS / BCS double 是否开)。"
             f"nodes={[t.get('node_id') for t in g.get('tasks') or []]}",
         )
         for n in coop_nodes:
-            self.assertEqual(n.get("status"), "SUCCESS", f"coop_group 子任务未 SUCCESS:{n.get('node_id')}")
+            self.assertEqual(
+                n.get("status"),
+                "SUCCESS",
+                f"coop_group 子任务未 SUCCESS:{n.get('node_id')}",
+            )
             self.assertTrue(
                 # 群 id 前缀容忍两种后端:本地 stub/double 产 ``grp_<8hex>``;真 BCS(:21000)产 ``bcs_grp_<uuid>``。
-                str((n.get("run_info") or {}).get("assignee") or "").startswith(("grp_", "bcs_grp_")),
+                str((n.get("run_info") or {}).get("assignee") or "").startswith(
+                    ("grp_", "bcs_grp_")
+                ),
                 f"coop_group assignee 非群 id:{n.get('node_id')} assignee={(n.get('run_info') or {}).get('assignee')}",
             )
 
         # 6c) bbs:架构师名册 MISS→BBS,金庸自驱 bbs scoped 节点(DONE,assignee=金庸,output.architects)
         bbs_nodes = [
-            t for t in g.get("tasks") or []
-            if (t.get("run_info") or {}).get("run_mode") == "bbs" and t["node_id"] != task_id
+            t
+            for t in g.get("tasks") or []
+            if (t.get("run_info") or {}).get("run_mode") == "bbs"
+            and t["node_id"] != task_id
         ]
         self.assertGreaterEqual(
-            len(bbs_nodes), 1,
+            len(bbs_nodes),
+            1,
             f"无金庸自驱的 bbs scoped 节点(架构师名册未升 BBS/未中继);"
             f"nodes={[t.get('node_id') for t in g.get('tasks') or []]}",
         )
         for n in bbs_nodes:
             ri = n.get("run_info") or {}
-            self.assertEqual(n.get("status"), "SUCCESS", f"scoped 未 SUCCESS:{n.get('node_id')}")
             self.assertEqual(
-                ri.get("assignee"), jy_id,
+                n.get("status"), "SUCCESS", f"scoped 未 SUCCESS:{n.get('node_id')}"
+            )
+            self.assertEqual(
+                ri.get("assignee"),
+                jy_id,
                 f"scoped 非 金庸 接力:{n.get('node_id')} assignee={ri.get('assignee')}",
             )
             self.assertTrue(
                 (ri.get("output") or {}).get("architects"),
                 f"scoped 缺架构师 checkpoint:{n.get('node_id')}",
             )
-        print(f"[final] graph={g.get('status')} single_bot={len(single_nodes)} "
-              f"coop_group={len(coop_nodes)} bbs={len(bbs_nodes)} 唤醒={wakes} 根=SUCCESS")
+        print(
+            f"[final] graph={g.get('status')} single_bot={len(single_nodes)} "
+            f"coop_group={len(coop_nodes)} bbs={len(bbs_nodes)} 唤醒={wakes} 根=SUCCESS"
+        )
 
 
 def nodes_first_ext(g: dict, key: str) -> str:

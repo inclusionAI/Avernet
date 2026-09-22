@@ -7,7 +7,7 @@ from agentclaw.community.core.task.task_dispatch.strategies import GroupFormatio
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import BcsCreateGroupResult
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
-from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_identity_resolver import (
+from tests.community.core.task.support.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
 

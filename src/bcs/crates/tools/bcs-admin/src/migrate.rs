@@ -1474,6 +1474,7 @@ mod tests {
         let database = opts
             .db_name()
             .ok_or_else(|| anyhow!("BCS_TEST_MYSQL_URL must include a database name"))?;
+        let db_pass = opts.pass().map(str::to_string);
         let mut config = MysqlDbConfig::new()
             .with_database(database)
             .with_connection(MysqlConnectionConfig {
@@ -1481,7 +1482,7 @@ mod tests {
                 host: Some(opts.ip_or_hostname().to_string()),
                 port: Some(opts.tcp_port()),
                 user: opts.user().map(str::to_string),
-                password: opts.pass().map(str::to_string),
+                password: db_pass,
                 extra: BTreeMap::new(),
             })
             .with_statement_protocol(StatementProtocol::Text);

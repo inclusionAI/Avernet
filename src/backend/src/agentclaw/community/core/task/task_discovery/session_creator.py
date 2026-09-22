@@ -1,6 +1,6 @@
 """SessionCreator — 通过 backend connection API 定位 per-bot engine 后直连创建 session。
 
-singlebox 模式下 ``DeviceAdapterTransport`` 绑的是 ``InMemoryDeviceAdapterTransport``
+本地测试模式下 ``DeviceAdapterTransport`` 绑的是 ``InMemoryDeviceAdapterTransport``
 (mock)，relay 的 ``call()`` 不会做真实 HTTP 转发。因此 session_creator 需要自己：
   1. 调 backend ``GET /api/bots/{bot_id}/connection`` 拿到 per-bot engine 的 target
   2. 直连 ``http://{target}/api/sessions`` 创建 session
@@ -26,10 +26,10 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-#: 默认 backend 地址（singlebox local）
+#: 默认 backend 地址（本地联调）
 _DEFAULT_BACKEND_URL = "http://localhost:8888"
 
-#: 默认前端 workbench 端口（singlebox local, frontend.sh:8000）
+#: 默认前端 workbench 端口（本地联调, frontend.sh:8000）
 _DEFAULT_FRONTEND_PORT = "8000"
 
 

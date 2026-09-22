@@ -10,8 +10,8 @@ from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
-from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
-    LocalBcsTokenProvider,
+from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
+    BcsTokenProviderImpl,
 )
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
@@ -21,7 +21,7 @@ from agentclaw.community.core.task.task_runner.client.callback_data_enricher imp
 def _claw_mind_graph(raw, disposition="result"):
     """translate_claw_mind + enrich_claw_mind → execution_graph(execution_graph 构建已移至 CallbackDataEnricher)。"""
     _tc = translate_claw_mind(raw, disposition)
-    CallbackDataEnricher(LocalBcsTokenProvider(base_url="http://bcs")).enrich_claw_mind(_tc.data, raw)
+    CallbackDataEnricher(BcsTokenProviderImpl(base_url="http://bcs")).enrich_claw_mind(_tc.data, raw)
     return _tc.data.data.get("execution_graph")
 
 
@@ -145,7 +145,7 @@ class TestClawMind:
 
     def test_translate_claw_mind_maps_fields(self):
         tc = translate_claw_mind(self._BODY, "result")
-        CallbackDataEnricher(LocalBcsTokenProvider(base_url="http://bcs")).enrich_claw_mind(tc.data, self._BODY)
+        CallbackDataEnricher(BcsTokenProviderImpl(base_url="http://bcs")).enrich_claw_mind(tc.data, self._BODY)
         assert tc.disposition == "result"
         d = tc.data.data
         assert d["loop_task_id"] == "flow-abc-123"  # loop_task_id = flow_id(run 实例,对齐 BCN);node_id 空

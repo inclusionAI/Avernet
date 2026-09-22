@@ -1,12 +1,13 @@
 """CatalogKeywordBotDiscover — task 派发候选预查适配,实现 ``BotDiscoverServiceProtocol.search_by_keyword``。
 
-profile 无关:corp / prod / community / singlebox 各 profile 的 task 派发候选预查均复用此实现
+profile 无关:各部署 profile 的 task 派发候选预查均复用此实现
 (``TaskModule._resolve_discover`` 无条件返回本类)。底层走 ``BotPublicService.search_catalog_public_bots_by_keyword``
 (BCS catalog 关键字搜索),刻意不依赖 BCSFuse recommendation——其可用性不应决定派发路由。
 
-早期与 ``SingleboxEngineAdapter`` 同处 ``singlebox_engine_adapter.py``;因本类非 singlebox 专属,
+早期与直连引擎适配器同处一文件;因本类非任何部署形态专属,
 独立成模块以避免文件名误导。
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,7 +29,11 @@ logger = logging.getLogger("task.catalog.search")
 # {public,protected}(见 bcs-http search_bots viewer_kind / bcs-bot-store search_candidates)。
 _DISPATCH_CATALOG_FILTERS = BotCatalogSearchFilters(
     visibility=("public",),
-    user_visibility=("public", "protected", "private"),  # 中和 user_visibility 默认,见下
+    user_visibility=(
+        "public",
+        "protected",
+        "private",
+    ),  # 中和 user_visibility 默认,见下
     status="online",
 )
 
@@ -38,7 +43,7 @@ class CatalogKeywordBotDiscover:
     底层走 ``BotPublicService.search_catalog_public_bots_by_keyword``(BCS catalog 关键字搜索,
     适配 OSS ``public='0'`` 部署 bot 也能命中)。
 
-    非单 ``singlebox`` 专用:corp / prod / community / singlebox 各 profile 的 task 派发候选预查
+    非任何部署形态专用:各 profile 的 task 派发候选预查
     均复用此实现(``TaskModule._resolve_discover``)。底层经 BCS ``/bots/search`` 关键字检索后回 join
     后端 bot 元数据,每个 item 自带完整 ``bot_uuid``(``{bot_id}:{entity_id}``,对齐 BCN onboard 的
     ``bot_id:owner_id`` 形态),供下游 BCS 派发身份解析直接消费,无需搜推层再做 product→复合兜底。
@@ -133,6 +138,10 @@ class CatalogKeywordBotDiscover:
             (search or "")[:500],
             res.get("total") if isinstance(res, dict) else None,
             len(items),
-            [item.get("bot_uuid") or item.get("bot_id") for item in items if isinstance(item, dict)],
+            [
+                item.get("bot_uuid") or item.get("bot_id")
+                for item in items
+                if isinstance(item, dict)
+            ],
         )
         return items

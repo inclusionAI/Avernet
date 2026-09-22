@@ -228,7 +228,7 @@ def seed_discovered_tasks(db: DatabasePlugin, tasks: list[dict]) -> None:
 class OrmTaskReader:
     """通过 ``DatabasePlugin.orm_session()`` 读取已发现任务。
 
-    corp 环境走 OceanBase，local/singlebox 环境走 SQLite 内存库。
+    corp 环境走 OceanBase，本地配置走 SQLite 内存库。
     替代 ``SqliteTaskReader`` 的直接 sqlite3 文件访问。
     """
 

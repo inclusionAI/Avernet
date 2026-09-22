@@ -63,7 +63,7 @@ class CentralizedExecutionAdapter:
         task_context_service: "TaskContextServiceProtocol | None" = None,
     ) -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
-        端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
+        端口由 DI 从配置注入(local/prod 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
         ``_build_*`` 注入 stub 策略/投递时可省略(走 super 路径默认 berth)。
 
         BBS 任务模式候选通过 ``bcn.list_bots_by_task_modes``(注入的 BcnService,复用统一 provider 身份)查询。
@@ -194,7 +194,7 @@ class CentralizedExecutionAdapter:
             logger.warning(
                 "[task][engine] execution_backend 不装配(bot=%s bcs=%s)→ form_coop_group/start_run/"
                 "BBS start_run 全退 Avernet 桩(grp_<8hex>/stub_<8hex>/无 poller,任务卡 RUNNING 不收敛)。"
-                "corp 排查: 确认 DEPLOY_PROFILE=corp + grep [task][corp-task] not configured 看哪个端口空。",
+                "corp 排查: 检查 corp overlay task transport 配置与 [task][corp-task] not configured 日志。",
                 "None" if self._bot is None else type(self._bot).__name__,
                 "None" if self._bcs is None else type(self._bcs).__name__,
             )

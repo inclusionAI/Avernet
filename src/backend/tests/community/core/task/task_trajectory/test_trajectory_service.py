@@ -763,7 +763,7 @@ class _FakeGraph:
 
 class _FakeBcs:
     """Serves ``get_session_messages``; scriptable per-session payloads/failures.
-    Records each call as ``(session_id, limit, caller_bot_token)``."""
+    Records each call as ``(session_id, limit, caller_bearer)``."""
 
     def __init__(self, *, messages_by_session: dict | None = None,
                  raise_exc: Exception | None = None) -> None:
@@ -773,8 +773,8 @@ class _FakeBcs:
 
     async def get_session_messages(self, session_id: str, *, limit: int = 50,
                                    since_msg_id: str | None = None,
-                                   caller_bot_token: str | None = None) -> list:
-        self.calls.append((session_id, limit, caller_bot_token))
+                                   caller_bearer: str | None = None) -> list:
+        self.calls.append((session_id, limit, caller_bearer))
         if self._raise is not None:
             raise self._raise
         return self._messages.get(session_id, [])
@@ -943,7 +943,7 @@ async def test_do_analysis_fast_path_skips_probe():
 @pytest.mark.unit
 async def test_do_analysis_probe_passes_holder_bearer_token():
     """方案一(401 修复):会话历史读口有参与者级 ACL——探测经 BcsBotTokenProvider
-    解析 RUNNING 节点持有者 bot 的 session_token,以 caller_bot_token 传入(BCS HTTP
+    解析 RUNNING 节点持有者 bot 的 session_token,以 caller_bearer 传入(BCS HTTP
     层携带 ``Authorization: Bearer``)。持有者 id 取值序 relay_holder_id →
     driver_bot_id → assignee。"""
     graph = _FakeGraph([
@@ -989,7 +989,7 @@ async def test_do_analysis_probe_passes_holder_bearer_token():
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_do_analysis_probe_omniauth_fallback_without_token():
-    """未注入 provider / 持有者解析不到 token / provider 抛错 → caller_bot_token
+    """未注入 provider / 持有者解析不到 token / provider 抛错 → caller_bearer
     传 None(裸 HMAC 尝试,BCS 401 时由既有 WARNING 降级)——检测不抛、不阻断。"""
     graph = _FakeGraph([
         _FakeNode(node_id="n1", status=Status.RUNNING,

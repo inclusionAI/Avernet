@@ -12,6 +12,7 @@
 ``_bcn_state_machine_status``/``_claw_mind_status_to_task``)。形状对齐
 ``core/task/repository/serializers.py::graph_to_dict``。
 """
+
 from __future__ import annotations
 
 import json
@@ -34,13 +35,24 @@ logger = logging.getLogger("task.task_callback")
 # acceptance pass is resolved by the task callback path to SUCCESS.
 # cancelled/aborted→CANCELLED、running/started→RUNNING,余缺省 PENDING。
 _CLAW_MIND_TO_TASK_STATUS: dict[str, Status] = {
-    "succeeded": Status.DONE, "completed": Status.DONE, "done": Status.DONE,
-    "node_succeeded": Status.DONE, "success": Status.DONE,
-    "failed": Status.FAILED, "node_failed": Status.FAILED,
-    "cancelled": Status.CANCELLED, "canceled": Status.CANCELLED, "aborted": Status.CANCELLED,
-    "running": Status.RUNNING, "started": Status.RUNNING, "in_progress": Status.RUNNING,
+    "succeeded": Status.DONE,
+    "completed": Status.DONE,
+    "done": Status.DONE,
+    "node_succeeded": Status.DONE,
+    "success": Status.DONE,
+    "failed": Status.FAILED,
+    "node_failed": Status.FAILED,
+    "cancelled": Status.CANCELLED,
+    "canceled": Status.CANCELLED,
+    "aborted": Status.CANCELLED,
+    "running": Status.RUNNING,
+    "started": Status.RUNNING,
+    "in_progress": Status.RUNNING,
     "active": Status.RUNNING,
-    "pending": Status.PENDING, "queued": Status.PENDING, "waiting": Status.PENDING, "blocked": Status.PENDING,
+    "pending": Status.PENDING,
+    "queued": Status.PENDING,
+    "waiting": Status.PENDING,
+    "blocked": Status.PENDING,
     "planning": Status.PLANNING,
 }
 
@@ -100,17 +112,30 @@ def _to_ms(value: Any) -> int | None:
 # 图级 extend_props 白名单(workflow 标识/运行指标);credentials_json/identity_key/
 # plugin_version 等密钥·摘要·版本,以及图级 node_count/succeeded_count(节点为权威源)均不入。
 _CLAW_MIND_GRAPH_KEEP = (
-    "workflow_id", "workflow_title", "flow_id", "origin_session_id",
-    "total_duration_ms", "total_token_usage", "triggered_by",
-    "current_phase", "started_at", "completed_at",
+    "workflow_id",
+    "workflow_title",
+    "flow_id",
+    "origin_session_id",
+    "total_duration_ms",
+    "total_token_usage",
+    "triggered_by",
+    "current_phase",
+    "started_at",
+    "completed_at",
 )
 _CLAW_MIND_NODE_KEEP = (
-    "session_id", "session_key", "embedded_session_key",
-    "branch_id", "progress_message", "triggered_by",
+    "session_id",
+    "session_key",
+    "embedded_session_key",
+    "branch_id",
+    "progress_message",
+    "triggered_by",
 )
 
 
-def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str, Any] | None:
+def _build_claw_mind_execution_graph(
+    ext: dict, *, run_status: Any
+) -> dict[str, Any] | None:
     """ClawMind ext_info(flow_runs + node_executions)→ graph_to_dict 形状执行图快照。
 
     - ``run_id`` = int(flow_runs.id)(非法 → 0);图级 status 由底层 status 映射 7 态;
@@ -130,8 +155,11 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
     if not flow_runs and not node_execs:
         return None
 
-    node_ids = {ne.get("node_id") for ne in node_execs
-                if isinstance(ne, dict) and ne.get("node_id")}
+    node_ids = {
+        ne.get("node_id")
+        for ne in node_execs
+        if isinstance(ne, dict) and ne.get("node_id")
+    }
 
     tasks: list[dict[str, Any]] = []
     relations: list[dict[str, Any]] = []
@@ -140,7 +168,9 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
             continue
         node_id = ne["node_id"]
         status = _claw_mind_status_to_task(ne.get("status") or run_status)
-        input_doc = _parse_dict_strict(ne.get("input_json"), field="node_executions.input_json")
+        input_doc = _parse_dict_strict(
+            ne.get("input_json"), field="node_executions.input_json"
+        )
         ik_raw = input_doc.get("nodeOutputKeys")
         input_keys = ik_raw if isinstance(ik_raw, list) else []
 
@@ -149,18 +179,22 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
             ep["executor_type"] = ne["executor_type"]
         if ne.get("attempt") is not None:
             ep["attempt"] = ne["attempt"]
-        tok = _parse_dict_strict(ne.get("token_usage_json"), field="node_executions.token_usage_json")
+        tok = _parse_dict_strict(
+            ne.get("token_usage_json"), field="node_executions.token_usage_json"
+        )
         if tok:
             ep["token_usage"] = tok
         if input_doc:
             ep["input"] = input_doc
-        sc = _parse_dict_strict(ne.get("system_context_json"), field="node_executions.system_context_json")
+        sc = _parse_dict_strict(
+            ne.get("system_context_json"), field="node_executions.system_context_json"
+        )
         if sc:
             ep["system_context"] = sc
         if ne.get("duration_ms") is not None:
             ep["duration_ms"] = ne["duration_ms"]
         if ne.get("started_at") is not None:
-            ep["started_at"] = ne["started_at"]          # 原始秒
+            ep["started_at"] = ne["started_at"]  # 原始秒
         if ne.get("completed_at") is not None:
             ep["completed_at"] = ne["completed_at"]
         if ne.get("error_text"):
@@ -171,47 +205,61 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
 
         for src in input_keys:
             if isinstance(src, str) and src in node_ids and src != node_id:
-                relations.append({"src_id": src, "dst_id": node_id,
-                                  "type": "DEPENDENCY", "extend_props": {}})
+                relations.append(
+                    {
+                        "src_id": src,
+                        "dst_id": node_id,
+                        "type": "DEPENDENCY",
+                        "extend_props": {},
+                    }
+                )
 
         title = ne.get("node_title") or node_id
-        tasks.append({
-            "node_id": node_id,
-            "task_id": "",
-            "status": status.value,
-            "task_spec": {
-                "context": {
-                    "title": title,
-                    "background": "",
-                    "extend_props": {
-                        "deliverables": [],
-                        "constraints": [],
-                        "resources": [],
+        tasks.append(
+            {
+                "node_id": node_id,
+                "task_id": "",
+                "status": status.value,
+                "task_spec": {
+                    "context": {
+                        "title": title,
+                        "background": "",
+                        "extend_props": {
+                            "deliverables": [],
+                            "constraints": [],
+                            "resources": [],
+                        },
                     },
+                    "goal": {"objective": "", "acceptances": []},
                 },
-                "goal": {"objective": "", "acceptances": []},
-            },
-            "run_info": {
-                "run_mode": None,
-                "assignee": None,
-                "start_time": _to_ms(ne.get("started_at")),
-                "end_time": _to_ms(ne.get("completed_at")),
-                "output": _parse_dict_strict(ne.get("output_json"), field="node_executions.output_json"),
-                "acceptance_result": None,
-                "extend_props": ep,
-            },
-        })
+                "run_info": {
+                    "run_mode": None,
+                    "assignee": None,
+                    "start_time": _to_ms(ne.get("started_at")),
+                    "end_time": _to_ms(ne.get("completed_at")),
+                    "output": _parse_dict_strict(
+                        ne.get("output_json"), field="node_executions.output_json"
+                    ),
+                    "acceptance_result": None,
+                    "extend_props": ep,
+                },
+            }
+        )
 
     graph_ep: dict[str, Any] = {}
     for k in _CLAW_MIND_GRAPH_KEEP:
         if flow_runs.get(k) is not None:
             graph_ep[k] = flow_runs[k]
-    graph_params = _parse_dict_strict(flow_runs.get("params_json"), field="flow_runs.params_json")
+    graph_params = _parse_dict_strict(
+        flow_runs.get("params_json"), field="flow_runs.params_json"
+    )
     if graph_params:
         graph_ep["params"] = graph_params
     # 最终输出(flow_runs.result_json):图级 output 与 extend_props.output 两处都以 `output` 可取;
     # extend_props 仅在非空时落 key(对齐 graph_ep 白名单/params 只加非空的约定)。
-    _flow_output = _parse_dict_strict(flow_runs.get("result_json"), field="flow_runs.result_json")
+    _flow_output = _parse_dict_strict(
+        flow_runs.get("result_json"), field="flow_runs.result_json"
+    )
     if _flow_output:
         graph_ep["output"] = _flow_output
 
@@ -237,12 +285,15 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
 # 形状对齐 serializers.graph_to_dict / ClawMind _build_claw_mind_execution_graph
 # (run_id:int / task_id / loop_round / status / output / extend_props / tasks / relations)。
 
+
 def _bcn_state_machine_status(event_type: str) -> Status:
     """state_machine 事件 → 回调行 status:``run.completed``→``DONE``，其余→``RUNNING``。
 
     对齐 req2:仅 ``state_machine.run.completed`` 视作完成;node.completed 等判运行中
     (节点/run 级终态由 BCS run 明细驱动收敛,回调行 status 仅做粗粒度审计投影)。"""
-    return Status.DONE if event_type == "state_machine.run.completed" else Status.RUNNING
+    return (
+        Status.DONE if event_type == "state_machine.run.completed" else Status.RUNNING
+    )
 
 
 # manager_worker(任务协作群)事件 → 回调行 status 粗粒度审计投影(对齐 _bcn_state_machine_status req2):
@@ -259,7 +310,9 @@ def _manager_worker_status(event_type: str) -> Status:
     对齐 ``_bcn_state_machine_status`` 的粗粒度审计投影:回调行 status 仅标该回调是否抵达终态事件;
     真终态 ``DONE`` / ``FAILED`` 由 ``converge_by_session`` 按 ``session.completed`` 的 ``data.reason`` 收敛,
     非直接由本映射驱动(与 state_machine 的 run_detail.run.status 收敛口径一致)。"""
-    return Status.DONE if event_type in _BCN_MANAGER_WORKER_STATUS_DONE else Status.RUNNING
+    return (
+        Status.DONE if event_type in _BCN_MANAGER_WORKER_STATUS_DONE else Status.RUNNING
+    )
 
 
 _BCN_NODE_STATUS_DONE = frozenset({"completed", "succeeded", "done", "success"})
@@ -320,9 +373,7 @@ def _bcn_node_task(dag_node: dict, exec_node: dict) -> dict[str, Any]:
             "assignee": dag_node.get("assignee"),
             "start_time": exec_node.get("started_at"),
             "end_time": exec_node.get("completed_at"),
-            "output": {
-                "artifact_text": final_out
-            },
+            "output": {"artifact_text": final_out},
             "acceptance_result": None,
             "extend_props": ep,
         },
@@ -330,8 +381,12 @@ def _bcn_node_task(dag_node: dict, exec_node: dict) -> dict[str, Any]:
 
 
 def _build_bcn_execution_graph(
-    *, event_type: str, run_id: Any, data: dict | None = None,
-    run_detail: dict | None = None, graph_detail: dict | None = None,
+    *,
+    event_type: str,
+    run_id: Any,
+    data: dict | None = None,
+    run_detail: dict | None = None,
+    graph_detail: dict | None = None,
 ) -> dict[str, Any] | None:
     """BCN state_machine → ``graph_to_dict`` 形状 TaskExecutionGraph 快照(对齐 ClawMind builder)。
 
@@ -392,8 +447,14 @@ def _build_bcn_execution_graph(
             _src = _e.get("src") or _e.get("source")
             _dst = _e.get("dst") or _e.get("target")
             if _src and _dst:
-                relations.append({"src_id": _src, "dst_id": _dst,
-                                  "type": "DEPENDENCY", "extend_props": {}})
+                relations.append(
+                    {
+                        "src_id": _src,
+                        "dst_id": _dst,
+                        "type": "DEPENDENCY",
+                        "extend_props": {},
+                    }
+                )
 
     graph_ep: dict[str, Any] = {}
     if run_obj.get("status") is not None:
@@ -415,11 +476,12 @@ def _build_bcn_execution_graph(
 
 # ===== enricher =====
 
+
 class CallbackDataEnricher:
     """统一处理 BCN(state_machine)与 ClawMind 回投数据:构建 execution_graph + 明细 enrich。
 
-    ``base_url`` 取自动态注入的 ``BcsTokenProvider``(corp ``_RealToken`` / singlebox
-    ``LocalBcsTokenProvider``),替代 router 原 ``os.environ BCS_API_BASE_URL`` 硬编码。
+    ``base_url`` 取自动态注入的 ``BcsTokenProvider``(配置化组合根提供),
+    替代 router 原 ``os.environ BCS_API_BASE_URL`` 硬编码。未注入时保持空地址并失败关闭。
 
     - ``enrich_bcn``:经 BCS GET ``/state-machine-runs/{run_id}`` 与 ``/graph`` 取 run 明细 + DAG,
       落 ``result._ext_info``(→ extend_props)并构建 execution_graph;fetch 失败/非 200 不抛,
@@ -429,27 +491,35 @@ class CallbackDataEnricher:
 
     def __init__(
         self,
-        provider: BcsTokenProvider,
+        provider: BcsTokenProvider | None,
         *,
         http_client: httpx.AsyncClient | None = None,
         timeout: float = 10.0,
     ) -> None:
-        self._base = provider.base_url.rstrip("/")
-        self._client = http_client            # 注入(测试 MockTransport);None → 每请求短连
+        self._base = provider.base_url.rstrip("/") if provider is not None else ""
+        self._client = http_client  # 注入(测试 MockTransport);None → 每请求短连
         self._timeout = timeout
 
-    async def enrich_bcn(self, cd: TaskCallbackData, raw: dict, run_id: str) -> dict | None:
+    async def enrich_bcn(
+        self, cd: TaskCallbackData, raw: dict, run_id: str
+    ) -> dict | None:
         """BCN state_machine:查 BCS run 明细 + DAG → enrich(cd.data);返 run_detail(供收敛)。"""
         if not isinstance(cd.data, dict):
             return None
-        _sid = (cd.data.get("workflow_instance_id") or "")
+        _sid = cd.data.get("workflow_instance_id") or ""
         if not _sid and isinstance(raw, dict):
             scope = raw.get("scope")
             if isinstance(scope, dict) and scope.get("session_id"):
                 _sid = str(scope["session_id"])
         event_type = raw.get("event_type") if isinstance(raw, dict) else None
 
-        logger.info("[task_callback] enrich_bcn, sid=%s, event_type=%s, run_id=%s, bcs_base_url=%s", _sid, event_type, run_id, self._base)
+        logger.info(
+            "[task_callback] enrich_bcn, sid=%s, event_type=%s, run_id=%s, bcs_base_url=%s",
+            _sid,
+            event_type,
+            run_id,
+            self._base,
+        )
 
         run_detail: dict | None = None
         graph_detail: dict | None = None
@@ -457,17 +527,29 @@ class CallbackDataEnricher:
         try:
             run_detail, graph_detail = await self._fetch_run_and_graph(run_id)
         except Exception as exc:  # noqa: BLE001 查 BCS 明细/DAG 失败不阻断(用事件体兜底建图)
-            logger.error("[task_callback] 查 BCS run 明细/DAG 失败 run_id=%s session_id=%s: %s", run_id, _sid, exc)
+            logger.error(
+                "[task_callback] 查 BCS run 明细/DAG 失败 run_id=%s session_id=%s: %s",
+                run_id,
+                _sid,
+                exc,
+            )
 
         if run_detail:
             # 查询出来的原始 run 明细 → extend_props(result._ext_info);
             # orig_callback_data 保持原始 CloudEvent(callback 数据由 _raw_callback_body 承载,不在此覆盖)。
             cd.data.setdefault("result", {})["_ext_info"] = run_detail
-            #logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, run_detail=%s", run_id, _sid, run_detail)
-            logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, graph_detail=%s", run_id, _sid, graph_detail)
+            # logger.info("[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, run_detail=%s", run_id, _sid, run_detail)
+            logger.info(
+                "[task_callback] BCN run 明细已取回 run_id=%s session_id=%s → extend_props, graph_detail=%s",
+                run_id,
+                _sid,
+                graph_detail,
+            )
             eg = _build_bcn_execution_graph(
-                event_type=event_type, run_id=run_id,
-                run_detail=run_detail, graph_detail=graph_detail,
+                event_type=event_type,
+                run_id=run_id,
+                run_detail=run_detail,
+                graph_detail=graph_detail,
             )
         else:
             logger.error(
@@ -477,7 +559,9 @@ class CallbackDataEnricher:
             )
             # 用事件体兜底建极简图(_build_bcn_execution_graph 的 data-only 路径),保证 execution_graph 永不为原始事件体
             _ev_data = raw.get("data") if isinstance(raw, dict) else None
-            eg = _build_bcn_execution_graph(event_type=event_type, run_id=run_id, data=_ev_data)
+            eg = _build_bcn_execution_graph(
+                event_type=event_type, run_id=run_id, data=_ev_data
+            )
 
         if eg is not None:
             cd.data["execution_graph"] = eg
@@ -493,32 +577,55 @@ class CallbackDataEnricher:
         flow_runs = flow_runs if isinstance(flow_runs, dict) else {}
         node_execs = ext.get("node_executions")
         node_execs = node_execs if isinstance(node_execs, list) else []
-        first_node = node_execs[0] if (node_execs and isinstance(node_execs[0], dict)) else {}
-        low_status = (flow_runs.get("status") or first_node.get("status") or raw.get("status") or "")
+        first_node = (
+            node_execs[0] if (node_execs and isinstance(node_execs[0], dict)) else {}
+        )
+        low_status = (
+            flow_runs.get("status")
+            or first_node.get("status")
+            or raw.get("status")
+            or ""
+        )
         eg = _build_claw_mind_execution_graph(ext, run_status=low_status)
         if eg is not None:
             cd.data["execution_graph"] = eg
 
-    async def _fetch_run_and_graph(self, run_id: str) -> tuple[dict | None, dict | None]:
+    async def _fetch_run_and_graph(
+        self, run_id: str
+    ) -> tuple[dict | None, dict | None]:
         """GET {base}/state-machine-runs/{run_id} 与 /graph;各 200 才取 json,否则 None。"""
         if self._client is not None:
             return await self._gets(self._client, run_id)
         async with httpx.AsyncClient(base_url=self._base, timeout=self._timeout) as cli:
             return await self._gets(cli, run_id)
 
-    async def _gets(self, cli: httpx.AsyncClient, run_id: str) -> tuple[dict | None, dict | None]:
-        logger.info("[task_callback], http_get_state_machine_runs_detail, begin, run_id=%s", run_id)
+    async def _gets(
+        self, cli: httpx.AsyncClient, run_id: str
+    ) -> tuple[dict | None, dict | None]:
+        logger.info(
+            "[task_callback], http_get_state_machine_runs_detail, begin, run_id=%s",
+            run_id,
+        )
 
         try:
             run_resp = await cli.get(f"/state-machine-runs/{run_id}")
-            logger.info("[task_callback], http_get_state_machine_runs_detail, run_resp=%s", run_resp)
+            logger.info(
+                "[task_callback], http_get_state_machine_runs_detail, run_resp=%s",
+                run_resp,
+            )
 
             graph_resp = await cli.get(f"/state-machine-runs/{run_id}/graph")
-            logger.info("[task_callback], http_get_state_machine_runs_detail, graph_resp=%s", graph_resp)
+            logger.info(
+                "[task_callback], http_get_state_machine_runs_detail, graph_resp=%s",
+                graph_resp,
+            )
 
             run_detail = run_resp.json() if run_resp.status_code == 200 else None
             graph_detail = graph_resp.json() if graph_resp.status_code == 200 else None
             return run_detail, graph_detail
         except Exception as e:
-            logger.error("[task_callback], http_get_state_machine_runs_detail, meet_exception=%s", e)
+            logger.error(
+                "[task_callback], http_get_state_machine_runs_detail, meet_exception=%s",
+                e,
+            )
             return None, None

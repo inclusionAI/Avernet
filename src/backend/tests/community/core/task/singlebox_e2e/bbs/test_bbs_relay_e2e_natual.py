@@ -29,12 +29,13 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 - owner 用独立 bot 名 ``task-owner-arch-bot`` + 通用 ``planning-arch`` skill,避免与
   ``test_task_integration_e2e.py`` 的 ``task-owner-bot``(装存储案例的 ``task-planning``)在同一
   singlebox 上共用 bot 造成 planning skill 串扰。
-- 金庸的 ``arch-analysis`` 是真实 LLM 推理,经 ``SingleboxEngineAdapter`` live 调用(唤醒 + 接力中段
-  执行都是 live);金庸本体由 ``SingleboxBotProvisioner`` 真实建 bot + 装 skill,幂等。
+- 金庸的 ``arch-analysis`` 是真实 LLM 推理,经 ``OpenApiBotAdapter`` live 调用(唤醒 + 接力中段
+  执行都是 live);金庸本体由 ``LiveTaskBotProvisioner`` 真实建 bot + 装 skill,幂等。
 - ``SUB_DOMAINS`` 只取一个方向(基础架构)。**剧本刻意收窄为单一交付物**(3 位架构师名册)+ ``MAX_DEPTH=1``,
   使规划只展一层、拆出 **1~3 个扁平子任务**即停(不再像宽目标被切成一堆子方向);全 MISS 自然升 BBS,
   金庸自判 ``full`` 一段收口。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -46,10 +47,27 @@ from pathlib import Path
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
-    SingleboxBotProvisioner,
-    SingleboxEngineAdapter,
+from tests.community.core.task.support.live_task_bot_provisioner import (
+    LiveTaskBotProvisioner,
 )
+from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
+    OpenApiBotAdapter,
+)
+from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
+    ApiKeyProviderImpl,
+)
+
+
+def _openapi_adapter() -> OpenApiBotAdapter:
+    """Return the production OpenAPI bot transport using live deployment values."""
+    return OpenApiBotAdapter(
+        ApiKeyProviderImpl(
+            api_key=os.getenv("api_key_secret", ""),
+            api_key_prefix=os.environ.get("api_key_prefix", ""),
+            base_url=os.environ.get("BASS_URL", "http://localhost:8890"),
+        )
+    )
+
 
 _LIVE = os.environ.get("SINGLEBOX_TASK_E2E", "").strip() in {"1", "true"}
 _BACKEND = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
@@ -67,7 +85,9 @@ _ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")
 # test 文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/bbs/ ,parents[6] = <repo>/src/backend
 _BBS_SKILL = str(
     Path(__file__).resolve().parents[6]
-    / "specs" / "2026-08-09-task-goal-driven-task-runner-bbs" / "bbs-relay-pickup"
+    / "specs"
+    / "2026-08-09-task-goal-driven-task-runner-bbs"
+    / "bbs-relay-pickup"
 )
 
 # 任务目标:整理某某某公司「基础架构」方向 3 位核心架构师名册;单一交付物 + MAX_DEPTH=1 → 规划只展一层、
@@ -127,11 +147,17 @@ def _execute_body(owner_id: str) -> dict:
                     f"不要按子方向(中间件/存储/云原生/可观测/安全 等)再拆分。"
                 ),
             },
-            "context": {"background": "某某某公司内部技术架构师梳理", "extend_props": {}},
+            "context": {
+                "background": "某某某公司内部技术架构师梳理",
+                "extend_props": {},
+            },
             "goal": {
                 "objective": f"整理某某某公司内部「{sub}」方向 3 位核心技术架构师(姓名/角色 + 职责)",
                 "acceptances": [
-                    {"id": "ac1", "description": f"给出「{sub}」方向 3 位架构师的姓名/角色 + 职责"},
+                    {
+                        "id": "ac1",
+                        "description": f"给出「{sub}」方向 3 位架构师的姓名/角色 + 职责",
+                    },
                 ],
             },
         },
@@ -172,22 +198,27 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
         # 1) provisioning(幂等建 bot + 装 skill):
         #    owner 装通用 planning-arch + search(规划/分解 → 派发 MISS → 自然升 BBS);
         #    金庸 装 arch-analysis + bbs-relay-pickup(BBS 接力执行者)。
-        prov = SingleboxBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
+        prov = LiveTaskBotProvisioner(backend_base_url=_BACKEND, user_id=_USER_ID)
         owner_id = await prov.create_bot(bot_name=_OWNER_BOT_NAME)
         await prov.install_skills(owner_id, [_ARCH_PLANNING_SKILL, _SEARCH_SKILL])
         jy_id = await prov.create_bot(bot_name=_JY_BOT_NAME)
         await prov.install_skills(jy_id, [_ARCH_SKILL, _BBS_SKILL])
         await prov._aclose()
-        print(f"[provision] owner={owner_id} ← planning-arch+search ; "
-              f"金庸={jy_id} ← arch-analysis+bbs-relay-pickup")
+        print(
+            f"[provision] owner={owner_id} ← planning-arch+search ; "
+            f"金庸={jy_id} ← arch-analysis+bbs-relay-pickup"
+        )
 
         # 2) live adapter:用于唤醒金庸自驱 bbs-relay-pickup(真实 LLM 推理)
-        adapter = SingleboxEngineAdapter(backend_base_url=_BACKEND, user_id=_USER_ID)
+        adapter = _openapi_adapter()
 
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
             # 3) POST /openapi/v1/collaboration/tasks/execute → backend 进程内真实 engine 推进:owner 规划 → search 派发 →
             #    候选不匹配 → on_miss@MAX_DEPTH 自然升 BBS(bbs_mode=True / 根 PLANNING / 图空闲)。
-            r = await cli.post(f"{_BACKEND}/openapi/v1/collaboration/tasks/execute", json=_execute_body(owner_id))
+            r = await cli.post(
+                f"{_BACKEND}/openapi/v1/collaboration/tasks/execute",
+                json=_execute_body(owner_id),
+            )
             r.raise_for_status()
             print(f"[execute] {r.json().get('message')} data={r.json().get('data')}")
 
@@ -200,13 +231,18 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
                     await asyncio.sleep(5.0)
                     continue  # engine 持锁跑规划导致读排队,稍后重试
                 snap = [
-                    (t.get("node_id"), t.get("status"),
-                     (t.get("run_info") or {}).get("run_mode") or "",
-                     str((t.get("run_info") or {}).get("assignee") or "")[:24])
+                    (
+                        t.get("node_id"),
+                        t.get("status"),
+                        (t.get("run_info") or {}).get("run_mode") or "",
+                        str((t.get("run_info") or {}).get("assignee") or "")[:24],
+                    )
                     for t in g.get("tasks") or []
                 ]
-                print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
-                      f"bbs_mode={(g.get('extend_props') or {}).get('bbs_mode')} nodes={snap}")
+                print(
+                    f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
+                    f"bbs_mode={(g.get('extend_props') or {}).get('bbs_mode')} nodes={snap}"
+                )
                 if (g.get("extend_props") or {}).get("bbs_mode"):
                     # 已自然升 BBS:打印升 BBS 落点(可恢复态 vs 图级 HUNG),供定位 §10.5 seam
                     _ep = g.get("extend_props") or {}
@@ -222,9 +258,11 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
                     )
                     for _t in g.get("tasks") or []:
                         _ri = _t.get("run_info") or {}
-                        print(f" 已自然升BBS  - {_t.get('node_id'):28} {_t.get('status'):9} "
-                              f"mode={_ri.get('run_mode') or '-':5} "
-                              f"reason={(_ri.get('extend_props') or {}).get('hung_reason') or '-'}")
+                        print(
+                            f" 已自然升BBS  - {_t.get('node_id'):28} {_t.get('status'):9} "
+                            f"mode={_ri.get('run_mode') or '-':5} "
+                            f"reason={(_ri.get('extend_props') or {}).get('hung_reason') or '-'}"
+                        )
                     break  # 已自然升 BBS
                 if g.get("status") == "SUCCESS":
                     break  # 未升 BBS 已闭环(异常路径,留待断言揭出)
@@ -252,7 +290,9 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
                     )
                     status = run.get("status")
                     content = (run.get("result") or {}).get("content") or ""
-                    print(f"[wake#{wakes}] status={status} content[:300]={content[:300]!r}")
+                    print(
+                        f"[wake#{wakes}] status={status} content[:300]={content[:300]!r}"
+                    )
                 except Exception as exc:  # noqa: BLE001
                     print(f"[wake#{wakes}] adapter 异常:{exc!r}")
                 # 唤醒后轮询,等接力写回落地 / 图收口 / 图空闲可再唤醒
@@ -263,17 +303,24 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
                         await asyncio.sleep(5.0)
                         continue  # 同上:engine 持锁排队,稍后重试
                     snap = [
-                        (t.get("node_id"), t.get("status"),
-                         (t.get("run_info") or {}).get("run_mode") or "",
-                         str((t.get("run_info") or {}).get("assignee") or "")[:24])
+                        (
+                            t.get("node_id"),
+                            t.get("status"),
+                            (t.get("run_info") or {}).get("run_mode") or "",
+                            str((t.get("run_info") or {}).get("assignee") or "")[:24],
+                        )
                         for t in g.get("tasks") or []
                     ]
-                    print(f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
-                          f"bbs_owner={(nodes_first_ext(g,'bbs_owner'))} nodes={snap}")
+                    print(
+                        f"[snapshot] graph={g.get('status')} loop={g.get('loop_round')} "
+                        f"bbs_owner={(nodes_first_ext(g, 'bbs_owner'))} nodes={snap}"
+                    )
                     if g.get("status") in ("DONE", "HUNG"):
                         break
                     # 图空闲(无 RUNNING + 无人占根)→ 本次唤醒写回已落,可决定再唤醒
-                    busy = any((t.get("status") == "RUNNING") for t in g.get("tasks") or [])
+                    busy = any(
+                        (t.get("status") == "RUNNING") for t in g.get("tasks") or []
+                    )
                     held = (g.get("extend_props") or {}).get("bbs_owner")
                     if not busy and not held:
                         break
@@ -285,32 +332,44 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
         except Exception:
             pass
 
-        self.assertEqual(g.get("status"), "SUCCESS", f"全图未闭环 DONE:status={g.get('status')}")
+        self.assertEqual(
+            g.get("status"), "SUCCESS", f"全图未闭环 DONE:status={g.get('status')}"
+        )
         nodes = {t["node_id"]: t for t in g.get("tasks") or []}
         self.assertEqual(nodes[TASK_ID]["status"], "SUCCESS", "根未 SUCCESS")
-        self.assertTrue((g.get("extend_props") or {}).get("bbs_mode"), "图未置 bbs_mode")
+        self.assertTrue(
+            (g.get("extend_props") or {}).get("bbs_mode"), "图未置 bbs_mode"
+        )
 
         bbs_nodes = [
-            t for t in g.get("tasks") or []
-            if (t.get("run_info") or {}).get("run_mode") == "bbs" and t["node_id"] != TASK_ID
+            t
+            for t in g.get("tasks") or []
+            if (t.get("run_info") or {}).get("run_mode") == "bbs"
+            and t["node_id"] != TASK_ID
         ]
         self.assertGreaterEqual(
-            len(bbs_nodes), 1,
+            len(bbs_nodes),
+            1,
             f"无金庸自驱的 bbs scoped 节点(检查 bbs-relay-pickup 是否被唤醒执行);"
             f"nodes={[t.get('node_id') for t in g.get('tasks') or []]}",
         )
         for n in bbs_nodes:
             ri = n.get("run_info") or {}
-            self.assertEqual(n.get("status"), "SUCCESS", f"scoped 未 SUCCESS:{n.get('node_id')}")
             self.assertEqual(
-                ri.get("assignee"), jy_id,
+                n.get("status"), "SUCCESS", f"scoped 未 SUCCESS:{n.get('node_id')}"
+            )
+            self.assertEqual(
+                ri.get("assignee"),
+                jy_id,
                 f"scoped 非 金庸 接力:{n.get('node_id')} assignee={ri.get('assignee')}",
             )
             self.assertTrue(
                 (ri.get("output") or {}).get("architects"),
                 f"scoped 缺架构师 checkpoint:{n.get('node_id')}",
             )
-        print(f"[final] graph={g.get('status')} 金庸接力段={len(bbs_nodes)} 唤醒={wakes} 根=SUCCESS")
+        print(
+            f"[final] graph={g.get('status')} 金庸接力段={len(bbs_nodes)} 唤醒={wakes} 根=SUCCESS"
+        )
 
 
 def nodes_first_ext(g: dict, key: str) -> str:

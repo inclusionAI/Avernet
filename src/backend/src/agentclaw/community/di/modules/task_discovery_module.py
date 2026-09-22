@@ -17,9 +17,10 @@
   TASK_DISCOVERY_TIMEZONE          调度时区 (默认 "Asia/Shanghai")
   TASK_DISCOVERY_DATA_FILE         任务数据文件路径
 """
+
 from __future__ import annotations
 
-import os
+from urllib.parse import urlparse
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
@@ -60,10 +61,12 @@ from agentclaw.community.core.task.task_discovery.task_reader import (
     OrmTaskReader,
     TaskReader,
 )
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
+    BcsTokenProvider,
+)
 from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotPort,
 )
-from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -74,39 +77,20 @@ _DEFAULT_BACKEND_URL = "http://localhost:8888"
 _DEFAULT_FRONTEND_URL = "http://localhost:8000"
 
 
-def _resolve_frontend_url() -> str:
-    """Resolve frontend workbench URL — env-aware fallback chain.
+def _backend_origin_from_callback_url(provider: BcsTokenProvider | None) -> str:
+    """Return the backend origin from the standard task callback configuration.
 
-    Priority: ``FRONTEND_URL`` env > ``SINGLEBOX_FRONTEND_URL`` env (singlebox)
-    > ``http://localhost:8000``.
-
-    Does NOT inline corporate DNS names (satisfies the OSS architecture gate
-    ``test_shipped_config_no_corp_identifiers``). The singlebox env overlay sets
-    ``SINGLEBOX_FRONTEND_URL`` to the local domain; the community source defaults
-    to ``localhost``.
+    ``bcs_client.task_callback_url[_pre]`` already points BCS at this backend.
+    Reuse that deployment-neutral value instead of introducing a parallel URL
+    axis; absent configuration retains the local default for lightweight tests.
     """
-    url = os.environ.get("FRONTEND_URL")
-    if url:
-        return url
-    if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
-        return os.environ.get("SINGLEBOX_FRONTEND_URL", _DEFAULT_FRONTEND_URL)
-    return _DEFAULT_FRONTEND_URL
-
-
-def _resolve_backend_url() -> str:
-    """Resolve backend self URL — env-aware fallback chain.
-
-    Priority: ``BACKEND_URL`` env > ``SINGLEBOX_BACKEND_URL`` env (singlebox)
-    > ``http://localhost:8888``.
-
-    Mirrors ``task_module.py._resolve_api_base_url``: env-aware, no inline corp DNS.
-    """
-    url = os.environ.get("BACKEND_URL")
-    if url:
-        return url
-    if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
-        return os.environ.get("SINGLEBOX_BACKEND_URL", _DEFAULT_BACKEND_URL)
-    return _DEFAULT_BACKEND_URL
+    callback_url = provider.task_callback_url if provider is not None else ""
+    if not callback_url:
+        return _DEFAULT_BACKEND_URL
+    parsed = urlparse(callback_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return _DEFAULT_BACKEND_URL
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 class TaskDiscoveryModule(Module):
@@ -142,7 +126,9 @@ class TaskDiscoveryModule(Module):
         injector: Injector,
     ) -> DiscoveryService:
         """构建 DiscoveryService（注入 reader + initiator + notify + bot_service + lock + work_order + frontend_url_provider）。"""
-        logger.debug("[task_discovery] → TaskDiscoveryModule._provide_discovery_service()")
+        logger.debug(
+            "[task_discovery] → TaskDiscoveryModule._provide_discovery_service()"
+        )
         try:
             fe_provider: ConfigFrontendUrlProvider = injector.get(
                 ConfigFrontendUrlProvider
@@ -181,7 +167,9 @@ class TaskDiscoveryModule(Module):
         community 列经 user_config.task_discovery 中性块, 未配置→空值)。「取 URL」
         是数据差异而非行为差异, 故不再走 plugin 契约/分列实现。
         """
-        logger.debug("[task_discovery] → TaskDiscoveryModule._provide_session_initiator()")
+        logger.debug(
+            "[task_discovery] → TaskDiscoveryModule._provide_session_initiator()"
+        )
         try:
             fe_provider: ConfigFrontendUrlProvider = injector.get(
                 ConfigFrontendUrlProvider
@@ -190,13 +178,19 @@ class TaskDiscoveryModule(Module):
             fe_provider = ConfigFrontendUrlProvider()
 
         try:
+            bcs_identity_provider: BcsTokenProvider | None = injector.get(BcsTokenProvider)
+        except Exception:  # noqa: BLE101 未绑定 → 本地默认 origin
+            bcs_identity_provider = None
+
+        try:
             openapi_bot = injector.get(OpenApiBotPort)
         except Exception as exc:  # noqa: BLE101 未绑定 → fail-closed 占位
             logger.warning(
                 "[task_discovery] OpenApiBotPort 未绑定/解析失败(%s: %s) — "
                 "SessionInitiator 退化为 UnavailableSessionInitiator"
                 "(session 创建 fail-closed, per-bot 容错记录)",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             return UnavailableSessionInitiator(
                 reason=f"OpenApiBotPort DI 解析失败: {type(exc).__name__}: {exc}"
@@ -213,8 +207,8 @@ class TaskDiscoveryModule(Module):
 
         return OpenApiBotSessionInitiator(
             openapi_bot=openapi_bot,
-            frontend_url=_resolve_frontend_url(),
-            backend_url=_resolve_backend_url(),
+            frontend_url=_DEFAULT_FRONTEND_URL,
+            backend_url=_backend_origin_from_callback_url(bcs_identity_provider),
             frontend_url_provider=fe_provider,
         )
 
@@ -242,8 +236,6 @@ class TaskDiscoveryModule(Module):
         so no adapter wrapper is needed — just return the instance directly.
         """
         return bot_service  # type: ignore[return-value]
-
-    
 
     @singleton
     @provider

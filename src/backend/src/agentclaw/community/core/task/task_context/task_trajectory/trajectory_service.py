@@ -675,12 +675,12 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             # 身份手法),BCS 把 caller 解析成会话内成员 bot。持有者 id 取值序:
             # relay_holder_id(relay 棒)→ driver_bot_id(协作群 driver)→ assignee
             # (single_bot;协作群时是 group_id,解析自然 None→裸 HMAC 尝试)。
-            holder_token = self._holder_bearer_token(node)
+            holder_bearer = self._holder_bearer_token(node)
             try:
                 logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin get bcs msgs holder_bearer=%s",
-                            "yes" if holder_token else "hmac-only")
+                            "yes" if holder_bearer else "hmac-only")
                 msgs = await self._bcs.get_session_messages(
-                    sid, limit=limit, caller_bot_token=holder_token,
+                    sid, limit=limit, caller_bearer=holder_bearer,
                 )
                 logger.info("[task][trajectory], collect_trajectory_event_session_msgs, finish get bcs msgs")
             except Exception as ex:  # noqa: BLE001  单节点 BCS 失败 → 跳过,不拖垮其余
