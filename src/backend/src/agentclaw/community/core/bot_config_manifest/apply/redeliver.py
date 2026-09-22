@@ -55,8 +55,7 @@ class TeclawRedeliver:
     binding (``None``, not an error), the delivery succeeded (``None``), or the
     sync service answered ``{"success": False, ...}``.
 
-    Created by: the composition root, bound as
-    ``TeclawPlatformBindings.redeliver``.
+    Created by: the composition root, bound under :data:`~...delivery.Redeliver`.
     Consumed by: ``TeclawPlatformDelivery.finish``.
 
     "Re-deliver" because the container already received an artifact when it

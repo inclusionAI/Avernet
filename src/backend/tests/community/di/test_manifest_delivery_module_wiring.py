@@ -28,8 +28,9 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     ArcaDelivery,
     DeliveryStrategies,
     DeliveryStrategyFactory,
-    DeviceDeliveryBindings,
+    DevicePorts,
     EngineFamily,
+    PlatformPorts,
     TeclawDeliveryMode,
     TeclawDeviceDelivery,
     TeclawPlatformDelivery,
@@ -115,13 +116,31 @@ def test_the_device_bundle_is_one_binding_both_shapes_read(test_injector) -> Non
 
     They are two strategies over one bundle, not two bundles that have to agree:
     the binding is the seam, so a deployment cannot end up with the ``arca``
-    CLI binding on one and something else on the other.
+    CLI binding on one and something else on the other. The qualifier is what
+    keeps that bundle distinct from the store-backed one, which has the same
+    ``Callable[[], MaterialiserPorts]`` shape and would otherwise share its key.
     """
     strategies = _strategies(test_injector, TeclawDeliveryMode.DEVICE)
-    bindings = test_injector.get(DeviceDeliveryBindings)
+    device_ports = test_injector.get(DevicePorts)
 
-    assert strategies[EngineFamily.ARCA]._ports is bindings.device_ports
-    assert strategies[EngineFamily.TECLAW]._ports is bindings.device_ports
+    assert strategies[EngineFamily.ARCA]._ports is device_ports
+    assert strategies[EngineFamily.TECLAW]._ports is device_ports
+
+
+def test_the_two_port_bundles_are_not_the_same_binding(test_injector) -> None:
+    """The bug the qualifiers exist to prevent.
+
+    Both bundles are ``Callable[[], MaterialiserPorts]``. Bound on that bare
+    shape they would be one key, and injector would silently let whichever
+    provider the module installed last answer for both — a teclaw bot writing
+    into a container, or an ARCA bot writing into the platform's store, with
+    nothing in the graph to say so.
+    """
+    device = test_injector.get(DevicePorts)
+    platform = test_injector.get(PlatformPorts)
+
+    assert device is not platform
+    assert DevicePorts != PlatformPorts
 
 
 @pytest.mark.parametrize("mode", list(TeclawDeliveryMode))

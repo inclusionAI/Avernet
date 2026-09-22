@@ -62,6 +62,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from abc import abstractmethod
 from typing import (
+    Annotated,
     Any,
     Awaitable,
     Callable,
@@ -169,8 +170,8 @@ class MaterialiserPorts:
     teclaw binds store-backed ports, and each field is typed by the narrow port
     the materialiser calls through so the two are interchangeable by shape.
 
-    Created by: the composition root, as the two lazy bundles it binds — the
-    device-backed one and the store-backed one.
+    Created by: the composition root, as the two lazy bundles it binds —
+    :data:`DevicePorts` and :data:`PlatformPorts`.
     Consumed by: ``apply/registry.build_materialisers``, via
     :meth:`as_kwargs`.
     """
@@ -206,6 +207,28 @@ class MaterialiserPorts:
             "resource_service": self.resource_service,
             "cli_tool_service": self.cli_tool_service,
         }
+
+
+#: A port bundle that has not been built yet. Every field behind one reaches
+#: either the device graph or the object store, so a strategy is bound holding
+#: the thunk and calls it once per apply.
+LazyPorts = Callable[[], MaterialiserPorts]
+
+# ── Injector qualifiers (Guice @Named-style) ─────────────────────────────────
+# The SAME :data:`LazyPorts` shape, bound once per write path: one bundle writes
+# through a live container, the other into the platform's own store. Bind and
+# inject them as :data:`DevicePorts` / :data:`PlatformPorts` — never as a bare
+# ``LazyPorts``, which would make the two one key and let whichever provider the
+# composition root installed last answer for both.
+QUALIFIER_DEVICE_PORTS = "device-ports"
+QUALIFIER_PLATFORM_PORTS = "platform-ports"
+
+#: ARCA's whole binding, and the device-backed teclaw shape's ports — the
+#: bundle whose writes go through a live container.
+DevicePorts = Annotated[LazyPorts, QUALIFIER_DEVICE_PORTS]
+#: Platform-managed teclaw's ports — the bundle that writes platform state, and
+#: whose artifact is the delivery.
+PlatformPorts = Annotated[LazyPorts, QUALIFIER_PLATFORM_PORTS]
 
 
 class DeliveryStrategy(Protocol):
@@ -419,7 +442,7 @@ class ArcaDelivery(_PhaseTableDelivery):
     creation_sequence = CreationSequence.CREATE_BETWEEN_PHASES
     _PHASES = _ARCA_PHASES
 
-    def __init__(self, ports: Callable[[], MaterialiserPorts]) -> None:
+    def __init__(self, ports: LazyPorts) -> None:
         self._ports = ports
 
     def needs_container(self) -> bool:
@@ -470,7 +493,7 @@ class TeclawPlatformDelivery(_PhaseTableDelivery):
     def __init__(
         self,
         *,
-        ports: Callable[[], MaterialiserPorts],
+        ports: LazyPorts,
         redeliver: Redeliver,
     ) -> None:
         self._ports = ports
@@ -526,7 +549,7 @@ class TeclawDeviceDelivery(_PhaseTableDelivery):
     def __init__(
         self,
         *,
-        ports: Callable[[], MaterialiserPorts],
+        ports: LazyPorts,
         cli_tool_service: Callable[[], CliToolService],
     ) -> None:
         self._ports = ports
@@ -544,55 +567,6 @@ class TeclawDeviceDelivery(_PhaseTableDelivery):
         # This shape runs the ARCA one: the device-backed ports projected as
         # they wrote, so there is nothing left to close.
         return None
-
-
-@dataclass(frozen=True)
-class DeviceDeliveryBindings:
-    """The device-backed port bundle, as one DI value.
-
-    One field, and a type of its own rather than the bare
-    ``Callable[[], MaterialiserPorts]`` it wraps, because the store-backed
-    bundle has exactly that shape too — and the two must never be one binding
-    key. Two strategies read this one: ARCA, whose whole binding it is, and the
-    device-backed teclaw shape, which takes these ports and substitutes its own
-    CLI service into them.
-
-    Lazy for the reason every device-side binding here is lazy: each provider
-    behind the bundle reaches the device graph, so a bundle built at boot would
-    resolve that graph at boot. It is called once per apply.
-
-    Created by: the composition root.
-    Consumed by: the ARCA and device-backed teclaw strategy providers.
-    """
-
-    #: Builds the device-backed port bundle — the writes that go through a live
-    #: container.
-    device_ports: Callable[[], MaterialiserPorts]
-
-
-@dataclass(frozen=True)
-class TeclawPlatformBindings:
-    """What the platform-managed teclaw path needs bound, as one DI value.
-
-    Two fields, both callables, so nothing is resolved until an apply actually
-    runs on a teclaw bot::
-
-        TeclawPlatformBindings(
-            platform_ports=lambda: MaterialiserPorts(...),  # store-backed
-            redeliver=<an async (ApplyContext) -> Optional[str]>,
-        )
-
-    Created by: the composition root, beside the store these ports write to.
-    Consumed by: the provider that binds :class:`TeclawPlatformDelivery`, and
-    the W9 CLI service factory, whose ``teclaw-live`` binding pushes through the
-    same redeliver.
-    """
-
-    #: Builds the store-backed port bundle. Lazy: it reaches the object store
-    #: graph.
-    platform_ports: Callable[[], MaterialiserPorts]
-    #: The closing whole-artifact redeliver. See :data:`Redeliver`.
-    redeliver: Redeliver
 
 
 #: One built strategy per family — :class:`DeliveryStrategyFactory`'s other
@@ -698,15 +672,18 @@ __all__ = [
     "DeliveryStrategies",
     "DeliveryStrategy",
     "DeliveryStrategyFactory",
-    "DeviceDeliveryBindings",
+    "DevicePorts",
     "EngineFamily",
     "EngineFamilyOf",
+    "LazyPorts",
     "MaterialiserPorts",
+    "PlatformPorts",
+    "QUALIFIER_DEVICE_PORTS",
+    "QUALIFIER_PLATFORM_PORTS",
     "Redeliver",
     "TECLAW_PLATFORM_MANAGED_KEY",
     "TeclawDeliveryMode",
     "TeclawDeviceDelivery",
-    "TeclawPlatformBindings",
     "TeclawPlatformDelivery",
     "family_from_engine_test",
     "teclaw_delivery_mode_from_config",

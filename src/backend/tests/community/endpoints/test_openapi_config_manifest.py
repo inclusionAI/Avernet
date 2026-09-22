@@ -606,7 +606,8 @@ def _seed_pending_teclaw_platform_managed(world) -> None:
     from agentclaw.community.core.bot_config_manifest.apply.delivery import (
         DeliveryStrategyFactory,
         EngineFamily,
-        TeclawPlatformBindings,
+        PlatformPorts,
+        Redeliver,
         TeclawPlatformDelivery,
         family_from_engine_test,
     )
@@ -625,14 +626,13 @@ def _seed_pending_teclaw_platform_managed(world) -> None:
     # deployment's provider builds, over the store-backed bundle the DI graph
     # already binds whichever mode is set. ARCA's row is carried across
     # untouched.
-    bindings = world.get(TeclawPlatformBindings)
     arca = applies._strategies.for_family(EngineFamily.ARCA)
     applies._strategies = DeliveryStrategyFactory(
         family_of=family_from_engine_test(lambda engine: engine == "teclaw"),
         strategies={
             EngineFamily.ARCA: arca,
             EngineFamily.TECLAW: TeclawPlatformDelivery(
-                ports=bindings.platform_ports, redeliver=bindings.redeliver
+                ports=world.get(PlatformPorts), redeliver=world.get(Redeliver)
             ),
         },
     )

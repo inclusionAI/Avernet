@@ -95,7 +95,7 @@ from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_pr
     BotConfigManifestServiceProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
-    TeclawPlatformBindings,
+    Redeliver,
 )
 from agentclaw.community.core.bot_startup_script.protocols import (
     TeclawEngineTestProtocol,
@@ -485,12 +485,10 @@ class ManifestFetchModule(Module):
             if family == "teclaw":
                 return TeclawCliToolPort()
             if family == "teclaw-live":
-                # Bound lazily: ``teclaw_bindings`` reaches the device graph,
-                # and asking for it here would close the same import cycle the
-                # function-level imports below exist to avoid.
-                return TeclawCliToolPort(
-                    redeliver=injector.get(TeclawPlatformBindings).redeliver
-                )
+                # Resolved lazily: the redeliver's provider reaches the device
+                # graph, and asking for it here would close the same import
+                # cycle the function-level imports below exist to avoid.
+                return TeclawCliToolPort(redeliver=injector.get(Redeliver))
             from agentclaw.community.core.bot_config_manifest.cli_tools.arca_port import (
                 ArcaCliToolPort,
             )

@@ -9,9 +9,13 @@ because the cluster reads as one thing: everything here exists so that
 rather than by assembling them.
 
 **One provider per component, including the ones only another provider
-wants.** The device-backed bundle, the store-backed bundle, each strategy and
-the family adapter are all bindings of their own, so no provider in this file
-constructs a collaborator for another provider to consume. What
+wants.** The device-backed bundle, the store-backed bundle, the closing
+redeliver, each strategy and the family adapter are all bindings of their own,
+so no provider in this file constructs a collaborator for another provider to
+consume, and none reaches into a value to get at a field of it. The two port
+bundles are the same ``Callable[[], MaterialiserPorts]`` shape, so they are told
+apart the way this codebase tells one ``HttpClient`` from another: by qualifier
+(:data:`DevicePorts` / :data:`PlatformPorts`). What
 ``manifest_delivery_strategies`` does is exactly what
 :class:`DeliveryStrategyFactory` does with what it is given: nothing but a
 lookup.
@@ -44,13 +48,14 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     ArcaDelivery,
     DeliveryStrategies,
     DeliveryStrategyFactory,
-    DeviceDeliveryBindings,
+    DevicePorts,
     EngineFamily,
     EngineFamilyOf,
     MaterialiserPorts,
+    PlatformPorts,
+    Redeliver,
     TeclawDeliveryMode,
     TeclawDeviceDelivery,
-    TeclawPlatformBindings,
     TeclawPlatformDelivery,
     family_from_engine_test,
 )
@@ -104,12 +109,12 @@ from agentclaw.community.di import config as cfg
 class ManifestDeliveryModule(Module):
     """Wire the strategy each engine family delivers a manifest through."""
 
-    # ── the two port bundles ───────────────────────────────────────────────
+    # ── the two port bundles, and the closing step ─────────────────────────
 
     @singleton
     @provider
     @inject
-    def manifest_device_delivery_bindings(
+    def manifest_device_ports(
         self,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         activation_service_provider: Callable[[], DirectActivationServiceProtocol],
@@ -121,7 +126,7 @@ class ManifestDeliveryModule(Module):
         entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
         resource_service_provider: Callable[[], ResourceFilePort],
         cli_tool_service_factory: CliToolServiceFactory,
-    ) -> DeviceDeliveryBindings:
+    ) -> DevicePorts:
         """The device-backed ports — ARCA's writes, and the pre-W8 teclaw shape's.
 
         The sibling of the store-backed bundle below, and built the same way:
@@ -131,9 +136,10 @@ class ManifestDeliveryModule(Module):
         other purpose — a wiring decision made by a component rather than by
         the root that wires it.
 
-        It stays a thunk rather than a value: every provider behind it reaches
-        the device graph, so a bundle built at boot would resolve that graph at
-        boot. It is called once per apply.
+        A thunk rather than a value, so what the qualifier names is the *unbuilt*
+        bundle: every provider behind it reaches the device graph, and a bundle
+        built at boot would resolve that graph at boot. It is called once per
+        apply.
         """
         def device_ports() -> MaterialiserPorts:
             return MaterialiserPorts(
@@ -149,12 +155,12 @@ class ManifestDeliveryModule(Module):
                 cli_tool_service=cli_tool_service_factory("arca"),
             )
 
-        return DeviceDeliveryBindings(device_ports=device_ports)
+        return device_ports
 
     @singleton
     @provider
     @inject
-    def manifest_teclaw_platform_bindings(
+    def manifest_platform_ports(
         self,
         injector: Injector,
         store: ManagedFilesStore,
@@ -165,23 +171,17 @@ class ManifestDeliveryModule(Module):
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
         cli_tool_service_factory: CliToolServiceFactory,
-    ) -> TeclawPlatformBindings:
-        """The store-backed ports and the closing redeliver (W8, spec D-7).
+    ) -> PlatformPorts:
+        """The store-backed ports (W8, spec D-7).
 
         The three file categories write to the managed-files store instead of
-        a container; activation records without projecting; the closing step
-        hands the running container the whole artifact once. Everything the
+        a container; activation records without projecting. Everything the
         family shares with ARCA — the script service, the permission check,
         the capability reader, the validator, the fetch pipeline — is the
         same object ARCA's ports carry.
 
-        Bound whichever mode a deployment runs, because the W9 CLI service
-        factory's ``teclaw-live`` binding pushes through the same redeliver on
-        either. Only the platform-managed strategy's provider reads the ports.
-
-        The device graph is resolved lazily and by function-level import for
-        the reason the device bundle above records: it reaches the device
-        dispatcher graph at import time.
+        Read by the platform-managed strategy's provider and by nothing else,
+        so a ``DEVICE`` deployment builds this thunk and never calls it.
         """
         def platform_ports() -> MaterialiserPorts:
             validator = package_validator_provider()
@@ -205,6 +205,24 @@ class ManifestDeliveryModule(Module):
                 cli_tool_service=cli_tool_service_factory("teclaw"),
             )
 
+        return platform_ports
+
+    @singleton
+    @provider
+    @inject
+    def manifest_teclaw_redeliver(self, injector: Injector) -> Redeliver:
+        """The closing whole-artifact push: one per apply, at the end (W8, D-7).
+
+        Bound whichever mode a deployment runs, because it has two consumers
+        that do not agree about the mode: the platform-managed strategy closes
+        an apply with it, and the W9 CLI service factory's ``teclaw-live``
+        binding pushes through it on either mode, that path having no closing
+        step of its own.
+
+        The device graph is reached lazily and by function-level import for the
+        reason the device bundle above records: it reaches the device dispatcher
+        graph at import time.
+        """
         def resolve(bot_id: str, owner_id: str):
             from agentclaw.community.core.devices.services.device_context_resolver import (
                 DeviceContextResolver,
@@ -223,11 +241,8 @@ class ManifestDeliveryModule(Module):
             DeviceNotBoundError,
         )
 
-        return TeclawPlatformBindings(
-            platform_ports=platform_ports,
-            redeliver=TeclawRedeliver(
-                resolve=resolve, dispatch=dispatch, not_bound=DeviceNotBoundError
-            ),
+        return TeclawRedeliver(
+            resolve=resolve, dispatch=dispatch, not_bound=DeviceNotBoundError
         )
 
     # ── one provider per bound strategy ────────────────────────────────────
@@ -236,30 +251,30 @@ class ManifestDeliveryModule(Module):
     @multiprovider
     @inject
     def manifest_arca_delivery_strategy(
-        self, device_bindings: DeviceDeliveryBindings
+        self, device_ports: DevicePorts
     ) -> DeliveryStrategies:
         """The ARCA row: the device-backed bundle, and nothing else to decide.
 
         No mode is consulted here — the switch is a teclaw-only fact, and a
         deployment cannot run ARCA any other way.
         """
-        return {EngineFamily.ARCA: ArcaDelivery(device_bindings.device_ports)}
+        return {EngineFamily.ARCA: ArcaDelivery(device_ports)}
 
     @singleton
     @multiprovider
     @inject
     def manifest_teclaw_platform_delivery_strategy(
         self,
-        teclaw_bindings: TeclawPlatformBindings,
+        platform_ports: PlatformPorts,
+        redeliver: Redeliver,
         manifest_config: cfg.BotConfigManifestConfig,
     ) -> DeliveryStrategies:
         """The teclaw row a ``PLATFORM`` deployment runs — and nothing on a
         ``DEVICE`` one.
 
         The artifact is the delivery: store-backed ports, and one
-        whole-artifact redeliver closing the apply. Both come off the one
-        bundle built for this shape, so this provider selects rather than
-        assembles.
+        whole-artifact redeliver closing the apply. Both arrive bound, so this
+        provider selects rather than assembles.
 
         An empty mapping when the deployment is not this mode, which is how a
         provider says "not me" to a map multibinding: the strategy is not
@@ -270,8 +285,7 @@ class ManifestDeliveryModule(Module):
             return {}
         return {
             EngineFamily.TECLAW: TeclawPlatformDelivery(
-                ports=teclaw_bindings.platform_ports,
-                redeliver=teclaw_bindings.redeliver,
+                ports=platform_ports, redeliver=redeliver
             )
         }
 
@@ -280,7 +294,7 @@ class ManifestDeliveryModule(Module):
     @inject
     def manifest_teclaw_device_delivery_strategy(
         self,
-        device_bindings: DeviceDeliveryBindings,
+        device_ports: DevicePorts,
         cli_tool_service_factory: CliToolServiceFactory,
         manifest_config: cfg.BotConfigManifestConfig,
     ) -> DeliveryStrategies:
@@ -294,14 +308,15 @@ class ManifestDeliveryModule(Module):
         own binding from, not a second component: which binding a key names is
         the factory's answer, and this is the caller that needs the teclaw one.
 
-        It never sees the redeliver — its constructor does not take one — which
-        is why a device-backed deployment cannot redeliver by accident.
+        It never sees the redeliver — its constructor does not take one, and
+        this provider does not ask for it — which is why a device-backed
+        deployment cannot redeliver by accident.
         """
         if manifest_config.teclaw_delivery_mode is not TeclawDeliveryMode.DEVICE:
             return {}
         return {
             EngineFamily.TECLAW: TeclawDeviceDelivery(
-                ports=device_bindings.device_ports,
+                ports=device_ports,
                 cli_tool_service=lambda: cli_tool_service_factory("teclaw"),
             )
         }
