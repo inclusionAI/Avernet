@@ -59,8 +59,16 @@ def _resolve_owner_user_id_from_graph(graph, task_id: str) -> str:
     return str(owner) if owner else ""
 
 
-def _release_relay_bbs_claim(graph, task_id: str, node_id: str, reason: str) -> None:
-    """Return a claimed Relay BBS baton to the square without touching predecessors."""
+def _release_relay_bbs_claim(
+    graph, task_id: str, node_id: str, reason: str,
+    *, task_context_service=None, execution_graph=None,
+) -> None:
+    """Return a claimed Relay BBS baton to the square without touching predecessors.
+
+    回广场即录(零盲区):``task_context_service`` + ``execution_graph`` 传入时同步落一条
+    ``execute/bbs_released`` 轨迹行(前面紧邻的失败成因行——``bbs_execution_result_missing``
+    / ``bbs_execution_failed``——只记因,不记"棒已回广场"这个态);两参缺省(未接线)跳过,
+    ``_emit_bbs_trajectory`` 自带吞异常 + WARNING(决策 #14),绝不阻断归还补丁。"""
     graph.report(TaskCallbackData(data={
         "report_type": "NODE_PATCH",
         "payload": {
@@ -90,6 +98,12 @@ def _release_relay_bbs_claim(graph, task_id: str, node_id: str, reason: str) -> 
             ),
         },
     }))
+    if task_context_service is not None and execution_graph is not None:
+        _emit_bbs_trajectory(
+            task_context_service, execution_graph, node_id,
+            "bbs_released",
+            details={"release_reason": reason},
+        )
 
 
 def _relay_bbs_execution_result_missing(graph, task_id: str, node_id: str) -> bool:
@@ -457,6 +471,8 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
             _release_relay_bbs_claim(
                 graph, task_id, target_node_id,
                 "relay BBS bot replied without EXECUTION_RESULT",
+                task_context_service=task_context_service,
+                execution_graph=execution_graph,
             )
             return
 
@@ -506,6 +522,8 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
             _release_relay_bbs_claim(
                 graph, task_id, target_node_id,
                 f"relay BBS execution failed: {exc}",
+                task_context_service=task_context_service,
+                execution_graph=execution_graph,
             )
         else:
             graph.report(TaskCallbackData(data={

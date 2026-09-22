@@ -1430,3 +1430,49 @@ class TestRelayTrajectory:
         errors = {r.action_result: r for r in _relay_records(repo)}
         assert errors["dispatch_failed_reopen"].error_type == ReasonCatalog.RELAY.value
         assert errors["resume_exhausted_hung"].error_type == ReasonCatalog.RELAY.value
+
+
+class TestRelayBbsReturnTrajectory:
+    """零盲区补点②:harness SLA 超时无执行事实 → 棒退回 BBS 广场,relay/bbs_return
+    事件落库(RUNNING→PENDING + RELAY 错误 + published_bbs 上下文)。"""
+
+    def test_emit_relay_bbs_return_writes_trajectory_row(self):
+        service, graph, repo = _service_with_traj()
+        _run(service.execute(_request()))  # 初始化图 + relay 任务存在
+
+        service._emit_relay_bbs_return(
+            "relay-task", "relay-task", "执行超时未上报 EXECUTION_RESULT",
+        )
+
+        rows = [
+            r for r in _relay_records(repo) if r.action_result == "bbs_return"
+        ]
+        assert len(rows) == 1, [r.action_result for r in _relay_records(repo)]
+        row = rows[0]
+        assert row.node_id == "relay-task"
+        assert row.status_from == Status.RUNNING.value
+        assert row.status_to == Status.PENDING.value
+        assert row.error_type == ReasonCatalog.RELAY.value
+        assert "执行超时未上报" in (row.error_msg or "")
+        ext = json.loads(row.ext_info)
+        assert ext["published_bbs"] is True
+        assert "执行超时未上报" in ext["return_reason"]
+
+    def test_harness_bbs_return_callback_lands_in_trajectory_repo(self):
+        """组合根接线语义:harness 回调 → _emit_relay_bbs_return → 轨迹行。
+        (_service() 不注入 harness,这里按 TaskService ctor 的同款接线手动模拟)"""
+        from agentclaw.community.core.task.task_harness.harness import TaskHarness
+
+        service, graph, repo = _service_with_traj()
+        _run(service.execute(_request()))
+        harness = TaskHarness(graph)
+        harness.set_on_relay_bbs_return(service._emit_relay_bbs_return)
+
+        g = graph.query_task_dashboard("relay-task")
+        g.extend_props["execution_config"]["orchestration_mode"] = "relay"
+
+        # 直驱回调(等价 harness 内部 _recover_relay_without_execution_result 触发)
+        harness._on_relay_bbs_return_fn("relay-task", "relay-task", "执行超时未上报 EXECUTION_RESULT")
+
+        rows = [r for r in _relay_records(repo) if r.action_result == "bbs_return"]
+        assert len(rows) == 1

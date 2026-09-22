@@ -172,6 +172,8 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         if self._harness is not None:
             self._harness.set_on_harness(self._centralized_adapter.on_harness)
             self._harness.set_on_relay_turn_expired(self.resume_expired_relay_turn)
+            # relay 零盲区:SLA 超时无执行事实 → 棒回 BBS 广场时同步落 relay/bbs_return 轨迹
+            self._harness.set_on_relay_bbs_return(self._emit_relay_bbs_return)
             import threading as _t
 
             _t.Thread(

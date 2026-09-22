@@ -50,6 +50,30 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
     def _emit_relay(self, **details: Any) -> None:
         emit_relay_event(self, **details)
 
+    def _emit_relay_bbs_return(self, task_id: str, node_id: str, reason: str) -> None:
+        """relay 棒**退回 BBS 广场**的轨迹事件(harness 兜底路径,零盲区补点)。
+
+        触发方:TaskHarness SLA 超时且无任何执行事实(``_recover_relay_without_execution_
+        result``,经 ``set_on_relay_bbs_return`` 接线)——即"派发了但 bot 一直不上报结果"
+        的场景。之前该路径只落 node/graph 补丁,时间线上看不到棒为何回广场。
+
+        形态对齐既有 relay 事件(action_type=relay;MISS 发布用 ``published_bbs`` 同词表):
+        ``action_result="bbs_return"``(轮到超时回广场)、RUNNING→PENDING、
+        ``error_type=RELAY + error_msg=reason``(异常事实,非 MISS 那类预期路径)、
+        ``ext_info.published_bbs=True``。``emit_relay_event`` 自带吞异常 + WARNING
+        (决策 #14),未接线 ``_task_context_service`` 时静默 no-op。"""
+        self._emit_relay(
+            task_id=task_id,
+            node_id=node_id,
+            action_result="bbs_return",
+            status_from=Status.RUNNING,
+            status_to=Status.PENDING,
+            error_type=ReasonCatalog.RELAY,
+            error_msg=reason or None,
+            attempt=self._relay_attempt(task_id),
+            ext_info={"published_bbs": True, "return_reason": reason or ""},
+        )
+
     def record_relay_callback_success(self, **details: Any) -> None:
         emit_relay_callback_success(self, **details)
 

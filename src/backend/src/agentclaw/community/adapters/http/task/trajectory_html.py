@@ -55,7 +55,9 @@ _FAILURE_RESULTS: frozenset[str] = frozenset(
      "parse_fail", "exec_failed_retry", "accept_fail",
      # relay(RELAY)失败子态:执行失败 / 派发失败回退 / gap 或超轮 HUNG / resume 耗尽 / turn 失效
      "execution_failed", "dispatch_failed_reopen", "gap_hung", "max_loop_hung",
-     "resume_exhausted_hung", "turn_invalid"}
+     "resume_exhausted_hung", "turn_invalid",
+     # 棒回 BBS 广场(harness 超时兜底 / 认领失败归还)——异常事实,红标
+     "bbs_return", "bbs_released"}
 )
 
 
