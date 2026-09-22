@@ -28,6 +28,7 @@
 legacy 结果额外读取一次指定 Session 检查停止状态，不扫描历史或其他任务。
 
 错误可见历史与生命周期展示仍为既有 post-commit 投影，存储失败会返回错误；
+用户-only ledger 提示除外：其保存/发布错误只记录服务端日志，不改变 Manager 回执。
 不新增 durable inbox/outbox 或承诺进程崩溃后自动补齐所有展示。
 
 ## 兼容性
@@ -60,3 +61,14 @@ Manager 投递失败不重做 Worker、关闭群禁止唤醒。
 `/tmp/bcs-status-architecture.log`，不纳入仓库。
 
 未执行部署、提交或推送；尚未运行独立 Singlebox 覆盖率门禁。
+
+## 用户展示错误隔离补充（2026-09-22）
+
+`emit_task_ledger_status` 在展示边界记录通知错误，所有派发与终态调用点不再传播该错误。
+任务入队、task.assigned 事件及 TaskResult 持久化/投递的错误语义保持不变。
+不处理已延期的 Manager 通知失败收尾和迟到回调缓存清理，不拆文件。
+
+新增回归用例模拟用户提示持久化失败，同时覆盖 queued 和 legacy dispatched 路径：
+仍返回原任务标识与正确派发状态，不额外生成 delivery，后续 Worker Error 仍正常生成并
+发送 TaskResult。`cargo test --manifest-path src/bcs/Cargo.toml -p bcs-message-flow -p bcs-system-message`
+通过（531 passed，0 failed）；`git diff --check` 通过。未重跑全 workspace 或 Singlebox。

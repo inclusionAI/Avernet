@@ -89,7 +89,11 @@ canonical result persistence, not those projections, determine task completion.
 See `src/bcs/specs/2026-09-16-task-message-queue/spec.md` and conformance_queued_task.
 
 Task ledger notifications are explicitly human-only; they create no Bot
-delivery. Confirmed Failed/Cancelled assignment transitions without a Worker
+delivery. Their projection failures are logged locally and never invalidate
+admission, dispatch, or terminal results, nor produce Manager notifications.
+Task admission, lifecycle event, and canonical result persistence errors retain
+their existing error contracts; only this auxiliary human notice is best-effort.
+Confirmed Failed/Cancelled assignment transitions without a Worker
 callback create the same stable TaskResult in the terminal CAS transaction.
 Unknown/CancelUnknown and result-delivery failures never recursively create
 TaskResults. Result preparation retains current Session/group authorization.

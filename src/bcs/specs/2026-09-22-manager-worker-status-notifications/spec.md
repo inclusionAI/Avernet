@@ -3,6 +3,10 @@
 状态：已评审；已实现，验证记录见 implementation.md
 
 版本：0.2
+
+补充：用户-only ledger 状态提示为 best-effort 展示。提示保存或发布失败仅记录服务端
+错误日志，不 Send/Inject 给 Manager，不改变已入队/派发/终态回执，不将 coordination
+从 Applied 改成 Unknown。任务入队、生命周期事件与 TaskResult 持久化错误仍按原契约处理。
 日期：2026-09-22
 
 ## 1. 需求

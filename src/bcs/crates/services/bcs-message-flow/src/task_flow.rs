@@ -184,9 +184,9 @@ pub(crate) async fn emit_task_ledger_status(
     group_id: &str,
     session_id: Option<&str>,
     driver_bot_id: &str,
-) -> ServiceResult<()> {
+) {
     let Some(system_message) = flow.system_message.as_ref() else {
-        return Ok(());
+        return;
     };
     let Some(_receiver) = group
         .participants
@@ -194,7 +194,7 @@ pub(crate) async fn emit_task_ledger_status(
         .find(|participant| participant.bot_uuid == driver_bot_id)
         .cloned()
     else {
-        return Ok(());
+        return;
     };
     let summary = flow
         .task_store
@@ -202,17 +202,22 @@ pub(crate) async fn emit_task_ledger_status(
         .await;
     let message = format_ledger_status_line(&summary);
     if message.is_empty() {
-        return Ok(());
+        return;
     }
     let event = SystemMessageEvent::UserNotification {
         group_id: group_id.to_string(),
         message,
     };
     let notify_session_id = session_id.unwrap_or(group_id);
-    system_message
+    // This is a human-only projection, not the task admission/result. Keep
+    // persistence errors observable without changing the Manager's outcome.
+    if let Err(error) = system_message
         .notify(group_id, event, notify_session_id, &group.participants)
-        .await?;
-    Ok(())
+        .await
+    {
+        warn!(%group_id, %notify_session_id, %driver_bot_id, error = %error,
+            "failed to emit user-only task ledger status");
+    }
 }
 
 fn format_ledger_status_line(summary: &LedgerSummary) -> String {

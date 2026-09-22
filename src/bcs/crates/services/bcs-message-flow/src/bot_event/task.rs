@@ -62,7 +62,7 @@ pub(super) async fn handle_task_bot_event(
             crate::queued_task_terminal::commit(flow, &row, cmd, &response_text, normalized).await?;
             if let Some(group) = flow.group.get(&entry.group_id).await {
                 crate::task_flow::emit_task_ledger_status(flow, &group, &entry.group_id,
-                    entry.session_id.as_deref(), &entry.driver_bot).await?;
+                    entry.session_id.as_deref(), &entry.driver_bot).await;
             }
             return Ok(Vec::new());
         }
@@ -88,7 +88,7 @@ pub(super) async fn handle_task_bot_event(
             flow.message_tracker.cleanup_run(&cmd.run_id).await;
             flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(cmd)).await;
             crate::task_flow::emit_task_ledger_status(flow, group, &entry.group_id,
-                entry.session_id.as_deref(), &entry.driver_bot).await?;
+                entry.session_id.as_deref(), &entry.driver_bot).await;
             return Ok(Vec::new());
         }
     }
@@ -243,7 +243,7 @@ pub(super) async fn handle_task_bot_event(
             entry.session_id.as_deref(),
             &entry.driver_bot,
         )
-        .await?;
+        .await;
     }
     Ok(vec![result])
 }

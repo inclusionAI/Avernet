@@ -135,7 +135,7 @@ pub async fn handle_task_dispatch(
                 ("status".into(), serde_json::json!("queued")),
                 ("assignment".into(), serde_json::json!({"content_type":"text/plain", "size_bytes":message.len(), "text":message, "truncated":false})),
             ])).await?;
-        emit_task_ledger_status(flow, &group, &group_id, Some(&manager_session_id), &cmd.driver_bot_id).await?;
+        emit_task_ledger_status(flow, &group, &group_id, Some(&manager_session_id), &cmd.driver_bot_id).await;
         return Ok(TaskDispatchOutcome { task_id:effective_task_id, status:"queued".into(),
             bot_deliveries:Vec::new(), frontend_deliveries:Vec::new() });
     }
@@ -352,7 +352,7 @@ pub async fn handle_task_dispatch(
                 ledger_session_id,
                 &cmd.driver_bot_id,
             )
-            .await?;
+            .await;
             return Err(error);
         }
     };
@@ -364,7 +364,7 @@ pub async fn handle_task_dispatch(
         ledger_session_id,
         &cmd.driver_bot_id,
     )
-    .await?;
+    .await;
 
     Ok(TaskDispatchOutcome {
         task_id: effective_task_id,

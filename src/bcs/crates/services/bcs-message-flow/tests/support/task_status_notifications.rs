@@ -1,5 +1,60 @@
 use super::*;
 
+#[derive(Default)]
+struct FailingUserNotice(std::sync::atomic::AtomicUsize);
+
+#[async_trait::async_trait]
+impl bcs_service_api::SystemMessageService for FailingUserNotice {
+    async fn notify(&self, _: &str, event: bcs_domain::SystemMessageEvent, _: &str,
+        _: &[bcs_domain::Participant]) -> bcs_service_api::ServiceResult<usize> {
+        assert!(matches!(event, bcs_domain::SystemMessageEvent::UserNotification { .. }));
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Err(bcs_service_api::ServiceError::InternalError("user notice persistence failed".into()))
+    }
+}
+
+#[tokio::test]
+async fn user_notice_failure_preserves_dispatch_and_worker_result() {
+    for managed in [true, false] {
+        let mut f = Fixture::new().await;
+        let notice = Arc::new(FailingUserNotice::default());
+        f.flow = Fixture::configured_flow(&f.support, &f.service, &f.repo, &f.live,
+            |flow| flow.with_system_message(notice.clone())).await;
+        if !managed {
+            let mut policy = f.live.snapshot.read().await.policy.clone(); policy.flow_enabled.task = false;
+            f.flow.replace_delivery_policy(admin(), 1, policy).await.unwrap();
+        }
+        let task = f.flow.handle_task_dispatch(dispatch_command()).await.unwrap();
+        assert_eq!(task.status, if managed { "queued" } else { "dispatched" });
+        assert_eq!(notice.0.load(Ordering::SeqCst), 1);
+        let entry = f.flow.task_store.get(&task.task_id).await.unwrap();
+        assert_eq!(entry.assignment_intent_id.as_deref(), Some("bcs_intent_assignment"));
+        assert!(!matches!(entry.status, bcs_message_flow::task_store::TaskLedgerStatus::Failed));
+        let run_id = if managed {
+            let rows = f.rows().await;
+            assert_eq!(rows.len(), 1, "a user notice failure creates no extra delivery");
+            assert_eq!(rows[0].semantic_projection_json["task"]["task_id"], task.task_id);
+            f.start(&rows[0]).await.run_id.unwrap()
+        } else { task.task_id.clone() };
+        assert_eq!(f.support.bot_delivery.kinds().await, vec![bcs_service_api::BotDeliveryKind::TaskDispatch]);
+        f.flow.handle_bot_event(BotEventCommand { bot_id:"bot-observer".into(), run_id,
+            group_id:"group-1".into(), bcs_session_id:Some(SESSION.into()),
+            state:ChatEventState::Error, event_type:"chat.event".into(),
+            event_payload:json!({"errorMessage":"Worker execution failed"}) }).await.unwrap();
+        assert_eq!(notice.0.load(Ordering::SeqCst), 2);
+        assert_eq!(f.flow.task_store.get(&task.task_id).await.unwrap().status,
+            bcs_message_flow::task_store::TaskLedgerStatus::Failed);
+        if managed {
+            let rows = f.rows().await;
+            assert_eq!(rows.len(), 2);
+            let result = rows.iter().find(|r| r.semantic_projection_json["task"]["leg"] == "result").unwrap();
+            f.start(result).await;
+        }
+        assert_eq!(f.support.bot_delivery.kinds().await,
+            vec![bcs_service_api::BotDeliveryKind::TaskDispatch, bcs_service_api::BotDeliveryKind::TaskResult]);
+    }
+}
+
 #[tokio::test]
 async fn non_callback_terminal_is_atomic_idempotent_and_can_wake_manager() {
     for event in [Event::CancelRequested, Event::PreparationFailed] {
