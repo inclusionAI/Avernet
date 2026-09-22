@@ -278,8 +278,7 @@ class RunStatusService:
         """返回 session 工作空间下所有 run 关联的工作项数据，按 at 倒序。
 
         接口响应结构保持不变；内部命令从 ``aix run output list --kind issue``
-        改为 ``aix run list --filter <workspace_root>``，并按
-        ``docs/arch/aix-run-list-workitem-wire-contract.md`` 中的 v1 契约从
+        改为 ``aix run list --filter <workspace_root>``，并从
         ``runs[].workItem`` 构造原有 issue 字段。
         """
         workspace_root = WorkspaceService.resolve_workspace(session_id, cwd)
