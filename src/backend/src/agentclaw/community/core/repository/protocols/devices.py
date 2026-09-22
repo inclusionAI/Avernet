@@ -327,7 +327,7 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
-    def claim_baas_desktop_data_init_trigger_if_ready(
+    def claim_pool_data_init_trigger_if_ready(
         self,
         *,
         binding_id: int,
@@ -338,7 +338,7 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
-    def release_baas_desktop_data_init_trigger_if_matches(
+    def release_pool_data_init_trigger_if_matches(
         self,
         *,
         binding_id: int,

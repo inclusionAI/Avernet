@@ -69,6 +69,9 @@ from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # 
 LOCAL_DEVICE_PROVIDER = "local"
 ARCA_DEVICE_PROVIDER = "arca"
 BAAS_DEVICE_PROVIDER = "baas"
+POOL_DATA_INIT_PROVIDERS = frozenset(
+    {ARCA_DEVICE_PROVIDER, BAAS_DEVICE_PROVIDER}
+)
 
 T = TypeVar("T")
 
@@ -1192,7 +1195,7 @@ class DeviceService:
 
 
         if (
-            record.device_provider == BAAS_DEVICE_PROVIDER
+            record.device_provider in POOL_DATA_INIT_PROVIDERS
             and record.status
             in {
                 DeviceBindingStatus.PENDING.value,
@@ -1291,7 +1294,7 @@ class DeviceService:
                 binding_id=record.id,
                 require_pool_confirmation=(
                     guarded_status_callback
-                    and record.device_provider == BAAS_DEVICE_PROVIDER
+                    and record.device_provider in POOL_DATA_INIT_PROVIDERS
                 ),
             )
 
@@ -1759,7 +1762,7 @@ class DeviceService:
             claim: DataInitTriggerClaim | None = None
             if require_pool_confirmation:
                 if (
-                    record.device_provider != BAAS_DEVICE_PROVIDER
+                    record.device_provider not in POOL_DATA_INIT_PROVIDERS
                     or startup_identity is None
                     or confirmed_identity != startup_identity
                 ):
@@ -1770,7 +1773,7 @@ class DeviceService:
                         f"confirmed_identity={confirmed_identity}"
                     )
                     return
-                claim = self._repo.claim_baas_desktop_data_init_trigger_if_ready(
+                claim = self._repo.claim_pool_data_init_trigger_if_ready(
                     binding_id=binding_id,
                     device_id=device_id,
                     startup_identity=startup_identity,
@@ -1808,12 +1811,12 @@ class DeviceService:
     ) -> None:
         """Retry data-init using the layout declaration persisted on the Binding."""
         try:
-            props = record.device_props or {}
-            envs = props.get("envs") if isinstance(props, dict) else None
-            pool_declared = (
-                isinstance(envs, dict)
-                and envs.get("AGENTCLAW_SKILLS_LAYOUT") == "pool"
-            )
+            pool_declared = self._binding_declares_pool(record)
+            if (
+                record.device_provider == ARCA_DEVICE_PROVIDER
+                and not pool_declared
+            ):
+                return
             if not pool_declared:
                 bot = self._bot_query.get_by_binding_id(record.id)
                 if self._load_bot_ext(bot).get("start_status") != "SUCCEEDED":
@@ -1833,6 +1836,15 @@ class DeviceService:
                 f"device_id={device_id} binding_id={record.id} exc={exc}",
                 exc_info=True,
             )
+
+    @staticmethod
+    def _binding_declares_pool(record: DeviceBindingRecord) -> bool:
+        props = record.device_props or {}
+        envs = props.get("envs") if isinstance(props, dict) else None
+        return (
+            isinstance(envs, dict)
+            and envs.get("AGENTCLAW_SKILLS_LAYOUT") == "pool"
+        )
 
     @staticmethod
     def _load_bot_ext(bot: dict[str, Any] | None) -> dict[str, Any]:
@@ -1990,7 +2002,7 @@ class DeviceService:
         if startup_identity is None or claim_token is None:
             return
         try:
-            self._repo.release_baas_desktop_data_init_trigger_if_matches(
+            self._repo.release_pool_data_init_trigger_if_matches(
                 binding_id=binding_id,
                 device_id=device_id,
                 startup_identity=startup_identity,

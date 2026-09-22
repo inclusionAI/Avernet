@@ -351,7 +351,7 @@ class BaasGuardedLifecycleRepositoryMixin:
                 db.rollback()
                 raise
 
-    def claim_baas_desktop_data_init_trigger_if_ready(
+    def claim_pool_data_init_trigger_if_ready(
         self,
         *,
         binding_id: int,
@@ -364,7 +364,7 @@ class BaasGuardedLifecycleRepositoryMixin:
         with self._db.orm_session() as db:
             try:
                 begin_guarded_transaction(
-                    db, purpose="BaaS Desktop data-init trigger claim"
+                    db, purpose="Pool data-init trigger claim"
                 )
                 binding = (
                     db.query(EntityDeviceBinding)
@@ -380,7 +380,7 @@ class BaasGuardedLifecycleRepositoryMixin:
                 if (
                     binding is None
                     or binding.device_id != device_id
-                    or binding.device_provider != "baas"
+                    or binding.device_provider not in {"arca", "baas"}
                     or binding.status != _ACTIVE
                     or resolve_startup_identity(props) != startup_identity
                     or str(
@@ -446,7 +446,7 @@ class BaasGuardedLifecycleRepositoryMixin:
                 db.rollback()
                 raise
 
-    def release_baas_desktop_data_init_trigger_if_matches(
+    def release_pool_data_init_trigger_if_matches(
         self,
         *,
         binding_id: int,
@@ -460,7 +460,7 @@ class BaasGuardedLifecycleRepositoryMixin:
         with self._db.orm_session() as db:
             try:
                 begin_guarded_transaction(
-                    db, purpose="BaaS Desktop data-init trigger release"
+                    db, purpose="Pool data-init trigger release"
                 )
                 binding = (
                     db.query(EntityDeviceBinding)
@@ -476,7 +476,7 @@ class BaasGuardedLifecycleRepositoryMixin:
                 if (
                     binding is None
                     or binding.device_id != device_id
-                    or binding.device_provider != "baas"
+                    or binding.device_provider not in {"arca", "baas"}
                     or binding.status != _ACTIVE
                     or resolve_startup_identity(props) != startup_identity
                     or str(

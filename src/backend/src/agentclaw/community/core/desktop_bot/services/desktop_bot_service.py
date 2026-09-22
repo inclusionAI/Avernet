@@ -6,15 +6,11 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import secrets
 import threading
 import time
-import uuid
 from datetime import datetime
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -30,18 +26,23 @@ from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
 from agentclaw.community.core.devices.services.device_service import DeviceService
-from agentclaw.community.core.devices.services.baas_container_init import (
-    BaasContainerInitializer,
-)
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.protocols import (
     LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
     LayoutInitializationConfirmationProtocol,
 )
-from agentclaw.community.core.events.bus import RequiredEventDeliveryError, get_event_bus
-from agentclaw.community.core.events.types import (
-    BaasPublishCompletedEvent,
-    RuntimeProjectionRequestedEvent,
+from agentclaw.community.core.events.bus import get_event_bus
+from agentclaw.community.core.events.types import RuntimeProjectionRequestedEvent
+from agentclaw.community.core.desktop_bot.services.desktop_publish_lifecycle import (
+    DesktopLayoutConfirmationStatus as _DesktopLayoutConfirmationStatus,
+    DesktopPublishLifecycle,
+    DesktopPublishLifecycleHooks,
+    DesktopTerminalTransitionStatus as _DesktopTerminalTransitionStatus,
+)
+from agentclaw.community.core.desktop_bot.services.desktop_creation_lifecycle import (
+    DesktopCreationLifecycle,
+    DesktopCreationLifecycleHooks,
+    generate_desktop_request_id as _generate_request_id,
 )
 from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
 from agentclaw.community.core.service_bot.services.baas_service import (
@@ -60,7 +61,7 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, SUPPORTED_ENGINE_TYPES
+from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import PassportPlugin, PassportError
@@ -77,33 +78,6 @@ if TYPE_CHECKING:
     from agentclaw.community.di import config as cfg
 
 logger = get_logger()
-
-_DESKTOP_PROVISIONING_CLAIM_STALE_SECONDS = 5 * 60
-
-
-class _DesktopLayoutConfirmationStatus(StrEnum):
-    CONFIRMED = "confirmed"
-    PENDING = "pending"
-    FAILED = "failed"
-    SUPERSEDED = "superseded"
-
-
-class _DesktopTerminalTransitionStatus(StrEnum):
-    COMMITTED = "committed"
-    RETRY = "retry"
-    SUPERSEDED = "superseded"
-
-
-def _generate_request_id(
-    bot_id: str,
-    entity_id: str,
-    entity_type: str,
-    env: str,
-    action: str,
-) -> str:
-    raw = f"{entity_id}_{entity_type}_{bot_id}_{env}_{action}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:32]
-
 
 def _to_device_display_status(status: str) -> str:
     """将 BaaS 机器状态映射为设备展示状态."""
@@ -163,6 +137,56 @@ class DesktopBotService(DesktopBotServiceProtocol):
         self._tenant = baas_config.tenant
         self._desktop_template_uuid = baas_config.desktop_template_uuid
         self._desktop_ttl_minutes = getattr(baas_config, "desktop_ttl_minutes", 0)
+        self._publish_lifecycle = DesktopPublishLifecycle(
+            baas=baas_service,
+            binding_repository=device_binding_repo,
+            bot_repository=bot_repository,
+            device_service=device_service,
+            hooks=DesktopPublishLifecycleHooks(
+                query_publish_status=lambda publish_id: (
+                    self._query_publish_status(publish_id)
+                ),
+                confirm_layout_initialization=lambda **kwargs: (
+                    self._confirm_desktop_layout_initialization(**kwargs)
+                ),
+                transition_restart_terminal=lambda **kwargs: (
+                    self._transition_desktop_restart_terminal_if_current(**kwargs)
+                ),
+                trigger_pool_data_init=lambda **kwargs: (
+                    self._trigger_pool_data_init_after_activation(**kwargs)
+                ),
+                request_runtime_projection=lambda **kwargs: (
+                    self._request_runtime_projection_after_reconnect(**kwargs)
+                ),
+                trigger_device_alive=lambda device_id: (
+                    self._trigger_device_alive(device_id)
+                ),
+                update_local_status=lambda *args: self._update_local_status(*args),
+            ),
+        )
+        self._creation_lifecycle = DesktopCreationLifecycle(
+            baas=baas_service,
+            binding_repository=device_binding_repo,
+            bot_repository=bot_repository,
+            skill_set_factory=skill_set_factory,
+            native_creation_policy=skills_pool_native_creation_policy,
+            desktop_template_uuid=self._desktop_template_uuid,
+            hooks=DesktopCreationLifecycleHooks(
+                layout_credentials_for_scope=lambda **kwargs: (
+                    self._desktop_layout_credentials_for_scope(**kwargs)
+                ),
+                layout_env=lambda credentials: self._desktop_layout_env(credentials),
+                build_payload=lambda **kwargs: (
+                    self._build_desktop_bot_payload(**kwargs)
+                ),
+                release_claim=lambda **kwargs: (
+                    self._release_desktop_creation_claim(**kwargs)
+                ),
+                start_publish_polling=lambda **kwargs: (
+                    self._start_publish_polling(**kwargs)
+                ),
+            ),
+        )
 
     # ── list & status check ──────────────────────────────────────────────
 
@@ -346,31 +370,12 @@ class DesktopBotService(DesktopBotServiceProtocol):
         binding_id: int | str,
         device_id: str,
     ) -> None:
-        """Retry pending data-init only for a confirmed Pool Desktop startup."""
-        try:
-            bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-            if (
-                bot is None
-                or bot.get("status") != DeviceBindingStatus.ACTIVE.value
-                or str(bot.get("binding_id")) != str(binding_id)
-            ):
-                return
-            ext = bot.get("ext") or {}
-            if not isinstance(ext, dict) or ext.get("skills_layout") != "pool":
-                return
-            self._device_service.trigger_data_init_on_device_ready(
-                device_id=device_id,
-                binding_id=int(binding_id),
-                require_pool_confirmation=True,
-            )
-        except Exception:
-            logger.exception(
-                "[DesktopBotService] Pool data-init readiness trigger failed: "
-                "bot_id=%s binding_id=%s device_id=%s",
-                bot_id,
-                binding_id,
-                device_id,
-            )
+        self._publish_lifecycle.trigger_pool_data_init_after_activation(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            binding_id=binding_id,
+            device_id=device_id,
+        )
 
     def _merge_bot_ext(self, bot_id: str, owner_id: str, patch: dict) -> bool:
         """Read-modify-write bot ext field, merging only specified keys."""
@@ -689,359 +694,17 @@ class DesktopBotService(DesktopBotServiceProtocol):
         engine_type: str | None = None,
         existing_bot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """执行 BAAS 创建 Bot、审批、写数据库的完整流程。
-
-        由 create_after_authorization 在授权完成后调用，不应直接被外部调用。
-
-        Args:
-            bot: Bot 信息字典，包含 bot_id, bot_name, entity_id, entity_type, bot_desc, active_engine, avatar_url
-            user_id: 创建者用户 ID
-            machine_id: 目标设备节点 ID
-            migration_path: Bot 实例数据目录路径
-            mount_path: 用户自定义本地磁盘挂载路径（可选）
-            agent_code: Passport 返回的 agent_code，用于 BaaS 部署配置
-
-        Returns:
-            dict: bot_uuid, binding_id, bot_id, agent_code
-        """
-        bot_id = bot.get("bot_id", "")
-
-        # Step 1: 生成唯一请求 ID，用于 BaaS 接口幂等
-        request_id = _generate_request_id(
-            bot_id=bot_id,
-            entity_id=bot["entity_id"],
-            entity_type=bot["entity_type"],
-            env=get_current_env(),
-            action="create",
-        )
-
-        # Step 2: 检查桌面 Bot 模板 UUID 是否已配置
-        if not self._desktop_template_uuid:
-            raise DesktopBotServiceError(
-                "desktop_template_uuid is not configured; "
-                "set baas.desktop_template_uuid in config"
-            )
-
-        env = get_current_env()
-        if existing_bot is None:
-            client_id = f"staff_{user_id}_{bot_id}_{uuid.uuid4().hex}"
-            callback_token = secrets.token_urlsafe(32)
-            initial_layout = self._skills_pool_native_creation_policy.select(
-                env=env,
-                owner_id=user_id,
-                bot_id=str(bot_id),
-                engine_type=str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE),
-                bot_type="desktop",
-            )
-            initial_ext: dict[str, Any] = {
-                "passport": {"agent_code": agent_code, "status": "ISSUED"},
-                "start_status": "PENDING",
-                "start_message": "",
-                "machine_id": machine_id,
-                "mount_path": (mount_path or "").strip(),
-                "migration_path": migration_path,
-                "desktop_template_uuid": self._desktop_template_uuid or "",
-                "workspace_path": f"~/.teamclaw/boxes/{bot_id}",
-                "client_id": client_id,
-                "callback_token": callback_token,
-                "pending_since": datetime.now().isoformat(),
-                "skills_layout": "pool" if initial_layout is not None else "legacy",
-                "skills_layout_contract_version": (
-                    initial_layout.layout_contract_version
-                    if initial_layout is not None
-                    else ""
-                ),
-            }
-            avatar_url = bot.get("avatar_url")
-            if avatar_url:
-                initial_ext["avatar_url"] = avatar_url
-            self._bot_repo.insert_with_initial_skill_layout(
-                {
-                    "bot_id": bot_id,
-                    "bot_name": bot.get("bot_name", ""),
-                    "bot_desc": bot.get("bot_desc"),
-                    "entity_id": user_id,
-                    "entity_type": "staff",
-                    "creator_id": user_id,
-                    "owner_id": user_id,
-                    "owner_name": bot.get("owner_name", user_id),
-                    "engine_types": list(SUPPORTED_ENGINE_TYPES),
-                    "active_engine": bot.get("active_engine", DEFAULT_ENGINE_TYPE),
-                    "status": "PENDING",
-                    "binding_id": None,
-                    "device_id": None,
-                    "modifier_id": user_id,
-                    "is_delete": 0,
-                    "bot_type": "desktop",
-                    "ext": initial_ext,
-                },
-                layout=initial_layout,
-            )
-        else:
-            raw_ext = existing_bot.get("ext") or {}
-            if isinstance(raw_ext, str):
-                try:
-                    raw_ext = json.loads(raw_ext)
-                except json.JSONDecodeError as exc:
-                    raise DesktopBotServiceError(
-                        "persisted desktop creation context is invalid"
-                    ) from exc
-            if not isinstance(raw_ext, dict):
-                raise DesktopBotServiceError(
-                    "persisted desktop creation context is invalid"
-                )
-            initial_ext = dict(raw_ext)
-            client_id = str(initial_ext.get("client_id") or "")
-            callback_token = str(initial_ext.get("callback_token") or "")
-            if not client_id or not callback_token:
-                raise DesktopBotServiceError(
-                    "persisted desktop creation credentials are incomplete"
-                )
-
-            retained_binding_id = existing_bot.get("binding_id")
-            retained_device_id = existing_bot.get("device_id")
-            if retained_binding_id and retained_device_id:
-                retained_binding = self._binding_repo.get_by_id(
-                    int(retained_binding_id)
-                )
-                if (
-                    retained_binding is not None
-                    and str(retained_binding.status or "").upper()
-                    == DeviceBindingStatus.RELEASED.value
-                ):
-                    detached = (
-                        self._binding_repo.detach_released_baas_desktop_binding_if_matches(
-                            binding_id=int(retained_binding_id),
-                            bot_id=bot_id,
-                            owner_id=user_id,
-                            device_id=str(retained_device_id),
-                            entity_id=user_id,
-                            env=env,
-                            expected_client_id=client_id,
-                            expected_callback_token=callback_token,
-                        )
-                    )
-                    if not detached:
-                        raise DesktopBotServiceError(
-                            "released Desktop binding could not be detached from "
-                            f"the retained Bot: bot_id={bot_id}"
-                        )
-
-        layout_credentials = self._desktop_layout_credentials_for_scope(
-            env=env,
-            entity_id=user_id,
-            bot_id=bot_id,
-        )
-        if not self._bot_repo.claim_provisioning(
-            bot_id,
-            user_id,
-            reclaim_after_seconds=_DESKTOP_PROVISIONING_CLAIM_STALE_SECONDS,
-        ):
-            raise DesktopBotServiceError(
-                f"Desktop bot creation is already in progress: bot_id={bot_id}"
-            )
-        try:
-            installation_kwargs: dict[str, Any] = {
-                "bot_id": bot_id,
-                "owner_id": user_id,
-            }
-            if existing_bot is not None:
-                installation_kwargs["bot"] = existing_bot
-            self._skill_set_factory.initialize_installations(**installation_kwargs)
-        except Exception:
-            self._release_desktop_creation_claim(bot_id=bot_id, owner_id=user_id)
-            raise
-
-        # Step 4: 构建 BaaS 创建 Bot 的请求体
-        payload = self._build_desktop_bot_payload(
+        """Delegate idempotent Desktop creation to the focused lifecycle module."""
+        return self._creation_lifecycle.execute(
             bot=bot,
-            owner_id=user_id,
-            request_id=request_id,
+            user_id=user_id,
+            machine_id=machine_id,
             migration_path=migration_path,
             mount_path=mount_path,
-            machine_id=machine_id,
             agent_code=agent_code,
-            client_id=client_id,
-            callback_token=callback_token,
             engine_type=engine_type,
-            layout_credentials=layout_credentials,
+            existing_bot=existing_bot,
         )
-
-        # Step 5: 调用 BaaS API 创建 Bot
-        try:
-            baas_result = self._baas.post_bots_api(
-                path="/api/v1/bots",
-                payload=payload,
-                action="desktop_create_bot",
-            )
-        except Exception as e:
-            self._release_desktop_creation_claim(bot_id=bot_id, owner_id=user_id)
-            logger.error(
-                "[DesktopBotService._execute_creation] BaaS create_bot failed: bot_id=%s error=%s",
-                bot_id, e,
-            )
-            raise DesktopBotServiceError(
-                f"BaaS create_bot failed: bot_id={bot_id} error={e}"
-            )
-
-        logger.info(
-            "[DesktopBotService._execute_creation] BaaS create_bot response: bot_id=%s "
-            "bot_uuid=%s publish_id=%s",
-            bot_id, baas_result.get("bot_uuid"), baas_result.get("publish_id"),
-        )
-
-        bot_uuid = baas_result.get("bot_uuid", "")
-        publish_id = baas_result.get("publish_id")
-        if not bot_uuid:
-            self._release_desktop_creation_claim(bot_id=bot_id, owner_id=user_id)
-            raise DesktopBotServiceError("BaaS create_bot returned no bot_uuid")
-
-        # Step 5: 自动审批 publish（若有 publish_id）
-        if publish_id:
-            try:
-                self._baas.approve_publish(
-                    publish_id=publish_id,
-                    operator=user_id,
-                    request_id=request_id,
-                    comment="自动审批",
-                )
-            except Exception as e:
-                self._release_desktop_creation_claim(
-                    bot_id=bot_id,
-                    owner_id=user_id,
-                )
-                logger.error(
-                    "[DesktopBotService._execute_creation] approve_publish failed: "
-                    "publish_id=%s, error=%s", publish_id, e,
-                )
-                raise DesktopBotServiceError(
-                    f"Desktop bot approve publish failed: publish_id={publish_id}, error={e}"
-                )
-
-        # Step 6: 写入本地数据库（binding + bot）
-        binding_id: int | None = None
-        try:
-            binding_props = {
-                "bot_uuid": bot_uuid,
-                "client_id": client_id,
-                "callback_token": callback_token,
-                "publish_id": str(publish_id) if publish_id else None,
-                "envs": self._desktop_layout_env(layout_credentials),
-            }
-            apply_reason = f"Create desktop bot: {bot.get('bot_name', '')}"
-            recoverable_binding = self._binding_repo.get_by_device_id(bot_uuid)
-            if recoverable_binding is not None:
-                recovered = (
-                    self._binding_repo.recover_baas_desktop_creation_binding_if_matches(
-                        binding_id=recoverable_binding.id,
-                        bot_id=bot_id,
-                        owner_id=user_id,
-                        device_id=bot_uuid,
-                        entity_id=user_id,
-                        env=env,
-                        expected_client_id=client_id,
-                        expected_callback_token=callback_token,
-                        device_props=binding_props,
-                        apply_reason=apply_reason,
-                        applied_by=user_id,
-                    )
-                )
-                if not recovered:
-                    raise DesktopBotServiceError(
-                        "existing Desktop binding does not match the persisted "
-                        f"creation context: bot_id={bot_id}"
-                    )
-                binding_id = recoverable_binding.id
-            else:
-                binding_id = self._binding_repo.insert_binding(
-                    entity_id=user_id,
-                    entity_type="staff",
-                    device_id=bot_uuid,
-                    device_provider="baas",
-                    env=env,
-                    device_props=binding_props,
-                    status="PENDING",
-                    apply_reason=apply_reason,
-                    applied_by=user_id,
-                )
-
-            ext = {
-                **initial_ext,
-                "publish_id": str(publish_id) if publish_id else "",
-            }
-            updated_bot = self._bot_repo.update_by_owner(
-                bot_id=bot_id,
-                owner_id=user_id,
-                update_data={
-                    "binding_id": binding_id,
-                    "device_id": bot_uuid,
-                    "ext": ext,
-                    "status": "PENDING",
-                },
-            )
-            if updated_bot is None:
-                raise DesktopBotServiceError(
-                    f"Desktop bot binding update did not match: bot_id={bot_id}"
-                )
-
-            logger.info(
-                "[DesktopBotService._execute_creation] bot_id=%s binding_id=%s bot_uuid=%s",
-                bot_id, binding_id, bot_uuid,
-            )
-
-            # Step 7: 启动后台轮询 publish 进度
-            if publish_id:
-                self._start_publish_polling(
-                    publish_id=str(publish_id),
-                    binding_id=str(binding_id),
-                    bot_id=bot_id,
-                    owner_id=user_id,
-                    device_id=bot_uuid,
-                    engine_type=engine_type or DEFAULT_ENGINE_TYPE,
-                )
-
-            return {
-                "bot_uuid": bot_uuid,
-                "binding_id": binding_id,
-                "bot_id": bot_id,
-                "agent_code": agent_code,
-            }
-
-        except Exception as e:
-            if binding_id is not None:
-                try:
-                    self._binding_repo.release_binding(
-                        binding_id=binding_id,
-                        release_reason="Desktop bot creation did not persist",
-                        released_by=user_id,
-                    )
-                except Exception:
-                    logger.exception(
-                        "[DesktopBotService._execute_creation] failed to release "
-                        "orphan binding_id=%s",
-                        binding_id,
-                    )
-                try:
-                    self._bot_repo.update_by_owner(
-                        bot_id=bot_id,
-                        owner_id=user_id,
-                        update_data={
-                            "binding_id": None,
-                            "device_id": None,
-                            "status": "PENDING",
-                        },
-                    )
-                except Exception:
-                    logger.exception(
-                        "[DesktopBotService._execute_creation] failed to clear "
-                        "orphan binding from bot_id=%s",
-                        bot_id,
-                    )
-            self._release_desktop_creation_claim(bot_id=bot_id, owner_id=user_id)
-            logger.error(
-                "[DesktopBotService._execute_creation] local DB write failed: %s", e,
-            )
-            raise DesktopBotServiceError(f"Desktop bot local write failed: {e}")
 
     # ── create_after_authorization ─────────────────────────────────────
 
@@ -2047,366 +1710,27 @@ class DesktopBotService(DesktopBotServiceProtocol):
         observe_only: bool = False,
         restart_publish_id: str | None = None,
     ) -> None:
-        """轮询 publish 进度，根据结果更新本地 bot 状态。
-
-        在后台线程中运行。首次创建 SUCCESS 走 device-alive 激活；restart
-        SUCCESS 先按 publish identity 原子提交 ACTIVE，再请求 Runtime Projection。
-        BaaS 明确 FAILED → _update_local_status(FAILED)。
-        轮询超时 → 保持 PENDING + ext.start_status=DOWNLOADING，委托周期扫描裁决。
-
-        Args:
-            engine_type: 引擎类型，用于选择轮询超时时间。
-                非默认引擎（如 claude_code）需要下载镜像，给更长的超时。
-        """
-        poll_timeout = (
-            self._EXTENDED_POLL_TIMEOUT_SECONDS
-            if engine_type and engine_type != DEFAULT_ENGINE_TYPE
-            else self._DEFAULT_POLL_TIMEOUT_SECONDS
+        """Delegate Desktop publish lifecycle tracking to the focused module."""
+        self._publish_lifecycle.poll_publish_progress(
+            publish_id=publish_id,
+            binding_id=binding_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            device_id=device_id,
+            engine_type=engine_type,
+            poll_interval_seconds=self._POLL_INTERVAL_SECONDS,
+            default_timeout_seconds=self._DEFAULT_POLL_TIMEOUT_SECONDS,
+            extended_timeout_seconds=self._EXTENDED_POLL_TIMEOUT_SECONDS,
+            restart_tracking=restart_tracking,
+            observe_only=observe_only,
+            restart_publish_id=restart_publish_id,
         )
-        start_time = time.monotonic()
-        final_status = "FAILED"
-        layout_watchdog_dispatched = False
-        terminal_persistence_pending = False
-        restart_completion_pending: BaasPublishCompletedEvent | None = None
-
-        logger.info(
-            "[DesktopBotService._poll_publish_progress] start polling "
-            "publish_id=%s bot_id=%s device_id=%s engine_type=%s timeout=%ds",
-            publish_id, bot_id, device_id, engine_type, poll_timeout,
-        )
-
-        try:
-            while (time.monotonic() - start_time) < poll_timeout:
-                time.sleep(self._POLL_INTERVAL_SECONDS)
-
-                if restart_completion_pending is not None:
-                    try:
-                        get_event_bus().publish(restart_completion_pending)
-                    except RequiredEventDeliveryError:
-                        logger.exception(
-                            "[DesktopBotService._poll_publish_progress] "
-                            "required restart completion hand-off failed; will retry: "
-                            "bot_id=%s publish_id=%s",
-                            bot_id,
-                            publish_id,
-                        )
-                        continue
-                    return
-
-                if restart_tracking is not None:
-                    (
-                        bot_ext_patch,
-                        binding_props_patch,
-                        expected_publish_id,
-                    ) = restart_tracking
-                    try:
-                        prepared = self._binding_repo.prepare_baas_desktop_restart(
-                            binding_id=int(binding_id),
-                            bot_id=bot_id,
-                            owner_id=owner_id,
-                            expected_publish_id=expected_publish_id,
-                            bot_ext_patch=bot_ext_patch,
-                            binding_props_patch=binding_props_patch,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "[DesktopBotService._poll_publish_progress] "
-                            "restart tracking persistence retry failed: "
-                            "bot_id=%s publish_id=%s",
-                            bot_id,
-                            publish_id,
-                        )
-                        continue
-                    restart_tracking = None
-                    if not prepared:
-                        current = self._binding_repo.get_by_id(int(binding_id))
-                        observe_only = not self._restart_identity_matches(
-                            current,
-                            publish_id,
-                        )
-
-                try:
-                    status = self._query_publish_status(publish_id)
-                except Exception as e:
-                    logger.warning(
-                        "[DesktopBotService._poll_publish_progress] "
-                        "query failed (will retry): %s", e,
-                    )
-                    continue
-
-                if status == "SUCCESS":
-                    if observe_only:
-                        logger.info(
-                            "[DesktopBotService._poll_publish_progress] "
-                            "observe-only restart succeeded: bot_id=%s publish_id=%s",
-                            bot_id,
-                            publish_id,
-                        )
-                        return
-                    try:
-                        (
-                            layout_status,
-                            watchdog_dispatched,
-                        ) = self._confirm_desktop_layout_initialization(
-                            publish_id=publish_id,
-                            binding_id=binding_id,
-                            bot_id=bot_id,
-                            owner_id=owner_id,
-                            device_id=device_id,
-                            dispatch_watchdog=not layout_watchdog_dispatched,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "[DesktopBotService._poll_publish_progress] "
-                            "layout confirmation failed transiently; will retry: "
-                            "bot_id=%s publish_id=%s",
-                            bot_id,
-                            publish_id,
-                        )
-                        continue
-                    layout_watchdog_dispatched |= watchdog_dispatched
-                    if layout_status == _DesktopLayoutConfirmationStatus.PENDING:
-                        continue
-                    if layout_status == _DesktopLayoutConfirmationStatus.SUPERSEDED:
-                        logger.info(
-                            "[DesktopBotService._poll_publish_progress] "
-                            "publish superseded; stopping without writes: "
-                            "bot_id=%s publish_id=%s",
-                            bot_id,
-                            publish_id,
-                        )
-                        return
-                    if layout_status == _DesktopLayoutConfirmationStatus.FAILED:
-                        if restart_publish_id is not None:
-                            transition = (
-                                self._transition_desktop_restart_terminal_if_current(
-                                    binding_id=binding_id,
-                                    bot_id=bot_id,
-                                    owner_id=owner_id,
-                                    publish_id=restart_publish_id,
-                                    status="FAILED",
-                                )
-                            )
-                            if transition is (
-                                _DesktopTerminalTransitionStatus.COMMITTED
-                            ):
-                                return
-                            if transition is (
-                                _DesktopTerminalTransitionStatus.SUPERSEDED
-                            ):
-                                return
-                            terminal_persistence_pending = True
-                            continue
-                        final_status = "FAILED"
-                        break
-                    if restart_publish_id is not None:
-                        transition = (
-                            self._transition_desktop_restart_terminal_if_current(
-                                binding_id=binding_id,
-                                bot_id=bot_id,
-                                owner_id=owner_id,
-                                publish_id=restart_publish_id,
-                                status="ACTIVE",
-                            )
-                        )
-                        if transition is _DesktopTerminalTransitionStatus.COMMITTED:
-                            self._trigger_pool_data_init_after_activation(
-                                bot_id=bot_id,
-                                owner_id=owner_id,
-                                device_id=device_id,
-                                binding_id=binding_id,
-                            )
-                            self._request_runtime_projection_after_reconnect(
-                                bot_id=bot_id,
-                                owner_id=owner_id,
-                                binding_id=binding_id,
-                            )
-                            restart_completion_pending = BaasPublishCompletedEvent(
-                                binding_id=int(binding_id),
-                                bot_id=bot_id,
-                                owner_id=owner_id,
-                                publish_id=int(restart_publish_id),
-                                publish_kind="restart",
-                            )
-                            try:
-                                get_event_bus().publish(restart_completion_pending)
-                            except RequiredEventDeliveryError:
-                                logger.exception(
-                                    "[DesktopBotService._poll_publish_progress] "
-                                    "required restart completion hand-off failed; "
-                                    "will retry: bot_id=%s publish_id=%s",
-                                    bot_id,
-                                    publish_id,
-                                )
-                                continue
-                            return
-                        if transition is _DesktopTerminalTransitionStatus.SUPERSEDED:
-                            return
-                        terminal_persistence_pending = True
-                        continue
-                    final_status = "ACTIVE"
-                    if not self._trigger_device_alive(device_id):
-                        logger.warning(
-                            "[DesktopBotService._poll_publish_progress] "
-                            "_trigger_device_alive failed, falling back to _update_local_status: "
-                            "bot_id=%s device_id=%s", bot_id, device_id,
-                        )
-                        final_status = "ACTIVE_FALLBACK"
-                    break
-
-                if status == "FAILED":
-                    if restart_publish_id is not None:
-                        transition = self._transition_desktop_restart_terminal_if_current(
-                            binding_id=binding_id,
-                            bot_id=bot_id,
-                            owner_id=owner_id,
-                            publish_id=restart_publish_id,
-                            status="FAILED",
-                        )
-                        if transition is _DesktopTerminalTransitionStatus.COMMITTED:
-                            return
-                        if transition is _DesktopTerminalTransitionStatus.SUPERSEDED:
-                            logger.info(
-                                "[DesktopBotService._poll_publish_progress] "
-                                "failed publish superseded; stopping: "
-                                "bot_id=%s publish_id=%s",
-                                bot_id,
-                                publish_id,
-                            )
-                            return
-                        terminal_persistence_pending = True
-                        continue
-                    if observe_only:
-                        logger.warning(
-                            "[DesktopBotService._poll_publish_progress] "
-                            "observe-only restart failed: bot_id=%s publish_id=%s",
-                            bot_id,
-                            publish_id,
-                        )
-                        return
-                    final_status = "FAILED"
-                    break
-
-                # 其他状态（PENDING/RUNNING 等）继续轮询
-
-            logger.info(
-                "[DesktopBotService._poll_publish_progress] done "
-                "publish_id=%s final_status=%s elapsed=%.1fs",
-                publish_id, final_status, time.monotonic() - start_time,
-            )
-
-            if restart_tracking is not None or observe_only:
-                logger.warning(
-                    "[DesktopBotService._poll_publish_progress] stopped without "
-                    "local writes: bot_id=%s publish_id=%s tracking_pending=%s "
-                    "observe_only=%s",
-                    bot_id,
-                    publish_id,
-                    restart_tracking is not None,
-                    observe_only,
-                )
-                return
-            if restart_completion_pending is not None:
-                logger.error(
-                    "[DesktopBotService._poll_publish_progress] restart completion "
-                    "hand-off could not be delivered before timeout: "
-                    "bot_id=%s publish_id=%s",
-                    bot_id,
-                    publish_id,
-                )
-                return
-            if terminal_persistence_pending:
-                logger.error(
-                    "[DesktopBotService._poll_publish_progress] terminal "
-                    "restart status could not be persisted before timeout: "
-                    "bot_id=%s publish_id=%s",
-                    bot_id,
-                    publish_id,
-                )
-                return
-
-        except Exception as e:
-            logger.error(
-                "[DesktopBotService._poll_publish_progress] unexpected error: %s", e,
-            )
-            if restart_publish_id is not None:
-                logger.error(
-                    "[DesktopBotService._poll_publish_progress] guarded restart "
-                    "poll aborted without lifecycle writes: bot_id=%s "
-                    "publish_id=%s",
-                    bot_id,
-                    publish_id,
-                )
-                return
-            final_status = "FAILED"
-
-        # while 循环结束后，判断是轮询超时还是明确的 BaaS FAILED
-        elapsed = time.monotonic() - start_time
-        timed_out = final_status == "FAILED" and elapsed >= poll_timeout
-
-        if timed_out:
-            logger.info(
-                "[DesktopBotService._poll_publish_progress] poll timed out — "
-                "delegating to periodic scan, publish_id=%s bot_id=%s",
-                publish_id, bot_id,
-            )
-            final_status = "PENDING_DOWNLOADING"
-
-        # 状态更新：PENDING_DOWNLOADING 保持 PENDING，不调 _update_local_status
-        if final_status == "PENDING_DOWNLOADING":
-            pass  # 保持 PENDING，委托周期扫描裁决
-        elif final_status != "ACTIVE":
-            effective_status = "ACTIVE" if final_status == "ACTIVE_FALLBACK" else final_status
-            self._update_local_status(binding_id, bot_id, owner_id, effective_status)
-
-        # 同步更新 ext 中的 start_status
-        if final_status in ("ACTIVE", "ACTIVE_FALLBACK"):
-            start_status = "SUCCEEDED"
-        elif final_status == "PENDING_DOWNLOADING":
-            start_status = "DOWNLOADING"
-        else:
-            start_status = "FAILED"
-
-        try:
-            bot = self._bot_repo.get_by_id_and_owner(bot_id=bot_id, owner_id=owner_id)
-            if bot:
-                current_ext = bot.get("ext") or {}
-                current_ext["start_status"] = start_status
-                if start_status == "DOWNLOADING":
-                    current_ext["start_message"] = "镜像下载中，请耐心等待..."
-                self._bot_repo.update_by_owner(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    update_data={"ext": current_ext},
-                )
-        except Exception as e:
-            logger.warning(
-                "[DesktopBotService._poll_publish_progress] "
-                "ext update failed: bot_id=%s error=%s", bot_id, e,
-            )
-        if final_status in {"ACTIVE", "ACTIVE_FALLBACK"}:
-            self._trigger_pool_data_init_after_activation(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                device_id=device_id,
-                binding_id=binding_id,
-            )
 
     @staticmethod
     def _restart_identity_matches(binding: Any, publish_id: object) -> bool:
-        if binding is None or binding.status not in {
-            DeviceBindingStatus.PENDING.value,
-            DeviceBindingStatus.ACTIVE.value,
-        }:
-            return False
-        props = binding.device_props or {}
-        if not isinstance(props, dict):
-            return False
-        current_publish_id = props.get("restart_publish_id") or props.get(
-            "publish_id"
-        )
-        return current_publish_id is not None and str(current_publish_id) == str(
-            publish_id
+        return DesktopPublishLifecycle.restart_identity_matches(
+            binding,
+            publish_id,
         )
 
     def _confirm_desktop_layout_initialization(
@@ -2419,71 +1743,14 @@ class DesktopBotService(DesktopBotServiceProtocol):
         device_id: str,
         dispatch_watchdog: bool,
     ) -> tuple[_DesktopLayoutConfirmationStatus, bool]:
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if bot is None:
-            return _DesktopLayoutConfirmationStatus.PENDING, False
-        ext = bot.get("ext") or {}
-        if not isinstance(ext, dict) or ext.get("skills_layout") != "pool":
-            return _DesktopLayoutConfirmationStatus.CONFIRMED, False
-
-        try:
-            binding = self._binding_repo.get_by_id(int(binding_id))
-        except Exception:
-            logger.exception(
-                "[DesktopBotService] layout confirmation binding lookup failed: "
-                "bot_id=%s publish_id=%s",
-                bot_id,
-                publish_id,
-            )
-            return _DesktopLayoutConfirmationStatus.PENDING, False
-        if binding is None:
-            return _DesktopLayoutConfirmationStatus.FAILED, False
-        if binding.status in {
-            DeviceBindingStatus.RELEASED.value,
-            DeviceBindingStatus.STOPPED.value,
-        }:
-            return _DesktopLayoutConfirmationStatus.SUPERSEDED, False
-
-        props = binding.device_props or {}
-        if not isinstance(props, dict):
-            return _DesktopLayoutConfirmationStatus.FAILED, False
-        current_publish_id = props.get("restart_publish_id") or props.get(
-            "publish_id"
+        return self._publish_lifecycle.confirm_layout_initialization(
+            publish_id=publish_id,
+            binding_id=binding_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            device_id=device_id,
+            dispatch_watchdog=dispatch_watchdog,
         )
-        if current_publish_id is None:
-            return _DesktopLayoutConfirmationStatus.FAILED, False
-        if str(current_publish_id) != str(publish_id):
-            return _DesktopLayoutConfirmationStatus.SUPERSEDED, False
-        if binding.status == DeviceBindingStatus.FAILED.value:
-            return _DesktopLayoutConfirmationStatus.FAILED, False
-        if str(props.get(LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY) or "") == str(
-            publish_id
-        ):
-            return _DesktopLayoutConfirmationStatus.CONFIRMED, False
-
-        callback_token = props.get("callback_token")
-        if not isinstance(callback_token, str) or not callback_token:
-            return _DesktopLayoutConfirmationStatus.FAILED, False
-        if dispatch_watchdog:
-            try:
-                BaasContainerInitializer(self._baas).dispatch_watchdog(
-                    bot_uuid=device_id,
-                    # The callback contract calls this value ``device_id``;
-                    # Desktop bindings are keyed by BaaS bot_uuid.
-                    client_id=device_id,
-                    token=callback_token,
-                    startup_identity=str(publish_id),
-                )
-            except Exception:
-                logger.exception(
-                    "[DesktopBotService] layout watchdog dispatch failed: "
-                    "bot_id=%s publish_id=%s",
-                    bot_id,
-                    publish_id,
-                )
-                return _DesktopLayoutConfirmationStatus.PENDING, False
-            return _DesktopLayoutConfirmationStatus.PENDING, True
-        return _DesktopLayoutConfirmationStatus.PENDING, False
 
     def _transition_desktop_restart_terminal_if_current(
         self,
@@ -2494,64 +1761,13 @@ class DesktopBotService(DesktopBotServiceProtocol):
         publish_id: str,
         status: str,
     ) -> _DesktopTerminalTransitionStatus:
-        if status not in {"ACTIVE", "FAILED"}:
-            raise ValueError(f"unsupported Desktop restart status: {status}")
-        try:
-            bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        except Exception:
-            logger.exception(
-                "[DesktopBotService] restart terminal Bot lookup failed: "
-                "bot_id=%s publish_id=%s status=%s",
-                bot_id,
-                publish_id,
-                status,
-            )
-            return _DesktopTerminalTransitionStatus.RETRY
-        if bot is None:
-            return _DesktopTerminalTransitionStatus.RETRY
-        raw_ext = bot.get("ext")
-        if raw_ext is not None and not isinstance(raw_ext, dict):
-            return _DesktopTerminalTransitionStatus.RETRY
-        current_ext = raw_ext if isinstance(raw_ext, dict) else {}
-        terminal_ext = dict(current_ext)
-        terminal_ext["start_status"] = (
-            "SUCCEEDED" if status == "ACTIVE" else "FAILED"
+        return self._publish_lifecycle.transition_restart_terminal_if_current(
+            binding_id=binding_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            publish_id=publish_id,
+            status=status,
         )
-        try:
-            committed = self._binding_repo.transition_baas_restart_terminal(
-                binding_id=int(binding_id),
-                bot_id=bot_id,
-                owner_id=owner_id,
-                publish_id=publish_id,
-                request_id=None,
-                status=status,
-                expected_bot_ext=raw_ext,
-                bot_ext=terminal_ext,
-            )
-        except Exception:
-            logger.exception(
-                "[DesktopBotService] guarded restart terminal transition failed: "
-                "bot_id=%s publish_id=%s status=%s",
-                bot_id,
-                publish_id,
-                status,
-            )
-            return _DesktopTerminalTransitionStatus.RETRY
-        if committed:
-            return _DesktopTerminalTransitionStatus.COMMITTED
-        try:
-            binding = self._binding_repo.get_by_id(int(binding_id))
-        except Exception:
-            logger.exception(
-                "[DesktopBotService] restart identity recheck failed: "
-                "bot_id=%s publish_id=%s",
-                bot_id,
-                publish_id,
-            )
-            return _DesktopTerminalTransitionStatus.RETRY
-        if self._restart_identity_matches(binding, publish_id):
-            return _DesktopTerminalTransitionStatus.RETRY
-        return _DesktopTerminalTransitionStatus.SUPERSEDED
 
     def _query_publish_status(self, publish_id: str) -> str:
         """查询单次 publish 进度，返回 status 字符串。"""

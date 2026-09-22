@@ -702,13 +702,17 @@ def test_recover_desktop_creation_binding_rejects_foreign_bot_link(repo, db):
     ) is False
 
 
-def test_desktop_data_init_trigger_claim_is_current_once_and_releasable(repo):
+@pytest.mark.parametrize("device_provider", ["arca", "baas"])
+def test_pool_data_init_trigger_claim_is_current_once_and_releasable(
+    repo,
+    device_provider,
+):
     bid = repo.insert_binding(
         **_binding(
             entity_id="u001",
             entity_type="staff",
             device_id="desktop-bot-uuid",
-            device_provider="baas",
+            device_provider=device_provider,
             env="dev",
             status="ACTIVE",
             device_props={
@@ -734,25 +738,25 @@ def test_desktop_data_init_trigger_claim_is_current_once_and_releasable(repo):
         ),
     )
 
-    claim = repo.claim_baas_desktop_data_init_trigger_if_ready(
+    claim = repo.claim_pool_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
     )
     assert claim is not None
     assert claim.resume_stale_in_progress is False
-    assert repo.claim_baas_desktop_data_init_trigger_if_ready(
+    assert repo.claim_pool_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
     ) is None
-    assert repo.release_baas_desktop_data_init_trigger_if_matches(
+    assert repo.release_pool_data_init_trigger_if_matches(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
         claim_token=claim.claim_token,
     ) is True
-    next_claim = repo.claim_baas_desktop_data_init_trigger_if_ready(
+    next_claim = repo.claim_pool_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
@@ -760,7 +764,7 @@ def test_desktop_data_init_trigger_claim_is_current_once_and_releasable(repo):
     assert next_claim is not None
     assert next_claim.resume_stale_in_progress is False
     assert next_claim.claim_token != claim.claim_token
-    assert repo.claim_baas_desktop_data_init_trigger_if_ready(
+    assert repo.claim_pool_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="16",
@@ -1059,7 +1063,7 @@ def test_desktop_data_init_expired_claim_is_fenced_during_takeover(repo):
             }
         ),
     )
-    first_claim = repo.claim_baas_desktop_data_init_trigger_if_ready(
+    first_claim = repo.claim_pool_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
@@ -1082,7 +1086,7 @@ def test_desktop_data_init_expired_claim_is_fenced_during_takeover(repo):
             }
         )
 
-    second_claim = repo.claim_baas_desktop_data_init_trigger_if_ready(
+    second_claim = repo.claim_pool_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
@@ -1090,19 +1094,19 @@ def test_desktop_data_init_expired_claim_is_fenced_during_takeover(repo):
     assert second_claim is not None
     assert second_claim.resume_stale_in_progress is True
     assert second_claim.claim_token != first_claim.claim_token
-    assert repo.release_baas_desktop_data_init_trigger_if_matches(
+    assert repo.release_pool_data_init_trigger_if_matches(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
         claim_token=first_claim.claim_token,
     ) is False
-    assert repo.release_baas_desktop_data_init_trigger_if_matches(
+    assert repo.release_pool_data_init_trigger_if_matches(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
         claim_token=second_claim.claim_token,
     ) is True
-    third_claim = repo.claim_baas_desktop_data_init_trigger_if_ready(
+    third_claim = repo.claim_pool_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
@@ -1144,7 +1148,7 @@ def test_desktop_data_init_trigger_claim_waits_for_active_bot(repo):
         ),
     )
 
-    assert repo.claim_baas_desktop_data_init_trigger_if_ready(
+    assert repo.claim_pool_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
@@ -1155,7 +1159,7 @@ def test_desktop_data_init_trigger_claim_waits_for_active_bot(repo):
             {BotModel.status: "ACTIVE"}, synchronize_session=False
         )
 
-    assert repo.claim_baas_desktop_data_init_trigger_if_ready(
+    assert repo.claim_pool_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
