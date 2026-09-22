@@ -4820,19 +4820,23 @@ class BotService(BotServiceProtocol):
             source_provider=current_device_provider,
         )
 
-        # Idempotency guard: acquire the per-bot restart lock. If a restart is
-        # already in progress, suppress this duplicate and return the current
-        # in-progress bot — the frontend is already polling on PENDING, so this
-        # behaves identically to the first click (no duplicate sandbox/binding).
-        lock = strategy.prepare_restart(
+        # Engine precondition (e.g. coding's mounted-data backup) runs BEFORE
+        # the short-lived lock: it may wait far longer than the lock TTL and
+        # must not hold it. It never touches the lock — it returns an optional
+        # verifier to run under the lock below. Failures raise here, before any
+        # lock exists, so no cleanup is needed.
+        verify_restart_backup = strategy.prepare_restart(
             ctx, binding_id=binding_id,
             device_service_provider=self._device_service_provider,
             target_runtime_provider=lambda: self._baas_service_provider(),
             bot_repository=self._repository,
-            acquire_lock=lambda: self._try_acquire_restart_lock(env, entity_id, bot_id, user_id),
-            release_lock=lambda acquired: self._restart_lock_repo.release(
-                env, entity_id, bot_id, acquired.lock_token),
         )
+
+        # Idempotency guard: acquire the per-bot restart lock. If a restart is
+        # already in progress, suppress this duplicate and return the current
+        # in-progress bot — the frontend is already polling on PENDING, so this
+        # behaves identically to the first click (no duplicate sandbox/binding).
+        lock = self._try_acquire_restart_lock(env, entity_id, bot_id, user_id)
         if lock is None:
             logger.info(
                 "[bot_service.restart_bot] Restart already in progress for bot %s "
@@ -4868,6 +4872,11 @@ class BotService(BotServiceProtocol):
         lock_key = (env, entity_id, bot_id, lock.lock_token)
         handed_off = False
         try:
+            # Under-lock verification: the backup must still match the binding
+            # and container identity we are about to replace. On failure the
+            # existing except/finally below releases the lock untouched.
+            if verify_restart_backup is not None:
+                verify_restart_backup()
             if bot.get("bot_type") == "service" and not self.is_teclaw_bot(
                 bot.get("active_engine")
             ):

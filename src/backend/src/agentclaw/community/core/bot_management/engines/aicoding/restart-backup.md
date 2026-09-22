@@ -9,13 +9,15 @@ polling, physical-target selection, receipt verification and logs live in
 and dispatches instance preconditions through its declared async contract; it
 contains no backup logic or concrete strategy type checks.
 
-Ordinary Bot restart calls `strategy.prepare_restart` once in place of its
-existing lock acquisition. The default strategy only invokes the original
-acquisition callback; it never probes devices. The coding strategy prepares
-before acquiring that same lock, verifies binding and receipt under it, and
-releases the acquired lock on verification failure. Existing duplicate handling,
-stop/start/update, status transitions and allocation lock hand-off remain in the
-original caller. No lock repository or TTL changes are required.
+Ordinary Bot restart calls `strategy.prepare_restart` immediately BEFORE its
+existing lock acquisition, then runs the returned verifier immediately AFTER
+acquiring that same lock. The strategy never sees, acquires, or releases the
+lock: acquire/release/async hand-off ownership stays entirely in the original
+caller, so a prepare failure leaves no lock to clean up and a verify failure
+flows through the caller's existing `finally` release. The default strategy
+returns no verifier and never probes devices. Existing duplicate handling,
+stop/start/update, status transitions and allocation lock hand-off remain
+untouched. No lock repository or TTL changes are required.
 
 Async HTTP entrypoints call `BotServiceProtocol.restart_bot_async`. BotService
 resolves the strategy and calls its `execute_restart` contract; coding offloads
@@ -24,8 +26,9 @@ The original synchronous Service API is unchanged. Published restart
 and caller upgrade each invoke the coding precondition before replacement.
 Ordinary publication, instance creation/reuse and workflow adoption are not
 backup operations. Instance consumers call `prepare_restart_async`, which delegates to the same
-`prepare_restart` precondition. Default engines do not probe or offload; coding
-offloads the precondition. Failure propagates before the original replacement.
+`prepare_restart` precondition and runs its returned verifier (they hold no
+restart lock). Default engines do not probe or offload; coding offloads both
+phases to a worker thread. Failure propagates before the original replacement.
 The registry adapter is shared dispatch, not an independent lifecycle pipeline.
 
 ## Existing transports only

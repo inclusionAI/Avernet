@@ -182,7 +182,12 @@ def test_original_lock_and_binding_survive_backup_failure(phase, provider):
     with patch.object(backup, 'prepare_backup', side_effect=prepare_check), \
          patch.object(svc, 'stop_bot') as stop, patch.object(svc, 'start_bot') as start, \
          patch.object(svc, '_restart_bot_baas') as update:
-        with pytest.raises(RuntimeError, match='backup failed'):
+        # prepare fails BEFORE the caller's lock exists (raw error, no lock to
+        # clean up); verify fails INSIDE the caller's try (wrapped by the
+        # existing restart error path, lock released by its finally).
+        from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
+        expected = RuntimeError if phase == 'prepare' else BotServiceError
+        with pytest.raises(expected, match='backup failed'):
             svc.restart_bot(bot_id='bot001', user_id='user001')
     stop.assert_not_called()
     start.assert_not_called()
@@ -247,44 +252,30 @@ async def test_coding_execution_keeps_event_loop_available(engine):
     assert await task != current_thread
 
 
-def test_default_hook_only_acquires_original_lock():
-    lock = object()
-    acquire, release, provider = Mock(return_value=lock), Mock(), Mock()
+def test_default_hook_is_lock_free_noop():
+    provider = Mock()
     assert DefaultProvisioningStrategy().prepare_restart(
-        None, acquire_lock=acquire, release_lock=release,
-        device_service_provider=provider, binding_id=42) is lock
-    acquire.assert_called_once_with()
-    release.assert_not_called()
+        None, device_service_provider=provider, binding_id=42) is None
     provider.assert_not_called()
 
 
-@pytest.mark.parametrize('lock_acquired', [True, False])
-def test_single_coding_hook_owns_prepare_acquire_verify_order(lock_acquired):
-    events = []
-    lock = object() if lock_acquired else None
+def test_coding_prepare_returns_verifier_without_touching_any_lock():
     ctx = BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding')
     strategy = AicodingProvisioningStrategy('aicoding')
-
-    def prepare(*args, **kwargs):
-        events.append('prepare')
-        return lambda: events.append('verify')
-
-    def acquire():
-        events.append('acquire')
-        return lock
-
-    release = Mock()
-    with patch.object(strategy, '_prepare_restart', side_effect=prepare):
-        assert strategy.prepare_restart(ctx, acquire_lock=acquire, release_lock=release) is lock
-    assert events == (['prepare', 'acquire', 'verify'] if lock_acquired else ['prepare', 'acquire'])
-    release.assert_not_called()
+    verify = Mock()
+    with patch.object(strategy, '_prepare_restart', return_value=verify) as prepare:
+        assert strategy.prepare_restart(ctx) is verify
+        prepare.assert_called_once_with(ctx, target_runtime_provider=None)
+        verify.assert_not_called()  # The caller decides when to verify (under its lock).
 
 
 def test_no_binding_does_not_resolve_device_service():
     ctx = BotProvisioningContext(bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding')
     provider = Mock(side_effect=AssertionError('device provider should not be resolved'))
-    assert AicodingProvisioningStrategy('aicoding').prepare_restart(
-        ctx, binding_id=None, device_service_provider=provider) is None
+    verify = AicodingProvisioningStrategy('aicoding').prepare_restart(
+        ctx, binding_id=None, device_service_provider=provider)
+    verify()  # No-op verifier: nothing probed, nothing to recheck.
+    provider.assert_not_called()
 
 
 def _run_absent_helper_probe(cmd, *, present_paths=()):
@@ -390,13 +381,6 @@ def test_non_coding_original_restart_never_probes_even_with_coding_template(engi
     device.exec_shell_new.assert_not_called()
     assert update.call_count == (1 if provider == 'baas' else 0)
     assert stop.call_count == start.call_count == (1 if provider == 'arca' else 0)
-
-
-def test_default_hook_preserves_original_lock_exception():
-    failure = ValueError('original lock failure')
-    with pytest.raises(ValueError) as caught:
-        DefaultProvisioningStrategy().prepare_restart(None, acquire_lock=Mock(side_effect=failure))
-    assert caught.value is failure
 
 
 @pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])

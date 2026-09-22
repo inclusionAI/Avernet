@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from agentclaw.community.core.bot_management.errors import BotTemplateInvalidError
 from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
@@ -238,9 +238,17 @@ class EngineProvisioningStrategy(ABC):
         ``src/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
         """
 
-    def prepare_restart(self, ctx: BotProvisioningContext, *, acquire_lock=None, **kwargs):
-        """Engine precondition; default preserves the caller's original lock operation."""
-        return acquire_lock() if acquire_lock is not None else None
+    def prepare_restart(
+        self, ctx: BotProvisioningContext, **kwargs
+    ) -> Optional[Callable[[], None]]:
+        """Engine precondition before the caller's restart lock.
+
+        Returns an optional verifier the caller runs immediately AFTER its
+        original lock acquisition. The strategy never sees or owns the lock:
+        acquire/release/hand-off stay with the caller, exactly as before.
+        Default is a no-op — no probing, no waiting, no verifier.
+        """
+        return None
 
     async def prepare_restart_async(self, ctx: BotProvisioningContext, **kwargs):
         """Async consumers use the same precondition; default performs no I/O."""

@@ -178,28 +178,26 @@ def _live_targets(state):
 
 
 class AicodingRestartBackupMixin:
+    def prepare_restart(self, ctx, *, device_service_provider=None,
+                        target_runtime_provider=None, **kwargs):
+        """Back up outside the caller's lock; return the under-lock verifier.
+
+        Self-contained: no lock callbacks. A prepare failure raises before the
+        caller ever acquires its lock, so there is nothing for the strategy to
+        release. Verification failure propagates through the caller's existing
+        error path, which owns lock release.
+        """
+        if device_service_provider is not None and kwargs.get('binding_id') is not None:
+            kwargs['device_service'] = device_service_provider()
+        return self._prepare_restart(ctx, target_runtime_provider=target_runtime_provider, **kwargs)
+
     async def prepare_restart_async(self, ctx, **kwargs):
-        return await asyncio.to_thread(self.prepare_restart, ctx, **kwargs)
+        verify = await asyncio.to_thread(self.prepare_restart, ctx, **kwargs)
+        if verify is not None:
+            await asyncio.to_thread(verify)
 
     async def execute_restart(self, ctx, restart, **kwargs):
         return await asyncio.to_thread(restart, **kwargs)
-
-    def prepare_restart(self, ctx, *, acquire_lock=None, release_lock=None,
-                        device_service_provider=None, target_runtime_provider=None, **kwargs):
-        """One lifecycle hook owns wait-before-lock and verify-under-lock."""
-        if device_service_provider is not None and kwargs.get('binding_id') is not None:
-            kwargs['device_service'] = device_service_provider()
-        verify = self._prepare_restart(ctx, target_runtime_provider=target_runtime_provider, **kwargs)
-        lock = acquire_lock() if acquire_lock is not None else None
-        if acquire_lock is not None and lock is None:
-            return None  # Preserve existing duplicate-restart handling.
-        try:
-            verify()
-        except BaseException:
-            if lock is not None:
-                release_lock(lock)
-            raise
-        return lock
 
     def _prepare_restart(self, ctx, *, binding_id=None, device_service=None,
                         bot_repository=None, device_id=None, target_runtime=None, target_runtime_provider=None):
