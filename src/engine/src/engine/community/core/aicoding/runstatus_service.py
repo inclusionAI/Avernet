@@ -271,13 +271,41 @@ class RunStatusService:
     async def get_session_issues(
         self, session_id: str, cwd: str | None = None
     ) -> list[dict]:
-        """返回 session 工作空间下所有 run 产出的 issue outputs，按 at 倒序。
+        """返回 session 工作空间下所有 run 关联的工作项数据，按 at 倒序。
 
-        与 :meth:`get_session_pull_requests` 保持同样的错误语义，只是执行
-        ``aix run output list --kind issue --json --filter <workspace_root>``。
+        接口响应结构保持不变；内部命令从 ``aix run output list --kind issue``
+        改为 ``aix run list --filter <workspace_root>``，并从
+        ``runs[].workItem`` 构造原有 issue 字段。
         """
         workspace_root = WorkspaceService.resolve_workspace(session_id, cwd)
-        return await self._aix_run_output_list(workspace_root, kind="issue")
+        runs = await self._aix_run_list_for_issues(workspace_root)
+
+        items: list[dict] = []
+        for run in runs:
+            work_item = run.get("workItem")
+            if not isinstance(work_item, dict) or not work_item.get("url"):
+                continue
+
+            items.append(
+                {
+                    "runId": run.get("runId") or run.get("id"),
+                    "kind": "issue",
+                    "provider": work_item.get("provider"),
+                    "url": work_item.get("url"),
+                    "title": work_item.get("title") or work_item.get("subject"),
+                    "at": run.get("startedAtUnixMs")
+                    or run.get("updatedAtUnixMs"),
+                    "projectDir": run.get("projectDir"),
+                }
+            )
+
+        items.sort(
+            key=lambda item: item.get("at")
+            if isinstance(item.get("at"), int)
+            else 0,
+            reverse=True,
+        )
+        return items
 
     # ── internal ──────────────────────────────────────────────────────────────
 
@@ -361,6 +389,37 @@ class RunStatusService:
             return (json.loads(res.stdout) or {}).get("runs") or []
         except json.JSONDecodeError:
             return None
+
+    async def _aix_run_list_for_issues(
+        self, workspace_root: str
+    ) -> list[dict]:
+        """执行严格版 ``aix run list`` 并返回 ``runs`` 列表。
+
+        与 :meth:`_aix_run_list` 的差异是这里保留 issue outputs 接口原有的
+        错误语义：命令失败或 JSON 解析失败抛 ``HTTPException(500)``。
+        """
+        cmd = f"aix run list --filter {shlex.quote(workspace_root)} --json"
+        res = await self._safe_exec(cmd, workspace_root, RUNS_TIMEOUT)
+
+        if res is None or res.exit_code != 0:
+            stderr = res.stderr if res else "no stderr"
+            raise HTTPException(
+                status_code=500,
+                detail=f"aix run list failed: {stderr}",
+            )
+
+        try:
+            payload = json.loads(res.stdout) or {}
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to parse aix output: {exc}",
+            ) from exc
+
+        runs = payload.get("runs") or []
+        if not isinstance(runs, list):
+            return []
+        return [run for run in runs if isinstance(run, dict)]
 
     async def _aix_run_list_all(self) -> Optional[list[dict]]:
         """裸跑 ``aix run list --json``（不带 ``--filter``）拿容器内所有 workspace 的 run。
