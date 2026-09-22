@@ -9,7 +9,7 @@ from engine.community.plugins.openclaw._file import _FilePortMixin
 
 
 @pytest.mark.asyncio
-async def test_count_regular_entries_without_following_links(tmp_path, monkeypatch):
+async def test_count_regular_entries_and_allowed_links(tmp_path, monkeypatch):
     root = tmp_path / "openclaw"
     work = root / "workspace"
     work.mkdir(parents=True)
@@ -25,7 +25,7 @@ async def test_count_regular_entries_without_following_links(tmp_path, monkeypat
     port = _FilePortMixin()
     result = await port.count_files("workspace")
     assert result["path"] == "workspace"
-    assert result["file_count"] == 4
+    assert result["file_count"] == 5
     assert isinstance(result["elapsed_ms"], int)
     assert result["elapsed_ms"] >= 0
 
@@ -34,7 +34,7 @@ async def test_count_regular_entries_without_following_links(tmp_path, monkeypat
 @pytest.mark.parametrize("path,code", [
     ("", "invalid_path"), ("../outside", "path_forbidden"),
     ("/etc", "path_forbidden"), ("workspace/missing", "path_not_found"),
-    ("workspace/file", "not_directory"), ("workspace/link", "path_forbidden"),
+    ("workspace/file", "not_directory"),
     ("workspace/\x00", "invalid_path"),
 ])
 async def test_count_rejects_invalid_target(tmp_path, monkeypatch, path, code):
@@ -263,8 +263,8 @@ def test_worker_detects_replaced_regular_directory(tmp_path, monkeypatch, swap_b
             replace()
         return original_open(name, flags, **kwargs)
 
-    def scanning(fd):
-        result = original_scan(fd)
+    def scanning(fd, *args):
+        result = original_scan(fd, *args)
         if os.fstat(fd).st_ino == child.stat().st_ino:
             replace()
         return result

@@ -12,7 +12,7 @@ import time
 from engine.community.kernel.file_count import FileCountError, file_count_request_id
 
 log = logging.getLogger("engine.file_count")
-SCAN_TIMEOUT_SECONDS = 10.0
+SCAN_TIMEOUT_SECONDS = 120.0
 MAX_CONCURRENT_SCANS = 2
 _SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_SCANS)
 _WORKER = str(Path(__file__).with_name("file_count_worker.py"))
@@ -60,6 +60,12 @@ async def count_files(root: Path, path: str) -> dict:
         count = result["file_count"]
         if type(count) is not int or count < 0:
             raise FileCountError("scan_failed")
+        log.info("engine.file_count.scan_completed", extra={
+            "request_id": file_count_request_id.get(), "file_count": count,
+            "timeout_seconds": SCAN_TIMEOUT_SECONDS,
+            "skipped_links": result.get("skipped_links", {}),
+            "elapsed_ms": int((time.monotonic() - started) * 1000),
+        })
         return {"path": path, "file_count": count, "elapsed_ms": int((time.monotonic() - started) * 1000)}
     except TimeoutError:
         raise FileCountError("scan_timeout") from None

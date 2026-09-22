@@ -64,6 +64,7 @@ def file_count_contract(tmp_path, monkeypatch):
             async def invoke(self, conn, method, endpoint, *, params, timeout):
                 assert conn["device_uuid"] == "replica-a"
                 assert method == "GET" and endpoint == "/api/file/count"
+                assert timeout == 150
                 captured.append(params)
                 response = client.get(endpoint, params=params)
                 if response.is_error:
@@ -73,6 +74,7 @@ def file_count_contract(tmp_path, monkeypatch):
         class ArcaHttp:
             def get(self, url, *, params, headers, timeout):
                 assert url == "https://device.example/api/file/count"
+                assert timeout == 150
                 captured.append(params)
                 return client.get("/api/file/count", params=params)
 
@@ -102,7 +104,7 @@ async def test_real_filesystem_count_across_provider_and_stage(file_count_contra
         FileCountQuery("bot", "entity", stage, path, "contract-request"), "manager",
     )
     assert result["status"] == "success"
-    assert result["file_count"] == 3
+    assert result["file_count"] == 4
     assert result["path"] == path
     assert result["elapsed_ms"] >= 0
     assert ctx.captured[0]["path"] == path
@@ -114,7 +116,6 @@ async def test_real_filesystem_count_across_provider_and_stage(file_count_contra
 @pytest.mark.parametrize("path,code", [
     ("workspace/missing", "path_not_found"),
     ("workspace/test_ignore/one.txt", "not_directory"),
-    ("workspace/test_ignore/loop", "path_forbidden"),
     ("../outside", "path_forbidden"),
 ])
 async def test_engine_failure_is_not_zero(file_count_contract, provider, path, code):
@@ -128,3 +129,46 @@ async def test_engine_failure_is_not_zero(file_count_contract, provider, path, c
     assert result["status"] == "failed"
     assert result["file_count"] is None
     assert result["error_code"] == code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["baas", "arca"])
+async def test_external_workspace_link_and_abnormal_links_are_counted_safely(file_count_contract, provider):
+    from agentclaw.community.kernel.file_count import FileCountQuery
+
+    ctx = file_count_contract
+    extension = ctx.root.parent / "openclawExt" / "clawmind"
+    extension.mkdir(parents=True)
+    (extension / "one").write_text("one")
+    (extension / "two").write_text("two")
+    (extension / "file-alias").symlink_to("one")
+    (extension / "dangling").symlink_to("missing")
+    (extension / "cycle").symlink_to(".", target_is_directory=True)
+    (extension / "outside").symlink_to(ctx.root.parent, target_is_directory=True)
+    (ctx.root / "workspace" / "clawmind").symlink_to(extension, target_is_directory=True)
+    result = await ctx.runtime.query(
+        ctx.binding(provider), "replica-a",
+        FileCountQuery("bot", "entity", "draft", "workspace/clawmind", "contract-links"), "manager",
+    )
+    assert result["status"] == "success"
+    assert result["file_count"] == 3
+    assert "error_code" not in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["baas", "arca"])
+@pytest.mark.parametrize("kind", ["dangling", "cycle", "outside"])
+async def test_abnormal_requested_link_returns_success_zero(file_count_contract, provider, kind):
+    from agentclaw.community.kernel.file_count import FileCountQuery
+
+    ctx = file_count_contract
+    link = ctx.root / "workspace" / "abnormal"
+    target = {"dangling": "missing", "cycle": "abnormal", "outside": str(ctx.root.parent)}[kind]
+    link.symlink_to(target, target_is_directory=True)
+    result = await ctx.runtime.query(
+        ctx.binding(provider), "replica-a",
+        FileCountQuery("bot", "entity", "draft", "workspace/abnormal", "contract-skip"), "manager",
+    )
+    assert result["status"] == "success"
+    assert result["file_count"] == 0
+    assert "error_code" not in result

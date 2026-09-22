@@ -19,7 +19,7 @@
 GET /api/service-bot/publish/ops/file-count?bot_id=20260918_51d4ual4&entity_id=ENTITY_ID&stage=draft&path=workspace%2Ftest_ignore
 ```
 
-OpenClaw 中 `workspace/test_ignore` 相对当前引擎根目录；也可传该根内的绝对路径，例如 `/home/admin/.openclaw/workspace/test_ignore`。`.` 查询根目录。不同引擎物理路径可能不同，不能把上述绝对路径当作所有引擎的固定地址。禁止越界路径和符号链接路径。
+OpenClaw 中 `workspace/test_ignore` 相对当前引擎根目录；也可传允许根内的绝对路径，例如 `/home/admin/.openclaw/workspace/test_ignore`。`.` 查询根目录。允许根为当前引擎根目录和同级 `openclawExt`，因此 `workspace/clawmind` 指向 `/home/admin/openclawExt/clawmind` 时可以统计。不同引擎物理路径可能不同，不能把上述绝对路径当作所有引擎的固定地址。直接传入越界路径或 `..` 仍报错。
 
 ## 成功结果
 
@@ -54,7 +54,8 @@ OpenClaw 中 `workspace/test_ignore` 相对当前引擎根目录；也可传该�
 ## 展示规则
 
 - 递归统计普通文件，包含隐藏文件；压缩包算一个文件，不统计包内内容；硬链接按目录项计数。
-- 不计目录、符号链接和特殊文件，不沿符号链接进入子目录。空目录成功返回 `0`。
+- 跟随允许范围内的符号链接：文件链接计一个文件，目录链接递归扫描；多个入口指向同一目标时按各入口分别计数，不按 inode 全局去重。不计目录和特殊文件。
+- 循环、断链和越界软链跳过、不报错、不参与计数；请求路径自身为这类异常软链时成功返回 `0`。因此成功数量是按跳过规则统计的结果，不保证包含全部链接目标。空目录也成功返回 `0`；普通不存在目录、无权限、超时等仍返回失败，不能与跳过混淆。
 - 统计当前实际运行目录，不是发布物；命中 ignore 的实际文件仍计入。
 - draft 查询 Bot 当前草稿运行实例；verify/online 查询当前阶段绑定。没有绑定或实例时明确失败，不回退其他阶段。
 - 多实例逐个显示，不能把各副本相加当作 Bot 文件总数。扫描不是原子快照，过程中有文件变化时结果可能变化或失败。
@@ -72,7 +73,7 @@ OpenClaw 中 `workspace/test_ignore` 相对当前引擎根目录；也可传该�
   "path": "workspace/test_ignore",
   "status": "timeout",
   "file_count": null,
-  "elapsed_ms": 10000,
+  "elapsed_ms": 120000,
   "error_code": "scan_timeout"
 }
 ```
@@ -92,4 +93,4 @@ OpenClaw 中 `workspace/test_ignore` 相对当前引擎根目录；也可传该�
 
 本接口需要 Backend 与 Engine 同时具备新协议；旧 Engine 不会降级为全量文件列表查询。
 
-当前支持生产 OpenClaw 文件端口；尚未定义唯一物理根的 Claude Code 和内存测试引擎返回 `unsupported`。每个 Backend 请求最多同时查询 2 个实例，每实例连接/调用截止 30 秒；每个 Engine 进程最多 2 个扫描，扫描截止 10 秒，满载立即返回 `busy`，不排队。
+当前支持生产 OpenClaw 文件端口；尚未定义唯一物理根的 Claude Code 和内存测试引擎返回 `unsupported`。每个 Backend 请求最多同时查询 2 个实例，每实例连接/调用截止 150 秒；每个 Engine 进程最多 2 个扫描，扫描截止 120 秒，满载立即返回 `busy`，不排队。worker回收可能增加少量耗时；多实例分批执行时整个请求可能超过150秒。前端请求超时和部署网关超时也需要覆盖实际等待时间，本次不会自动修改网关配置。
