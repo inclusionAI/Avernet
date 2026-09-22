@@ -1,6 +1,4 @@
 """Tests for BotService.update_bot — devflow_workflow change triggers cron update."""
-import pytest
-import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -63,6 +61,10 @@ def _make_service(
         teclaw_provision_service_provider=MagicMock(),
         device_status_client=MagicMock(),
         cron_auto_setup_service_provider=cron_provider,
+        skills_pool_native_creation_policy=MagicMock(
+            select=MagicMock(return_value=None)
+        ),
+        skill_layout_repository=MagicMock(),
         policy_service=None,
         baas_template_resolver=None,
     )
@@ -118,7 +120,7 @@ def test_workflow_change_logs_info():
     with patch.object(service._template_service, "get_template_config") as mock_old_tc, \
          patch.object(service._template_service, "exists_template", return_value=True), \
          patch.object(service._template_service, "update_template"), \
-         patch("agentclaw.community.core.bot_management.services.bot_service.threading.Thread") as mock_thread:
+         patch("agentclaw.community.core.bot_management.services.bot_service.threading.Thread"):
 
         mock_old_tc.return_value = {"devflow_workflow": {"name": "old-flow"}}
         new_template_config = {"devflow_workflow": {"name": "new-flow"}}
@@ -156,8 +158,7 @@ def test_cron_update_exception_in_thread_is_caught():
         )
 
         # Invoke the thread target — exception should be caught, not raised
-        target = thread_kwargs = mock_thread.call_args.kwargs
-        target_fn = target_kwargs = mock_thread.call_args.kwargs["target"]
+        target_fn = mock_thread.call_args.kwargs["target"]
         # Should not raise
         target_fn()
 

@@ -23,9 +23,14 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 
-from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
-from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
-from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+    OssToNasRecordRepository,
+)
+from agentclaw.community.core.devices.repository.record import (
+    DataInitTriggerClaim,
+    DeviceBindingRecord,
+)
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
     DeviceBindingInfo,
@@ -47,8 +52,13 @@ from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
+    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
+    LayoutInitializationConflictError,
+    LayoutInitializationEvidenceError,
+    LayoutInitializationConfirmationProtocol,
     McpSyncProtocol,
 )
+from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -59,6 +69,9 @@ from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # 
 LOCAL_DEVICE_PROVIDER = "local"
 ARCA_DEVICE_PROVIDER = "arca"
 BAAS_DEVICE_PROVIDER = "baas"
+POOL_DATA_INIT_PROVIDERS = frozenset(
+    {ARCA_DEVICE_PROVIDER, BAAS_DEVICE_PROVIDER}
+)
 
 T = TypeVar("T")
 
@@ -99,6 +112,7 @@ class DeviceService:
         vault: "Optional[TokenVault]" = None,
         sandbox_client: "Optional[SandboxRuntimeClient]" = None,
         task_queue_service: "TaskQueueService | None" = None,
+        layout_confirmation: "LayoutInitializationConfirmationProtocol",
     ):
         """Initialize device service.
 
@@ -130,6 +144,7 @@ class DeviceService:
         # construction paths (unit tests) that never hit that branch.
         self._sandbox_client = sandbox_client
         self._task_queue_service = task_queue_service
+        self._layout_confirmation = layout_confirmation
         logger.info("[DeviceService] Initialized")
 
     # =========================================================================
@@ -658,8 +673,33 @@ class DeviceService:
         }
         # 4. Process database record
         status = DeviceBindingStatus.PENDING.value
+        binding_id = None
 
-        if released_binding is not None:
+        if allocated.device_provider == BAAS_DEVICE_PROVIDER:
+            recovered_binding_id = (
+                self._repo.recover_baas_creation_binding_if_matches(
+                    bot_id=resolved_bot_id,
+                    owner_id=resolved_owner_id,
+                    device_id=allocated.device_id,
+                    entity_id=resolved_entity_id,
+                    entity_type=resolved_entity_type,
+                    env=env,
+                    device_props=device_props,
+                    apply_reason=apply_reason,
+                    applied_by=operator.staff,
+                )
+            )
+            if recovered_binding_id is not None:
+                recovered_record = self._repo.get_by_id(recovered_binding_id)
+                if recovered_record is None:
+                    raise DeviceServiceError(
+                        "recovered BaaS binding disappeared before readback"
+                    )
+                if recovered_record.status == DeviceBindingStatus.ACTIVE.value:
+                    return recovered_record
+                binding_id = recovered_binding_id
+
+        if binding_id is None and released_binding is not None:
             logger.info(f"[apply_device] reusing released device: {device_id}, status={status}")
             self._repo.reuse_binding(
                 binding_id=released_binding.id,
@@ -669,7 +709,7 @@ class DeviceService:
                 status=status,
             )
             binding_id = released_binding.id
-        else:
+        elif binding_id is None:
             binding_id = self._repo.insert_binding(
                 entity_id=resolved_entity_id,
                 entity_type=resolved_entity_type,
@@ -1093,14 +1133,23 @@ class DeviceService:
 
         self._repo.update_status_and_alive_at(binding_id=record.id, status=new_status)
 
+        # Reconcile the Bot on every authenticated heartbeat. The Binding may
+        # already be ACTIVE when a previous best-effort Bot status write was
+        # lost; the repository guard only advances the same binding's
+        # PENDING/PROVISIONING Bot, so retries cannot overwrite terminal state.
+        _t_cb = _time.time()
+        if record.status in {
+            DeviceBindingStatus.PENDING.value,
+            DeviceBindingStatus.ACTIVE.value,
+        }:
+            self._update_bot_status_on_device_active(binding_id=record.id)
+
         # If status changed from PENDING to ACTIVE, sync bot status and trigger callbacks
         if record.status == DeviceBindingStatus.PENDING.value:
             logger.info(
                 f"[report_device_alive] device_id={device_id} PENDING→ACTIVE callbacks start: "
                 f"binding_id={record.id}"
             )
-            _t_cb = _time.time()
-            self._update_bot_status_on_device_active(binding_id=record.id)
             logger.info(
                 f"[report_device_alive] device_id={device_id} update_bot_status done: "
                 f"cost_ms={(_time.time() - _t_cb) * 1000:.0f}"
@@ -1144,6 +1193,20 @@ class DeviceService:
                     exc_info=True,
                 )
 
+
+        if (
+            record.device_provider in POOL_DATA_INIT_PROVIDERS
+            and record.status
+            in {
+                DeviceBindingStatus.PENDING.value,
+                DeviceBindingStatus.ACTIVE.value,
+            }
+        ):
+            self._retry_data_init_on_device_alive(
+                device_id=device_id,
+                record=record,
+            )
+
         updated_record = self._repo.get_by_id(record.id)
         if updated_record is None:
             raise DeviceNotFoundError(f"binding {record.id} not found after update")
@@ -1151,7 +1214,14 @@ class DeviceService:
         return updated_record
 
     def report_device_status(
-        self, *, device_id: str, status: str, message: str | None, token: str
+        self,
+        *,
+        device_id: str,
+        status: str,
+        message: str | None,
+        token: str,
+        startup_identity: str | None = None,
+        layout_initialization: dict[str, object] | None = None,
     ) -> DeviceBindingRecord:
         """Report device startup status.
 
@@ -1172,25 +1242,117 @@ class DeviceService:
         if record.status == DeviceBindingStatus.RELEASED.value:
             raise InvalidDeviceStatusError("cannot report status for released device")
 
+        layout_confirmation_callback = (
+            status == "SUCCEEDED" and layout_initialization is not None
+        )
+        guarded_status_callback = (
+            startup_identity is not None and status in {"SUCCEEDED", "FAILED"}
+        )
+        if layout_confirmation_callback:
+            self._confirm_pool_layout_initialization(
+                record=record,
+                startup_identity=startup_identity,
+                evidence=layout_initialization,
+            )
+
         # Update ac_bots.ext field
-        self._update_bot_start_status(binding_id=record.id, status=status, message=message)
+        if guarded_status_callback:
+            assert startup_identity is not None
+            if not (
+                self._repo.transition_layout_startup_status_if_matches(
+                    binding_id=record.id,
+                    startup_identity=startup_identity,
+                    status=status,
+                    message=message,
+                )
+            ):
+                raise LayoutInitializationConflictError(
+                    "startup identity changed after layout confirmation"
+                )
+        else:
+            self._update_bot_start_status(
+                binding_id=record.id,
+                status=status,
+                message=message,
+            )
 
         # If FAILED, update both ac_bots and ac_entity_device_binding status
         if status == "FAILED":
             logger.info(f"[report_device_status] Status is FAILED, updating bot and device status: device_id={device_id}")
-            self._update_bot_status_on_device_failed(binding_id=record.id)
-            self._repo.update_status(binding_id=record.id, status=DeviceBindingStatus.FAILED.value)
+            if not guarded_status_callback:
+                self._update_bot_status_on_device_failed(binding_id=record.id)
+                self._repo.update_status(
+                    binding_id=record.id,
+                    status=DeviceBindingStatus.FAILED.value,
+                )
 
         elif status == "SUCCEEDED":
             # 设备自报启动成功，前置条件 bot_status=ACTIVE + start_status=SUCCEEDED 均已满足
             logger.info(f"report_device_status device_id={device_id} status=SUCCEEDED triggering_data_init")
-            self._trigger_data_init_on_device_ready(device_id=device_id, record=record)
+            self.trigger_data_init_on_device_ready(
+                device_id=device_id,
+                binding_id=record.id,
+                require_pool_confirmation=(
+                    guarded_status_callback
+                    and record.device_provider in POOL_DATA_INIT_PROVIDERS
+                ),
+            )
 
         updated_record = self._repo.get_by_id(record.id)
         if updated_record is None:
             raise DeviceNotFoundError(f"binding {record.id} not found after update")
 
         return updated_record
+
+    def _confirm_pool_layout_initialization(
+        self,
+        *,
+        record: DeviceBindingRecord,
+        startup_identity: str | None,
+        evidence: dict[str, object],
+    ) -> None:
+        """Validate current startup identity before advancing layout state."""
+
+        expected_identity = resolve_startup_identity(record.device_props)
+        if (
+            expected_identity is None
+            or startup_identity is None
+            or startup_identity != expected_identity
+        ):
+            raise InvalidDeviceStatusError("stale startup identity")
+
+        bot = self._bot_query.get_by_binding_id(record.id)
+        if bot is None:
+            raise InvalidDeviceStatusError("Bot not found for layout confirmation")
+        bot_id = bot.get("bot_id")
+        engine = bot.get("active_engine")
+        if not isinstance(bot_id, str) or not bot_id or not isinstance(engine, str):
+            raise InvalidDeviceStatusError("invalid Bot identity for layout confirmation")
+
+        try:
+            self._layout_confirmation.confirm(
+                binding_id=record.id,
+                startup_identity=startup_identity,
+                env=record.env,
+                entity_id=record.entity_id,
+                bot_id=bot_id,
+                expected_engine=engine,
+                evidence=evidence,
+            )
+        except LayoutInitializationEvidenceError as error:
+            message = str(error)
+            if startup_identity is None or not (
+                self._repo.transition_layout_startup_status_if_matches(
+                    binding_id=record.id,
+                    startup_identity=startup_identity,
+                    status="FAILED",
+                    message=message,
+                )
+            ):
+                raise LayoutInitializationConflictError(
+                    "startup identity changed before failure persistence"
+                ) from error
+            raise
 
     def list_connectable_devices(
         self,
@@ -1565,7 +1727,144 @@ class DeviceService:
             target=bind_current_avernet_tenant(_run), daemon=True
         ).start()
 
-    def _trigger_data_init_on_device_ready(self, *, device_id: str, record) -> None:
+    def trigger_data_init_on_device_ready(
+        self,
+        *,
+        device_id: str,
+        binding_id: int,
+        require_pool_confirmation: bool = False,
+    ) -> None:
+        """Trigger pending data-init once both Binding and Bot are ACTIVE.
+
+        The status callback and Desktop activation paths both call this seam so
+        SUCCEEDED and ACTIVE may arrive in either order. The existing
+        ``data_init_status`` guard keeps the operation idempotent.
+        """
+        try:
+            record = self._repo.get_by_id(binding_id)
+            if (
+                record is None
+                or record.device_id != device_id
+                or record.status != DeviceBindingStatus.ACTIVE.value
+            ):
+                logger.info(
+                    "data_init_trigger skipped binding_not_active_or_current: "
+                    f"device_id={device_id} binding_id={binding_id}"
+                )
+                return
+            startup_identity = resolve_startup_identity(record.device_props)
+            confirmed_identity = str(
+                (record.device_props or {}).get(
+                    LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY
+                )
+                or ""
+            )
+            claim: DataInitTriggerClaim | None = None
+            if require_pool_confirmation:
+                if (
+                    record.device_provider not in POOL_DATA_INIT_PROVIDERS
+                    or startup_identity is None
+                    or confirmed_identity != startup_identity
+                ):
+                    logger.info(
+                        "data_init_trigger skipped unconfirmed_or_superseded: "
+                        f"device_id={device_id} binding_id={binding_id} "
+                        f"startup_identity={startup_identity} "
+                        f"confirmed_identity={confirmed_identity}"
+                    )
+                    return
+                claim = self._repo.claim_pool_data_init_trigger_if_ready(
+                    binding_id=binding_id,
+                    device_id=device_id,
+                    startup_identity=startup_identity,
+                )
+                if claim is None:
+                    logger.info(
+                        "data_init_trigger skipped already_claimed_or_not_ready: "
+                        f"device_id={device_id} binding_id={binding_id} "
+                        f"startup_identity={startup_identity}"
+                    )
+                    return
+            self._trigger_data_init_on_device_ready(
+                device_id=device_id,
+                record=record,
+                claimed_startup_identity=(
+                    startup_identity if require_pool_confirmation else None
+                ),
+                claim_token=claim.claim_token if claim is not None else None,
+                resume_stale_in_progress=(
+                    claim.resume_stale_in_progress if claim is not None else False
+                ),
+            )
+        except Exception as exc:
+            logger.warning(
+                "data_init_trigger readiness check failed: "
+                f"device_id={device_id} binding_id={binding_id} exc={exc}",
+                exc_info=True,
+            )
+
+    def _retry_data_init_on_device_alive(
+        self,
+        *,
+        device_id: str,
+        record: DeviceBindingRecord,
+    ) -> None:
+        """Retry data-init using the layout declaration persisted on the Binding."""
+        try:
+            pool_declared = self._binding_declares_pool(record)
+            if (
+                record.device_provider == ARCA_DEVICE_PROVIDER
+                and not pool_declared
+            ):
+                return
+            if not pool_declared:
+                bot = self._bot_query.get_by_binding_id(record.id)
+                if self._load_bot_ext(bot).get("start_status") != "SUCCEEDED":
+                    logger.info(
+                        "data_init_trigger alive retry skipped start_not_succeeded: "
+                        f"device_id={device_id} binding_id={record.id}"
+                    )
+                    return
+            self.trigger_data_init_on_device_ready(
+                device_id=device_id,
+                binding_id=record.id,
+                require_pool_confirmation=pool_declared,
+            )
+        except Exception as exc:
+            logger.warning(
+                "data_init_trigger alive retry failed: "
+                f"device_id={device_id} binding_id={record.id} exc={exc}",
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _binding_declares_pool(record: DeviceBindingRecord) -> bool:
+        props = record.device_props or {}
+        envs = props.get("envs") if isinstance(props, dict) else None
+        return (
+            isinstance(envs, dict)
+            and envs.get("AGENTCLAW_SKILLS_LAYOUT") == "pool"
+        )
+
+    @staticmethod
+    def _load_bot_ext(bot: dict[str, Any] | None) -> dict[str, Any]:
+        raw_ext = bot.get("ext") if bot is not None else None
+        if isinstance(raw_ext, str):
+            try:
+                raw_ext = json.loads(raw_ext)
+            except json.JSONDecodeError:
+                return {}
+        return raw_ext if isinstance(raw_ext, dict) else {}
+
+    def _trigger_data_init_on_device_ready(
+        self,
+        *,
+        device_id: str,
+        record,
+        claimed_startup_identity: str | None = None,
+        claim_token: str | None = None,
+        resume_stale_in_progress: bool = False,
+    ) -> None:
         """当设备自报 SUCCEEDED 时触发 data-init。
 
         由 report_device_status(status=SUCCEEDED) 调用。
@@ -1573,6 +1872,7 @@ class DeviceService:
         start_status=SUCCEEDED（当前回调刚写入）。
         无需轮询 engine health 或等待 warmup。
         """
+        claim_handed_to_worker = False
         try:
             bot = self._bot_query.get_by_binding_id(record.id)
             if bot is None:
@@ -1586,13 +1886,7 @@ class DeviceService:
             entity_id = bot.get("entity_id") or getattr(record, "entity_id", "") or ""
             entity_type = bot.get("entity_type") or getattr(record, "entity_type", "staff") or "staff"
 
-            import json as _json
-            ext = bot.get("ext") or {}
-            if isinstance(ext, str):
-                try:
-                    ext = _json.loads(ext)
-                except _json.JSONDecodeError:
-                    ext = {}
+            ext = self._load_bot_ext(bot)
             data_init_status = ext.get("data_init_status")
 
             logger.info(
@@ -1603,7 +1897,9 @@ class DeviceService:
 
             # 仅在 data_init_status 为 pending_init / failed 时触发
             # null（存量 Bot，未启用 data-init）/ completed / in_progress 跳过
-            if data_init_status not in ("pending_init", "failed"):
+            if data_init_status not in ("pending_init", "failed") and not (
+                data_init_status == "in_progress" and resume_stale_in_progress
+            ):
                 logger.info(
                     f"bot_id={bot_id} data_init_trigger skipped "
                     f"data_init_status={data_init_status}"
@@ -1641,19 +1937,33 @@ class DeviceService:
                 _t_start = _time.time()
                 logger.info(f"bot_id={bot_id} data_init_trigger thread_started")
                 try:
-                    asyncio.run(
+                    result = asyncio.run(
                         data_init_service.trigger_init(
                             bot_id=bot_id,
                             owner_id=owner_id,
                             entity_id=entity_id,
                             entity_type=entity_type,
+                            resume_stale_in_progress=resume_stale_in_progress,
                         )
                     )
+                    if result.get("status") != "completed":
+                        self._release_pool_data_init_trigger_claim(
+                            binding_id=record.id,
+                            device_id=device_id,
+                            startup_identity=claimed_startup_identity,
+                            claim_token=claim_token,
+                        )
                     logger.info(
                         f"bot_id={bot_id} data_init_trigger thread_finished "
                         f"total_ms={(_time.time() - _t_start) * 1000:.0f}"
                     )
                 except Exception as run_exc:
+                    self._release_pool_data_init_trigger_claim(
+                        binding_id=record.id,
+                        device_id=device_id,
+                        startup_identity=claimed_startup_identity,
+                        claim_token=claim_token,
+                    )
                     logger.error(
                         f"bot_id={bot_id} data_init_trigger thread_failed exc={run_exc} "
                         f"total_ms={(_time.time() - _t_start) * 1000:.0f}",
@@ -1666,11 +1976,46 @@ class DeviceService:
                 name=f"data-init-{bot_id}",
             )
             thread.start()
+            claim_handed_to_worker = True
 
             logger.info(f"bot_id={bot_id} data_init_trigger dispatched source=status_succeeded thread={thread.name}")
 
         except Exception as e:
             logger.warning(f"bot_id=unknown data_init_trigger failed device_id={device_id} exc={e}", exc_info=True)
+        finally:
+            if claimed_startup_identity is not None and not claim_handed_to_worker:
+                self._release_pool_data_init_trigger_claim(
+                    binding_id=record.id,
+                    device_id=device_id,
+                    startup_identity=claimed_startup_identity,
+                    claim_token=claim_token,
+                )
+
+    def _release_pool_data_init_trigger_claim(
+        self,
+        *,
+        binding_id: int,
+        device_id: str,
+        startup_identity: str | None,
+        claim_token: str | None,
+    ) -> None:
+        if startup_identity is None or claim_token is None:
+            return
+        try:
+            self._repo.release_pool_data_init_trigger_if_matches(
+                binding_id=binding_id,
+                device_id=device_id,
+                startup_identity=startup_identity,
+                claim_token=claim_token,
+            )
+        except Exception:
+            logger.exception(
+                "data_init_trigger claim release failed: "
+                "device_id=%s binding_id=%s startup_identity=%s",
+                device_id,
+                binding_id,
+                startup_identity,
+            )
 
     # =========================================================================
     # get_device_connection_v2 — 代理/直连组装（公共方法，多个上层模块共用）

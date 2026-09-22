@@ -36,10 +36,22 @@ from agentclaw.community.core.devices.models import DeviceBindingStatus
 
 def _make_service(max_bots: int = 5, current_bots: int = 0, policy_service=None) -> BotService:
     svc = BotService.__new__(BotService)
+    svc._skills_pool_native_creation_policy = MagicMock(
+        select=MagicMock(return_value=None)
+    )
+    svc._skill_layout_repository = MagicMock()
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = current_bots
     svc._repository.get_by_id_and_owner.return_value = None
+
+    def _insert_with_layout(data, *, layout):
+        record = {"id": 1, **data}
+        svc._repository.get_by_id_and_owner.return_value = record
+        return record
+
+    svc._repository.insert_with_initial_skill_layout.side_effect = _insert_with_layout
+    svc._repository.claim_provisioning.return_value = True
     svc._allocation_config = SimpleNamespace(
         mode="multi",
         max_devices_per_entity=max_bots,
@@ -469,7 +481,6 @@ class TestCreateBotPersistsConfiguredEngines:
         svc = _make_service(max_bots=10, current_bots=0)
         svc._repository.get_by_id_and_owner.return_value = None
         svc._repository.exists_by_bot_name.return_value = False
-        svc._repository.insert.return_value = {"id": 1, "bot_id": "b1", "ext": {}}
 
         try:
             # No engine_type → defaults to openclaw, which this registry omits.
@@ -477,8 +488,9 @@ class TestCreateBotPersistsConfiguredEngines:
         except Exception:
             pass  # downstream provisioning is mocked; persistence is the subject
 
-        assert svc._repository.insert.called, "create never reached persistence"
-        persisted = svc._repository.insert.call_args[0][0]
+        insert = svc._repository.insert_with_initial_skill_layout
+        assert insert.called, "create never reached persistence"
+        persisted = insert.call_args.args[0]
         assert persisted["active_engine"] in persisted["engine_types"], persisted
 
     def test_a_supported_engine_outside_the_registry_still_creates(self, monkeypatch):
@@ -491,7 +503,6 @@ class TestCreateBotPersistsConfiguredEngines:
         svc = _make_service(max_bots=10, current_bots=0)
         svc._repository.get_by_id_and_owner.return_value = None
         svc._repository.exists_by_bot_name.return_value = False
-        svc._repository.insert.return_value = {"id": 1, "bot_id": "b1", "ext": {}}
 
         try:
             svc.create_bot(
@@ -501,8 +512,9 @@ class TestCreateBotPersistsConfiguredEngines:
         except Exception:
             pass
 
-        assert svc._repository.insert.called, "teclaw creation was rejected"
-        persisted = svc._repository.insert.call_args[0][0]
+        insert = svc._repository.insert_with_initial_skill_layout
+        assert insert.called, "teclaw creation was rejected"
+        persisted = insert.call_args.args[0]
         assert "teclaw" in persisted["engine_types"], persisted["engine_types"]
         assert persisted["active_engine"] == "teclaw"
 
@@ -513,7 +525,6 @@ class TestCreateBotPersistsConfiguredEngines:
         assert "teclaw" in _get_engine_types()
 
         svc = _make_service(max_bots=10, current_bots=0)
-        svc._repository.insert.return_value = {"id": 1, "bot_id": "b1", "ext": {}}
         # No existing row and the name is free — otherwise create_bot returns
         # or raises before reaching persistence.
         svc._repository.get_by_id_and_owner.return_value = None
@@ -528,8 +539,9 @@ class TestCreateBotPersistsConfiguredEngines:
             # what this test is about, and insert() is reached before it.
             pass
 
-        assert svc._repository.insert.called, "create never reached persistence"
-        persisted = svc._repository.insert.call_args[0][0]
+        insert = svc._repository.insert_with_initial_skill_layout
+        assert insert.called, "create never reached persistence"
+        persisted = insert.call_args.args[0]
         assert "teclaw" in persisted["engine_types"], persisted["engine_types"]
         # The active engine is always in its own enabled list — the invariant
         # every consumer of that list depends on.

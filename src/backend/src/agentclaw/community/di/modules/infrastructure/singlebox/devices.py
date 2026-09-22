@@ -20,6 +20,7 @@ from agentclaw.community.core.devices.models import (
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
+    LayoutInitializationConfirmationProtocol,
     McpSyncProtocol,
 )
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
@@ -183,6 +184,7 @@ class SingleboxDevicesModule(Module):
         token_vault: TokenVault,
         task_queue_service: TaskQueueService,
         template_service: TemplateService,
+        layout_confirmation: LayoutInitializationConfirmationProtocol,
     ) -> BaasDeviceService:
         """Keep BaaS lifecycle wiring while projecting local engine connections."""
         return SingleboxBaasDeviceService(
@@ -196,6 +198,7 @@ class SingleboxDevicesModule(Module):
             vault=token_vault,
             task_queue_service=task_queue_service,
             template_service=template_service,
+            layout_confirmation=layout_confirmation,
         )
 
     @singleton

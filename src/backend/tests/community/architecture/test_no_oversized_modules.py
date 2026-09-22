@@ -132,7 +132,9 @@ _ALLOWLIST: dict[str, str] = {
     "corp/core/devices/services/arca_device_service.py":
         "~1147 lines — arca sandbox device adapter (corp-only prod plugin).",
     "core/desktop_bot/services/desktop_bot_service.py":
-        "~1492 lines — desktop-bot lifecycle service.",
+        "~1875 lines — legacy Desktop inventory, Passport, delete, and status "
+        "orchestration remain; creation recovery and publish/restart tracking were "
+        "extracted in #2321, with the remaining legacy split kept as a follow-up.",
 
     # ── other ────────────────────────────────────────────────────────
     "adapters/http/harness/router.py":

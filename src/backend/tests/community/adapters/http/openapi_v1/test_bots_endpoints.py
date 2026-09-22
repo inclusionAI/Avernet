@@ -787,7 +787,7 @@ def test_create_bot_owner_relationship_failure_is_enveloped_502(
     assert resp.status_code == 502
     assert resp.json()["code"] == 502000
     assert resp.json()["message"] == "Authorization relationship service error"
-    assert resp.json()["data"] is None
+    assert resp.json()["data"] == {"bot_id": "default", "retryable": True}
 
 
 def test_create_bot_normalizes_unexpected_relationship_failure(
@@ -804,6 +804,7 @@ def test_create_bot_normalizes_unexpected_relationship_failure(
     assert response.status_code == 502
     assert response.json()["code"] == 502000
     assert response.json()["message"] == "Authorization relationship service error"
+    assert response.json()["data"] == {"bot_id": "default", "retryable": True}
 
 
 def test_create_bot_rejects_unresolved_business_space_before_side_effects(

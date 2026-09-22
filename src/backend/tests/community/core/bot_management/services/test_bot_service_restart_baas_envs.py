@@ -73,6 +73,7 @@ def _make_service(
     )
     svc._oss_record_repo = MagicMock()
     svc._skill_set_factory = MagicMock()
+    svc._skill_layout_repository = MagicMock()
     svc._device_binding_repo = MagicMock()
     svc._bot_publish_repo = MagicMock()
     # template_service.get_template_config 返回读回的 template_config（含 model/runtime/token）
@@ -374,6 +375,7 @@ class TestRestartBaasEnvInjection:
             "restart_workflow_baseline": 0,
             "restart_publish_id": None,
             "restart_image_policy_on_success": None,
+            "envs": {"AGENTCLAW_SKILLS_LAYOUT": "legacy"},
         }
         assert calls[1].kwargs["props"] == {
             "publish_id": "12372",
@@ -396,6 +398,61 @@ class TestRestartBaasEnvInjection:
             deadline_seconds=86400,
             delay_seconds=2,
         )
+
+    def test_pool_restart_replays_persisted_layout_to_runtime_and_binding(self):
+        from agentclaw.community.core.skills_pool.types import (
+            SkillLayout,
+            SkillLayoutPhase,
+        )
+
+        svc, baas, _device_service = _make_service(template_config={})
+        svc._skill_layout_repository.get.return_value = MagicMock(
+            active_layout=SkillLayout.POOL,
+            layout_contract_version="skills-pool-p3-v1",
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+        )
+        bot = _make_bot(active_engine="openclaw", template_type=None)
+
+        svc._restart_bot_baas(
+            bot_id="bot001",
+            user_id="user001",
+            binding_id=42,
+            bot=bot,
+        )
+
+        expected_layout = {
+            "AGENTCLAW_SKILLS_LAYOUT": "pool",
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
+        }
+        assert baas.upgrade_bot.call_args.kwargs["extra_envs"] == expected_layout
+        first_props = svc._device_binding_repo.update_device_props.call_args_list[
+            0
+        ].kwargs["props"]
+        assert first_props["envs"] == expected_layout
+
+    def test_pool_rollback_phase_requires_runtime_recovery(self):
+        from agentclaw.community.core.skills_pool.types import (
+            SkillLayout,
+            SkillLayoutPhase,
+        )
+
+        svc, _baas, _device_service = _make_service(template_config={})
+        svc._skill_layout_repository.get.return_value = MagicMock(
+            active_layout=SkillLayout.POOL,
+            layout_contract_version="skills-pool-p3-v1",
+            phase=SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING,
+        )
+
+        assert svc._skills_layout_env(
+            env="dev",
+            entity_id="user001",
+            bot_id="bot001",
+        ) == {
+            "AGENTCLAW_SKILLS_LAYOUT": "pool",
+            "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": "recovery_required",
+        }
 
     def test_restart_baas_enqueues_recovery_before_pending_and_external_call(self):
         svc, baas, device_service = _make_service(template_config={})

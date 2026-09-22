@@ -168,6 +168,27 @@ class TestDeviceServiceRouterInit:
             is router._providers[BAAS_DEVICE_PROVIDER]
         )
 
+    def test_data_init_readiness_routes_to_binding_provider(self):
+        router, repo, _, _ = _make_router(is_local=False)
+        repo.get_by_id.return_value = _make_record(
+            id=42,
+            device_id="desktop-42",
+            device_provider=BAAS_DEVICE_PROVIDER,
+        )
+        baas = router._providers[BAAS_DEVICE_PROVIDER]
+
+        router.trigger_data_init_on_device_ready(
+            device_id="desktop-42",
+            binding_id=42,
+            require_pool_confirmation=True,
+        )
+
+        baas.trigger_data_init_on_device_ready.assert_called_once_with(
+            device_id="desktop-42",
+            binding_id=42,
+            require_pool_confirmation=True,
+        )
+
     def test_invalid_default_provider_key_raises(self):
         import pytest
 
@@ -782,11 +803,30 @@ class TestReportDeviceRouting:
 
         result = router.report_device_status(
             device_id="staff_u001_default",
-            status="FAILED",
-            message="oops",
+            status="SUCCEEDED",
+            message=None,
             token="tok",
+            startup_identity="sandbox-1",
+            layout_initialization={
+                "actual_engine": "openclaw",
+                "actual_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "roots_initialized": True,
+            },
         )
-        mock_service.report_device_status.assert_called_once()
+        mock_service.report_device_status.assert_called_once_with(
+            device_id="staff_u001_default",
+            status="SUCCEEDED",
+            message=None,
+            token="tok",
+            startup_identity="sandbox-1",
+            layout_initialization={
+                "actual_engine": "openclaw",
+                "actual_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "roots_initialized": True,
+            },
+        )
         assert result is updated
 
 

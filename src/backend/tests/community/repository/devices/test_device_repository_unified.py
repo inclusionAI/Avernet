@@ -1,7 +1,7 @@
 """Unified DeviceBindingRepository — behavior + contract.
 
-The last DB-repo twin in the unification program (S5). Covers all
-19 Protocol methods + the 3 adopt-prod behavior changes:
+The last DB-repo twin in the unification program (S5). Covers the complete
+Protocol surface plus the 3 adopt-prod behavior changes:
 - ``gmt_modified`` advances DB-side after each UPDATE (proves the
   ``func.now()`` reaches the column on SQLite).
 - ``get_active_engine_by_device_id`` falls back to
@@ -12,6 +12,7 @@ The last DB-repo twin in the unification program (S5). Covers all
 import json
 import time
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from threading import Event, Thread, current_thread
 from unittest.mock import patch
 
@@ -412,6 +413,759 @@ def test_reuse_binding_clears_release_fields(repo):
     assert rec.last_alive_at is None
 
 
+def test_reuse_released_desktop_binding_requires_exact_creation_context(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            device_props={
+                "client_id": "client-1",
+                "callback_token": "token-1",
+                "publish_id": "16",
+            },
+        )
+    )
+    repo.release_binding(
+        binding_id=bid,
+        release_reason="Desktop bot creation did not persist",
+        released_by="u001",
+    )
+    _bot(
+        db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        status="PROVISIONING",
+        device_id=None,
+        binding_id=None,
+        env="dev",
+    )
+
+    reused = repo.recover_baas_desktop_creation_binding_if_matches(
+        binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id="client-1",
+        expected_callback_token="token-1",
+        device_props={
+            "client_id": "client-1",
+            "callback_token": "token-1",
+            "publish_id": "17",
+        },
+        apply_reason="Create desktop bot: Desktop",
+        applied_by="u001",
+    )
+
+    assert reused is True
+    binding = repo.get_by_id(bid)
+    assert binding.status == "PENDING"
+    assert binding.device_props["publish_id"] == "17"
+    assert binding.release_reason is None
+    assert binding.released_by is None
+    assert binding.released_at is None
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="desktop-bot").one()
+        bot.status = "PENDING"
+        bot.binding_id = bid
+        bot.device_id = "desktop-bot-uuid"
+    assert repo.recover_baas_desktop_creation_binding_if_matches(
+        binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id="client-1",
+        expected_callback_token="token-1",
+        device_props={"client_id": "client-1", "callback_token": "token-1"},
+        apply_reason="Create desktop bot: Desktop",
+        applied_by="u001",
+    ) is False
+
+
+@pytest.mark.parametrize(
+    ("expected_client_id", "expected_callback_token"),
+    [("other-client", "token-1"), ("client-1", "other-token")],
+)
+def test_reuse_released_desktop_binding_rejects_foreign_creation_context(
+    repo,
+    db,
+    expected_client_id,
+    expected_callback_token,
+):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            device_props={
+                "client_id": "client-1",
+                "callback_token": "token-1",
+            },
+        )
+    )
+    repo.release_binding(binding_id=bid, release_reason="done", released_by="u001")
+    _bot(
+        db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        status="PROVISIONING",
+        device_id=None,
+        binding_id=None,
+        env="dev",
+    )
+
+    reused = repo.recover_baas_desktop_creation_binding_if_matches(
+        binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id=expected_client_id,
+        expected_callback_token=expected_callback_token,
+        device_props={"client_id": "client-1", "callback_token": "token-1"},
+        apply_reason="Create desktop bot: Desktop",
+        applied_by="u001",
+    )
+
+    assert reused is False
+    assert repo.get_by_id(bid).status == "RELEASED"
+
+
+def test_detach_released_desktop_binding_repairs_retained_bot(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            device_props={
+                "client_id": "client-1",
+                "callback_token": "token-1",
+            },
+        )
+    )
+    _bot(
+        db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        active_engine="openclaw",
+        device_id="desktop-bot-uuid",
+        binding_id=bid,
+        status="PENDING",
+        env="dev",
+    )
+    repo.release_binding(
+        binding_id=bid,
+        release_reason="Desktop bot creation did not persist",
+        released_by="u001",
+    )
+
+    repaired = repo.detach_released_baas_desktop_binding_if_matches(
+        binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id="client-1",
+        expected_callback_token="token-1",
+    )
+
+    assert repaired is True
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="desktop-bot").one()
+        assert bot.status == "PENDING"
+        assert bot.binding_id is None
+        assert bot.device_id is None
+
+
+@pytest.mark.parametrize("status", ["RELEASED", "PENDING"])
+def test_recover_desktop_creation_binding_accepts_only_matching_orphan(
+    repo, db, status
+):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            status=status,
+            device_props={
+                "client_id": "client-1",
+                "callback_token": "token-1",
+                "publish_id": "16",
+            },
+        )
+    )
+    if status == "RELEASED":
+        repo.release_binding(
+            binding_id=bid,
+            release_reason="Desktop bot creation did not persist",
+            released_by="u001",
+        )
+    _bot(
+        db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        status="PROVISIONING",
+        device_id=None,
+        binding_id=None,
+        env="dev",
+    )
+
+    recovered = repo.recover_baas_desktop_creation_binding_if_matches(
+        binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id="client-1",
+        expected_callback_token="token-1",
+        device_props={
+            "client_id": "client-1",
+            "callback_token": "token-1",
+            "publish_id": "17",
+        },
+        apply_reason="Create desktop bot: Desktop",
+        applied_by="u001",
+    )
+
+    assert recovered is True
+    binding = repo.get_by_id(bid)
+    assert binding.status == "PENDING"
+    assert binding.device_props["publish_id"] == "17"
+    assert binding.release_reason is None
+
+
+def test_recover_desktop_creation_binding_rejects_foreign_bot_link(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            status="PENDING",
+            device_props={
+                "client_id": "client-1",
+                "callback_token": "token-1",
+            },
+        )
+    )
+    _bot(
+        db,
+        bot_id="foreign-bot",
+        owner_id="other-owner",
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        env="dev",
+    )
+    _bot(
+        db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        status="PROVISIONING",
+        env="dev",
+    )
+
+    assert repo.recover_baas_desktop_creation_binding_if_matches(
+        binding_id=bid,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        device_id="desktop-bot-uuid",
+        entity_id="u001",
+        env="dev",
+        expected_client_id="client-1",
+        expected_callback_token="token-1",
+        device_props={"client_id": "client-1", "callback_token": "token-1"},
+        apply_reason="Create desktop bot: Desktop",
+        applied_by="u001",
+    ) is False
+
+
+@pytest.mark.parametrize("device_provider", ["arca", "baas"])
+def test_pool_data_init_trigger_claim_is_current_once_and_releasable(
+    repo,
+    device_provider,
+):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider=device_provider,
+            env="dev",
+            status="ACTIVE",
+            device_props={
+                "restart_publish_id": "17",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        status="ACTIVE",
+        env="dev",
+        ext=json.dumps(
+            {
+                "start_status": "SUCCEEDED",
+                "data_init_status": "pending_init",
+            }
+        ),
+    )
+
+    claim = repo.claim_pool_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    )
+    assert claim is not None
+    assert claim.resume_stale_in_progress is False
+    assert repo.claim_pool_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    ) is None
+    assert repo.release_pool_data_init_trigger_if_matches(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+        claim_token=claim.claim_token,
+    ) is True
+    next_claim = repo.claim_pool_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    )
+    assert next_claim is not None
+    assert next_claim.resume_stale_in_progress is False
+    assert next_claim.claim_token != claim.claim_token
+    assert repo.claim_pool_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="16",
+    ) is None
+
+
+def test_baas_creation_retry_recovers_and_links_retained_binding(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="retained-baas-uuid",
+            device_provider="baas",
+            env="dev",
+            status="PENDING",
+            device_props={
+                "bot_uuid": "retained-baas-uuid",
+                "publish_id": "17",
+                "create_request_id": "request-17",
+                "callback_token": "original-token",
+                "retained_fact": "keep",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="retained-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        status="PENDING",
+        env="dev",
+    )
+
+    recovered_id = repo.recover_baas_creation_binding_if_matches(
+        bot_id="retained-bot",
+        owner_id="u001",
+        device_id="retained-baas-uuid",
+        entity_id="u001",
+        entity_type="staff",
+        env="dev",
+        device_props={
+            "bot_uuid": "retained-baas-uuid",
+            "publish_id": "17",
+            "create_request_id": "request-17",
+            "callback_token": "retry-token",
+        },
+        apply_reason="Create bot: retained",
+        applied_by="u001",
+    )
+
+    assert recovered_id == bid
+    recovered = repo.get_by_id(bid)
+    assert recovered is not None
+    assert recovered.device_props["retained_fact"] == "keep"
+    assert recovered.device_props["callback_token"] == "original-token"
+    with repo._db.orm_session() as db:
+        bot = db.query(BotModel).filter_by(bot_id="retained-bot").one()
+        assert bot.binding_id == bid
+        assert bot.device_id == "retained-baas-uuid"
+
+
+def test_baas_creation_retry_rejects_changed_creation_identity(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="retained-baas-uuid",
+            device_provider="baas",
+            env="dev",
+            device_props={
+                "bot_uuid": "retained-baas-uuid",
+                "publish_id": "17",
+                "create_request_id": "request-17",
+                "callback_token": "original-token",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="retained-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        env="dev",
+    )
+
+    assert (
+        repo.recover_baas_creation_binding_if_matches(
+            bot_id="retained-bot",
+            owner_id="u001",
+            device_id="retained-baas-uuid",
+            entity_id="u001",
+            entity_type="staff",
+            env="dev",
+            device_props={
+                "bot_uuid": "retained-baas-uuid",
+                "publish_id": "18",
+                "create_request_id": "request-17",
+                "callback_token": "retry-token",
+            },
+            apply_reason="Create bot: retained",
+            applied_by="u001",
+        )
+        is None
+    )
+    with repo._db.orm_session() as db:
+        bot = db.query(BotModel).filter_by(bot_id="retained-bot").one()
+        assert bot.binding_id is None
+        assert bot.device_id is None
+    assert repo.get_by_id(bid).device_props["callback_token"] == "original-token"
+
+
+def test_baas_creation_retry_converges_bot_when_binding_is_active(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="active-baas-uuid",
+            device_provider="baas",
+            env="dev",
+            status="ACTIVE",
+            device_props={
+                "bot_uuid": "active-baas-uuid",
+                "publish_id": "17",
+                "create_request_id": "request-17",
+                "callback_token": "original-token",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="retained-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        status="PROVISIONING",
+        env="dev",
+    )
+
+    recovered_id = repo.recover_baas_creation_binding_if_matches(
+        bot_id="retained-bot",
+        owner_id="u001",
+        device_id="active-baas-uuid",
+        entity_id="u001",
+        entity_type="staff",
+        env="dev",
+        device_props={
+            "bot_uuid": "active-baas-uuid",
+            "publish_id": "17",
+            "create_request_id": "request-17",
+            "callback_token": "retry-token",
+        },
+        apply_reason="Create bot: retained",
+        applied_by="u001",
+    )
+
+    assert recovered_id == bid
+    with repo._db.orm_session() as db:
+        bot = db.query(BotModel).filter_by(bot_id="retained-bot").one()
+        assert bot.binding_id == bid
+        assert bot.device_id == "active-baas-uuid"
+        assert bot.status == "ACTIVE"
+
+
+def test_baas_creation_retry_rejects_active_bot_for_pending_binding(repo):
+    repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="retained-baas-uuid",
+            device_provider="baas",
+            env="dev",
+            status="PENDING",
+            device_props={
+                "bot_uuid": "retained-baas-uuid",
+                "publish_id": "17",
+                "create_request_id": "request-17",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="retained-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        status="ACTIVE",
+        env="dev",
+    )
+
+    recovered_id = repo.recover_baas_creation_binding_if_matches(
+        bot_id="retained-bot",
+        owner_id="u001",
+        device_id="retained-baas-uuid",
+        entity_id="u001",
+        entity_type="staff",
+        env="dev",
+        device_props={
+            "bot_uuid": "retained-baas-uuid",
+            "publish_id": "17",
+            "create_request_id": "request-17",
+        },
+        apply_reason="Create bot: retained",
+        applied_by="u001",
+    )
+
+    assert recovered_id is None
+
+
+def test_baas_creation_retry_rejects_competing_device_link(repo):
+    repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="retained-baas-uuid",
+            device_provider="baas",
+            env="dev",
+            device_props={
+                "bot_uuid": "retained-baas-uuid",
+                "publish_id": "17",
+                "create_request_id": "request-17",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="retained-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        env="dev",
+    )
+    _bot(
+        repo._db,
+        bot_id="competing-bot",
+        owner_id="u002",
+        entity_id="u002",
+        binding_id=None,
+        device_id="retained-baas-uuid",
+        env="dev",
+    )
+
+    recovered_id = repo.recover_baas_creation_binding_if_matches(
+        bot_id="retained-bot",
+        owner_id="u001",
+        device_id="retained-baas-uuid",
+        entity_id="u001",
+        entity_type="staff",
+        env="dev",
+        device_props={
+            "bot_uuid": "retained-baas-uuid",
+            "publish_id": "17",
+            "create_request_id": "request-17",
+        },
+        apply_reason="Create bot: retained",
+        applied_by="u001",
+    )
+
+    assert recovered_id is None
+
+
+def test_desktop_data_init_expired_claim_is_fenced_during_takeover(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            status="ACTIVE",
+            device_props={
+                "restart_publish_id": "17",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        status="ACTIVE",
+        env="dev",
+        ext=json.dumps(
+            {
+                "start_status": "SUCCEEDED",
+                "data_init_status": "pending_init",
+            }
+        ),
+    )
+    first_claim = repo.claim_pool_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    )
+    assert first_claim is not None
+    assert first_claim.resume_stale_in_progress is False
+
+    with repo._db.orm_session() as db:
+        binding = db.query(EntityDeviceBinding).filter_by(id=bid).one()
+        props = json.loads(binding.device_props)
+        stale_at = datetime.now(timezone.utc) - timedelta(minutes=11)
+        props["data_init_trigger_claimed_at"] = stale_at.isoformat()
+        binding.device_props = json.dumps(props)
+        bot = db.query(BotModel).filter_by(binding_id=bid).one()
+        bot.ext = json.dumps(
+            {
+                "start_status": "SUCCEEDED",
+                "data_init_status": "in_progress",
+                "data_init_started_at": stale_at.isoformat(),
+            }
+        )
+
+    second_claim = repo.claim_pool_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    )
+    assert second_claim is not None
+    assert second_claim.resume_stale_in_progress is True
+    assert second_claim.claim_token != first_claim.claim_token
+    assert repo.release_pool_data_init_trigger_if_matches(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+        claim_token=first_claim.claim_token,
+    ) is False
+    assert repo.release_pool_data_init_trigger_if_matches(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+        claim_token=second_claim.claim_token,
+    ) is True
+    third_claim = repo.claim_pool_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    )
+    assert third_claim is not None
+    assert third_claim.resume_stale_in_progress is True
+    assert third_claim.claim_token != second_claim.claim_token
+
+
+def test_desktop_data_init_trigger_claim_waits_for_active_bot(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="desktop-bot-uuid",
+            device_provider="baas",
+            env="dev",
+            status="ACTIVE",
+            device_props={
+                "restart_publish_id": "17",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="desktop-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        status="PENDING",
+        env="dev",
+        ext=json.dumps(
+            {
+                "start_status": "SUCCEEDED",
+                "data_init_status": "pending_init",
+            }
+        ),
+    )
+
+    assert repo.claim_pool_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    ) is None
+
+    with repo._db.orm_session() as db:
+        db.query(BotModel).filter(BotModel.binding_id == bid).update(
+            {BotModel.status: "ACTIVE"}, synchronize_session=False
+        )
+
+    assert repo.claim_pool_data_init_trigger_if_ready(
+        binding_id=bid,
+        device_id="desktop-bot-uuid",
+        startup_identity="17",
+    ) is not None
+
+
 def test_batch_update_env(repo):
     a = repo.insert_binding(**_binding(device_id="d1", env="dev"))
     b = repo.insert_binding(**_binding(device_id="d2", env="dev"))
@@ -478,7 +1232,7 @@ def test_update_bot_start_status_propagates_on_malformed_ext(repo, db):
         assert ext == {"start_status": "OK"}  # reset to {} + new keys
 
 
-def test_update_bot_status_on_device_active_only_when_pending(repo, db):
+def test_update_bot_status_on_device_active_only_from_creation_states(repo, db):
     bid = repo.insert_binding(**_binding())
     _bot(db, bot_id="b1", binding_id=bid, status="PENDING")
     _bot(db, bot_id="b2", binding_id=999, status="PENDING")
@@ -488,11 +1242,22 @@ def test_update_bot_status_on_device_active_only_when_pending(repo, db):
         # untouched
         assert s.query(BotModel).filter_by(bot_id="b2").one().status == "PENDING"
 
-    # Non-PENDING bot is NOT flipped.
+    # A terminal failed bot is NOT flipped.
     _bot(db, bot_id="b3", binding_id=bid + 100, status="FAILED")
     repo.update_bot_status_on_device_active(binding_id=bid + 100)
     with db.orm_session() as s:
         assert s.query(BotModel).filter_by(bot_id="b3").one().status == "FAILED"
+
+
+def test_update_bot_status_on_device_active_accepts_provisioning_claim(repo, db):
+    """A claimed create converges when its asynchronous device becomes ACTIVE."""
+    bid = repo.insert_binding(**_binding())
+    _bot(db, bot_id="b1", binding_id=bid, status="PROVISIONING")
+
+    repo.update_bot_status_on_device_active(binding_id=bid)
+
+    with db.orm_session() as s:
+        assert s.query(BotModel).filter_by(bot_id="b1").one().status == "ACTIVE"
 
 
 def test_update_bot_status_on_device_failed_unconditional(repo, db):
@@ -536,6 +1301,485 @@ def test_transition_teclaw_publish_terminal_updates_bot_and_binding(repo, db):
             s.query(BotModel).filter_by(bot_id="bot-teclaw").one().status
             == "ACTIVE"
         )
+
+
+def test_transition_baas_restart_terminal_updates_matching_bot_and_binding(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            device_props={
+                "restart_request_id": "request-1",
+                "restart_publish_id": "9",
+            },
+        )
+    )
+    old_ext = {"keep": "value"}
+    new_ext = {"keep": "value", "restart_publish_id": "9"}
+    _bot(
+        db,
+        bot_id="bot-baas",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        ext=json.dumps(old_ext),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        transitioned = repo.transition_baas_restart_terminal(
+            binding_id=bid,
+            bot_id="bot-baas",
+            owner_id="emp-1",
+            publish_id=9,
+            request_id="request-1",
+            status="ACTIVE",
+            expected_bot_ext=old_ext,
+            bot_ext=new_ext,
+        )
+
+    assert transitioned is True
+    assert repo.get_by_id(bid).status == "ACTIVE"
+    with db.orm_session() as s:
+        bot = s.query(BotModel).filter_by(bot_id="bot-baas").one()
+        assert bot.status == "ACTIVE"
+        assert json.loads(bot.ext) == new_ext
+
+
+def test_baas_restart_guards_reject_superseded_identity(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            device_props={
+                "restart_request_id": "request-new",
+                "restart_workflow_baseline": 8,
+                "restart_publish_id": "10",
+            },
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-baas",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        ext=json.dumps({"keep": "value"}),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        transitioned = repo.transition_baas_restart_terminal(
+            binding_id=bid,
+            bot_id="bot-baas",
+            owner_id="emp-1",
+            publish_id=9,
+            request_id="request-old",
+            status="ACTIVE",
+            expected_bot_ext={"keep": "value"},
+            bot_ext={"restart_publish_id": "9"},
+        )
+        cleared = repo.clear_baas_restart_intent_if_matches(
+            binding_id=bid,
+            publish_id=9,
+            request_id="request-old",
+            keys=("restart_request_id", "restart_workflow_baseline"),
+        )
+
+    assert transitioned is False
+    assert cleared is False
+    binding = repo.get_by_id(bid)
+    assert binding.status == "PENDING"
+    assert binding.device_props["restart_request_id"] == "request-new"
+    assert binding.device_props["restart_publish_id"] == "10"
+
+
+def test_clear_baas_restart_intent_preserves_other_props(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            device_props={
+                "restart_request_id": "request-1",
+                "restart_workflow_baseline": 8,
+                "restart_publish_id": "9",
+                "callback_token": "keep-me",
+            },
+        )
+    )
+
+    cleared = repo.clear_baas_restart_intent_if_matches(
+        binding_id=bid,
+        publish_id=9,
+        request_id="request-1",
+        keys=("restart_request_id", "restart_workflow_baseline"),
+    )
+
+    assert cleared is True
+    props = repo.get_by_id(bid).device_props
+    assert props["restart_request_id"] is None
+    assert props["restart_workflow_baseline"] is None
+    assert props["restart_publish_id"] == "9"
+    assert props["callback_token"] == "keep-me"
+
+
+def test_adopt_baas_restart_publish_guards_request_and_baseline(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            device_props={
+                "restart_request_id": "request-1",
+                "restart_workflow_baseline": 8,
+                "restart_publish_id": None,
+            },
+        )
+    )
+
+    assert repo.adopt_baas_restart_publish_if_matches(
+        binding_id=bid,
+        request_id="request-stale",
+        workflow_baseline=8,
+        publish_id=9,
+    ) is False
+    assert repo.adopt_baas_restart_publish_if_matches(
+        binding_id=bid,
+        request_id="request-1",
+        workflow_baseline=8,
+        publish_id=9,
+    ) is True
+
+    props = repo.get_by_id(bid).device_props
+    assert props["publish_id"] == "9"
+    assert props["restart_publish_id"] == "9"
+
+
+@pytest.mark.parametrize("terminal_status", ["RELEASED", "STOPPED"])
+def test_baas_restart_terminal_does_not_revive_stopped_binding(
+    repo, db, terminal_status
+):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status=terminal_status,
+            device_props={
+                "restart_request_id": "request-1",
+                "restart_publish_id": "9",
+            },
+        )
+    )
+    old_ext = {"keep": "value"}
+    _bot(
+        db,
+        bot_id="bot-baas",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        ext=json.dumps(old_ext),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        transitioned = repo.transition_baas_restart_terminal(
+            binding_id=bid,
+            bot_id="bot-baas",
+            owner_id="emp-1",
+            publish_id=9,
+            request_id="request-1",
+            status="ACTIVE",
+            expected_bot_ext=old_ext,
+            bot_ext={"restart_publish_id": "9"},
+        )
+
+    assert transitioned is False
+    assert repo.get_by_id(bid).status == terminal_status
+    with db.orm_session() as session:
+        assert (
+            session.query(BotModel).filter_by(bot_id="bot-baas").one().status
+            == "PENDING"
+        )
+
+
+def test_prepare_baas_desktop_restart_updates_identity_and_status_atomically(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status="ACTIVE",
+            device_props={"callback_token": "keep"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status="ACTIVE",
+        ext=json.dumps({"keep": "value"}),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        prepared = repo.prepare_baas_desktop_restart(
+            binding_id=bid,
+            bot_id="bot-desktop",
+            owner_id="emp-1",
+            expected_publish_id=None,
+            bot_ext_patch={"publish_id": "17", "pending_since": "now"},
+            binding_props_patch={"restart_publish_id": "17"},
+        )
+
+    assert prepared is True
+    binding = repo.get_by_id(bid)
+    assert binding.status == "PENDING"
+    assert binding.device_props == {
+        "callback_token": "keep",
+        "restart_publish_id": "17",
+    }
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-desktop").one()
+        assert bot.status == "PENDING"
+        assert json.loads(bot.ext) == {
+            "keep": "value",
+            "publish_id": "17",
+            "pending_since": "now",
+        }
+
+
+def test_prepare_baas_desktop_restart_allows_explicit_retry_from_failed(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status="FAILED",
+            device_props={"restart_publish_id": "16"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status="FAILED",
+        ext=json.dumps({"publish_id": "16"}),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        prepared = repo.prepare_baas_desktop_restart(
+            binding_id=bid,
+            bot_id="bot-desktop",
+            owner_id="emp-1",
+            expected_publish_id="16",
+            bot_ext_patch={"publish_id": "17", "pending_since": "now"},
+            binding_props_patch={"restart_publish_id": "17"},
+        )
+
+    assert prepared is True
+    binding = repo.get_by_id(bid)
+    assert binding.status == "PENDING"
+    assert binding.device_props["restart_publish_id"] == "17"
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-desktop").one()
+        assert bot.status == "PENDING"
+        assert json.loads(bot.ext)["publish_id"] == "17"
+
+
+@pytest.mark.parametrize("terminal_status", ["RELEASED", "STOPPED"])
+def test_prepare_baas_desktop_restart_keeps_release_boundary(
+    repo, db, terminal_status
+):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status=terminal_status,
+            device_props={"restart_publish_id": "16"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status=terminal_status,
+        ext=json.dumps({"publish_id": "16"}),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        prepared = repo.prepare_baas_desktop_restart(
+            binding_id=bid,
+            bot_id="bot-desktop",
+            owner_id="emp-1",
+            expected_publish_id="16",
+            bot_ext_patch={"publish_id": "17"},
+            binding_props_patch={"restart_publish_id": "17"},
+        )
+
+    assert prepared is False
+    binding = repo.get_by_id(bid)
+    assert binding.status == terminal_status
+    assert binding.device_props["restart_publish_id"] == "16"
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-desktop").one()
+        assert bot.status == terminal_status
+        assert json.loads(bot.ext)["publish_id"] == "16"
+
+
+def test_prepare_baas_desktop_restart_rolls_back_both_rows_on_failure(
+    autocommit_db,
+):
+    db, engine = autocommit_db
+    repo = DeviceRepository(db)
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status="ACTIVE",
+            device_props={"callback_token": "keep"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status="ACTIVE",
+        ext=json.dumps({"keep": "value"}),
+    )
+
+    def fail_binding_update(
+        _conn, _cursor, statement, _parameters, _context, _executemany
+    ):
+        if statement.lstrip().lower().startswith(
+            "update ac_entity_device_binding"
+        ):
+            raise RuntimeError("binding write failed")
+
+    event.listen(engine, "before_cursor_execute", fail_binding_update)
+    try:
+        with (
+            patch(_ENV_MOD, return_value="dev"),
+            pytest.raises(RuntimeError, match="binding write failed"),
+        ):
+            repo.prepare_baas_desktop_restart(
+                binding_id=bid,
+                bot_id="bot-desktop",
+                owner_id="emp-1",
+                expected_publish_id=None,
+                bot_ext_patch={"publish_id": "17"},
+                binding_props_patch={"restart_publish_id": "17"},
+            )
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_binding_update)
+
+    binding = repo.get_by_id(bid)
+    assert binding.status == "ACTIVE"
+    assert binding.device_props == {"callback_token": "keep"}
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-desktop").one()
+        assert bot.status == "ACTIVE"
+        assert json.loads(bot.ext) == {"keep": "value"}
+
+
+def test_prepare_baas_desktop_restart_rejects_changed_publish_baseline(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status="PENDING",
+            device_props={"restart_publish_id": "newer-publish"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status="PENDING",
+        ext=json.dumps({"publish_id": "newer-publish"}),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        prepared = repo.prepare_baas_desktop_restart(
+            binding_id=bid,
+            bot_id="bot-desktop",
+            owner_id="emp-1",
+            expected_publish_id="older-baseline",
+            bot_ext_patch={"publish_id": "older-publish"},
+            binding_props_patch={"restart_publish_id": "older-publish"},
+        )
+
+    assert prepared is False
+    assert repo.get_by_id(bid).device_props["restart_publish_id"] == (
+        "newer-publish"
+    )
+
+
+def test_layout_startup_success_updates_bot_only_for_current_identity(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status="PENDING",
+            device_props={"restart_publish_id": "17"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status="ACTIVE",
+        ext=json.dumps({"keep": "value"}),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        assert repo.transition_layout_startup_status_if_matches(
+            binding_id=bid,
+            startup_identity="17",
+            status="SUCCEEDED",
+            message=None,
+        )
+
+    assert repo.get_by_id(bid).status == "PENDING"
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-desktop").one()
+        assert bot.status == "ACTIVE"
+        assert json.loads(bot.ext) == {
+            "keep": "value",
+            "start_status": "SUCCEEDED",
+        }
+
+
+def test_layout_startup_failure_is_guarded_by_current_identity(repo, db):
+    bid = repo.insert_binding(
+        **_binding(
+            device_provider="baas",
+            status="PENDING",
+            device_props={"restart_publish_id": "newer"},
+        )
+    )
+    _bot(
+        db,
+        bot_id="bot-desktop",
+        owner_id="emp-1",
+        binding_id=bid,
+        env="dev",
+        status="PENDING",
+        ext=json.dumps({"keep": "value"}),
+    )
+
+    with patch(_ENV_MOD, return_value="dev"):
+        assert not repo.transition_layout_startup_status_if_matches(
+            binding_id=bid,
+            startup_identity="older",
+            status="FAILED",
+            message="invalid layout",
+        )
+        assert repo.transition_layout_startup_status_if_matches(
+            binding_id=bid,
+            startup_identity="newer",
+            status="FAILED",
+            message="invalid layout",
+        )
+
+    assert repo.get_by_id(bid).status == "FAILED"
+    with db.orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-desktop").one()
+        assert bot.status == "FAILED"
+        assert json.loads(bot.ext)["start_message"] == "invalid layout"
 
 
 def test_transition_teclaw_publish_terminal_rolls_back_bot_on_binding_failure(

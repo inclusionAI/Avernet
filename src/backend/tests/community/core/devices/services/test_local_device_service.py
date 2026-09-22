@@ -159,6 +159,7 @@ def _make_service(
         bot_sync=bot_sync,
         oss_record_repo=MagicMock(),
         mcp_sync=MagicMock(),
+        layout_confirmation=MagicMock(),
     )
 
 

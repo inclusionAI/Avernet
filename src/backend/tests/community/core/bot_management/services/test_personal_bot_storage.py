@@ -75,7 +75,8 @@ def test_real_create_stops_before_allocation_if_policy_preparation_fails():
             bot_type="personal",
         )
     device.apply_device.assert_not_called()
-    svc._repository.soft_delete_by_owner.assert_called_once_with("b1", "u1")
+    svc._repository.soft_delete_by_owner.assert_not_called()
+    assert svc._repository.get_by_id_and_owner.return_value["bot_id"] == "b1"
 
 
 @pytest.mark.parametrize("with_table", [True, False])

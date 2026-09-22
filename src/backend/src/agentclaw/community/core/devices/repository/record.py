@@ -42,3 +42,11 @@ class DeviceBindingRecord:
             if val is not None and hasattr(val, "isoformat"):
                 result[key] = val.isoformat()
         return result
+
+
+@dataclass(frozen=True, slots=True)
+class DataInitTriggerClaim:
+    """One fenced Pool data-init dispatch lease."""
+
+    claim_token: str
+    resume_stale_in_progress: bool

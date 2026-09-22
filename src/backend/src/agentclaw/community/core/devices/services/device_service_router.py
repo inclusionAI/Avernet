@@ -40,6 +40,9 @@ from agentclaw.community.core.devices.services.device_instance_service import (
     EvalBindingNotFoundError,
     InstanceHealthStatus,
 )
+from agentclaw.community.core.devices.services.device_provider_router_mixin import (
+    DeviceProviderRouterMixin,
+)
 from agentclaw.community.core.devices.services.device_service import (
     BAAS_DEVICE_PROVIDER,
     DeviceService,
@@ -94,7 +97,7 @@ class _PlaceholderClusterConfigService:
     pass
 
 
-class DeviceServiceRouter(DeviceService):
+class DeviceServiceRouter(DeviceProviderRouterMixin, DeviceService):
     """设备服务路由器 - 支持多 Provider 动态路由
 
     职责：
@@ -176,114 +179,6 @@ class DeviceServiceRouter(DeviceService):
         logger.info(
             f"[DeviceServiceRouter] Initialized with providers: {list(self._providers.keys())}, "
             f"default={default_provider_key}"
-        )
-
-    def _get_provider_for_binding(self, binding_id: int) -> DeviceService:
-        """根据 binding_id 获取对应的 Provider 服务.
-
-        Args:
-            binding_id: 设备绑定 ID
-
-        Returns:
-            对应的 DeviceService 实例
-        """
-        record = self._repo.get_by_id(binding_id)
-        if record is None:
-            logger.warning(
-                f"[_get_provider_for_binding] Binding {binding_id} not found, using default"
-            )
-            return self._default_service
-
-        provider = record.device_provider
-        if provider in self._providers:
-            logger.info(
-                f"[_get_provider_for_binding] binding_id={binding_id} -> provider={provider}"
-            )
-            return self._providers[provider]
-
-        logger.warning(
-            f"[_get_provider_for_binding] Unknown provider {provider}, using default"
-        )
-        return self._default_service
-
-    def _get_provider_for_device_id(self, device_id: str) -> DeviceService:
-        """根据 device_id 获取对应的 Provider 服务.
-
-        Args:
-            device_id: 设备 ID
-
-        Returns:
-            对应的 DeviceService 实例
-        """
-        record = self._repo.get_by_device_id(device_id)
-        if record is None:
-            logger.warning(
-                f"[_get_provider_for_device_id] Device {device_id} not found, using default"
-            )
-            return self._default_service
-
-        provider = record.device_provider
-        if provider in self._providers:
-            logger.info(
-                f"[_get_provider_for_device_id] device_id={device_id} -> provider={provider}"
-            )
-            return self._providers[provider]
-
-        logger.warning(
-            f"[_get_provider_for_device_id] Unknown provider {provider}, using default"
-        )
-        return self._default_service
-
-    def _get_provider_for_new_device(
-        self,
-        staff_id: str,
-        *,
-        engine_type: str | None = None,
-        template_type: str | None = None,
-        bot_type: str | None = None,
-    ) -> DeviceService:
-        """根据员工工号 + bot 属性获取新设备申请的 Provider.
-
-        原 ARCA 新建 personal/service 草稿 bot 的 BaaS 灰度只看
-        ``staff_id + bot_type + engine bucket``。DRM 平台自身按环境隔离；
-        ``template_type`` 会用于
-        ``claude_code`` coding 类模板归入 ``aicoding`` 桶。
-
-        Args:
-            staff_id: 员工工号
-            engine_type: bot active engine（openclaw / claude_code / aicoding 等）
-            template_type: bot 模板类型（personalCoding / applicationCoding 等）
-            bot_type: bot 业务类型（personal / service / desktop）
-
-        Returns:
-            对应的 DeviceService 实例
-        """
-        # 未显式指定 provider 的创建请求，交给创建期灰度策略决定走 ARCA 还是 BaaS。
-        decision = self._arca_baas_rollout_policy.decide(
-            user_id=staff_id,
-            bot_type=bot_type or "",
-            engine_type=engine_type or "openclaw",
-            template_type=template_type or "",
-        )
-        provider_name = decision.target_provider
-
-        if provider_name in self._providers:
-            logger.info(
-                f"[_get_provider_for_new_device] staff_id={staff_id} "
-                f"engine_type={engine_type} template_type={template_type} "
-                f"bot_type={bot_type} -> provider={provider_name} "
-                f"reason={decision.reason} rollout_version={decision.rollout_version} "
-                f"engine_bucket={decision.engine_bucket}"
-            )
-            return self._providers[provider_name]
-
-        logger.error(
-            f"[_get_provider_for_new_device] Unknown create provider {provider_name}, "
-            f"reason={decision.reason}, registered={list(self._providers.keys())}"
-        )
-        raise DeviceServiceError(
-            f"unknown create provider {provider_name!r}; "
-            f"reason={decision.reason}; registered={list(self._providers.keys())!r}"
         )
 
     # ============== DeviceService 接口代理实现 ==============
@@ -598,24 +493,18 @@ class DeviceServiceRouter(DeviceService):
         status: str,
         message: str | None,
         token: str,
+        startup_identity: str | None = None,
+        layout_initialization: dict[str, object] | None = None,
     ):
-        """设备上报启动状态 - 根据 device_id 路由.
-
-        Args:
-            device_id: 设备 ID
-            status: 启动状态 (STARTING, FAILED, SUCCEEDED)
-            message: 启动信息
-            token: 回调 Token
-
-        Returns:
-            更新后的设备绑定记录
-        """
+        """设备上报启动状态 - 根据 device_id 路由."""
         service = self._get_provider_for_device_id(device_id)
         return service.report_device_status(
             device_id=device_id,
             status=status,
             message=message,
             token=token,
+            startup_identity=startup_identity,
+            layout_initialization=layout_initialization,
         )
 
     @override

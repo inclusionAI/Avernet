@@ -19,6 +19,9 @@ from agentclaw.community.api.skills_pool_rollout_service import (
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.devices.protocols import (
+    LayoutInitializationConfirmationProtocol,
+)
 from agentclaw.community.core.skills_pool.claim_service import (
     SkillsPoolMigrationClaimService,
 )
@@ -32,6 +35,9 @@ from agentclaw.community.core.skills_pool.operational_query import (
 )
 from agentclaw.community.core.skills_pool.operations import (
     SkillsPoolRolloutOperations,
+)
+from agentclaw.community.core.skills_pool.native_confirmation import (
+    SkillsPoolNativeLayoutConfirmationService,
 )
 from agentclaw.community.core.skills_pool.operator_commands import (
     SkillsPoolOperatorCommands,
@@ -62,6 +68,9 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
 from agentclaw.community.core.skills_pool.runtime import SkillsPoolRuntime
+from agentclaw.community.core.skills_pool.native_creation import (
+    SkillsPoolNativeCreationPolicy,
+)
 from agentclaw.community.core.repository.implementations.skills_pool.layout import SkillsPoolLayoutRepository
 from agentclaw.community.core.repository.implementations.skills_pool.rollout import SkillsPoolRolloutRepository
 
@@ -86,6 +95,11 @@ class SkillsPoolModule(Module):
             scope=singleton,
         )
         binder.bind(
+            SkillsPoolNativeCreationPolicy,
+            to=SkillsPoolNativeCreationPolicy,
+            scope=singleton,
+        )
+        binder.bind(
             SkillsPoolMigrationClaimService,
             to=SkillsPoolMigrationClaimService,
             scope=singleton,
@@ -103,6 +117,11 @@ class SkillsPoolModule(Module):
         binder.bind(
             SkillsPoolReconcileService,
             to=SkillsPoolReconcileService,
+            scope=singleton,
+        )
+        binder.bind(
+            LayoutInitializationConfirmationProtocol,
+            to=SkillsPoolNativeLayoutConfirmationService,
             scope=singleton,
         )
         binder.bind(
