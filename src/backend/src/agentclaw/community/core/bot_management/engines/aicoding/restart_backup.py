@@ -11,6 +11,7 @@ import shlex
 import time
 import uuid
 from typing import Any, Callable
+from urllib.parse import quote
 
 from agentclaw.community.log import get_logger
 
@@ -177,17 +178,12 @@ def _live_targets(state):
 
 
 class AicodingRestartBackupMixin:
-    async def execute_restart(self, operation):
-        # Only coding restarts may wait for the runtime backup. Never move other
-        # engines' lifecycle work off their original execution path.
-        return await asyncio.to_thread(operation)
-
     def prepare_restart(self, ctx, *, acquire_lock=None, release_lock=None,
-                        device_service_provider=None, **kwargs):
+                        device_service_provider=None, target_runtime_provider=None, **kwargs):
         """One lifecycle hook owns wait-before-lock and verify-under-lock."""
         if device_service_provider is not None and kwargs.get('binding_id') is not None:
             kwargs['device_service'] = device_service_provider()
-        verify = self._prepare_restart(ctx, **kwargs)
+        verify = self._prepare_restart(ctx, target_runtime_provider=target_runtime_provider, **kwargs)
         lock = acquire_lock() if acquire_lock is not None else None
         if acquire_lock is not None and lock is None:
             return None  # Preserve existing duplicate-restart handling.
@@ -200,7 +196,7 @@ class AicodingRestartBackupMixin:
         return lock
 
     def _prepare_restart(self, ctx, *, binding_id=None, device_service=None,
-                        bot_repository=None, device_id=None, target_runtime=None):
+                        bot_repository=None, device_id=None, target_runtime=None, target_runtime_provider=None):
         """Only coding engines probe runtime; no generic lifecycle/status changes."""
         try:
             if device_id is not None:
@@ -210,8 +206,7 @@ class AicodingRestartBackupMixin:
                     ctx.bot_id, device_id, len(targets),
                 )
                 checks = [prepare_backup(
-                    execute=lambda cmd, target=physical: target_runtime.exec_command_on_bot(
-                        bot_uuid=device_id, paas_device_id=target, cmd=cmd),
+                    execute=lambda cmd, target=physical: _execute_physical(target_runtime, target, cmd),
                     operation_id=uuid.uuid5(uuid.NAMESPACE_URL, 'restart:' + device_id + ':' + physical).hex,
                     bot_id=ctx.bot_id, target_id=physical,
                 ) for physical in targets]
@@ -231,12 +226,31 @@ class AicodingRestartBackupMixin:
             target = binding.get('device_id') if isinstance(binding, dict) else getattr(binding, 'device_id', None)
             if not isinstance(target, str) or not target:
                 raise RestartBackupError('missing_device', '无法定位当前旧实例，禁止跳过重启备份')
-            check = prepare_backup(
-                execute=lambda cmd: device_service.exec_shell_new(
-                    device_id=target, shell_cmd=cmd, allow_recovery=True),
-                operation_id=uuid.uuid5(uuid.NAMESPACE_URL, 'restart:' + target).hex,
-                bot_id=ctx.bot_id, target_id=target,
-            )
+            provider = _field(binding, 'device_provider')
+            if provider == 'baas':
+                # Existing BaaS inventory/POST contracts also work for FAILED
+                # bindings; no change to the ordinary DeviceService exec gate.
+                check = self._prepare_restart(
+                    ctx, device_id=target, target_runtime=target_runtime_provider())
+            else:
+                if _field(binding, 'status') in {'FAILED', 'STOPPED'}:
+                    # Legacy ARCA's physical sandbox ID is already persisted.
+                    # PaaS accepts it independently of OCB's binding status.
+                    props = _field(binding, 'device_props') or {}
+                    physical = props.get('sandbox_id')
+                    if provider != 'arca' or not isinstance(physical, str) or not physical.startswith('ARCA-SANDBOX-'):
+                        raise RestartBackupError('missing_device', '无法定位待恢复容器，禁止跳过重启备份')
+                    runtime = target_runtime_provider()
+                    def execute(cmd):
+                        return _execute_physical(runtime, physical, cmd)
+                else:
+                    def execute(cmd):
+                        return device_service.exec_shell_new(device_id=target, shell_cmd=cmd)
+                check = prepare_backup(
+                    execute=execute,
+                    operation_id=uuid.uuid5(uuid.NAMESPACE_URL, 'restart:' + target).hex,
+                    bot_id=ctx.bot_id, target_id=target,
+                )
 
             def verify():
                 current = bot_repository.get_by_id_and_owner(ctx.bot_id, ctx.owner_id)
@@ -251,3 +265,44 @@ class AicodingRestartBackupMixin:
                          "bot_id=%s binding_id=%s target_id=%s error_type=%s reason=%s",
                          ctx.bot_id, binding_id, device_id, type(error).__name__, error_reason(error))
             raise
+
+
+def _field(record, name):
+    return record.get(name) if isinstance(record, dict) else getattr(record, name, None)
+
+
+def _execute_physical(runtime, target, cmd):
+    """Use the existing public POST API; no shared command/recovery API extension."""
+    return runtime.post_bots_api(
+        path=f"/api/v1/paas/devices/{quote(target, safe='@')}/commands",
+        payload={'cmd': cmd}, action='aicoding_restart_backup')
+
+
+def _coding_strategy(bot):
+    # Resolve through the existing registry; do not invent a second engine map.
+    from ..registry import resolve_provisioning
+    ctx, strategy = resolve_provisioning(
+        bot_id=str(bot.get('bot_id') or ''),
+        owner_id=str(bot.get('owner_id') or bot.get('entity_id') or ''),
+        bot_type=str(bot.get('bot_type') or ''),
+        active_engine=bot.get('active_engine') or bot.get('engine_type'),
+        template_type=bot.get('template_type'), template_config=bot.get('template_config'),
+    )
+    return ctx, strategy if isinstance(strategy, AicodingRestartBackupMixin) else None
+
+
+async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime: Any) -> None:
+    """Coding-only precondition for published/caller restart call sites."""
+    ctx, strategy = _coding_strategy(bot)
+    if strategy is not None:
+        await asyncio.to_thread(strategy.prepare_restart, ctx,
+                                device_id=device_id, target_runtime=target_runtime)
+
+
+async def execute_bot_restart(bot_service, **kwargs):
+    """Keep the synchronous Service API; only coding's blocking wait is offloaded."""
+    bot = bot_service.get_bot(kwargs['bot_id'], kwargs['user_id'])
+    _, strategy = _coding_strategy(bot)
+    if strategy is None:
+        return bot_service.restart_bot(**kwargs)
+    return await asyncio.to_thread(bot_service.restart_bot, **kwargs)

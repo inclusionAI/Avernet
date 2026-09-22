@@ -12,6 +12,7 @@ from .aicoding.strategy import (
     CODING_TEMPLATE_TYPES,
 )
 from .aicoding.cli_defaults import AicodingCliDefaultsResolver
+from .aicoding.restart_backup import execute_bot_restart, prepare_instance_restart
 from .aicoding.mcp_defaults import AicodingMcpDefaultsResolver
 from .aicoding.default_skill_set_selection import AicodingDefaultSkillSetSelectionResolver
 from .default import DefaultProvisioningStrategy
@@ -562,31 +563,10 @@ def resolve_outbound_rule_envelope(
         return None
 
 
-async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime: Any) -> None:
-    """Thin strategy dispatch for an existing published/caller instance."""
-    ctx, strategy = resolve_provisioning(
-        bot_id=str(bot.get("bot_id") or ""),
-        owner_id=str(bot.get("owner_id") or bot.get("entity_id") or ""),
-        bot_type=str(bot.get("bot_type") or "service"),
-        active_engine=bot.get("active_engine") or bot.get("engine_type"),
-        template_type=bot.get("template_type"), template_config=bot.get("template_config"),
-    )
-    await strategy.execute_restart(lambda: strategy.prepare_restart(
-        ctx, device_id=device_id, target_runtime=target_runtime))
-
-
-async def execute_bot_restart(bot_service, **kwargs):
-    """Select execution policy; lifecycle validation remains in BotService."""
-    bot = bot_service.get_bot(kwargs['bot_id'], kwargs['user_id'])
-    _, strategy = resolve_provisioning(
-        bot_id=kwargs['bot_id'], owner_id=kwargs['user_id'],
-        bot_type=str(bot.get('bot_type') or ''), active_engine=bot.get('active_engine'),
-        template_type=bot.get('template_type'), template_config=None,
-    )
-    return await strategy.execute_restart(lambda: bot_service.restart_bot(**kwargs))
-
 
 __all__ = [
+    "execute_bot_restart",
+    "prepare_instance_restart",
     "AICODING_ENGINE_TYPE",
     "BaasEngineBucketResolver",
     "BaasEngineBucketResolverRegistry",

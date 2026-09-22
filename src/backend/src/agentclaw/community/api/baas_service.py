@@ -120,9 +120,8 @@ class BaasServiceProtocol(Protocol):
         cmd: str,
         env: dict[str, str] | None = None,
         timeout_seconds: int = 30,
-        paas_device_id: str | None = None,
     ) -> dict[str, Any]:
-        """Execute on a bot; optional physical target must come from its inventory."""
+        """Execute a shell command inside a BaaS bot container."""
         ...
 
     def get_publish_progress(

@@ -123,8 +123,9 @@ async def test_instance_targets_are_pinned_and_inventory_is_rechecked():
             await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': 'aicoding'},
                                            device_id='caller-uuid', target_runtime=runtime)
     prepared.call_args.kwargs['execute']('probe')
-    runtime.exec_command_on_bot.assert_called_once_with(
-        bot_uuid='caller-uuid', paas_device_id='physical-1', cmd='probe')
+    runtime.post_bots_api.assert_called_once_with(
+        path='/api/v1/paas/devices/physical-1/commands',
+        payload={'cmd': 'probe'}, action='aicoding_restart_backup')
 
 
 @pytest.mark.parametrize('error', [PermissionError('denied'), OSError('I/O')])
@@ -158,8 +159,10 @@ def test_original_lock_and_binding_survive_backup_failure(phase, provider):
     repository, state = _stateful_bot_repository(bot)
     device = Mock()
     device.get_device.return_value = {'device_id': 'old-container', 'device_provider': provider, 'status': 'ACTIVE'}
+    runtime = Mock()
+    runtime.get_bot.return_value = {'devices': [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]}
     svc = _make_service(locks, bot_repository=repository, device_provider=device,
-                        baas_service_provider=lambda: Mock())
+                        baas_service_provider=lambda: runtime)
 
     def prepare_check(**kwargs):
         assert not locks.rows  # No 25-minute wait inside the old 120-second lease.
@@ -325,18 +328,26 @@ def test_old_coding_bot_without_new_script_completes_original_restart(engine, pr
                     status='PENDING' if binding_status == 'PENDING' else 'ACTIVE')
     repository, _ = _stateful_bot_repository(bot)
     record = _make_record(id=42, device_id='legacy-container', device_provider=provider,
-                          status=binding_status)
+                          status=binding_status, device_props={"sandbox_id": "ARCA-SANDBOX-legacy@0"})
     device_repo = Mock()
     device_repo.get_by_id.return_value = device_repo.get_by_device_id.return_value = record
     device = make_device_service(repo=device_repo)
     device._exec_shell_new = Mock(side_effect=lambda **kw: _run_absent_helper_probe(kw['shell_cmd']))
+    runtime = Mock()
+    runtime.get_bot.return_value = {'devices': [{'provider_device_id': 'physical-legacy', 'status': 'ACTIVE'}]}
+    runtime.post_bots_api.side_effect = lambda **kw: vars(_run_absent_helper_probe(kw['payload']['cmd']))
     svc = _make_service(locks, bot_repository=repository, device_provider=device,
-                        baas_service_provider=lambda: Mock())
+                        baas_service_provider=lambda: runtime)
     with patch.object(svc, 'stop_bot', return_value=True) as stop, \
          patch.object(svc, 'start_bot', return_value=bot) as start, \
          patch.object(svc, '_restart_bot_baas', return_value=bot) as update:
         assert svc.restart_bot(bot_id='bot001', user_id='user001') == bot
-    assert device._exec_shell_new.call_count == 2
+    if provider == 'baas' or binding_status in {'FAILED', 'STOPPED'}:
+        device._exec_shell_new.assert_not_called()
+        assert runtime.post_bots_api.call_count == 2
+    else:
+        assert device._exec_shell_new.call_count == 2
+        runtime.post_bots_api.assert_not_called()
     assert 'status=legacy' in caplog.text and 'reason=helper_absent' in caplog.text
     if provider == 'arca':
         stop.assert_called_once()
@@ -387,12 +398,12 @@ async def test_legacy_published_or_caller_instance_without_script_is_allowed(eng
     runtime = Mock()
     runtime.get_bot.return_value = {'devices': [
         {'provider_device_id': 'physical-legacy', 'status': 'ACTIVE'}]}
-    runtime.exec_command_on_bot.side_effect = lambda **kw: vars(_run_absent_helper_probe(kw['cmd']))
+    runtime.post_bots_api.side_effect = lambda **kw: vars(_run_absent_helper_probe(kw['payload']['cmd']))
     await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': engine},
                                    device_id='instance-legacy', target_runtime=runtime)
-    assert runtime.exec_command_on_bot.call_count == 2
-    assert all(call.kwargs['paas_device_id'] == 'physical-legacy'
-               for call in runtime.exec_command_on_bot.call_args_list)
+    assert runtime.post_bots_api.call_count == 2
+    assert all(call.kwargs['path'] == '/api/v1/paas/devices/physical-legacy/commands'
+               for call in runtime.post_bots_api.call_args_list)
 
 
 @pytest.mark.parametrize('engine', ['openclaw', 'teclaw', 'hermes', 'moltis', 'unknown', None])
@@ -407,33 +418,60 @@ async def test_non_coding_instance_skips_all_backup_dependencies(engine):
 
 
 @pytest.mark.parametrize('status', ['ACTIVE', 'PENDING', 'FAILED', 'STOPPED', 'RELEASED', 'UNKNOWN'])
-@pytest.mark.parametrize('allow_recovery', [False, True])
-def test_command_recovery_opt_in_preserves_existing_status_gate(status, allow_recovery):
+def test_shared_command_status_gate_remains_unchanged(status):
     from tests.community.core.devices.services.test_device_service import _make_service, _make_record
     from agentclaw.community.core.devices.errors import InvalidDeviceStatusError
     repo = Mock()
     repo.get_by_device_id.return_value = _make_record(status=status)
     svc = _make_service(repo=repo)
     svc._exec_shell_new = Mock(return_value='original-result')
-    allowed = status in {'ACTIVE', 'PENDING'} or (allow_recovery and status in {'FAILED', 'STOPPED'})
+    allowed = status in {'ACTIVE', 'PENDING'}
     if allowed:
-        assert svc.exec_shell_new('device', 'probe', allow_recovery=allow_recovery) == 'original-result'
+        assert svc.exec_shell_new('device', 'probe') == 'original-result'
         svc._exec_shell_new.assert_called_once()
     else:
         with pytest.raises(InvalidDeviceStatusError):
-            svc.exec_shell_new('device', 'probe', allow_recovery=allow_recovery)
+            svc.exec_shell_new('device', 'probe')
         svc._exec_shell_new.assert_not_called()
     repo.update_status.assert_not_called()
 
 
-@pytest.mark.parametrize('allow_recovery', [False, True])
-def test_router_only_forwards_recovery_opt_in_when_requested(allow_recovery):
-    from tests.community.core.devices.services.test_device_service_router import _make_router
-    router, *_ = _make_router()
-    provider = Mock()
-    with patch.object(router, '_get_provider_for_device_id', return_value=provider):
-        router.exec_shell_new('device', 'probe', allow_recovery=allow_recovery)
-    if allow_recovery:
-        provider.exec_shell_new.assert_called_once_with('device', 'probe', allow_recovery=True)
-    else:
-        provider.exec_shell_new.assert_called_once_with('device', 'probe')
+def test_physical_command_reuses_unchanged_public_baas_api():
+    from tests.community.core.service_bot.services.test_baas_service_exec_command import _make_service
+    runtime, _ = _make_service()
+    result = {'exit_code': 0, 'stdout': 'result'}
+    runtime._http.post.return_value.json.return_value = {'code': 0, 'data': result}
+    assert backup._execute_physical(runtime, 'physical@12', 'probe') == result
+    runtime._http.post.assert_called_once_with(
+        '/api/v1/paas/devices/physical@12/commands', params={'tenant': runtime._tenant},
+        json={'cmd': 'probe'}, timeout=30.0)
+
+
+def test_physical_command_cannot_inject_another_url_path():
+    runtime = Mock()
+    backup._execute_physical(runtime, 'device/other?x=1', 'probe')
+    assert runtime.post_bots_api.call_args.kwargs['path'] == (
+        '/api/v1/paas/devices/device%2Fother%3Fx%3D1/commands')
+
+
+def test_physical_command_transport_failure_is_not_legacy():
+    runtime = Mock()
+    runtime.post_bots_api.side_effect = TimeoutError('unavailable')
+    with pytest.raises(TimeoutError):
+        backup.prepare_backup(execute=lambda cmd: backup._execute_physical(runtime, 'physical', cmd),
+                              operation_id=OPERATION, bot_id='b', target_id='physical')
+
+
+def test_restart_policy_does_not_extend_shared_execution_apis():
+    import inspect
+    from agentclaw.community.core.bot_management.engines.provisioning import EngineProvisioningStrategy
+    from agentclaw.community.core.bot_management.engines.registry import execute_bot_restart
+    from agentclaw.community.core.devices.services.device_service import DeviceService
+    from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
+    from agentclaw.community.core.service_bot.services.baas_service import BaasService
+    assert execute_bot_restart.__module__ == backup.__name__
+    assert prepare_instance_restart.__module__ == backup.__name__
+    assert 'execute_restart' not in EngineProvisioningStrategy.__dict__
+    assert 'allow_recovery' not in inspect.signature(DeviceService.exec_shell_new).parameters
+    assert 'allow_recovery' not in inspect.signature(DeviceServiceRouter.exec_shell_new).parameters
+    assert 'paas_device_id' not in inspect.signature(BaasService.exec_command_on_bot).parameters

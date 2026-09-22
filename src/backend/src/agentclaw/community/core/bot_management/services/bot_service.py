@@ -4821,6 +4821,7 @@ class BotService(BotServiceProtocol):
         lock = strategy.prepare_restart(
             ctx, binding_id=binding_id,
             device_service_provider=self._device_service_provider,
+            target_runtime_provider=lambda: self._baas_service_provider(),
             bot_repository=self._repository,
             acquire_lock=lambda: self._try_acquire_restart_lock(env, entity_id, bot_id, user_id),
             release_lock=lambda acquired: self._restart_lock_repo.release(
