@@ -3,9 +3,11 @@
 ## Boundary
 
 This is an aicoding/claude_code provisioning policy, not a generic lifecycle or
-command-execution framework. Its implementation, async adaptation, compatibility
-checks, polling, physical-target selection, receipt verification and logs all
-live in `restart_backup.py`. The registry only re-exports the two entrypoints.
+command-execution framework. Its backup implementation, coding-specific offloading, compatibility checks,
+polling, physical-target selection, receipt verification and logs live in
+`restart_backup.py`. The registry resolves the existing provisioning strategy
+and dispatches instance preconditions through its declared async contract; it
+contains no backup logic or concrete strategy type checks.
 
 Ordinary Bot restart calls `strategy.prepare_restart` once in place of its
 existing lock acquisition. The default strategy only invokes the original
@@ -15,11 +17,16 @@ releases the acquired lock on verification failure. Existing duplicate handling,
 stop/start/update, status transitions and allocation lock hand-off remain in the
 original caller. No lock repository or TTL changes are required.
 
-Async HTTP entrypoints invoke the coding-owned adapter; it offloads only coding
-restart work. Non-coding operations execute inline as before. Published restart
+Async HTTP entrypoints call `BotServiceProtocol.restart_bot_async`. BotService
+resolves the strategy and calls its `execute_restart` contract; coding offloads
+the original synchronous restart method, while default engines execute inline.
+The original synchronous Service API is unchanged. Published restart
 and caller upgrade each invoke the coding precondition before replacement.
 Ordinary publication, instance creation/reuse and workflow adoption are not
-backup operations. There is no new generic `execute_restart` strategy method.
+backup operations. Instance consumers call `prepare_restart_async`, which delegates to the same
+`prepare_restart` precondition. Default engines do not probe or offload; coding
+offloads the precondition. Failure propagates before the original replacement.
+The registry adapter is shared dispatch, not an independent lifecycle pipeline.
 
 ## Existing transports only
 
@@ -57,3 +64,37 @@ STOPPED recovery, default engines, unchanged shared command guards, existing
 PaaS POST transport, physical pinning, backup failure, lock order and receipt
 changes. Linux root/admin, live provider routing and NAS need staging validation
 with the paired scripts. No test here restarts a production Bot.
+
+## Runtime wire contract v1
+
+The helper CLI is `restart_backup start|status OPERATION_ID`. Platform exec must
+return exit code zero and stdout containing one JSON object. Unknown versions,
+unknown states, malformed output and nonzero/missing exit codes block replacement.
+Additional JSON fields are ignored to allow additive v1 changes.
+
+| Field | v1 requirement |
+| --- | --- |
+| `version` | Integer `1`; incompatible versions must not be silently accepted |
+| `operation_id` | The requested operation ID, identical throughout one operation |
+| `status` | `legacy`, `not_mounted`, `running`, `committed`, or `failed` |
+| `boot_id` | Nonempty container-boot identity, required except for `legacy` |
+| `backup` | Required for `committed`: object with `status: success`, matching `operation_id`, and nonempty `generation_id` |
+
+`legacy` is emitted only by the backend's missing-helper probe when both new
+capability markers are absent; it is not a fallback for transport errors.
+`not_mounted` means the installed helper found no canonical data mounts.
+`running` requires polling; it must not transition to a skip state. `committed`
+means writers have been stopped and the backup generation is durable. `failed`
+blocks replacement. Before replacement, the status, boot identity and committed
+generation are checked again; a changed identity/receipt blocks replacement.
+
+The paired script repository must implement this same v1 contract. Rollout must
+install the root-owned helper and admin sudo permission before enabling mounts.
+An OCB rollback is not safe for already-mounted runtimes unless a compatible
+backup gate remains in place. Never interpret CI mocks as root/admin or NAS
+integration evidence.
+
+The current polling interval is 2 seconds and the observation deadline is 1500
+seconds. This is not a hard transport timeout: an in-flight exec uses its existing
+transport timeout. These constants remain unchanged in this boundary-only patch;
+configuration and executor-capacity tuning are separate unresolved review items.

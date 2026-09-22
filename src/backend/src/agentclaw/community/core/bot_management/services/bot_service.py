@@ -27,6 +27,7 @@ from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     CLAUDE_CODE_ENGINE_TYPE,
 )
 from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_restart_strategy,
     normalize_engine_type,
     resolve_baas_engine_bucket,
 )
@@ -4610,6 +4611,12 @@ class BotService(BotServiceProtocol):
         updated_bot["engine_types"] = engine_types
         logger.info(f"[bot_service.start_bot] Bot {bot_id} start initiated, device allocation in progress")
         return updated_bot
+
+    async def restart_bot_async(self, **kwargs) -> Dict[str, Any]:
+        """HTTP adapter entrypoint; retain the synchronous lifecycle and engine policy."""
+        bot = self.get_bot(kwargs['bot_id'], kwargs['user_id'])
+        ctx, strategy = resolve_restart_strategy(bot)
+        return await strategy.execute_restart(ctx, self.restart_bot, **kwargs)
 
     def restart_bot(
         self,

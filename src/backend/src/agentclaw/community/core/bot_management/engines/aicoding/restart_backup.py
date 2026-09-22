@@ -178,6 +178,12 @@ def _live_targets(state):
 
 
 class AicodingRestartBackupMixin:
+    async def prepare_restart_async(self, ctx, **kwargs):
+        return await asyncio.to_thread(self.prepare_restart, ctx, **kwargs)
+
+    async def execute_restart(self, ctx, restart, **kwargs):
+        return await asyncio.to_thread(restart, **kwargs)
+
     def prepare_restart(self, ctx, *, acquire_lock=None, release_lock=None,
                         device_service_provider=None, target_runtime_provider=None, **kwargs):
         """One lifecycle hook owns wait-before-lock and verify-under-lock."""
@@ -276,33 +282,3 @@ def _execute_physical(runtime, target, cmd):
     return runtime.post_bots_api(
         path=f"/api/v1/paas/devices/{quote(target, safe='@')}/commands",
         payload={'cmd': cmd}, action='aicoding_restart_backup')
-
-
-def _coding_strategy(bot):
-    # Resolve through the existing registry; do not invent a second engine map.
-    from ..registry import resolve_provisioning
-    ctx, strategy = resolve_provisioning(
-        bot_id=str(bot.get('bot_id') or ''),
-        owner_id=str(bot.get('owner_id') or bot.get('entity_id') or ''),
-        bot_type=str(bot.get('bot_type') or ''),
-        active_engine=bot.get('active_engine') or bot.get('engine_type'),
-        template_type=bot.get('template_type'), template_config=bot.get('template_config'),
-    )
-    return ctx, strategy if isinstance(strategy, AicodingRestartBackupMixin) else None
-
-
-async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime: Any) -> None:
-    """Coding-only precondition for published/caller restart call sites."""
-    ctx, strategy = _coding_strategy(bot)
-    if strategy is not None:
-        await asyncio.to_thread(strategy.prepare_restart, ctx,
-                                device_id=device_id, target_runtime=target_runtime)
-
-
-async def execute_bot_restart(bot_service, **kwargs):
-    """Keep the synchronous Service API; only coding's blocking wait is offloaded."""
-    bot = bot_service.get_bot(kwargs['bot_id'], kwargs['user_id'])
-    _, strategy = _coding_strategy(bot)
-    if strategy is None:
-        return bot_service.restart_bot(**kwargs)
-    return await asyncio.to_thread(bot_service.restart_bot, **kwargs)

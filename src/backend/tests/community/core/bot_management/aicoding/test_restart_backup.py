@@ -208,13 +208,13 @@ def test_wait_logs_are_throttled_but_keep_progress(caplog):
 @pytest.mark.asyncio
 async def test_http_dispatch_preserves_non_coding_execution_thread(engine):
     import threading
-    from agentclaw.community.core.bot_management.engines.registry import execute_bot_restart
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
     service = Mock()
     service.get_bot.return_value = {'active_engine': engine}
     current_thread = threading.get_ident()
     service.restart_bot.side_effect = lambda **kwargs: threading.get_ident()
     with patch.object(backup.asyncio, 'to_thread', side_effect=AssertionError('unexpected offload')):
-        assert await execute_bot_restart(service, bot_id='b', user_id='o') == current_thread
+        assert await BotService.restart_bot_async(service, bot_id='b', user_id='o') == current_thread
     service.restart_bot.assert_called_once_with(bot_id='b', user_id='o')
 
 
@@ -223,7 +223,7 @@ async def test_http_dispatch_preserves_non_coding_execution_thread(engine):
 async def test_coding_execution_keeps_event_loop_available(engine):
     import asyncio
     import threading
-    from agentclaw.community.core.bot_management.engines.registry import execute_bot_restart
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
     service = Mock()
     service.get_bot.return_value = {'active_engine': engine}
     started, release = threading.Event(), threading.Event()
@@ -235,7 +235,7 @@ async def test_coding_execution_keeps_event_loop_available(engine):
         return threading.get_ident()
 
     service.restart_bot.side_effect = operation
-    task = asyncio.create_task(execute_bot_restart(service, bot_id='b', user_id='o'))
+    task = asyncio.create_task(BotService.restart_bot_async(service, bot_id='b', user_id='o'))
     try:
         for _ in range(100):
             if started.is_set():
@@ -472,13 +472,51 @@ def test_physical_command_transport_failure_is_not_legacy():
 def test_restart_policy_does_not_extend_shared_execution_apis():
     import inspect
     from agentclaw.community.core.bot_management.engines.provisioning import EngineProvisioningStrategy
-    from agentclaw.community.core.bot_management.engines.registry import execute_bot_restart
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
     from agentclaw.community.core.devices.services.device_service import DeviceService
     from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
-    assert execute_bot_restart.__module__ == backup.__name__
-    assert prepare_instance_restart.__module__ == backup.__name__
-    assert 'execute_restart' not in EngineProvisioningStrategy.__dict__
+    assert "execute_restart" in EngineProvisioningStrategy.__dict__
+    assert hasattr(BotService, "restart_bot_async")
     assert 'allow_recovery' not in inspect.signature(DeviceService.exec_shell_new).parameters
     assert 'allow_recovery' not in inspect.signature(DeviceServiceRouter.exec_shell_new).parameters
     assert 'paas_device_id' not in inspect.signature(BaasService.exec_command_on_bot).parameters
+
+
+@pytest.mark.asyncio
+async def test_instance_dispatch_uses_strategy_contract_not_coding_type():
+    from agentclaw.community.core.bot_management.engines import registry
+
+    class OtherStrategy(DefaultProvisioningStrategy):
+        def prepare_restart(self, ctx, **kwargs):
+            prepared(ctx, **kwargs)
+
+    prepared = Mock()
+    ctx = object()
+    runtime = Mock()
+    with patch.object(registry, 'resolve_restart_strategy', return_value=(ctx, OtherStrategy())):
+        await registry.prepare_instance_restart(bot={}, device_id='target', target_runtime=runtime)
+    prepared.assert_called_once_with(ctx, device_id='target', target_runtime=runtime)
+    assert not runtime.mock_calls
+
+
+@pytest.mark.asyncio
+async def test_async_service_preserves_original_restart_error():
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
+    service = Mock()
+    service.get_bot.return_value = {'active_engine': 'openclaw'}
+    error = RuntimeError('original restart failure')
+    service.restart_bot.side_effect = error
+    with pytest.raises(RuntimeError) as caught:
+        await BotService.restart_bot_async(service, bot_id='b', user_id='o')
+    assert caught.value is error
+
+
+def test_async_service_contract_matches_implementation():
+    import inspect
+    from agentclaw.community.core.bot_management.bot_service_protocol import BotServiceProtocol
+    from agentclaw.community.core.bot_management.services.bot_service import BotService
+    expected = BotServiceProtocol.restart_bot_async
+    actual = BotService.restart_bot_async
+    assert inspect.iscoroutinefunction(expected) and inspect.iscoroutinefunction(actual)
+    assert list(inspect.signature(expected).parameters) == list(inspect.signature(actual).parameters)

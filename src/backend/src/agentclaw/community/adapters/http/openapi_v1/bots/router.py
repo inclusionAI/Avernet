@@ -1056,9 +1056,8 @@ async def restart_bot(
     a lifecycle state a restart cannot leave.
     """
     _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id))
-    from agentclaw.community.core.bot_management.engines.registry import execute_bot_restart
 
-    bot = await execute_bot_restart(bot_service, bot_id=bot_id, user_id=owner_id)
+    bot = await bot_service.restart_bot_async( bot_id=bot_id, user_id=owner_id)
     # The result carries the base record, so a collaborator restarting a
     # shared bot gets it without the owner's template snapshot (`_to_bot`).
     return envelope(

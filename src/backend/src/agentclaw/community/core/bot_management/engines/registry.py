@@ -12,7 +12,6 @@ from .aicoding.strategy import (
     CODING_TEMPLATE_TYPES,
 )
 from .aicoding.cli_defaults import AicodingCliDefaultsResolver
-from .aicoding.restart_backup import execute_bot_restart, prepare_instance_restart
 from .aicoding.mcp_defaults import AicodingMcpDefaultsResolver
 from .aicoding.default_skill_set_selection import AicodingDefaultSkillSetSelectionResolver
 from .default import DefaultProvisioningStrategy
@@ -564,8 +563,24 @@ def resolve_outbound_rule_envelope(
 
 
 
+def resolve_restart_strategy(bot):
+    """Resolve restart policy through the existing provisioning composition root."""
+    return resolve_provisioning(
+        bot_id=str(bot.get('bot_id') or ''),
+        owner_id=str(bot.get('owner_id') or bot.get('entity_id') or ''),
+        bot_type=str(bot.get('bot_type') or ''),
+        active_engine=bot.get('active_engine') or bot.get('engine_type'),
+        template_type=bot.get('template_type'), template_config=bot.get('template_config'),
+    )
+
+
+async def prepare_instance_restart(*, bot: dict, device_id: str, target_runtime: Any) -> None:
+    """Dispatch only; engine contracts own preconditions and execution mode."""
+    ctx, strategy = resolve_restart_strategy(bot)
+    await strategy.prepare_restart_async(ctx, device_id=device_id, target_runtime=target_runtime)
+
+
 __all__ = [
-    "execute_bot_restart",
     "prepare_instance_restart",
     "AICODING_ENGINE_TYPE",
     "BaasEngineBucketResolver",

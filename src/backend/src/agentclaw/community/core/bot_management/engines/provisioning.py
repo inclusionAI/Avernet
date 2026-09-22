@@ -242,6 +242,14 @@ class EngineProvisioningStrategy(ABC):
         """Engine precondition; default preserves the caller's original lock operation."""
         return acquire_lock() if acquire_lock is not None else None
 
+    async def prepare_restart_async(self, ctx: BotProvisioningContext, **kwargs):
+        """Async consumers use the same precondition; default performs no I/O."""
+        return self.prepare_restart(ctx, **kwargs)
+
+    async def execute_restart(self, ctx: BotProvisioningContext, restart, **kwargs):
+        """Preserve inline execution unless the engine requires blocking work offload."""
+        return restart(**kwargs)
+
     @abstractmethod
     def apply_restart_extra_configs(
         self,
