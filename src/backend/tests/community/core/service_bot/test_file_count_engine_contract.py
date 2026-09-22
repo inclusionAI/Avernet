@@ -39,7 +39,7 @@ def file_count_contract(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", str(root / "workspace"))
 
     class CountEngine(BaseEngine):
-        name = "file-count-contract"
+        name = "openclaw"
         version = "1.0.0"
 
         @property
