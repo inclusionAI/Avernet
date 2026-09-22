@@ -335,6 +335,11 @@ class SkillsMaterialiser(Materialiser):
             for intent in intents
         ]
         removals = tuple(sorted((set(area) | set(local_assets)) - declared))
+        # Local package replacement deliberately preserves the row's scanned
+        # ``mcp_dependencies``; package validation/upload neither parses nor
+        # rewrites them. A new Local row therefore starts dependency-free.
+        # The declared names already present in this catalog are consequently
+        # the exact post-write dependency projection, including Dry-run.
         retained_local = [
             local_assets[name] for name in declared if name in local_assets
         ]

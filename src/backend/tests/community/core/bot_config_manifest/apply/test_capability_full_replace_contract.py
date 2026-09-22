@@ -409,6 +409,12 @@ manifest:
     assert dry_run.status is ApplyStatus.SUCCEEDED
     assert dry_categories[ManifestCategory.SKILLS].entries[0].outcome is EntryOutcome.UPDATED
     assert dry_categories[ManifestCategory.MCP].removals == ("mcp.omit",)
+    dry_dependency = next(
+        entry
+        for entry in dry_categories[ManifestCategory.MCP].entries
+        if entry.identity == "mcp.dep"
+    )
+    assert dry_dependency.outcome is EntryOutcome.UPDATED
     assert runtime.scopes == []
     with db.orm_session() as session:
         assert session.query(SkillSetSkill).count() == 1

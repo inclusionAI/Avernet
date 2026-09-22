@@ -64,6 +64,8 @@ class FakeSkillRepository:
         self.rows: dict[int, dict[str, Any]] = {}
         self.creates: list[dict[str, Any]] = []
         self.updates: list[tuple[str, dict[str, Any]]] = []
+        self.delete_preflights: list[str] = []
+        self.delete_blocker: Exception | None = None
         self._next = 100
 
     def list_bot_local_by_name(self, *, bot_id: str, name: str) -> list[dict]:
@@ -96,6 +98,11 @@ class FakeSkillRepository:
             return False
         del self.rows[int(skill_id)]
         return True
+
+    def require_unreferenced_for_delete(self, skill_id: str) -> None:
+        self.delete_preflights.append(skill_id)
+        if self.delete_blocker is not None:
+            raise self.delete_blocker
 
 
 class LiveCapabilityReader:
@@ -272,6 +279,38 @@ def test_removal_deactivates_and_physically_deletes_the_local_asset() -> None:
     assert activation.skill_deactivations == [skills.creates[0]["id"]]
     assert _indexed(store) == []
     assert skills.rows == {}
+
+
+def test_removal_checks_references_before_deleting_store_objects() -> None:
+    import pytest
+
+    _, store, _oss, skills, _, _ = _rig({})
+    port = PlatformSkillPackageUpload(
+        store, validator=real_validator(), skill_repository=skills
+    )
+    uploaded = _run(
+        port.upload_local_skill(
+            bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ
+        )
+    )
+    skill_id = str(uploaded["skill"]["id"])
+    indexed_before = _indexed(store)
+    skills.delete_blocker = RuntimeError("SKILL_ASSET_IN_USE")
+
+    with pytest.raises(RuntimeError, match="SKILL_ASSET_IN_USE"):
+        _run(
+            port.delete_local_skill(
+                skill_id=skill_id,
+                name="quality-check",
+                bot_id="b_1",
+                owner_id="u_owner",
+                actor_id="u_actor",
+            )
+        )
+
+    assert skills.delete_preflights == [skill_id]
+    assert _indexed(store) == indexed_before
+    assert int(skill_id) in skills.rows
 
 
 # ── the port's own answers ─────────────────────────────────────────────────

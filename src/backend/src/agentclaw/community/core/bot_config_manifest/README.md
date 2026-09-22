@@ -370,6 +370,10 @@ omitted active or inactive Local packages are physically deleted while shared
 Repo/Center assets remain. `mcp` is the complete explicit MCP snapshot: every
 declaration becomes Direct with its complete Bot override, while the final
 runtime closure also retains derived MCP dependencies of the final Skills.
+Those dependencies are the persisted scanner metadata on Skill rows: Local
+package replacement preserves them, and a newly uploaded Local row starts with
+none. Manifest Apply does not infer MCP identity from arbitrary package text or
+introduce a dependency preflight.
 Default exclusion plus Installation is the persisted Direct shape and survives
 read repair; source-only conversions remain externally `unchanged`.
 
@@ -733,6 +737,7 @@ internal_dependencies:
   - agentclaw.community.core.ports.activation_port  # ActivationPort — the outbound port both apply-side activation delegates declare
   - agentclaw.community.core.ports.skill_package_upload_port  # SkillPackageUploadPort — the outbound port both upload implementations declare
   - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the activation Service API both delegates wrap and forward `project` to
+  - agentclaw.community.core.skill_center.errors  # internal committed-write marker used to distinguish FAILED from confirmed PARTIAL
   - agentclaw.community.core.skill_center.local_skill_delete_service_protocol  # device-backed physical Local cleanup
   - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # the upload road a manifest skill travels (W5)
   - agentclaw.community.core.skill_center.mcp_dependency_scope  # final Skill dependency closure shared with the MCP wave
