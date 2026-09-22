@@ -106,6 +106,7 @@ class TestCount:
         work = tmp_path / "workspace"
         work.mkdir()
         monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", str(work))
+        rich_manager._engine = "openclaw"
         rich_manager._active_engine._file = OpenClawFileAdapter(_FilePortMixin())
         original_spawn = asyncio.create_subprocess_exec
         spawned = asyncio.Event()
@@ -140,6 +141,7 @@ class TestCount:
         work.mkdir()
         (work / "a").write_text("data")
         monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", str(work))
+        rich_manager._engine = "openclaw"
         rich_manager._active_engine._file = OpenClawFileAdapter(_FilePortMixin())
         with caplog.at_level("INFO", logger="api-file"):
             response = client.get("/api/file/count", params={"path": "workspace", "request_id": "req-1"})
@@ -156,22 +158,22 @@ class TestCount:
         ("path_forbidden", 403), ("permission_denied", 403), ("scan_timeout", 408),
         ("directory_changed", 409), ("busy", 503), ("scan_failed", 500), ("unsupported", 501),
     ])
-    def test_stable_errors(self, rich_manager, client, caplog, code, status):
+    def test_stable_errors(self, rich_manager, client, caplog, code, status, monkeypatch):
         from engine.community.kernel.file_count import FileCountError
 
         plugin = MagicMock()
         plugin.count_files = AsyncMock(side_effect=FileCountError(code))
-        rich_manager._active_engine._file = plugin
+        monkeypatch.setattr(EngineManager, "file_counter", property(lambda self: plugin))
         with caplog.at_level("INFO", logger="api-file"):
             response = client.get("/api/file/count", params={"path": "workspace", "request_id": "err-1"})
         assert response.status_code == status
         assert response.json()["detail"] == code
         assert caplog.records[-1].fields["error_code"] == code
 
-    def test_unexpected_error_never_leaks_credentials(self, rich_manager, client, caplog):
+    def test_unexpected_error_never_leaks_credentials(self, rich_manager, client, caplog, monkeypatch):
         plugin = MagicMock()
         plugin.count_files = AsyncMock(side_effect=RuntimeError("Authorization Bearer reusable-secret"))
-        rich_manager._active_engine._file = plugin
+        monkeypatch.setattr(EngineManager, "file_counter", property(lambda self: plugin))
         with caplog.at_level("INFO", logger="api-file"):
             response = client.get("/api/file/count", params={"path": "workspace", "request_id": "err-2"})
         assert response.status_code == 500

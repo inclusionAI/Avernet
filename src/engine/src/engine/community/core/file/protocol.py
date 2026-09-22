@@ -37,7 +37,7 @@ class FileService(Protocol):
         explicitly fail rather than return a partial or empty result. OpenClaw
         follows confined links and skips cyclic, dangling and outside links.
         """
-        ...
+        raise NotImplementedError("File counting uses the shared FileCountService")
 
     async def upload(
         self,
