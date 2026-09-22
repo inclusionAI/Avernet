@@ -721,6 +721,7 @@ from agentclaw.community.core.task.task_harness.centralized_recovery import (  #
     _reset_sla_threshold_ms as __reset_sla_threshold_ms,
     _reset_elapsed_ms as __reset_elapsed_ms,
     _emit_reset_trajectory as __emit_reset_trajectory,
+    _emit_enter_bbs_trajectory as __emit_enter_bbs_trajectory,
     _on_harness_collect as __on_harness_collect,
     on_miss as _on_miss,
     on_harness as _on_harness,
@@ -743,6 +744,7 @@ TaskHarness._reset_action_result = __reset_action_result
 TaskHarness._reset_sla_threshold_ms = __reset_sla_threshold_ms
 TaskHarness._reset_elapsed_ms = __reset_elapsed_ms
 TaskHarness._emit_reset_trajectory = __emit_reset_trajectory
+TaskHarness._emit_enter_bbs_trajectory = __emit_enter_bbs_trajectory
 TaskHarness._on_harness_collect = __on_harness_collect
 TaskHarness.on_miss = _on_miss
 TaskHarness.on_harness = _on_harness

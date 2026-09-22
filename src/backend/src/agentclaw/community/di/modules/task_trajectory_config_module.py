@@ -15,6 +15,7 @@ YAML shape under ``user_config.task_trajectory``::
       analysis_bot_id: "bot-traj-analyst"          # REQUIRED to enable do_analysis=true (prod)
       analysis_bot_id_pre: "bot-traj-analyst-pre"  # pre env override (mirrors openapi_bot.base_url_pre)
       tc_bot_timeout_seconds: 180                  # synchronous round-trip cap (float seconds)
+      running_session_message_limit: 50            # 会话明细探测每 session 最大消息条数(int)
 
 The bot_id is deployment-configured, not per-request (决策 #10): the P5b service
 reads ``analysis_bot_id`` and passes it as ``analysis_executor`` to
@@ -71,6 +72,13 @@ class TaskTrajectoryConfigModule(Module):
                 "tc_bot_timeout_seconds",
                 float,
                 defaults.tc_bot_timeout_seconds,
+                "task_trajectory",
+            ),
+            running_session_message_limit=config_module._coerce(
+                block,
+                "running_session_message_limit",
+                int,
+                defaults.running_session_message_limit,
                 "task_trajectory",
             ),
         )

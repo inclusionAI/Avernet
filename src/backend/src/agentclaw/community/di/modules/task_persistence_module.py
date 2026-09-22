@@ -76,7 +76,13 @@ from agentclaw.community.core.task.task_context.task_trajectory.trajectory_servi
     TaskTrajectoryServiceProtocol,
 )
 from agentclaw.community.core.task.task_context.task_context_service import TaskContextService
-from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
+from agentclaw.community.core.task.task_context.task_graph_service import (  # noqa: E402
+    TaskGraphService,
+)
+from agentclaw.community.core.task.task_runner.client.ports import (
+    BcsClientPort,
+    OpenApiBotPort,
+)
 from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
 
@@ -194,11 +200,35 @@ class TaskPersistenceModule(Module):
                 type(exc).__name__, exc,
             )
             config = None
+        # RUNNING 节点会话明细探测的两个可选协作方(决策 #14 精神:未接线 → 探测
+        # 整体关闭,do_analysis 传 running_sessions=None,行为与探测前一致):
+        # * TaskGraphService — 读 task_execution_graph 现场节点状态/session_id
+        #   (TaskModule 单例绑定;轻量 injector 未装 → get 抛 → None);
+        # * BcsClientPort — 经 BCS 拉会话明细(profile 模块绑定;community 提供
+        #   方者在空配置下可能直接返回 None,同样自然关探测)。
+        try:
+            graph = injector.get(TaskGraphService)
+        except Exception as exc:  # noqa: BLE001  轻量 DI 未装配 TaskModule
+            logger.info(
+                "[task-persistence] TaskGraphService 未绑定 → RUNNING 会话探测关闭:%s: %s",
+                type(exc).__name__, exc,
+            )
+            graph = None
+        try:
+            bcs = injector.get(BcsClientPort)
+        except Exception as exc:  # noqa: BLE001  轻量 DI 未装配 runner profile
+            logger.info(
+                "[task-persistence] BcsClientPort 未绑定 → RUNNING 会话探测关闭:%s: %s",
+                type(exc).__name__, exc,
+            )
+            bcs = None
         return TaskTrajectoryService(
             assembler=injector.get(TaskTrajectoryAssembler),
             repo=injector.get(TaskTrajectoryRepositoryProtocol),
             analyzer=injector.get(TaskTrajectoryAnalyzer),
             config=config,
+            graph=graph,
+            bcs=bcs,
         )
 
     @singleton

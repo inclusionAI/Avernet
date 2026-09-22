@@ -1014,38 +1014,48 @@ class TestDoAnalysisTrueServicePath:
             _run(svc.get_trajectory(task_id, do_analysis=True))
 
     def test_do_analysis_idempotent_returns_persisted_without_bot_call(self, monkeypatch):
-        """``do_analysis=true`` is IDEMPOTENT: when the head row already carries a
-        non-empty ``analysis``, it returns the persisted analysis directly WITHOUT
-        calling the bot (省一次 bot 调用 / 超时 / 504). Only an empty/None analysis
-        triggers the bot (see the env-aware + ``test_do_analysis_true…`` tests)."""
+        """``do_analysis=true`` is INCREMENTALLY idempotent, keyed to the
+        ``timeline_version`` fingerprint (NOT mere analysis presence): a first
+        run backfills a stamped analysis; a second call with an UNCHANGED
+        event set returns the persisted analysis WITHOUT calling the bot
+        (省一次 bot 调用 / 超时 / 504); appending a NEW trajectory event makes
+        the third call re-run the bot and re-stamp the fingerprint."""
         db = _make_db()
         repo = TaskTrajectoryRepository(db)
         task_id = "e2e-idem"
         graph_svc = TaskGraphService()
         _drive_submit(repo, graph_svc, task_id=task_id)   # SUBMIT event row
-        # warmup: assemble once to ensure the head row exists (upsert_head) BEFORE
-        # backfill — submit emission only inserts the SUBMIT event; the head
-        # is created lazily on the first assemble. Without this, backfill's UPDATE
-        # hits 0 rows and the idempotent short-circuit never fires.
-        assembler = TaskTrajectoryAssembler(repo)
-        assert assembler.assemble(task_id).timeline, "warmup assemble should yield the SUBMIT event"
-        persisted = json.dumps({
-            "analysis_type": "tc_bot", "analysis_executor": "prior-bot",
-            "analysis_input": "prior input", "analysis_output": "prior conclusion",
-            "gmt_create": 1, "boost_reason": "prior boost", "failure_reason": None,
-        }, ensure_ascii=False)
-        repo.backfill_analysis(task_id, persisted)
 
-        bot = _FakeBot(content=json.dumps({"analysis_output": "should not be called"}, ensure_ascii=False))
+        bot = _FakeBot(content=json.dumps({"analysis_output": "first conclusion"}, ensure_ascii=False))
+        assembler = TaskTrajectoryAssembler(repo)
         svc = TaskTrajectoryService(
             assembler, repo, TaskTrajectoryAnalyzer(bot=bot),
             TrajectoryAnalysisConfig(analysis_bot_id="botA"),
         )
         monkeypatch.setenv("SERVER_ENV", "prod")
-        result = _run(svc.get_trajectory(task_id, do_analysis=True))
-        # returned the PRIOR (persisted) analysis, NOT a fresh one
-        assert result.analysis == persisted
-        assert bot.last_call is None  # bot was NOT called — this is the idempotent short-circuit
+
+        # run 1 — fresh: bot called; the backfilled analysis carries the
+        # timeline_version stamp computed from the current event rows.
+        result1 = _run(svc.get_trajectory(task_id, do_analysis=True))
+        assert bot.last_call is not None
+        parsed1 = json.loads(result1.analysis)
+        assert parsed1.get("timeline_version"), "backfilled analysis must carry the fingerprint stamp"
+
+        # run 2 — UNCHANGED timeline → fingerprint match → persisted analysis
+        # returned directly WITHOUT calling the bot.
+        bot.last_call = None
+        result2 = _run(svc.get_trajectory(task_id, do_analysis=True))
+        assert result2.analysis == result1.analysis
+        assert bot.last_call is None, "version match must short-circuit the bot"
+
+        # run 3 — a NEW trajectory event arrives → fingerprint mismatch →
+        # the bot re-runs and the fresh backfill carries the NEW stamp.
+        _drive_plan(repo, graph_svc, task_id=task_id, child_node_id="c9")
+        bot.last_call = None
+        result3 = _run(svc.get_trajectory(task_id, do_analysis=True))
+        assert bot.last_call is not None, "appended event must invalidate the stamp"
+        parsed3 = json.loads(result3.analysis)
+        assert parsed3["timeline_version"] != parsed1["timeline_version"]
 
 
 # ---------------------------------------------------------------------------

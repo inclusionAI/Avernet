@@ -186,6 +186,52 @@ def _emit_reset_trajectory(
     )
 
 
+def _emit_enter_bbs_trajectory(self, task_id: str, current) -> None:
+    """升 BBS 广场任务**产生**的轨迹事件 — 在 ``_enter_root_bbs`` 置 ``bbs_mode``
+    +调度 notify 的那一刻**同步**发射,补上"产生→调度→执行"链路中 ``bbs_entered``
+    (bbs_modal_executor 执行期才发)之前的时间线盲区:需求点名"BBS 任务产生之后就要
+    立即录入轨迹,不能等调度、执行的时候才记录"。
+
+    事件形状:node_id = 根节点(提交 BBS 广场任务的主体),action_type 复用 SUBMIT
+    ("任务提交"语义;无新增枚举),action_result="enter_bbs";ext_info 自描述来源
+    (execution_mode=bbs / phase=enter_root_bbs / loop_round / hung_reason——该轮
+    BBS 是"第几轮"以及"为何升级")。status_from/status_to 故意 None:对 analyzer
+    七 bullet 与 ``_terminal_status`` 全惰性(不参与终态判定,bullets 只键 RESET/
+    EXECUTE|VERIFY/PLAN/error_type/terminal TRANSITION)。
+
+    决策 #14 fire-and-forget:全程 try/except 吞异常 + WARNING,发射失败绝不阻断
+    升级主流程;bbs_mode 置位 / loop_round 递增不在 swallow 内。relay 模式的棒发布
+    已有同步 relay 轨迹,不经此函数。
+    """
+    try:
+        root = next(
+            (n for n in current.tasks if n.node_id == task_id),
+            None,
+        )
+        hung_reason = (
+            (root.run_info.extend_props or {}).get("hung_reason")
+            if root is not None else None
+        ) or (current.extend_props or {}).get("hung_reason") or ""
+        self._log_trajectory(
+            task_id,
+            task_id,  # node_id = 根节点(BBS 广场任务产生的主体)
+            "submit",  # TrajectoryActionType.SUBMIT.value(复用;emitter accepts str)
+            action_result="enter_bbs",
+            action_input=None,
+            ext_info={
+                "execution_mode": "bbs",
+                "phase": "enter_root_bbs",
+                "loop_round": getattr(current, "loop_round", None),
+                "hung_reason": hung_reason,
+            },
+        )
+    except Exception as ex:  # noqa: BLE001  轨迹旁路:吞而不抛 + WARNING(决策 #14)
+        logger.warning(
+            "[task][trajectory][bbs] task=%s enter_bbs 发射失败:%s",
+            task_id, ex,
+        )
+
+
 async def _on_harness_collect(
     self, task_id: str, node_id: str, exec_error: str, side: list[tuple]
 ) -> None:
@@ -741,6 +787,9 @@ def _enter_root_bbs(self, task_id: str, execution_graph) -> bool:
         return False
     self._reset_root_plan_round(task_id)
     self._schedule_bbs_notify(task_id, current)
+    # BBS 任务已产生:立即同步录轨迹(需求:不等调度/执行期的 bbs_entered)。
+    # 决策 #14:发射失败被吞,不阻断升级主流程。
+    self._emit_enter_bbs_trajectory(task_id, current)
     return True
 
 

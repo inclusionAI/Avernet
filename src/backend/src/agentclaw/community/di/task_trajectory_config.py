@@ -42,6 +42,9 @@ class TrajectoryAnalysisConfig:
     analysis_bot_id: str | None = None
     analysis_bot_id_pre: str | None = None  # pre env override (mirrors openapi_bot.base_url_pre)
     tc_bot_timeout_seconds: float = 180.0
+    # RUNNING 节点会话明细探测:每次 do_analysis 对每个 RUNNING session 经
+    # BcsClientPort.get_session_messages 拉取的最大消息条数(50 条内含 role/content 摘录)。
+    running_session_message_limit: int = 50
 
 
 __all__ = ["TrajectoryAnalysisConfig"]

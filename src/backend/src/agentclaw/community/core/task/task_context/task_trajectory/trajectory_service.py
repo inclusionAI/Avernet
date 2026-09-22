@@ -65,6 +65,7 @@ from agentclaw.community.core.task.task_runner.centralized_support import (
     logger,
 )
 
+import hashlib
 import json
 import logging
 import time
@@ -101,8 +102,19 @@ from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConf
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
+    from agentclaw.community.core.task.task_context.task_graph_service import (
+        TaskGraphService,
+    )
+    from agentclaw.community.core.task.task_runner.client.ports import (
+        BcsClientPort,
+    )
 
 logger = logging.getLogger("task.trajectory")
+
+# RUNNING 节点会话明细探测的摘录预算(字符):单条消息截断上限 + 全任务所有
+# 节点摘录总上限(超预算即停止消费且标 truncated,防 token 失控)。
+_RUNNING_SESSION_MSG_MAX_CHARS = 600
+_RUNNING_SESSION_TOTAL_MAX_CHARS = 4000
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +154,59 @@ def _event_signature(rec: TrajectoryEventRecord) -> tuple:
     )
 
 
+# ---------------------------------------------------------------------------
+# Timeline fingerprint — the incremental idempotency key for ``do_analysis``
+# ---------------------------------------------------------------------------
+
+
+def _timeline_fingerprint(records: list[TrajectoryEventRecord]) -> str:
+    """The sha256 fingerprint of a task's FULL trajectory-event set — the
+    ``timeline_version`` stamped into :class:`TrajectoryAnalysis` at backfill.
+
+    Ingredient per requirement: this task's ALL events concatenated in
+    ``id + gmt_create`` ascending order, prefixed by the event count. The
+    modified-timestamp (``gmt_modify``) is deliberately EXCLUDED:
+    ``backfill_analysis`` rewrites EVERY event row's ``gmt_modify`` on every
+    backfill (explicit UPDATE value + ORM ``onupdate``), so a gmt_modify-based
+    fingerprint recorded in run N can never match the re-computation in run
+    N+1 — idempotency would self-defeat and the bot would re-run on every
+    call. ``gmt_create`` is written only at INSERT and never touched again,
+    and the table is append-only, so "new event" ≡ "new id + new gmt_create"
+    — exactly the change signal the version check wants.
+
+    Pure function: no repo access, deterministic across input order (sorts by
+    ``id`` itself). Empty list → the stable ``sha256("v1:0")`` so a zero-event
+    task analysis stays idempotent.
+    """
+    parts = [f"v1:{len(records)}"]
+    for rec in sorted(records, key=lambda r: r.id):
+        gc = rec.gmt_create
+        formatted = (
+            gc.isoformat(sep=" ", timespec="microseconds")
+            if hasattr(gc, "isoformat") else str(gc)
+        )
+        parts.append(f"|{rec.id}:{formatted}")
+    return hashlib.sha256("".join(parts).encode("utf-8")).hexdigest()
+
+
+def _persisted_timeline_version(analysis_json: str | None) -> str | None:
+    """Defensively read the ``timeline_version`` stamped inside the persisted
+    head-row analysis JSON. ``None`` on any failure — non-dict JSON, corrupt
+    text, or a legacy analysis persisted before the key existed (``None`` is
+    the "never matches" sentinel: legacy rows re-analyze exactly once, then
+    carry the stamp)."""
+    if not analysis_json:
+        return None
+    try:
+        parsed = json.loads(analysis_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    version = parsed.get("timeline_version")
+    return version if isinstance(version, str) and version else None
+
+
 def _event_key(event: TrajectoryEvent) -> tuple:
     """The domain-event side of ``_event_signature`` (mirrors the record key).
 
@@ -161,6 +226,7 @@ def _event_key(event: TrajectoryEvent) -> tuple:
 def _build_ext_info_lookup(
     repo: TaskTrajectoryRepositoryProtocol,
     task_id: str,
+    records: list[TrajectoryEventRecord] | None = None,
 ) -> Callable[[TrajectoryEvent], dict | None]:
     """Build the ``ext_info_lookup`` seam the analyzer consumes.
 
@@ -171,6 +237,11 @@ def _build_ext_info_lookup(
     must not break the on-demand analysis), and returns a closure
     ``lookup(event) -> dict | None`` keyed by the stable 4-tuple signature.
 
+    ``records``: the SAME ``list_events_by_task`` result the caller already
+    fetched (the ``do_analysis`` path reads it ONCE for the timeline
+    fingerprint + this lookup). Supplied → the internal repo re-fetch is
+    skipped; ``None`` → fetched here (unchanged standalone behavior).
+
     The outer ``schema_v`` envelope (``{"schema_v": 1, "_dispatch_rationale": ...,
     "elapsed_ms": ...}``) is preserved as-is — the analyzer reads the specific
     keys it needs (``_dispatch_rationale`` / ``elapsed_ms`` / ``sla_threshold_ms``)
@@ -178,7 +249,8 @@ def _build_ext_info_lookup(
     """
     lookup: dict[tuple, dict | None] = {}
     try:
-        records = repo.list_events_by_task(task_id)
+        if records is None:
+            records = repo.list_events_by_task(task_id)
     except Exception as ex:  # noqa: BLE001  read failure → empty lookup (degrade)
         logger.warning(
             "[task][trajectory] ext_info_lookup 构建失败 task=%s: %s: %s",
@@ -284,11 +356,20 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         repo: TaskTrajectoryRepositoryProtocol,
         analyzer: TaskTrajectoryAnalyzer,
         config: "TrajectoryAnalysisConfig | None" = None,
+        graph: "TaskGraphService | None" = None,
+        bcs: "BcsClientPort | None" = None,
     ) -> None:
+        """``graph`` + ``bcs`` (the RUNNING-node session probe's collaborators)
+        are optional lightweight-DI deps: either unbound/None → the probe is
+        DISABLED and do_analysis passes ``running_sessions=None`` (zero
+        behavior change vs. the pre-probe service). Full DI wires both via
+        try/except-get fallbacks in ``TaskPersistenceModule``."""
         self._assembler = assembler
         self._repo = repo
         self._analyzer = analyzer
         self._config = config
+        self._graph = graph
+        self._bcs = bcs
 
     async def get_trajectory(
         self,
@@ -302,16 +383,22 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         table and returns ``TaskTrajectory``; ``analysis`` = persisted or
         ``None``; no DB write, no bot call.
 
-        ``do_analysis=True``: IDEMPOTENT — assembles; if the head row already
-        carries a non-empty ``analysis``, returns it directly WITHOUT calling the
-        bot (省一次 bot 调用 / 504). Only an empty/None analysis proceeds: builds
-        ``ext_info_lookup`` → calls the configured ``tc_bot`` analyzer → serializes
-        the ``TrajectoryAnalysis`` JSON → ``backfill_analysis`` (overwrite, 决策 #13
-        on the bot-run path) → returns the same-shape ``TaskTrajectory`` carrying
-        the fresh analysis. To FORCE a refresh, clear the persisted head-row
-        analysis, then re-call ``do_analysis=True``. Bot failure/timeout →
+        ``do_analysis=True``: INCREMENTALLY IDEMPOTENT — assembles; computes the
+        timeline fingerprint (ALL the task's event rows, ``id+gmt_create`` 正序);
+        if the head row carries a non-empty ``analysis`` whose persisted
+        ``timeline_version`` equals the freshly computed fingerprint (the
+        timeline is unchanged since the last analysis), returns it directly
+        WITHOUT calling the bot (省一次 bot 调用 / 504). Mismatch — empty/None
+        analysis, a legacy analysis without a stamp, or new events appended
+        after the last backfill — re-runs the bot: builds ``ext_info_lookup``
+        → calls the configured ``tc_bot`` analyzer → stamps the fresh
+        ``timeline_version`` → serializes the ``TrajectoryAnalysis`` JSON →
+        ``backfill_analysis`` (overwrite, 决策 #13 on the bot-run path) → returns
+        the same-shape ``TaskTrajectory`` carrying the fresh analysis. To FORCE
+        a refresh, append/change timeline events (or clear the head-row
+        analysis), then re-call ``do_analysis=True``. Bot failure/timeout →
         ``TrajectoryAnalysisError`` re-raised (504, no backfill — 决策 #14); bot
-        not configured (AND analysis absent) →
+        not configured (AND analysis stale/absent) →
         ``TrajectoryAnalysisNotConfiguredError`` (503).
         """
         if not do_analysis:
@@ -323,29 +410,53 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
     # ------------------------------------------------------------------
 
     async def _do_analysis(self, task_id: str) -> TaskTrajectory:
-        """Assemble → (已有 analysis 则直接返回,不再请求 bot) → build ext_info_lookup
-        → analyze → backfill → return."""
+        """Assemble → (timeline 版本与持久分析戳一致则直接返回) → build ext_info_lookup
+        → analyze → stamp timeline_version → backfill → return."""
         # 1. Assemble the timeline (read-side; no DB write beyond the head UPSERT
         #    which preserves existing analysis/gmt_modified).
         trajectory = self._assembler.assemble(task_id)
 
-        # idempotent 快路径:head 行 analysis 非空 → 已分析过,不再请求 bot,直接返回
-        # 持久化的分析。``do_analysis=true`` 的语义因此从"每次强制重跑 bot"改为"确保
-        # 有分析"(省一次 bot 调用 / 超时 / 504 风险)。只有 analysis 为 None/空串才走 bot。
-        # 需强制重分析时:清掉持久化 analysis(或将来加 force=true 入口)。
-        if trajectory.analysis:
+        # 1b. Read ALL the task's event rows ONCE — feeding both the timeline
+        #     fingerprint and the ext_info_lookup below. Read failure → WARNING
+        #     + ``fingerprint=None`` (the never-matching sentinel: an
+        #     unfingerprintable read must NOT be treated as a stale-match — the
+        #     analysis re-runs rather than serving possibly-stale analysis).
+        try:
+            records = self._repo.list_events_by_task(task_id)
+        except Exception as ex:  # noqa: BLE001  指纹读失败 → 视为不匹配(重跑,不误命中)
+            logger.warning(
+                "[task][trajectory] list_events_by_task 失败,指纹未计算 task=%s: %s: %s",
+                task_id, type(ex).__name__, ex,
+            )
+            records = None
+        fingerprint = _timeline_fingerprint(records) if records is not None else None
+
+        # 2. Incremental idempotent fast path: head analysis present AND its
+        #    persisted ``timeline_version`` equals the freshly computed
+        #    fingerprint → the timeline has not changed since the last
+        #    analysis; return the persisted analysis WITHOUT calling the bot
+        #    (省一次 bot 调用 / 504). Mismatch → the timeline gained events
+        #    after the last backfill → re-run the bot and re-stamp. A legacy
+        #    analysis persisted before ``timeline_version`` existed carries no
+        #    stamp → mismatch → re-analyzes exactly once, then carries the
+        #    stamp. ``fingerprint=None`` (records read failed) never matches.
+        if (
+            trajectory.analysis
+            and fingerprint is not None
+            and _persisted_timeline_version(trajectory.analysis) == fingerprint
+        ):
             logger.info(
-                "[task][trajectory] analysis already present, skip bot call "
+                "[task][trajectory] timeline_version match, skip bot call "
                 "(idempotent do_analysis) task=%s head_analysis_len=%d",
                 task_id, len(trajectory.analysis),
             )
             return trajectory
 
-        # 2. Build ext_info_lookup from the repo's records (the assembler DROPPED
+        # 3. Build ext_info_lookup from the same records (the assembler DROPPED
         #    ext_info; the analyzer re-queries via this closure).
-        ext_info_lookup = _build_ext_info_lookup(self._repo, task_id)
+        ext_info_lookup = _build_ext_info_lookup(self._repo, task_id, records=records)
 
-        # 3. Resolve the deployment-configured analysis bot_id (decision #10:
+        # 4. Resolve the deployment-configured analysis bot_id (decision #10:
         #    NOT per-request). None → 503 (service capability not ready, fix
         #    config — distinct from 504 bot failure/timeout).
         analysis_bot_id = self._resolve_analysis_bot_id()
@@ -359,7 +470,14 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 "do_analysis=true requires a deployment-configured bot_id"
             )
 
-        # 4. Call the analyzer (tc_bot executor; synchronous with timeout per
+        # 5. RUNNING 节点会话明细探测(决策 #14 精神:观测旁路,永不抛)。有节点卡在
+        #    RUNNING 时,经 task_execution_graph 拿 session_id → BCS 拉会话明细,
+        #    组 brief 交给分析 bot(大模型)判"工具调用报错 / 执行完不上报结果"等
+        #    timeline 看不到的问题。任一步失败 → 降级跳过该节点(WARNING),不影响
+        #    主分析。
+        running_sessions = await self._collect_running_session_briefs(task_id)
+
+        # 6. Call the analyzer (tc_bot executor; synchronous with timeout per
         #    决策 #10). Raises TrajectoryAnalysisError on bot timeout/failure/
         #    unparseable response — the caller (router) maps to 504; the service
         #    does NOT backfill on this path (decision #14).
@@ -368,24 +486,150 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
             ext_info_lookup,
             analysis_type=AnalysisType.TC_BOT,
             analysis_executor=analysis_bot_id,
+            running_sessions=running_sessions,
         )
 
-        # 5. Serialize the flat TrajectoryAnalysis (no event list, no recursion —
+        # 7. Stamp the timeline fingerprint the analysis was computed from —
+        #    the NEXT ``do_analysis=true`` compares its re-computed fingerprint
+        #    against this stamp (match → skip the bot). A ``records`` read
+        #    failure stamps ``None`` → the next call re-runs (never a stale
+        #    match). Stamped on the service side — the analyzer stays
+        #    transport-only and knows nothing of the repo.
+        analysis.timeline_version = fingerprint
+
+        # 8. Serialize the flat TrajectoryAnalysis (no event list, no recursion —
         #    P0). ensure_ascii=False keeps Chinese error messages readable in
         #    the persisted JSON (matches the emitter's ext_info convention).
+        #    The JSON now carries ``timeline_version`` automatically via ``asdict``.
         analysis_json = json.dumps(asdict(analysis), ensure_ascii=False)
 
-        # 6. Backfill (overwrite both tables' analysis+gmt_modified — P1b
+        # 9. Backfill (overwrite both tables' analysis+gmt_modified — P1b
         #    transactional; decision #13 overwrite). Bot-failure path did NOT
-        #    reach here (analyzer raised in step 4).
+        #    reach here (analyzer raised in step 6).
         self._repo.backfill_analysis(task_id, analysis_json)
 
-        # 7. Return the TaskTrajectory carrying the fresh analysis. Mutate the
+        # 10. Return the TaskTrajectory carrying the fresh analysis. Mutate the
         #    in-memory object (avoids a second DB round-trip); gmt_modified
         #    reflects the backfill moment.
         trajectory.analysis = analysis_json
         trajectory.gmt_modified = int(time.time() * 1000)
         return trajectory
+
+    # ------------------------------------------------------------------
+    # RUNNING 节点会话明细探测 — timeline 之外的"执行侧现场"(决策 #14 精神:
+    # 观测旁路,逐步降级,永不抛;探测失败绝不影响主分析)。
+    # ------------------------------------------------------------------
+
+    async def _collect_running_session_briefs(self, task_id: str) -> "list[dict] | None":
+        """Probe the SESSION-side scene of nodes still RUNNING (task_id+node_id).
+
+        For each node whose current status is RUNNING (queried from
+        ``task_execution_graph`` — the authoritative live graph, not the
+        trajectory's event-side view), read ``session_id`` from
+        ``run_info.extend_props`` and pull the session's recent messages via
+        ``BcsClientPort.get_session_messages``; the excerpt (role/content pairs,
+        per-message + total budget truncated) goes to the analysis bot as the
+        ``running_sessions`` section — the LLM's cue to look for what the
+        timeline CANNOT show: tool-call errors, 执行已结束但不主动上报结果,
+        长时间无新进展 etc.
+
+        Guarantees: NEVER raises (every step degrades + WARNING); ``None`` when
+        the probe is disabled (``graph``/``bcs`` unbound), the graph read
+        fails, no node is RUNNING, or every node's brief degraded away. The
+        ``Status`` import at module top (``centralized_support``) is runtime —
+        ``Status.RUNNING`` is compared against node.status as-is.
+        """
+        if self._graph is None or self._bcs is None:
+            return None  # 探测未接线(轻量 DI / 未部署 BCS)→ 无 RUNNING 会话段
+        try:
+            graph = self._graph.query_task_dashboard(task_id)
+        except Exception as ex:  # noqa: BLE001  图读失败 → 探测整体降级
+            logger.warning(
+                "[task][trajectory] RUNNING 探测图读失败 task=%s: %s: %s",
+                task_id, type(ex).__name__, ex,
+            )
+            return None
+        running = [n for n in getattr(graph, "tasks", []) if n.status == Status.RUNNING]
+        if not running:
+            return None
+        # 卡得最久的排最前(总摘录预算耗尽时优先保留最"病"的节点)
+        now_ms = int(time.time() * 1000)
+        def _elapsed_ms(node) -> int:  # noqa: ANN001  domain node;defensive read
+            st = getattr(node.run_info, "start_time", None)
+            try:
+                return now_ms - int(st) if st is not None else 0
+            except (TypeError, ValueError):
+                return 0
+        running.sort(key=_elapsed_ms, reverse=True)
+
+        limit = 50
+        try:
+            limit = int(
+                getattr(self._config, "running_session_message_limit", 50) or 50
+            )
+        except (TypeError, ValueError):
+            limit = 50
+
+        briefs: list[dict] = []
+        budget = _RUNNING_SESSION_TOTAL_MAX_CHARS
+        for node in running:
+            if budget <= 0:
+                break  # 总预算耗尽:截断在节点粒度即止(不再拉新会话)
+            sid = (node.run_info.extend_props or {}).get("session_id")
+            if not sid or not isinstance(sid, str):
+                logger.warning(
+                    "[task][trajectory] RUNNING 节点无 session_id,跳过探测 task=%s node=%s",
+                    task_id, node.node_id,
+                )
+                continue
+            try:
+                msgs = await self._bcs.get_session_messages(sid, limit=limit)
+            except Exception as ex:  # noqa: BLE001  单节点 BCS 失败 → 跳过,不拖垮其余
+                logger.warning(
+                    "[task][trajectory] 会话明细拉取失败,跳过 task=%s node=%s session=%s: %s: %s",
+                    task_id, node.node_id, sid, type(ex).__name__, ex,
+                )
+                continue
+            if not msgs:
+                logger.info(
+                    "[task][trajectory] 会话明细为空,跳过 task=%s node=%s session=%s",
+                    task_id, node.node_id, sid,
+                )
+                continue
+            excerpt: list[dict] = []
+            truncated = False
+            for m in msgs:
+                if not isinstance(m, dict):
+                    continue  # 非预期形态 → 跳过该条(防御)
+                role = str(m.get("role") or "")
+                content = str(m.get("content") or "")
+                if len(content) > _RUNNING_SESSION_MSG_MAX_CHARS:
+                    content = content[: _RUNNING_SESSION_MSG_MAX_CHARS - 1] + "…"
+                if budget <= 0:
+                    truncated = True
+                    break
+                if len(content) > budget:
+                    content = content[: budget - 1] + "…"
+                    truncated = True
+                budget -= len(content)
+                excerpt.append({"role": role, "content": content})
+            if not excerpt:
+                continue
+            briefs.append({
+                "node_id": node.node_id,
+                "session_id": sid,
+                "elapsed_ms": _elapsed_ms(node),
+                "message_count": len(msgs),
+                "truncated": truncated,
+                "messages": excerpt,
+            })
+        if not briefs:
+            return None
+        logger.info(
+            "[task][trajectory] RUNNING 会话探测完成 task=%s briefs=%d",
+            task_id, len(briefs),
+        )
+        return briefs
 
     # ------------------------------------------------------------------
     # Config resolution — optional DI; None when unbound (lightweight injectors)

@@ -346,11 +346,18 @@ def _derive_failure_reason(
             return f"acceptance_failed: {ev.action_result}"
 
     # Bullet 7: unclassified — the most recent event summary
-    #           (action_type + action_result + error_msg).
-    if timeline:
-        last = timeline[-1]
-        at = last.action_type.value if isinstance(last.action_type, TrajectoryActionType) else str(last.action_type)
-        summary = f"{at} {last.action_result}"
+    #           (action_type + action_result + error_msg). SUBMIT rows are
+    #           SKIPPED in the backward walk: they are milestone markers (task
+    #           submission / enter_bbs — the BBS-production marker fired
+    #           synchronously in _enter_root_bbs), not terminal causes, so a
+    #           timeline ending in one must surface the last substantive event
+    #           instead of a misleading "submit enter_bbs" fallback.
+    for last in reversed(timeline):
+        at = last.action_type
+        at_str = at.value if isinstance(at, TrajectoryActionType) else str(at)
+        if at_str == "submit":
+            continue
+        summary = f"{at_str} {last.action_result}"
         if last.error_msg:
             summary += f": {last.error_msg}"
         return f"unclassified: {summary}"
@@ -611,6 +618,7 @@ class TaskTrajectoryAnalyzer:
         *,
         analysis_type: AnalysisType,
         analysis_executor: str,
+        running_sessions: "list[dict[str, Any]] | None" = None,
     ) -> TrajectoryAnalysis:
         """Dispatch to the configured executor and return a flat
         ``TrajectoryAnalysis`` (no event list).
@@ -621,13 +629,25 @@ class TaskTrajectoryAnalyzer:
         P5b service from ``TrajectoryAnalysisConfig.analysis_bot_id`` and passed
         here), the model name for ``llm``. Both accept the ``AnalysisType`` enum
         OR the bare ``str`` form (``StrEnum`` equality).
+
+        ``running_sessions`` (tc_bot-only): the service-side probe's briefs of
+        nodes still RUNNING — per node its session_id, elapsed_ms and a recent
+        messages excerpt. Fed to the bot as the ``running_sessions`` message
+        section so the LLM can surface session-side problems the timeline
+        cannot show (tool-call errors, 执行完不上报结果, 无新进展).
+        ``None``/empty → the section is omitted entirely (missing key =
+        signal absent, NOT a null placeholder). The rule executor ignores it
+        (deterministic bullets derive from the timeline only).
         """
         # Normalize to AnalysisType so both the enum and bare-string forms work.
         at = analysis_type if isinstance(analysis_type, AnalysisType) else AnalysisType(str(analysis_type))
         if at == AnalysisType.RULE:
             return self._analyze_rule(trajectory, ext_info_lookup, analysis_executor)
         if at == AnalysisType.TC_BOT:
-            return await self._analyze_tc_bot(trajectory, ext_info_lookup, analysis_executor)
+            return await self._analyze_tc_bot(
+                trajectory, ext_info_lookup, analysis_executor,
+                running_sessions=running_sessions,
+            )
         if at == AnalysisType.LLM:
             raise NotImplementedError(
                 "llm analysis executor not wired in first iteration (决策 #11)"
@@ -681,6 +701,8 @@ class TaskTrajectoryAnalyzer:
         trajectory: TaskTrajectory,
         ext_info_lookup: Callable[[TrajectoryEvent], dict | None],
         analysis_executor: str,
+        *,
+        running_sessions: "list[dict[str, Any]] | None" = None,
     ) -> TrajectoryAnalysis:
         """Call the configured bot (REQ-9 + 决策 #10) and wrap its response as a
         ``TrajectoryAnalysis``.
@@ -704,7 +726,10 @@ class TaskTrajectoryAnalyzer:
                 "to be wired in DI; got bot=None"
             )
         analysis_input = _build_analysis_input(trajectory.timeline, ext_info_lookup)
-        message = self._build_bot_message(trajectory, analysis_input, ext_info_lookup)
+        message = self._build_bot_message(
+            trajectory, analysis_input, ext_info_lookup,
+            running_sessions=running_sessions,
+        )
         try:
             run = await self._bot.send_and_wait_async(
                 bot_id=analysis_executor,
@@ -725,12 +750,14 @@ class TaskTrajectoryAnalyzer:
         trajectory: TaskTrajectory,
         analysis_input: str,
         ext_info_lookup: Callable[[TrajectoryEvent], dict | None],
+        *,
+        running_sessions: "list[dict[str, Any]] | None" = None,
     ) -> str:
         """Build the structured JSON message fed to the bot (trajectory summary +
-        ``analysis_input`` + **ext_info 概要**). The bot is asked to return a
-        JSON response with ``analysis_output`` (required) + optional
-        ``boost_reason`` / ``failure_reason`` (the contract documented in the
-        module docstring).
+        ``analysis_input`` + **ext_info 概要** [+ RUNNING 会话明细段]). The bot
+        is asked to return a JSON response with ``analysis_output`` (required) +
+        optional ``boost_reason`` / ``failure_reason`` (the contract documented
+        in the module docstring).
 
         The ``ext_info_brief`` field (REQ-9 — analysis_input = "事件数 +
         ext_info 概要") carries the structured "为何" signals the bot needs to
@@ -742,7 +769,16 @@ class TaskTrajectoryAnalyzer:
         brief degrades to ``{}`` when the lookup is empty/broken
         (``_safe_lookup`` swallows + WARNING), so the bot's input stays
         well-formed (a missing key = signal absent, NOT a ``null`` placeholder
-        the bot would have to parse around)."""
+        the bot would have to parse around).
+
+        ``running_sessions`` (service-side probe): briefs of nodes still
+        RUNNING — per node session_id / elapsed_ms / a (possibly truncated)
+        recent-messages excerpt. Added to the message ONLY when non-empty
+        (same house convention: a missing key = no readable RUNNING session,
+        NOT a null placeholder). The instruction's conditional clause tells the
+        bot what to look for in it (tool-call errors, 执行完不上报结果,
+        长时间无新进展) — timeline-only analyses are unaffected by the section's
+        absence."""
         timeline_brief = [
             {
                 "action_type": (
@@ -765,19 +801,20 @@ class TaskTrajectoryAnalyzer:
 analysis_output（必填，字符串）：整体的人类可读分析/结论文本（必须是扁平字符串，不是结构化对象）；
 boost_reason（可选，字符串或 null）：调度理由摘要（包括 strategy / decision_mode / candidates / JOIN drops，基于 ext_info_brief 提取）；
 failure_reason（可选，字符串或 null）：失败的根本原因；如果任务成功，则填 null。
-请将这三个字段保持为彼此独立的顶层扁平字符串；任何结构化拆解内容都应写进 analysis_output 的字符串正文中，不要写成嵌套 JSON。ext_info_brief 字段包含调度理由摘要、RESET SLA 指标，以及 interface_error 事件中的“为何”信号——请使用这些信息来填写 boost_reason / failure_reason。如果 ext_info_brief 中缺少某个键，表示该信号不存在，不是 null。        
+请将这三个字段保持为彼此独立的顶层扁平字符串；任何结构化拆解内容都应写进 analysis_output 的字符串正文中，不要写成嵌套 JSON。ext_info_brief 字段包含调度理由摘要、RESET SLA 指标，以及 interface_error 事件中的“为何”信号——请使用这些信息来填写 boost_reason / failure_reason。如果 ext_info_brief 中缺少某个键，表示该信号不存在，不是 null。
+若消息中存在 running_sessions 字段，它列出当前仍为 RUNNING 状态的节点(task_id+node_id)及其执行会话的最近消息摘录(elapsed_ms 为已运行毫秒数，内容可能截断，不含完整上下文)——这是轨迹事件之外从执行现场(BCS 会话)抓取的补充线索。请结合 elapsed_ms 判断各节点的卡住程度，重点检查这些会话是否出现：工具调用报错、执行已完成但未主动上报结果、长时间无新进展等问题；若发现，请把结论写入 analysis_output，必要时在 failure_reason 中给出根因。running_sessions 缺失只表示当前没有可获得会话明细的 RUNNING 节点，不代表任务没有其他问题。
         """
 
-        return json.dumps(
-            {
-                "task_id": trajectory.task_id,
-                "analysis_input": analysis_input,
-                "ext_info_brief": ext_info_brief,
-                "timeline": timeline_brief,
-                "instruction": instruction,
-            },
-            ensure_ascii=False,
-        )
+        payload: dict[str, Any] = {
+            "task_id": trajectory.task_id,
+            "analysis_input": analysis_input,
+            "ext_info_brief": ext_info_brief,
+            "timeline": timeline_brief,
+            "instruction": instruction,
+        }
+        if running_sessions:
+            payload["running_sessions"] = running_sessions
+        return json.dumps(payload, ensure_ascii=False)
 
     @staticmethod
     def _parse_bot_response(

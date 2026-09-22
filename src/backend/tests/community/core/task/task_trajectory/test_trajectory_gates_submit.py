@@ -162,7 +162,16 @@ def _exec(facade, request):
 
 
 def _submit_records(repo: _TrajRepo) -> list[TrajectoryEventRecord]:
-    return [r for r in repo.records if r.action_type == "submit"]
+    """The task's ORIGINAL submission row(s). The ``enter_bbs`` milestone
+    (Mod-3: BBS 任务产生即录轨迹,由 ``_enter_root_bbs`` 同步发射) reuses
+    ``action_type='submit'`` but is a DISTINCT production marker, NOT the
+    submission — excluded here so "task submitted exactly once" stays
+    meaningful; the stub environments may legitimately escalate dynamic tasks
+    into BBS and emit that second marker row."""
+    return [
+        r for r in repo.records
+        if r.action_type == "submit" and r.action_result != "enter_bbs"
+    ]
 
 
 def _service(traj_repo, *, task_info_repo=None, task_id="submit-tid"):

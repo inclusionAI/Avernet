@@ -143,6 +143,7 @@ class TrajectoryAnalysis:
     gmt_create: int                           # 分析产出时间(ms epoch)
     boost_reason: str | None = None           # 派发“为何选该执行者”(末条 DISPATCH 派生)
     failure_reason: str | None = None         # 失败根因(末条 terminal 事件派生)
+    timeline_version: str | None = None       # 分析时 timeline 指纹(sha256:事件数+逐条 id:gmt_create 正序;由 service backfill 前盖戳,do_analysis 依它做增量幂等)
 
 
 @dataclass

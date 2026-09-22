@@ -352,6 +352,37 @@ def test_rule_failure_reason_unclassified_fallback():
     assert "aborted by operator" in ta.failure_reason
 
 
+def test_rule_unclassified_ignores_submit_rows():
+    """Bullet-7's backward walk SKIPS submit rows: SUBMIT is a milestone marker
+    (task submission / the enter_bbs BBS-production marker fired synchronously
+    in _enter_root_bbs), NOT a terminal cause — a timeline ending in one must
+    surface the last SUBSTANTIVE event, never a misleading "submit enter_bbs"."""
+    transition = _ev(
+        TrajectoryActionType.TRANSITION,
+        action_result="failed",
+        error_msg="aborted by operator",
+        ms=_MS + 20_000,
+        status_from=Status.RUNNING,
+        status_to=Status.FAILED,
+    )
+    enter_bbs = _ev(
+        TrajectoryActionType.SUBMIT,
+        action_result="enter_bbs",
+        ms=_MS + 30_000,
+    )
+    timeline = [transition, enter_bbs]
+    ta = _analyze_rule(timeline)
+    assert ta.failure_reason.startswith("unclassified:")
+    # the summary names the terminal TRANSITION, not the trailing submit marker
+    assert "transition" in ta.failure_reason
+    assert "aborted by operator" in ta.failure_reason
+    assert "enter_bbs" not in ta.failure_reason
+    # all-submit timeline → bullet 7 finds nothing substantive → None (not a
+    # fabricated "submit"-only summary)
+    ta_all_submits = _analyze_rule([enter_bbs])
+    assert ta_all_submits.failure_reason is None or "enter_bbs" not in (ta_all_submits.failure_reason or "")
+
+
 # ---------------------------------------------------------------------------
 # 3. rule executor — success task → failure_reason=None
 # ---------------------------------------------------------------------------
@@ -810,6 +841,63 @@ async def test_tc_bot_calls_bot_with_trajectory_summary_and_bot_id():
     assert bot.last_call["metadata"] is not None
     # the default-config timeout (180s) flows through to the bot call (M3).
     assert bot.last_call["timeout"] == 180.0
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_message_includes_running_sessions_section():
+    """Mod-2: ``running_sessions`` briefs (nodes still RUNNING + their session
+    message excerpts) are folded into the tc_bot message as a dedicated
+    section — the LLM's cue to look for session-side problems (tool-call
+    errors / 执行完不上报结果) the timeline cannot show."""
+    bot = _FakeBot(content=_bot_analysis_content())
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    trajectory = _traj([
+        _ev(TrajectoryActionType.SUBMIT, action_result="success"),
+        _ev(TrajectoryActionType.EXECUTE, action_result="failed", ms=_MS + 5_000),
+        _terminal_failed(),
+    ])
+    briefs = [{
+        "node_id": "n1",
+        "session_id": "sess-1",
+        "elapsed_ms": 3_600_000,
+        "message_count": 2,
+        "truncated": False,
+        "messages": [
+            {"role": "user", "content": "run the job"},
+            {"role": "assistant", "content": "tool failed: boom"},
+        ],
+    }]
+    await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+        running_sessions=briefs,
+    )
+    assert bot.last_call is not None
+    parsed = json.loads(bot.last_call["message"])
+    # the section is present verbatim + the instruction points the LLM at it
+    assert parsed["running_sessions"] == briefs
+    assert "running_sessions" in parsed["instruction"]
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_message_omits_running_sessions_when_absent():
+    """Mod-2: ``running_sessions=None`` (probe disabled / no RUNNING node with a
+    readable session) → the key is OMITTED entirely (house convention: a
+    missing key = signal absent, NOT a null placeholder) — the pre-probe message
+    shape is preserved for existing consumers/tests."""
+    bot = _FakeBot(content=_bot_analysis_content())
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    trajectory = _traj([
+        _ev(TrajectoryActionType.SUBMIT, action_result="success"),
+        _terminal_failed(),
+    ])
+    await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+        running_sessions=None,
+    )
+    parsed = json.loads(bot.last_call["message"])
+    assert "running_sessions" not in parsed
 
 
 @pytest.mark.asyncio

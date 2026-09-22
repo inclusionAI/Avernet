@@ -390,6 +390,7 @@ class CentralizedExecutionAdapter:
         "_reset_sla_threshold_ms": TaskHarness,
         "_reset_elapsed_ms": TaskHarness,
         "_emit_reset_trajectory": TaskHarness,
+        "_emit_enter_bbs_trajectory": TaskHarness,  # BBS 任务产生即录轨迹(enter_bbs, _enter_root_bbs 内同步发)
         "_on_harness_collect": TaskHarness,
         "on_miss": TaskHarness,
         "on_harness": TaskHarness,
