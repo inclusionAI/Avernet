@@ -145,9 +145,6 @@ class SingleboxDevicesModule(Module):
         from agentclaw.community.plugins.local.device_connection_manager import (
             NoopDeviceConnectionManagerPlugin,
         )
-        from agentclaw.community.plugins.local.device_adapter_transport import (
-            InMemoryDeviceAdapterTransport,
-        )
 
         binder.bind(
             DeviceConnectionManagerPlugin,
@@ -155,10 +152,25 @@ class SingleboxDevicesModule(Module):
             scope=singleton,
         )
         binder.bind(BaasDeviceAccessor, to=BaasDeviceAccessor, scope=singleton)
-        binder.bind(
-            DeviceAdapterTransport,
-            to=InMemoryDeviceAdapterTransport,
-            scope=singleton,
+
+    @singleton
+    @provider
+    def device_adapter_transport(self) -> DeviceAdapterTransport:
+        """Singlebox: the in-memory cron adapter with a proxy fallback URL.
+
+        The transport mocks the well-known paths (health, capabilities,
+        skills, /api/cron) in memory and proxies everything else to the
+        engine adapter's HTTP origin. A nil default_adapter_url preserves
+        the original test/sentinel behavior (no network).
+        """
+        from os import environ
+
+        from agentclaw.community.plugins.local.device_adapter_transport import (
+            InMemoryDeviceAdapterTransport,
+        )
+
+        return InMemoryDeviceAdapterTransport(
+            default_adapter_url=environ.get("SINGLEBOX_ENGINE_ADAPTER_URL"),
         )
 
     @singleton

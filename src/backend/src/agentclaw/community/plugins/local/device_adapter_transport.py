@@ -22,8 +22,13 @@ from collections.abc import AsyncIterator, Mapping
 import hashlib
 from typing import Any, Optional
 
+import httpx
+
 from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
     DeviceAdapterStreamResponse,
+    DeviceAdapterTimeoutError,
     DeviceAdapterTransport,
 )
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
@@ -44,15 +49,29 @@ def _device_key(conn_info: dict[str, Any]) -> str:
     )
 
 
+_DEFAULT_PROXY_TIMEOUT = 30.0
+
+
 @plugin_impl(
     mode=Mode.LOCAL,
     flavor=Flavor.SIMULATOR,
     rationale="stateful in-memory cron adapter; relay runs end-to-end over it",
 )
 class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
-    """In-memory cron adapter answering ``/api/cron*`` paths."""
+    """In-memory cron adapter answering ``/api/cron*`` paths.
 
-    def __init__(self) -> None:
+    Paths outside the well-known in-memory set (health, capabilities, skills,
+    layout probe, ``/api/cron*``) proxy to the per-device adapter URL
+    resolved from ``conn_info`` with each ``invoke``, falling back to the
+    constructor-supplied ``default_adapter_url`` when the device connection
+    info doesn't carry an address. Without either, the ``"unhandled path"``
+    sentinel applies (test deployments have no engine to proxy to).
+    """
+
+    def __init__(self, *, default_adapter_url: str | None = None) -> None:
+        self._default_adapter_url = (
+            default_adapter_url.rstrip("/") if default_adapter_url else None
+        )
         # device_key -> {cron_id -> cron item}
         self._crons: dict[str, dict[str, dict[str, Any]]] = {}
         self._materialized_contents: dict[str, tuple[bytes, str, str]] = {}
@@ -126,6 +145,74 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         }
 
     # ── transport ────────────────────────────────────────────────────────
+
+    def _resolve_adapter_url(self, conn_info: dict[str, Any]) -> str | None:
+        """Per-device adapter base URL for unmatched paths.
+
+        Resolution order: ``conn_info["url"]`` (the device binding's HTTP
+        origin, mirrors the production transport contract); then
+        ``conn_info["target"]`` formatted as an HTTP origin (the
+        in-memory store's own device\_key idiom); then the constructor
+        default. ``None`` means this caller cannot be proxied.
+        """
+        url = conn_info.get("url")
+        if isinstance(url, str) and url.startswith("http"):
+            return url.rstrip("/")
+        target = conn_info.get("target")
+        if isinstance(target, str) and target:
+            return f"http://{target.rstrip('/')}"
+        return self._default_adapter_url
+
+    async def _proxy(
+        self,
+        adapter_url: str,
+        conn_info: dict[str, Any],
+        method: str,
+        path: str,
+        body: Optional[dict[str, Any]],
+        params: Optional[dict[str, Any]],
+        timeout: float | None,
+    ) -> dict[str, Any]:
+        """Issue an HTTP request to the adapter, raising protocol errors.
+
+        Error channel matches the community transport:
+        ``DeviceAdapterEndpointNotFoundError`` for 404,
+        ``DeviceAdapterHTTPStatusError`` for other HTTP errors,
+        ``DeviceAdapterTimeoutError`` for timeouts, and a bare ``ValueError``
+        for any remaining transport failures so the relay maps them uniformly.
+        """
+        url = f"{adapter_url}{path}"
+        headers = dict(conn_info.get("headers") or {})
+        try:
+            async with httpx.AsyncClient(
+                timeout=timeout or _DEFAULT_PROXY_TIMEOUT,
+                headers=headers or None,
+            ) as client:
+                resp = await client.request(
+                    method, url, json=body, params=params
+                )
+        except httpx.TimeoutException as exc:
+            raise DeviceAdapterTimeoutError(
+                f"engine adapter timed out on {path}: {exc}"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ValueError(
+                f"engine adapter unreachable at {adapter_url}: {exc}"
+            ) from exc
+
+        if resp.status_code == 404:
+            raise DeviceAdapterEndpointNotFoundError(resp.text)
+        if resp.status_code >= 400:
+            raise DeviceAdapterHTTPStatusError(resp.status_code, resp.text)
+
+        if not resp.content:
+            return {"success": True, "data": None, "message": None}
+        try:
+            return resp.json()
+        except ValueError:
+            # Non-JSON 2xx (204 No Content, plain text): the transport
+            # contract expects an envelope dict; wrap the raw text.
+            return {"success": True, "data": resp.text, "message": None}
 
     async def invoke(
         self,
@@ -206,6 +293,25 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
                     },
                 },
             }
+
+        # ── Guard: only /api/cron* paths enter the in-memory store.
+        # Everything else either proxies to the device's adapter (when an
+        # address is resolvable) or returns the sentinel. This prevents
+        # the cron shape parser below from swallowing non-cron paths
+        # (sessions, models, nodes …) and returning fabricated data.
+        if not path.startswith("/api/cron"):
+            adapter_url = self._resolve_adapter_url(conn_info)
+            if adapter_url:
+                return await self._proxy(
+                    adapter_url, conn_info, method, path, body, params, timeout
+                )
+            return {
+                "success": False,
+                "message": f"unhandled path {path}",
+                "error_code": 404,
+            }
+
+        # ── In-memory cron store (paths below are guaranteed /api/cron*)─
         store = self._store(conn_info)
         # Segments after ``/api/cron``: [] | [status] | [running] |
         # [task_id] | [task_id, run|runs]
@@ -297,6 +403,7 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
                 },
             }
 
+        # Unhandled /api/cron sub-shape (e.g. /api/cron/{id}/ nonexistent/verb).
         return {
             "success": False,
             "message": f"unhandled path {path}",
