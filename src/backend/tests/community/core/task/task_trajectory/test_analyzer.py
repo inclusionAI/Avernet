@@ -1191,15 +1191,80 @@ async def test_tc_bot_raises_domain_error_on_bot_call_failure():
 
 
 @pytest.mark.asyncio
-async def test_tc_bot_raises_domain_error_on_unparseable_response():
-    bot = _FakeBot(content="this is not json {")
+async def test_tc_bot_raises_domain_error_on_empty_unparseable_response():
+    """空/空白响应无可降级内容 → 仍 raise(→504,决策 #10)。非空脏响应见下方
+    修复/降级两档(prod 2026-09-22 504 修复后的解析阶梯)。"""
+    for content in ("", "   \n  "):
+        bot = _FakeBot(content=content)
+        analyzer = TaskTrajectoryAnalyzer(bot=bot)
+        trajectory = _traj([_ev(TrajectoryActionType.SUBMIT, action_result="success"), _terminal_success()])
+        with pytest.raises(TrajectoryAnalysisError):
+            await analyzer.analyze(
+                trajectory, lambda ev: None,
+                analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+            )
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_degrades_unparseable_response_to_raw_content():
+    """方案B降级:响应非空但不是 JSON(修复 A 也救不回)→ analysis_output =
+    响应原文,不 504、不丢 bot 产出;boost/failure 缺省 None。"""
+    raw = "this is not json {"
+    bot = _FakeBot(content=raw)
     analyzer = TaskTrajectoryAnalyzer(bot=bot)
     trajectory = _traj([_ev(TrajectoryActionType.SUBMIT, action_result="success"), _terminal_success()])
-    with pytest.raises(TrajectoryAnalysisError):
-        await analyzer.analyze(
-            trajectory, lambda ev: None,
-            analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
-        )
+    ta = await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    assert ta.analysis_output == raw  # 原文保真,不 504
+    assert ta.boost_reason is None
+    assert ta.failure_reason is None
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_repairs_unescaped_inner_quotes_in_json():
+    """方案A修复(线上 504 复现):中文结论里引用工具名的裸双引号
+    ("...工具 "query_data" 报错...")使字符串提前闭合 → "Expecting ',' delimiter"。
+    修复器给值内裸引号补转义后重解析成功,字段完整取回。"""
+    broken = (
+        "{\n"
+        '"analysis_output": "执行发现工具 "query_data" 报错且一直未上报",\n'
+        '"failure_reason": "工具调用报错"\n'
+        "}"
+    )
+    # 首选证明:该文本裸 json.loads 确实复现线上语法错误(非"no JSON")。
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(broken)
+
+    bot = _FakeBot(content=broken)
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    trajectory = _traj([_ev(TrajectoryActionType.SUBMIT, action_result="success"), _terminal_success()])
+    ta = await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    assert ta.analysis_output == '执行发现工具 "query_data" 报错且一直未上报'
+    assert ta.failure_reason == "工具调用报错"
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_repairs_raw_newline_inside_string():
+    """方案A修复:字符串值内的裸换行(json.loads 严格模式拒绝的控制字符)
+    → 转义为 \\n 后重解析成功。"""
+    broken = '{"analysis_output": "第一行\n第二行", "failure_reason": null}'
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(broken)
+
+    bot = _FakeBot(content=broken)
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    trajectory = _traj([_ev(TrajectoryActionType.SUBMIT, action_result="success"), _terminal_success()])
+    ta = await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    assert ta.analysis_output == "第一行\n第二行"
+    assert ta.failure_reason is None
 
 
 @pytest.mark.asyncio

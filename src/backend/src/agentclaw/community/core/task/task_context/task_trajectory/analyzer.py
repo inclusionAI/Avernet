@@ -801,6 +801,7 @@ class TaskTrajectoryAnalyzer:
 analysis_output（必填，字符串）：整体的人类可读分析/结论文本（必须是扁平字符串，不是结构化对象）；
 boost_reason（可选，字符串或 null）：调度理由摘要（包括 strategy / decision_mode / candidates / JOIN drops，基于 ext_info_brief 提取）；
 failure_reason（可选，字符串或 null）：失败的根本原因；如果任务成功，则填 null。
+输出必须是严格合法的 JSON（能被 json.loads 直接解析）：所有字符串值内部出现的英文双引号必须转义为 \\"；引用工具名、报错原文、字段名时优先改用中文引号「」，避免裸引号；字符串值内不要出现未转义的换行或控制字符。
 请将这三个字段保持为彼此独立的顶层扁平字符串；任何结构化拆解内容都应写进 analysis_output 的字符串正文中，不要写成嵌套 JSON。ext_info_brief 字段包含调度理由摘要、RESET SLA 指标，以及 interface_error 事件中的“为何”信号——请使用这些信息来填写 boost_reason / failure_reason。如果 ext_info_brief 中缺少某个键，表示该信号不存在，不是 null。
 若消息中存在 running_sessions 字段，它列出当前仍为 RUNNING 状态的节点(task_id+node_id)及其执行会话的最近消息摘录(elapsed_ms 为已运行毫秒数，内容可能截断，不含完整上下文)——这是轨迹事件之外从执行现场(BCS 会话)抓取的补充线索。请结合 elapsed_ms 判断各节点的卡住程度，重点检查这些会话是否出现：工具调用报错、执行已完成但未主动上报结果、长时间无新进展等问题；若发现，请把结论写入 analysis_output，必要时在 failure_reason 中给出根因。running_sessions 缺失只表示当前没有可获得会话明细的 RUNNING 节点，不代表任务没有其他问题。
         """
@@ -828,24 +829,56 @@ failure_reason（可选，字符串或 null）：失败的根本原因；如果�
         Contract: the bot returns a run dict whose ``result`` is either a bare
         string (the JSON response) or a ``{"content": "<json string>"}`` dict
         (the planner's seam shape). The JSON response MUST carry
-        ``analysis_output`` (required, a STRING — a non-str value is a
-        contract violation, not a coercion candidate; raising surfaces a bot
-        contract bug rather than silently stringifying e.g. a list);
-        ``boost_reason`` / ``failure_reason`` are optional (the bot may decline
-        to populate them). Missing ``analysis_output`` or an unparseable body
-        raises ``TrajectoryAnalysisError`` (decision #10: caller gets a 504, no
-        backfill).
+        ``analysis_output`` (non-empty); ``boost_reason`` / ``failure_reason``
+        are optional (the bot may decline to populate them).
+
+        解析阶梯(prod 504 修复,ua 2026-09-22):
+        1. ``extract_json`` — 鲁棒抽出(裸 JSON / ```json 代码块 / 散文包裹);
+        2. 方案A:抽失败且为 JSON **语法**错误 → ``_repair_inner_bare_quotes``
+           修复字符串值内的裸引号/裸控制字符后重试;
+        3. 方案B降级:仍失败且响应非空 → ``analysis_output`` = 响应**原文**,
+           WARNING 记合同违规,**不 504**(保内容优先,沿用结构化 analysis_output
+           coerce 的先例)。
+        仍 raise(→504,决策 #10)的仅剩:**空响应**(无可降级内容)/解析出非 dict
+        形态 / dict 缺 ``analysis_output`` / bot 调用失败与超时(在 tc_bot 调用处)。
         """
         content = _extract_response_content(run)
+        parsed: Any = None
+        parse_exc: Exception | None = None
         try:
             # bot 常把 JSON 包在 ```json 代码块 / 散文里(同 plan/search skill 回投);用
             # extract_json 鲁棒抽出而非裸 json.loads — 否则首字符为 ``` 时 json.loads 报
-            # "Expecting value: line 1 column 1 (char 0)" → 误判 504。extract_json 抛 ValueError。
+            # "Expecting value: line 1 column 1 (char 0)"。extract_json 抛 ValueError。
             parsed = extract_json(content)
         except (json.JSONDecodeError, ValueError, TypeError) as ex:
-            raise TrajectoryAnalysisError(
-                f"tc_bot returned an unparseable response (bot_id={analysis_executor}): {ex}"
-            ) from ex
+            parse_exc = ex
+            # 方案A:LLM 中文结论里引用工具名/报错原文时极易裸贴双引号
+            # ("...工具 "query_data" 报错..." → "Expecting ',' delimiter"),也偶有
+            # 字符串值内裸换行 → 修复后重试同一抽取管线。
+            repaired = _repair_inner_bare_quotes(str(content))
+            if repaired is not None:
+                try:
+                    parsed = extract_json(repaired)
+                    logger.warning(
+                        "[task][trajectory][analyzer] bot 响应含未转义引号/裸控制字符,"
+                        "修复后解析成功 bot_id=%s", analysis_executor,
+                    )
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    parsed = None
+        if parsed is None:
+            # 方案B降级:A 也救不回 = bot 彻底违反 JSON 合同。只要响应非空就保原文
+            # 进 analysis_output(WARNING 可见,不丢 bot 的大段分析、不 504);空响应
+            # 无可降级内容,维持 504。
+            if not str(content).strip():
+                raise TrajectoryAnalysisError(
+                    f"tc_bot returned an unparseable response "
+                    f"(bot_id={analysis_executor}): {parse_exc}"
+                ) from parse_exc
+            logger.warning(
+                "[task][trajectory][analyzer] bot 返回非法 JSON,降级保留原文 "
+                "bot_id=%s head=%.200s", analysis_executor, str(content),
+            )
+            parsed = {"analysis_output": str(content)}
         if not isinstance(parsed, dict):
             raise TrajectoryAnalysisError(
                 f"tc_bot response is not a JSON object (bot_id={analysis_executor}): {content!r}"
@@ -892,6 +925,76 @@ def _extract_response_content(run: dict[str, Any]) -> str:
     if result is None:
         return ""
     return str(result)
+
+
+# JSON 语法修复所需的字符串值内控制字符 → 转义序列表。
+_INNER_CTRL_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+def _repair_inner_bare_quotes(text: str) -> str | None:
+    """修复 LLM 回投 JSON 中**字符串值内**的裸双引号与裸控制字符(prod 504 修复
+    方案A,analyzer 本地;典型错误形态:"...工具 "query_data" 报错..." →
+    "Expecting ',' delimiter: line 2 column 41")。
+
+    判定规则(单趟扫描,从首个 ``{``/``[`` 起修——散文前缀与 ``_balanced_substring``
+    同规则忽略):在字符串内遇到 ``"`` 时向后看**首个非空白字符**——是结构字符
+    (``,``/``:``/``}``/``]``)或文末 → 视为字符串闭合;否则视为值内裸引号 → 补
+    ``\\"``。字符串内的裸 ``\\n``/``\\r``/``\\t`` 同步转义(``json.loads`` 严格模式
+    拒绝控制字符)。已有的 ``\\"`` 等合法转义原样保留。
+
+    返回修复后的文本;无 ``{``/``[`` 起符(bot 根本没写 JSON) → ``None``
+    (交由调用方走降级)。**不保证**修复结果可解析——只为重试提供一次机会,
+    仍是坏 JSON 则交给方案B降级。有意不放进共享的 ``json_extract.py``:
+    plan/search skill 的回投保持既有严格抽取行为,修复仅限轨迹分析路径。
+    """
+    start = -1
+    for i, ch in enumerate(text):
+        if ch in "[{":
+            start = i
+            break
+    if start < 0:
+        return None
+    out: list[str] = [text[:start]]
+    chunk = text[start:]
+    in_str = False
+    i = 0
+    n = len(chunk)
+    while i < n:
+        ch = chunk[i]
+        if not in_str:
+            if ch == '"':
+                in_str = True
+                out.append(ch)
+            else:
+                out.append(ch)
+            i += 1
+            continue
+        # in_str:
+        if ch == "\\":
+            # 合法转义(可能已是 \")原样保留成对。
+            out.append(ch)
+            if i + 1 < n:
+                out.append(chunk[i + 1])
+            i += 2
+            continue
+        if ch == '"':
+            j = i + 1
+            while j < n and chunk[j] in " \t\r\n":
+                j += 1
+            if j >= n or chunk[j] in ",:}]":
+                in_str = False
+                out.append(ch)  # 真正的字符串闭合
+            else:
+                out.append('\\"')  # 值内裸引号 → 补转义
+            i += 1
+            continue
+        esc = _INNER_CTRL_ESCAPES.get(ch)
+        if esc is not None:
+            out.append(esc)  # 值内裸控制字符 → 转义序列
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 # ---------------------------------------------------------------------------

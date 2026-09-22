@@ -478,9 +478,13 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         running_sessions = await self._collect_running_session_briefs(task_id)
 
         # 6. Call the analyzer (tc_bot executor; synchronous with timeout per
-        #    决策 #10). Raises TrajectoryAnalysisError on bot timeout/failure/
-        #    unparseable response — the caller (router) maps to 504; the service
-        #    does NOT backfill on this path (decision #14).
+        #    决策 #10). Raises TrajectoryAnalysisError on bot CALL failure/
+        #    timeout or an EMPTY/unusable response — the caller (router) maps
+        #    to 504; the service does NOT backfill on this path (decision #14).
+        #    NB: a NON-EMPTY malformed-JSON response no longer 504s — the
+        #    analyzer repairs bare inner quotes (方案A) or degrades to the raw
+        #    text as analysis_output (方案B); only an empty response has
+        #    nothing to salvage.
         analysis = await self._analyzer.analyze(
             trajectory,
             ext_info_lookup,
