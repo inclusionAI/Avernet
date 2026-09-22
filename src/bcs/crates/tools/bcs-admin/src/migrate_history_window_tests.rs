@@ -53,12 +53,17 @@ async fn verify(db: Arc<dyn DbPlugin>) -> Result<()> {
     ordinary?; history?;
     let join_seq = joined?.participant_join_seq.unwrap()["human_race"].as_i64().unwrap();
     assert!((11..=13).contains(&join_seq), "join must use a physical position: {join_seq}");
-    // A failed insert must roll sequence allocation back. Inject a database failure after allocation.
+    // A failed insert must roll sequence allocation back. Use a temporary CHECK in
+    // this disposable schema; triggers require SUPER when binary logging is enabled.
     let before = messages.get_current_seq(&session.id).await?;
-    db.execute(DbStatement::new("CREATE TRIGGER fail_window_message BEFORE INSERT ON bcs_messages FOR EACH ROW BEGIN IF NEW.message_id = 'reject-window' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'injected history write failure'; END IF; END")).await?;
-    assert!(messages.append_message_with_id("reject-window".into(), message(&session.id, "reject-window", true)).await.is_err());
+    db.execute(DbStatement::new("ALTER TABLE bcs_messages ADD CONSTRAINT reject_history_window CHECK (message_id <> 'reject-window')")).await?;
+    let error = messages.append_message_with_id("reject-window".into(), message(&session.id, "reject-window", true)).await.expect_err("injected message insert must fail");
+    assert!(error.to_string().contains("reject_history_window"), "{error}");
     assert_eq!(messages.get_current_seq(&session.id).await?, before);
-    db.execute(DbStatement::new("DROP TRIGGER fail_window_message")).await?;
+    assert!(messages.get_message_by_id(&session.id, "reject-window").await?.is_none());
+    db.execute(DbStatement::new("ALTER TABLE bcs_messages DROP CHECK reject_history_window")).await?;
+    let retried = messages.append_message_with_id("reject-window".into(), message(&session.id, "reject-window", true)).await?;
+    assert_eq!(retried.session_seq, before + 1);
     let columns = db.query(DbStatement::new("SELECT COUNT(*) AS n FROM information_schema.columns WHERE table_schema=DATABASE() AND column_name IN ('participant_history_seq','current_participant_history_seq')")).await?;
     assert_eq!(db_get_column::<i64>(&columns[0], "n")?, 0);
     let indexes = db.query(DbStatement::new("SELECT COUNT(*) AS n FROM information_schema.statistics WHERE table_schema=DATABASE() AND index_name IN ('idx_messages_history_window','idx_messages_session_client','idx_messages_session_run')")).await?;
