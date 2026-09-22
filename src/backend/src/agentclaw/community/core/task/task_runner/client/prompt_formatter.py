@@ -358,4 +358,4 @@ def format_benchmark_prompt(task_spec: dict[str, Any]) -> str:
     parts.append(NO_WEB_SEARCH_CONSTRAINT)
     parts.append(OUTPUT_LANGUAGE_CONSTRAINT)
 
-    return "\n\n".join(parts)
+    return "/task " + "\n\n".join(parts)
