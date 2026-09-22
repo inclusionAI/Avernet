@@ -39,8 +39,8 @@ fn truncate_preview(s: &str, max_chars: usize) -> &str {
 
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotSendResult, ChatEventRouting, DeliveryType,
-    Group, GroupKind, GroupStrategy, HiddenMentionInfo, Participant, ParticipantMode,
-    ParticipantRole, ResponseMode, RouteAndSendResult, RouteParticipantOverlay,
+    Group, GroupKind, GroupStrategy, HiddenMentionInfo, HumanMentionNotifyMode, Participant,
+    ParticipantMode, ParticipantRole, ResponseMode, RouteAndSendResult, RouteParticipantOverlay,
     RouteSelectorWire, RoutingCoreService, RoutingDecision, RoutingTarget,
     StructuredRoutingError,
 };
@@ -1040,6 +1040,7 @@ mod tests {
             driver_bot: "driver".to_string(),
             originator: None, // Defaults to driver_bot
             routing_policy: None,
+            human_mention_notify_mode: HumanMentionNotifyMode::default(),
             context: None,
             opening_message: None,
             participants: vec![
@@ -1426,6 +1427,7 @@ mod tests {
             driver_bot: "pmo".to_string(),
             originator: None,
             routing_policy: None,
+            human_mention_notify_mode: HumanMentionNotifyMode::default(),
             context: None,
             opening_message: None,
             participants: vec![
@@ -1660,6 +1662,7 @@ mod tests {
             driver_bot: "alice".to_string(),
             originator: Some("alice".to_string()),
             routing_policy: None,
+            human_mention_notify_mode: HumanMentionNotifyMode::default(),
             context: None,
             opening_message: None,
             participants: vec![
@@ -1968,6 +1971,7 @@ mod tests {
             driver_bot: "a".to_string(),
             originator: None,
             routing_policy: None,
+            human_mention_notify_mode: HumanMentionNotifyMode::default(),
             context: None,
             opening_message: None,
             participants: vec![
@@ -2237,6 +2241,7 @@ mod tests {
             driver_bot: "driver".to_string(),
             originator: None,
             routing_policy: None,
+            human_mention_notify_mode: HumanMentionNotifyMode::default(),
             context: None,
             opening_message: None,
             service_group_uuid: None,

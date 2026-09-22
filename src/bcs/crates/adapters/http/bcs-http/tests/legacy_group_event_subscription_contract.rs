@@ -116,6 +116,7 @@ fn group_detail() -> GroupDetail {
                 bot_final_delivery: BotFinalDelivery::SendToDriver,
             },
         }),
+        human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         created_at: 1,
         updated_at: 1,
     })
@@ -218,6 +219,7 @@ async fn legacy_create_group_delegates_inline_subscriptions_to_v1_application() 
         .expect("response body");
     let response_json: Value = serde_json::from_slice(&response_body).expect("response JSON");
     assert_eq!(response_json["id"], "group-with-webhook");
+    assert_eq!(response_json["human_mention_notify_mode"], "all");
 
     let (command, subscriptions) = service
         .create

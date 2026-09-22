@@ -105,6 +105,7 @@ fn group_detail() -> GroupDetail {
                 bot_final_delivery: BotFinalDelivery::InjectObservers,
             },
         }),
+        human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         created_at: 1,
         updated_at: 2,
     })
@@ -288,6 +289,128 @@ async fn legacy_patch_group_rejects_unknown_fields_before_application() {
         .expect("response");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(service.update.lock().expect("update lock").is_none());
+}
+
+#[tokio::test]
+async fn legacy_patch_group_forwards_human_mention_notify_mode() {
+    for (wire, expected) in [
+        ("driver_bot_only", bcs_service_api::HumanMentionNotifyMode::DriverBotOnly),
+        ("all", bcs_service_api::HumanMentionNotifyMode::All),
+        ("none", bcs_service_api::HumanMentionNotifyMode::None),
+    ] {
+        let service = Arc::new(RecordingGroupService::default());
+        let response = test_router(service.clone())
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/groups/group-1")
+                    .header("content-type", "application/json")
+                    .body(
+                        json!({
+                            "human_mention_notify_mode": wire
+                        })
+                        .to_string(),
+                    )
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let command = service
+            .update
+            .lock()
+            .expect("update lock")
+            .take()
+            .expect("update command");
+        assert_eq!(command.patch.human_mention_notify_mode, Some(expected));
+        assert!(command.patch.name.is_none());
+    }
+}
+
+#[tokio::test]
+async fn legacy_patch_group_rejects_invalid_human_mention_notify_mode() {
+    let service = Arc::new(RecordingGroupService::default());
+    let response = test_router(service.clone())
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/groups/group-1")
+                .header("content-type", "application/json")
+                .body(
+                    json!({
+                        "human_mention_notify_mode": "invalid"
+                    })
+                    .to_string(),
+                )
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body");
+    let response_json: Value = serde_json::from_slice(&body).expect("response JSON");
+    // The current legacy 400 envelope is { status, code, message, error }.
+    assert_eq!(response_json["status"], StatusCode::BAD_REQUEST.as_u16());
+    assert_eq!(response_json["code"], "invalid_request");
+    assert!(
+        response_json["message"]
+            .as_str()
+            .expect("message")
+            .contains("human_mention_notify_mode"),
+        "envelope should name the rejected field"
+    );
+    assert_eq!(
+        response_json["error"].as_str(),
+        response_json["message"].as_str()
+    );
+    // The application recorder must not have been called: a boundary
+    // parse failure short-circuits before the group application is invoked.
+    assert!(service.update.lock().expect("update lock").is_none());
+}
+
+#[tokio::test]
+async fn legacy_patch_group_rejects_null_human_mention_notify_mode() {
+    let service = Arc::new(RecordingGroupService::default());
+    let response = test_router(service.clone())
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/groups/group-1")
+                .header("content-type", "application/json")
+                .body(
+                    json!({
+                        "human_mention_notify_mode": null
+                    })
+                    .to_string(),
+                )
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body");
+    let response_json: Value = serde_json::from_slice(&body).expect("response JSON");
+    assert_eq!(response_json["status"], StatusCode::BAD_REQUEST.as_u16());
+    assert_eq!(response_json["code"], "invalid_request");
+    assert!(
+        response_json["message"]
+            .as_str()
+            .expect("message")
+            .contains("human_mention_notify_mode"),
+        "envelope should name the rejected field"
+    );
+    assert_eq!(
+        response_json["error"].as_str(),
+        response_json["message"].as_str()
+    );
     assert!(service.update.lock().expect("update lock").is_none());
 }
 

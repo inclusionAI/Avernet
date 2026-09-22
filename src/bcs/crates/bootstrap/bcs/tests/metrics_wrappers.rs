@@ -575,6 +575,7 @@ fn group_detail(status: GroupStatus, group_kind: GroupKind) -> GroupDetailResult
         initial_run: None,
         originator: None,
         visibility: "private".to_string(),
+        human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
     }
 }
 

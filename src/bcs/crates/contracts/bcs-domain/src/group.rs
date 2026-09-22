@@ -363,6 +363,11 @@ pub struct Group {
     /// Group-level routing policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing_policy: Option<RoutingPolicy>,
+    /// Per-group policy controlling whether human-mention messages notify
+    /// external channels. Missing serialized legacy data defaults to `All`
+    /// via `#[serde(default)]`; all in-memory Groups carry an explicit value.
+    #[serde(default)]
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
     /// User-provided group context (optional description of collaboration goal/background).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
@@ -498,6 +503,7 @@ impl Group {
             driver_bot: driver_bot.into(),
             originator: None, // Will be set to driver_bot by default
             routing_policy: None,
+            human_mention_notify_mode: HumanMentionNotifyMode::default(),
             context: None,
             opening_message: None,
             participants,
@@ -551,6 +557,31 @@ impl Group {
     /// Get the originator (defaults to driver_bot if not specified).
     pub fn originator(&self) -> &str {
         self.originator.as_deref().unwrap_or(&self.driver_bot)
+    }
+}
+
+/// Mode controlling whether human-mention messages notify external channels.
+///
+/// Stored on the Group as a per-group policy. `All` is the legacy/forward
+/// default: every human-mention message triggers external notify.
+/// `DriverBotOnly` limits external notify to messages whose sender is the
+/// driver bot. `None` disables external notify entirely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HumanMentionNotifyMode {
+    DriverBotOnly,
+    #[default]
+    All,
+    None,
+}
+
+impl HumanMentionNotifyMode {
+    pub fn allows_external_notify(self, sender_actor_id: &str, driver_bot_id: &str) -> bool {
+        match self {
+            Self::DriverBotOnly => sender_actor_id == driver_bot_id,
+            Self::All => true,
+            Self::None => false,
+        }
     }
 }
 
@@ -659,6 +690,41 @@ mod tests {
         assert!(strategy.allows_role(ParticipantRole::Observer));
         assert!(!strategy.allows_role(ParticipantRole::Manager));
         assert!(!strategy.allows_role(ParticipantRole::Worker));
+    }
+
+    #[test]
+    fn human_mention_notify_mode_uses_wire_values_and_all_default() {
+        assert_eq!(
+            serde_json::to_string(&HumanMentionNotifyMode::DriverBotOnly).unwrap(),
+            "\"driver_bot_only\""
+        );
+        assert_eq!(
+            serde_json::from_str::<HumanMentionNotifyMode>("\"all\"").unwrap(),
+            HumanMentionNotifyMode::All
+        );
+        assert_eq!(HumanMentionNotifyMode::default(), HumanMentionNotifyMode::All);
+        assert!(serde_json::from_str::<HumanMentionNotifyMode>("\"invalid\"").is_err());
+    }
+
+    #[test]
+    fn human_mention_notify_mode_allows_only_the_driver_when_requested() {
+        assert!(HumanMentionNotifyMode::All.allows_external_notify("other", "driver"));
+        assert!(HumanMentionNotifyMode::DriverBotOnly.allows_external_notify("driver", "driver"));
+        assert!(!HumanMentionNotifyMode::DriverBotOnly.allows_external_notify("other", "driver"));
+        assert!(!HumanMentionNotifyMode::None.allows_external_notify("driver", "driver"));
+    }
+
+    #[test]
+    fn legacy_group_json_without_notify_mode_defaults_to_all() {
+        let mut value = serde_json::to_value(Group::new(
+            "group-1",
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+        ))
+        .unwrap();
+        value.as_object_mut().unwrap().remove("human_mention_notify_mode");
+        let group: Group = serde_json::from_value(value).unwrap();
+        assert_eq!(group.human_mention_notify_mode, HumanMentionNotifyMode::All);
     }
 
     fn group_with_updated_at(id: &str, updated_at: u64) -> Group {

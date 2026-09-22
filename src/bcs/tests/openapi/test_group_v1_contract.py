@@ -471,7 +471,54 @@ def test_update_group_accepts_only_the_current_patch_fields() -> None:
     assert schema["properties"]["context"] == {"type": "string"}
     assert set(schema["properties"]) == {
         "name", "context", "opening_message", "visibility", "delivery_policy",
+        "human_mention_notify_mode",
     }
+
+
+def test_update_group_notify_mode_is_omitted_but_non_null() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][GROUP_PATH]["patch"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert schema["minProperties"] == 1
+    assert schema["additionalProperties"] is False
+    # The field is optional in the request body, but an explicit null is
+    # rejected at the HTTP boundary: the schema must not admit nulls.
+    notify_mode = schema["properties"]["human_mention_notify_mode"]
+    assert notify_mode["enum"] == ["driver_bot_only", "all", "none"]
+    assert notify_mode["type"] == "string"
+    assert "oneOf" not in notify_mode
+
+
+NOTIFY_MODE_ENUM = ["driver_bot_only", "all", "none"]
+
+
+def test_group_notify_mode_is_required_on_every_response_shape() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+
+    detail_variants = contract["paths"][GROUP_PATH]["get"]["responses"]["200"][
+        "content"
+    ]["application/json"]["schema"]["properties"]["data"]["oneOf"]
+    collaboration_detail, dm_detail = detail_variants
+    summary_items = contract["paths"][GROUPS_PATH]["get"]["responses"]["200"][
+        "content"
+    ]["application/json"]["schema"]["properties"]["data"]["properties"]["items"]["items"]
+    normal_summary, dm_summary = summary_items["oneOf"]
+
+    for shape in (collaboration_detail, dm_detail, normal_summary, dm_summary):
+        assert "human_mention_notify_mode" in shape["required"]
+        assert shape["additionalProperties"] is False
+        assert shape["properties"]["human_mention_notify_mode"]["type"] == "string"
+        assert shape["properties"]["human_mention_notify_mode"]["enum"] == NOTIFY_MODE_ENUM
+
+    # The reusable schema keeps the shared three-value enum definition.
+    create_detail = contract["paths"][GROUPS_PATH]["post"]["responses"]["201"][
+        "content"
+    ]["application/json"]["schema"]["properties"]["data"]["oneOf"][0]
+    assert (
+        create_detail["properties"]["human_mention_notify_mode"]["enum"]
+        == NOTIFY_MODE_ENUM
+    )
 
 
 PUBLIC_GROUPS_PATH = "/openapi/v1/collaboration/public-groups"

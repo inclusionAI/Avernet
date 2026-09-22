@@ -9,7 +9,7 @@ use bcs_service_api::port::repo::{
 };
 use bcs_service_api::port::{EventRecordFactoryPort, NewEvent};
 use bcs_service_api::types::{
-    EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject, MessageViewScope,
+    EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject, GroupHumanNotifyPolicy, MessageViewScope,
 };
 use bcs_service_api::{
     ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage,
@@ -63,6 +63,13 @@ impl Default for GroupCore {
 impl GroupCoreService for GroupCore {
     async fn upsert(&self, group: Group) -> ServiceResult<()> {
         self.repo.upsert(group).await
+    }
+
+    async fn read_human_notify_policy(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<Option<GroupHumanNotifyPolicy>> {
+        self.repo.read_human_notify_policy(group_id).await
     }
 
     async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
@@ -538,6 +545,11 @@ fn prepare_group_mutation(
                 if current != delivery {
                     changed_fields.push("delivery_policy");
                 }
+            }
+            if let Some(mode) = patch.human_mention_notify_mode
+                && group.human_mention_notify_mode != mode
+            {
+                changed_fields.push("human_mention_notify_mode");
             }
             if changed_fields.is_empty() {
                 return Ok(None);

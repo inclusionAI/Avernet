@@ -158,3 +158,15 @@ async fn noop_group_count_helpers_are_benign() {
     service.increment_message_count(missing).await.unwrap();
     service.reset_message_count(missing).await.unwrap();
 }
+
+#[tokio::test]
+async fn read_human_notify_policy_fails_closed_on_default_implementation() {
+    let service = NoopGroupCoreService::default();
+    let missing = "missing";
+
+    assert!(matches!(
+        service.read_human_notify_policy(missing).await,
+        Err(ServiceError::InternalError(reason))
+            if reason == "current Group human-notify policy read is not implemented"
+    ));
+}

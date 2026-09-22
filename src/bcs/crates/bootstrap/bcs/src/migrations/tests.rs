@@ -7,6 +7,9 @@ mod fixed_loop;
 #[path = "tests/bot_provider_storage.rs"]
 mod bot_provider_storage;
 
+#[path = "tests/group_human_mention_notify_mode.rs"]
+mod group_human_mention_notify_mode;
+
 async fn column_names(db: &dyn DbPlugin, table: &str) -> DbResult<Vec<String>> {
     let rows = db
         .query(DbStatement::new(format!("PRAGMA table_info({table})")))
@@ -195,7 +198,12 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
             (27, "run_reply_segments".to_string(), "sqlite".to_string()),
             (28, "provider_bot_webhook".to_string(), "sqlite".to_string()),
             (29, "fixed_loop_runtime".to_string(), "sqlite".to_string()),
-            (30, "bot_provider_storage".to_string(), "sqlite".to_string())
+            (30, "bot_provider_storage".to_string(), "sqlite".to_string()),
+            (
+                31,
+                "group_human_mention_notify_mode".to_string(),
+                "sqlite".to_string()
+            )
         ]
     );
     Ok(())
@@ -207,7 +215,7 @@ async fn sqlite_migration_plan_reports_all_versions() -> DbResult<()> {
 
     let report = check_sqlite_migrations(&db).await?;
 
-    assert_eq!(report.pending_versions.len(), 30);
+    assert_eq!(report.pending_versions.len(), 31);
     assert_eq!(report.pending_versions[0].version, 1);
     assert_eq!(report.pending_versions[0].name, "init_schema");
     assert!(report.pending_versions[0].statements.is_empty());
@@ -637,7 +645,12 @@ async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
             (27, "run_reply_segments".to_string(), "sqlite".to_string()),
             (28, "provider_bot_webhook".to_string(), "sqlite".to_string()),
             (29, "fixed_loop_runtime".to_string(), "sqlite".to_string()),
-            (30, "bot_provider_storage".to_string(), "sqlite".to_string())
+            (30, "bot_provider_storage".to_string(), "sqlite".to_string()),
+            (
+                31,
+                "group_human_mention_notify_mode".to_string(),
+                "sqlite".to_string()
+            )
         ]
     );
     Ok(())

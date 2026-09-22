@@ -480,6 +480,7 @@ impl GroupQueryService for RecordingGroupQuery {
             latest_running_session_id: None,
             initial_run: None,
             visibility: "private".to_string(),
+            human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         })
     }
 
@@ -560,6 +561,7 @@ impl GroupManagementService for RecordingGroupManagement {
             latest_running_session_id: None,
             initial_run: None,
             visibility: "private".to_string(),
+            human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         };
         self.create_dm_calls.lock().await.push(cmd);
         Ok(DmCreateResult {
@@ -609,6 +611,7 @@ impl GroupManagementService for RecordingGroupManagement {
             latest_running_session_id: None,
             initial_run: None,
             visibility: "private".to_string(),
+            human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         };
         self.status_calls.lock().await.push(cmd);
         Ok(result)
@@ -676,6 +679,7 @@ impl GroupManagementService for RecordingGroupManagement {
             latest_running_session_id: None,
             initial_run: None,
             visibility: "private".to_string(),
+            human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         };
         self.terminate_calls.lock().await.push(cmd);
         Ok(result)
@@ -709,6 +713,7 @@ impl GroupManagementService for RecordingGroupManagement {
             latest_running_session_id: None,
             initial_run: None,
             visibility: "private".to_string(),
+            human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         };
         self.label_calls.lock().await.push(cmd);
         Ok(result)
@@ -1116,6 +1121,7 @@ async fn post_groups_delegates_to_group_management_create_and_preserves_response
     assert_eq!(json["initial_run"]["bot_uuid"], "driver-bot");
     assert_eq!(json["initial_run"]["activity_kind"], "group_bootstrap");
     assert_eq!(json["initial_run"]["state"], "running");
+    assert_eq!(json["human_mention_notify_mode"], "all");
     assert!(json.get("opening_message").is_none());
     assert!(json.get("scene_group_id").is_none());
     assert!(json.get("scene_group_name").is_none());
@@ -2098,6 +2104,10 @@ async fn post_groups_dm_delegates_to_create_dm_with_human_caller() {
         json["participants"],
         serde_json::json!(["human_alice", "target-bot"])
     );
+    // Step 1: the DM projection surfaces `human_mention_notify_mode` even
+    // though Dm human-mention delivery remains disabled — the field is
+    // visible-but-inactive for Dm Groups.
+    assert_eq!(json["human_mention_notify_mode"], "all");
 
     let create_calls = recorder.create_calls.lock().await;
     assert!(create_calls.is_empty());
@@ -2211,6 +2221,7 @@ async fn group_query_routes_delegate_to_group_query_service() {
         .unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["items"][0]["id"], "group-1");
+    assert_eq!(json["items"][0]["human_mention_notify_mode"], "all");
     assert_eq!(json["total"], 1);
     assert_eq!(json["offset"], 2);
     assert_eq!(json["limit"], 3);
@@ -2252,6 +2263,7 @@ async fn group_query_routes_delegate_to_group_query_service() {
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["bot_uuid"], "driver-bot");
     assert_eq!(json["items"][0]["group_id"], "bot-group-1");
+    assert_eq!(json["items"][0]["human_mention_notify_mode"], "all");
     assert_eq!(json["total"], 1);
 
     let workspace_response = app
@@ -2553,6 +2565,7 @@ async fn get_group_preserves_legacy_detail_payload_from_query_service() {
     assert_eq!(json["service_group_uuid"], "service-group-1");
     assert_eq!(json["service_mode"], "master_slave");
     assert_eq!(json["dm_pair_key"], "bot-a|bot-b");
+    assert_eq!(json["human_mention_notify_mode"], "all");
     assert_eq!(json["participants"][0]["type"], "bot");
 }
 
@@ -3137,6 +3150,7 @@ fn detail_from_create(cmd: &GroupCreateCommand) -> GroupDetailResult {
         latest_running_session_id: None,
         initial_run: None,
         visibility: "private".to_string(),
+        human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
     }
 }
 
@@ -3168,6 +3182,7 @@ fn group_list_entry(group_id: &str) -> GroupListEntry {
         group_kind: Default::default(),
         group_strategy: Default::default(),
         visibility: "private".to_string(),
+        human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
     }
 }
 

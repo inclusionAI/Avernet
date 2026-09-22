@@ -17,8 +17,10 @@ use bcs_service_api::application::v1::{
     BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CollaborationGroupDetail,
     CreateGroup, CreateGroupOutcome, CreateGroupSpec, DeleteGroup, DeleteGroupParticipant,
     DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupService, GroupStatus,
-    GroupStrategy, GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups,
-    ListPublicGroups, MembershipFilter, Page, Participant, UpdateGroup, UpdateGroupParticipant,
+    GroupStrategy, GroupSummary, GroupVisibility, InlineGroupEventSubscriptionRequest,
+    ListGroups, ListPublicGroups, MembershipFilter,
+    DirectMessageGroupSummary, Membership, NormalGroupSummary, Page, Participant,
+    UpdateGroup, UpdateGroupParticipant,
 };
 use bcs_service_api::application::v1::{
     AddSessionParticipant, CompleteSession, CreateSession, CreateSessionOutcome, DeleteSession,
@@ -59,6 +61,7 @@ impl PrincipalVerifier for HeaderVerifier {
 struct FakeGroupService {
     list: Mutex<Option<ListGroups>>,
     list_public: Mutex<Option<ListPublicGroups>>,
+    populated_list_items: Mutex<Vec<GroupSummary>>,
     created: Mutex<Option<CreateGroup>>,
     inline_event_subscriptions: Mutex<Vec<InlineGroupEventSubscriptionRequest>>,
     reuse_dm: AtomicBool,
@@ -77,15 +80,28 @@ impl GroupService for FakeGroupService {
     async fn list_groups(
         &self,
         command: ListGroups,
-    ) -> Result<Page<bcs_service_api::application::v1::GroupSummary>, ApplicationError> {
+    ) -> Result<Page<GroupSummary>, ApplicationError> {
+        let offset = command.offset;
+        let limit = command.limit;
         *self.list.lock().expect("list lock") = Some(command);
-        Ok(Page::empty(0, 20))
+        let items = self.populated_list_items.lock().expect("populated list lock");
+        if items.is_empty() {
+            Ok(Page::empty(0, 20))
+        } else {
+            let total = items.len() as u64;
+            Ok(Page {
+                items: items.clone(),
+                total,
+                offset,
+                limit,
+            })
+        }
     }
 
     async fn list_public_groups(
         &self,
         command: ListPublicGroups,
-    ) -> Result<Page<bcs_service_api::application::v1::GroupSummary>, ApplicationError> {
+    ) -> Result<Page<GroupSummary>, ApplicationError> {
         *self.list_public.lock().expect("list public lock") = Some(command);
         Ok(Page::empty(0, 20))
     }
@@ -450,6 +466,7 @@ fn group_detail() -> GroupDetail {
                 bot_final_delivery: BotFinalDelivery::SendToDriver,
             },
         }),
+        human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         created_at: 1,
         updated_at: 2,
     })
@@ -483,6 +500,132 @@ fn authenticated_request(method: &str, uri: &str, body: Value) -> Request<Body> 
         .header("x-request-id", "request-123")
         .body(Body::from(body.to_string()))
         .expect("request")
+}
+
+// Step 4 V1 adapter: successful Group detail/list responses surface the
+// stored `human_mention_notify_mode` and leave every existing client-facing
+// field unchanged.
+fn populated_group_summaries() -> Vec<GroupSummary> {
+    vec![
+        GroupSummary::Normal(NormalGroupSummary {
+            group_id: "group-normal".into(),
+            version: 1,
+            name: None,
+            context: None,
+            status: GroupStatus::Active,
+            visibility: GroupVisibility::Private,
+            membership: Membership::Direct,
+            originator_actor_id: "bot-1".into(),
+            participant_count: 2,
+            driver_bot_uuid: "bot-1".into(),
+            strategy: GroupStrategy::Chat,
+            human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
+            created_at: 1,
+            updated_at: 2,
+        }),
+        GroupSummary::DirectMessage(DirectMessageGroupSummary {
+            group_id: "group-dm".into(),
+            version: 1,
+            name: None,
+            context: None,
+            status: GroupStatus::Active,
+            visibility: GroupVisibility::Private,
+            membership: Membership::Direct,
+            originator_actor_id: "bot-1".into(),
+            participant_count: 2,
+            peer_actor: None,
+            human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::DriverBotOnly,
+            created_at: 1,
+            updated_at: 2,
+        }),
+    ]
+}
+
+#[tokio::test]
+async fn group_detail_response_exposes_human_mention_notify_mode_and_preserves_existing_fields() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/groups/group-1",
+            Value::Null,
+        ))
+        .await
+        .expect("detail response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    // V1 envelope: { code, message, data, request_id }.
+    assert_eq!(body["code"], 20_000);
+    assert_eq!(body["message"], "OK");
+    assert_eq!(body["request_id"], "request-123");
+    // The Group detail surfaces the persisted notify mode.
+    assert_eq!(
+        body["data"]["human_mention_notify_mode"],
+        serde_json::json!("all")
+    );
+    // Existing fields the old clients expect must remain unchanged.
+    assert_eq!(body["data"]["kind"], serde_json::json!("normal"));
+    assert_eq!(body["data"]["group_id"], serde_json::json!("group-1"));
+    assert_eq!(body["data"]["version"], serde_json::json!(1));
+    assert_eq!(body["data"]["driver_bot_uuid"], serde_json::json!("bot-1"));
+    assert_eq!(body["data"]["visibility"], serde_json::json!("private"));
+    assert_eq!(body["data"]["status"], serde_json::json!("active"));
+    assert_eq!(
+        body["data"]["collaboration"]["strategy"],
+        serde_json::json!("chat")
+    );
+
+    let get_query = service.get.lock().expect("get lock");
+    assert_eq!(get_query.as_ref().expect("get recorded").group_id, "group-1");
+}
+
+#[tokio::test]
+async fn group_list_response_exposes_human_mention_notify_mode_on_every_summary() {
+    let service = Arc::new(FakeGroupService::default());
+    *service
+        .populated_list_items
+        .lock()
+        .expect("populated list lock") = populated_group_summaries();
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/groups?offset=0&limit=20",
+            Value::Null,
+        ))
+        .await
+        .expect("list response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20_000);
+    assert_eq!(body["message"], "OK");
+    assert_eq!(body["data"]["total"], 2);
+    assert_eq!(body["data"]["offset"], 0);
+    assert_eq!(body["data"]["limit"], 20);
+    assert_eq!(body["data"]["items"].as_array().expect("items").len(), 2);
+
+    let normal = &body["data"]["items"][0];
+    assert_eq!(normal["kind"], serde_json::json!("normal"));
+    assert_eq!(normal["group_id"], serde_json::json!("group-normal"));
+    assert_eq!(normal["version"], serde_json::json!(1));
+    assert_eq!(normal["driver_bot_uuid"], serde_json::json!("bot-1"));
+    assert_eq!(normal["strategy"], serde_json::json!("chat"));
+    assert_eq!(
+        normal["human_mention_notify_mode"],
+        serde_json::json!("all")
+    );
+
+    let dm = &body["data"]["items"][1];
+    assert_eq!(dm["kind"], serde_json::json!("dm"));
+    assert_eq!(dm["group_id"], serde_json::json!("group-dm"));
+    assert_eq!(dm["version"], serde_json::json!(1));
+    assert_eq!(
+        dm["human_mention_notify_mode"],
+        serde_json::json!("driver_bot_only")
+    );
 }
 
 #[tokio::test]
@@ -900,6 +1043,8 @@ async fn patch_rejects_explicit_null_for_every_mutable_field() {
         json!({"context": null}),
         json!({"visibility": null}),
         json!({"delivery_policy": null}),
+        json!({"human_mention_notify_mode": null}),
+        json!({"human_mention_notify_mode": "invalid"}),
         json!({"name": "Renamed", "context": null}),
     ] {
         let response = app
@@ -950,6 +1095,41 @@ async fn patch_forwards_context_to_the_group_service() {
     assert!(command.patch.delivery_policy.is_none());
     assert!(command.patch.visibility.is_none());
     assert!(command.patch.opening_message.is_none());
+    assert!(command.patch.human_mention_notify_mode.is_none());
+}
+
+#[tokio::test]
+async fn patch_forwards_human_mention_notify_mode_to_the_group_service() {
+    let service = Arc::new(FakeGroupService::default());
+    let app = test_router(service.clone());
+
+    for (wire, expected) in [
+        ("driver_bot_only", bcs_service_api::HumanMentionNotifyMode::DriverBotOnly),
+        ("all", bcs_service_api::HumanMentionNotifyMode::All),
+        ("none", bcs_service_api::HumanMentionNotifyMode::None),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authenticated_request(
+                "PATCH",
+                "/openapi/v1/collaboration/groups/group-1",
+                json!({ "human_mention_notify_mode": wire }),
+            ))
+            .await
+            .expect("notify mode patch response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let command = service
+            .updated
+            .lock()
+            .expect("update lock")
+            .as_ref()
+            .expect("update command")
+            .clone();
+        assert_eq!(command.group_id, "group-1");
+        assert_eq!(command.patch.human_mention_notify_mode, Some(expected));
+        assert!(command.patch.name.is_none());
+    }
 }
 
 #[tokio::test]

@@ -11,7 +11,8 @@ use crate::types::{
 use crate::InitialGroupRun;
 
 pub use bcs_domain::{
-    ActorKind, MessageViewScope, OpeningMessage, ParticipantMode, ParticipantRole,
+    ActorKind, HumanMentionNotifyMode, MessageViewScope, OpeningMessage, ParticipantMode,
+    ParticipantRole,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,6 +130,7 @@ pub struct NormalGroupSummary {
     pub participant_count: usize,
     pub driver_bot_uuid: String,
     pub strategy: GroupStrategy,
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -148,6 +150,7 @@ pub struct DirectMessageGroupSummary {
     pub participant_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_actor: Option<Actor>,
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -223,6 +226,7 @@ pub struct CollaborationGroupDetail {
     pub participants: Vec<Participant>,
     pub driver_bot_uuid: String,
     pub collaboration: CollaborationConfiguration,
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -239,6 +243,7 @@ pub struct DirectMessageGroupDetail {
     pub context: Option<String>,
     pub originator_actor_id: String,
     pub participants: Vec<Participant>,
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -444,6 +449,9 @@ pub struct GroupPatch {
     pub opening_message: Option<Option<OpeningMessage>>,
     pub visibility: Option<GroupVisibility>,
     pub delivery_policy: Option<GroupDeliveryPolicy>,
+    /// `None` leaves the stored Group value unchanged; `Some(mode)` overwrites it.
+    /// `null` is rejected at the HTTP boundary; there is no "clear to null" state.
+    pub human_mention_notify_mode: Option<HumanMentionNotifyMode>,
 }
 
 impl GroupPatch {
@@ -453,6 +461,7 @@ impl GroupPatch {
             && self.opening_message.is_none()
             && self.visibility.is_none()
             && self.delivery_policy.is_none()
+            && self.human_mention_notify_mode.is_none()
     }
 }
 

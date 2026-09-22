@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_domain::{
-    ActorKind, DeliveryType, Group, GroupKind, GroupStatus, GroupStrategy, MessageAudience,
-    Participant, ParticipantMode, ParticipantRole, PersistMode, RedactedToken, SystemGroupMessage,
-    SystemMessageEvent, SystemMessageEventKind,
+    ActorKind, DeliveryType, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
+    MessageAudience, Participant, ParticipantMode, ParticipantRole, PersistMode, RedactedToken,
+    SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind,
 };
 use bcs_service_api::{
     ActiveBotRunContext, ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand,
@@ -296,6 +296,7 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
         driver_bot: existing_bot_id.clone(),
         originator: Some(existing_bot_id.clone()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         context: None,
         opening_message: None,
         participants: vec![
@@ -400,6 +401,7 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
         driver_bot: existing_bot_id.clone(),
         originator: Some(existing_bot_id.clone()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         context: None,
         opening_message: None,
         participants: vec![
@@ -526,6 +528,7 @@ async fn dispatch_bot_left_with_no_recipients_persists_public_record_and_pushes_
         driver_bot: leaving.clone(),
         originator: Some(leaving.clone()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         context: None,
         opening_message: None,
         participants: vec![Participant {
@@ -1016,6 +1019,7 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
         driver_bot: "bot-provider".to_string(),
         originator: Some("bot-provider".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         context: None,
         opening_message: None,
         participants: vec![Participant {
@@ -1121,6 +1125,7 @@ async fn deprecated_stream_gray_setting_keeps_system_message_send_delivery() {
         driver_bot: "bot-provider".to_string(),
         originator: Some("bot-provider".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         context: None,
         opening_message: None,
         participants: vec![Participant {
@@ -1188,6 +1193,7 @@ async fn dispatch_send_system_message_to_websocket_records_run_context_and_retur
         driver_bot: "bot-ws".to_string(),
         originator: Some("bot-ws".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         context: None,
         opening_message: None,
         participants: vec![Participant {
@@ -1284,6 +1290,7 @@ async fn dispatch_failed_send_system_message_does_not_leave_active_run_context()
         driver_bot: "bot-provider".to_string(),
         originator: Some("bot-provider".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         context: None,
         opening_message: None,
         participants: vec![Participant {
@@ -1366,6 +1373,7 @@ async fn dispatch_failed_provider_send_notifies_frontend_without_active_run_cont
         driver_bot: "bot-provider".to_string(),
         originator: Some("bot-provider".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         context: None,
         opening_message: None,
         participants: vec![Participant {
@@ -1455,6 +1463,7 @@ async fn dispatch_inject_system_message_does_not_record_run_context() {
         driver_bot: "bot-provider".to_string(),
         originator: Some("bot-provider".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         context: None,
         opening_message: None,
         participants: vec![Participant {

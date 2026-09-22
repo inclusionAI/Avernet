@@ -120,6 +120,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 28, name: "provider_bot_webhook" },
     SqliteMigration { version: 29, name: "fixed_loop_runtime" },
     SqliteMigration { version: 30, name: "bot_provider_storage" },
+    SqliteMigration {
+        version: 31,
+        name: "group_human_mention_notify_mode",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -371,6 +375,15 @@ async fn apply_sqlite_migration_body(
                 if index == added.len() && index_present { continue; }
                 db.execute(DbStatement::new(sql)).await?;
             }
+            Ok(())
+        }
+        31 => {
+            // Single additive DDL statement; kept verbatim from
+            // migrations/sqlite/031_group_human_mention_notify_mode.sql.
+            db.execute(DbStatement::new(include_str!(
+                "../../../../migrations/sqlite/031_group_human_mention_notify_mode.sql"
+            )))
+            .await?;
             Ok(())
         }
         _ => Ok(()),

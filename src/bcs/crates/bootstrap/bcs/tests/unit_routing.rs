@@ -3,7 +3,7 @@
 //! Tests for the full flow from frontend to bot and back.
 
 use bcs_service_api::{
-    Group, GroupStrategy, Participant, ParticipantRole, Workspace,
+    Group, GroupStrategy, HumanMentionNotifyMode, Participant, ParticipantRole, Workspace,
     RoutingCoreService, GroupStatus, DeliveryType,
 };
 use bcs_routing::MessageRouter;
@@ -21,6 +21,7 @@ async fn test_broadcast_to_all_on_no_mention() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -94,6 +95,7 @@ async fn test_mention_broadcasts_to_all_with_mentions_extracted() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -157,6 +159,7 @@ async fn test_multiple_mentions_broadcast_to_all() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -232,6 +235,7 @@ async fn test_invalid_mention_ignored_broadcasts_to_all() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -326,6 +330,7 @@ fn test_group_session_originator_defaults_to_driver() {
         driver_bot: "driver".to_string(),
         originator: None, // Not set
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -369,6 +374,7 @@ fn test_group_session_originator_can_be_set() {
         driver_bot: "driver".to_string(),
         originator: Some("initiator".to_string()), // Explicitly set
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -429,6 +435,7 @@ async fn test_g1_agent_mode_mention_routes_to_consultant() {
         driver_bot: "zhangsan".to_string(),
         originator: Some("zhangsan".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "zhangsan".to_string(),
@@ -488,6 +495,7 @@ async fn test_g2_fusion_mode_broadcast_to_all() {
         driver_bot: "zhangsan".to_string(),
         originator: Some("zhangsan".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "zhangsan".to_string(),
@@ -556,6 +564,7 @@ async fn test_g4_dynamic_member_addition() {
         driver_bot: "pm".to_string(),
         originator: Some("pm".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "pm".to_string(),
@@ -619,6 +628,7 @@ async fn test_g5_expert_consultation_multiple_mentions() {
         driver_bot: "zhangsan".to_string(),
         originator: Some("zhangsan".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "zhangsan".to_string(),
@@ -814,6 +824,7 @@ async fn test_all_participants_mentioned() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -873,6 +884,7 @@ async fn test_routing_target_is_driver_flag() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -933,6 +945,7 @@ async fn test_routing_target_is_driver_flag() {
             driver_bot: "driver".to_string(),
             originator: Some("driver".to_string()),
             routing_policy: None,
+            human_mention_notify_mode: HumanMentionNotifyMode::default(),
             participants: vec![
                 Participant {
                     bot_uuid: "driver".to_string(),
@@ -1012,6 +1025,7 @@ async fn test_no_mention_originator_gets_send_others_inject() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -1087,6 +1101,7 @@ async fn test_mention_mentioned_gets_send_others_inject() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -1162,6 +1177,7 @@ async fn test_all_mention_everyone_gets_send() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -1222,6 +1238,7 @@ async fn test_sender_excluded_from_delivery() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -1292,6 +1309,7 @@ async fn test_multiple_mentions_delivery_type() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -1382,6 +1400,7 @@ async fn test_real_person_sends_message_all_bots_receive() {
         driver_bot: "zhangsan".to_string(),
         originator: Some("zhangsan".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "zhangsan".to_string(),
@@ -1444,6 +1463,7 @@ async fn test_real_person_sends_with_mention() {
         driver_bot: "zhangsan".to_string(),
         originator: Some("zhangsan".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "zhangsan".to_string(),
@@ -1513,6 +1533,7 @@ async fn test_anonymous_sender_broadcasts_to_all() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),

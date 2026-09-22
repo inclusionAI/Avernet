@@ -123,6 +123,7 @@ pub async fn handle_web_send(
         .await
         {
             crate::human_notify_hook::spawn_human_mention_notify(
+                flow.group.as_ref(),
                 &flow.human_mention_notify,
                 &flow.session_management,
                 Some(mention_actor_ids),
@@ -136,7 +137,8 @@ pub async fn handle_web_send(
                     message_text: notify_text,
                     timestamp_ms: now_ms(),
                 },
-            );
+            )
+            .await;
         }
     }
     let mut active_run_ids = Vec::new();

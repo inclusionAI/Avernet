@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 
 use crate::types::{
-    EventActor, Group, GroupKind, GroupMessage, GroupMutableFieldsPatch, GroupStatus, Participant,
-    MessageViewScope, ParticipantMode, RoutingPolicy, ServiceResult, ServiceSpec, Workspace,
+    EventActor, Group, GroupHumanNotifyPolicy, GroupKind, GroupMessage, GroupMutableFieldsPatch,
+    GroupStatus, Participant, MessageViewScope, ParticipantMode, RoutingPolicy, ServiceError,
+    ServiceResult, ServiceSpec, Workspace,
 };
 
 use super::AppendEventRecord;
@@ -67,7 +68,7 @@ pub trait GroupRepoPort: Send + Sync {
     /// inline subscriptions, and append the ordered creation Events.
     async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
         let _ = command;
-        Err(crate::types::ServiceError::InvalidOperation {
+        Err(ServiceError::InvalidOperation {
             message: "Group provisioning finalization is not configured".to_string(),
             request_id: None,
         })
@@ -80,7 +81,7 @@ pub trait GroupRepoPort: Send + Sync {
         command: CommitGroupEventfulMutation,
     ) -> ServiceResult<Group> {
         let _ = command;
-        Err(crate::types::ServiceError::InvalidOperation {
+        Err(ServiceError::InvalidOperation {
             message: "Eventful Group mutation is not configured".to_string(),
             request_id: None,
         })
@@ -210,4 +211,19 @@ pub trait GroupRepoPort: Send + Sync {
         visibility: Option<&str>,
         label: Option<&str>,
     ) -> u64;
+
+    /// Read the Group human-mention notify policy. Fail-closed default that
+    /// production Group Core/Store implementations override in Task 2.
+    ///
+    /// This is a scoped, transport-neutral policy read. `None` means Group
+    /// not found; storage or enum parsing errors return `Err`. It must not
+    /// call cache-first `get`/`try_get` or load participants/Session state.
+    async fn read_human_notify_policy(
+        &self,
+        _group_id: &str,
+    ) -> ServiceResult<Option<GroupHumanNotifyPolicy>> {
+        Err(ServiceError::InternalError(
+            "current Group human-notify policy read is not implemented".to_string(),
+        ))
+    }
 }

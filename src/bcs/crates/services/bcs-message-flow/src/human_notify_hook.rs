@@ -6,7 +6,7 @@ use std::sync::Arc;
 use bcs_domain::routing::RouteParticipantOverlay;
 use bcs_domain::{ActorKind, ActorStatus};
 use bcs_service_api::port::{HumanMentionNotifyPort, MentionNotification, MentionedHuman};
-use bcs_service_api::SessionManagementService;
+use bcs_service_api::{GroupCoreService, SessionManagementService};
 
 /// Context needed to assemble a [`MentionNotification`].
 pub(crate) struct MentionNotifyContext {
@@ -61,8 +61,15 @@ pub(crate) fn build_mention_trigger(
 }
 
 /// Spawn a fire-and-forget notification when the trigger resolves to at least
-/// one human and the port is available. Errors are logged by the port adapter.
-pub(crate) fn spawn_human_mention_notify(
+/// one human, the port is available, and the Group's current authoritative
+/// notify policy allows the sender. The policy read is a dedicated uncached
+/// `GroupCoreService::read_human_notify_policy` call: it happens only after
+/// the in-memory eligibility checks, it never trusts a request-time copy of
+/// mode/driver, and it is fail-closed (missing Group or read error logs a
+/// warning and skips the external notification without failing the message
+/// flow). Errors are logged by the port adapter.
+pub(crate) async fn spawn_human_mention_notify(
+    groups: &dyn GroupCoreService,
     port: &Option<Arc<dyn HumanMentionNotifyPort>>,
     sessions: &Option<Arc<dyn SessionManagementService>>,
     mention_actor_ids: Option<&[String]>,
@@ -79,6 +86,29 @@ pub(crate) fn spawn_human_mention_notify(
     else {
         return;
     };
+    let policy = match groups.read_human_notify_policy(&context.group_id).await {
+        Ok(Some(policy)) => policy,
+        Ok(None) | Err(_) => {
+            tracing::warn!(
+                group_id = %context.group_id,
+                sender_actor_id = %context.sender_actor_id,
+                "current human-notify policy unavailable; external notification skipped"
+            );
+            return;
+        }
+    };
+    if !policy
+        .mode
+        .allows_external_notify(&context.sender_actor_id, &policy.driver_bot_id)
+    {
+        tracing::debug!(
+            group_id = %context.group_id,
+            sender_actor_id = %context.sender_actor_id,
+            mode = ?policy.mode,
+            "human mention external notification suppressed by group policy"
+        );
+        return;
+    }
     let mut notification = MentionNotification {
         session_id: context.session_id,
         group_id: context.group_id,
@@ -115,66 +145,5 @@ pub(crate) fn spawn_human_mention_notify(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn overlay_entry(
-        bot_uuid: &str,
-        bot_name: Option<&str>,
-        actor_kind: ActorKind,
-        status: ActorStatus,
-    ) -> RouteParticipantOverlay {
-        RouteParticipantOverlay {
-            bot_uuid: bot_uuid.to_string(),
-            bot_name: bot_name.map(str::to_string),
-            actor_kind,
-            mode: None,
-            status,
-            is_driver: false,
-        }
-    }
-
-    fn overlay() -> Vec<RouteParticipantOverlay> {
-        vec![
-            overlay_entry("bot-driver", Some("Driver"), ActorKind::Bot, ActorStatus::Online),
-            overlay_entry("human_1", Some("Human One"), ActorKind::Human, ActorStatus::Online),
-            overlay_entry("human_2", Some("Hidden Human"), ActorKind::Human, ActorStatus::Hidden),
-        ]
-    }
-
-    #[test]
-    fn trigger_resolves_human_mentions() {
-        let ids = vec!["human_1".to_string(), "bot-driver".to_string()];
-        let trigger = build_mention_trigger(&ids, &overlay(), "bot-driver").expect("trigger");
-        assert_eq!(trigger.len(), 1);
-        assert_eq!(trigger[0].actor_id, "human_1");
-        assert_eq!(trigger[0].display_name, "Human One");
-    }
-
-    #[test]
-    fn trigger_excludes_self_mention() {
-        let ids = vec!["human_1".to_string()];
-        assert!(build_mention_trigger(&ids, &overlay(), "human_1").is_none());
-    }
-
-    #[test]
-    fn trigger_skips_hidden_humans() {
-        let ids = vec!["human_2".to_string()];
-        assert!(build_mention_trigger(&ids, &overlay(), "bot-driver").is_none());
-    }
-
-    #[test]
-    fn trigger_none_for_bot_only_or_unknown_mentions() {
-        let overlay = overlay();
-        assert!(build_mention_trigger(&["bot-driver".to_string()], &overlay, "human_1").is_none());
-        assert!(build_mention_trigger(&["unknown".to_string()], &overlay, "bot-driver").is_none());
-        assert!(build_mention_trigger(&[], &overlay, "bot-driver").is_none());
-    }
-
-    #[test]
-    fn trigger_deduplicates_repeated_mentions() {
-        let ids = vec!["human_1".to_string(), "human_1".to_string()];
-        let trigger = build_mention_trigger(&ids, &overlay(), "bot-driver").expect("trigger");
-        assert_eq!(trigger.len(), 1);
-    }
-}
+#[path = "human_notify_hook_tests.rs"]
+mod tests;

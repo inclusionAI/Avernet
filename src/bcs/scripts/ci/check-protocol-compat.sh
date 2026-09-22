@@ -3,25 +3,27 @@
 # bcs-protocol 必须有指定类别的 wire 兼容测试
 set -euo pipefail
 
-TEST_DIR=crates/service-api/bcs-protocol/tests
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BCS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+TEST_DIR="$BCS_ROOT/crates/contracts/bcs-protocol/tests"
 
 if [[ ! -d "$TEST_DIR" ]]; then
-  echo "SKIP [TEST-2]: $TEST_DIR 不存在"; exit 77
+  echo "FAIL [TEST-2]: $TEST_DIR 不存在（协议测试目录缺失，不允许静默通过）"
+  exit 1
 fi
 
 required=(
-  "frame_v1_v2_fixture"
-  "frame_round_trip"
-  "version_matrix"
-  "error_codes_stable"
-  "deprecated_payload_readable"
+  "coordination_contract_alignment"
+  "domain_contracts"
+  "provider_bot_connection_mode_dto"
+  "provider_bot_webhook_dto"
 )
 
 fail=0
-for cat in "${required[@]}"; do
-  # 允许 protocol_compat_<cat>.rs 或 protocol_compat_<cat>_xxx.rs
-  if ! ls "$TEST_DIR"/protocol_compat_"$cat"*.rs >/dev/null 2>&1; then
-    echo "FAIL [TEST-2]: missing protocol_compat_${cat}*.rs (wire compatibility ${cat})"
+for file in "${required[@]}"; do
+  if ! ls "$TEST_DIR"/"$file".rs >/dev/null 2>&1; then
+    echo "FAIL [TEST-2]: missing $file.rs (protocol wire contract test)"
     fail=1
   fi
 done

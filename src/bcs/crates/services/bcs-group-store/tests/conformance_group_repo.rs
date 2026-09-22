@@ -18,8 +18,9 @@ use bcs_service_api::types::{
     EventSubject, EventSubscriptionScope, EventSubscriptionScopeType, EventSubscriptionStatus,
 };
 use bcs_service_api::{
-    DefaultDelivery, GroupKind, GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant,
-    ParticipantRole, RoutingMode, RoutingPolicy, ServiceError,
+    DefaultDelivery, GroupKind, GroupMutableFieldsPatch, GroupStatus, GroupStrategy,
+    HumanMentionNotifyMode, Participant, ParticipantRole, RoutingMode, RoutingPolicy,
+    ServiceError,
 };
 
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
@@ -162,6 +163,61 @@ async fn sqlite_group_opening_message_round_trips_and_can_be_cleared() {
             .opening_message,
         None
     );
+}
+
+#[tokio::test]
+async fn sqlite_eventful_notify_mode_patch_round_trips_and_bumps_version() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref())
+        .await
+        .expect("migrate sqlite");
+    let writer = MySqlGroupStore::sqlite(Arc::clone(&db), PROVISIONING_ENV.to_string());
+    let mut group = GroupBuilder::new("driver").id("notify-eventful").build();
+    group.human_mention_notify_mode = HumanMentionNotifyMode::DriverBotOnly;
+    let expected_version = group.version;
+    writer.upsert(group).await.expect("seed Group");
+
+    let updated = writer
+        .commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: "notify-eventful".to_string(),
+            expected_version,
+            mutated_at_ms: 1_787_028_100_000,
+            mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch {
+                human_mention_notify_mode: Some(HumanMentionNotifyMode::None),
+                ..Default::default()
+            }),
+            event: None,
+        })
+        .await
+        .expect("commit eventful notify-mode patch");
+    assert_eq!(updated.version, expected_version + 1);
+    assert_eq!(
+        updated.human_mention_notify_mode,
+        HumanMentionNotifyMode::None
+    );
+
+    // A freshly-built Store on the same DB proves the patch is in SQL, not a
+    // writer-cache residue.
+    let cold = MySqlGroupStore::sqlite(Arc::clone(&db), PROVISIONING_ENV.to_string());
+    let loaded = cold
+        .try_get("notify-eventful")
+        .await
+        .expect("cold read")
+        .expect("group");
+    assert_eq!(loaded.version, expected_version + 1);
+    assert_eq!(
+        loaded.human_mention_notify_mode,
+        HumanMentionNotifyMode::None
+    );
+
+    // The authoritative policy read on the cold reader must agree.
+    let policy = cold
+        .read_human_notify_policy("notify-eventful")
+        .await
+        .expect("policy read")
+        .expect("policy");
+    assert_eq!(policy.mode, HumanMentionNotifyMode::None);
+    assert_eq!(policy.driver_bot_id, "driver");
 }
 
 #[tokio::test]

@@ -139,6 +139,7 @@ fn direct_message_summary_cannot_carry_normal_group_fields() {
         originator_actor_id: "bot-a".into(),
         participant_count: 2,
         peer_actor: None,
+        human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         created_at: 1,
         updated_at: 2,
     });

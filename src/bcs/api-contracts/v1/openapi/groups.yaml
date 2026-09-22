@@ -673,6 +673,12 @@ UpdateGroup:
         - public
     delivery_policy:
       $ref: ../domain-models.yaml#/DeliveryPolicy
+    human_mention_notify_mode:
+      description: >-
+        Per-Group policy for notifying external channels on human-mention
+        messages. `null` is rejected; omitting the field leaves the stored
+        value unchanged.
+      $ref: ../domain-models.yaml#/HumanMentionNotifyMode
 
 UpdateGroupParticipantRequest:
   type: object

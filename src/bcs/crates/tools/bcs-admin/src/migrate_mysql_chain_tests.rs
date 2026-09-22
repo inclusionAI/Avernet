@@ -1,4 +1,9 @@
+#[cfg(test)]
+#[path = "migrate_group_notify_contract.rs"]
+mod group_notify_contract;
+
 use super::*;
+use std::sync::Arc;
 use bcs_config_api::mysql::MysqlConnectionConfig;
 use bcs_config_api::{MysqlDbConfig, StatementProtocol};
 use mysql_async::Opts;
@@ -80,22 +85,25 @@ async fn full_mysql_migration_chain_applies_and_preserves_history() -> Result<()
     fs::write(&config_file, serde_json::to_vec(&bcs_config)?)?;
     let global = MigrateGlobalArgs { config_dir: None, config_file: Some(config_file) };
     let manager = MysqlDbManager::new(config).await?;
-    let db = MysqlDbPlugin::new(manager.clone(), "bcs");
-    let result = check_full_mysql_chain(&db, &global).await;
+    let db: Arc<dyn DbPlugin> = Arc::new(MysqlDbPlugin::new(manager.clone(), "bcs"));
+    let result = check_full_mysql_chain(db, &global).await;
     manager.close().await;
     result
 }
 
-async fn check_full_mysql_chain(db: &dyn DbPlugin, global: &MigrateGlobalArgs) -> Result<()> {
+async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArgs) -> Result<()> {
+    let migrated_db = Arc::clone(&db);
+    let db: &dyn DbPlugin = db.as_ref();
     // The test owns an empty database exclusively. Refuse existing tables before
     // entering the cleanup scope; CI runs this before all other MySQL contracts.
     anyhow::ensure!(chain_table_names(db).await?.is_empty(), "full-chain test requires an empty disposable database");
     let args = chain_args();
     let result: Result<()> = async {
+        println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=29\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=30\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=29).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=30).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_history_lookup_plans(db).await?;
         history_window_tests::verify_history_windows(global).await?;
@@ -104,14 +112,19 @@ async fn check_full_mysql_chain(db: &dyn DbPlugin, global: &MigrateGlobalArgs) -
         assert!(report.contains("applied_versions=0\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?, records);
 
+        println!("[phase 2/3] Group Store human-notify contract on the migrated chain");
+        group_notify_contract::verify(migrated_db.clone()).await?;
+
         // A completed historical prefix upgrades normally without rewriting its
         // records. The old IF NOT EXISTS spelling has the same DDL result here;
         // old checksum/timestamp rows model a prior successful deployment.
+        println!("[phase 3/3] v20 prefix upgrade with a pre-existing Group row");
         drop_chain_tables(db).await?;
         let mut prefix = chain_args();
         prefix.to = Some(20);
         apply_mysql_migrations(&prefix, global).await?;
         db.execute(DbStatement::new("INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, tags_json) VALUES ('chain-group', 'chain-bot', 'member', 'test', '[\"keep\"]')")).await?;
+        db.execute(DbStatement::new("INSERT INTO bcs_groups (group_id, status, driver_bot, env) VALUES ('chain-group', 'active', 'chain-driver', 'test')")).await?;
         db.execute(DbStatement::new("INSERT INTO bcs_state_machine_definition_snapshots (env, run_id, group_id, session_id, group_version, definition_id, definition_version, definition_content_hash, snapshot_json) VALUES ('test', 'legacy-run', 'chain-group', 'chain-session', 1, 'legacy', 1, REPEAT('a', 64), '{\"version\":1}')")).await?;
         for &(version, _, current, archived) in MYSQL_SYNTAX_REVISIONS {
             let updated = db.execute(DbStatement::with_params(
@@ -122,9 +135,11 @@ async fn check_full_mysql_chain(db: &dyn DbPlugin, global: &MigrateGlobalArgs) -
         }
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=9\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=10\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_chain_columns(db).await?;
+        let row = db.query(DbStatement::new("SELECT human_mention_notify_mode FROM bcs_groups WHERE group_id = 'chain-group' AND env = 'test'")).await?.remove(0);
+        assert_eq!(db_get_column::<String>(&row, "human_mention_notify_mode")?, "all");
         let row = db.query(DbStatement::new("SELECT tags_json, message_view_scope FROM bcs_group_participants WHERE bot_uuid = 'chain-bot'")).await?.remove(0);
         assert_eq!(db_get_column::<String>(&row, "tags_json")?, "[\"keep\"]");
         assert_eq!(db_get_column::<String>(&row, "message_view_scope")?, "full");
@@ -170,6 +185,7 @@ async fn assert_chain_columns(db: &dyn DbPlugin) -> Result<()> {
         ("bcs_messages", vec!["owner_bot_id", "visibility_domain", "audience_kind", "audience_actor_ids_json"]),
         ("bcs_state_machine_node_runs", vec!["outcome", "responded_by", "failure_action"]),
         ("bcs_group_participants", vec!["tags_json", "message_view_scope"]),
+        ("bcs_groups", vec!["human_mention_notify_mode"]),
         ("bcs_bots", vec!["task_claim_mode", "task_dream_mode", "user_visibility", "friend_ext", "friend_check_in_strategy", "provider_id", "provider_bot_ref", "connection_mode", "webhook_url"]),
         ("bcs_state_machine_runs", vec!["root_run_id", "rerun_of", "session_activation_count", "opening_message_override_json"]),
         ("bcs_group_sessions", vec!["message_visibility_version", "callback_lease_owner", "callback_lease_token", "callback_lease_until_ms"]),

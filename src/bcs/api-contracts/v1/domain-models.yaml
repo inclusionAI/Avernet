@@ -559,6 +559,13 @@ Membership:
     - session_only
     - none
 
+HumanMentionNotifyMode:
+  type: string
+  enum:
+    - driver_bot_only
+    - all
+    - none
+
 NormalGroupSummary:
   type: object
   additionalProperties: false
@@ -573,6 +580,7 @@ NormalGroupSummary:
     - participant_count
     - driver_bot_uuid
     - strategy
+    - human_mention_notify_mode
     - created_at
     - updated_at
   properties:
@@ -605,6 +613,8 @@ NormalGroupSummary:
         - chat
         - manager_worker
         - state_machine
+    human_mention_notify_mode:
+      $ref: "#/HumanMentionNotifyMode"
     created_at:
       type: integer
       minimum: 0
@@ -623,6 +633,7 @@ DirectMessageGroupSummary:
     - membership
     - originator_actor_id
     - participant_count
+    - human_mention_notify_mode
     - created_at
     - updated_at
   properties:
@@ -648,6 +659,8 @@ DirectMessageGroupSummary:
       const: 2
     peer_actor:
       $ref: "#/Actor"
+    human_mention_notify_mode:
+      $ref: "#/HumanMentionNotifyMode"
     created_at:
       type: integer
       minimum: 0
@@ -798,6 +811,7 @@ CollaborationGroupDetail:
     - participants
     - driver_bot_uuid
     - collaboration
+    - human_mention_notify_mode
     - created_at
     - updated_at
   properties:
@@ -828,6 +842,8 @@ CollaborationGroupDetail:
       type: string
     collaboration:
       $ref: "#/CollaborationConfiguration"
+    human_mention_notify_mode:
+      $ref: "#/HumanMentionNotifyMode"
     created_at:
       type: integer
       minimum: 0
@@ -858,6 +874,7 @@ DirectMessageGroupDetail:
     - visibility
     - originator_actor_id
     - participants
+    - human_mention_notify_mode
     - created_at
     - updated_at
   properties:
@@ -883,6 +900,8 @@ DirectMessageGroupDetail:
       maxItems: 2
       items:
         $ref: "#/Participant"
+    human_mention_notify_mode:
+      $ref: "#/HumanMentionNotifyMode"
     created_at:
       type: integer
       minimum: 0

@@ -2,9 +2,10 @@ use bcs_service_api::application::v1::{
     ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
     CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroupSpec, CreateParticipant,
     GroupDeliveryPolicy, GroupKindFilter, GroupPatch, GroupStrategy, GroupVisibility,
-    InlineGroupEventSubscriptionRequest, ManagerWorkerConfiguration, MembershipFilter,
-    OpeningMessage, ParticipantMode, ParticipantRole, StateMachineConfiguration, StateMachineDefinition,
-    StateMachineDefinitionContent, StateMachineParticipantBinding, MessageViewScope,
+    HumanMentionNotifyMode, InlineGroupEventSubscriptionRequest, ManagerWorkerConfiguration,
+    MembershipFilter, OpeningMessage, ParticipantMode, ParticipantRole, StateMachineConfiguration,
+    StateMachineDefinition, StateMachineDefinitionContent, StateMachineParticipantBinding,
+    MessageViewScope,
 };
 use serde::{Deserialize, Deserializer, de::Error as _};
 
@@ -307,6 +308,8 @@ pub struct UpdateGroupRequest {
     pub visibility: Option<GroupVisibility>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub delivery_policy: Option<DeliveryPolicyRequest>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub human_mention_notify_mode: Option<HumanMentionNotifyMode>,
 }
 
 fn deserialize_present_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -327,6 +330,7 @@ impl From<UpdateGroupRequest> for GroupPatch {
             delivery_policy: value.delivery_policy.map(|policy| GroupDeliveryPolicy {
                 bot_final_delivery: policy.bot_final_delivery,
             }),
+            human_mention_notify_mode: value.human_mention_notify_mode,
         }
     }
 }
@@ -353,5 +357,73 @@ mod tests {
             configured.opening_message,
             Some(Some(OpeningMessage::Text("Run {{bcs.run_id}}".to_string())))
         );
+    }
+
+    #[test]
+    fn human_mention_notify_mode_parses_present_omitted_and_rejects_null_or_invalid() {
+        let configured: UpdateGroupRequest = serde_json::from_value(serde_json::json!({
+            "human_mention_notify_mode": "driver_bot_only"
+        }))
+        .expect("valid notify mode");
+        assert_eq!(
+            configured.human_mention_notify_mode,
+            Some(HumanMentionNotifyMode::DriverBotOnly)
+        );
+
+        let omitted: UpdateGroupRequest = serde_json::from_value(serde_json::json!({
+            "name": "renamed"
+        }))
+        .expect("omitted notify mode");
+        assert_eq!(omitted.human_mention_notify_mode, None);
+
+        assert!(serde_json::from_value::<UpdateGroupRequest>(serde_json::json!({
+            "human_mention_notify_mode": null
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<UpdateGroupRequest>(serde_json::json!({
+            "human_mention_notify_mode": "invalid"
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn human_mention_notify_mode_forwards_every_variant_into_group_patch() {
+        for (wire, expected) in [
+            ("driver_bot_only", HumanMentionNotifyMode::DriverBotOnly),
+            ("all", HumanMentionNotifyMode::All),
+            ("none", HumanMentionNotifyMode::None),
+        ] {
+            let request: UpdateGroupRequest = serde_json::from_value(serde_json::json!({
+                "human_mention_notify_mode": wire
+            }))
+            .expect("valid notify mode");
+            let patch: GroupPatch = request.into();
+            assert_eq!(patch.human_mention_notify_mode, Some(expected));
+            assert!(!patch.is_empty());
+        }
+
+        let omitted: UpdateGroupRequest = serde_json::from_value(serde_json::json!({
+            "name": "renamed"
+        }))
+        .expect("omitted notify mode");
+        let omitted: GroupPatch = omitted.into();
+        assert_eq!(omitted.human_mention_notify_mode, None);
+        assert!(!omitted.is_empty());
+
+        let notify_only = GroupPatch {
+            human_mention_notify_mode: Some(HumanMentionNotifyMode::None),
+            ..Default::default()
+        };
+        assert!(!notify_only.is_empty());
+    }
+
+    #[test]
+    fn mode_only_group_patch_is_not_empty() {
+        let patch = GroupPatch {
+            human_mention_notify_mode: Some(HumanMentionNotifyMode::All),
+            ..Default::default()
+        };
+        assert!(!patch.is_empty());
+        assert!(GroupPatch::default().is_empty());
     }
 }

@@ -115,6 +115,7 @@ fn dm_create_command_and_result_carry_create_or_reuse_semantics() {
             initial_run: None,
             originator: None,
             visibility: "private".to_string(),
+            human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         },
         created: false,
     };
@@ -232,6 +233,7 @@ fn group_result_dtos_are_route_friendly_views() {
         initial_run: None,
         originator: None,
         visibility: "private".to_string(),
+        human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
     };
     let proposal = GroupProposalCreateResult {
         proposal_created: true,

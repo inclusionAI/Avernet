@@ -23,7 +23,9 @@ sha2 = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+bcs-group-store = { workspace = true }
 bcs-service-api = { workspace = true }
+bcs-test-support = { workspace = true }
 bcs-message-store = { workspace = true }
 bcs-session-store = { workspace = true }
 bcs-config-api = { workspace = true }

@@ -65,7 +65,9 @@ impl SystemMessageProducerService for BotHiddenNoticeProducer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bcs_domain::{ActorKind, Participant, ParticipantMode, ParticipantRole};
+    use bcs_domain::{
+        ActorKind, HumanMentionNotifyMode, Participant, ParticipantMode, ParticipantRole,
+    };
     use bcs_test_support::NoopBotRegistryCoreService;
 
     #[test]
@@ -84,6 +86,7 @@ mod tests {
             driver_bot: "bot-driver".into(),
             originator: Some("bot-driver".into()),
             routing_policy: None,
+            human_mention_notify_mode: HumanMentionNotifyMode::default(),
             context: None,
             opening_message: None,
             participants: vec![
@@ -157,6 +160,7 @@ mod tests {
             driver_bot: "bot-driver".into(),
             originator: Some("bot-driver".into()),
             routing_policy: None,
+            human_mention_notify_mode: HumanMentionNotifyMode::default(),
             context: None,
             opening_message: None,
             participants: vec![Participant {

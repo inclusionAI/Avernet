@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use super::{ActorKind, GroupMessage, ServiceResult};
-use crate::types::EventActor;
+use crate::types::{EventActor, GroupHumanNotifyPolicy};
 
 pub use bcs_domain::{
-    DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, MessageViewScope, Participant,
-    ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy,
-    SenderRoutesValidationError, ServiceSpec, Workspace,
+    DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
+    MessageViewScope, Participant, ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode,
+    RoutingPolicy, SenderRoutesValidationError, ServiceSpec, Workspace,
 };
 
 /// Actor input for actor-level DM group creation.
@@ -573,5 +573,20 @@ pub trait GroupCoreService: Send + Sync {
             None,
         )
         .await
+    }
+
+    /// Read the Group human-mention notify policy. Fail-closed default that
+    /// production Group Core/Store implementations override in Task 2.
+    ///
+    /// This is a scoped, transport-neutral policy read. `None` means Group
+    /// not found; storage or enum parsing errors return `Err`. It must not
+    /// call cache-first `get`/`try_get` or load participants/Session state.
+    async fn read_human_notify_policy(
+        &self,
+        _group_id: &str,
+    ) -> ServiceResult<Option<GroupHumanNotifyPolicy>> {
+        Err(super::ServiceError::InternalError(
+            "current Group human-notify policy read is not implemented".to_string(),
+        ))
     }
 }

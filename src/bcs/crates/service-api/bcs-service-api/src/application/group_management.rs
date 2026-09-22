@@ -6,9 +6,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{
-    ActorKind, DefaultDelivery, GroupKind, GroupStatus, GroupStrategy, ParticipantKind,
-    MessageViewScope, ParticipantMode, RoutingMode, RoutingPolicy, ServiceError, ServiceSpec,
-    Workspace,
+    ActorKind, DefaultDelivery, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
+    ParticipantKind, MessageViewScope, ParticipantMode, RoutingMode, RoutingPolicy, ServiceError,
+    ServiceSpec, Workspace,
 };
 
 /// Request for creating a group collaboration session.
@@ -217,6 +217,9 @@ pub struct GroupDetailResult {
     pub initial_run: Option<InitialGroupRun>,
     pub originator: Option<String>,
     pub visibility: String,
+    /// Per-Group external-notify policy for human-mention messages; every
+    /// Group reports an effective value (default `all`).
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -257,6 +260,9 @@ pub struct GroupListEntry {
     pub group_kind: GroupKind,
     pub group_strategy: GroupStrategy,
     pub visibility: String,
+    /// Per-Group external-notify policy for human-mention messages; every
+    /// Group reports an effective value (default `all`).
+    pub human_mention_notify_mode: HumanMentionNotifyMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

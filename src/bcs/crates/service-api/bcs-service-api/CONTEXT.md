@@ -276,6 +276,22 @@ events without prescribing a metrics implementation or exposing payload labels.
 MessageFlowService exposes Human-only environment-wide delivery-policy read/replace operations; policy values use the leaf bcs-config-api contract, and the delivery repository owns durable version CAS. Application validation rejects non-Human callers independently of HTTP.
 
 - Application, core, and port trait contracts for BCS.
+- Group human-mention notify mode is part of the Group patch contract.
+  Both HTTP adapters translate the wire field into
+  `application::v1::GroupPatch::human_mention_notify_mode` (`null` and unknown
+  values are rejected at the adapter boundary); the V1 Group application copies
+  `Some(mode)` into the working Group and the typed
+  `GroupMutableFieldsPatch`, and `GroupCoreService` change detection treats an
+  equal stored value as a no-op (no version increment, no Event) while a real
+  change is persisted through `PatchMutableFields` — persistence failures
+  propagate as errors. The four V1 response shapes (`NormalGroupSummary`,
+  `DirectMessageGroupSummary`, `CollaborationGroupDetail`,
+  `DirectMessageGroupDetail`) and the legacy `GroupDetailResult` /
+  `GroupListEntry` carry the non-optional effective mode read from the
+  persisted Group; projections perform uncached reads of the stored value and
+  never read Session state for it. The outbound notify consumer
+  (message-flow) reads the mode per candidate notification via the fail-closed
+  `GroupCoreService::read_human_notify_policy` port.
 - `GroupCreateCommand` requires an explicit `create_initial_session` boolean.
   Existing callers use true; false supports non-provisional normal groups, including StateMachine,
   creation without initial Session writes or bootstrap delivery. It is not a

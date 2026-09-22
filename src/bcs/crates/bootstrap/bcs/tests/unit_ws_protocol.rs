@@ -9,8 +9,8 @@
 //! ```
 
 use bcs_service_api::{
-    DeliveryType, Group, GroupStatus, GroupStrategy, Participant, ParticipantRole, Workspace,
-    RoutingCoreService,
+    DeliveryType, Group, GroupStatus, GroupStrategy, HumanMentionNotifyMode, Participant,
+    ParticipantRole, Workspace, RoutingCoreService,
 };
 use bcs_routing::MessageRouter;
 use bcs_protocol::GroupContext;
@@ -107,6 +107,7 @@ async fn test_group_chat_routing_no_mention() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -171,6 +172,7 @@ async fn test_group_chat_routing_with_mention() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -235,6 +237,7 @@ async fn test_group_chat_sender_exclusion() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -297,6 +300,7 @@ async fn test_real_person_sends_to_group() {
         driver_bot: "zhangsan".to_string(),
         originator: Some("zhangsan".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "zhangsan".to_string(),
@@ -501,6 +505,7 @@ async fn test_all_mention_routing() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -571,6 +576,7 @@ async fn test_invalid_mention_ignored() {
         driver_bot: "driver".to_string(),
         originator: Some("driver".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "driver".to_string(),
@@ -621,6 +627,7 @@ async fn test_single_participant_group() {
         driver_bot: "solo".to_string(),
         originator: Some("solo".to_string()),
         routing_policy: None,
+        human_mention_notify_mode: HumanMentionNotifyMode::default(),
         participants: vec![
             Participant {
                 bot_uuid: "solo".to_string(),

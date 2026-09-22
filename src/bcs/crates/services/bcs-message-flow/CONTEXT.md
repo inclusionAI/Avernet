@@ -26,6 +26,15 @@ exclusivity is implemented; it must never be emulated by a scope-wide abort.
 
 ## Provides
 
+The shared human-mention notify helper owns the per-Group external-notify
+policy decision. Callers (group_send, web_send, bot-event relay) invoke it only
+after the message is persisted; the helper performs one uncached authoritative
+`GroupCoreService::read_human_notify_policy` read per candidate notification —
+it never caches the mode and never trusts request-time copies. The read is
+fail-closed: an unavailable or failed policy read logs and skips the external
+notification without failing the message flow, while mode/driver comparison is
+synchronous and injects no extra await after admission.
+
 IM queue hints are best-effort and appear only after ten seconds of continued
 Queued state. The Channel `/cacel` command (with `/cancel` compatibility alias)
 cancels the authenticated Human's newest still-unsent IM message in the current

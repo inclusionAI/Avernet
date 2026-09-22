@@ -809,8 +809,9 @@ mod tests {
         GroupRepoPort, SessionFileRepoPort, SessionRepoPort,
     };
     use bcs_service_api::{
-        BotCapabilities, BotRegistryCoreService, Group, GroupKind, GroupStatus, Participant,
-        ParticipantRole, ServiceResult, SessionKind, SystemMessageService, Workspace,
+        BotCapabilities, BotRegistryCoreService, Group, GroupKind, GroupStatus,
+        HumanMentionNotifyMode, Participant, ParticipantRole, ServiceResult, SessionKind,
+        SystemMessageService, Workspace,
     };
     use bcs_services_container::Services;
     use bcs_session::SessionManagementServiceImpl;
@@ -948,6 +949,7 @@ mod tests {
             driver_bot: "bot-a".into(),
             originator: Some("bot-a".into()),
             routing_policy: None,
+            human_mention_notify_mode: HumanMentionNotifyMode::default(),
             context: None,
             opening_message: None,
             participants: vec![group_participant("bot-a"), group_participant("bot-b")],

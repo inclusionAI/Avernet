@@ -195,6 +195,7 @@ pub async fn handle_persistent_group_send(
         .await
         {
             crate::human_notify_hook::spawn_human_mention_notify(
+                flow.group.as_ref(),
                 &flow.human_mention_notify,
                 &flow.session_management,
                 Some(decision.mentions.as_slice()),
@@ -208,7 +209,8 @@ pub async fn handle_persistent_group_send(
                     message_text: notify_text,
                     timestamp_ms: now_ms(),
                 },
-            );
+            )
+            .await;
         }
     }
 

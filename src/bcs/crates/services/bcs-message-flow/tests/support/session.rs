@@ -6,6 +6,7 @@ use bcs_service_api::{
 pub struct StaticSessionManagement {
     session: Session,
     fail_get: bool,
+    get_calls: std::sync::atomic::AtomicUsize,
 }
 
 impl StaticSessionManagement {
@@ -18,7 +19,19 @@ impl StaticSessionManagement {
     }
 
     pub fn new(session: Session) -> Self {
-        Self { session, fail_get: false }
+        Self {
+            session,
+            fail_get: false,
+            get_calls: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// Count of `get` reads. Used to attribute Session-title reads on the
+    /// notification path: the only delta between an eligible message and an
+    /// otherwise identical suppressed message is the title lookup.
+    #[allow(dead_code)]
+    pub fn get_count(&self) -> usize {
+        self.get_calls.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -32,6 +45,8 @@ impl SessionManagementService for StaticSessionManagement {
     }
 
     async fn get(&self, session_id: &str) -> Result<Option<Session>, SessionUseCaseError> {
+        self.get_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if self.fail_get {
             return Err(SessionUseCaseError::Internal(bcs_service_api::ServiceError::InternalError("injected session read failure".into())));
         }

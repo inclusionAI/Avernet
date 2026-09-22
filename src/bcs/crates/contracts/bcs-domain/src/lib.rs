@@ -67,9 +67,9 @@ pub use fusion::{
     ContextFusionResponse, ContextParticipantPerspective,
 };
 pub use group::{
-    DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, MessageViewScope, Participant,
-    ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy,
-    SenderRoutesValidationError, Workspace,
+    DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
+    MessageViewScope, Participant, ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode,
+    RoutingPolicy, SenderRoutesValidationError, Workspace,
 };
 pub use group_id::{
     GENERATED_SESSION_ID_SUFFIX_CHARS, GROUP_ID_PREFIX, GroupIdBuildError,
