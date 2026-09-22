@@ -532,6 +532,34 @@ class FakeSkillUploadService:
         ]
 
 
+class FakeLocalSkillDeleteService:
+    """The explicit delete Service API over the package fake's shared rows."""
+
+    def __init__(self, packages: FakeSkillUploadService) -> None:
+        self._packages = packages
+
+    async def delete_local_skill(
+        self, *, skill_id: str, owner_id: str, user_id: str
+    ) -> None:
+        name = next(
+            (
+                name
+                for name, row in self._packages.rows.items()
+                if str(row["id"]) == str(skill_id)
+            ),
+            None,
+        )
+        if name is None:
+            return
+        await self._packages.delete_local_skill(
+            skill_id=skill_id,
+            name=name,
+            bot_id="fake-bot",
+            owner_id=owner_id,
+            actor_id=user_id,
+        )
+
+
 def _skill_name_of(package: bytes, parser: Any) -> str | None:
     """The package's own declared name, via its SKILL.md front matter."""
     import io
@@ -1159,6 +1187,7 @@ def device_port_bundle(
     mcp_config_service=None,
     identity_service=None,
     upload_service=None,
+    delete_service=None,
     capability_reader=None,
     package_validator=None,
     entry_fetcher=None,
@@ -1195,6 +1224,10 @@ def device_port_bundle(
         DeclaredSourceResolver,
     )
 
+    effective_upload = upload_service or FakeSkillUploadService()
+    effective_delete = delete_service or FakeLocalSkillDeleteService(
+        effective_upload
+    )
     bundle = MaterialiserPorts(
         script_service=script_service or FakeStartupScriptService(),
         activation_service=DeviceActivation(
@@ -1204,7 +1237,8 @@ def device_port_bundle(
         mcp_config_service=mcp_config_service or FakeMcpConfigService(),
         identity_service=DeviceIdentity(identity_service or FakeIdentityService()),
         upload_service=DeviceSkillPackageUpload(
-            upload_service or FakeSkillUploadService()
+            effective_upload,
+            effective_delete,
         ),
         capability_reader=capability_reader or FakeCapabilityReader(),
         package_validator=package_validator or real_validator(),
