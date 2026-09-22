@@ -7,7 +7,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from secbaas.community.api.device_manage import ArcaCredentials, ResourceSpecification
+from secbaas.community.api.device_manage import (
+    ArcaCredentials,
+    HeaderOperationRule,
+    OutBoundOperationRule,
+    OutBoundOperationRuleUpdatedMode,
+    ResourceSpecification,
+)
 from secbaas.community.plugins.sandbox.arca.local_k8s import (
     LocalK8sArcaSandbox,
     LocalK8sArcaSandboxPlugin,
@@ -86,6 +92,8 @@ class TestLocalK8sPluginCreate:
         )
 
         assert isinstance(sandbox, LocalK8sArcaSandbox)
+        # ConfigMap was created
+        mock_core.create_namespaced_config_map.assert_called_once()
         # Deployment was created
         mock_apps.create_namespaced_deployment.assert_called_once()
         # Service was created
@@ -96,6 +104,14 @@ class TestLocalK8sPluginCreate:
         # Verify service type is NodePort
         svc = mock_core.create_namespaced_service.call_args[1]["body"]
         assert svc.spec.type == "NodePort"
+
+        # Deployment has bot-runtime and envoy-sidecar
+        deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
+        container_names = [c.name for c in deployment.spec.template.spec.containers]
+        assert container_names == ["bot-runtime", "envoy-sidecar"]
+        volumes = deployment.spec.template.spec.volumes
+        assert len(volumes) == 1
+        assert volumes[0].config_map.name.startswith("envoy-header-rules-")
 
     @patch("kubernetes.client.AppsV1Api")
     @patch("kubernetes.client.CoreV1Api")
@@ -296,8 +312,21 @@ class TestLocalK8sSandbox:
         assert sandbox.destroy() is True
         mock_apps.delete_namespaced_deployment.assert_called_once()
         mock_core.delete_namespaced_service.assert_called_once()
+        mock_core.delete_namespaced_config_map.assert_called_once()
 
-    def test_update_outbound_rule_and_extend_ttl_noop(self, mock_client) -> None:
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_update_outbound_rule_patches_configmap_and_rolls_deployment(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        mock_client,
+    ) -> None:
+        mock_apps = MagicMock()
+        mock_apps_cls.return_value = mock_apps
+        mock_core = MagicMock()
+        mock_core_cls.return_value = mock_core
+
         sandbox = LocalK8sArcaSandbox(
             sandbox_id="tpl-test-abc",
             pod_name="bot-pod",
@@ -307,5 +336,32 @@ class TestLocalK8sSandbox:
             container_name="bot-runtime",
         )
 
-        assert sandbox.update_outbound_rule(MagicMock(), MagicMock()) is True
-        assert sandbox.extend_ttl(10) is True
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="set",
+                    header_name="X-Custom",
+                    value="foo",
+                )
+            ]
+        )
+        assert (
+            sandbox.update_outbound_rule(
+                rule, OutBoundOperationRuleUpdatedMode.REPLACE
+            )
+            is True
+        )
+        mock_core.patch_namespaced_config_map.assert_called_once()
+        mock_apps.patch_namespaced_deployment.assert_called_once()
+
+    def test_update_outbound_rule_empty_rule(self, mock_client) -> None:
+        sandbox = LocalK8sArcaSandbox(
+            sandbox_id="tpl-test-abc",
+            pod_name="bot-pod",
+            namespace="default",
+            template_id="openclaw-default",
+            client=mock_client,
+            container_name="bot-runtime",
+        )
+        assert sandbox.update_outbound_rule(None, MagicMock()) is True

@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
+import yaml
+
 from secbaas.community.api.device_manage import (
     OutBoundOperationRule,
     OutBoundOperationRuleUpdatedMode,
@@ -19,6 +21,37 @@ if TYPE_CHECKING:
     from secbaas.community.api.device_manage import ArcaCredentials
 
 logger = get_logger("plugin-sandbox")
+
+
+def _convert_outbound_rules(rule: OutBoundOperationRule | None) -> str:
+    """把 OutBoundOperationRule 转成 header-rules.yaml 文本。"""
+    if not rule or not rule.header_operation_rules:
+        return "rules: []"
+
+    domain_groups: dict[tuple[str, ...], dict[str, Any]] = {}
+    for h in rule.header_operation_rules:
+        key = tuple(sorted(h.domains))
+        if key not in domain_groups:
+            domain_groups[key] = {
+                "name": h.domains[0],
+                "domains": list(h.domains),
+                "set": [],
+                "remove": [],
+            }
+        action = (h.action or "").lower()
+        if action in ("replace", "set"):
+            set_entry: dict[str, Any] = {"header": h.header_name, "value": h.value}
+            if h.placeholder:
+                set_entry["placeholder"] = h.placeholder
+            domain_groups[key]["set"].append(set_entry)
+        elif action == "remove":
+            domain_groups[key]["remove"].append(h.header_name)
+
+    return yaml.safe_dump(
+        {"rules": list(domain_groups.values())},
+        default_flow_style=False,
+        sort_keys=False,
+    )
 
 
 class _ExecResult:
@@ -51,6 +84,7 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         credentials: ArcaCredentials | None = None,
         ttl_in_minutes: int | None = None,
         resources: ResourceSpecification | None = None,
+        sidecar_container_name: str | None = None,
     ) -> None:
         self._sandbox_id = sandbox_id
         self._pod_name = pod_name
@@ -61,10 +95,15 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         self._credentials = credentials
         self._ttl_in_minutes = ttl_in_minutes
         self._resources = resources
+        self._sidecar_container_name = sidecar_container_name
 
     @property
     def sandbox_id(self) -> str:
         return self._sandbox_id
+
+    @property
+    def _header_rules_configmap_name(self) -> str:
+        return f"envoy-header-rules-{self._sandbox_id}"
 
     @property
     def is_ready(self) -> bool:
@@ -107,7 +146,7 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         )
 
     def destroy(self) -> Any:
-        """删除 Deployment 和 Service。"""
+        """删除 Deployment、Service 和 header-rules ConfigMap。"""
         from kubernetes.client import ApiException, AppsV1Api, CoreV1Api
 
         apps_api = AppsV1Api(self._client)
@@ -117,6 +156,11 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         for api, name, kind in [
             (apps_api.delete_namespaced_deployment, self._sandbox_id, "deployment"),
             (core_api.delete_namespaced_service, service_name, "service"),
+            (
+                core_api.delete_namespaced_config_map,
+                self._header_rules_configmap_name,
+                "configmap",
+            ),
         ]:
             try:
                 api(name=name, namespace=self._namespace)
@@ -188,8 +232,46 @@ class LocalK8sArcaSandbox(ArcaSandbox):
         rule: OutBoundOperationRule,
         updated_mode: OutBoundOperationRuleUpdatedMode,
     ) -> Any:
-        """本地模式下 outbound rule 暂不实现，返回成功。"""
-        logger.info("local_k8s: update_outbound_rule (no-op)")
+        """更新 header-rules ConfigMap 并滚动 Deployment 使规则生效。"""
+        from kubernetes.client import AppsV1Api, CoreV1Api
+
+        core_api = CoreV1Api(self._client)
+        apps_api = AppsV1Api(self._client)
+        configmap_name = self._header_rules_configmap_name
+
+        core_api.patch_namespaced_config_map(
+            name=configmap_name,
+            namespace=self._namespace,
+            body={
+                "data": {
+                    "header-rules.yaml": _convert_outbound_rules(rule),
+                }
+            },
+        )
+        logger.info(
+            "local_k8s: patched configmap %s/%s", self._namespace, configmap_name
+        )
+
+        apps_api.patch_namespaced_deployment(
+            name=self._sandbox_id,
+            namespace=self._namespace,
+            body={
+                "spec": {
+                    "template": {
+                        "metadata": {
+                            "annotations": {
+                                "avernet.local-k8s/outbound-rule-updated": str(
+                                    int(time.time())
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+        )
+        logger.info(
+            "local_k8s: rolled deployment %s/%s", self._namespace, self._sandbox_id
+        )
         return True
 
     def extend_ttl(self, ttl_minutes: int) -> Any:
