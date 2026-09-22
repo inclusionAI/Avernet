@@ -34,6 +34,9 @@ from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
 from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchFailedError,
 )
+from agentclaw.community.core.bot_config_manifest.apply.registry import (
+    ConfirmedPartialWriteError,
+)
 
 from ._fakes import (
     FakeActivationService,
@@ -94,6 +97,7 @@ def skill_rig(
     packages: dict[str, bytes] | None = None,
     assets: list | None = None,
     member_ids: set[int] | None = None,
+    local_assets: list | None = None,
 ) -> tuple:
     """(materialiser, uploads, activation, reader, objects, content).
 
@@ -107,7 +111,9 @@ def skill_rig(
 
     uploads = FakeSkillUploadService()
     activation = FakeActivationService()
-    reader = FakeCapabilityReader(assets=assets, member_ids=member_ids)
+    reader = FakeCapabilityReader(
+        assets=assets, member_ids=member_ids, local_assets=local_assets
+    )
     objects = seeded_object_store(packages)
     content = FakeManifestContent()
     pipeline = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
@@ -152,7 +158,7 @@ def test_a_declared_skill_uploads_the_validated_package_and_activates():
     assert activated_id == uploads.rows["quality-check"]["id"]
 
 
-def test_the_second_apply_of_an_unchanged_document_performs_no_writes():
+def test_the_second_apply_fully_overwrites_and_reports_updated():
     materialiser, uploads, activation, reader, objects, content = skill_rig(
         packages={QC_KEY: QZ}
     )
@@ -166,9 +172,9 @@ def test_the_second_apply_of_an_unchanged_document_performs_no_writes():
     reader.assets = (skill_asset(qc_id, "quality-check"),)
 
     _, plan, second = _run(_apply(materialiser, _ctx(), entries))
-    assert [e.outcome.value for e in second] == ["unchanged"]
-    assert len(uploads.uploads) == 1  # zero further uploads
-    assert activation.writes == 1  # and zero further activations
+    assert [e.outcome.value for e in second] == ["updated"]
+    assert len(uploads.uploads) == 2
+    assert activation.writes == 2
     assert len(objects.calls) == 1  # only the first apply hit the store;
     # the second was answered by the platform's own copy of the pinned bytes
 
@@ -361,6 +367,35 @@ def test_an_oversized_package_fails_at_resolve_not_mid_write():
 # ── the area: overwrite, governance narrowing, declared-empty ──────────────
 
 
+def test_dry_run_dependency_projection_uses_persisted_local_metadata():
+    dependency = ({"code": "mcp.persisted"},)
+    materialiser, _, _, _, _, _ = skill_rig(
+        packages={QC_KEY: QZ},
+        assets=[skill_asset(11, "quality-check", mcp_dependencies=dependency)],
+        local_assets=[
+            skill_asset(11, "quality-check", mcp_dependencies=dependency)
+        ],
+    )
+    ctx = _ctx()
+    resolved = _run(materialiser.resolve(ctx, [_declared()]))
+    _run(materialiser.plan(ctx, resolved.intents))
+
+    assert ctx.capability_state.final_skill_dependency_codes == frozenset(
+        {"mcp.persisted"}
+    )
+
+
+def test_brand_new_local_package_has_no_dependency_metadata_at_apply_time():
+    materialiser, _, _, _, _, _ = skill_rig(
+        packages={QC_KEY: QZ}, assets=[], local_assets=[]
+    )
+    ctx = _ctx()
+    resolved = _run(materialiser.resolve(ctx, [_declared()]))
+    _run(materialiser.plan(ctx, resolved.intents))
+
+    assert ctx.capability_state.final_skill_dependency_codes == frozenset()
+
+
 def test_skills_empty_removes_every_directly_active_skill():
     materialiser, uploads, activation, reader, _, _ = skill_rig(
         assets=[
@@ -374,7 +409,42 @@ def test_skills_empty_removes_every_directly_active_skill():
     assert uploads.uploads == []
 
 
-def test_set_governed_skills_are_never_removals():
+def test_skills_empty_physically_deletes_inactive_local_assets():
+    inactive = skill_asset(22, "inactive-local")
+    materialiser, uploads, activation, _reader, _, _ = skill_rig(
+        assets=[], local_assets=[inactive]
+    )
+
+    _, plan, _written = _run(_apply(materialiser, _ctx(), []))
+
+    assert plan.removals == ("inactive-local",)
+    assert activation.skill_deactivations == [22]
+    assert uploads.deleted == ["22"]
+    assert uploads.uploads == []
+
+
+def test_local_cleanup_is_sorted_and_stops_on_first_failure():
+    materialiser, uploads, activation, _reader, _, _ = skill_rig(
+        assets=[],
+        local_assets=[skill_asset(32, "z-last"), skill_asset(31, "a-first")],
+    )
+
+    async def _fail_first(**kwargs):
+        assert kwargs["name"] == "a-first"
+        raise RuntimeError("storage unavailable")
+
+    uploads.delete_local_skill = _fail_first
+    resolved = _run(materialiser.resolve(_ctx(), []))
+    plan = _run(materialiser.plan(_ctx(), resolved.intents))
+
+    import pytest as _pytest
+
+    with _pytest.raises(RuntimeError, match="Local Skill asset cleanup failed"):
+        _run(materialiser.write(_ctx(), plan))
+    assert activation.skill_deactivations == [31]
+
+
+def test_active_set_governed_skills_are_removed_by_empty_replacement():
     # A skill one of the bot's Sets supplies is not the manifest's to remove:
     # the write would refuse it, so the plan refuses to plan it.
     materialiser, _, activation, reader, _, _ = skill_rig(
@@ -385,35 +455,34 @@ def test_set_governed_skills_are_never_removals():
         member_ids={12},
     )
     _, plan, _ = _run(_apply(materialiser, _ctx(), []))
-    assert plan.removals == ("alpha",)
-    assert activation.skill_deactivations == [11]
+    assert plan.removals == ("alpha", "set-supplied")
+    assert activation.skill_deactivations == [11, 12]
 
 
-def test_a_declared_name_matching_a_set_governed_skill_fails_at_resolve():
+def test_a_declared_name_matching_a_set_governed_skill_becomes_direct():
     materialiser, uploads, activation, reader, _, _ = skill_rig(
         assets=[skill_asset(12, "quality-check")],
         member_ids={12},
         packages={QC_KEY: QZ},
     )
-    resolved = _run(materialiser.resolve(_ctx(), [_declared()]))
-    assert not resolved.ok
-    assert "skill set" in resolved.failures[0].reason
-    assert uploads.uploads == []
-    assert activation.writes == 0
-    assert reader.asset_reads  # the conflict was asked before the fetch…
+    resolved, _plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
+    assert resolved.ok
+    assert [entry.outcome.value for entry in written] == ["updated"]
+    assert uploads.uploads
+    assert activation.skill_activations
 
 
-def test_a_declared_name_matching_a_non_local_active_skill_fails():
+def test_a_declared_name_matching_a_non_local_active_skill_becomes_local_direct():
     # git:// skills are shared assets: a runtime name collision is refused
     # before any bytes spend, because install would refuse it mid-write.
     materialiser, uploads, _, _, _, _ = skill_rig(
         assets=[skill_asset(9, "quality-check", git_path="git://default/x")],
         packages={QC_KEY: QZ},
     )
-    resolved = _run(materialiser.resolve(_ctx(), [_declared()]))
-    assert not resolved.ok
-    assert "non-local" in resolved.failures[0].reason
-    assert uploads.uploads == []
+    resolved, _plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
+    assert resolved.ok
+    assert [entry.outcome.value for entry in written] == ["updated"]
+    assert uploads.uploads
 
 
 def test_undeclared_members_of_the_area_are_removed_by_name():
@@ -432,7 +501,7 @@ def test_undeclared_members_of_the_area_are_removed_by_name():
     assert plan.removals == ("some-other-skill",)
     assert activation.skill_deactivations == [11]
     assert uploads.uploads[0]["name"] == "quality-check"
-    assert activation.skill_activations == []  # already active: not re-activated
+    assert activation.skill_activations  # source is converted to Direct
 
 
 # ── parity with the upload path, by construction ───────────────────────────
@@ -493,8 +562,8 @@ def test_an_unpinned_skill_source_defaults_to_keep_last():
     reader.assets = (skill_asset(qc_id, "quality-check"),)
 
     _, _, second = _run(_apply(materialiser, _ctx(), entries))
-    assert [e.outcome.value for e in second] == ["unchanged"]
-    assert len(uploads.uploads) == 1  # the store's copy answered, no re-upload
+    assert [e.outcome.value for e in second] == ["updated"]
+    assert len(uploads.uploads) == 2
 
 
 def test_the_receipts_link_the_apply_and_the_entry():
@@ -538,7 +607,7 @@ def test_a_dry_run_receipt_is_not_installation_evidence():
         uploads.uploads[0]["package"]
         == real_validator().validate_zip(QZ).canonical_zip
     )
-    assert activation.skill_activations == []  # already active: replaced only
+    assert activation.skill_activations  # replacement reasserts the Direct claim
 
 
 def test_a_receipt_left_behind_by_an_aborted_write_is_not_evidence():
@@ -612,10 +681,13 @@ def test_a_deactivation_conflict_mid_write_reports_partially_written():
             "RESOURCE_MANAGED_BY_SKILL_SET"
         )
 
-    activation.deactivate_skill = _conflicting_deactivate
+    activation.remove_manifest_skill = _conflicting_deactivate
     import pytest as _pytest
 
-    with _pytest.raises(RuntimeError, match="RESOURCE_MANAGED"):
+    with _pytest.raises(
+        ConfirmedPartialWriteError,
+        match="Skill replacement stopped after a durable write",
+    ):
         dev(materialiser.write(_ctx(), plan))
     # The upload for the declared skill DID land — the honest
     # partially-written shape (the engine's write-raise classifier
@@ -755,4 +827,3 @@ def test_git_keep_last_serves_the_stored_zip_through_the_zip_road():
     assert result.ok
     assert [e.outcome.value for e in written] == ["created"]
     real_validator().validate_zip(uploads.uploads[0]["package"])
-

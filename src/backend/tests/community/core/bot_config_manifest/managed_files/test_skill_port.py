@@ -64,6 +64,8 @@ class FakeSkillRepository:
         self.rows: dict[int, dict[str, Any]] = {}
         self.creates: list[dict[str, Any]] = []
         self.updates: list[tuple[str, dict[str, Any]]] = []
+        self.delete_preflights: list[str] = []
+        self.delete_blocker: Exception | None = None
         self._next = 100
 
     def list_bot_local_by_name(self, *, bot_id: str, name: str) -> list[dict]:
@@ -90,6 +92,18 @@ class FakeSkillRepository:
         self.updates.append((skill_id, dict(skill_data)))
         return dict(row)
 
+    def delete_bot_local_skill(self, *, skill_id: str, owner_id: str, bot_id: str):
+        row = self.rows.get(int(skill_id))
+        if row is None or row.get("user_id") != owner_id or row.get("bolt_id") != bot_id:
+            return False
+        del self.rows[int(skill_id)]
+        return True
+
+    def require_unreferenced_for_delete(self, skill_id: str) -> None:
+        self.delete_preflights.append(skill_id)
+        if self.delete_blocker is not None:
+            raise self.delete_blocker
+
 
 class LiveCapabilityReader:
     """The active set as the record-only activation left it."""
@@ -107,6 +121,18 @@ class LiveCapabilityReader:
 
     def member_skill_ids(self, *, bot):
         return frozenset()
+
+    def local_skill_assets(self, *, bot_id: str, owner_id: str, bot=None):
+        return tuple(
+            SimpleNamespace(
+                skill_id=row["id"], name=row["name"], git_path=row["git_path"],
+                mcp_dependencies=(),
+            )
+            for row in self._skills.rows.values()
+            if row.get("bolt_id") == bot_id
+            and row.get("user_id") == owner_id
+            and str(row.get("git_path") or "").startswith("local://")
+        )
 
 
 def _rig(packages: dict[str, bytes]):
@@ -194,17 +220,16 @@ def test_a_declared_skill_is_unpacked_into_the_store_and_recorded() -> None:
 # ── convergence from the store ─────────────────────────────────────────────
 
 
-def test_the_second_apply_is_unchanged_and_writes_nothing() -> None:
+def test_the_second_apply_fully_replaces_the_package() -> None:
     materialiser, store, oss, skills, activation, _ = _rig({QC_KEY: QZ})
     _run(_apply(materialiser, _ctx(), [_declared()]))
-    puts_before = list(oss.puts)
-
     plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
 
-    assert [e.outcome.value for e in written] == ["unchanged"]
-    assert oss.puts == puts_before
-    assert skills.updates == [] and len(skills.creates) == 1
-    assert activation.skill_activations == [skills.creates[0]["id"]]
+    assert [e.outcome.value for e in written] == ["updated"]
+    assert len(skills.updates) == 1 and len(skills.creates) == 1
+    assert activation.skill_activations == [
+        skills.creates[0]["id"], skills.creates[0]["id"]
+    ]
 
 
 def test_a_changed_package_is_replaced_in_place() -> None:
@@ -219,10 +244,10 @@ def test_a_changed_package_is_replaced_in_place() -> None:
     assert [e.outcome.value for e in written] == ["updated"]
     rows = {r.rel_path: r for r in store.list(_SCOPE, category=CATEGORY_SKILLS)}
     assert oss.objects[rows["workspace/skills-local/quality-check/scripts/run.sh"].store_key] == b"echo v2\n"
-    # The same row, updated in place — no second create, no re-activation.
+    # The same row, updated in place — no second create; Direct is reasserted.
     assert len(skills.creates) == 1
     assert [sid for sid, _ in skills.updates] == [str(created_id)]
-    assert activation.skill_activations == [created_id]
+    assert activation.skill_activations == [created_id, created_id]
 
 
 def test_a_stale_member_of_a_replaced_package_is_dropped_from_the_store() -> None:
@@ -244,7 +269,7 @@ def test_a_stale_member_of_a_replaced_package_is_dropped_from_the_store() -> Non
     assert len(oss.objects) == 2
 
 
-def test_removal_deactivates_record_only() -> None:
+def test_removal_deactivates_and_physically_deletes_the_local_asset() -> None:
     materialiser, store, oss, skills, activation, _ = _rig({QC_KEY: QZ})
     _run(_apply(materialiser, _ctx(), [_declared()]))
 
@@ -252,37 +277,52 @@ def test_removal_deactivates_record_only() -> None:
 
     assert plan.removals == ("quality-check",)
     assert activation.skill_deactivations == [skills.creates[0]["id"]]
+    assert _indexed(store) == []
+    assert skills.rows == {}
+
+
+def test_removal_checks_references_before_deleting_store_objects() -> None:
+    import pytest
+
+    _, store, _oss, skills, _, _ = _rig({})
+    port = PlatformSkillPackageUpload(
+        store, validator=real_validator(), skill_repository=skills
+    )
+    uploaded = _run(
+        port.upload_local_skill(
+            bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ
+        )
+    )
+    skill_id = str(uploaded["skill"]["id"])
+    indexed_before = _indexed(store)
+    skills.delete_blocker = RuntimeError("SKILL_ASSET_IN_USE")
+
+    with pytest.raises(RuntimeError, match="SKILL_ASSET_IN_USE"):
+        _run(
+            port.delete_local_skill(
+                skill_id=skill_id,
+                name="quality-check",
+                bot_id="b_1",
+                owner_id="u_owner",
+                actor_id="u_actor",
+            )
+        )
+
+    assert skills.delete_preflights == [skill_id]
+    assert _indexed(store) == indexed_before
+    assert int(skill_id) in skills.rows
 
 
 # ── the port's own answers ─────────────────────────────────────────────────
 
 
-def test_installed_digest_answers_from_the_store() -> None:
+def test_manifest_upload_port_has_no_installed_digest_probe() -> None:
     _, store, oss, skills, _, _ = _rig({})
     port = PlatformSkillPackageUpload(
         store, validator=real_validator(), skill_repository=skills
     )
 
-    def digest(name="quality-check"):
-        return _run(
-            port.installed_package_digest(bot={}, bot_id="b_1", owner_id="u_owner", name=name)
-        )
-
-    # Nothing stored: unknown, never equal.
-    assert digest() is None
-
-    _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ))
-    # The materialiser's own identity of the content: sha256 of the canonical zip.
-    assert digest() == _digest_of(real_validator().validate_zip(QZ).canonical_zip)
-    assert digest("other") is None
-
-    # A member whose object is gone: the listing is the record, so the
-    # package is now a different package — never equal to the declared one,
-    # and the next apply writes it again.
-    full = digest()
-    row = next(r for r in store.list(_SCOPE, category=CATEGORY_SKILLS) if r.rel_path.endswith("SKILL.md"))
-    del oss.objects[row.store_key]
-    assert digest() != full
+    assert not hasattr(port, "installed_package_digest")
 
 
 def test_a_same_name_row_owned_by_someone_else_is_never_replaced() -> None:

@@ -12,8 +12,8 @@ confuse it with:
 
 | | Owned by | Shaped by | Example |
 |---|---|---|---|
-| **Service API Protocol** (`community/api`, `core/<domain>/*_protocol.py`) | the provider | everything the service offers | `DirectActivationServiceProtocol` — six methods **and** `project` |
-| **Outbound port** (here) | the consumer | only what the consumer calls | `ActivationPort` — the same six methods, **no** `project` |
+| **Service API Protocol** (`community/api`, `core/<domain>/*_protocol.py`) | the provider | everything the service offers | `DirectActivationServiceProtocol` — ordinary and Manifest-specific capability commands **with** `project` |
+| **Outbound port** (here) | the consumer | only what the consumer calls | `ActivationPort` — the apply-relevant surface, **no** `project` |
 | **Repository protocol** (`core/repository`) | the persistence layer | one aggregate's storage | `SkillRepository` |
 
 A port is narrower than the service Protocol on purpose. `ActivationPort`

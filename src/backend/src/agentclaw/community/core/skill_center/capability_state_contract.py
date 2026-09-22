@@ -75,6 +75,16 @@ class BotCapabilityStateReaderProtocol(Protocol):
         """Flush, then return Runtime-ready assets with exact Center Versions."""
         ...
 
+    def local_skill_assets(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        bot: Mapping[str, Any] | None = None,
+    ) -> tuple[RegisteredSkillAsset, ...]:
+        """Return every Bot-owned Local asset, including inactive rows."""
+        ...
+
     def active_capabilities(
         self,
         *,

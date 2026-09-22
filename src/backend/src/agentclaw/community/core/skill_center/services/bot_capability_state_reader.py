@@ -121,6 +121,23 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         )
         return self._read_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot)
 
+    def local_skill_assets(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        bot: Mapping[str, Any] | None = None,
+    ) -> tuple[RegisteredSkillAsset, ...]:
+        """Read the complete Bot-owned Local asset catalog without activation filtering."""
+        resolved_bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        return tuple(
+            self._pool_skills.list_bot_local_assets(
+                env=str(resolved_bot["env"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+            )
+        )
+
     def _read_skill_assets(
         self, *, bot_id: str, owner_id: str, bot: Mapping[str, Any]
     ) -> tuple[RegisteredSkillAsset, ...]:

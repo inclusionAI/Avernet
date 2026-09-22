@@ -102,7 +102,8 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
                 skill_name=str(skill["name"]),
             )
             try:
-                package_deleted = await package.delete()
+                package_exists = await package.exists()
+                package_deleted = await package.delete() if package_exists else True
             except Exception as exc:
                 raise LocalSkillStorageError() from exc
             if not package_deleted:

@@ -43,6 +43,9 @@ class _Files:
         }
         return True
 
+    async def list_dir(self, path):
+        return [name for name in self.files if name.startswith(f"{path}/")] or None
+
 
 class _Skills:
     def __init__(
@@ -353,6 +356,19 @@ async def test_package_delete_failure_leaves_database_state_unchanged():
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
     assert files.delete_calls == ["/skills/one"]
+
+
+@pytest.mark.asyncio
+async def test_missing_package_repairs_the_stale_database_row_idempotently():
+    service, files, skills, _guard = _service()
+    files.files.clear()
+
+    await service.delete_local_skill(
+        skill_id="9", owner_id="owner", user_id="owner"
+    )
+
+    assert skills.deleted is True
+    assert files.delete_calls == []
 
 
 @pytest.mark.asyncio

@@ -314,6 +314,10 @@ class CategoryResult:
     #: means "do not trust the area, re-apply to converge it". Silently reporting
     #: the second as the first is what a caller cannot recover from.
     partially_written: bool = False
+    #: Internal status derivation hint: unlike the conservative
+    #: ``partially_written`` flag, this means an earlier durable step is known
+    #: to have committed (for example deactivation before Local package delete).
+    confirmed_partial: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         """The wire shape for one category's summary. Note that the entries are
@@ -599,6 +603,11 @@ def derive_status(categories: tuple[CategoryResult, ...]) -> ApplyStatus:
     to reach.
     """
     entries = tuple(entry for category in categories for entry in category.entries)
+    # A write-stage failure means some durable or external work may already
+    # have landed even when no declared entry can honestly be called delivered.
+    # That is exactly PARTIAL, not FAILED: a retry must converge the remainder.
+    if any(category.confirmed_partial for category in categories):
+        return ApplyStatus.PARTIAL
     # Counted as failures in their own right; see the docstring.
     silent_failures = sum(
         1 for category in categories if category.aborted and not category.entries
