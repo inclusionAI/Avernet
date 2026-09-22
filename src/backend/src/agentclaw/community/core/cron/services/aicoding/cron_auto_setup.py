@@ -1,12 +1,16 @@
-"""Cron auto-setup service — 自动为 is_hosted_24x7 的应用 Coding Bot 创建定时任务。
+"""Cron auto-setup service — 自动为 is_hosted_24x7 的 aicoding Coding Bot 创建定时任务。
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any, Dict, Optional
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
+from agentclaw.community.core.aicoding.protocols import (
+    AicodingHostedWorkspaceServiceProtocol,
+)
 from agentclaw.community.core.cron.services.cron_relay import CronRelayService
 from agentclaw.community.log import get_logger
 
@@ -147,7 +151,9 @@ class CronAutoSetupService:
     """自动为 is_hosted_24x7 的 Bot 创建定时任务的服务。
 
     依赖注入方式使用:
-        - 构造函数注入 TemplateRepository 和 CronRelayService
+        - 构造函数注入 TemplateRepository、CronRelayService 与（可选的）
+          AicodingHostedWorkspaceServiceProtocol —— ext 缺 ``dima_space_id``
+          时通过后者幂等补建 DIMA 工作空间
         - 通过 BotManagementModule 注册为 singleton
     """
 
@@ -156,9 +162,11 @@ class CronAutoSetupService:
         self,
         template_repository: TemplateRepository,
         cron_relay_service: CronRelayService,
+        hosted_workspace_service: Optional[AicodingHostedWorkspaceServiceProtocol] = None,
     ) -> None:
         self._template_repo = template_repository
         self._cron_relay = cron_relay_service
+        self._hosted_workspace_service = hosted_workspace_service
 
     async def auto_setup_cron_for_bot(
         self,
@@ -168,10 +176,11 @@ class CronAutoSetupService:
     ) -> Optional[Dict[str, Any]]:
         """为 Bot 自动创建 7×24 托管定时任务。
 
-        判断条件（必须同时满足）：
-        1. active_engine 为 aicoding 或其别名
-        2. template_type 为 "applicationCoding"
-        3. template_config.is_hosted_24x7 == 1
+        判断条件（listener 已保证 active_engine 为 aicoding 或其别名）：
+        1. template ext 中 is_hosted_24x7 == 1
+        2. dima_space_id 存在；缺失时通过 hosted workspace 服务幂等补建
+           （applicationCoding，或 capabilities.dima_workspace 显式开启的
+           模板工厂 bot 如 mcptestpq），补建失败/不可托管则跳过
 
         Args:
             bot_id: Bot ID
@@ -210,12 +219,17 @@ class CronAutoSetupService:
 
         logger.info(f"[auto_setup_cron] Bot {bot_id} has is_hosted_24x7=1, will create cron task")
 
-        # 3. 获取 dima_space_id
+        # 3. 获取 dima_space_id；缺失时先幂等补建 DIMA 工作空间
         dima_space_id = ext.get("dima_space_id")
         if not dima_space_id:
+            # ensure 链路是同步 requests 调用，放入线程池避免阻塞事件循环
+            dima_space_id = await asyncio.to_thread(
+                self._ensure_dima_space_id, bot_id, owner_id
+            )
+        if not dima_space_id:
             logger.warning(
-                f"[auto_setup_cron] Bot {bot_id} has no dima_space_id in template_config, "
-                f"skipping cron setup"
+                f"[auto_setup_cron] Bot {bot_id} has no dima_space_id in template_config "
+                f"and hosted workspace ensure did not yield one, skipping cron setup"
             )
             return None
 
@@ -311,6 +325,39 @@ class CronAutoSetupService:
                 exc_info=True,
             )
             raise CronAutoSetupError(f"Auto cron setup failed for bot {bot_id}: {e}")
+
+    def _ensure_dima_space_id(self, bot_id: str, owner_id: str) -> Optional[str]:
+        """ext 缺 dima_space_id 时幂等补建 DIMA 工作空间，返回 space id。
+
+        资格（applicationCoding 或 capabilities.dima_workspace 开启）与幂等
+        由 AicodingHostedWorkspaceService/引擎策略统一判定；本方法只对
+        "不可用/不可托管/开通失败"统一降级为 None（cron 创建跳过）。
+        """
+        if self._hosted_workspace_service is None:
+            logger.warning(
+                f"[auto_setup_cron] hosted workspace service unavailable, "
+                f"cannot auto-create dima workspace for bot {bot_id}"
+            )
+            return None
+        try:
+            workspace_id = self._hosted_workspace_service.ensure_hosted_workspace(
+                bot_id, owner_id,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[auto_setup_cron] ensure hosted workspace failed for bot {bot_id}: {e}",
+                exc_info=True,
+            )
+            return None
+        if not workspace_id:
+            logger.warning(
+                f"[auto_setup_cron] hosted workspace ensure returned no id for bot {bot_id}"
+            )
+            return None
+        logger.info(
+            f"[auto_setup_cron] ensured hosted workspace {workspace_id} for bot {bot_id}"
+        )
+        return workspace_id
 
     async def update_auto_initiate_workflow(
         self,
