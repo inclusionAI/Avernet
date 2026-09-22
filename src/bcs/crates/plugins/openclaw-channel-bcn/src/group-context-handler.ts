@@ -1,13 +1,22 @@
 /**
  * Group Context tool handlers — call BCS HTTP API with framework-injected origin.
  *
- * Origin parameters (group_id, session_id, run_id, actor_id) are resolved from
- * BCN's in-process Maps populated by BCS chat.send frames. The LLM only passes
- * business parameters (domain, key, content, query, limit). See also:
+ * Origin parameters are resolved as follows:
+ *   tenant_id  — hardcoded constant ('default')
+ *   group_id   — resolveBcsGroupId(), from in-process Map populated by BCS chat.send
+ *   session_id — resolveBcsSessionId(), from the same Map
+ *   run_id     — resolveActiveRunId(), from the same Map
+ *   actor_id   — getActiveBcsClient().botUuid, from the active BCS WebSocket session
+ *
+ * BCS re-resolves actor_id from the Bearer token (bot_uuid_from_headers) and
+ * ignores any actor_id in the request body — this is the security property that
+ * makes origin non-forgeable. The LLM only passes business parameters
+ * (domain, key, content, query, limit). See also:
  *   specs/2026-09-09-group-context-api/bcn-integration-plan.md
  */
 
 import { getBcsRuntime } from './runtime.js';
+import { getActiveBcsClient } from './channel.js';
 import {
   resolveActiveRunId,
   resolveBcsGroupId,
@@ -32,23 +41,30 @@ async function bcsApiCall(opts: BcsApiCallOptions): Promise<unknown> {
   const sessionId = resolveBcsSessionId(opts.sessionKey) ?? undefined;
   const runId = resolveActiveRunId(opts.sessionKey) ?? undefined;
 
-  const token = process.env.BCN_BOT_TOKEN;
-  if (!token) {
-    throw new Error('BCS group context unavailable: BCN_BOT_TOKEN not set');
+  const activeClient = getActiveBcsClient();
+  const bearer = activeClient?.sessionToken ?? process.env.BCN_BOT_TOKEN;
+  if (!bearer) {
+    throw new Error('BCS group context unavailable: no BCS session token');
   }
+  const actorId = activeClient?.botUuid ?? process.env.BCN_BOT_UUID;
 
   const runtime = getBcsRuntime();
   const config = await runtime.config.loadConfig();
-  const bcsUrl = (config?.channels?.bcs?.bcsUrl as string) ?? process.env.BCS_URL;
+  const rawBcsUrl = (config?.channels?.bcs?.bcsUrl as string) ?? process.env.BCS_URL;
+  // Prefer the HTTP base URL env var; otherwise convert the WebSocket URL
+  // (ws://host:port/ws/bot) to an HTTP base (http://host:port).
+  const bcsUrl = process.env.BCS_API_BASE_URL
+    ?? (rawBcsUrl ? rawBcsUrl.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://').replace(/\/ws\/bot\/?$/, '') : undefined);
   if (!bcsUrl) {
     throw new Error('BCS group context unavailable: BCS_URL not configured');
   }
 
   const url = `${bcsUrl.replace(/\/$/, '')}${opts.path}`;
+  console.log('[group-context] origin:', { tenant_id: TENANT_ID, group_id: groupId, session_id: sessionId, run_id: runId, actor_id: actorId, path: opts.path });
   const resp = await fetch(url, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${bearer}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({

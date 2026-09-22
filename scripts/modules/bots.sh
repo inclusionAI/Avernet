@@ -615,7 +615,7 @@ bots_dynamic_config_has_bcs_core_tools() {
     [ -f "$config_file" ] || return 1
     jq -e '
       (.tools.alsoAllow // []) as $tools
-      | ["bcs_route", "bcs_assign_task", "bcs_send_task_message", "bcs_task_complete"]
+      | ["bcs_route", "bcs_assign_task", "bcs_send_task_message", "bcs_task_complete", "bcs_group_context_status", "bcs_group_context_create", "bcs_group_context_update", "bcs_group_context_retrieve"]
       | all(. as $tool | ($tools | index($tool)) != null)
     ' "$config_file" >/dev/null
 }
@@ -840,7 +840,11 @@ bots_dynamic_write_openclaw_config() {
               "bcs_route",
               "bcs_assign_task",
               "bcs_send_task_message",
-              "bcs_task_complete"
+              "bcs_task_complete",
+              "bcs_group_context_status",
+              "bcs_group_context_create",
+              "bcs_group_context_update",
+              "bcs_group_context_retrieve"
             ]
           },
           messages: {
@@ -1004,7 +1008,16 @@ bots_dynamic_start_openclaw() {
         log_info "${name} manual model credential is present for gateway startup."
     fi
 
+    # Inject BCS session token and bot_uuid so BCN plugin tool handlers
+    # (e.g. group-context-handler) can authenticate against BCS HTTP API.
+    local bcn_session_file="${profile_dir}/.bcs/session.json"
+    local bcs_authz bcn_bot_uuid
+    bcs_authz="$(bots_session_token "$bcn_session_file")"
+    bcn_bot_uuid="$(bots_session_bot_uuid "$bcn_session_file")"
+
     # 以下为安全注释COSEC：仅向子进程传递环境中的凭据；生成的 Bot 配置保留 SecretRef。
+    BCN_BOT_TOKEN="$bcs_authz" \
+    BCN_BOT_UUID="$bcn_bot_uuid" \
     NODE_TLS_REJECT_UNAUTHORIZED=0 \
     BCS_IGNORE_CREDENTIALS=1 \
     OPENCLAW_GATEWAY_TOKEN="" \

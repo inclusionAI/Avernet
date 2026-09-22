@@ -1,5 +1,5 @@
 import type { OpenClawPluginApi, OpenClawPluginToolContext } from 'openclaw/plugin-sdk/core';
-import { bcsPlugin } from './channel.js';
+import { bcsPlugin, getActiveBcsClient } from './channel.js';
 import { setBcsRuntime } from './runtime.js';
 import {
   resolveActiveRunId,
@@ -164,12 +164,12 @@ export function registerBcsCore(
       if (!sessionKey) return null;
 
       const taskInfo = getSessionTaskGroupInfo(sessionKey);
-      console.log(`[bcs_assign_task] taskInfo: ${JSON.stringify(taskInfo)}, BCN_BOT_UUID=${process.env.BCN_BOT_UUID}`);
+      console.log(`[bcs_assign_task] taskInfo: ${JSON.stringify(taskInfo)}, BCN_BOT_UUID=${getActiveBcsClient()?.botUuid ?? process.env.BCN_BOT_UUID}`);
       if (!taskInfo || taskInfo.groupType !== 'manager_worker') return null;
 
       // Manager check: prefer recipient_role (new BCS), fall back to
       // originator.includes(botUuid) for older BCS that didn't surface role.
-      const botUuid = process.env.BCN_BOT_UUID;
+      const botUuid = getActiveBcsClient()?.botUuid ?? process.env.BCN_BOT_UUID;
       const isManager = taskInfo.recipientRole
         ? taskInfo.recipientRole === 'manager'
         : (botUuid ? taskInfo.originator.includes(botUuid) : false);
@@ -234,7 +234,7 @@ export function registerBcsCore(
 
       // Manager check: prefer recipient_role (new BCS), fall back to
       // originator.includes(botUuid) for older BCS that didn't surface role.
-      const botUuid = process.env.BCN_BOT_UUID;
+      const botUuid = getActiveBcsClient()?.botUuid ?? process.env.BCN_BOT_UUID;
       const isManager = taskInfo.recipientRole
         ? taskInfo.recipientRole === 'manager'
         : (botUuid ? taskInfo.originator.includes(botUuid) : false);
