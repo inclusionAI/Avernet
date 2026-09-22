@@ -794,7 +794,12 @@ async def _dispatch_impl(
     if not isinstance(_raw_obj, dict):
         raise HTTPException(status_code=422, detail="callback body must be a JSON object")
 
-    reject_legacy_relay_result(disposition, _raw_obj, svc)
+    try:
+        reject_legacy_relay_result(disposition, _raw_obj, svc)
+    except Exception as e:
+        record_relay_callback_error(svc, _raw_obj, "reject_legacy_relay_result", e)
+        raise e
+
     if _raw_obj.get("event_type") in {
         "EXECUTION_RESULT", "PLAN_RESULT", "DISPATCH_RESULT", "SEARCH_RESULT",
     }:
