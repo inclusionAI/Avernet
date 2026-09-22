@@ -426,11 +426,32 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         (不向调用方抛;图停在中间态由 harness 旁路巡检兜底复位)。"""
         self._wire_semantic_dispatcher()
         request = self._normalize_owner_bot_id(request)
-        if not request.execution_config.get("orchestration_mode"):
-            request = self._apply_orchestration_mode(request)
+        requested_orchestration_mode = self._normalize_orchestration_mode(
+            request.execution_config.get("orchestration_mode")
+        )
+        # Resolve the operations-owned default first, then let an explicit caller
+        # field override only that default. This keeps settings discoverable in
+        # every execute call while preserving caller-facing override semantics.
+        request = self._apply_orchestration_mode(request)
+        default_orchestration_mode = str(
+            request.execution_config.get("orchestration_mode") or ""
+        )
+        if requested_orchestration_mode is not None:
+            config = dict(request.execution_config)
+            config["orchestration_mode"] = requested_orchestration_mode
+            request = replace(request, execution_config=config)
         if request.execution_config.get("orchestration_mode") != "relay":
             request = self._materialize_static_plan_if_needed(request)
         task_id = self._task_id_provider()
+        logger.info(
+            "[task][execute][mode] task=%s task_type=%s default_mode=%s "
+            "requested_mode=%s selected_mode=%s",
+            task_id,
+            request.execution_config.get("task_type"),
+            default_orchestration_mode,
+            requested_orchestration_mode,
+            request.execution_config.get("orchestration_mode"),
+        )
         task_info = request.to_task_info(task_id)
         if self._task_info_repo is not None:
             record = TaskInfoRecord(
@@ -493,8 +514,25 @@ class TaskService(TaskServiceRelayMixin, TaskServiceExecutionMixin):
         bg.add_done_callback(self._on_bg_done)
         return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
 
+    @staticmethod
+    def _normalize_orchestration_mode(value: Any) -> str | None:
+        """Normalize an explicit orchestration-mode override.
+
+        `None` means the caller did not request a mode and the runtime default is
+        used. Supported values are intentionally limited to the two shipped
+        orchestration strategies; invalid strategy names fail before task creation.
+        """
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            return None
+        if normalized not in {"relay", "centralized"}:
+            raise TaskStateError(
+                f"unsupported orchestration_mode: {value!r}; expected relay or centralized"
+            )
+        return normalized
+
     def _apply_orchestration_mode(self, request: TaskInfoRequest) -> TaskInfoRequest:
-        """Stamp the operations-owned orchestration mode; callers cannot select it."""
+        """Stamp the runtime-default orchestration mode before explicit caller override."""
         relay_enabled = False
         if self._task_settings is not None:
             relay_enabled = self._task_settings.is_enabled(RELAY_EXECUTION)

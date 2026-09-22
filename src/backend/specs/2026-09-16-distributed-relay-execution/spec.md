@@ -38,10 +38,13 @@ acceptance closes or the configured iteration limit is reached.
    clarification/confirmation card and the platform calls the existing execute
    API.
 2. Execution mode is not shown in the recognition/clarification card and is
-   not selected by the user. An operations-owned task setting selects
-   `centralized` (default) or `relay`; TaskService resolves that setting when a
-   task is created and stamps the resulting value into
-   `execution_config.orchestration_mode` and the graph blackboard.
+   not selected interactively by the user. An operations-owned task setting
+   selects the default `centralized` or `relay`; TaskService resolves that
+   setting when a task is created. A trusted caller may explicitly provide a
+   closed override in `execution_config.orchestration_mode`, in which case the
+   explicit value replaces the runtime default. TaskService logs both values
+   and stamps the selected result into `execution_config.orchestration_mode`
+   and the graph blackboard.
 3. In relay mode, `TaskService.execute` persists task metadata and initializes
    the shared graph/context blackboard only. It does not plan or use Runner to
    redeliver the root to the owner bot: the platform injects the new task handle
@@ -79,9 +82,12 @@ acceptance closes or the configured iteration limit is reached.
 
 ## Required invariants
 
-- `orchestration_mode` is a closed, validated internally stamped config value:
-  `centralized` (default) or `relay`. A task caller cannot use the recognition
-  card or execute request to override the operations-owned setting.
+- `orchestration_mode` is a closed, validated config value:
+  `centralized` (default) or `relay`. TaskService always resolves the
+  operations-owned runtime default from task settings. When
+  `execution_config.orchestration_mode` is explicitly supplied, that valid
+  caller value overrides the default; unknown values are rejected before task
+  creation.
 - A task has at most one live relay turn. It is bound to task id, triggering
   node, actor identity, and an expiry, and is protected by the task graph's
   optimistic version/CAS write; it is single-use once a commit succeeds.

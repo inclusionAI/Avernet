@@ -91,6 +91,8 @@ source_context                 → source_type / owner_user_id / owner_bot_id /
 
 `title` 和 `background` 为可选业务上下文，缺失时使用空字符串；四要素完整性只由 task-loop 澄清阶段保证，`init_task_request` 只转换，不重复业务澄清。
 
+`orchestration_mode` 是执行配置的封闭枚举（`centralized` / `relay`）。TaskService 创建任务时先解析 `tasks/settings` 的运行时默认值；如果调用方在 `execution_config.orchestration_mode` 中显式提供合法值，则该值覆盖默认值，并记录默认值、请求值和最终选择以便审计。
+
 ### 2.2 TaskSpec and node facts
 
 ```python

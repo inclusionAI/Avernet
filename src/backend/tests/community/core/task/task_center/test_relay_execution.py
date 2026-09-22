@@ -900,6 +900,63 @@ def test_relay_setting_does_not_capture_non_dynamic_execution_adapters(
     assert stamped.execution_config["orchestration_mode"] == "centralized"
 
 
+def test_caller_centralized_mode_overrides_relay_setting() -> None:
+    async def scenario() -> None:
+        service, graph_service = _service(relay_enabled=True)
+        request = replace(
+            _request(),
+            execution_config={
+                "task_type": "dynamic",
+                "orchestration_mode": "centralized",
+            },
+        )
+        submitted = await service.execute(request)
+        await service.drain_background()
+        graph = graph_service.query_task_dashboard(submitted.task_id)
+        assert (
+            graph.extend_props["execution_config"]["orchestration_mode"]
+            == "centralized"
+        )
+
+    _run(scenario())
+
+
+def test_caller_relay_mode_overrides_disabled_relay_setting() -> None:
+    service, graph_service = _service(relay_enabled=False)
+    request = replace(
+        _request(),
+        execution_config={
+            "task_type": "dynamic",
+            "orchestration_mode": "relay",
+        },
+    )
+
+    submitted = _run(service.execute(request))
+
+    graph = graph_service.query_task_dashboard(submitted.task_id)
+    assert (
+        graph.extend_props["execution_config"]["orchestration_mode"] == "relay"
+    )
+    assert graph.tasks[0].status == Status.RUNNING
+
+
+@pytest.mark.parametrize("invalid_mode", ["banana", "RELAY_HEX"])
+def test_invalid_explicit_orchestration_mode_fails_before_task_creation(
+    invalid_mode: str,
+) -> None:
+    service, _ = _service()
+    request = replace(
+        _request(),
+        execution_config={
+            "task_type": "dynamic",
+            "orchestration_mode": invalid_mode,
+        },
+    )
+
+    with pytest.raises(TaskStateError, match="unsupported orchestration_mode"):
+        _run(service.execute(request))
+
+
 def test_relay_plan_rejects_parallel_children() -> None:
     service, graph_service = _service()
     _run(service.execute(_request()))
