@@ -291,7 +291,13 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
-    def count_by_owner(self, owner_id: str, exclude_bot_type: str | None = None) -> int:
+    def count_by_owner(
+        self,
+        owner_id: str,
+        exclude_bot_type: str | None = None,
+        *,
+        exclude_active_engine: str | None = None,
+    ) -> int:
         """Count bots by owner_id.
 
         Scoped by current env AND tenant (via the ``BotModel`` avernet_tenant
@@ -301,6 +307,8 @@ class BotRepository(Protocol):
             owner_id: Owner user ID.
             exclude_bot_type: If provided, exclude bots with this bot_type from the count.
                 Used to exclude desktop bots from cloud bot limits.
+            exclude_active_engine: Optional case-insensitive engine exclusion for
+                quota checks. NULL engines still count. Default counts all engines.
         """
         ...
 
@@ -315,6 +323,7 @@ class BotRepository(Protocol):
 
         Legacy rows with ``space_id IS NULL`` belong to that same scope and are
         included alongside the numeric Personal Space id when one exists.
+        Desktop and TeClaw Bots do not consume quota and are excluded.
         """
         ...
 
@@ -324,7 +333,10 @@ class BotRepository(Protocol):
         *,
         space_id: int,
     ) -> int:
-        """Count all live Bots assigned to one exact Space across owners."""
+        """Count live quota-consuming Bots in one Space across owners.
+
+        Desktop and TeClaw Bots are excluded.
+        """
         ...
 
     @abstractmethod

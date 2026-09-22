@@ -685,7 +685,13 @@ class BotRepository(
 
     # ── counts / existence (env-scoped) ─────────────────────────
 
-    def count_by_owner(self, owner_id: str, exclude_bot_type: str | None = None) -> int:
+    def count_by_owner(
+        self,
+        owner_id: str,
+        exclude_bot_type: str | None = None,
+        *,
+        exclude_active_engine: str | None = None,
+    ) -> int:
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.is_delete == 0,
@@ -694,6 +700,14 @@ class BotRepository(
             )
             if exclude_bot_type:
                 query = query.filter(self.Model.bot_type != exclude_bot_type)
+            if exclude_active_engine:
+                query = query.filter(
+                    or_(
+                        self.Model.active_engine.is_(None),
+                        func.lower(func.trim(self.Model.active_engine))
+                        != exclude_active_engine.strip().lower(),
+                    )
+                )
             return query.count()
 
     def exists_by_owner_and_bot_id(self, owner_id: str, bot_id: str) -> bool:

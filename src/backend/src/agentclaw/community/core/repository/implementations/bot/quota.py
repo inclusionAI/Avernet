@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
 
 class BotQuotaQueries:
-    """Count live cloud Bots in Personal or Team Space scopes."""
+    """Count live quota-consuming Bots, excluding desktop and TeClaw."""
 
     def count_cloud_bots_in_personal_space(
         self,
@@ -19,6 +19,10 @@ class BotQuotaQueries:
                 self.Model.is_delete == 0,
                 self.Model.owner_id == owner_id,
                 or_(self.Model.bot_type.is_(None), self.Model.bot_type != "desktop"),
+                or_(
+                    self.Model.active_engine.is_(None),
+                    func.lower(func.trim(self.Model.active_engine)) != "teclaw",
+                ),
                 self._env(),
             )
             if personal_space_id is None:
@@ -47,6 +51,10 @@ class BotQuotaQueries:
                         self.Model.bot_type.is_(None), self.Model.bot_type != "desktop"
                     ),
                     self._env(),
+                    or_(
+                        self.Model.active_engine.is_(None),
+                        func.lower(func.trim(self.Model.active_engine)) != "teclaw",
+                    ),
                 )
                 .count()
             )

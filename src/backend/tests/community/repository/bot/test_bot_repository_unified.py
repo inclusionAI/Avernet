@@ -385,6 +385,21 @@ def test_list_by_conditions_space_filter_spans_owners(repo):
     assert {row["bot_id"] for row in rows} == {"b1", "b2"}
 
 
+@pytest.mark.parametrize("space_id", [None, 11, 22])
+def test_quota_excludes_teclaw_without_changing_general_count(repo, space_id):
+    for idx, engine in enumerate(["teclaw", " TeClaw ", "openclaw", "hermes", ""]):
+        repo.insert(_data(bot_id=f"engine-{idx}", active_engine=engine, space_id=space_id))
+    repo.insert(_data(bot_id="default-engine", space_id=space_id))
+    assert repo.count_by_owner("emp1") == 6
+    assert repo.count_by_owner("emp1", exclude_active_engine="teclaw") == 4
+    if space_id == 22:
+        assert repo.count_cloud_bots_by_space(space_id=22) == 4
+    else:
+        assert repo.count_cloud_bots_in_personal_space(
+            owner_id="emp1", personal_space_id=space_id
+        ) == 4
+
+
 def test_count_by_owner_excludes_desktop(repo):
     repo.insert(_data(bot_id="b1", bot_type="personal"))
     repo.insert(_data(bot_id="b2", bot_type="desktop"))

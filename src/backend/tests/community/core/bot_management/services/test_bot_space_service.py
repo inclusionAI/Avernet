@@ -64,6 +64,23 @@ def _service(*, bot: dict | None = None, space: SpaceRecord | None = None):
     return BotSpaceService(repository, access, quota), repository, access, quota
 
 
+@pytest.mark.parametrize("space_type", [SpaceType.PERSONAL, SpaceType.TEAM])
+def test_teclaw_transfer_skips_quota_not_membership(space_type):
+    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7,
+           "active_engine": " TeClaw "}
+    target = _space(space_type=space_type, personal_owner_id="u1")
+    service, repository, access, quota = _service(bot=bot, space=target)
+    quota.guard_add.side_effect = AssertionError("must not check quota")
+    assert service.change_space(bot_id="b1", owner_id="u1", space_id=42).changed
+    quota.guard_add.assert_not_called()
+    access.require_space_member.assert_called_once_with(space_id=42, user_id="u1")
+    repository.update_space_by_owner.reset_mock()
+    access.require_space_member.side_effect = SpaceAccessDeniedError("not a member")
+    with pytest.raises(SpaceAccessDeniedError):
+        service.change_space(bot_id="b1", owner_id="u1", space_id=42)
+    repository.update_space_by_owner.assert_not_called()
+
+
 def test_moves_owned_cloud_bot_to_joined_team_space():
     bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7}
     target = _space(space_id=42)

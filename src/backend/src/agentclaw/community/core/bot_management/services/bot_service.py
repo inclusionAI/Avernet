@@ -1074,7 +1074,7 @@ class BotService(BotServiceProtocol):
         → ``device_allocation.max_devices_per_entity`` (default 5)。
 
         桌面 Bot（bot_type="desktop"）运行在用户本地 VM，不占用云端容器资源，
-        因此不计入数量限制。
+        因此不计入数量限制。TeClaw Bot 同样不占用此额度。
 
         Args:
             owner_id: 当前操作用户
@@ -1089,7 +1089,7 @@ class BotService(BotServiceProtocol):
             return
         try:
             current_raw = self._repository.count_by_owner(
-                owner_id, exclude_bot_type="desktop"
+                owner_id, exclude_bot_type="desktop", exclude_active_engine="teclaw"
             )
             current = int(current_raw)
         except (TypeError, ValueError):
@@ -1167,12 +1167,14 @@ class BotService(BotServiceProtocol):
         check stays where it is — this one narrows the window, it does not close
         it, since another create can take the name in between.
         """
-        if space_quota:
-            self._require_bot_quota_service().assert_can_add(
-                owner_id=user_id, space_id=space_id
-            )
-        else:
-            self._check_bot_count_limit(user_id)
+        # TeClaw does not consume Bot quota; other validations still apply.
+        if (engine_type or "").strip().lower() != "teclaw":
+            if space_quota:
+                self._require_bot_quota_service().assert_can_add(
+                    owner_id=user_id, space_id=space_id
+                )
+            else:
+                self._check_bot_count_limit(user_id)
         if bot_name and bot_name.strip():
             if self._repository.get_by_bot_name(bot_name.strip()):
                 raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
@@ -1241,6 +1243,8 @@ class BotService(BotServiceProtocol):
             bot_binding_map = {}  # binding_id -> bot info for logging
             skipped_desktop = 0
             for bot in bots:
+                if (bot.get("active_engine") or "").strip().lower() == "teclaw":
+                    continue
                 if bot.get("bot_type") == "desktop":
                     skipped_desktop += 1
                     continue
@@ -1490,7 +1494,8 @@ class BotService(BotServiceProtocol):
         # The legacy route keeps its established owner/device limit. A Space-aware
         # OpenAPI create has already checked the target Space's Bot rows and must
         # not be blocked again by the owner's personal ceiling.
-        if not space_quota:
+        quota_exempt = resolved_active_engine.strip().lower() == "teclaw"
+        if not space_quota and not quota_exempt:
             self._check_device_limit(resolved_entity_id, resolved_entity_type, user_id)
 
         logger.info(f"[bot_service.create_bot] Creating bot {bot_id} for user {user_id}, "
@@ -1522,7 +1527,7 @@ class BotService(BotServiceProtocol):
                 "space_id": space_id,  # Business-space ownership: NULL -> personal fallback
             }
 
-            if not space_quota:
+            if not space_quota or quota_exempt:
                 bot_record = self._repository.insert(bot_data)
             else:
                 # Serialize only the final count + row insert. Passport and

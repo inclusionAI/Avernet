@@ -72,6 +72,56 @@ def _team_quota_scope() -> BotQuotaScope:
     )
 
 
+@pytest.mark.parametrize("space_quota", [False, True])
+@pytest.mark.parametrize("engine", ["teclaw", " TeClaw "])
+def test_teclaw_preflight_skips_only_quota(space_quota, engine):
+    svc = _make_service(max_bots=1, current_bots=99)
+    svc._bot_quota_service = MagicMock(spec=BotQuotaServiceProtocol)
+    svc._repository.get_by_bot_name.return_value = None
+    svc.check_create_bot_preflight(
+        "u1", "bot001", engine, bot_name="Unique", space_quota=space_quota,
+    )
+    svc._repository.count_by_owner.assert_not_called()
+    svc._bot_quota_service.assert_can_add.assert_not_called()
+    svc._repository.get_by_bot_name.assert_called_once_with("Unique")
+    svc._repository.get_by_bot_name.return_value = {"bot_id": "existing"}
+    with pytest.raises(BotNameExistsError):
+        svc.check_create_bot_preflight("u1", "bot001", engine, bot_name="Unique")
+    with pytest.raises(DefaultBotTeclawNotAllowedError):
+        svc.check_create_bot_preflight("u1", "default", engine)
+
+
+@pytest.mark.parametrize("space_quota", [False, True])
+def test_teclaw_create_skips_final_quota_and_device_guard(space_quota):
+    svc = _make_service(max_bots=1, current_bots=99)
+    svc._bot_quota_service = MagicMock(spec=BotQuotaServiceProtocol)
+    svc._repository.exists_by_bot_name.return_value = False
+    svc._check_device_limit = MagicMock(side_effect=AssertionError("device quota"))
+    svc._initialize_capability_installations = MagicMock()
+    result = svc.create_bot(
+        user_id="u1", nick_name="U1", bot_id="bot001", bot_name="TeClaw",
+        engine_type="teclaw", space_id=42, space_quota=space_quota, provision=False,
+    )
+    assert result is svc._repository.insert.return_value
+    svc._repository.insert.assert_called_once()
+    svc._repository.count_by_owner.assert_not_called()
+    svc._check_device_limit.assert_not_called()
+    svc._bot_quota_service.guard_add.assert_not_called()
+
+
+def test_device_count_excludes_teclaw_but_keeps_other_engines():
+    svc = _make_service(max_bots=2)
+    bots = [{**_bound_bot(0), "active_engine": " TeClaw "}, _bound_bot(1)]
+    svc._repository.list_by_owner.return_value = (2, bots)
+    devices = _make_device_service(active_count=2)
+    svc._device_service_provider = lambda: devices
+    svc._check_device_limit("u1", "staff", "u1")
+    devices.get_device.assert_called_once_with(binding_id="binding-1")
+    svc._allocation_config.max_devices_per_entity = 1
+    with pytest.raises(DeviceLimitError):
+        svc._check_device_limit("u1", "staff", "u1")
+
+
 # ---------------------------------------------------------------------------
 # validate_bot_name (pure helper)
 # ---------------------------------------------------------------------------
@@ -231,11 +281,14 @@ class TestCreateBotValidation:
         # 只要 exclude_bot_type="desktop" 后的计数未超限就应通过。
         svc = _make_service(max_bots=3, current_bots=3)
         # 第一次调用带 exclude_bot_type="desktop" 时应返回 2（未超限）
-        svc._repository.count_by_owner.side_effect = lambda owner_id, exclude_bot_type=None: (
+        svc._repository.count_by_owner.side_effect = lambda owner_id, exclude_bot_type=None, **kwargs: (
             2 if exclude_bot_type == "desktop" else 3
         )
         # 不应抛出 BotLimitExceededError
         svc._check_bot_count_limit("u1")
+        svc._repository.count_by_owner.assert_called_once_with(
+            "u1", exclude_bot_type="desktop", exclude_active_engine="teclaw"
+        )
 
     def test_preflight_uses_count_limit(self):
         svc = _make_service(max_bots=3, current_bots=3)

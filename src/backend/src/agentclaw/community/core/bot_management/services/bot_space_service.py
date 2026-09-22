@@ -82,7 +82,11 @@ class BotSpaceService(BotSpaceServiceProtocol):
             and space.space_type is SpaceType.PERSONAL
             and space.personal_owner_id == owner_id
         )
-        if bot.get("bot_type") == "desktop" or normalizes_legacy_personal:
+        if (
+            bot.get("bot_type") == "desktop"
+            or (bot.get("active_engine") or "").strip().lower() == "teclaw"
+            or normalizes_legacy_personal
+        ):
             updated = self._repository.update_space_by_owner(
                 bot_id=bot_id,
                 owner_id=owner_id,
