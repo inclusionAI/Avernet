@@ -376,6 +376,16 @@ HTTP 路由只负责协议和鉴权上下文转换；不能在两个 adapter 中
 
 删除 `state_machine_history.read_source`，不保留别名，旧配置会作为未知字段被拒绝。新部署开启 persistence 且省略 cutoff 时直接使用 messages；存量生产观察必须显式设置未来 cutoff。关闭 persistence 时 cutoff 不参与读取。三处 bootstrap 注入相同规则，StateMachine 群与 Chat / ManagerWorker 一次性状态机均适用；普通消息继续使用原有两项 cutoff，权限和分页不变。配置修改通过实例重启生效，不新增切读 API 或热更新设施。
 
+这里的“原链路”不是所有场景都读取 Run / Node。混合会话保持原有视角与 owner 规则，两个 cutoff 不互相覆盖：
+
+| ManagerWorker 会话 / 视角 | 普通消息来源 | one-shot 状态机历史 |
+| --- | --- | --- |
+| Full / Bot，达到 manager-worker cutoff | messages | 仍从同一消息页读取已有可见记录，不因 StateMachine cutoff 或关闭 persistence 改成运行态合并 |
+| Full / Bot，早于 manager-worker cutoff | 原生历史及既有 panel / opening | 命中 StateMachine cutoff 且开启 persistence 时，以持久记录替换原生历史中的状态机项；否则保留原行为 |
+| Human Participant | 始终使用带 audience 的 messages，避免原生历史扩权 | 原有补充历史查询按 StateMachine cutoff 选择运行态或 messages，再按稳定身份去重 |
+
+Chat 的普通消息改用 `cutoff_timestamp` 判断，状态机补充历史同理。ManagerWorker Worker 视角仍只读自身 owner 消息，不因切读增加内部节点输出。Full/Bot 混合视角原本没有 Run / Node 合并；本需求不为其新增运行态输出。已存在的 messages 路径不因关闭新双写而停用。one-shot 的判断时间仍是承载它的 Session 首次创建时间，创建新 Run 或重新激活 Session 不跨越截止点。
+
 ### 11.1 发布顺序
 
 1. 部署身份归一化、旧格式适配、两入口排序修正、查询侧窗口补偿及 checkpoint 恢复能力；不执行 DDL 或数据初始化。开启新写入前确认所有读取实例支持新增投影标记，维持默认配置。

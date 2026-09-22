@@ -244,3 +244,11 @@ T02、T03 的开发项及本次新增行为验证已完成；全量发布门禁�
 - port purity、forbidden symbols、store boundaries、interceptor chain 及 OpenAPI YAML 解析通过。未执行涉及服务启停的 Singlebox；未改数据库、迁移或运行配置，未拆分文件。已有超长文件保留原布局，发布清单不因本轮局部验证而勾选。
 
 本轮日志：`/tmp/bcs-history-cutoff-{unit,config,http}.log`。
+
+### 2026-09-22：澄清 one-shot 切读边界与补齐覆盖率
+
+- 核对 PR #2407 改动前后的调用链：Chat / ManagerWorker 的 Full/Bot 混合视角原本不合并运行态历史，普通 cutoff 已命中 messages 时保留该路径及 Worker owner 隔离；Participant 原有状态机补充历史才通过 runtime facade 按 StateMachine cutoff 分流。补充 spec 第 11 节矩阵及两入口说明，不新增 Full/Bot 运行态可见内容。
+- 增加 Chat / ManagerWorker 的 cutoff、persistence 开关、Full/Manager/Worker 视角组合测试，以及 Session 查询错误、Session 缺失、非法 limit 不回退的测试。生产代码和覆盖率门槛均未修改。
+- CI 原报告为 31/40（77.50%）：6 行未覆盖位于 Session 查询错误/缺失处理，3 行位于默认装配。新增测试已实际覆盖前者。本地 LLVM 覆盖率按相同变更行算法为 34/40（85.00%）；局部执行未覆盖两处 Bootstrap 装配，不能冒充全量 CI 报告。
+- 覆盖率模式下核心包 420 项、Bootstrap lib 302 项通过，5 项按条件忽略。Bootstrap 首次因沙箱禁止本机端口监听失败的 6 项已在允许测试监听的进程中重跑通过；未启停用户服务。全量 CI 和 Singlebox 未在本轮重跑。
+- OpenAPI YAML 解析及 `git diff --check` 通过。明细位于 `/tmp/bcs-pr2407-changed-coverage.txt`，测试日志为 `/tmp/bcs-pr2407-{coverage,bootstrap-coverage}.log`。

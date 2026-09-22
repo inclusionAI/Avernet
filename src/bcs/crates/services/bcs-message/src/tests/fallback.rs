@@ -465,3 +465,35 @@ async fn messages_mode_keeps_ordinary_fallback_but_uses_only_frozen_workflow_row
     assert_eq!(after.messages[1].content, "ordinary legacy chat");
     assert_eq!(fallback.session_calls().await, 3);
 }
+
+#[tokio::test]
+async fn state_machine_cutoff_preserves_existing_store_path_and_worker_ownership() {
+    for strategy in [GroupStrategy::Chat, GroupStrategy::ManagerWorker] {
+        let (mut service, repo, sessions, fallback, sid) = service_fixture(strategy.clone(), 0, 0,
+            vec![fallback_message("native transcript must not replace stored history")]).await;
+        let created_at = sessions.get(&sid).await.unwrap().created_at;
+        append_history(&repo, "group-1", &sid, "mgr", "ordinary public chat", None).await;
+        append_history(&repo, "group-1", &sid, "worker-a", "worker private chat", Some("worker-a")).await;
+        repo.append_message(NewMessage {
+            group_id: "group-1".into(), session_id: sid.clone(), sender_id: "mgr".into(), sender_type: SenderType::Bot,
+            message_type: bcs_domain::STATE_MACHINE_OUTPUT_MESSAGE_TYPE.into(),
+            content: serde_json::json!({"text": "stored one-shot output", "metadata": {"state_machine": {
+                "event": "output", "run_id": "run", "node_id": "n", "attempt": 0}}}),
+            client_msg_id: None, owner_bot_id: None, created_at: 2, run_id: "run".into(),
+            visibility_domain: bcs_domain::MessageVisibilityDomain::StateMachine,
+            audience: Some(bcs_domain::MessageAudience::FullOnly),
+        }).await.unwrap();
+        for (enabled, cutoff) in [(false, 0), (false, created_at + 1), (true, created_at), (true, created_at + 1)] {
+            service = service.with_persisted_state_machine_history(enabled, cutoff);
+            for viewer in [None, Some("mgr"), Some("worker-a")] {
+                let rows = service.get_session_history(session_cmd("group-1", &sid, viewer)).await.unwrap().messages;
+                let worker_only = strategy == GroupStrategy::ManagerWorker && viewer == Some("worker-a");
+                assert_eq!(rows.iter().any(|m| m.content == "stored one-shot output"), !worker_only);
+                assert_eq!(rows.iter().any(|m| m.content == "ordinary public chat"), !worker_only);
+                assert_eq!(rows.iter().any(|m| m.content == "worker private chat"), viewer == Some("worker-a"));
+                assert_eq!(rows.len(), if worker_only { 1 } else if viewer == Some("worker-a") { 3 } else { 2 });
+            }
+        }
+        assert_eq!(fallback.session_calls().await, 0, "StateMachine cutoff must not switch ordinary chat back to native history");
+    }
+}

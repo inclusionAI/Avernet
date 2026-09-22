@@ -1,6 +1,7 @@
 use super::*;
 use bcs_db_api::{DbPlugin, DbStatement, DbResult, DbRow, DbExecuteResult, DbTransactionStep, DbTransactionStepResult, DbHealth};
 use bcs_collaboration_store::MySqlCollaborationStore;
+use bcs_service_api::{CreateOrReactivateOutcome, Session, SessionUseCaseError};
 
 struct ForbiddenWorkflowDb;
 #[async_trait]
@@ -92,4 +93,45 @@ async fn cutoff_uses_session_creation_for_all_views_and_keeps_old_history() {
     let empty = isolated_reader(&h).with_history_cutoff_timestamp(created_at)
         .get_state_machine_session_history(&run.session_id, 100, None).await.unwrap().unwrap();
     assert!(empty.messages.is_empty(), "an empty messages page must not fall back to workflow storage");
+}
+
+struct UnavailableHistorySession { fail: bool }
+#[async_trait]
+impl SessionManagementService for UnavailableHistorySession {
+    async fn get(&self, _: &str) -> Result<Option<Session>, SessionUseCaseError> {
+        if self.fail { Err(SessionUseCaseError::Internal(ServiceError::InternalError("session lookup failed".into()))) }
+        else { Ok(None) }
+    }
+    async fn create_or_reactivate(&self, _: CreateOrReactivateCommand) -> Result<CreateOrReactivateOutcome, SessionUseCaseError> { panic!("history mutated session") }
+    async fn belongs_to_group(&self, _: &str, _: &str) -> Result<bool, SessionUseCaseError> { panic!("unexpected lookup") }
+    async fn list_by_group(&self, _: &str, _: Option<SessionStatus>, _: u64, _: u64, _: Option<&str>, _: Option<&str>) -> Result<Vec<Session>, SessionUseCaseError> { panic!("history listed sessions") }
+    async fn count_running_service(&self, _: &str) -> Result<u64, SessionUseCaseError> { panic!("history counted sessions") }
+    async fn list_running_service(&self, _: u64, _: u64) -> Result<Vec<Session>, SessionUseCaseError> { panic!("history listed sessions") }
+    async fn update_callback_status(&self, _: &str, _: &str) -> Result<(), SessionUseCaseError> { panic!("history mutated session") }
+    async fn complete_if_running(&self, _: &str, _: Option<Value>, _: Option<String>) -> Result<Option<Session>, SessionUseCaseError> { panic!("history mutated session") }
+    async fn add_participant(&self, _: &str, _: Participant) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
+    async fn remove_participant(&self, _: &str, _: &str) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
+    async fn update_participant_mode(&self, _: &str, _: &str, _: ParticipantMode) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
+    async fn update_title(&self, _: &str, _: Option<String>) -> Result<Session, SessionUseCaseError> { panic!("history mutated session") }
+    async fn list_group_ids_by_session_participant(&self, _: &str) -> Result<Vec<String>, SessionUseCaseError> { panic!("history listed groups") }
+    async fn delete(&self, _: &str) -> Result<bool, SessionUseCaseError> { panic!("history mutated session") }
+}
+
+#[tokio::test]
+async fn cutoff_session_lookup_failure_and_missing_session_never_fall_back() {
+    let h = HistoryHarness::new(noop_judge()).await;
+    let forbidden = Arc::new(MySqlCollaborationStore::sqlite(Arc::new(ForbiddenWorkflowDb), "local".into()));
+    for fail in [true, false] {
+        let reader = CollaborationRuntime::new(forbidden.clone(), forbidden.clone(), forbidden.clone(), forbidden.clone(),
+            h.groups.clone(), Arc::new(UnavailableHistorySession { fail }), h.delivery.clone(), noop_judge())
+            .with_history_persistence(true);
+        for scope in [MessageViewScope::Full, MessageViewScope::Participant] {
+            let mut human = view(); human.scope = scope;
+            let result = reader.get_state_machine_session_history_for_view("unavailable", 10, None, human.clone()).await;
+            if fail { assert!(result.unwrap_err().to_string().contains("session lookup failed")); }
+            else { assert!(result.unwrap().is_none()); }
+            assert!(matches!(reader.get_state_machine_session_history_for_view("unavailable", 0, None, human).await,
+                Err(CollaborationRuntimeError::InvalidRequest(_))));
+        }
+    }
 }
