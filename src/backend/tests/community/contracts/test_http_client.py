@@ -64,8 +64,8 @@ def test_set_response_drives_a_consumer_and_records_the_call() -> None:
     service = BcnService(
         http_client=http,
         config=BcnConfig(
-            provider_id_pre="prv_40354c8a",
-            provider_admin_token_pre="test-bcn-token-pre",
+            provider_id="prv_40354c8a",
+            provider_admin_token="test-bcn-token",
         ),
         timeout=5.0,
     )
@@ -95,8 +95,8 @@ def test_set_override_can_simulate_a_transport_error() -> None:
     service = BcnService(
         http_client=http,
         config=BcnConfig(
-            provider_id_pre="prv_40354c8a",
-            provider_admin_token_pre="test-bcn-token-pre",
+            provider_id="prv_40354c8a",
+            provider_admin_token="test-bcn-token",
         ),
         timeout=5.0,
     )

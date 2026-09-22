@@ -135,19 +135,12 @@ class HarnessModule(Module):
         bcsfuse: BcsFuseConfig,
         kb: KbConfig,
     ) -> ContentScanner:
-        from agentclaw.community.utils.env_utils import get_current_env
-
-        bcsfuse_base_url = (
-            bcsfuse.base_url_pre
-            if get_current_env() == "pre"
-            else bcsfuse.base_url
-        )
         return ContentScanner(
             bot_profile=bot_profile,
             llm=llm,
             patch_library=patch_library,
             mcp_center=mcp_center,
-            bcsfuse_base_url=bcsfuse_base_url,
+            bcsfuse_base_url=bcsfuse.base_url,
             kb_config=kb,
         )
 

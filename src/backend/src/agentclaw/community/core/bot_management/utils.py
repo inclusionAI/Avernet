@@ -229,13 +229,12 @@ def trigger_memory_initialization(
     template_config: Dict[str, Any],
     cookie: str,
     aixcore_base_url: str = "",
-    aixcore_base_url_pre: str = "",
 ) -> None:
     """Trigger memory initialization for applicationCoding bot.
 
     The aixcore endpoint is deployment config (``WorkspaceHostingConfig``,
-    passed by BotService). ``pre`` env uses ``aixcore_base_url_pre``, else
-    ``aixcore_base_url``. Empty ⇒ memoryOS init is skipped (feature-off).
+    passed by BotService) — one host, supplied by the deployment overlay.
+    Empty ⇒ memoryOS init is skipped (feature-off).
 
     Calls the AIX memoryos init API to initialize bot memory with
     code repositories and knowledge base information.
@@ -274,15 +273,14 @@ def trigger_memory_initialization(
         if yuque_urls:
             payload["yuqueUrls"] = yuque_urls
 
-        # Call the memoryos init API with cookie (environment-dependent)
-        current_env = get_current_env()
-        if current_env == "dev":
+        # dev never calls memoryOS init — a behavioural gate, not a host choice.
+        if get_current_env() == "dev":
             logger.info(f"[trigger_memory_initialization] Dev environment, skipping memoryos init for bot {bot_id}")
             return
 
         # memoryOS init endpoint is deployment config (WorkspaceHostingConfig,
-        # passed in). Select by env; empty ⇒ feature-off (skip init).
-        aixcore = aixcore_base_url_pre if current_env == "pre" else aixcore_base_url
+        # passed in); empty ⇒ feature-off (skip init).
+        aixcore = aixcore_base_url
         if not aixcore:
             logger.info(
                 "[trigger_memory_initialization] aixcore base url not configured; "

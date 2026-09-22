@@ -340,20 +340,15 @@ class ConfigModule(Module):
     @singleton
     @provider
     def bcn(self) -> cfg.BcnConfig:
-        """BCN host + provider credentials (neutral empty; corp env overlays set
-        pre/prod hosts, provider ids, and admin tokens)."""
+        """BCN host + provider credentials (neutral empty; each deployment
+        overlay sets its own host, provider id, and admin token)."""
         block = _block("bcn")
         defaults = cfg.BcnConfig()
         return cfg.BcnConfig(
             base_url=block.get("base_url", defaults.base_url),
-            base_url_pre=block.get("base_url_pre", defaults.base_url_pre),
-            provider_id_prod=block.get("provider_id_prod", defaults.provider_id_prod),
-            provider_id_pre=block.get("provider_id_pre", defaults.provider_id_pre),
-            provider_admin_token_prod=block.get(
-                "provider_admin_token_prod", defaults.provider_admin_token_prod
-            ),
-            provider_admin_token_pre=block.get(
-                "provider_admin_token_pre", defaults.provider_admin_token_pre
+            provider_id=block.get("provider_id", defaults.provider_id),
+            provider_admin_token=block.get(
+                "provider_admin_token", defaults.provider_admin_token
             ),
         )
 
@@ -503,7 +498,6 @@ class ConfigModule(Module):
         defaults = cfg.BcsFuseConfig()
         return cfg.BcsFuseConfig(
             base_url=user_block.get("base_url", defaults.base_url),
-            base_url_pre=user_block.get("base_url_pre", defaults.base_url_pre),
             worker_id_with_owner=_coerce(
                 user_block, "worker_id_with_owner", _as_bool,
                 defaults.worker_id_with_owner, "bcsfuse",
@@ -528,7 +522,6 @@ class ConfigModule(Module):
         defaults = cfg.EcbConfig()
         return cfg.EcbConfig(
             base_url=block.get("base_url", defaults.base_url),
-            base_url_pre=block.get("base_url_pre", defaults.base_url_pre),
             resource_ready_base_url=block.get(
                 "resource_ready_base_url", defaults.resource_ready_base_url
             ),
@@ -537,33 +530,25 @@ class ConfigModule(Module):
     @singleton
     @provider
     def gateway(self) -> cfg.GatewayConfig:
-        """Public API gateway hosts (neutral empty; corp env overlays set the
-        ``gateway`` yaml block)."""
+        """Public API gateway host (neutral empty; each deployment overlay sets
+        the ``gateway`` yaml block)."""
         block = _block("gateway")
         defaults = cfg.GatewayConfig()
         return cfg.GatewayConfig(
             base_url=block.get("base_url", defaults.base_url),
-            base_url_pre=block.get("base_url_pre", defaults.base_url_pre),
         )
     @singleton
     @provider
     @inject
     def gateway_endpoint(self, gateway: cfg.GatewayConfig) -> cfg.GatewayEndpoint:
-        """The gateway host for this environment, resolved here rather than by
-        the consumer — selecting a deployment is composition-root work, and it
-        keeps ``SERVER_ENV`` out of the core service (see ``GatewayEndpoint``).
+        """The gateway host this deployment publishes, resolved here rather than
+        by the consumer — a deployment detail is composition-root work (see
+        ``GatewayEndpoint``).
 
-        Same pre/prod selection every other host pair in this build uses
-        (``http_client_module.py``); pre and prod are distinct gateways, so a
-        credential issued for one is not accepted by the other.
+        The overlay SOFAPy merged already picked the host for this deployment,
+        so this only re-shapes the yaml block into the endpoint type.
         """
-        return cfg.GatewayEndpoint(
-            base_url=(
-                gateway.base_url_pre
-                if get_current_env() == "pre"
-                else gateway.base_url
-            )
-        )
+        return cfg.GatewayEndpoint(base_url=gateway.base_url)
 
     @singleton
     @provider
@@ -583,9 +568,6 @@ class ConfigModule(Module):
         )
         return cfg.BaasConfig(
             api_base_url=block.get("api_base_url", defaults.api_base_url),
-            api_base_url_pre=block.get(
-                "api_base_url_pre", defaults.api_base_url_pre
-            ),
             tenant=block.get("tenant", defaults.tenant),
             template_uuid=block.get("template_uuid", defaults.template_uuid),
             desktop_template_uuid=block.get(
@@ -652,9 +634,6 @@ class ConfigModule(Module):
             tenant=block.get("tenant", defaults.tenant),
             timeout=int(block.get("timeout", defaults.timeout)),
             aixcore_base_url=block.get("aixcore_base_url", defaults.aixcore_base_url),
-            aixcore_base_url_pre=block.get(
-                "aixcore_base_url_pre", defaults.aixcore_base_url_pre
-            ),
             admin_member_staff_ids=admin_ids,
         )
 
@@ -770,7 +749,6 @@ class ConfigModule(Module):
         defaults = cfg.MasaAgentEvalConfig()
         return cfg.MasaAgentEvalConfig(
             base_url=block.get("base_url", defaults.base_url),
-            base_url_pre=block.get("base_url_pre", defaults.base_url_pre),
         )
 
     @singleton

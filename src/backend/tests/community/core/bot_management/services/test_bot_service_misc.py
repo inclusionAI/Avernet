@@ -80,7 +80,7 @@ def _make_service() -> BotService:
     svc._path_factory = MagicMock()
     svc._bcn_service = MagicMock()
     svc._workspace_hosting_service = MagicMock()
-    svc._workspace_hosting_config = MagicMock(aixcore_base_url="", aixcore_base_url_pre="")
+    svc._workspace_hosting_config = MagicMock(aixcore_base_url="")
     svc._collaborator_repo = MagicMock()
     svc._allocation_config = MagicMock()
     svc._device_binding_repo = MagicMock()

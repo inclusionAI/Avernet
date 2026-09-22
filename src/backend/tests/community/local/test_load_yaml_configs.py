@@ -260,7 +260,7 @@ class TestCommunityOverlaySelection:
         # bcn 块（新）也只在 community overlay，strict 占位符来自同一 fixture。
         bcn = user_config.get("bcn", {})
         assert bcn.get("base_url") == "http://bcs.example.test:21000"
-        assert bcn.get("provider_admin_token_prod") == "bcs-admin-token-test"
+        assert bcn.get("provider_admin_token") == "bcs-admin-token-test"
         # 证明基座确实被合并进来了：一个只在中性 base 里的块（device_provider）出现。
         assert user_config.get("device_provider") == "local"
         assert cfg.get("app_name") == "agentclaw"
@@ -280,7 +280,6 @@ class TestCommunityOverlaySelection:
             "antcode",
             "skill_center",
             "daas_sdk_config",
-            "daas_sdk_config_prod",
             "codefuse_token",
         ):
             assert corp_block not in user_config, (

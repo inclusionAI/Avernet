@@ -86,8 +86,8 @@ user_config:
   # Community binds BCS-delegated auth (see application-community.yaml `bcs`); it
   # never reads these blocks.
 
-  # NOTE: daas_sdk_config / daas_sdk_config_prod (DaaS device SDK, xhuntercore)
-  # are corp-only — carried by each corp env overlay, not this neutral base.
+  # NOTE: daas_sdk_config (DaaS device SDK, xhuntercore) is corp-only —
+  # carried by each corp env overlay, not this neutral base.
 
   # OpenClaw 技能仓库配置
   # 仓库地址优先读环境变量 AIWORKBENCH_REPO_URL；未设时由密钥库解析（secret 名是

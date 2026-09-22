@@ -449,12 +449,12 @@ class TaskModule(Module):
     def _resolve_api_base_url(task_callback_url: str = "") -> str:
         """返回本 backend 自身访问 URL(agent 回投结果往此 origin POST,自行拼 /api/v1/... 内部路径)。
 
-        解析 ``bcs_client.task_callback_url[_pre]`` 提供的任务回投 origin。BCS client
-        已按当前环境选择 ``task_callback_url_pre`` 或 ``task_callback_url``；这里仅取
+        解析 ``bcs_client.task_callback_url`` 提供的任务回投 origin。该值由部署
+        overlay 给定（每个部署只有一个回投地址）；这里仅取
         ``scheme://netloc``，避免把路径误拼到任务 callback endpoint。
 
         - singlebox(``DEPLOY_PROFILE``) → ``SINGLEBOX_BACKEND_URL``/localhost(本地直连);
-        - 其余 → 解析 ``bcs_client.task_callback_url[_pre]`` 的 origin;
+        - 其余 → 解析 ``bcs_client.task_callback_url`` 的 origin;
         - 空值/非法(社区/dev/未配置 BCS 回投地址)→ 回退 localhost:8888。"""
         if (
             os.environ.get("DEPLOY_PROFILE", "").strip().lower()

@@ -571,11 +571,6 @@ class BotManagementModule(Module):
         # ``resolver`` 是全仓唯一 provider 解析点,_get_engine_connection
         # 走 (bot_id, owner_id) → resolver.resolve_for_bot 而不是旧的
         # device_service.get_device_connection_v2(binding_id, ...)。
-        from agentclaw.community.utils.env_utils import get_current_env
-
-        is_pre = get_current_env() == "pre"
-        bcsfuse_base_url = bcsfuse.base_url_pre if is_pre else bcsfuse.base_url
-        ecb_base_url = ecb.base_url_pre if is_pre else ecb.base_url
         return DataInitService(
             resource_repo=resource_repo,
             device_service=device_service,
@@ -584,8 +579,8 @@ class BotManagementModule(Module):
             bot_service_provider=bot_service_provider,
             skill_md_path=skill_repo_sync.get_data_init_skill_md_path(),
             resolver=resolver,
-            bcsfuse_base_url=bcsfuse_base_url,
-            ecb_base_url=ecb_base_url,
+            bcsfuse_base_url=bcsfuse.base_url,
+            ecb_base_url=ecb.base_url,
         )
 
     # ── Lazy factory providers — cycle-breakers for BotService ──────────

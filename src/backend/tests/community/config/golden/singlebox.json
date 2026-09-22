@@ -107,11 +107,6 @@
       "partner_id": "a2dd39c227",
       "scene_code": "default"
     },
-    "daas_sdk_config_prod": {
-      "endpoint": "https://xhuntercore-prod.teamclaw.com",
-      "partner_id": "a2dd39c227",
-      "scene_code": "default"
-    },
     "desktop_bot_periodic_scan": {
       "apply_owner_whitelist": [],
       "enabled": true,
@@ -129,7 +124,6 @@
       "access_key": "dummy-access-key",
       "access_secret": "dummy-secret-16b",
       "aixcore_base_url": "https://aixcore.teamclaw.com",
-      "aixcore_base_url_pre": "https://aixcore-pre.teamclaw.com",
       "base_url": "https://devapi.teamclaw.com",
       "tenant": "alipay",
       "timeout": 30
@@ -174,8 +168,7 @@
     },
     "local_git_repo_dir": "/tmp/aiworkbench-singlebox",
     "masa_agent_eval": {
-      "base_url": "http://127.0.0.1:9999",
-      "base_url_pre": "http://127.0.0.1:9999"
+      "base_url": "http://127.0.0.1:9999"
     },
     "mock_tcauth": true,
     "nas_mount_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
@@ -247,7 +240,6 @@
     },
     "baas": {
       "api_base_url": "http://localhost:8890",
-      "api_base_url_pre": "http://localhost:8888",
       "default_ttl_minutes": 1440,
       "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
       "desktop_ttl_minutes": 0,
@@ -259,15 +251,11 @@
     },
     "bcn": {
       "base_url": "http://localhost:21000",
-      "base_url_pre": "",
-      "provider_admin_token_pre": "",
-      "provider_admin_token_prod": "",
-      "provider_id_pre": "",
-      "provider_id_prod": ""
+      "provider_admin_token": "",
+      "provider_id": ""
     },
     "bcsfuse": {
       "base_url": "https://bcsfuse-pre.teamclaw.com",
-      "base_url_pre": "",
       "raw": {
         "base_url": "https://bcsfuse-pre.teamclaw.com"
       },
@@ -316,7 +304,6 @@
     },
     "ecb": {
       "base_url": "https://ecb-pre.teamclaw.com",
-      "base_url_pre": "",
       "resource_ready_base_url": "",
       "resource_ready_dedupe_max_entries": 10000,
       "resource_ready_dedupe_ttl_seconds": 3600.0,
@@ -325,8 +312,7 @@
       "resource_ready_worker_threads": 2
     },
     "gateway": {
-      "base_url": "http://127.0.0.1:9999",
-      "base_url_pre": ""
+      "base_url": "http://127.0.0.1:9999"
     },
     "http_client_pool": {
       "defaults": {
@@ -349,8 +335,7 @@
       "secret_name": ""
     },
     "masa_agent_eval": {
-      "base_url": "http://127.0.0.1:9999",
-      "base_url_pre": "http://127.0.0.1:9999"
+      "base_url": "http://127.0.0.1:9999"
     },
     "oss_to_nas": {
       "nas_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
@@ -361,8 +346,8 @@
       "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
       "dormant_internal_token": "",
       "gateway_principal_signing_key": "gateway_principal_signing_key",
-      "tc_file_service_token": "",
-      "skill_center_internal_token": "other_manual_agentclaw_skill_center_internal_token"
+      "skill_center_internal_token": "other_manual_agentclaw_skill_center_internal_token",
+      "tc_file_service_token": ""
     },
     "skill_scan": {
       "auth_app_key": "agentclaw",
@@ -407,7 +392,6 @@
       "access_secret": "dummy-secret-16b",
       "admin_member_staff_ids": [],
       "aixcore_base_url": "https://aixcore.teamclaw.com",
-      "aixcore_base_url_pre": "https://aixcore-pre.teamclaw.com",
       "base_url": "https://devapi.teamclaw.com",
       "tenant": "alipay",
       "timeout": 30

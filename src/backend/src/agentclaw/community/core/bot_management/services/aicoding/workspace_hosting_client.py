@@ -16,7 +16,6 @@ from injector import inject
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.di.config import WorkspaceHostingConfig
-from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -54,12 +53,8 @@ class WorkspaceHostingClient:
         self.tenant = config.tenant
         self.timeout = config.timeout
 
-        # 根据环境选择 aixcore base URL：预发用 aixcore_base_url_pre，线上用 aixcore_base_url
-        current_env = get_current_env()
-        if current_env == "prod":
-            self.aixcore_base_url = config.aixcore_base_url.rstrip('/')
-        else:
-            self.aixcore_base_url = config.aixcore_base_url_pre.rstrip('/')
+        # aixcore base URL 由部署 overlay 给定，直接读取（不再按进程环境选择）
+        self.aixcore_base_url = config.aixcore_base_url.rstrip('/')
 
         self.session = requests.Session()
         retry_strategy = Retry(

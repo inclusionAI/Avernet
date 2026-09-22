@@ -2014,7 +2014,6 @@ class BotService(BotServiceProtocol):
                     template_config=template_config,
                     cookie=cookie or "",
                     aixcore_base_url=self._workspace_hosting_config.aixcore_base_url,
-                    aixcore_base_url_pre=self._workspace_hosting_config.aixcore_base_url_pre,
                 )
                 logger.info(
                     f"[bot_service.create_bot] Memory initialization completed for bot {bot_id}"
@@ -3105,7 +3104,6 @@ class BotService(BotServiceProtocol):
                         template_config=template_config,
                         cookie=cookie or "",
                         aixcore_base_url=self._workspace_hosting_config.aixcore_base_url,
-                        aixcore_base_url_pre=self._workspace_hosting_config.aixcore_base_url_pre,
                     )
             except Exception as e:
                 logger.error(

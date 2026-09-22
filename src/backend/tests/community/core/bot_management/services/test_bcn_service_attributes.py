@@ -29,13 +29,11 @@ from agentclaw.community.di.config import BcnConfig
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
 # Down-link provider config the tests assert on (mirrors register_provider).
-# provider_id_* are non-sensitive identifiers; the admin tokens are fake.
+# provider_id is a non-sensitive identifier; the admin token is fake.
 _TEST_BCN_CONFIG = BcnConfig(
     base_url="http://fake-bcn:21000",
-    provider_id_prod="prv_4b7fce5b",
-    provider_id_pre="prv_40354c8a",
-    provider_admin_token_prod="test-bcn-token-prod",
-    provider_admin_token_pre="test-bcn-token-pre",
+    provider_id="prv_40354c8a",
+    provider_admin_token="test-bcn-token",
 )
 
 _BOT_UUID = "bot-uuid-x"
@@ -99,7 +97,7 @@ class TestGetAttributes:
         call = http.calls_to("get")[0]
         assert call.args[0] == _ATTR_PATH
         assert call.kwargs["headers"]["Authorization"] == (
-            "Bearer test-bcn-token-pre"
+            "Bearer test-bcn-token"
         )
         assert call.kwargs["timeout"] == 5.0
 
@@ -162,7 +160,7 @@ class TestPatchAttributes:
         assert call.args[0] == _ATTR_PATH
         assert call.kwargs["json"] == _PATCH_BODY
         assert call.kwargs["headers"]["Authorization"] == (
-            "Bearer test-bcn-token-pre"
+            "Bearer test-bcn-token"
         )
         assert call.kwargs["headers"]["Content-Type"] == "application/json"
 

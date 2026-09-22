@@ -96,7 +96,7 @@ def _service(log: list, *, teclaw: bool = False) -> BotService:
     svc._bot_publish_repo = MagicMock()
     svc._template_service = MagicMock()
     svc._workspace_hosting_service = MagicMock()
-    svc._workspace_hosting_config = MagicMock(aixcore_base_url="", aixcore_base_url_pre="")
+    svc._workspace_hosting_config = MagicMock(aixcore_base_url="")
     skill_set_service = MagicMock()
     skill_set_service.get_symlink_mappings.return_value = []
     svc._skill_set_factory = MagicMock()

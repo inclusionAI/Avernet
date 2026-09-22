@@ -71,7 +71,6 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
-from agentclaw.community.utils.env_utils import get_current_env
 from injector import Binder, Module, inject, provider, singleton
 
 
@@ -550,9 +549,9 @@ class EconomyGovernanceModule(Module):
               tc_card_template_id: "xxx.schema"
               iframe_callback_url: "https://..."
 
-        Resolution priority: YAML → env var → dataclass default.
-        For pre+prod shared YAML, ``_pre`` suffix fields override when
-        ``SERVER_ENV`` is ``pre`` / ``prepub`` (same pattern as bcsfuse/secbaas).
+        Resolution priority: YAML → env var → dataclass default. Each field
+        carries one value per deployment — the overlay SOFAPy merged already
+        picked it, so nothing is selected by ``SERVER_ENV`` here.
         """
         defaults = EconomyGovernanceConfig()
 
@@ -637,13 +636,10 @@ class EconomyGovernanceModule(Module):
             yaml_block.get("expire_days", defaults.expire_days)
         )
 
-        # iframe_callback_url: YAML _pre suffix → YAML base → default.
-        # Card React component fetch POST target; env-aware (pre/prod differ).
-        _env = get_current_env()
-        _is_pre = _env in ("pre", "prepub")
+        # iframe_callback_url: YAML → default. Card React component fetch POST
+        # target; one value per deployment, supplied by its overlay.
         iframe_callback_url = str(yaml_block.get(
-            "iframe_callback_url_pre" if _is_pre else "iframe_callback_url",
-            defaults.iframe_callback_url,
+            "iframe_callback_url", defaults.iframe_callback_url
         ))
 
         return EconomyGovernanceConfig(

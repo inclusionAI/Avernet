@@ -1,15 +1,21 @@
-"""The gateway pre/prod selection, which lives in the composition root.
+"""The gateway endpoint the composition root hands to the connection service.
 
 ``EngineConnectionService`` receives an already-resolved
-:class:`GatewayEndpoint` and never reads ``SERVER_ENV`` itself — selecting a
-deployment is composition-root work (``AGENTS.md``: raw environment access
-belongs in configuration loading, bootstrap, composition roots, or tests). So
-the selection is pinned here rather than in that service's tests.
+:class:`GatewayEndpoint` and never reads ``SERVER_ENV`` itself — a deployment
+detail is composition-root work (``AGENTS.md``: raw environment access belongs
+in configuration loading, bootstrap, composition roots, or tests).
+
+Since SOFAPy 1.3 the deployment overlay is selected and merged before this code
+reads config, so the ``gateway`` block carries ONE host and this provider only
+re-shapes it — the process env no longer picks between a prod and a pre key.
 """
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
+from agentclaw.community.di import config as cfg
 from agentclaw.community.di.modules import config_module
 from agentclaw.community.di.modules.config_module import ConfigModule
 
@@ -28,27 +34,19 @@ def _clear_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-_HOSTS = {"base_url": "https://gw.example", "base_url_pre": "https://gw-pre.example"}
+_HOSTS = {"base_url": "https://gw.example"}
 
 
-def test_pre_selects_the_pre_gateway(stub_user_config, monkeypatch):
-    """pre and prod are separate gateways; collapsing them would send a
-    credential issued for one to the other, which rejects it."""
-    stub_user_config({"gateway": _HOSTS})
-    monkeypatch.setenv("SERVER_ENV", "pre")
-    module = ConfigModule()
-    assert module.gateway_endpoint(module.gateway()).base_url == "https://gw-pre.example"
-
-
-@pytest.mark.parametrize("env", ["prod", "dev", ""])
-def test_every_other_env_selects_the_prod_gateway(stub_user_config, monkeypatch, env):
+@pytest.mark.parametrize("env", ["pre", "prod", "dev", ""])
+def test_every_env_publishes_the_overlay_host(stub_user_config, monkeypatch, env):
+    """The overlay already picked the gateway; the process env cannot re-pick it."""
     stub_user_config({"gateway": _HOSTS})
     monkeypatch.setenv("SERVER_ENV", env)
     module = ConfigModule()
     assert module.gateway_endpoint(module.gateway()).base_url == "https://gw.example"
 
 
-def test_an_unset_env_selects_the_prod_gateway(stub_user_config):
+def test_an_unset_env_publishes_the_overlay_host(stub_user_config):
     """``get_current_env`` returns ``""`` when no env var is set at all."""
     stub_user_config({"gateway": _HOSTS})
     module = ConfigModule()
@@ -63,13 +61,19 @@ def test_an_absent_block_resolves_to_no_gateway(stub_user_config):
     assert module.gateway_endpoint(module.gateway()).base_url == ""
 
 
-def test_a_pre_deployment_with_only_a_prod_host_resolves_empty(
-    stub_user_config, monkeypatch
-):
-    """No silent fallback to the prod host — a pre deployment pointed at the
-    prod gateway is the mix-up the separate keys exist to prevent, so an
-    unconfigured pre resolves empty and is reported as unconfigured."""
-    stub_user_config({"gateway": {"base_url": "https://gw.example"}})
+def test_a_legacy_pre_key_is_not_read(stub_user_config, monkeypatch):
+    """A stale ``base_url_pre`` left in a yaml block is inert — no fallback, no
+    selection. A pre deployment gets its host from its own overlay's
+    ``base_url`` or it is reported as unconfigured."""
+    stub_user_config({"gateway": {"base_url_pre": "https://gw-pre.example"}})
     monkeypatch.setenv("SERVER_ENV", "pre")
     module = ConfigModule()
+    assert module.gateway().base_url == ""
     assert module.gateway_endpoint(module.gateway()).base_url == ""
+
+
+def test_gateway_config_has_no_legacy_env_suffixed_field() -> None:
+    """Guard: ``base_url_pre`` is gone for good (SOFAPy 1.3 overlays)."""
+    fields = {f.name for f in dataclasses.fields(cfg.GatewayConfig)}
+    assert "base_url_pre" not in fields
+    assert "base_url" in fields

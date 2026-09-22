@@ -365,21 +365,14 @@ class ServiceBotModule(Module):
     ) -> BaasService:
         """Construct ``BaasService`` from typed bindings.
 
-        ``BaasConfig.api_base_url_pre`` is selected when the runtime
-        env is ``pre``; otherwise ``api_base_url`` wins.
-        ``storage_path`` is still imported as a module — it is a
+        ``BaasConfig.api_base_url`` is the host this deployment's overlay
+        supplies. ``storage_path`` is still imported as a module — it is a
         plain Python module, not a service.
         """
         from agentclaw.community.core.storage import path as storage_path
 
-        api_base = (
-            baas.api_base_url_pre
-            if env_utils.get_current_env() == "pre"
-            else baas.api_base_url
-        )
-
         service = BaasService(
-            baas_api_base=api_base,
+            baas_api_base=baas.api_base_url,
             tenant=baas.tenant,
             template_uuid=baas.template_uuid,
             deploy_composer=deploy_composer,
@@ -402,7 +395,7 @@ class ServiceBotModule(Module):
         logger.info(
             "[NEW-ARCH] BaasService initialized: api_base=%s, tenant=%s, template_uuid=%s, "
             "personal_bot_template_uuid=%s, deploy_runtime=%s",
-            api_base,
+            baas.api_base_url,
             baas.tenant,
             baas.template_uuid,
             baas.personal_bot_template_uuid,

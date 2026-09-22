@@ -23,7 +23,6 @@ from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
     get_current_avernet_tenant,
 )
-from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey, BotFriendStatus, ApprovalStatus, ApprovalType
 from agentclaw.community.core.operator_context import OperatorContext
@@ -378,11 +377,8 @@ class BotPublicService(BotPublicServiceProtocol):
         logger.info(f"[_rebuild_auth_relationships] Rebuild done: bot_id={bot_id}, owner_id={owner_id}, total={len(keep_work_nos)}")
 
     def _resolve_bcsfuse_base_url(self) -> str:
-        """Resolve the configured BCSFuse base URL for the current env."""
-        base_url = self._bcsfuse_config.base_url
-        if get_current_env() == "pre" and self._bcsfuse_config.base_url_pre:
-            base_url = self._bcsfuse_config.base_url_pre
-        return base_url.rstrip("/")
+        """The BCSFuse base URL this deployment's overlay configured."""
+        return self._bcsfuse_config.base_url.rstrip("/")
 
     def _sync_bcsfuse_runtime_state(
         self, bot_id: str, owner_id: str, public: str

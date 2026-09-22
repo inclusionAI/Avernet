@@ -25,13 +25,11 @@ from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
 
 # 下行 provider 配置(测试直接注入;生产来自 bcn yaml block 的 corp env overlay)。
-# provider_id_* 为非敏感标识;admin token 为假值。
+# provider_id 为非敏感标识;admin token 为假值。
 _TEST_BCN_CONFIG = BcnConfig(
     base_url="http://fake-bcn:21000",
-    provider_id_prod="prv_4b7fce5b",
-    provider_id_pre="prv_40354c8a",
-    provider_admin_token_prod="test-bcn-token-prod",
-    provider_admin_token_pre="test-bcn-token-pre",
+    provider_id="prv_40354c8a",
+    provider_admin_token="test-bcn-token",
 )
 
 
@@ -72,7 +70,7 @@ class TestListBotsByTaskModesEnvSelection:
         "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
         return_value="prod",
     )
-    def test_prod_env_uses_prod_provider_credentials(self, _mock_env, service, http):
+    def test_prod_env_uses_the_configured_provider_credentials(self, _mock_env, service, http):
         http.set_response("get", _ok_response(200, {
             "success": True,
             "items": [
@@ -86,8 +84,8 @@ class TestListBotsByTaskModesEnvSelection:
         assert [i["bot_id"] for i in items] == ["bot-a", "bot-b"]
 
         call = http.calls_to("get")[0]
-        assert call.args[0] == "/providers/prv_4b7fce5b/bots/by-task-modes"
-        assert call.kwargs["headers"]["Authorization"] == "Bearer test-bcn-token-prod"
+        assert call.args[0] == "/providers/prv_40354c8a/bots/by-task-modes"
+        assert call.kwargs["headers"]["Authorization"] == "Bearer test-bcn-token"
         assert call.kwargs["timeout"] == 5.0
         assert call.kwargs["params"] == {
             "match": "all",
@@ -99,7 +97,7 @@ class TestListBotsByTaskModesEnvSelection:
         "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
         return_value="pre",
     )
-    def test_pre_env_uses_pre_provider_credentials(self, _mock_env, service, http):
+    def test_pre_env_uses_the_configured_provider_credentials(self, _mock_env, service, http):
         http.set_response("get", _ok_response(200, {"items": [{"bot_id": "bot-pre"}]}))
 
         items = service.list_bots_by_task_modes(claim=True, dream=True, match="all")
@@ -108,7 +106,7 @@ class TestListBotsByTaskModesEnvSelection:
 
         call = http.calls_to("get")[0]
         assert call.args[0] == "/providers/prv_40354c8a/bots/by-task-modes"
-        assert call.kwargs["headers"]["Authorization"] == "Bearer test-bcn-token-pre"
+        assert call.kwargs["headers"]["Authorization"] == "Bearer test-bcn-token"
 
 
 class TestListBotsByTaskModesRequestParams:
