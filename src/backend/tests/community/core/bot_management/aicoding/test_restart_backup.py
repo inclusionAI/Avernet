@@ -1,6 +1,7 @@
 """Coding-only restart preconditions, receipt fencing, and sanitized logs."""
 import json
 import logging
+import re
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -294,7 +295,10 @@ def test_coding_prepare_returns_verifier_without_touching_any_lock():
     verify = Mock()
     with patch.object(strategy, '_prepare_restart', return_value=verify) as prepare:
         assert strategy.prepare_restart(ctx) is verify
-        prepare.assert_called_once_with(ctx, target_runtime_provider=None)
+        prepare.assert_called_once()
+        kwargs = prepare.call_args.kwargs
+        assert kwargs['target_runtime_provider'] is None
+        assert re.fullmatch(r'[a-f0-9]{32}', kwargs['operation_id'])
         verify.assert_not_called()  # The caller decides when to verify (under its lock).
 
 
@@ -509,7 +513,8 @@ async def test_instance_dispatch_uses_strategy_contract_not_coding_type():
     runtime = Mock()
     with patch.object(registry, 'resolve_restart_strategy', return_value=(ctx, OtherStrategy())):
         await registry.prepare_instance_restart(bot={}, device_id='target', target_runtime=runtime)
-    prepared.assert_called_once_with(ctx, device_id='target', target_runtime=runtime)
+    prepared.assert_called_once_with(ctx, device_id='target', target_runtime=runtime,
+                                     operation_id=None, restart_key=None)
     assert not runtime.mock_calls
 
 

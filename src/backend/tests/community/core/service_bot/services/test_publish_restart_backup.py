@@ -20,13 +20,13 @@ async def test_restart_backup_failure_never_issues_or_releases_published_target(
     svc._release_binding = Mock()
     targets = []
 
-    async def guard(*, bot, device_id, target_runtime):
-        targets.append(device_id)
+    async def guard(*, bot, device_id, target_runtime, restart_key=None):
+        targets.append((device_id, restart_key))
         raise RuntimeError('backup failed')
 
     with patch('agentclaw.community.core.service_bot.services.publish_flow.restart_mixin.prepare_instance_restart', side_effect=guard), pytest.raises(RuntimeError, match='backup failed'):
         await svc.execute_restart(1, 'online', 'operator')
-    assert targets == ['BOT-live']
+    assert targets == [('BOT-live', 'restart:1:online')]
     build.upgrade_async.assert_not_called()
     build.retire_superseded_bot.assert_not_called()
     build.release_async.assert_not_called()
