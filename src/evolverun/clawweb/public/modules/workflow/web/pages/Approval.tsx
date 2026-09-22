@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import { approvalDisplay, type ApprovalDisplay } from '../../shared/approval-display'
 import { formatDuration } from '../utils/time'
 import { useParams } from 'react-router-dom'
-import { loadDingTalkConfig, requestDingTalkAuthCode } from '../services/dingtalk-auth'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -95,15 +94,14 @@ type StatusResult = {
 
 async function resolveApproval(
   id: number,
-  authCode: string,
   action: 'approve' | 'reject',
   comment?: string,
   detail?: Record<string, unknown>,
 ): Promise<ResolveResult> {
-  const res = await fetch(`/api/approval/${id}/resolve`, {
+  const res = await fetch(`/api/approval/${id}/resolve/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ authCode, action, comment, detail }),
+    body: JSON.stringify({ action, comment, detail }),
   })
   const body = await res.json() as ResolveResult
   if (!res.ok) {
@@ -599,16 +597,10 @@ export default function Approval() {
 
       setActionLoading(true)
       try {
-        const config = await loadDingTalkConfig()
-        const auth = await requestDingTalkAuthCode(config)
-        if (auth.ok === false) {
-          setResult({ error: auth.error })
-          return
-        }
         const detail = isSectionMode && data?.sections
           ? buildDetailPayload(data.sections, sectionSelection)
           : undefined
-        const res = await resolveApproval(approvalId, auth.authCode, action, comment || undefined, detail)
+        const res = await resolveApproval(approvalId, action, comment || undefined, detail)
         setResult(res)
         if (res.ok) {
           const freshUrl = `/api/approval/${approvalId}`
