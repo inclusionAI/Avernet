@@ -310,6 +310,14 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
         event_suffix="1",
     )
 
+    handed_off = graph_service.query_task_dashboard("relay-task")
+    handed_off_root = next(n for n in handed_off.tasks if n.node_id == "relay-task")
+    handed_off_child = next(n for n in handed_off.tasks if n.node_id == research_step)
+    assert handed_off_root.status == Status.DONE
+    assert handed_off_child.status == Status.PENDING
+    assert handed_off.status == Status.RUNNING
+    assert handed_off.effective_status == Status.RUNNING
+
     # PLAN_RESULT must be persistable as an idempotent HTTP fact. A live
     # TaskNode in the event record would break repository JSON persistence and
     # make a response-loss retry unable to recover target_node_id.
@@ -352,13 +360,13 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
         )
     )
     assert dispatched["assignee"] == "research-bot"
-    assert (
-        graph_service.query_task_nodes(
-            "relay-task",
-            TaskNodeQueryCriteria(node_ids=[research_step]),
-        )[0].status
-        == Status.RUNNING
+    running_baton = graph_service.query_task_dashboard("relay-task")
+    running_child = next(
+        n for n in running_baton.tasks if n.node_id == research_step
     )
+    assert running_child.status == Status.RUNNING
+    assert running_baton.status == Status.RUNNING
+    assert running_baton.effective_status == Status.RUNNING
 
     second = _run(
         service.report_task_event(
@@ -419,6 +427,7 @@ def test_relay_exec_plan_search_dispatch_and_complete() -> None:
         Status.SUCCESS,
     ]
     assert final.status == Status.DONE
+    assert final.effective_status == Status.DONE
     assert final.output == {
         "relay-task": {"summary": "首轮结论"},
         research_step: {"recommendation": "进入市场"},
@@ -528,6 +537,8 @@ def test_relay_miss_publishes_bbs_and_claimant_continues_without_root_planning_r
     assert root.status == Status.DONE
     assert bbs.status == Status.RUNNING
     assert bbs.run_info.assignee == "bbs-bot"
+    assert graph.status == Status.RUNNING
+    assert graph.effective_status == Status.RUNNING
     with pytest.raises(TaskStateError):
         service.claim_bbs_task("relay-task", "other-bbs-bot", bbs_step)
 

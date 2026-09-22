@@ -640,6 +640,60 @@ class TestEffectiveStatus:
         _ = g.effective_status  # 读派生不写存储
         assert g.status == before
 
+    @staticmethod
+    def _relay_graph(svc: TaskGraphService, task_id: str):
+        info = _task_info(task_id)
+        info.execution_config["orchestration_mode"] = "relay"
+        return svc.initialize_graph(info)
+
+    def test_relay_effective_status_does_not_mirror_handed_off_root(self, svc):
+        graph = self._relay_graph(svc, "tr")
+        svc.add_task_nodes(
+            [_node("baton", "tr")], parent_node_id="tr", mark_parent_planning=False
+        )
+        root = next(node for node in graph.tasks if node.node_id == "tr")
+        baton = next(node for node in graph.tasks if node.node_id == "baton")
+        root.status = Status.DONE
+        graph.extend_props["gaps"] = ["补齐研究缺口"]
+
+        for baton_status in (Status.PENDING, Status.RUNNING):
+            baton.status = baton_status
+            # Simulate an older persisted root-mirrored value to ensure it cannot
+            # make the dashboard show a Relay task as completed.
+            graph.status = Status.DONE
+            assert graph.effective_status is Status.RUNNING
+
+        baton.status = Status.DONE
+        graph.extend_props["gaps"] = []
+        assert graph.effective_status is Status.RUNNING
+
+        graph.status = Status.DONE
+        assert svc.list_task_summaries()[0].status is Status.RUNNING
+        assert svc.list_task_summaries(Status.DONE) == []
+
+        baton.status = Status.SUCCESS
+        assert graph.effective_status is Status.DONE
+        assert svc.list_task_summaries(Status.RUNNING) == []
+        assert svc.list_task_summaries()[0].status is Status.DONE
+
+    def test_relay_effective_status_requires_explicit_empty_gaps(self, svc):
+        graph = self._relay_graph(svc, "tg")
+        root = graph.tasks[0]
+        root.status = Status.SUCCESS
+        del graph.extend_props["gaps"]
+
+        assert graph.effective_status is Status.RUNNING
+
+        graph.extend_props["gaps"] = []
+        assert graph.effective_status is Status.DONE
+
+    def test_relay_effective_status_keeps_explicit_hard_stop_authoritative(self, svc):
+        graph = self._relay_graph(svc, "th-r")
+        graph.tasks[0].status = Status.RUNNING
+        graph.status = Status.HUNG
+
+        assert graph.effective_status is Status.HUNG
+
 
 def test_runtime_profile_is_frozen_at_graph_creation(svc: TaskGraphService):
     info = _task_info("profile-task")

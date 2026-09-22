@@ -306,6 +306,45 @@ class TaskNode:
     # 无跨兄弟/跨层级直接数据边——数据流由步进式批规划顺序 + 执行时结构父聚合上下文承载
 
 
+def _relay_graph_status(graph: "TaskExecutionGraph") -> "Status":
+    """Derive the Relay graph state from baton convergence, not the root node.
+
+    ``DONE`` on a handed-off baton only means that it produced a successor.
+    The whole Relay graph is complete only after every node has reached its own
+    terminal state, the active leaf is accepted (``SUCCESS``), and the latest
+    persisted GAP snapshot is an explicit empty list. A missing GAP snapshot is
+    not treated as completion.
+    """
+    if graph.status in {Status.FAILED, Status.HUNG, Status.CANCELLED}:
+        return graph.status
+    if not graph.tasks:
+        return graph.status
+
+    active = {Status.PENDING, Status.PLANNING, Status.RUNNING}
+    if any(node.status in active for node in graph.tasks):
+        return Status.RUNNING
+    for terminal in (Status.FAILED, Status.HUNG, Status.CANCELLED):
+        if any(node.status == terminal for node in graph.tasks):
+            return terminal
+
+    outgoing = {
+        relation.src_id
+        for relation in graph.relations
+        if relation.type == RelationType.DEPENDENCY
+    }
+    leaves = [node for node in graph.tasks if node.node_id not in outgoing] or list(
+        graph.tasks
+    )
+    all_nodes_closed = all(
+        node.status in {Status.DONE, Status.SUCCESS} for node in graph.tasks
+    )
+    active_leaf_accepted = all(node.status == Status.SUCCESS for node in leaves)
+    gaps = graph.extend_props.get("gaps")
+    if gaps == [] and all_nodes_closed and active_leaf_accepted:
+        return Status.DONE
+    return Status.RUNNING
+
+
 @dataclass
 class TaskExecutionGraph:
     """任务运行时执行图。"""
@@ -323,14 +362,24 @@ class TaskExecutionGraph:
     # 派生不持久: depth / child_tasks / parent_task(均从 relations 分解树派生)
 
     @property
-    def effective_status(self) -> "Status":
-        """图级有效态(乙' c+R2 只读派生根态):有根节点时以根态为准,使"图状态与根节点状态保持一致"
-        落在观测口径;无根(未初始化)回落存储的图级 ``status``。
+    def is_relay(self) -> bool:
+        """Whether this graph is driven by the serial Relay orchestration mode."""
+        config = self.extend_props.get("execution_config")
+        return isinstance(config, dict) and config.get("orchestration_mode") == "relay"
 
-        纯只读派生,不改并发主线——图级 ``status`` 仍由编排核 ``update_task_graph_info`` 显式写
-        (终态收口 / loop_exhausted / 外部镜像);控制流(``_is_graph_terminal`` 等)继续读 ``status``,
-        本属性供看板/持久化等"以根态为准"的观测口径消费。与 ``_persist_locked`` 既有 root 派生
-        (runtime_status)完全等价,是其单源化的命名口径。"""
+    @property
+    def effective_status(self) -> "Status":
+        """图级有效态：按编排模式派生。
+
+        中心化保持既有口径：有根节点时以根节点状态为准。Relay 不镜像根节点；
+        根/前序节点 ``DONE`` 只表示已交接，图级状态由各节点收敛态与最新 GAP 决定。
+        无根(未初始化)回落存储的图级 ``status``。
+
+        纯只读派生，不改并发主线。图级 ``status`` 仍由 Relay 事实写入或
+        ``update_task_graph_info`` 显式写；控制流(``_is_graph_terminal`` 等)继续读 ``status``。
+        本属性供持久化、任务列表和看板等统一观测口径消费。"""
+        if self.is_relay:
+            return _relay_graph_status(self)
         root = next((n for n in self.tasks if n.node_id == self.task_id), None)
         return root.status if root is not None else self.status
 

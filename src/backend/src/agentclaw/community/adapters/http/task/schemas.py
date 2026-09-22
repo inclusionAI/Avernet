@@ -725,10 +725,11 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
         )
         for r in graph.relations
     ]
+    graph_status = graph.effective_status if graph.is_relay else graph.status
     return TaskExecutionGraphDTO(
         run_id=graph.run_id,
         loop_round=graph.loop_round,
-        status=runtime_status_to_product_status(graph.status),
+        status=runtime_status_to_product_status(graph_status),
         output=dict(graph.output),
         tasks=nodes,
         relations=relations,

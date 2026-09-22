@@ -118,10 +118,10 @@ def query_task_dashboard(
 
 
 def effective_graph_status(self, task_id: str) -> "Status":
-    """图级有效态(乙' c+R2 只读派生根态):有根节点时以根态为准,无根回落存储的图级 status。
+    """图级有效态:中心化以根态为准;Relay 由各节点收敛态与最新 gaps 决定。
 
     与 ``query_task_dashboard(task_id).effective_status`` 同源;控制流不消费本方法(不改并发主线),
-    仅供"以根态为准"的观测口径(看板/持久化派生)使用。"""
+    供看板、任务列表和持久化派生统一使用。"""
     with self._lock_for(task_id):
         graph = self._require_graph(task_id)
         return graph.effective_status
@@ -183,7 +183,8 @@ def list_task_summaries(self, status: "Status | None" = None) -> list[TaskSummar
     with self._registry_lock:
         summaries: list[TaskSummary] = []
         for tid, graph in self._graphs.items():
-            if status is not None and graph.status != status:
+            graph_status = graph.effective_status
+            if status is not None and graph_status != status:
                 continue
             root = next((n for n in graph.tasks if n.node_id == tid), None)
             title = root.task_spec.context.title if root else ""
@@ -191,7 +192,7 @@ def list_task_summaries(self, status: "Status | None" = None) -> list[TaskSummar
                 TaskSummary(
                     task_id=tid,
                     run_id=graph.run_id,
-                    status=graph.status,
+                    status=graph_status,
                     title=title,
                     node_count=len(graph.tasks),
                     loop_round=graph.loop_round,
@@ -621,6 +622,9 @@ def apply_relay_plan_result(
             raise TaskStateError("relay PLAN_RESULT with gaps requires next_task_spec")
         origin.status = Status.DONE
         origin.run_info.end_time = now
+        # A handed-off origin is DONE, but its successor keeps the Relay graph
+        # RUNNING. Graph status must not mirror the root/origin node.
+        graph.status = Status.RUNNING
         child_id = f"relay-{uuid.uuid4().hex[:8]}"
         child = TaskNode(
             node_id=child_id,

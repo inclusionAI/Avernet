@@ -78,6 +78,9 @@
 - [ ] `actual_goal` 由当前 Bot 本地计算，在 `EXECUTION_RESULT` 中首次持久化；不新增执行范围开始事件。
 - [ ] Relay Skill 依据最新 `TaskContext` 和当前完成节点事实重新计算 `gaps: list[str]`，并通过 `PLAN_RESULT` 让 Graph 持久化最新 GAP 快照。
 - [ ] Relay `PLAN_RESULT` 的 `gaps` 非空时必须携带唯一 `next_task_spec`；GAP 为空时不得携带下一棒，并完成任务。
+- [ ] Relay 图级 status 不镜像根节点或父节点状态：前序/root 的 `DONE` 只表示已交接；存在待处理、规划中或执行中的接力节点，或仍有未闭合 GAP 时，图级有效态保持 `RUNNING`。
+- [ ] Relay 图级 `DONE` 只能由接力收敛推导：所有节点已达自身终态、当前叶子为 `SUCCESS`，且最新 `PLAN_RESULT` 持久化的 `gaps` 为显式空列表；缺失 GAP 快照不得被推断为完成。
+- [ ] Relay 图级 `FAILED/HUNG/CANCELLED` 由显式控制事实决定，不通过父子状态传播回写前序节点；中心化模式继续使用自己的根节点与父子收敛策略。
 - [ ] Relay 的下一棒节点由 Graph 生成 `node_id`，初始 `runtime_info` 为空；Skill 不预填下一棒 `actual_goal`。
 - [ ] Relay 当前棒仅修改当前节点与图级 Relay 控制事实；不得修改任何前序节点或根节点的 `status`、`actual_goal`、`output`、`acceptance_result`、`assignee` 或 `run_mode`。
 - [ ] Relay 文档/报告类 `RuntimeInfo.output` 使用 `{"result":"<完整 Markdown 全文>"}` 承载最终交付物，不得退化为标题、摘要或状态说明；任务完成时图级 `output` 仅做只读汇总，不回写任何前序/root RuntimeInfo。
