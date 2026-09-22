@@ -30,6 +30,11 @@
 
 This crate owns BCSFuse transport concerns only. Business implementations that consume this client live in `services/bcs-fusion`.
 
+Worker lifecycle operations use the shared `/v1/workers/*` contract implemented
+by both the internal and open-source BCSFuse deployments. Missing-worker
+responses may use either the OSS `WORKER_NOT_FOUND` code or the internal
+`BCSFUSE-DOM-WORKER-NOT-FOUND` code.
+
 ## Tests
 
 - `cargo test --package bcs-fuse-client --manifest-path Cargo.toml`

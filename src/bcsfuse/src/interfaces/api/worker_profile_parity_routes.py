@@ -837,6 +837,23 @@ async def set_worker_availability(worker_id: str, request: Request, req: WorkerA
         )
 
 
+@compat_router.put(
+    "/workers/{worker_id}/availability",
+    summary="Set worker availability (backward-compatible)",
+    description="Update worker availability through the shared BCS lifecycle contract.",
+    response_model=WorkerAvailabilityResponse,
+    tags=["Workers"],
+    deprecated=True,
+)
+async def set_worker_availability_compat(
+    worker_id: str,
+    request: Request,
+    req: WorkerAvailabilityUpdate,
+):
+    """Backward-compatible alias for the BCS-facing /v1 contract."""
+    return await set_worker_availability(worker_id, request, req)
+
+
 @mgmt_router.put(
     "/workers/{worker_id}/trust-level",
     summary="Set worker trust level",
@@ -2884,7 +2901,7 @@ def include_r3_routes(app) -> None:
     Route categories:
     - api_router: External product APIs at /api/v1 (sync, availability — for 3rd-party callers)
     - mgmt_router: Management platform APIs at /v1 (trust-level, profiles, config reads — for admin portal)
-    - compat_router: Backward-compatible alias at /v1 (sync — deprecated, for existing callers like BCS)
+    - compat_router: Backward-compatible aliases at /v1 (sync and availability, for BCS)
     - admin_router: Privileged admin APIs at /v1/admin (only when BCSFUSE_EXPOSE_ADMIN=true)
 
     These routes MUST be mounted BEFORE skeleton routes to avoid shadowing.

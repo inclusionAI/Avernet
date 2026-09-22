@@ -8,7 +8,7 @@ from src.bootstrap.oss_business_routes import require_oss_auth
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1", tags=["Workers"])
+router = APIRouter(prefix="/v1", tags=["Workers"])
 
 
 def _get_profile_service():

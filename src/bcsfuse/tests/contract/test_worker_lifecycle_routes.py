@@ -61,11 +61,11 @@ def test_authenticated_product_route_deletes_worker_without_admin_routes(monkeyp
     monkeypatch.setattr(workers, "delete", delete_worker)
 
     with TestClient(app) as client:
-        unauthenticated = client.delete("/api/v1/workers/bot:owner")
+        unauthenticated = client.delete("/v1/workers/bot:owner")
         assert unauthenticated.status_code == 401
 
         response = client.delete(
-            "/api/v1/workers/bot:owner",
+            "/v1/workers/bot:owner",
             headers={"Authorization": "Bearer test-token"},
         )
 
@@ -80,11 +80,41 @@ def test_authenticated_product_route_deletes_worker_without_admin_routes(monkeyp
 
     with TestClient(app) as client:
         missing = client.delete(
-            "/api/v1/workers/bot:owner",
+            "/v1/workers/bot:owner",
             headers={"Authorization": "Bearer test-token"},
         )
     assert missing.status_code == 404
     assert missing.json()["detail"]["code"] == "WORKER_NOT_FOUND"
+
+
+def test_authenticated_v1_route_updates_worker_availability(monkeypatch):
+    monkeypatch.setenv("BCSFUSE_AUTH_TOKEN", "test-token")
+    monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "runtime")
+    app = create_opensource_app(mode="test")
+    workers = app.state.context.registry.get("worker_registry_store")
+    workers.create(
+        Worker(
+            id="bot:owner",
+            type=WorkerType.BOT,
+            responsibilities=[],
+            capabilities=[],
+            identity=WorkerIdentity(name="Bot", handle="@bot:owner"),
+            state=WorkerState(
+                availability=Availability.PROTECTED,
+                trust_level=TrustLevel.UNVERIFIED,
+            ),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/v1/workers/bot:owner/availability",
+            headers={"Authorization": "Bearer test-token"},
+            json={"availability": "public"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert workers.get_by_id("bot:owner").state.availability == Availability.PUBLIC
 
 
 def test_profile_cleanup_failure_preserves_worker_for_retry(monkeypatch):
@@ -118,7 +148,7 @@ def test_profile_cleanup_failure_preserves_worker_for_retry(monkeypatch):
 
     with TestClient(app) as client:
         response = client.delete(
-            "/api/v1/workers/bot:owner",
+            "/v1/workers/bot:owner",
             headers={"Authorization": "Bearer test-token"},
         )
 
@@ -158,7 +188,7 @@ def test_missing_vector_cleanup_preserves_worker_for_retry(monkeypatch):
 
     with TestClient(app) as client:
         response = client.delete(
-            "/api/v1/workers/bot:owner",
+            "/v1/workers/bot:owner",
             headers={"Authorization": "Bearer test-token"},
         )
 
