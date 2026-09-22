@@ -276,7 +276,7 @@ async def update_mcp_unified_config(
 
         return MCPUnifiedConfigResponse(
             success=True,
-            message="MCP config updated and synced to all devices",
+            message="MCP config updated and synced to affected devices",
             data=MCPUnifiedConfigData(
                 server_code=result.server_code,
                 api_key=result.api_key,
@@ -285,6 +285,7 @@ async def update_mcp_unified_config(
                 headers=result.headers,
                 has_config=result.has_config,
                 sync_results=sync_results,
+                sync_summary=result.sync_summary,
             ),
         )
     except HTTPException:

@@ -76,10 +76,12 @@ for restart/whole-artifact composition. Contract changes therefore affect Manife
 apply, user-config fan-out, every DeviceSync implementation, and OCB's ARCA adapter.
 
 User-default fan-out is best-effort: the persistent `ac_user_mcp_config` row is
-the desired state, while each reachable Bot is projected independently. A
-per-Bot resolution, probe, dispatch, or delivery failure is returned in
-`sync_results` and does not roll the row back; only a batch-level inability to
-enumerate the entity's Bot set remains a write failure.
+the desired state, and only Bots whose effective MCP state contains the changed
+server are projected. Unrelated Bots receive neither a device probe nor an
+outcome. A selected Bot's resolution, probe, dispatch, or delivery failure is
+returned in `sync_results` and does not roll the row back; `sync_summary`
+reports the affected/synced/offline/failed counts. When a selected Bot lacks the
+MCP at runtime, the result is `RUNTIME_DRIFT` and the Bot is fully reconciled.
 
 A custom Bot URL does not inherit static user/default/managed credentials in the
 server entry. Container-wide mcporter `headerPolicies` remain host-matched runtime

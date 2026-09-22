@@ -85,11 +85,13 @@ def config_service(repo):
     }
     bot_config_repo = MagicMock()
     bot_config_repo.list_by_owner_and_server_code.return_value = {}
+    bot_repo = MagicMock()
+    bot_repo.list_by_entity.return_value = (0, [])
     return MCPConfigService(
         user_mcp_config_repo=repo,
         bot_mcp_config_repo=bot_config_repo,
         mcp_center=mcp_center,
-        bot_repo=MagicMock(),
+        bot_repo=bot_repo,
         capability_reader=MagicMock(),
         mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
         secret_resolver=MagicMock(),
@@ -150,8 +152,9 @@ def test_get_config_when_absent_is_unchanged(client):
             "headers": {},
             "endpoint_env": "PROD",
             "transport_protocol": None,
-            "has_config": False,
-            "sync_results": None,
+                "has_config": False,
+                "sync_results": None,
+                "sync_summary": None,
         },
     }
 
@@ -185,8 +188,9 @@ def test_get_config_masks_api_key_and_omits_tenant(client, repo):
             "headers": {"x-ling-auth": "tok"},
             "endpoint_env": "PRE",
             "transport_protocol": "SSE",
-            "has_config": True,
-            "sync_results": None,
+                "has_config": True,
+                "sync_results": None,
+                "sync_summary": None,
         },
     }
     assert "avernet_tenant" not in resp.text
@@ -209,7 +213,7 @@ def test_post_config_creates_and_response_is_unchanged(client, repo):
     assert resp.status_code == 200
     assert resp.json() == {
         "success": True,
-        "message": "MCP config updated and synced to all devices",
+            "message": "MCP config updated and synced to affected devices",
         "data": {
             "server_code": "mcp.third.weather",
             "api_key": "sk-a****mnop",
@@ -219,8 +223,9 @@ def test_post_config_creates_and_response_is_unchanged(client, repo):
             "headers": None,
             "endpoint_env": "PROD",
             "transport_protocol": "SSE",  # upper-cased, as before
-            "has_config": True,
-            "sync_results": [],
+                "has_config": True,
+                "sync_results": [],
+                "sync_summary": None,
         },
     }
     assert "avernet_tenant" not in resp.text

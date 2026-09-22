@@ -86,6 +86,7 @@ class MCPUnifiedConfigData(BaseModel):
     headers: Optional[Dict[str, str]] = None
     has_config: bool = False
     sync_results: Optional[List[MCPSyncResult]] = None  # 广播同步结果
+    sync_summary: Optional[Dict[str, int]] = None
 
 
 class MCPUnifiedConfigResponse(BaseModel):
