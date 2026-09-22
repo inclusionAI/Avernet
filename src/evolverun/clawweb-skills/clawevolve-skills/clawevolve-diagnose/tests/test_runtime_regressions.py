@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from clawevolve_diagnose._ocsa_session_report.evaluators.session_report import evaluator as evaluator_module
 from clawevolve_diagnose._ocsa_session_report.evaluators.session_report.evaluator import SessionReportEvaluator
 from clawevolve_diagnose.judge.keyless_session_prompt import (
@@ -595,6 +597,41 @@ def test_agent_session_discovery_builds_locator_without_parsing_content(
     assert rows[0].path == str(session_file)
     assert rows[0].first_question == ""
     assert rows[0].raw_session == {}
+
+
+def test_explicit_local_session_resolution_supports_multiple_identifiers(
+    tmp_path: Path,
+) -> None:
+    from clawevolve_diagnose.acquisition.sessions import resolve_explicit_local_sessions
+
+    first = tmp_path / "first.jsonl"
+    second = tmp_path / "second.jsonl"
+    first.write_text('{"type":"message","message":{"role":"user","content":"first"}}\n', encoding="utf-8")
+    second.write_text('{"type":"message","message":{"role":"user","content":"second"}}\n', encoding="utf-8")
+    (tmp_path / "sessions.json").write_text(json.dumps({
+        "agent:main:first": {"sessionId": "id-first", "sessionFile": str(first), "sessionStartedAt": "2026-08-26T00:00:00Z", "chatType": "direct"},
+        "agent:main:second": {"sessionId": "id-second", "sessionFile": str(second), "sessionStartedAt": "2026-08-27T00:00:00Z", "chatType": "direct"},
+    }), encoding="utf-8")
+
+    rows = resolve_explicit_local_sessions(
+        {"session_dirs": [str(tmp_path)]},
+        ["id-first", "agent:main:second", "agent:main:first"],
+        parse_content=False,
+    )
+
+    assert [row.session_id for row in rows] == ["id-first", "id-second"]
+
+
+def test_explicit_local_session_resolution_fails_when_any_selector_is_missing(
+    tmp_path: Path,
+) -> None:
+    from clawevolve_diagnose.acquisition.sessions import resolve_explicit_local_sessions
+
+    (tmp_path / "sessions.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="count=1"):
+        resolve_explicit_local_sessions(
+            {"session_dirs": [str(tmp_path)]}, ["missing"], parse_content=False
+        )
 
 
 def test_local_judge_excludes_analysis_failures_from_eval_candidates(

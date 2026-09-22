@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from ..acquisition.runtime_identity import resolve_runtime_bot_id
 from ..acquisition.sessions import (
     discover_sessions,
     parse_jsonl_file,
+    resolve_explicit_local_sessions,
     session_locator_from_path,
 )
 from ..acquisition.service_export import acquire_exported_sessions
@@ -108,6 +110,8 @@ def run_pipeline(req: RunRequest) -> RunResult:
     )
     pref, pref_warnings = parse_preference(req.message, preference_parse_api_config)
     _apply_session_analysis_limit(req, pref)
+    if req.session_identifiers:
+        pref.max_sessions = len(req.session_identifiers)
     warnings.extend(pref_warnings)
     progress(
         "preference parsed",
@@ -131,6 +135,7 @@ def run_pipeline(req: RunRequest) -> RunResult:
     )
 
     max_sessions = _local_session_scan_limit(req, pref)
+    explicit_sessions = bool(req.session_identifiers)
     source_bot_id = ""
     source_meta: dict[str, Any] = {}
     if req.session_source == "service_export":
@@ -153,6 +158,7 @@ def run_pipeline(req: RunRequest) -> RunResult:
             since=pref.since,
             until=pref.until,
             parse_content=judge_runtime.backend == "api",
+            session_identifiers=req.session_identifiers,
         )
         rows = acquired.rows
         source_bot_id = acquired.source_bot_id
@@ -167,6 +173,8 @@ def run_pipeline(req: RunRequest) -> RunResult:
             oldest_session_id=rows[-1].session_id if rows else "",
         )
     elif req.debug_session_path:
+        if explicit_sessions:
+            raise ValueError("--debug-session-path cannot be combined with --session-identifier")
         debug_path = Path(req.debug_session_path).expanduser().resolve(strict=False)
         progress(
             "debug single session load start",
@@ -193,6 +201,41 @@ def run_pipeline(req: RunRequest) -> RunResult:
             first_session_id=rows[0].session_id if rows else "",
             first_created_at=rows[0].created_at if rows else "",
         )
+    elif explicit_sessions:
+        progress(
+            "explicit local session resolution start",
+            session_identifier_count=len(req.session_identifiers),
+        )
+        rows = resolve_explicit_local_sessions(
+            layout,
+            req.session_identifiers,
+            parse_content=judge_runtime.backend == "api",
+        )
+        acquisition_manifest = out.parent / "input" / "session-source" / "acquisition-manifest.json"
+        write_json(acquisition_manifest, {
+            "schemaVersion": "clawevolve.session-acquisition.v1",
+            "sourceMode": "local",
+            "selectionMode": "explicit",
+            "requested": {
+                "sessionIdentifierCount": len(req.session_identifiers),
+                "selectors": [
+                    {"type": "session_identifier", "hash": hashlib.sha256(value.encode("utf-8")).hexdigest()}
+                    for value in req.session_identifiers
+                ],
+            },
+            "resolved": [
+                {"resolvedSessionId": row.session_id, "status": "selected"}
+                for row in rows
+            ],
+        })
+        source_meta = {
+            "source": "local_session_store",
+            "source_mode": "local",
+            "selection_mode": "explicit",
+            "artifacts": {"acquisition_manifest": str(acquisition_manifest)},
+        }
+        layout["session_source"] = source_meta
+        progress("explicit local session resolution done", session_rows=len(rows))
     else:
         progress("local session discovery start", scan_limit=max_sessions)
         rows = discover_sessions(

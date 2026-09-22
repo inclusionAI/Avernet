@@ -62,6 +62,9 @@ def run_diagnose_command(
         diag_logger.configure(
             output_dir / "clawevolve-diagnose.log", secrets=[args.api_key]
         )
+        req = _build_run_request(
+            args, task_id=task_id, step_id=step_id, output_dir=output_dir
+        )
         _log_command_start(
             args, task_id=task_id, step_id=step_id, output_dir=output_dir
         )
@@ -76,9 +79,6 @@ def run_diagnose_command(
         report_policy="final_only",
         final_report_will_be_sent_after="pipeline_returns_or_raises",
         preflight_report_sent=False,
-    )
-    req = _build_run_request(
-        args, task_id=task_id, step_id=step_id, output_dir=output_dir
     )
     try:
         diag_logger.info(
@@ -197,6 +197,7 @@ def _log_command_start(args: Any, *, task_id: str, step_id: str, output_dir: Any
         skip_clawweb_report=bool(getattr(args, "skip_clawweb_report", False)),
         intent_source=_intent_source(args),
         intent_chars=len(_resolve_intent(args)),
+        session_identifier_count=len(getattr(args, "session_identifier", []) or []),
     )
 
 
@@ -233,6 +234,9 @@ def _build_run_request(args: Any, *, task_id: str, step_id: str, output_dir: Any
     message = scrub_message_secrets(
         normalize_invocation_message(_resolve_intent(args)), api_key
     )
+    session_identifiers = _normalize_session_selectors(
+        getattr(args, "session_identifier", [])
+    )
     return RunRequest(
         api_key=api_key,
         message=message,
@@ -250,7 +254,31 @@ def _build_run_request(args: Any, *, task_id: str, step_id: str, output_dir: Any
         source_bot_id=getattr(args, "source_bot_id", ""),
         source_download_network=getattr(args, "source_download_network", "office"),
         clawweb_url=getattr(args, "clawweb_url", ""),
+        session_identifiers=session_identifiers,
     )
+
+
+def _normalize_session_selectors(session_identifiers: Any) -> list[str]:
+    if not isinstance(session_identifiers, list) or any(
+        not isinstance(item, str) for item in session_identifiers
+    ):
+        raise ValueError("session-identifier must be a list of strings")
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in session_identifiers:
+        value = item.strip()
+        if not value:
+            continue
+        if len(value) > 1024:
+            raise ValueError("session-identifier item cannot exceed 1024 characters")
+        if any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("session-identifier item cannot contain control characters")
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    if len(result) > 20:
+        raise ValueError("session-identifier supports at most 20 values")
+    return result
 
 
 def _skipped_step_reporter(

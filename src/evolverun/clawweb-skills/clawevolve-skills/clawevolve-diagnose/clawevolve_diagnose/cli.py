@@ -143,6 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="最多分析多少个本地 session；默认 10。可在 --intent 中描述自然语言筛选要求；不读取环境变量",
     )
+    p.add_argument("--session-identifier", action="append", default=[], help=argparse.SUPPRESS)
     p.add_argument(
         "--debug-session-path",
         default="",

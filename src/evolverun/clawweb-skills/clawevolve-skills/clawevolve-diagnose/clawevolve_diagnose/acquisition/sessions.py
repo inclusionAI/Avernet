@@ -664,6 +664,71 @@ def discover_sessions(
     return store_rows
 
 
+def resolve_explicit_local_sessions(
+    layout: dict[str, Any],
+    session_identifiers: list[str],
+    *,
+    parse_content: bool = True,
+) -> list[SessionRow]:
+    """Resolve explicitly selected user Sessions from OpenClaw route stores."""
+
+    roots = [Path(root).expanduser() for root in layout.get("session_dirs", [])]
+    by_id: dict[str, tuple[_SessionStoreCandidate, Path]] = {}
+    by_key: dict[str, tuple[_SessionStoreCandidate, Path]] = {}
+    for root in roots:
+        for store_path in _session_store_paths(root):
+            if not store_path.exists():
+                continue
+            for store_key, record in _load_session_store_entries(store_path):
+                candidate = _session_store_candidate(store_key, record, root)
+                if candidate is None:
+                    continue
+                by_id.setdefault(candidate.session_id, (candidate, root))
+                if candidate.store_key:
+                    by_key.setdefault(candidate.store_key, (candidate, root))
+
+    missing = [value for value in session_identifiers if value not in by_id and value not in by_key]
+    if missing:
+        raise ValueError(
+            f"explicit Session identifier not found: count={len(missing)}"
+        )
+
+    # Keep the same deterministic auto-resolution order as AIS: exact Session ID
+    # first, then exact sessions.json/session.json object key.
+    selected = [by_id[value] if value in by_id else by_key[value] for value in session_identifiers]
+    rows: list[SessionRow] = []
+    seen: set[str] = set()
+    for candidate, root in selected:
+        if candidate.session_id in seen:
+            continue
+        source = candidate.path.expanduser()
+        root_resolved = root.resolve(strict=False)
+        source_resolved = source.resolve(strict=False)
+        try:
+            source_resolved.relative_to(root_resolved)
+        except ValueError as exc:
+            raise ValueError("explicit Session file is outside the allowed Session root") from exc
+        if source.is_symlink() or not source_resolved.exists() or not source_resolved.is_file():
+            raise ValueError("explicit Session file does not exist or is not a regular file")
+
+        if parse_content:
+            parsed = _parse_jsonl_file(source_resolved, row_limit=1).rows
+            if not parsed:
+                raise ValueError("explicit Session could not be parsed as a user Session")
+            row = _merge_store_metadata(parsed[0], candidate)
+        else:
+            row = _session_locator_from_store_candidate(candidate)
+        seen.add(candidate.session_id)
+        rows.append(row)
+
+    logger.info(
+        "explicit local sessions resolved",
+        session_identifier_count=len(session_identifiers),
+        resolved_count=len(rows),
+    )
+    return rows
+
+
 def _discover_sessions_from_session_stores(
     roots: list[Path],
     max_sessions: int,

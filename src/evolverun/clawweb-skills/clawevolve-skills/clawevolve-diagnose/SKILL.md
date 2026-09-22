@@ -81,6 +81,7 @@ cd clawevolve-diagnose && bash scripts/run.sh '/clawevolve-diagnose --api-key **
 | `--model` | API Judge 必填；Subagent 可选 | Subagent 使用 OpenClaw 当前默认模型；API Judge 无默认值 | LLM model name；ClawWeb 发起的 API Judge 任务会显式传递页面选择值。 |
 | `--intent` | 否 | 空 | 本次诊断的自然语言意图；可描述问题类型、case 数量、时间范围和筛选偏好。自然语言只能通过该参数传入。 |
 | `--max-sessions` | 否 | 10 | 快速过滤后最多保留并送 Judge 分析的最新 session 数；个人/服务 Bot 共用。 |
+| `--session-identifier` | 否，可重复 | 空 | 按 Session ID 或 Session Key 精确选择；先按 ID、未命中再按 Key，最多 20 个。 |
 | `--debug-session-path` | 否 | 空 | 调试入口：只从指定 session JSONL 文件读取并分析该 session。 |
 | `--openclaw-home` | 否 | `~/.openclaw` | 本地测试可指定 OpenClaw 根目录。 |
 | `--clawweb-url` | 否 | 部署默认值 | ClawWeb Step Report 基础地址。 |

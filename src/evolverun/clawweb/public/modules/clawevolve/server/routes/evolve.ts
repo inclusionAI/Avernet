@@ -31,6 +31,8 @@ import {
   resolveEvolveTransport,
 } from "../services/evolve-dispatcher.js";
 import {
+  diagnoseSessionFilterSystemArgs,
+  normalizeDiagnoseSessionFilter,
   parseNodeCommandYamls,
   normalizeDiagnoseIntent,
   normalizeEvolutionGoal,
@@ -1316,7 +1318,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       apiKey: rawApiKey, judgeBackend: rawJudgeBackend,
       model = "", diagnoseIntent: rawDiagnoseIntent, maxSessions: rawMaxSessions = 10, maxRounds = 3,
       startDate, endDate, goal: rawGoal, inputMode: rawInputMode, nodeCommandYamls,
-      sessionSource: rawSessionSource,
+      sessionSource: rawSessionSource, sessionFilter: rawSessionFilter,
       forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
       openclawExecutionMode: rawOpenClawExecutionMode,
       improvementId: rawImprovementId, improvementRequestId: rawImprovementRequestId,
@@ -1327,6 +1329,17 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(400).json({ error: "inputMode 必须是 diagnose_goal 或 direct_goal" }); return;
     }
     const requiresDiagnose = taskType === "diagnose" || inputMode === "diagnose_goal";
+    let sessionFilter;
+    try {
+      if (!requiresDiagnose && rawSessionFilter != null) {
+        throw new Error("当前任务不包含 Diagnose 节点，不能设置 sessionFilter");
+      }
+      sessionFilter = requiresDiagnose
+        ? normalizeDiagnoseSessionFilter(rawSessionFilter)
+        : undefined;
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return;
+    }
     let sessionSourceMode = rawSessionSource == null || rawSessionSource === "local"
       ? "local"
       : rawSessionSource === "service_export" ? "service_export" : null;
@@ -1498,6 +1511,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       model: diagnoseModel,
       ...(requiresDiagnose ? { diagnoseIntent, maxSessions } : {}),
       ...(requiresDiagnose ? { sessionSource: { mode: sessionSourceMode } } : {}),
+      ...(sessionFilter ? { sessionFilter } : {}),
       maxRounds: rounds,
       ...(taskType === "full" && goal ? { goal } : {}),
       ...(requiresDiagnose && startDate ? { startDate: String(startDate) } : {}),
@@ -1524,14 +1538,22 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         ["source-download-network", "office"],
       );
     }
+    const publicDiagnoseSystemArgs = [
+      ...diagnoseSystemArgs,
+      ...diagnoseSessionFilterSystemArgs(sessionFilter, true),
+    ];
+    const dispatchDiagnoseSystemArgs = [
+      ...diagnoseSystemArgs,
+      ...diagnoseSessionFilterSystemArgs(sessionFilter),
+    ];
     let publicCommand = renderCommand(diagnoseTemplate, {
       api_key: "******", model: diagnoseModel, diagnose_intent: quoteCommandArgument(diagnoseIntent),
       start_date: String(startDate ?? ""), end_date: String(endDate ?? ""),
-    }, diagnoseSystemArgs);
+    }, publicDiagnoseSystemArgs);
     let dispatchCommand = renderCommand(diagnoseTemplate, {
       api_key: judgeBackend === "api" ? apiKey : "******", model: diagnoseModel, diagnose_intent: quoteCommandArgument(diagnoseIntent),
       start_date: String(startDate ?? ""), end_date: String(endDate ?? ""),
-    }, diagnoseSystemArgs);
+    }, dispatchDiagnoseSystemArgs);
     if (judgeBackend === "subagent") {
       publicCommand = withoutDiagnoseApiKey(publicCommand);
       dispatchCommand = withoutDiagnoseApiKey(dispatchCommand);
@@ -2406,6 +2428,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       diagnoseIntent?: string;
       maxSessions?: number;
       sessionSource?: { mode?: "local" | "service_export" };
+      sessionFilter?: { mode: "explicit"; sessionIdentifiers: string[] };
       startDate?: string; endDate?: string;
       trainBenchDomainId?: string; testBenchDomainId?: string;
       ownerUserId?: string;
@@ -2503,11 +2526,17 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           start_date: config.startDate ?? "",
           end_date: config.endDate ?? "",
         };
-        publicCommand = renderCommand(template, { ...commonValues, api_key: "******" }, systemArgs);
+        publicCommand = renderCommand(template, { ...commonValues, api_key: "******" }, [
+          ...systemArgs,
+          ...diagnoseSessionFilterSystemArgs(config.sessionFilter, true),
+        ]);
         dispatchCommand = renderCommand(template, {
           ...commonValues,
           api_key: diagnoseJudgeBackend === "api" ? diagnoseApiKey : "******",
-        }, systemArgs);
+        }, [
+          ...systemArgs,
+          ...diagnoseSessionFilterSystemArgs(config.sessionFilter),
+        ]);
         if (diagnoseJudgeBackend === "subagent") {
           publicCommand = withoutDiagnoseApiKey(publicCommand);
           dispatchCommand = withoutDiagnoseApiKey(dispatchCommand);

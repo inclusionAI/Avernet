@@ -54,6 +54,24 @@ const primaryButton = 'inline-flex items-center justify-center gap-2 rounded-lg 
 const secondaryButton = 'inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50'
 const inputClass = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10'
 type FullInputMode = 'diagnose_goal' | 'direct_goal'
+type DiagnoseSessionFilter = { mode: 'explicit'; sessionIdentifiers: string[] }
+
+function parseSessionSelectorLines(value: string, label: string): string[] {
+  const items = value.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean)
+  const unique = [...new Set(items)]
+  for (const item of unique) {
+    if (item.length > 1024) throw new Error(`${label} 单项不能超过 1024 个字符`)
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(item)) throw new Error(`${label} 不能包含控制字符`)
+  }
+  return unique
+}
+
+function buildSessionFilter(enabled: boolean, sessionIdentifiersText: string): DiagnoseSessionFilter | undefined {
+  if (!enabled) return undefined
+  const sessionIdentifiers = parseSessionSelectorLines(sessionIdentifiersText, 'Session 标识')
+  if (sessionIdentifiers.length < 1 || sessionIdentifiers.length > 20) throw new Error('Session 标识必须是 1 到 20 个')
+  return { mode: 'explicit', sessionIdentifiers }
+}
 
 function packRestoreTaskName(pack: {
   botId: string
@@ -329,6 +347,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [workflowModel, setWorkflowModel] = useState(configuredInitialModel)
   const [lookbackDays, setLookbackDays] = useState('3')
   const [maxDiagnoseSessions, setMaxDiagnoseSessions] = useState('10')
+  const [sessionFilterEnabled, setSessionFilterEnabled] = useState(false)
+  const [sessionIdentifiersText, setSessionIdentifiersText] = useState('')
   const [badCaseCount, setBadCaseCount] = useState('4')
   const [goodCaseCount, setGoodCaseCount] = useState('1')
   const [focusIssue, setFocusIssue] = useState('影响任务完成率的主要问题，优先关注工具调用失败、任务未完成和未经验证的回答')
@@ -887,6 +907,10 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             focusIssue={focusIssue}
             onFocusIssueChange={setFocusIssue}
             diagnoseIntent={diagnoseIntent}
+            sessionFilterEnabled={sessionFilterEnabled}
+            onSessionFilterEnabledChange={setSessionFilterEnabled}
+            sessionIdentifiersText={sessionIdentifiersText}
+            onSessionIdentifiersTextChange={setSessionIdentifiersText}
           />}
           {taskType === 'optimize' && <><OptimizeFields botSelected={Boolean(botId)} tasks={diagnosisTasks} selectedTaskIds={sourceDiagnosisTaskIds} onTaskIdsChange={setSourceDiagnosisTaskIds} /><TaskModelFields title="优化模型" model={workflowModel} configuredModel={localModel} onModelChange={setWorkflowModel} /></>}
           {taskType === 'bench' && <><BenchFields domains={benchDomains} domainId={benchDomainId} onDomainIdChange={setBenchDomainId} error={benchDomainsError} /><TaskModelFields title="Bench 模型" model={workflowModel} configuredModel={localModel} onModelChange={setWorkflowModel} /></>}
@@ -934,6 +958,14 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             if (improvementSource && !activeHandoff) { setSubmitError('请先成功加载 Insight Center 改进项'); return }
             if (crossBotTarget && !crossBotConfirmed) { setSubmitError('请确认 Evidence 来源与实际执行目标不同'); return }
             if (diagnoseEnabled && effectiveJudgeBackend === 'api' && !apiKey.trim()) { setSubmitError('API Judge 模式请输入 API Key'); return }
+            let sessionFilter: DiagnoseSessionFilter | undefined
+            try {
+              sessionFilter = diagnoseEnabled
+                ? buildSessionFilter(sessionFilterEnabled, sessionIdentifiersText)
+                : undefined
+            } catch (error) {
+              setSubmitError(error instanceof Error ? error.message : 'Session 筛选条件不合法'); return
+            }
             const parsedLookbackDays = Number(lookbackDays)
             const parsedMaxDiagnoseSessions = Number(maxDiagnoseSessions)
             const parsedBadCaseCount = Number(badCaseCount)
@@ -967,6 +999,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
                 sessionSource: diagnoseSessionSource,
                 apiKey: effectiveJudgeBackend === 'api' ? apiKey.trim() : undefined, model: diagnoseModel,
                 diagnoseIntent, maxSessions: parsedMaxDiagnoseSessions,
+                sessionFilter,
                 goal: taskType === 'full' ? evolutionGoal.trim() : undefined,
                 startDate, endDate, nodeCommandYamls: customCommands ? (improvementSource
                   ? Object.fromEntries(Object.entries(nodeCommandYamls).filter(([node]) => node === 'plan' || node === 'optimize'))
@@ -1044,6 +1077,8 @@ function DiagnoseFields({
   onLookbackDaysChange, maxDiagnoseSessions, onMaxDiagnoseSessionsChange,
   badCaseCount, goodCaseCount, onBadCaseCountChange,
   onGoodCaseCountChange, focusIssue, onFocusIssueChange, diagnoseIntent,
+  sessionFilterEnabled, onSessionFilterEnabledChange,
+  sessionIdentifiersText, onSessionIdentifiersTextChange,
 }: {
   configuredModel?: string
   sessionSource: 'local' | 'service_export'
@@ -1072,6 +1107,10 @@ function DiagnoseFields({
   focusIssue: string
   onFocusIssueChange: (value: string) => void
   diagnoseIntent: string
+  sessionFilterEnabled: boolean
+  onSessionFilterEnabledChange: (value: boolean) => void
+  sessionIdentifiersText: string
+  onSessionIdentifiersTextChange: (value: string) => void
 }) {
   const { models } = useEvolveModelConfig()
   const availableModels = configuredModel
@@ -1105,9 +1144,9 @@ function DiagnoseFields({
         <h2 className="text-sm font-semibold text-gray-900">诊断范围</h2>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           {dateRangeEnabled ? <>
-            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">开始日期</span><input type="date" className={inputClass} value={startDate} max={endDate} onChange={(event) => onStartDateChange(event.target.value)} /></label>
-            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">结束日期</span><input type="date" className={inputClass} value={endDate} min={startDate} max={dateValue()} onChange={(event) => onEndDateChange(event.target.value)} /></label>
-          </> : <label><span className="mb-1.5 block text-xs font-medium text-gray-600">会话时间范围</span><select className={inputClass} value={lookbackDays} onChange={(event) => onLookbackDaysChange(event.target.value)}><option value="3">最近 3 天</option><option value="7">最近 7 天</option><option value="14">最近 14 天</option><option value="30">最近 30 天</option></select></label>}
+            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">开始日期</span><input type="date" disabled={sessionFilterEnabled} className={`${inputClass} disabled:bg-gray-100 disabled:text-gray-400`} value={startDate} max={endDate} onChange={(event) => onStartDateChange(event.target.value)} /></label>
+            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">结束日期</span><input type="date" disabled={sessionFilterEnabled} className={`${inputClass} disabled:bg-gray-100 disabled:text-gray-400`} value={endDate} min={startDate} max={dateValue()} onChange={(event) => onEndDateChange(event.target.value)} /></label>
+          </> : <label><span className="mb-1.5 block text-xs font-medium text-gray-600">会话时间范围</span><select disabled={sessionFilterEnabled} className={`${inputClass} disabled:bg-gray-100 disabled:text-gray-400`} value={lookbackDays} onChange={(event) => onLookbackDaysChange(event.target.value)}><option value="3">最近 3 天</option><option value="7">最近 7 天</option><option value="14">最近 14 天</option><option value="30">最近 30 天</option></select></label>}
           <EvolveModelFields
             modelOptions={availableModels}
             choice={availableModels.includes(model) ? model : EVOLVE_CUSTOM_MODEL}
@@ -1118,11 +1157,21 @@ function DiagnoseFields({
             customAriaLabel="诊断自定义模型名称"
             inputClassName={inputClass}
           />
-          <label><span className="mb-1.5 block text-xs font-medium text-gray-600">最多诊断 Session 数量</span><input className={inputClass} type="number" min={1} max={1000} step={1} inputMode="numeric" value={maxDiagnoseSessions} onChange={(event) => onMaxDiagnoseSessionsChange(event.target.value)} /><span className="mt-1 block text-xs text-gray-400">最多送入 Judge 分析的候选 Session，默认 10。</span></label>
+          <label><span className="mb-1.5 block text-xs font-medium text-gray-600">最多诊断 Session 数量</span><input disabled={sessionFilterEnabled} className={`${inputClass} disabled:bg-gray-100 disabled:text-gray-400`} type="number" min={1} max={1000} step={1} inputMode="numeric" value={maxDiagnoseSessions} onChange={(event) => onMaxDiagnoseSessionsChange(event.target.value)} /><span className="mt-1 block text-xs text-gray-400">{sessionFilterEnabled ? '当前按指定 Session 诊断。' : '最多送入 Judge 分析的候选 Session，默认 10。'}</span></label>
           <label><span className="mb-1.5 block text-xs font-medium text-gray-600">Bad Case 数量</span><input className={inputClass} type="number" min={0} max={100} step={1} inputMode="numeric" value={badCaseCount} onChange={(event) => onBadCaseCountChange(event.target.value)} /></label>
           <label><span className="mb-1.5 block text-xs font-medium text-gray-600">Good Case 数量</span><input className={inputClass} type="number" min={0} max={100} step={1} inputMode="numeric" value={goodCaseCount} onChange={(event) => onGoodCaseCountChange(event.target.value)} /></label>
           <div><span className="mb-1.5 block text-xs font-medium text-gray-600">Judge 方式</span><div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1"><button type="button" onClick={() => onJudgeBackendChange('subagent')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${judgeBackend === 'subagent' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>Agent Judge</button><button type="button" disabled={apiJudgeDisabled} onClick={() => onJudgeBackendChange('api')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${judgeBackend === 'api' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>自定义 API</button></div><span className="mt-1 block text-xs text-gray-400">{apiJudgeDisabled ? 'ARCA 模式仅支持 Agent Judge，不会通过 Message 传递 API Key。' : judgeBackend === 'subagent' ? '使用 Bot 当前 OpenClaw 模型，无需 API Key。' : '使用指定模型与本次临时 API Key。'}</span></div>
           {judgeBackend === 'api' && <label><span className="mb-1.5 block text-xs font-medium text-gray-600">模型 API Key</span><input type="password" autoComplete="off" className={inputClass} value={apiKey} onChange={(event) => onApiKeyChange(event.target.value)} placeholder="仅本次命令使用，不写入数据库" /></label>}
+        </div>
+        <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50/70 p-4">
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" checked={sessionFilterEnabled} onChange={(event) => onSessionFilterEnabledChange(event.target.checked)} />
+            <span><span className="block text-xs font-semibold text-gray-800">仅诊断指定 Session</span><span className="mt-1 block text-xs text-gray-500">可选。按 Session ID 或 Session Key 精确选择会话，不使用模型匹配。</span></span>
+          </label>
+          {sessionFilterEnabled && <div className="mt-4">
+            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">Session 标识</span><textarea className={`${inputClass} min-h-32 resize-y font-mono text-xs`} value={sessionIdentifiersText} onChange={(event) => onSessionIdentifiersTextChange(event.target.value)} placeholder={'每行填写一个完整标识，例如：\n2a7b50a1-4806-4...\nagent:main:main'} /><span className="mt-1 block text-xs leading-5 text-gray-400">可填写 Session ID 或 Session Key。多个 Session 请换行填写，每行一个，最多 20 个；系统会自动精确解析。</span></label>
+            <p className="mt-2 text-xs leading-5 text-amber-700">任一标识无法解析时任务失败，不会回退为全量扫描。</p>
+          </div>}
         </div>
         <label className="mt-4 block"><span className="mb-1.5 block text-xs font-medium text-gray-600">关注问题</span><textarea className={`${inputClass} min-h-24 resize-y`} value={focusIssue} maxLength={1000} onChange={(event) => onFocusIssueChange(event.target.value)} placeholder="例如：语雀 MCP 未调用、调用失败、参数错误，以及失败后给出未经验证的答案" /></label>
         <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs leading-5 text-gray-600"><span className="font-medium text-gray-700">实际诊断要求：</span>{diagnoseIntent}</div>
@@ -2253,12 +2302,17 @@ function TaskConfigPanel({ config }: { config: Record<string, unknown> }) {
   const sessionSource = config.sessionSource && typeof config.sessionSource === 'object'
     ? (config.sessionSource as { mode?: unknown }).mode
     : undefined
+  const sessionFilter = config.sessionFilter && typeof config.sessionFilter === 'object'
+    ? config.sessionFilter as { sessionIdentifiers?: unknown }
+    : undefined
+  const sessionFilterCount = Array.isArray(sessionFilter?.sessionIdentifiers) ? sessionFilter.sessionIdentifiers.length : 0
   const rows = [
     ['进化方式', config.inputMode === 'direct_goal' ? '按目标进化' : config.inputMode === 'diagnose_goal' ? '先诊断再进化' : undefined],
     ['Session 来源', sessionSource === 'service_export' ? '服务 Session（只读导出）' : sessionSource === 'local' ? '个人 Bot 本地 Session' : undefined],
     ['优化目标', config.goal],
     [config.inputMode === 'direct_goal' ? '规划模型' : '诊断模型', config.model],
-    ['最多诊断 Session', config.maxSessions],
+    ['最多诊断 Session', sessionFilterCount > 0 ? undefined : config.maxSessions],
+    ['指定 Session', sessionFilterCount > 0 ? `${sessionFilterCount} 个` : undefined],
     ['诊断要求', config.diagnoseIntent],
     ['Bot 阶段', config.lifecycleStage === 'draft' ? '草稿' : config.lifecycleStage],
     ['命令投递', config.forceMessage === true ? '强制 Bot Message' : '按 Bot provider 自动选择'],

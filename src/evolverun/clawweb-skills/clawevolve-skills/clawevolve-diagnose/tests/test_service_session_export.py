@@ -229,6 +229,51 @@ def test_service_export_calls_public_api_and_freezes_one_source_file(
     assert acquisition["entries"][0]["rawPath"] == str(raw_path)
 
 
+def test_service_export_resolves_multiple_explicit_selectors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exports = {
+        "session-id-1": _session_bytes("s1", "2026-08-25T02:00:00Z", "one"),
+        "agent:main:two": _session_bytes("s2", "2026-08-25T03:00:00Z", "two"),
+    }
+    requested: list[str] = []
+
+    def request_json(url: str, *, method: str, body=None, headers=None):
+        if method == "POST":
+            identifier = body["sessionIdentifier"]
+            requested.append(identifier)
+            return {"apiVersion": "session-export/v1", "exportId": f"SE-{len(requested)}", "status": "succeeded", "exportScope": "single"}
+        index = int(url.split("/SE-", 1)[1].split("?", 1)[0]) - 1
+        identifier = requested[index]
+        content = exports[identifier]
+        resolved = "s1" if identifier == "session-id-1" else "s2"
+        return {
+            "apiVersion": "session-export/v1", "exportId": f"SE-{index + 1}", "status": "succeeded", "exportScope": "single",
+            "target": {"userId": "197444", "botId": "bot-1", "stage": "service"},
+            "resolution": {"inputType": "session_id" if index == 0 else "session_key", "resolvedSessionIds": [resolved], "fileCount": 1},
+            "artifact": {"downloadUrl": f"https://oss.example/{identifier}.jsonl", "contentType": "application/x-ndjson", "size": len(content), "sha256": hashlib.sha256(content).hexdigest()},
+        }
+
+    def download_artifact(*, initial_url: str, destination: Path, **_kwargs) -> None:
+        identifier = initial_url.rsplit("/", 1)[1].removesuffix(".jsonl")
+        destination.write_bytes(exports[identifier])
+
+    monkeypatch.setattr(service_export, "_request_json", request_json)
+    monkeypatch.setattr(service_export, "_download_artifact", download_artifact)
+    acquired = acquire_exported_sessions(
+        clawweb_url="https://clawweb.example", task_id="EV-1", step_id="STEP-1",
+        source_user_id="197444", source_bot_id="bot-1", download_network="office",
+        input_dir=tmp_path / "task" / "input", max_sessions=10,
+        session_identifiers=["session-id-1", "agent:main:two"],
+    )
+
+    assert requested == ["session-id-1", "agent:main:two"]
+    assert [row.session_id for row in acquired.rows] == ["s1", "s2"]
+    manifest = json.loads((tmp_path / "task" / "input" / "session-source" / "acquisition-manifest.json").read_text())
+    assert manifest["selectedCount"] == 2
+    assert "agent:main:two" not in json.dumps(manifest)
+
+
 def test_service_export_freezes_unparseable_session_for_diagnosis(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

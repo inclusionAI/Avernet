@@ -51,3 +51,16 @@ def test_slash_command_with_intent_is_normalized() -> None:
     ]
     args = _args(normalized)
     assert args.intent == "诊断异步任务未完成，抽取5个case"
+
+
+def test_repeated_session_selectors_are_normalized_and_deduplicated() -> None:
+    args = _args([
+        "--task-id", "task-1", "--step-id", "step-1",
+        "--session-identifier", " id-1 ",
+        "--session-identifier", "agent:main:one",
+        "--session-identifier", "id-1",
+    ])
+    request = _build_run_request(
+        args, task_id="task-1", step_id="step-1", output_dir=Path("/tmp/out")
+    )
+    assert request.session_identifiers == ["id-1", "agent:main:one"]

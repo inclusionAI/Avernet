@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 
 export type NodeCommandKey = "diagnose" | "plan" | "bench" | "bench_plan" | "optimize";
@@ -6,7 +7,65 @@ export type NodeCommandYamls = Partial<Record<NodeCommandKey, string>>;
 const MAX_RENDERED_COMMAND_BYTES = 64 * 1024;
 const MAX_EVOLUTION_GOAL_LENGTH = 2000;
 const MAX_DIAGNOSE_INTENT_LENGTH = 4000;
-const FORBIDDEN_NODE_CONTROL_ARGUMENTS = /--(?:task[_-]id|step[_-]id|judge[_-]backend|max[_-]sessions|domain[_-]id|train[_-](?:bench[_-])?domain[_-]id|test[_-](?:bench[_-])?domain[_-]id|owner[_-]id|round|action|final[_-]action|prepare[_-]only|workspace|skill[_-]base[_-]dir|clawweb[_-]url(?:[_-](?:legacy|camel))?|runner[_-]path|local[_-](?:opt|val)[_-]template[_-]dir|bench[_-]mode|openclaw[_-]execution[_-]mode|clawbench[_-]home|bench[_-]run[_-]id|bench[_-]dir|output[_-]dir|result[_-]path|artifact[_-]path|baseline[_-]artifact|start[_-]round|skip[_-](?:clawweb|oss)|no[_-]resume)(?:\s|=|$)/i;
+const FORBIDDEN_NODE_CONTROL_ARGUMENTS = /--(?:task[_-]id|step[_-]id|judge[_-]backend|max[_-]sessions|session[_-](?:id|key|identifier)|domain[_-]id|train[_-](?:bench[_-])?domain[_-]id|test[_-](?:bench[_-])?domain[_-]id|owner[_-]id|round|action|final[_-]action|prepare[_-]only|workspace|skill[_-]base[_-]dir|clawweb[_-]url(?:[_-](?:legacy|camel))?|runner[_-]path|local[_-](?:opt|val)[_-]template[_-]dir|bench[_-]mode|openclaw[_-]execution[_-]mode|clawbench[_-]home|bench[_-]run[_-]id|bench[_-]dir|output[_-]dir|result[_-]path|artifact[_-]path|baseline[_-]artifact|start[_-]round|skip[_-](?:clawweb|oss)|no[_-]resume)(?:\s|=|$)/i;
+
+const MAX_SESSION_FILTER_ITEMS = 20;
+const MAX_SESSION_SELECTOR_LENGTH = 1024;
+
+export type DiagnoseSessionFilter = {
+  mode: "explicit";
+  sessionIdentifiers: string[];
+};
+
+function normalizeSessionSelectorList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new Error(`${label} 必须是字符串数组`);
+  }
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const normalized = item.trim();
+    if (!normalized) continue;
+    if (normalized.length > MAX_SESSION_SELECTOR_LENGTH) {
+      throw new Error(`${label} 单项不能超过 ${MAX_SESSION_SELECTOR_LENGTH} 个字符`);
+    }
+    if (/[\u0000-\u001f\u007f]/u.test(normalized)) {
+      throw new Error(`${label} 不能包含控制字符`);
+    }
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+  return result;
+}
+
+export function normalizeDiagnoseSessionFilter(value: unknown): DiagnoseSessionFilter | undefined {
+  if (value == null) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("sessionFilter 必须是对象");
+  }
+  const input = value as Record<string, unknown>;
+  if (input.mode !== "explicit") throw new Error('sessionFilter.mode 必须是 "explicit"');
+  const sessionIdentifiers = normalizeSessionSelectorList(input.sessionIdentifiers, "sessionIdentifiers");
+  if (sessionIdentifiers.length < 1 || sessionIdentifiers.length > MAX_SESSION_FILTER_ITEMS) {
+    throw new Error(`Session 标识必须是 1 到 ${MAX_SESSION_FILTER_ITEMS} 个`);
+  }
+  return { mode: "explicit", sessionIdentifiers };
+}
+
+export function diagnoseSessionFilterSystemArgs(
+  filter: DiagnoseSessionFilter | undefined,
+  redact = false,
+): Array<[string, string]> {
+  if (!filter) return [];
+  const render = (value: string) => quoteCommandArgument(redact
+    ? `sha256:${createHash("sha256").update(value).digest("hex").slice(0, 12)}`
+    : value);
+  return [
+    ...filter.sessionIdentifiers.map((value): [string, string] => ["session-identifier", render(value)]),
+  ];
+}
 
 export type DiagnoseJudgeBackend = "subagent" | "api";
 export type OpenClawExecutionMode = "local" | "gateway";

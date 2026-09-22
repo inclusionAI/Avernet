@@ -792,6 +792,62 @@ describe("ClawEvolve step protocol", () => {
     expect(dispatch.mock.calls.at(-1)?.[0]).not.toHaveProperty("secrets");
   });
 
+  it("freezes and dispatches multiple explicit Session selectors", async () => {
+    const response = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({
+        taskName: "指定 Session 诊断", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.1", maxSessions: 10,
+        diagnoseIntent: "只诊断指定 Session。",
+        sessionFilter: {
+          mode: "explicit",
+          sessionIdentifiers: [" id-1 ", "agent:main:one", "id-1"],
+        },
+      }),
+    });
+    expect(response.status).toBe(201);
+    const body = await response.json() as { task_id: string; config: Record<string, unknown>; steps: Array<{ stepId: string; command: string }> };
+    expect(body.config.sessionFilter).toEqual({
+      mode: "explicit", sessionIdentifiers: ["id-1", "agent:main:one"],
+    });
+    expect(body.steps[0].command).toContain("--session-identifier 'sha256:");
+    expect(body.steps[0].command).not.toContain("agent:main:one");
+    expect(dispatch.mock.calls.at(-1)?.[0].command).toContain("--session-identifier 'id-1'");
+    expect(dispatch.mock.calls.at(-1)?.[0].command).toContain("--session-identifier 'agent:main:one'");
+
+    const firstStep = body.steps[0];
+    await callback(body.task_id, firstStep.stepId, {
+      status: "failed", error: { code: "TEST", message: "retry", retryable: true },
+    });
+    const retry = await fetch(`${baseUrl}/api/evolve/tasks/${body.task_id}/steps/${firstStep.stepId}/retry`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" }, body: "{}",
+    });
+    expect(retry.status).toBe(201);
+    const retried = await retry.json() as { step: { command: string } };
+    expect(retried.step.command).toContain("--session-identifier 'sha256:");
+    expect(retried.step.command).not.toContain("agent:main:one");
+    expect(dispatch.mock.calls.at(-1)?.[0].command).toContain("--session-identifier 'agent:main:one'");
+  });
+
+  it("rejects empty and oversized explicit Session filters", async () => {
+    for (const sessionFilter of [
+      { mode: "explicit", sessionIdentifiers: [] },
+      { mode: "explicit", sessionIdentifiers: Array.from({ length: 21 }, (_, index) => `id-${index}`) },
+    ]) {
+      const response = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+        body: JSON.stringify({
+          taskName: "非法筛选", userId: "user-1", botId: "bot-1",
+          judgeBackend: "subagent", model: "GLM-5.1", maxSessions: 10,
+          diagnoseIntent: "test", sessionFilter,
+        }),
+      });
+      expect(response.status).toBe(400);
+    }
+  });
+
   it("freezes the configured ClawEvolve default when a Subagent task omits model", async () => {
     const response = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
       method: "POST",
