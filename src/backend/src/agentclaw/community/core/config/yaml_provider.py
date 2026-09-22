@@ -152,6 +152,30 @@ def _load_yaml_configs(
         Path.cwd() / "configs",
         community_root.parent / "corp" / "configs",  # agentclaw/corp/configs
     ]
+    # B11 monorepo layout: the community package resolves inside the ocb-public
+    # submodule (<repo>/ocb-public/src/backend/src/agentclaw/community) while the
+    # corp credential overlay lives in the repo trunk under the same backend-src
+    # shape (<repo>/src/backend/src/agentclaw/corp/configs) — the sibling dir
+    # above does not exist there. Probe the trunk beside whatever container holds
+    # the module-shaped subtree, so a backend started from a monorepo worktree
+    # finds the corp layer the same way an assembled deploy (cwd/configs) does;
+    # in a community-only install no such path exists and the probe stays silent.
+    for ancestor in community_root.parents:
+        if (
+            ancestor.name == "src"
+            and ancestor.parent.name == "backend"
+            and ancestor.parent.parent.name == "src"
+        ):
+            corp_config_dirs.append(
+                ancestor.parent.parent.parent.parent
+                / "src"
+                / "backend"
+                / "src"
+                / "agentclaw"
+                / "corp"
+                / "configs"
+            )
+            break
 
     for config_dir in config_dirs:
         base_path = config_dir / "application.yaml"

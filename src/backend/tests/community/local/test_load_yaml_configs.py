@@ -449,3 +449,57 @@ class TestEnvPlaceholderExpansion:
         monkeypatch.delenv("DATABASE_URL", raising=False)
         for overlay in ("application-singlebox.yaml", "application-test.yaml"):
             assert _load_yaml_configs(overlay)
+
+    def test_corp_overlay_resolves_in_monorepo_trunk(self, monkeypatch, tmp_path):
+        """B11 monorepo: corp lives in the repo trunk, community in the submodule.
+
+        In the ocb monorepo the community package resolves under
+        ``<repo>/ocb-public/src/backend/src/agentclaw/community`` while the corp
+        credential overlay sits in the trunk
+        ``<repo>/src/backend/src/agentclaw/corp/configs`` — the
+        ``agentclaw/corp`` sibling next to community does not exist there. A
+        backend started from a monorepo worktree (scripts/singlebox.sh start
+        backend) must still pick the corp overlay up, the same way an
+        assembled deploy (cwd/configs) does; before this fix the layer was
+        silently skipped and every credential read fell back to the dummy
+        values.
+        """
+        overlay_name = "application-test.yaml"
+        repo = tmp_path
+        community_agentclaw = (
+            repo / "ocb-public" / "src" / "backend" / "src" / "agentclaw"
+        )
+        community_configs = community_agentclaw / "community" / "configs"
+        community_configs.mkdir(parents=True)
+        (community_configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (community_configs / overlay_name).write_text(
+            "user_config:\n  overlay: overlay-val\n"
+        )
+
+        corp_configs = (
+            repo / "src" / "backend" / "src" / "agentclaw" / "corp" / "configs"
+        )
+        corp_configs.mkdir(parents=True)
+        (corp_configs / "application-test-corp.yaml").write_text(
+            "user_config:\n  overlay: corp-override\n  corp_secret: real-secret\n"
+        )
+
+        # cwd holds no configs/ and the community sibling corp/ dir is absent —
+        # only the monorepo-trunk probe can find the overlay.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            yaml_provider,
+            "__file__",
+            str(
+                community_agentclaw
+                / "community"
+                / "core"
+                / "config"
+                / "yaml_provider.py"
+            ),
+        )
+
+        result = _load_yaml_configs(overlay_name)
+        assert result["user_config"]["base"] == "base-val"
+        assert result["user_config"]["overlay"] == "corp-override"
+        assert result["user_config"]["corp_secret"] == "real-secret"
