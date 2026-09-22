@@ -100,6 +100,23 @@ def test_resolve_adapter_url_formats_target_as_http():
     assert resolved == "http://127.0.0.1:20012"
 
 
+def test_resolve_adapter_url_rejects_non_http_scheme():
+    """Only full ``http(s)`` origins qualify; a value that merely starts
+    with "http" (e.g. ``httpx://``) or a websocket URL falls through to
+    the next resolution step instead of producing an unproxyable URL."""
+    transport = InMemoryDeviceAdapterTransport(
+        default_adapter_url="http://fallback.example.com"
+    )
+    assert (
+        transport._resolve_adapter_url({"url": "httpx://not-a-site"})
+        == "http://fallback.example.com"
+    )
+    via_target = transport._resolve_adapter_url(
+        {"url": "ws://127.0.0.1:20003", "target": "127.0.0.1:20012"}
+    )
+    assert via_target == "http://127.0.0.1:20012"
+
+
 def test_resolve_adapter_url_falls_back_to_default():
     transport = InMemoryDeviceAdapterTransport(
         default_adapter_url="http://fallback.example.com"
@@ -136,13 +153,6 @@ async def test_invoke_proxies_and_returns_engine_json(monkeypatch: MonkeyPatch):
 # ── _proxy() protocol error channel (raise, not return dict) ──
 
 
-class _StubAsyncClient(httpx.AsyncClient):
-    """A real AsyncClient with a pre-staged MockTransport response."""
-
-    def __init__(self, handler, **kwargs):
-        super().__init__(transport=httpx.MockTransport(handler), **kwargs)
-
-
 def _patch_httpx_async_client(monkeypatch: MonkeyPatch, handler) -> None:
     """Patch httpx.AsyncClient so any constructor within _proxy() gets a
     MockTransport wired to *handler*. Captures the pre-patch class to
@@ -159,12 +169,6 @@ def _patch_httpx_async_client(monkeypatch: MonkeyPatch, handler) -> None:
 @pytest.mark.asyncio
 async def test_proxy_404_raises_endpoint_not_found(monkeypatch: MonkeyPatch):
     """A 404 from the adapter raises DeviceAdapterEndpointNotFoundError."""
-    monkeypatch.setattr(
-        InMemoryDeviceAdapterTransport,
-        "_original_httpx_client",
-        httpx.AsyncClient,
-        raising=False,
-    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"detail": "Not Found"})
@@ -184,12 +188,6 @@ async def test_proxy_404_raises_endpoint_not_found(monkeypatch: MonkeyPatch):
 async def test_proxy_http_error_raises_status_error(monkeypatch: MonkeyPatch):
     """A 422 from the adapter raises DeviceAdapterHTTPStatusError with the
     exact status_code preserved."""
-    monkeypatch.setattr(
-        InMemoryDeviceAdapterTransport,
-        "_original_httpx_client",
-        httpx.AsyncClient,
-        raising=False,
-    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(422, json={"detail": "bad session id"})
@@ -262,3 +260,64 @@ async def test_proxy_200_json_returns_verbatim(monkeypatch: MonkeyPatch):
         "/api/sessions/cron_001/messages", None, None, None,
     )
     assert result == engine_response
+
+
+# ── Connection failures and per-device routing (invoke level) ──
+
+
+@pytest.mark.asyncio
+async def test_invoke_connect_refusal_raises_value_error(
+    monkeypatch: MonkeyPatch,
+):
+    """A connection refusal surfaces as ValueError out of invoke() — the
+    community-transport contract the relay maps uniformly — proving the
+    guard propagates _proxy exceptions end to end."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    _patch_httpx_async_client(monkeypatch, refuse)
+    transport = InMemoryDeviceAdapterTransport(
+        default_adapter_url="http://127.0.0.1:20003"
+    )
+    with pytest.raises(ValueError) as exc_info:
+        await transport.invoke({}, "GET", "/api/sessions/cron_001/messages")
+    assert "unreachable" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_invoke_routes_each_device_to_its_own_adapter(
+    monkeypatch: MonkeyPatch,
+):
+    """Per-device routing proof, end to end: two devices with different
+    addresses land on two different adapter origins, with the request
+    path, query and per-device headers passed through verbatim
+    (a single global fallback URL would fail this test)."""
+    captured = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"success": True, "data": [], "message": None})
+
+    _patch_httpx_async_client(monkeypatch, capture)
+    transport = InMemoryDeviceAdapterTransport()
+    await transport.invoke(
+        {"url": "http://127.0.0.1:9901/", "headers": {"x-proxypass-token": "tokenA"}},
+        "GET",
+        "/api/sessions/dev-1/messages",
+        params={"limit": 2},
+    )
+    await transport.invoke(
+        {"target": "127.0.0.1:9902"},
+        "GET",
+        "/api/sessions/dev-2/messages",
+    )
+
+    assert len(captured) == 2
+    assert (
+        str(captured[0].url)
+        == "http://127.0.0.1:9901/api/sessions/dev-1/messages?limit=2"
+    )
+    assert captured[0].headers["x-proxypass-token"] == "tokenA"
+    assert str(captured[1].url) == "http://127.0.0.1:9902/api/sessions/dev-2/messages"
+    assert "x-proxypass-token" not in captured[1].headers

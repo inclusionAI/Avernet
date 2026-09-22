@@ -156,7 +156,7 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         default. ``None`` means this caller cannot be proxied.
         """
         url = conn_info.get("url")
-        if isinstance(url, str) and url.startswith("http"):
+        if isinstance(url, str) and url.startswith(("http://", "https://")):
             return url.rstrip("/")
         target = conn_info.get("target")
         if isinstance(target, str) and target:
