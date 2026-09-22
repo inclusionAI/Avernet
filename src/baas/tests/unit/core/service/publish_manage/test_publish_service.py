@@ -188,8 +188,9 @@ class TestPublishCreation:
         _publish_service_instance._bot_service.get_bot = AsyncMock(
             return_value=mock_bot
         )
-        _publish_service_instance._bot_service.create_bot_record = AsyncMock(
-            return_value=mock_new_bot
+        _publish_service_instance._bot_repo = MagicMock()
+        _publish_service_instance._bot_repo.try_insert_pending_bot.return_value = (
+            mock_new_bot.id
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
@@ -230,13 +231,14 @@ class TestPublishCreation:
         assert result.publish_type == "UPDATE"
         assert result.status == "PENDING"
         _publish_service_instance._template_service.get_online_template_by_uuid.assert_not_called()
-        _publish_service_instance._bot_service.create_bot_record.assert_awaited_once_with(
-            tenant="test_tenant",
-            source_bot_id=1,
-            new_config=None,
-            new_template_uuid=None,
-            operator="user1",
+        create_call = (
+            _publish_service_instance._bot_repo.try_insert_pending_bot.call_args.kwargs
         )
+        assert create_call["source_bot_id"] == 1
+        assert create_call["tenant"] == "test_tenant"
+        assert create_call["extra_config"] is None
+        assert create_call["template_uuid"] is None
+        assert create_call["modifier"] == "user1"
 
     @pytest.mark.asyncio
     async def test_create_publish_restart_type(self):
@@ -658,9 +660,8 @@ class TestPublishApproval:
         _publish_service_instance._bot_service.get_bot = AsyncMock(
             return_value=mock_bot
         )
-        _publish_service_instance._bot_service.create_bot_record = AsyncMock(
-            return_value=MagicMock(id=2)
-        )
+        _publish_service_instance._bot_repo = MagicMock()
+        _publish_service_instance._bot_repo.try_insert_pending_bot.return_value = 2
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
         # Mock get_active_by_bot_id for create
@@ -8505,8 +8506,9 @@ class TestCreatePublishUpdateConfigOverwrite:
         _publish_service_instance._bot_service.get_bot = AsyncMock(
             return_value=mock_bot
         )
-        _publish_service_instance._bot_service.create_bot_record = AsyncMock(
-            return_value=mock_new_bot
+        _publish_service_instance._bot_repo = MagicMock()
+        _publish_service_instance._bot_repo.try_insert_pending_bot.return_value = (
+            mock_new_bot.id
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()
@@ -8559,8 +8561,8 @@ class TestCreatePublishUpdateConfigOverwrite:
                 tenant="test_tenant",
                 template_uuid="TEMPLATE-new",
             )
-            create_call = _publish_service_instance._bot_service.create_bot_record.call_args.kwargs
-            assert create_call["new_template_uuid"] == "TEMPLATE-new"
+            create_call = _publish_service_instance._bot_repo.try_insert_pending_bot.call_args.kwargs
+            assert create_call["template_uuid"] == "TEMPLATE-new"
 
             insert_call_args = (
                 _publish_service_instance._publish_repo.insert_publish.call_args
@@ -8867,8 +8869,9 @@ class TestCreatePublishNoEligibleDeviceRecords:
         _publish_service_instance._bot_service.get_bot = AsyncMock(
             return_value=mock_bot
         )
-        _publish_service_instance._bot_service.create_bot_record = AsyncMock(
-            return_value=mock_new_bot
+        _publish_service_instance._bot_repo = MagicMock()
+        _publish_service_instance._bot_repo.try_insert_pending_bot.return_value = (
+            mock_new_bot.id
         )
         _publish_service_instance._publish_repo = MagicMock()
         _publish_service_instance._publish_repo.now.return_value = datetime.now()

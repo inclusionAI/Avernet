@@ -22,12 +22,14 @@ from secbaas.community.api.device_manage import (
     DeviceResponse,
     DeviceService,
 )
+from secbaas.community.api.publish_manage import PublishConflictError
 from secbaas.community.api.template_manage import (
     DeviceTemplateManageService,
     TemplateNotFoundError,
 )
 from secbaas.community.core.repository.bot import (
     BotRecord,
+    BotRecordConflictError,
     BotRepository,
 )
 from secbaas.community.core.repository.bot_device_rel import (
@@ -151,16 +153,21 @@ class DefaultBotCrudService(BotCrudService):
         if new_config is not None:
             extra_config = new_config.model_dump(exclude_none=True)
 
-        new_bot_id = bot_repo.insert_bot_record(
-            source_bot_id=source_bot_id,
-            tenant=tenant,
-            env=env,
-            status=BotStatus.PENDING.value,
-            extra_config=extra_config,
-            name=new_name,
-            template_uuid=new_template_uuid,
-            modifier=operator,
-        )
+        try:
+            new_bot_id = bot_repo.try_insert_pending_bot(
+                source_bot_id=source_bot_id,
+                tenant=tenant,
+                env=env,
+                extra_config=extra_config,
+                name=new_name,
+                template_uuid=new_template_uuid,
+                modifier=operator,
+            )
+        except BotRecordConflictError as exc:
+            raise PublishConflictError(
+                f"Bot {source_bot_id} already has a pending update record; "
+                f"a concurrent UPDATE publish is in progress"
+            ) from exc
 
         record = bot_repo.get_by_id(new_bot_id, tenant, env)
         if record is None:

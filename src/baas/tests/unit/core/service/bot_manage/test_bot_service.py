@@ -391,7 +391,7 @@ class TestCreateBotRecord:
         new_record.gmt_modified = datetime(2025, 1, 1)
         new_record.extra_config = {}
 
-        mock_bot_repo.insert_bot_record.return_value = 99
+        mock_bot_repo.try_insert_pending_bot.return_value = 99
         mock_bot_repo.get_by_id.return_value = new_record
 
         result = await bot_crud_service.create_bot_record(
@@ -402,11 +402,10 @@ class TestCreateBotRecord:
 
         assert result.id == 99
         assert result.bot_uuid == "BOT-cloned"
-        mock_bot_repo.insert_bot_record.assert_called_once_with(
+        mock_bot_repo.try_insert_pending_bot.assert_called_once_with(
             source_bot_id=1,
             tenant="test-tenant",
             env="test",
-            status="PENDING",
             extra_config=None,
             name=None,
             template_uuid=None,
@@ -440,7 +439,7 @@ class TestCreateBotRecord:
         new_record.gmt_modified = datetime(2025, 1, 1)
         new_record.extra_config = {}
 
-        mock_bot_repo.insert_bot_record.return_value = 99
+        mock_bot_repo.try_insert_pending_bot.return_value = 99
         mock_bot_repo.get_by_id.return_value = new_record
 
         new_config = BotConfig(sla_grade="enterprise", share_policy={"public": True})
@@ -454,7 +453,7 @@ class TestCreateBotRecord:
         )
 
         assert result.name == "new-name"
-        call_kwargs = mock_bot_repo.insert_bot_record.call_args.kwargs
+        call_kwargs = mock_bot_repo.try_insert_pending_bot.call_args.kwargs
         assert call_kwargs["extra_config"] is not None
         assert call_kwargs["name"] == "new-name"
         assert call_kwargs["template_uuid"] == "TEMPLATE-new"
@@ -463,7 +462,7 @@ class TestCreateBotRecord:
     async def test_create_bot_record_new_record_not_found_raises(
         self, mock_bot_repo, bot_crud_service
     ):
-        mock_bot_repo.insert_bot_record.return_value = 99
+        mock_bot_repo.try_insert_pending_bot.return_value = 99
         mock_bot_repo.get_by_id.return_value = None
 
         with pytest.raises(RuntimeError, match="New bot record not found: 99"):
