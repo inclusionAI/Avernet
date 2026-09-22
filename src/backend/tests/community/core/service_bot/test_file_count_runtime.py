@@ -58,11 +58,20 @@ async def test_engine_errors_are_safe(code, status, caplog):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["baas", "arca"])
-async def test_success_and_timeout(provider, caplog):
+async def test_success_and_timeout(provider, caplog, monkeypatch):
+    import asyncio
     import httpx
     caplog.set_level("INFO")
     from agentclaw.community.kernel.file_count import FileCountBinding, FileCountQuery
     from agentclaw.community.plugins.community.file_count_runtime import HttpFileCountRuntime
+    deadlines = []
+    real_timeout = asyncio.timeout
+
+    def capture_deadline(delay):
+        deadlines.append(delay)
+        return real_timeout(delay)
+
+    monkeypatch.setattr(asyncio, "timeout", capture_deadline)
     transport = SimpleNamespace(invoke=AsyncMock(return_value={
         "success": True, "data": {"path": "/workspace", "file_count": 0, "elapsed_ms": 0},
     }))
@@ -77,6 +86,9 @@ async def test_success_and_timeout(provider, caplog):
     result = await runtime.query(binding, "replica", query, "owner")
     assert result["status"] == "success"
     assert result["file_count"] == 0
+    call = transport.invoke.call_args if provider == "baas" else http.get.call_args
+    assert call.kwargs["timeout"] == 150
+    assert deadlines == [150]
     transport.invoke.side_effect = TimeoutError("secret-value")
     http.get.side_effect = TimeoutError("secret-value")
     result = await runtime.query(binding, "replica", query, "owner")
@@ -85,6 +97,9 @@ async def test_success_and_timeout(provider, caplog):
     assert "secret-value" not in caplog.text
     assert "backend.file_count.engine_response" in caplog.text
     assert "backend.file_count.engine_failure" in caplog.text
+    records = [r for r in caplog.records if "backend.file_count.engine_" in r.msg]
+    assert all((r.args if isinstance(r.args, dict) else r.args[-1])["timeout_seconds"] == 150
+               for r in records)
 
 
 @pytest.mark.asyncio

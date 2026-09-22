@@ -31,10 +31,11 @@ class FileService(Protocol):
     async def count_files(
         self, path: str, auth: AuthContext | None = None,
     ) -> CountFilesResult:
-        """Count ordinary entries inside the engine root, never following links.
+        """Count ordinary entries under the runtime's documented allowed roots.
 
         Failure raises kernel FileCountError; unsupported implementations must
-        explicitly fail rather than return a partial or empty result.
+        explicitly fail rather than return a partial or empty result. OpenClaw
+        follows confined links and skips cyclic, dangling and outside links.
         """
         ...
 
