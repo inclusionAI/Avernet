@@ -142,7 +142,10 @@ def _scan(directory: int, physical: Path, roots: tuple[Path, ...], active: set, 
     return total
 
 
-def count(root: str, path: str, skipped: dict | None = None) -> int:
+def count(
+    root: str, path: str, skipped: dict | None = None, *,
+    allowed_roots: tuple[Path, ...] | None = None,
+) -> int:
     """Count logical entries; skip abnormal links inside the allowed roots."""
     if not path.strip() or "\x00" in path or len(path) > 4096:
         raise ScanError("invalid_path")
@@ -153,7 +156,10 @@ def count(root: str, path: str, skipped: dict | None = None) -> int:
         raise ScanError("path_forbidden")
     if ".." in requested.parts:
         raise ScanError("path_forbidden")
-    roots = (trusted, trusted.parent / "openclawExt")
+    roots = (trusted, trusted.parent / "openclawExt") if allowed_roots is None else allowed_roots
+    # COSEC: only the composition root grants scan boundaries; never widen them.
+    if not roots or any(not item.is_absolute() or item == Path("/") or ".." in item.parts for item in roots):
+        raise ScanError("path_forbidden")
     requested = requested if requested.is_absolute() else trusted / requested
     if not any(requested.is_relative_to(allowed) for allowed in roots):
         raise ScanError("path_forbidden")
@@ -183,7 +189,8 @@ def count(root: str, path: str, skipped: dict | None = None) -> int:
 def main() -> None:
     try:
         skipped = {}
-        result = {"file_count": count(sys.argv[1], sys.argv[2], skipped)}
+        roots = tuple(Path(item) for item in json.loads(sys.argv[3])) if len(sys.argv) > 3 else None
+        result = {"file_count": count(sys.argv[1], sys.argv[2], skipped, allowed_roots=roots)}
         if skipped:
             result["skipped_links"] = skipped
     except ScanError as error:
