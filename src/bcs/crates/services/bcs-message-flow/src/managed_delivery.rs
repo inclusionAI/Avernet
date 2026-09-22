@@ -120,9 +120,17 @@ impl ManagedMessageDelivery {
     ) -> Result<PersistedMessageDelivery, ManagedDeliveryError> {
         // Only discover immutable ownership before locking. State is reloaded
         // and validated below after all source/reply-target locks are held.
-        let owner = self.repo.get_delivery(&command.delivery_id).await?.ok_or(ManagedDeliveryError::NotFound)?.target_bot_id;
+        let initial = self.repo.get_delivery(&command.delivery_id).await?.ok_or(ManagedDeliveryError::NotFound)?;
+        let owner = initial.target_bot_id.clone();
         let mut bots = vec![owner.clone()];
         if let Some(reply) = &command.reply { bots.extend(reply.targets.iter().map(|t| t.target_bot_id.clone())); }
+        if command.reply.is_none() && matches!(command.event, Event::Failed | Event::Aborted | Event::CancelRequested
+            | Event::PreparationFailed | Event::TransportRejected | Event::ResolveStopped | Event::ResolveNotSent
+            | Event::DefinitelyNotSent { .. }) {
+            if let Some(task) = crate::queued_task::intent(&initial).map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))? {
+                if task.leg == crate::queued_task::TaskLeg::Dispatch { bots.push(task.manager); }
+            }
+        }
         let waiting = crate::reply_timing::Timer::new("delivery.mutation_lock_wait");
         let _guards = self.mutations.acquire(bots).await;
         drop(waiting);
@@ -248,6 +256,15 @@ impl ManagedMessageDelivery {
         if !outcome.changed && !start_abort && !submitted {
             return Ok(original.clone());
         }
+        if command.reply.is_none() && outcome.changed {
+            command.reply = crate::task_failure::fallback(original, outcome.state, command.now_ms,
+                command.actor_id.as_deref(), command.transport_context_json.as_ref())
+                .map_err(|e| MessageDeliveryRepoError::Storage(e.to_string()))?;
+            if let (Some(policy), Some(reply)) = (&policy, command.reply.as_mut()) {
+                for target in &mut reply.targets { target.max_queued = policy.policy.bot(&target.target_bot_id).max_queued; }
+                reply.expire_at_ms = policy.policy.queue_ttl_ms.map(|ttl| reply.now_ms.saturating_add(ttl as i64));
+            }
+        }
         if start_abort
             && original.abort_request_id.is_some()
             && !(event == Event::ScopeAbortRequested
@@ -304,6 +321,7 @@ impl ManagedMessageDelivery {
             primary.abort_started_at_ms = Some(command.now_ms);
             primary.cancel_deadline_at_ms = command.deadline_at_ms;
         }
+        let cancel_reason = command.transport_context_json.as_ref().and_then(|v| v.get("cancel_reason")).and_then(|v| v.as_str()).map(str::to_owned);
         if event == Event::StartSend {
             primary.wait_reason = None;
             if primary.run_id.is_none() || primary.idempotency_key.is_none() {
@@ -328,6 +346,9 @@ impl ManagedMessageDelivery {
             event,
             Event::CancelRequested | Event::WithdrawBoundContext | Event::ScopeAbortRequested
         ) {
+            if let Some(reason) = cancel_reason {
+                primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}))["cancel_reason"] = serde_json::json!(reason);
+            }
             primary.cancel_requested_at_ms = Some(command.now_ms);
             primary.cancel_requested_by = command.actor_id;
             primary.cancel_deadline_at_ms = command.deadline_at_ms;

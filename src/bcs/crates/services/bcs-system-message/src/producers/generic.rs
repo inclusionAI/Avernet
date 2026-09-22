@@ -25,18 +25,19 @@ impl SystemMessageProducerService for GenericNotificationMessageProducer {
         _registry: &dyn BotRegistryCoreService,
         participants: &[Participant],
     ) -> (Vec<SystemGroupMessage>, Option<String>) {
-        let SystemMessageEvent::GenericNotification {
-            message, receivers, ..
-        } = event
-        else {
-            return (vec![], None);
+        let (message, receivers, user_only) = match event {
+            SystemMessageEvent::GenericNotification { message, receivers, .. } => (message, receivers.as_slice(), false),
+            SystemMessageEvent::UserNotification { message, .. } => (message, &[][..], true),
+            _ => return (vec![], None),
         };
         let user_message = if message.trim().is_empty() {
             None
         } else {
             Some(message.clone())
         };
-        let recipients: Vec<String> = if receivers.is_empty() {
+        let recipients: Vec<String> = if user_only {
+            Vec::new()
+        } else if receivers.is_empty() {
             participants
                 .iter()
                 .filter(|p| p.is_bot())
@@ -75,6 +76,20 @@ mod tests {
 
     fn group_with(bot: &str) -> Group {
         Group::new("g1", bot, vec![Participant::bot(bot, ParticipantRole::Driver)])
+    }
+
+    #[tokio::test]
+    async fn user_only_and_empty_receivers_have_distinct_semantics() {
+        let group = group_with("bot-a");
+        for user_only in [true, false] {
+            let event = if user_only { SystemMessageEvent::UserNotification { group_id:"g1".into(), message:"状态".into() } }
+                else { SystemMessageEvent::GenericNotification { group_id:"g1".into(), message:"状态".into(), receivers:vec![] } };
+            let (messages, user) = GenericNotificationMessageProducer
+                .produce(&event, &group, &NoopBotRegistryCoreService, &group.participants).await;
+            assert_eq!(messages[0].recipients.is_empty(), user_only);
+            assert_eq!(messages[0].persist, PersistMode::Public);
+            assert_eq!(user.as_deref(), Some("状态"));
+        }
     }
 
     #[tokio::test]

@@ -17,6 +17,23 @@ mod session_support;
 #[path = "../../../test-support/message_flow_contract_support.rs"]
 mod support;
 
+#[tokio::test]
+async fn user_only_notice_persists_and_publishes_without_bot_delivery() {
+    let (support, flow, service, repo, _) = fixture().await;
+    let group = support.group.get("group-1").await.unwrap();
+    let dispatcher = SystemMessageDispatcherImpl::builder().with_registry(support.registry.clone())
+        .with_delivery(support.bot_delivery.clone()).with_frontend_delivery(support.frontend_delivery.clone())
+        .with_message_repo(repo.clone()).with_queue(flow.system_queue_port())
+        .register(bcs_system_message::producers::generic::GenericNotificationMessageProducer).build().unwrap();
+    let outcome = dispatcher.dispatch(SystemMessageEvent::UserNotification { group_id:group.id.clone(),
+        message:"用户状态提示".into() }, &group, "group-1:system", &group.participants).await.unwrap();
+    assert!(outcome.recipient_results.is_empty());
+    assert!(service.snapshot(None).await.unwrap().is_empty());
+    assert!(support.bot_delivery.frames().await.is_empty());
+    assert_eq!(repo.get_current_seq("group-1:system").await.unwrap(), 1);
+    assert!(!support.frontend_delivery.events().await.is_empty());
+}
+
 async fn fixture() -> (support::FlowTestSupport, Arc<BcsMessageFlow>, Arc<ManagedMessageDelivery>, Arc<MemoryMessageRepo>, Arc<MemoryBotRunContextStore>) {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let group = support.group.get("group-1").await.unwrap();

@@ -227,12 +227,15 @@ fn manager_worker_initial_message(
     } else {
         String::new()
     };
-    let instruction = manager_worker_coordination_instruction(
+    let mut instruction = manager_worker_coordination_instruction(
         is_manager,
         delivery_type,
         coordination_surface,
         &status_line,
     );
+    if is_manager {
+        instruction.push_str("收到子任务失败或中断结果后，不要继续等待该任务的正常回复；结合用户目标和中断原因决定重新派发、调整安排或说明问题。");
+    }
     // `## 任务说明` is shown only to the manager; workers receive only the
     // coordination instruction.
     let task = if is_manager { task_input } else { None };
@@ -502,16 +505,18 @@ fn format_ledger_status_line(summary: &LedgerSummary) -> String {
     if summary.pending.is_empty()
         && summary.replied.is_empty()
         && summary.failed.is_empty()
+        && summary.cancelled.is_empty()
         && summary.timed_out.is_empty()
     {
         return String::new();
     }
     format!(
-        "[任务状态] 待回复: {} | 已回复: {} | 失败: {} | 超时: {}",
+        "[任务状态] 待回复: {} | 已回复: {} | 失败: {} | 超时: {} | 已中断: {}",
         join_or_dash(&summary.pending),
         join_or_dash(&summary.replied),
         join_or_dash(&summary.failed),
         join_or_dash(&summary.timed_out),
+        join_or_dash(&summary.cancelled),
     )
 }
 

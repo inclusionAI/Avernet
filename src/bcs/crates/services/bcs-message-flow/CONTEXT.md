@@ -88,6 +88,18 @@ propagate, but a process crash can leave these projections missing. Delivery and
 canonical result persistence, not those projections, determine task completion.
 See `src/bcs/specs/2026-09-16-task-message-queue/spec.md` and conformance_queued_task.
 
+Task ledger notifications are explicitly human-only; they create no Bot
+delivery. Confirmed Failed/Cancelled assignment transitions without a Worker
+callback create the same stable TaskResult in the terminal CAS transaction.
+Unknown/CancelUnknown and result-delivery failures never recursively create
+TaskResults. Result preparation retains current Session/group authorization.
+Task intent optionally persists assignment_intent_id and a UTF-8-safe summary;
+historical intents without these fields fall back to the internal task reference.
+Confirmed cancellation is a separate ledger category, not a failure. Existing
+abnormal callbacks use a hidden run_reply with task_result_text; human error
+history remains a separate, idempotent post-commit projection. No new outbox,
+MCP tool, database table or automatic retry policy is introduced.
+
 The scheduler wraps an empty Bot page once in the same tick without resetting
 its budgets. Control work uses fair due-action batches rather than a global ID
 cursor; abort slots and transition fencing remain unchanged.

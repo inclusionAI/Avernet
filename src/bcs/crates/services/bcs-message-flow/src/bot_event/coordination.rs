@@ -143,6 +143,7 @@ pub(super) async fn dispatch_coordination_call(
             };
             let mut payload = serde_json::json!({
                 "message": message,
+                "assignment_intent_id": call.intent_id,
             });
             if let Some(response_mode) = coordination_argument_str(call, "response_mode") {
                 payload["response_mode"] = Value::String(response_mode.to_string());

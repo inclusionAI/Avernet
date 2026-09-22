@@ -9,6 +9,8 @@ pub const TASK_TTL_MS: u64 = 5 * 60 * 1000;
 #[derive(Debug, Clone)]
 pub struct TaskEntry {
     pub task_id: String,
+    pub assignment_intent_id: Option<String>,
+    pub summary: String,
     pub group_id: String,
     pub session_id: Option<String>,
     pub driver_bot: String,
@@ -35,6 +37,7 @@ pub enum TaskLedgerStatus {
     Dispatched,
     Replied,
     Failed,
+    Cancelled,
     TimedOut,
 }
 
@@ -61,6 +64,8 @@ impl TaskStore {
         if let Some(existing) = tasks.get_mut(&entry.task_id) {
             if entry.managed_version >= existing.managed_version {
                 existing.status = entry.status;
+                existing.assignment_intent_id = entry.assignment_intent_id;
+                existing.summary = entry.summary;
                 existing.managed = true;
                 existing.managed_version = entry.managed_version;
             }
@@ -230,6 +235,10 @@ impl TaskStore {
         self.set_status(task_id, TaskLedgerStatus::Failed).await;
     }
 
+    pub async fn mark_cancelled(&self, task_id: &str) {
+        self.set_status(task_id, TaskLedgerStatus::Cancelled).await;
+    }
+
     pub async fn mark_timed_out(&self, task_id: &str) {
         self.set_status(task_id, TaskLedgerStatus::TimedOut).await;
     }
@@ -283,12 +292,14 @@ impl TaskStore {
                 TaskLedgerStatus::Queued | TaskLedgerStatus::Dispatched => summary.pending.push(target_name(entry)),
                 TaskLedgerStatus::Replied => summary.replied.push(target_name(entry)),
                 TaskLedgerStatus::Failed => summary.failed.push(target_name(entry)),
+                TaskLedgerStatus::Cancelled => summary.cancelled.push(target_name(entry)),
                 TaskLedgerStatus::TimedOut => summary.timed_out.push(target_name(entry)),
             }
         }
         summary.pending.sort();
         summary.replied.sort();
         summary.failed.sort();
+        summary.cancelled.sort();
         summary.timed_out.sort();
         summary
     }
@@ -308,12 +319,14 @@ impl TaskStore {
                 TaskLedgerStatus::Queued | TaskLedgerStatus::Dispatched => summary.pending.push(target_name(entry)),
                 TaskLedgerStatus::Replied => summary.replied.push(target_name(entry)),
                 TaskLedgerStatus::Failed => summary.failed.push(target_name(entry)),
+                TaskLedgerStatus::Cancelled => summary.cancelled.push(target_name(entry)),
                 TaskLedgerStatus::TimedOut => summary.timed_out.push(target_name(entry)),
             }
         }
         summary.pending.sort();
         summary.replied.sort();
         summary.failed.sort();
+        summary.cancelled.sort();
         summary.timed_out.sort();
         summary
     }
@@ -345,6 +358,8 @@ pub fn new_task_entry(
 ) -> TaskEntry {
     TaskEntry {
         task_id,
+        assignment_intent_id: None,
+        summary: String::new(),
         group_id,
         session_id,
         driver_bot,

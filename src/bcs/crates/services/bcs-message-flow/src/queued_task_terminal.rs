@@ -37,7 +37,13 @@ pub(crate) async fn commit(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
             max_queued:100, semantic_projection_json:serde_json::to_value(projection)? }],
         now_ms:now, expire_at_ms:None,
     };
-    let reply = normalize_result(flow, reply, &task, cmd, result_text, normalized)?;
+    let mut terminal = cmd.clone();
+    if terminal.state == ChatEventState::Aborted && terminal.event_payload.get("reason").and_then(|v| v.as_str()).is_none() {
+        if let Some(reason) = row.transport_context_json.as_ref().and_then(|v| v.get("cancel_reason")) {
+            terminal.event_payload["reason"] = reason.clone();
+        }
+    }
+    let reply = normalize_result(flow, reply, &task, &terminal, result_text, normalized)?;
     let service = flow.managed_deliveries.as_ref().ok_or_else(|| queued_task::error("task queue unavailable"))?;
     let mut current = row.clone();
     for _ in 0..3 {
@@ -102,25 +108,20 @@ fn normalize_result(flow: &BcsMessageFlow,
     // body is retained in the same source so recovery never relies on final alone.
     let result_text = match cmd.state {
         ChatEventState::Final => result_text.to_string(),
-        ChatEventState::Aborted => format!("[task cancelled] {result_text}"),
-        _ => format!("[task failed] {result_text}"),
+        _ => crate::task_failure::callback_text(task, cmd, !normalized.display.is_empty()),
     };
     reply.message.run_id = cmd.run_id.clone();
-    if cmd.state == ChatEventState::Error {
-        reply.message.content = serde_json::Value::String(normalized.text.clone());
-        reply.message.client_msg_id = Some(format!("chat-error:{}", task.task_id));
-        reply.message.message_type = bcs_domain::CHAT_ERROR_MESSAGE_TYPE.into();
-    } else {
-        reply.message.content["task_result_text"] = serde_json::json!(result_text);
-        reply.message.content["text"] = serde_json::json!(normalized.text);
-        reply.message.content["task_state"] = serde_json::json!(match cmd.state {
+    reply.message_id = result_message_id(&task.task_id);
+    reply.message.content = serde_json::json!({
+        "task_result_text":result_text, "text":normalized.text,
+        "task_state":match cmd.state {
             ChatEventState::Final => "completed",
             ChatEventState::Aborted => "cancelled",
             _ => "failed",
-        });
-        reply.message.client_msg_id = Some(format!("task-result:{}", task.task_id));
-        reply.message.message_type = "run_reply".into();
-    }
+        },
+    });
+    reply.message.client_msg_id = Some(format!("task-result:{}", task.task_id));
+    reply.message.message_type = "run_reply".into();
     reply.event = None;
     if !normalized.display.is_empty() {
         let mut display = reply.message.clone();
@@ -141,13 +142,14 @@ pub(crate) async fn admit_legacy_result(flow: &BcsMessageFlow, entry: &crate::ta
     let Some(drain) = queued_task::admission_mode(flow, group, session, &entry.driver_bot).await? else { return Ok(false); };
     let task = TaskIntent { leg:TaskLeg::Result, task_id:entry.task_id.clone(), manager:entry.driver_bot.clone(),
         worker:entry.target_bot.clone(), worker_name:entry.target_bot_name.clone().unwrap_or_else(|| entry.target_bot.clone()),
-        response_mode:entry.response_mode };
+        response_mode:entry.response_mode, assignment_intent_id:entry.assignment_intent_id.clone(), summary:entry.summary.clone() };
     let reply = result_admission(flow, group, session, task, cmd, result_text, drain).await?;
     // Capacity rejection is itself durable. The Worker has finished even if
     // the Manager result cannot be admitted; never re-execute the Worker.
     flow.managed_deliveries.as_ref().ok_or_else(|| queued_task::error("task queue unavailable"))?
         .admit(reply).await.map_err(|e| queued_task::error(&format!("task result admission failed: {e}")))?;
     if cmd.state == ChatEventState::Final { flow.task_store.mark_replied(&entry.task_id).await; }
+    else if cmd.state == ChatEventState::Aborted { flow.task_store.mark_cancelled(&entry.task_id).await; }
     else { flow.task_store.mark_failed(&entry.task_id).await; }
     Ok(true)
 }

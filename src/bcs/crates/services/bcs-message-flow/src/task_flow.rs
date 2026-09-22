@@ -160,10 +160,9 @@ async fn emit_unknown_task_target_notice(
         "[协同提醒] 未找到 worker {:?}，任务未派发。当前可用 worker: {}。请使用准确名称或 Bot ID 重试。",
         requested_target, available_workers
     );
-    let event = SystemMessageEvent::GenericNotification {
+    let event = SystemMessageEvent::UserNotification {
         group_id: group_id.to_string(),
         message,
-        receivers: Vec::new(),
     };
     let notify_session_id = session_id.unwrap_or(group_id);
     if let Err(error) = system_message
@@ -185,17 +184,17 @@ pub(crate) async fn emit_task_ledger_status(
     group_id: &str,
     session_id: Option<&str>,
     driver_bot_id: &str,
-) {
+) -> ServiceResult<()> {
     let Some(system_message) = flow.system_message.as_ref() else {
-        return;
+        return Ok(());
     };
-    let Some(receiver) = group
+    let Some(_receiver) = group
         .participants
         .iter()
         .find(|participant| participant.bot_uuid == driver_bot_id)
         .cloned()
     else {
-        return;
+        return Ok(());
     };
     let summary = flow
         .task_store
@@ -203,33 +202,35 @@ pub(crate) async fn emit_task_ledger_status(
         .await;
     let message = format_ledger_status_line(&summary);
     if message.is_empty() {
-        return;
+        return Ok(());
     }
-    let event = SystemMessageEvent::GenericNotification {
+    let event = SystemMessageEvent::UserNotification {
         group_id: group_id.to_string(),
         message,
-        receivers: vec![receiver],
     };
     let notify_session_id = session_id.unwrap_or(group_id);
-    let _ = system_message
+    system_message
         .notify(group_id, event, notify_session_id, &group.participants)
-        .await;
+        .await?;
+    Ok(())
 }
 
 fn format_ledger_status_line(summary: &LedgerSummary) -> String {
     if summary.pending.is_empty()
         && summary.replied.is_empty()
         && summary.failed.is_empty()
+        && summary.cancelled.is_empty()
         && summary.timed_out.is_empty()
     {
         return String::new();
     }
     format!(
-        "[任务状态] 待回复: {} | 已回复: {} | 失败: {} | 超时: {}",
+        "[任务状态] 待回复: {} | 已回复: {} | 失败: {} | 超时: {} | 已中断: {}",
         join_or_dash(&summary.pending),
         join_or_dash(&summary.replied),
         join_or_dash(&summary.failed),
         join_or_dash(&summary.timed_out),
+        join_or_dash(&summary.cancelled),
     )
 }
 
@@ -426,7 +427,8 @@ pub async fn handle_task_message(
     if let Some(drain) = crate::queued_task::admission_mode(flow, &group, &manager_session_id, &manager.bot_uuid).await? {
         let intent = crate::queued_task::TaskIntent { leg:crate::queued_task::TaskLeg::Message,
             task_id:run_id, manager:manager.bot_uuid.clone(), worker:cmd.worker_bot_id.clone(),
-            worker_name:worker_name.clone(), response_mode:ChatResponseMode::Full };
+            worker_name:worker_name.clone(), response_mode:ChatResponseMode::Full,
+            assignment_intent_id:None, summary:String::new() };
         let admission = crate::queued_task::command(flow, &group, &manager_session_id, intent,
             &message, cmd.payload.get("attachments"), &worker_name, drain).await?;
         crate::queued_task::admit(flow, admission).await?;

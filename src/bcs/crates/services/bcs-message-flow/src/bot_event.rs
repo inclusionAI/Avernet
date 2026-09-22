@@ -260,11 +260,9 @@ pub async fn handle_bot_event(
                         "Coordination event could not be confirmed");
                     if let Some(system_message) = &flow.system_message {
                         if let Some(group) = flow.group.get(&cmd.group_id).await {
-                            let event = SystemMessageEvent::GenericNotification {
+                            let event = SystemMessageEvent::UserNotification {
                                 group_id: cmd.group_id.clone(),
                                 message: "协同操作未确认完成，请检查任务状态后再处理；系统不会自动重复分发。".into(),
-                                receivers: group.participants.iter()
-                                    .filter(|p| p.bot_uuid == cmd.bot_id).cloned().collect(),
                             };
                             if let Err(notice_error) = system_message.notify(&cmd.group_id, event,
                                 cmd.bcs_session_id.as_deref().unwrap_or(&cmd.group_id), &group.participants).await {

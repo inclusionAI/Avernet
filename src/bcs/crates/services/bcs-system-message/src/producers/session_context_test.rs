@@ -530,6 +530,7 @@ async fn manager_worker_manager_reminder_includes_task_ledger_status() {
             pending: vec!["B".to_string(), "C".to_string()],
             replied: vec!["A".to_string()],
             failed: Vec::new(),
+            cancelled: Vec::new(),
             timed_out: Vec::new(),
         }),
     )
@@ -595,6 +596,7 @@ async fn session_context_produces_no_user_message() {
             pending: vec!["B".to_string()],
             replied: vec!["A".to_string()],
             failed: Vec::new(),
+            cancelled: Vec::new(),
             timed_out: Vec::new(),
         }),
         driver_delivery: None,

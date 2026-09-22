@@ -830,7 +830,6 @@ async fn state_machine_group_manager_chat_is_public_in_realtime_and_history() {
     assert_eq!(announcement.audience, Some(MessageAudience::Public));
 }
 
-
 #[tokio::test]
 async fn agent_thinking_delta_self_accumulates_and_resets_after_tool_start() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
@@ -2416,7 +2415,7 @@ async fn task_ledger_notifications_are_sent_to_driver_after_dispatch_and_reply()
 }
 
 #[tokio::test]
-async fn dispatch_delivery_failure_marks_failed_not_removed() {
+async fn dispatch_transport_error_remains_pending_until_confirmed() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
     group.service_mode = Some("master_slave".to_string());
@@ -2447,31 +2446,28 @@ async fn dispatch_delivery_failure_marks_failed_not_removed() {
 
     assert!(matches!(err, ServiceError::BotNotConnected(bot) if bot == "bot-observer"));
     let ledger = flow.task_store.ledger_summary("group-1", None).await;
-    assert!(ledger.pending.is_empty());
-    assert_eq!(ledger.failed, vec!["Observer".to_string()]);
+    assert_eq!(ledger.pending, vec!["Observer".to_string()]);
+    assert!(ledger.failed.is_empty());
     assert!(ledger.replied.is_empty());
     assert!(ledger.timed_out.is_empty());
 
     let notifications = system_message.notifications.lock().await;
     assert_eq!(notifications.len(), 1);
     match &notifications[0].event {
-        SystemMessageEvent::GenericNotification { message, receivers, .. } => {
-            assert!(message.contains("待回复: -"));
-            assert!(message.contains("失败: Observer"));
+        SystemMessageEvent::UserNotification { message, .. } => {
+            assert!(message.contains("待回复: Observer"));
+            assert!(message.contains("失败: -"));
             assert!(message.contains("超时: -"));
-            assert_eq!(receivers.len(), 1);
-            assert_eq!(receivers[0].bot_uuid, "bot-driver");
         }
-        other => panic!("expected GenericNotification, got {other:?}"),
+        other => panic!("expected UserNotification, got {other:?}"),
     }
 }
 
 fn assert_ledger_notification(event: &SystemMessageEvent, pending: &str, replied: &str) {
     match event {
-        SystemMessageEvent::GenericNotification {
+        SystemMessageEvent::UserNotification {
             group_id,
             message,
-            receivers,
         } => {
             assert_eq!(group_id, "group-1");
             assert!(message.contains("[任务状态]"));
@@ -2479,10 +2475,8 @@ fn assert_ledger_notification(event: &SystemMessageEvent, pending: &str, replied
             assert!(message.contains(replied));
             assert!(message.contains("失败: -"));
             assert!(message.contains("超时: -"));
-            assert_eq!(receivers.len(), 1);
-            assert_eq!(receivers[0].bot_uuid, "bot-driver");
         }
-        other => panic!("expected GenericNotification, got {other:?}"),
+        other => panic!("expected UserNotification, got {other:?}"),
     }
 }
 
@@ -2668,13 +2662,12 @@ async fn manager_worker_unknown_target_emits_public_group_notice() {
     assert_eq!(notifications.len(), 1);
     assert_eq!(notifications[0].session_id, "group-1:abcdef12");
     match &notifications[0].event {
-        SystemMessageEvent::GenericNotification { message, receivers, .. } => {
+        SystemMessageEvent::UserNotification { message, .. } => {
             assert!(message.contains("未找到 worker \"Wrong Worker\""));
             assert!(message.contains("Worker (bot-worker)"));
             assert!(message.contains("任务未派发"));
-            assert!(receivers.is_empty(), "empty receivers broadcasts the public notice");
         }
-        other => panic!("expected GenericNotification, got {other:?}"),
+        other => panic!("expected UserNotification, got {other:?}"),
     }
 }
 
@@ -5756,7 +5749,7 @@ async fn manager_worker_task_dispatch_records_context_before_history_persistence
 }
 
 #[tokio::test]
-async fn manager_worker_task_dispatch_does_not_persist_when_delivery_is_not_delivered() {
+async fn manager_worker_rejected_task_dispatch_persists_error_and_sends_result() {
     let (support, repo, flow) = manager_worker_flow_with_repo().await;
     support.bot_delivery.not_delivered_for("bot-worker").await;
 
@@ -5777,7 +5770,10 @@ async fn manager_worker_task_dispatch_does_not_persist_when_delivery_is_not_deli
         }
         other => panic!("expected InvalidOperation for not-delivered dispatch, got {other:?}"),
     }
-    assert!(repo.appended().await.is_empty());
+    let messages = repo.appended().await;
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].message_type, bcs_domain::CHAT_ERROR_MESSAGE_TYPE);
+    assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskDispatch, BotDeliveryKind::TaskResult]);
 }
 
 #[tokio::test]
@@ -6549,6 +6545,8 @@ async fn direct_chat_segment_boundaries_do_not_persist_group_history() {
             }
     }));
 }
+
+
 
 /// Regression: a TASK run (its run_id resolves to a dispatched task) that streams
 /// buffered chat deltas and then terminates with `error` must still flush the

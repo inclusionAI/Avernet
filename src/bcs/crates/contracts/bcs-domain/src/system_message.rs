@@ -52,6 +52,11 @@ pub enum SystemMessageEvent {
         group_id: String,
         actor: Participant,
     },
+    /// Persist and publish to humans without creating Bot deliveries.
+    UserNotification {
+        group_id: String,
+        message: String,
+    },
     GenericNotification {
         group_id: String,
         message: String,
@@ -86,6 +91,7 @@ impl SystemMessageEvent {
             Self::ParticipantModeChanged { .. } => SystemMessageEventKind::ParticipantModeChanged,
             Self::SessionContext { .. } => SystemMessageEventKind::SessionContext,
             Self::GenericNotification { .. } => SystemMessageEventKind::GenericNotification,
+            Self::UserNotification { .. } => SystemMessageEventKind::GenericNotification,
             Self::BotHiddenNotice { .. } => SystemMessageEventKind::BotHiddenNotice,
         }
     }

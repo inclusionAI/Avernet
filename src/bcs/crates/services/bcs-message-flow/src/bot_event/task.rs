@@ -62,7 +62,7 @@ pub(super) async fn handle_task_bot_event(
             crate::queued_task_terminal::commit(flow, &row, cmd, &response_text, normalized).await?;
             if let Some(group) = flow.group.get(&entry.group_id).await {
                 crate::task_flow::emit_task_ledger_status(flow, &group, &entry.group_id,
-                    entry.session_id.as_deref(), &entry.driver_bot).await;
+                    entry.session_id.as_deref(), &entry.driver_bot).await?;
             }
             return Ok(Vec::new());
         }
@@ -72,6 +72,14 @@ pub(super) async fn handle_task_bot_event(
         crate::task_flow::apply_session_participants(flow, group, &entry.group_id, session_id)
             .await?;
     }
+    let session_stopped = if let (Some(sessions), Some(id)) = (&flow.session_management, entry.session_id.as_deref()) {
+        sessions.get(id).await.map_err(|e| crate::queued_task::error(&format!("task session read failed: {e}")))?
+            .is_none_or(|s| s.status != bcs_service_api::SessionStatus::Running)
+    } else { false };
+    if session_stopped || group.as_ref().is_none_or(|g| g.status != GroupStatus::Active) {
+        crate::task_failure::mark_terminal(flow, task_id, &cmd.state).await;
+        return Ok(Vec::new());
+    }
     if let Some(group) = &group {
         if crate::queued_task_terminal::admit_legacy_result(flow, &entry, group, cmd, &response_text).await? {
             if cmd.state == ChatEventState::Final {
@@ -80,7 +88,7 @@ pub(super) async fn handle_task_bot_event(
             flow.message_tracker.cleanup_run(&cmd.run_id).await;
             flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(cmd)).await;
             crate::task_flow::emit_task_ledger_status(flow, group, &entry.group_id,
-                entry.session_id.as_deref(), &entry.driver_bot).await;
+                entry.session_id.as_deref(), &entry.driver_bot).await?;
             return Ok(Vec::new());
         }
     }
@@ -89,12 +97,15 @@ pub(super) async fn handle_task_bot_event(
         .target_bot_name
         .as_deref()
         .unwrap_or(entry.target_bot.as_str());
-    let result = if entry.terminal_result_delivered {
-        BotDeliveryResult {
+    let manager_text = if cmd.state == ChatEventState::Final { response_text.clone() } else {
+        crate::task_failure::callback_text(&crate::task_failure::entry_intent(&entry), cmd, !entry.response_content.is_empty())
+    };
+    let result = async { if entry.terminal_result_delivered {
+        Ok(BotDeliveryResult {
             target_bot_id: entry.driver_bot.clone(),
             delivered: true,
             error: None,
-        }
+        })
     } else {
         let manager_result_run_id = uuid::Uuid::new_v4().to_string();
         let delivery_target = flow
@@ -122,7 +133,7 @@ pub(super) async fn handle_task_bot_event(
             &entry.driver_bot,
             &entry.target_bot,
             target_bot_name,
-            &response_text,
+            &manager_text,
             &entry.task_id,
             &manager_result_run_id,
             provider_tags,
@@ -159,13 +170,23 @@ pub(super) async fn handle_task_bot_event(
         };
         if !result.delivered {
             flow.discard_send_context(&manager_result_run_id).await?;
-            return Ok(vec![result]);
+            return Ok(result);
         }
-        if cmd.state == ChatEventState::Error {
+        if cmd.state != ChatEventState::Final {
             flow.task_store.record_terminal_delivery(task_id).await;
         }
-        result
+        Ok(result)
+    }}.await;
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            if cmd.state != ChatEventState::Final {
+                crate::task_failure::mark_terminal(flow, task_id, &cmd.state).await;
+            }
+            return Err(error);
+        }
     };
+    if !result.delivered && cmd.state == ChatEventState::Final { return Ok(vec![result]); }
 
     record_task_response_event(flow, task_id, cmd).await;
 
@@ -213,7 +234,7 @@ pub(super) async fn handle_task_bot_event(
     flow.message_tracker
         .cleanup_run(&crate::run_reply::chat_key(cmd))
         .await;
-    flow.task_store.mark_replied(task_id).await;
+    crate::task_failure::mark_terminal(flow, task_id, &cmd.state).await;
     if let Some(group) = group.as_ref() {
         crate::task_flow::emit_task_ledger_status(
             flow,
@@ -222,7 +243,7 @@ pub(super) async fn handle_task_bot_event(
             entry.session_id.as_deref(),
             &entry.driver_bot,
         )
-        .await;
+        .await?;
     }
     Ok(vec![result])
 }

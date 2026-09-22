@@ -118,7 +118,9 @@ pub async fn handle_task_dispatch(
         let name = resolve_participant_name(flow, driver).await;
         let intent = crate::queued_task::TaskIntent { leg:crate::queued_task::TaskLeg::Dispatch,
             task_id:effective_task_id.clone(), manager:cmd.driver_bot_id.clone(), worker:target_bot_id,
-            worker_name:target_bot_name, response_mode };
+            worker_name:target_bot_name, response_mode,
+            assignment_intent_id:cmd.payload.get("assignment_intent_id").and_then(Value::as_str).map(str::to_owned),
+            summary:message.chars().take(80).collect() };
         let admission = crate::queued_task::command(flow, &group, &manager_session_id, intent,
             &message, cmd.payload.get("attachments"), &name, drain).await?;
         crate::queued_task::admit(flow, admission).await?;
@@ -133,11 +135,11 @@ pub async fn handle_task_dispatch(
                 ("status".into(), serde_json::json!("queued")),
                 ("assignment".into(), serde_json::json!({"content_type":"text/plain", "size_bytes":message.len(), "text":message, "truncated":false})),
             ])).await?;
-        emit_task_ledger_status(flow, &group, &group_id, Some(&manager_session_id), &cmd.driver_bot_id).await;
+        emit_task_ledger_status(flow, &group, &group_id, Some(&manager_session_id), &cmd.driver_bot_id).await?;
         return Ok(TaskDispatchOutcome { task_id:effective_task_id, status:"queued".into(),
             bot_deliveries:Vec::new(), frontend_deliveries:Vec::new() });
     }
-    let task_entry = new_task_entry(
+    let mut task_entry = new_task_entry(
         effective_task_id.clone(),
         group_id.clone(),
         (manager_session_id != group_id).then(|| manager_session_id.clone()),
@@ -147,7 +149,10 @@ pub async fn handle_task_dispatch(
         now,
         response_mode,
     );
+    task_entry.assignment_intent_id = cmd.payload.get("assignment_intent_id").and_then(Value::as_str).map(str::to_owned);
+    task_entry.summary = message.chars().take(80).collect();
     let mut assignment_data = BTreeMap::from([
+        ("assignment_intent_id".into(), serde_json::json!(task_entry.assignment_intent_id)),
         (
             "task_id".to_string(),
             serde_json::json!(effective_task_id.clone()),
@@ -231,15 +236,7 @@ pub async fn handle_task_dispatch(
                 Some(error_text.as_str()),
                 Some("resolve_target"),
             );
-            flow.task_store.mark_failed(&effective_task_id).await;
-            emit_task_ledger_status(
-                flow,
-                &group,
-                &group_id,
-                ledger_session_id,
-                &cmd.driver_bot_id,
-            )
-            .await;
+            crate::task_failure::finish_legacy(flow, &effective_task_id, false, "未能连接到 Worker，任务尚未开始执行。").await?;
             return Err(error);
         }
     };
@@ -326,15 +323,7 @@ pub async fn handle_task_dispatch(
                 result.error.as_ref().map(ToString::to_string).as_deref(),
                 Some("deliver"),
             );
-            flow.task_store.mark_failed(&effective_task_id).await;
-            emit_task_ledger_status(
-                flow,
-                &group,
-                &group_id,
-                ledger_session_id,
-                &cmd.driver_bot_id,
-            )
-            .await;
+            crate::task_failure::finish_legacy(flow, &effective_task_id, false, "Worker 未接受本次任务，任务未完成。").await?;
             return Err(ServiceError::InvalidOperation {
                 message: "target bot is not connected".to_string(),
                 request_id: Some(effective_task_id),
@@ -354,7 +343,8 @@ pub async fn handle_task_dispatch(
                 Some(error_text.as_str()),
                 Some("deliver"),
             );
-            flow.task_store.mark_failed(&effective_task_id).await;
+            // A transport error alone does not prove Worker failure. Keep the
+            // task pending for an authoritative callback or existing timeout.
             emit_task_ledger_status(
                 flow,
                 &group,
@@ -362,7 +352,7 @@ pub async fn handle_task_dispatch(
                 ledger_session_id,
                 &cmd.driver_bot_id,
             )
-            .await;
+            .await?;
             return Err(error);
         }
     };
@@ -374,7 +364,7 @@ pub async fn handle_task_dispatch(
         ledger_session_id,
         &cmd.driver_bot_id,
     )
-    .await;
+    .await?;
 
     Ok(TaskDispatchOutcome {
         task_id: effective_task_id,

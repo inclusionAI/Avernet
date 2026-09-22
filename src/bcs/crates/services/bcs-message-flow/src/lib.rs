@@ -11,6 +11,7 @@ pub mod queued_admission;
 pub mod queued_system;
 mod queued_task;
 mod queued_task_terminal;
+mod task_failure;
 mod run_reply;
 mod reply_timing;
 mod storage_retry;

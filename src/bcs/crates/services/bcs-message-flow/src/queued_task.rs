@@ -20,6 +20,10 @@ pub(crate) struct TaskIntent {
     pub worker: String,
     pub worker_name: String,
     pub response_mode: ChatResponseMode,
+    #[serde(default)]
+    pub assignment_intent_id: Option<String>,
+    #[serde(default)]
+    pub summary: String,
 }
 
 pub(crate) fn error(message: &str) -> ServiceError { ServiceError::InternalError(message.into()) }
@@ -130,13 +134,16 @@ pub(crate) async fn restore(flow: &BcsMessageFlow, row: &PersistedMessageDeliver
     let status = match row.state.status {
         Status::Queued => TaskLedgerStatus::Queued,
         Status::Completed => TaskLedgerStatus::Replied,
-        Status::Failed | Status::RejectedCapacity | Status::Cancelled => TaskLedgerStatus::Failed,
+        Status::Failed | Status::RejectedCapacity => TaskLedgerStatus::Failed,
+        Status::Cancelled => TaskLedgerStatus::Cancelled,
         Status::Expired => TaskLedgerStatus::TimedOut,
         _ => TaskLedgerStatus::Dispatched, // Unknown/cancelling still owns the task.
     };
     let mut entry = new_task_entry(task.task_id.clone(), row.group_id.clone(), Some(row.session_id.clone()),
         task.manager, task.worker, Some(task.worker_name), row.created_at_ms as u64, task.response_mode);
     entry.status = status;
+    entry.assignment_intent_id = task.assignment_intent_id;
+    entry.summary = task.summary;
     entry.managed = true;
     entry.managed_version = row.state.state_version;
     if status == TaskLedgerStatus::Dispatched && row.state.may_have_been_sent

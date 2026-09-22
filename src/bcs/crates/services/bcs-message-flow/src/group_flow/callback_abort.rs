@@ -445,6 +445,14 @@ pub async fn handle_chat_abort(
         }
     }
     for context in confirmed {
+        if !managed_abort.owned.contains_key(&context.canonical_run_id) {
+            if let Some(task_id) = flow.task_store.resolve_task_id(&context.canonical_run_id).await {
+                let reason = if matches!(&cmd.caller, CallerContext::Human(_)) {
+                    "用户中断了本次执行。"
+                } else { "已按停止请求中断本次执行。" };
+                crate::task_failure::finish_legacy(flow, &task_id, true, reason).await?;
+            }
+        }
         if commit_aborted_run(run_context.as_ref(), &context).await? && !managed_abort.owned.contains_key(&context.canonical_run_id) {
             aborted_run_ids.push(context.canonical_run_id);
         }

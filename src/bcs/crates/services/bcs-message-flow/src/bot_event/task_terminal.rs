@@ -36,12 +36,14 @@ pub(super) async fn finish(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
         Status::Cancelled => ChatEventState::Aborted,
         _ => ChatEventState::Error,
     };
+    let mut error = None;
     if terminal.state == ChatEventState::Error {
         let text = error_display_text(&terminal.event_payload);
         inject_synthesized_message(&mut terminal.event_payload, &text);
         terminal.event_payload["errorMessage"] = Value::String(text);
+        error = persist_chat_error(flow, &terminal).await.err();
     }
-    let mut error = record_completion(flow, row, &mut terminal, replay).await.err();
+    if let Err(err) = record_completion(flow, row, &mut terminal, replay).await { error.get_or_insert(err); }
     let frontend_deliveries = match publish_incoming_event(flow, &terminal, Some(&task.task_id)).await {
         Ok(deliveries) => deliveries,
         Err(err) => { error.get_or_insert(err); Vec::new() }

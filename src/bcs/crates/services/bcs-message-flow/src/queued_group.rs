@@ -84,6 +84,9 @@ pub struct QueuedTransportContext {
     pub downstream_session_key: String,
     #[serde(default)]
     pub downstream_run_id: Option<String>,
+    /// Confirmed stop results retain the initiating user's intent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_reason: Option<String>,
     #[serde(default)]
     pub provider_route_headers: Vec<(String, String)>,
     /// Causal routing metadata also crosses WS runs without entering their frames.
@@ -628,7 +631,10 @@ async fn prepare_queued_group_bounded(
     let attachments = (!payload.attachments.is_empty())
         .then(|| payload.attachments.into_iter().map(Into::into).collect());
     let tags = if delivery_target.is_http_provider() {
-        projection.target_tags.as_slice()
+        if projection.task.as_ref().is_some_and(|task| task.leg == crate::queued_task::TaskLeg::Result) {
+            group.participants.iter().find(|p| p.bot_uuid == row.target_bot_id)
+                .map(|p| p.tags.as_slice()).unwrap_or_default()
+        } else { projection.target_tags.as_slice() }
     } else {
         &[]
     };
@@ -768,6 +774,7 @@ async fn prepare_queued_group_bounded(
         owner,
         connection_id,
         downstream_run_id: None,
+        cancel_reason: None,
         downstream_session_key: request_session_key(&frame)
             .ok_or_else(|| invalid("queue send lacks downstream session key"))?,
     };

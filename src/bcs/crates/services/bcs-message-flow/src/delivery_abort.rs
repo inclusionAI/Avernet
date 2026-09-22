@@ -110,6 +110,11 @@ pub async fn select(
         }
         let now = chrono::Utc::now().timestamp_millis();
         let mut intent = transition(&row, Event::ScopeAbortRequested, now);
+        intent.transport_context_json = Some(serde_json::json!({"cancel_reason":
+            if matches!(&command.caller, bcs_service_api::CallerContext::Human(_)) {
+                "用户中断了本次执行。"
+            } else { "已按停止请求中断本次执行。" }
+        }));
         intent.actor_id = match &command.caller {
             bcs_service_api::CallerContext::Human(actor) => Some(actor.actor_id.clone()),
             bcs_service_api::CallerContext::Bot(actor) => Some(actor.bot_uuid.clone()),

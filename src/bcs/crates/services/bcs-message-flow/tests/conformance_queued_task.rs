@@ -22,6 +22,8 @@ mod support;
 mod migrations;
 #[path = "support/queued_task_review.rs"]
 mod queued_task_review;
+#[path = "support/task_status_notifications.rs"]
+mod task_status_notifications;
 
 const SESSION: &str = "group-1:task";
 fn admin() -> CallerContext { CallerContext::Human(HumanActor { actor_id:"human_operator".into(), staff_no:"operator".into() }) }
@@ -121,7 +123,8 @@ impl Fixture {
 
 fn dispatch_command() -> TaskDispatchCommand {
     TaskDispatchCommand { driver_bot_id:"bot-driver".into(), group_id:"group-1".into(), target_bot_id:"bot-observer".into(),
-        target_bot_name:None, payload:json!({"message":"TASK_BODY", "bcs_session_id":SESSION, "response_mode":"full"}) }
+        target_bot_name:None, payload:json!({"message":"TASK_BODY", "bcs_session_id":SESSION, "response_mode":"full",
+            "assignment_intent_id":"bcs_intent_assignment"}) }
 }
 fn final_event(row: &PersistedMessageDelivery) -> BotEventCommand {
     BotEventCommand { bot_id:row.target_bot_id.clone(), run_id:row.run_id.clone().unwrap(), group_id:"group-1".into(),
@@ -187,6 +190,7 @@ async fn restart_recovers_task_mapping_and_dispatch_deadline_does_not_include_qu
     f.service.recover(chrono::Utc::now().timestamp_millis()).await.unwrap();
     f.flow.handle_bot_event(final_event(&row)).await.unwrap();
     assert_eq!(f.flow.task_store.get(&task_id).await.unwrap().status, bcs_message_flow::task_store::TaskLedgerStatus::Replied);
+    assert_eq!(f.flow.task_store.get(&task_id).await.unwrap().assignment_intent_id.as_deref(), Some("bcs_intent_assignment"));
     assert!(f.rows().await.iter().any(|r| r.semantic_projection_json["task"]["leg"] == "result"));
 }
 
@@ -282,20 +286,16 @@ async fn running_abort_and_error_create_one_explicit_failure_result() {
         let result = rows.iter().find(|r| r.semantic_projection_json["task"]["leg"] == "result").unwrap();
         let source = f.repo.get_message_by_id(SESSION, &result.source_message_id).await.unwrap().unwrap();
         if state == ChatEventState::Error {
-            assert_eq!(source.message_type, bcs_domain::CHAT_ERROR_MESSAGE_TYPE);
-            assert_eq!(source.content, json!("WORKER_RESULT"));
-            let expected = format!(
-                "chat-error:{}",
-                row.semantic_projection_json["task"]["task_id"]
-                    .as_str()
-                    .unwrap()
-            );
-            assert_eq!(source.client_msg_id.as_deref(), Some(expected.as_str()));
+            assert_eq!(source.message_type, "run_reply");
+            assert_eq!(source.content["task_state"], "failed");
+            assert!(source.content["task_result_text"].as_str().unwrap().starts_with("[任务失败]"));
         } else {
             assert_eq!(source.message_type, "run_reply");
             assert_eq!(source.content["task_state"], "cancelled");
-            assert!(source.content["task_result_text"].as_str().unwrap().starts_with("[task "));
+            assert!(source.content["task_result_text"].as_str().unwrap().starts_with("[任务中断]"));
         }
+        assert!(source.content["task_result_text"].as_str().unwrap().contains("bcs_intent_assignment"));
+        f.start(result).await;
     }
 }
 

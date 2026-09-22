@@ -10,6 +10,11 @@ propagates without direct fallback. Off targets retain direct delivery after
 batch commit, and human notices remain a separate frontend publication.
 Recipient results distinguish durable admission from confirmed delivery.
 
+UserNotification uses the generic producer's public history/frontend path with
+an explicitly empty produced recipient set. It never produces a Bot delivery.
+GenericNotification's empty input receivers still means all Bots; the two
+events must not be conflated. Task ledger notices use UserNotification.
+
 ## Consumes
 
 Service API contracts for queue admission, Bot registry, delivery, run context,

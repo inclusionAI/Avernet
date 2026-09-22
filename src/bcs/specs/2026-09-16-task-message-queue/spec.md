@@ -90,6 +90,12 @@ Send；结果会在 Manager lane 可用后独立启动下一轮。
 只有可信 chat/chat.event 的 final、error、aborted 才能结算任务；agent/tool 的终止标记
 不能冒充整个任务终态。
 
+2026-09-22 补充：由现有 delivery 状态机确认的派发失败、未发送取消、停止确认也在
+同一个终态 CAS 中生成 TaskResult；不要求 Worker 再发一次回调。Unknown/CancelUnknown
+不产生异常结果。原 assignment_intent_id 和短任务摘要保存在既有 task 元数据中，
+失败/中断使用短文本回传，Cancelled 在 ledger 中单独分类。具体通知规则见
+`docs/specs/2026-09-22-manager-worker-status-notifications/spec.md`。
+
 Worker 终态事务同时完成：
 
 - 通过 delivery state_version CAS 结算 Worker Send，消费已发送上下文、释放 Worker lane；
