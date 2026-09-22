@@ -2,9 +2,11 @@
 
 订阅 DeviceActivatedEvent，在设备激活后按 per-engine 能力位
 （``supports_auto_cron_setup``，经引擎策略 registry 按 ``active_engine`` 解析，
-未注册引擎保守拒绝）放行，交由 CronAutoSetupService 读取 template ext
-判定 ``is_hosted_24x7 == 1``（不再以 template_type=applicationCoding 或引擎
-字符串集合为门禁，模板工厂 bot 如 mcptestpq 同样走此链路）。
+未注册引擎保守拒绝；能力位内含模板级守卫——aicoding/claude_code 仅放行
+非空且非 legacy ``normalCC`` 的 ``template_type``）放行，交由
+CronAutoSetupService 读取 template ext 判定 ``is_hosted_24x7 == 1``
+（不再以 template_type=applicationCoding 为必要条件，模板工厂 bot
+如 mcptestpq 同样走此链路）。
 """
 from __future__ import annotations
 
@@ -89,21 +91,26 @@ class CronAutoSetupListener(LifecycleBase):
                 )
                 return
 
-            # 2. 检查引擎是否声明 7×24 自动 cron 能力位（is_hosted_24x7 /
-            #    dima_space_id 在 template ext 里，bot 记录不带，由 service
+            # 2. 检查引擎是否声明 7×24 自动 cron 能力位（含模板级守卫：
+            #    aicoding/claude_code 仅放行非空且非 normalCC 的 template_type；
+            #    is_hosted_24x7 / dima_space_id 在 template ext 里，由 service
             #    读取后判定）
             active_engine = bot.get("active_engine", "")
-            engine_eligible = supports_auto_cron_setup(engine_type=active_engine)
+            template_type = bot.get("template_type", "")
+            engine_eligible = supports_auto_cron_setup(
+                engine_type=active_engine,
+                template_type=template_type,
+            )
             logger.info(
                 "[cron_auto_setup_listener] bot %s check: engine=%s, "
-                "auto_cron_eligible=%s",
-                bot_id, active_engine, engine_eligible,
+                "template_type=%s, auto_cron_eligible=%s",
+                bot_id, active_engine, template_type, engine_eligible,
             )
             if not engine_eligible:
                 logger.info(
-                    "[cron_auto_setup_listener] bot %s engine=%s does not "
-                    "support auto-cron setup, skipping",
-                    bot_id, active_engine,
+                    "[cron_auto_setup_listener] bot %s engine=%s "
+                    "template_type=%s does not support auto-cron setup, skipping",
+                    bot_id, active_engine, template_type,
                 )
                 return
 

@@ -171,9 +171,14 @@ class AicodingProvisioningStrategy(AicodingHostedWorkspaceMixin, EngineProvision
     def engine_type(self) -> str:
         return self._engine_type
 
-    def supports_auto_cron_setup(self) -> bool:
-        """Coding engines opt in to the 7×24 auto-cron capability bit."""
-        return True
+    def supports_auto_cron_setup(self, *, template_type: str | None = None) -> bool:
+        """Coding engines opt in to the 7×24 auto-cron capability bit.
+
+        家族内的模板级守卫：仅 ``template_type`` 非空、且非 legacy
+        ``normalCC`` 的 bot 进入 7×24 自动 cron（工厂 bot 如 mcptestpq、
+        applicationCoding 等编码模板均满足；无模板或 normalCC 不进入）。
+        """
+        return bool(template_type) and template_type != "normalCC"
 
     def prepare_create(
         self,

@@ -263,21 +263,26 @@ def resolve_bot_engine(bot: dict[str, Any]) -> str | None:
     return get_engine_provisioning_registry().resolve_bot_engine(bot)
 
 
-def supports_auto_cron_setup(*, engine_type: str | None) -> bool:
+def supports_auto_cron_setup(
+    *,
+    engine_type: str | None,
+    template_type: str | None = None,
+) -> bool:
     """Whether ``engine_type``'s strategy declares the 7×24 auto-cron capability.
 
     The single eligibility entry for auto-cron routing (e.g. the cron
     auto-setup listener asks this instead of branching on engine strings):
     resolution is by ``active_engine`` through the composition-root registry,
     per-engine decision lives on the strategy (``supports_auto_cron_setup``
-    capability bit), and unknown / missing engines conservatively deny via the
-    registry's default no-op strategy.
+    capability bit, which may further gate on the bot's ``template_type``),
+    and unknown / missing engines conservatively deny via the registry's
+    default no-op strategy.
     """
     normalized = normalize_engine_type(engine_type, default="")
     if not normalized:
         return False
     strategy = get_engine_provisioning_registry().resolve(normalized)
-    return strategy.supports_auto_cron_setup()
+    return strategy.supports_auto_cron_setup(template_type=template_type)
 
 
 def _build_default_baas_engine_bucket_resolver_registry() -> (
