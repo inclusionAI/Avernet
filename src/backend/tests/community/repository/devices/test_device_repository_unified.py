@@ -734,12 +734,13 @@ def test_desktop_data_init_trigger_claim_is_current_once_and_releasable(repo):
         ),
     )
 
-    claim_token = repo.claim_baas_desktop_data_init_trigger_if_ready(
+    claim = repo.claim_baas_desktop_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
     )
-    assert claim_token is not None
+    assert claim is not None
+    assert claim.resume_stale_in_progress is False
     assert repo.claim_baas_desktop_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
@@ -749,15 +750,16 @@ def test_desktop_data_init_trigger_claim_is_current_once_and_releasable(repo):
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
-        claim_token=claim_token,
+        claim_token=claim.claim_token,
     ) is True
-    next_claim_token = repo.claim_baas_desktop_data_init_trigger_if_ready(
+    next_claim = repo.claim_baas_desktop_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
     )
-    assert next_claim_token is not None
-    assert next_claim_token != claim_token
+    assert next_claim is not None
+    assert next_claim.resume_stale_in_progress is False
+    assert next_claim.claim_token != claim.claim_token
     assert repo.claim_baas_desktop_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
@@ -796,12 +798,13 @@ def test_desktop_data_init_expired_claim_is_fenced_during_takeover(repo):
             }
         ),
     )
-    first_token = repo.claim_baas_desktop_data_init_trigger_if_ready(
+    first_claim = repo.claim_baas_desktop_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
     )
-    assert first_token is not None
+    assert first_claim is not None
+    assert first_claim.resume_stale_in_progress is False
 
     with repo._db.orm_session() as db:
         binding = db.query(EntityDeviceBinding).filter_by(id=bid).one()
@@ -818,24 +821,25 @@ def test_desktop_data_init_expired_claim_is_fenced_during_takeover(repo):
             }
         )
 
-    second_token = repo.claim_baas_desktop_data_init_trigger_if_ready(
+    second_claim = repo.claim_baas_desktop_data_init_trigger_if_ready(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
     )
-    assert second_token is not None
-    assert second_token != first_token
+    assert second_claim is not None
+    assert second_claim.resume_stale_in_progress is True
+    assert second_claim.claim_token != first_claim.claim_token
     assert repo.release_baas_desktop_data_init_trigger_if_matches(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
-        claim_token=first_token,
+        claim_token=first_claim.claim_token,
     ) is False
     assert repo.release_baas_desktop_data_init_trigger_if_matches(
         binding_id=bid,
         device_id="desktop-bot-uuid",
         startup_identity="17",
-        claim_token=second_token,
+        claim_token=second_claim.claim_token,
     ) is True
 
 

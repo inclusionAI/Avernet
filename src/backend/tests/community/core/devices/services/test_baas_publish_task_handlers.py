@@ -1137,7 +1137,7 @@ def test_create_init_marks_active_after_init_and_alive():
         status=DeviceBindingStatus.ACTIVE.value,
         device_props=binding.device_props,
     )
-    repo.get_by_id.side_effect = [binding, updated_binding]
+    repo.get_by_id.side_effect = [binding, updated_binding, updated_binding]
     repo.get_by_device_id.return_value = binding
     bot_query = MagicMock()
     bot_query.get_by_binding_id.return_value = {
@@ -1213,7 +1213,7 @@ def test_create_init_reads_codefuse_token_from_template_service_and_writes_conta
         status=DeviceBindingStatus.ACTIVE.value,
         device_props=binding.device_props,
     )
-    repo.get_by_id.side_effect = [binding, updated_binding]
+    repo.get_by_id.side_effect = [binding, updated_binding, updated_binding]
     repo.get_by_device_id.return_value = binding
     bot_query = MagicMock()
     bot_query.get_by_binding_id.return_value = {

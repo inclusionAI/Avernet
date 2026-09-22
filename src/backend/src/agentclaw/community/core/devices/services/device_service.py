@@ -23,9 +23,14 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 
-from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
-from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
-from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+    OssToNasRecordRepository,
+)
+from agentclaw.community.core.devices.repository.record import (
+    DataInitTriggerClaim,
+    DeviceBindingRecord,
+)
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
     DeviceBindingInfo,
@@ -1160,12 +1165,20 @@ class DeviceService:
                     exc_info=True,
                 )
 
-            if record.device_provider == BAAS_DEVICE_PROVIDER:
-                self.trigger_data_init_on_device_ready(
-                    device_id=device_id,
-                    binding_id=record.id,
-                    require_pool_confirmation=True,
-                )
+
+        if (
+            record.device_provider == BAAS_DEVICE_PROVIDER
+            and record.status
+            in {
+                DeviceBindingStatus.PENDING.value,
+                DeviceBindingStatus.ACTIVE.value,
+            }
+        ):
+            self.trigger_data_init_on_device_ready(
+                device_id=device_id,
+                binding_id=record.id,
+                require_pool_confirmation=True,
+            )
 
         updated_record = self._repo.get_by_id(record.id)
         if updated_record is None:
@@ -1719,7 +1732,7 @@ class DeviceService:
                 )
                 or ""
             )
-            claim_token = None
+            claim: DataInitTriggerClaim | None = None
             if require_pool_confirmation:
                 if (
                     record.device_provider != BAAS_DEVICE_PROVIDER
@@ -1733,12 +1746,12 @@ class DeviceService:
                         f"confirmed_identity={confirmed_identity}"
                     )
                     return
-                claim_token = self._repo.claim_baas_desktop_data_init_trigger_if_ready(
+                claim = self._repo.claim_baas_desktop_data_init_trigger_if_ready(
                     binding_id=binding_id,
                     device_id=device_id,
                     startup_identity=startup_identity,
                 )
-                if claim_token is None:
+                if claim is None:
                     logger.info(
                         "data_init_trigger skipped already_claimed_or_not_ready: "
                         f"device_id={device_id} binding_id={binding_id} "
@@ -1751,7 +1764,10 @@ class DeviceService:
                 claimed_startup_identity=(
                     startup_identity if require_pool_confirmation else None
                 ),
-                claim_token=claim_token,
+                claim_token=claim.claim_token if claim is not None else None,
+                resume_stale_in_progress=(
+                    claim.resume_stale_in_progress if claim is not None else False
+                ),
             )
         except Exception as exc:
             logger.warning(
@@ -1767,6 +1783,7 @@ class DeviceService:
         record,
         claimed_startup_identity: str | None = None,
         claim_token: str | None = None,
+        resume_stale_in_progress: bool = False,
     ) -> None:
         """当设备自报 SUCCEEDED 时触发 data-init。
 
@@ -1807,7 +1824,7 @@ class DeviceService:
             # 仅在 data_init_status 为 pending_init / failed 时触发
             # null（存量 Bot，未启用 data-init）/ completed / in_progress 跳过
             if data_init_status not in ("pending_init", "failed") and not (
-                data_init_status == "in_progress" and claim_token is not None
+                data_init_status == "in_progress" and resume_stale_in_progress
             ):
                 logger.info(
                     f"bot_id={bot_id} data_init_trigger skipped "
@@ -1852,6 +1869,7 @@ class DeviceService:
                             owner_id=owner_id,
                             entity_id=entity_id,
                             entity_type=entity_type,
+                            resume_stale_in_progress=resume_stale_in_progress,
                         )
                     )
                     if result.get("status") != "completed":

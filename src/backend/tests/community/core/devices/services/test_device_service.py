@@ -18,7 +18,10 @@ from agentclaw.community.core.devices.models import (
     DeviceConnectionInfo,
     OperatorContext,
 )
-from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.repository.record import (
+    DataInitTriggerClaim,
+    DeviceBindingRecord,
+)
 from agentclaw.community.core.devices.errors import (
     DeviceNotFoundError,
     InvalidDeviceStatusError,
@@ -942,7 +945,9 @@ class TestReportDeviceAlive:
         repo = MagicMock()
         repo.get_by_device_id.return_value = pending
         repo.get_by_id.side_effect = [pending, active, active]
-        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = "claim-17"
+        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = (
+            DataInitTriggerClaim("claim-17", False)
+        )
         service = _make_service(repo=repo)
         service._sync_bot_config_when_device_active = MagicMock()
         service._trigger_data_init_on_device_ready = MagicMock()
@@ -962,6 +967,7 @@ class TestReportDeviceAlive:
             record=active,
             claimed_startup_identity="17",
             claim_token="claim-17",
+            resume_stale_in_progress=False,
         )
         repo.claim_baas_desktop_data_init_trigger_if_ready.assert_called_once_with(
             binding_id=active.id,
@@ -994,6 +1000,40 @@ class TestReportDeviceAlive:
 
         service.trigger_data_init_on_device_ready.assert_not_called()
 
+    def test_active_baas_heartbeat_retries_pool_data_init_readiness(self):
+        record = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={
+                "callback_token": "tok123",
+                "restart_publish_id": "17",
+                "layout_confirmed_startup_identity": "17",
+            },
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = record
+        repo.claim_baas_desktop_data_init_trigger_if_ready.side_effect = [
+            RuntimeError("claim write unavailable"),
+            DataInitTriggerClaim("claim-17", False),
+        ]
+        service = _make_service(repo=repo)
+        service._trigger_data_init_on_device_ready = MagicMock()
+
+        for _ in range(2):
+            service.report_device_alive(
+                device_id=record.device_id,
+                token="tok123",
+            )
+
+        service._trigger_data_init_on_device_ready.assert_called_once_with(
+            device_id=record.device_id,
+            record=record,
+            claimed_startup_identity="17",
+            claim_token="claim-17",
+            resume_stale_in_progress=False,
+        )
+
     def test_pool_data_init_dispatch_failure_releases_claim_for_retry(self):
         active = _make_record(
             status=DeviceBindingStatus.ACTIVE.value,
@@ -1005,7 +1045,9 @@ class TestReportDeviceAlive:
         )
         repo = MagicMock()
         repo.get_by_id.return_value = active
-        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = "claim-17"
+        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = (
+            DataInitTriggerClaim("claim-17", False)
+        )
         repo.release_baas_desktop_data_init_trigger_if_matches.return_value = True
         bot_query = MagicMock()
         bot_query.get_by_binding_id.return_value = {
@@ -1056,7 +1098,9 @@ class TestReportDeviceAlive:
         released = Event()
         repo = MagicMock()
         repo.get_by_id.return_value = active
-        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = "claim-17"
+        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = (
+            DataInitTriggerClaim("claim-17", False)
+        )
         repo.release_baas_desktop_data_init_trigger_if_matches.side_effect = (
             lambda **_kwargs: released.set() or True
         )
@@ -1109,7 +1153,9 @@ class TestReportDeviceAlive:
         invoked = Event()
         repo = MagicMock()
         repo.get_by_id.return_value = active
-        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = "claim-stale"
+        repo.claim_baas_desktop_data_init_trigger_if_ready.return_value = (
+            DataInitTriggerClaim("claim-stale", True)
+        )
         bot_query = MagicMock()
         bot_query.get_by_binding_id.return_value = {
             "bot_id": "desktop-bot",
@@ -1139,6 +1185,13 @@ class TestReportDeviceAlive:
         )
 
         assert invoked.wait(timeout=1)
+        data_init_service.trigger_init.assert_called_once_with(
+            bot_id="desktop-bot",
+            owner_id="u001",
+            entity_id="u001",
+            entity_type="staff",
+            resume_stale_in_progress=True,
+        )
         repo.release_baas_desktop_data_init_trigger_if_matches.assert_not_called()
 
     def test_pool_data_init_readiness_rejects_superseded_confirmation(self):

@@ -319,6 +319,106 @@ class TestTriggerInit:
         bot_service.update_bot_ext.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_stale_in_progress_claim_resumes_past_second_guard(self):
+        from datetime import datetime, timedelta, timezone
+
+        stale_at = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat()
+        bot_service = MagicMock()
+        bot_service.get_bot.return_value = {
+            "status": "ACTIVE",
+            "ext": {
+                "data_init_status": "in_progress",
+                "data_init_started_at": stale_at,
+            },
+        }
+        self.service._bot_service_provider = lambda: bot_service
+        self.service._async_execute_with_retry = AsyncMock(return_value=True)
+
+        result = await self.service.trigger_init(
+            bot_id="bot1",
+            owner_id="u1",
+            entity_id="u1",
+            entity_type="staff",
+            resume_stale_in_progress=True,
+        )
+
+        assert result["status"] == "completed"
+        self.service._async_execute_with_retry.assert_awaited_once()
+        bot_service.update_bot_ext.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stale_resume_stops_when_second_read_is_fresh(self):
+        from datetime import datetime, timedelta, timezone
+
+        stale_at = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat()
+        fresh_at = datetime.now(timezone.utc).isoformat()
+        bot_service = MagicMock()
+        bot_service.get_bot.side_effect = [
+            {
+                "status": "ACTIVE",
+                "ext": {
+                    "data_init_status": "in_progress",
+                    "data_init_started_at": stale_at,
+                },
+            },
+            {
+                "status": "ACTIVE",
+                "ext": {
+                    "data_init_status": "in_progress",
+                    "data_init_started_at": fresh_at,
+                },
+            },
+        ]
+        self.service._bot_service_provider = lambda: bot_service
+        self.service._async_execute_with_retry = AsyncMock(return_value=True)
+
+        result = await self.service.trigger_init(
+            bot_id="bot1",
+            owner_id="u1",
+            entity_id="u1",
+            entity_type="staff",
+            resume_stale_in_progress=True,
+        )
+
+        assert result["status"] == "skipped"
+        self.service._async_execute_with_retry.assert_not_awaited()
+        bot_service.update_bot_ext.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stale_resume_stops_when_second_read_is_completed(self):
+        from datetime import datetime, timedelta, timezone
+
+        stale_at = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat()
+        bot_service = MagicMock()
+        bot_service.get_bot.side_effect = [
+            {
+                "status": "ACTIVE",
+                "ext": {
+                    "data_init_status": "in_progress",
+                    "data_init_started_at": stale_at,
+                },
+            },
+            {
+                "status": "ACTIVE",
+                "ext": {"data_init_status": "completed"},
+            },
+        ]
+        self.service._bot_service_provider = lambda: bot_service
+        self.service._async_execute_with_retry = AsyncMock(return_value=True)
+
+        result = await self.service.trigger_init(
+            bot_id="bot1",
+            owner_id="u1",
+            entity_id="u1",
+            entity_type="staff",
+            resume_stale_in_progress=True,
+        )
+
+        assert result == {"status": "skipped", "message": "初始化已完成"}
+        self.service._async_execute_with_retry.assert_not_awaited()
+        bot_service.update_bot_ext.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_pending_init_persists_status_and_iam_token_together(self):
         bot_service = MagicMock()
         bot_service.get_bot.return_value = {"status": "PENDING", "ext": {}}
@@ -365,5 +465,3 @@ class TestTriggerInit:
         )
         assert result["status"] == "skipped"
         self.service._should_run_init.assert_called_once()
-
-

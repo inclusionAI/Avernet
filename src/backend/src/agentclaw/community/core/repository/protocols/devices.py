@@ -12,7 +12,10 @@ from abc import abstractmethod
 from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+    from agentclaw.community.core.devices.repository.record import (
+        DataInitTriggerClaim,
+        DeviceBindingRecord,
+    )
 
 
 @runtime_checkable
@@ -313,8 +316,8 @@ class DeviceBindingRepository(Protocol):
         binding_id: int,
         device_id: str,
         startup_identity: str,
-    ) -> str | None:
-        """Return a leased claim token once Binding and Bot are ready."""
+    ) -> DataInitTriggerClaim | None:
+        """Return a fenced dispatch lease once Binding and Bot are ready."""
         ...
 
     @abstractmethod

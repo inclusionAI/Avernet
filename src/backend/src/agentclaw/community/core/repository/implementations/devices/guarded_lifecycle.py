@@ -10,6 +10,7 @@ from uuid import uuid4
 from sqlalchemy import func
 
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
+from agentclaw.community.core.devices.repository.record import DataInitTriggerClaim
 from agentclaw.community.core.devices.protocols import (
     LAYOUT_CONFIRMED_STARTUP_IDENTITY_KEY,
 )
@@ -250,7 +251,7 @@ class BaasDesktopLifecycleRepositoryMixin:
         binding_id: int,
         device_id: str,
         startup_identity: str,
-    ) -> str | None:
+    ) -> DataInitTriggerClaim | None:
         marker_key = "data_init_triggered_startup_identity"
         token_key = "data_init_trigger_claim_token"
         claimed_at_key = "data_init_trigger_claimed_at"
@@ -329,7 +330,10 @@ class BaasDesktopLifecycleRepositoryMixin:
                 binding.device_props = json.dumps(props, ensure_ascii=False)
                 binding.gmt_modified = func.now()
                 db.commit()
-                return claim_token
+                return DataInitTriggerClaim(
+                    claim_token=claim_token,
+                    resume_stale_in_progress=in_progress_is_stale,
+                )
             except Exception:
                 db.rollback()
                 raise
