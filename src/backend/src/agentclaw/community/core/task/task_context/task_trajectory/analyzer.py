@@ -779,8 +779,9 @@ class TaskTrajectoryAnalyzer:
         bot what to look for in it (tool-call errors, 执行完不上报结果,
         长时间无新进展) — timeline-only analyses are unaffected by the section's
         absence."""
-        timeline_brief = [
-            {
+        timeline_brief = []
+        for ev in trajectory.timeline:
+            row: dict[str, Any] = {
                 "action_type": (
                     ev.action_type.value
                     if isinstance(ev.action_type, TrajectoryActionType) else str(ev.action_type)
@@ -791,8 +792,11 @@ class TaskTrajectoryAnalyzer:
                 "status_to": ev.status_to.value if isinstance(ev.status_to, Status) else ev.status_to,
                 "attempt": ev.attempt,
             }
-            for ev in trajectory.timeline
-        ]
+            # 读时富化的节点产出(service._attach_node_outputs):仅每个 node 的
+            # 最后一条事件携带;有则透传给 bot(缺省 = 无产出信号,不加键)。
+            if getattr(ev, "output", None):
+                row["output"] = ev.output
+            timeline_brief.append(row)
         ext_info_brief = _build_ext_info_brief(trajectory.timeline, ext_info_lookup)
 
         instruction = """

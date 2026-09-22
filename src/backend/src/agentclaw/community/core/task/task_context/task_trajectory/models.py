@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 from agentclaw.community.core.task.domain.models import Status
 
@@ -91,6 +92,11 @@ class TrajectoryEvent:
     ``gmt_create`` = 事件发射时间(timeline 排序依据);``gmt_modified`` 仅在分析回填 ``analysis``
     时更新(未回填时 == ``gmt_create``)。``analysis`` 为内嵌 ``TrajectoryAnalysis`` JSON 字符串,
     发射时为 ``None``,分析完成后统一回填(REC-9)。``action_input`` **不截断**(原文落库)。
+
+    ``output`` = **读时富化**字段(不落库):子任务**(task_id+node_id)当前产出**
+    (``node.run_info.output``,经 ``task_execution_graph`` 查询接口获取),由 service
+    在 ``get_trajectory`` 返回前挂到该节点在 timeline 中的**最后一条**事件上;库行
+    无此列,组装的原始值为 ``None``,富化失败/未接线也保持 ``None``(缺字段=无信号)。
     """
 
     task_id: str
@@ -108,6 +114,7 @@ class TrajectoryEvent:
     boost_reason: str | None = None           # 本次动作推进原因(成功推进时可填)
     holder_id: str | None = None              # Relay 当前动作执行人(ext_info 定向投影)
     analysis: str | None = None              # 内嵌 TrajectoryAnalysis JSON(发射时 None)
+    output: dict[str, Any] | None = None      # 读时富化:节点当前产出(仅该节点最后一条事件;不落库)
 
 
 @dataclass

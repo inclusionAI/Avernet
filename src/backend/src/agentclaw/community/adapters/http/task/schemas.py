@@ -937,6 +937,11 @@ class TrajectoryEventDTO(BaseModel):
     boost_reason: str | None = Field(None, description="本次动作的推进原因")
     holder_id: str | None = Field(None, description="Relay 当前动作执行人")
     analysis: str | None = Field(None, description="内嵌 TrajectoryAnalysis JSON 字符串(未回填为 None)")
+    output: dict[str, Any] | None = Field(
+        None,
+        description="子任务当前产出(node.run_info.output;读时经 task_execution_graph 富化,"
+                    "仅该 node 在 timeline 中的最后一条事件携带,无产出为 None)",
+    )
 
 
 class TaskTrajectoryDTO(BaseModel):
@@ -991,6 +996,7 @@ def trajectory_to_dto(trajectory: "TaskTrajectory") -> TaskTrajectoryDTO:
                 boost_reason=ev.boost_reason,
                 holder_id=ev.holder_id,
                 analysis=ev.analysis,
+                output=ev.output,
             )
             for ev in trajectory.timeline
         ],

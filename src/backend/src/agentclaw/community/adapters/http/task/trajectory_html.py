@@ -165,6 +165,15 @@ def _render_event(ev: "object") -> str:
         parts.append(f'<pre>{html.escape(str(action_input))}</pre>')
         parts.append("</details>")
 
+    # 节点产出(读时富化;仅每个 node 的最后一条事件携带,可折叠)
+    output = getattr(ev, "output", None)
+    if output:
+        payload = json.dumps(output, ensure_ascii=False, indent=2)
+        parts.append('<details class="ev-input">')
+        parts.append("<summary>节点产出 · output</summary>")
+        parts.append(f"<pre>{html.escape(payload)}</pre>")
+        parts.append("</details>")
+
     parts.append("</div>")
     return "".join(parts)
 

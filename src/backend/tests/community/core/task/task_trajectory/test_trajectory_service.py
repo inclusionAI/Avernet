@@ -690,13 +690,18 @@ async def test_do_analysis_true_passes_ext_info_lookup_to_analyzer():
 
 class _FakeNode:
     """A domain-shaped node stub — the probe touches only ``node_id`` /
-    ``status`` / ``run_info.extend_props`` / ``run_info.start_time``."""
+    ``status`` / ``run_info.extend_props`` / ``run_info.start_time`` /
+    ``run_info.output``(产出富化)."""
 
     def __init__(self, *, node_id: str, status: Status, extend_props: dict | None = None,
-                 start_time: int | None = None) -> None:
+                 start_time: int | None = None, output: dict | None = None) -> None:
         self.node_id = node_id
         self.status = status
-        self.run_info = RuntimeInfo(start_time=start_time, extend_props=dict(extend_props or {}))
+        self.run_info = RuntimeInfo(
+            start_time=start_time,
+            output=dict(output or {}),
+            extend_props=dict(extend_props or {}),
+        )
 
 
 class _FakeGraph:
@@ -898,3 +903,76 @@ async def test_do_analysis_probe_truncates_long_messages():
     assert len(briefs) == 1 and briefs[0]["messages"][0]["content"] is not None
     assert len(briefs[0]["messages"][0]["content"]) <= 600 + 1
     assert briefs[0]["message_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 节点产出读时富化 — 每个子任务的最后一条事件携带 node.run_info.output
+# ---------------------------------------------------------------------------
+
+
+def _output_graph(nodes: list[_FakeNode]) -> _FakeGraph:
+    return _FakeGraph(nodes)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_get_trajectory_attaches_node_output_to_last_event():
+    """富化语义:timeline 中每个 (task_id,node_id) 的**最后一条**事件挂上该节点
+    当前产出(graph 查询接口);更早的事件保持 output=None。"""
+    graph = _output_graph([
+        _FakeNode(node_id="n1", status=Status.DONE, output={"result": "n1-done", "by": "bot1"}),
+        _FakeNode(node_id="n2", status=Status.RUNNING, output={}),  # 空产出 → 不挂
+    ])
+    timeline = [
+        _make_event(node_id="n1", action_type=TrajectoryActionType.PLAN, gmt_create=1000),
+        _make_event(node_id="n1", action_type=TrajectoryActionType.EXECUTE, gmt_create=2000),
+        _make_event(node_id="n2", action_type=TrajectoryActionType.PLAN, gmt_create=3000),
+    ]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    assembler = _FakeAssembler(traj)
+    analyzer = _FakeAnalyzer()
+    svc = TaskTrajectoryService(assembler, _FakeRepo(), analyzer, None, graph=graph)
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    n1_events = [e for e in result.timeline if e.node_id == "n1"]
+    assert n1_events[0].output is None, "更早的 PLAN 事件不挂产出"
+    assert n1_events[-1].output == {"result": "n1-done", "by": "bot1"}, (
+        "最后一条 EXECUTE 事件挂 n1 当前产出"
+    )
+    n2_last = [e for e in result.timeline if e.node_id == "n2"][-1]
+    assert n2_last.output is None, "空产出不挂(缺字段=无信号)"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_get_trajectory_output_skipped_when_graph_unbound():
+    """graph 未接线(4 参轻量构造)→ 不富化也不抛,事件保持 output=None。"""
+    timeline = [_make_event(node_id="n1", gmt_create=1000)]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc = TaskTrajectoryService(_FakeAssembler(traj), _FakeRepo(), _FakeAnalyzer(), None)
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    assert result.timeline[0].output is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_get_trajectory_output_enrichment_survives_graph_failure():
+    """图读失败(任务已删/relay 外部托管)→ WARNING 降级,轨迹本体照常返回。"""
+    class _RaisingGraph(_FakeGraph):
+        def query_task_dashboard(self, task_id: str):
+            raise RuntimeError("no graph")
+
+    timeline = [_make_event(node_id="n1", gmt_create=1000)]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    svc = TaskTrajectoryService(
+        _FakeAssembler(traj), _FakeRepo(), _FakeAnalyzer(), None,
+        graph=_RaisingGraph([]),
+    )
+
+    result = await svc.get_trajectory("t1", do_analysis=False)
+
+    assert result is traj  # 本体照常返回
+    assert result.timeline[0].output is None

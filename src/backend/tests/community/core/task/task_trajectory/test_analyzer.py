@@ -80,6 +80,7 @@ def _ev(
     status_to: Status | None = None,
     error_type: ReasonCatalog | None = None,
     error_msg: str | None = None,
+    output: dict | None = None,
 ) -> TrajectoryEvent:
     """Build a ``TrajectoryEvent`` with sensible defaults."""
     return TrajectoryEvent(
@@ -95,6 +96,7 @@ def _ev(
         status_to=status_to,
         error_type=error_type,
         error_msg=error_msg,
+        output=output,
     )
 
 
@@ -898,6 +900,33 @@ async def test_tc_bot_message_omits_running_sessions_when_absent():
     )
     parsed = json.loads(bot.last_call["message"])
     assert "running_sessions" not in parsed
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_timeline_rows_carry_enriched_node_output():
+    """节点产出读时富化:挂在事件上的 ``output``(service._attach_node_outputs,
+    仅每 node 最后一条事件)透传进 bot 消息的 timeline 行;未挂载的事件无
+    ``output`` 键(缺键=无产出信号)。"""
+    bot = _FakeBot(content=_bot_analysis_content())
+    analyzer = TaskTrajectoryAnalyzer(bot=bot)
+    last = _ev(
+        TrajectoryActionType.EXECUTE, action_result="success", ms=_MS + 5_000,
+        output={"result": "n1-done", "artifacts": 2},
+    )
+    trajectory = _traj([
+        _ev(TrajectoryActionType.SUBMIT, action_result="success"),
+        last,
+        _terminal_success(),
+    ])
+    await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    parsed = json.loads(bot.last_call["message"])
+    rows = parsed["timeline"]
+    assert rows[1]["output"] == {"result": "n1-done", "artifacts": 2}
+    assert "output" not in rows[0]
+    assert "output" not in rows[2]
 
 
 @pytest.mark.asyncio

@@ -402,7 +402,9 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         ``TrajectoryAnalysisNotConfiguredError`` (503).
         """
         if not do_analysis:
-            return self._assembler.assemble(task_id)
+            trajectory = self._assembler.assemble(task_id)
+            self._attach_node_outputs(trajectory)
+            return trajectory
         return await self._do_analysis(task_id)
 
     # ------------------------------------------------------------------
@@ -415,6 +417,10 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         # 1. Assemble the timeline (read-side; no DB write beyond the head UPSERT
         #    which preserves existing analysis/gmt_modified).
         trajectory = self._assembler.assemble(task_id)
+        # 1a. 读时富化:每个子任务(task_id+node_id)的最后一条事件挂上该节点的
+        #     当前产出(task_execution_graph 查询接口)。旁路,失败降级不抛;两模式
+        #     返回的 timeline 同形态(含快路径直接返回的持久化分析)。
+        self._attach_node_outputs(trajectory)
 
         # 1b. Read ALL the task's event rows ONCE — feeding both the timeline
         #     fingerprint and the ext_info_lookup below. Read failure → WARNING
@@ -518,6 +524,53 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         trajectory.analysis = analysis_json
         trajectory.gmt_modified = int(time.time() * 1000)
         return trajectory
+
+    # ------------------------------------------------------------------
+    # 节点产出读时富化 — timeline 的"每子任务最后一条事件"携带执行产出
+    # (决策 #14 精神:观测旁路,graph 未接线/图读失败 → 跳过,绝不影响轨迹本体)。
+    # ------------------------------------------------------------------
+
+    def _attach_node_outputs(self, trajectory: TaskTrajectory) -> None:
+        """把每个子任务(task_id+node_id)的**当前产出**挂到它在 timeline 中的
+        **最后一条**事件上。
+
+        产出数据经 ``task_execution_graph`` 的查询接口获取
+        (``query_task_dashboard`` → ``node.run_info.output``——执行回投写图的
+        节点级 dict 产出)。倒序扫 timeline 找每个 node 的末位事件(正序时间线的
+        "最新一条"),挂 ``ev.output``(浅拷贝与图现场解耦)。挂载语义:
+        空 ``{}`` / 缺失的产出保持 ``None``(缺字段=无信号,DTO/HTML 不透出)。
+
+        旁路保障:``graph`` 未接线(轻量 DI)→ 静默跳过;图读失败(任务已删 /
+        relay 外部托管等)→ WARNING + 返回未富化;一律**不**影响 ``get_trajectory``
+        本体返回。注意:富化不写库、不进指纹(``timeline_version`` 仍只敏感于
+        事件行变化)。
+        """
+        if self._graph is None or not trajectory.timeline:
+            return
+        try:
+            graph = self._graph.query_task_dashboard(trajectory.task_id)
+        except Exception as ex:  # noqa: BLE001  图读失败 → 不富化,轨迹本体照常
+            logger.warning(
+                "[task][trajectory] 节点产出富化图读失败,跳过 task=%s: %s: %s",
+                trajectory.task_id, type(ex).__name__, ex,
+            )
+            return
+        outputs: dict[str, dict] = {}
+        for node in getattr(graph, "tasks", []):
+            out = getattr(node.run_info, "output", None)
+            if isinstance(out, dict) and out:
+                outputs[node.node_id] = out
+        if not outputs:
+            return
+        last_seen: set[str] = set()
+        for ev in reversed(trajectory.timeline):
+            node_id = ev.node_id
+            if node_id in last_seen:
+                continue  # 该节点更早的事件:production 只挂最后一条
+            last_seen.add(node_id)
+            out = outputs.get(node_id)
+            if out:
+                ev.output = dict(out)
 
     # ------------------------------------------------------------------
     # RUNNING 节点会话明细探测 — timeline 之外的"执行侧现场"(决策 #14 精神:
