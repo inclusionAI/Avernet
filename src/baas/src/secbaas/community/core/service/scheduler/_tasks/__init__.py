@@ -10,6 +10,10 @@ from ._expire_sandbox_timer_task import (
     ExpireSandboxTimerTaskConfig,
 )
 from ._file_transfer_poller import FileTransferPoller, FileTransferPollerConfig
+from ._publish_retry_sweep_task import (
+    PublishRetrySweepConfig,
+    PublishRetrySweepTask,
+)
 
 __all__ = [
     "BotRunRecoveryTask",
@@ -23,5 +27,7 @@ __all__ = [
     "FileTransferPoller",
     "FileTransferPollerConfig",
     "GapDetectionResult",
+    "PublishRetrySweepConfig",
+    "PublishRetrySweepTask",
     "RenewalRunReport",
 ]

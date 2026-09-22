@@ -116,6 +116,15 @@ class PublishConfig(BaseModel):
         le=3600,
         description="Max seconds to wait for device callback before marking record as failed",
     )
+    publish_max_retry_times: int = Field(
+        default=0,
+        ge=0,
+        le=3,
+        description=(
+            "Additional full-lifecycle attempts per device after a failed publish "
+            "attempt; 0 disables retry"
+        ),
+    )
 
     # Caller-specific keys (injected per publish type)
     bot_name: str | None = None
@@ -452,6 +461,12 @@ class DeviceOperationResult(BaseModel):
     )
     new_device_id: int | None = Field(
         default=None, description="New device ID (for CREATE/UPDATE operations)"
+    )
+    publish_max_retry_times: int = Field(
+        default=0, description="Retry budget configured for this device operation"
+    )
+    publish_retry_count: int = Field(
+        default=0, description="Retry attempts consumed so far for this device"
     )
     gmt_create: datetime = Field(..., description="Operation timestamp")
 

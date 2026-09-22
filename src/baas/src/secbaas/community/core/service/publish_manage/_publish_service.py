@@ -75,6 +75,11 @@ from secbaas.community.core.service.paas import is_paas_mock_mode
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
 
+from ._publish_retry_orchestrator import (
+    PublishAttemptOrchestrator,
+    _retry_field,
+)
+
 logger = get_logger("core-service")
 
 
@@ -98,7 +103,7 @@ class BatchConfig:
     device_count: int
 
 
-class DefaultPublishService(PublishService):
+class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
     """Bot publish workflow orchestration service.
 
     State Machine Overview:
@@ -1203,6 +1208,11 @@ class DefaultPublishService(PublishService):
                     PublishRecordExtraConfig(
                         device_uuid=device.device_uuid,
                         provider_device_id=device.provider_device_id,
+                        publish_max_retry_times=(
+                            publish_config.publish_max_retry_times
+                            if publish_config is not None
+                            else 0
+                        ),
                     )
                 )
                 extra_config = (
@@ -2485,6 +2495,19 @@ class DefaultPublishService(PublishService):
                 )
 
                 if result.status == DeviceStatus.FAILED.value:
+                    retried = await self._drive_record_attempt(
+                        record=record,
+                        tenant=tenant,
+                        operator=operator,
+                        publish_id=publish_id,
+                        failure_reason=(result.err_msg or "Device start failed"),
+                    )
+                    if retried:
+                        logger.warning(
+                            f"[start_batch] retrying device {device.device_uuid} "
+                            f"after failure: {result.err_msg}"
+                        )
+                        continue
                     failed += 1
                     logger.error(
                         f"Device {device.device_uuid} start failed: {result.err_msg}"
@@ -2514,6 +2537,18 @@ class DefaultPublishService(PublishService):
                     )
 
             except Exception as e:
+                retried = await self._drive_record_attempt(
+                    record=record,
+                    tenant=tenant,
+                    operator=operator,
+                    publish_id=publish_id,
+                    failure_reason=str(e),
+                )
+                if retried:
+                    logger.warning(
+                        f"[start_batch] retrying device {device.id} after exception: {e}"
+                    )
+                    continue
                 failed += 1
                 logger.error(f"Failed to start device {device.id}: {e}")
                 record_repo.update_result(
@@ -2713,6 +2748,19 @@ class DefaultPublishService(PublishService):
                     )
 
             except Exception as e:
+                retried = await self._drive_record_attempt(
+                    record=record,
+                    tenant=tenant,
+                    operator=operator,
+                    publish_id=publish_id,
+                    failure_reason=str(e),
+                )
+                if retried:
+                    logger.warning(
+                        f"[update_batch] retrying device {device_record.device_uuid} "
+                        f"after failure: {e}"
+                    )
+                    continue
                 failed += 1
                 logger.error(f"Failed to update device {device_record.id}: {e}")
 
@@ -2859,6 +2907,19 @@ class DefaultPublishService(PublishService):
                     )
 
             except Exception as e:
+                retried = await self._drive_record_attempt(
+                    record=record,
+                    tenant=tenant,
+                    operator=operator,
+                    publish_id=publish_id,
+                    failure_reason=str(e),
+                )
+                if retried:
+                    logger.warning(
+                        f"[restart_batch] retrying device {device_record.device_uuid} "
+                        f"after failure: {e}"
+                    )
+                    continue
                 failed += 1
                 logger.error(f"Failed to restart device {device_record.id}: {e}")
 
@@ -3005,6 +3066,19 @@ class DefaultPublishService(PublishService):
                     )
 
                     if result.status == DeviceStatus.FAILED.value:
+                        retried = await self._drive_record_attempt(
+                            record=record,
+                            tenant=tenant,
+                            operator=operator,
+                            publish_id=publish_id,
+                            failure_reason=(result.err_msg or "Device start failed"),
+                        )
+                        if retried:
+                            logger.warning(
+                                f"[scale_batch] retrying device {device.device_uuid} "
+                                f"after failure: {result.err_msg}"
+                            )
+                            continue
                         failed += 1
                         logger.error(
                             f"Device {device.device_uuid} start failed: "
@@ -3036,6 +3110,19 @@ class DefaultPublishService(PublishService):
                         )
 
                 except Exception as e:
+                    retried = await self._drive_record_attempt(
+                        record=record,
+                        tenant=tenant,
+                        operator=operator,
+                        publish_id=publish_id,
+                        failure_reason=str(e),
+                    )
+                    if retried:
+                        logger.warning(
+                            f"[scale_batch] retrying device {device.device_uuid} "
+                            f"after exception: {e}"
+                        )
+                        continue
                     failed += 1
                     logger.error(f"Failed to start device for scale up: {e}")
                     record_repo.update_result(
@@ -3734,6 +3821,20 @@ class DefaultPublishService(PublishService):
             )
             logger.info(f"Device {callback.device_uuid} set to FAILED via callback")
 
+            retried = await self._drive_record_attempt(
+                record=publish_record,
+                tenant=tenant,
+                operator="callback",
+                publish_id=callback.publish_id,
+                failure_reason=err_msg,
+            )
+            if retried:
+                logger.warning(
+                    f"[device_callback] retrying device {callback.device_uuid} "
+                    f"after hook failure: {err_msg}"
+                )
+                return {"status": "retrying"}
+
         # Update publish_record with serialized hook result (optimistic lock)
         result_message = serialize_hook_result(
             exit_code=callback.exit_code,
@@ -4364,10 +4465,11 @@ class DefaultPublishService(PublishService):
             )
 
             try:
-                await self.handle_device_callback(callback)
+                result = await self.handle_device_callback(callback)
                 logger.info(
                     f"[timeout] Synthetic FAILED callback processed for "
-                    f"record={record.id}, device_uuid={record.device_uuid}"
+                    f"record={record.id}, device_uuid={record.device_uuid}, "
+                    f"result={result.get('status')}"
                 )
             except Exception:
                 logger.exception(
@@ -4635,6 +4737,10 @@ class DefaultPublishService(PublishService):
                     result_message=rec.result_message,
                     old_device_id=None,  # Would need to parse from extra_config
                     new_device_id=None,  # Would need to parse from extra_config
+                    publish_max_retry_times=_retry_field(
+                        rec, "publish_max_retry_times"
+                    ),
+                    publish_retry_count=_retry_field(rec, "publish_retry_count"),
                     gmt_create=rec.gmt_create,
                 )
                 batch_devices.append(device_result)

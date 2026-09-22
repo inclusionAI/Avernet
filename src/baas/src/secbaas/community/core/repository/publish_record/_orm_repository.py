@@ -1,11 +1,13 @@
 """Publish record repository ORM implementation."""
 
+from datetime import datetime
+
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
 from secbaas.community.logger import get_logger
 
 from ._orm_model import PublishRecordModel
 from ._protocol import PublishRecordRepository
-from ._record import PublishRecordRecord
+from ._record import PublishRecordExtraConfig, PublishRecordRecord
 
 log = get_logger("orm")
 
@@ -206,6 +208,177 @@ class OrmPublishRecordRepository(OrmConnectionMixin, PublishRecordRepository):
         result = int(result) > 0
         log.info("[publish-record:update_result_if_processing] result: %s", result)
         return result
+
+    @with_orm_session
+    def try_claim_retry(
+        self,
+        *,
+        record_id: int,
+        tenant: str,
+        env: str,
+        expected_retry_count: int,
+        attempt_started_at: str,
+        modifier: str | None = None,
+    ) -> bool:
+        log.info(
+            "try_claim_retry: record_id=%s, tenant=%s, env=%s, expected_retry_count=%s",
+            record_id,
+            tenant,
+            env,
+            expected_retry_count,
+        )
+        import dataclasses
+        import json
+
+        from sqlalchemy import func
+
+        row = (
+            self._session.query(PublishRecordModel)
+            .filter(
+                PublishRecordModel.id == record_id,
+                PublishRecordModel.tenant == tenant,
+                PublishRecordModel.env == env,
+                PublishRecordModel.is_deleted == 0,
+                PublishRecordModel.result_status == "PROCESSING",
+            )
+            .with_for_update()
+            .first()
+        )
+        if row is None:
+            log.info("[publish-record:try_claim_retry] no PROCESSING record")
+            return False
+
+        current = PublishRecordExtraConfig(**self._parse_extra_config(row.extra_config))
+        if current.publish_retry_count != expected_retry_count:
+            log.info(
+                "[publish-record:try_claim_retry] stale expected count: "
+                "expected=%s actual=%s",
+                expected_retry_count,
+                current.publish_retry_count,
+            )
+            return False
+
+        claimed = PublishRecordExtraConfig(
+            device_uuid=current.device_uuid,
+            provider_device_id=current.provider_device_id,
+            publish_max_retry_times=current.publish_max_retry_times,
+            publish_retry_count=current.publish_retry_count + 1,
+            attempt_started_at=attempt_started_at,
+        )
+        values = {
+            "extra_config": json.dumps(dataclasses.asdict(claimed), ensure_ascii=False),
+            "gmt_modified": func.now(),
+        }
+        if modifier is not None:
+            values["modifier"] = modifier
+
+        updated = (
+            self._session.query(PublishRecordModel)
+            .filter(
+                PublishRecordModel.id == record_id,
+                PublishRecordModel.tenant == tenant,
+                PublishRecordModel.env == env,
+                PublishRecordModel.is_deleted == 0,
+                PublishRecordModel.result_status == "PROCESSING",
+            )
+            .update(values, synchronize_session=False)
+        )
+        result = int(updated) > 0
+        log.info("[publish-record:try_claim_retry] result: %s", result)
+        return result
+
+    @with_orm_session
+    def get_retry_state(
+        self, record_id: int, tenant: str, env: str
+    ) -> PublishRecordExtraConfig | None:
+        row = (
+            self._session.query(PublishRecordModel)
+            .filter(
+                PublishRecordModel.id == record_id,
+                PublishRecordModel.tenant == tenant,
+                PublishRecordModel.env == env,
+                PublishRecordModel.is_deleted == 0,
+            )
+            .first()
+        )
+        if row is None:
+            return None
+        return PublishRecordExtraConfig(**self._parse_extra_config(row.extra_config))
+
+    @with_orm_session
+    def database_now(self) -> datetime:
+        from sqlalchemy import func
+
+        return self._session.execute(func.now()).scalar()
+
+    @with_orm_session
+    def list_stale_processing_records_across_tenants(
+        self, timeout_seconds: int, env: str
+    ) -> list[PublishRecordRecord]:
+        from datetime import timedelta
+
+        from sqlalchemy import func
+
+        db_now = self._session.execute(func.now()).scalar()
+        cutoff = db_now - timedelta(seconds=timeout_seconds)
+        rows = (
+            self._session.query(PublishRecordModel)
+            .filter(
+                PublishRecordModel.result_status == "PROCESSING",
+                PublishRecordModel.gmt_modified < cutoff,
+                PublishRecordModel.env == env,
+                PublishRecordModel.is_deleted == 0,
+            )
+            .all()
+        )
+        records = [row.to_record() for row in rows]
+        log.info(
+            "[publish-record:list_stale_across_tenants] result: %s rows",
+            len(records),
+        )
+        return records
+
+    @with_orm_session
+    def list_stale_processing_records_all(
+        self, timeout_seconds: int, tenant: str, env: str
+    ) -> list[PublishRecordRecord]:
+        from datetime import timedelta
+
+        from sqlalchemy import func
+
+        db_now = self._session.execute(func.now()).scalar()
+        cutoff = db_now - timedelta(seconds=timeout_seconds)
+        rows = (
+            self._session.query(PublishRecordModel)
+            .filter(
+                PublishRecordModel.result_status == "PROCESSING",
+                PublishRecordModel.gmt_modified < cutoff,
+                PublishRecordModel.tenant == tenant,
+                PublishRecordModel.env == env,
+                PublishRecordModel.is_deleted == 0,
+            )
+            .all()
+        )
+        records = [row.to_record() for row in rows]
+        log.info(
+            "[publish-record:list_stale_processing_records_all] result: %s rows",
+            len(records),
+        )
+        return records
+
+    @staticmethod
+    def _parse_extra_config(raw: object) -> dict:
+        import json
+
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        if isinstance(raw, dict):
+            return raw
+        return {}
 
     @with_orm_session
     def get_by_device_id_and_publish_id(

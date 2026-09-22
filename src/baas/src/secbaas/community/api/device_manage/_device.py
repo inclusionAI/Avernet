@@ -38,6 +38,26 @@ class DeviceStatus(StrEnum):
     OFFLINE = "OFFLINE"
 
 
+class DeviceOperationOutcome(StrEnum):
+    """Structural outcome of a device start/restart/update attempt.
+
+    Distinguishes the cases the publish retry pipeline must handle
+    differently, without inspecting error message text.
+
+    ``HOOK_FAILED`` is not produced by the synchronous device service: a start
+    hook reports its result through the device callback, so the hook-failed
+    case reaches the retry pipeline via ``handle_device_callback`` instead.
+    The member is retained so the outcome vocabulary covers every lifecycle
+    stage.
+    """
+
+    PROVISION_FAILED = "PROVISION_FAILED"
+    HOOK_PENDING = "HOOK_PENDING"
+    HOOK_FAILED = "HOOK_FAILED"
+    COMPLETED = "COMPLETED"
+    NOT_ATTEMPTED = "NOT_ATTEMPTED"
+
+
 # ==================== Pydantic Schemas ====================
 
 
@@ -87,6 +107,7 @@ class DeviceResponse(BaseModel):
     provider_device_props: dict[str, Any] | None
     extra_config: DeviceConfig | None = Field(default=None, description="扩展配置")
     err_msg: str | None = None
+    operation_outcome: DeviceOperationOutcome = DeviceOperationOutcome.NOT_ATTEMPTED
     creator: str
     modifier: str
     gmt_create: datetime

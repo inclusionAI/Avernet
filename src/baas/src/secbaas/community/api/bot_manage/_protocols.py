@@ -188,6 +188,7 @@ class BotManageService(Protocol):
         request_id: str,
         scope: RestartScope = RestartScope.ALL,
         auto_approve_publish: bool = False,
+        publish_max_retry_times: int | None = None,
     ) -> RestartBotResponse:
         """Create RESTART publish for Bot device recycling."""
         ...

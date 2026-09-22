@@ -39,6 +39,15 @@ class BotConfig(BaseModel):
         le=3600,
         description="Max seconds to wait for device callback before marking record as failed",
     )
+    publish_max_retry_times: int | None = Field(
+        default=None,
+        ge=0,
+        le=3,
+        description=(
+            "Additional full-lifecycle attempts per device after a failed publish "
+            "attempt; None leaves any stored value unchanged"
+        ),
+    )
     entity_id: str = ""
     entity_type: str = "staff"
     auto_approve_publish: bool = Field(

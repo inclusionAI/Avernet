@@ -17,6 +17,7 @@ from secbaas.community.api.device_manage import (
     DeviceConfig,
     DeviceCreate,
     DeviceCreateConfig,  # noqa: F401 used in _native_update_device signature
+    DeviceOperationOutcome,
     DeviceResponse,
     DeviceService,
     DeviceStatus,
@@ -410,7 +411,9 @@ async def _native_restart_device(
             raise ValueError(
                 f"Device record not found after failed restart: id={record.id}"
             )
-        return device_record_to_response(updated_record)
+        return device_record_to_response(
+            updated_record, DeviceOperationOutcome.PROVISION_FAILED
+        )
 
     target_status = DeviceStatus.PENDING if has_async_callback else DeviceStatus.ACTIVE
     # Update status: PENDING if caller has a callback/health-check mechanism,
@@ -435,7 +438,12 @@ async def _native_restart_device(
     logger.info(
         f"[restart_device] done: device_uuid={device_uuid} status={final_status}"
     )
-    return device_record_to_response(updated_record)
+    outcome = (
+        DeviceOperationOutcome.HOOK_PENDING
+        if has_async_callback
+        else DeviceOperationOutcome.COMPLETED
+    )
+    return device_record_to_response(updated_record, outcome)
 
 
 async def _native_update_device(
@@ -535,7 +543,10 @@ _ARCA_STATUS_MAP = {
 }
 
 
-def device_record_to_response(record: DeviceRecord | None) -> DeviceResponse:
+def device_record_to_response(
+    record: DeviceRecord | None,
+    outcome: DeviceOperationOutcome = DeviceOperationOutcome.NOT_ATTEMPTED,
+) -> DeviceResponse:
     """Convert DeviceRecord to DeviceResponse."""
     if record is None:
         raise RuntimeError("Device record is None")
@@ -557,6 +568,7 @@ def device_record_to_response(record: DeviceRecord | None) -> DeviceResponse:
         provider_device_props=record.provider_device_props,
         extra_config=extra_config,
         err_msg=(v if isinstance(v := getattr(record, "err_msg", None), str) else None),
+        operation_outcome=outcome,
         creator=record.creator,
         modifier=record.modifier,
         gmt_create=record.gmt_create,
@@ -1130,7 +1142,9 @@ class DefaultDeviceService(DeviceService):
                 raise ValueError(
                     f"Device record not found after update: id={record.id}"
                 )
-            return device_record_to_response(updated_record)
+            return device_record_to_response(
+                updated_record, DeviceOperationOutcome.PROVISION_FAILED
+            )
 
         # Step 8: TeClaw async — device stays PENDING until external callback.
         # Sync TeClawCreateConfig (callback_context None) falls through.
@@ -1148,7 +1162,9 @@ class DefaultDeviceService(DeviceService):
                 raise ValueError(
                     f"Device record not found after TeClaw async submit: id={record.id}"
                 )
-            return device_record_to_response(updated_record)
+            return device_record_to_response(
+                updated_record, DeviceOperationOutcome.HOOK_PENDING
+            )
 
         # Step 9: Check for after_create_cmd_hook
         if deploy_config and deploy_config.after_create_cmd_hook and provider_device_id:
@@ -1171,7 +1187,9 @@ class DefaultDeviceService(DeviceService):
                     raise ValueError(
                         f"Device record not found after start: id={record.id}"
                     )
-                return device_record_to_response(updated_record)
+                return device_record_to_response(
+                    updated_record, DeviceOperationOutcome.HOOK_PENDING
+                )
             elif provider_type == "TECLAW":
                 logger.info(
                     f"TeClaw platform: skipping after_create_cmd_hook for device {device_uuid}, "
@@ -1207,7 +1225,9 @@ class DefaultDeviceService(DeviceService):
                     raise ValueError(
                         f"Device record not found after hook dispatch: id={record.id}"
                     )
-                return device_record_to_response(updated_record)
+                return device_record_to_response(
+                    updated_record, DeviceOperationOutcome.HOOK_PENDING
+                )
 
         # No-hook fast path: set ACTIVE immediately
         repo.update_device(
@@ -1224,7 +1244,9 @@ class DefaultDeviceService(DeviceService):
             raise ValueError(
                 f"Device record not found after activation: id={record.id}"
             )
-        return device_record_to_response(updated_record)
+        return device_record_to_response(
+            updated_record, DeviceOperationOutcome.COMPLETED
+        )
 
     def _resolve_device_for_operation(
         self,
@@ -1328,6 +1350,37 @@ class DefaultDeviceService(DeviceService):
 
         return record, device_config, template, provider_type
 
+    def prepare_for_reprovision(
+        self,
+        tenant: str,
+        device_uuid: str,
+        modifier: str = "system",
+    ) -> bool:
+        """Reset a device so a publish retry can provision it again.
+
+        Clears the provider identity and moves the device to PENDING, which
+        ``start_device`` requires. Returns False when the device is RELEASED,
+        missing, or otherwise not resettable.
+        """
+        env = get_current_env()
+        updated = self._repository.prepare_device_for_reprovision(
+            device_uuid=device_uuid,
+            tenant=tenant,
+            env=env,
+            modifier=modifier,
+        )
+        if updated <= 0:
+            logger.warning(
+                "[prepare_for_reprovision] device not resettable: "
+                f"device_uuid={device_uuid}, tenant={tenant}"
+            )
+            return False
+        logger.info(
+            f"[prepare_for_reprovision] device reset to PENDING: "
+            f"device_uuid={device_uuid}"
+        )
+        return True
+
     async def restart_device(
         self,
         tenant: str,
@@ -1427,7 +1480,9 @@ class DefaultDeviceService(DeviceService):
                 "returning current device state as no-op: device_uuid=%s",
                 device_uuid,
             )
-            return device_record_to_response(record)
+            return device_record_to_response(
+                record, DeviceOperationOutcome.HOOK_PENDING
+            )
 
         elif provider_type == "K8S":
             return await _native_restart_device(

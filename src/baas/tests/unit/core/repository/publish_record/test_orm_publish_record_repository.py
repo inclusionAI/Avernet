@@ -973,7 +973,8 @@ class TestPublishRecordExtraConfig:
         assert cfg.provider_device_id == "container-xyz"
 
         d = asdict(cfg)
-        assert d == {"device_uuid": "dev-abc", "provider_device_id": "container-xyz"}
+        assert d["device_uuid"] == "dev-abc"
+        assert d["provider_device_id"] == "container-xyz"
 
     def test_defaults_to_none(self):
         from dataclasses import asdict
@@ -985,9 +986,9 @@ class TestPublishRecordExtraConfig:
         cfg = PublishRecordExtraConfig()
         assert cfg.device_uuid is None
         assert cfg.provider_device_id is None
-
-        d = asdict(cfg)
-        assert d == {"device_uuid": None, "provider_device_id": None}
+        assert cfg.publish_max_retry_times == 0
+        assert cfg.publish_retry_count == 0
+        assert cfg.attempt_started_at is None
 
     def test_provider_device_id_none(self):
         from dataclasses import asdict
@@ -998,7 +999,8 @@ class TestPublishRecordExtraConfig:
 
         cfg = PublishRecordExtraConfig(device_uuid="dev-1", provider_device_id=None)
         d = asdict(cfg)
-        assert d == {"device_uuid": "dev-1", "provider_device_id": None}
+        assert d["device_uuid"] == "dev-1"
+        assert d["provider_device_id"] is None
 
     def test_slots_enforced(self):
         from secbaas.community.core.repository.publish_record import (
@@ -1017,3 +1019,200 @@ class TestConstructor:
     def test_constructor_sets_database(self, mock_database):
         repo = OrmPublishRecordRepository(mock_database)
         assert repo._database is mock_database
+
+
+# ==================== retry claim ====================
+
+
+class TestTryClaimRetry:
+    def _processing_row(self, publish_retry_count=0, publish_max_retry_times=2):
+        row = MagicMock()
+        row.extra_config = json.dumps(
+            {
+                "device_uuid": "dev-1",
+                "provider_device_id": "prov-1",
+                "publish_max_retry_times": publish_max_retry_times,
+                "publish_retry_count": publish_retry_count,
+                "attempt_started_at": None,
+            }
+        )
+        return row
+
+    def test_claim_succeeds_on_matching_count(self, repo, mock_session):
+        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = self._processing_row(
+            publish_retry_count=0
+        )
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
+
+        claimed = repo.try_claim_retry(
+            record_id=1,
+            tenant="t",
+            env="e",
+            expected_retry_count=0,
+            attempt_started_at="2026-01-01T00:00:00",
+        )
+
+        assert claimed is True
+        values = mock_session.query.return_value.filter.return_value.update.call_args[
+            0
+        ][0]
+        stored = json.loads(values["extra_config"])
+        assert stored["publish_retry_count"] == 1
+        assert stored["attempt_started_at"] == "2026-01-01T00:00:00"
+
+    def test_claim_rejected_on_wrong_expected_count(self, repo, mock_session):
+        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = self._processing_row(
+            publish_retry_count=1
+        )
+
+        claimed = repo.try_claim_retry(
+            record_id=1,
+            tenant="t",
+            env="e",
+            expected_retry_count=0,
+            attempt_started_at="2026-01-01T00:00:00",
+        )
+
+        assert claimed is False
+        mock_session.query.return_value.filter.return_value.update.assert_not_called()
+
+    def test_claim_rejected_when_not_processing(self, repo, mock_session):
+        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = None
+
+        claimed = repo.try_claim_retry(
+            record_id=1,
+            tenant="t",
+            env="e",
+            expected_retry_count=0,
+            attempt_started_at="2026-01-01T00:00:00",
+        )
+
+        assert claimed is False
+        mock_session.query.return_value.filter.return_value.update.assert_not_called()
+
+    def test_claim_rejected_when_update_affects_no_row(self, repo, mock_session):
+        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = self._processing_row(
+            publish_retry_count=0
+        )
+        mock_session.query.return_value.filter.return_value.update.return_value = 0
+
+        claimed = repo.try_claim_retry(
+            record_id=1,
+            tenant="t",
+            env="e",
+            expected_retry_count=0,
+            attempt_started_at="2026-01-01T00:00:00",
+        )
+
+        assert claimed is False
+
+    def test_claim_preserves_budget_and_identity(self, repo, mock_session):
+        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = self._processing_row(
+            publish_retry_count=1, publish_max_retry_times=5
+        )
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
+
+        repo.try_claim_retry(
+            record_id=1,
+            tenant="t",
+            env="e",
+            expected_retry_count=1,
+            attempt_started_at="2026-01-01T00:05:00",
+        )
+
+        values = mock_session.query.return_value.filter.return_value.update.call_args[
+            0
+        ][0]
+        stored = json.loads(values["extra_config"])
+        assert stored["publish_max_retry_times"] == 5
+        assert stored["publish_retry_count"] == 2
+        assert stored["device_uuid"] == "dev-1"
+        assert stored["provider_device_id"] == "prov-1"
+
+
+class TestGetRetryState:
+    def test_returns_parsed_state(self, repo, mock_session):
+        row = MagicMock()
+        row.extra_config = json.dumps(
+            {
+                "device_uuid": "dev-1",
+                "provider_device_id": "prov-1",
+                "publish_max_retry_times": 3,
+                "publish_retry_count": 2,
+                "attempt_started_at": "2026-01-01T00:00:00",
+            }
+        )
+        mock_session.query.return_value.filter.return_value.first.return_value = row
+
+        state = repo.get_retry_state(1, "t", "e")
+
+        assert state is not None
+        assert state.publish_max_retry_times == 3
+        assert state.publish_retry_count == 2
+
+    def test_returns_none_when_missing(self, repo, mock_session):
+        mock_session.query.return_value.filter.return_value.first.return_value = None
+        assert repo.get_retry_state(1, "t", "e") is None
+
+    def test_tolerates_invalid_json(self, repo, mock_session):
+        row = MagicMock()
+        row.extra_config = "{not-json"
+        mock_session.query.return_value.filter.return_value.first.return_value = row
+
+        state = repo.get_retry_state(1, "t", "e")
+
+        assert state is not None
+        assert state.publish_retry_count == 0
+
+
+class TestDatabaseNow:
+    def test_returns_scalar_from_db(self, repo, mock_session):
+        mock_session.execute.return_value.scalar.return_value = "2026-01-01 00:00:00"
+        assert repo.database_now() == "2026-01-01 00:00:00"
+
+
+class TestParseExtraConfig:
+    def test_dict_returned_as_is(self, repo):
+        assert repo._parse_extra_config({"a": 1}) == {"a": 1}
+
+    def test_none_returns_empty(self, repo):
+        assert repo._parse_extra_config(None) == {}
+
+    def test_list_returns_empty(self, repo):
+        assert repo._parse_extra_config([1, 2]) == {}
+
+    def test_invalid_json_string_returns_empty(self, repo):
+        assert repo._parse_extra_config("{bad") == {}
+
+    def test_json_list_string_returns_empty(self, repo):
+        assert repo._parse_extra_config("[1,2]") == {}
+
+
+class TestClaimWithModifier:
+    def test_modifier_persisted_when_supplied(self, repo, mock_session):
+        row = MagicMock()
+        row.extra_config = json.dumps(
+            {
+                "device_uuid": "d",
+                "provider_device_id": None,
+                "publish_max_retry_times": 2,
+                "publish_retry_count": 0,
+                "attempt_started_at": None,
+            }
+        )
+        mock_session.query.return_value.filter.return_value.with_for_update.return_value.first.return_value = row
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
+
+        repo.try_claim_retry(
+            record_id=1,
+            tenant="t",
+            env="e",
+            expected_retry_count=0,
+            attempt_started_at="2026-01-01 00:00:00",
+            modifier="operator-1",
+        )
+
+        values = mock_session.query.return_value.filter.return_value.update.call_args[
+            0
+        ][0]
+        assert values["modifier"] == "operator-1"

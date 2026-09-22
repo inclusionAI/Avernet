@@ -164,6 +164,21 @@ class DeviceRepository(Protocol):
         """Update device status by device_uuid with tenant+env isolation. Returns affected row count."""
         ...
 
+    def prepare_device_for_reprovision(
+        self,
+        device_uuid: str,
+        tenant: str,
+        env: str,
+        modifier: str | None = None,
+    ) -> int:
+        """Reset a device to a re-provisionable state for a publish retry.
+
+        Clears the provider identity and moves the device to PENDING so
+        ``start_device`` accepts it again. Refuses devices in RELEASED status.
+        Returns the affected row count.
+        """
+        ...
+
     def batch_update_status_to_offline(self, device_ids: list[int], env: str) -> int:
         """Batch update device status to OFFLINE for given device IDs.
 

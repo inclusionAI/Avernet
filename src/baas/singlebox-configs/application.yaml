@@ -120,6 +120,17 @@ user_config:
     stale_seconds: 120  # RUNNING 超过此时长无心跳视为悬挂（秒），默认: 120
     dry_run: false  # 测试模式：只打印日志
 
+  # Publish retry sweep config (periodically advances timed-out device publish
+  # attempts so retries do not depend on a client polling for progress).
+  publish_retry_sweep:
+    enabled: true  # 是否启用定时任务
+    cron_interval_seconds: 60  # 执行间隔（秒），默认: 60
+    lock_name: "publish_retry_sweep_lock"  # 分布式锁名称
+    lock_expire_seconds: 240  # 分布式锁过期时间（秒），默认: 240
+    attempt_timeout_seconds: 1800  # 单次尝试超时（秒），超过视为失败并可重试
+    batch_limit: 100  # 单轮处理的最大记录数
+    dry_run: false  # 测试模式：只打印日志
+
   # 文件传输轮询器配置（定期检测 OSS 上传完成并触发 device 下载）
   file_transfer_poller:
     enabled: true  # 是否启用定时任务

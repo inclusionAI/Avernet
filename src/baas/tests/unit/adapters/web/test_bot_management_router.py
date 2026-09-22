@@ -1238,6 +1238,7 @@ async def test_restart_bot_success(mock_service):
         request_id="a" * 32,
         scope=RestartScope.ALL,
         auto_approve_publish=False,
+        publish_max_retry_times=None,
     )
 
 
@@ -1291,6 +1292,7 @@ async def test_restart_bot_unhealthy_scope(mock_service):
         request_id="a" * 32,
         scope=RestartScope.UNHEALTHY,
         auto_approve_publish=False,
+        publish_max_retry_times=None,
     )
 
 
@@ -1346,6 +1348,7 @@ async def test_restart_bot_with_auto_approve(mock_service):
         request_id="a" * 32,
         scope=RestartScope.ALL,
         auto_approve_publish=True,
+        publish_max_retry_times=None,
     )
 
 

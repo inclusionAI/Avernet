@@ -561,6 +561,7 @@ async def create_test_bot(
     deploy_config: dict[str, Any] | None = None,
     callback_timeout_seconds: int | None = None,
     auto_approve_publish: bool = False,
+    publish_max_retry_times: int | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "name": name,
@@ -576,6 +577,8 @@ async def create_test_bot(
         config["callback_timeout_seconds"] = callback_timeout_seconds
     if auto_approve_publish:
         config["auto_approve_publish"] = auto_approve_publish
+    if publish_max_retry_times is not None:
+        config["publish_max_retry_times"] = publish_max_retry_times
     if config:
         body["config"] = config
     response = await api.client.post(

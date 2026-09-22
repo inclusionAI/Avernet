@@ -90,7 +90,29 @@ Key configuration sections:
 | `user_config.bot_run_queue` | Task queue worker config |
 | `user_config.device_ttl_timer` | Device TTL renewal schedule |
 | `user_config.expire_sandbox_timer` | Aliyun ACK pod expiry sweep (destroy Pod + stop bot) schedule |
+| `user_config.publish_retry_sweep` | Publish retry sweep schedule (advances timed-out device attempts) |
 | `user_config.bot_runner` | Concurrency limits per bot |
+
+### Publish retry
+
+Device publish operations retry the full per-device lifecycle — sandbox create,
+start script, and callback — up to a per-request budget. The budget is a request
+parameter, not a deployment setting; it defaults to `0`, which preserves
+single-attempt behavior.
+
+| API | Parameter |
+|---|---|
+| Publish API (`POST /api/v1/publishes`) | `config.publish_max_retry_times` |
+| Bot API (`POST /api/v1/bots`, `/scale`, `/update`, `/update-devices`) | `config.publish_max_retry_times` |
+| Bot restart API (`POST /api/v1/bots/{bot_uuid}/restart`) | `publish_max_retry_times` |
+
+Accepted range is `0`–`3`; the value means additional attempts after the first.
+The budget and attempts consumed are stored per device in
+`baas_publish_record.extra_config`, so retry state survives process restarts.
+Attempts that outrun their window are picked up by the `publish_retry_sweep`
+scheduled task, so retries do not depend on a client polling for progress. A
+device that exhausts its budget is marked `FAILED`, failing the publish exactly
+as a single-attempt failure would.
 
 ## Development
 

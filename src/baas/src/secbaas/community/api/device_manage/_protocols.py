@@ -69,6 +69,20 @@ class DeviceService(Protocol):
         """Restart device: destroy and recreate PaaS container."""
         ...
 
+    def prepare_for_reprovision(
+        self,
+        tenant: str,
+        device_uuid: str,
+        modifier: str = "system",
+    ) -> bool:
+        """Reset a device so it can be provisioned again by a publish retry.
+
+        Clears the provider identity and moves the device to PENDING, which
+        ``start_device`` requires. Returns False when the device cannot be
+        reset, for example because it is RELEASED or missing.
+        """
+        ...
+
     async def update_device(
         self,
         tenant: str,
