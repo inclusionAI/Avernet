@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.core.devices.repository.record import DataInitTriggerClaim
@@ -22,6 +22,7 @@ _PENDING = "PENDING"
 _ACTIVE = "ACTIVE"
 _FAILED = "FAILED"
 _DATA_INIT_TRIGGER_CLAIM_TIMEOUT_SECONDS = 10 * 60
+_BAAS_CREATION_IDENTITY_KEYS = ("bot_uuid", "publish_id", "create_request_id")
 
 
 def _utc_timestamp_expired(raw: Any, *, timeout_seconds: int) -> bool:
@@ -75,12 +76,117 @@ def load_device_props(raw: Any) -> dict[str, Any]:
     return props if isinstance(props, dict) else {}
 
 
-class BaasDesktopLifecycleRepositoryMixin:
-    """Atomic persistence seams for guarded Desktop BaaS lifecycle writes."""
+class BaasGuardedLifecycleRepositoryMixin:
+    """Atomic persistence seams for guarded BaaS lifecycle writes."""
 
     _db: Any
 
     def _bot_env(self): ...
+
+    def recover_baas_creation_binding_if_matches(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        device_id: str,
+        entity_id: str,
+        entity_type: str,
+        env: str,
+        device_props: dict[str, Any],
+        apply_reason: str | None,
+        applied_by: str,
+    ) -> int | None:
+        """Recover the binding retained after a Bot-link write failure."""
+
+        with self._db.orm_session() as db:
+            try:
+                begin_guarded_transaction(
+                    db, purpose="BaaS retained creation binding recovery"
+                )
+                binding = (
+                    db.query(EntityDeviceBinding)
+                    .filter(
+                        EntityDeviceBinding.device_id == device_id,
+                        EntityDeviceBinding.env == env,
+                        EntityDeviceBinding.device_provider == "baas",
+                        EntityDeviceBinding.entity_id == entity_id,
+                        EntityDeviceBinding.entity_type == entity_type,
+                        EntityDeviceBinding.status.in_({_PENDING, _ACTIVE}),
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if binding is None:
+                    db.rollback()
+                    return None
+                bot = (
+                    db.query(BotModel)
+                    .filter(
+                        BotModel.bot_id == bot_id,
+                        BotModel.owner_id == owner_id,
+                        BotModel.entity_id == entity_id,
+                        BotModel.entity_type == entity_type,
+                        BotModel.status.in_({_PENDING, "PROVISIONING", _ACTIVE}),
+                        BotModel.is_delete == 0,
+                        self._bot_env(),
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if (
+                    bot is None
+                    or bot.binding_id not in {None, binding.id}
+                    or bot.device_id not in {None, device_id}
+                    or (binding.status == _PENDING and bot.status == _ACTIVE)
+                ):
+                    db.rollback()
+                    return None
+                competing_link = (
+                    db.query(BotModel.id)
+                    .filter(
+                        or_(
+                            BotModel.binding_id == binding.id,
+                            BotModel.device_id == device_id,
+                        ),
+                        BotModel.id != bot.id,
+                        BotModel.is_delete == 0,
+                        self._bot_env(),
+                    )
+                    .with_for_update()
+                    .first()
+                )
+                if competing_link is not None:
+                    db.rollback()
+                    return None
+                persisted_props = load_device_props(binding.device_props)
+                if any(
+                    not persisted_props.get(key)
+                    or not device_props.get(key)
+                    or str(persisted_props[key]) != str(device_props[key])
+                    for key in _BAAS_CREATION_IDENTITY_KEYS
+                ):
+                    db.rollback()
+                    return None
+                retained_callback_token = persisted_props.get("callback_token")
+                persisted_props.update(device_props)
+                if retained_callback_token is not None:
+                    persisted_props["callback_token"] = retained_callback_token
+                binding.device_props = json.dumps(
+                    persisted_props, ensure_ascii=False
+                )
+                binding.apply_reason = apply_reason
+                binding.applied_by = applied_by
+                binding.gmt_modified = func.now()
+                bot.binding_id = binding.id
+                bot.device_id = device_id
+                if binding.status == _ACTIVE:
+                    bot.status = _ACTIVE
+                bot.gmt_modified = func.now()
+                db.commit()
+                return int(binding.id)
+            except Exception:
+                db.rollback()
+                raise
 
     def detach_released_baas_desktop_binding_if_matches(
         self,

@@ -2293,6 +2293,100 @@ class TestApplyDevice:
         assert svc.start_called is False
         thread_cls.assert_not_called()
 
+    def test_apply_device_recovers_retained_baas_binding_before_plain_insert(self):
+        repo = MagicMock()
+        repo.exists_device_id.return_value = False
+        repo.get_released_binding.return_value = None
+        repo.recover_baas_creation_binding_if_matches.return_value = 42
+        record = _make_record(
+            id=42,
+            status=DeviceBindingStatus.PENDING.value,
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_id="retained-baas-uuid",
+        )
+        repo.get_by_id.return_value = record
+        svc = self.HookClaimingDeviceService(
+            repository=repo,
+            bot_query=MagicMock(),
+            bot_sync=MagicMock(),
+            oss_record_repo=MagicMock(),
+            mcp_sync=MagicMock(),
+            layout_confirmation=MagicMock(),
+        )
+        svc._setup_directory = MagicMock(return_value=[])
+        svc._do_allocate = MagicMock(
+            return_value=AllocatedDevice(
+                device_id="retained-baas-uuid",
+                device_provider=BAAS_DEVICE_PROVIDER,
+                device_props={"publish_id": "17"},
+            )
+        )
+
+        with patch(
+            "agentclaw.community.utils.env_utils.get_current_env",
+            return_value="dev",
+        ):
+            result = svc.apply_device(
+                apply_reason="Create bot: retained",
+                entity_id="u001",
+                entity_type="staff",
+                operator=_make_operator(),
+                bot_id="bot1",
+                owner_id="owner-001",
+            )
+
+        assert result is record
+        repo.insert_binding.assert_not_called()
+        repo.recover_baas_creation_binding_if_matches.assert_called_once()
+        assert svc.after_binding_args is not None
+        assert svc.after_binding_args["binding_id"] == 42
+
+    def test_apply_device_does_not_replay_lifecycle_for_recovered_active_binding(self):
+        repo = MagicMock()
+        repo.exists_device_id.return_value = False
+        repo.get_released_binding.return_value = None
+        repo.recover_baas_creation_binding_if_matches.return_value = 42
+        record = _make_record(
+            id=42,
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_id="active-baas-uuid",
+        )
+        repo.get_by_id.return_value = record
+        svc = self.HookClaimingDeviceService(
+            repository=repo,
+            bot_query=MagicMock(),
+            bot_sync=MagicMock(),
+            oss_record_repo=MagicMock(),
+            mcp_sync=MagicMock(),
+            layout_confirmation=MagicMock(),
+        )
+        svc._setup_directory = MagicMock(return_value=[])
+        svc._do_allocate = MagicMock(
+            return_value=AllocatedDevice(
+                device_id="active-baas-uuid",
+                device_provider=BAAS_DEVICE_PROVIDER,
+                device_props={"publish_id": "17"},
+            )
+        )
+
+        with patch(
+            "agentclaw.community.utils.env_utils.get_current_env",
+            return_value="dev",
+        ):
+            result = svc.apply_device(
+                apply_reason="Create bot: retained",
+                entity_id="u001",
+                entity_type="staff",
+                operator=_make_operator(),
+                bot_id="bot1",
+                owner_id="owner-001",
+            )
+
+        assert result is record
+        repo.insert_binding.assert_not_called()
+        assert svc.after_binding_args is None
+
     def test_apply_device_runs_generic_start_when_provider_hook_does_not_claim_lifecycle(
         self,
     ):

@@ -670,8 +670,33 @@ class DeviceService:
         }
         # 4. Process database record
         status = DeviceBindingStatus.PENDING.value
+        binding_id = None
 
-        if released_binding is not None:
+        if allocated.device_provider == BAAS_DEVICE_PROVIDER:
+            recovered_binding_id = (
+                self._repo.recover_baas_creation_binding_if_matches(
+                    bot_id=resolved_bot_id,
+                    owner_id=resolved_owner_id,
+                    device_id=allocated.device_id,
+                    entity_id=resolved_entity_id,
+                    entity_type=resolved_entity_type,
+                    env=env,
+                    device_props=device_props,
+                    apply_reason=apply_reason,
+                    applied_by=operator.staff,
+                )
+            )
+            if recovered_binding_id is not None:
+                recovered_record = self._repo.get_by_id(recovered_binding_id)
+                if recovered_record is None:
+                    raise DeviceServiceError(
+                        "recovered BaaS binding disappeared before readback"
+                    )
+                if recovered_record.status == DeviceBindingStatus.ACTIVE.value:
+                    return recovered_record
+                binding_id = recovered_binding_id
+
+        if binding_id is None and released_binding is not None:
             logger.info(f"[apply_device] reusing released device: {device_id}, status={status}")
             self._repo.reuse_binding(
                 binding_id=released_binding.id,
@@ -681,7 +706,7 @@ class DeviceService:
                 status=status,
             )
             binding_id = released_binding.id
-        else:
+        elif binding_id is None:
             binding_id = self._repo.insert_binding(
                 entity_id=resolved_entity_id,
                 entity_type=resolved_entity_type,

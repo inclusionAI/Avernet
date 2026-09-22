@@ -1899,6 +1899,10 @@ class TestAfterBindingPersisted:
         assert payload["publish_id"] == 12372
         assert "started_at_epoch_s" in payload
         assert task_queue.enqueue.call_args.kwargs["deadline_seconds"] == 86400
+        assert (
+            task_queue.enqueue.call_args.kwargs["idempotency_key"]
+            == "baas-create-poll:1357:12372"
+        )
 
     def test_baas_after_binding_persisted_marks_failed_when_task_queue_missing(self):
         svc = _make_service(task_queue_service=None)

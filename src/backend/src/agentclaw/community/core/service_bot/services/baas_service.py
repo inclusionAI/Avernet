@@ -907,6 +907,7 @@ class BaasService:  # pragma: no cover
         layout_keys = {
             "AGENTCLAW_SKILLS_LAYOUT",
             "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE",
         }
         layout_envs = {
             key: value

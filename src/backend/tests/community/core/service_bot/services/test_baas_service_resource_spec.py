@@ -295,11 +295,13 @@ def test_template_env_cannot_override_persisted_layout_selection():
         extra_envs={
             "AGENTCLAW_SKILLS_LAYOUT": "pool",
             "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+            "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_initializing",
         },
         template_config={
             "envs": {
                 "AGENTCLAW_SKILLS_LAYOUT": "legacy",
                 "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "stale-contract",
+                "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
                 "USER_ENV": "yes",
             }
         },
@@ -310,6 +312,7 @@ def test_template_env_cannot_override_persisted_layout_selection():
     assert envs["AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION"] == (
         "skills-pool-p3-v1"
     )
+    assert envs["AGENTCLAW_SKILLS_LAYOUT_PHASE"] == "pool_initializing"
     assert envs["USER_ENV"] == "yes"
 
 
@@ -322,6 +325,7 @@ def test_template_env_cannot_invent_pool_layout_selection():
             "envs": {
                 "AGENTCLAW_SKILLS_LAYOUT": "pool",
                 "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
+                "AGENTCLAW_SKILLS_LAYOUT_PHASE": "pool_active",
             }
         },
         resource_spec=None,
@@ -329,6 +333,7 @@ def test_template_env_cannot_invent_pool_layout_selection():
 
     assert "AGENTCLAW_SKILLS_LAYOUT" not in envs
     assert "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION" not in envs
+    assert "AGENTCLAW_SKILLS_LAYOUT_PHASE" not in envs
 
 
 def test_payload_ignores_template_config_command_until_baas_has_field():

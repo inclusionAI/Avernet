@@ -271,6 +271,23 @@ class DeviceBindingRepository(Protocol):
         ...
 
     @abstractmethod
+    def recover_baas_creation_binding_if_matches(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        device_id: str,
+        entity_id: str,
+        entity_type: str,
+        env: str,
+        device_props: dict[str, Any],
+        apply_reason: str | None,
+        applied_by: str,
+    ) -> int | None:
+        """Atomically link an unbound retained Bot to its matching BaaS binding."""
+        ...
+
+    @abstractmethod
     def detach_released_baas_desktop_binding_if_matches(
         self,
         *,

@@ -767,6 +767,267 @@ def test_desktop_data_init_trigger_claim_is_current_once_and_releasable(repo):
     ) is None
 
 
+def test_baas_creation_retry_recovers_and_links_retained_binding(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="retained-baas-uuid",
+            device_provider="baas",
+            env="dev",
+            status="PENDING",
+            device_props={
+                "bot_uuid": "retained-baas-uuid",
+                "publish_id": "17",
+                "create_request_id": "request-17",
+                "callback_token": "original-token",
+                "retained_fact": "keep",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="retained-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        status="PENDING",
+        env="dev",
+    )
+
+    recovered_id = repo.recover_baas_creation_binding_if_matches(
+        bot_id="retained-bot",
+        owner_id="u001",
+        device_id="retained-baas-uuid",
+        entity_id="u001",
+        entity_type="staff",
+        env="dev",
+        device_props={
+            "bot_uuid": "retained-baas-uuid",
+            "publish_id": "17",
+            "create_request_id": "request-17",
+            "callback_token": "retry-token",
+        },
+        apply_reason="Create bot: retained",
+        applied_by="u001",
+    )
+
+    assert recovered_id == bid
+    recovered = repo.get_by_id(bid)
+    assert recovered is not None
+    assert recovered.device_props["retained_fact"] == "keep"
+    assert recovered.device_props["callback_token"] == "original-token"
+    with repo._db.orm_session() as db:
+        bot = db.query(BotModel).filter_by(bot_id="retained-bot").one()
+        assert bot.binding_id == bid
+        assert bot.device_id == "retained-baas-uuid"
+
+
+def test_baas_creation_retry_rejects_changed_creation_identity(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="retained-baas-uuid",
+            device_provider="baas",
+            env="dev",
+            device_props={
+                "bot_uuid": "retained-baas-uuid",
+                "publish_id": "17",
+                "create_request_id": "request-17",
+                "callback_token": "original-token",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="retained-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        env="dev",
+    )
+
+    assert (
+        repo.recover_baas_creation_binding_if_matches(
+            bot_id="retained-bot",
+            owner_id="u001",
+            device_id="retained-baas-uuid",
+            entity_id="u001",
+            entity_type="staff",
+            env="dev",
+            device_props={
+                "bot_uuid": "retained-baas-uuid",
+                "publish_id": "18",
+                "create_request_id": "request-17",
+                "callback_token": "retry-token",
+            },
+            apply_reason="Create bot: retained",
+            applied_by="u001",
+        )
+        is None
+    )
+    with repo._db.orm_session() as db:
+        bot = db.query(BotModel).filter_by(bot_id="retained-bot").one()
+        assert bot.binding_id is None
+        assert bot.device_id is None
+    assert repo.get_by_id(bid).device_props["callback_token"] == "original-token"
+
+
+def test_baas_creation_retry_converges_bot_when_binding_is_active(repo):
+    bid = repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="active-baas-uuid",
+            device_provider="baas",
+            env="dev",
+            status="ACTIVE",
+            device_props={
+                "bot_uuid": "active-baas-uuid",
+                "publish_id": "17",
+                "create_request_id": "request-17",
+                "callback_token": "original-token",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="retained-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        status="PROVISIONING",
+        env="dev",
+    )
+
+    recovered_id = repo.recover_baas_creation_binding_if_matches(
+        bot_id="retained-bot",
+        owner_id="u001",
+        device_id="active-baas-uuid",
+        entity_id="u001",
+        entity_type="staff",
+        env="dev",
+        device_props={
+            "bot_uuid": "active-baas-uuid",
+            "publish_id": "17",
+            "create_request_id": "request-17",
+            "callback_token": "retry-token",
+        },
+        apply_reason="Create bot: retained",
+        applied_by="u001",
+    )
+
+    assert recovered_id == bid
+    with repo._db.orm_session() as db:
+        bot = db.query(BotModel).filter_by(bot_id="retained-bot").one()
+        assert bot.binding_id == bid
+        assert bot.device_id == "active-baas-uuid"
+        assert bot.status == "ACTIVE"
+
+
+def test_baas_creation_retry_rejects_active_bot_for_pending_binding(repo):
+    repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="retained-baas-uuid",
+            device_provider="baas",
+            env="dev",
+            status="PENDING",
+            device_props={
+                "bot_uuid": "retained-baas-uuid",
+                "publish_id": "17",
+                "create_request_id": "request-17",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="retained-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        status="ACTIVE",
+        env="dev",
+    )
+
+    recovered_id = repo.recover_baas_creation_binding_if_matches(
+        bot_id="retained-bot",
+        owner_id="u001",
+        device_id="retained-baas-uuid",
+        entity_id="u001",
+        entity_type="staff",
+        env="dev",
+        device_props={
+            "bot_uuid": "retained-baas-uuid",
+            "publish_id": "17",
+            "create_request_id": "request-17",
+        },
+        apply_reason="Create bot: retained",
+        applied_by="u001",
+    )
+
+    assert recovered_id is None
+
+
+def test_baas_creation_retry_rejects_competing_device_link(repo):
+    repo.insert_binding(
+        **_binding(
+            entity_id="u001",
+            entity_type="staff",
+            device_id="retained-baas-uuid",
+            device_provider="baas",
+            env="dev",
+            device_props={
+                "bot_uuid": "retained-baas-uuid",
+                "publish_id": "17",
+                "create_request_id": "request-17",
+            },
+        )
+    )
+    _bot(
+        repo._db,
+        bot_id="retained-bot",
+        owner_id="u001",
+        entity_id="u001",
+        binding_id=None,
+        device_id=None,
+        env="dev",
+    )
+    _bot(
+        repo._db,
+        bot_id="competing-bot",
+        owner_id="u002",
+        entity_id="u002",
+        binding_id=None,
+        device_id="retained-baas-uuid",
+        env="dev",
+    )
+
+    recovered_id = repo.recover_baas_creation_binding_if_matches(
+        bot_id="retained-bot",
+        owner_id="u001",
+        device_id="retained-baas-uuid",
+        entity_id="u001",
+        entity_type="staff",
+        env="dev",
+        device_props={
+            "bot_uuid": "retained-baas-uuid",
+            "publish_id": "17",
+            "create_request_id": "request-17",
+        },
+        apply_reason="Create bot: retained",
+        applied_by="u001",
+    )
+
+    assert recovered_id is None
+
+
 def test_desktop_data_init_expired_claim_is_fenced_during_takeover(repo):
     bid = repo.insert_binding(
         **_binding(
