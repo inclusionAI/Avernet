@@ -18,6 +18,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
+    ManifestDesiredStateCommittedError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
@@ -802,6 +803,33 @@ async def test_manifest_claim_logs_safe_source_transition(monkeypatch):
     assert "to_source=direct" in rendered
     assert "apply_id=apply-1" in rendered
     assert "must-not-be-logged" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_manifest_command_marks_a_post_commit_audit_failure():
+    class _FailingAudit(_Audit):
+        def insert(self, _data) -> None:
+            raise RuntimeError("audit backend unavailable")
+
+    repository = _Repository()
+    service = DirectActivationService(
+        repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
+        _Authorization(), _FailingAudit(), _McpCenter(allowed=True), _Reader(),
+        _PlatformDefaultMcpPolicy(), MagicMock(),
+    )
+
+    with pytest.raises(ManifestDesiredStateCommittedError):
+        await service.claim_manifest_mcp(
+            server_code="github",
+            config=None,
+            bot_id="bot-1",
+            owner_id="true-owner",
+            actor_id="true-owner",
+            apply_id="apply-1",
+            project=False,
+        )
+
+    assert repository.manifest_mcp_claim_calls
 
 
 @pytest.mark.asyncio

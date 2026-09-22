@@ -37,6 +37,9 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     DeclaredSourceResolver,
 )
+from agentclaw.community.core.skill_center.errors import (
+    ManifestDesiredStateCommittedError,
+)
 
 from ._fakes import (
     FakeActivationService,
@@ -1011,6 +1014,25 @@ async def test_a_later_mcp_failure_after_a_committed_claim_reports_partial():
     assert report.status is ApplyStatus.PARTIAL
     assert activations.installed == {"first"}
     assert report.categories[0].partially_written is True
+
+
+@pytest.mark.asyncio
+async def test_first_mcp_post_commit_failure_reports_partial():
+    activations = FakeActivationService()
+
+    async def _commit_then_fail(**kwargs):
+        activations.installed.add(kwargs["server_code"])
+        raise ManifestDesiredStateCommittedError()
+
+    activations.claim_manifest_mcp = _commit_then_fail
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp:\n"
+        "    - server_code: committed\n",
+    )
+
+    assert report.status is ApplyStatus.PARTIAL
+    assert activations.installed == {"committed"}
 
 
 @pytest.mark.asyncio

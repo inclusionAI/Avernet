@@ -33,6 +33,7 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillRuntimeSyncError,
+    ManifestDesiredStateCommittedError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneNotFoundError,
@@ -149,22 +150,29 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
             return mutation_result
 
-        result = await self._flow.apply(
-            bot=bot,
-            bot_id=bot_id,
-            engine_type=bot_engine_type(bot),
-            runtime_required=project,
-            mutation=mutation,
-            scope_from_result=skill_claim_scope,
-        )
-        self._log_manifest_source_transitions(
-            apply_id=apply_id, bot_id=bot_id, capability_type="skill",
-            identity=skill_id, mutation=mutation_result,
-        )
-        self._audit(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
-            action="skill_manifest_direct_claim",
-        )
+        try:
+            result = await self._flow.apply(
+                bot=bot,
+                bot_id=bot_id,
+                engine_type=bot_engine_type(bot),
+                runtime_required=project,
+                mutation=mutation,
+                scope_from_result=skill_claim_scope,
+            )
+            self._log_manifest_source_transitions(
+                apply_id=apply_id, bot_id=bot_id, capability_type="skill",
+                identity=skill_id, mutation=mutation_result,
+            )
+            self._audit(
+                bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
+                action="skill_manifest_direct_claim",
+            )
+        except Exception:
+            if mutation_result is not None and mutation_result.changed:
+                raise ManifestDesiredStateCommittedError(
+                    "Manifest desired state committed before follow-up failure"
+                ) from None
+            raise
         return {**skill, **result}
 
     async def remove_manifest_skill(
@@ -195,22 +203,29 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
             return mutation_result
 
-        result = await self._flow.apply(
-            bot=bot,
-            bot_id=bot_id,
-            engine_type=bot_engine_type(bot),
-            runtime_required=project,
-            mutation=mutation,
-            scope_from_result=skill_release_scope,
-        )
-        self._log_manifest_source_transitions(
-            apply_id=apply_id, bot_id=bot_id, capability_type="skill",
-            identity=skill_id, mutation=mutation_result,
-        )
-        self._audit(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
-            action="skill_manifest_remove",
-        )
+        try:
+            result = await self._flow.apply(
+                bot=bot,
+                bot_id=bot_id,
+                engine_type=bot_engine_type(bot),
+                runtime_required=project,
+                mutation=mutation,
+                scope_from_result=skill_release_scope,
+            )
+            self._log_manifest_source_transitions(
+                apply_id=apply_id, bot_id=bot_id, capability_type="skill",
+                identity=skill_id, mutation=mutation_result,
+            )
+            self._audit(
+                bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
+                action="skill_manifest_remove",
+            )
+        except Exception:
+            if mutation_result is not None and mutation_result.changed:
+                raise ManifestDesiredStateCommittedError(
+                    "Manifest desired state committed before follow-up failure"
+                ) from None
+            raise
         return {**skill, **result}
 
     async def _set_skill_active(
@@ -391,22 +406,29 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
             return mutation_result
 
-        result = await self._flow.apply(
-            bot=bot,
-            bot_id=bot_id,
-            engine_type=bot_engine_type(bot),
-            runtime_required=project,
-            mutation=mutation,
-            scope_from_result=mcp_claim_scope,
-        )
-        self._log_manifest_source_transitions(
-            apply_id=apply_id, bot_id=bot_id, capability_type="mcp",
-            identity=server_code, mutation=mutation_result,
-        )
-        self._audit(
-            bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
-            action="mcp_manifest_direct_claim",
-        )
+        try:
+            result = await self._flow.apply(
+                bot=bot,
+                bot_id=bot_id,
+                engine_type=bot_engine_type(bot),
+                runtime_required=project,
+                mutation=mutation,
+                scope_from_result=mcp_claim_scope,
+            )
+            self._log_manifest_source_transitions(
+                apply_id=apply_id, bot_id=bot_id, capability_type="mcp",
+                identity=server_code, mutation=mutation_result,
+            )
+            self._audit(
+                bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
+                action="mcp_manifest_direct_claim",
+            )
+        except Exception:
+            if mutation_result is not None and mutation_result.changed:
+                raise ManifestDesiredStateCommittedError(
+                    "Manifest desired state committed before follow-up failure"
+                ) from None
+            raise
         return result
 
     async def remove_manifest_mcp(
@@ -437,22 +459,29 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
             return mutation_result
 
-        result = await self._flow.apply(
-            bot=bot,
-            bot_id=bot_id,
-            engine_type=bot_engine_type(bot),
-            runtime_required=project,
-            mutation=mutation,
-            scope_from_result=mcp_release_scope,
-        )
-        self._log_manifest_source_transitions(
-            apply_id=apply_id, bot_id=bot_id, capability_type="mcp",
-            identity=server_code, mutation=mutation_result,
-        )
-        self._audit(
-            bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
-            action="mcp_manifest_remove",
-        )
+        try:
+            result = await self._flow.apply(
+                bot=bot,
+                bot_id=bot_id,
+                engine_type=bot_engine_type(bot),
+                runtime_required=project,
+                mutation=mutation,
+                scope_from_result=mcp_release_scope,
+            )
+            self._log_manifest_source_transitions(
+                apply_id=apply_id, bot_id=bot_id, capability_type="mcp",
+                identity=server_code, mutation=mutation_result,
+            )
+            self._audit(
+                bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
+                action="mcp_manifest_remove",
+            )
+        except Exception:
+            if mutation_result is not None and mutation_result.changed:
+                raise ManifestDesiredStateCommittedError(
+                    "Manifest desired state committed before follow-up failure"
+                ) from None
+            raise
         return result
 
     async def deactivate_mcp(

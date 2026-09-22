@@ -3728,6 +3728,48 @@ def test_ordinary_update_and_remove_can_manage_an_existing_manifest_direct_mcp()
         assert session.query(BotMCPConfig).count() == 0
 
 
+def test_default_exclusion_plus_install_is_not_direct_with_ordinary_membership():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, _skill = _seed_default_with_member(db)
+    with db.transactional_orm_session() as session:
+        ordinary = SkillSet(
+            name="ordinary", user_id="owner", bolt_id="bot",
+            engine_type="openclaw", is_active=True, env="dev",
+        )
+        session.add(ordinary)
+        session.flush()
+        session.add_all([
+            SkillSetMCPServer(
+                skill_set_id=ordinary.id, server_code="mcp.member",
+                name="member", env="dev",
+            ),
+            DefaultSkillsetMcpExclusion(
+                user_id="owner", bot_id="bot", skill_set_id=default.id,
+                server_code="mcp.member",
+            ),
+        ])
+
+    assert repository.manifest_direct_mcp_exists(
+        bot_id="bot", owner_id="owner", server_code="mcp.member",
+        platform_default_codes=frozenset(), engine_type="openclaw",
+        default_engine_types=("openclaw",),
+    ) is False
+    with pytest.raises(SkillSetControlPlaneConflictError):
+        repository.uninstall_mcp(
+            bot_id="bot", owner_id="owner", server_code="mcp.member",
+            platform_default_codes=frozenset(), engine_type="openclaw",
+            default_engine_types=("openclaw",),
+        )
+
+    removed = repository.remove_manifest_mcp(
+        bot_id="bot", owner_id="owner", server_code="mcp.member",
+        platform_default_codes=frozenset(), engine_type="openclaw",
+        default_engine_types=("openclaw",),
+    )
+    assert removed.source_transitions == (("skill_set", "none"),)
+
+
 def test_manifest_skill_claim_replaces_same_name_membership_with_local_direct_claim():
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)

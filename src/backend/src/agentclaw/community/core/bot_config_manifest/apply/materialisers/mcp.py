@@ -39,6 +39,9 @@ from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
+from agentclaw.community.core.skill_center.errors import (
+    ManifestDesiredStateCommittedError,
+)
 from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
 )
@@ -334,10 +337,12 @@ class McpMaterialiser(Materialiser):
                 )
                 confirmed_write = True
         except Exception as exc:
-            if confirmed_write:
+            if confirmed_write or isinstance(
+                exc, ManifestDesiredStateCommittedError
+            ):
                 raise ConfirmedPartialWriteError(
                     "MCP replacement stopped after a durable write"
-                ) from exc
+                ) from None
             raise
 
         return tuple(results)

@@ -34,6 +34,9 @@ from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
 from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchFailedError,
 )
+from agentclaw.community.core.bot_config_manifest.apply.registry import (
+    ConfirmedPartialWriteError,
+)
 
 from ._fakes import (
     FakeActivationService,
@@ -652,7 +655,10 @@ def test_a_deactivation_conflict_mid_write_reports_partially_written():
     activation.remove_manifest_skill = _conflicting_deactivate
     import pytest as _pytest
 
-    with _pytest.raises(RuntimeError, match="RESOURCE_MANAGED"):
+    with _pytest.raises(
+        ConfirmedPartialWriteError,
+        match="Skill replacement stopped after a durable write",
+    ):
         dev(materialiser.write(_ctx(), plan))
     # The upload for the declared skill DID land — the honest
     # partially-written shape (the engine's write-raise classifier

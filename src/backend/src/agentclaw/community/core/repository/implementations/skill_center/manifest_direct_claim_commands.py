@@ -86,6 +86,19 @@ class ManifestDirectClaimCommands:
         if not defaults:
             return False
         default_ids = {int(row.id) for row in defaults}
+        ordinary_ids = {int(row.id) for row in sets if not row.is_default}
+        if ordinary_ids and (
+            self._scope(
+                session.query(SkillSetMCPServer.id), SkillSetMCPServer
+            )
+            .filter(
+                SkillSetMCPServer.skill_set_id.in_(ordinary_ids),
+                SkillSetMCPServer.server_code == server_code,
+            )
+            .first()
+            is not None
+        ):
+            return False
         member_default_ids = {
             int(value[0])
             for value in self._scope(
@@ -292,7 +305,7 @@ class ManifestDirectClaimCommands:
                 env=get_current_env(),
                 server_codes={server_code},
             ) > 0
-            if removed:
+            if removed and not transitions:
                 transitions.add(("direct", "none"))
             session.flush()
             return DesiredStateMutation(
@@ -319,6 +332,14 @@ class ManifestDirectClaimCommands:
     ) -> DesiredStateMutation:
         """Replace same-runtime-name Set/Default supply with a Direct Skill."""
         with self._db.transactional_orm_session() as session:
+            sets = self._bot_sets(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+                locked=True,
+            )
             target = (
                 self._scope(session.query(Skill), Skill)
                 .filter(Skill.id == int(skill_id))
@@ -344,14 +365,6 @@ class ManifestDirectClaimCommands:
             candidate_uuids = {
                 str(skill.skill_uuid) for skill in same_name if skill.skill_uuid
             }
-            sets = self._bot_sets(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                engine_type=engine_type,
-                default_engine_types=default_engine_types,
-                locked=True,
-            )
             identity = [SkillSetSkill.skill_id.in_(candidate_ids)]
             if candidate_uuids:
                 identity.append(SkillSetSkill.skill_uuid.in_(candidate_uuids))
@@ -447,6 +460,14 @@ class ManifestDirectClaimCommands:
     ) -> DesiredStateMutation:
         """Remove one effective Skill; Local cleanup may detach dormant refs."""
         with self._db.transactional_orm_session() as session:
+            sets = self._bot_sets(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+                locked=True,
+            )
             skill = (
                 self._scope(session.query(Skill), Skill)
                 .filter(Skill.id == int(skill_id))
@@ -456,14 +477,6 @@ class ManifestDirectClaimCommands:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             if skill is None:
                 return DesiredStateMutation({}, False, old)
-            sets = self._bot_sets(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                engine_type=engine_type,
-                default_engine_types=default_engine_types,
-                locked=True,
-            )
             identity = [SkillSetSkill.skill_id == int(skill.id)]
             if skill.skill_uuid:
                 identity.append(SkillSetSkill.skill_uuid == skill.skill_uuid)
@@ -505,7 +518,7 @@ class ManifestDirectClaimCommands:
                 env=get_current_env(),
                 skill_ids={int(skill.id)},
             ) > 0
-            if removed:
+            if removed and not transitions:
                 transitions.add(("direct", "none"))
             dependencies = skill_projection_mcp_dependency_codes(
                 session, skill, allow_unresolvable_center=True

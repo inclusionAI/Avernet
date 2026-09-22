@@ -58,6 +58,9 @@ from agentclaw.community.core.ports.skill_package_upload_port import (
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
+from agentclaw.community.core.skill_center.errors import (
+    ManifestDesiredStateCommittedError,
+)
 from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
 )
@@ -401,18 +404,20 @@ class SkillsMaterialiser(Materialiser):
                             owner_id=ctx.owner_id,
                             actor_id=ctx.actor_id,
                         )
-                    except Exception as exc:
+                    except Exception:
                         raise ConfirmedPartialWriteError(
-                            f"Local Skill asset cleanup failed for {name!r}: {exc}"
-                        ) from exc
+                            "Local Skill asset cleanup failed"
+                        ) from None
         except Exception as exc:
             self._refresh_actual_dependency_codes(ctx)
             if isinstance(exc, ConfirmedPartialWriteError):
                 raise
-            if confirmed_write:
+            if confirmed_write or isinstance(
+                exc, ManifestDesiredStateCommittedError
+            ):
                 raise ConfirmedPartialWriteError(
-                    f"Skill replacement stopped after a durable write: {exc}"
-                ) from exc
+                    "Skill replacement stopped after a durable write"
+                ) from None
             raise
         self._refresh_actual_dependency_codes(ctx)
         return tuple(results)
