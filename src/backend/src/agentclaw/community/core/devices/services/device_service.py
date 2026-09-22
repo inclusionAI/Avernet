@@ -1814,6 +1814,14 @@ class DeviceService:
                 isinstance(envs, dict)
                 and envs.get("AGENTCLAW_SKILLS_LAYOUT") == "pool"
             )
+            if not pool_declared:
+                bot = self._bot_query.get_by_binding_id(record.id)
+                if self._load_bot_ext(bot).get("start_status") != "SUCCEEDED":
+                    logger.info(
+                        "data_init_trigger alive retry skipped start_not_succeeded: "
+                        f"device_id={device_id} binding_id={record.id}"
+                    )
+                    return
             self.trigger_data_init_on_device_ready(
                 device_id=device_id,
                 binding_id=record.id,
@@ -1825,6 +1833,16 @@ class DeviceService:
                 f"device_id={device_id} binding_id={record.id} exc={exc}",
                 exc_info=True,
             )
+
+    @staticmethod
+    def _load_bot_ext(bot: dict[str, Any] | None) -> dict[str, Any]:
+        raw_ext = bot.get("ext") if bot is not None else None
+        if isinstance(raw_ext, str):
+            try:
+                raw_ext = json.loads(raw_ext)
+            except json.JSONDecodeError:
+                return {}
+        return raw_ext if isinstance(raw_ext, dict) else {}
 
     def _trigger_data_init_on_device_ready(
         self,
@@ -1856,13 +1874,7 @@ class DeviceService:
             entity_id = bot.get("entity_id") or getattr(record, "entity_id", "") or ""
             entity_type = bot.get("entity_type") or getattr(record, "entity_type", "staff") or "staff"
 
-            import json as _json
-            ext = bot.get("ext") or {}
-            if isinstance(ext, str):
-                try:
-                    ext = _json.loads(ext)
-                except _json.JSONDecodeError:
-                    ext = {}
+            ext = self._load_bot_ext(bot)
             data_init_status = ext.get("data_init_status")
 
             logger.info(

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from agentclaw.community.core.devices.services.device_service import (
@@ -986,7 +988,11 @@ class TestReportDeviceAlive:
         repo = MagicMock()
         repo.get_by_device_id.return_value = record
         repo.get_by_id.return_value = record
-        service = _make_service(repo=repo)
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "ext": {"start_status": "SUCCEEDED"}
+        }
+        service = _make_service(repo=repo, bot_query=bot_query)
         service._trigger_data_init_on_device_ready = MagicMock()
 
         service.report_device_alive(
@@ -1002,6 +1008,35 @@ class TestReportDeviceAlive:
             claim_token=None,
             resume_stale_in_progress=False,
         )
+
+    def test_legacy_baas_alive_waits_for_start_succeeded_before_data_init(self):
+        record = _make_record(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={"callback_token": "tok123"},
+        )
+        repo = MagicMock()
+        repo.get_by_device_id.return_value = record
+        repo.get_by_id.return_value = record
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "ext": json.dumps(
+                {
+                    "start_status": "STARTING",
+                    "data_init_status": "pending_init",
+                }
+            )
+        }
+        service = _make_service(repo=repo, bot_query=bot_query)
+        service._trigger_data_init_on_device_ready = MagicMock()
+
+        service.report_device_alive(
+            device_id=record.device_id,
+            token="tok123",
+        )
+
+        repo.claim_baas_desktop_data_init_trigger_if_ready.assert_not_called()
+        service._trigger_data_init_on_device_ready.assert_not_called()
 
     def test_non_pool_alive_does_not_trigger_data_init_readiness(self):
         record = _make_record(

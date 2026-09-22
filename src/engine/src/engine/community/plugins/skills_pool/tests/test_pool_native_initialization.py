@@ -247,6 +247,29 @@ def test_recovery_required_never_enters_native_or_steady(
         )
 
 
+@pytest.mark.parametrize(
+    "trusted_layout_phase",
+    ("pool_cutover_finalizing", "", "POOL_ACTIVE", " pool_active"),
+)
+def test_unknown_or_malformed_layout_phase_fails_closed(
+    tmp_path: Path,
+    trusted_layout_phase: str,
+) -> None:
+    home = tmp_path / "home" / "admin"
+
+    with pytest.raises(
+        PoolNativeInitializationError,
+        match="unsupported persisted Pool layout phase",
+    ):
+        initialize_pool_native(
+            engine="openclaw",
+            home=home,
+            trusted_layout_phase=trusted_layout_phase,
+        )
+
+    assert not (home / ".openclaw/workspace/skills-pool/.pool-active").exists()
+
+
 def test_legacy_entry_stat_error_is_not_treated_as_absent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

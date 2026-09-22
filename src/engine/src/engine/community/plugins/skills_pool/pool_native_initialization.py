@@ -21,6 +21,11 @@ from engine.community.plugins.skills_pool.active_marker_validation import (
 )
 
 
+_TRUSTED_LAYOUT_PHASES = frozenset(
+    {"pool_initializing", "pool_active", "recovery_required"}
+)
+
+
 class PoolNativeInitializationError(RuntimeError):
     """The trusted Pool startup declaration conflicts with filesystem facts."""
 
@@ -143,6 +148,13 @@ def initialize_pool_native(
     if engine != "openclaw":
         raise PoolNativeInitializationError(
             f"Pool-native initialization is unsupported for engine={engine}"
+        )
+    if (
+        trusted_layout_phase is not None
+        and trusted_layout_phase not in _TRUSTED_LAYOUT_PHASES
+    ):
+        raise PoolNativeInitializationError(
+            f"unsupported persisted Pool layout phase: {trusted_layout_phase!r}"
         )
     if trusted_layout_phase == "recovery_required":
         raise PoolNativeInitializationError(
