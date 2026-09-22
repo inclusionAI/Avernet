@@ -1,9 +1,12 @@
-"""Aicoding 引擎特有：托管工作空间的判定与开通逻辑。
+"""Aicoding 引擎策略的可组合能力块：托管工作空间判定/开通 + 7×24 自动 cron 资格。
 
 `provision_hosted_workspace`（创建期）/`ensure_hosted_workspace`（补救期）在内部
 判定是否需要托管工作空间，BotService 只调这两个入口，引擎策略内部自行决定是否
 托管并完成开通/回滚，不暴露单独的 needs 判定入口；非 aicoding 引擎（默认策略）
 只继承默认实现即可，无需关注额外概念。
+
+``supports_auto_cron_setup`` 能力位（默认策略保守拒绝）也在此覆写：
+aicoding/claude_code 家族仅放行非空且非 legacy ``normalCC`` 的 template_type。
 """
 from __future__ import annotations
 
@@ -25,6 +28,10 @@ logger = get_logger(__name__)
 
 class AicodingHostedWorkspaceMixin:
     """托管工作空间：applicationCoding，或显式开启 workspace 托管能力时需要。"""
+
+    def supports_auto_cron_setup(self, *, template_type: str | None = None) -> bool:
+        # 家族模板守卫：仅非空且非 legacy normalCC 的 template_type 进入 7×24 自动 cron
+        return bool(template_type) and template_type != "normalCC"
 
     def _needs_hosted_workspace(self, ctx: BotProvisioningContext) -> bool:
         return ctx.template_type == "applicationCoding" or has_dima_workspace_enabled(
