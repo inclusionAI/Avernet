@@ -290,6 +290,7 @@ def test_legacy_relative_locator_cleanup_resolves_against_bot_local_dir(
         is_desktop=False,
         is_teclaw=False,
         locator="reviewer",
+        skill_name="reviewer",
     )
 
     assert storage._device_directory == ("/bots/project-42/bot-1/skills-local/reviewer")
@@ -318,6 +319,7 @@ def test_legacy_locator_cleanup_rejects_paths_outside_bot_local_dir(
             is_desktop=False,
             is_teclaw=False,
             locator=locator,
+            skill_name="reviewer",
         )
 
 
@@ -338,6 +340,7 @@ def test_teclaw_legacy_locator_cleanup_reapplies_workspace_adapter(test_injector
         is_desktop=False,
         is_teclaw=True,
         locator="skills-local/reviewer",
+        skill_name="reviewer",
     )
 
     assert storage._device_directory == "workspace/skills-local/reviewer"
