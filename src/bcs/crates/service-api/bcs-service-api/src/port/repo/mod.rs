@@ -1,3 +1,4 @@
+pub mod auth_session;
 pub mod collaboration_history;
 pub use collaboration_history::*;
 pub mod collaboration_terminal_im;
@@ -35,6 +36,11 @@ pub mod session;
 pub mod session_file;
 pub mod user_identity;
 
+pub use auth_session::{
+    AuthSessionRevoke, AuthSessionRepoPort, AuthSessionScope, AuthSessionSnapshot,
+    AuthSessionStoreError, AuthSessionVersion, AuthSessionWrite, InstallAuthSession,
+    RotateAuthSession,
+};
 pub use bot::BotRepoPort;
 pub use bot_actor_config::BotActorConfigRepoPort;
 pub use chat_run::{

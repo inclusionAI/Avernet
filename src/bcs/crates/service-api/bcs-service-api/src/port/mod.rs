@@ -19,6 +19,7 @@ pub mod interaction;
 pub mod judge;
 pub mod leader_election;
 pub mod metrics;
+pub mod oauth;
 pub mod state_machine_metrics;
 pub mod pending_group_message;
 pub mod participant_view_binding;
@@ -91,33 +92,39 @@ pub use metrics::{
 pub use pending_group_message::{
     PendingGroupMessage, PendingGroupMessageKind, PendingGroupMessagePort,
 };
+pub use oauth::{
+    BrowserSession, ExternalLoginIdentity, OAuthProviderPort, OAuthSessionPort,
+    PendingLoginBatch, PendingOAuthLoginPort,
+};
 pub use participant_view_binding::{
     NoopParticipantViewBindingPort, ParticipantViewBindingPort,
     ParticipantViewScopeChangeLease,
 };
 pub use provider_stream_gray::ProviderStreamGrayList;
 pub use repo::{
-    FailStateMachineNodeAttempt, StateMachineFailureAction, StateMachineNodeAttemptFailure,
-    FinishStateMachineJudge, StateMachineJudgeClaim, StateMachineJudgeResult,
-    StateMachineOpeningPayload, StateMachineOpeningCheckpoint,
+    AuthSessionRevoke, AuthSessionRepoPort, AuthSessionScope, AuthSessionSnapshot,
+    AuthSessionStoreError, AuthSessionVersion, AuthSessionWrite, BotCandidateReadQuery,
+    BotCandidateReadRecord, BotCandidateVisibility, BotControlPlaneDescriptor,
+    BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort, ChannelBindingRepoPort,
+    CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
+    CollaborationTemplateEntry, CollaborationTemplateRepoPort, ConversationSessionRepoPort,
+    CreateOrganizationRecord, CreateStateMachineRerun, CreateStateMachineRerunOutcome,
+    StateMachineFailureAction, StateMachineNodeAttemptFailure, StateMachineJudgeClaim,
+    StateMachineJudgeResult, StateMachineOpeningPayload, StateMachineOpeningCheckpoint,
     StateMachineDispatchPayload, StateMachineDispatchTarget, StateMachineDispatchStatus,
     StateMachineDispatchCheckpoint, StateMachineDispatchClaim, StateMachineDispatchResult,
-    BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
-    BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
-    BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort,
-    ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
-    CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
-    ConversationSessionRepoPort, CreateOrganizationRecord, CreateStateMachineRerun,
-    CreateStateMachineRerunOutcome, EventRepoPort, FriendRepoPort, FriendRequestRepoPort,
-    GroupRepoPort, GroupRuntimeBindingRepoPort, HumanInputEnqueueDisposition,
-    HumanInputRequestRepoPort, ImParticipantRepoPort, ListOrganizationMembersPageQuery,
+    EventRepoPort, FailStateMachineNodeAttempt, FinishStateMachineJudge, FriendRepoPort,
+    FriendRequestRepoPort, GroupRepoPort, GroupRuntimeBindingRepoPort,
+    HumanInputEnqueueDisposition, HumanInputRequestRepoPort, ImParticipantRepoPort,
+    InstallAuthSession, ListOrganizationMembersPageQuery,
     ListOrganizationMembersQuery, ListOrganizationsQuery, MarkHumanNodeRunningCommand,
     NewSessionParams, OrganizationCandidateReadPage, OrganizationCandidateReadPort,
     OrganizationCandidateReadQuery, OrganizationMemberPage, OrganizationRepoPort,
     ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
-    ProviderCredentialRepoPort, ProviderRepoPort, RelationRepoPort, SessionRepoPort,
-    StateMachineDefinitionRepoPort, StateMachineRunRepoPort, UpdateOrganizationRecord,
-    UpdateSessionParticipantMessageViewScopeWithEvent,
+    ProviderCredentialRepoPort, ProviderRepoPort, RelationRepoPort, RotateAuthSession,
+    SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
+    UpdateOrganizationRecord, UpdateSessionParticipantMessageViewScopeWithEvent,
     UpsertOrganizationMemberRecord, UserIdentity, UserIdentityRepoPort,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};

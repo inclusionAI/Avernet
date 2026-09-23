@@ -15,7 +15,10 @@ use super::wire::{
     GatewayAccessKeyPrincipal, GatewayAppPrincipal, GatewayBotPrincipal, GatewayClaims,
     GatewayPrincipal, GatewayUserPrincipal,
 };
-use crate::v1::common::{PrincipalVerificationError, PrincipalVerifier};
+use crate::v1::common::{
+    AuthenticationContext, CredentialKind, GATEWAY_PRINCIPAL_SOURCE, PrincipalVerificationError,
+    PrincipalVerifier, VerifiedRequestIdentity,
+};
 
 const CLOCK_SKEW_SECONDS: u64 = 5;
 const GATEWAY_PRINCIPAL_HEADER: &str = "x-avernet-principal";
@@ -250,26 +253,28 @@ impl PrincipalVerifier for GatewayPrincipalTokenVerifier {
     async fn verify(
         &self,
         headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         let mut values = headers.get_all(GATEWAY_PRINCIPAL_HEADER).iter();
         let value = values.next().ok_or(PrincipalVerificationError::Missing)?;
         if values.next().is_some() {
-            return Err(PrincipalVerificationError::Invalid(
-                "Gateway Principal header must occur exactly once".into(),
-            ));
+            return Err(PrincipalVerificationError::Invalid);
         }
-        let token = value.to_str().map_err(|_| {
-            PrincipalVerificationError::Invalid(
-                "Gateway Principal header is not valid text".into(),
-            )
-        })?;
+        let token = value
+            .to_str()
+            .map_err(|_| PrincipalVerificationError::Invalid)?;
         if token.is_empty() || token.trim() != token {
-            return Err(PrincipalVerificationError::Invalid(
-                "Gateway Principal header is empty or padded".into(),
-            ));
+            return Err(PrincipalVerificationError::Invalid);
         }
-        GatewayPrincipalTokenVerifier::verify(self, token).map_err(|_| {
-            PrincipalVerificationError::Invalid("Gateway Principal token is invalid".into())
+        let caller = GatewayPrincipalTokenVerifier::verify(self, token)
+            .map_err(|_| PrincipalVerificationError::Invalid)?;
+        Ok(VerifiedRequestIdentity {
+            caller,
+            authentication_context: AuthenticationContext {
+                source: GATEWAY_PRINCIPAL_SOURCE.to_string(),
+                credential_kind: CredentialKind::GatewayPrincipalHeader,
+            },
+            // Gateway principals carry no display extras today.
+            display: Default::default(),
         })
     }
 }

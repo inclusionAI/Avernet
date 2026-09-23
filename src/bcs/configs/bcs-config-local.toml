@@ -207,6 +207,36 @@ mock_user_id = "000000"
 mock_user_name = "guest"
 allow_mock_headers = true
 
+# V1 OpenAPI auth ([api.auth]) is intentionally absent in this local
+# config. Local development keeps the legacy chain above for `/auth/*`
+# and WS bot auth; the V1 protected routes run in compatibility mode
+# (Gateway-only auth + the security-upgraded browser binding / atomic
+# session model). Adding `[api.auth]` does NOT carry the legacy mock
+# user over to the V1 chain — the `[auth].mock_user_*` fields only
+# affect the legacy chain, and the V1 chain has no `local` or Mock
+# source. If you enable any OAuth source here, every OAuth-only
+# required field (`public_base_url`, `session_signing_key_secret`,
+# `trusted_browser_origins`) MUST be provided; the schema fails
+# startup on partial configuration. A provider table present without
+# a `chain` entry is schema-validated but its secrets are NOT read
+# (a provider table present ≠ enabled). See:
+#   docs/superpowers/specs/2026-09-18-v1-api-auth-plugin-chain-design.md §4
+#   api-contracts/v1/authentication/contract.md
+#
+# Example local-only debugging block (GitHub sandbox against a loopback
+# callback):
+#
+# [api.auth]
+# chain = ["github"]
+# public_base_url = "http://127.0.0.1:21000/openapi/v1/auth"
+# session_signing_key_secret = "bcs-local-session-signing-key"
+# trusted_browser_origins = ["http://localhost:8000"]
+# success_redirect_path = "/"
+#
+# [api.auth.github]
+# client_id = "local-github-oauth-client-id"
+# client_secret_secret = "bcs-local-github-client-secret"
+
 [bcsfuse]
 enabled = true
 url = "http://127.0.0.1:8765"

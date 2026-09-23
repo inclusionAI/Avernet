@@ -8,12 +8,46 @@ use bcs_auth_api::{AuthError, AuthPlugin, OAuthProvider, UserIdentityInfo, UserI
 use bcs_auth_google::{GoogleOAuthConfig, GoogleOAuthProvider};
 use bcs_auth_oauth::{verify_oauth_session, OAuthSessionPlugin};
 use bcs_jwt::JwtService;
+use bcs_service_api::port::repo::auth_session::{
+    AuthSessionRepoPort, AuthSessionScope, AuthSessionVersion, InstallAuthSession,
+};
 use bcs_service_api::UserIdentityRepoPort;
 use bcs_user_identity::MemoryUserIdentityRepo;
 
+/// Task 11 coverage transfer: session binding now goes through the strict
+/// CAS install path (the same write the OAuth session engine performs at
+/// login); the removed unconditional `update_token` back door is gone.
+async fn install_bound_session(
+    inner: &Arc<MemoryUserIdentityRepo>,
+    user_id: &str,
+    env: &str,
+    token_hash: &str,
+    expires_at: u64,
+) {
+    let scope = AuthSessionScope {
+        user_id: user_id.to_string(),
+        provider: "google".to_string(),
+        env: env.to_string(),
+    };
+    let revision = inner.read_session_revision(&scope).await.unwrap();
+    inner
+        .install_login_session(InstallAuthSession {
+            scope,
+            expected_revision: revision,
+            next: AuthSessionVersion {
+                session_id: format!("sid-{token_hash}"),
+                revision: revision + 1,
+                token_hash: token_hash.to_string(),
+            },
+            expires_at,
+        })
+        .await
+        .unwrap();
+}
+
 /// Mock UserIdentityPort wrapping MemoryUserIdentityRepo.
 struct MockUserIdentityPort {
-    inner: MemoryUserIdentityRepo,
+    inner: Arc<MemoryUserIdentityRepo>,
 }
 
 #[async_trait]
@@ -66,24 +100,14 @@ impl UserIdentityPort for MockUserIdentityPort {
         }))
     }
 
-    async fn update_token(
-        &self,
-        user_id: &str,
-        token: &str,
-        expire_at: u64,
-    ) -> Result<(), AuthError> {
-        self.inner
-            .update_token(user_id, token, expire_at)
-            .await
-            .map_err(AuthError::LookupFailed)
-    }
 }
 
 #[tokio::test]
 async fn full_oauth_session_flow() {
     let jwt_secret = "test-secret-key-at-least-32-bytes!!";
+    let inner = Arc::new(MemoryUserIdentityRepo::new());
     let port: Arc<dyn UserIdentityPort> = Arc::new(MockUserIdentityPort {
-        inner: MemoryUserIdentityRepo::new(),
+        inner: inner.clone(),
     });
 
     // 1. Simulate: user logs in via Google, backend ensures identity
@@ -106,10 +130,16 @@ async fn full_oauth_session_flow() {
         name: None,
     };
     let jwt = jwt_svc.sign(&claims).unwrap();
-    // Callback persists the JWT fingerprint so the hot path can bind to it.
-    port.update_token(&user_id, &bcs_jwt::token_hash(&jwt), claims.exp)
-        .await
-        .unwrap();
+    // Callback persists the JWT fingerprint via the strict install path so
+    // the hot path can bind to it.
+    install_bound_session(
+        &inner,
+        &user_id,
+        "default",
+        &bcs_jwt::token_hash(&jwt),
+        claims.exp,
+    )
+    .await;
 
     // 3. Next request: the provider-agnostic session plugin verifies the JWT
     let plugin = OAuthSessionPlugin::new(jwt_secret.to_string(), port.clone());
@@ -158,7 +188,7 @@ fn google_provider_auth_url_format() {
 async fn expired_jwt_returns_none() {
     let jwt_secret = "test-secret-key-at-least-32-bytes!!";
     let port: Arc<dyn UserIdentityPort> = Arc::new(MockUserIdentityPort {
-        inner: MemoryUserIdentityRepo::new(),
+        inner: Arc::new(MemoryUserIdentityRepo::new()),
     });
 
     let user_id = port
@@ -193,8 +223,9 @@ async fn expired_jwt_returns_none() {
 #[tokio::test]
 async fn verify_oauth_session_hot_path_does_not_refresh() {
     let jwt_secret = "test-secret-key-at-least-32-bytes!!";
+    let inner = Arc::new(MemoryUserIdentityRepo::new());
     let port: Arc<dyn UserIdentityPort> = Arc::new(MockUserIdentityPort {
-        inner: MemoryUserIdentityRepo::new(),
+        inner: inner.clone(),
     });
 
     let user_id = port
@@ -216,10 +247,16 @@ async fn verify_oauth_session_hot_path_does_not_refresh() {
         name: None,
     };
     let jwt = jwt_svc.sign(&claims).unwrap();
-    // Bind the session (as the callback would) so the hash check passes.
-    port.update_token(&user_id, &bcs_jwt::token_hash(&jwt), claims.exp)
-        .await
-        .unwrap();
+    // Bind the session via the strict install path (as the callback would)
+    // so the hash check passes.
+    install_bound_session(
+        &inner,
+        &user_id,
+        "default",
+        &bcs_jwt::token_hash(&jwt),
+        claims.exp,
+    )
+    .await;
 
     let mut headers = HeaderMap::new();
     headers.insert("cookie", format!("bcs_session={}", jwt).parse().unwrap());
@@ -239,7 +276,7 @@ async fn verify_oauth_session_hot_path_does_not_refresh() {
 async fn verify_oauth_session_rejects_unbound_jwt() {
     let jwt_secret = "test-secret-key-at-least-32-bytes!!";
     let port: Arc<dyn UserIdentityPort> = Arc::new(MockUserIdentityPort {
-        inner: MemoryUserIdentityRepo::new(),
+        inner: Arc::new(MemoryUserIdentityRepo::new()),
     });
     let user_id = port
         .ensure_identity("google", "unbound-user", None, None, "default")
@@ -259,7 +296,7 @@ async fn verify_oauth_session_rejects_unbound_jwt() {
         name: None,
     };
     let jwt = jwt_svc.sign(&claims).unwrap();
-    // Note: no update_token — this JWT was never bound as the current session.
+    // Note: no session install — this JWT was never bound as the current session.
 
     let mut headers = HeaderMap::new();
     headers.insert("cookie", format!("bcs_session={}", jwt).parse().unwrap());
@@ -270,8 +307,9 @@ async fn verify_oauth_session_rejects_unbound_jwt() {
 
 #[tokio::test]
 async fn token_storage_and_retrieval_via_port() {
+    let inner = Arc::new(MemoryUserIdentityRepo::new());
     let port: Arc<dyn UserIdentityPort> = Arc::new(MockUserIdentityPort {
-        inner: MemoryUserIdentityRepo::new(),
+        inner: inner.clone(),
     });
 
     // 1. Create identity with avatar
@@ -280,14 +318,14 @@ async fn token_storage_and_retrieval_via_port() {
         .await
         .unwrap();
 
-    // 2. Before update_token, get_identity_by_token finds nothing
+    // 2. Before a session install, get_identity_by_token finds nothing
     assert!(
         port.get_identity_by_token("no-such-token").await.unwrap().is_none(),
         "should not find identity before token is stored"
     );
 
-    // 3. Store a token
-    port.update_token(&user_id, "jwt-carol-abc", 9999).await.unwrap();
+    // 3. Store a session binding through the strict install path.
+    install_bound_session(&inner, &user_id, "default", "jwt-carol-abc", 9999).await;
 
     // 4. Now get_identity_by_token finds the user
     let found = port
@@ -300,8 +338,8 @@ async fn token_storage_and_retrieval_via_port() {
     assert_eq!(found.external_user_name.as_deref(), Some("Carol"));
     assert_eq!(found.avatar.as_deref(), Some("https://img.url/carol"));
 
-    // 5. Overwrite token (single-session: old token invalidated)
-    port.update_token(&user_id, "jwt-carol-v2", 10000).await.unwrap();
+    // 5. Re-install (single-session: old token invalidated).
+    install_bound_session(&inner, &user_id, "default", "jwt-carol-v2", 10000).await;
     assert!(
         port.get_identity_by_token("jwt-carol-abc").await.unwrap().is_none(),
         "old token should no longer match after overwrite"

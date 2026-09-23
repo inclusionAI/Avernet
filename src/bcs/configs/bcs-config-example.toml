@@ -71,6 +71,88 @@ key_id = "bare"
 # Runtime lookup only; set this environment variable to real secret material.
 signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
 
+# =============================================================================
+# V1 OpenAPI auth source chain ([api.auth]).
+# =============================================================================
+#
+# `[api.auth]` selects the V1-only authentication source chain for protected
+# `/openapi/v1/**` and `/api/v1/**` routes. The legacy `[auth]` chain still
+# governs the legacy `/auth/*` and WS bot connection auth and is unchanged
+# by this section. See:
+#   docs/superpowers/specs/2026-09-18-v1-api-auth-plugin-chain-design.md §4
+#   api-contracts/v1/authentication/contract.md
+#
+# Omitting `[api.auth]` entirely enters compatibility mode: the V1 routes
+# keep the original Gateway-only protected auth, while the OAuth browser
+# binding and atomic session model are STILL upgraded (spec §4.3 — the
+# security upgrade is not optional in compatibility mode).
+#
+# Three deployment modes are documented below. Uncomment one at a time.
+# Each source table MUST declare its full schema; unknown table fields
+# fail startup. A table present without `chain` entry keeps its schema
+# validated but its secrets are NOT read and its client is NOT
+# initialized (spec §4.2 — a provider table present ≠ enabled).
+
+# ---- Mode A: Gateway-only (recommended first rollout) ---------------------
+# Accept the signed X-Avernet-Principal header from the gateway/backend.
+# Omit all OAuth-specific fields (`public_base_url`,
+# `session_signing_key_secret`, `trusted_browser_origins`) when no OAuth
+# source is enabled; the schema rejects contradictory configurations
+# (e.g. OAuth-only fields present with no OAuth source).
+#
+# [api.auth]
+# chain = ["gateway"]
+# success_redirect_path = "/"
+#
+# [api.auth.gateway]
+# issuers = ["gateway", "backend"]
+# audience = "bcs"
+# key_id = "bare"
+# signing_key_secret = "principal-signing-key"  # logical SecretAccessPort name
+
+# ---- Mode B: GitHub OAuth-only (no Gateway) --------------------------------
+# A deployment without a gateway can authenticate humans directly. The
+# V1 protected routes fall back to the OAuth session cookie. The chain
+# has NO implicit Gateway; `gateway` MUST NOT be auto-appended.
+#
+# [api.auth]
+# chain = ["github"]
+# public_base_url = "https://bcs.example.com/openapi/v1/auth"
+# session_signing_key_secret = "bcs-api-session-signing-key"
+# session_idle_timeout_minutes = 30
+# success_redirect_path = "/"
+# trusted_browser_origins = ["https://workbench.example.com"]
+#
+# [api.auth.github]
+# client_id = "example-github-client-id"
+# client_secret_secret = "bcs-api-github-client-secret"
+
+# ---- Mode C: Mixed Gateway + GitHub ---------------------------------------
+# Both the gateway principal header and a browser cookie are accepted,
+# evaluated in the configured order. The first source to succeed stops
+# evaluation; a failed source never falls back to a later source.
+# Spec §7.1 explicitly allows gateway-first OR OAuth-first; the chosen
+# order MUST be a conscious decision because it changes the trust
+# boundary.
+#
+# [api.auth]
+# chain = ["gateway", "github"]
+# public_base_url = "https://bcs.example.com/openapi/v1/auth"
+# session_signing_key_secret = "bcs-api-session-signing-key"
+# session_idle_timeout_minutes = 30
+# success_redirect_path = "/"
+# trusted_browser_origins = ["https://workbench.example.com"]
+#
+# [api.auth.gateway]
+# issuers = ["gateway", "backend"]
+# audience = "bcs"
+# key_id = "bare"
+# signing_key_secret = "principal-signing-key"
+#
+# [api.auth.github]
+# client_id = "example-github-client-id"
+# client_secret_secret = "bcs-api-github-client-secret"
+
 [cors]
 allowed_origins = [
   "https://bcs.example.com",

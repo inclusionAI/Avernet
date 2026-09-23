@@ -63,7 +63,10 @@ mod tests {
     use axum::Router;
     use serde_json::Value;
     use tower::ServiceExt;
-    use crate::{PrincipalVerificationError, PrincipalVerifier};
+    use crate::{
+        AuthenticationContext, CredentialKind, PrincipalVerificationError, PrincipalVerifier,
+        VerifiedRequestIdentity,
+    };
 
     #[derive(Default)]
     struct CountingInviteCodeService {
@@ -127,8 +130,21 @@ mod tests {
         async fn verify(
             &self,
             _headers: &HeaderMap,
-        ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
-            Ok(AuthenticatedCaller { tenant: None, user: None, bot: None, app: None, access_key: None })
+        ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
+            Ok(VerifiedRequestIdentity {
+                caller: AuthenticatedCaller {
+                    tenant: None,
+                    user: None,
+                    bot: None,
+                    app: None,
+                    access_key: None,
+                },
+                authentication_context: AuthenticationContext {
+                    source: "test-dummy".to_string(),
+                    credential_kind: CredentialKind::GatewayPrincipalHeader,
+                },
+                display: Default::default(),
+            })
         }
     }
 

@@ -1,19 +1,49 @@
 use std::sync::Arc;
 
 use bcs_config_api::ManifestConfig;
+use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    AuthService as ApplicationAuthService, BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendConnectionService, FriendshipService, GroupService, InvitationService, InviteCodeService, RegisterService,
-    SessionFileApplicationService, SessionMessageService, SessionService,
+    ApplicationError, AuthUserInfo, AuthService as ApplicationAuthService, BotService,
+    CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService,
+    FriendConnectionService, FriendshipService, GroupService, InvitationService,
+    InviteCodeService, RegisterService, SessionFileApplicationService, SessionMessageService,
+    SessionService,
 };
 use bcs_service_api::application::channel::ChannelService;
 use bcs_service_api::application::CollaborationRuntimeService;
 
 use crate::v1::openapi::SessionFileUrlProjector;
 
+use super::csrf::TrustedBrowserOrigins;
 use super::{InviteCodeGateState, PrincipalVerifier};
 
 pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier>;
+
+    /// Trusted browser origins used by `verify_principal` for the post-
+    /// verification Origin CSRF check. `None` means CSRF is disabled (used
+    /// when the deployment runs gateway-only with no cookie verifier — the
+    /// Gateway credential kind always passes the CSRF rule, so CSRF is a
+    /// no-op in production today). When OAuth/Sso cookie verifiers arrive
+    /// (Tasks 8/12) this must be populated from `api.auth.trusted_browser_origins`.
+    fn trusted_browser_origins(&self) -> Option<&TrustedBrowserOrigins> {
+        None
+    }
+}
+
+/// Delivery-side projection port for the legacy non-OAuth `/auth/user`
+/// fallback (Task 11). The OLD answer came from the legacy auth plugin chain;
+/// the chain itself is NOT a delivery concern of this crate, so bootstrap
+/// injects a bridge over it. Returns the exact `AuthUserInfo` projection the
+/// legacy `/auth/user` shape has always returned. `ApplicationError::Internal`
+/// on chain failure, `ApplicationError::Unauthenticated` when the chain yields
+/// no human identity.
+#[async_trait]
+pub trait ChainUserProjection: Send + Sync {
+    async fn current_user(
+        &self,
+        headers: &axum::http::HeaderMap,
+    ) -> Result<AuthUserInfo, ApplicationError>;
 }
 
 #[derive(Clone)]
@@ -42,6 +72,13 @@ pub struct ApiState {
     pub manifest: ManifestConfig,
     pub manifest_env: String,
     pub principal_verifier: Arc<dyn PrincipalVerifier>,
+    /// Optional trusted-browser-origin allow-list for CSRF gating. Production
+    /// today runs gateway-only; turn this on when cookie/sso verifiers mount.
+    pub trusted_browser_origins: Option<TrustedBrowserOrigins>,
+    /// Optional legacy-chain projection used as the `/auth/user` fallback
+    /// when the new verifier chain yields no human identity (old non-OAuth
+    /// behavior preserved — see Task 11).
+    pub chain_user_projection: Option<Arc<dyn ChainUserProjection>>,
 }
 
 impl ApiState {
@@ -79,6 +116,8 @@ impl ApiState {
             manifest: ManifestConfig::default(),
             manifest_env: "local".to_string(),
             principal_verifier,
+            trusted_browser_origins: None,
+            chain_user_projection: None,
         }
     }
 
@@ -203,6 +242,30 @@ impl ApiState {
         self.manifest = manifest;
         self
     }
+
+    /// Configure the trusted-browser-origin allow-list used by the
+    /// `verify_principal` middleware to gate cookie-backed unsafe requests
+    /// via an Origin check. When `None`, the CSRF step is skipped entirely;
+    /// since the Gateway credential kind is not cookie-backed, CSRF is a
+    /// no-op in production today. OAuth/Sso cookie verifiers (Tasks 8/12) must
+    /// mount this from `api.auth.trusted_browser_origins` so cookie-backed
+    /// POST/PUT/DELETE/PATCH requests reject non-matching Origins.
+    pub fn with_trusted_browser_origins(
+        mut self,
+        origins: TrustedBrowserOrigins,
+    ) -> Self {
+        self.trusted_browser_origins = Some(origins);
+        self
+    }
+
+    /// Register the legacy-chain `/auth/user` fallback projection.
+    pub fn with_chain_user_projection(
+        mut self,
+        projection: Arc<dyn ChainUserProjection>,
+    ) -> Self {
+        self.chain_user_projection = Some(projection);
+        self
+    }
 }
 
 impl InviteCodeGateState for ApiState {
@@ -218,5 +281,9 @@ impl InviteCodeGateState for ApiState {
 impl PrincipalVerificationState for ApiState {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier> {
         &self.principal_verifier
+    }
+
+    fn trusted_browser_origins(&self) -> Option<&TrustedBrowserOrigins> {
+        self.trusted_browser_origins.as_ref()
     }
 }

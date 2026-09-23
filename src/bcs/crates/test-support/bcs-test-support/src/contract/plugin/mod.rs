@@ -6,6 +6,12 @@ use bcs_llm_api::{LlmChatCompletionPort, LlmChatCompletionRequest, LlmChatMessag
 use bcs_service_api::port::secret::{SecretAccessPort, SecretRecord};
 use serde_json::json;
 
+pub mod auth_session_identity;
+pub mod pending_oauth_login;
+
+pub use auth_session_identity::auth_session_identity_port_contract_tests;
+pub use pending_oauth_login::pending_oauth_login_store_contract_tests;
+
 pub async fn cache_plugin_contract_tests<P: CachePlugin>(plugin: &P) {
     crate::cache_plugin_contract_tests(plugin).await;
 }

@@ -267,6 +267,7 @@ fn application_err_to_response(err: ApplicationError) -> Response {
         PayloadTooLarge { .. } => ("PAYLOAD_TOO_LARGE", StatusCode::PAYLOAD_TOO_LARGE),
         Unprocessable { .. } => ("INVALID_STATE", StatusCode::UNPROCESSABLE_ENTITY),
         BadGateway { .. } => ("STORAGE_BACKEND", StatusCode::BAD_GATEWAY),
+        Unavailable(_) => ("UNAVAILABLE", StatusCode::SERVICE_UNAVAILABLE),
         Internal(_) => ("INTERNAL", StatusCode::INTERNAL_SERVER_ERROR),
     };
     (

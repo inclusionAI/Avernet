@@ -55,13 +55,4 @@ pub trait UserIdentityRepoPort: Send + Sync {
     /// Look up a user identity by internal `user_id` for display purposes.
     /// Returns the first matching row (there should be at most one per source).
     async fn get_by_user_id_display(&self, user_id: &str) -> Option<UserIdentity>;
-
-    /// Write or overwrite the session token for a user.
-    /// Called after OAuth callback JWT signing and after sliding-expiry re-sign.
-    async fn update_token(
-        &self,
-        user_id: &str,
-        token: &str,
-        expire_at: u64,
-    ) -> Result<(), String>;
 }

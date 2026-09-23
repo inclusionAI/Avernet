@@ -5,7 +5,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
-use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_api_http::{
+    ApiState, AuthenticationContext, CredentialKind, PrincipalVerificationError, PrincipalVerifier,
+    VerifiedRequestIdentity, router,
+};
 use bcs_config_api::{ManifestBundleConfig, ManifestConfig};
 use bcs_service_api::application::v1::*;
 use serde_json::Value;
@@ -18,7 +21,7 @@ impl PrincipalVerifier for AcceptAllVerifier {
     async fn verify(
         &self,
         _headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         // Public routes do not pass the verify_principal boundary; this is
         // only here to satisfy ApiState::new.
         Err(PrincipalVerificationError::Missing)

@@ -734,6 +734,10 @@ fn internal_attributes_error(error: ApplicationError) -> ProviderRouteError {
             status: StatusCode::BAD_GATEWAY,
             message,
         },
+        ApplicationError::Unavailable(message) => ProviderRouteError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message,
+        },
         ApplicationError::Internal(message) => ProviderRouteError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message,

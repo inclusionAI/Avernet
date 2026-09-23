@@ -119,10 +119,42 @@ AuthUrlPath:
     operationId: get_auth_login_urls
     tags: ["Authentication"]
     summary: Return configured OAuth login URLs for the OpenAPI auth facade.
+    description: >-
+      Enumerates the configured OAuth provider login URLs in the chain
+      subsequence order. Each successful response also issues a fresh
+      `__Host-bcs_oauth_login` browser-binding challenge cookie (spec
+      §8.4) so the subsequent `GET /auth/callback/{provider}` callback can
+      prove it originated from the same browser. The redirect URL is
+      `{public_base_url}/callback/{provider}`; the public base URL is
+      configured in `[api.auth]` and is never inferred from the request
+      Host/Forwarded headers. Failure to start the pending-login batch
+      surfaces as an error response with NO cookie changes (the challenge
+      was never set). Responses carry `Cache-Control: no-store` because
+      the per-response challenge cookie is unique and must never be
+      cached or replayed.
     x-avernet-security: {}
     responses:
       "200":
         description: Login URLs returned for each configured OAuth provider.
+        headers:
+          Set-Cookie:
+            description: >-
+              Issues the temporary `__Host-bcs_oauth_login` HttpOnly,
+              Secure, SameSite=Lax, Path=/, Max-Age=300 cookie carrying
+              the per-browser CSPRNG nonce. Local HTTP development is the
+              only environment permitted to use a non-Secure variant.
+            schema:
+              type: string
+          Cache-Control:
+            description: Prevents caching of the per-response challenge cookie.
+            schema:
+              type: string
+              const: no-store
+          Pragma:
+            description: Legacy cache prevention for HTTP/1.0 intermediaries.
+            schema:
+              type: string
+              const: no-cache
         content:
           application/json:
             schema:
@@ -142,6 +174,21 @@ AuthCallbackPath:
     operationId: complete_auth_login
     tags: ["Authentication"]
     summary: Complete the OAuth login redirect for the OpenAPI auth facade.
+    description: >-
+      Completes the OAuth login redirect for `provider`. The endpoint
+      requires the temporary `__Host-bcs_oauth_login` challenge cookie
+      that `GET /auth/url` issued to the same browser (spec §8.4);
+      missing, duplicate, or empty challenge cookies are rejected as
+      `invalid_state` BEFORE any provider exchange. The `state` query
+      parameter, the cookie nonce hash, the provider, the exact
+      callback URL, and the configured flow namespace must all match
+      the pending-login batch, which is atomically consumed on the
+      first fully-matching callback. A successful redirect carries two
+      `Set-Cookie` headers: the fresh `bcs_session` cookie and a cleared
+      `__Host-bcs_oauth_login` cookie. A callback that fails AFTER the
+      atomic consume (provider exchange or session install failure)
+      still clears the challenge cookie per spec §8.4; a callback that
+      fails BEFORE the consume clears nothing.
     x-avernet-security: {}
     x-avernet-raw-response: true
     parameters:
@@ -151,10 +198,25 @@ AuthCallbackPath:
       - $ref: "#/AuthStateQuery"
     responses:
       "302":
-        description: Login completed successfully and a session cookie was issued.
+        description: Login completed successfully; a session cookie was issued and the challenge cookie was cleared.
+        headers:
+          Set-Cookie:
+            description: >-
+              Multiple Set-Cookie headers are appended on success: the
+              fresh `bcs_session` authentication cookie (HttpOnly, Secure,
+              SameSite=Lax) and the cleared `__Host-bcs_oauth_login`
+              challenge cookie (Max-Age=0). The two values MUST be emitted
+              as distinct Set-Cookie headers, never merged.
+            schema:
+              type: string
+          Location:
+            description: The configured post-login redirect URL.
+            schema:
+              type: string
       "400":
-        description: Invalid or mismatched OAuth callback state.
+        description: Invalid or mismatched OAuth callback state, or duplicated callback query parameters.
         x-error-codes:
+          - invalid_request
           - invalid_state
           - provider_mismatch
           - missing_code
@@ -177,6 +239,14 @@ AuthUserPath:
     operationId: get_auth_user
     tags: ["Authentication"]
     summary: Return the current authenticated OpenAPI human identity.
+    description: >-
+      Projects the Human returned by the configured verifier chain. A verified
+      identity without a Human component is rejected with 403, not 401, and
+      never falls back to the legacy identity chain. A disallowed OAuth
+      provider also returns 403. Invalid credentials return 401, verifier
+      dependency faults return 503, and internal failures return 500. Only a
+      missing credential may use the explicitly wired legacy compatibility
+      projection; terminal verification errors never trigger fallback.
     x-avernet-security: {}
     responses:
       "200":
@@ -186,8 +256,27 @@ AuthUserPath:
             schema:
               $ref: "#/AuthUserInfoEnvelope"
       "401":
-        description: Session is missing or does not resolve to a human identity.
+        description: Credentials are missing or invalid, or no identity was resolved by the configured authentication sources.
         x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          The verified identity has no human component, or the verified OAuth
+          session belongs to a provider that the configured chain disallows.
+          The response is forbidden; no other identity chain is attempted.
+        x-error-codes: [forbidden]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "503":
+        description: >-
+          A verifier dependency, such as the identity store, is unavailable.
+          This is not an unauthenticated session and must not trigger fallback.
+        x-error-codes: [unavailable]
         content:
           application/json:
             schema:
@@ -200,17 +289,67 @@ AuthRefreshPath:
     operationId: refresh_auth_session
     tags: ["Authentication"]
     summary: Renew the bound OpenAPI auth session cookie.
+    description: >-
+      Rotates the presented `bcs_session` cookie via the atomic session
+      operation (spec §8.5). The presented cookie is parsed ONLY from
+      the request cookie; a Gateway identity in the headers cannot
+      substitute for it. A successful rotation returns a fresh
+      `Set-Cookie`. The atomic CAS uses `(scope, session_id,
+      expected_revision, expected_hash)`; a CAS conflict — the session
+      was already rotated, revoked, or replaced by a newer login —
+      returns `401` with `session_conflict` so the client knows it must
+      re-authenticate (the spec explicitly rejects "refresh against an
+      already-replaced instance"). Storage / dependency faults return
+      `503` with `unavailable`; the response carries no success
+      envelope and no `Set-Cookie` change. The HTTP layer clears the
+      session cookie when a 401 is returned.
     x-avernet-security: {}
     responses:
       "200":
         description: The session was renewed and a fresh cookie was issued.
+        headers:
+          Set-Cookie:
+            description: >-
+              The rotated `bcs_session` cookie (HttpOnly, Secure,
+              SameSite=Lax).
+            schema:
+              type: string
         content:
           application/json:
             schema:
               $ref: "#/AuthSessionMutationEnvelope"
       "401":
-        description: Session is missing, malformed, expired, or unbound.
-        x-error-codes: [unauthenticated]
+        description: >-
+          Session is missing, malformed, expired, unbound, or replaced
+          by a newer login/refresh. A CAS conflict during the atomic
+          rotate (the session was already rotated, revoked, or
+          replaced) returns `session_conflict`; the client MUST
+          re-authenticate.
+        x-error-codes:
+          - unauthenticated
+          - session_conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          The cookie-backed request failed the Origin/CSRF check
+          (spec §7.4). The session itself is not the failing party;
+          the request is rejected with no fallback to another source.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "503":
+        description: >-
+          A dependency (identity store, database, secret resolver)
+          fault prevented the atomic rotate. The error is NOT
+          collapsed into `401`; persistence failure must not return
+          success or promise the session was rotated.
+        x-error-codes: [unavailable]
         content:
           application/json:
             schema:
@@ -223,13 +362,69 @@ AuthLogoutPath:
     operationId: logout_auth_session
     tags: ["Authentication"]
     summary: Clear the bound OpenAPI auth session cookie.
+    description: >-
+      Revokes the presented `bcs_session` cookie via the atomic session
+      revoke (spec §8.5). The presented cookie is parsed ONLY from the
+      request cookie; a Gateway identity in the headers cannot
+      substitute for it. A request without the session cookie is the
+      idempotent logout boundary (no revoke is attempted). A blank, value-less,
+      duplicated session cookie or any unreadable Cookie header is rejected
+      with 401 unauthenticated, with no revoke and no Set-Cookie change; it
+      never takes the no-cookie success path. The atomic
+      revoke validates `(scope, session_id)` and only revokes the
+      matching instance; a logout for an already-revoked or
+      already-replaced session is idempotent `NotCurrent`. A storage
+      or dependency fault returns `503` with `unavailable`; the
+      response carries no success envelope — persistence failure must
+      not be reported as a successful logout (spec §8.5). The HTTP layer
+      still appends the `Set-Cookie: Max-Age=0` clear on success paths
+      only.
     x-avernet-security: {}
     responses:
       "200":
         description: The session was cleared and the cookie removal header was issued.
+        headers:
+          Set-Cookie:
+            description: >-
+              The cleared `bcs_session` cookie (Max-Age=0) when a
+              session was presented; absent on the idempotent no-cookie
+              logout boundary.
+            schema:
+              type: string
         content:
           application/json:
             schema:
               $ref: "#/AuthSessionMutationEnvelope"
+      "401":
+        description: >-
+          The presented session credential is invalid, or its Cookie carrier
+          is blank, value-less, duplicated, or unreadable. This is not the
+          idempotent no-cookie boundary. No session cookie is cleared.
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          The cookie-backed request failed the Origin/CSRF check
+          (spec §7.4). The session itself is not the failing party.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "503":
+        description: >-
+          A dependency (identity store, database, secret resolver)
+          fault prevented the atomic revoke. The error is NOT
+          collapsed into a `200`; persistence failure must not be
+          reported as a successful logout.
+        x-error-codes: [unavailable]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse

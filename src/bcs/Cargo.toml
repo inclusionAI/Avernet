@@ -60,6 +60,7 @@ members = [
     "crates/application/v1/bcs-app-register",
     "crates/application/v1/bcs-app-collaboration-template",
     "crates/application/v1/bcs-app-collaboration-definition",
+    "crates/application/v1/bcs-app-auth",
     "crates/services/bcs-session-file",
     "crates/services/bcs-session-file-store",
     "crates/services/bcs-invite-code-store",
@@ -308,6 +309,7 @@ bcs-app-register = { path = "crates/application/v1/bcs-app-register" }
 bcs-app-invite-code = { path = "crates/application/v1/bcs-app-invite-code" }
 bcs-app-collaboration-template = { path = "crates/application/v1/bcs-app-collaboration-template" }
 bcs-app-collaboration-definition = { path = "crates/application/v1/bcs-app-collaboration-definition" }
+bcs-app-auth                  = { path = "crates/application/v1/bcs-app-auth" }
 bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
 bcs-invite-code-store      = { path = "crates/services/bcs-invite-code-store" }
 bcs-session-file           = { path = "crates/services/bcs-session-file" }

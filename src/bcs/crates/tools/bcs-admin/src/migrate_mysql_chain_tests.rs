@@ -126,9 +126,9 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
     let result: Result<()> = async {
         println!("[phase 1/3] applying the fresh MySQL migration chain");
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=30\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=31\npending_versions=0"), "{report}");
         let versions = load_applied_mysql_migrations(db).await?.into_iter().map(|record| record.version).collect::<Vec<_>>();
-        assert_eq!(versions, (1..=30).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=31).collect::<Vec<_>>());
         assert_chain_columns(db).await?;
         assert_history_lookup_plans(db).await?;
         history_window_tests::verify_history_windows(global).await?;
@@ -163,7 +163,7 @@ async fn check_full_mysql_chain(db: Arc<dyn DbPlugin>, global: &MigrateGlobalArg
         }
         let records = chain_history(db).await?;
         let report = apply_mysql_migrations(&args, global).await?;
-        assert!(report.contains("applied_versions=10\npending_versions=0"), "{report}");
+        assert!(report.contains("applied_versions=11\npending_versions=0"), "{report}");
         assert_eq!(chain_history(db).await?.into_iter().filter(|(version, _)| *version <= 20).collect::<Vec<_>>(), records);
         assert_chain_columns(db).await?;
         let row = db.query(DbStatement::new("SELECT human_mention_notify_mode FROM bcs_groups WHERE group_id = 'chain-group' AND env = 'test'")).await?.remove(0);

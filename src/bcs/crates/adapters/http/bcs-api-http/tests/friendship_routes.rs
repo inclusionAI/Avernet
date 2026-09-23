@@ -1,592 +1,10 @@
-use std::sync::{Arc, Mutex};
-
-use async_trait::async_trait;
-use axum::body::{Body, to_bytes};
-use axum::http::{HeaderMap, Request, StatusCode};
-use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
-use bcs_service_api::RequestAuthHeaders;
-use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptFriendConnectionRequest, AcceptInvitation, AddGroupParticipant,
-    AddSessionParticipant, ApplicationError, AuthProviderUrlList, AuthRedirect,
-    AuthService as ApplicationAuthService, AuthUserInfo, AuthenticatedCaller,
-    AuthenticatedUserIdentity, BotRegistration, BuildLoginUrls, CancelFriendConnectionRequest,
-    CompleteOAuthLogin, CompleteSession, CreateBotFriendRequest, CreateFriendConnectionRequest,
-    CreateGroup, CreateGroupInvitation, CreateSession, CreateSessionInvitation,
-    CreateSessionOutcome, DeleteBotFriendship, DeleteFriendConnection, DeleteGroup,
-    DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, Friendship,
-    FriendshipService, FriendConnectionActor, FriendConnectionActorType,
-    FriendConnectionCreateResult, FriendConnectionCreateStatus, FriendConnectionPage,
-    FriendConnectionRequestDirection, FriendConnectionRequestPage,
-    FriendConnectionRequestStatus, FriendConnectionRequestView, FriendConnectionService,
-    FriendConnectionView, FriendRequest, FriendRequestDirection, FriendRequestStatus, GetGroup,
-    GetSession, GroupDetail, GroupService, GroupSummary, Invitation, InvitationAcceptResult,
-    InvitationService, IssueRegisterToken, ListBotFriendRequests, ListBotFriendships,
-    ListFriendConnectionRequests, ListFriendConnections, ListGroups, ListSessionMessages,
-    ListSessions, LogoutResult, LogoutSession, Page, ReadCurrentUser, RefreshSession,
-    RegisterBot, RegisterService, RegisterTokenView, RejectFriendConnectionRequest,
-    RejectFriendRequest, SessionCompletionResult, SessionDetail, SessionMessageService,
-    SessionParticipant, SessionRenewal, SessionService, SessionSummary, UpdateGroup,
-    UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
-};
-use serde_json::{Value, json};
-use tower::ServiceExt;
-
-// ---------------------------------------------------------------------------
-// Shared test helpers (duplicated from group/session test files to keep each
-// test target self-contained — see task note on shared test-support vs dup).
-// ---------------------------------------------------------------------------
-
-struct HeaderVerifier {
-    caller: AuthenticatedCaller,
-}
-
-#[async_trait]
-impl PrincipalVerifier for HeaderVerifier {
-    async fn verify(
-        &self,
-        headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
-        if headers
-            .get("x-test-auth")
-            .and_then(|value| value.to_str().ok())
-            == Some("yes")
-        {
-            Ok(self.caller.clone())
-        } else {
-            Err(PrincipalVerificationError::Missing)
-        }
-    }
-}
-
-fn caller() -> AuthenticatedCaller {
-    AuthenticatedCaller {
-        tenant: Some("tenant-a".into()),
-        user: Some(AuthenticatedUserIdentity {
-            id: "staff-1".into(),
-            username: "alice".into(),
-            display_name: None,
-            full_name: None,
-        }),
-        bot: None,
-        app: None,
-        access_key: None,
-    }
-}
-
-fn caller_user_id(caller: &AuthenticatedCaller) -> &str {
-    caller.user.as_ref().expect("User identity").id.as_str()
-}
-
-fn authenticated_request(method: &str, uri: &str, body: Value) -> Request<Body> {
-    Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("content-type", "application/json")
-        .header("x-test-auth", "yes")
-        .header("x-request-id", "request-123")
-        .body(Body::from(body.to_string()))
-        .expect("request")
-}
-
-async fn response_json(response: axum::response::Response) -> Value {
-    let bytes = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read response body");
-    serde_json::from_slice(&bytes).expect("JSON response")
-}
-
-// ---------------------------------------------------------------------------
-// Noop services for group / session / message / invitation (friendship tests
-// never hit those routes).
-// ---------------------------------------------------------------------------
-
-struct NoopGroupService;
-
-#[async_trait]
-impl GroupService for NoopGroupService {
-    async fn list_groups(
-        &self,
-        _command: ListGroups,
-    ) -> Result<Page<GroupSummary>, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn create(&self, _command: CreateGroup) -> Result<GroupDetail, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn get(&self, _query: GetGroup) -> Result<GroupDetail, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn update(&self, _command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn delete(&self, _command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn add_participant(
-        &self,
-        _command: AddGroupParticipant,
-    ) -> Result<bcs_service_api::application::v1::Participant, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn update_participant(
-        &self,
-        _command: UpdateGroupParticipant,
-    ) -> Result<bcs_service_api::application::v1::Participant, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-
-    async fn delete_participant(
-        &self,
-        _command: DeleteGroupParticipant,
-    ) -> Result<DeleteResult, ApplicationError> {
-        Err(ApplicationError::internal("group not configured"))
-    }
-}
-
-struct NoopSessionService;
-
-#[async_trait]
-impl SessionService for NoopSessionService {
-    async fn create(
-        &self,
-        _command: CreateSession,
-    ) -> Result<CreateSessionOutcome, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn list(&self, _command: ListSessions) -> Result<Page<SessionSummary>, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn get(&self, _query: GetSession) -> Result<SessionDetail, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn update(&self, _command: UpdateSession) -> Result<SessionDetail, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn delete(&self, _command: DeleteSession) -> Result<DeleteResult, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn complete(
-        &self,
-        _command: CompleteSession,
-    ) -> Result<SessionCompletionResult, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn collect(
-        &self,
-        _: bcs_service_api::application::v1::CollectSession,
-    ) -> Result<bcs_service_api::application::v1::SessionCollectionResult, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn uncollect(
-        &self,
-        _: bcs_service_api::application::v1::UncollectSession,
-    ) -> Result<bcs_service_api::application::v1::SessionCollectionResult, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn add_participant(
-        &self,
-        _command: AddSessionParticipant,
-    ) -> Result<SessionParticipant, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn update_participant(
-        &self,
-        _command: UpdateSessionParticipant,
-    ) -> Result<SessionParticipant, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-
-    async fn delete_participant(
-        &self,
-        _command: DeleteSessionParticipant,
-    ) -> Result<DeleteResult, ApplicationError> {
-        Err(ApplicationError::internal("session not configured"))
-    }
-}
-
-struct NoopSessionMessageService;
-
-#[async_trait]
-impl SessionMessageService for NoopSessionMessageService {
-    async fn list(
-        &self,
-        _query: ListSessionMessages,
-    ) -> Result<Vec<bcs_service_api::GroupMessage>, ApplicationError> {
-        Err(ApplicationError::internal("session messages not configured"))
-    }
-}
-
-struct NoopInvitationService;
-
-#[async_trait]
-impl InvitationService for NoopInvitationService {
-    async fn create_group_invitation(
-        &self,
-        _command: CreateGroupInvitation,
-    ) -> Result<Invitation, ApplicationError> {
-        Err(ApplicationError::internal("invitation not configured"))
-    }
-
-    async fn create_session_invitation(
-        &self,
-        _command: CreateSessionInvitation,
-    ) -> Result<Invitation, ApplicationError> {
-        Err(ApplicationError::internal("invitation not configured"))
-    }
-
-    async fn accept_invitation(
-        &self,
-        _command: AcceptInvitation,
-    ) -> Result<InvitationAcceptResult, ApplicationError> {
-        Err(ApplicationError::internal("invitation not configured"))
-    }
-}
-
-struct NoopRegisterService;
-
-#[async_trait]
-impl RegisterService for NoopRegisterService {
-    async fn issue_register_token(
-        &self,
-        _command: IssueRegisterToken,
-    ) -> Result<RegisterTokenView, ApplicationError> {
-        Err(ApplicationError::internal("register service is a noop in this test"))
-    }
-
-    async fn register_bot(
-        &self,
-        _command: RegisterBot,
-    ) -> Result<BotRegistration, ApplicationError> {
-        Err(ApplicationError::internal("register service is a noop in this test"))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Fake friendship service.
-// ---------------------------------------------------------------------------
-
-#[derive(Default)]
-struct FakeFriendshipService {
-    listed_friendships: Mutex<Option<ListBotFriendships>>,
-    removed_friendship: Mutex<Option<DeleteBotFriendship>>,
-    created_friend_request: Mutex<Option<CreateBotFriendRequest>>,
-    listed_friend_requests: Mutex<Option<ListBotFriendRequests>>,
-    accepted_friend_request: Mutex<Option<AcceptFriendRequest>>,
-    rejected_friend_request: Mutex<Option<RejectFriendRequest>>,
-}
-
-#[async_trait]
-impl FriendshipService for FakeFriendshipService {
-    async fn list_bot_friendships(
-        &self,
-        command: ListBotFriendships,
-    ) -> Result<Page<Friendship>, ApplicationError> {
-        let offset = command.offset;
-        let limit = command.limit;
-        *self.listed_friendships.lock().expect("list friendships lock") = Some(command);
-        Ok(Page {
-            items: vec![friendship()],
-            total: 1,
-            offset,
-            limit,
-        })
-    }
-
-    async fn delete_bot_friendship(
-        &self,
-        command: DeleteBotFriendship,
-    ) -> Result<DeleteResult, ApplicationError> {
-        *self.removed_friendship.lock().expect("remove friendship lock") = Some(command);
-        Ok(DeleteResult { deleted: true })
-    }
-
-    async fn create_bot_friend_request(
-        &self,
-        command: CreateBotFriendRequest,
-    ) -> Result<FriendRequest, ApplicationError> {
-        *self
-            .created_friend_request
-            .lock()
-            .expect("create friend request lock") = Some(command.clone());
-        Ok(FriendRequest {
-            request_id: "req-1".into(),
-            from_bot_uuid: command.bot_uuid.clone(),
-            to_bot_uuid: command.to_bot_uuid.clone(),
-            status: FriendRequestStatus::Pending,
-            message: None,
-            created_at: 10,
-            updated_at: 10,
-        })
-    }
-
-    async fn list_bot_friend_requests(
-        &self,
-        command: ListBotFriendRequests,
-    ) -> Result<Page<FriendRequest>, ApplicationError> {
-        let offset = command.offset;
-        let limit = command.limit;
-        *self
-            .listed_friend_requests
-            .lock()
-            .expect("list friend requests lock") = Some(command);
-        Ok(Page {
-            items: vec![friend_request(FriendRequestStatus::Pending)],
-            total: 1,
-            offset,
-            limit,
-        })
-    }
-
-    async fn accept_friend_request(
-        &self,
-        command: AcceptFriendRequest,
-    ) -> Result<FriendRequest, ApplicationError> {
-        let request_id = command.request_id.clone();
-        *self
-            .accepted_friend_request
-            .lock()
-            .expect("accept friend request lock") = Some(command);
-        Ok(decision_result(request_id, FriendRequestStatus::Accepted))
-    }
-
-    async fn reject_friend_request(
-        &self,
-        command: RejectFriendRequest,
-    ) -> Result<FriendRequest, ApplicationError> {
-        let request_id = command.request_id.clone();
-        *self
-            .rejected_friend_request
-            .lock()
-            .expect("reject friend request lock") = Some(command);
-        Ok(decision_result(request_id, FriendRequestStatus::Rejected))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Fake friend-connection service.
-// ---------------------------------------------------------------------------
-
-struct FakeFriendConnectionService {
-    created_request: Mutex<Option<CreateFriendConnectionRequest>>,
-    listed_requests: Mutex<Option<ListFriendConnectionRequests>>,
-    accepted_request: Mutex<Option<AcceptFriendConnectionRequest>>,
-    rejected_request: Mutex<Option<RejectFriendConnectionRequest>>,
-    cancelled_request: Mutex<Option<CancelFriendConnectionRequest>>,
-    listed_connections: Mutex<Option<ListFriendConnections>>,
-    deleted_connection: Mutex<Option<DeleteFriendConnection>>,
-    create_result: Mutex<FriendConnectionCreateResult>,
-    request_page: Mutex<FriendConnectionRequestPage>,
-    request_view: Mutex<FriendConnectionRequestView>,
-    connection_page: Mutex<FriendConnectionPage>,
-    delete_result: Mutex<DeleteResult>,
-}
-
-impl Default for FakeFriendConnectionService {
-    fn default() -> Self {
-        Self {
-            created_request: Mutex::new(None),
-            listed_requests: Mutex::new(None),
-            accepted_request: Mutex::new(None),
-            rejected_request: Mutex::new(None),
-            cancelled_request: Mutex::new(None),
-            listed_connections: Mutex::new(None),
-            deleted_connection: Mutex::new(None),
-            create_result: Mutex::new(friend_connection_create_result()),
-            request_page: Mutex::new(friend_connection_request_page()),
-            request_view: Mutex::new(friend_connection_request_view()),
-            connection_page: Mutex::new(friend_connection_page()),
-            delete_result: Mutex::new(DeleteResult { deleted: true }),
-        }
-    }
-}
-
-
-#[async_trait]
-impl FriendConnectionService for FakeFriendConnectionService {
-    async fn create_friend_connection_request(
-        &self,
-        command: CreateFriendConnectionRequest,
-    ) -> Result<FriendConnectionCreateResult, ApplicationError> {
-        *self.created_request.lock().expect("create request lock") = Some(command);
-        Ok(self.create_result.lock().expect("create result lock").clone())
-    }
-
-    async fn list_friend_connection_requests(
-        &self,
-        command: ListFriendConnectionRequests,
-    ) -> Result<FriendConnectionRequestPage, ApplicationError> {
-        *self.listed_requests.lock().expect("list requests lock") = Some(command);
-        Ok(self.request_page.lock().expect("request page lock").clone())
-    }
-
-    async fn accept_friend_connection_request(
-        &self,
-        command: AcceptFriendConnectionRequest,
-    ) -> Result<FriendConnectionRequestView, ApplicationError> {
-        *self.accepted_request.lock().expect("accept request lock") = Some(command);
-        Ok(self.request_view.lock().expect("request view lock").clone())
-    }
-
-    async fn reject_friend_connection_request(
-        &self,
-        command: RejectFriendConnectionRequest,
-    ) -> Result<FriendConnectionRequestView, ApplicationError> {
-        *self.rejected_request.lock().expect("reject request lock") = Some(command);
-        Ok(self.request_view.lock().expect("request view lock").clone())
-    }
-
-    async fn cancel_friend_connection_request(
-        &self,
-        command: CancelFriendConnectionRequest,
-    ) -> Result<FriendConnectionRequestView, ApplicationError> {
-        *self.cancelled_request.lock().expect("cancel request lock") = Some(command);
-        Ok(self.request_view.lock().expect("request view lock").clone())
-    }
-
-    async fn list_friend_connections(
-        &self,
-        command: ListFriendConnections,
-    ) -> Result<FriendConnectionPage, ApplicationError> {
-        *self.listed_connections.lock().expect("list connections lock") = Some(command);
-        Ok(self.connection_page.lock().expect("connection page lock").clone())
-    }
-
-    async fn delete_friend_connection(
-        &self,
-        command: DeleteFriendConnection,
-    ) -> Result<DeleteResult, ApplicationError> {
-        *self.deleted_connection.lock().expect("delete connection lock") = Some(command);
-        Ok(self.delete_result.lock().expect("delete result lock").clone())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Canned data.
-// ---------------------------------------------------------------------------
-
-fn friend_connection_create_result() -> FriendConnectionCreateResult {
-    FriendConnectionCreateResult {
-        request_ids: vec!["1".to_string()],
-        edge_ids: vec![11],
-        status: FriendConnectionCreateStatus::Pending,
-        auto_accepted: false,
-    }
-}
-
-fn friend_connection_request_view() -> FriendConnectionRequestView {
-    FriendConnectionRequestView {
-        request_id: "1".to_string(),
-        edge_id: Some(11),
-        from_actor: FriendConnectionActor {
-            actor_type: FriendConnectionActorType::Bot,
-            id: "bot-1".into(),
-        },
-        to_actor: FriendConnectionActor {
-            actor_type: FriendConnectionActorType::Bot,
-            id: "bot-2".into(),
-        },
-        message: Some("hi".into()),
-        status: FriendConnectionRequestStatus::Pending,
-        decision_reason: None,
-        created_by: FriendConnectionActor {
-            actor_type: FriendConnectionActorType::Bot,
-            id: "bot-1".into(),
-        },
-        decided_by: None,
-        decided_at: None,
-    }
-}
-
-fn friend_connection_request_page() -> FriendConnectionRequestPage {
-    FriendConnectionRequestPage {
-        items: vec![friend_connection_request_view()],
-        total: 1,
-        page: 1,
-        page_size: 20,
-    }
-}
-
-fn friend_connection_page() -> FriendConnectionPage {
-    FriendConnectionPage {
-        items: vec![FriendConnectionView {
-            actor: FriendConnectionActor {
-                actor_type: FriendConnectionActorType::Bot,
-                id: "friend-bot".into(),
-            },
-            name: Some("Friend Bot".into()),
-            summary: Some("friend summary".into()),
-            is_online: true,
-        }],
-        total: 1,
-        page: 1,
-        page_size: 20,
-    }
-}
-
-fn friendship() -> Friendship {
-    Friendship {
-        bot_uuid: "bot-1".into(),
-        friend_bot_uuid: "bot-2".into(),
-        created_at: 10,
-    }
-}
-
-fn friend_request(status: FriendRequestStatus) -> FriendRequest {
-    FriendRequest {
-        request_id: "req-1".into(),
-        from_bot_uuid: "bot-1".into(),
-        to_bot_uuid: "bot-2".into(),
-        status,
-        message: Some("hi".into()),
-        created_at: 10,
-        updated_at: 20,
-    }
-}
-
-fn decision_result(request_id: String, status: FriendRequestStatus) -> FriendRequest {
-    FriendRequest {
-        request_id,
-        from_bot_uuid: "bot-1".into(),
-        to_bot_uuid: "bot-2".into(),
-        status,
-        message: None,
-        created_at: 10,
-        updated_at: 20,
-    }
-}
-
-fn test_router(service: Arc<FakeFriendshipService>) -> axum::Router {
-    router(ApiState::new(
-        Arc::new(NoopGroupService),
-        Arc::new(NoopSessionService),
-        Arc::new(NoopSessionMessageService),
-        Arc::new(NoopInvitationService),
-        Arc::new(NoopRegisterService),
-        service,
-        Arc::new(HeaderVerifier {
-            caller: caller(),
-        }),
-    ))
-}
-
-// ---------------------------------------------------------------------------
-// Tests.
-// ---------------------------------------------------------------------------
+//! V1 `friendship_routes` boundary tests. Shared fixtures loaded from
+//! `support/friendship_routes_fixtures.rs` to keep this file under 1000 lines
+//! (Task 7 split).
+
+#[path = "support/friendship_routes_fixtures.rs"]
+mod fixtures;
+use fixtures::*;
 
 #[tokio::test]
 async fn list_friendships_returns_page_and_forwards_principal() {
@@ -859,69 +277,16 @@ async fn unknown_fields_rejected_with_invalid_request() {
     assert_eq!(body["data"]["error_code"], "invalid_request");
 }
 
-fn openapi_test_router(service: Arc<FakeFriendConnectionService>) -> axum::Router {
-    router(ApiState::new(
-        Arc::new(NoopGroupService),
-        Arc::new(NoopSessionService),
-        Arc::new(NoopSessionMessageService),
-        Arc::new(NoopInvitationService),
-        Arc::new(NoopRegisterService),
-        Arc::new(FakeFriendshipService::default()),
-        Arc::new(HeaderVerifier {
-            caller: caller(),
-        }),
-    )
-    .with_friend_connection_service(service))
-}
-
-#[derive(Default)]
-struct CapturingAuthService {
-    current_user_request: Mutex<Option<ReadCurrentUser>>,
-}
-
-#[async_trait]
-impl ApplicationAuthService for CapturingAuthService {
-    async fn login_urls(
-        &self,
-        _request: BuildLoginUrls,
-    ) -> Result<AuthProviderUrlList, ApplicationError> {
-        Err(ApplicationError::internal("unused"))
-    }
-
-    async fn complete_login(
-        &self,
-        _request: CompleteOAuthLogin,
-    ) -> Result<AuthRedirect, ApplicationError> {
-        Err(ApplicationError::internal("unused"))
-    }
-
-    async fn current_user(&self, request: ReadCurrentUser) -> Result<AuthUserInfo, ApplicationError> {
-        *self
-            .current_user_request
-            .lock()
-            .expect("current user request lock") = Some(request);
-        Ok(AuthUserInfo {
-            user_id: "staff-1".to_string(),
-            name: Some("alice".to_string()),
-            provider: "chain".to_string(),
-            avatar: None,
-        })
-    }
-
-    async fn refresh_session(
-        &self,
-        _request: RefreshSession,
-    ) -> Result<SessionRenewal, ApplicationError> {
-        Err(ApplicationError::internal("unused"))
-    }
-
-    async fn logout(&self, _request: LogoutSession) -> Result<LogoutResult, ApplicationError> {
-        Err(ApplicationError::internal("unused"))
-    }
-}
-
+/// Task 11 coverage transfer: the OLD test asserted raw header forwarding
+/// into the auth service (RequestAuthHeaders). After the delivery-principal
+/// boundary (Task 7) and the atomic AuthService switchover (Task 11),
+/// `/auth/user` no longer forwards headers into the application layer — the
+/// delivery adapter verifies the caller and projects the resolved Human via
+/// `AuthenticatedUserQuery`. This test pins the NEW contract: the
+/// verifier-resolved caller identity (never raw credentials) reaches the
+/// service.
 #[tokio::test]
-async fn openapi_auth_user_forwards_request_auth_headers_to_auth_service() {
+async fn openapi_auth_user_projects_verified_caller_into_auth_service() {
     let auth_service = Arc::new(CapturingAuthService::default());
     let app = router(
         ApiState::new(
@@ -944,8 +309,6 @@ async fn openapi_auth_user_forwards_request_auth_headers_to_auth_service() {
                 .header("x-test-auth", "yes")
                 .header("authorization", "Bearer forwarded-user-token")
                 .header("cookie", "bcs_session=session-token")
-                .header("x-forwarded-for", "1.2.3.4")
-                .header("forwarded", "for=1.2.3.4")
                 .body(Body::empty())
                 .expect("auth user request"),
         )
@@ -959,18 +322,17 @@ async fn openapi_auth_user_forwards_request_auth_headers_to_auth_service() {
         .expect("current user request lock")
         .clone()
         .expect("captured auth request");
-    assert_eq!(request.headers.authorization.as_deref(), Some("Bearer forwarded-user-token"));
-    assert_eq!(request.headers.cookie.as_deref(), Some("bcs_session=session-token"));
-    let mut forwarded = request.headers.forwarded_headers.clone();
-    forwarded.sort();
+    // The service sees the VERIFIED caller projection, never credentials.
     assert_eq!(
-        forwarded,
-        vec![
-            ("forwarded".to_string(), "for=1.2.3.4".to_string()),
-            ("x-forwarded-for".to_string(), "1.2.3.4".to_string()),
-            ("x-test-auth".to_string(), "yes".to_string()),
-        ]
+        request
+            .caller
+            .user
+            .as_ref()
+            .expect("human caller projected")
+            .id,
+        "staff-1"
     );
+    assert_eq!(request.provider_label, "test");
 }
 
 #[tokio::test]
@@ -1325,5 +687,67 @@ async fn openapi_friend_connections_rejects_invalid_query_types() {
         )).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{suffix}");
         assert!(service.listed_connections.lock().unwrap().is_none());
+    }
+}
+
+/// A verified Bot cannot become a Human through the legacy fallback, with or
+/// without an OAuth facade configured. Pin the documented 403 envelope.
+#[tokio::test]
+async fn openapi_auth_user_rejects_non_human_without_legacy_fallback() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use bcs_api_http::v1::common::ChainUserProjection;
+    use bcs_service_api::application::v1::AuthenticatedBotIdentity;
+
+    #[derive(Default)]
+    struct LegacyProjection(AtomicUsize);
+
+    #[async_trait]
+    impl ChainUserProjection for LegacyProjection {
+        async fn current_user(&self, _headers: &HeaderMap) -> Result<AuthUserInfo, ApplicationError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(AuthUserInfo {
+                user_id: "legacy-human".to_string(),
+                name: None,
+                provider: "legacy".to_string(),
+                avatar: None,
+            })
+        }
+    }
+
+    for with_oauth in [false, true] {
+        let projection = Arc::new(LegacyProjection::default());
+        let auth_service = Arc::new(CapturingAuthService::default());
+        let mut bot_caller = caller();
+        bot_caller.user = None;
+        bot_caller.bot = Some(AuthenticatedBotIdentity {
+            bot_uuid: "bot-only".to_string(),
+            owner_id: "owner".to_string(),
+            app_id: 1,
+            agent_code: "agent".to_string(),
+        });
+        let mut state = ApiState::new(
+            Arc::new(NoopGroupService),
+            Arc::new(NoopSessionService),
+            Arc::new(NoopSessionMessageService),
+            Arc::new(NoopInvitationService),
+            Arc::new(NoopRegisterService),
+            Arc::new(FakeFriendshipService::default()),
+            Arc::new(HeaderVerifier { caller: bot_caller }),
+        ).with_chain_user_projection(projection.clone());
+        if with_oauth {
+            state = state.with_auth_service(
+                auth_service.clone(), "http://127.0.0.1/openapi/v1/auth".to_string(),
+            );
+        }
+        let response = router(state).oneshot(authenticated_request(
+            "GET", "/openapi/v1/auth/user", Value::Null,
+        )).await.expect("response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = response_json(response).await;
+        assert_eq!(body["code"], 40_300);
+        assert_eq!(body["data"]["error_code"], "forbidden");
+        assert_eq!(body["request_id"], "request-123");
+        assert_eq!(projection.0.load(Ordering::SeqCst), 0);
+        assert!(auth_service.current_user_request.lock().unwrap().is_none());
     }
 }
