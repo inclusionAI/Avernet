@@ -2949,14 +2949,11 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const task = step ? await repo.findTask(taskId) : null;
     if (!step || !task || step.task_id !== taskId) { res.status(404).json({ error: "Step 不属于指定 Task" }); return; }
     if (TERMINAL_STATUSES.has(step.status)) { res.status(409).json({ error: "终态 Step 不再签发上传 URL" }); return; }
-    if (req.body?.artifactName !== undefined) {
-      const contract = parseAisArtifactContract(parseJson(task.config_json));
-      if (!contract || contract.stepId !== step.step_id) {
-        res.status(409).json({ error: "当前 Step 不属于有效的 AIS Base attempt" }); return;
-      }
+    const aisContract = parseAisArtifactContract(parseJson(task.config_json));
+    if (aisContract?.stepId === step.step_id) {
       let request;
       try {
-        request = validateAisArtifactRequest(contract, req.body.artifactName, req.body);
+        request = validateAisArtifactRequest(aisContract, req.body?.artifactName, req.body ?? {});
       } catch (error) {
         res.status(422).json({ error: error instanceof Error ? error.message : String(error) }); return;
       }

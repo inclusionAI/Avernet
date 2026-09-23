@@ -66,6 +66,18 @@ describe("ClawEvolve AIS Base transport", () => {
     expect(createSignedUrl).not.toHaveBeenCalled();
   });
 
+  it("selects the AIS upload contract from the stored task rather than artifactName", async () => {
+    const { base, createSignedUrl, createAisSignedUrl } = await start();
+    const response = await fetch(`${base}/internal/tasks/${taskId}/steps/${stepId}/artifacts/upload-url`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ size: 10, sha256: "a".repeat(64), contentType: "application/json" }),
+    });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ error: "Artifact 名称不合法" });
+    expect(createAisSignedUrl).not.toHaveBeenCalled();
+    expect(createSignedUrl).not.toHaveBeenCalled();
+  });
+
   it("validates and atomically applies the AIS terminal callback", async () => {
     const { base, applyAisStatus } = await start();
     const output = { taskId, success: true, artifacts: { result: {
