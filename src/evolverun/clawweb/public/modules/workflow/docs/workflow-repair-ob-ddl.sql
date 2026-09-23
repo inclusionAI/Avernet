@@ -1,0 +1,65 @@
+-- Workflow Repair v2 OceanBase/MySQL DDL.
+-- 必须通过版本化迁移执行一次；若 workflow_healing_outcomes 已部分升级，先核对已有列和索引。
+
+CREATE TABLE IF NOT EXISTS workflow_repair_items (
+  item_id VARCHAR(64) PRIMARY KEY COMMENT '修复处理项唯一标识',
+  workflow_id VARCHAR(190) NOT NULL COMMENT '所属Workflow唯一标识',
+  group_key VARCHAR(128) NOT NULL COMMENT '稳定问题分组键',
+  proposal_key VARCHAR(64) NOT NULL COMMENT '建议内容摘要键',
+  episode_key VARCHAR(128) NOT NULL COMMENT '问题发生轮次键',
+  identity_digest VARCHAR(64) NOT NULL COMMENT 'Workflow分组建议轮次组合身份SHA-256摘要',
+  content_revision BIGINT NOT NULL COMMENT '处理项内容版本号',
+  previous_item_id VARCHAR(64) COMMENT '上一轮关联处理项ID',
+  content_json MEDIUMTEXT NOT NULL COMMENT '问题建议证据等冻结内容JSON',
+  source_refs_json MEDIUMTEXT NOT NULL COMMENT '关联建议诊断及事件来源引用JSON',
+  state VARCHAR(32) NOT NULL COMMENT '处理状态:pending|processing|awaiting_verification|verified|ineffective|no_action',
+  state_version BIGINT NOT NULL DEFAULT 0 COMMENT '处理状态乐观锁版本号',
+  active_task_id VARCHAR(64) COMMENT '当前占用该处理项的修复任务ID',
+  active_revision BIGINT COMMENT '当前占用该处理项的修订版本号',
+  disposition_json TEXT COMMENT '人工无需处理或恢复决定的当前投影JSON',
+  updated_at_ms BIGINT NOT NULL COMMENT '业务内容最近更新时间Unix毫秒',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录修改时间',
+  UNIQUE KEY uk_repair_item_identity (identity_digest),
+  KEY idx_repair_item_workflow (workflow_id),
+  KEY idx_repair_item_task (active_task_id)
+) COMMENT='Workflow修复处理项';
+
+CREATE TABLE IF NOT EXISTS workflow_repair_revisions (
+  task_id VARCHAR(64) NOT NULL COMMENT '修复任务唯一标识',
+  revision BIGINT NOT NULL COMMENT '任务修订版本号',
+  workflow_id VARCHAR(190) NOT NULL COMMENT '所属Workflow唯一标识',
+  phase VARCHAR(32) NOT NULL COMMENT '修订阶段:drafting|review|blocked|publishing|published|no_change|failed|cancelled',
+  state_version BIGINT NOT NULL DEFAULT 0 COMMENT '修订状态乐观锁版本号',
+  request_id VARCHAR(128) NOT NULL COMMENT '创建本修订的客户端幂等请求ID',
+  request_digest VARCHAR(64) NOT NULL COMMENT '修订请求内容SHA-256摘要',
+  request_key VARCHAR(64) NOT NULL COMMENT '任务与请求组合幂等键SHA-256摘要',
+  input_json MEDIUMTEXT NOT NULL COMMENT '本修订冻结输入JSON',
+  draft_json MEDIUMTEXT COMMENT '候选分支Commit及逐项处理结果JSON',
+  checks_json MEDIUMTEXT COMMENT '候选静态和Mock检查结果JSON',
+  candidate_digest VARCHAR(64) COMMENT '候选草稿规范化内容SHA-256摘要',
+  checks_digest VARCHAR(64) COMMENT '检查报告规范化内容SHA-256摘要',
+  confirmation_json TEXT COMMENT '人工审核确认内容JSON',
+  error_json TEXT COMMENT '本修订失败错误信息JSON',
+  created_at_ms BIGINT NOT NULL COMMENT '修订创建时间Unix毫秒',
+  updated_at_ms BIGINT NOT NULL COMMENT '修订最近更新时间Unix毫秒',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录修改时间',
+  PRIMARY KEY (task_id, revision),
+  UNIQUE KEY uk_repair_revision_request (request_key),
+  KEY idx_repair_revision_workflow (workflow_id)
+) COMMENT='Workflow修复任务修订';
+
+ALTER TABLE workflow_healing_outcomes
+  MODIFY COLUMN lesson_id VARCHAR(64) NULL COMMENT '关联经验ID',
+  MODIFY COLUMN workflow_id VARCHAR(190) NULL COMMENT '关联Workflow唯一标识',
+  ADD COLUMN repair_item_id VARCHAR(64) COMMENT '关联修复处理项ID',
+  ADD COLUMN repair_revision BIGINT COMMENT '关联修复任务修订版本号',
+  ADD COLUMN deployed_version BIGINT COMMENT '本次处置关联的Workflow部署版本号',
+  ADD COLUMN evidence_json TEXT COMMENT '处置审计证据JSON',
+  ADD COLUMN event_key VARCHAR(128) COMMENT '处置审计事件幂等键',
+  ADD COLUMN suggestion_id VARCHAR(64) COMMENT '关联优化建议ID',
+  ADD COLUMN source_task_id VARCHAR(64) COMMENT '来源任务ID',
+  ADD COLUMN source_step_id VARCHAR(64) COMMENT '来源任务步骤ID',
+  ADD UNIQUE KEY uk_healing_outcome_event (event_key),
+  ADD KEY idx_healing_outcome_repair_item (repair_item_id, repair_revision);

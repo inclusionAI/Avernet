@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
+import { DatabaseSync } from 'node:sqlite';
+import '../../test/setup.js';
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "../../repositories/evolve-repository.js";
 import { EVOLVE_TASK_REGISTRY } from "../../services/evolve/task-registry.js";
@@ -24,7 +26,7 @@ async function seedTask(taskId: string, taskType: string, createdBy: string): Pr
 }
 
 beforeEach(async () => {
-  db = new SqliteDatabase(new Database(":memory:"));
+  db = new SqliteDatabase(new DatabaseSync(":memory:") as unknown as Database.Database);
   await runMigrations(db, "sqlite");
   repo = new EvolveRepository(db);
 
@@ -52,6 +54,37 @@ afterEach(async () => {
 });
 
 describe("generic Evolve Repair isolation", () => {
+  it('excludes workflow repair from generic list rows and counts, even for the administrator', async () => {
+    await seedTask('WORKFLOW-PRIVATE', 'workflow_repair', 'owner');
+    await seedTask('LEGACY-PUBLIC', 'diagnose', 'owner');
+    for (const query of ['scope=mine&category=all', 'scope=all&category=all', 'scope=all&category=not-a-category']) {
+      const response = await fetch(`${baseUrl}/api/evolve/tasks?${query}`, { headers: { 'X-User-Id': 'owner', 'X-Test-Evolve-Admin': 'true' } });
+      const body = await response.json() as { tasks: Array<{ task_id: string }>; total: number };
+      expect(response.status).toBe(200);
+      expect(body.tasks.map(task => task.task_id)).toEqual(['LEGACY-PUBLIC']);
+      expect(body.total).toBe(1);
+    }
+  });
+  it('rejects all generic workflow repair entrypoints without changing task or step rows', async () => {
+    await seedTask('WORKFLOW-PRIVATE', 'workflow_repair', 'owner');
+    await db.exec(`INSERT INTO ce_steps (step_id, task_id, step_type, step_no, command, status)
+      VALUES ('WORKFLOW-STEP', 'WORKFLOW-PRIVATE', 'workflow_repair_draft', 1, '', 'running')`, []);
+    const tasksBefore = await db.query('SELECT * FROM ce_tasks');
+    const stepsBefore = await db.query('SELECT * FROM ce_steps');
+    for (const [method, path] of [
+      ['GET', '/tasks/WORKFLOW-PRIVATE'],
+      ['POST', '/tasks/WORKFLOW-PRIVATE/steps/WORKFLOW-STEP/retry'],
+      ['POST', '/tasks/WORKFLOW-PRIVATE/steps/WORKFLOW-STEP/cancel'],
+      ['GET', '/internal/tasks/WORKFLOW-PRIVATE/steps/WORKFLOW-STEP/input'],
+      ['POST', '/internal/tasks/WORKFLOW-PRIVATE/steps/WORKFLOW-STEP/report'],
+    ]) {
+      const response = await fetch(`${baseUrl}/api/evolve${path}`, { method, headers: { 'Content-Type': 'application/json', 'X-User-Id': 'owner' },
+        ...(method === 'POST' ? { body: JSON.stringify({ status: 'succeeded', summary: 'attempted bypass' }) } : {}) });
+      expect(response.status, `${method} ${path}`).toBe(404);
+    }
+    expect(await db.query('SELECT * FROM ce_tasks')).toEqual(tasksBefore);
+    expect(await db.query('SELECT * FROM ce_steps')).toEqual(stepsBefore);
+  });
   it("uses the same request user identity for Repair task lists", async () => {
     await seedTask("REPAIR-OWNER", "repair", "verified-owner");
     await seedTask("REPAIR-FORGED", "repair", "forged-user");
