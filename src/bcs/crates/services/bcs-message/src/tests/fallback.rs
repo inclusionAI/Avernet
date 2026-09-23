@@ -122,6 +122,36 @@ async fn pre_cutoff_worker_history_merges_only_own_task_displays_with_pagination
 }
 
 #[tokio::test]
+async fn pre_cutoff_worker_history_deduplicates_provider_answer_with_different_id() {
+    let mut provider = fallback_message("full worker answer");
+    provider.id = "provider-answer".into();
+    provider.sender = "worker-a".into();
+    provider.timestamp = 19;
+    let (service, repo, _sessions, _fallback, session_id) = service_fixture(
+        GroupStrategy::ManagerWorker, 0, u64::MAX, vec![provider],
+    ).await;
+    for (client, text, created_at) in [
+        ("task-display:represented", "worker answer", 20),
+        ("task-display:missing", "missing answer", 30),
+        ("task-display:later", "worker answer", 120_000),
+    ] {
+        repo.append_message(NewMessage {
+            group_id: "group-1".into(), session_id: session_id.clone(),
+            sender_id: "worker-a".into(), sender_type: SenderType::Bot,
+            message_type: "chat".into(), content: serde_json::json!(text),
+            client_msg_id: Some(client.into()), owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::ManagerWorker,
+            audience: Some(bcs_domain::MessageAudience::FullOnly),
+            created_at, run_id: "worker-run".into(),
+        }).await.unwrap();
+    }
+    let result = service.get_session_history(session_cmd("group-1", &session_id, Some("worker-a")))
+        .await.unwrap();
+    assert_eq!(result.messages.iter().map(|message| message.content.as_str()).collect::<Vec<_>>(),
+        vec!["worker answer", "missing answer", "full worker answer"]);
+}
+
+#[tokio::test]
 async fn pre_cutoff_participant_reads_only_classified_durable_history() {
     let (service, repo, sessions, fallback, session_id) = service_fixture(
         GroupStrategy::ManagerWorker,

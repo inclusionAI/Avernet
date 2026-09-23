@@ -791,7 +791,22 @@ impl GroupMessageHistoryService for MessageService {
                     ServiceError::InternalError(format!("message repo task-display history error: {error}"))
                 ))?;
                 persisted_anchors_have_more |= display_page.has_more;
-                persisted_anchors.extend(display_page.messages);
+                // Provider history has no TaskResult id. Match only a nearby
+                // worker answer containing the displayed final segment, and
+                // consume each Provider answer at most once.
+                let mut provider_replies = fallback_result.messages.iter()
+                    .filter(|message| message.sender == *worker_id && message.role == MessageRole::Assistant)
+                    .collect::<Vec<_>>();
+                persisted_anchors.extend(display_page.messages.into_iter().filter(|display| {
+                    let text = display.content.as_str().unwrap_or_default();
+                    let matched = (!text.is_empty()).then(|| provider_replies.iter().enumerate()
+                        .filter(|(_, provider)| provider.timestamp <= display.created_at
+                            && display.created_at - provider.timestamp <= 60_000
+                            && provider.content.ends_with(text))
+                        .min_by_key(|(_, provider)| display.created_at - provider.timestamp)
+                        .map(|(index, _)| index)).flatten();
+                    if let Some(index) = matched { provider_replies.swap_remove(index); false } else { true }
+                }));
             }
             if self.persisted_state_machine_history && session.created_at >= self.state_machine_cutoff_timestamp {
                 // Keep ordinary legacy transcripts, but StateMachine content
