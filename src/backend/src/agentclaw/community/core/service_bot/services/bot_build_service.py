@@ -1257,13 +1257,49 @@ class BotBuildService:
         )
 
         if is_nas:
-            self._run_local_command(
-                cmd=["sudo", "chmod", "755", str(nas_storage_id)],
-                command_name="sudo chmod",
-                error_message="chmod source directory failed",
-            )
+            # The NAS staging directory is the production/container ARCA mount
+            # (DEFAULT_ARCA_ROOT = /home/admin/.merge_nas). In singlebox the
+            # local_proc sandbox stores data elsewhere — the mount point
+            # doesn't exist, and a nonexistent dir has no permissions to fix.
+            # Skip the chmod entirely when the directory is absent (singlebox)
+            # and try without sudo first when it exists: the local_proc dirs
+            # in a non-container deployment are user-owned, and a
+            # non-interactive shell cannot prompt for the sudo password.
+            # In production the NAS mount exists and the plain chmod either
+            # succeeds (same 755, same result as sudo) or falls back to sudo.
+            nas_dir_path = Path(str(nas_storage_id)) if nas_storage_id else None
+            if nas_dir_path is not None and nas_dir_path.exists():
+                try:
+                    self._run_local_command(
+                        cmd=["chmod", "755", str(nas_storage_id)],
+                        command_name="chmod",
+                        error_message="chmod source directory failed",
+                    )
+                except Exception:
+                    self._run_local_command(
+                        cmd=["sudo", "chmod", "755", str(nas_storage_id)],
+                        command_name="sudo chmod",
+                        error_message="chmod source directory failed",
+                    )
 
         if not source_dir.exists():
+            # NAS staging is a production-container construct (nas_storage_id
+            # from DEFAULT_ARCA_ROOT = /home/admin/.merge_nas — the ARCA
+            # container's NAS mount). When the NAS root itself is absent,
+            # this is a local_proc/singlebox deployment where the bot's data
+            # already lives on the local sandbox filesystem and the
+            # rsync-to-NAS step has no NAS to migrate to. Skip the
+            # migration rather than failing the publish build, so the
+            # remaining stage steps (configs, MCP, artifacts) can complete.
+            if is_nas:
+                nas_root = Path(str(nas_storage_id)).parent if nas_storage_id else Path("/")
+                if not nas_root.exists():
+                    logger.info(
+                        f"[BotBuildService._migrate_bot_instance] "
+                        f"NAS root absent on this host ({nas_root}); skipping "
+                        f"NAS migration for local sandbox: {source_dir}"
+                    )
+                    return True
             logger.warning(
                 f"[BotBuildService._migrate_bot_instance] "
                 f"Source directory does not exist: {source_dir}"
@@ -1775,12 +1811,23 @@ class BotBuildService:
         if not artifact_dir.exists():
             raise BotBuildMigrationError(f"历史构造物目录不存在: {artifact_dir}")
 
-        self._run_local_command(
-            cmd=["sudo", "chmod", "755", str(draft_nas_dir)],
-            command_name="sudo chmod",
-            error_message="chmod draft NAS directory failed",
-            timeout_seconds=remaining_timeout(),
-        )
+        # Same NAS-existence guard and non-sudo-first order as
+        # _migrate_bot_instance 1261 — see there for the full rationale.
+        if draft_nas_dir.exists():
+            try:
+                self._run_local_command(
+                    cmd=["chmod", "755", str(draft_nas_dir)],
+                    command_name="chmod",
+                    error_message="chmod draft NAS directory failed",
+                    timeout_seconds=remaining_timeout(),
+                )
+            except Exception:
+                self._run_local_command(
+                    cmd=["sudo", "chmod", "755", str(draft_nas_dir)],
+                    command_name="sudo chmod",
+                    error_message="chmod draft NAS directory failed",
+                    timeout_seconds=remaining_timeout(),
+                )
         draft_dir.mkdir(parents=True, exist_ok=True)
 
         excludes = [f"--exclude={item}" for item in build_plan.rsync_excludes]
