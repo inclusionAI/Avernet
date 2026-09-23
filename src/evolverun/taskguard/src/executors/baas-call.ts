@@ -106,12 +106,13 @@ export async function executeBaasCall(
 
   // API key resolution. Precedence:
   //   config.baas.apiKey (application.yaml / clawweb cm_app_config) →
-  //   env.BAAS_API_KEY → apiKeyRef (legacy: a literal secret or env name).
+  //   env.BAAS_API_KEY → env[apiKeyRef] (when apiKeyRef names an env var).
+  // Never treat apiKeyRef as a literal secret value.
   const apiKeyRef = executor.apiKeyRef ?? "BAAS_API_KEY";
   const apiKey =
     baasCfg.apiKey ||
     process.env.BAAS_API_KEY ||
-    (apiKeyRef && apiKeyRef !== "BAAS_API_KEY" ? apiKeyRef : "") ||
+    (apiKeyRef && apiKeyRef !== "BAAS_API_KEY" ? process.env[apiKeyRef] : "") ||
     "";
 
   if (!baseUrl) {
