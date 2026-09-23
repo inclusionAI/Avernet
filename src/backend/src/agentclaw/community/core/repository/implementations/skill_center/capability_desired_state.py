@@ -330,6 +330,10 @@ class CapabilityDesiredStateRepository(
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
+            excluded_default_ids = default_exclusions.lock_skill_exclusions(
+                session, bot_id=bot_id, owner_id=owner_id,
+                skill_id=int(skill_id),
+            )
             row = self._set(
                 session,
                 bot_id=bot_id,
@@ -373,8 +377,8 @@ class CapabilityDesiredStateRepository(
                         CENTER_MEMBERSHIP_IDENTITY_MISSING
                     )
                 return DesiredStateMutation(_item(row), False, old)
-            # R3 covers ANY of the Bot's Sets — the Default included, its
-            # members excluded or not.
+            # An excluded Default source does not block this ordinary Set,
+            # but Direct control and other ordinary memberships still do.
             bot_sets = self._bot_sets(
                 session,
                 bot_id=bot_id,
@@ -382,6 +386,9 @@ class CapabilityDesiredStateRepository(
                 engine_type=engine_type,
                 default_engine_types=default_engine_types,
             )
+            excluded_default_ids &= {
+                int(candidate.id) for candidate in bot_sets if candidate.is_default
+            }
             reachable_ids = {int(candidate.id) for candidate in bot_sets} - {
                 int(row.id)
             }
@@ -398,6 +405,10 @@ class CapabilityDesiredStateRepository(
                 if reachable_ids
                 else []
             )
+            conflicting_memberships = [
+                member for member in memberships
+                if int(member.skill_set_id) not in excluded_default_ids
+            ]
             # Installation is the effective-capability SSOT, not its
             # provenance.  An active Default/ordinary Set legitimately
             # materializes an Installation row, so row existence alone must
@@ -415,7 +426,7 @@ class CapabilityDesiredStateRepository(
                     skill.id in old.installations
                     and not active_set_claim
                 ),
-                is_in_another_set=bool(memberships),
+                is_in_another_set=bool(conflicting_memberships),
             )
             if row.is_active:
                 self._require_unique_runtime_names(

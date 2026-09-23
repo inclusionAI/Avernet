@@ -337,7 +337,9 @@ the same UoW transaction.
 - **One rule book.** `policies/capability_ownership.py` owns the ownership
   rules: R1 a Set-held capability (Default included, excluded or not) refuses
   direct control; R2 a directly-active capability refuses joining a Set; R3 a
-  capability lives in at most one Set. Engine/template Default MCPs are a
+  capability has at most one non-excluded Set source for this Bot; an excluded
+  Default Skill/MCP may join an ordinary Set without becoming directly
+  controllable. Engine/template Default MCPs are a
   separate platform policy input rather than Set membership; they likewise
   refuse Direct control and change only through Default exclusion/un-exclusion.
   Command services consult these policies before and inside the write

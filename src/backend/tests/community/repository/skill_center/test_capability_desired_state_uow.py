@@ -2467,8 +2467,9 @@ def test_flush_preserves_exclusion_plus_mcp_installation_as_direct():
         } == {"kept-mcp", "excluded-mcp"}
 
 
-def test_a_default_set_member_cannot_join_an_ordinary_set():
-    """R3 covers ANY Set: the Default included, its members excluded or not."""
+@pytest.mark.parametrize("excluded", [False, True])
+def test_a_default_skill_member_requires_exclusion_to_join_an_ordinary_set(excluded):
+    """An exclusion releases the Default source only for this Bot's Set addition."""
     db = _Database()
     with db.transactional_orm_session() as session:
         default_set = SkillSet(
@@ -2489,44 +2490,49 @@ def test_a_default_set_member_cannot_join_an_ordinary_set():
             env="dev",
         )
         member = Skill(name="member", git_path="git://defaults/member", env="dev")
-        excluded = Skill(
+        excluded_skill = Skill(
             name="excluded", git_path="git://defaults/excluded", env="dev"
         )
-        session.add_all([default_set, ordinary, member, excluded])
+        session.add_all([default_set, ordinary, member, excluded_skill])
         session.flush()
-        session.add_all(
-            [
-                SkillSetSkill(
-                    skill_set_id=default_set.id, skill_id=member.id, env="dev"
-                ),
-                SkillSetSkill(
-                    skill_set_id=default_set.id, skill_id=excluded.id, env="dev"
-                ),
-                BotSkillInstallation(
-                    bot_id="bot", owner_id="owner", skill_id=member.id, env="dev"
-                ),
-                DefaultSkillsetSkillExclusion(
-                    user_id="owner",
-                    bot_id="bot",
-                    skill_set_id=int(default_set.id),
-                    skill_id=int(excluded.id),
-                ),
-            ]
-        )
+        session.add_all([
+            SkillSetSkill(skill_set_id=default_set.id, skill_id=member.id, env="dev"),
+            SkillSetSkill(skill_set_id=default_set.id, skill_id=excluded_skill.id, env="dev"),
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=member.id, env="dev"
+            ),
+        ])
+        if excluded:
+            session.add(DefaultSkillsetSkillExclusion(
+                user_id="owner", bot_id="bot",
+                skill_set_id=int(default_set.id), skill_id=int(excluded_skill.id),
+            ))
+        else:
+            session.add(BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=excluded_skill.id, env="dev"
+            ))
 
     repository = CapabilityDesiredStateRepository(db)
 
-    for skill_id in ("1", "2"):
-        with pytest.raises(SkillSetControlPlaneConflictError) as error:
+    with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"):
+        repository.add_skill(
+            bot_id="bot", owner_id="owner", set_id=str(ordinary.id),
+            skill_id=str(member.id), engine_type="openclaw",
+            default_engine_types=("openclaw",),
+        )
+    if excluded:
+        assert repository.add_skill(
+            bot_id="bot", owner_id="owner", set_id=str(ordinary.id),
+            skill_id=str(excluded_skill.id), engine_type="openclaw",
+            default_engine_types=("openclaw",),
+        ).changed
+    else:
+        with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"):
             repository.add_skill(
-                bot_id="bot",
-                owner_id="owner",
-                set_id=str(ordinary.id),
-                skill_id=skill_id,
-                engine_type="openclaw",
+                bot_id="bot", owner_id="owner", set_id=str(ordinary.id),
+                skill_id=str(excluded_skill.id), engine_type="openclaw",
                 default_engine_types=("openclaw",),
             )
-        assert "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET" in str(error.value)
 
 
 def test_direct_active_precedes_membership_when_both_forbid_joining():
@@ -2852,6 +2858,122 @@ def test_unexclusion_restores_the_installation_row_in_one_command():
     assert not repository.unexclude_default_skill(
         set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
     ).changed
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_excluded_default_skill_can_move_to_ordinary_set_without_restoring_default(active):
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, skill = _seed_default_with_member(db)
+    repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+    with db.transactional_orm_session() as session:
+        ordinary = SkillSet(
+            name="mine", user_id="owner", bolt_id="bot",
+            engine_type="openclaw", is_active=active, env="dev",
+        )
+        session.add(ordinary)
+        session.flush()
+        ordinary_id = ordinary.id
+
+    assert repository.add_skill(
+        set_id=str(ordinary_id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    ).changed
+    with db.orm_session() as session:
+        assert session.query(BotSkillInstallation).filter_by(
+            bot_id="bot", owner_id="owner", skill_id=skill.id
+        ).count() == int(active)
+        assert session.query(DefaultSkillsetSkillExclusion).filter_by(
+            bot_id="bot", user_id="owner", skill_id=skill.id
+        ).count() == 1
+
+    assert not repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    ).changed
+    with db.orm_session() as session:
+        assert session.query(BotSkillInstallation).filter_by(
+            bot_id="bot", owner_id="owner", skill_id=skill.id
+        ).count() == int(active)
+    with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"):
+        repository.unexclude_default_skill(
+            set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+        )
+    repository.remove_skill(
+        set_id=str(ordinary_id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+    assert repository.unexclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    ).changed
+
+
+def test_another_bots_skill_exclusion_does_not_release_default_membership():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, skill = _seed_default_with_member(db)
+    with db.transactional_orm_session() as session:
+        ordinary = SkillSet(
+            name="mine", user_id="owner", bolt_id="bot",
+            engine_type="openclaw", is_active=False, env="dev",
+        )
+        session.add(ordinary)
+        session.flush()
+        ordinary_id = ordinary.id
+        session.add(DefaultSkillsetSkillExclusion(
+            user_id="owner", bot_id="other-bot",
+            skill_set_id=default.id, skill_id=skill.id,
+        ))
+
+    with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"):
+        repository.add_skill(
+            set_id=str(ordinary_id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+        )
+
+
+def test_center_skill_unexclusion_rejects_ordinary_membership_with_stale_row_id():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, env="dev",
+        )
+        ordinary = SkillSet(
+            name="mine", user_id="owner", bolt_id="bot",
+            engine_type="openclaw", is_active=True, env="dev",
+        )
+        skill = Skill(
+            name="center", git_path="center://uuid-a", skill_uuid="uuid-a",
+            version=2, status="PUBLISHED", env="dev",
+        )
+        session.add_all([default, ordinary, skill])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(
+                skill_set_id=default.id, skill_id=skill.id,
+                skill_uuid="uuid-a", env="dev",
+            ),
+            SkillSetSkill(
+                skill_set_id=ordinary.id, skill_id=999,
+                skill_uuid="uuid-a", env="dev",
+            ),
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=skill.id, env="dev",
+            ),
+        ])
+
+    assert repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    ).changed
+    with db.orm_session() as session:
+        assert session.query(BotSkillInstallation).count() == 1
+    with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"):
+        repository.unexclude_default_skill(
+            set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+        )
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 1
+        assert session.query(BotSkillInstallation).count() == 1
 
 
 def test_offline_skill_rejects_membership_direct_and_default_restore_before_writes():
