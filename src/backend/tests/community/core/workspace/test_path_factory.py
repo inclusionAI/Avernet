@@ -202,3 +202,74 @@ def test_entity_identity_dir_proj():
     with patch("agentclaw.community.core.workspace.path_factory.get_bolt_base_dir", return_value=Path("/base")):
         result = get_entity_identity_dir("proj123", "proj", "openclaw")
         assert result == Path("/base/proj_proj123/data")
+
+
+def test_arca_root_uses_default_when_config_is_absent(monkeypatch):
+    """ARCA root mirrors the aidesktop_root override chain: env -> user_config
+    -> DEFAULT_ARCA_ROOT. A deployment without NAS mount (singlebox 等) 指向
+    本地目录即可，业务码不感知。"""
+    from agentclaw.community.core.config.provider import AppConfig
+    from agentclaw.community.core.workspace.path_factory import (
+        DEFAULT_ARCA_ROOT,
+        _get_arca_root,
+    )
+
+    config = AppConfig(user_config={}, raw={}, app_name="agentclaw", delegate=None)
+    monkeypatch.delenv("ARCA_ROOT", raising=False)
+    monkeypatch.setattr(
+        "agentclaw.community.core.config.provider.load_config",
+        lambda: config,
+    )
+
+    assert _get_arca_root() == DEFAULT_ARCA_ROOT
+
+
+def test_arca_root_env_overrides_config(monkeypatch, tmp_path):
+    from agentclaw.community.core.workspace.path_factory import _get_arca_root
+
+    def fail_if_config_is_read():
+        raise AssertionError("config provider must not be read when env is set")
+
+    expected = tmp_path / "arca-from-env"
+    monkeypatch.setenv("ARCA_ROOT", str(expected))
+    monkeypatch.setattr(
+        "agentclaw.community.core.config.provider.load_config",
+        fail_if_config_is_read,
+    )
+
+    assert _get_arca_root() == expected
+
+
+def test_arca_root_user_config_overrides_default(monkeypatch, tmp_path):
+    from agentclaw.community.core.config.provider import AppConfig
+    from agentclaw.community.core.workspace.path_factory import _get_arca_root
+
+    expected = tmp_path / "arca-from-config"
+    config = AppConfig(
+        user_config={"arca_root": str(expected)},
+        raw={},
+        app_name="agentclaw",
+        delegate=None,
+    )
+    monkeypatch.delenv("ARCA_ROOT", raising=False)
+    monkeypatch.setattr(
+        "agentclaw.community.core.config.provider.load_config",
+        lambda: config,
+    )
+
+    assert _get_arca_root() == expected.expanduser()
+    assert _get_arca_root() == expected.expanduser()
+
+
+def test_get_bot_nas_dir_uses_configured_arca_root(monkeypatch, tmp_path):
+    """/ home/admin/.merge_nas 硬编码解耦后，bot NAS 目录跟随部署声明的
+    arca_root — singlebox 与生产用同一条目录推导逻辑。"""
+    from agentclaw.community.core.workspace.path_factory import get_bot_nas_dir
+
+    expected_root = tmp_path / "shared-merge-nas"
+    monkeypatch.setenv("ARCA_ROOT", str(expected_root))
+    monkeypatch.setenv("SERVER_ENV", "dev")
+
+    assert get_bot_nas_dir("user123", "bot456", "openclaw") == (
+        expected_root / "dev_staff_user123_openclaw_bot456"
+    )

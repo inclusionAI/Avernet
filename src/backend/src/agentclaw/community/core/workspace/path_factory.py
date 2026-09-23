@@ -27,6 +27,22 @@ SQLITE_PERSONAL_ROOT = Path.home() / ".moltis"
 # NAS挂载根目录
 DEFAULT_ARCA_ROOT = Path("/home/admin/.merge_nas")
 
+
+def _get_arca_root() -> Path:
+    """Read arca_root from env, then the process-cached config provider.
+
+    Same override chain as ``_get_aidesktop_root``: deployments without the
+    prod NAS mount (singlebox / local-k8s with a shared hostPath dir) point
+    this at their own root; business code derives bot NAS paths through this
+    seam instead of mounting the prod path into every environment.
+    """
+    value = os.getenv("ARCA_ROOT")
+    if not value:
+        from agentclaw.community.core.config.provider import load_config
+
+        value = load_config().user_config.get("arca_root")
+    return Path(value).expanduser() if value else DEFAULT_ARCA_ROOT
+
 def _get_aidesktop_root() -> Path:
     """Read aidesktop_root from env, then the process-cached config provider."""
     value = os.getenv("AIDESKTOP_ROOT")
@@ -141,8 +157,12 @@ def get_bot_nas_dir(
     engine_type: str,
     entity_type: str = "staff",
 ) -> Path:
-    """Bot 远端 NAS 挂载目录: DEFAULT_ARCA_ROOT/get_bot_nas_storage_id"""
-    return DEFAULT_ARCA_ROOT / get_bot_nas_storage_id(entity_id, bot_id, engine_type, entity_type)
+    """Bot 远端 NAS 挂载目录: {arca_root}/get_bot_nas_storage_id
+
+    arca_root 经 ``_get_arca_root`` 解析（env ARCA_ROOT → user_config.arca_root
+    → DEFAULT_ARCA_ROOT），无 NAS 挂载的部署指向自己的共享目录即可。
+    """
+    return _get_arca_root() / get_bot_nas_storage_id(entity_id, bot_id, engine_type, entity_type)
 
 
 def get_bot_nas_storage_id(
