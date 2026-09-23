@@ -112,6 +112,9 @@ def run_pipeline(req: RunRequest) -> RunResult:
     _apply_session_analysis_limit(req, pref)
     if req.session_identifiers:
         pref.max_sessions = len(req.session_identifiers)
+        pref.since = ""
+        pref.until = ""
+        pref.time_range_label = "精确 Session"
     warnings.extend(pref_warnings)
     progress(
         "preference parsed",
