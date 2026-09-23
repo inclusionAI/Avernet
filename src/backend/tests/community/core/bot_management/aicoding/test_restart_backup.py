@@ -120,7 +120,7 @@ async def test_other_engine_instance_does_not_probe_or_lock():
 def test_empty_inventory_logs_raw_summary(caplog):
     caplog.set_level(logging.INFO, logger=backup.logger.name)
     runtime = Mock()
-    runtime.get_bot.return_value = {'status': 'ACTIVE', 'devices': []}
+    runtime.list_devices_by_bot_uuid.return_value = []
     with pytest.raises(RuntimeError, match='清单为空'):
         AicodingProvisioningStrategy('aicoding')._prepare_restart(
             BotProvisioningContext(
@@ -134,7 +134,7 @@ def test_empty_inventory_logs_raw_summary(caplog):
 
 def test_active_empty_inventory_fails_closed():
     runtime = Mock()
-    runtime.get_bot.return_value = {'status': 'ACTIVE', 'devices': []}
+    runtime.list_devices_by_bot_uuid.return_value = []
     with pytest.raises(RuntimeError, match='清单为空'):
         AicodingProvisioningStrategy('aicoding')._prepare_restart(
             BotProvisioningContext(
@@ -153,7 +153,7 @@ def test_all_stopped_inventory_skips_backup_but_verifies_again():
             'status': 'STOPPED',
         }],
     }
-    runtime.get_bot.return_value = stopped
+    runtime.list_devices_by_bot_uuid.return_value = (stopped)['devices']
     ctx = BotProvisioningContext(
         bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
     )
@@ -165,18 +165,16 @@ def test_all_stopped_inventory_skips_backup_but_verifies_again():
 
     prepared.assert_not_called()
     verify()
-    assert runtime.get_bot.call_count == 2
+    assert runtime.list_devices_by_bot_uuid.call_count == 2
     runtime.post_bots_api.assert_not_called()
 
 
 def test_all_released_inventory_skips_backup():
     runtime = Mock()
-    runtime.get_bot.return_value = {
-        'devices': [{
+    runtime.list_devices_by_bot_uuid.return_value = [{
             'provider_device_id': 'physical-1',
             'status': 'RELEASED',
-        }],
-    }
+        }]
     verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
         BotProvisioningContext(
             bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
@@ -189,10 +187,10 @@ def test_all_released_inventory_skips_backup():
 
 def test_no_live_target_recheck_blocks_if_device_reappears():
     runtime = Mock()
-    runtime.get_bot.side_effect = [
+    runtime.list_devices_by_bot_uuid.side_effect = [state['devices'] for state in [
         {'devices': [{'provider_device_id': 'physical-1', 'status': 'STOPPED'}]},
         {'devices': [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}]},
-    ]
+    ]]
     with pytest.raises(RuntimeError, match='清单变化'):
         verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
             BotProvisioningContext(
@@ -208,10 +206,7 @@ def test_operation_id_is_fresh_per_restart_request():
         bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
     )
     runtime = Mock()
-    runtime.get_bot.return_value = {
-        'status': 'ACTIVE',
-        'devices': [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}],
-    }
+    runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}]
     with patch.object(backup, 'prepare_backup', side_effect=lambda **kwargs: Mock()) as prepared:
         strategy = AicodingProvisioningStrategy('aicoding')
         strategy._prepare_restart(ctx, device_id='caller-uuid', target_runtime=runtime)
@@ -223,10 +218,10 @@ def test_operation_id_is_fresh_per_restart_request():
 @pytest.mark.asyncio
 async def test_instance_targets_are_pinned_and_inventory_is_rechecked():
     runtime = Mock()
-    runtime.get_bot.side_effect = [
+    runtime.list_devices_by_bot_uuid.side_effect = [state['devices'] for state in [
         {'devices': [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}]},
         {'devices': [{'provider_device_id': 'physical-2', 'status': 'ACTIVE'}]},
-    ]
+    ]]
     with patch.object(backup, 'prepare_backup', return_value=Mock()) as prepared:
         with pytest.raises(RuntimeError, match='清单变化'):
             await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': 'aicoding'},
@@ -269,7 +264,7 @@ def test_original_lock_and_binding_survive_backup_failure(phase, provider):
     device = Mock()
     device.get_device.return_value = {'device_id': 'old-container', 'device_provider': provider, 'status': 'ACTIVE'}
     runtime = Mock()
-    runtime.get_bot.return_value = {'devices': [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]}
+    runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
     svc = _make_service(locks, bot_repository=repository, device_provider=device,
                         baas_service_provider=lambda: runtime)
 
@@ -439,7 +434,7 @@ def test_old_coding_bot_without_new_script_completes_original_restart(engine, pr
     device = make_device_service(repo=device_repo)
     device._exec_shell_new = Mock(side_effect=lambda **kw: _run_absent_helper_probe(kw['shell_cmd']))
     runtime = Mock()
-    runtime.get_bot.return_value = {'devices': [{'provider_device_id': 'physical-legacy', 'status': 'ACTIVE'}]}
+    runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical-legacy', 'status': 'ACTIVE'}]
     runtime.post_bots_api.side_effect = lambda **kw: vars(_run_absent_helper_probe(kw['payload']['cmd']))
     svc = _make_service(locks, bot_repository=repository, device_provider=device,
                         baas_service_provider=lambda: runtime)
@@ -494,8 +489,8 @@ def test_non_coding_original_restart_never_probes_even_with_coding_template(engi
 @pytest.mark.asyncio
 async def test_legacy_published_or_caller_instance_without_script_is_allowed(engine):
     runtime = Mock()
-    runtime.get_bot.return_value = {'devices': [
-        {'provider_device_id': 'physical-legacy', 'status': 'ACTIVE'}]}
+    runtime.list_devices_by_bot_uuid.return_value = [
+        {'provider_device_id': 'physical-legacy', 'status': 'ACTIVE'}]
     runtime.post_bots_api.side_effect = lambda **kw: vars(_run_absent_helper_probe(kw['payload']['cmd']))
     await prepare_instance_restart(bot={'bot_id': 'b', 'owner_id': 'o', 'active_engine': engine},
                                    device_id='instance-legacy', target_runtime=runtime)
@@ -632,10 +627,7 @@ async def test_http_restart_preserves_lifecycle_callback_signature():
 @pytest.mark.asyncio
 async def test_durable_restart_key_is_consumed_by_coding_strategy():
     runtime = Mock()
-    runtime.get_bot.return_value = {
-        'status': 'ACTIVE',
-        'devices': [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}],
-    }
+    runtime.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}]
     bot = {'bot_id': 'b', 'owner_id': 'o', 'active_engine': 'aicoding'}
     with patch.object(backup, 'prepare_backup', side_effect=lambda **kwargs: Mock()) as prepared:
         for key in ['restart:publish-1:prod', 'restart:publish-1:prod', 'restart:publish-2:prod']:
