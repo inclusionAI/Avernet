@@ -763,12 +763,12 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 # 的 session_token 做 ``Authorization: Bearer``(同 create_group 的
                 # caller 身份手法);持有者 id 取值序 relay_holder_id → driver_bot_id
                 # → assignee(协作群时是 group_id,解析自然 None→裸 HMAC 尝试)。
-                holder_token = self._holder_bearer_token(node)
+                caller_bearer = self._holder_bearer_token(node)
                 try:
                     logger.info("[task][trajectory], collect_trajectory_event_session_msgs, begin get bcs msgs holder_bearer=%s",
-                                "yes" if holder_token else "hmac-only")
+                                "yes" if caller_bearer else "hmac-only")
                     msgs = await self._bcs.get_session_messages(
-                        sid, limit=limit, caller_bearer=holder_token,
+                        sid, limit=limit, caller_bearer=caller_bearer,
                     )
                     logger.info("[task][trajectory], collect_trajectory_event_session_msgs, finish get bcs msgs")
                 except Exception as ex:  # noqa: BLE001  单节点 BCS 失败 → 跳过,不拖垮其余
