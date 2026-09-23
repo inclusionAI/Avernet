@@ -2,7 +2,7 @@
 
 ``ac_default_skillset_skill_exclusion`` / ``ac_default_skillset_mcp_exclusion``:
 an exclusion row is the Default Set's per-Bot deactivation of one member.
-An ordinary Set may separately provide an excluded MCP and its Installation.
+An ordinary Set may separately provide an excluded Skill or MCP and its Installation.
 The rows are keyed by owner and Bot, not env: a Default Set is shared, its
 exclusions are per-Bot.
 
@@ -237,6 +237,30 @@ def lock_mcp_exclusions(
             DefaultSkillsetMcpExclusion.server_code == server_code,
         )
         .order_by(DefaultSkillsetMcpExclusion.id)
+        .with_for_update()
+        .all()
+    )
+    return {int(row.skill_set_id) for row in rows}
+
+
+def lock_skill_exclusions(
+    session, *, bot_id: str, owner_id: str, skill_id: int
+) -> set[int]:
+    """Lock this Bot's Skill exclusion rows before Set or snapshot locks.
+
+    The existing row serializes ordinary membership with un-exclusion;
+    without an exclusion, Default membership cannot be released.
+    """
+    rows = (
+        session.query(DefaultSkillsetSkillExclusion)
+        .filter(
+            DefaultSkillsetSkillExclusion.avernet_tenant
+            == get_current_avernet_tenant(),
+            DefaultSkillsetSkillExclusion.user_id == owner_id,
+            DefaultSkillsetSkillExclusion.bot_id == bot_id,
+            DefaultSkillsetSkillExclusion.skill_id == skill_id,
+        )
+        .order_by(DefaultSkillsetSkillExclusion.id)
         .with_for_update()
         .all()
     )
