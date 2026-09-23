@@ -34,6 +34,9 @@ from fastapi.testclient import TestClient
 router_mod = importlib.import_module("engine.community.api.aicoding_sessions.router")
 router = router_mod.router
 
+from engine.community.core.aicoding.runstatus_service import (  # noqa: E402
+    AixCommandError,
+)
 from engine.community.core.aicoding.models import (  # noqa: E402
     DiffTreeNode,
     FileContent,
@@ -878,16 +881,14 @@ def test_issues_success(client, runstatus_svc):
     )
 
 
-def test_issues_propagates_500_on_aix_failure(client, runstatus_svc):
-    runstatus_svc.issue_raise = HTTPException(
-        status_code=500, detail="aix run output list failed: boom"
-    )
+def test_issues_maps_aix_command_error_to_500(client, runstatus_svc):
+    runstatus_svc.issue_raise = AixCommandError("aix run list failed: boom")
     resp = client.get(
         "/api/aicoding/sessions/runs/issues",
         params={"session_id": "s1"},
     )
     assert resp.status_code == 500
-    assert "boom" in resp.json()["detail"]
+    assert resp.json()["detail"] == "aix run list failed: boom"
 
 
 # ── _workspace_service / _runstatus_service 工厂 ───────────────────────────

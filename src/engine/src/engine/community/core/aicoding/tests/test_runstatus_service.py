@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Optional
 
 import pytest
@@ -25,6 +26,7 @@ from fastapi import HTTPException
 
 from engine.community.core.bash.models import BashExecResult
 from engine.community.core.aicoding.runstatus_service import (
+    AixCommandError,
     IDLE_STATUS,
     RunStatusService,
     SESSION_CACHE_TTL,
@@ -993,45 +995,66 @@ async def test_get_session_pull_requests_empty_outputs_returns_empty_list() -> N
 
 
 async def test_get_session_issues_success_and_sort() -> None:
-    """issue outputs 使用 --kind issue，返回字段透传并按 at 倒序。"""
+    """Map the versioned aix run list workItem fixture to the issue shape."""
+    fixture = Path(__file__).parent / "fixtures" / "aix_run_list_workitem.v1.json"
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+
     plugin = FakeBashPlugin()
     plugin.add(
-        "aix run output list --kind issue",
+        "aix run list",
         WORKSPACE,
-        BashExecResult(
-            stdout=_pr_outputs_payload(
-                [
-                    {
-                        "runId": "r-old",
-                        "kind": "issue",
-                        "provider": "generic",
-                        "url": "https://issues.example.com/work-items/1",
-                        "title": "old issue",
-                        "at": 1_000,
-                        "projectDir": PROJECT_DIR,
-                    },
-                    {
-                        "runId": "r-new",
-                        "kind": "issue",
-                        "provider": "generic",
-                        "url": "https://issues.example.com/work-items/2",
-                        "title": "new issue",
-                        "at": 2_000,
-                        "projectDir": PROJECT_DIR,
-                    },
-                ]
-            ),
-            stderr="",
-            exit_code=0,
-        ),
+        BashExecResult(stdout=json.dumps(payload), stderr="", exit_code=0),
     )
 
     service = _make_service(plugin)
     items = await service.get_session_issues(SESSION_ID)
 
-    assert [o["runId"] for o in items] == ["r-new", "r-old"]
-    assert items[0]["provider"] == "generic"
-    assert "--kind issue" in plugin.calls[0][0]
+    assert items == [
+        {
+            "runId": "r-new",
+            "kind": "issue",
+            "provider": "work-item",
+            "url": (
+                "https://example.com/work-items/2026091700119169408"
+                "?workItemId=2026091700119169408"
+            ),
+            "title": None,
+            "at": 2_000,
+            "projectDir": (
+                "/home/admin/.aicoding/workspace/example-session/project"
+            ),
+        }
+    ]
+    assert "aix run list --filter" in plugin.calls[0][0]
+    assert "--json" in plugin.calls[0][0]
+
+
+async def test_get_session_issues_500_when_cmd_fails() -> None:
+    """issue 查询改用 run list 后，命令失败仍保持 500 错误语义。"""
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "aix run list",
+        WORKSPACE,
+        BashExecResult(stdout="", stderr="aix internal error", exit_code=1),
+    )
+    service = _make_service(plugin)
+
+    with pytest.raises(AixCommandError, match="aix run list failed"):
+        await service.get_session_issues(SESSION_ID)
+
+
+async def test_get_session_issues_500_on_bad_json() -> None:
+    """run list 返回非法 JSON 时，issue 接口仍返回 500。"""
+    plugin = FakeBashPlugin()
+    plugin.add(
+        "aix run list",
+        WORKSPACE,
+        BashExecResult(stdout="not-json", stderr="", exit_code=0),
+    )
+    service = _make_service(plugin)
+
+    with pytest.raises(AixCommandError, match="Failed to parse aix output"):
+        await service.get_session_issues(SESSION_ID)
 
 
 async def test_get_session_pull_requests_500_when_cmd_fails() -> None:
