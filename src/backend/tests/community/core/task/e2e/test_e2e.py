@@ -129,7 +129,7 @@ class CaseDecomposer:
                 continue
             if self._has_child(graph, n.node_id):
                 continue
-            if n.status == Status.FAILED and n.run_info.acceptance_result and n.run_info.acceptance_result.gaps:
+            if n.status == Status.FAILED and n.run_info.acceptance_result and n.run_info.acceptance_result.gap_items:
                 return [self._node(f"{n.node_id}_remedy")]
             if n.status in {Status.PENDING, Status.PLANNING} and n.run_info.extend_props.get("miss_events"):
                 return [self._node(f"{n.node_id}_miss_remedy")]
@@ -452,7 +452,7 @@ class TestMissEscalateBbs:
         assert scoped.run_info.run_mode == "bbs"
         _run(facade.report_bbs_result(
             task_id="t_case", node_id=scoped.node_id, bot_id=bbs_bot_id,
-            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, gaps=[]),
+            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, gap_items=[]),
             output_patch={"result": "bbs 一手实践"},
         ))
         g = svc.query_task_dashboard("t_case")

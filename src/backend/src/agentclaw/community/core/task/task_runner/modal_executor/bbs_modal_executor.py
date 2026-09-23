@@ -354,7 +354,7 @@ async def _notify_impl(execution_graph, *, bcn, bot, graph, backend_url: str,
         logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
 
     # 任务msg:分布式 Relay 的 BBS 认领者仍是一条普通接力棒，只允许接收
-    # 同一的 context→EXECUTION_RESULT→PLAN_RESULT→search→DISPATCH_RESULT→dispatch
+    # 同一的 S1-S8 闭环：S6 本地规划后先 search 决策，再 PLAN_RESULT、DISPATCH_RESULT、dispatch。
     # 闭环；中心化 legacy BBS 才保留旧的 status/output 一次性上报协议。
     relay_inputs = None
     if _relay_mode(execution_graph, target_node_id):
@@ -687,7 +687,7 @@ def _build_task_snapshot(execution_graph) -> dict:
     goal = spec.goal
     ctx = spec.context
     acc = root.run_info.acceptance_result if root.run_info else None
-    gaps = list(acc.gaps) if acc else []
+    gaps = list(acc.gap_items) if acc else []
     child_ids = [
         r.dst_id for r in (getattr(execution_graph, "relations", []) or [])
         if r.src_id == root.node_id and r.type == RelationType.DEPENDENCY
@@ -857,10 +857,10 @@ def _task_msg(
       "output": "存储行业尽调报告已完成,覆盖全部 5 项验收标准……",
       "acceptance_result": {
         "verdict": "DONE",
-        "acceptances_metric": [
+        "done_items": [
           {"id": "ac1", "passed": true, "summary": "投资价值已明确,给出 ★★★★☆ 评级"}
         ],
-        "gaps": []
+        "gap_items": []
       },
       "extend_props": {}
     }'

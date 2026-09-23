@@ -1126,7 +1126,7 @@ class TestFrameworkCallback:
             node_id="c1",
             status="DONE",
             output={"r": 1},
-            acceptance_result={"verdict": "DONE", "gaps": []},
+            acceptance_result={"verdict": "DONE", "gap_items": []},
             workflow_instance_id="i1",
         )
         d.update(kw)
@@ -1159,7 +1159,7 @@ class TestFrameworkCallback:
         body = self._req_body(
             status="FAILED",
             output=None,
-            acceptance_result={"verdict": "FAILED", "gaps": ["证据不足"]},
+            acceptance_result={"verdict": "FAILED", "gap_items": ["证据不足"]},
         )
         svc, engine, _repo, _ri = _make_svc()
         _run(
@@ -1172,9 +1172,9 @@ class TestFrameworkCallback:
         )
         patch = engine.reports[0]
         assert patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
-        assert patch.acceptance_result.gaps == [
+        assert patch.acceptance_result.gap_items == [
             "证据不足"
-        ]  # acceptance_result.gaps 直传
+        ]  # acceptance_result.gap_items 直传
 
     def test_task_level_uses_explicit_node_id(self):
         # common_task 路由用 body 顶层 node_id 定位节点(无 loop_task_id 回声/registry 解析)
@@ -1217,7 +1217,7 @@ class TestFallbackAndInvalid:
             "node_id": "c1",
             "status": "DONE",
             "output": "done",
-            "acceptance_result": {"verdict": "DONE", "gaps": []},
+            "acceptance_result": {"verdict": "DONE", "done_items": [], "gap_items": []},
         }
         svc, engine, repo, _ri = _make_svc()
         result = _run(
@@ -1282,7 +1282,7 @@ class TestIdempotency:
             "node_id": node_id,
             "status": status,
             "output": {"r": 1},
-            "acceptance_result": {"verdict": "DONE", "gaps": []},
+            "acceptance_result": {"verdict": "DONE", "done_items": [], "gap_items": []},
         }
 
     def test_result_replay_is_idempotent_and_returns_200(self):

@@ -29,6 +29,8 @@ def test_five_tables_build_with_key_columns():
     cols = {c["name"] for c in inspector.get_columns("task_callback")}
     # D5.1 fix: node_id is NOT NULL varchar(128).
     assert "node_id" in cols
+    run_info_cols = {c["name"] for c in inspector.get_columns("task_node_run_info")}
+    assert "actual_goal" in run_info_cols
     node_id = next(c for c in inspector.get_columns("task_callback") if c["name"] == "node_id")
     assert not node_id["nullable"], "task_callback.node_id must be NOT NULL"
 

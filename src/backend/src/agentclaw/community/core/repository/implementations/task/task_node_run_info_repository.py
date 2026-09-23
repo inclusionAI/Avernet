@@ -42,6 +42,11 @@ class TaskNodeRunInfoRepository(TaskNodeRunInfoRepositoryProtocol):
                 if record.acceptance_result is not None
                 else None
             ),
+            actual_goal=(
+                json.dumps(record.actual_goal)
+                if record.actual_goal is not None
+                else None
+            ),
             retry=record.retry,
             session_id=record.session_id,
             extend_props=(

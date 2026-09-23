@@ -284,8 +284,8 @@ class CallbackAdapter:
                 output_patch={"output": content} if content is not None else None,
                 acceptance_result=AcceptanceResult(
                     verdict=AcceptanceVerdict.DONE,
-                    acceptances_metric=[],
-                    gaps=[],
+                    done_items=[],
+                    gap_items=[],
                 ),
                 extend_props_patch=ext_patch,
             )
@@ -315,8 +315,8 @@ class CallbackAdapter:
             output_patch={"output": content} if content is not None else None,
             acceptance_result=AcceptanceResult(
                 verdict=AcceptanceVerdict.FAILED,
-                acceptances_metric=[],
-                gaps=gaps,
+                done_items=[],
+                gap_items=gaps,
             ),
             extend_props_patch=merged_ext if merged_ext else None,
         )
@@ -338,8 +338,8 @@ class CallbackAdapter:
             failure_reason=body.get("failure_reason"),
             acceptance_result=AcceptanceResult(
                 verdict=AcceptanceVerdict(accept.get("verdict")),
-                acceptances_metric=accept.get("acceptances_metric", []),
-                gaps=accept.get("gaps", []),
+                done_items=accept.get("done_items", []),
+                gap_items=accept.get("gap_items", []),
             ) if accept else None,
             extend_props_patch=body.get("extend_props"),
         )

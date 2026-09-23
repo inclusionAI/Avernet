@@ -134,8 +134,8 @@ def _accept(verdict: AcceptanceVerdict = AcceptanceVerdict.DONE,
             gaps: list[str] | None = None) -> AcceptanceResult:
     return AcceptanceResult(
         verdict=verdict,
-        acceptances_metric=[],
-        gaps=gaps or [],
+        done_items=[],
+        gap_items=gaps or [],
     )
 
 
@@ -613,7 +613,7 @@ class TestExecuteVerifyGateSuccessPath:
             runner=_StubRunner(), trajectory_repo=repo,
         )
         patch = _patch("t1", "t1", status=Status.DONE,
-                       acceptance_result=_accept(AcceptanceVerdict.FAILED, gaps=["g1"]))
+                       acceptance_result=_accept(AcceptanceVerdict.FAILED, gap_items=["g1"]))
         _run(eng.on_report(patch))
 
         vf = _verify_records(repo)
@@ -726,7 +726,7 @@ class TestLogActionUnchangedAndAdditive:
             runner=_StubRunner(), trajectory_repo=repo,
         )
         patch = _patch("t1", "t1", status=Status.DONE,
-                       acceptance_result=_accept(AcceptanceVerdict.FAILED, gaps=["g1"]))
+                       acceptance_result=_accept(AcceptanceVerdict.FAILED, gap_items=["g1"]))
         _run(eng.on_report(patch))
 
         node = svc._get_node(graph, "t1")
@@ -1175,7 +1175,7 @@ class TestStaticPlanExecuteVerifyTrajectoryGate:
         )
         patch = _patch(
             "t1", "worker",
-            acceptance_result=_accept(AcceptanceVerdict.FAILED, gaps=["g1"]),
+            acceptance_result=_accept(AcceptanceVerdict.FAILED, gap_items=["g1"]),
             output_patch={"result": {"ok": False}},
         )
         _run(eng.on_report(patch))

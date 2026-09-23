@@ -729,15 +729,18 @@ def get_task_context(self, task_id: str) -> TaskContext:
             if (
                 str(runtime.extend_props.get("execution_decision") or "").upper()
                 != "ACCEPTED"
-                or runtime.actual_goal is None
                 or not runtime.output
                 or runtime.acceptance_result is None
             ):
                 continue
+            # Older Relay graphs were persisted before actual_goal gained its
+            # own column. On ACCEPTED nodes, the effective goal was the node
+            # TaskSpec goal, so project it without mutating the prior node.
+            actual_goal = runtime.actual_goal or node.task_spec.goal
             outputs.append(
                 DoneOutput(
                     node_id=node.node_id,
-                    actual_goal=runtime.actual_goal,
+                    actual_goal=actual_goal,
                     output=dict(runtime.output),
                     acceptance_result=runtime.acceptance_result,
                 )

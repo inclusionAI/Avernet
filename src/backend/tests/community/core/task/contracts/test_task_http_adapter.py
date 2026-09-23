@@ -612,7 +612,7 @@ class TestTaskCallbackReport:
             "node_id": "N_http",
             "status": "DONE",
             "output": "ok",
-            "acceptance_result": {"verdict": "DONE", "gaps": []},
+            "acceptance_result": {"verdict": "DONE", "gap_items": []},
         })
         assert r.status_code == 200, r.text
         assert r.json()["data"] == {"ok": True}

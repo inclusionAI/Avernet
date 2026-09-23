@@ -86,7 +86,7 @@ class TestAdapt:
         patch = adapter.adapt(_data(success=False, fail_detail="tech深度不足"))
         assert patch.acceptance_result is not None
         assert patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
-        assert patch.acceptance_result.gaps == ["tech深度不足"]
+        assert patch.acceptance_result.gap_items == ["tech深度不足"]
         assert patch.extend_props_patch == {"fail_detail": "tech深度不足"}
         assert patch.output_patch is None  # 无 data
 
@@ -173,7 +173,7 @@ class TestTaskLoopCallback:
         engine = RecordingEngine()
         cb = TaskLoopCallback(CallbackAdapter(), engine)
         _run(cb.report_result(_data(loop_task_id="t1::c1", success=False, fail_detail="缺证据")))
-        assert engine.reports[0].acceptance_result.gaps == ["缺证据"]
+        assert engine.reports[0].acceptance_result.gap_items == ["缺证据"]
 
     def test_start_run_routes_to_on_start(self):
         from agentclaw.community.core.task.domain.models import Status
@@ -328,7 +328,7 @@ class TestZeroCase:
 
     def test_actual(self):
         adapter = CallbackAdapter()
-        data = {'loop_task_id': '46fa696d-1714-4294-bc36-a46c709637e2', 'node_id': 'N_dual_view', 'workflow_type': 'task_loop', 'workflow_id': 0, 'instance_id': 0, 'workflow_source': 'task_loop', 'workflow_instance_id': '', 'event_id': '', 'status': 'DONE', '_raw_callback_body': {'task_id': '46fa696d-1714-4294-bc36-a46c709637e2', 'node_id': 'N_dual_view', 'status': 'DONE', 'output': '完整分析内容...', 'acceptance_result': {'verdict': 'DONE', 'acceptances_metric': [{'ac_1': 'exec_ok'}], 'gaps': []}, 'extend_props': {}}, 'result': '完整分析内容...'}
+        data = {'loop_task_id': '46fa696d-1714-4294-bc36-a46c709637e2', 'node_id': 'N_dual_view', 'workflow_type': 'task_loop', 'workflow_id': 0, 'instance_id': 0, 'workflow_source': 'task_loop', 'workflow_instance_id': '', 'event_id': '', 'status': 'DONE', '_raw_callback_body': {'task_id': '46fa696d-1714-4294-bc36-a46c709637e2', 'node_id': 'N_dual_view', 'status': 'DONE', 'output': '完整分析内容...', 'acceptance_result': {'verdict': 'DONE', 'done_items': [{'ac_1': 'exec_ok'}], 'gap_items': []}, 'extend_props': {}}, 'result': '完整分析内容...'}
         task_callback_data = TaskCallbackData(data=data)
         res = adapter.adapt(task_callback_data)
 
@@ -345,7 +345,7 @@ class TestZeroCase:
             "_raw_callback_body": {
                 "task_id": "t9", "node_id": "N1", "status": "DONE",
                 "output": "完整分析内容...",
-                "acceptance_result": {"verdict": "DONE", "acceptances_metric": [], "gaps": []},
+                "acceptance_result": {"verdict": "DONE", "done_items": [], "gap_items": []},
                 "extend_props": {},
             },
             "result": "完整分析内容...",

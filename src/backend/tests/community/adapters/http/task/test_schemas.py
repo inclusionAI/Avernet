@@ -196,16 +196,46 @@ def test_acceptance_verdict_backward_compat_pass_fail():
 
 
 def test_acceptance_result_dto_accepts_object_arrays():
-    """新协议 acceptances_metric/gaps 为对象数组,DTO(list[Any]) 应接受,不再 500。"""
+    """新协议 done_items/gap_items 为对象数组,DTO(list[Any]) 应接受,不再 500。"""
     from agentclaw.community.adapters.http.task.schemas import AcceptanceResultDTO
     dto = AcceptanceResultDTO(
         verdict="DONE",
-        acceptances_metric=[{"ac_1": "exec_ok"}],
-        gaps=[{"sddss": "xxsdd"}],
+        done_items=[{"ac_1": "exec_ok"}],
+        gap_items=[{"sddss": "xxsdd"}],
     )
     assert dto.verdict == "DONE"
-    assert dto.acceptances_metric == [{"ac_1": "exec_ok"}]
-    assert dto.gaps == [{"sddss": "xxsdd"}]
+    assert dto.done_items == [{"ac_1": "exec_ok"}]
+    assert dto.gap_items == [{"sddss": "xxsdd"}]
+
+def test_acceptance_result_dto_rejects_legacy_verdict():
+    """新外部协议只接受 verdict=DONE/FAILED;历史 PASS/FAIL 仅由领域反序列化兼容。"""
+    from agentclaw.community.adapters.http.task.schemas import AcceptanceResultDTO
+
+    with pytest.raises(ValidationError):
+        AcceptanceResultDTO(verdict="PASS", done_items=[], gap_items=[])
+
+
+def test_bbs_acceptance_result_is_canonicalized_before_external_dto():
+    """BBS 历史持久化数据出口统一为 verdict/done_items/gap_items。"""
+    from agentclaw.community.adapters.http.task.schemas import (
+        _canonical_bbs_acceptance_result,
+    )
+
+    canonical = _canonical_bbs_acceptance_result(
+        {
+            "verdict": "PASS",
+            "acceptances_metric": [
+                {"id": "ac1", "passed": True, "summary": "已完成"},
+                {"id": "ac2", "passed": False, "summary": "未完成"},
+            ],
+            "gaps": ["缺交付物"],
+        }
+    )
+    assert canonical == {
+        "verdict": "DONE",
+        "done_items": [{"id": "ac1", "passed": True, "summary": "已完成"}],
+        "gap_items": ["缺交付物"],
+    }
 
 
 def test_unwrap_node_output_collapses_single_output_key():

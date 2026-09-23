@@ -140,12 +140,12 @@ class TestPlanParserWiring:
     def test_parse_acceptance_result_new_protocol(self):
         from agentclaw.community.core.task.task_plan.strategies import _parse_plan_result
         g = _graph()
-        run = {"status": "COMPLETED", "result": {"content": '{"tasks": [], "has_gap": false, "gap_detail": "done", "acceptance_result": {"verdict": "DONE", "acceptances_metric": [{"id": "ac1", "passed": true, "summary": "ok"}], "gaps": []}}'}}
+        run = {"status": "COMPLETED", "result": {"content": '{"tasks": [], "has_gap": false, "gap_detail": "done", "acceptance_result": {"verdict": "DONE", "done_items": [{"id": "ac1", "passed": true, "summary": "ok"}], "gap_items": []}}'}}
         pr = _parse_plan_result(run, g.tasks[0], g)
         assert pr.acceptance_result is not None
         assert pr.acceptance_result.verdict == AcceptanceVerdict.DONE
-        assert pr.acceptance_result.acceptances_metric == [{"id": "ac1", "passed": True, "summary": "ok"}]
-        assert pr.acceptance_result.gaps == []
+        assert pr.acceptance_result.done_items == [{"id": "ac1", "passed": True, "summary": "ok"}]
+        assert pr.acceptance_result.gap_items == []
 
 class TestDispatchParserWiring:
     def test_parses_prose_fence_hit_single(self):

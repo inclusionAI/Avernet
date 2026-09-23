@@ -164,6 +164,7 @@ class TaskNodeRunInfoModel(Base):
     assignee = Column(_ASSIGNEE, nullable=True)
     output = Column(Text, nullable=True)
     acceptance_result = Column(Text, nullable=True)
+    actual_goal = Column(Text, nullable=True)
     retry = Column(Integer, nullable=False, default=0)
     session_id = Column(_SESSION_ID, nullable=True)
     extend_props = Column(Text, nullable=True)
@@ -191,6 +192,7 @@ class TaskNodeRunInfoModel(Base):
             assignee=self.assignee,
             output=_loads(self.output),
             acceptance_result=_loads(self.acceptance_result),
+            actual_goal=_loads(self.actual_goal),
             retry=self.retry,
             session_id=self.session_id,
             extend_props=_loads(self.extend_props),

@@ -360,7 +360,7 @@ class TestExternalManagedIsolation:
                     "t1",
                     "t1",
                     acceptance_result=AcceptanceResult(
-                        verdict=AcceptanceVerdict.FAILED, gaps=["third-party failure"]
+                        verdict=AcceptanceVerdict.FAILED, gap_items=["third-party failure"]
                     ),
                 )
             )
@@ -482,7 +482,7 @@ class TestStructuralParentGapClosedRollup:
         svc.add_task_nodes([_child("m1")], parent_node_id="t1")
         svc.add_task_nodes([_child("lm")], parent_node_id="m1")
         svc.update_task_node_info(_patch("t1", "lm", status=Status.RUNNING, run_mode="single_bot", assignee="worker_bot"))
-        planner = _VerdictPlanner(AcceptanceResult(verdict=AcceptanceVerdict.DONE, acceptances_metric=[{"id": "ac1", "passed": True, "summary": "名册3位齐全"}], gaps=[]))
+        planner = _VerdictPlanner(AcceptanceResult(verdict=AcceptanceVerdict.DONE, done_items=[{"id": "ac1", "passed": True, "summary": "名册3位齐全"}], gap_items=[]))
         eng = _engine(svc, planner=planner)
         _run(eng.on_report(_patch("t1", "lm",
             acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE),
@@ -495,7 +495,7 @@ class TestStructuralParentGapClosedRollup:
         assert m.run_info.output == {"output": "# 架构师名册\n章文嵩/毕玄/唐洪"}
         assert m.run_info.acceptance_result is not None
         assert m.run_info.acceptance_result.verdict == AcceptanceVerdict.DONE
-        assert m.run_info.acceptance_result.acceptances_metric == [{"id": "ac1", "passed": True, "summary": "名册3位齐全"}]
+        assert m.run_info.acceptance_result.done_items == [{"id": "ac1", "passed": True, "summary": "名册3位齐全"}]
         # root: 一跳 SUCCESS children 看到非空 m1.output -> plan(t1) gap 闭 -> 图 SUCCESS
         root = svc._get_node(graph, "t1")
         assert root.status == Status.SUCCESS
@@ -514,7 +514,7 @@ class TestOnReportFail:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
         eng = _engine(svc, planner=planner)
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["缺x"]))))
         assert svc._get_node(graph, "c1").status == Status.HUNG
         assert planner.plan_calls == 0  # 不 plan 补救(HUNG 冒泡/升 BBS 交既有逻辑)
 
@@ -526,12 +526,12 @@ class TestOnReportFail:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
         eng = _engine(svc, planner=planner)
-        r = _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
+        r = _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["缺x"]))))
         assert r.new_status == Status.HUNG
         n = svc._get_node(graph, "c1")
         assert n.status == Status.HUNG
         assert n.run_info.acceptance_result is not None
-        assert n.run_info.acceptance_result.gaps == ["缺x"]
+        assert n.run_info.acceptance_result.gap_items == ["缺x"]
         assert graph.loop_round == 1
         assert planner.plan_calls == 0
 
@@ -547,13 +547,13 @@ class TestOnReportFail:
         r = _run(eng.on_report(_patch(
             "t1", "c1",
             status=Status.FAILED,
-            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]),
+            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["缺x"]),
         )))
         assert r.new_status == Status.HUNG
         n = svc._get_node(graph, "c1")
         assert n.status == Status.HUNG
         assert n.run_info.acceptance_result is not None
-        assert n.run_info.acceptance_result.gaps == ["缺x"]
+        assert n.run_info.acceptance_result.gap_items == ["缺x"]
         assert graph.loop_round == 1
         assert planner.plan_calls == 0  # HUNG 冒泡/升 BBS 交既有逻辑,不 plan 补救
 
@@ -721,7 +721,7 @@ class TestLoopRound:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         before = graph.loop_round
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c1_remedy")]))
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["x"]))))
         assert graph.loop_round == before + 1
 
 

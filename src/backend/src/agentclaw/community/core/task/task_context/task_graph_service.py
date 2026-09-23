@@ -442,7 +442,7 @@ class TaskGraphService:
     ) -> TaskExecutionGraph:
         """并子图(单写 relations 分解树)。触发条件 a/b/c 由编排核判后调,本方法双检:
         a. 只有一个根节点且 status=PENDING(初始规划);
-        b. 存在 FAILED 节点且 acceptance_result.gaps 非空的叶子(补救);
+        b. 存在 FAILED 节点且 acceptance_result.gap_items 非空的叶子(补救);
         c. 存在 PLANNING 节点 且 无 RUNNING(下一层规划)。
         登记分解树:每新子挂 ``parent_node_id`` 下写入 DEPENDENCY 边(src=parent,dst=新子,单入);
         默认将 parent 置为 PLANNING(委托态)。Relay 串行接力可关闭该行为，
@@ -552,7 +552,7 @@ class TaskGraphService:
         cond_b = any(
             n.status == Status.FAILED
             and n.run_info.acceptance_result is not None
-            and bool(n.run_info.acceptance_result.gaps)
+            and bool(n.run_info.acceptance_result.gap_items)
             and not self._has_child(graph, n.node_id)
             for n in graph.tasks
         )

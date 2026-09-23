@@ -91,7 +91,7 @@ async def test_report_does_not_delete_node_and_marks_execution_done(task_service
     svc, task_id, node_id, bot = task_service_with_bbs_node
     await svc.report_bbs_result(
         task_id, node_id, bot,
-        acceptance_result=AcceptanceResult(AcceptanceVerdict.FAILED, gaps=["partial"]),
+        acceptance_result=AcceptanceResult(AcceptanceVerdict.FAILED, gap_items=["partial"]),
         output_patch={"progress": 30},
     )
     tasks = svc.get_task_dashboard(task_id).tasks

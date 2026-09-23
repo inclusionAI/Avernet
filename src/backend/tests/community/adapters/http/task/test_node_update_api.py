@@ -119,8 +119,8 @@ class TestNodeUpdateApi:
                 "node_id": "n2",
                 "acceptance_result": {
                     "verdict": "DONE",
-                    "acceptances_metric": [{"ac1": "ok"}],
-                    "gaps": [],
+                    "done_items": [{"ac1": "ok"}],
+                    "gap_items": [],
                 },
                 "output_patch": {"output": "done"},
             },
@@ -134,6 +134,8 @@ class TestNodeUpdateApi:
         # acceptance_result DTO 经 acceptance_result_from_dto 转为 domain AcceptanceResult
         assert svc.last["acceptance_result"] is not None
         assert svc.last["acceptance_result"].verdict.value == "DONE"
+        assert svc.last["acceptance_result"].done_items == [{"ac1": "ok"}]
+        assert svc.last["acceptance_result"].gap_items == []
         assert svc.last["output_patch"] == {"output": "done"}
         assert svc.last["status"] is None
         assert svc.last["exec_error"] is None

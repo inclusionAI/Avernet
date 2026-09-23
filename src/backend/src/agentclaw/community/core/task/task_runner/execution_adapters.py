@@ -589,8 +589,8 @@ class CentralizedExecutionAdapter:
                     NodeAction.VERIFY,
                     {
                         "verdict": _ar.verdict.value,
-                        "acceptances_metric": list(_ar.acceptances_metric),
-                        "gaps": list(_ar.gaps),
+                        "done_items": list(_ar.done_items),
+                        "gap_items": list(_ar.gap_items),
                     },
                     status_from=result.prev_status,
                     status_to=result.new_status,

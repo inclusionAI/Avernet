@@ -128,6 +128,22 @@ relay_turn
 
 ```python
 @dataclass
+class AcceptanceCriteria:
+    id: str
+    description: str
+
+
+@dataclass
+class AcceptanceResult:
+    verdict: Literal["DONE", "FAILED"]
+    done_items: list[Any]
+    gap_items: list[Any]
+```
+
+`AcceptanceResult.done_items` 表示已完成验收项，承载 `{id, passed, summary}` 或兼容对象/字符串事实；`gap_items` 表示未完成验收项或缺口。这两个字段不再命名 `acceptances_metric`、`done` 或 `gaps`。
+
+```python
+@dataclass
 class RuntimeInfo:
     run_mode: str | None
     assignee: str | None
@@ -154,7 +170,7 @@ RuntimeInfo.output / acceptance_result
 报告、尽调、方案、材料、文档类 RuntimeInfo.output 契约:
   {"result": "<完整 Markdown 全文>"}
 result 是最终交付物全文，不得退化为标题列表、摘要或状态说明；
-未形成交付物时必须表达为 DECLINED 或局部 acceptance_result.gaps。
+未形成交付物时必须表达为 DECLINED 或局部 acceptance_result.gap_items。
 ```
 
 ### 2.3 TaskContext
@@ -206,9 +222,10 @@ class TaskContext:
   → S4 由 EXECUTION_RESULT 持久化当前节点事实。
   → S5 不重新读取图谱；Skill 将 S1 TaskContext 的 all_done_output 与当前节点 actual_goal/output/acceptance_result 合并。
   → S5/S6 本地解析 new_gaps 和唯一 next_task_spec（无 GAP 则为 null）。
-  → S7 由 PLAN_RESULT 持久化 new_gaps + next_task_spec，整体覆盖旧 gaps，并按需创建唯一下一棒节点。
-  → 有 GAP 时继续一次 /search 和一次 DISPATCH_RESULT；无 GAP 时停止，不调用 search / DISPATCH_RESULT / dispatch。
-  → 正常有 GAP 链路的 HTTP 上限：GET context ×1、EXECUTION_RESULT ×1、PLAN_RESULT ×1、search ×1、DISPATCH_RESULT ×1、dispatch ×1。S5 不重新 GET context。
+  → S7 有 GAP 时使用 S6 已在本地解析、且尚未上报的 next_task_spec + S5 gaps 构造 query，先执行一次 /search。
+  → Skill 基于真实候选确定下一棒执行者与执行模态；决策完成后统一进入上报阶段。
+  → 上报阶段先由 PLAN_RESULT 持久化 new_gaps + next_task_spec，整体覆盖旧 gaps，并创建唯一下一棒节点；再对同一 target 执行一次 DISPATCH_RESULT。无 GAP 时跳过搜索，直接提交 PLAN_RESULT 收口，不调用 search / DISPATCH_RESULT / dispatch。
+  → 正常有 GAP 链路的 HTTP 上限：GET context ×1、EXECUTION_RESULT ×1、search ×1、PLAN_RESULT ×1、DISPATCH_RESULT ×1、dispatch ×1。S5 不重新 GET context。
 ```
 
 `gaps` 不是节点局部验收的字符串拼接；Skill 必须基于根任务、全部 DoneOutput 与节点局部验收重新推理。只有已接纳的 `PLAN_RESULT(gaps=[])` 才表示根任务已无已知缺口；Graph 不把初始空数组自行解释为完成。

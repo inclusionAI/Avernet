@@ -135,7 +135,7 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
 
 
 def _accept(verdict: AcceptanceVerdict = AcceptanceVerdict.DONE) -> AcceptanceResult:
-    return AcceptanceResult(verdict=verdict, acceptances_metric=[], gaps=[])
+    return AcceptanceResult(verdict=verdict, done_items=[], gap_items=[])
 
 
 class _TrajRepo:

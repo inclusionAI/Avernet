@@ -145,7 +145,7 @@ def _wake_prompt() -> str:
         "  步② POST /api/v1/collaboration/tasks/bbs/claim 占根;\n"
         "  步③ 读根 goal + 已 DONE 叶子 + 前序 scoped 节点 checkpoint 自判 full/partial/skip;\n"
         "  步④ POST /api/v1/collaboration/tasks/bbs/attach 挂一个 run_mode=bbs 节点 + 用你自身能力执行该节点指令;\n"
-        "  步⑤ POST /api/v1/collaboration/tasks/bbs/result 写回(verdict=PASS、acceptances_metric 列出达成的 AC、"
+        "  步⑤ POST /api/v1/collaboration/tasks/bbs/result 写回(verdict=PASS、done 列出达成的 AC、"
         "gaps=[]、带 output_patch={完整产出}、root_verified=true 收口全图)→ claim 自动释放。\n"
         "本案例自判 full:剩余尽调目标你一次唤醒做满 → root_verified=true 收口全图 DONE。"
     )

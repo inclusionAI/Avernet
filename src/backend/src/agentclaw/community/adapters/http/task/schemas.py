@@ -242,13 +242,13 @@ class TaskOpResultDTO(BaseModel):
 
 
 class AcceptanceResultDTO(BaseModel):
-    """验收结论(DONE/FAILED + 通过项与缺口)。"""
+    """验收结论(DONE/FAILED + 已完成项与缺口)。"""
 
-    verdict: str = Field(..., description="DONE / FAILED")
-    acceptances_metric: list[Any] = Field(
-        default_factory=list, description="通过的验收项明细列表(新协议为对象数组,[{项:结论}])"
+    verdict: Literal["DONE", "FAILED"] = Field(..., description="DONE / FAILED")
+    done_items: list[Any] = Field(
+        default_factory=list, description="已完成验收项明细列表(对象数组=[{id,passed,summary}])"
     )
-    gaps: list[Any] = Field(
+    gap_items: list[Any] = Field(
         default_factory=list, description="未通过的验收项明细/差距(对象数组 [{项:原因}] 或字符串数组)"
     )
 
@@ -436,8 +436,8 @@ def task_context_to_dto(context) -> LatestTaskContextDTO:
                 output=dict(item.output),
                 acceptance_result=AcceptanceResultDTO(
                     verdict=item.acceptance_result.verdict.value,
-                    acceptances_metric=list(item.acceptance_result.acceptances_metric),
-                    gaps=list(item.acceptance_result.gaps),
+                    done_items=list(item.acceptance_result.done_items),
+                    gap_items=list(item.acceptance_result.gap_items),
                 ),
             )
             for item in context.all_done_output
@@ -585,8 +585,8 @@ def acceptance_result_from_dto(dto: AcceptanceResultDTO):
 
     return AcceptanceResult(
         verdict=AcceptanceVerdict(dto.verdict),
-        acceptances_metric=list(dto.acceptances_metric),
-        gaps=list(dto.gaps),
+        done_items=list(dto.done_items),
+        gap_items=list(dto.gap_items),
     )
 
 
@@ -644,8 +644,8 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
         ar_dto = (
             AcceptanceResultDTO(
                 verdict=ar.verdict.value,
-                acceptances_metric=list(ar.acceptances_metric),
-                gaps=list(ar.gaps),
+                done_items=list(ar.done_items),
+                gap_items=list(ar.gap_items),
             )
             if ar is not None
             else None
@@ -765,6 +765,31 @@ def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
     )
 
 
+def _canonical_bbs_acceptance_result(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalize stored acceptance JSON to the current external contract."""
+    if raw is None:
+        return None
+    if "done_items" in raw:
+        done_items = list(raw["done_items"])
+    else:
+        done_items = [
+            item
+            for item in raw.get("acceptances_metric", [])
+            if not (isinstance(item, dict) and item.get("passed") is False)
+        ]
+    if "gap_items" in raw:
+        gap_items = list(raw["gap_items"])
+    else:
+        gap_items = list(raw.get("gaps", []))
+    from agentclaw.community.core.task.domain.models import AcceptanceVerdict
+
+    return {
+        "verdict": AcceptanceVerdict(raw.get("verdict")).value,
+        "done_items": list(done_items or []),
+        "gap_items": list(gap_items or []),
+    }
+
+
 def bbs_task_overview_to_dto(record) -> BbsTaskItemDTO:
     """BbsTaskOverviewRecord -> BbsTaskItemDTO(Rule 22):二次解析 task_spec/extend_props。"""
     task_spec = task_spec_from_dict(record.task_spec or {}).to_dict()
@@ -778,7 +803,7 @@ def bbs_task_overview_to_dto(record) -> BbsTaskItemDTO:
         retry=record.retry,
         assignee_id=record.assignee_id,
         status=record.status.value if record.status is not None else None,
-        acceptance_result=record.acceptance_result,
+        acceptance_result=_canonical_bbs_acceptance_result(record.acceptance_result),
         extend_props=record.extend_props,
         relay_create_time=record.relay_create_time,
         relay_begin_time=record.relay_begin_time,

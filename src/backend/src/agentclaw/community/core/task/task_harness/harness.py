@@ -301,7 +301,7 @@ class TaskHarness:
                                 node_id=n.node_id,
                                 acceptance_result=AcceptanceResult(
                                     verdict=AcceptanceVerdict.FAILED,
-                                    gaps=["bbs_lease_expired"],
+                                    gap_items=["bbs_lease_expired"],
                                 ),
                             )
                         )

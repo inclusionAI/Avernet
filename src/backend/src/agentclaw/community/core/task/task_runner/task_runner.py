@@ -700,7 +700,7 @@ class TaskRunner:
                 node_id=node_id,
                 acceptance_result=AcceptanceResult(
                     verdict=AcceptanceVerdict.DONE,
-                    acceptances_metric=["static_auto"],
+                    done_items=["static_auto"],
                 ),
                 output_patch={"result": mock_result},
                 extend_props_patch={"dispatching": None},
@@ -754,7 +754,7 @@ class TaskRunner:
                 node_id=node_id,
                 acceptance_result=AcceptanceResult(
                     verdict=AcceptanceVerdict.DONE,
-                    acceptances_metric=["bbs_handoff"],
+                    done_items=["bbs_handoff"],
                 ),
                 output_patch={
                     "result": {

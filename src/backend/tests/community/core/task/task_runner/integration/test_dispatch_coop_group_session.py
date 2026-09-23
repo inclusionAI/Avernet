@@ -110,9 +110,9 @@ def test_form_coop_group_relay_footer_only_reporter_no_duplicate_protocol():
         extend_props={"manager_bot_id": "mgr", "loop_task_id": "t1::n1", "task_instruction": fc_msg},
     )))
     ctx = bcs.created[0].context
-    # static_plan 接力:不注入 HTTP 上报协议(回调地址/请求体/verdict/acceptances_metric)
+    # static_plan 接力:不注入 HTTP 上报协议(回调地址/请求体/verdict/done)
     assert "回调地址" not in ctx and "callback/report" not in ctx
-    assert '"verdict"' not in ctx and '"acceptances_metric"' not in ctx
+    assert '"verdict"' not in ctx and '"done"' not in ctx
     # 接力脚注仅保留 driver/reporter 定位(协作群分工,不提上报回投),无 mock 字样
     assert "reporter_bot_id=mgr" in ctx and "reporter_role=master/manager" in ctx
     assert "协作群分工" in ctx
@@ -263,7 +263,8 @@ def test_form_coop_group_singlebot_2_group_uses_single_business_protocol():
     ctx = bcs.created[0].context
     assert "【业务节点执行协议】" in ctx
     assert "POST http://b/api/v1/collaboration/tasks/callback/report" in ctx
-    assert "acceptances_metric 必须逐条且仅一次覆盖" in ctx
+    assert "done_items 只放已满足项" in ctx
+    assert "done_items 与 gap_items 的并集必须逐条且仅一次覆盖" in ctx
     assert "阶段1 执行" not in ctx
     assert "bcs_assign_task" not in ctx
     assert "bcs_task_complete" not in ctx
@@ -387,7 +388,8 @@ def test_manager_worker_uses_unified_business_protocol_for_one_or_many_bots():
         assert "【业务节点执行协议】" in context
         assert "[task-loop] loop_task_id=t1::n1; backend=http://backend" in context
         assert "POST http://backend/api/v1/collaboration/tasks/callback/report" in context
-        assert "acceptances_metric 必须逐条且仅一次覆盖" in context
+        assert "done_items 只放已满足项" in context
+        assert "done_items 与 gap_items 的并集必须逐条且仅一次覆盖" in context
         assert "bcs_assign_task" not in context
         assert "bcs_task_complete" not in context
         assert context.count("/api/v1/collaboration/tasks/callback/report") == 1

@@ -95,7 +95,7 @@ def _seed_task(
             run_mode=run_mode,
             assignee=assignee,
             output=output,
-            acceptance_result={"verdict": "PASS", "acceptances_metric": [], "gaps": []},
+            acceptance_result={"verdict": "PASS", "done_items": [], "gap_items": []},
             retry=0,
             session_id=None,
             extend_props=props,
@@ -175,7 +175,7 @@ def test_list_bbs_tasks_overview_joins_run_info_and_node(db):
     assert r.run_mode == "bbs"
     assert r.assignee_id == "asg-1"
     assert r.status is Status.RUNNING
-    assert r.acceptance_result == {"verdict": "PASS", "acceptances_metric": [], "gaps": []}
+    assert r.acceptance_result == {"verdict": "PASS", "done_items": [], "gap_items": []}
     assert r.extend_props == {"assignee_name": "Alice"}
     assert r.task_spec == _TASK_SPEC
     assert r.publisher == "pub-1"

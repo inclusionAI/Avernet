@@ -465,8 +465,8 @@ class TaskServiceRelayMixin(TaskServiceRelayDispatchMixin):
             raise TaskStateError("invalid acceptance_result.verdict") from exc
         return AcceptanceResult(
             verdict=verdict,
-            acceptances_metric=list(value.get("acceptances_metric") or []),
-            gaps=list(value.get("gaps") or []),
+            done_items=list(value.get("done_items") or []),
+            gap_items=list(value.get("gap_items") or []),
         )
 
     async def resume_expired_relay_turn(self, task_id: str) -> bool:

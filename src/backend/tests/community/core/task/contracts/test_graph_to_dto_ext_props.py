@@ -28,7 +28,7 @@ def _svc_graph_with_node():
         TaskNodePatch(
             task_id="tdto", node_id="c1", status=Status.RUNNING,
             run_mode="single_bot", assignee="b",
-            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, acceptances_metric=["ac1"]),
+            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, done_items=["ac1"]),
         )
     )
     return svc, graph

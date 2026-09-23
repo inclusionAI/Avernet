@@ -115,7 +115,7 @@ class TestBbsLeaseExpire:
         assert scoped.status == Status.DONE
         assert scoped.run_info.acceptance_result is not None
         assert scoped.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED
-        assert scoped.run_info.acceptance_result.gaps == ["bbs_lease_expired"]
+        assert scoped.run_info.acceptance_result.gap_items == ["bbs_lease_expired"]
 
         # (c) on_harness_fn 对 bbs 节点零扇出(任何 scan 都不重派 bbs 节点):
         #     RUNNING-scan 直写图 + continue 跳过 PENDING reset;FAILED-scan guard 跳过 bbs。
@@ -133,7 +133,7 @@ class TestBbsLeaseExpire:
         # 模拟 bot 回投验收 FAIL:RUNNING→DONE(via acceptance_result,走 _ACCEPTANCE_TRANSITIONS)
         svc.update_task_node_info(_patch(
             "t3", "c3",
-            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["bot_reported_gap"])))
+            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gap_items=["bot_reported_gap"])))
         assert svc._get_node(graph, "c3").status == Status.DONE
 
         clock = _Clock(0.0)

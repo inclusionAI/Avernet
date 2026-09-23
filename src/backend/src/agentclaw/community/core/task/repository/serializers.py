@@ -25,18 +25,38 @@ def _acceptance_to_dict(value: AcceptanceResult | None) -> dict[str, Any] | None
         return None
     return {
         "verdict": value.verdict.value,
-        "acceptances_metric": list(value.acceptances_metric),
-        "gaps": list(value.gaps),
+        "done_items": list(value.done_items),
+        "gap_items": list(value.gap_items),
     }
 
 
 def _acceptance_from_dict(value: dict[str, Any] | None) -> AcceptanceResult | None:
     if value is None:
         return None
+    # Recover the canonical fields first, then historical field names. The
+    # compatibility order is: done_items, acceptances_metric and gap_items,
+    # gaps. The intermediate ``done`` field was never deployed, so it is not
+    # accepted. Persisted writes always emit only ``done_items`` and
+    # ``gap_items``. Legacy prompts sometimes placed passed=false metrics in
+    # acceptances_metric; those are not completed items, so drop them.
+    done_items = (
+        list(value["done_items"])
+        if "done_items" in value
+        else [
+            item
+            for item in value.get("acceptances_metric", [])
+            if not (isinstance(item, dict) and item.get("passed") is False)
+        ]
+    )
+    gap_items = (
+        list(value["gap_items"])
+        if "gap_items" in value
+        else list(value.get("gaps", []))
+    )
     return AcceptanceResult(
         verdict=AcceptanceVerdict(value["verdict"]),
-        acceptances_metric=list(value.get("acceptances_metric", [])),
-        gaps=list(value.get("gaps", [])),
+        done_items=done_items,
+        gap_items=gap_items,
     )
 
 

@@ -56,7 +56,7 @@ def _record(
         retry=0,
         assignee_id="asg-1",
         status=status,
-        acceptance_result={"verdict": "PASS", "acceptances_metric": [], "gaps": []},
+        acceptance_result={"verdict": "PASS", "done_items": [], "gap_items": []},
         extend_props={"assignee_name": "Alice"} if extend_props is None else extend_props,
         relay_create_time=datetime(2026, 9, 1, 10, 0, 0),
         relay_begin_time=datetime(2026, 9, 1, 10, 0, 1),
@@ -151,7 +151,7 @@ def test_bbs_list_route_returns_envelope_with_parsed_fields(client):
     assert it["retry"] == 0
     assert it["assignee_id"] == "asg-1"
     assert it["status"] == "RUNNING"
-    assert it["acceptance_result"] == {"verdict": "PASS", "acceptances_metric": [], "gaps": []}
+    assert it["acceptance_result"] == {"verdict": "PASS", "done_items": [], "gap_items": []}
     assert it["extend_props"] == {"assignee_name": "Alice"}
     assert "metadata" not in it["task_spec"]
     assert it["task_spec"]["context"]["title"] == "BBS 任务标题"

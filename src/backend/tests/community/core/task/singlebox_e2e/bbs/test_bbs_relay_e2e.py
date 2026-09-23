@@ -154,7 +154,7 @@ def _result_body(
         "task_id": task_id,
         "node_id": node_id,
         "bot_id": bot_id,
-        "acceptance_result": {"verdict": verdict, "acceptances_metric": [], "gaps": gaps or []},
+        "acceptance_result": {"verdict": verdict, "done_items": [], "gap_items": gaps or []},
         "output_patch": output_patch,
     }
 
@@ -279,7 +279,7 @@ def test_d_crash_lease_relay(client):
     _, nodes = _dashboard_tasks(c, task_id)
     assert _root_owner(nodes, task_id) is None, "harness 到期应清根 bbs_owner 释放接力所有权"
     assert nodes[node_a]["status"] == "FAILED", "scoped 节点应标终态 FAILED(非 PENDING 重派)"
-    assert (nodes[node_a]["run_info"]["acceptance_result"] or {})["gaps"] == ["bbs_lease_expired"]
+    assert (nodes[node_a]["run_info"]["acceptance_result"] or {})["gap_items"] == ["bbs_lease_expired"]
     # harness 不经 on_harness_fn 重派 bbs 节点(recorder 不含 node_a 的 PENDING 复位)
     assert not any(getattr(p, "node_id", None) == node_a for p in recorder), (
         f"bbs 节点不应经 on_harness_fn 重派(标终态不重派): {recorder}")

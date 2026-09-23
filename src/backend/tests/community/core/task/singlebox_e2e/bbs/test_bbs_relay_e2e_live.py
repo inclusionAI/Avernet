@@ -379,8 +379,8 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                         "bot_id": jy_id,
                         "acceptance_result": {
                             "verdict": "DONE",
-                            "acceptances_metric": [],
-                            "gaps": [],
+                            "done_items": [],
+                            "gap_items": [],
                         },
                         "output_patch": {"domain": sub, "architects": finding_text},
                     },

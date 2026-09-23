@@ -951,7 +951,7 @@ class TaskExecutor(TaskExecutorRelayMixin, TaskExecutorBbsMixin):
                                     "acceptance_result": {},
                                     "extend_props": {},
                                 }, ensure_ascii=False)
-                                + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE，并在 acceptance_result.gaps 填写具体差距；只有执行失败才使用 FAILED。"
+                                + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE，并在 acceptance_result.gap_items 填写具体差距；只有执行失败才使用 FAILED。"
                             )
                         else:
                             req_kwargs["context"] += "\n" + _no_callback_instruction()

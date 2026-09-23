@@ -149,8 +149,8 @@ def _accepted(output):
         "output": output,
         "acceptance_result": {
             "verdict": "DONE",
-            "acceptances_metric": [],
-            "gaps": [],
+            "done_items": [],
+            "gap_items": [],
         },
     }
 

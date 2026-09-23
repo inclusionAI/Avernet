@@ -240,8 +240,8 @@ def test_prompt_formatter_uses_context_and_node_spec():
     assert '"task_id"' in s
     assert '"acceptance_result"' in s
     assert '"verdict": "DONE"' in s
-    assert '"acceptances_metric"' in s
-    assert '"gaps": []' in s
+    assert '"done_items"' in s
+    assert '"gap_items": []' in s
 
 
 def test_prompt_formatter_disabled_report_does_not_inject_platform_protocol():
@@ -275,7 +275,7 @@ def test_prompt_formatter_skill_report_on_uses_http_post():
     assert '"status": "SUCCESS"' in s
     assert '"success": true' not in s
     assert '"verdict": "DONE"' in s
-    assert '"acceptances_metric"' in s
+    assert '"done_items"' in s
     assert "每位执行者（包括 driver）完成分内真实业务推理并给出可复核产出" in s
     assert "HTTP 200 且响应明确表示成功，才算回投成功" in s
     assert "不得重贴完整输出" in s
@@ -361,9 +361,22 @@ def test_prompt_formatter_relay_mode_injects_event_protocol_only():
     assert '"payload": {"execution_decision": "DECLINED"}' in prompt
     assert "DECLINED payload 只能携带 execution_decision" in prompt
     assert "请求顶层字段必须包含 task_id、node_id、event_type、event_id、holder_id、relay_turn、progress_reason" in prompt
+    assert "已满足项写入 acceptance_result.done_items" in prompt
+    assert "未满足项写入 acceptance_result.gap_items" in prompt
+    assert "done_items 不得包含 passed=false 的项" in prompt
     assert "作为顶层 relay_turn 字段提交，严禁放入 payload" in prompt
     assert "node_id 必须是 PLAN_RESULT 返回的 target_node_id" in prompt
     assert "HTTP 200 前，不得向用户宣称任务已完成" in prompt
+
+    s7 = prompt.split("S7/8", 1)[1].split("S8/8", 1)[0]
+    assert "严格按 SEARCH → PLAN_RESULT → DISPATCH_RESULT 执行" in s7
+    assert "SEARCH 前置不是跳过 S6" in s7
+    assert "S6 已在本地解析出唯一 next_task_spec" in s7
+    assert "不得提前上报 PLAN" in s7
+    assert "确定下一棒执行者与执行模态" in s7
+    assert "决策完成后统一进入上报阶段" in s7
+    assert s7.index("/api/v1/collaboration/tasks/search") < s7.index("event_type=PLAN_RESULT") < s7.index("event_type=DISPATCH_RESULT")
+    assert "gaps 为空时必须跳过搜索，直接提交 PLAN_RESULT(gaps=[], next_task_spec=null) 收口" in s7
 
     assert "固定阶段编号 S1-S8" in prompt
     for stage in (

@@ -201,7 +201,7 @@ class TestRouter:
                 "node_id": "c1",
                 "status": "SUCCESS",
                 "output": "误用旧协议直接完成",
-                "acceptance_result": {"verdict": "DONE", "acceptances_metric": [], "gaps": []},
+                "acceptance_result": {"verdict": "DONE", "done_items": [], "gap_items": []},
                 "extend_props": {},
             },
         )

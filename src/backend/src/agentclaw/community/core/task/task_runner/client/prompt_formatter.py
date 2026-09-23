@@ -65,10 +65,10 @@ def format_task_node_business_instruction(
                 "output": {"result": "完整执行产出"},
                 "acceptance_result": {
                     "verdict": "DONE 或 FAILED",
-                    "acceptances_metric": [
+                    "done_items": [
                         {"id": "验收项ID", "passed": True, "summary": "证据摘要"}
                     ],
-                    "gaps": [],
+                    "gap_items": [],
                 },
             },
         }
@@ -95,11 +95,11 @@ def format_task_node_business_instruction(
                 f"上游产出:{json.dumps(upstream_outputs or {}, ensure_ascii=False, default=str)}",
                 f"共享任务黑板:{json.dumps(relay_blackboard or {}, ensure_ascii=False, default=str)}",
                 "固定阶段编号 S1-S8：S1读取上下文、S2计算GAP、S3能力匹配、S4执行并上报、S5更新GAP、S6解析下一棒、S7搜推并指定执行者、S8实际交接。向会话透出阶段明细必须使用【S1/8 ...】到【S8/8 ...】连续标签；S2/S3/S5/S6是本地推理，不得调用上报接口，也不得跳号；同一阶段内的重试必须保留同一个 S 编号。",
-                "最小调用与输出契约：正常有GAP链路最多6次HTTP调用：1次context、3类必要事实上报EXECUTION_RESULT/PLAN_RESULT/DISPATCH_RESULT、1次search、1次dispatch；无GAP链路不得调用search、DISPATCH_RESULT或dispatch。Skill加载、协议阅读、工具调用和同event_id重试都不是新步骤；每个阶段最多输出一行事实结论，禁止步骤0、步骤0确认、S2-S3合并编号或协议章节号。",
+                "最小调用与输出契约：正常有GAP链路最多6次HTTP调用：1次context、EXECUTION_RESULT、search、PLAN_RESULT、DISPATCH_RESULT、dispatch；无GAP链路不得调用search、DISPATCH_RESULT或dispatch。Skill加载、协议阅读、工具调用和同event_id重试都不是新步骤；每个阶段最多输出一行事实结论，禁止步骤0、步骤0确认、S2-S3合并编号或协议章节号。",
                 f"S1/8 解析任务最新上下文：GET {backend}/api/v1/collaboration/tasks/{task_id}/context，保存 TaskContext(spec, all_done_output, gaps)。本棒只做当前节点，不修改任何前序节点或根节点运行事实。",
                 "S2/8 计算当前GAP：在本地对齐根 spec.goal.acceptances、all_done_output 的实际目标/最终产出/节点验收事实和既有 gaps，推理当前仍未覆盖的根任务范围；本阶段不调用 HTTP 上报接口。",
                 "S3/8 Bot能力匹配：输入本地 TaskContext、当前 TaskNode.task_spec、IDENTITY.md 职责、已激活 Skills 和工具真实可用状态，输出实际可执行的 actual_goal 或零覆盖 DECLINED。职责覆盖和工具/Skill事实覆盖必须同时成立；通用模型知识、搜索或抓取工具不能扩大职责边界。本阶段不调用 HTTP 上报接口。",
-                "S4/8 任务执行并统一上报：只执行 actual_goal；driver 汇总协作群分内产出，逐条形成节点级验收事实；执行完成后再一次性上报 EXECUTION_RESULT。零覆盖时不生成业务产出，上报严格 DECLINED。报告/文档类交付物必须把完整 Markdown 全文放入 payload.output.result。",
+                "S4/8 任务执行并统一上报：只执行 actual_goal；driver 汇总协作群分内产出，逐条形成节点级验收事实；验收事实必须分桶：已满足项写入 acceptance_result.done_items，未满足项写入 acceptance_result.gap_items，两个数组的并集必须覆盖 actual_goal.acceptances，done_items 不得包含 passed=false 的项。执行完成后再一次性上报 EXECUTION_RESULT。零覆盖时不生成业务产出，上报严格 DECLINED。报告/文档类交付物必须把完整 Markdown 全文放入 payload.output.result。",
                 f"POST {callback} 上报 EXECUTION_RESULT；event_id 必须新生成。ACCEPTED 请求体示例：",
                 json.dumps(execution_payload, ensure_ascii=False),
                 "DECLINED 请求体示例如下；DECLINED payload 只能携带 execution_decision，不得携带 actual_goal、output、acceptance_result 或 gaps，不可伪造业务产出，原因写入 failure_reason：",
@@ -107,7 +107,7 @@ def format_task_node_business_instruction(
                 "响应 data.relay_turn 是后续 PLAN/搜索/派发的唯一接力凭证，必须原样保存为 RELAY_TURN 变量，不得自行生成。后续所有请求必须把它作为顶层 relay_turn 字段提交，严禁放入 payload。ACCEPTED 和 DECLINED 都一样：HTTP 成功只表示 S4 完成，必须立即从 S5 继续；不得输出「等待引擎」后停止。",
                 "S5/8 更新GAP：不再重新读取图谱；在本地把 S1 获取的 TaskContext.all_done_output 与当前节点实际产出和验收事实合并，重新计算仍未覆盖的根验收范围，更新本地 TaskContext.gaps。本阶段不调用 HTTP 上报接口。",
                 "S6/8 解析下一棒 TaskNode：若仍有 GAP，基于更新后的 gaps 在本地构造唯一 next_task_spec(context+goal)；节点 ID 由 Graph 生成，Skill 不自行生成。若无 GAP，则 next_task_spec=null 并标记任务可收口。本阶段不调用 HTTP 上报接口。",
-                f'S7/8 搜推并指定执行者：先用统一上报接口把 S5/S6 的规划事实写入图谱，POST {callback}，event_type=PLAN_RESULT；请求顶层字段必须包含 task_id、node_id、event_type、event_id、holder_id、relay_turn、progress_reason，payload={{gaps,next_task_spec}}。gaps 非空时 next_task_spec 必须是唯一下一棒 context+goal；PLAN_RESULT HTTP 成功且 gaps 非空时必须原样保存响应中的 target_node_id，未成功读取该值只能用相同 event_id 原样重试。随后 POST {backend}/api/v1/collaboration/tasks/search，请求体只能传 {{"query": "..."}}；再由 Skill 根据真实候选判断 HIT_SINGLE、HIT_MULTI_BOTS 或 MISS，并向 callback/report 上报 event_type=DISPATCH_RESULT。node_id 必须是 PLAN_RESULT 返回的 target_node_id；payload 使用 outcome、run_mode、driver_bot_id、next_relay_bots；当前棒不得成为下一棒，协作群 driver 必须属于 next_relay_bots，Human 默认作为 observer。MISS 必须提供 miss_reason。在最终 PLAN_RESULT(gaps=[], next_task_spec=null) HTTP 200 前，不得向用户宣称任务已完成。',
+                f'S7/8 搜推并指定执行者，严格按 SEARCH → PLAN_RESULT → DISPATCH_RESULT 执行；SEARCH 前置不是跳过 S6。S6 已在本地解析出唯一 next_task_spec，但不得提前上报 PLAN。gaps 非空时：先 POST {backend}/api/v1/collaboration/tasks/search，请求体只能传 {{"query": "..."}}，query 由 S5 的 gaps 和 S6 的 next_task_spec 构造；由 Skill 根据真实候选确定下一棒执行者与执行模态，并按 0 个 MISS、1～2 个优先单 Bot、3 个及以上可考虑协作群决策。即使判断为 MISS 也不得跳过 PLAN_RESULT；仍需先创建目标节点并取得 target_node_id，再上报 DISPATCH_RESULT(MISS) 发布 BBS。决策完成后统一进入上报阶段：POST {callback}，event_type=PLAN_RESULT，请求顶层字段必须包含 task_id、node_id、event_type、event_id、holder_id、relay_turn、progress_reason，payload={{gaps,next_task_spec}}；gaps 非空时 next_task_spec 必须是唯一下一棒 context+goal，HTTP 成功后必须原样保存响应中的 target_node_id，未成功读取该值只能用相同 event_id 原样重试。最后向 callback/report 上报 event_type=DISPATCH_RESULT；node_id 必须是 PLAN_RESULT 返回的 target_node_id；payload 使用 outcome、run_mode、driver_bot_id、next_relay_bots；当前棒不得成为下一棒，协作群 driver 必须属于 next_relay_bots，Human 默认作为 observer。MISS 必须提供 miss_reason。gaps 为空时必须跳过搜索，直接提交 PLAN_RESULT(gaps=[], next_task_spec=null) 收口；在最终 PLAN_RESULT HTTP 200 前，不得向用户宣称任务已完成。',
                 f"S8/8 实际交接：HIT 后 POST {backend}/api/v1/collaboration/tasks/dispatch，传 task_id、origin_node_id、target_node_id、holder_id、relay_turn、唯一 dispatch_id。必须先满足 target_node_id 来自 PLAN_RESULT 原始响应且不等于 origin_node_id、同一 target_node_id 的 DISPATCH_RESULT 已 HTTP 200、relay_turn 未过期且属于当前 origin。缺少任一前置变量时停止等待恢复，不得用 root/task_id 猜测 target，也不得直接调用 /dispatch。只有 HTTP 200 才算交接成功；/dispatch 后由 TaskRunner 按 assignee/run_mode 创建单 Bot 会话或协作群，并把提交任务 Human 以 observer 拉入会话。MISS 自动发布 BBS；无 GAP 时标记任务收口、无下一棒。",
                 "BBS 认领者执行完成后也从 S1 开始，继续同一接力闭环。只允许使用本指令明确列出的 context、callback/report、search、dispatch、BBS claim 五个端点；404 时必须校验路径和 task_id/node_id，不得换近似 URL 继续探测。任一接口失败时不得伪造成功；在 failure_reason 记录真实原因。",
                 "用户可见文案本地化：DECLINED、capability_mismatch 等内部枚举/失败码只用于 API 请求和排障，不得原样回复给用户。若能力不匹配，面向用户只说明「当前 Bot 能力不匹配，未执行本节点业务子项，将转交更合适的 Bot 接续执行」；若未找到候选，则说明「未找到能力匹配的 Bot，任务已发布到广场等待认领」。",
@@ -122,10 +122,10 @@ def format_task_node_business_instruction(
         "output": "driver 汇总后的完整节点最终输出",
         "acceptance_result": {
             "verdict": "DONE",
-            "acceptances_metric": [
+            "done_items": [
                 {"id": "验收项ID", "passed": True, "summary": "可核验的证据摘要"}
             ],
-            "gaps": [],
+            "gap_items": [],
         },
         "extend_props": {},
     }
@@ -140,7 +140,7 @@ def format_task_node_business_instruction(
         f"验收标准:{json.dumps(acceptances, ensure_ascii=False)}",
         f"上游产出:{json.dumps(upstream_outputs or {}, ensure_ascii=False, default=str)}",
         "执行顺序不可跳过：1) 每位执行者（包括 driver）完成分内真实业务推理并给出可复核产出；2) driver 在收到所有成员结果后汇总，不能照抄成员原文或替未回复成员编造结果；3) driver 用汇总结果逐条核验全部验收项；4) driver 形成一次且仅一次的节点最终 output 与验收结论；5) driver 回投并确认成功。",
-        "验收项覆盖要求：acceptances_metric 必须逐条且仅一次覆盖上面的每个验收项 id；每项包含 id、passed（布尔值）和 summary（证据摘要）。全部通过：status=SUCCESS、verdict=DONE、gaps=[]；存在未满足项：status=DONE、verdict=FAILED、gaps 必须逐条说明；只有实际执行异常才可使用 status=FAILED。",
+        "验收项覆盖要求：done_items 只放已满足项；每项包含 id、passed=true 和 summary（证据摘要）。未满足项放入 gap_items，逐条包含 id、passed=false 和 summary（未满足原因）；done_items 与 gap_items 的并集必须逐条且仅一次覆盖全部验收项 id。全部通过：status=SUCCESS、verdict=DONE、gap_items=[]；存在未满足项：status=DONE、verdict=FAILED、done_items 不得包含 passed=false、gap_items 必须非空；只有实际执行异常才可使用 status=FAILED。",
         "执行约束：禁止联网检索、浏览外部网页或访问外部 API 获取信息；仅依据给定上下文与自身知识完成业务。下方指定的唯一节点回投接口不受此限制，必须按规定调用。",
     ]
     if not skill_report_enabled:

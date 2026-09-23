@@ -284,20 +284,20 @@ class TaskPlanner:
         """结构父/根 gap 闭(自身验收通过)翻 DONE 时的父自身验收结果(验收执行者=owner)。
 
         调用上下文已 ``not pr.has_gap`` → verdict 恒 DONE。``pr.acceptance_result``(owner bot plan
-        自评,对齐 common_task 协议)非空 → 直接用(acceptances_metric 透传);空 → 回退合成逐条"验收通过"。"""
+        自评,对齐 common_task 协议)非空 → 直接用(done_items 透传);空 → 回退合成逐条"验收通过"。"""
         if pr is not None and pr.acceptance_result is not None:
             ar = pr.acceptance_result
             return AcceptanceResult(
                 verdict=AcceptanceVerdict.DONE,  # gap 闭语境恒 DONE(防御 owner 自评 FAILED)
-                acceptances_metric=list(ar.acceptances_metric or []),
-                gaps=[],
+                done_items=list(ar.done_items or []),
+                gap_items=[],
             )
         ac_ids = [a.id for a in parent.task_spec.goal.acceptances]
         metrics = [{ac_id: "验收通过(子节点交付达成)"} for ac_id in ac_ids]
         if not metrics:
             metrics = [{"all": "验收通过"}]
         return AcceptanceResult(
-            verdict=AcceptanceVerdict.DONE, acceptances_metric=metrics, gaps=[]
+            verdict=AcceptanceVerdict.DONE, done_items=metrics, gap_items=[]
         )
 
     async def plan_requested(self, task_id: str) -> list[str]:

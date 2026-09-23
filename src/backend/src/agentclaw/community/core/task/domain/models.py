@@ -60,7 +60,7 @@ class NodeAction(StrEnum):
     PLAN = "plan"               # 规划(gap 计算 + 产子);payload: target/children/has_gap/gap_detail
     DISPATCH = "dispatch"       # 搜推派发结果;payload: outcome(HIT_SINGLE|HIT_MULTI|MISS)/run_mode/assignee/miss_reason
     EXECUTE = "execute"         # 执行产出(bot 回投 output/exec_error);payload: success/exec_error/output
-    VERIFY = "verify"           # 验收结论;payload: verdict/acceptances_metric/gaps
+    VERIFY = "verify"           # 验收结论;payload: verdict/done_items/gap_items
     RESET = "reset"             # harness 复位重投;payload: reason/prev_status/harness_retries
     TRANSITION = "transition"   # 框架直驱翻态(HUNG/传播 DONE);payload: reason
 
@@ -204,8 +204,8 @@ class AcceptanceResult:
     """验收/审计结果(无 verifier 字段)。"""
 
     verdict: AcceptanceVerdict
-    acceptances_metric: list[Any] = field(default_factory=list)  # 已满足的验收指标明细(新协议为指标对象数组,放宽为 Any)
-    gaps: list[Any] = field(default_factory=list)  # 与期望目标的差距(驱动 plan 自算,非 plan 入参);新协议 FAIL 为对象数组,放宽为 Any
+    done_items: list[Any] = field(default_factory=list)  # 已完成接收项;协议为对象数组[{id,passed,summary}]
+    gap_items: list[Any] = field(default_factory=list)  # 未完成/未通过接收项;协议为对象数组,放宽为 Any
 
 
 @dataclass
@@ -417,7 +417,7 @@ class TaskNodePatch:
     assignee: str | None = None
     start_time: int | None = None                    # 节点进入 task_dispatch/BBS claim 的时间
     output_patch: dict[str, Any] | None = None               # fold 到 run_info.output
-    acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(PASS→DONE/FAIL+gaps→DONE)
+    acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(DONE→SUCCESS / FAILED→DONE)
     exec_error: str | None = None                            # 执行报错信号(非验收;→ on_harness 重投,)
     progress_reason: str | None = None                       # 推进原因(规划/搜推/派发)
     failure_reason: str | None = None                        # 失败原因(规划/搜推/派发/执行)
@@ -503,7 +503,7 @@ class PlanResult:
     children: list["TaskNode"] = field(default_factory=list)
     has_gap: bool = False
     gap_detail: str = ""                # gap 描述(空+has_gap=True 时说明为何拆不出;has_gap=False 时可为 "done")
-    acceptance_result: AcceptanceResult | None = None  # owner bot plan 自评(对齐 common_task 协议 {verdict,acceptances_metric:[{id,passed,summary}],gaps});gap 闭翻 DONE 时直接用作父自身验收结果,空则回退合成
+    acceptance_result: AcceptanceResult | None = None  # owner bot plan 自评(对齐 common_task 协议 {verdict,done_items:[{id,passed,summary}],gap_items});gap 闭翻 DONE 时直接用作父自身验收结果,空则回退合成
     # REQ-3 PLAN 轨迹溯源(additive optional 字段,默认 None → 完全向后兼容;现有构造不影响)
     strategy_name: str | None = None         # "workflow" | "gap_based" | None — 命中策略名
     prompt_digest: str | None = None         # SHA-256(prompt + response[:500]);workflow/未命中 → None

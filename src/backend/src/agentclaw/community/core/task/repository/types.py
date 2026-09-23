@@ -80,6 +80,7 @@ class TaskNodeRunInfoRecord:
     start_time: Optional[int]
     update_time: Optional[int]
     end_time: Optional[int]
+    actual_goal: Optional[dict[str, Any]] = None
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
 
@@ -87,12 +88,25 @@ class TaskNodeRunInfoRecord:
         """Project the ``acceptance_result`` JSON dict onto the domain type."""
         if self.acceptance_result is None:
             return None
+        raw = self.acceptance_result
+        done_items = (
+            list(raw["done_items"])
+            if "done_items" in raw
+            else [
+                item
+                for item in raw.get("acceptances_metric", [])
+                if not (isinstance(item, dict) and item.get("passed") is False)
+            ]
+        )
+        gap_items = (
+            list(raw["gap_items"])
+            if "gap_items" in raw
+            else list(raw.get("gaps", []))
+        )
         return AcceptanceResult(
-            verdict=AcceptanceVerdict(self.acceptance_result["verdict"]),
-            acceptances_metric=list(
-                self.acceptance_result.get("acceptances_metric", [])
-            ),
-            gaps=list(self.acceptance_result.get("gaps", [])),
+            verdict=AcceptanceVerdict(raw["verdict"]),
+            done_items=done_items,
+            gap_items=gap_items,
         )
 
 

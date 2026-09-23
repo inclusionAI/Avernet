@@ -61,6 +61,7 @@
 - [ ] `TaskContext` 只包含 `spec`、`all_done_output` 和 `gaps`；其中 gaps 的语义由 Bot/Skill 的 PLAN_RESULT 定义，Graph 不自行做 GAP 推理。
 - [ ] `DoneOutput` 包含 `node_id`、`actual_goal`、`output` 和节点局部 `acceptance_result`。
 - [ ] `TaskSpec` 不包含 `metadata`、`task_id` 或 `instruction`；用户业务事实只映射到 `context` 和 `goal`。
+- [ ] `AcceptanceResult` 使用 `verdict`、`done_items`、`gap_items` 三个字段；`done_items` 表示已完成验收项，`gap_items` 表示未完成项/缺口，不再返回或要求上报 `acceptances_metric`、`done` 或 `gaps`。
 
 ### Task intake
 
@@ -70,7 +71,7 @@
 
 ### Relay
 
-- [ ] Relay 以固定 S1-S8 闭环推进：S1 读取上下文、S2 计算 GAP、S3 能力匹配、S4 执行并上报 `EXECUTION_RESULT`、S5 更新 GAP、S6 解析下一棒、S7 `PLAN_RESULT → /search → DISPATCH_RESULT`、S8 `/dispatch | BBS`；`EXECUTION_RESULT` 成功不是本棒结束。
+- [ ] Relay 以固定 S1-S8 闭环推进：S1 读取上下文、S2 计算 GAP、S3 能力匹配、S4 执行并上报 `EXECUTION_RESULT`、S5 更新 GAP、S6 解析下一棒、S7 使用 S6 已本地规划的 `next_task_spec` 先 `/search`，确定下一棒执行者与执行模态后再依次上报 `PLAN_RESULT → DISPATCH_RESULT`、S8 `/dispatch | BBS`；`EXECUTION_RESULT` 成功不是本棒结束。
 - [ ] Relay 会话中的执行阶段明细使用 `【S1/8 ...】` 到 `【S8/8 ...】` 连续编号；重试、恢复或接口章节号不得造成步骤编号跳变。
 - [ ] S2/S3/S5/S6 是 Skill 端本地推理，不调用任务 HTTP 上报接口；S4 后可直接基于 S1 上下文与当前节点事实进入 S5，无需再次读取 TaskContext。
 - [ ] Relay 正常有 GAP 链路最多 6 次 HTTP 调用：1 次 context、3 类必要事实上报、1 次 search、1 次 dispatch；无 GAP 链路不得调用 search、DISPATCH_RESULT 或 dispatch。确定性错误只能使用同幂等 ID 原样重试，不得增加进度型或探测型调用。

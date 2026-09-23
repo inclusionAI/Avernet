@@ -136,6 +136,10 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                         json.loads(runtime_row.acceptance_result)
                         if runtime_row and runtime_row.acceptance_result else None
                     ),
+                    "actual_goal": (
+                        json.loads(runtime_row.actual_goal)
+                        if runtime_row and runtime_row.actual_goal else None
+                    ),
                     "extend_props": self._hydrated_extend_props(
                         json.loads(runtime_row.extend_props)
                         if runtime_row and runtime_row.extend_props else {}
@@ -330,12 +334,16 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             run_row.run_mode = node.run_info.run_mode
             run_row.assignee = node.run_info.assignee
             run_row.output = self._json(node.run_info.output)
+            actual_goal = node.run_info.actual_goal
+            run_row.actual_goal = self._json(
+                actual_goal.to_dict() if actual_goal is not None else None
+            )
             acceptance = node.run_info.acceptance_result
             run_row.acceptance_result = self._json(
                 {
                     "verdict": acceptance.verdict.value,
-                    "acceptances_metric": list(acceptance.acceptances_metric),
-                    "gaps": list(acceptance.gaps),
+                    "done_items": list(acceptance.done_items),
+                    "gap_items": list(acceptance.gap_items),
                 }
                 if acceptance is not None
                 else None
