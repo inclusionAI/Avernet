@@ -9,6 +9,7 @@ from agentclaw.community.core.repository.protocols.bot_message_feedback import (
     BotMessageFeedbackRepositoryProtocol,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 class BotMessageFeedbackRepository(BotMessageFeedbackRepositoryProtocol):
@@ -32,16 +33,18 @@ class BotMessageFeedbackRepository(BotMessageFeedbackRepositoryProtocol):
             feedback_type=row.feedback_type,
             reason=row.reason,
             comment=row.comment,
+            env=row.env,
             created_at=row.gmt_create,
             updated_at=row.gmt_modified,
         )
 
-    def _existing_row(self, session, message_id: str, user_id: str):
+    def _existing_row(self, session, message_id: str, user_id: str, env: str):
         return (
             session.query(self._model)
             .filter(
                 self._model.message_id == message_id,
                 self._model.user_id == user_id,
+                self._model.env == env,
             )
             .one_or_none()
         )
@@ -58,9 +61,14 @@ class BotMessageFeedbackRepository(BotMessageFeedbackRepositoryProtocol):
         session_key: str | None = None,
         reason: str | None = None,
         comment: str | None = None,
+        env: str | None = None,
     ) -> BotMessageFeedbackRecord:
+        # Normalize env here as well so the repository is safe when called
+        # directly; the service already supplies a non-empty value.
+        env = (env or "").strip().lower() or get_current_env()
+
         with self._db.orm_session() as session:
-            existing = self._existing_row(session, message_id, user_id)
+            existing = self._existing_row(session, message_id, user_id, env)
             if existing is not None:
                 existing.feedback_type = feedback_type
                 existing.message_content = message_content
@@ -69,6 +77,7 @@ class BotMessageFeedbackRepository(BotMessageFeedbackRepositoryProtocol):
                 existing.bot_id = bot_id
                 if session_key is not None:
                     existing.session_key = session_key
+                existing.env = env
                 # 点赞时清空之前点踩的原因和评论，避免数据污脏
                 if feedback_type == "like":
                     existing.reason = None
@@ -93,6 +102,7 @@ class BotMessageFeedbackRepository(BotMessageFeedbackRepositoryProtocol):
                 bot_id=bot_id,
                 reason=reason,
                 comment=comment,
+                env=env,
             )
             session.add(row)
             session.flush()

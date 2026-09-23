@@ -24,6 +24,7 @@ class BotMessageFeedbackServiceProtocol(Protocol):
         session_key: str | None = None,
         reason: str | None = None,
         comment: str | None = None,
+        env: str | None = None,
     ) -> BotMessageFeedbackRecord:
         """Submit or overwrite feedback for a message."""
         ...

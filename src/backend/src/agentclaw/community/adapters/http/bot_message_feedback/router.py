@@ -31,6 +31,7 @@ def _record_to_response(record) -> BotMessageFeedbackResponse:
         feedback_type=record.feedback_type,
         reason=record.reason,
         comment=record.comment,
+        env=record.env,
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
