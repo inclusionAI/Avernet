@@ -1540,7 +1540,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const publicDiagnoseSystemArgs = [
       ...diagnoseSystemArgs,
-      ...diagnoseSessionFilterSystemArgs(sessionFilter, true),
+      ...diagnoseSessionFilterSystemArgs(sessionFilter),
     ];
     const dispatchDiagnoseSystemArgs = [
       ...diagnoseSystemArgs,
@@ -2528,7 +2528,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         };
         publicCommand = renderCommand(template, { ...commonValues, api_key: "******" }, [
           ...systemArgs,
-          ...diagnoseSessionFilterSystemArgs(config.sessionFilter, true),
+          ...diagnoseSessionFilterSystemArgs(config.sessionFilter),
         ]);
         dispatchCommand = renderCommand(template, {
           ...commonValues,

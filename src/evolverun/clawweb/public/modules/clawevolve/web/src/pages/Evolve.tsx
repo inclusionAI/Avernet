@@ -100,7 +100,7 @@ function RuntimeMaintenanceOption({ enabled, onChange }: { enabled: boolean; onC
             <span>任务启动前清理 ClawEvolve 历史会话并重启 Gateway（推荐）</span>
           </label>
           <p className="mt-2 text-xs leading-5 text-amber-800">{enabled
-            ? '维护过程会临时调整 openclaw.json：关闭 AgentGuard，并调整 ClawMind 的 API、流控和上下文压缩配置。Gateway 重启会影响该 Bot 当前正在运行的会话和任务，并可能导致这些任务失败；任务完成后如需继续使用原有配置，可在 TC 中使用“恢复配置”一键恢复。'
+            ? '维护过程会临时调整 openclaw.json：关闭 AgentGuard 和 ClawMind。Gateway 重启会影响该 Bot 当前正在运行的会话和任务，并可能导致这些任务失败；任务完成后如需继续使用原有配置，可在 TC 中使用“恢复配置”一键恢复。'
             : '未清理历史会话且不重启 Gateway，残留运行状态可能导致本次进化任务失败。'}</p>
         </div>
       </div>
@@ -2305,14 +2305,16 @@ function TaskConfigPanel({ config }: { config: Record<string, unknown> }) {
   const sessionFilter = config.sessionFilter && typeof config.sessionFilter === 'object'
     ? config.sessionFilter as { sessionIdentifiers?: unknown }
     : undefined
-  const sessionFilterCount = Array.isArray(sessionFilter?.sessionIdentifiers) ? sessionFilter.sessionIdentifiers.length : 0
+  const sessionFilterIdentifiers = Array.isArray(sessionFilter?.sessionIdentifiers)
+    ? sessionFilter.sessionIdentifiers.filter((value): value is string => typeof value === 'string')
+    : []
   const rows = [
     ['进化方式', config.inputMode === 'direct_goal' ? '按目标进化' : config.inputMode === 'diagnose_goal' ? '先诊断再进化' : undefined],
     ['Session 来源', sessionSource === 'service_export' ? '服务 Session（只读导出）' : sessionSource === 'local' ? '个人 Bot 本地 Session' : undefined],
     ['优化目标', config.goal],
     [config.inputMode === 'direct_goal' ? '规划模型' : '诊断模型', config.model],
-    ['最多诊断 Session', sessionFilterCount > 0 ? undefined : config.maxSessions],
-    ['指定 Session', sessionFilterCount > 0 ? `${sessionFilterCount} 个` : undefined],
+    ['最多诊断 Session', sessionFilterIdentifiers.length > 0 ? undefined : config.maxSessions],
+    ['指定 Session', sessionFilterIdentifiers.length > 0 ? sessionFilterIdentifiers.join('；') : undefined],
     ['诊断要求', config.diagnoseIntent],
     ['Bot 阶段', config.lifecycleStage === 'draft' ? '草稿' : config.lifecycleStage],
     ['命令投递', config.forceMessage === true ? '强制 Bot Message' : '按 Bot provider 自动选择'],
