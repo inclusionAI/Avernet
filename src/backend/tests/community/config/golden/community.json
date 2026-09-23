@@ -150,6 +150,10 @@
         }
       ]
     },
+    "publish_build": {
+      "mcp_catalog_required": true,
+      "nas_migration_required": true
+    },
     "secret": {
       "env_prefix": ""
     },

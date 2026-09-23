@@ -36,6 +36,7 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     validate_required_paths,
 )
 from agentclaw.community.kernel.build_ignore import normalize_build_ignore_path
+from agentclaw.community.di.config import PublishBuildPolicyConfig
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_bot_engine,
 )
@@ -152,6 +153,7 @@ class BotBuildService:
         teclaw_template_uuid: str,
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
         env: str,
+        publish_build_policy: PublishBuildPolicyConfig = PublishBuildPolicyConfig(),
     ):
         """初始化 BotBuildService。
 
@@ -177,6 +179,9 @@ class BotBuildService:
         self._baas_template_resolver = baas_template_resolver
         self._build_ignore_repository = build_ignore_repository
         self._env = env
+        # Deploy-declared publish resource policy; never probe the host for
+        # environment facts in the build path (see PublishBuildPolicyConfig).
+        self._publish_policy = publish_build_policy
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
@@ -187,26 +192,25 @@ class BotBuildService:
         timeout_seconds: float = 30.0,
         poll_interval_seconds: float = 2.0,
     ) -> None:
-        """Block until the bot's device is ACTIVE on BaaS (or timeout).
+        """Block until BaaS knows the bot's device (or timeout), best effort.
 
-        In singlebox the build pipeline triggers immediately after bot
-        creation, racing the per-device boot (local_proc sandbox still
-        writing config; BaaS callback hasn't arrived — every exec_shell
-        and ws_info call returns 404). This wait is a no-op in
-        production where the device is typically long-running ACTIVE.
-        On timeout it returns silently: the subsequent exec_shell calls
-        will surface the real error.
+        The build pipeline can trigger while the device is still booting
+        (e.g. right after bot creation); BaaS answers 404 "BOT_NOT_FOUND"
+        for exec_shell / get_ws_info until boot finishes, so probe the
+        ws-info entry until it exists. For a long-running ACTIVE device
+        the first probe returns and this is a single extra read. On
+        timeout it returns silently: the subsequent exec_shell calls
+        surface the real error.
+
+        Tenant resolution is left to BaasService — an empty ``tenant``
+        falls back to the deployment's ``BaasConfig.tenant``; never
+        hardcode one here.
         """
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             try:
-                # get_publish_progress checks the device without needing
-                # the ws-info path; a 200 response means BaaS knows
-                # the bot. The binding's own status is in the backend
-                # DB (ac_entity_device_binding), checked via the repo.
                 ws_info = self._baas_service.get_ws_info_by_bot_uuid(
                     bot_uuid=device_id,
-                    tenant="team_claw",
                 )
                 if ws_info:
                     logger.info(
@@ -411,14 +415,12 @@ class BotBuildService:
             # ============================================================
             # Step 2: Bot 实例迁移
             # ============================================================
-            # 2.0 Wait for the device to become ACTIVE before the build
-            # generates MCP / stage configs over it. In singlebox the
-            # freshly created bot's device can still be mid-boot (build
-            # triggers before the DeviceActivatedEvent callback lands),
-            # and every BaaS exec_shell / get_ws_info returns 404
-            # "BOT_NOT_FOUND" until the boot finishes; in production the
-            # device is typically long-running ACTIVE so this single
-            # check-and-return is a no-op.
+            # 2.0 Wait for the device to register on BaaS before the build
+            # generates MCP / stage configs over it: a freshly created
+            # bot's device can still be mid-boot here, and every BaaS
+            # exec_shell / get_ws_info answers 404 "BOT_NOT_FOUND" until
+            # the boot finishes. For a long-running device this is a
+            # single extra read.
             if device_id:
                 self._wait_for_device_ready(device_id)
 
@@ -1310,16 +1312,11 @@ class BotBuildService:
         )
 
         if is_nas:
-            # The NAS staging directory is the production/container ARCA mount
-            # (DEFAULT_ARCA_ROOT = /home/admin/.merge_nas). In singlebox the
-            # local_proc sandbox stores data elsewhere — the mount point
-            # doesn't exist, and a nonexistent dir has no permissions to fix.
-            # Skip the chmod entirely when the directory is absent (singlebox)
-            # and try without sudo first when it exists: the local_proc dirs
-            # in a non-container deployment are user-owned, and a
-            # non-interactive shell cannot prompt for the sudo password.
-            # In production the NAS mount exists and the plain chmod either
-            # succeeds (same 755, same result as sudo) or falls back to sudo.
+            # Fix the staging root's permission only when it is present:
+            # a required-but-missing root fails loudly at the source check
+            # below instead of dying first in an unrelated chmod. Plain
+            # chmod before sudo — a user-owned root needs no escalation,
+            # and the sudo fallback covers root-owned mounts.
             nas_dir_path = Path(str(nas_storage_id)) if nas_storage_id else None
             if nas_dir_path is not None and nas_dir_path.exists():
                 try:
@@ -1336,23 +1333,18 @@ class BotBuildService:
                     )
 
         if not source_dir.exists():
-            # NAS staging is a production-container construct (nas_storage_id
-            # from DEFAULT_ARCA_ROOT = /home/admin/.merge_nas — the ARCA
-            # container's NAS mount). When the NAS root itself is absent,
-            # this is a local_proc/singlebox deployment where the bot's data
-            # already lives on the local sandbox filesystem and the
-            # rsync-to-NAS step has no NAS to migrate to. Skip the
-            # migration rather than failing the publish build, so the
-            # remaining stage steps (configs, MCP, artifacts) can complete.
-            if is_nas:
-                nas_root = Path(str(nas_storage_id)).parent if nas_storage_id else Path("/")
-                if not nas_root.exists():
-                    logger.info(
-                        f"[BotBuildService._migrate_bot_instance] "
-                        f"NAS root absent on this host ({nas_root}); skipping "
-                        f"NAS migration for local sandbox: {source_dir}"
-                    )
-                    return True
+            if is_nas and not self._publish_policy.nas_migration_required:
+                # The deployment declares it has no NAS staging
+                # (publish_build.nas_migration_required=false): skip the
+                # instance migration by explicit configuration. Never
+                # infer this from the host — that would fork build
+                # semantics per environment.
+                logger.info(
+                    f"[BotBuildService._migrate_bot_instance] "
+                    f"NAS staging not required by deployment policy; "
+                    f"skipping instance migration: {source_dir}"
+                )
+                return True
             logger.warning(
                 f"[BotBuildService._migrate_bot_instance] "
                 f"Source directory does not exist: {source_dir}"
@@ -1575,20 +1567,24 @@ class BotBuildService:
 
             # 检查返回结果
             if not result.stdout or not result.stdout.strip():
-                # In singlebox's local_proc sandbox, the on-device mcporter
-                # directory (/home/admin/.mcporter) doesn't exist — the device
-                # just booted and hasn't installed any MCP tools. An empty
-                # catalog is a valid state ("no remote MCP tools"), not a
-                # build failure; the bot still works (its OpenClaw agent
-                # loads its own skills/MCP from the local sandbox workspace).
-                # In production, an empty catalog from an established device
-                # is unusual but non-fatal the same way: the build continues
-                # and the operator inspects the device at first run.
+                if self._publish_policy.mcp_catalog_required:
+                    # Default (prod) semantics: an empty catalog hides a
+                    # broken mcporter or a dead device shell — fail the
+                    # build so the defect is visible, not shipped.
+                    logger.warning(
+                        f"[BotBuildService._generate_mcp_config] "
+                        f"Empty stdout from device {device_id}, "
+                        f"stderr={result.stderr}"
+                    )
+                    return False
+                # The deployment declares an empty catalog legal ("no
+                # remote MCP tools" is a valid device state there):
+                # continue without the remote MCP list.
                 logger.info(
                     f"[BotBuildService._generate_mcp_config] "
-                    f"Empty MCP catalog from device {device_id} "
-                    f"(no mcporter content on device); continuing without "
-                    f"remote MCP list, stderr={result.stderr}"
+                    f"Empty MCP catalog from device {device_id} tolerated "
+                    f"by deployment policy; continuing without remote MCP "
+                    f"list, stderr={result.stderr}"
                 )
                 return True
 

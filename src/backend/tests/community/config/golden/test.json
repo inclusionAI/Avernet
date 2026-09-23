@@ -79,6 +79,10 @@
     "openclaw": {
       "skills_repo_url": ""
     },
+    "publish_build": {
+      "mcp_catalog_required": true,
+      "nas_migration_required": true
+    },
     "skill_scan": {
       "auth_app_key": "agentclaw",
       "enable_scheduled_scan": false,

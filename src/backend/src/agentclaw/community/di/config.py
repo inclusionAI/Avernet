@@ -515,6 +515,29 @@ class BaasConfig:
 
 
 @dataclass(frozen=True)
+class PublishBuildPolicyConfig:
+    """Publish-build resource policy — one build code path, per-deployment
+    resource declarations.
+
+    The publish build must not infer capabilities from the host it runs on
+    (that forks business semantics by environment). Deployments declare the
+    resources they guarantee via the ``publish_build`` yaml block instead.
+    """
+
+    # NAS instance staging required: when True (default, prod semantics) a
+    # missing NAS source fails the build loudly — a silent skip would hide
+    # a broken NAS mount. Deployments without NAS (e.g. singlebox local
+    # sandboxes) declare False and the migration is skipped by explicit
+    # configuration, not host probing.
+    nas_migration_required: bool = True
+    # Remote MCP catalog required: when True (default) an empty mcporter
+    # catalog from the device fails the build — it hides a broken mcporter
+    # or dead device shell. Deployments where "no remote MCP tools" is a
+    # legal fresh-device state declare False.
+    mcp_catalog_required: bool = True
+
+
+@dataclass(frozen=True)
 class DeployRuntimeConfig:
     """Which container this deployment runs its bots in.
 

@@ -399,6 +399,7 @@ class ServiceBotModule(Module):
         bot_repo: BotRepository,
         channel_service: ChannelServiceProtocol,
         baas: cfg.BaasConfig,
+        publish_build_policy: cfg.PublishBuildPolicyConfig,
         common_whitelist_service: CommonWhiteListService,
         system_config_service: SystemConfigService,
     ) -> BotBuildService:
@@ -415,6 +416,7 @@ class ServiceBotModule(Module):
             channel_service=channel_service,
             bot_repository=bot_repo,
             teclaw_template_uuid=baas.teclaw_template_uuid,
+            publish_build_policy=publish_build_policy,
             common_whitelist_service=common_whitelist_service,
             baas_template_resolver=SystemConfigBaasTemplateResolver(system_config_service),
         )

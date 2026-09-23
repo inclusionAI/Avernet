@@ -605,6 +605,27 @@ class ConfigModule(Module):
 
     @singleton
     @provider
+    def publish_build_policy(self) -> cfg.PublishBuildPolicyConfig:
+        """Publish-build resource declarations (``publish_build`` yaml block).
+
+        Both keys default True (prod semantics: missing NAS staging / empty
+        device MCP catalog fail the build loudly). A deployment without those
+        resources (e.g. singlebox's local sandboxes) declares False here —
+        the build code stays one code path and never probes the host.
+        """
+        block = _block("publish_build")
+        defaults = cfg.PublishBuildPolicyConfig()
+        return cfg.PublishBuildPolicyConfig(
+            nas_migration_required=block.get(
+                "nas_migration_required", defaults.nas_migration_required
+            ),
+            mcp_catalog_required=block.get(
+                "mcp_catalog_required", defaults.mcp_catalog_required
+            ),
+        )
+
+    @singleton
+    @provider
     def deploy_runtime(self) -> cfg.DeployRuntimeConfig:
         """Which container this deployment runs (``baas.deploy_runtime``).
 
