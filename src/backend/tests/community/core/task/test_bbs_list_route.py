@@ -151,7 +151,8 @@ def test_bbs_list_route_returns_envelope_with_parsed_fields(client):
     assert it["retry"] == 0
     assert it["assignee_id"] == "asg-1"
     assert it["status"] == "RUNNING"
-    assert it["acceptance_result"] == {"verdict": "PASS", "done_items": [], "gap_items": []}
+    # legacy "PASS" 输入经 AcceptanceVerdict._missing_ 单向归一为 DONE(不回写旧值)
+    assert it["acceptance_result"] == {"verdict": "DONE", "done_items": [], "gap_items": []}
     assert it["extend_props"] == {"assignee_name": "Alice"}
     assert "metadata" not in it["task_spec"]
     assert it["task_spec"]["context"]["title"] == "BBS 任务标题"

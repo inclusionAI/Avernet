@@ -10,7 +10,6 @@ from agentclaw.community.core.task.domain.models import (
     Goal,
     Relation,
     RelationType,
-    Metadata,
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
@@ -27,9 +26,8 @@ def _graph(task_id="T-GRAPH"):
         task_id=task_id,
         status=Status.PENDING,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="title", instruction="do"),
-            context=Context(background="background"),
-            goal=Goal(objective="objective", acceptances=[]),
+            context=Context(title="title", background="background"),
+            goal=Goal(objective="do", acceptances=[]),
         ),
         run_info=RuntimeInfo(),
         node_run_graph=None,
@@ -76,7 +74,7 @@ def test_graph_create_and_load_round_trips_shared_state(db):
     assert restored.status is Status.RUNNING
     assert restored.output == {"answer": "ok"}
     assert restored.extend_props == {"bbs_mode": True}
-    assert restored.tasks[0].task_spec.metadata.title == "title"
+    assert restored.tasks[0].task_spec.context.title == "title"
     assert restored.tasks[0].status is Status.PENDING
 
 
@@ -140,6 +138,7 @@ def test_second_graph_service_hydrates_from_shared_store(db):
     repo = TaskGraphRepository(db)
     first = TaskGraphService(graph_repo=repo)
     first.initialize_graph(TaskInfo(
+        task_id=task_id,
         task_spec=_graph(task_id).tasks[0].task_spec,
         source_type="bot",
         owner_bot_id="B-1",

@@ -17,7 +17,6 @@ from agentclaw.community.core.repository.implementations.task.task_info_reposito
 from agentclaw.community.core.task.domain.models import (
     Context,
     Goal,
-    Metadata,
     NodeAction,
     RuntimeInfo,
     Status,
@@ -42,9 +41,8 @@ from agentclaw.community.core.task.task_runner.callback_adapter import (
 
 def _spec(task_id):
     return TaskSpec(
-        metadata=Metadata(task_id=task_id, title="t", instruction="do it"),
-        context=Context(background="bg"),
-        goal=Goal(objective="obj", acceptances=[]),
+        context=Context(title="t", background="bg"),
+        goal=Goal(objective="do it", acceptances=[]),
     )
 
 
@@ -106,7 +104,7 @@ def test_instanceA_initialize_instanceB_dashboard_hydrates(db):
     task_id = "T-CROSS-DASH"
     _seed(db, task_id)
     a = _make_graph_service(db)
-    a.initialize_graph(TaskInfo(task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
+    a.initialize_graph(TaskInfo(task_id=task_id, task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
 
     b = _make_graph_service(db)  # empty cache -> must hydrate from shared store
     graph = b.query_task_dashboard(task_id)
@@ -119,7 +117,7 @@ def test_cross_instance_callback_advances_graph_and_audits_same_tx(db):
     task_id = "T-CROSS-CB"
     _seed(db, task_id)
     a = _make_graph_service(db)
-    a.initialize_graph(TaskInfo(task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
+    a.initialize_graph(TaskInfo(task_id=task_id, task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
 
     callback_repo = TaskCallbackRepository(db)
     b = _make_graph_service(db)
@@ -145,7 +143,7 @@ def test_callback_result_replay_uses_stable_event_id_without_graph_mutation(db):
     task_id = "T-IDEM"
     _seed(db, task_id)
     a = _make_graph_service(db)
-    a.initialize_graph(TaskInfo(task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
+    a.initialize_graph(TaskInfo(task_id=task_id, task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
     callback_repo = TaskCallbackRepository(db)
     cb = _make_callback(a, callback_repo)
 
@@ -202,7 +200,7 @@ def test_graph_patch_retries_after_cross_instance_version_conflict(db):
     task_id = "T-CROSS-VERSION-RETRY"
     _seed(db, task_id)
     writer_a = _make_graph_service(db)
-    writer_a.initialize_graph(TaskInfo(task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
+    writer_a.initialize_graph(TaskInfo(task_id=task_id, task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
 
     writer_b = _make_graph_service(db)
     writer_b.query_task_dashboard(task_id)  # hydrate version 1 into B's cache
@@ -225,7 +223,7 @@ def test_all_graph_mutations_retry_after_cross_instance_conflict(db):
     task_id = "T-CROSS-MUTATION-RETRY"
     _seed(db, task_id)
     writer_a = _make_graph_service(db)
-    writer_a.initialize_graph(TaskInfo(task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
+    writer_a.initialize_graph(TaskInfo(task_id=task_id, task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
     writer_b = _make_graph_service(db)
     writer_b.query_task_dashboard(task_id)
 
@@ -282,7 +280,7 @@ def test_recovery_precondition_pending_leaf_hydrates_cross_instance(db):
     task_id = "T-RECOV-PRE"
     _seed(db, task_id, status=Status.RUNNING)
     a = _make_graph_service(db)
-    a.initialize_graph(TaskInfo(task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
+    a.initialize_graph(TaskInfo(task_id=task_id, task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
     leaf = TaskNode(
         node_id="leaf-1", task_id=task_id, status=Status.PENDING,
         task_spec=_spec(task_id), run_info=RuntimeInfo(), node_run_graph=None,

@@ -99,14 +99,13 @@ def test_list_recoverable_skips_terminal_and_leased(db):
 # ---- helpers ----
 def _minimal_graph(task_id):
     from agentclaw.community.core.task.domain.models import (
-        Context, Goal, Metadata, RuntimeInfo, TaskExecutionGraph, TaskNode, TaskSpec,
+        Context, Goal, RuntimeInfo, TaskExecutionGraph, TaskNode, TaskSpec,
     )
     root = TaskNode(
         node_id=task_id, task_id=task_id, status=Status.RUNNING,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="t", instruction="i"),
-            context=Context(background="b"),
-            goal=Goal(objective="o", acceptances=[]),
+            context=Context(title="t", background="b"),
+            goal=Goal(objective="i", acceptances=[]),
         ),
         run_info=RuntimeInfo(),
         node_run_graph=None,
