@@ -82,6 +82,10 @@ classified as `NOTICE`. `HUMAN2BOT_FRIEND_APPLIED` and
 `BOT2BOT_FRIEND_APPLIED` opt into the BCN friend-decision callback; other
 generic approval events remain local-only until explicitly registered.
 
+`create_work_order_event` accepts `SKILL_COLLABORATOR_APPLIED` through the
+common approval-event validation. Resource-specific request eligibility is
+outside this generic service.
+
 ## Space-join message templates
 
 Space-join notification titles are persisted as stable, language-independent

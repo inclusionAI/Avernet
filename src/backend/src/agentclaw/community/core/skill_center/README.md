@@ -473,3 +473,12 @@ metadata transaction. A later metadata failure is returned as a storage error
 without restoring runtime files, so this flow is not a cross-storage atomic
 transaction. The exact trade-off and Teclaw adapter semantics are recorded in
 `docs/adr/0014-engine-owned-package-deletion.md`.
+
+Team Space Skill editor approval policy is stored on `SkillSpaceBinding` and
+defaults to manual approval. Only the current active Skill Owner may read or
+replace it through the Space Skill API; Personal Space Skills reject both
+operations. Until the shared WorkOrder contract supplies persisted
+`approval_mode`, a trusted `AUTO/SYSTEM` invocation boundary, and callback
+ordering, an enabled policy fails editor-request creation before any WorkOrder
+or Owner notification is written. This fail-closed staging rule must be
+removed only together with that contract and its conformance tests.

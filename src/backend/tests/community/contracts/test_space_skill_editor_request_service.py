@@ -18,12 +18,15 @@ from agentclaw.community.plugin_api.staff_dept import (
 def test_space_skill_editor_request_service_routes_through_work_order_repository(
 ) -> None:
     repository = MagicMock()
+    skill_repository = MagicMock()
     staff_dept = MagicMock()
     staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
         work_no="200177", nick_name="张三"
     )
     repository.create_skill_editor_request.return_value.status = WorkOrderStatus.PENDING
-    service = SpaceSkillEditorRequestService(repository, staff_dept, lambda: "test")
+    service = SpaceSkillEditorRequestService(
+        repository, skill_repository, staff_dept, lambda: "test"
+    )
     assert isinstance(service, SpaceSkillEditorRequestServiceProtocol)
     result = service.create_request(
         space_id=7,
@@ -47,12 +50,15 @@ def test_space_skill_editor_request_service_routes_through_work_order_repository
 def test_space_skill_editor_request_service_falls_back_to_work_no_when_profile_lookup_fails(
 ) -> None:
     repository = MagicMock()
+    skill_repository = MagicMock()
     staff_dept = MagicMock()
     staff_dept.get_profile_by_work_no.side_effect = StaffProfileLookupError(
         "directory unavailable"
     )
     repository.create_skill_editor_request.return_value.status = WorkOrderStatus.PENDING
-    service = SpaceSkillEditorRequestService(repository, staff_dept, lambda: "test")
+    service = SpaceSkillEditorRequestService(
+        repository, skill_repository, staff_dept, lambda: "test"
+    )
 
     service.create_request(
         space_id=7,
@@ -67,5 +73,40 @@ def test_space_skill_editor_request_service_falls_back_to_work_no_when_profile_l
         applicant_user_id="200177",
         applicant_name="200177",
         apply_reason="maintain together",
+        env="test",
+    )
+
+
+def test_space_skill_editor_request_service_manages_owner_policy() -> None:
+    repository = MagicMock()
+    skill_repository = MagicMock()
+    staff_dept = MagicMock()
+    service = SpaceSkillEditorRequestService(
+        repository, skill_repository, staff_dept, lambda: "test"
+    )
+    skill_repository.get_policy.return_value = {
+        "auto_approve_editor_requests": False
+    }
+    skill_repository.update_policy.return_value = {
+        "auto_approve_editor_requests": True
+    }
+
+    assert service.get_approval_policy(
+        space_id=7, skill_id=9, actor_id="owner-1"
+    ) == {"auto_approve_editor_requests": False}
+    assert service.update_approval_policy(
+        space_id=7,
+        skill_id=9,
+        actor_id="owner-1",
+        auto_approve_editor_requests=True,
+    ) == {"auto_approve_editor_requests": True}
+    skill_repository.get_policy.assert_called_once_with(
+        space_id=7, skill_id=9, actor_id="owner-1", env="test"
+    )
+    skill_repository.update_policy.assert_called_once_with(
+        space_id=7,
+        skill_id=9,
+        actor_id="owner-1",
+        auto_approve_editor_requests=True,
         env="test",
     )

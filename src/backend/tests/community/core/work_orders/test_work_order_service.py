@@ -1220,6 +1220,40 @@ def test_create_work_order_event_normalizes_and_delegates(
     )
 
 
+def test_create_work_order_event_accepts_skill_collaborator_approval() -> None:
+    service, repository, _, _, _ = _service()
+    expected = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.APPROVAL,
+        work_order_id=42,
+        work_order_no="WO-42",
+        notification_ids=[21],
+        status=WorkOrderEventStatus.PENDING,
+    )
+    repository.create_work_order_event.return_value = expected
+
+    result = service.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+        biz_id="42",
+        event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+        applicant_user_id="actor-1",
+        approver_user_ids=["owner-1"],
+        recipient_user_ids=[],
+        title="Skill editor request",
+        content={"text": "request"},
+        apply_reason="edit",
+        biz_data={"space_id": 7, "skill_id": 42, "skill_name": "Example"},
+        actor_id="actor-1",
+    )
+
+    assert result == expected
+    forwarded = repository.create_work_order_event.call_args.kwargs
+    assert forwarded["biz_type"] == WorkOrderBizType.SKILL_COLLABORATOR.value
+    assert forwarded["event_type"] == WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
+    assert forwarded["applicant_user_id"] == "actor-1"
+    assert forwarded["approver_user_ids"] == ["owner-1"]
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
@@ -1241,13 +1275,6 @@ def test_create_work_order_event_normalizes_and_delegates(
         ),
         ({"applicant_user_id": "other-user"}, "applicant must be"),
         ({"apply_reason": "x" * 513}, "no more than 512"),
-        (
-            {
-                "biz_type": "SKILL_COLLABORATOR",
-                "event_type": "SKILL_COLLABORATOR_APPLIED",
-            },
-            "must use the Skill endpoint",
-        ),
     ],
 )
 def test_create_work_order_event_rejects_invalid_input(

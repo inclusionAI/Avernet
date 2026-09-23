@@ -46,6 +46,9 @@ from agentclaw.community.core.market_favorites.services import MarketFavoriteSer
 from agentclaw.community.core.repository.implementations.market_favorites import (
     MarketFavoriteRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.editor_approval_policy import (
+    SkillEditorApprovalPolicyRepository,
+)
 from agentclaw.community.core.repository.implementations.spaces import SpaceRepository
 from agentclaw.community.core.repository.protocols.market_favorites import (
     MarketFavoriteRepositoryProtocol,
@@ -120,6 +123,9 @@ from agentclaw.community.core.skill_center.services.space_skill_grant_service im
 from agentclaw.community.core.skill_center.services.space_skill_editor_request_service import (
     SpaceSkillEditorRequestService,
 )
+from agentclaw.community.core.skill_center.editor_approval_policy_protocol import (
+    SkillEditorApprovalPolicyRepositoryProtocol,
+)
 from agentclaw.community.core.skill_center.services.draft_edit_lease_service import (
     DraftEditLeaseService,
 )
@@ -167,6 +173,11 @@ class SpacesModule(Module):
         binder.bind(
             SpaceSkillQueryServiceProtocol,
             to=SpaceSkillQueryService,
+            scope=singleton,
+        )
+        binder.bind(
+            SkillEditorApprovalPolicyRepositoryProtocol,
+            to=SkillEditorApprovalPolicyRepository,
             scope=singleton,
         )
         binder.bind(
@@ -221,10 +232,13 @@ class SpacesModule(Module):
     def space_skill_editor_request_service(
         self,
         repository: WorkOrderRepositoryProtocol,
+        skill_repository: SkillEditorApprovalPolicyRepositoryProtocol,
         staff_dept: StaffDeptPlugin,
     ) -> SpaceSkillEditorRequestServiceProtocol:
         """Assemble editor-request policy with environment at the boundary."""
-        return SpaceSkillEditorRequestService(repository, staff_dept, get_current_env)
+        return SpaceSkillEditorRequestService(
+            repository, skill_repository, staff_dept, get_current_env
+        )
 
     @singleton
     @provider

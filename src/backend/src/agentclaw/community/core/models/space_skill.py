@@ -12,6 +12,7 @@ from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -107,6 +108,9 @@ class SkillSpaceBinding(_ScopedDomainFact, Base):
     skill_id = Column(UnsignedBigInteger, nullable=False)
     space_id = Column(UnsignedBigInteger, nullable=False)
     created_by = Column(String(128), nullable=False)
+    auto_approve_editor_requests = Column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
 
 
 class SkillGrant(_ScopedDomainFact, Base):
