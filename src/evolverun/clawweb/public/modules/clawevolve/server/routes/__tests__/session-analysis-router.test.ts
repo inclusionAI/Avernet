@@ -127,13 +127,13 @@ describe("session analysis Router", () => {
         artifacts,
       }),
     } as EvolveTaskRow;
-    const applySessionAisStatus = vi.fn().mockResolvedValue(true);
+    const applyAisStatus = vi.fn().mockResolvedValue(true);
     const repo = {
       findTask: vi.fn().mockResolvedValue(task),
       findStep: vi.fn().mockResolvedValue({
         task_id: "SA-1", step_id: "SA-1-AIS", status: "running",
       }),
-      applySessionAisStatus,
+      applyAisStatus,
     } as unknown as EvolveRepository;
     const store = { getObject: vi.fn(), createSignedUrl: vi.fn() } as unknown as ObjectStore;
     const ais = {
@@ -162,10 +162,10 @@ describe("session analysis Router", () => {
     const response = await postJson(router, "/internal/SA-1/steps/SA-1-AIS/report", {
       status: "succeeded",
       summary: "会话诊断完成",
-      output: { taskId: "SA-1", analysisId: "SA-1", success: true, artifacts: uploaded },
+      output: { taskId: "SA-1", success: true, artifacts: uploaded },
     });
     expect(response.status).toBe(200);
-    expect(applySessionAisStatus).toHaveBeenCalledWith("SA-1", "SA-1-AIS", expect.objectContaining({
+    expect(applyAisStatus).toHaveBeenCalledWith("SA-1", "SA-1-AIS", expect.objectContaining({
       status: "succeeded",
       summary: "会话诊断完成",
     }));

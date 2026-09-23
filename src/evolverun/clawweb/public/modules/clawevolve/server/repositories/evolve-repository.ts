@@ -1605,26 +1605,27 @@ export class EvolveRepository {
     );
   }
 
-  /** Atomically settle the current Base-backed session analysis attempt. */
-  async applySessionAisStatus(taskId: string, stepId: string, input: {
+  /** Atomically update the current AIS Base-backed attempt. */
+  async applyAisStatus(taskId: string, stepId: string, input: {
     status: 'running' | 'succeeded' | 'failed'; summary?: string; output?: Record<string, unknown>;
     errorCode?: string; errorMessage?: string; retryable?: boolean;
   }): Promise<boolean> {
     const now = this.db.dialect.now();
     return this.db.transaction(async tx => {
       const task = (await tx.query<EvolveTaskRow>(
-        "SELECT * FROM ce_tasks WHERE task_id = ? AND task_type = 'session_analysis'",
+        "SELECT * FROM ce_tasks WHERE task_id = ?",
         [taskId],
       ))[0];
-      if (!task || !['pending', 'running'].includes(task.status)
-        || JSON.parse(task.config_json).stepId !== stepId) return false;
+      const config = task ? JSON.parse(task.config_json) as Record<string, unknown> : null;
+      if (!task || !config || typeof config.aisBase !== 'object' || !config.aisBase
+        || !['pending', 'running'].includes(task.status) || config.stepId !== stepId) return false;
       // 以下为安全注释COSEC：当前 attempt 与终态 CAS，拒绝旧容器或监控覆盖已完成结果。
       const updated = await tx.exec(
         `UPDATE ce_steps SET status = ?, summary = COALESCE(?, summary),
          output_json = COALESCE(?, output_json), error_code = COALESCE(?, error_code),
          error_message = COALESCE(?, error_message), retryable = COALESCE(?, retryable),
          started_at = COALESCE(started_at, ?), completed_at = ?, gmt_modified = ?
-         WHERE step_id = ? AND task_id = ? AND step_type = 'session_ais'
+         WHERE step_id = ? AND task_id = ?
          AND status NOT IN ('succeeded', 'failed', 'canceled')
          AND EXISTS (SELECT 1 FROM ce_tasks WHERE task_id = ? AND config_json = ?
                      AND status IN ('pending', 'running'))`,
@@ -1639,6 +1640,16 @@ export class EvolveRepository {
       );
       return true;
     });
+  }
+
+  /** Compatibility entry point for the session AIS recovery monitor. */
+  async applySessionAisStatus(taskId: string, stepId: string, input: {
+    status: 'running' | 'succeeded' | 'failed'; summary?: string; output?: Record<string, unknown>;
+    errorCode?: string; errorMessage?: string; retryable?: boolean;
+  }): Promise<boolean> {
+    const task = await this.findTask(taskId);
+    if (task?.task_type !== 'session_analysis') return false;
+    return this.applyAisStatus(taskId, stepId, input);
   }
 
   async listActiveTasksByTypes(taskTypes: string[], limit = 100): Promise<EvolveTaskRow[]> {

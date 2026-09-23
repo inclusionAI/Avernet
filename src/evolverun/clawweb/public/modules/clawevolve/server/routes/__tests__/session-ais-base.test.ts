@@ -16,23 +16,23 @@ describe("session analysis AIS base attachments", () => {
 
   it("requires generated outputs and archives and accepts the main Session as evidence", () => {
     const required = ["raw", "manifest", "report", "analysis", "result", "artifactBundle", "runtimeBundle", "openclawSessions"];
-    expect(() => validateAisResult({ taskId: "SA-1", analysisId: "SA-1", success: true,
+    expect(() => validateAisResult({ taskId: "SA-1", success: true,
       artifacts: Object.fromEntries(required.map(name => [name, meta(name)])) }, config)).not.toThrow();
   });
 
   it("accepts trajectory as the only source evidence and rejects a result with neither source", () => {
     const generated = ["manifest", "report", "analysis", "result", "artifactBundle", "runtimeBundle", "openclawSessions"];
     const trajectoryOnly = [...generated, "trajectory"];
-    expect(() => validateAisResult({ taskId: "SA-1", analysisId: "SA-1", success: true,
+    expect(() => validateAisResult({ taskId: "SA-1", success: true,
       artifacts: Object.fromEntries(trajectoryOnly.map(name => [name, meta(name)])) }, config)).not.toThrow();
-    expect(() => validateAisResult({ taskId: "SA-1", analysisId: "SA-1", success: true,
+    expect(() => validateAisResult({ taskId: "SA-1", success: true,
       artifacts: Object.fromEntries(generated.map(name => [name, meta(name)])) }, config)).toThrow(
-      "AIS 结果缺少 Session 或 trajectory 证据",
+      "AIS 结果缺少 raw/trajectory 产物",
     );
   });
 
   it("accepts verified partial evidence on failure and rejects a foreign object key", () => {
-    const payload = { taskId: "SA-1", analysisId: "SA-1", success: false,
+    const payload = { taskId: "SA-1", success: false,
       artifacts: { trajectory: meta("trajectory", 0) } };
     expect(() => validateAisResult(payload, config, true)).not.toThrow();
     payload.artifacts.trajectory.objectKey = "other-task";

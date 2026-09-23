@@ -1,8 +1,9 @@
 import type { AisExecutor } from "../../contracts/ais-executor.js";
 import type { EvolveRepository, EvolveTaskRow } from "../../repositories/evolve-repository.js";
 import type { ObjectStore } from "../object-storage/oss-object-store.js";
+import type { AisArtifactSpec } from "./ais-artifact-contract.js";
 
-export type AisArtifactSpec = { objectKey: string; contentType?: string };
+export type { AisArtifactSpec } from "./ais-artifact-contract.js";
 
 export type AisTaskDefinition<TConfig> = {
   taskTypes: readonly string[];

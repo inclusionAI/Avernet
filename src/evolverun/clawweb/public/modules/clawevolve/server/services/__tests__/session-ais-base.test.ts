@@ -37,6 +37,7 @@ describe("session analysis AIS base contract", () => {
       }
       expect((await repo.listActiveSessionAisTasks(0, 100)).map(task => task.task_id)).toEqual(["SA-1"]);
       await expect(repo.applySessionAisStatus("SE-1", "SE-1-AIS", { status: "failed" })).resolves.toBe(false);
+      await expect(repo.applyAisStatus("SE-1", "SE-1-AIS", { status: "failed" })).resolves.toBe(true);
       await expect(repo.applySessionAisStatus("SA-1", "SA-1-AIS", {
         status: "succeeded", output: { success: true },
       })).resolves.toBe(true);

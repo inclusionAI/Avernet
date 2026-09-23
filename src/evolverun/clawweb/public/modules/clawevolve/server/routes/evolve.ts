@@ -59,6 +59,11 @@ import {
   taskLogArchiveLocation,
 } from "../services/evolve/artifact-url.js";
 import { getArtifactBucket, UnavailableObjectStore, type ObjectStore } from "../services/object-storage/oss-object-store.js";
+import {
+  parseAisArtifactContract,
+  validateAisArtifactRequest,
+  validateAisOutput,
+} from "../services/ais/ais-artifact-contract.js";
 
 type InsightBoundaryError = Error & {
   code: string;
@@ -2941,6 +2946,33 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const task = step ? await repo.findTask(taskId) : null;
     if (!step || !task || step.task_id !== taskId) { res.status(404).json({ error: "Step 不属于指定 Task" }); return; }
     if (TERMINAL_STATUSES.has(step.status)) { res.status(409).json({ error: "终态 Step 不再签发上传 URL" }); return; }
+    if (req.body?.artifactName !== undefined) {
+      const contract = parseAisArtifactContract(parseJson(task.config_json));
+      if (!contract || contract.stepId !== step.step_id) {
+        res.status(409).json({ error: "当前 Step 不属于有效的 AIS Base attempt" }); return;
+      }
+      let request;
+      try {
+        request = validateAisArtifactRequest(contract, req.body.artifactName, req.body);
+      } catch (error) {
+        res.status(422).json({ error: error instanceof Error ? error.message : String(error) }); return;
+      }
+      const headers = { "Content-Type": request.spec.contentType };
+      const url = await artifactUrlStore.createSignedUrl(
+        request.spec.objectKey, "PUT", EVOLVE_ARTIFACT_URL_TTL_SECONDS, headers,
+      );
+      res.json({
+        schemaVersion: "clawevolve.ais-artifact-url.v1",
+        method: "PUT", url, headers,
+        expiresInSeconds: EVOLVE_ARTIFACT_URL_TTL_SECONDS,
+        objectKey: request.spec.objectKey,
+        artifact: {
+          name: request.name, objectKey: request.spec.objectKey,
+          size: request.size, sha256: request.sha256, contentType: request.spec.contentType,
+        },
+      });
+      return;
+    }
     const { kind, round, size, sha256, contentType } = req.body ?? {};
     if (!Number.isSafeInteger(size) || Number(size) < 0 || !/^[0-9a-f]{64}$/.test(String(sha256 ?? ""))) {
       res.status(400).json({ error: "Artifact size 或 sha256 不合法" }); return;
@@ -3132,6 +3164,53 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!step) { res.status(404).json({ error: "step 不存在" }); return; }
     if (req.params.taskId && step.task_id !== String(req.params.taskId)) {
       res.status(404).json({ error: "step 不属于指定 task" }); return;
+    }
+    const aisTask = await repo.findTask(step.task_id);
+    const aisContract = aisTask ? parseAisArtifactContract(parseJson(aisTask.config_json)) : null;
+    if (aisContract) {
+      const status = String(req.body?.status ?? "").toLowerCase();
+      if (aisContract.stepId !== stepId) {
+        res.status(409).json({ error: "旧 AIS attempt 不可回调当前任务" }); return;
+      }
+      if (!["running", "succeeded", "failed"].includes(status)) {
+        res.status(400).json({ error: "status 必须为 running/succeeded/failed" }); return;
+      }
+      const output = req.body?.output;
+      if (output != null && !isRecord(output)) {
+        res.status(400).json({ error: "output 必须为对象" }); return;
+      }
+      try {
+        if (status === "succeeded") validateAisOutput(step.task_id, aisContract, output, false);
+        if (status === "failed" && output != null) validateAisOutput(step.task_id, aisContract, output, true);
+      } catch (validationError) {
+        res.status(422).json({ error: validationError instanceof Error ? validationError.message : String(validationError) }); return;
+      }
+      const failure = isRecord(req.body?.error) ? req.body.error : {};
+      const normalized = {
+        status: status as "running" | "succeeded" | "failed",
+        summary: typeof req.body?.summary === "string" ? req.body.summary : undefined,
+        ...(output ? { output } : {}),
+        ...(status === "failed" ? {
+          errorCode: typeof failure.code === "string" ? failure.code : "AIS_EXECUTION_FAILED",
+          errorMessage: typeof failure.message === "string" ? failure.message : "AIS 执行失败",
+          retryable: failure.retryable !== false,
+        } : {}),
+      };
+      if (TERMINAL_STATUSES.has(step.status)) {
+        const sameOutput = output === undefined || JSON.stringify(output) === JSON.stringify(parseJson(step.output_json));
+        const sameSummary = normalized.summary === undefined || normalized.summary === (step.summary ?? "");
+        const sameError = status !== "failed" || (normalized.errorCode === (step.error_code ?? "")
+          && normalized.errorMessage === (step.error_message ?? "")
+          && normalized.retryable === Boolean(step.retryable));
+        if (step.status === status && sameOutput && sameSummary && sameError) {
+          res.json({ ok: true, duplicate: true, taskId: step.task_id, stepId, status }); return;
+        }
+        res.status(409).json({ error: `Step 已处于终态: ${step.status}` }); return;
+      }
+      const applied = await repo.applyAisStatus(step.task_id, stepId, normalized);
+      if (!applied) { res.status(409).json({ error: "Step 状态已改变" }); return; }
+      res.json({ ok: true, duplicate: false, taskId: step.task_id, stepId, status });
+      return;
     }
     if (step.step_type === "run_analysis" || step.step_type === "suggestion_apply") {
       res.status(410).json({

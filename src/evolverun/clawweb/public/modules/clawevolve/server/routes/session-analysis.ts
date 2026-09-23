@@ -6,6 +6,11 @@ import type { ObjectStore } from "../services/object-storage/oss-object-store.js
 import type { AisExecutor, SessionAisOptions } from "../contracts/ais-executor.js";
 import { sessionAisBaseConfig, sessionAisDeadline, sessionAisParams, type SessionAisBaseConfig } from "../services/session-ais-config.js";
 import { AisTaskRunner, type AisTaskDefinition } from "../services/ais/ais-task-runner.js";
+import {
+  parseAisArtifactContract,
+  validateAisOutput,
+  type AisArtifactSpec,
+} from "../services/ais/ais-artifact-contract.js";
 
 type Config = {
   aisBase?: SessionAisBaseConfig;
@@ -16,7 +21,8 @@ type Config = {
   clawwebUrl?: string; callbackUrl?: string;
   shared?: boolean;
   artifactUploadMode?: "broker" | "none";
-  artifacts: Record<string, { objectKey: string; uploadUrl?: string }>;
+  artifactAnyOfOnSuccess?: string[][];
+  artifacts: Record<string, AisArtifactSpec & { uploadUrl?: string }>;
 };
 
 function isSingleSessionMode(mode: Config["mode"]): boolean { return mode !== "EXPORT_ALL"; }
@@ -65,31 +71,17 @@ function sessionPreview(content: Buffer) {
 }
 async function latestStep(repo: EvolveRepository, taskId: string) { const steps = await repo.listSteps(taskId); return steps[steps.length - 1]; }
 export function validateAisResult(payload: Record<string, unknown>, config: Config & { taskId: string }, partial = false) {
-  if (payload.taskId !== config.taskId || payload.analysisId !== config.taskId
-    || payload.success !== !partial) throw new Error("AIS 结果身份或状态不匹配");
-  const uploaded = payload.artifacts;
-  if (!uploaded || typeof uploaded !== "object" || Array.isArray(uploaded)) throw new Error("AIS 结果缺少 artifacts");
-  const sourceAlternatives = new Set(["raw", "trajectory"]);
-  const allowedOptional = new Set(["trajectoryPath", ...sourceAlternatives]);
-  const required = Object.keys(config.artifacts).filter(name => !allowedOptional.has(name)
-    && (config.aisBase || name !== "result"));
-  if (!partial) for (const name of required) {
-    if (!(name in uploaded)) throw new Error(`AIS 结果缺少 ${name} 产物`);
-  }
-  if (!partial && config.aisBase
-    && ![...sourceAlternatives].some(name => name in (uploaded as Record<string, unknown>))) {
-    throw new Error("AIS 结果缺少 Session 或 trajectory 证据");
-  }
-  // 以下为安全注释COSEC：失败附件同样校验归属；允许集合不代表成功时全部必需。
-  for (const [name, actual] of Object.entries(uploaded)) {
-    const expected = config.artifacts[name];
-    if (!expected || !actual || typeof actual !== "object" || Array.isArray(actual)) throw new Error("未知或无效附件");
-    const item = actual as Record<string, unknown>;
-    if (item.objectKey !== expected.objectKey) throw new Error(`AIS ${name} 产物路径不匹配`);
-    if (!Number.isSafeInteger(item.size) || Number(item.size) < (allowedOptional.has(name) ? 0 : 1)) throw new Error(`AIS ${name} size 无效`);
-    if (typeof item.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(item.sha256)) throw new Error(`AIS ${name} sha256 无效`);
-    if (config.aisBase && item.contentType !== artifactContentType(name, config.mode)) throw new Error(`AIS ${name} contentType 无效`);
-  }
+  const contract = parseAisArtifactContract(config) ?? {
+    aisBase: config.aisBase ?? {}, stepId: config.stepId ?? "",
+    artifacts: Object.fromEntries(Object.entries(config.artifacts).map(([name, item]) => [name, {
+      ...item, contentType: item.contentType ?? artifactContentType(name, config.mode) ?? "application/octet-stream",
+      requiredOnSuccess: !["raw", "trajectory", "trajectoryPath"].includes(name)
+        && (Boolean(config.aisBase) || name !== "result"),
+      allowEmpty: ["trajectory", "trajectoryPath"].includes(name),
+    }])),
+    ...(config.aisBase ? { artifactAnyOfOnSuccess: [["raw", "trajectory"]] } : {}),
+  };
+  validateAisOutput(config.taskId, contract, payload, partial);
 }
 
 function artifactContentType(name: string, mode: Config['mode']): string | undefined {
@@ -273,7 +265,7 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
     if (current.aisBase) {
       if (current.stepId !== stepId) return res.status(409).json({ error: "旧 attempt 不可回调当前任务" });
       if (status === "succeeded") {
-        if (!output || output.taskId !== taskId || output.analysisId !== taskId || output.success !== true)
+        if (!output || output.taskId !== taskId || output.success !== true)
           return res.status(422).json({ error: "AIS 成功结果身份或状态不匹配" });
         try { validateAisResult(output, current as Config & { taskId: string }); }
         catch { return res.status(422).json({ error: "AIS 附件元数据无效" }); }
@@ -283,7 +275,7 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
         catch { return res.status(422).json({ error: "AIS 失败附件元数据无效" }); }
       }
       const failure = error && typeof error === "object" && !Array.isArray(error) ? error : {};
-      const applied = await repo.applySessionAisStatus(taskId, stepId, {
+      const applied = await repo.applyAisStatus(taskId, stepId, {
         status: status as "running" | "succeeded" | "failed",
         summary: typeof req.body?.summary === "string" ? req.body.summary : undefined,
         ...(output ? { output } : {}),
@@ -398,13 +390,19 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
     const clawwebUrl = publicBaseUrl;
     const artifacts = Object.fromEntries(names.map((name) => [name, {
       objectKey: `${prefix}/${suffix[name]}`,
+      ...(aisBase ? {
+        contentType: artifactContentType(name, mode)!,
+        requiredOnSuccess: !["raw", "trajectory", "trajectoryPath"].includes(name),
+        allowEmpty: ["trajectory", "trajectoryPath"].includes(name),
+      } : {}),
     }]));
     const config = { ...(aisBase ? { aisBase } : {}), mode, stage, engineType: "openclaw", userId, botId, botEnv, taskId, stepId, clawwebUrl,
       ...(sessionIdentifier ? { sessionIdentifier } : {}), ...(sessionId ? { sessionId } : {}),
       ...(sessionKey ? { sessionKey } : {}), ...(question ? { question } : {}),
       llmAnalysis, llmUseDefault, ...(mode === "ANALYZE_SINGLE" ? { sessionLookbackDays } : {}),
       ...(!llmUseDefault ? { llmModel, ...(llmApiKey ? { llmApiKey } : {}) } : {}),
-      attempt, artifactUploadMode: aisBase ? "broker" : artifactUploadMode, artifacts };
+      attempt, artifactUploadMode: aisBase ? "broker" : artifactUploadMode, artifacts,
+      ...(aisBase ? { artifactAnyOfOnSuccess: [["raw", "trajectory"]] } : {}) };
     await repo.createTask({ taskId, taskType: mode === "ANALYZE_SINGLE" ? "session_analysis" : "session_export",
       userId, botId, taskName, remark: remark || undefined, configJson: JSON.stringify(config), createdBy: creatorUserId });
     await repo.createStep({ stepId, taskId, stepType: "session_ais", stepNo: 1, command: mode === "ANALYZE_SINGLE" ? "analysis" : "package" });
@@ -458,7 +456,7 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
         .replace(/\/[^/]+\.(?:jsonl|tar\.gz)$/, isSingleSessionMode(previous.mode)
           ? `/${safeSessionFilename(previous.sessionIdentifier || previous.sessionId || previous.sessionKey)}` : "/session.tar.gz");
       if (name === "manifest") objectKey = objectKey.replace(/\/raw\.manifest\.json$/, "/session.manifest.json");
-      return [name, { objectKey }];
+      return [name, { ...item, objectKey }];
     }));
     const next = { ...previous, ...(previous.aisBase ? {
       aisBase: { ...previous.aisBase, deadlineAt: sessionAisDeadline(aisOptions.deadlineSeconds) },
