@@ -27,9 +27,6 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.mcp.mcp_config_service_protocol import (
     MCPConfigServiceProtocol,
 )
-from agentclaw.community.core.skill_center.policies.capability_ownership import (
-    require_non_platform_mcp,
-)
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
     PlatformDefaultMcpPolicy,
 )
@@ -680,9 +677,6 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                 ),
             )
         platform_default_codes = self._platform_default_mcp_codes(bot, bot_id)
-        require_non_platform_mcp(
-            server_code=server_code, platform_default_codes=platform_default_codes
-        )
         detail = resolve_mcp_catalog_detail(self._mcp_center, server_code)
         require_mcp_delivery_eligibility(
             mcp_config=self._mcp_config,

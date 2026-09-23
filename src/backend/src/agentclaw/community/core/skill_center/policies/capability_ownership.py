@@ -9,7 +9,9 @@ R2 — Deactivate before joining. A capability holding a direct Installation
 R3 — One Set per capability: held by ANY Set (ordinary or Default, excluded
      or not) ⇒ cannot be added to another.
 
-Identical for skills and MCPs. Callers read the facts; this module decides.
+The MCP add-to-ordinary-Set command treats an excluded Default membership as
+released by that source; Skill membership and Direct control keep R1-R3.
+Callers read the facts; this module decides the resulting conflict.
 """
 
 from __future__ import annotations
@@ -86,10 +88,11 @@ def require_direct_mcp_control_allowed(
 def require_non_platform_mcp(
     *, server_code: str, platform_default_codes: frozenset[str]
 ) -> None:
-    """Policy-owned MCPs cannot be Direct or ordinary-Set controlled.
+    """Policy-owned MCPs cannot be directly controlled or joined unexcluded.
 
     Pass the complete applicable engine/template policy, before exclusions:
-    excluding a default changes activation, not ownership.
+    Direct control remains forbidden after exclusion. Ordinary-Set addition
+    applies its own source-scoped exclusion rule in the transactional command.
     """
     if server_code in platform_default_codes:
         raise SkillSetControlPlaneConflictError(

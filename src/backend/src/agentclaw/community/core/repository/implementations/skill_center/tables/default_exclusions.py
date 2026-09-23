@@ -1,10 +1,10 @@
 """The ONLY code that reads or writes the Default-Set exclusion tables.
 
 ``ac_default_skillset_skill_exclusion`` / ``ac_default_skillset_mcp_exclusion``:
-an exclusion row is the Default Set's per-Bot deactivation of one member —
-the member stays the Set's, but must not hold an Installation row. The rows
-are keyed by owner and Bot, not env: a Default Set is shared, its exclusions
-are per-Bot.
+an exclusion row is the Default Set's per-Bot deactivation of one member.
+An ordinary Set may separately provide an excluded MCP and its Installation.
+The rows are keyed by owner and Bot, not env: a Default Set is shared, its
+exclusions are per-Bot.
 
 The UoW exclusion commands (spec E.11) compose these with the Installation
 deltas in one transaction; the legacy ``SkillRepository`` writers retire
@@ -217,3 +217,27 @@ def excluded_mcp_codes(session, *, bot_id: str, owner_id: str, set_id: int) -> s
         )
         .all()
     }
+
+
+def lock_mcp_exclusions(
+    session, *, bot_id: str, owner_id: str, server_code: str
+) -> set[int]:
+    """Lock this Bot's existing exclusion rows before Set or snapshot locks.
+
+    The row is the shared serialization point for ordinary membership and
+    un-exclusion. A missing row cannot authorize ordinary Default MCP addition.
+    """
+    rows = (
+        session.query(DefaultSkillsetMcpExclusion)
+        .filter(
+            DefaultSkillsetMcpExclusion.avernet_tenant
+            == get_current_avernet_tenant(),
+            DefaultSkillsetMcpExclusion.user_id == owner_id,
+            DefaultSkillsetMcpExclusion.bot_id == bot_id,
+            DefaultSkillsetMcpExclusion.server_code == server_code,
+        )
+        .order_by(DefaultSkillsetMcpExclusion.id)
+        .with_for_update()
+        .all()
+    )
+    return {int(row.skill_set_id) for row in rows}
