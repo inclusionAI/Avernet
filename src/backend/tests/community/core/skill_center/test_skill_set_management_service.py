@@ -4784,7 +4784,7 @@ async def test_default_mcp_exclusion_passes_the_platform_default_policy():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("active", [False, True])
-async def test_ordinary_set_rejects_platform_default_before_mutation(active):
+async def test_ordinary_set_passes_platform_default_codes_to_transaction(active):
     class Repository(_Repository):
         def get_set(self, **kwargs):
             return {"id": "set-1", "is_default": False, "is_active": active}
@@ -4792,13 +4792,13 @@ async def test_ordinary_set_rejects_platform_default_before_mutation(active):
     repository = Repository()
     runtime = _ProjectionCountingRuntime()
     service = _default_wire_service(repository, runtime)
-    with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_PLATFORM_POLICY"):
-        await service.add_mcp(
-            bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
-            set_id="set-1", server_code="mcp.ant.arkai.dimamcpserver",
-        )
-    assert repository.add_mcp_calls == []
-    assert runtime.projections == 0
+    await service.add_mcp(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+        set_id="set-1", server_code="mcp.ant.arkai.dimamcpserver",
+    )
+    assert len(repository.add_mcp_calls) == 1
+    assert "mcp.ant.arkai.dimamcpserver" in repository.add_mcp_calls[0]["platform_default_codes"]
+    assert runtime.projections == int(active)
 
 
 @pytest.mark.asyncio
