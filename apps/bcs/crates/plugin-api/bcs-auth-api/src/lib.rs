@@ -11,8 +11,10 @@ pub mod chain;
 pub mod port;
 pub mod config;
 pub mod cookie;
+pub mod login_state;
 pub mod oauth_types;
 pub mod oauth_provider;
+pub mod session;
 
 pub use chain::{AuthPlugin, AuthPluginChain};
 pub use config::{AuthConfig, LocalAuthConfig, OAuthConfig};
@@ -21,4 +23,12 @@ pub use jwt::is_jwt_format;
 pub use oauth_provider::OAuthProvider;
 pub use oauth_types::{OAuthError, OAuthToken, ProviderUserInfo};
 pub use port::{BotInfo, UserIdentityInfo, BotLookupPort, UserIdentityPort};
+pub use session::{
+    AuthSessionIdentityPort, InstallSession, IssuedSession, RotateSession, SessionAuthError,
+    SessionRevoke, SessionScope, SessionSnapshot, SessionStoreError, SessionVersion, SessionWrite,
+};
 pub use types::{AuthError, AuthPrincipal, AuthResult, AuthSource};
+
+pub use login_state::{
+    LoginBatch, LoginStateError, PendingOAuthLoginStore, PENDING_LOGIN_TTL_SECS,
+};

@@ -52,14 +52,20 @@ impl UserIdentityPort for Identity {
     async fn ensure_identity(&self, _: &str, _: &str, _: Option<&str>, _: Option<&str>, _: &str) -> Result<String, AuthError> { panic!("history created identity") }
     async fn get_identity_by_token(&self, _: &str) -> Result<Option<UserIdentityInfo>, AuthError> { Ok(None) }
     async fn get_identity_by_user_id(&self, _: &str) -> Result<Option<UserIdentityInfo>, AuthError> { Ok(None) }
-    async fn update_token(&self, _: &str, _: &str, _: u64) -> Result<(), AuthError> { panic!("history updated identity") }
 }
 #[async_trait]
 impl PrincipalVerifier for Identity {
-    async fn verify(&self, _: &HeaderMap) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
-        Ok(AuthenticatedCaller { tenant: None, user: Some(AuthenticatedUserIdentity {
-            id: self.0.clone(), username: self.0.clone(), display_name: None, full_name: None,
-        }), bot: None, app: None, access_key: None })
+    async fn verify(&self, _: &HeaderMap) -> Result<bcs_api_http::VerifiedRequestIdentity, PrincipalVerificationError> {
+        Ok(bcs_api_http::VerifiedRequestIdentity {
+            caller: AuthenticatedCaller { tenant: None, user: Some(AuthenticatedUserIdentity {
+                id: self.0.clone(), username: self.0.clone(), display_name: None, full_name: None,
+            }), bot: None, app: None, access_key: None },
+            authentication_context: bcs_api_http::AuthenticationContext {
+                source: "test".to_string(),
+                credential_kind: bcs_api_http::CredentialKind::GatewayPrincipalHeader,
+            },
+            display: Default::default(),
+        })
     }
 }
 

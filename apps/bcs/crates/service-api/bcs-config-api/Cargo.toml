@@ -16,6 +16,7 @@ serde_json  = { workspace = true }
 secrecy     = { workspace = true }
 urlencoding = { workspace = true }
 ipnet       = { workspace = true }
+url         = { workspace = true }
 
 [dev-dependencies]
 toml       = { workspace = true }

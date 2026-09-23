@@ -35,9 +35,28 @@ Apply remote DDL before enabling the updated queue path; SQLite bootstrap applie
 its migration automatically. Rollback binaries must retain history filtering for
 `run_reply` so internal summaries/diagnostic metadata are not exposed as chat.
 
+
+Auth-session versioning adds SQLite `032_auth_session_version.sql` and
+MySQL/OceanBase `031_auth_session_version.sql`: three additive columns on
+`bcs_user_identities` (`session_id` / `session_revision` / `session_expires_at`)
+plus a guarded one-time `UPDATE` that invalidates legacy `token` /
+`token_expire_at` rows on upgrade. Identities and avatars are NOT deleted; the
+clear is guarded by `session_id IS NULL` so sessions installed through the new
+`AuthSessionRepoPort` (which always sets `session_id`) survive a re-application
+of the UPDATE, and the runner is additionally a no-op via
+`bcs_schema_migrations` on the second pass. SQLite 3.26 (the bundled `[database]
+sqlite` runtime on systems without the bundled SQLite; no DROP COLUMN support)
+gets `ALTER TABLE ADD COLUMN` with CONSTANT defaults (`NULL` / `0` / `0`);
+MySQL/OceanBase uses the equivalent `ALTER TABLE ... ADD COLUMN` form. Live
+MySQL conformance + double-connection race testing is deferred to Task 13; the
+in-repository SQLite-only conformance (`conformance_auth_session_sqlite.rs`)
+and fault-injection (`auth_session_db_errors.rs`) tests stand in for the
+parity check here.
+
 The open-source v1 baseline starts from a single MySQL/OceanBase init schema.
 001 is the starting schema, not a snapshot of the latest schema. Fresh databases
 must apply the subsequent numbered migrations in order as well.
+
 
 | Version | File | Purpose |
 | --- | --- | --- |
@@ -538,6 +557,116 @@ fact commit together only on the failure path; normal startup adds no writes.
 The fact authorizes snapshot-less completion of the original failed Service
 activation and is not a delivery operation. Keep it until Session completion
 and the applicable audit retention boundary; do not infer it from error text.
+
+Control-query optimization adds MySQL `025_delivery_pending_abort.sql` and
+SQLite `026_delivery_pending_abort.sql`. Apply before the new worker starts;
+SQLite applies it through bootstrap, remote databases require deployment DDL.
+This adds only the `(env, status, abort_request_id, delivery_id)` index. Existing
+run/cancel deadline indexes are reused. A binary downgrade can retain this index;
+there is no data backfill or additional persisted delivery state in this migration.
+
+Delivery worker optimization adds MySQL `023_delivery_worker_queries.sql` and
+SQLite `024_delivery_worker_queries.sql` (dialect numbering differs due to the
+earlier SQLite-only history). Apply before the optimized worker starts. The new
+`downstream_run_id` column is a derived index projection of transport JSON, not
+a new logical run identity. Older binaries do not maintain this projection;
+mixed-version concurrent writers are unsupported, and a downgrade/re-upgrade
+requires a reviewed alias-projection reconciliation before resuming the worker.
+
+## Auth-session versioning rollout and rollback runbook
+
+Auth-session versioning (SQLite `032_auth_session_version.sql` /
+MySQL/OceanBase `031_auth_session_version.sql`) is forward-only and changes
+the BCS auth-session write contract. The `update_token` unconditional writer
+is removed across the public workspace; all shared callback/refresh/logout
+writers now use atomic `rotate_session` / `revoke_session` through the
+`AuthSessionRepoPort`. This section is the documented procedure — it has not
+yet been executed against a real environment.
+
+### Rollout sequence (do not reorder)
+
+1. Block/drain all old `bcs-http` callback/refresh/logout writer
+   instances through the edge/ingress so no old binary is serving auth
+   lifecycle routes. Old and fixed writers are NOT a supported mixed-writer
+   rollout: the old `update_token` writer is gone, the new CAS writer depends
+   on `session_id`/`session_revision`, and unconditional UPDATE from a
+   down-level binary would bypass the CAS guard and break the
+   rotate/revoke invariants required by spec §8.5.
+2. Schema upgrade: apply `032_auth_session_version.sql` (SQLite) or
+   `031_auth_session_version.sql` (MySQL/OceanBase). The guarded one-time
+   `UPDATE` invalidates legacy `token`/`token_expire_at` rows where
+   `session_id IS NULL`. Identities and avatars are NOT deleted — the
+   `sqlite_store_passes_contract_harness_after_legacy_invalidation` test
+   in `crates/services/bcs-user-identity/tests/conformance_auth_session_sqlite.rs`
+   verifies the post-upgrade row preserves display fields while losing the
+   token. Re-application is a no-op through `bcs_schema_migrations`.
+3. Deploy the fully-fixed writers built from this branch. The
+   `update_token` trait method is removed (`grep -rn "update_token" crates --include=*.rs`
+   returns only documentation comments; verified by Task 11 §E). The shared
+   `OAuthSessionEngine` is mounted by both V1 `/openapi/v1/auth/*` and legacy
+   `/auth/*` entry services; there is no second business-logic copy.
+4. Enable `[api.auth]` with the configured `chain`, `public_base_url`,
+   `session_signing_key_secret`, and `trusted_browser_origins`. Unknown /
+   duplicated sources, unknown fields, or missing required parameters fail
+   startup. Gateway-only compatible assembly (no `[api.auth]` table at all)
+   remains supported and uses the same fixed browser-binding and atomic
+   session writers.
+5. Fresh logins: users whose legacy `bcs_session` cookie is invalidated in
+   step 2 must run `/openapi/v1/auth/login/<provider>` through OAuth callback
+   to obtain a new cookie. Old sid-less JWTs are NOT recoverable — the
+   `session_id IS NULL` guard cleared the corresponding `token`/`token_expire_at`
+   rows, and the new `get_session_by_hash` returns `Ok(None)` → 401
+   (Task 13 §B test `valid_jwt_no_stored_session_returns_401_and_no_business_call`).
+
+The post-rollout atomic guarantees are covered by Task 13 §C race scenarios
+1–6 in `crates/bootstrap/bcs/tests/api_auth_races.rs`: legacy refresh vs. V1
+logout CAS conflict (and the mirror), rotate-commits-but-response-paused late
+B cookie failure, new-login C survives late A logout, and the two concurrent
+refresh "exactly one applied, loser 401 with no Set-Cookie" race.
+
+### Rollback procedure (hard constraint on old binaries)
+
+1. Chain switch to Gateway-only. Comment out `[api.auth]` or set
+   `chain = ["gateway"]`. `Gateway` source and the original Gateway verifier
+   remain available in the compatible assembly.
+2. Disable OAuth lifecycle entrances (V1 `/openapi/v1/auth/*` and legacy
+   `/auth/*`) at the edge. The Gateway verifier and group-session signing
+   are independent of `[api.auth]` and continue to operate.
+3. Group-session token signing remains valid without reconfiguration:
+   `GroupSessionWsConfig` lives in
+   `crates/bootstrap/bcs/src/config/types.rs` (key `group_session_ws`),
+   validated independently in `crates/bootstrap/bcs/src/config/validation.rs`.
+   `session_signing_key_secret` under `[api.auth]` does not touch
+   `group_session_ws.signing_key_secret`.
+4. Old-binary rollback must reconcile config + JWT/schema compatibility. The
+   `028`/`027` `ALTER TABLE ... ADD COLUMN` uses CONSTANT defaults
+   (`NULL`/`0`/`0`) so an older binary that ignores unknown columns can
+   still read/write rows. **However, the old unconditional `update_token`
+   writer is removed from the auth trait and port.** An old binary built
+   before this branch cannot re-enable `update_token` — the trait no longer
+   carries that method, and it cannot link against the new repo to obtain
+   an implementation. This is a HARD rollback constraint: the old
+   unconditional writer CANNOT be reintroduced by rolling back the binary.
+   Any plan to keep a mixed-writer window must author a reviewed paired
+   revert migration and a temporary bridge port before resuming the old
+   binary; the public workspace does not provide that bridge.
+5. After restore, users must re-login. The `session_id IS NULL` UPDATE has
+   already cleared legacy `token`/`token_expire_at`; any pre-rollback
+   sid-less JWT verifies as `Ok(None)` → 401 (Task 13 §B). Users with V1
+   OAuth entry disabled (step 2) authenticate through the Gateway.
+
+### Live MySQL conformance caveat
+
+The `#[ignore]` test `conformance_auth_session_mysql.rs` is the live
+conformance + double-connection CAS race harness. It runs only when
+`BCS_TEST_MYSQL_URL` is set AND the test is invoked with `--ignored`. When
+the environment variable is not set, the test panics with a documented
+configuration message and never silently passes. The in-repository SQLite
+conformance and fault-injection tests stand in for the parity check here;
+live MySQL conformance is recorded as NOT VERIFIED until a configured test
+MySQL database is available (per spec §A8/§O8).
+
+## Rollback
 
 Control-query optimization adds MySQL `025_delivery_pending_abort.sql` and
 SQLite `026_delivery_pending_abort.sql`. Apply before the new worker starts;

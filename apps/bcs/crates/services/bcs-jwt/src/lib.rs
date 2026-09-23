@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 mod group_session;
+pub mod oauth_session;
 
 pub use group_session::{GroupSessionJwtBuildError, GroupSessionJwtService};
+pub use oauth_session::{OAuthSessionClaims, OAuthSessionJwt};
 
 type HmacSha256 = Hmac<Sha256>;
 

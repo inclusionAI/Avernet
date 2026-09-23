@@ -14,18 +14,28 @@ use serde::Serialize;
 
 use super::common::{
     Envelope, ErrorResponse, PrincipalVerificationState, PrincipalVerifier, RequestId,
-    application_error_response, verify_principal,
+    TrustedBrowserOrigins, application_error_response, verify_principal,
 };
 
 #[derive(Clone)]
 struct GroupSessionConnectionHttpState {
     service: Arc<dyn GroupSessionConnectionService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
+    /// Same trusted-browser-origin allowlist the main V1 ApiState uses, so
+    /// the standalone connection-token route applies the SAME Origin CSRF
+    /// rule for cookie-backed credentials (Task 12; Gateway-only
+    /// deployments pass `None` — the Gateway credential kind never
+    /// triggers an Origin check).
+    trusted_browser_origins: Option<TrustedBrowserOrigins>,
 }
 
 impl PrincipalVerificationState for GroupSessionConnectionHttpState {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier> {
         &self.principal_verifier
+    }
+
+    fn trusted_browser_origins(&self) -> Option<&TrustedBrowserOrigins> {
+        self.trusted_browser_origins.as_ref()
     }
 }
 
@@ -36,13 +46,19 @@ struct GroupSessionConnectionTokenResponse {
 }
 
 /// Build only the authenticated session-token issuance slice.
+///
+/// `trusted_browser_origins` must carry the SAME allowlist the main V1
+/// state was built with (unified injection): a cookie-authenticated unsafe
+/// request to this route is rejected unless its Origin matches.
 pub fn group_session_connection_router(
     service: Arc<dyn GroupSessionConnectionService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
+    trusted_browser_origins: Option<TrustedBrowserOrigins>,
 ) -> Router {
     let state = GroupSessionConnectionHttpState {
         service,
         principal_verifier,
+        trusted_browser_origins,
     };
     Router::new()
         .route(

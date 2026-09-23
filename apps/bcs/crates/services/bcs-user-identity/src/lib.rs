@@ -11,6 +11,8 @@ use bcs_service_api::{UserIdentity, UserIdentityRepoPort};
 use tracing::warn;
 
 pub mod memory;
+pub mod session_db;
+pub mod session_memory;
 pub use memory::{generate_user_id, MemoryUserIdentityRepo};
 
 pub type MysqlUserIdentityRepo = DbUserIdentityStore;
@@ -200,33 +202,6 @@ impl UserIdentityRepoPort for DbUserIdentityStore {
             .and_then(|rows| rows.first().map(|r| row_to_display_identity(r)))
     }
 
-    async fn update_token(
-        &self,
-        user_id: &str,
-        token: &str,
-        expire_at: u64,
-    ) -> Result<(), String> {
-        let sql = match self.flavor {
-            DbSqlFlavor::Mysql => {
-                "UPDATE bcs_user_identities SET token = ?, token_expire_at = FROM_UNIXTIME(?) WHERE user_id = ?"
-            }
-            DbSqlFlavor::Sqlite => {
-                "UPDATE bcs_user_identities SET token = ?, token_expire_at = datetime(?, 'unixepoch') WHERE user_id = ?"
-            }
-        };
-        self.db
-            .execute(DbStatement::with_params(
-                sql,
-                vec![
-                    DbValue::from(token),
-                    DbValue::from(expire_at as i64),
-                    DbValue::from(user_id),
-                ],
-            ))
-            .await
-            .map_err(|e| format!("update_token: {e}"))?;
-        Ok(())
-    }
 }
 
 fn row_to_display_identity(row: &bcs_db_api::DbRow) -> UserIdentity {

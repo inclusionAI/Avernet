@@ -43,6 +43,15 @@ method_min="${BCS_E2E_METHOD_MIN:-$compat_min}"
 # The coverage runner is a local test launcher, so explicitly provide the same
 # non-production Principal key to both the BCS child and the E2E client.
 export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+# Run the e2e stack with the V1 [api.auth] chain active (gateway verifies the
+# e2e principal traffic; a github registration with dummy secrets exercises
+# the chain's OAuth-side construction at startup — no provider network call
+# is ever exchanged). singlebox appends the chain to the generated runtime
+# config and exposes the matching BCS_SECRET_* env secrets; see
+# scripts/modules/bcs.sh (append_e2e_api_auth_config) and stories.sh
+# (story_v1_api_auth_chain). Set BCS_E2E_ENABLE_API_AUTH=0 to fall back to
+# compatibility mode for a debugging run.
+export BCS_E2E_ENABLE_API_AUTH="${BCS_E2E_ENABLE_API_AUTH:-1}"
 source "$bcs_dir/scripts/e2e-test/mock_services.sh"
 
 skip_start=0

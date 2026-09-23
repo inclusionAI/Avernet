@@ -374,9 +374,20 @@ pub fn build_oauth_provider(
             .map_err(|e| format!("auth.oauth.providers.{name}: alipay key error: {e}"))?;
             Ok(Arc::new(provider) as Arc<dyn OAuthProvider>)
         }
-        other => Err(format!(
-            "auth.oauth.providers.{name}: unknown provider kind '{other}'"
-        )),
+        other => {
+            // Extension hook: test/downstream factories may still answer this
+            // instance name through the SAME construction path (inventory,
+            // mirroring the auth-plugin factory hook). A miss is a real
+            // misconfiguration and fails fast.
+            for registration in inventory::iter::<crate::api_auth_wiring::OAuthProviderFactoryRegistration> {
+                if let Some(provider) = (registration.build)(name, cfg) {
+                    return Ok(provider);
+                }
+            }
+            Err(format!(
+                "auth.oauth.providers.{name}: unknown provider kind '{other}'"
+            ))
+        }
     }
 }
 
