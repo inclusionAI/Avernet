@@ -219,6 +219,7 @@
     "secret_names": {
       "aicoding_theta_master_key": "",
       "aiworkbench_repo_url": "",
+      "cron_guard_internal_token": "",
       "dormant_internal_token": "",
       "gateway_principal_signing_key": "gateway_principal_signing_key",
       "skill_center_internal_token": "",
