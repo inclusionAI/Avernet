@@ -164,13 +164,6 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderInvalidEventError(
                 "event_type category does not match event_category"
             )
-        if (
-            biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value
-            or event_type == WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
-        ):
-            raise WorkOrderInvalidEventError(
-                "Skill editor requests must use the Skill endpoint"
-            )
         if event_category is NotificationCategory.APPROVAL:
             if not approvers or recipients:
                 raise WorkOrderInvalidEventError(
