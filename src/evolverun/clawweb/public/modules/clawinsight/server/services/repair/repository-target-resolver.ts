@@ -1,7 +1,6 @@
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { RepairTarget, RepairTargetEnvironment } from "./contracts.js";
 import { RepairError, repairValidation } from "./errors.js";
-import { normalizeArcaSandboxId } from "./arca-command-transport.js";
 
 function required(value: string | number | null | undefined, field: string): string {
   const text = value == null ? "" : String(value).trim();
@@ -47,7 +46,8 @@ export class RepositoryRepairTargetResolver implements RepairTargetResolver {
     let arcaInstanceId: string | undefined;
     if (provider === "arca") {
       arcaInstanceId = required(runtime.arcaInstanceId, "ARCA sandbox_id");
-      sandboxId = normalizeArcaSandboxId(arcaInstanceId);
+      sandboxId = arcaInstanceId.trim().split("@", 1)[0];
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/u.test(sandboxId)) repairValidation("invalid_arca_sandbox_id", "ARCA sandbox_id 格式不合法");
     }
     return {
       environment: input.environment,
