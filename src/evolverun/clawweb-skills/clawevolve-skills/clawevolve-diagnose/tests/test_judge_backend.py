@@ -338,6 +338,71 @@ def test_filtered_agent_result_keeps_complete_request_and_response(tmp_path: Pat
     assert validation["decision"] == "filtered_after_contract_validation"
 
 
+def test_explicit_session_is_preserved_when_it_does_not_match_failure_focus(
+    tmp_path: Path,
+) -> None:
+    runtime = resolve_judge_runtime(_request(tmp_path))
+    analyzer = create_session_analyzer(
+        runtime,
+        CasePreference(
+            raw_message="只关注工具调用失败",
+            explicit_session_mode=True,
+        ),
+        max_concurrent_tasks=1,
+        artifact_dir=tmp_path / "judge",
+    )
+    assert isinstance(analyzer, KeylessSubagentSessionAnalyzer)
+    response = {
+        "schema_version": "clawevolve-diagnose-native-session-output.v1",
+        "session_id": "session-explicit",
+        "is_evaluable": False,
+        "case_type": "bad",
+        "query": "Open the requested document with the available MCP tool.",
+        "intent_match": {
+            "is_match": False,
+            "reason": "The tools succeeded, so the focused failure is absent.",
+        },
+        "original_query": "open the document",
+        "root_cause_class": "COMPLETED",
+        "evolution_failure_mode": "good_regression",
+        "root_cause_summary": "The task completed successfully.",
+        "evidence": [{"source": "session", "snippet": "All tool calls succeeded."}],
+        "reject_reason": "unrelated_to_user_request",
+        "reject_category": "unrelated_to_user_request",
+        "reject_detail": "The selected Session does not contain the focused failure.",
+    }
+
+    class FakeClient:
+        def run_json_prompt_captured(self, prompt: str, timeout: int) -> SubagentPromptResult:
+            assert '"selection_mode": "explicit"' in prompt
+            return SubagentPromptResult(raw_text=json.dumps(response), parsed=response)
+
+        def close(self) -> None:
+            return None
+
+    analyzer.client = FakeClient()  # type: ignore[assignment]
+    diagnoses = analyzer.analyze(
+        [
+            SessionRow(
+                session_id="session-explicit",
+                path="/tmp/session-explicit.jsonl",
+                bot_id="bot",
+                created_at="2026-09-23T00:00:00+00:00",
+                first_question="open the document",
+                user_text="",
+                assistant_text="",
+                tool_text="",
+                raw_text="",
+            )
+        ],
+        "bot",
+    )
+
+    assert len(diagnoses) == 1
+    assert diagnoses[0].case_type == "good"
+    assert "explicit_session_semantic_mismatch_preserved" in diagnoses[0].quality_notes
+
+
 def test_transcript_extraction_returns_only_last_assistant_message(tmp_path: Path) -> None:
     transcript = tmp_path / "judge.jsonl"
     events = [

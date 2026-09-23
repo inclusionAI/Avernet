@@ -83,6 +83,11 @@ def build_native_session_analysis_input(
             "include_good": bool(preference.include_good) if preference else True,
             "drop_context_dependent": bool(preference.drop_context_dependent) if preference else True,
             "require_replayable_query": True,
+            "selection_mode": (
+                "explicit"
+                if preference and preference.explicit_session_mode
+                else "discovery"
+            ),
         },
         "taxonomy": {
             "allowed_case_types": sorted(ALLOWED_CASE_TYPES),
@@ -156,7 +161,13 @@ def build_raw_session_content_for_llm(
     return bounded[:max_chars], True
 
 
-def map_native_session_analysis_result(row: SessionRow, result: dict[str, Any], *, source_note: str) -> Diagnosis | None:
+def map_native_session_analysis_result(
+    row: SessionRow,
+    result: dict[str, Any],
+    *,
+    source_note: str,
+    preserve_explicit_session: bool = False,
+) -> Diagnosis | None:
     """Convert diagnose-native LLM output into the shared Diagnosis model."""
 
     if not isinstance(result, dict):
@@ -172,7 +183,15 @@ def map_native_session_analysis_result(row: SessionRow, result: dict[str, Any], 
         )
 
     intent_match = _normalize_intent_match(result.get("intent_match"))
-    if intent_match and not intent_match.get("is_match", True):
+    reject_category = str(result.get("reject_category") or "").strip()
+    semantic_rejection = reject_category in {
+        "unrelated_to_user_request",
+        "different_skill_or_tool",
+        "different_problem_type",
+        "low_value_session",
+    }
+    preserve_semantic_result = preserve_explicit_session and semantic_rejection
+    if intent_match and not intent_match.get("is_match", True) and not preserve_semantic_result:
         logger.info(
             "native session diagnosis rejected by intent match",
             session_id=row.session_id,
@@ -180,7 +199,7 @@ def map_native_session_analysis_result(row: SessionRow, result: dict[str, Any], 
             source_note=source_note,
         )
         return None
-    if not _as_bool(result.get("is_evaluable"), default=True):
+    if not _as_bool(result.get("is_evaluable"), default=True) and not preserve_semantic_result:
         logger.info(
             "native session diagnosis rejected as not evaluable",
             session_id=row.session_id,
@@ -193,6 +212,8 @@ def map_native_session_analysis_result(row: SessionRow, result: dict[str, Any], 
 
     root = _normalize_root(result.get("root_cause_class"), result.get("case_type"))
     case_type = _normalize_case_type(result.get("case_type"), root)
+    if preserve_semantic_result and root == "COMPLETED":
+        case_type = "good"
     failure = _normalize_failure_mode(result.get("evolution_failure_mode"), root)
     generated_query = clean_query(str(result.get("query") or ""), max_len=900)
     fidelity = ReplayQueryFidelityPolicy().decide(row, generated_query)
@@ -203,6 +224,8 @@ def map_native_session_analysis_result(row: SessionRow, result: dict[str, Any], 
     )
     notes = _string_list(result.get("quality_notes"))
     notes.insert(0, source_note)
+    if preserve_semantic_result:
+        notes.append("explicit_session_semantic_mismatch_preserved")
     notes.extend(fidelity.notes)
     assessment = assess_replayability(query)
     if assessment.hard_failures:

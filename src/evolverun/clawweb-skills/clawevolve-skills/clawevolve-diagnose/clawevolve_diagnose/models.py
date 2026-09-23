@@ -141,6 +141,10 @@ class CasePreference:
     search_evidence_required_for_high_score: bool = True
     stable_run_required: bool = True
     max_sessions: int | None = None
+    # Exact Session mode treats the user-provided identifiers as the complete
+    # analysis scope. The intent guides the diagnosis but must not discard an
+    # explicitly selected Session.
+    explicit_session_mode: bool = False
 
     def normalized_modes(self) -> list[str]:
         modes = self.target_failure_modes

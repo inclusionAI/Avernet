@@ -144,7 +144,13 @@ class KeylessSubagentSessionAnalyzer:
                     reject_detail=str(subagent_output.get("reject_detail") or "")[:500],
                 )
                 diagnosis = map_native_session_analysis_result(
-                    row, subagent_output, source_note=self.SOURCE_NOTE
+                    row,
+                    subagent_output,
+                    source_note=self.SOURCE_NOTE,
+                    preserve_explicit_session=bool(
+                        self.config.preference
+                        and self.config.preference.explicit_session_mode
+                    ),
                 )
                 if diagnosis is not None:
                     validation.update(accepted=True, decision="accepted")

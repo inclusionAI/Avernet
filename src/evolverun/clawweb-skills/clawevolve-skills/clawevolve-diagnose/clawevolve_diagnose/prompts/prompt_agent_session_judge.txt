@@ -20,6 +20,7 @@ Analysis perspective:
 - A good case is allowed only when requirements.include_good is true and the session shows successful behavior worth protecting as regression.
 - Treat requirements.intent_text as the primary semantic relevance contract; use requirements.user_request only as traceability. Decide whether this session is about that requested topic/problem before judging quality.
 - If requirements.intent_text is non-empty and the session does not match it, set intent_match.is_match=false and is_evaluable=false with reject_reason="unrelated_to_user_request", a machine-readable reject_category, and a concrete reject_detail.
+- Exception for requirements.selection_mode="explicit": the Session was selected directly by the user. Treat intent_text as an analysis focus, not an admission filter. Analyze the Session's actual quality even when it does not exhibit the focused failure. Return a good case for successful behavior worth preserving, or a bad case for an evidenced improvement opportunity. Do not reject an explicit Session solely for intent mismatch or low value.
 
 Replayable query requirements:
 - query must be a standalone user task for a fresh agent. It must not say "read this session", "continue", "above", "as before", or require hidden context.
@@ -32,7 +33,7 @@ Relevance requirements:
 - First compare the session's real user task, tool/skill calls, errors, and final outcome with requirements.intent_text.
 - Return intent_match with is_match, confidence, matched_aspects, unmatched_aspects, and reason. This is the sole semantic relevance decision; do not approximate it with keyword matching.
 - A short executable command is valid when the session demonstrates that command's task and outcome; do not reject it for lacking prose or multiple task objects.
-- Keep the session only when the evidence supports a direct match to the user's requested mining scope.
+- In discovery mode, keep the session only when the evidence supports a direct match to the user's requested mining scope. In explicit mode, always assess the selected Session unless its evidence is unreadable, unsafe, lacks a real user task, or cannot support a replayable query.
 - For examples like "抽取 xxx skill 调用失败的问题" or "xxx skill 结果错误", reject sessions that do not involve xxx skill, do not involve a skill/tool call, or involve a different problem type.
 - When rejecting for relevance, return the normal output JSON with is_evaluable=false, session_id, schema_version, reject_reason, reject_category, and reject_detail explaining the mismatch.
 - reject_category must be one of: unreadable_session, no_real_user_task, unrelated_to_user_request, different_skill_or_tool, different_problem_type, non_replayable_query, insufficient_evidence, unsafe_or_secret_dependent, low_value_session.

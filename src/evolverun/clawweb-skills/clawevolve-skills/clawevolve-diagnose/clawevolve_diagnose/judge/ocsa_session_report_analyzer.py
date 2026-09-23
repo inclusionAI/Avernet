@@ -284,6 +284,10 @@ class OcsaSessionReportAnalyzer:
                 row,
                 result,
                 source_note="source:api_raw_session_fallback",
+                preserve_explicit_session=bool(
+                    self.config.preference
+                    and self.config.preference.explicit_session_mode
+                ),
             )
             logger.info(
                 "api raw session fallback done",

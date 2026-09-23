@@ -115,6 +115,7 @@ def run_pipeline(req: RunRequest) -> RunResult:
         pref.since = ""
         pref.until = ""
         pref.time_range_label = "精确 Session"
+        pref.explicit_session_mode = True
     warnings.extend(pref_warnings)
     progress(
         "preference parsed",
