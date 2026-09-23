@@ -71,6 +71,18 @@ async fn worker_history_includes_only_own_task_display(repo: &dyn bcs_service_ap
         texts.sort_unstable();
         assert_eq!(texts, vec!["own-result", "owned-segment", "owned-tool"]);
     }
+    let display_filter = MessageOwnerFilter::WorkerTaskDisplay("worker-a".into());
+    let display_query = repo.query_messages(MessageQuery {
+        group_id: group.into(), session_id: session.into(), cursor: None, limit: 20,
+        keyword: None, sender_id: None, message_type: Some("chat".into()),
+        owner_filter: display_filter.clone(), time_range: None, visible_from_seq: None,
+        human_view: None,
+    }).await.unwrap();
+    let display_list = repo.list_session_history(session, display_filter, None, None, None, 20).await.unwrap();
+    for page in [display_query, display_list] {
+        assert_eq!(page.messages.len(), 1);
+        assert_eq!(page.messages[0].content.as_str(), Some("own-result"));
+    }
 }
 
 #[tokio::test]

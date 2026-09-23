@@ -85,6 +85,43 @@ async fn pre_cutoff_manager_worker_falls_back_to_legacy_history() {
 }
 
 #[tokio::test]
+async fn pre_cutoff_worker_history_merges_only_own_task_displays_with_pagination() {
+    let (service, repo, _sessions, fallback, session_id) = service_fixture(
+        GroupStrategy::ManagerWorker, 0, u64::MAX, Vec::new(),
+    ).await;
+    for (sender, client, owner, text, created_at) in [
+        ("worker-a", Some("task-display:older"), None, "older result", 10),
+        ("worker-a", Some("task-display:newer"), None, "newer result", 20),
+        ("worker-b", Some("task-display:other"), None, "other result", 30),
+        ("worker-a", None, Some("worker-a"), "owned segment", 40),
+        ("worker-a", None, None, "unrelated public chat", 50),
+    ] {
+        repo.append_message(NewMessage {
+            group_id: "group-1".into(), session_id: session_id.clone(),
+            sender_id: sender.into(), sender_type: SenderType::Bot,
+            message_type: "chat".into(), content: serde_json::json!(text),
+            client_msg_id: client.map(str::to_string), owner_bot_id: owner.map(str::to_string),
+            visibility_domain: bcs_domain::MessageVisibilityDomain::ManagerWorker,
+            audience: Some(match owner {
+                Some(worker) => bcs_domain::MessageAudience::directed([worker.to_string()]).unwrap(),
+                None => bcs_domain::MessageAudience::FullOnly,
+            }),
+            created_at, run_id: "worker-run".into(),
+        }).await.unwrap();
+    }
+    let mut command = session_cmd("group-1", &session_id, Some("worker-a"));
+    command.limit = 1;
+    let first = service.get_session_history(command.clone()).await.unwrap();
+    assert_eq!(first.messages.iter().map(|message| message.content.as_str()).collect::<Vec<_>>(), vec!["newer result"]);
+    assert_eq!(first.next_before, Some(20));
+    command.before = first.next_before;
+    let second = service.get_session_history(command).await.unwrap();
+    assert_eq!(second.messages.iter().map(|message| message.content.as_str()).collect::<Vec<_>>(), vec!["older result"]);
+    assert_eq!(second.next_before, None);
+    assert_eq!(fallback.session_calls().await, 2);
+}
+
+#[tokio::test]
 async fn pre_cutoff_participant_reads_only_classified_durable_history() {
     let (service, repo, sessions, fallback, session_id) = service_fixture(
         GroupStrategy::ManagerWorker,

@@ -42,6 +42,12 @@ fn worker_history_condition() -> &'static str {
      AND visibility_domain = 'manager_worker' AND audience_kind = 'full_only'))"
 }
 
+fn worker_task_display_condition() -> &'static str {
+    "(owner_bot_id IS NULL AND sender_id = ? \
+     AND message_type = 'chat' AND client_msg_id LIKE 'task-display:%' \
+     AND visibility_domain = 'manager_worker' AND audience_kind = 'full_only')"
+}
+
 // ---------------------------------------------------------------------------
 // Public type
 // ---------------------------------------------------------------------------
@@ -491,6 +497,10 @@ impl MessageRepoPort for MySqlMessageStore {
                 params.push(DbValue::from(owner_bot_id.clone()));
                 params.push(DbValue::from(owner_bot_id.clone()));
             }
+            MessageOwnerFilter::WorkerTaskDisplay(owner_bot_id) => {
+                conditions.push(worker_task_display_condition().to_string());
+                params.push(DbValue::from(owner_bot_id.clone()));
+            }
             MessageOwnerFilter::PublicOrOwner(owner_bot_id) => {
                 conditions.push("(owner_bot_id IS NULL OR owner_bot_id = ?)".to_string());
                 params.push(DbValue::from(owner_bot_id.clone()));
@@ -709,6 +719,10 @@ impl MessageRepoPort for MySqlMessageStore {
             MessageOwnerFilter::WorkerHistory(owner) => {
                 conditions.push(worker_history_condition().to_string());
                 params.push(DbValue::from(owner.clone()));
+                params.push(DbValue::from(owner.clone()));
+            }
+            MessageOwnerFilter::WorkerTaskDisplay(owner) => {
+                conditions.push(worker_task_display_condition().to_string());
                 params.push(DbValue::from(owner.clone()));
             }
             MessageOwnerFilter::PublicOrOwner(owner) => {

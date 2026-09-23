@@ -320,6 +320,9 @@ impl MessageRepoPort for MemoryMessageRepo {
             MessageOwnerFilter::WorkerHistory(owner_bot_id) => {
                 filtered.retain(|m| worker_history_visible(m, owner_bot_id));
             }
+            MessageOwnerFilter::WorkerTaskDisplay(owner_bot_id) => {
+                filtered.retain(|m| worker_task_display_visible(m, owner_bot_id));
+            }
             MessageOwnerFilter::PublicOrOwner(owner_bot_id) => {
                 filtered.retain(|m| {
                     m.owner_bot_id.is_none()
@@ -416,6 +419,9 @@ impl MessageRepoPort for MemoryMessageRepo {
             MessageOwnerFilter::WorkerHistory(owner) => {
                 filtered.retain(|m| worker_history_visible(m, owner));
             }
+            MessageOwnerFilter::WorkerTaskDisplay(owner) => {
+                filtered.retain(|m| worker_task_display_visible(m, owner));
+            }
             MessageOwnerFilter::PublicOrOwner(owner) => {
                 filtered.retain(|m| {
                     m.owner_bot_id.is_none() || m.owner_bot_id.as_deref() == Some(owner.as_str())
@@ -499,12 +505,16 @@ fn content_text(value: &serde_json::Value) -> String {
 
 fn worker_history_visible(message: &PersistedMessage, worker_id: &str) -> bool {
     message.owner_bot_id.as_deref() == Some(worker_id)
-        || (message.owner_bot_id.is_none()
-            && message.sender_id == worker_id
-            && message.message_type == "chat"
-            && message.client_msg_id.as_deref().is_some_and(|id| id.starts_with("task-display:"))
-            && message.visibility_domain == Some(MessageVisibilityDomain::ManagerWorker)
-            && message.audience == Some(MessageAudience::FullOnly))
+        || worker_task_display_visible(message, worker_id)
+}
+
+fn worker_task_display_visible(message: &PersistedMessage, worker_id: &str) -> bool {
+    message.owner_bot_id.is_none()
+        && message.sender_id == worker_id
+        && message.message_type == "chat"
+        && message.client_msg_id.as_deref().is_some_and(|id| id.starts_with("task-display:"))
+        && message.visibility_domain == Some(MessageVisibilityDomain::ManagerWorker)
+        && message.audience == Some(MessageAudience::FullOnly)
 }
 
 fn validate_new_message_visibility(msg: &NewMessage) -> Result<(), MessageRepoError> {

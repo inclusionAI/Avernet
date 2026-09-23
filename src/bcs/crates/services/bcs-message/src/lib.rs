@@ -291,6 +291,7 @@ impl MessageService {
             MessageOwnerFilter::IsNull => owner_bot_id.is_none(),
             MessageOwnerFilter::Eq(expected) => owner_bot_id == Some(expected.as_str()),
             MessageOwnerFilter::WorkerHistory(expected) => owner_bot_id == Some(expected.as_str()),
+            MessageOwnerFilter::WorkerTaskDisplay(_) => false,
             MessageOwnerFilter::PublicOrOwner(expected) => {
                 owner_bot_id.is_none() || owner_bot_id == Some(expected.as_str())
             }
@@ -779,6 +780,19 @@ impl GroupMessageHistoryService for MessageService {
                 })?;
             let mut persisted_anchors = panel_page.messages;
             let mut persisted_anchors_have_more = panel_page.has_more;
+            if let MessageOwnerFilter::WorkerHistory(worker_id) = &owner_filter {
+                let display_page = self.message_repo.query_messages(MessageQuery {
+                    group_id: cmd.group_id.clone(), session_id: session_id.clone(),
+                    cursor: cmd.before, limit, keyword: None, sender_id: None,
+                    message_type: Some("chat".into()),
+                    owner_filter: MessageOwnerFilter::WorkerTaskDisplay(worker_id.clone()),
+                    time_range: None, visible_from_seq: None, human_view: human_view.clone(),
+                }).await.map_err(|error| GroupUseCaseError::Service(
+                    ServiceError::InternalError(format!("message repo task-display history error: {error}"))
+                ))?;
+                persisted_anchors_have_more |= display_page.has_more;
+                persisted_anchors.extend(display_page.messages);
+            }
             if self.persisted_state_machine_history && session.created_at >= self.state_machine_cutoff_timestamp {
                 // Keep ordinary legacy transcripts, but StateMachine content
                 // comes only from durable rows, including before the chat cutoff.
