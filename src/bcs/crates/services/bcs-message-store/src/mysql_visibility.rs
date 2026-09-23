@@ -187,3 +187,30 @@ pub(super) fn row_to_message(row: &bcs_db_api::DbRow) -> Result<PersistedMessage
         run_id,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_unknown_visibility_domain_from_stored_message() {
+        let error = parse_visibility_domain(Some("unknown"))
+            .expect_err("unknown visibility domains must not be accepted");
+        assert!(matches!(error, MessageRepoError::StorageError(message) if message == "unknown visibility_domain: unknown"));
+    }
+
+    #[test]
+    fn rejects_malformed_stored_audience() {
+        for (kind, actor_ids, expected) in [
+            (None, Some("[]"), "audience actor ids exist without audience_kind"),
+            (Some("public"), Some("[]"), "non-directed audience must not contain actor ids"),
+            (Some("directed"), None, "directed audience requires actor ids"),
+            (Some("directed"), Some("not-json"), "invalid directed audience JSON"),
+            (Some("unknown"), None, "unknown audience_kind: unknown"),
+        ] {
+            let error = parse_audience(kind, actor_ids)
+                .expect_err("malformed audience metadata must not be accepted");
+            assert!(matches!(error, MessageRepoError::StorageError(message) if message.contains(expected)));
+        }
+    }
+}
