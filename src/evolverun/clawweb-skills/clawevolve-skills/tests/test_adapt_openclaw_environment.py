@@ -57,11 +57,11 @@ def test_config_mtime_change_causes_recheck(tmp_path):
 def test_clawmind_rules_and_restore(tmp_path):
     config = tmp_path / "openclaw.json"
     marker = tmp_path / "marker.json"
-    original = {"plugins": {"entries": {"clawmind": {"enabled": False, "config": {"keep": 1}}}}}
+    original = {"plugins": {"entries": {"clawmind": {"enabled": True, "config": {"keep": 1}}}}}
     write(config, original)
     result = MODULE.check_and_adapt(config, marker)
     entry = json.loads(config.read_text(encoding="utf-8"))["plugins"]["entries"]["clawmind"]
-    assert entry["enabled"] is True
+    assert entry["enabled"] is False
     assert entry["config"]["keep"] == 1
     assert entry["config"]["api"]["enabled"] is False
     assert entry["config"]["flowControl"]["enabled"] is False

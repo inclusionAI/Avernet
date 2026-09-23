@@ -14,14 +14,14 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 RULES: dict[str, dict[str, Any]] = {
     "agent-guard": {
         "enabled": False,
         "hooks": {"allowConversationAccess": True},
     },
     "clawmind": {
-        "enabled": True,
+        "enabled": False,
         "hooks": {"allowConversationAccess": True},
         "config": {
             "api": {"enabled": False},

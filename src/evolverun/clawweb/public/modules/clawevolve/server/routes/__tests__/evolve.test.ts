@@ -811,8 +811,8 @@ describe("ClawEvolve step protocol", () => {
     expect(body.config.sessionFilter).toEqual({
       mode: "explicit", sessionIdentifiers: ["id-1", "agent:main:one"],
     });
-    expect(body.steps[0].command).toContain("--session-identifier 'sha256:");
-    expect(body.steps[0].command).not.toContain("agent:main:one");
+    expect(body.steps[0].command).toContain("--session-identifier 'id-1'");
+    expect(body.steps[0].command).toContain("--session-identifier 'agent:main:one'");
     expect(dispatch.mock.calls.at(-1)?.[0].command).toContain("--session-identifier 'id-1'");
     expect(dispatch.mock.calls.at(-1)?.[0].command).toContain("--session-identifier 'agent:main:one'");
 
@@ -825,8 +825,8 @@ describe("ClawEvolve step protocol", () => {
     });
     expect(retry.status).toBe(201);
     const retried = await retry.json() as { step: { command: string } };
-    expect(retried.step.command).toContain("--session-identifier 'sha256:");
-    expect(retried.step.command).not.toContain("agent:main:one");
+    expect(retried.step.command).toContain("--session-identifier 'id-1'");
+    expect(retried.step.command).toContain("--session-identifier 'agent:main:one'");
     expect(dispatch.mock.calls.at(-1)?.[0].command).toContain("--session-identifier 'agent:main:one'");
   });
 

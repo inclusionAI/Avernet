@@ -33,7 +33,7 @@ SCHEMA_VERSION = 3
 MIN_OPENCLAW_VERSION = "2026.5.22"
 MIN_CLAWEVOLVE_DEPLOY_VERSION = "clawevolve-deploy-20260821-v4"
 DEFAULT_EVOLVE_RESULTS_BASE = "/home/admin/.openclaw/workspace/clawevolve_results"
-DEFAULT_MAX_ARTIFACT_MB = float(os.environ.get("CLAWEVOLVE_MAX_ARTIFACT_MB", "100"))
+DEFAULT_MAX_ARTIFACT_MB = float(os.environ.get("CLAWEVOLVE_MAX_ARTIFACT_MB", "1024"))
 
 # 顶层 md:persona 配置白名单(与 SKILL.md L24 对齐:保留 persona 配置,排除运行时
 # 文档如 fix_record / SPEC / clawbench_review)。MEMORY/HEARTBEAT 是运行时状态也排除。

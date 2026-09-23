@@ -119,7 +119,7 @@ def _open_empty_skill_instruction() -> str:
     return (
         "开源运行环境中，workspace/skills 为空是合法状态；此时无需寻找参考 Skill，"
         "reference_files 返回空数组，且不要搜索当前 workspace 之外的 Skill。确认该目录为空后停止调用工具，"
-        "直接根据 user_goal 和 JSON 契约输出完整 JSON，不得只完成分析而不输出最终答案。\n"
+        "直接根据 user_goal 和 JSON 契约生成完整结果文件，不得只完成分析而不写入结果。\n"
     )
 
 
@@ -152,14 +152,14 @@ def build_direct_goal_prompt(
 3. prospective_cases 是未来验证场景，每个 query 必须上下文独立、可直接回放。
 4. {requested_count_rule}
 5. {inspection_rule}不得全仓扫描、安装依赖、运行测试、访问网络或执行 git。
-6. merged_targets 表示已存在、实际检查过的后续安全操作范围；必须位于 workspace_root 内且边界窄。
+6. merged_targets 表示已存在、实际检查过的后续安全操作范围；必须位于 workspace_root 内且边界窄。需要修改的现有文件只放入 merged_targets/target_findings，不得重复放入 planned_deliverables。
 7. 新建 Skill/文件时，不得把尚不存在的未来路径放入 merged_targets；应把最近的、已存在且足够窄的父目录作为 target_type=creation_scope 的 merged target，并把未来路径写入 planned_deliverables。
 8. reference_files 只表示已存在且实际检查过的只读参考，绝不能同时出现在 merged_targets。
-9. planned_deliverables.operation 必须为 create，creation_scope 必须引用 merged_targets 中 target_type=creation_scope 的现有目录；未来路径必须位于该 scope 下。
+9. planned_deliverables 只描述当前不存在、后续需要创建的文件，operation 必须为 create；如果文件已经存在，应从 planned_deliverables 删除并仅作为 merged target。creation_scope 必须引用 merged_targets 中 target_type=creation_scope 的现有目录；未来路径必须位于该 scope 下。
 10. 不得读取 secrets/token/.env，不得把 judge、scorer、templates、plan 输入输出、历史 artifacts 作为 target、reference 或 planned deliverable。
-11. 只读检查后，在最终回复直接输出一个完整JSON对象；不写文件、不生成或运行Python/shell脚本。解析、校验与落盘由调用程序负责。JSON外不要输出解释或代码围栏。
+11. 只读检查后，构造 Python dict，并使用 json.dump(..., ensure_ascii=False, indent=2) 将一个完整 JSON 对象写入 output_path。output_path 是本阶段唯一允许写入的文件；不得修改 workspace 中的其他文件，不得使用 shell heredoc 或手工拼接转义 JSON。
 12. 每个 prospective case 必须有对应 case_findings；每个 merged target 必须有对应 target_findings。
-13. 最终JSON回复后立即结束，不继续调用工具。
+13. 写入后必须使用 Python json.load() 重新读取确认可解析；最终回复只写 `direct_goal candidate written`，随后立即结束，不在回复中重复 JSON，也不继续调用工具。
 14. 顶层和 discovery 中都不要输出 schema_version 或 workspace_root，也不要输出 goal_digest 或 original_goal；这些是调用程序绑定的字段。
 
 任务信息：

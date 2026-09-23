@@ -142,7 +142,6 @@ def build_direct_goal_plan(
         )
         correction_prompt = build_structured_artifact_correction_prompt(
             label="direct goal",
-            response_only=True,
             candidate_path=candidate_path,
             final_path=raw_path,
             validation_error=str(first_error),
@@ -154,6 +153,7 @@ def build_direct_goal_plan(
                 "Do not invent historical sessions or Diagnose evidence.",
                 "Preserve only targets and references actually inspected by the first attempt.",
                 "Every merged target must exist inside workspace_root; future files belong only in planned_deliverables.",
+                "Existing files to modify belong only in merged_targets/target_findings; remove them from planned_deliverables instead of using operation=modify.",
                 "planned_deliverables.path must be workspace-relative; do not repeat the absolute workspace_root prefix.",
             ],
         )

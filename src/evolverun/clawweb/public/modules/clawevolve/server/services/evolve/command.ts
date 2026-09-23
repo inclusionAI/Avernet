@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 
 export type NodeCommandKey = "diagnose" | "plan" | "bench" | "bench_plan" | "optimize";
@@ -56,14 +55,10 @@ export function normalizeDiagnoseSessionFilter(value: unknown): DiagnoseSessionF
 
 export function diagnoseSessionFilterSystemArgs(
   filter: DiagnoseSessionFilter | undefined,
-  redact = false,
 ): Array<[string, string]> {
   if (!filter) return [];
-  const render = (value: string) => quoteCommandArgument(redact
-    ? `sha256:${createHash("sha256").update(value).digest("hex").slice(0, 12)}`
-    : value);
   return [
-    ...filter.sessionIdentifiers.map((value): [string, string] => ["session-identifier", render(value)]),
+    ...filter.sessionIdentifiers.map((value): [string, string] => ["session-identifier", quoteCommandArgument(value)]),
   ];
 }
 

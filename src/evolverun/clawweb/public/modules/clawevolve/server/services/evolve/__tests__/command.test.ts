@@ -19,7 +19,6 @@ describe("Diagnose Session filter command boundary", () => {
       ["session-identifier", "'id-1'"],
       ["session-identifier", "'agent:main:one'"],
     ]);
-    expect(diagnoseSessionFilterSystemArgs(filter, true)[0]?.[1]).toMatch(/^'sha256:[a-f0-9]{12}'$/);
   });
 
   it("rejects empty, oversized, and custom-command-owned selectors", () => {
