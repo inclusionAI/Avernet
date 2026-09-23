@@ -25,6 +25,7 @@ class BotMessageFeedbackRepositoryProtocol(Protocol):
         session_key: str | None = None,
         reason: str | None = None,
         comment: str | None = None,
+        env: str | None = None,
     ) -> "BotMessageFeedbackRecord":
         """Create or update a feedback record for (message_id, user_id)."""
         ...
