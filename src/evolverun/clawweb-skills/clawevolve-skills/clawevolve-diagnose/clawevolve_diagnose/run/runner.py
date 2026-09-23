@@ -212,6 +212,7 @@ def run_pipeline(req: RunRequest) -> RunResult:
             parse_content=judge_runtime.backend == "api",
         )
         acquisition_manifest = out.parent / "input" / "session-source" / "acquisition-manifest.json"
+        acquisition_manifest.parent.mkdir(parents=True, exist_ok=True)
         write_json(acquisition_manifest, {
             "schemaVersion": "clawevolve.session-acquisition.v1",
             "sourceMode": "local",
