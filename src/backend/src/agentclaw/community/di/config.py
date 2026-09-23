@@ -271,6 +271,7 @@ class SecretNamesConfig:
 
     dormant_internal_token: str = ""
     skill_center_internal_token: str = ""
+    cron_guard_internal_token: str = ""
     tc_file_service_token: str = ""
     aiworkbench_repo_url: str = ""
     gateway_principal_signing_key: str = "gateway_principal_signing_key"
@@ -798,6 +799,12 @@ class SkillCenterInternalToken:
     granted independently.
     """
 
+    value: str = ""
+
+
+@dataclass(frozen=True)
+class CronGuardInternalToken:
+    """Resolved Bearer credential for the fail-closed cron guard API."""
     value: str = ""
 
 

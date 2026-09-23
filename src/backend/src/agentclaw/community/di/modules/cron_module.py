@@ -23,6 +23,8 @@ from agentclaw.community.core.cron.services.cron_auto_setup_listener import (
     CronAutoSetupListener,
 )
 from agentclaw.community.core.cron.services.cron_relay import CronRelayService
+from agentclaw.community.di.config import CronGuardInternalToken, SecretNamesConfig
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
 
 class CronModule(Module):
@@ -43,3 +45,23 @@ class CronModule(Module):
     @inject
     def _cron_relay_service_protocol(self, svc: CronRelayService) -> CronRelayServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def _cron_guard_internal_token(
+        self,
+        secret_resolver: SecretResolver,
+        secret_names: SecretNamesConfig,
+    ) -> CronGuardInternalToken:
+        """Missing name, missing value, or resolver failure all disable writes."""
+        if not secret_names.cron_guard_internal_token:
+            return CronGuardInternalToken()
+        try:
+            resolved_record = secret_resolver.get_secret(
+                secret_name=secret_names.cron_guard_internal_token,
+            )
+        except Exception:
+            return CronGuardInternalToken()
+        value = getattr(resolved_record, "secret_value", None)
+        return CronGuardInternalToken(value=str(value) if value else "")
