@@ -579,7 +579,10 @@ class TestUpgradeContainer:
     async def test_upgrade_forwards_aligned_envs_from_template_config(self):
         """_upgrade_container forwards publish-aligned extra_envs/template_config/ext_info (recycled container)."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
-        svc._baas.get_bot.return_value = {'status': 'RELEASED'}
+        # Recycled devices are reported by the inventory API, not get_bot.
+        baas.list_devices_by_bot_uuid.return_value = [
+            {'device_uuid': 'DEVICE-recycled', 'status': 'RELEASED'},
+        ]
         repo_url = "https://code.example.com/o/r.git"
         template_config = {
             "template_key": "normalcc",
@@ -614,6 +617,10 @@ class TestUpgradeContainer:
             publish_ext=publish_ext,
         )
 
+        assert baas.list_devices_by_bot_uuid.call_count == 2
+        baas.list_devices_by_bot_uuid.assert_called_with(bot_uuid=BOT_UUID)
+        baas.get_bot.assert_not_called()
+        baas.post_bots_api.assert_not_called()
         bot_build_service.upgrade_async.assert_called_once()
         kwargs = bot_build_service.upgrade_async.call_args[1]
         assert kwargs["bot_uuid"] == BOT_UUID

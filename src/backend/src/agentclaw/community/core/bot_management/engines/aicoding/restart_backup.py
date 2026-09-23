@@ -156,7 +156,7 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
     return verify
 
 
-def _log_inventory(*, bot_id, target_id, state, phase):
+def _log_inventory(*, bot_id, target_id, state, phase, operation_id="-", elapsed_ms=0):
     """Log a redacted BaaS inventory summary before target resolution."""
     if not isinstance(state, dict):
         raw_count = -1
@@ -175,8 +175,9 @@ def _log_inventory(*, bot_id, target_id, state, phase):
                 status_counts[status] = status_counts.get(status, 0) + 1
     logger.info(
         "event=aicoding_restart_backup phase=%s inventory=observed "
-        "bot_id=%s target_id=%s raw_device_count=%s raw_status_counts=%s",
-        phase, bot_id, target_id, raw_count, status_counts,
+        "bot_id=%s target_id=%s raw_device_count=%s raw_status_counts=%s "
+        "operation_id=%s source=baas_devices elapsed_ms=%s",
+        phase, bot_id, target_id, raw_count, status_counts, operation_id, elapsed_ms,
     )
 
 
@@ -205,6 +206,49 @@ def _live_targets(state):
     # stale or incomplete BaaS projection while the Bot is still present.
     if not devices:
         raise RuntimeError("目标容器清单为空，禁止跳过重启备份")
+    return targets
+
+
+def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
+    """Coding-only inventory lookup; keep shared BaaS lifecycle untouched."""
+    started = time.monotonic()
+    logger.info(
+        "event=aicoding_restart_backup phase=%s inventory=query_started "
+        "bot_id=%s target_id=%s operation_id=%s source=baas_devices",
+        phase, bot_id, target_id, operation_id,
+    )
+    try:
+        state = {'devices': runtime.list_devices_by_bot_uuid(bot_uuid=target_id)}
+    except Exception as error:
+        # Shared transport exceptions may contain response bodies/credentials.
+        logger.error(
+            "event=aicoding_restart_backup phase=%s inventory=query_failed "
+            "bot_id=%s target_id=%s operation_id=%s source=baas_devices "
+            "elapsed_ms=%s error_type=%s reason=inventory_query_failed",
+            phase, bot_id, target_id, operation_id,
+            int((time.monotonic() - started) * 1000), type(error).__name__,
+        )
+        raise
+    _log_inventory(
+        bot_id=bot_id, target_id=target_id, state=state, phase=phase,
+        operation_id=operation_id, elapsed_ms=int((time.monotonic() - started) * 1000),
+    )
+    try:
+        targets = _live_targets(state)
+    except Exception as error:
+        logger.error(
+            "event=aicoding_restart_backup phase=%s inventory=blocked "
+            "bot_id=%s target_id=%s operation_id=%s source=baas_devices "
+            "error_type=%s reason=%s",
+            phase, bot_id, target_id, operation_id, type(error).__name__,
+            'empty_inventory' if state['devices'] == [] else 'invalid_inventory',
+        )
+        raise
+    logger.info(
+        "event=aicoding_restart_backup phase=%s inventory=resolved "
+        "bot_id=%s target_id=%s operation_id=%s target_count=%s",
+        phase, bot_id, target_id, operation_id, len(targets),
+    )
     return targets
 
 
@@ -251,14 +295,9 @@ class AicodingRestartBackupMixin:
         try:
             operation_id = _operation_id(operation_id)
             if device_id is not None:
-                state = target_runtime.get_bot(bot_uuid=device_id)
-                _log_inventory(
-                    bot_id=ctx.bot_id, target_id=device_id, state=state, phase='resolve'
-                )
-                targets = _live_targets(state)
-                logger.info(
-                    "event=aicoding_restart_backup phase=resolve bot_id=%s target_id=%s target_count=%s",
-                    ctx.bot_id, device_id, len(targets),
+                targets = _query_inventory(
+                    target_runtime, bot_id=ctx.bot_id, target_id=device_id,
+                    operation_id=operation_id, phase='resolve',
                 )
 
                 # BaaS can legitimately report a non-empty inventory whose
@@ -273,11 +312,11 @@ class AicodingRestartBackupMixin:
                     )
 
                     def verify_no_live_targets():
-                        state = target_runtime.get_bot(bot_uuid=device_id)
-                        _log_inventory(
-                            bot_id=ctx.bot_id, target_id=device_id, state=state, phase='verify'
+                        current_targets = _query_inventory(
+                            target_runtime, bot_id=ctx.bot_id, target_id=device_id,
+                            operation_id=operation_id, phase='verify',
                         )
-                        if _live_targets(state):
+                        if current_targets:
                             logger.error(
                                 "event=aicoding_restart_backup phase=verify status=blocked "
                                 "reason=target_changed bot_id=%s target_id=%s",
@@ -301,11 +340,11 @@ class AicodingRestartBackupMixin:
                 ) for physical in targets]
 
                 def verify():
-                    state = target_runtime.get_bot(bot_uuid=device_id)
-                    _log_inventory(
-                        bot_id=ctx.bot_id, target_id=device_id, state=state, phase='verify'
+                    current_targets = _query_inventory(
+                        target_runtime, bot_id=ctx.bot_id, target_id=device_id,
+                        operation_id=operation_id, phase='verify',
                     )
-                    if set(_live_targets(state)) != set(targets):
+                    if set(current_targets) != set(targets):
                         logger.error("event=aicoding_restart_backup phase=verify status=blocked "
                                      "reason=target_changed bot_id=%s target_id=%s", ctx.bot_id, device_id)
                         raise RestartBackupError('target_changed', '备份期间目标容器清单变化，禁止替换')
