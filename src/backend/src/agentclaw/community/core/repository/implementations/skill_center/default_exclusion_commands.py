@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.models.skill import Skill, SkillSet
 from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
+    center_membership_skill_uuid,
     set_member_skill_ids,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
@@ -25,6 +26,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
     DesiredStateMutation,
 )
 from agentclaw.community.core.skill_center.errors import (
+    SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
@@ -75,6 +77,10 @@ class DefaultExclusionCommands:
         exclusion retires it in the same transaction.
         """
         with self._db.transactional_orm_session() as session:
+            default_exclusions.lock_skill_exclusions(
+                session, bot_id=bot_id, owner_id=owner_id,
+                skill_id=int(skill_id) if str(skill_id).isdecimal() else -1,
+            )
             row = self._default_set(
                 session, bot_id=bot_id, owner_id=owner_id, set_id=set_id,
                 engine_type=engine_type,
@@ -101,10 +107,32 @@ class DefaultExclusionCommands:
             released = self._skill_mcp_codes(
                 session, skill_id, allow_unresolvable_center=True
             )
-            skill_installations.uninstall(
-                session, bot_id=bot_id, owner_id=owner_id,
-                env=get_current_env(), skill_ids={int(skill_id)},
+            skill = (
+                self._scope(session.query(Skill), Skill)
+                .filter(Skill.id == int(skill_id))
+                .with_for_update()
+                .one_or_none()
             )
+            membership_skill_uuid = (
+                center_membership_skill_uuid(skill) if skill is not None else None
+            )
+            active_ordinary_claim = any(
+                old.set_active[set_id]
+                and any(
+                    member[0] == int(skill_id)
+                    or (
+                        membership_skill_uuid is not None
+                        and member[2] == membership_skill_uuid
+                    )
+                    for member in members
+                )
+                for set_id, members in old.memberships.items()
+            )
+            if not active_ordinary_claim:
+                skill_installations.uninstall(
+                    session, bot_id=bot_id, owner_id=owner_id,
+                    env=get_current_env(), skill_ids={int(skill_id)},
+                )
             session.flush()
             return DesiredStateMutation(
                 _item(row), True, old, mcp_codes=released
@@ -123,6 +151,10 @@ class DefaultExclusionCommands:
         """Remove the exclusion; the member's Installation row comes back with
         it — a Default Set is always active."""
         with self._db.transactional_orm_session() as session:
+            excluded_default_ids = default_exclusions.lock_skill_exclusions(
+                session, bot_id=bot_id, owner_id=owner_id,
+                skill_id=int(skill_id) if str(skill_id).isdecimal() else -1,
+            )
             row = self._default_set(
                 session, bot_id=bot_id, owner_id=owner_id, set_id=set_id,
                 engine_type=engine_type,
@@ -140,6 +172,19 @@ class DefaultExclusionCommands:
             if skill is None:
                 raise SkillSetControlPlaneNotFoundError()
             require_skill_online(skill)
+            membership_skill_uuid = center_membership_skill_uuid(skill)
+            if int(row.id) in excluded_default_ids and any(
+                member[0] == int(skill_id)
+                or (
+                    membership_skill_uuid is not None
+                    and member[2] == membership_skill_uuid
+                )
+                for members in old.memberships.values()
+                for member in members
+            ):
+                raise SkillSetControlPlaneConflictError(
+                    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
+                )
             removed = default_exclusions.unexclude_skill(
                 session, bot_id=bot_id, owner_id=owner_id,
                 set_id=int(row.id), skill_id=int(skill_id),
