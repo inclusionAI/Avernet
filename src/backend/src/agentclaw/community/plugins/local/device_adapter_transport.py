@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
 import hashlib
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import httpx
 
@@ -36,6 +36,14 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 )
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 from agentclaw.community.plugins.local._mock_seam import MockSeam
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
+
+if TYPE_CHECKING:
+    from agentclaw.community.plugins.local.runtime_endpoints import (
+        RuntimeEndpointRegistry,
+    )
 
 # Fixed clock so emitted timestamps are deterministic across runs.
 _BASE_MS = 1_700_000_000_000
@@ -65,15 +73,36 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
 
     Paths outside the well-known in-memory set (health, capabilities, skills,
     layout probe, ``/api/cron*``) proxy to the per-device adapter URL
-    resolved from ``conn_info`` with each ``invoke``, falling back to the
-    constructor-supplied ``default_adapter_url`` when the device connection
-    info doesn't carry an address. Without either, the ``"unhandled path"``
-    sentinel applies (test deployments have no engine to proxy to).
+    resolved from ``conn_info`` with each ``invoke``:
+
+    * explicit ``target``/``url`` carries the production transport contract;
+    * binding-routed conn_info (device identity only, no address) resolves
+      through the ``RuntimeEndpointRegistry`` — the live map maintained by
+      ``LocalProcessManager`` at spawn/stop, so a runtime respawn with a new
+      port is visible on the next invoke (no baked-in address to migrate);
+    * the constructor-supplied ``default_adapter_url`` remains the fallback
+      only for calls that carry no device identity at all. A device that
+      identifies itself but has no live runtime entry declines to proxy
+      (``"unhandled path"`` sentinel) rather than borrowing another
+      runtime's address — the global fallback for binding-routed calls was
+      the cross-bot data-leak path (#2435 review).
     """
 
-    def __init__(self, *, default_adapter_url: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        default_adapter_url: str | None = None,
+        endpoint_registry: "RuntimeEndpointRegistry | None" = None,
+    ) -> None:
+        from agentclaw.community.plugins.local.runtime_endpoints import (
+            RuntimeEndpointRegistry,
+        )
+
         self._default_adapter_url = (
             default_adapter_url.rstrip("/") if default_adapter_url else None
+        )
+        self._endpoint_registry = (
+            endpoint_registry or RuntimeEndpointRegistry.instance()
         )
         # device_key -> {cron_id -> cron item}
         self._crons: dict[str, dict[str, dict[str, Any]]] = {}
@@ -158,9 +187,12 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         the BaaS ``invoke-http`` endpoint the URL carries returns
         ``PLATFORM_ERROR`` and is never routable locally. In deployments where
         the target is not a bare loopback (production, remote BaaS), the
-        URL (the production transport contract) takes priority. The
-        constructor ``default_adapter_url`` is the last resort; ``None``
-        means this caller cannot be proxied.
+        URL (the production transport contract) takes priority. A
+        binding-routed conn_info (device identity, no address) resolves
+        through the ``RuntimeEndpointRegistry``; a device that identifies
+        itself but has no live runtime entry declines (``None``) rather
+        than falling to the global default. ``default_adapter_url`` applies
+        only to identityless calls.
         """
         target = conn_info.get("target")
         if isinstance(target, str) and target and is_loopback_target(target):
@@ -170,6 +202,18 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
             return url.rstrip("/")
         if isinstance(target, str) and target:
             return f"http://{target.rstrip('/')}"
+        device_id = conn_info.get("bot_uuid")
+        if isinstance(device_id, str) and device_id:
+            endpoints = self._endpoint_registry.resolve(device_id)
+            if endpoints is None:
+                logger.warning(
+                    "[InMemoryDeviceAdapterTransport] device %s has no live "
+                    "runtime endpoint (not registered / stopped); declining "
+                    "to proxy instead of using the global default",
+                    device_id,
+                )
+                return None
+            return endpoints.adapter_url
         return self._default_adapter_url
 
     async def _proxy(

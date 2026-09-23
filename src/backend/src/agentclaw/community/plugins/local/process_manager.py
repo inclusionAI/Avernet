@@ -45,6 +45,9 @@ import requests
 
 from agentclaw.community.core.devices.errors import DeviceAllocateError
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugins.local.runtime_endpoints import (
+    RuntimeEndpointRegistry,
+)
 
 logger = get_logger()
 
@@ -124,6 +127,10 @@ class LocalProcessManager:
         self._adapter_ports: set[int] = set()
         self._openclaw_ports: set[int] = set()
         self._hermes_ports: set[int] = set()
+        # URL 与 runtime 生命周期解耦：调用方按设备身份现场解析地址
+        # （transport binding-routed 路径），本管理器在 spawn/stop 时同步
+        # 登记当前 adapter 地址 —— 重启换端口后写即生效，无需迁移旧值。
+        self._endpoint_registry = RuntimeEndpointRegistry.instance()
 
     @classmethod
     def instance(cls) -> "LocalProcessManager":
@@ -434,6 +441,12 @@ class LocalProcessManager:
                 config_dir=config_dir,
                 workspace_dir=workspace_dir,
             )
+            # 同步登记当前 adapter 地址：binding-routed 调用按设备身份在
+            # 调用时解析到这里 —— runtime 重启换端口即后写覆盖，无需迁移。
+            self._endpoint_registry.register(
+                device_id,
+                adapter_url=f"http://127.0.0.1:{adapter_port}",
+            )
 
             # Step 5: Set up skill symlinks (non-fatal)
             if symbol_json:
@@ -472,6 +485,9 @@ class LocalProcessManager:
             self._openclaw_ports.discard(entry.openclaw_port)
             self._hermes_ports.discard(entry.hermes_port)
 
+        # 地址随 runtime 消失摘除：后续 binding-routed 调用拒绝而不是打旧端口。
+        self._endpoint_registry.unregister(device_id)
+
         logger.info(
             "Stopped processes: device=%s adapter=:%s openclaw=:%s hermes=:%s",
             device_id, entry.adapter_port, entry.openclaw_port, entry.hermes_port,
@@ -482,6 +498,7 @@ class LocalProcessManager:
         """Kill all tracked process pairs. Called on backend shutdown."""
         with self._lock:
             entries = list(self._processes.values())
+            device_ids = list(self._processes.keys())
             self._processes.clear()
 
         for entry in entries:
@@ -493,6 +510,9 @@ class LocalProcessManager:
             self._adapter_ports.clear()
             self._openclaw_ports.clear()
             self._hermes_ports.clear()
+
+        for device_id in device_ids:
+            self._endpoint_registry.unregister(device_id)
 
         if entries:
             logger.info("Stopped %d process pair(s)", len(entries))
