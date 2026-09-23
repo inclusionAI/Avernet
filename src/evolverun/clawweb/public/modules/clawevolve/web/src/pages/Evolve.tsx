@@ -114,15 +114,19 @@ function dateValue(offsetDays = 0): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-function buildDiagnoseIntent(input: {
+export function buildDiagnoseIntent(input: {
   lookbackDays: number
   startDate: string
   endDate: string
   useDateRange: boolean
+  explicitSessions: boolean
   badCaseCount: number
   goodCaseCount: number
   focusIssue: string
 }): string {
+  if (input.explicitSessions) {
+    return `诊断指定的历史 session；重点关注${input.focusIssue.trim()}。`
+  }
   const timeRange = input.useDateRange
     ? `${input.startDate} 至 ${input.endDate}`
     : `最近${input.lookbackDays}天`
@@ -621,6 +625,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
     startDate,
     endDate,
     useDateRange: taskType === 'full',
+    explicitSessions: sessionFilterEnabled,
     badCaseCount: Number(badCaseCount),
     goodCaseCount: Number(goodCaseCount),
     focusIssue,
@@ -918,18 +923,17 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
           {taskType === 'pack_restore' && <PackRestoreFields packs={restorePacks} selectedPackId={restorePackId} onPackIdChange={setRestorePackId} loading={restorePacksLoading} error={restorePacksError} />}
           {taskType === 'runtime_cleanup' && <section className="border-t border-gray-100 pt-6"><h2 className="text-sm font-semibold text-gray-900">清理范围</h2><div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">{openVersion ? '开源版手动清理：不重启 Gateway，不检查运行任务。只清理所选 Bot 下带 ClawEvolve 标记的 Agent 与 Session，不清理普通业务 Session、业务 Skill、Pack、Bench 日志或进化产物。可能中断正在执行的进化任务，请确认后操作。' : '执行清理前会重启所选 Bot 草稿环境的 Gateway，当前草稿会话可能中断。仅清理带明确 ClawEvolve 任务标记的历史 Agent 与 Session；不会清理普通业务 Session、业务 Skill、Pack、Bench 日志或 clawevolve_results。若仍有进化任务运行，系统会要求再次确认后才能强制清理。'}</div></section>}
           {taskType === 'bench_optimize' && <section className="border-t border-gray-100 pt-6"><h2 className="text-sm font-semibold text-gray-900">优化目标</h2><label className="mt-3 block"><span className="mb-1.5 block text-xs font-medium text-gray-600">目标、成功标准和约束 <span className="text-red-500">*</span></span><textarea className={`${inputClass} min-h-28 resize-y`} value={benchObjective} onChange={(event) => setBenchObjective(event.target.value)} placeholder="例如：提升博客的结构完整性、事实准确性和语言表达，测试集得分不低于 0.9，不得针对测试用例硬编码。" /></label></section>}
-          {!openVersion && (taskType === 'diagnose' || taskType === 'full' || taskType === 'optimize' || taskType === 'bench' || taskType === 'bench_optimize') && <NodeCommandYamlFields definitions={improvementSource && taskType === 'full'
-            ? insightNodeDefinitions
-            : taskType === 'full' && fullInputMode === 'direct_goal'
-              ? (nodeDefinitions.full ?? []).filter((node) => node.key !== 'diagnose')
-              : (nodeDefinitions[taskType] ?? [])} expanded={customCommands} onExpandedChange={setCustomCommands} values={nodeCommandYamls} onChange={setNodeCommandYamls} />}
-
           {taskType === 'optimize' || taskType === 'full' || taskType === 'bench_optimize' ? <section className="border-t border-gray-100 pt-6">
             <h2 className="text-sm font-semibold text-gray-900">优化迭代</h2>
             <label className="mt-3 block max-w-xs"><span className="mb-1.5 block text-xs font-medium text-gray-600">最大优化轮数 <span className="font-normal text-gray-400">（上限 100 轮）</span></span><input className={inputClass} type="number" min={1} max={100} step={1} inputMode="numeric" value={maxRounds} onChange={(event) => setMaxRounds(event.target.value)} placeholder="请输入 1 到 100" /></label>
             <p className="mt-2 text-xs text-gray-400">{taskType === 'full' && fullInputMode === 'direct_goal' ? 'Plan 只执行一次；' : '诊断只执行一次；'}只有优化阶段会按验证结果进行多轮迭代，最多执行 100 轮。</p>
           </section> : null}
           {!openVersion && taskType !== 'pack' && taskType !== 'pack_restore' && taskType !== 'runtime_cleanup' && <RuntimeMaintenanceOption enabled={runtimeMaintenance} onChange={setRuntimeMaintenance} />}
+          {!openVersion && (taskType === 'diagnose' || taskType === 'full' || taskType === 'optimize' || taskType === 'bench' || taskType === 'bench_optimize') && <NodeCommandYamlFields definitions={improvementSource && taskType === 'full'
+            ? insightNodeDefinitions
+            : taskType === 'full' && fullInputMode === 'direct_goal'
+              ? (nodeDefinitions.full ?? []).filter((node) => node.key !== 'diagnose')
+              : (nodeDefinitions[taskType] ?? [])} expanded={customCommands} onExpandedChange={setCustomCommands} values={nodeCommandYamls} onChange={setNodeCommandYamls} />}
           </div>
           <TaskFormOverview taskType={taskType} fullInputMode={fullInputMode} improvementSource={improvementSource} />
           </div>
@@ -970,7 +974,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             const parsedMaxDiagnoseSessions = Number(maxDiagnoseSessions)
             const parsedBadCaseCount = Number(badCaseCount)
             const parsedGoodCaseCount = Number(goodCaseCount)
-            if (diagnoseEnabled
+            if (diagnoseEnabled && !sessionFilter
               && (!Number.isSafeInteger(parsedLookbackDays) || parsedLookbackDays < 1 || parsedLookbackDays > 30
                 || !Number.isSafeInteger(parsedMaxDiagnoseSessions) || parsedMaxDiagnoseSessions < 1 || parsedMaxDiagnoseSessions > 1000
                 || !Number.isSafeInteger(parsedBadCaseCount) || parsedBadCaseCount < 0 || parsedBadCaseCount > 100
@@ -981,7 +985,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             if (diagnoseEnabled && !focusIssue.trim()) {
               setSubmitError('请输入关注问题'); return
             }
-            if (taskType === 'full' && !improvementSource && fullInputMode === 'diagnose_goal' && (!startDate || !endDate || startDate > endDate)) {
+            if (taskType === 'full' && !improvementSource && fullInputMode === 'diagnose_goal' && !sessionFilter && (!startDate || !endDate || startDate > endDate)) {
               setSubmitError('请选择合法的开始和结束日期'); return
             }
             const parsedMaxRounds = Number(maxRounds)
@@ -998,10 +1002,10 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
                 ...taskInfo, userId: evolveUserId, botId, botEnv, judgeBackend: effectiveJudgeBackend,
                 sessionSource: diagnoseSessionSource,
                 apiKey: effectiveJudgeBackend === 'api' ? apiKey.trim() : undefined, model: diagnoseModel,
-                diagnoseIntent, maxSessions: parsedMaxDiagnoseSessions,
+                diagnoseIntent, maxSessions: sessionFilter?.sessionIdentifiers.length ?? parsedMaxDiagnoseSessions,
                 sessionFilter,
                 goal: taskType === 'full' ? evolutionGoal.trim() : undefined,
-                startDate, endDate, nodeCommandYamls: customCommands ? (improvementSource
+                ...(!sessionFilter ? { startDate, endDate } : {}), nodeCommandYamls: customCommands ? (improvementSource
                   ? Object.fromEntries(Object.entries(nodeCommandYamls).filter(([node]) => node === 'plan' || node === 'optimize'))
                   : nodeCommandYamls) : undefined, forceMessage, runtimeMaintenance: taskType === 'pack' || taskType === 'pack_restore' ? false : runtimeMaintenance,
               }
@@ -1142,11 +1146,31 @@ function DiagnoseFields({
       </section>
       <section className="border-t border-gray-100 pt-6">
         <h2 className="text-sm font-semibold text-gray-900">诊断范围</h2>
-        <div className="mt-3 grid gap-4 sm:grid-cols-2">
+        <p className="mt-1 text-xs leading-5 text-gray-500">按时间扫描候选 Session，或精确指定要诊断的 Session。两种范围互斥。</p>
+        <div role="radiogroup" aria-label="诊断范围" className="mt-3 grid gap-3 sm:grid-cols-2">
+          <button type="button" role="radio" aria-checked={!sessionFilterEnabled} onClick={() => onSessionFilterEnabledChange(false)} className={`rounded-xl border p-4 text-left transition ${!sessionFilterEnabled ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500/10' : 'border-gray-200 bg-white hover:border-blue-200'}`}>
+            <div className="flex items-center justify-between gap-3"><span className={`text-sm font-semibold ${!sessionFilterEnabled ? 'text-blue-800' : 'text-gray-800'}`}>按时间范围</span>{!sessionFilterEnabled && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">已选择</span>}</div>
+            <p className="mt-1.5 text-xs leading-5 text-gray-500">在指定时间窗口内扫描候选 Session，再执行 Judge 和 Case 抽取。</p>
+          </button>
+          <button type="button" role="radio" aria-checked={sessionFilterEnabled} onClick={() => onSessionFilterEnabledChange(true)} className={`rounded-xl border p-4 text-left transition ${sessionFilterEnabled ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500/10' : 'border-gray-200 bg-white hover:border-blue-200'}`}>
+            <div className="flex items-center justify-between gap-3"><span className={`text-sm font-semibold ${sessionFilterEnabled ? 'text-blue-800' : 'text-gray-800'}`}>精确 Session</span>{sessionFilterEnabled && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">已选择</span>}</div>
+            <p className="mt-1.5 text-xs leading-5 text-gray-500">按 Session ID 或 Session Key 精确选择，不再应用日期和扫描数量限制。</p>
+          </button>
+        </div>
+        {!sessionFilterEnabled ? <div className="mt-4 grid gap-4 sm:grid-cols-2">
           {dateRangeEnabled ? <>
-            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">开始日期</span><input type="date" disabled={sessionFilterEnabled} className={`${inputClass} disabled:bg-gray-100 disabled:text-gray-400`} value={startDate} max={endDate} onChange={(event) => onStartDateChange(event.target.value)} /></label>
-            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">结束日期</span><input type="date" disabled={sessionFilterEnabled} className={`${inputClass} disabled:bg-gray-100 disabled:text-gray-400`} value={endDate} min={startDate} max={dateValue()} onChange={(event) => onEndDateChange(event.target.value)} /></label>
-          </> : <label><span className="mb-1.5 block text-xs font-medium text-gray-600">会话时间范围</span><select disabled={sessionFilterEnabled} className={`${inputClass} disabled:bg-gray-100 disabled:text-gray-400`} value={lookbackDays} onChange={(event) => onLookbackDaysChange(event.target.value)}><option value="3">最近 3 天</option><option value="7">最近 7 天</option><option value="14">最近 14 天</option><option value="30">最近 30 天</option></select></label>}
+            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">开始日期</span><input type="date" className={inputClass} value={startDate} max={endDate} onChange={(event) => onStartDateChange(event.target.value)} /></label>
+            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">结束日期</span><input type="date" className={inputClass} value={endDate} min={startDate} max={dateValue()} onChange={(event) => onEndDateChange(event.target.value)} /></label>
+          </> : <label><span className="mb-1.5 block text-xs font-medium text-gray-600">会话时间范围</span><select className={inputClass} value={lookbackDays} onChange={(event) => onLookbackDaysChange(event.target.value)}><option value="3">最近 3 天</option><option value="7">最近 7 天</option><option value="14">最近 14 天</option><option value="30">最近 30 天</option></select></label>}
+          <label><span className="mb-1.5 block text-xs font-medium text-gray-600">最多诊断 Session 数量</span><input className={inputClass} type="number" min={1} max={1000} step={1} inputMode="numeric" value={maxDiagnoseSessions} onChange={(event) => onMaxDiagnoseSessionsChange(event.target.value)} /><span className="mt-1 block text-xs text-gray-400">最多送入 Judge 分析的候选 Session，默认 10。</span></label>
+        </div> : <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50/70 p-4">
+          <label><span className="mb-1.5 block text-xs font-medium text-gray-600">Session 标识</span><textarea className={`${inputClass} min-h-32 resize-y font-mono text-xs`} value={sessionIdentifiersText} onChange={(event) => onSessionIdentifiersTextChange(event.target.value)} placeholder={'每行填写一个完整标识，例如：\n2a7b50a1-4806-4...\nagent:main:main'} /><span className="mt-1 block text-xs leading-5 text-gray-400">可填写 Session ID 或 Session Key。多个 Session 请换行填写，每行一个，最多 20 个；系统会自动精确解析。</span></label>
+          <p className="mt-2 text-xs leading-5 text-amber-700">任一标识无法解析时任务失败，不会回退为时间范围扫描。</p>
+        </div>}
+      </section>
+      <section className="border-t border-gray-100 pt-6">
+        <h2 className="text-sm font-semibold text-gray-900">诊断设置</h2>
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <EvolveModelFields
             modelOptions={availableModels}
             choice={availableModels.includes(model) ? model : EVOLVE_CUSTOM_MODEL}
@@ -1157,21 +1181,10 @@ function DiagnoseFields({
             customAriaLabel="诊断自定义模型名称"
             inputClassName={inputClass}
           />
-          <label><span className="mb-1.5 block text-xs font-medium text-gray-600">最多诊断 Session 数量</span><input disabled={sessionFilterEnabled} className={`${inputClass} disabled:bg-gray-100 disabled:text-gray-400`} type="number" min={1} max={1000} step={1} inputMode="numeric" value={maxDiagnoseSessions} onChange={(event) => onMaxDiagnoseSessionsChange(event.target.value)} /><span className="mt-1 block text-xs text-gray-400">{sessionFilterEnabled ? '当前按指定 Session 诊断。' : '最多送入 Judge 分析的候选 Session，默认 10。'}</span></label>
-          <label><span className="mb-1.5 block text-xs font-medium text-gray-600">Bad Case 数量</span><input className={inputClass} type="number" min={0} max={100} step={1} inputMode="numeric" value={badCaseCount} onChange={(event) => onBadCaseCountChange(event.target.value)} /></label>
-          <label><span className="mb-1.5 block text-xs font-medium text-gray-600">Good Case 数量</span><input className={inputClass} type="number" min={0} max={100} step={1} inputMode="numeric" value={goodCaseCount} onChange={(event) => onGoodCaseCountChange(event.target.value)} /></label>
+          {!sessionFilterEnabled && <><label><span className="mb-1.5 block text-xs font-medium text-gray-600">Bad Case 数量</span><input className={inputClass} type="number" min={0} max={100} step={1} inputMode="numeric" value={badCaseCount} onChange={(event) => onBadCaseCountChange(event.target.value)} /></label>
+          <label><span className="mb-1.5 block text-xs font-medium text-gray-600">Good Case 数量</span><input className={inputClass} type="number" min={0} max={100} step={1} inputMode="numeric" value={goodCaseCount} onChange={(event) => onGoodCaseCountChange(event.target.value)} /></label></>}
           <div><span className="mb-1.5 block text-xs font-medium text-gray-600">Judge 方式</span><div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1"><button type="button" onClick={() => onJudgeBackendChange('subagent')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${judgeBackend === 'subagent' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>Agent Judge</button><button type="button" disabled={apiJudgeDisabled} onClick={() => onJudgeBackendChange('api')} className={`rounded-md px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${judgeBackend === 'api' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>自定义 API</button></div><span className="mt-1 block text-xs text-gray-400">{apiJudgeDisabled ? 'ARCA 模式仅支持 Agent Judge，不会通过 Message 传递 API Key。' : judgeBackend === 'subagent' ? '使用 Bot 当前 OpenClaw 模型，无需 API Key。' : '使用指定模型与本次临时 API Key。'}</span></div>
           {judgeBackend === 'api' && <label><span className="mb-1.5 block text-xs font-medium text-gray-600">模型 API Key</span><input type="password" autoComplete="off" className={inputClass} value={apiKey} onChange={(event) => onApiKeyChange(event.target.value)} placeholder="仅本次命令使用，不写入数据库" /></label>}
-        </div>
-        <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50/70 p-4">
-          <label className="flex cursor-pointer items-start gap-2.5">
-            <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" checked={sessionFilterEnabled} onChange={(event) => onSessionFilterEnabledChange(event.target.checked)} />
-            <span><span className="block text-xs font-semibold text-gray-800">仅诊断指定 Session</span><span className="mt-1 block text-xs text-gray-500">可选。按 Session ID 或 Session Key 精确选择会话，不使用模型匹配。</span></span>
-          </label>
-          {sessionFilterEnabled && <div className="mt-4">
-            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">Session 标识</span><textarea className={`${inputClass} min-h-32 resize-y font-mono text-xs`} value={sessionIdentifiersText} onChange={(event) => onSessionIdentifiersTextChange(event.target.value)} placeholder={'每行填写一个完整标识，例如：\n2a7b50a1-4806-4...\nagent:main:main'} /><span className="mt-1 block text-xs leading-5 text-gray-400">可填写 Session ID 或 Session Key。多个 Session 请换行填写，每行一个，最多 20 个；系统会自动精确解析。</span></label>
-            <p className="mt-2 text-xs leading-5 text-amber-700">任一标识无法解析时任务失败，不会回退为全量扫描。</p>
-          </div>}
         </div>
         <label className="mt-4 block"><span className="mb-1.5 block text-xs font-medium text-gray-600">关注问题</span><textarea className={`${inputClass} min-h-24 resize-y`} value={focusIssue} maxLength={1000} onChange={(event) => onFocusIssueChange(event.target.value)} placeholder="例如：语雀 MCP 未调用、调用失败、参数错误，以及失败后给出未经验证的答案" /></label>
         <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs leading-5 text-gray-600"><span className="font-medium text-gray-700">实际诊断要求：</span>{diagnoseIntent}</div>
