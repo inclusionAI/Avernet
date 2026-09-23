@@ -5981,21 +5981,30 @@ describe("AIS Base one-Step executions", () => {
     return { created, written, report };
   }
 
-  it("separates credentials from the public task and freezes the Base snapshot", async () => {
+  it("uses one Base parameter with Repair input and freezes the snapshot", async () => {
     const { created } = await ready();
     const [, params, snapshotId] = harness.execute.mock.calls[0] as [string, Record<string, string>, number];
     expect(snapshotId).toBe(12345);
     const task = JSON.parse(params[REPAIR_PARAMS_KEY]);
-    const credentials = JSON.parse(params["$" + "{clawevolve_credentials}"]);
+    expect(Object.keys(params)).toEqual([REPAIR_PARAMS_KEY]);
     expect(Object.keys(task).sort()).toEqual(["attempt", "input", "runtime", "stepId", "taskId", "taskType"]);
     expect(task.input.execution.executionId).toBe(created.identity.executionId);
     expect(task.input.executionTimings).toHaveProperty("decisionGraceSeconds");
     expect(task.runtime.package.packageId).toBe("clawevolve-repair");
-    expect(task.runtime.callback.path).toBe("/api/repair/v1/internal/tasks/" + created.taskId + "/steps/" + created.identity.stepId + "/ais");
-    expect(credentials.bearerToken).toMatch(/^ce_repair_/);
-    expect(params[REPAIR_PARAMS_KEY]).not.toContain(credentials.bearerToken);
+    expect(Object.keys(task.runtime).sort()).toEqual(["clawwebUrl", "package"]);
+    expect(task.input.executionTicket).toMatch(/^ce_repair_/);
     expect(task.runtime).not.toHaveProperty("artifacts");
     expect(created.config.aisBase?.snapshotId).toBe(12345);
+  });
+
+  it("grants Base preparation grace without lengthening package heartbeats", async () => {
+    const { created } = await ready();
+    await harness.service.reportAisExecution(created.identity, { status: "running" });
+    const prepared = JSON.parse((await harness.repo.findTask(created.taskId))!.config_json);
+    expect(prepared.execution.leaseExpiresAt).toBe(harness.now.value + harness.repairConfig.decisionGraceSeconds);
+    await harness.service.heartbeat(created.identity, {});
+    const active = JSON.parse((await harness.repo.findTask(created.taskId))!.config_json);
+    expect(active.execution.leaseExpiresAt).toBe(harness.now.value + harness.repairConfig.executionLeaseSeconds);
   });
 
   it("preflights without committing, releases after archival, and launches a fresh Apply", async () => {
@@ -6110,16 +6119,14 @@ it.skipIf(!process.env.REPAIR_AIS_BASE_ROOT || !process.env.REPAIR_AIS_SKILL_ROO
     const runExecution = async (index: number) => {
       const params = harness.execute.mock.calls[index][1] as Record<string, string>;
       const task = join(directory, "task-" + index + ".json");
-      const credentials = join(directory, "credentials-" + index + ".json");
       const config = join(directory, "config.yaml");
       await writeFile(task, params[REPAIR_PARAMS_KEY]);
-      await writeFile(credentials, params["$" + "{clawevolve_credentials}"], { mode: 0o600 });
       await writeFile(config, "oss:\n  endpoint: " + origin + "\n  bucket: test\n  prefix: skills\nruntime:\n  task_timeout_seconds: 45\n");
       let childError: unknown;
       try {
         await run(process.env.REPAIR_TEST_PYTHON || "python3", [
           join(process.env.REPAIR_AIS_SKILL_ROOT!, "tests/integration/run_base_fixture.py"),
-          process.env.REPAIR_AIS_BASE_ROOT!, process.env.REPAIR_AIS_SKILL_ROOT!, task, credentials, config,
+          process.env.REPAIR_AIS_BASE_ROOT!, process.env.REPAIR_AIS_SKILL_ROOT!, task, config,
         ], { timeout: 60000, maxBuffer: 2 * 1024 * 1024, env: {
           ...process.env, NO_PROXY: "localhost,127.0.0.1", no_proxy: "localhost,127.0.0.1",
           OPENCLAW_STATE_DIR: join(directory, "execution-" + index),
@@ -6132,7 +6139,9 @@ it.skipIf(!process.env.REPAIR_AIS_BASE_ROOT || !process.env.REPAIR_AIS_SKILL_ROO
         const log = await readFile(join(resultRoot, "runner_state", publicTask.stepId, "run.log"), "utf8");
         throw new Error("Synthetic Base execution failed:\n" + log);
       }
-      const stage = join(resultRoot, "repair", publicTask.stepId, "output", "result.json");
+      const archivedInput = await readFile(join(resultRoot, "repair", "input", "task.json"), "utf8");
+      expect(archivedInput).not.toContain(publicTask.input.executionTicket);
+      const stage = join(resultRoot, "repair", "output", "result.json");
       const result = JSON.parse(await readFile(stage, "utf8"));
       expect(result.status).toBe("succeeded");
       expect(Object.keys(result.output.artifacts).sort()).toEqual(["artifactBundle", "openclawSessions", "runtimeBundle"]);

@@ -1596,7 +1596,7 @@ function definition(config: RepairConfig): AisTaskDefinition<RepairDispatchConfi
       executionId: task.execution.executionId,
     }),
     buildGlobalParams: (task, uploadArtifacts) => task.aisBase
-      ? repairAisParams(safeTaskEnvelope(task, uploadArtifacts, task.executionTicket), config.heartbeatIntervalSeconds)
+      ? repairAisParams(safeTaskEnvelope(task, uploadArtifacts, task.executionTicket))
       : { [REPAIR_PARAMS_KEY]: JSON.stringify(safeTaskEnvelope(task, uploadArtifacts, task.executionTicket)) },
   };
 }
@@ -3283,7 +3283,7 @@ export class RepairTaskService {
   async reportAisExecution(identity: RepairWorkloadIdentity, body: Record<string, any>) {
     const { config } = await this.credentialWorkloadContext(identity);
     if (!config.aisBase) repairValidation("repair_ais_base_required", "任务未启用 AIS Base");
-    if (body.status === "running") return this.reportStep(identity, { status: "running", summary: body.summary });
+    if (body.status === "running") return this.reportStep(identity, { status: "running", summary: body.summary }, "ais_base");
     if (!["succeeded", "failed"].includes(body.status)) repairValidation("invalid_executor_status", "无效 AIS 终态");
     const artifacts = validateRuntimeArtifacts(identity.taskId, identity.stepId, body.output?.artifacts ?? {});
     if (body.status === "succeeded") {
@@ -3376,7 +3376,9 @@ export class RepairTaskService {
           execution: {
             ...config.execution,
             state: "running",
-            leaseExpiresAt: now + this.deps.config.executionLeaseSeconds,
+            leaseExpiresAt: now + (source === "ais_base"
+              ? Math.max(this.deps.config.executionLeaseSeconds, this.deps.config.decisionGraceSeconds)
+              : this.deps.config.executionLeaseSeconds),
             lastHeartbeatAt: now,
           },
         };

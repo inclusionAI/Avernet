@@ -11,11 +11,20 @@ using persisted history, checkpoints, approved Plan and action-ledger records.
 
 ## Public task and credentials
 
-The public launch parameter contains taskType, taskId, stepId, attempt, input,
-runtime. runtime selects a package and a same-origin callback path with a bounded
-heartbeat interval. No signed upload URL, bearer ticket or model API key belongs
-in the public task/archive. Invocation credentials use a separate platform
-parameter.
+The existing launch parameter contains taskType, taskId, stepId, attempt, input,
+runtime. runtime contains only clawwebUrl and package. Repair-specific execution
+settings and executionTicket are in input; optional modelApiKey stays in the agent
+configuration. There is no separate credentials parameter or callback configuration.
+Base derives the Repair HTTP route from the task/step identifiers and attaches the
+execution ticket. Before archiving task.json, it removes launch credential fields,
+including when the package fails to download or times out. Signed upload URLs are
+requested by the Repair package rather than embedded in launch parameters.
+
+Repair owns execution heartbeats. CW grants initial Base preparation the existing
+decisionGraceSeconds window (at least executionLeaseSeconds). Package progress and
+heartbeats use the normal execution lease. After the package stops, the three known
+runtime archive upload endpoints alone allow 15 minutes beyond that lease; business
+access is not extended, and ended/invalidated/superseded executions remain rejected.
 
 ## Internal endpoints
 
@@ -26,7 +35,6 @@ execution-scoped bearer ticket.
 | Endpoint | Semantics |
 | --- | --- |
 | POST /ais/validate-report | Validate a successful business report without committing its terminal state; preserve output correction. |
-| POST /ais/heartbeat | Renew the existing execution lease through archival. |
 | POST /ais/artifacts/:name/upload-url | Authorize an upload to the server-derived canonical runtime archive key. |
 | POST /ais/report | Commit Base final result plus business report and archive metadata; final ledger and business checks still apply. |
 

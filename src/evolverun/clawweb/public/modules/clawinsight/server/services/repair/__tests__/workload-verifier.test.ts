@@ -110,3 +110,30 @@ describe("DatabaseRepairWorkloadVerifier", () => {
     ))).rejects.toMatchObject({ status: 401 });
   });
 });
+
+
+it("bounds Base archive closeout without reviving tools, ended executions or old steps", async () => {
+  const issued = issueRepairExecutionTicket();
+  const repo = repository(issued.digest, 999);
+  const row = (await repo.findTask("REPAIR-1"))!;
+  const config = JSON.parse(row.config_json);
+  config.aisBase = { snapshotId: 12345 };
+  row.config_json = JSON.stringify(config);
+  const path = "/internal/tasks/REPAIR-1/steps/STEP-1/ais/artifacts/runtimeBundle/upload-url";
+  const archive = { ...request("REPAIR-1", "STEP-1", issued.ticket, path), method: "POST" } as Request;
+  const verifier = new DatabaseRepairWorkloadVerifier(repo, () => 1_500);
+  await expect(verifier.verify(archive)).resolves.toMatchObject({ executionId: "EXEC-1" });
+  await expect(verifier.verify(request("REPAIR-1", "STEP-1", issued.ticket, "/tools/apply-action")))
+    .rejects.toMatchObject({ status: 401 });
+  await expect(verifier.verify({ ...archive, params: { taskId: "REPAIR-1", stepId: "old" } } as Request))
+    .rejects.toMatchObject({ status: 401 });
+  await expect(new DatabaseRepairWorkloadVerifier(repo, () => 1_900).verify(archive))
+    .rejects.toMatchObject({ status: 401 });
+  config.execution.invalidatedAt = 1_200;
+  row.config_json = JSON.stringify(config);
+  await expect(verifier.verify(archive)).rejects.toMatchObject({ status: 401 });
+  config.execution.invalidatedAt = null;
+  config.execution.state = "ended";
+  row.config_json = JSON.stringify(config);
+  await expect(verifier.verify(archive)).rejects.toMatchObject({ status: 401 });
+});

@@ -300,10 +300,6 @@ export function createRepairRouter(deps: RepairRouterDeps): Router {
     try { res.json(await service.reportAisExecution(await workload(deps, req), req.body ?? {})); }
     catch (error) { sendRepairError(res, error); }
   }));
-  router.post("/internal/tasks/:taskId/steps/:stepId/ais/heartbeat", asyncHandler(async (req, res) => {
-    try { res.json(await service.heartbeat(await workload(deps, req), req.body ?? {})); }
-    catch (error) { sendRepairError(res, error); }
-  }));
   router.post("/internal/tasks/:taskId/steps/:stepId/ais/artifacts/:name/upload-url", asyncHandler(async (req, res) => {
     try { res.json(await service.aisArtifactUpload(await workload(deps, req), String(req.params.name), req.body ?? {})); }
     catch (error) { sendRepairError(res, error); }
