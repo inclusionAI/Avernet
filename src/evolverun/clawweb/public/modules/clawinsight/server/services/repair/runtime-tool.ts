@@ -5,49 +5,17 @@ import type {
   RepairRuntimeInspectInput,
   RepairTaskContext,
 } from "./contracts.js";
-import {
-  executeBaasCommand,
-  resolveBaasCommandTarget,
-  type BaasCommandResponse,
-  type BaasCommandTargetConfig,
-} from "@avernet/clawevolve/server/services/baas-command-transport";
-import { RepairError, repairUnavailable, repairValidation } from "./errors.js";
-import { redactPersistableLines, redactText } from "./redaction.js";
+import { BotRuntimeClient, BaasRuntimeProvider, ArcaRuntimeProvider, BotRuntimeError, type BotRuntime } from "@avernet/clawweb-shared/server/services/bot-runtime";
+import { RepairError, repairValidation } from "./errors.js";
+import { redactPersistableLines } from "./redaction.js";
 import type { ArcaCommandTransport } from "./arca-command-transport.js";
 import { evidenceLocatorsFromText } from "./evidence-locators.js";
 
+import { buildRuntimeUserCommand as buildRepairRuntimeUserCommand } from "@avernet/clawweb-shared/server/services/bot-runtime/legacy";
+export { buildRepairRuntimeUserCommand };
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
-const REPAIR_RUNTIME_USER = "admin";
-const REPAIR_RUNTIME_HOME = "/home/admin";
-const REPAIR_RUNTIME_USER_EXIT_CODE = 78;
-
-/**
- * Remote command transports inherit the container's default user. Legacy ARCA
- * sandboxes may therefore start commands as root even though OpenClaw runs as
- * admin. Drop that inherited privilege before every Repair read or approved
- * container action, and fail closed for any other execution identity.
- */
-export function buildRepairRuntimeUserCommand(command: string): string {
-  const payload = [
-    `export HOME=${REPAIR_RUNTIME_HOME} USER=${REPAIR_RUNTIME_USER} LOGNAME=${REPAIR_RUNTIME_USER}`,
-    `cd ${REPAIR_RUNTIME_HOME} || exit ${REPAIR_RUNTIME_USER_EXIT_CODE}`,
-    "umask 077",
-    `exec bash --noprofile --norc -c ${shellQuote(command)}`,
-  ].join("; ");
-  const identityError = "Repair target command must run as admin";
-  return [
-    `repair_uid=$(id -u) || exit ${REPAIR_RUNTIME_USER_EXIT_CODE}`,
-    'if [ "$repair_uid" = "0" ]; then',
-    `  id ${REPAIR_RUNTIME_USER} >/dev/null 2>&1 || { printf '%s\\n' ${shellQuote(identityError)} >&2; exit ${REPAIR_RUNTIME_USER_EXIT_CODE}; }`,
-    `  command -v su >/dev/null 2>&1 || { printf '%s\\n' ${shellQuote(identityError)} >&2; exit ${REPAIR_RUNTIME_USER_EXIT_CODE}; }`,
-    `  exec su ${REPAIR_RUNTIME_USER} -c ${shellQuote(payload)}`,
-    "fi",
-    `test "$(id -un)" = ${REPAIR_RUNTIME_USER} || { printf '%s\\n' ${shellQuote(identityError)} >&2; exit ${REPAIR_RUNTIME_USER_EXIT_CODE}; }`,
-    `exec bash --noprofile --norc -c ${shellQuote(payload)}`,
-  ].join("\n");
 }
 
 function integer(value: unknown, fallback: number, min: number, max: number, field: string): number {
@@ -196,10 +164,14 @@ function shellObservedLocators(operation: string, stdout: string, stderr: string
 }
 
 export class RepairRuntimeTool {
-  constructor(
-    private readonly config: ResolvedBaasConfig,
-    private readonly arcaTransport?: ArcaCommandTransport,
-  ) {}
+  private readonly runtime: Pick<BotRuntime, "executeShell">;
+  constructor(configOrRuntime: ResolvedBaasConfig | Pick<BotRuntime, "executeShell">, arcaTransport?: ArcaCommandTransport) {
+    // Preserve existing callers while hosts migrate to injected runtime composition.
+    this.runtime = "executeShell" in configOrRuntime ? configOrRuntime : new BotRuntimeClient({ providers: {
+      baas: new BaasRuntimeProvider(configOrRuntime),
+      ...(arcaTransport ? { arca: new ArcaRuntimeProvider({ commandTransport: arcaTransport, proxyBaseUrls: {} }) } : {}),
+    } });
+  }
 
   async inspect(
     context: RepairTaskContext,
@@ -243,108 +215,21 @@ export class RepairRuntimeTool {
     requestLocators: readonly string[],
   ): Promise<Record<string, unknown>> {
     const target = context.target;
-    const runtimeUserCommand = buildRepairRuntimeUserCommand(command);
-    if (target.provider === "arca") {
-      if (!target.sandboxId) repairValidation("runtime_target_missing", "Repair 缺少 ARCA sandbox_id");
-      if (!this.arcaTransport) {
-        return repairUnavailable("repair_arca_not_configured", "Repair 未配置 ARCA 运行态访问");
-      }
-      const result = await this.arcaTransport.execute({
-        environment: target.environment,
-        bindingId: target.bindingId,
-        sandboxId: target.sandboxId,
-        arcaInstanceId: target.arcaInstanceId,
-        command: runtimeUserCommand,
-      });
-      const stdout = safeOutput(result.stdout);
-      const stderr = safeOutput(result.stderr);
-      return {
-        status: result.status,
-        operation,
-        target: {
-          environment: target.environment,
-          bindingId: target.bindingId,
-          sandboxId: target.sandboxId,
-        },
-        exitCode: result.exitCode,
-        stdout,
-        stderr,
-        evidenceLocators: result.status === "success"
-          ? verifiedOutputLocators(operation, stdout, stderr, requestLocators)
-          : [],
-        shellObservedLocators: result.status === "success"
-          ? shellObservedLocators(operation, stdout, stderr)
-          : [],
-        durationMs: result.durationMs,
-      };
-    }
-    if (target.provider !== "baas") {
-      throw new RepairError(422, "unsupported_runtime_provider", `Repair 当前不能操作 provider=${target.provider}`);
-    }
-    if (!target.deviceId) {
-      repairValidation("runtime_target_missing", "Repair 缺少 BaaS 逻辑 deviceId");
-    }
-    let targetConfig: BaasCommandTargetConfig;
     try {
-      targetConfig = resolveBaasCommandTarget(this.config, target.environment);
-    } catch (error) {
-      return repairUnavailable(
-        "repair_baas_not_configured",
-        `Repair 无法复用 ${target.environment} BaaS 配置: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), (this.config.commandTimeoutSeconds + 5) * 1_000);
-    try {
-      const { response, body } = await executeBaasCommand<BaasCommandResponse>({
-        config: targetConfig,
-        tenant: this.config.commandTenant,
-        deviceId: target.deviceId,
-        deviceAffinity: context.taskId,
-        cmd: runtimeUserCommand,
-        timeoutSeconds: this.config.commandTimeoutSeconds,
-        signal: controller.signal,
-      });
-      const data = body.data ?? {};
-      const exitCode = data.exit_code ?? data.result?.exit_code ?? null;
-      const succeeded = response.ok
-        && (body.code == null || Number(body.code) === 0)
-        && body.data != null
-        && (exitCode == null || exitCode === 0);
-      const stdout = safeOutput(data.stdout ?? data.result?.stdout ?? "");
-      const stderr = safeOutput(data.stderr ?? data.result?.stderr ?? body.buserviceErrorMsg ?? body.message ?? "");
+      const result = await this.runtime.executeShell({ target, command: buildRepairRuntimeUserCommand(command), deviceAffinity: context.taskId });
+      const stdout = safeOutput(result.stdout), stderr = safeOutput(result.stderr);
       return {
-        status: succeeded ? "success" : "failed",
-        operation,
-        target: {
-          environment: target.environment,
-          bindingId: target.bindingId,
-          deviceId: target.deviceId,
-        },
-        exitCode,
-        stdout,
-        stderr,
-        evidenceLocators: succeeded
-          ? verifiedOutputLocators(operation, stdout, stderr, requestLocators)
-          : [],
-        shellObservedLocators: succeeded
-          ? shellObservedLocators(operation, stdout, stderr)
-          : [],
-        durationMs: data.execution_time_ms ?? null,
+        status: result.status, operation,
+        target: { environment: target.environment, bindingId: target.bindingId,
+          ...(target.sandboxId ? { sandboxId: target.sandboxId } : { deviceId: target.deviceId }) },
+        exitCode: result.exitCode, stdout, stderr, durationMs: result.durationMs,
+        ...(result.error ? { error: result.error } : {}),
+        evidenceLocators: result.status === "success" ? verifiedOutputLocators(operation, stdout, stderr, requestLocators) : [],
+        shellObservedLocators: result.status === "success" ? shellObservedLocators(operation, stdout, stderr) : [],
       };
     } catch (error) {
-      if (controller.signal.aborted) {
-        return { status: "unknown", operation, error: "BaaS 操作超时；远端执行状态未知" };
-      }
-      if (error instanceof RepairError) throw error;
-      throw new RepairError(
-        502,
-        "repair_baas_failed",
-        `BaaS 操作失败: ${redactText(error instanceof Error ? error.message : String(error), 2_000)}`,
-      );
-    } finally {
-      clearTimeout(timeout);
+      if (error instanceof BotRuntimeError) throw new RepairError(error.status, error.code, error.message);
+      throw error;
     }
   }
-
 }
