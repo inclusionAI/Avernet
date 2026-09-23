@@ -63,6 +63,10 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     DraftEditLeaseResource,
     UpdateSpaceMemberRoleRequest,
 )
+from agentclaw.community.adapters.http.openapi_v1.spaces.editor_approval_schemas import (
+    SkillEditorApprovalPolicy,
+    UpdateSkillEditorApprovalPolicy,
+)
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
 )
@@ -684,6 +688,52 @@ async def create_space_skill_editor_request(
         ),
         request,
     )
+
+
+@router.get(
+    "/{space_id}/skills/{skill_id}/editor-approval-policy",
+    response_model=Envelope[SkillEditorApprovalPolicy],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def get_space_skill_editor_approval_policy(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillEditorRequestServiceProtocol = Injected(
+        SpaceSkillEditorRequestServiceProtocol
+    ),
+) -> Envelope[SkillEditorApprovalPolicy]:
+    result = service.get_approval_policy(
+        space_id=space_id, skill_id=skill_id, actor_id=user_id
+    )
+    return envelope(SkillEditorApprovalPolicy.model_validate(result), request)
+
+
+@router.put(
+    "/{space_id}/skills/{skill_id}/editor-approval-policy",
+    response_model=Envelope[SkillEditorApprovalPolicy],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def update_space_skill_editor_approval_policy(
+    body: UpdateSkillEditorApprovalPolicy,
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillEditorRequestServiceProtocol = Injected(
+        SpaceSkillEditorRequestServiceProtocol
+    ),
+) -> Envelope[SkillEditorApprovalPolicy]:
+    result = service.update_approval_policy(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        auto_approve_editor_requests=body.auto_approve_editor_requests,
+    )
+    return envelope(SkillEditorApprovalPolicy.model_validate(result), request)
 
 
 @router.post(

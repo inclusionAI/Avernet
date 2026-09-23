@@ -252,6 +252,39 @@ def test_skill_editor_request_publishes_stable_wire_and_uses_current_user(
     )
 
 
+def test_skill_editor_approval_policy_contract_is_owner_scoped(
+    client, skill_editor_request_service
+):
+    skill_editor_request_service.get_approval_policy.return_value = {
+        "auto_approve_editor_requests": False
+    }
+    skill_editor_request_service.update_approval_policy.return_value = {
+        "auto_approve_editor_requests": True
+    }
+
+    read = client.get(
+        "/openapi/v1/bots/spaces/7/skills/9/editor-approval-policy"
+    )
+    updated = client.put(
+        "/openapi/v1/bots/spaces/7/skills/9/editor-approval-policy",
+        json={"auto_approve_editor_requests": True},
+    )
+
+    assert read.status_code == 200
+    assert read.json()["data"] == {"auto_approve_editor_requests": False}
+    assert updated.status_code == 200
+    assert updated.json()["data"] == {"auto_approve_editor_requests": True}
+    skill_editor_request_service.get_approval_policy.assert_called_once_with(
+        space_id=7, skill_id=9, actor_id="owner-1"
+    )
+    skill_editor_request_service.update_approval_policy.assert_called_once_with(
+        space_id=7,
+        skill_id=9,
+        actor_id="owner-1",
+        auto_approve_editor_requests=True,
+    )
+
+
 def test_draft_edit_lease_endpoints_publish_fenced_resource_contract(
     client, draft_edit_lease_service
 ):
