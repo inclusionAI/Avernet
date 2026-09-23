@@ -35,6 +35,8 @@ export type ClawevolveModuleOptions = {
   cancelExecution?: EvolveRouterDeps["cancelExecution"];
   artifactStore?: ObjectStore;
   artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
+  /** Signing store whose endpoint is reachable from AIS containers. */
+  aisArtifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   artifactBucket?: string;
   clawInsight?: ClawInsightInternalApi;
   insightTaskService?: EvolveRouterDeps["insightTaskService"];
@@ -105,6 +107,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     benchRunRepo: benchRun,
     artifactStore: options.artifactStore,
     artifactUrlStore: options.artifactUrlStore,
+    aisArtifactUrlStore: options.aisArtifactUrlStore,
     botWorkflowPermissionRepo: botWorkflowPermission,
     modelConfig,
   });

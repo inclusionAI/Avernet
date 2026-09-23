@@ -115,6 +115,8 @@ export type EvolveRouterDeps = {
   artifactStore?: ObjectStore;
   /** Backward-compatible signing-only dependency used by an embedding host. */
   artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
+  /** Signing-only dependency for artifacts uploaded from AIS containers. */
+  aisArtifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   botWorkflowPermissionRepo?: BotWorkflowPermissionRepository | null;
   runAnalysisStarter?: RunAnalysisStarter | null;
   modelConfig?: EvolveModelConfig;
@@ -1105,6 +1107,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   const unavailableArtifactStore = new UnavailableObjectStore();
   const artifactStore = deps.artifactStore ?? unavailableArtifactStore;
   const artifactUrlStore = deps.artifactUrlStore ?? deps.artifactStore ?? unavailableArtifactStore;
+  const aisArtifactUrlStore = deps.aisArtifactUrlStore ?? artifactUrlStore;
   const botWorkflowPermissionRepo = deps.botWorkflowPermissionRepo ?? null;
   const runAnalysisStarter = deps.runAnalysisStarter
     ?? (repo && db ? createRunAnalysisStarter({ repo, db, dispatch }) : null);
@@ -2958,7 +2961,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         res.status(422).json({ error: error instanceof Error ? error.message : String(error) }); return;
       }
       const headers = { "Content-Type": request.spec.contentType };
-      const url = await artifactUrlStore.createSignedUrl(
+      const url = await aisArtifactUrlStore.createSignedUrl(
         request.spec.objectKey, "PUT", EVOLVE_ARTIFACT_URL_TTL_SECONDS, headers,
       );
       res.json({
