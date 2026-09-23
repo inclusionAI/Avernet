@@ -699,7 +699,10 @@ def test_code_policy_mcp_requires_default_exclusion_to_join_ordinary_set(active,
     repository = CapabilityDesiredStateRepository(db)
     with db.transactional_orm_session() as session:
         ordinary = SkillSet(name="ordinary", user_id="owner", bolt_id="bot", is_active=active, env="dev", engine_type="openclaw")
-        default = SkillSet(name="default", is_default=True, engine_type="openclaw", env="dev")
+        default = SkillSet(
+            name="default", user_id="", bolt_id="", is_default=True,
+            engine_type="openclaw", env="dev",
+        )
         session.add_all([ordinary, default])
         session.flush()
         if excluded:
