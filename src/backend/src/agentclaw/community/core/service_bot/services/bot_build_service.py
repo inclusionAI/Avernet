@@ -181,6 +181,48 @@ class BotBuildService:
     def _get_device_binding_repo(self):
         return self._device_binding_repo
 
+    def _wait_for_device_ready(
+        self,
+        device_id: str,
+        timeout_seconds: float = 30.0,
+        poll_interval_seconds: float = 2.0,
+    ) -> None:
+        """Block until the bot's device is ACTIVE on BaaS (or timeout).
+
+        In singlebox the build pipeline triggers immediately after bot
+        creation, racing the per-device boot (local_proc sandbox still
+        writing config; BaaS callback hasn't arrived — every exec_shell
+        and ws_info call returns 404). This wait is a no-op in
+        production where the device is typically long-running ACTIVE.
+        On timeout it returns silently: the subsequent exec_shell calls
+        will surface the real error.
+        """
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            try:
+                # get_publish_progress checks the device without needing
+                # the ws-info path; a 200 response means BaaS knows
+                # the bot. The binding's own status is in the backend
+                # DB (ac_entity_device_binding), checked via the repo.
+                ws_info = self._baas_service.get_ws_info_by_bot_uuid(
+                    bot_uuid=device_id,
+                    tenant="team_claw",
+                )
+                if ws_info:
+                    logger.info(
+                        "[BotBuildService._wait_for_device_ready] "
+                        f"device ready: {device_id}"
+                    )
+                    return
+            except Exception:
+                pass  # Still PENDING/404 — poll again.
+            time.sleep(poll_interval_seconds)
+        logger.warning(
+            "[BotBuildService._wait_for_device_ready] "
+            f"device {device_id} not ready after {timeout_seconds}s; "
+            "proceeding (exec_shell may fail)"
+        )
+
     def _resolve_sandbox_provider(self, bot: Dict[str, Any]) -> EngineSandboxProvider:
         engine_type = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
         engine_type = resolve_bot_engine(bot) or engine_type
@@ -369,6 +411,17 @@ class BotBuildService:
             # ============================================================
             # Step 2: Bot 实例迁移
             # ============================================================
+            # 2.0 Wait for the device to become ACTIVE before the build
+            # generates MCP / stage configs over it. In singlebox the
+            # freshly created bot's device can still be mid-boot (build
+            # triggers before the DeviceActivatedEvent callback lands),
+            # and every BaaS exec_shell / get_ws_info returns 404
+            # "BOT_NOT_FOUND" until the boot finishes; in production the
+            # device is typically long-running ACTIVE so this single
+            # check-and-return is a no-op.
+            if device_id:
+                self._wait_for_device_ready(device_id)
+
             # 2.1 执行 rsync 迁移
             transfer_started = time.monotonic()
             migration_success = False
