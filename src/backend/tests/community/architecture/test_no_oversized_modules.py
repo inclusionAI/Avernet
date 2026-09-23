@@ -56,27 +56,6 @@ _MAX_LINES = 1000
 # the current size on disk.
 # ---------------------------------------------------------------------------
 _ALLOWLIST: dict[str, str] = {
-    # ── openapi_v1 per-route tables ──────────────────────────────────
-    # Two files that are *inventories*: one row per public operation. They
-    # cross the cap by growing with the surface, not by taking on a second
-    # concern, so splitting them buys nothing a reader wants — the reviewer's
-    # call on #1727, where extracting the tables to their own modules was
-    # judged worse than the exception: it turned four added rows into a
-    # whole-file move and made the change unreadable.
-    #
-    # This file was exactly 1000 lines before that PR, so the first route added
-    # after the guard landed was always going to hit this. Splitting the *seam*
-    # from the *table* is still the obvious refactor when someone wants it;
-    # it should just be its own change, not a rider on a feature.
-    "adapters/http/openapi_v1/admission.py":
-        "1020 — one ADMISSION row per public operation; grows with the surface",
-    # The third file of that shape, and it crossed for the same reason: W9's
-    # three ``cli-tools`` operations were the first rows added after it reached
-    # exactly 1000. Splitting the ``Check``/``EDIT_LOCK`` vocabulary at the top
-    # from the table below it is the obvious refactor and is still available —
-    # it just should not ride on a feature that adds three rows.
-    "adapters/http/openapi_v1/authorization.py":
-        "1011 — one AUTHORIZATION row per public operation; grows with the surface",
     # ── bot_management cluster ───────────────────────────────────────
     "adapters/http/bot_management/router.py":
         "~2931 lines — biggest router; bot CRUD + lifecycle + status + engine config + ext.",

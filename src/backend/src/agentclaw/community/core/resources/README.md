@@ -17,6 +17,7 @@ consumes:
   - "DeviceFileSystem (transitional: FileService P0 else-branch injection)"
   - "PassportPlugin (yuque permission sync, injected via the plugin Protocol)"
 internal_dependencies:
+  - agentclaw.community.core.errors
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.platform    # repository contracts consumed by this module
   - agentclaw.community.core.bot_management
@@ -30,3 +31,13 @@ internal_dependencies:
 ### Change impact
 
 Upload signatures here flow up to api/resources routes — the kw-only (data, filename) shape is the R7-correct contract; reverts to UploadFile pull FastAPI back into core.
+
+### Desktop link management
+
+LinkWorkflowProtocol exposes owner-scoped list/create/update/delete to the new
+OpenAPI adapter. Mutations reuse ResourceService and Yuque resolution. A resource
+must match both bot_id and owner_id before mutation. New calls request strict
+Passport synchronization: failures propagate, including persistence failures.
+Legacy sync_yuque_permissions callers retain the default best-effort behavior.
+A failed external synchronization may follow a persisted resource write; callers
+should reload the resource before retrying. Batch operations are not atomic.

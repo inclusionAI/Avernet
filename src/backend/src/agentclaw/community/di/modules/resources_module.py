@@ -17,16 +17,27 @@ wrap legacy ``services/openclawserver/`` paths and live transitionally
 inside the dependencies module. Task 23 cleanup decides their fate
 once the legacy code is fully gone.
 """
+
 from __future__ import annotations
 
-from injector import Binder, Module, inject, provider, singleton
-
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
+from agentclaw.community.core.devices.services.device_context_resolver import (
+    DeviceContextResolver,
+)
+from agentclaw.community.core.repository.implementations.platform.resource import (
+    ResourceRepository as UnifiedResourceRepository,
+)
+from agentclaw.community.core.repository.protocols.platform import (
+    ResourceRepositoryProtocol,
+)
 from agentclaw.community.core.resources.factory import ResourceServiceFactory
-from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
+from agentclaw.community.core.resources.link_workflow import (
+    LinkWorkflow,
+    LinkWorkflowProtocol,
+)
 from agentclaw.community.log import get_logger
-from agentclaw.community.core.repository.implementations.platform.resource import ResourceRepository as UnifiedResourceRepository
-
+from agentclaw.community.plugin_api.passport import PassportPlugin
+from injector import Binder, Module, inject, provider, singleton
 
 logger = get_logger()
 
@@ -35,9 +46,7 @@ class ResourcesModule(Module):
     """Production bindings for the resources module."""
 
     def configure(self, binder: Binder) -> None:
-        binder.bind(
-            ResourceServiceFactory, to=ResourceServiceFactory, scope=singleton
-        )
+        binder.bind(ResourceServiceFactory, to=ResourceServiceFactory, scope=singleton)
         # Provider-agnostic workspace-namespace file service (mirrors IdentityModule's
         # self-binding). Its @inject ctor pulls path_factory + repos + resolver +
         # device-fs dispatcher; deferred import keeps module load cheap and avoids the
@@ -45,6 +54,7 @@ class ResourcesModule(Module):
         from agentclaw.community.core.services.resource_file_service import (
             ResourceFileService,
         )
+
         binder.bind(ResourceFileService, to=ResourceFileService, scope=singleton)
         # Unified ORM repo (one body, ZDAS + SQLite). @inject ctor takes
         # the bound DatabasePlugin; prod vs test differ only by which
@@ -62,3 +72,15 @@ class ResourcesModule(Module):
         self, svc: ResourceServiceFactory
     ) -> ResourceServiceFactoryProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def link_workflow(
+        self,
+        factory: ResourceServiceFactoryProtocol,
+        repository: ResourceRepositoryProtocol,
+        resolver: DeviceContextResolver,
+        passport: PassportPlugin,
+    ) -> LinkWorkflowProtocol:
+        return LinkWorkflow(factory, repository, resolver, passport)

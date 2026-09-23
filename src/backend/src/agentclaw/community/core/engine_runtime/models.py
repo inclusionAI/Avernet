@@ -134,6 +134,7 @@ class ConnectionResult:
     engine: str
     expires_at: str
     sockets: list[SocketInfo] = field(default_factory=list)
+    transport_mode: str = ""
 
 
 __all__ = ["BotFacts", "ConnectionResult", "EngineResult", "SocketInfo"]

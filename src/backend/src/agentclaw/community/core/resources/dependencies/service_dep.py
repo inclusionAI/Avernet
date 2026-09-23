@@ -1,4 +1,5 @@
 """Yuque permission sync — fire-and-forget helper used by routes."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -7,7 +8,9 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import SubResourceItem
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.platform import (
+        ResourceRepositoryProtocol,
+    )
     from agentclaw.community.plugin_api.passport import PassportPlugin
 
 logger = get_logger()
@@ -21,13 +24,17 @@ def sync_yuque_permissions(
     user_id: str,
     repository: "ResourceRepositoryProtocol",
     passport: "PassportPlugin",
+    *,
+    strict: bool = False,
 ) -> None:
     """Read all bot's yuque links, build the neutral ``SubResourceItem`` list,
     and call the injected ``PassportPlugin.save_sub_resources``.
 
     This is a full (not incremental) update. Failure is logged but does not
     interrupt the caller — permissions are eventual-consistency. In the community
-    build the injected passport plugin is a no-op.
+    build the injected passport plugin is a no-op. New OpenAPI callers pass
+    strict=True to propagate failed writes/synchronization; legacy callers
+    retain the default best-effort behavior.
     """
     try:
         from agentclaw.community.core.resources.models import ResourceType
@@ -40,7 +47,8 @@ def sync_yuque_permissions(
             status="active",
         )
         yuque_links = [
-            item for item in all_links
+            item
+            for item in all_links
             if (item.get("attributes") or {}).get("link_type") == "yuque"
         ]
 
@@ -64,25 +72,43 @@ def sync_yuque_permissions(
             if book_id:
                 detail_config["book_id"] = str(book_id)
 
-            sub_resources.append(SubResourceItem(
-                resource_type="MCP_TOOL",
-                sub_resource_type=sub_resource_type,
-                sub_resource_code=url,
-                detail_config=detail_config,
-            ))
+            sub_resources.append(
+                SubResourceItem(
+                    resource_type="MCP_TOOL",
+                    sub_resource_type=sub_resource_type,
+                    sub_resource_code=url,
+                    detail_config=detail_config,
+                )
+            )
 
         logger.info(
             "[sync_yuque_permissions] Sending to passport: bot_id=%s, user_id=%s, count=%d, sub_resources=%s",
-            bot_id, user_id, len(sub_resources),
-            [{"code": s.sub_resource_code, "type": s.sub_resource_type, "detail": s.detail_config} for s in sub_resources],
+            bot_id,
+            user_id,
+            len(sub_resources),
+            [
+                {
+                    "code": s.sub_resource_code,
+                    "type": s.sub_resource_type,
+                    "detail": s.detail_config,
+                }
+                for s in sub_resources
+            ],
         )
         result = passport.save_sub_resources(bot_id, user_id, sub_resources)
+        if strict and not result:
+            raise RuntimeError("Link permissions were not synchronized")
         logger.info(
             "[sync_yuque_permissions] Passport result: bot_id=%s, success=%s",
-            bot_id, result,
+            bot_id,
+            result,
         )
     except Exception as exc:
+        if strict:
+            raise
         logger.warning(
             "[sync_yuque_permissions] failed: bot_id=%s, error=%s",
-            bot_id, exc, exc_info=True,
+            bot_id,
+            exc,
+            exc_info=True,
         )

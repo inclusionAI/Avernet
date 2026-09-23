@@ -15,6 +15,7 @@ provides:
   - "EngineResult / ConnectionResult / SocketInfo value objects"
   - "SessionKeyCodec / SessionKeyCodecRegistry — the engine-specific wire form of a session id (assembled by EngineRuntimeModule)"
   - "Engine-runtime domain errors (no HTTP status; the adapter maps them)"
+  - "DesktopConnectionServiceProtocol — owner-affined desktop WebSocket discovery"
 consumes:
   - "BotService — owner-scoped bot lookup; the isolation seam"
   - "DeviceContextResolver — bot -> DeviceContext (the repo's single provider-resolution point)"
@@ -23,6 +24,8 @@ consumes:
   - "DeviceBindingRepository — the active binding id, without building conn info"
   - "BotPublishRepository — a service bot's published stage bindings (ext.binding.{verify,online})"
 internal_dependencies:
+  - agentclaw.community.core.service_bot.services.baas_service
+  - agentclaw.community.core.service_bot.baas_service_errors
   - agentclaw.community.core.bot_management.engines    # engine-type spelling normalisation
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
@@ -69,3 +72,16 @@ are load-bearing and must survive any refactor:
 
 Adding a group means adding a router, not a relay method: `call()` is a generic
 forward on purpose.
+
+### Desktop connection contract
+
+Desktop Bots support draft only. After owner/operator authorization, the active
+binding is resolved through BaaS get_ws_info using device_affinity=owner_id and
+the engine-specific WebSocket path. The default desktop_connection.mode is
+direct: only an explicit loopback ws port and the expected path are accepted.
+The optional relay value uses existing gateway routing. Unknown configuration
+keys and unsupported modes fail validation. The additive transport_mode field
+appears only in desktop responses; cloud and friend responses retain their shape.
+HTTP runtime discovery and legacy endpoints retain their existing behavior.
+Consumer contract tests are test_desktop_connection_contract.py and
+test_desktop_workflows.py; Mock BaaS results do not constitute device acceptance.

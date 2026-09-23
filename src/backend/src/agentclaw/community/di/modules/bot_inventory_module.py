@@ -2,23 +2,29 @@
 
 from __future__ import annotations
 
-from injector import Binder, Module, inject, provider, singleton
-
+from agentclaw.community.adapters.bot_space_context import (
+    SpaceServiceBotSpaceContext,
+)
+from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.local_bot_workflow_service import (
     LocalBotWorkflowServiceProtocol,
 )
-from agentclaw.community.adapters.bot_space_context import (
-    SpaceServiceBotSpaceContext,
-)
-from agentclaw.community.core.bot_inventory.adapters.service_lifecycle import (
-    ServiceLifecycleView,
+from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+    CollaboratorService,
 )
 from agentclaw.community.core.bot_inventory.adapters.service_edit_lock import (
     ServiceEditLockView,
 )
+from agentclaw.community.core.bot_inventory.adapters.service_lifecycle import (
+    ServiceLifecycleView,
+)
 from agentclaw.community.core.bot_inventory.adapters.template_page import (
     TemplateServiceInventoryTemplatePort,
+)
+from agentclaw.community.core.bot_inventory.local_progress import (
+    LocalProgressService,
+    LocalProgressServiceProtocol,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryAccessPort,
@@ -42,21 +48,19 @@ from agentclaw.community.core.bot_management.services.bot_service import BotServ
 from agentclaw.community.core.bot_management.services.template_service import (
     TemplateService,
 )
-from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
-    CollaboratorService,
-)
 from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
     DesktopBotService,
-)
-from agentclaw.community.core.repository.protocols.publishing import (
-    BotPublishRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLockRepositoryProtocol,
     CollaboratorRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from injector import Binder, Module, inject, provider, singleton
 
 
 class BotInventoryModule(Module):
@@ -180,3 +184,11 @@ class BotInventoryModule(Module):
         self, service: LocalBotWorkflowService
     ) -> LocalBotWorkflowServiceProtocol:
         return service
+
+    @singleton
+    @provider
+    @inject
+    def local_progress(
+        self, workflow: LocalBotWorkflowServiceProtocol, baas: BaasServiceProtocol
+    ) -> LocalProgressServiceProtocol:
+        return LocalProgressService(workflow, baas)

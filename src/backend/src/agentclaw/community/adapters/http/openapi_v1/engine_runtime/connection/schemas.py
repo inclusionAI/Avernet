@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
 
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import SocketKind
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Socket(BaseModel):
@@ -64,6 +65,15 @@ class Connection(BaseModel):
     sockets: list[Socket] = Field(
         description="Exactly the sockets this bot offers. A kind absent from "
         "the list is not available for this bot."
+    )
+
+
+class DesktopConnection(Connection):
+    """Desktop connection adds explicit mode without changing cloud responses."""
+
+    model_config = ConfigDict(json_schema_extra={})
+    transport_mode: Literal["direct", "relay"] = Field(
+        description="Effective desktop WebSocket mode; direct connects to localhost."
     )
 
 

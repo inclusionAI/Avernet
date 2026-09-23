@@ -33,7 +33,7 @@ per-user filter upstream would be a silent no-op rather than isolation. An
 admitted operator therefore sees every session on the addressed runtime,
 including ones end users' chats created; the published docs say so plainly.
 
-**Which bots.** ``personal`` and ``service`` — the allowlist. Anything else —
+**Which bots.** ``personal``, ``desktop`` and ``service`` — the allowlist. Anything else —
 an empty type, a type this build has never heard of — is refused rather than
 assumed personal.
 
@@ -73,7 +73,7 @@ logger = get_logger()
 
 #: The bot types an operator surface may serve. Necessary but **not**
 #: sufficient — the caller must also pass :func:`require_bot_operator`.
-SUPPORTED_BOT_TYPES = frozenset({"personal", SERVICE_BOT_TYPE})
+SUPPORTED_BOT_TYPES = frozenset({"personal", "desktop", SERVICE_BOT_TYPE})
 
 #: The least collaborator level that holds an operator channel. One bar for
 #: every operation on the surface — reads, writes and the socket alike —

@@ -1,10 +1,15 @@
 """Unit tests for Bot inventory action policy tables."""
+
 from __future__ import annotations
 
 import pytest
 
 from agentclaw.community.core.bot_inventory.policies.action_policy import actions_for
-from agentclaw.community.core.bot_inventory.types import BotAction, BotInventoryKind, DisplayState
+from agentclaw.community.core.bot_inventory.types import (
+    BotAction,
+    BotInventoryKind,
+    DisplayState,
+)
 
 
 def _values(actions: tuple[BotAction, ...]) -> tuple[str, ...]:
@@ -19,8 +24,15 @@ def _values(actions: tuple[BotAction, ...]) -> tuple[str, ...]:
             BotInventoryKind.PERSONAL_CLOUD,
             DisplayState.RUNNING,
             (
-                "view", "chat", "edit", "restart", "engine_restart", "delete",
-                "passport", "engine_config", "data_init",
+                "view",
+                "chat",
+                "edit",
+                "restart",
+                "engine_restart",
+                "delete",
+                "passport",
+                "engine_config",
+                "data_init",
             ),
             {},
         ),
@@ -39,7 +51,10 @@ def _values(actions: tuple[BotAction, ...]) -> tuple[str, ...]:
             BotInventoryKind.PERSONAL_CLOUD,
             DisplayState.FAILED,
             ("view", "delete"),
-            {"restart": "bot provisioning failed", "engine_restart": "bot provisioning failed"},
+            {
+                "restart": "bot provisioning failed",
+                "engine_restart": "bot provisioning failed",
+            },
         ),
         (
             BotInventoryKind.PERSONAL_CLOUD,
@@ -55,10 +70,17 @@ def _values(actions: tuple[BotAction, ...]) -> tuple[str, ...]:
         (
             BotInventoryKind.LOCAL,
             DisplayState.LOCAL_RUNNING,
-            ("view", "chat", "edit", "restart", "delete", "open_folder"),
+            (
+                "view",
+                "chat",
+                "edit",
+                "restart",
+                "engine_restart",
+                "delete",
+                "open_folder",
+            ),
             {
                 "runtime_logs": "not supported in this phase",
-                "engine_restart": "not supported in this phase",
             },
         ),
         (
@@ -71,13 +93,21 @@ def _values(actions: tuple[BotAction, ...]) -> tuple[str, ...]:
             BotInventoryKind.LOCAL,
             DisplayState.LOCAL_PENDING,
             ("view", "delete"),
-            {"chat": "local bot not ready", "edit": "local bot not ready", "restart": "local bot not ready"},
+            {
+                "chat": "local bot not ready",
+                "edit": "local bot not ready",
+                "restart": "local bot not ready",
+            },
         ),
         (
             BotInventoryKind.LOCAL,
             DisplayState.LOCAL_FAILED,
             ("view", "delete"),
-            {"chat": "local bot not ready", "edit": "local bot not ready", "restart": "local bot not ready"},
+            {
+                "chat": "local bot not ready",
+                "edit": "local bot not ready",
+                "restart": "local bot not ready",
+            },
         ),
         (BotInventoryKind.SERVICE, DisplayState.SERVICE_DRAFT, ("view",), {}),
     ],

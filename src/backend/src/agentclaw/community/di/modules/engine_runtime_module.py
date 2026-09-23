@@ -22,13 +22,17 @@ that leaves every other engine's ids exactly as they are.
 
 from __future__ import annotations
 
-from injector import Binder, Module, inject, provider, singleton
-
+from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
+from agentclaw.community.core.engine_runtime.desktop_connection import (
+    DesktopConnectionConfig,
+    DesktopConnectionService,
+    DesktopConnectionServiceProtocol,
+)
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
 from agentclaw.community.core.engine_runtime.session_key import (
     TECLAW_ENGINE_TYPE,
@@ -36,15 +40,21 @@ from agentclaw.community.core.engine_runtime.session_key import (
     PassThroughSessionKeyCodec,
     SessionKeyCodecRegistry,
 )
-from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
-from agentclaw.community.core.repository.protocols.publishing import (
-    BotPublishRepositoryProtocol,
-)
 from agentclaw.community.core.repository.protocols.chat import (
     ExpertChatInstanceRepository,
 )
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
+from agentclaw.community.core.runtime_binding.service import (
+    RuntimeBindingResolutionService,
+)
+from agentclaw.community.di.modules.config_module import read_user_config
+from injector import Binder, Module, inject, provider, singleton
 
 
 class EngineRuntimeModule(Module):
@@ -54,6 +64,21 @@ class EngineRuntimeModule(Module):
         binder.bind(EngineRuntimeRelay, to=EngineRuntimeRelay, scope=singleton)
         binder.bind(
             EngineConnectionService, to=EngineConnectionService, scope=singleton
+        )
+
+    @singleton
+    @provider
+    @inject
+    def desktop_connections(
+        self, baas: BaasServiceProtocol
+    ) -> DesktopConnectionServiceProtocol:
+        block = read_user_config().get("desktop_connection", {})
+        if not isinstance(block, dict):
+            raise ValueError("desktop_connection must be a mapping")
+        if set(block) - {"mode"}:
+            raise ValueError("unknown desktop_connection configuration key")
+        return DesktopConnectionService(
+            baas, DesktopConnectionConfig(block.get("mode", "direct"))
         )
 
     @singleton

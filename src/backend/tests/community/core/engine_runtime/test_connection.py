@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import dataclasses
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
-
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -91,9 +91,7 @@ class _Devices:
     """
 
     def __init__(self, **overrides):
-        defaults = dict(
-            type="remote", target="tgt", token="tok", available=True
-        )
+        defaults = dict(type="remote", target="tgt", token="tok", available=True)
         self._url_override = overrides.pop("url", None)
         self.info = SimpleNamespace(url="", **{**defaults, **overrides})
         self.kwargs = None
@@ -193,19 +191,21 @@ def _svc(
     gateway=None,
     collaborators=None,
     publish_repo=None,
+    desktop=None,
 ):
     return EngineConnectionService(
-        bots or _Bots(), bindings or _Bindings(), devices or _Devices(),
+        bots or _Bots(),
+        bindings or _Bindings(),
+        devices or _Devices(),
         gateway if gateway is not None else _gateway(),
         collaborators or _Collaborators(),
         publish_repo or _PublishRepo(),
+        desktop_connections=desktop or Mock(),
     )
 
 
 def _build(svc, caller_id=OWNER, stage="draft"):
-    return svc.build(
-        bot_id=BOT, owner_id=OWNER, caller_id=caller_id, stage=stage
-    )
+    return svc.build(bot_id=BOT, owner_id=OWNER, caller_id=caller_id, stage=stage)
 
 
 def test_foreign_bot_raises_before_resolving_a_device():
@@ -312,7 +312,9 @@ def test_a_failing_provider_is_an_upstream_error_not_a_500():
         _build(_svc(devices=devices))
 
 
-@pytest.mark.parametrize("error_name", ["DeviceNotFoundError", "InvalidDeviceStatusError"])
+@pytest.mark.parametrize(
+    "error_name", ["DeviceNotFoundError", "InvalidDeviceStatusError"]
+)
 def test_an_unusable_device_is_not_ready_rather_than_a_500(error_name):
     """No binding, a failed one, or one the operator cannot reach — the same
     class of answer as a device that will not resolve."""
@@ -352,12 +354,16 @@ def test_the_published_url_never_names_the_hop_behind_the_gateway():
 def test_an_http_gateway_base_becomes_ws():
     """The branch singlebox actually runs — its overlay ships an http base."""
     result = _build(_svc(gateway=_gateway(base="http://127.0.0.1:9999")))
-    assert result.sockets[0].url.startswith("ws://127.0.0.1:9999/openapi/v1/bots/messages/ws/")
+    assert result.sockets[0].url.startswith(
+        "ws://127.0.0.1:9999/openapi/v1/bots/messages/ws/"
+    )
 
 
 def test_a_gateway_base_already_spelled_as_a_socket_origin_is_kept():
     result = _build(_svc(gateway=_gateway(base="wss://gw.example")))
-    assert result.sockets[0].url.startswith("wss://gw.example/openapi/v1/bots/messages/ws/")
+    assert result.sockets[0].url.startswith(
+        "wss://gw.example/openapi/v1/bots/messages/ws/"
+    )
 
 
 @pytest.mark.parametrize(
@@ -374,7 +380,9 @@ def test_a_gateway_base_carrying_a_path_is_refused(base):
 
 def test_a_trailing_slash_and_stray_whitespace_are_normalised():
     result = _build(_svc(gateway=_gateway(base="  https://gw.example//  ")))
-    assert result.sockets[0].url.startswith("wss://gw.example/openapi/v1/bots/messages/ws/")
+    assert result.sockets[0].url.startswith(
+        "wss://gw.example/openapi/v1/bots/messages/ws/"
+    )
 
 
 def test_a_relay_url_carrying_a_fragment_is_refused():
@@ -402,11 +410,11 @@ def test_a_provider_query_is_preserved_and_the_credential_appended():
 def test_the_provider_path_is_carried_through_verbatim():
     """Whatever the provider put after its routing prefix is what a caller
     connects to — this endpoint holds no opinion about that grammar."""
-    devices = _Devices(
-        url="wss://proxy.example/proxypass/tgt/v2/api/openclaw/ws"
-    )
+    devices = _Devices(url="wss://proxy.example/proxypass/tgt/v2/api/openclaw/ws")
     url = _build(_svc(devices=devices)).sockets[0].url
-    assert url.startswith("wss://gw.example/openapi/v1/bots/messages/ws/tgt/v2/api/openclaw/ws?")
+    assert url.startswith(
+        "wss://gw.example/openapi/v1/bots/messages/ws/tgt/v2/api/openclaw/ws?"
+    )
 
 
 @pytest.mark.parametrize("base", ["https://gw.example/#", "https://gw.example/?x=1"])
@@ -422,7 +430,9 @@ def test_a_gateway_base_carrying_url_delimiters_is_refused(base):
     "devices",
     [
         pytest.param(_Devices(ws_token="tok\ud800"), id="credential"),
-        pytest.param(_Devices(url="wss://p.example/proxypass/t\ud800/ws"), id="relay-url"),
+        pytest.param(
+            _Devices(url="wss://p.example/proxypass/t\ud800/ws"), id="relay-url"
+        ),
         pytest.param(
             _Devices(type="local", target="127.0.0.1\ud800:20003"), id="local-target"
         ),
@@ -507,7 +517,10 @@ def test_the_target_segment_is_not_percent_encoded():
     gateway matches the target raw."""
     devices = _Devices(target="ARCA_ARCA-SANDBOX-abc@0:20003")
     url = _build(_svc(devices=devices)).sockets[0].url
-    assert "/openapi/v1/bots/messages/ws/ARCA_ARCA-SANDBOX-abc@0:20003/api/openclaw/ws" in url
+    assert (
+        "/openapi/v1/bots/messages/ws/ARCA_ARCA-SANDBOX-abc@0:20003/api/openclaw/ws"
+        in url
+    )
 
 
 def test_a_local_ipv6_target_keeps_its_brackets():
@@ -613,6 +626,7 @@ def test_result_exposes_no_field_beside_the_url_to_compose_with():
         "engine",
         "expires_at",
         "sockets",
+        "transport_mode",
     }
     assert {f.name for f in dataclasses.fields(result.sockets[0])} == {"kind", "url"}
 
@@ -846,8 +860,7 @@ def test_a_composed_url_with_no_credential_publishes_no_query_string():
     devices = _arca(token="")
     url = _build(_svc(devices=devices)).sockets[0].url
     assert url == (
-        "wss://gw.example/openapi/v1/bots/messages/ws/"
-        f"{ARCA_TARGET}/api/openclaw/ws"
+        f"wss://gw.example/openapi/v1/bots/messages/ws/{ARCA_TARGET}/api/openclaw/ws"
     )
     assert "?" not in url
 
@@ -864,19 +877,23 @@ def test_composing_and_readdressing_agree_byte_for_byte():
     and path. They share a builder precisely so they cannot drift — this pins
     that they have not."""
     composed = _build(_svc(devices=_arca())).sockets[0].url
-    readdressed = _build(
-        _svc(
-            devices=_Devices(
-                type="baas",
-                target=ARCA_TARGET,
-                token=ARCA_TOKEN,
-                url=(
-                    "wss://agentclawproxy-prod.example.com/proxypass/"
-                    f"{ARCA_TARGET}/api/openclaw/ws"
-                ),
+    readdressed = (
+        _build(
+            _svc(
+                devices=_Devices(
+                    type="baas",
+                    target=ARCA_TARGET,
+                    token=ARCA_TOKEN,
+                    url=(
+                        "wss://agentclawproxy-prod.example.com/proxypass/"
+                        f"{ARCA_TARGET}/api/openclaw/ws"
+                    ),
+                )
             )
         )
-    ).sockets[0].url
+        .sockets[0]
+        .url
+    )
     assert composed == readdressed == ARCA_URL
 
 

@@ -10,32 +10,32 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from datetime import datetime, timezone
 import json
+from datetime import datetime, timezone
 from typing import Annotated
 from urllib.parse import quote, urlsplit
 
-from fastapi import APIRouter, Query, Request
-
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Envelope,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection.schemas import (
     Connection,
+    DesktopConnection,
     FriendConnection,
     Socket,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
-    OwnerIdDep,
-    StageQuery,
-)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import (
     FriendUserIdQuery,
     authorize_friend_chat,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+    StageQuery,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -56,11 +56,13 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError as ExpertBotNotFoundError,
+)
+from agentclaw.community.core.expert_chat.errors import (
     ConnectionError as ExpertConnectionError,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.di.config import GatewayEndpoint
-from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from fastapi import APIRouter, Query, Request
 
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/connection",
@@ -142,7 +144,9 @@ def _ready_friend_connection(
     )
 
 
-@router.get("", response_model=Envelope[Connection | FriendConnection])
+@router.get(
+    "", response_model=Envelope[DesktopConnection | Connection | FriendConnection]
+)
 @envelope_errors
 async def get_connection(
     bot_id: BotIdPath,
@@ -163,7 +167,7 @@ async def get_connection(
     ),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     gateway: GatewayEndpoint = Injected(GatewayEndpoint),
-) -> Envelope[Connection | FriendConnection]:
+) -> Envelope[DesktopConnection | Connection | FriendConnection]:
     """Get usable socket connections for a bot."""
     if f_user_id is not None:
         if stage is not RuntimeStage.DRAFT or not session_id:
@@ -228,9 +232,14 @@ async def get_connection(
         stage=stage.value,
     )
     return envelope(
-        Connection(
+        (DesktopConnection if result.transport_mode else Connection)(
             engine=result.engine,
             expires_at=result.expires_at,
+            **(
+                {"transport_mode": result.transport_mode}
+                if result.transport_mode
+                else {}
+            ),
             sockets=[Socket(kind=s.kind, url=s.url) for s in result.sockets],
         ),
         request,

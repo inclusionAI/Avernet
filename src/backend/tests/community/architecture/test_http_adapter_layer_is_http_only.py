@@ -49,6 +49,8 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     "sofa_app.py",
     "middleware.py",
     "dependencies.py",
+    # Pure table split from enforcement; concrete-service imports remain checked.
+    "authorization_rules.py",
     "__init__.py",
 })
 

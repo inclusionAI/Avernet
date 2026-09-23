@@ -4,41 +4,48 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Mapping
 
-from fastapi import APIRouter, Depends, Header, Path as ApiPath, Query, Request
-from fastapi.responses import JSONResponse
-
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    BotIdPath,
     Deleted,
     Envelope,
     Page,
     PageParamsDep,
-    BotIdPath,
-)
-from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
-from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
-from agentclaw.community.adapters.http.openapi_v1.responses import (
-    accepted,
-    created,
-    deleted as deleted_envelope,
-    envelope,
-    envelope_errors,
-    page as page_envelope,
 )
 from agentclaw.community.adapters.http.openapi_v1.creation_grant import (
     grant_the_creating_app,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     DelegatedUserDep,
     UserIdDep,
     require_granted_own_bot,
 )
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    accepted,
+    created,
+    envelope,
+    envelope_errors,
+)
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    deleted as deleted_envelope,
+)
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    page as page_envelope,
+)
 from agentclaw.community.api.local_bot_workflow_service import (
     LocalBotWorkflowServiceProtocol,
 )
+from agentclaw.community.api.local_progress_service import LocalProgressServiceProtocol
 from agentclaw.community.core.bot_inventory.types import LocalBotCreateCommand
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
+from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import Path as ApiPath
+from fastapi.responses import JSONResponse
+
 from .schemas import (
     LocalBot,
     LocalBotAuthPending,
@@ -49,11 +56,12 @@ from .schemas import (
     LocalOpenFolder,
     LocalOpenFolderResult,
 )
-from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/bots", tags=["local-bots"], route_class=PublicAPIRoute)
+router = APIRouter(
+    prefix="/openapi/v1/bots", tags=["local-bots"], route_class=PublicAPIRoute
+)
 
 _GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
 
@@ -457,4 +465,24 @@ async def open_local_bot_folder(
     )
     return envelope(
         LocalOpenFolderResult(bot_id=str(result.get("bot_id") or bot_id)), request
+    )
+
+
+@router.get(
+    "/{bot_id}/local/start-progress",
+    response_model=Envelope[dict[str, Any]],
+    dependencies=_GRANT_CHECKED_OWN_BOT,
+)
+@envelope_errors
+async def local_start_progress(
+    bot_id: BotIdPath,
+    owner_id: UserIdDep,
+    request: Request,
+    x_space_id: SpaceIdHeader = None,
+    service: LocalProgressServiceProtocol = Injected(LocalProgressServiceProtocol),
+) -> Envelope[dict[str, Any]]:
+    """Read the authorized Bot's BaaS startup payload without synthesizing progress."""
+    return envelope(
+        service.get(bot_id=bot_id, owner_id=owner_id, header_space_id=x_space_id),
+        request,
     )

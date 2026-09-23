@@ -1,7 +1,12 @@
 """Action matrix for Bot inventory cards."""
+
 from __future__ import annotations
 
-from agentclaw.community.core.bot_inventory.types import BotAction, BotInventoryKind, DisplayState
+from agentclaw.community.core.bot_inventory.types import (
+    BotAction,
+    BotInventoryKind,
+    DisplayState,
+)
 
 
 def actions_for(
@@ -11,13 +16,13 @@ def actions_for(
     if kind is BotInventoryKind.LOCAL:
         if display_state is DisplayState.LOCAL_RUNNING:
             disabled[BotAction.RUNTIME_LOGS.value] = "not supported in this phase"
-            disabled[BotAction.ENGINE_RESTART.value] = "not supported in this phase"
             return (
                 (
                     BotAction.VIEW,
                     BotAction.CHAT,
                     BotAction.EDIT,
                     BotAction.RESTART,
+                    BotAction.ENGINE_RESTART,
                     BotAction.DELETE,
                     BotAction.OPEN_FOLDER,
                 ),
@@ -27,7 +32,12 @@ def actions_for(
             disabled[BotAction.CHAT.value] = "device offline"
             disabled[BotAction.EDIT.value] = "device offline"
             return (
-                (BotAction.VIEW, BotAction.RESTART, BotAction.DELETE, BotAction.OPEN_FOLDER),
+                (
+                    BotAction.VIEW,
+                    BotAction.RESTART,
+                    BotAction.DELETE,
+                    BotAction.OPEN_FOLDER,
+                ),
                 disabled,
             )
         disabled[BotAction.CHAT.value] = "local bot not ready"

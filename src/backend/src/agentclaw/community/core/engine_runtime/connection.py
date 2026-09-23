@@ -16,9 +16,8 @@ different one, and nothing names the hop behind the gateway.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from urllib.parse import quote, urlsplit
-
-from injector import inject
 
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
@@ -28,9 +27,14 @@ from agentclaw.community.core.devices.errors import (
     DeviceDomainError,
     DeviceServiceError,
 )
-from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.models import OperatorContext
 from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.engine_runtime.desktop_connection import (
+    DesktopConnectionServiceProtocol,
+)
+from agentclaw.community.core.engine_runtime.engine_connection_service_protocol import (
+    EngineConnectionServiceProtocol,
+)
 from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineUpstreamError,
@@ -48,13 +52,20 @@ from agentclaw.community.core.engine_runtime.stage import (
     STAGE_DRAFT,
     resolve_stage_bind_id,
 )
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
+)
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasNoActiveDevicesError,
+    BaasServiceError,
 )
 from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.engine_runtime.engine_connection_service_protocol import EngineConnectionServiceProtocol
+from injector import inject
 
 logger = get_logger()
 
@@ -164,6 +175,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         gateway: GatewayEndpoint,
         collaborators: CollaboratorServiceProtocol,
         publish_repo: BotPublishRepositoryProtocol,
+        desktop_connections: DesktopConnectionServiceProtocol,
     ) -> None:
         self._bot_service = bot_service
         self._binding_repository = binding_repository
@@ -171,6 +183,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         self._gateway = gateway
         self._collaborators = collaborators
         self._publish_repo = publish_repo
+        self._desktop_connections = desktop_connections
 
     def build(
         self, *, bot_id: str, owner_id: str, caller_id: str, stage: str
@@ -237,8 +250,32 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         )
         chat_path = self._chat_path(engine)
         try:
-            info = self._get_connection(binding_id, operator, chat_path)
-        except DeviceServiceError as exc:
+            if facts.bot_type == "desktop":
+                ws = self._desktop_connections.resolve(
+                    binding_id, resolved_owner, chat_path
+                )
+                mode = self._desktop_connections.config.mode
+                info = SimpleNamespace(
+                    type="local" if mode == "direct" else "baas",
+                    target=ws.target,
+                    token=ws.token,
+                    url=ws.ws_url,
+                    expires_at=ws.expires_at,
+                )
+                if mode == "direct":
+                    return ConnectionResult(
+                        engine=engine,
+                        expires_at=self._expires_at(info),
+                        sockets=[SocketInfo(kind="chat", url=ws.ws_url)],
+                        transport_mode="direct",
+                    )
+            else:
+                info = self._get_connection(binding_id, operator, chat_path)
+        except BaasNoActiveDevicesError as exc:
+            raise EngineDeviceNotReadyError(
+                f"device unavailable for bot={bot_id}"
+            ) from exc
+        except (DeviceServiceError, BaasServiceError) as exc:
             # The provider itself failed — a BaaS ws-info call that timed out or
             # answered an error. The bot's device may be perfectly healthy, so
             # this is an upstream fault, not "your device is not ready".
@@ -266,7 +303,12 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
             SocketInfo(kind="chat", url=self._socket_url(info, chat_path, token))
         ]
         return ConnectionResult(
-            engine=engine, expires_at=self._expires_at(info), sockets=sockets
+            engine=engine,
+            expires_at=self._expires_at(info),
+            sockets=sockets,
+            transport_mode=self._desktop_connections.config.mode
+            if facts.bot_type == "desktop"
+            else "",
         )
 
     def _stage_binding_id(
@@ -324,9 +366,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         :meth:`_stage_binding_id` resolves those through the shared stage
         rule instead.
         """
-        binding = self._binding_repository.get_active_by_bot_and_owner(
-            bot_id, owner_id
-        )
+        binding = self._binding_repository.get_active_by_bot_and_owner(bot_id, owner_id)
         if binding is None:
             raise EngineDeviceNotReadyError(f"device not ready for bot={bot_id}")
         return binding.id
@@ -414,9 +454,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
            bury that bug in a socket that fails at handshake instead.
         """
         target = str(
-            getattr(info, "ws_target", "")
-            or getattr(info, "target", "")
-            or ""
+            getattr(info, "ws_target", "") or getattr(info, "target", "") or ""
         )
         if not target:
             raise EngineUpstreamError("device connection carries no routing target")
@@ -443,9 +481,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
             f"is not a kind this endpoint can compose one for"
         )
 
-    def _compose_onto_gateway(
-        self, target: str, socket_path: str, token: str
-    ) -> str:
+    def _compose_onto_gateway(self, target: str, socket_path: str, token: str) -> str:
         """The gateway URL for a provider that hands back a bare routing target.
 
         Byte-for-byte what :meth:`_readdress_onto_gateway` produces for the same
@@ -498,9 +534,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
             # is already broken upstream and everything after the ``#`` is a
             # path we would silently drop. Named here rather than re-addressed
             # into something shorter that merely looks valid.
-            raise EngineUpstreamError(
-                "device connection relay url carries a fragment"
-            )
+            raise EngineUpstreamError("device connection relay url carries a fragment")
         try:
             # Not re-encoded — the provider already encoded this and doing it
             # twice is its own bug. Only checked: a lone surrogate would survive
@@ -601,9 +635,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
         contract makes mandatory.
         """
         reported = str(
-            getattr(info, "ws_expires_at", "")
-            or getattr(info, "expires_at", "")
-            or ""
+            getattr(info, "ws_expires_at", "") or getattr(info, "expires_at", "") or ""
         )
         if reported:
             normalised = self._as_utc_iso(reported)
