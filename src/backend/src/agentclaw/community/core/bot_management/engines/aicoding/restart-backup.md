@@ -42,6 +42,10 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
   the shared DeviceService ACTIVE/PENDING execution restriction is unchanged.
 - No `allow_recovery` or `paas_device_id` parameter is added to shared APIs.
   Missing identity and transport errors are not treated as successful backup.
+- A non-empty BaaS inventory whose devices are all explicitly `STOPPED`/`RELEASED`
+  is a confirmed no-live-target case: no container backup is attempted, and the
+  inventory is rechecked immediately before replacement. An actually empty or
+  malformed inventory remains fail-closed.
 
 ## Runtime contract
 
