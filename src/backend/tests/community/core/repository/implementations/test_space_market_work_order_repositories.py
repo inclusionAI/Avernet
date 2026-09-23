@@ -25,6 +25,9 @@ from agentclaw.community.core.repository.implementations.skill_center.space_skil
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.editor_approval_policy import (
+    SkillEditorApprovalPolicyRepository,
+)
 from agentclaw.community.core.models.space_skill import SkillGrant
 from agentclaw.community.core.spaces.models import SpaceJoinStatus, SpaceRole, SpaceType
 from agentclaw.community.core.spaces.repository.models import (
@@ -327,6 +330,36 @@ def test_skill_editor_request_rejects_non_member(db) -> None:
             apply_reason="not a member",
             env="dev",
         )
+
+
+def test_skill_editor_request_fails_closed_when_auto_integration_is_unavailable(
+    db,
+) -> None:
+    spaces = SpaceRepository(db)
+    team, skill_id = _space_skill(db, spaces)
+    SkillEditorApprovalPolicyRepository(db).update_policy(
+        space_id=team.id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        auto_approve_editor_requests=True,
+        env="dev",
+    )
+
+    with pytest.raises(
+        WorkOrderSkillEditorRequestNotAllowedError,
+        match="trusted WorkOrder integration",
+    ):
+        _work_orders(db).create_skill_editor_request(
+            space_id=team.id,
+            skill_id=skill_id,
+            applicant_user_id="applicant-1",
+            applicant_name="Applicant",
+            apply_reason="maintain together",
+            env="dev",
+        )
+
+    with db.orm_session() as session:
+        assert session.query(WorkOrderModel).count() == 0
 
 
 def test_skill_editor_approval_is_idempotent_when_manager_grant_already_exists(

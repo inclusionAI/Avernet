@@ -88,6 +88,12 @@ class SpaceSkillOwnershipRecord(TypedDict):
     env: str
 
 
+class SkillEditorApprovalPolicyRecord(TypedDict):
+    """Owner-visible policy persisted on the Skill-to-Space binding."""
+
+    auto_approve_editor_requests: bool
+
+
 class SpaceSkillGrantRecord(TypedDict):
     id: int
     skill_id: int

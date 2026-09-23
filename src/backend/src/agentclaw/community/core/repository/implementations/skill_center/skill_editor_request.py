@@ -83,6 +83,11 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
             )
             if binding is None:
                 raise WorkOrderNotFoundError("Space Skill not found")
+            if binding.auto_approve_editor_requests:
+                raise WorkOrderSkillEditorRequestNotAllowedError(
+                    "automatic approval is unavailable until the trusted "
+                    "WorkOrder integration is installed"
+                )
             space = (
                 db.query(SpaceModel)
                 .filter(

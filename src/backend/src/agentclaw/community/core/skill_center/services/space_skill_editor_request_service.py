@@ -9,6 +9,9 @@ from injector import inject
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
 )
+from agentclaw.community.core.skill_center.editor_approval_policy_protocol import (
+    SkillEditorApprovalPolicyRepositoryProtocol,
+)
 from agentclaw.community.core.work_orders.errors import WorkOrderInvalidReasonError
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.staff_dept import (
@@ -26,12 +29,38 @@ class SpaceSkillEditorRequestService:
     def __init__(
         self,
         repository: WorkOrderRepositoryProtocol,
+        skill_repository: SkillEditorApprovalPolicyRepositoryProtocol,
         staff_dept: StaffDeptPlugin,
         env_provider: Callable[[], str],
     ) -> None:
         self._repository = repository
+        self._skill_repository = skill_repository
         self._staff_dept = staff_dept
         self._env_provider = env_provider
+
+    def get_approval_policy(self, *, space_id: int, skill_id: int, actor_id: str):
+        return self._skill_repository.get_policy(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            env=self._env_provider(),
+        )
+
+    def update_approval_policy(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        auto_approve_editor_requests: bool,
+    ):
+        return self._skill_repository.update_policy(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            auto_approve_editor_requests=auto_approve_editor_requests,
+            env=self._env_provider(),
+        )
 
     def create_request(
         self,

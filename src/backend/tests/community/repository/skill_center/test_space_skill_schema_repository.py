@@ -20,6 +20,9 @@ from agentclaw.community.core.repository.implementations.skill_center.space_skil
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.editor_approval_policy import (
+    SkillEditorApprovalPolicyRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_center import (
     DraftEditLeaseRepository,
 )
@@ -43,6 +46,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseNotFoundError,
     DraftEditLeaseTokenRejectedError,
     SpaceSkillIdempotencyConflictError,
+    SpaceSkillGrantForbiddenError,
 )
 from agentclaw.community.core.models.skill import Skill, SkillSetSkill
 from agentclaw.community.core.models.skill_center_sync_log import SkillCenterSyncLog
@@ -81,6 +85,10 @@ def db() -> _Database:
 
 def _space_skills(db: _Database) -> SpaceSkillRepository:
     return SpaceSkillRepository(db, SkillEditorRequestRepository(db))
+
+
+def _editor_policy(db: _Database) -> SkillEditorApprovalPolicyRepository:
+    return SkillEditorApprovalPolicyRepository(db)
 
 
 def test_additive_schema_registers_space_and_skill_fact_scope(db):
@@ -126,6 +134,121 @@ def test_additive_schema_registers_space_and_skill_fact_scope(db):
         column.name for column in SpaceMemberModel.__table__.columns
     }
     assert SkillVersion.__table__.columns["publication_attempt_id"].nullable is True
+    policy_column = SkillSpaceBinding.__table__.columns[
+        "auto_approve_editor_requests"
+    ]
+    assert policy_column.nullable is False
+    assert str(policy_column.server_default.arg) == "0"
+
+
+def test_editor_approval_policy_is_owner_only_team_scoped_and_per_skill(db):
+    spaces = _space_skills(db)
+    repo = _editor_policy(db)
+    team = spaces.create_space(
+        {
+            "space_code": "policy-team",
+            "space_type": "TEAM",
+            "name": "Policy Team",
+            "created_by": "owner-1",
+            "env": "dev",
+        }
+    )
+    with db.orm_session() as session:
+        session.add(
+            SpaceMemberModel(
+                space_id=team["id"],
+                user_id="owner-1",
+                role="MEMBER",
+                status="ACTIVE",
+                env="dev",
+                created_by="owner-1",
+            )
+        )
+    first = _add_bound_skill(
+        db,
+        space_id=team["id"],
+        name="First policy skill",
+        grant_user_id="owner-1",
+        grant_role="OWNER",
+    )
+    second = _add_bound_skill(
+        db,
+        space_id=team["id"],
+        name="Second policy skill",
+        grant_user_id="owner-1",
+        grant_role="OWNER",
+    )
+
+    assert repo.get_policy(
+        space_id=team["id"], skill_id=first, actor_id="owner-1", env="dev"
+    ) == {"auto_approve_editor_requests": False}
+    assert repo.update_policy(
+        space_id=team["id"],
+        skill_id=first,
+        actor_id="owner-1",
+        auto_approve_editor_requests=True,
+        env="dev",
+    ) == {"auto_approve_editor_requests": True}
+    assert repo.get_policy(
+        space_id=team["id"], skill_id=second, actor_id="owner-1", env="dev"
+    ) == {"auto_approve_editor_requests": False}
+
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        repo.get_policy(
+            space_id=team["id"], skill_id=first, actor_id="member-1", env="dev"
+        )
+
+
+def test_editor_approval_policy_rejects_personal_space(db):
+    spaces = _space_skills(db)
+    repo = _editor_policy(db)
+    personal = spaces.create_space(
+        {
+            "space_code": "policy-personal",
+            "space_type": "PERSONAL",
+            "name": "Personal",
+            "created_by": "owner-1",
+            "personal_owner_id": "owner-1",
+            "env": "dev",
+        }
+    )
+    with db.orm_session() as session:
+        session.add(
+            SpaceMemberModel(
+                space_id=personal["id"],
+                user_id="owner-1",
+                role="ADMIN",
+                status="ACTIVE",
+                env="dev",
+                created_by="owner-1",
+            )
+        )
+    skill_id = _add_bound_skill(
+        db,
+        space_id=personal["id"],
+        name="Personal policy skill",
+        grant_user_id="owner-1",
+        grant_role="OWNER",
+    )
+
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        repo.update_policy(
+            space_id=personal["id"],
+            skill_id=skill_id,
+            actor_id="owner-1",
+            auto_approve_editor_requests=True,
+            env="dev",
+        )
+
+
+def test_editor_approval_policy_migration_defaults_existing_bindings_to_manual():
+    migration = (
+        Path(__file__).parents[4]
+        / "src/agentclaw/community/core/skill_center/sql/2026_09_23_skill_editor_auto_approval.sql"
+    ).read_text()
+
+    assert "ADD COLUMN auto_approve_editor_requests" in migration
+    assert "NOT NULL DEFAULT 0" in migration
 
 
 def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):
