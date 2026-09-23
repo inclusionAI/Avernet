@@ -117,6 +117,21 @@ async def test_other_engine_instance_does_not_probe_or_lock():
     assert not runtime.mock_calls
 
 
+def test_empty_inventory_logs_raw_summary(caplog):
+    caplog.set_level(logging.INFO, logger=backup.logger.name)
+    runtime = Mock()
+    runtime.get_bot.return_value = {'status': 'ACTIVE', 'devices': []}
+    with pytest.raises(RuntimeError, match='清单为空'):
+        AicodingProvisioningStrategy('aicoding')._prepare_restart(
+            BotProvisioningContext(
+                bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+            ),
+            device_id='caller-uuid', target_runtime=runtime,
+        )
+    assert 'raw_device_count=0' in caplog.text
+    assert 'raw_status_counts={}' in caplog.text
+
+
 def test_active_empty_inventory_fails_closed():
     runtime = Mock()
     runtime.get_bot.return_value = {'status': 'ACTIVE', 'devices': []}
@@ -127,6 +142,65 @@ def test_active_empty_inventory_fails_closed():
             ),
             device_id='caller-uuid', target_runtime=runtime,
         )
+
+
+def test_all_stopped_inventory_skips_backup_but_verifies_again():
+    runtime = Mock()
+    stopped = {
+        'status': 'ACTIVE',
+        'devices': [{
+            'provider_device_id': 'physical-1',
+            'status': 'STOPPED',
+        }],
+    }
+    runtime.get_bot.return_value = stopped
+    ctx = BotProvisioningContext(
+        bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+    )
+
+    with patch.object(backup, 'prepare_backup') as prepared:
+        verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+            ctx, device_id='caller-uuid', target_runtime=runtime,
+        )
+
+    prepared.assert_not_called()
+    verify()
+    assert runtime.get_bot.call_count == 2
+    runtime.post_bots_api.assert_not_called()
+
+
+def test_all_released_inventory_skips_backup():
+    runtime = Mock()
+    runtime.get_bot.return_value = {
+        'devices': [{
+            'provider_device_id': 'physical-1',
+            'status': 'RELEASED',
+        }],
+    }
+    verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+        BotProvisioningContext(
+            bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+        ),
+        device_id='caller-uuid', target_runtime=runtime,
+    )
+    verify()
+    runtime.post_bots_api.assert_not_called()
+
+
+def test_no_live_target_recheck_blocks_if_device_reappears():
+    runtime = Mock()
+    runtime.get_bot.side_effect = [
+        {'devices': [{'provider_device_id': 'physical-1', 'status': 'STOPPED'}]},
+        {'devices': [{'provider_device_id': 'physical-1', 'status': 'ACTIVE'}]},
+    ]
+    with pytest.raises(RuntimeError, match='清单变化'):
+        verify = AicodingProvisioningStrategy('aicoding')._prepare_restart(
+            BotProvisioningContext(
+                bot_id='b', owner_id='o', bot_type='personal', active_engine='aicoding'
+            ),
+            device_id='caller-uuid', target_runtime=runtime,
+        )
+        verify()
 
 
 def test_operation_id_is_fresh_per_restart_request():
