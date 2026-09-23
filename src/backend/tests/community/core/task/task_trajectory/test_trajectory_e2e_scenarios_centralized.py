@@ -510,7 +510,7 @@ class TestAcceptanceFailReason:
                           runner=_GroupStubRunner())
         patch = _patch(
             task_id, child,
-            acceptance_result=_accept(AcceptanceVerdict.FAILED, gap_items=["证据链不完整"]),
+            acceptance_result=_accept(AcceptanceVerdict.FAILED, gaps=["证据链不完整"]),
         )
         _run(eng.on_report(patch))
         _run(_drain_bg(eng))

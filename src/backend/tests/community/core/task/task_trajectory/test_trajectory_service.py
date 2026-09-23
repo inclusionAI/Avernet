@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from types import SimpleNamespace
 
 import pytest
 
@@ -1392,3 +1393,286 @@ async def test_get_trajectory_output_enrichment_survives_graph_failure():
 
     assert result is traj  # 本体照常返回
     assert result.timeline[0].output is None
+
+
+# ---------------------------------------------------------------------------
+# 覆盖缺口 — 防御分支/边缘降级(决策 #14 观测旁路:逐步降级、永不抛)
+# ---------------------------------------------------------------------------
+
+
+class _ExplodingRepo(_FakeRepo):
+    """list_events_by_task 永抛 → _safe_list_records 的读失败降级路径。"""
+
+    def list_events_by_task(self, task_id: str):
+        raise RuntimeError("db down")
+
+
+class _BadMergeRepo(_FakeRepo):
+    """merge_last_event_ext_info 返回 False → 「未能合并」日志分支。"""
+
+    def merge_last_event_ext_info(self, task_id, node_id, key, value) -> bool:
+        return False
+
+
+class _ClobberingRepo(_FakeRepo):
+    """敌意 repo:merge 收到 excerpt 列表后将其清空 → 812 防御哨兵的用武之地。"""
+
+    def merge_last_event_ext_info(self, task_id, node_id, key, value) -> bool:
+        value.clear()
+        return True
+
+
+class _HostileRecords:
+    """``__reversed__`` 永抛 → _attach_session_msgs 的 records 防御分支。"""
+
+    def __reversed__(self):
+        raise RuntimeError("bad records")
+
+
+class _NoGoalSpec:
+    """root_spec.goal 缺失(None)→ submit 富化早退。"""
+    goal = None
+
+
+class _RaisingGoalSpec:
+    """root_spec.goal 访问即抛 → submit 富化整体吞异常保原值。"""
+
+    @property
+    def goal(self):
+        raise RuntimeError("spec exploded")
+
+
+class _FullGoalSpec:
+    """normal-shape spec:goal(objective + acceptances)可富化。"""
+
+    def __init__(self):
+        self.goal = SimpleNamespace(
+            objective="调研存储市场",
+            acceptances=[SimpleNamespace(description="市场规模模型"),
+                         SimpleNamespace(description="周期判断")],
+        )
+
+
+class _ZeroLimitConfig:
+    """running_session_message_limit 非数值 → 退回默认 50(limit 读取兜底)。"""
+    running_session_message_limit = "not-a-number"
+
+
+def _submit_event(**kwargs) -> TrajectoryEvent:
+    return _make_event(action_type=TrajectoryActionType.SUBMIT, action_result="success",
+                       **kwargs)
+
+
+def _minimal_svc(**kwargs) -> TaskTrajectoryService:
+    return TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), kwargs.pop("repo", _FakeRepo()),
+        _FakeAnalyzer(analysis=_make_analysis()), kwargs.pop("config", None), **kwargs,
+    )
+
+
+@pytest.mark.unit
+def test_attach_submit_goal_keeps_digest_when_first_event_not_submit():
+    """首条事件非 submit → 629 早退:action_input 保持原 digest 不动。"""
+    svc = _minimal_svc()
+    timeline = [_make_event(node_id="t1", gmt_create=1000)]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    traj.timeline[0].action_input = "sha256:digest"
+
+    svc._attach_submit_goal(traj, _FullGoalSpec())
+
+    assert traj.timeline[0].action_input == "sha256:digest"
+
+
+@pytest.mark.unit
+def test_attach_submit_goal_keeps_digest_when_goal_missing():
+    """首条是 submit 但 root_spec.goal 为 None → 632 早退,digest 不动。"""
+    svc = _minimal_svc()
+    timeline = [_submit_event(node_id="t1", gmt_create=1000)]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    traj.timeline[0].action_input = "sha256:digest"
+
+    svc._attach_submit_goal(traj, _NoGoalSpec())
+
+    assert traj.timeline[0].action_input == "sha256:digest"
+
+
+@pytest.mark.unit
+def test_attach_submit_goal_survives_raising_goal():
+    """root_spec.goal 访问抛异常 → 646-647 吞掉,digest 保持原值(观测旁路)。"""
+    svc = _minimal_svc()
+    timeline = [_submit_event(node_id="t1", gmt_create=1000)]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+    traj.timeline[0].action_input = "sha256:digest"
+
+    svc._attach_submit_goal(traj, _RaisingGoalSpec())  # 不抛
+
+    assert traj.timeline[0].action_input == "sha256:digest"
+
+
+@pytest.mark.unit
+def test_last_event_ext_by_node_treats_corrupt_ext_as_empty():
+    """末位事件 ext_info 非法 JSON → 视作空(缓存判断退化为未缓存,不抛)。"""
+    svc = _minimal_svc()
+    records = [
+        SimpleNamespace(node_id="n1", ext_info="{not json"),
+        SimpleNamespace(node_id="n2", ext_info='[1, 2]'),  # 合法 JSON 但非 object
+        SimpleNamespace(node_id="n3", ext_info='{"session_msgs": [{"role": "user"}]}'),
+    ]
+
+    last = svc._last_event_ext_by_node(records)
+
+    assert last["n1"] == {}
+    assert last["n2"] == {}
+    assert last["n3"] == {"session_msgs": [{"role": "user"}]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_collect_session_briefs_degrades_when_graph_read_fails():
+    """图读抛异常 → 探测整体降级 (None, {}),绝不抛。"""
+    class _RaisingGraph(_FakeGraph):
+        def query_task_dashboard(self, task_id: str):
+            raise RuntimeError("graph down")
+
+    svc = _minimal_svc(graph=_RaisingGraph([]), bcs=_FakeBcs())
+
+    briefs, fresh = await svc._collect_session_briefs("t1", [])
+
+    assert briefs is None
+    assert fresh == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_collect_session_briefs_bad_start_time_and_limit_fallback():
+    """start_time 非数值 → elapsed 0;config.running_session_message_limit 非数值
+    → 退回默认 50(_FakeBcs 记录到 limit 参数)。"""
+    node = _FakeNode(node_id="n-bad", status=Status.RUNNING,
+                     extend_props={"session_id": "sess-1"}, start_time="oops")
+    bcs = _FakeBcs(messages_by_session={
+        "sess-1": [{"role": "user", "content": "hi"}],
+    })
+    svc = _minimal_svc(graph=_FakeGraph([node]), bcs=bcs, config=_ZeroLimitConfig())
+
+    briefs, fresh = await svc._collect_session_briefs("t1", [])
+
+    assert briefs is not None and len(briefs) == 1
+    assert briefs[0]["elapsed_ms"] == 0
+    assert bcs.calls[0][1] == 50  # limit 兜底值
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_collect_session_briefs_skips_non_string_session_id():
+    """session_id 非字符串(如数字)→ 过滤后跳过该节点,不抛、不产 brief。"""
+    node = _FakeNode(node_id="n-num", status=Status.RUNNING,
+                     extend_props={"session_id": 12345}, start_time=500)
+    bcs = _FakeBcs(messages_by_session={"12345": [{"role": "user", "content": "hi"}]})
+    svc = _minimal_svc(graph=_FakeGraph([node]), bcs=bcs)
+
+    briefs, fresh = await svc._collect_session_briefs("t1", [])
+
+    assert briefs is None
+    assert fresh == {}
+    assert bcs.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_collect_session_briefs_empty_msgs_no_brief():
+    """BCS 返回空列表 → 该节点 continue,无 brief、无 fresh 物化。"""
+    node = _FakeNode(node_id="n-empty", status=Status.RUNNING,
+                     extend_props={"session_id": "sess-1"}, start_time=500)
+    bcs = _FakeBcs(messages_by_session={"sess-1": []})
+    repo = _FakeRepo()
+    svc = _minimal_svc(repo=repo, graph=_FakeGraph([node]), bcs=bcs)
+
+    briefs, fresh = await svc._collect_session_briefs("t1", [])
+
+    assert briefs is None
+    assert fresh == {}
+    assert repo.merge_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_collect_session_briefs_non_dict_msgs_filtered_out():
+    """BCS 返回非 dict 条目 → 防御跳过;全部非 dict → excerpt 空该节点 hit no-brief。"""
+    node = _FakeNode(node_id="n-weird", status=Status.RUNNING,
+                     extend_props={"session_id": "sess-1"}, start_time=500)
+    bcs = _FakeBcs(messages_by_session={"sess-1": ["nonsense", 42]})
+    repo = _FakeRepo()
+    svc = _minimal_svc(repo=repo, graph=_FakeGraph([node]), bcs=bcs)
+
+    briefs, fresh = await svc._collect_session_briefs("t1", [])
+
+    assert briefs is None
+    assert fresh == {}
+    assert repo.merge_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_collect_session_briefs_merge_false_still_briefs():
+    """merge_last_event_ext_info 返回 False(无事件行/ext 不可解析)→ 仅日志,
+    研判 brief 照常产出(物化失败不影响分析)。"""
+    node = _FakeNode(node_id="n-run", status=Status.RUNNING,
+                     extend_props={"session_id": "sess-1"}, start_time=500)
+    bcs = _FakeBcs(messages_by_session={"sess-1": [{"role": "user", "content": "hi"}]})
+    repo = _BadMergeRepo()
+    svc = _minimal_svc(repo=repo, graph=_FakeGraph([node]), bcs=bcs)
+
+    briefs, fresh = await svc._collect_session_briefs("t1", [])
+
+    assert briefs is not None and len(briefs) == 1
+    assert briefs[0]["node_id"] == "n-run"
+    assert fresh == {"n-run": [{"role": "user", "content": "hi"}]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_collect_session_briefs_survives_repo_clobbering_excerpt():
+    """敌意 repo:merge 把 excerpt 清空 → 「无 excerpt 就不喂模型」哨兵兜住,
+    无 brief、不抛(excerpt 与物化共享同一 list,这是真实防御面)。"""
+    node = _FakeNode(node_id="n-clobber", status=Status.RUNNING,
+                     extend_props={"session_id": "sess-1"}, start_time=500)
+    bcs = _FakeBcs(messages_by_session={"sess-1": [{"role": "user", "content": "hi"}]})
+    svc = _minimal_svc(repo=_ClobberingRepo(), graph=_FakeGraph([node]), bcs=bcs)
+
+    briefs, fresh = await svc._collect_session_briefs("t1", [])
+
+    assert briefs is None  # excerpt 被下游清空 → 不喂模型
+    assert fresh == {"n-clobber": []}
+
+
+@pytest.mark.unit
+def test_safe_list_records_returns_none_on_repo_failure():
+    """读事件行失败 → WARNING + None(富化降级,不影响轨迹本体)。"""
+    svc = _minimal_svc(repo=_ExplodingRepo())
+
+    assert svc._safe_list_records("t1") is None
+
+
+@pytest.mark.unit
+def test_attach_session_msgs_survives_hostile_records():
+    """records 迭代抛异常 → msgs_by_node 退 {},timeline 不动、不抛。"""
+    svc = _minimal_svc()
+    timeline = [_submit_event(node_id="n1", gmt_create=1000)]
+    traj = _make_trajectory(task_id="t1", timeline=timeline)
+
+    svc._attach_session_msgs(traj, _HostileRecords())  # 不抛
+
+    assert traj.timeline[0].session_msgs is None
+
+
+@pytest.mark.unit
+def test_holder_bearer_token_none_when_holder_missing():
+    """extend_props 无持有者且 assignee 为 None → holder 缺失 → None(裸 HMAC)。"""
+    svc = TaskTrajectoryService(
+        _FakeAssembler(_make_trajectory()), _FakeRepo(),
+        _FakeAnalyzer(analysis=_make_analysis()), None,
+        bcs_bot_tokens=_FakeTokenProvider(tokens={"bot-x": "tok"}),
+    )
+    node = _FakeNode(node_id="n-anon", status=Status.RUNNING)
+
+    assert svc._holder_bearer_token(node) is None

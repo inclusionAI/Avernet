@@ -387,6 +387,22 @@ def test_merge_last_event_ext_info_unparseable_ext_never_clobbered(db):
     assert repo.list_events_by_task("T-1")[0].ext_info == before
 
 
+def test_merge_last_event_ext_info_non_object_ext_never_clobbered(db):
+    """末位行 ext_info 是合法 JSON 但非 object(数组/字符串/数字)→ 同样拒绝
+    增量合并(防覆盖),返回 False 且行原样保留。"""
+    repo = TaskTrajectoryRepository(db)
+    repo.insert_event(_event(task_id="T-1", node_id="N-1", ext_info='[1, 2]'))
+    repo.insert_event(_event(task_id="T-1", node_id="N-2", ext_info='"bare string"'))
+    before_1 = repo.list_events_by_task("T-1")[0].ext_info
+    before_2 = repo.list_events_by_task("T-1")[1].ext_info
+
+    assert repo.merge_last_event_ext_info("T-1", "N-1", "session_msgs", ["x"]) is False
+    assert repo.merge_last_event_ext_info("T-1", "N-2", "session_msgs", ["x"]) is False
+    [row_1, row_2] = repo.list_events_by_task("T-1")
+    assert row_1.ext_info == before_1
+    assert row_2.ext_info == before_2
+
+
 def test_merge_last_event_ext_info_does_not_touch_gmt_create(db):
     """gmt_create 不动(它进 do_analysis 的 timeline 指纹;物化不能误触发重分析)。"""
     repo = TaskTrajectoryRepository(db)

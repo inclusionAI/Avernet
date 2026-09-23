@@ -613,7 +613,7 @@ class TestExecuteVerifyGateSuccessPath:
             runner=_StubRunner(), trajectory_repo=repo,
         )
         patch = _patch("t1", "t1", status=Status.DONE,
-                       acceptance_result=_accept(AcceptanceVerdict.FAILED, gap_items=["g1"]))
+                       acceptance_result=_accept(AcceptanceVerdict.FAILED, gaps=["g1"]))
         _run(eng.on_report(patch))
 
         vf = _verify_records(repo)
@@ -726,7 +726,7 @@ class TestLogActionUnchangedAndAdditive:
             runner=_StubRunner(), trajectory_repo=repo,
         )
         patch = _patch("t1", "t1", status=Status.DONE,
-                       acceptance_result=_accept(AcceptanceVerdict.FAILED, gap_items=["g1"]))
+                       acceptance_result=_accept(AcceptanceVerdict.FAILED, gaps=["g1"]))
         _run(eng.on_report(patch))
 
         node = svc._get_node(graph, "t1")
@@ -738,7 +738,7 @@ class TestLogActionUnchangedAndAdditive:
         assert len(verify_entries) == 1
         p = verify_entries[0].payload
         assert p["verdict"] == "FAILED"
-        assert p["gaps"] == ["g1"]
+        assert p["gap_items"] == ["g1"]
         # AND the trajectory VERIFY row is additive (one row)
         assert len(_verify_records(repo)) == 1
 
@@ -1175,7 +1175,7 @@ class TestStaticPlanExecuteVerifyTrajectoryGate:
         )
         patch = _patch(
             "t1", "worker",
-            acceptance_result=_accept(AcceptanceVerdict.FAILED, gap_items=["g1"]),
+            acceptance_result=_accept(AcceptanceVerdict.FAILED, gaps=["g1"]),
             output_patch={"result": {"ok": False}},
         )
         _run(eng.on_report(patch))

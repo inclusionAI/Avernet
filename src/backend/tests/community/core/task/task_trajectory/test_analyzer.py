@@ -1296,6 +1296,24 @@ async def test_tc_bot_repairs_raw_newline_inside_string():
     assert ta.failure_reason is None
 
 
+def test_repair_inner_bare_quotes_keeps_valid_escape_pairs():
+    """方案A修复的转义保持分支:字符串内已有的合法转义(``\\"`` 成对)必须原样
+    保留,不得二次转义;行尾孤 ``\\``(我被截断的输出)不越界、原样返回可重试。"""
+    from agentclaw.community.core.task.task_context.task_trajectory.analyzer import (
+        _repair_inner_bare_quotes,
+    )
+    # 已合法转义的引号:修复后重解析应取回相同语义(不重复转义 → 仍可 loads)
+    text = '{"analysis_output": "工具 \\"query_data\\" 报错", "failure_reason": null}'
+    repaired = _repair_inner_bare_quotes(text)
+    assert repaired is not None
+    assert json.loads(repaired)["analysis_output"] == '工具 "query_data" 报错'
+    # 输出被截断在中途(末尾是尚未配对的 ``\\``):不抛、原样(修复器不保证可解析)
+    truncated = _repair_inner_bare_quotes('{"analysis_output": "半句\\')
+    assert truncated is not None and truncated.endswith("\\")
+    # 无 JSON 起符(bot 根本没写 JSON)→ None,交调用方走降级
+    assert _repair_inner_bare_quotes("纯散文,没 有花括号") is None
+
+
 @pytest.mark.asyncio
 async def test_tc_bot_parses_markdown_fenced_json_response():
     # Bot 常把 JSON 包在 ```json 代码块(同 plan/search skill 回投)。_parse_bot_response
