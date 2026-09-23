@@ -1223,6 +1223,7 @@ dependencies = [
  "bcs-service-api",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

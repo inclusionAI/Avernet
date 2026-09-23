@@ -11,3 +11,6 @@ serde_json.workspace   = true
 
 bcs-domain.workspace       = true
 bcs-service-api.workspace  = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

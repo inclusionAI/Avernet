@@ -285,3 +285,228 @@ impl GroupContextService for GroupContextApplication {
         Ok(RetrieveResponse { items: result.items })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bcs_domain::group_context::{ContextEntry, Granularity, Origin};
+
+    fn test_core() -> GroupContextCore {
+        GroupContextCore::new(Arc::new(NoopGroupContextRepo))
+    }
+
+    fn test_app() -> GroupContextApplication {
+        GroupContextApplication::new(Arc::new(test_core()))
+    }
+
+    fn test_origin() -> Origin {
+        Origin {
+            tenant_id: "tenant-1".to_string(),
+            group_id: "group-1".to_string(),
+            session_id: Some("sess-1".to_string()),
+            run_id: Some("run-1".to_string()),
+            actor_id: "bot-1".to_string(),
+        }
+    }
+
+    fn test_scope() -> ScopeKey {
+        ScopeKey {
+            tenant_id: "t".to_string(),
+            group_id: "g".to_string(),
+            session_id: None,
+            run_id: None,
+        }
+    }
+
+    // ── NoopGroupContextRepo ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn noop_find_active_in_scope_returns_empty() {
+        let repo = NoopGroupContextRepo;
+        assert!(repo.find_active_in_scope(&test_scope(), None, 10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn noop_insert_context_returns_error() {
+        let repo = NoopGroupContextRepo;
+        let entry = ContextEntry {
+            id: "e1".into(),
+            domain: "test".into(),
+            key: "k".into(),
+            content: serde_json::Value::Null,
+            origin: test_origin(),
+            time: Default::default(),
+            granularity: Granularity::Session,
+            template_id: "t1".into(),
+            version: 1,
+            superseded_by: None,
+            lineage: vec![],
+        };
+        assert!(repo.insert_context(InsertContextRequest { entry }).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn noop_supersede_returns_error() {
+        let repo = NoopGroupContextRepo;
+        let req = SupersedeRequest {
+            entry_id: "e1".into(),
+            new_version: 2,
+            prev_version: 1,
+            new_entry_id: "e2".into(),
+            tx_time_ms: 0,
+            actor_id: "bot-1".into(),
+        };
+        assert!(repo.supersede(req).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn noop_find_entries_by_domain_returns_empty() {
+        let repo = NoopGroupContextRepo;
+        assert!(repo.find_entries_by_domain(&test_scope(), "d", None, true, 10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn noop_find_candidates_for_retrieve_returns_empty() {
+        let repo = NoopGroupContextRepo;
+        assert!(repo.find_candidates_for_retrieve(&test_scope(), None, None, 10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn noop_find_policy_template_returns_none() {
+        let repo = NoopGroupContextRepo;
+        assert!(repo.find_policy_template("t1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn noop_list_policy_templates_returns_empty() {
+        let repo = NoopGroupContextRepo;
+        assert!(repo.list_policy_templates(None, 10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn noop_write_retrieve_audit_ok() {
+        let repo = NoopGroupContextRepo;
+        repo.write_retrieve_audit(AuditEntry {
+            entry_id: "e1".into(),
+            actor_id: "bot-1".into(),
+            op: "retrieve".into(),
+            tx_time_ms: 0,
+        }).await.unwrap();
+    }
+
+    // ── GroupContextCore ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn core_retrieve_returns_empty() {
+        let core = test_core();
+        let cmd = RetrieveCommand {
+            tenant_id: "t".into(),
+            group_id: "g".into(),
+            session_id: None,
+            run_id: None,
+            actor_id: "bot-1".into(),
+            domain: None,
+            query: None,
+            limit: 20,
+        };
+        assert!(core.retrieve(cmd).await.unwrap().items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn core_create_by_template_returns_error() {
+        let core = test_core();
+        let cmd = CreateByTemplateCommand {
+            tenant_id: "t".into(),
+            group_id: "g".into(),
+            session_id: None,
+            run_id: None,
+            actor_id: "bot-1".into(),
+            template_id: "t1".into(),
+            domain: "test".into(),
+            key: "k".into(),
+            content: serde_json::Value::Null,
+        };
+        assert!(core.create_by_template(cmd).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn core_update_content_returns_error() {
+        let core = test_core();
+        let cmd = UpdateContentCommand {
+            tenant_id: "t".into(),
+            group_id: "g".into(),
+            session_id: None,
+            run_id: None,
+            actor_id: "bot-1".into(),
+            entry_id: "e1".into(),
+            new_content: serde_json::Value::Null,
+            expected_version: None,
+        };
+        assert!(core.update_content(cmd).await.is_err());
+    }
+
+    // ── GroupContextApplication ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn app_retrieve_returns_empty() {
+        let app = test_app();
+        let request = RetrieveRequest {
+            domain: None,
+            query: None,
+            limit: 20,
+        };
+        assert!(app.retrieve(test_origin(), request).await.unwrap().items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn app_create_by_template_returns_error() {
+        let app = test_app();
+        let request = CreateByTemplateRequest {
+            template_id: "t1".into(),
+            domain: "test".into(),
+            key: "k".into(),
+            content: serde_json::Value::Null,
+        };
+        assert!(app.create_by_template(test_origin(), request).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn app_update_content_returns_error() {
+        let app = test_app();
+        let request = UpdateContentRequest {
+            entry_id: "e1".into(),
+            new_content: serde_json::Value::Null,
+            expected_version: None,
+        };
+        assert!(app.update_content(test_origin(), request).await.is_err());
+    }
+
+    // ── StatusRequest::into_origin ────────────────────────────────────────
+
+    #[test]
+    fn status_request_into_origin_preserves_all_fields() {
+        let req = StatusRequest {
+            tenant_id: "tenant-1".into(),
+            group_id: "group-1".into(),
+            session_id: Some("sess-1".into()),
+            run_id: Some("run-1".into()),
+            actor_id: "bot-1".into(),
+            domain: None,
+            limit: None,
+        };
+        let origin = req.into_origin();
+        assert_eq!(origin.tenant_id, "tenant-1");
+        assert_eq!(origin.group_id, "group-1");
+        assert_eq!(origin.session_id.as_deref(), Some("sess-1"));
+        assert_eq!(origin.run_id.as_deref(), Some("run-1"));
+        assert_eq!(origin.actor_id, "bot-1");
+    }
+
+    // ── RetrieveRequest serde default ─────────────────────────────────────
+
+    #[test]
+    fn retrieve_request_default_limit_is_20() {
+        let req: RetrieveRequest = serde_json::from_str(r#"{"domain":"test"}"#).unwrap();
+        assert_eq!(req.limit, 20);
+    }
+}
