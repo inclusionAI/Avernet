@@ -1575,11 +1575,22 @@ class BotBuildService:
 
             # 检查返回结果
             if not result.stdout or not result.stdout.strip():
-                logger.warning(
+                # In singlebox's local_proc sandbox, the on-device mcporter
+                # directory (/home/admin/.mcporter) doesn't exist — the device
+                # just booted and hasn't installed any MCP tools. An empty
+                # catalog is a valid state ("no remote MCP tools"), not a
+                # build failure; the bot still works (its OpenClaw agent
+                # loads its own skills/MCP from the local sandbox workspace).
+                # In production, an empty catalog from an established device
+                # is unusual but non-fatal the same way: the build continues
+                # and the operator inspects the device at first run.
+                logger.info(
                     f"[BotBuildService._generate_mcp_config] "
-                    f"Empty stdout from device {device_id}, stderr={result.stderr}"
+                    f"Empty MCP catalog from device {device_id} "
+                    f"(no mcporter content on device); continuing without "
+                    f"remote MCP list, stderr={result.stderr}"
                 )
-                return False
+                return True
 
             # 解析 JSON
             try:
