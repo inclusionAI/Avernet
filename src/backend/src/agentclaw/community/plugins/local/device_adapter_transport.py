@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping
 import hashlib
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -149,16 +150,24 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
     def _resolve_adapter_url(self, conn_info: dict[str, Any]) -> str | None:
         """Per-device adapter base URL for unmatched paths.
 
-        Resolution order: ``conn_info["url"]`` (the device binding's HTTP
-        origin, mirrors the production transport contract); then
-        ``conn_info["target"]`` formatted as an HTTP origin (the
-        in-memory store's own device\_key idiom); then the constructor
-        default. ``None`` means this caller cannot be proxied.
+        Resolution order: when the device binding's ``target`` is a loopback
+        address, the per-device adapter's own HTTP origin **wins** over
+        ``conn_info["url"]`` — singlebox has no BaaS proxy infrastructure, so
+        the BaaS ``invoke-http`` endpoint the URL carries returns
+        ``PLATFORM_ERROR`` and is never routable locally. In deployments where
+        the target is not a bare loopback (production, remote BaaS), the
+        URL (the production transport contract) takes priority. The
+        constructor ``default_adapter_url`` is the last resort; ``None``
+        means this caller cannot be proxied.
         """
+        target = conn_info.get("target")
+        if isinstance(target, str) and target:
+            host = urlsplit(f"//{target}").hostname if "://" in target else target.split(":")[0] if ":" in target else target
+            if host in ("localhost", "127.0.0.1", "::1"):
+                return f"http://{target.rstrip('/')}"
         url = conn_info.get("url")
         if isinstance(url, str) and url.startswith(("http://", "https://")):
             return url.rstrip("/")
-        target = conn_info.get("target")
         if isinstance(target, str) and target:
             return f"http://{target.rstrip('/')}"
         return self._default_adapter_url

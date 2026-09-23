@@ -86,7 +86,30 @@ async def test_cron_guard_blocks_models_from_leaking_cron_list():
 # ── URL resolution from conn_info (per-request, per-device) ──
 
 
-def test_resolve_adapter_url_prefers_conn_info_url():
+def test_resolve_loopback_target_wins_over_baas_invoke_http_url():
+    """Singlebox: BaaS invoke-http is a stub (no proxy infra); the URL
+    in conn_info points at it → PLATFORM_ERROR. A loopback target (the
+    per-device adapter on its own port) must win for local deployments."""
+    transport = InMemoryDeviceAdapterTransport()
+    resolved = transport._resolve_adapter_url({
+        "url": "http://127.0.0.1:8890/api/v1/bots/team_claw/BOT-x/invoke-http/20003",
+        "target": "127.0.0.1:20015",
+    })
+    assert resolved == "http://127.0.0.1:20015"
+
+
+def test_resolve_remote_url_wins_over_non_loopback_target():
+    """Production: a non-loopback target means the platform proxy infra
+    exists; the BaaS invoke-http URL is the correct route."""
+    transport = InMemoryDeviceAdapterTransport()
+    resolved = transport._resolve_adapter_url({
+        "url": "http://baas.example.com/api/v1/bots/team_claw/BOT-x/invoke-http/20003",
+        "target": "10.42.0.1:20003",
+    })
+    assert resolved == "http://baas.example.com/api/v1/bots/team_claw/BOT-x/invoke-http/20003"
+
+
+def test_resolve_adapter_url_prefers_url_without_target():
     transport = InMemoryDeviceAdapterTransport(
         default_adapter_url="http://default.example.com"
     )
