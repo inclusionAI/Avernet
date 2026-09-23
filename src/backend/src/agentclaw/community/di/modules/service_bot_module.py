@@ -169,6 +169,7 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterStoreConfig,
     CanonicalCenterVersionStore,
 )
+from agentclaw.community.core.service_bot.services.bot_build_policy import PublishBuildPolicyConfig
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.bot_config import StoreRef
 from agentclaw.community.log import get_logger
@@ -399,7 +400,7 @@ class ServiceBotModule(Module):
         bot_repo: BotRepository,
         channel_service: ChannelServiceProtocol,
         baas: cfg.BaasConfig,
-        publish_build_policy: cfg.PublishBuildPolicyConfig,
+        publish_build_policy: PublishBuildPolicyConfig,
         common_whitelist_service: CommonWhiteListService,
         system_config_service: SystemConfigService,
     ) -> BotBuildService:

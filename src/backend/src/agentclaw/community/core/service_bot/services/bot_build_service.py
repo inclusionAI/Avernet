@@ -36,7 +36,9 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     validate_required_paths,
 )
 from agentclaw.community.kernel.build_ignore import normalize_build_ignore_path
-from agentclaw.community.di.config import PublishBuildPolicyConfig
+from agentclaw.community.core.service_bot.services.bot_build_policy import (
+    PublishBuildPolicyConfig,
+)
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_bot_engine,
 )

@@ -52,6 +52,9 @@ from agentclaw.community.di.modules.desktop_bot_module import DesktopBotModule
 from agentclaw.community.di.modules.desktop_skill_recovery_config_module import (
     DesktopSkillRecoveryConfigModule,
 )
+from agentclaw.community.di.modules.publish_build_config_module import (
+    PublishBuildConfigModule,
+)
 from agentclaw.community.di.modules.devices_module import DevicesModule
 from agentclaw.community.di.modules.economy_governance_module import EconomyGovernanceModule
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
@@ -139,6 +142,7 @@ def build_injector(
         ConfigModule(),
         McpRuntimeCredentialsConfigModule(),
         DesktopSkillRecoveryConfigModule(),
+        PublishBuildConfigModule(),
         InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),

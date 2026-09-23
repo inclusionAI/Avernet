@@ -26,7 +26,9 @@ from agentclaw.community.core.service_bot.services.bot_build_service import (
     BotBuildService,
 )
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
-from agentclaw.community.di.config import PublishBuildPolicyConfig
+from agentclaw.community.core.service_bot.services.bot_build_policy import (
+    PublishBuildPolicyConfig,
+)
 
 REQUIRED_POLICY = PublishBuildPolicyConfig()
 PERMISSIVE_POLICY = PublishBuildPolicyConfig(
