@@ -34,6 +34,13 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
 ## Existing transports only
 
 - Active/Pending ARCA bindings use the original `exec_shell_new` API unchanged.
+- Coding restart calls the existing `list_devices_by_bot_uuid` client and
+  `GET /bots/{uuid}/devices` for both prepare and verification. The endpoint
+  returns device groups in descending Bot record ID order (excluding deleted
+  records); the existing client selects the first/current group, not historical
+  groups. It supplies status and physical provider ID without health probes.
+  Empty/malformed inventories and lookup failures block replacement. No change
+  to the shared `get_bot` contract or non-coding restart flow is required.
 - BaaS inventory identifies every live physical target. Commands use the
   existing public `post_bots_api` API and existing PaaS command endpoint, pinned
   to that target rather than randomly selecting a replica.
@@ -60,6 +67,8 @@ A permission error is not absence. Once installed, the runtime helper checks
 actual mounts; `not_mounted` skips backup. Mounted runtimes must stop writers and
 return a committed generation/operation receipt before replacement is allowed.
 
+Inventory logs include `source=baas_devices`, query start/failure, device count,
+status distribution, resolved target count, operation ID and elapsed time.
 Logs carry `event=aicoding_restart_backup`, phase, status/reason, Bot/target,
 operation, elapsed time and generation. The policy does not log raw output or
 exception messages. Poll logs occur on transitions or at most once per minute.
