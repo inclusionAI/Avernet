@@ -1289,6 +1289,8 @@ class BaasService:  # pragma: no cover
         bot_uuid: str,
         health_check: bool = False,
         engine_type: str = "",
+        *,
+        include_devices: bool = False,
     ) -> Dict[str, Any]:
         """查询 BaaS 层 bot 详情 / 状态。
 
@@ -1297,6 +1299,9 @@ class BaasService:  # pragma: no cover
             health_check: True 时 BaaS 经 PaaS 层实时探活，刷新 devices 的
                 status/health；False（默认）返回 DB 态，行为与原先一致。
             engine_type: 当前 bot 引擎类型；非空时作为 query 透传，留空则不传。
+
+            include_devices: 通过现有 detail-by-id 接口读取当前 Bot 的完整设备清单，
+                不额外触发健康探测。默认关闭，保持其他调用行为不变。
 
         Returns:
             BaaS 层返回的 data 字段（含 ``devices[]``、``bot_uuid``、``status`` 等）。
@@ -1319,13 +1324,28 @@ class BaasService:  # pragma: no cover
             params = extra
 
         try:
-            return self._get_bots_api(
+            result = self._get_bots_api(
                 path=f"/api/v1/bots/{bot_uuid}",
                 action="get_bot",
                 params=params,
             )
+            if include_devices:
+                bot_id = result.get("id") if isinstance(result, dict) else None
+                if type(bot_id) is not int or bot_id <= 0:
+                    raise BaasServiceError("Missing current BaaS bot id for device inventory")
+                # UUIDs can have historical records; never flatten their devices.
+                result = self._get_bots_api(
+                    path=f"/api/v1/bots/{bot_id}/detail-by-id",
+                    action="get_bot_devices",
+                    log_response=False,
+                )
+                if (not isinstance(result, dict) or result.get("id") != bot_id
+                        or result.get("bot_uuid") != bot_uuid
+                        or not isinstance(result.get("devices"), list)):
+                    raise BaasServiceError("Invalid BaaS device inventory")
+            return result
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
+            if e.response.status_code == 404 and not include_devices:
                 logger.warning(
                     f"[BaasService.get_bot] Bot not found, fallback to RELEASED: bot_uuid={bot_uuid}, tenant={self._tenant}"
                 )

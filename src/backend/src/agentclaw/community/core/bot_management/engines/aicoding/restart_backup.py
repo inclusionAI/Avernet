@@ -251,7 +251,7 @@ class AicodingRestartBackupMixin:
         try:
             operation_id = _operation_id(operation_id)
             if device_id is not None:
-                state = target_runtime.get_bot(bot_uuid=device_id)
+                state = target_runtime.get_bot(bot_uuid=device_id, include_devices=True)
                 _log_inventory(
                     bot_id=ctx.bot_id, target_id=device_id, state=state, phase='resolve'
                 )
@@ -273,7 +273,7 @@ class AicodingRestartBackupMixin:
                     )
 
                     def verify_no_live_targets():
-                        state = target_runtime.get_bot(bot_uuid=device_id)
+                        state = target_runtime.get_bot(bot_uuid=device_id, include_devices=True)
                         _log_inventory(
                             bot_id=ctx.bot_id, target_id=device_id, state=state, phase='verify'
                         )
@@ -301,7 +301,7 @@ class AicodingRestartBackupMixin:
                 ) for physical in targets]
 
                 def verify():
-                    state = target_runtime.get_bot(bot_uuid=device_id)
+                    state = target_runtime.get_bot(bot_uuid=device_id, include_devices=True)
                     _log_inventory(
                         bot_id=ctx.bot_id, target_id=device_id, state=state, phase='verify'
                     )

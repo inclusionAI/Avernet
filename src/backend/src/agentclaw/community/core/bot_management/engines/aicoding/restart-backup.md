@@ -34,6 +34,11 @@ The registry adapter is shared dispatch, not an independent lifecycle pipeline.
 ## Existing transports only
 
 - Active/Pending ARCA bindings use the original `exec_shell_new` API unchanged.
+- BaaS inventory resolves the current record via `GET /bots/{uuid}`, then reads
+  `GET /bots/{id}/detail-by-id` using the backend client’s `include_devices=True`.
+  The default UUID detail response does not populate devices. No health probe is
+  needed, and historical UUID records must not be flattened together. Both prepare
+  and verification use this lookup; missing/malformed inventory blocks replacement.
 - BaaS inventory identifies every live physical target. Commands use the
   existing public `post_bots_api` API and existing PaaS command endpoint, pinned
   to that target rather than randomly selecting a replica.
