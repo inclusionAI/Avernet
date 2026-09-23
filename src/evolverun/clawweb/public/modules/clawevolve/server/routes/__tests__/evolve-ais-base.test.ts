@@ -55,7 +55,8 @@ describe("ClawEvolve AIS Base transport", () => {
     const response = await fetch(`${base}/internal/tasks/${taskId}/steps/${stepId}/artifacts/upload-url`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        artifactName: "result", size: 10, sha256: "a".repeat(64), contentType: "application/json",
+        executor: "ais", artifactName: "result", size: 10,
+        sha256: "a".repeat(64), contentType: "application/json",
       }),
     });
     expect(response.status).toBe(200);
@@ -66,11 +67,12 @@ describe("ClawEvolve AIS Base transport", () => {
     expect(createSignedUrl).not.toHaveBeenCalled();
   });
 
-  it("selects the AIS upload contract from the stored task rather than artifactName", async () => {
+  it("selects the AIS upload contract from the explicit executor", async () => {
     const { base, createSignedUrl, createAisSignedUrl } = await start();
     const response = await fetch(`${base}/internal/tasks/${taskId}/steps/${stepId}/artifacts/upload-url`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ size: 10, sha256: "a".repeat(64), contentType: "application/json" }),
+      body: JSON.stringify({ executor: "ais", size: 10,
+        sha256: "a".repeat(64), contentType: "application/json" }),
     });
     expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({ error: "Artifact 名称不合法" });

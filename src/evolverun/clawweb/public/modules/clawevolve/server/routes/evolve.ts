@@ -2949,8 +2949,11 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const task = step ? await repo.findTask(taskId) : null;
     if (!step || !task || step.task_id !== taskId) { res.status(404).json({ error: "Step 不属于指定 Task" }); return; }
     if (TERMINAL_STATUSES.has(step.status)) { res.status(409).json({ error: "终态 Step 不再签发上传 URL" }); return; }
-    const aisContract = parseAisArtifactContract(parseJson(task.config_json));
-    if (aisContract?.stepId === step.step_id) {
+    if (req.body?.executor === "ais") {
+      const aisContract = parseAisArtifactContract(parseJson(task.config_json));
+      if (!aisContract || aisContract.stepId !== step.step_id) {
+        res.status(409).json({ error: "当前 Step 不属于有效的 AIS Base attempt" }); return;
+      }
       let request;
       try {
         request = validateAisArtifactRequest(aisContract, req.body?.artifactName, req.body ?? {});
