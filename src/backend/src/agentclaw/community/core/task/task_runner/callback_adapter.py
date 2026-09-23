@@ -486,7 +486,10 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
             if record is not None:
                 self._fallback_persist_audit()
             else:
-                self._set_pending_audit(None)
+                # 不可达(证明):payload 为 None 已在上方早退,走到这里 payload 必非
+                # None,而 record 仅在 payload 为 None 时为 None(_to_callback_record
+                # 对 dict payload 恒返记录)。防御性保留,pragma 沿用 analyzer 先例。
+                self._set_pending_audit(None)  # pragma: no cover
         logger.info("[task_callback] report_result, finish")
 
     async def ingest(self, data: TaskCallbackData) -> None:

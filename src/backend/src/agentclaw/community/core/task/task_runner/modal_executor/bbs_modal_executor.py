@@ -149,8 +149,12 @@ def _emit_bbs_trajectory(
     details: dict[str, Any] | None = None,
     error_msg: str | None = None,
     boost_reason: str | None = None,
+    error_type: str | None = None,
 ) -> None:
-    """Write BBS milestones/errors through the task-context trajectory facade."""
+    """Write BBS milestones/errors through the task-context trajectory facade.
+
+    ``error_type`` 为显式 ReasonCatalog 词(如跳棒场景的 ``relay``);未给且带
+    ``exception`` 时按异常类型归类(transport_error/unclassified)。"""
     if task_context_service is None:
         return
     task_id = str(execution_graph.task_id)
@@ -165,15 +169,15 @@ def _emit_bbs_trajectory(
     ext_info: dict[str, Any] = {"execution_mode": "bbs", "phase": "bbs_modal"}
     if details:
         ext_info.update(details)
-    error_type = None
     if exception is not None:
         exception_type = type(exception).__name__
         ext_info["exception_type"] = exception_type
-        error_type = (
-            "transport_error"
-            if isinstance(exception, (TimeoutError, ConnectionError))
-            else "unclassified"
-        )
+        if error_type is None:
+            error_type = (
+                "transport_error"
+                if isinstance(exception, (TimeoutError, ConnectionError))
+                else "unclassified"
+            )
         error_msg = str(exception)[:2000]
     try:
         task_context_service.emit_trajectory_event(
