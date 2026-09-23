@@ -694,7 +694,7 @@ def test_database_allows_system_default_and_one_ordinary_membership():
 
 @pytest.mark.parametrize("excluded", [False, True])
 @pytest.mark.parametrize("active", [False, True])
-def test_code_policy_mcp_cannot_join_ordinary_set_without_default_membership(active, excluded):
+def test_code_policy_mcp_requires_default_exclusion_to_join_ordinary_set(active, excluded):
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)
     with db.transactional_orm_session() as session:
@@ -706,15 +706,24 @@ def test_code_policy_mcp_cannot_join_ordinary_set_without_default_membership(act
             session.add(DefaultSkillsetMcpExclusion(
                 user_id="owner", bot_id="bot", skill_set_id=default.id, server_code="mcp.policy"
             ))
-    with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_PLATFORM_POLICY"):
-        repository.add_mcp(
+    if excluded:
+        added = repository.add_mcp(
             bot_id="bot", owner_id="owner", set_id=str(ordinary.id), server_code="mcp.policy",
             name="Policy", description=None, icon=None,
             platform_default_codes=frozenset({"mcp.policy"}), engine_type="openclaw",
         )
+        assert added.changed is True
+    else:
+        with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_PLATFORM_POLICY"):
+            repository.add_mcp(
+                bot_id="bot", owner_id="owner", set_id=str(ordinary.id), server_code="mcp.policy",
+                name="Policy", description=None, icon=None,
+                platform_default_codes=frozenset({"mcp.policy"}), engine_type="openclaw",
+            )
     with db.orm_session() as session:
-        assert session.query(SkillSetMCPServer).count() == 0
-        assert session.query(BotMCPInstallation).count() == 0
+        assert session.query(SkillSetMCPServer).count() == int(excluded)
+        assert session.query(BotMCPInstallation).count() == int(excluded and active)
+        assert session.query(DefaultSkillsetMcpExclusion).count() == int(excluded)
 
 
 def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
@@ -2560,8 +2569,9 @@ def test_direct_active_precedes_membership_when_both_forbid_joining():
     assert "RESOURCE_DIRECT_ACTIVE" in str(error.value)
 
 
-def test_a_default_set_mcp_member_cannot_join_an_ordinary_set():
-    """The MCP twin of R3's any-Set coverage."""
+@pytest.mark.parametrize("excluded", [False, True])
+def test_a_default_set_mcp_member_requires_exclusion_to_join_an_ordinary_set(excluded):
+    """An excluded Default membership releases only the MCP add-to-Set path."""
     db = _Database()
     with db.transactional_orm_session() as session:
         default_set = SkillSet(
@@ -2591,14 +2601,19 @@ def test_a_default_set_mcp_member_cannot_join_an_ordinary_set():
                 env="dev",
             )
         )
-        session.add(
-            BotMCPInstallation(
-                bot_id="bot", owner_id="owner", server_code="mcp.default-member", env="dev"
-            )
-        )
+        if excluded:
+            session.add(DefaultSkillsetMcpExclusion(
+                user_id="owner", bot_id="bot", skill_set_id=default_set.id,
+                server_code="mcp.default-member",
+            ))
+        else:
+            session.add(BotMCPInstallation(
+                bot_id="bot", owner_id="owner",
+                server_code="mcp.default-member", env="dev",
+            ))
 
-    with pytest.raises(SkillSetControlPlaneConflictError) as error:
-        CapabilityDesiredStateRepository(db).add_mcp(
+    def add_member():
+        return CapabilityDesiredStateRepository(db).add_mcp(
             platform_default_codes=frozenset(),
             bot_id="bot",
             owner_id="owner",
@@ -2610,7 +2625,12 @@ def test_a_default_set_mcp_member_cannot_join_an_ordinary_set():
             engine_type="openclaw",
             default_engine_types=("openclaw",),
         )
-    assert "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET" in str(error.value)
+    if excluded:
+        assert add_member().changed is True
+    else:
+        with pytest.raises(SkillSetControlPlaneConflictError) as error:
+            add_member()
+        assert "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET" in str(error.value)
 
 
 def test_direct_skill_installation_mirrors_the_mcp_pair():
@@ -2933,6 +2953,47 @@ def test_mcp_exclusion_mirrors_the_skill_pair():
         assert [
             row.server_code for row in session.query(BotMCPInstallation).all()
         ] == ["mcp.member"]
+
+    # Once the owner excludes Default again, an active ordinary Set may own
+    # the same MCP. Repeating Default exclusion must preserve its state, and
+    # un-exclusion must refuse the duplicate source.
+    repository.exclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
+    )
+    with db.transactional_orm_session() as session:
+        ordinary = SkillSet(
+            name="mine", user_id="owner", bolt_id="bot",
+            engine_type="openclaw", is_active=True, env="dev",
+        )
+        session.add(ordinary)
+        session.flush()
+    repository.add_mcp(
+        set_id=str(ordinary.id), server_code="mcp.member", name="member",
+        description=None, icon=None, platform_default_codes=frozenset(),
+        **_DEFAULT_SCOPE,
+    )
+    with db.transactional_orm_session() as session:
+        session.add(BotMCPConfig(
+            owner_id="owner", bot_id="bot", server_code="mcp.member",
+            config='{"headers":{}}', env="dev",
+        ))
+    repeated = repository.exclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
+    )
+    assert repeated.changed is False
+    with db.orm_session() as session:
+        assert session.query(BotMCPInstallation).count() == 1
+        assert session.query(BotMCPConfig).count() == 1
+    with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"):
+        repository.unexclude_default_mcp(
+            set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
+        )
+    repository.remove_mcp(
+        set_id=str(ordinary.id), server_code="mcp.member", **_DEFAULT_SCOPE
+    )
+    assert repository.unexclude_default_mcp(
+        set_id=str(default.id), server_code="mcp.member", **_DEFAULT_SCOPE
+    ).changed
 
 
 def test_ordinary_remove_mcp_refuses_a_default_set_address() -> None:
