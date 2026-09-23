@@ -67,6 +67,8 @@ delivery.semantic_projection_json 复用现有 version=1 的群快照，新增 t
 不在 delivery 中复制正文、附件 URL 或凭证。不增加数据库列或迁移。
 消息继续使用 ManagerWorker 可见性分类，任务派发对 Worker 定向可见，Worker 结果
 保持既有 FullOnly 分类；不扩大 Human 消息可见范围。
+Worker 历史视角除自身 owner 的消息外，还能回看自己产生的 TaskResult 展示 `chat`
+（`client_msg_id=task-display:<task_id>`）；内部 `run_reply` 仍不进入普通历史。
 
 ## 4. 准入与发送
 

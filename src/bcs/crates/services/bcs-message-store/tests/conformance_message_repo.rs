@@ -24,6 +24,56 @@ async fn sqlite_message_repo_passes_contract() {
 }
 
 #[tokio::test]
+async fn memory_worker_history_includes_only_own_task_display() {
+    worker_history_includes_only_own_task_display(&MemoryMessageRepo::new()).await;
+}
+
+#[tokio::test]
+async fn sqlite_worker_history_includes_only_own_task_display() {
+    let repo = MySqlMessageStore::sqlite(sqlite_db().await, "dev".into());
+    worker_history_includes_only_own_task_display(&repo).await;
+}
+
+async fn worker_history_includes_only_own_task_display(repo: &dyn bcs_service_api::port::repo::MessageRepoPort) {
+    use bcs_domain::{MessageAudience, MessageOwnerFilter, MessageQuery, MessageVisibilityDomain, NewMessage, SenderType};
+    let group = "contract-group";
+    let session = "contract-group:abcd1234";
+    for (sender, kind, owner, client, text) in [
+        ("worker-a", "chat", Some("worker-a"), None, "owned-segment"),
+        ("worker-a", "tool_call", Some("worker-a"), None, "owned-tool"),
+        ("worker-a", "chat", None, Some("task-display:a"), "own-result"),
+        ("worker-b", "chat", None, Some("task-display:b"), "other-result"),
+        ("worker-a", "chat", None, None, "unrelated-ownerless"),
+        ("worker-a", "run_reply", None, Some("task-result:a"), "internal-result"),
+    ] {
+        repo.append_message(NewMessage {
+            group_id: group.into(), session_id: session.into(), sender_id: sender.into(),
+            sender_type: SenderType::Bot, message_type: kind.into(),
+            content: serde_json::json!(text), client_msg_id: client.map(str::to_string),
+            owner_bot_id: owner.map(str::to_string),
+            visibility_domain: MessageVisibilityDomain::ManagerWorker,
+            audience: Some(match owner {
+                Some(worker) => MessageAudience::directed([worker.to_string()]).unwrap(),
+                None => MessageAudience::FullOnly,
+            }),
+            created_at: 100, run_id: "worker-run".into(),
+        }).await.unwrap();
+    }
+    let filter = MessageOwnerFilter::WorkerHistory("worker-a".into());
+    let query = repo.query_messages(MessageQuery {
+        group_id: group.into(), session_id: session.into(), cursor: None, limit: 20,
+        keyword: None, sender_id: None, message_type: None, owner_filter: filter.clone(),
+        time_range: None, visible_from_seq: None, human_view: None,
+    }).await.unwrap();
+    let list = repo.list_session_history(session, filter, None, None, None, 20).await.unwrap();
+    for page in [query, list] {
+        let mut texts: Vec<_> = page.messages.iter().filter_map(|m| m.content.as_str()).collect();
+        texts.sort_unstable();
+        assert_eq!(texts, vec!["own-result", "owned-segment", "owned-tool"]);
+    }
+}
+
+#[tokio::test]
 async fn error_projection_concurrent_retries_use_database_primary_key() {
     use bcs_domain::{NewMessage, SenderType, MessageVisibilityDomain};
     use bcs_service_api::port::repo::MessageRepoPort;

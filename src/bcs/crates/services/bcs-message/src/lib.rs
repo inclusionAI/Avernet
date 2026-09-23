@@ -203,8 +203,8 @@ impl MessageService {
     /// the V1 `bcs-app-session` message-history facade so the two cannot drift.
     ///
     /// Returns:
-    /// - `ManagerWorker` strategy + worker viewer → `(Eq(worker_id), None)`
-    ///   (owner isolation: a worker only reads its own messages).
+    /// - `ManagerWorker` strategy + worker viewer → `(WorkerHistory(worker_id), None)`
+    ///   (worker-owned messages and its own TaskResult display).
     /// - `ManagerWorker` strategy + non-worker bot manager viewer →
     ///   `(PublicOrOwner(view), None)`; none / human viewer →
     ///   `(IsNull, None)` (public-only, VUlai).
@@ -224,7 +224,7 @@ impl MessageService {
         if is_manager_worker {
             let view = Self::manager_worker_history_view(group, session, view_bot_id)?;
             let owner_filter = match view {
-                ManagerWorkerHistoryView::Worker(worker_id) => MessageOwnerFilter::Eq(worker_id),
+                ManagerWorkerHistoryView::Worker(worker_id) => MessageOwnerFilter::WorkerHistory(worker_id),
                 ManagerWorkerHistoryView::Public => match view_bot_id {
                     // Non-worker bot viewer (the manager) reads public + own copies.
                     Some(v) if !v.is_empty() && !v.starts_with("human_") => {
@@ -290,6 +290,7 @@ impl MessageService {
             MessageOwnerFilter::Any => true,
             MessageOwnerFilter::IsNull => owner_bot_id.is_none(),
             MessageOwnerFilter::Eq(expected) => owner_bot_id == Some(expected.as_str()),
+            MessageOwnerFilter::WorkerHistory(expected) => owner_bot_id == Some(expected.as_str()),
             MessageOwnerFilter::PublicOrOwner(expected) => {
                 owner_bot_id.is_none() || owner_bot_id == Some(expected.as_str())
             }
@@ -587,7 +588,7 @@ impl GroupMessageHistoryService for MessageService {
                 legacy_owner_filter
             };
             let merge_public_opening_message =
-                !hide_opening_message && matches!(&owner_filter, MessageOwnerFilter::Eq(_));
+                !hide_opening_message && matches!(&owner_filter, MessageOwnerFilter::WorkerHistory(_));
 
             info!(
                 session_id = %session_id,
@@ -748,7 +749,7 @@ impl GroupMessageHistoryService for MessageService {
                     match view {
                         ManagerWorkerHistoryView::Public => MessageOwnerFilter::IsNull,
                         ManagerWorkerHistoryView::Worker(worker_id) => {
-                            MessageOwnerFilter::Eq(worker_id)
+                            MessageOwnerFilter::WorkerHistory(worker_id)
                         }
                     }
                 }

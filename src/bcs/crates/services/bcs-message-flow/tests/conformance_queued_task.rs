@@ -362,6 +362,11 @@ async fn restarted_after_tool_task_retains_full_run_but_sends_only_result_window
     let mut tool = final_event(&row); tool.state = ChatEventState::ToolCallEnd; tool.event_type = "agent".into();
     tool.event_payload = json!({"stream":"tool", "data":{"phase":"result", "toolCallId":"call-task", "name":"lookup", "result":"not response text"}});
     f.flow.handle_bot_event(tool).await.unwrap();
+    let preceding = f.repo.list_session_history(SESSION, bcs_domain::MessageOwnerFilter::Eq("bot-observer".into()),
+        None, None, None, 100).await.unwrap();
+    assert!(preceding.messages.iter().any(|m| m.message_type == "chat" && m.content.as_str() == Some("BEFORE_TOOL")));
+    assert!(preceding.messages.iter().any(|m| m.message_type == "tool_call" && m.content["name"] == "lookup"));
+    assert!(preceding.messages.iter().all(|m| m.owner_bot_id.as_deref() == Some("bot-observer")));
     f.flow = Fixture::make_flow(&f.support, &f.service, &f.repo, &f.live).await;
     let mut final_cmd = final_event(&row);
     final_cmd.event_payload = json!({"message":{"content":[{"type":"text","text":"BEFORE_TOOLAFTER_TOOL"}]}});
@@ -398,6 +403,10 @@ async fn sqlite_task_roundtrip_rebuilds_from_durable_delivery_and_keeps_history_
     let history = f.repo.list_session_history(SESSION, bcs_domain::MessageOwnerFilter::Any, None, None, None, 100).await.unwrap();
     assert!(history.messages.iter().all(|m| m.message_type != "run_reply"));
     assert_eq!(history.messages.iter().filter(|m| m.run_id == row.run_id.clone().unwrap() && m.message_type == "chat").count(), 1);
+    let worker_history = f.repo.list_session_history(SESSION,
+        bcs_domain::MessageOwnerFilter::WorkerHistory("bot-observer".into()), None, None, None, 100).await.unwrap();
+    assert!(worker_history.messages.iter().any(|m| m.client_msg_id.as_deref() == Some(format!("task-display:{task_id}").as_str())
+        && m.content.as_str() == Some("WORKER_RESULT")));
     f.start(result).await;
 }
 

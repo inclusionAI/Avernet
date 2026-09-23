@@ -1,6 +1,33 @@
 use super::*;
 
 #[tokio::test]
+async fn manager_worker_worker_history_reads_own_task_display() {
+    let (service, repo, _sessions, _fallback, session_id) =
+        service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
+    for (sender, client, text) in [
+        ("worker-a", Some("task-display:a"), "own-result"),
+        ("worker-b", Some("task-display:b"), "other-result"),
+        ("worker-a", None, "unrelated-ownerless"),
+    ] {
+        repo.append_message(NewMessage {
+            group_id: "group-1".into(), session_id: session_id.clone(),
+            sender_id: sender.into(), sender_type: SenderType::Bot,
+            message_type: "chat".into(), content: serde_json::json!(text),
+            client_msg_id: client.map(str::to_string), owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::ManagerWorker,
+            audience: Some(bcs_domain::MessageAudience::FullOnly),
+            created_at: 1, run_id: "worker-run".into(),
+        }).await.unwrap();
+    }
+    let worker = service.get_session_history(session_cmd("group-1", &session_id, Some("worker-a")))
+        .await.unwrap();
+    assert_eq!(worker.messages.iter().map(|m| m.content.as_str()).collect::<Vec<_>>(), vec!["own-result"]);
+    let manager = service.get_session_history(session_cmd("group-1", &session_id, Some("mgr")))
+        .await.unwrap();
+    assert_eq!(manager.messages.len(), 3);
+}
+
+#[tokio::test]
 async fn manager_worker_manager_view_reads_public_rows_after_cutoff() {
     let (service, repo, _sessions, fallback, session_id) =
         service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
