@@ -21,10 +21,12 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping
 import hashlib
 from typing import Any, Optional
-from urllib.parse import urlsplit
 
 import httpx
 
+from agentclaw.community.core.devices.services.loopback_targets import (
+    is_loopback_target,
+)
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
@@ -161,10 +163,8 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         means this caller cannot be proxied.
         """
         target = conn_info.get("target")
-        if isinstance(target, str) and target:
-            host = urlsplit(f"//{target}").hostname if "://" in target else target.split(":")[0] if ":" in target else target
-            if host in ("localhost", "127.0.0.1", "::1"):
-                return f"http://{target.rstrip('/')}"
+        if isinstance(target, str) and target and is_loopback_target(target):
+            return f"http://{target.rstrip('/')}"
         url = conn_info.get("url")
         if isinstance(url, str) and url.startswith(("http://", "https://")):
             return url.rstrip("/")

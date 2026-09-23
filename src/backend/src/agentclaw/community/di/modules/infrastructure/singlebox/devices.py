@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from typing import cast  # noqa: UP035 - injector binding key matches provider side
-from urllib.parse import urlsplit
 
 from injector import Binder, Module, inject, provider, singleton
 
@@ -46,6 +45,9 @@ from agentclaw.community.core.devices.services.device_service import (
 from agentclaw.community.core.devices.services.device_service_router import (
     DeviceServiceRouter,
 )
+from agentclaw.community.core.devices.services.loopback_targets import (
+    is_loopback_target,
+)
 from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
@@ -74,17 +76,7 @@ class SingleboxBaasDeviceService(BaasDeviceService):
 
     @staticmethod
     def _is_loopback_target(target: str) -> bool:
-        if not target:
-            return False
-        try:
-            host = urlsplit(f"//{target}").hostname
-        except ValueError:
-            host = None
-        if host is None and target.count(":") >= 2:
-            host = target.rsplit(":", 1)[0]
-            if host.startswith("[") and host.endswith("]"):
-                host = host[1:-1]
-        return host in {"localhost", "127.0.0.1", "::1"}
+        return is_loopback_target(target)
 
     def get_device_connection(
         self,
