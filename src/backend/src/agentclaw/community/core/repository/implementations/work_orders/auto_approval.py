@@ -20,14 +20,18 @@ class _AutoApprovalWorkOrderRepository:
         self, *, work_order_id: int, reviewer_user_id: str, env: str
     ) -> None:
         with self._db.transactional_orm_session() as db:
-            updated = db.query(self._WorkOrder).filter(
-                self._WorkOrder.id == work_order_id,
-                self._WorkOrder.env == env,
-                self._WorkOrder.status == WorkOrderStatus.PENDING.value,
-                self._WorkOrder.reviewer_user_id.is_(None),
-            ).update(
-                {self._WorkOrder.status: WorkOrderStatus.PROCESSING.value},
-                synchronize_session=False,
+            updated = (
+                db.query(self._WorkOrder)
+                .filter(
+                    self._WorkOrder.id == work_order_id,
+                    self._WorkOrder.env == env,
+                    self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+                    self._WorkOrder.reviewer_user_id.is_(None),
+                )
+                .update(
+                    {self._WorkOrder.status: WorkOrderStatus.PROCESSING.value},
+                    synchronize_session=False,
+                )
             )
             if updated != 1:
                 raise WorkOrderAlreadyProcessedError("work order already processed")
@@ -72,19 +76,23 @@ class _AutoApprovalWorkOrderRepository:
     ) -> None:
         with self._db.transactional_orm_session() as db:
             now = db.execute(select(func.now())).scalar_one()
-            updated = db.query(self._WorkOrder).filter(
-                self._WorkOrder.id == work_order_id,
-                self._WorkOrder.env == env,
-                self._WorkOrder.status == WorkOrderStatus.PROCESSING.value,
-            ).update(
-                {
-                    self._WorkOrder.status: WorkOrderStatus.FAILED.value,
-                    self._WorkOrder.reviewer_user_id: reviewer_user_id,
-                    self._WorkOrder.review_remark: review_remark[:512],
-                    self._WorkOrder.reviewed_at: now,
-                    self._WorkOrder.gmt_modified: now,
-                },
-                synchronize_session=False,
+            updated = (
+                db.query(self._WorkOrder)
+                .filter(
+                    self._WorkOrder.id == work_order_id,
+                    self._WorkOrder.env == env,
+                    self._WorkOrder.status == WorkOrderStatus.PROCESSING.value,
+                )
+                .update(
+                    {
+                        self._WorkOrder.status: WorkOrderStatus.FAILED.value,
+                        self._WorkOrder.reviewer_user_id: reviewer_user_id,
+                        self._WorkOrder.review_remark: review_remark[:512],
+                        self._WorkOrder.reviewed_at: now,
+                        self._WorkOrder.gmt_modified: now,
+                    },
+                    synchronize_session=False,
+                )
             )
             if updated == 1:
                 db.query(self._Approver).filter(

@@ -71,7 +71,9 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 _ADMINISTRATOR_ROLES = ("ADMIN", "ADMINISTRATOR")
 
 
-class WorkOrderRepository(_AutoApprovalWorkOrderRepository, WorkOrderRepositoryProtocol):
+class WorkOrderRepository(
+    _AutoApprovalWorkOrderRepository, WorkOrderRepositoryProtocol
+):
     @inject
     def __init__(
         self,
