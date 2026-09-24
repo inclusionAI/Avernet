@@ -16,8 +16,10 @@ class WorkOrderApprovalMode(StrEnum):
 
 class WorkOrderStatus(StrEnum):
     PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    FAILED = "FAILED"
 
 
 class WorkOrderEventStatus(StrEnum):

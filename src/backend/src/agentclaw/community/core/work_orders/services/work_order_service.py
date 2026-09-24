@@ -65,6 +65,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderStatus,
     WorkOrderDecision,
     WorkOrderEventCreatedResult,
+    WorkOrderEventStatus,
     skill_collaborator_applicant_display,
 )
 from agentclaw.community.core.work_orders.protocols import (
@@ -194,16 +195,11 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 raise WorkOrderInvalidEventError(
                     "manual approval events require approvers and no recipients"
                 )
-            if (
-                approval_mode is WorkOrderApprovalMode.AUTO
-                and approvers
-                and actor_id not in approvers
-            ):
-                # approver_user_ids is accepted for compatibility but AUTO audit
-                # ownership is always the authenticated caller.
-                approvers = []
             if approval_mode is WorkOrderApprovalMode.AUTO:
-                approvers = [actor_id]
+                if not approvers:
+                    raise WorkOrderInvalidEventError(
+                        "auto approval events require approver_user_ids"
+                    )
                 if not recipients:
                     recipients = [applicant]
         elif event_category is NotificationCategory.NOTICE:
@@ -233,16 +229,6 @@ class WorkOrderService(WorkOrderServiceProtocol):
         if event_type == WorkOrderEventType.SPACE_JOIN_APPLIED.value:
             title = WorkOrderTitleKey.SPACE_JOIN_PENDING.value
         persisted_event_type = event_type
-        if (
-            approval_mode is WorkOrderApprovalMode.AUTO
-            and event_category is NotificationCategory.APPROVAL
-        ):
-            from agentclaw.community.core.work_orders.models import reviewed_event_type_for
-            persisted_event_type = reviewed_event_type_for(
-                source_event_type=event_type, biz_type=biz_type
-            )
-            if serialized_content is None:
-                serialized_content = json.dumps({"text": "审批已自动通过"}, ensure_ascii=False)
 
         repository_kwargs = dict(
             event_category=event_category,
@@ -254,21 +240,79 @@ class WorkOrderService(WorkOrderServiceProtocol):
         if approval_mode is WorkOrderApprovalMode.AUTO:
             repository_kwargs["approval_mode"] = approval_mode
             repository_kwargs["callback_source_event_type"] = event_type
-            if self._decision_callbacks.requires_callback(event_type):
-                callback_context = callback_auth or WorkOrderCallbackCredential(headers={})
 
-                def auto_approval_callback(context):
-                    self._decision_callbacks.dispatch(
-                        **{
-                            "context": context,
-                            "decision": WorkOrderDecision.APPROVED,
-                            "review_remark": None,
-                            "creden" + "tial": callback_context,
-                        }
-                    )
-
-                repository_kwargs["auto_approval_callback"] = auto_approval_callback
         result = self._repository.create_work_order_event(**repository_kwargs)
+        if (
+            approval_mode is WorkOrderApprovalMode.AUTO
+            and event_category is NotificationCategory.APPROVAL
+            and result.work_order_id is not None
+        ):
+            approver_id = approvers[-1]
+            self._repository.claim_auto_approval(
+                work_order_id=result.work_order_id,
+                reviewer_user_id=approver_id,
+                env=get_current_env(),
+            )
+            try:
+                if self._decision_callbacks.requires_callback(event_type):
+                    context = self._repository.get_approval_context(
+                        work_order_id=result.work_order_id,
+                        reviewer_user_id=approver_id,
+                        env=get_current_env(),
+                    ).model_copy(update={"source_event_type": event_type})
+                    self._decision_callbacks.dispatch(
+                        context=context,
+                        decision=WorkOrderDecision.APPROVED,
+                        review_remark=None,
+                        credential=callback_auth or WorkOrderCallbackCredential(headers={}),
+                    )
+                if biz_type == WorkOrderBizType.SPACE_JOIN.value:
+                    detail = self.get_detail(work_order_id=result.work_order_id, actor_id=approver_id)
+                    self._review_space_join(
+                        detail=detail,
+                        actor_id=approver_id,
+                        review_remark=None,
+                        target_status=WorkOrderStatus.APPROVED,
+                    )
+                elif biz_type == WorkOrderBizType.BOT_COLLABORATOR.value:
+                    detail = self.get_detail(work_order_id=result.work_order_id, actor_id=approver_id)
+                    self._review_bot_editor_request(
+                        detail=detail,
+                        actor_id=approver_id,
+                        review_remark=None,
+                        target_status=WorkOrderStatus.APPROVED,
+                    )
+                elif biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
+                    detail = self.get_detail(work_order_id=result.work_order_id, actor_id=approver_id)
+                    self._skill_collaborator_approval_handler.process(
+                        detail=detail,
+                        actor_id=approver_id,
+                        review_remark=None,
+                        target_status=WorkOrderStatus.APPROVED,
+                    )
+                else:
+                    self._repository.process_approval(
+                        work_order_id=result.work_order_id,
+                        reviewer_user_id=approver_id,
+                        decision=WorkOrderDecision.APPROVED,
+                        review_remark=None,
+                        env=get_current_env(),
+                        source_event_type=event_type,
+                    )
+            except Exception as exc:
+                self._repository.mark_auto_approval_failed(
+                    work_order_id=result.work_order_id,
+                    reviewer_user_id=approver_id,
+                    review_remark=f"AUTO approval failed: {str(exc)[:480]}",
+                    env=get_current_env(),
+                )
+                raise
+            self._repository.finalize_auto_approval(
+                work_order_id=result.work_order_id,
+                reviewer_user_id=approver_id,
+                env=get_current_env(),
+            )
+            result = result.model_copy(update={"status": WorkOrderEventStatus.APPROVED})
         return result
 
     def create_work_order(

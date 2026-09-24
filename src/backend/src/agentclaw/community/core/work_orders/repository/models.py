@@ -81,9 +81,9 @@ class WorkOrderModel(Base):
             reviewer_user_id=self.reviewer_user_id,
             review_remark=self.review_remark,
             reviewed_at=self.reviewed_at,
-            approval_mode=(
-                WorkOrderApprovalMode(self.approval_mode)
-                if self.approval_mode else None
+            # NULL is the persisted representation of legacy/manual rows.
+            approval_mode=WorkOrderApprovalMode(
+                self.approval_mode or WorkOrderApprovalMode.MANUAL.value
             ),
             env=self.env,
             gmt_created=self.gmt_created,

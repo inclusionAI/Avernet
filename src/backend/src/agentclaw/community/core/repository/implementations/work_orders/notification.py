@@ -74,9 +74,8 @@ class _WorkOrderNotificationRepository:
                 )
                 if work_order is not None:
                     status = WorkOrderStatus(work_order.status)
-                    approval_mode = (
-                        WorkOrderApprovalMode(work_order.approval_mode)
-                        if work_order.approval_mode else None
+                    approval_mode = WorkOrderApprovalMode(
+                        work_order.approval_mode or WorkOrderApprovalMode.MANUAL.value
                     )
                     is_approver = (
                         db.query(self._Approver.id)

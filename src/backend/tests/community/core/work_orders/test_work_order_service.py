@@ -631,18 +631,15 @@ def test_auto_friend_event_defers_callback_to_repository_with_real_context() -> 
 
     assert result.status is WorkOrderEventStatus.APPROVED
     kwargs = repository.create_work_order_event.call_args.kwargs
-    assert kwargs["approver_user_ids"] == ["actor-auto"]
+    assert kwargs["approver_user_ids"] == ["ignored-approver"]
     assert kwargs["callback_source_event_type"] == (
         WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value
     )
-    callback = kwargs["auto_approval_callback"]
-    context = _friend_context(
-        event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED,
-    )
-    callback(context)
     callbacks.dispatch.assert_called_once()
     dispatch_kwargs = callbacks.dispatch.call_args.kwargs
-    assert dispatch_kwargs["context"] is context
+    repository.get_approval_context.return_value.model_copy.assert_called_once_with(
+        update={"source_event_type": WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value}
+    )
     assert dispatch_kwargs["decision"] is WorkOrderDecision.APPROVED
     assert dispatch_kwargs["review_remark"] is None
     assert dispatch_kwargs["credential"] is callback_context

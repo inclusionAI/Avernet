@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Callable
 from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
 
@@ -48,7 +47,6 @@ class WorkOrderRepositoryProtocol(Protocol):
         biz_data: str | None,
         env: str,
         callback_source_event_type: str | None = None,
-        auto_approval_callback: Callable[[WorkOrderApprovalContext], None] | None = None,
     ) -> WorkOrderEventCreatedResult: ...
 
     @abstractmethod
@@ -71,6 +69,22 @@ class WorkOrderRepositoryProtocol(Protocol):
     ) -> WorkOrderApprovalContext: ...
 
     @abstractmethod
+    def claim_auto_approval(
+        self, *, work_order_id: int, reviewer_user_id: str, env: str
+    ) -> None: ...
+
+    @abstractmethod
+    def finalize_auto_approval(
+        self, *, work_order_id: int, reviewer_user_id: str, env: str
+    ) -> None: ...
+
+    @abstractmethod
+    def mark_auto_approval_failed(
+        self, *, work_order_id: int, reviewer_user_id: str,
+        review_remark: str, env: str
+    ) -> None: ...
+
+    @abstractmethod
     def process_approval(
         self,
         *,
@@ -79,6 +93,7 @@ class WorkOrderRepositoryProtocol(Protocol):
         decision: WorkOrderDecision,
         review_remark: str | None,
         env: str,
+        source_event_type: str | None = None,
     ) -> WorkOrderReviewResult: ...
     @abstractmethod
     def create_space_join_request(

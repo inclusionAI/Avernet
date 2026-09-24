@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 
 from injector import inject
 from sqlalchemy import and_, func, or_, select
@@ -108,7 +107,6 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         biz_data: str | None,
         env: str,
         callback_source_event_type: str | None = None,
-        auto_approval_callback: Callable[[WorkOrderApprovalContext], None] | None = None,
     ) -> WorkOrderEventCreatedResult:
         approval_mode = approval_mode or WorkOrderApprovalMode.MANUAL
         return self._creation.create_work_order_event(
@@ -126,7 +124,6 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             biz_data=biz_data,
             env=env,
             callback_source_event_type=callback_source_event_type,
-            auto_approval_callback=auto_approval_callback,
         )
 
     def create_work_order(
@@ -202,6 +199,67 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 source_event_type=source_event_type,
             )
 
+    def claim_auto_approval(self, *, work_order_id: int, reviewer_user_id: str, env: str) -> None:
+        with self._db.transactional_orm_session() as db:
+            updated = db.query(self._WorkOrder).filter(
+                self._WorkOrder.id == work_order_id,
+                self._WorkOrder.env == env,
+                self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+                self._WorkOrder.reviewer_user_id.is_(None),
+            ).update(
+                {self._WorkOrder.status: WorkOrderStatus.PROCESSING.value},
+                synchronize_session=False,
+            )
+            if updated != 1:
+                raise WorkOrderAlreadyProcessedError("work order already processed")
+
+    def finalize_auto_approval(self, *, work_order_id: int, reviewer_user_id: str, env: str) -> None:
+        with self._db.transactional_orm_session() as db:
+            now = db.execute(select(func.now())).scalar_one()
+            db.query(self._Approver).filter(
+                self._Approver.work_order_id == work_order_id,
+                self._Approver.env == env,
+                self._Approver.status.in_([
+                    WorkOrderApproverStatus.PENDING.value,
+                    WorkOrderApproverStatus.CANCELLED.value,
+                    WorkOrderApproverStatus.APPROVED.value,
+                ]),
+            ).update({
+                self._Approver.status: WorkOrderApproverStatus.APPROVED.value,
+                self._Approver.reviewed_at: now,
+                self._Approver.gmt_modified: now,
+            }, synchronize_session=False)
+            db.query(self._WorkOrder).filter(
+                self._WorkOrder.id == work_order_id,
+                self._WorkOrder.env == env,
+            ).update({
+                self._WorkOrder.status: WorkOrderStatus.APPROVED.value,
+                self._WorkOrder.reviewer_user_id: reviewer_user_id,
+                self._WorkOrder.reviewed_at: now,
+                self._WorkOrder.gmt_modified: now,
+            }, synchronize_session=False)
+
+    def mark_auto_approval_failed(self, *, work_order_id: int, reviewer_user_id: str, review_remark: str, env: str) -> None:
+        with self._db.transactional_orm_session() as db:
+            now = db.execute(select(func.now())).scalar_one()
+            updated = db.query(self._WorkOrder).filter(
+                self._WorkOrder.id == work_order_id,
+                self._WorkOrder.env == env,
+                self._WorkOrder.status == WorkOrderStatus.PROCESSING.value,
+            ).update({
+                self._WorkOrder.status: WorkOrderStatus.FAILED.value,
+                self._WorkOrder.reviewer_user_id: reviewer_user_id,
+                self._WorkOrder.review_remark: review_remark[:512],
+                self._WorkOrder.reviewed_at: now,
+                self._WorkOrder.gmt_modified: now,
+            }, synchronize_session=False)
+            if updated == 1:
+                db.query(self._Approver).filter(
+                    self._Approver.work_order_id == work_order_id,
+                    self._Approver.status == WorkOrderApproverStatus.PENDING.value,
+                    self._Approver.env == env,
+                ).update({self._Approver.status: WorkOrderApproverStatus.CANCELLED.value}, synchronize_session=False)
+
     def process_approval(
         self,
         *,
@@ -210,6 +268,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         decision: WorkOrderDecision,
         review_remark: str | None,
         env: str,
+        source_event_type: str | None = None,
     ):
         with self._db.transactional_orm_session() as db:
             now = db.execute(select(func.now())).scalar_one()
@@ -234,7 +293,10 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             if approver is None:
                 raise WorkOrderAccessDeniedError("current user is not an approver")
             if (
-                order.status != WorkOrderStatus.PENDING.value
+                order.status not in {
+                    WorkOrderStatus.PENDING.value,
+                    WorkOrderStatus.PROCESSING.value,
+                }
                 or approver.status != WorkOrderApproverStatus.PENDING.value
             ):
                 raise WorkOrderAlreadyProcessedError("work order already processed")
@@ -259,7 +321,10 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 raise WorkOrderAlreadyProcessedError("approver already processed")
             db.query(self._WorkOrder).filter(
                 self._WorkOrder.id == work_order_id,
-                self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+                self._WorkOrder.status.in_([
+                    WorkOrderStatus.PENDING.value,
+                    WorkOrderStatus.PROCESSING.value,
+                ]),
             ).update(
                 {
                     self._WorkOrder.status: target.value,
@@ -345,7 +410,11 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 .order_by(self._Notification.id.asc())
                 .first()
             )
-            source_event_type = source_event[0] if source_event is not None else None
+            source_event_type = (
+                source_event_type
+                if source_event_type is not None
+                else (source_event[0] if source_event is not None else None)
+            )
             reviewed_event_type = reviewed_event_type_for(
                 source_event_type=source_event_type,
                 biz_type=order.biz_type,
@@ -771,7 +840,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 db.query(self._WorkOrder)
                 .filter(
                     self._WorkOrder.id == work_order_id,
-                    self._WorkOrder.status == WorkOrderStatus.PENDING.value,
+                    self._WorkOrder.status.in_([WorkOrderStatus.PENDING.value, WorkOrderStatus.PROCESSING.value]),
                     self._WorkOrder.env == env,
                 )
                 .update(
