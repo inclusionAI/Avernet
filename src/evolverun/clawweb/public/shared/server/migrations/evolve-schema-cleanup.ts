@@ -109,6 +109,7 @@ export async function cleanupEvolveSchema(db: IDatabase): Promise<void> {
         await tx.exec(tx.dialect.renderDdl(evolveTables[i].replace(table, temporary)));
         for (const original of rows.get(table)!) {
           const row = { ...original };
+          if (!('gmt_modified' in row)) row.gmt_modified = row.gmt_create;
           if (table === 'ce_stage_developments') row.id = Number(ids.get(String(row.stage_skill_id)));
           if (table === 'ce_stage_skill_implementations') row.stage_skill_id = ids.get(String(row.stage_skill_id));
           for (const column of removed[table] ?? []) delete row[column];

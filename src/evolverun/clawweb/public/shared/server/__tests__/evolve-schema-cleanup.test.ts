@@ -76,9 +76,11 @@ describe('Evolve schema simplification', () => {
       for (const table of tableNames) {
         const columns = await db.query<{ name: string; pk: number }>(`PRAGMA table_info(${table})`);
         expect(columns.find(column => column.name === 'id')?.pk, table).toBe(1);
+        expect(columns.map(column => column.name), table).toEqual(expect.arrayContaining(['gmt_create', 'gmt_modified']));
         expect((await db.query<{ origin: string }>(`PRAGMA index_list(${table})`)).filter(index => index.origin === 'c'), table).toEqual([]);
       }
       const before = await db.query('SELECT * FROM ce_skill_events');
+      expect(await db.query('SELECT id FROM ce_skill_versions WHERE gmt_modified <> gmt_create')).toEqual([]);
       await cleanupEvolveSchema(db);
       expect(await db.query('SELECT * FROM ce_skill_events')).toEqual(before);
       expect(await db.query("SELECT name FROM sqlite_master WHERE name LIKE '%_v13_'")).toEqual([]);
@@ -167,6 +169,13 @@ describe('Evolve schema simplification', () => {
           .filter(index => index.unique).map(index => database.query(`PRAGMA index_info(${index.name})`)));
         expect(await keys(delivery)).toEqual(await keys(db));
       }
+      await db.exec(`INSERT INTO ce_skill_versions
+        (version_id, asset_id, version_no, package_ref, package_sha256, status, gmt_create, gmt_modified)
+        VALUES ('VERSION', 'ASSET', 1, 'package', 'digest', 'baseline', 100, 100)`);
+      await db.exec("UPDATE ce_skill_versions SET status = 'accepted' WHERE version_id = 'VERSION'");
+      const updated = (await db.query<{ gmt_create: number; gmt_modified: number }>('SELECT gmt_create, gmt_modified FROM ce_skill_versions'))[0];
+      expect(updated.gmt_create).toBe(100);
+      expect(updated.gmt_modified).toBeGreaterThan(100);
     } finally { await db.close(); await delivery.close(); }
   });
 });

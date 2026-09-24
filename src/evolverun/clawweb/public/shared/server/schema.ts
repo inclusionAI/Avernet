@@ -30,6 +30,9 @@ export type DbType = "sqlite" | "mysql" | "zdas";
  * are only needed for SQLite.
  */
 export const sqliteTriggers: string[] = [
+  `CREATE TRIGGER IF NOT EXISTS trg_ce_stage_extension_runs_update AFTER UPDATE ON ce_stage_extension_runs FOR EACH ROW BEGIN UPDATE ce_stage_extension_runs SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_ce_skill_versions_update AFTER UPDATE ON ce_skill_versions FOR EACH ROW BEGIN UPDATE ce_skill_versions SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_ce_skill_audit_events_update AFTER UPDATE ON ce_skill_audit_events FOR EACH ROW BEGIN UPDATE ce_skill_audit_events SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,
   `CREATE TRIGGER IF NOT EXISTS trg_flow_events_update AFTER UPDATE ON flow_events FOR EACH ROW BEGIN UPDATE flow_events SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,
   `CREATE TRIGGER IF NOT EXISTS trg_flow_metrics_update AFTER UPDATE ON flow_metrics FOR EACH ROW BEGIN UPDATE flow_metrics SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,
   `CREATE TRIGGER IF NOT EXISTS trg_triggered_alerts_update AFTER UPDATE ON triggered_alerts FOR EACH ROW BEGIN UPDATE triggered_alerts SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,

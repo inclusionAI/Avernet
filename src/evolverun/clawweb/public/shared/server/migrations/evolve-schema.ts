@@ -32,6 +32,7 @@ export const evolveTables = [
   implementation_id VARCHAR(64) NOT NULL COMMENT '执行实现标识，用于冻结任务和运行包引用',
   initial_input_json TEXT COMMENT '冻结的初始输入JSON',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间',
+  gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '修改时间',
   UNIQUE INDEX uk_step_id (step_id)
 ) COMMENT='Stage扩展执行记录'`,
   `CREATE TABLE IF NOT EXISTS ce_stage_interactions (
@@ -81,6 +82,7 @@ export const evolveTables = [
   baseline_package_sha256 VARCHAR(80) COMMENT '基线包校验值',
   status VARCHAR(32) NOT NULL COMMENT '当前状态',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间',
+  gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '修改时间',
   UNIQUE INDEX uk_version_id (version_id),
   UNIQUE INDEX uk_asset_version (asset_id, version_no)
 ) COMMENT='Skill版本快照'`,
@@ -114,7 +116,8 @@ export const evolveTables = [
   actor_type VARCHAR(16) NOT NULL COMMENT '操作主体类型：user或system',
   result VARCHAR(64) NOT NULL COMMENT '历史操作结果',
   detail_json TEXT COMMENT '详情JSON',
-  gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间'
+  gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间',
+  gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '修改时间'
 ) COMMENT='Skill历史操作审计记录'`,
   `CREATE TABLE IF NOT EXISTS ce_skill_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT COMMENT '主键ID',
