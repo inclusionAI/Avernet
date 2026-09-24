@@ -703,6 +703,12 @@ wait_reason 仍来自公共 scheduler，delivery 状态指标自动包含 `flow_
 - 每次 Direct ensure：一个两步事务（幂等 claim + primary read）。
 - Admission 沿用 bot/session writer lock、queued count、sender 幂等查询和序号 CAS；
   Direct 单 target，消息、delivery、序号在同一事务提交，不跨网络持有 DB 事务。
+  多实例竞争序号时，仅对 repository CAS conflict 最多尝试 4 次，间隔 10/20/40ms；
+  重用同一 ChatRun、message ID 和 client_msg_id。退避期间不持有 writer lock、事务或 admission slot。
+  单次 admission 仓储路径执行 queued count、待绑定 context 查询、幂等查询、序号读事务和写事务，
+  共 5 次数据库往返；持续 CAS 冲突最多 20 次，不重复创建 ChatRun。
+  每个 Direct admission 仅一个 target，成功事务更新一行序号、插入一条消息和一条 delivery；
+  冲突事务整体回滚，耗尽后由既有 orphan recovery 收敛 Pending ChatRun，不重放 send。
 - Managed response checkpoint 每次内容变化写一次 SQL CAS 并读回，保证 final 内容在 delivery
   结算前已经落盘；已有 legacy 流仍使用原来的 streaming overlay。单 run 正文继续限制为 1 MiB。
 - 每次状态读取执行 ChatRun/关联 delivery 查询；发生状态变化时执行 checkpoint CAS。
@@ -715,3 +721,17 @@ wait_reason 仍来自公共 scheduler，delivery 状态指标自动包含 `flow_
   ChatRun 关联列；旧的 Group registry 占位允许保留。
 - 存储短暂故障只重试稳定的 checkpoint 或 delivery CAS，沿用 100ms 至 5 秒的指数退避；
   不重放网络 send。测试覆盖故障注入后 final 落盘及新缓存实例读取。
+
+### 20.1 PR 评审与 CI 回归修复
+
+- Direct final/error/aborted 和 cancel 的有限 CAS 重试同时覆盖仓储 Conflict 与 lifecycle
+  StaleVersion；重新读取 delivery 后重建 transition，处理 scheduler Submitted 与响应并发。
+- 已确认 delivery 终态后，统一在 ChatRun 投影入口标记 BotRunContext terminal，并按持久化
+  scope 删除 ActiveBotRunContext 和 request alias、注销 run channel。Unknown/CancelUnknown
+  保留上下文与 lane。清理失败向上传播，ChatRun 保持可恢复，下一轮 recovery/status 可重试；
+  已过期上下文与重复终态也按同一持久化 scope 幂等清理。
+- MySQL 完整链测试覆盖版本 1–31、v20 升级 11 个版本，并验证 registry 回填、Group 序号保留、
+  ChatRun 关联列和环境唯一索引；历史 human-input 索引测试的无建表断言固定到版本 30。
+- E2E CLI 覆盖率记录器记录 `chat-run status` 与 `chat-run cancel` 完整叶命令，继续执行 100% 门禁。
+- 回归用真实 SQLite 事务和两个独立服务/仓储实例强制制造序号冲突；用同步屏障强制制造响应
+  checkpoint/cancel 读取与 Submitted 的并发，验证不丢正文、不重复入队和终态上下文清理。

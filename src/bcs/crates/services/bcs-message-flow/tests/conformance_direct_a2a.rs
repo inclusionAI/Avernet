@@ -16,6 +16,8 @@ mod support;
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
 #[allow(dead_code)]
 mod migrations;
+#[path = "support/direct_a2a_regressions.rs"]
+mod regressions;
 
 struct Harness {
     db: Option<Arc<ObservedDb>>,
@@ -30,11 +32,15 @@ struct Harness {
 
 impl Harness {
     async fn new(sql: bool) -> Self {
+        Self::with_db(sql, None).await
+    }
+
+    async fn with_db(sql: bool, shared: Option<Arc<ObservedDb>>) -> Self {
         let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
         support.registry.set_visibility("bot-observer", "public").await;
         let mut observed_db = None;
         let (sessions, messages, deliveries, runs): (Arc<dyn SessionRepoPort>, Arc<dyn MessageRepoPort>, Arc<dyn MessageDeliveryRepoPort>, Arc<dyn ChatRunRepoPort>) = if sql {
-            let db = Arc::new(ObservedDb { inner: bcs_db_local::LocalSqliteDbPlugin::new().unwrap(), queries: Default::default(), fail_checkpoint_once: Default::default() });
+            let db = shared.unwrap_or_else(|| Arc::new(ObservedDb::new()));
             observed_db = Some(db.clone());
             migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
             let sessions = Arc::new(bcs_session_store::MySqlSessionStore::sqlite(db.clone(), "dev".into()));
@@ -160,6 +166,7 @@ async fn scheduler_preserves_session_fifo_and_projects_scoped_terminal_without_g
         h.flow.handle_bot_event(event).await.unwrap();
         assert_eq!(h.status("first").await["state"], "completed");
         assert_eq!(h.status("first").await["content"], "answer");
+        regressions::assert_context_cleaned(&h, &row).await;
         tokio::time::timeout(Duration::from_secs(3), async {
             while h.support.bot_delivery.frames().await.len() < 2 { tokio::time::sleep(Duration::from_millis(10)).await; }
         }).await.unwrap();
@@ -173,12 +180,29 @@ struct ObservedDb {
     inner: bcs_db_local::LocalSqliteDbPlugin,
     queries: std::sync::Mutex<Vec<(String, usize)>>,
     fail_checkpoint_once: std::sync::atomic::AtomicBool,
+    checkpoint_gate: std::sync::Mutex<Option<Arc<regressions::Pause>>>,
+    delivery_read_gate: std::sync::Mutex<Option<Arc<regressions::Pause>>>,
+    sequence_barrier: std::sync::Mutex<Option<(usize, Arc<tokio::sync::Barrier>)>>,
+    admission_attempts: std::sync::atomic::AtomicUsize,
+    admission_conflicts: std::sync::atomic::AtomicUsize,
+    fail_admissions: std::sync::atomic::AtomicBool,
+}
+impl ObservedDb {
+    fn new() -> Self {
+        Self { inner: bcs_db_local::LocalSqliteDbPlugin::new().unwrap(), queries: Default::default(),
+            fail_checkpoint_once: Default::default(), checkpoint_gate: Default::default(), delivery_read_gate: Default::default(),
+            sequence_barrier: Default::default(), admission_attempts: Default::default(), admission_conflicts: Default::default(), fail_admissions: Default::default() }
+    }
 }
 #[async_trait::async_trait]
 impl DbPlugin for ObservedDb {
     async fn query(&self, stmt: DbStatement) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbRow>> {
         let rows = self.inner.query(stmt.clone()).await?;
         self.queries.lock().unwrap().push((stmt.sql().into(), rows.len()));
+        if stmt.sql().starts_with("SELECT * FROM bcs_message_deliveries WHERE env = ? AND delivery_id = ?") {
+            let gate = self.delivery_read_gate.lock().unwrap().take();
+            if let Some(gate) = gate { gate.pause().await; }
+        }
         Ok(rows)
     }
     async fn execute(&self, stmt: DbStatement) -> bcs_db_api::DbResult<bcs_db_api::DbExecuteResult> {
@@ -186,9 +210,36 @@ impl DbPlugin for ObservedDb {
             && self.fail_checkpoint_once.swap(false, std::sync::atomic::Ordering::SeqCst) {
             return Err(bcs_db_api::DbError::Backend("injected checkpoint outage".into()));
         }
+        if stmt.sql().starts_with("UPDATE bcs_chat_runs SET state") {
+            let gate = self.checkpoint_gate.lock().unwrap().take();
+            if let Some(gate) = gate { gate.pause().await; }
+        }
         self.inner.execute(stmt).await
     }
-    async fn transaction(&self, steps: Vec<bcs_db_api::DbTransactionStep>) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> { self.inner.transaction(steps).await }
+    async fn transaction(&self, steps: Vec<bcs_db_api::DbTransactionStep>) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> {
+        use bcs_db_api::{DbTransactionStep as Step, DbError};
+        use std::sync::atomic::Ordering::SeqCst;
+        let sequence = matches!(steps.first(), Some(Step::Query(stmt)) if stmt.sql().starts_with("SELECT current_msg_seq FROM bcs_session_registry"));
+        let admission = matches!(steps.first(), Some(Step::ExecuteChecked { statement, .. }) if statement.sql().starts_with("UPDATE bcs_session_registry SET current_msg_seq"));
+        if admission {
+            self.admission_attempts.fetch_add(1, SeqCst);
+            if self.fail_admissions.load(SeqCst) { return Err(DbError::ConditionFailed { expected: 1, actual: 0 }); }
+        }
+        let result = self.inner.transaction(steps).await;
+        if admission && matches!(&result, Err(DbError::ConditionFailed { .. })) { self.admission_conflicts.fetch_add(1, SeqCst); }
+        if sequence {
+            // Two independent stores both finish their primary sequence read
+            // before either can commit admission. The loser must retry CAS.
+            let barrier = {
+                let mut slot = self.sequence_barrier.lock().unwrap();
+                slot.as_mut().and_then(|(remaining, barrier)| {
+                    if *remaining == 0 { None } else { *remaining -= 1; Some(barrier.clone()) }
+                })
+            };
+            if let Some(barrier) = barrier { tokio::time::timeout(Duration::from_secs(5), barrier.wait()).await.unwrap(); }
+        }
+        result
+    }
     async fn health_check(&self) -> bcs_db_api::DbResult<bcs_db_api::DbHealth> { self.inner.health_check().await }
 }
 
@@ -282,11 +333,13 @@ async fn cancellation_requires_confirmed_stop_and_provider_keeps_the_lane() {
             assert!(h.support.bot_delivery.aborts().await.is_empty());
             assert_eq!(h.support.bot_delivery.frames().await.len(), 1);
             assert_eq!(h.status("cancel-next").await["delivery"]["status"], "queued");
+            assert!(h.flow.bot_run_context.as_ref().unwrap().find_active_run("cancel-active").await.unwrap().is_some());
         } else {
             let aborts = h.support.bot_delivery.aborts().await;
             assert_eq!(aborts.len(), 1);
             assert_eq!(aborts[0].session_id, "cancel-session");
             assert_eq!(aborts[0].run_id.as_deref(), Some("cancel-active"));
+            regressions::assert_context_cleaned(&h, &h.row("cancel-active").await).await;
         }
         stop.send(true).unwrap(); worker.await.unwrap().unwrap();
     }

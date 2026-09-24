@@ -1,6 +1,6 @@
 //! Send-time authorization and scoped Direct A2A events.
 use super::*;
-use super::queued::{DirectProjection, invalid, transition};
+use super::queued::{DirectProjection, invalid, transition, transition_conflict};
 use bcs_domain::message_delivery::{DeliveryFlowKind, PersistedMessageDelivery};
 use bcs_service_api::{BotDeliveryTarget, BotRunTransportOwner, PreparedManagedDelivery, BotEventCommand, BotEventOutcome, ChatEventState};
 use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
@@ -101,7 +101,7 @@ impl A2aChat {
                     match crate::storage_retry::retry(crate::storage_retry::shutdown(flow), "direct_terminal",
                         crate::storage_retry::managed_storage, || service.transition(command.clone())).await {
                         Ok(_) => { committed = true; break; }
-                        Err(bcs_service_api::ManagedDeliveryError::Conflict) | Err(bcs_service_api::ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Conflict)) => {
+                        Err(error) if transition_conflict(&error) => {
                             current = self.managed_row(&record).await?.ok_or_else(|| invalid("direct delivery missing"))?;
                             if current.state.status.is_terminal() { committed = true; break; }
                         }
@@ -118,7 +118,6 @@ impl A2aChat {
         let fresh = self.managed_row(&record).await?.ok_or_else(|| invalid("direct delivery missing"))?;
         self.reconcile_direct(&fresh).await?;
         let terminal = fresh.state.status.is_terminal();
-        if terminal { self.chat_run_cleanup.unregister(run).await; }
         Ok(BotEventOutcome { bot_deliveries: Vec::new(), frontend_deliveries: Vec::new(), unregistered_run_ids: if terminal { vec![run.into()] } else { Vec::new() },
             mentions: Vec::new(), delivered_count: 0, failed_count: 0, delivery_results: Vec::new() })
     }

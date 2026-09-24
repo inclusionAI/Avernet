@@ -81,7 +81,7 @@ impl A2aChat {
         record.source_message_id = Some(message_id.clone());
         self.run_store.create(record.clone()).await.map_err(|_| invalid("cannot persist chat run"))?;
         let expires = i64::try_from(expires).map_err(|_| invalid("invalid direct deadline"))?;
-        let queued = service.admit(AdmitMessageDeliveries {
+        let command = AdmitMessageDeliveries {
             display_message: None, message_id,
             message: NewMessage {
                 group_id: String::new(), session_id: session.into(), sender_id: from.into(), sender_type: SenderType::Bot,
@@ -96,7 +96,20 @@ impl A2aChat {
                 max_queued: policy.policy.bot(&cmd.target_bot_id).max_queued,
                 semantic_projection_json: serde_json::to_value(projection).map_err(|_| invalid("direct projection encoding failed"))? }],
             now_ms: now as i64, expire_at_ms: Some(policy.policy.queue_ttl_ms.map_or(expires, |ttl| expires.min((now as i64).saturating_add(ttl as i64)))), event: None,
-        }).await;
+        };
+        // Independent replicas can lose the session-sequence CAS. Reuse the
+        // same message/run identity after rollback; never repeat transport I/O.
+        let mut attempt = 0;
+        let queued = loop {
+            let result = service.admit(command.clone()).await;
+            if matches!(&result, Err(bcs_service_api::ManagedDeliveryError::Repository(
+                bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Conflict))) && attempt < 3 {
+                tokio::time::sleep(Duration::from_millis(10 << attempt)).await;
+                attempt += 1;
+                continue;
+            }
+            break result;
+        };
         match queued {
             Ok(admitted) => {
                 let row = admitted.deliveries.first().ok_or_else(|| invalid("direct admission result missing"))?;
@@ -133,6 +146,24 @@ impl A2aChat {
         if record.delivery_id.as_deref() != Some(&row.delivery_id) || record.session_key != row.session_id || record.bot_uuid != row.target_bot_id {
             return Err(invalid("direct projection scope mismatch"));
         }
+        if row.state.status.is_terminal() {
+            let flow = self.queue_flow().ok_or_else(|| invalid("direct queue unavailable"))?;
+            if let Some(contexts) = &flow.bot_run_context {
+                // Use durable scope even after the active entry's deadline or
+                // a partial cleanup. Reconciliation must be idempotent.
+                contexts.mark_terminal(&record.run_id).await;
+                contexts.remove_active_run(&bcs_service_api::BotRunScope {
+                    group_id: row.group_id.clone(), session_id: row.session_id.clone(), bot_id: row.target_bot_id.clone(),
+                }, &record.run_id).await?;
+            }
+            self.chat_run_cleanup.unregister(&record.run_id).await;
+        }
+        // Delivery is already committed. Keep ChatRun recoverable until run
+        // context cleanup succeeds, including retry after partial cleanup.
+        self.project_state(row, record).await
+    }
+
+    async fn project_state(&self, row: &PersistedMessageDelivery, record: ChatRunRecord) -> ServiceResult<ChatRunRecord> {
         if record.state.is_terminal() {
             if !row.state.status.is_terminal() { return Err(invalid("direct projection inconsistent")); }
             return Ok(record);
@@ -194,7 +225,7 @@ impl A2aChat {
             if row.state.status.is_terminal() || matches!(row.state.status, Status::Cancelling | Status::CancelUnknown) { break; }
             match service.transition(transition(&row, Event::CancelRequested, Some(actor.into()))).await {
                 Ok(_) => break,
-                Err(bcs_service_api::ManagedDeliveryError::Conflict) | Err(bcs_service_api::ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Conflict)) if attempt < 3 => {
+                Err(error) if transition_conflict(&error) && attempt < 3 => {
                     row = self.managed_row(&record).await?.ok_or_else(|| invalid("direct delivery missing"))?;
                 }
                 Err(_) => return Err(invalid("direct cancel persistence failed")),
@@ -204,6 +235,12 @@ impl A2aChat {
         let cancelled = !was_terminal && fresh.state.status == Status::Cancelled;
         self.status_with_delivery(record, Some(fresh), Some(cancelled)).await
     }
+}
+
+pub(crate) fn transition_conflict(error: &bcs_service_api::ManagedDeliveryError) -> bool {
+    matches!(error, bcs_service_api::ManagedDeliveryError::Conflict
+        | bcs_service_api::ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Conflict)
+        | bcs_service_api::ManagedDeliveryError::Lifecycle(bcs_service_api::core::message_delivery::DeliveryLifecycleError::StaleVersion { .. }))
 }
 
 pub(crate) fn transition(row: &PersistedMessageDelivery, event: Event, actor_id: Option<String>) -> DeliveryTransitionCommand {
