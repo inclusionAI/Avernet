@@ -561,6 +561,10 @@ async fn authorization_and_conflicts_are_enforced_on_every_request() {
         f.core.authorize(&f.provider, "bob").await,
         Err(ServiceError::Forbidden(_))
     ));
+    let mut unauthorized_webhook = request(&f, ProviderRegistrationMode::Gateway);
+    unauthorized_webhook.owner = "bob".into();
+    unauthorized_webhook.webhook_url = Some("https://individual.example.com/hook".into());
+    assert!(matches!(f.core.register(unauthorized_webhook).await, Err(ServiceError::Forbidden(_))));
     let shared = fixture(None, true).await;
     assert!(shared.core.authorize(&shared.provider, "bob").await.is_ok());
     let command = request(&shared, ProviderRegistrationMode::Plugin);
@@ -589,36 +593,33 @@ async fn authorization_and_conflicts_are_enforced_on_every_request() {
 }
 
 #[tokio::test]
-async fn self_service_cannot_redirect_shared_provider_credentials() {
+async fn self_service_can_register_a_custom_webhook_with_provider_credentials() {
     for auth_mode in [ProviderAuthMode::StaticBearer, ProviderAuthMode::ProviderAdmin, ProviderAuthMode::AgentPass] {
-        assert_self_service_cannot_redirect(auth_mode).await;
+        assert_self_service_custom_webhook(auth_mode).await;
     }
 }
 
-async fn assert_self_service_cannot_redirect(auth_mode: ProviderAuthMode) {
+async fn assert_self_service_custom_webhook(auth_mode: ProviderAuthMode) {
     let f = fixture_with_auth(Some("https://shared.example.com/hook"), true, None, auth_mode).await;
     assert!(f.core.authorize(&f.provider, "bob").await.is_ok());
     let mut command = request(&f, ProviderRegistrationMode::Gateway);
     command.owner = "bob".into();
-    command.webhook_url = Some("https://untrusted.example.com/hook".into());
-    assert!(matches!(
-        f.core.register(command).await,
-        Err(ServiceError::Forbidden(_))
-    ));
-    assert!(
-        f.membership
-            .get_provider_bot_by_ref(&f.provider, "stable-ref")
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        f.providers
-            .list_bindings_by_provider(&f.provider)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    command.webhook_url = Some("https://individual.example.com/hook".into());
+    let registered = f.core.register(command).await.unwrap();
+    assert_eq!(registered.record.owner, "bob");
+    assert_eq!(registered.record.webhook_url.as_deref(), Some("https://individual.example.com/hook"));
+    assert_eq!(registered.effective_webhook_url.as_deref(), Some("https://individual.example.com/hook"));
+    let credential = f.providers.get_credential_by_kind(&f.provider, "downlink_bcs_to_provider")
+        .await.unwrap().unwrap().secret_value;
+    let binding = f.providers.get_binding_by_bot_uuid(&registered.record.bot_uuid).await.unwrap().unwrap();
+    assert_eq!(binding.webhook_url.as_deref(), Some("https://individual.example.com/hook"));
+    match f.registry.resolve_delivery_target(&registered.record.bot_uuid).await.unwrap() {
+        BotDeliveryTarget::HttpProvider { webhook_url, bcs_to_provider_token, .. } => {
+            assert_eq!(webhook_url, "https://individual.example.com/hook");
+            assert_eq!(bcs_to_provider_token.expose_secret(), credential);
+        }
+        _ => panic!("gateway registration must use HTTP delivery"),
+    }
 }
 
 #[tokio::test]

@@ -156,9 +156,9 @@ RegisterPath:
       For AgentPass, provider_bot_ref must be the real AgentPass agent code;
       BCS saves it as the Bot's agent_code, as in Provider-admin registration.
       No separate agent_code parameter or AgentPass token is required to register.
-      Gateway uses webhook_url override or Provider default; only the Provider
-      creator/owners may set an override because delivery uses a shared Provider
-      credential. Self-service callers must use the Provider default. At least one usable
+      Gateway uses webhook_url override or Provider default. Callers authorized
+      for Provider self-service registration may set an override. Delivery to
+      either endpoint uses the shared Provider downlink credential. At least one usable
       endpoint is required, together with an existing, enabled
       downlink_bcs_to_provider credential with a nonblank secret. Gateway checks
       these prerequisites before creation; plugin does not read or require
@@ -207,7 +207,7 @@ RegisterPath:
       - name: webhook_url
         in: query
         required: false
-        description: Optional gateway-only Bot override, restricted to Provider creator/owners. Self-service callers must omit it and inherit Provider default. Blank is invalid; subject to outbound URL policy.
+        description: Optional gateway-only Bot override for authorized Provider registration callers. Delivery uses the shared Provider downlink credential. Blank is invalid; subject to outbound URL policy.
         schema:
           type: string
           format: uri
@@ -238,7 +238,7 @@ RegisterPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
       "403":
-        description: Provider registration or webhook override is not authorized, or requested mode is outside token scope.
+        description: Provider registration is not authorized, or requested mode is outside token scope.
         x-error-codes: [forbidden]
         content:
           application/json:

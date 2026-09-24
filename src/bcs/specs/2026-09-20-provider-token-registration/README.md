@@ -16,8 +16,9 @@ The public prefix is `/openapi/v1/collaboration`.
 
 Do not place literal credentials in command history or logs. Use client query
 encoding; deployment access logs must redact `token`. Both successful responses
-are `Cache-Control: no-store`. Never distribute Provider-admin or shared downlink
-tokens to a local bridge.
+are `Cache-Control: no-store`. Never distribute Provider-admin tokens to a local
+bridge. The Bridge issuer embeds the shared downlink credential at build time;
+handle the binary as containing a Provider-wide secret.
 
 ## Defaults and permissions
 
@@ -71,12 +72,12 @@ Issuance and upstream registration do not read or require downlink credentials;
 issuance also requires no endpoint.
 An omitted override stays null so later default changes take effect. The response
 distinguishes stored `webhook_url` and resolved `effective_webhook_url`.
-Only the Provider creator/owners may supply a Bot webhook override: the existing
-delivery protocol sends a Provider-wide bearer to that endpoint. Self-service
-callers may register upstream or use the configured Provider default for gateway,
-but cannot direct that bearer to their own endpoint (403 before creation).
-Supporting independent self-service callbacks requires separately designed
-Bot-scoped downlink credentials and is not included in this phase.
+Provider creator/owners and callers authorized for self-service registration
+may supply a Bot webhook override. Delivery to that endpoint uses the existing
+Provider-wide `downlink_bcs_to_provider` bearer. The Bridge build embeds the
+matching Provider credential; a custom receiver must accept that same bearer.
+Whoever controls the configured callback endpoint can observe this Provider-wide
+bearer in the Authorization header.
 Legacy Provider Bot lists continue listing delivery bindings, not new upstream
 memberships. A membership-list API is not part of this phase.
 

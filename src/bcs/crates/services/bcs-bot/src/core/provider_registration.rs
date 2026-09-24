@@ -93,13 +93,6 @@ impl ProviderRegistrationCore {
             }
             return Ok(None);
         }
-        // Delivery authenticates with the Provider-wide credential. Self-service
-        // membership does not authorize sending that credential to a new host.
-        if command.webhook_url.is_some() && !is_provider_manager(provider, &command.owner)? {
-            return Err(ServiceError::Forbidden(
-                "only Provider managers may set a Bot webhook override".into(),
-            ));
-        }
         if !downlink.enabled {
             return Err(invalid("gateway requires enabled downlink"));
         }
