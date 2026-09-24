@@ -298,10 +298,16 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
                 )
             )
 
+            # The precheck already loaded this entity into the session's
+            # identity map, and the Core-level upsert does not refresh it, so
+            # a plain re-select would return the stale pre-upsert attributes
+            # (the takeover path would falsely report "not acquired" while
+            # the DB row was in fact just taken over). populate_existing
+            # forces the fetched row's values onto the identity-mapped object.
             row = self._session.execute(
-                select(DistributedLockModel).where(
-                    DistributedLockModel.lock_name == lock_name
-                )
+                select(DistributedLockModel)
+                .where(DistributedLockModel.lock_name == lock_name)
+                .execution_options(populate_existing=True)
             ).scalar_one_or_none()
 
             if row is None:
