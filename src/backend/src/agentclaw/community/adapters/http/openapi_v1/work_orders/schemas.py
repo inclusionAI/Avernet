@@ -38,13 +38,17 @@ class WorkOrderStatus(_DocumentedEnum):
     """Current processing state of a work order."""
 
     PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+    FAILED = "FAILED"
 
     __descriptions__ = {
         "PENDING": "Awaiting review.",
+        "PROCESSING": "An automatic approval is being processed.",
         "APPROVED": "Approved by an authorized reviewer.",
         "REJECTED": "Rejected by an authorized reviewer.",
+        "FAILED": "Automatic approval processing failed.",
     }
 
 

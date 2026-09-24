@@ -1051,3 +1051,8 @@ def test_display_summary_unknown_event_falls_back_to_business_status():
         )
         == "Skill 共同编辑申请未通过。"
     )
+
+
+@pytest.mark.parametrize("status", [WorkOrderStatus.PROCESSING, WorkOrderStatus.FAILED])
+def test_openapi_work_order_status_accepts_auto_processing_states(status):
+    assert WorkOrderStatus(status.value) is status

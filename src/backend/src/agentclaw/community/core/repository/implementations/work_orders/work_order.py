@@ -219,11 +219,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             db.query(self._Approver).filter(
                 self._Approver.work_order_id == work_order_id,
                 self._Approver.env == env,
-                self._Approver.status.in_([
-                    WorkOrderApproverStatus.PENDING.value,
-                    WorkOrderApproverStatus.CANCELLED.value,
-                    WorkOrderApproverStatus.APPROVED.value,
-                ]),
+                self._Approver.approver_user_id == reviewer_user_id,
             ).update({
                 self._Approver.status: WorkOrderApproverStatus.APPROVED.value,
                 self._Approver.reviewed_at: now,
