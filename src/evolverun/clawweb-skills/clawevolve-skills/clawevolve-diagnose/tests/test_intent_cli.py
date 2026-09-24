@@ -95,3 +95,12 @@ def test_runtime_openclaw_home_is_inferred_from_the_installed_skill_path(tmp_pat
     assert resolve_runtime_openclaw_home("", invocation_cwd=str(skill_dir)) == str(
         tmp_path / ".openclaw"
     )
+
+
+def test_parser_prefers_explicit_openclaw_state_dir_over_legacy_home(monkeypatch) -> None:
+    monkeypatch.setenv("OPENCLAW_STATE_DIR", "/runtime/state")
+    monkeypatch.setenv("OPENCLAW_HOME", "/legacy/home")
+
+    args = _args(["--task-id", "task-1", "--step-id", "step-1"])
+
+    assert args.openclaw_home == "/runtime/state"

@@ -63,7 +63,7 @@ class HardeningHandlerTest(unittest.TestCase):
             return {"summary": "完成", "changed": True, "changed_files": ["SKILL.md"]}
 
         with patch.object(handler.runtime, "RUNTIME_LAYOUT_HOME", self.root), \
-                patch.object(handler.core_dispatcher, "begin_stage_core", return_value={"selected": True}), \
+                patch.object(handler.core_dispatcher, "begin_stage_core", return_value={"selected": False}), \
                 patch.object(handler.core_dispatcher, "execute_stage_skill", side_effect=execute), \
                 patch.object(handler.hardening_report, "post_report", return_value={"ok": True}):
             result = handler.run_handler(invocation)
@@ -71,10 +71,12 @@ class HardeningHandlerTest(unittest.TestCase):
         self.assertEqual(result["result"]["result"]["changed_files"], ["SKILL.md"])
 
     def test_replace_runs_custom_core_and_submits_without_builtin(self):
+        input_file = self.root / "custom-core-input.json"
+        input_file.write_text('{"loop":{"round":1}}')
         context = {
             "selected": True,
             "implementationSkill": "/runtime/SKILL.md",
-            "inputFile": "/runtime/input.json",
+            "inputFile": str(input_file),
             "resultFile": "/runtime/result.json",
         }
         with patch.object(handler.core_dispatcher, "begin_stage_core", return_value=context), \

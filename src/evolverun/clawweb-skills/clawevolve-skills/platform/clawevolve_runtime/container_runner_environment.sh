@@ -6,7 +6,7 @@ log_line() {
 }
 
 wait_for_openclaw_gateway() {
-  local config_path="${OPENCLAW_HOME}/openclaw.json"
+  local config_path="${OPENCLAW_CONFIG_PATH:-${OPENCLAW_STATE_DIR}/openclaw.json}"
   local timeout_seconds="${CLAWEVOLVE_GATEWAY_READY_TIMEOUT_SECONDS:-60}"
   local interval_seconds="${CLAWEVOLVE_GATEWAY_READY_INTERVAL_SECONDS:-2}"
   local gateway_port deadline attempt=0 supervisor_status="" last_error=""
@@ -75,7 +75,7 @@ restart_openclaw_gateway_once() {
 }
 
 ensure_openclaw_environment() {
-  local config_path="${OPENCLAW_HOME}/openclaw.json"
+  local config_path="${OPENCLAW_CONFIG_PATH:-${OPENCLAW_STATE_DIR}/openclaw.json}"
   local marker_path="${OPENCLAW_WORKSPACE}/clawevolve_results/.environment_initialized.json"
   local adapter="${SCRIPT_DIR}/adapt_openclaw_environment.py"
   local result status backup_path
@@ -186,7 +186,7 @@ print(json.dumps({
 PY
 )"
     log_line "runtime maintenance cleanup warning: ${cleanup_result}"
-  elif cleanup_result="$(python3 "$cleaner" --openclaw-home "$OPENCLAW_HOME" 2>&1)"; then
+  elif cleanup_result="$(python3 "$cleaner" --openclaw-home "$OPENCLAW_STATE_DIR" 2>&1)"; then
     log_line "runtime maintenance cleanup done: ${cleanup_result}"
   else
     cleanup_exit=$?

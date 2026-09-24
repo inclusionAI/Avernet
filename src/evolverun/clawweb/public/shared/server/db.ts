@@ -855,7 +855,7 @@ export function resolveBaasConfig(configPath?: string): ResolvedBaasConfig {
     environments,
     evolveScriptPaths,
     commandTenant: yaml.baas?.commandTenant ?? "clawevolve",
-    commandTimeoutSeconds: yaml.baas?.commandTimeoutSeconds ?? 30,
+    commandTimeoutSeconds: yaml.baas?.commandTimeoutSeconds ?? 60,
   };
 }
 
