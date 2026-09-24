@@ -1,5 +1,5 @@
 import { requirePreparedSkillCandidate, type FrozenSkillTarget } from "./skill-candidate.js";
-import { stageTestFixtureInput, type FrozenStageTestFixture } from "./stage-test-fixture.js";
+import { stageTestFixtureTarget, type FrozenStageTestFixture } from "./stage-test-fixture.js";
 import type { StageKey } from "./stage-catalog.js";
 import type { FrozenTaskStageExtensions } from "./stage-execution.js";
 
@@ -23,7 +23,7 @@ export function preparedStageSkillTarget(task: { task_id: string; config_json: s
   };
   if (config.targetSkill) return requirePreparedSkillCandidate(config.targetSkill);
   if (task.task_type === "stage_test" && config.stageTest?.fixture) {
-    const target = stageTestFixtureInput(task.task_id, config.stageTest.fixture);
+    const target = stageTestFixtureTarget(task.task_id, config.stageTest.fixture);
     return { workspacePath: target.workspace, skillPath: target.path };
   }
   return null;

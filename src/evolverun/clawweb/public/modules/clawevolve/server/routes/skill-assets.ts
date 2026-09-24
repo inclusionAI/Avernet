@@ -1,3 +1,4 @@
+import { SkillPackageStorage } from "../services/object-storage/skill-package-storage.js";
 import { applySkillVersion } from "../services/evolve/skill-application.js";
 import { skillPackageContentDigest } from "../services/evolve/skill-package-view.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -10,7 +11,7 @@ import type { SpaceDirectory } from "../contracts/space-directory.js";
 import { canReadSpaceRecord, registrationSpace, spaceColumns } from "../services/evolve/space-access.js";
 import type { SkillAssetRepository } from "../repositories/skill-asset-repository.js";
 import { skillEventTestBench } from "../repositories/skill-audit.js";
-import { getArtifactBucket, type ObjectStore } from "../services/object-storage/oss-object-store.js";
+import { type ObjectStore } from "../services/object-storage/oss-object-store.js";
 import { editSkillPackage, parseSkillPackage, skillPackageDiff, skillPackagesEquivalent, skillPackageView } from "../services/evolve/skill-package-view.js";
 
 const versionUpload = multer({
@@ -23,6 +24,7 @@ type SkillAssetsRouterInput = {
   hostLocalSkills: BotSkillGateway | null;
   hostSpaces?: SpaceDirectory;
   artifactStore?: ObjectStore;
+  skillPackages?: SkillPackageStorage;
 };
 
 function identity(req: Request): RequestIdentity | null {
@@ -62,19 +64,10 @@ function assetView(
   };
 }
 
-function objectKey(ref: string): string {
-  const prefix = `oss://${getArtifactBucket()}/`;
-  if (!ref.startsWith(prefix)) throw new Error("Skill 版本不属于当前文件存储");
-  const value = ref.slice(prefix.length);
-  if (!value || value.startsWith("/") || value.split("/").some((part) => !part || part === "." || part === "..")) {
-    throw new Error("Skill 版本文件路径不合法");
-  }
-  return value;
-}
 
-async function readSnapshot(store: ObjectStore, ref: string) {
+async function readSnapshot(store: SkillPackageStorage, ref: string) {
   try {
-    return await store.getObject(objectKey(ref));
+    return await store.read(ref);
   } catch (error) {
     const code = (error as { code?: unknown } | null)?.code;
     if (code !== "ENOENT" && code !== "NoSuchKey") throw error;
@@ -133,6 +126,7 @@ function versionView(version: Awaited<ReturnType<SkillAssetRepository["findVersi
 
 export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   const router = Router();
+  const packages = input.skillPackages ?? new SkillPackageStorage(undefined, input.artifactStore);
 
   async function readable(asset: NonNullable<Awaited<ReturnType<SkillAssetRepository["findAsset"]>>>, requestIdentity: RequestIdentity) {
     return canReadSpaceRecord(asset, requestIdentity.userId,
@@ -191,7 +185,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     const skillId = String(req.body?.skillId ?? "").trim();
     if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
     if (!botId || !skillId) { res.status(400).json({ error: "请选择 Bot 中自己的 Skill" }); return; }
-    if (!input.hostLocalSkills || !input.artifactStore?.putObject) {
+    if (!input.hostLocalSkills || !packages.canWrite) {
       res.status(503).json({ error: "Skill 登记所需服务不可用" }); return;
     }
     const space = await registrationSpace(input.hostSpaces, requestIdentity, req.body?.spaceId);
@@ -211,7 +205,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     });
     const assetId = `SKILL-${randomUUID().slice(0, 12).toUpperCase()}`;
     const objectKey = `evolve/skills/${assetId}/versions/v1/package.zip`;
-    await input.artifactStore.putObject(objectKey, exported.packageBytes, "application/zip");
+    await packages.put(objectKey, exported.packageBytes);
     const created = await input.repo.createAsset({
       assetId,
       versionId: `SKVER-${randomUUID().slice(0, 12).toUpperCase()}`,
@@ -221,7 +215,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
       externalSkillId: skillId,
       displayName: exported.displayName,
       description: exported.description ?? null,
-      packageRef: `oss://${getArtifactBucket()}/${objectKey}`,
+      packageRef: packages.ref(objectKey),
       packageSha256: exported.sha256,
     });
     const metadata = await displayMetadata([botId], requestIdentity, false);
@@ -236,7 +230,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
       || !await readable(asset, requestIdentity)) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
-    if (!input.hostLocalSkills || !input.artifactStore?.putObject) {
+    if (!input.hostLocalSkills || !packages.canWrite) {
       res.status(503).json({ error: "Skill 版本升级所需服务不可用" }); return;
     }
     const mode = String(req.body?.mode ?? "");
@@ -249,7 +243,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     if (!base) {
       res.status(409).json({ code: "SKILL_VERSION_CONFLICT", error: "Skill 已产生新版本，请刷新后重试" }); return;
     }
-    const baseline = await readSnapshot(input.artifactStore, base.package_ref);
+    const baseline = await readSnapshot(packages, base.package_ref);
     let sourceVersion = base;
     let candidate: Buffer;
     try {
@@ -269,7 +263,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
         const selected = await input.repo.findVersion(asset.asset_id, sourceVersionId);
         if (!selected) throw new Error("要回滚的历史版本不存在");
         sourceVersion = selected;
-        candidate = (await readSnapshot(input.artifactStore, selected.package_ref)).content;
+        candidate = (await readSnapshot(packages, selected.package_ref)).content;
       }
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : "Skill 编辑内容不合法" }); return;
@@ -288,17 +282,17 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     const key = `evolve/skills/${asset.asset_id}/versions/${versionId}/${packageDigest}.zip`;
     // Freeze bytes once; repeated submissions may have different ZIP metadata.
     const pending = asset.pending_application_json ? JSON.parse(asset.pending_application_json) : null;
-    if (pending?.operationId !== operationId) await input.artifactStore.putObject(key, candidate, "application/zip");
+    if (pending?.operationId !== operationId) await packages.put(key, candidate);
     let created;
     try {
       const applied = await applySkillVersion({
         repo: input.repo, host: input.hostLocalSkills, operationId, baselineBytes: baseline.content,
-        readPackage: async ref => (await readSnapshot(input.artifactStore!, ref)).content,
+        readPackage: async ref => (await readSnapshot(packages, ref)).content,
         replace: { botId: asset.bot_id, skillId: asset.external_skill_id, expectedSha256: base.package_sha256,
           ownerUserId: asset.owner_user_id, identity: requestIdentity },
         version: { kind: "manual", data: {
           versionId, assetId: asset.asset_id, baseVersionId,
-          packageRef: `oss://${getArtifactBucket()}/${key}`, packageSha256: `sha256:${packageDigest}`,
+          packageRef: packages.ref(key), packageSha256: `sha256:${packageDigest}`,
           creationKind, sourceVersionId: sourceVersion.version_id,
           createdBy: requestIdentity.userId,
         } },
@@ -345,10 +339,10 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     if (!requestIdentity || !asset || !await readable(asset, requestIdentity)) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
-    if (!input.artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }
+    if (!input.skillPackages && !input.artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }
     const version = await input.repo.findVersion(asset.asset_id, String(req.params.versionId));
     if (!version) { res.status(404).json({ error: "Skill 版本不存在" }); return; }
-    const stored = await readSnapshot(input.artifactStore, version.package_ref);
+    const stored = await readSnapshot(packages, version.package_ref);
     res.json(await skillPackageView(stored.content, String(req.query.path ?? "")));
   }));
 
@@ -358,15 +352,15 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     if (!requestIdentity || !asset || !await readable(asset, requestIdentity)) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
-    if (!input.artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }
+    if (!input.skillPackages && !input.artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }
     const version = await input.repo.findVersion(asset.asset_id, String(req.params.versionId));
     if (!version) { res.status(404).json({ error: "Skill 版本不存在" }); return; }
     if (!version.baseline_package_ref) {
       res.json({ baseline: null, files: [] }); return;
     }
     const [baseline, candidate] = await Promise.all([
-      readSnapshot(input.artifactStore, version.baseline_package_ref),
-      readSnapshot(input.artifactStore, version.package_ref),
+      readSnapshot(packages, version.baseline_package_ref),
+      readSnapshot(packages, version.package_ref),
     ]);
     res.json({
       baseline: { sha256: version.baseline_package_sha256 },

@@ -6,8 +6,9 @@ export type EvolveHostCapabilities = { skillManagement: boolean; stageCustomizat
 export function resolveEvolveHostCapabilities(input: {
   hostLocalSkills?: BotSkillGateway | null;
   artifactStore?: ObjectStore;
+  skillPackageStorage?: { store: ObjectStore };
 }): EvolveHostCapabilities {
-  const available = Boolean(input.hostLocalSkills && input.artifactStore?.putObject);
+  const available = Boolean(input.hostLocalSkills && (input.skillPackageStorage?.store ?? input.artifactStore)?.putObject);
   // Stage registration/test currently uses the same Skill package lifecycle.
   return { skillManagement: available, stageCustomization: available };
 }

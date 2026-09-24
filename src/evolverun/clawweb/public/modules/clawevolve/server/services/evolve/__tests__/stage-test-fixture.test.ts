@@ -1,7 +1,13 @@
+import { SkillPackageStorage } from "../../object-storage/skill-package-storage.js";
+import type { ObjectStore } from "../../object-storage/oss-object-store.js";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 import { createStageTestFixturePackage, freezeStageTestFixture, stageTestFixtureInput, selectStageTestFixtureVersion } from "../stage-test-fixture.js";
+function storage(putObject: NonNullable<ObjectStore["putObject"]>) {
+  return new SkillPackageStorage(undefined, { putObject, getObject: async () => { throw new Error("unused"); },
+    createSignedUrl: async () => { throw new Error("unused"); } });
+}
 describe("fixed Stage test Skill fixture", () => {
   it("selects constructed resources by integration position without historical tasks", () => {
     expect(selectStageTestFixtureVersion("skill_evolution", "diagnose", "preprocess")).toBe(2);
@@ -25,7 +31,7 @@ describe("fixed Stage test Skill fixture", () => {
     expect(content.toString()).toContain("name: daily-report-zh");
     expect(content.toString()).not.toContain("memory");
     expect((await createStageTestFixturePackage(3)).packageBytes.equals(fixture.packageBytes)).toBe(true);
-    const frozen = await freezeStageTestFixture("EV-DAILY", async () => ({ etag: "test" }), 3);
+    const frozen = await freezeStageTestFixture("EV-DAILY", storage(async () => ({ etag: "test" })), 3);
     expect(stageTestFixtureInput("EV-DAILY", frozen)).toMatchObject({
       kind: "stage_test_fixture", fixture_id: "skill-description-v3", name: "daily-report-zh",
       asset_id: "fixture:EV-DAILY:skill-description-v3", skill_id: "fixture:skill-description-v3",
@@ -68,9 +74,9 @@ describe("fixed Stage test Skill fixture", () => {
     expect(text).not.toContain("这里的“它”指");
     expect(text).not.toMatch(/changed|hitl|resultFile|必须修改|成功标记/);
     const writes: Array<[string, unknown]> = [];
-    const frozen = await freezeStageTestFixture("EV-NEW", async (key, bytes) => {
+    const frozen = await freezeStageTestFixture("EV-NEW", storage(async (key, bytes) => {
       writes.push([key, bytes]); return { etag: "test" };
-    });
+    }));
     expect(writes).toHaveLength(1);
     expect(writes[0][0]).toBe("evolve/stage-tests/EV-NEW/fixtures/skill-description-v2/package.zip");
     expect(frozen).toMatchObject({ fixtureId: "skill-description-v2", version: 2, sha256: current.sha256 });

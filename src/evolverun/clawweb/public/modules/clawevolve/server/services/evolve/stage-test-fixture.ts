@@ -1,10 +1,10 @@
+import { SkillPackageStorage } from "../object-storage/skill-package-storage.js";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import fixtureV1 from "../../resources/evolve/stage-test-fixtures/skill-description-v1.json" with { type: "json" };
 import fixtureV2 from "../../resources/evolve/stage-test-fixtures/skill-description-v2.json" with { type: "json" };
 import fixtureV3 from "../../resources/evolve/stage-test-fixtures/skill-description-v3.json" with { type: "json" };
 import type { StageExtensionMode, StageKey } from "./stage-catalog.js";
-import { getArtifactBucket, type ObjectStore } from "../object-storage/oss-object-store.js";
 
 const FIXTURES = {
   1: { id: "skill-description-v1", name: "stage-test-text-summary", files: fixtureV1 },
@@ -67,25 +67,31 @@ export async function createStageTestFixturePackage(version: FixtureVersion = CU
 
 export async function freezeStageTestFixture(
   taskId: string,
-  putObject: NonNullable<ObjectStore["putObject"]>,
+  packages: SkillPackageStorage,
   version: FixtureVersion = CURRENT_FIXTURE_VERSION,
 ): Promise<FrozenStageTestFixture> {
   const objectKey = fixtureObjectKey(taskId, version);
   const fixture = await createStageTestFixturePackage(version);
-  await putObject(objectKey, fixture.packageBytes, "application/zip");
+  await packages.put(objectKey, fixture.packageBytes);
   return {
     kind: "stage_test_fixture", fixtureId: fixture.fixtureId, version: fixture.version,
-    taskId, sha256: fixture.sha256, ref: `oss://${getArtifactBucket()}/${objectKey}`,
+    taskId, sha256: fixture.sha256, ref: packages.ref(objectKey),
   };
 }
 
 /** Resolve only the frozen task resource, never a request path or a live host Skill. */
-export function stageTestFixtureInput(taskId: string, fixture: FrozenStageTestFixture) {
-  const objectKey = fixtureObjectKey(taskId, fixture.version);
+export function stageTestFixtureInput(taskId: string, fixture: FrozenStageTestFixture, packages = new SkillPackageStorage()) {
+  if (!packages.matches(fixture.ref, fixtureObjectKey(taskId, fixture.version))) {
+    throw new Error("Stage 测试 fixture 与冻结的任务资源不一致");
+  }
+  return stageTestFixtureTarget(taskId, fixture);
+}
+
+/** Derive execution paths from frozen fixture identity; this does not read or sign storage. */
+export function stageTestFixtureTarget(taskId: string, fixture: Omit<FrozenStageTestFixture, "ref">) {
+  fixtureObjectKey(taskId, fixture.version);
   if (fixture.kind !== "stage_test_fixture" || fixture.fixtureId !== FIXTURES[fixture.version].id
-    || fixture.taskId !== taskId
-    || !/^[a-f0-9]{64}$/.test(fixture.sha256)
-    || fixture.ref !== `oss://${getArtifactBucket()}/${objectKey}`) {
+    || fixture.taskId !== taskId || !/^[a-f0-9]{64}$/.test(fixture.sha256)) {
     throw new Error("Stage 测试 fixture 与冻结的任务资源不一致");
   }
   const workspace = `/home/admin/.openclaw/clawevolve_workspaces/${taskId}/workspace`;

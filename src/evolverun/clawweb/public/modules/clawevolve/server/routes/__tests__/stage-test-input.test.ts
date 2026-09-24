@@ -1,3 +1,4 @@
+import { SkillPackageStorage } from "../../services/object-storage/skill-package-storage.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import Database from "better-sqlite3";
@@ -18,7 +19,7 @@ function planOutput() {
   };
 }
 
-describe("Optimize StageTest constructed input", () => {
+describe.each([false, true])("Optimize StageTest constructed input (dedicated storage=%s)", dedicated => {
   let db: SqliteDatabase;
   let repo: EvolveRepository;
   let stages: StageSkillRepository;
@@ -37,6 +38,9 @@ describe("Optimize StageTest constructed input", () => {
     const app = express(); app.use(express.json());
     app.use("/api/evolve", createEvolveRouter(repo, {
       dispatch, stageSkillRepo: stages, benchTemplateRepo: templates,
+      ...(dedicated ? { skillPackages: new SkillPackageStorage({ bucket: "skill-packages", prefix: "packages",
+        store: { createSignedUrl: signedUrl, putObject, getObject: vi.fn() } },
+        { createSignedUrl: signedUrl, putObject: vi.fn(), getObject: vi.fn() }) } : {}),
       artifactUrlStore: { createSignedUrl: signedUrl },
       artifactStore: { createSignedUrl: signedUrl, putObject, getObject: vi.fn() },
     }));
@@ -84,6 +88,9 @@ describe("Optimize StageTest constructed input", () => {
     expect(created.status).toBe(201);
     const { taskId, stepId } = created.body;
     const prepare = await input(taskId, stepId);
+    const fixtureKey = `${dedicated ? "packages/" : ""}evolve/stage-tests/${taskId}/fixtures/skill-description-v2/package.zip`;
+    expect(putObject).toHaveBeenCalledWith(fixtureKey, expect.any(Buffer), "application/zip");
+    expect(signedUrl).toHaveBeenCalledWith(fixtureKey, "GET", expect.any(Number));
     expect(prepare).toMatchObject({ protocolVersion: "clawevolve.skill-candidate/v1", action: "prepare",
       candidateWorkspace: `/home/admin/.openclaw/clawevolve_workspaces/${taskId}/workspace`,
       targetSkill: { skillId: "fixture:skill-description-v2" } });

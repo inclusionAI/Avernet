@@ -1,3 +1,4 @@
+import { SkillPackageStorage, type SkillPackageStorageOptions } from "./services/object-storage/skill-package-storage.js";
 import { resolveEvolveHostCapabilities } from "./services/evolve/host-capabilities.js";
 import type { Router } from "express";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
@@ -54,6 +55,7 @@ export type ClawevolveModuleOptions = {
   /** Signing store whose endpoint is reachable from AIS containers. */
   aisArtifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   artifactBucket?: string;
+  skillPackageStorage?: SkillPackageStorageOptions;
   clawInsight?: ClawInsightInternalApi;
   insightTaskService?: EvolveRouterDeps["insightTaskService"];
   taskSourceService?: EvolveRouterDeps["taskSourceService"];
@@ -97,6 +99,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   configureClawWebPublicBaseUrl(options.publicBaseUrl, options.trustedPublicOrigins);
   configureArtifactBucket(options.artifactBucket);
 
+  const skillPackages = new SkillPackageStorage(options.skillPackageStorage, options.artifactStore, options.artifactUrlStore);
   const evolve = new EvolveRepository(db, options.botDb);
   const clawInsight = options.clawInsight ?? null;
   const improvement = clawInsight?.improvementRepository ?? null;
@@ -137,6 +140,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     benchTemplateRepo: benchTemplate,
     benchRunRepo: benchRun,
     artifactStore: options.artifactStore,
+    skillPackages,
     artifactUrlStore: options.artifactUrlStore,
     aisArtifactUrlStore: options.aisArtifactUrlStore,
     botWorkflowPermissionRepo: botWorkflowPermission,
@@ -150,12 +154,14 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   publicRouter.use(createStageSkillsRouter({
     repo: stageSkill,
     artifactStore: options.artifactStore,
+    skillPackages,
     hostSpaces: options.hostSpaces,
   }));
   publicRouter.use(createSkillAssetsRouter({
     repo: skillAsset,
     hostLocalSkills: options.hostLocalSkills ?? null,
     artifactStore: options.artifactStore,
+    skillPackages,
     hostSpaces: options.hostSpaces,
   }));
   publicRouter.use(createEvolveSpacesRouter(options.hostSpaces));

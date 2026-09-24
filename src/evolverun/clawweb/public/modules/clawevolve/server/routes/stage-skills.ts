@@ -1,10 +1,10 @@
+import { SkillPackageStorage } from "../services/object-storage/skill-package-storage.js";
 import { randomUUID } from "node:crypto";
 import { Router, type Request } from "express";
 import multer from "multer";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import type { StageDevelopmentRow, StageSkillRepository } from "../repositories/stage-skill-repository.js";
 import type { ObjectStore } from "../services/object-storage/oss-object-store.js";
-import { getArtifactBucket } from "../services/object-storage/oss-object-store.js";
 import {
   createStageDevelopmentPackage,
   inspectStageSkillPackage,
@@ -35,6 +35,7 @@ const upload = multer({
 type StageSkillsRouterInput = {
   repo: StageSkillRepository;
   artifactStore?: ObjectStore;
+  skillPackages?: SkillPackageStorage;
   hostSpaces?: SpaceDirectory;
 };
 
@@ -76,19 +77,10 @@ function developmentView(row: StageDevelopmentRow) {
   };
 }
 
-function packageObjectKey(ref: string): string {
-  const prefix = `oss://${getArtifactBucket()}/`;
-  if (!ref.startsWith(prefix)) throw new Error("Stage Skill 文件不属于当前文件存储");
-  const key = ref.slice(prefix.length);
-  if (!key || key.startsWith("/")
-    || key.split("/").some((part) => !part || part === "." || part === "..")) {
-    throw new Error("Stage Skill 文件路径不合法");
-  }
-  return key;
-}
 
 export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
   const router = Router();
+  const packages = input.skillPackages ?? new SkillPackageStorage(undefined, input.artifactStore);
 
   async function readable(row: SpaceOwnedRecord, req: Request): Promise<boolean> {
     const identity = spaceRequestIdentity(req);
@@ -221,10 +213,10 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
     if (!owner || !row || !await readable(row, req) || row.status === "deleted") {
       res.status(404).json({ error: "Stage Skill 不存在" }); return;
     }
-    if (!input.artifactStore) {
+    if (!input.skillPackages && !input.artifactStore) {
       res.status(503).json({ error: "Stage Skill 文件存储不可用" }); return;
     }
-    const stored = await input.artifactStore.getObject(packageObjectKey(row.package_ref));
+    const stored = await packages.read(row.package_ref);
     res.json(await skillPackageView(stored.content, String(req.query.path ?? "")));
   }));
 
@@ -234,7 +226,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
     asyncHandler(async (req, res) => {
       const owner = actor(req);
       if (!owner) { res.status(401).json({ error: "无法识别当前用户" }); return; }
-      if (!input.artifactStore?.putObject) {
+      if (!packages.canWrite) {
         res.status(503).json({ error: "Stage Skill 文件存储不可用" }); return;
       }
       const stage = String(req.body?.stage ?? "") as StageKey;
@@ -263,7 +255,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
       const implementationId = `IMPL-${randomUUID().slice(0, 12).toUpperCase()}`;
       const versionNo = await input.repo.nextVersion(stageSkillId);
       const objectKey = `evolve/stage-implementations/${implementationId}/v${versionNo}/package.zip`;
-      await input.artifactStore.putObject(objectKey, req.file.buffer, "application/zip");
+      await packages.put(objectKey, req.file.buffer);
       const created = await input.repo.createImplementation({
         stageSkillId,
         implementationId,
@@ -273,7 +265,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
         stage,
         mode,
         versionNo,
-        packageRef: `oss://${getArtifactBucket()}/${objectKey}`,
+        packageRef: packages.ref(objectKey),
         packageSha256: inspection.packageSha256,
         // Freeze execution semantics only for this new upload. Neither package
         // fields nor later deployment changes can upgrade a historical version.

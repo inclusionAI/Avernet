@@ -1,3 +1,4 @@
+import { SkillPackageStorage } from "../../services/object-storage/skill-package-storage.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import Database from "better-sqlite3";
@@ -27,9 +28,10 @@ afterEach(async () => {
   artifactRoot = undefined;
 });
 
-async function startRouter(realRepository = false, spaces?: Array<{ id: string; name: string; type: "TEAM"; role: "MEMBER" }>) {
+async function startRouter(realRepository = false, spaces?: Array<{ id: string; name: string; type: "TEAM"; role: "MEMBER" }>, dedicated = false) {
   artifactRoot = await mkdtemp(join(tmpdir(), "skill-snapshot-test-"));
   const store = new FilesystemObjectStore(artifactRoot);
+  const packageStore = new FilesystemObjectStore(join(artifactRoot, "dedicated"));
   const exportLocalSkill = vi.fn();
   const replaceLocalSkill = vi.fn(async (input: { packageBytes: Buffer }) => ({
     sha256: `sha256:${createHash("sha256").update(input.packageBytes).digest("hex")}`,
@@ -57,6 +59,7 @@ async function startRouter(realRepository = false, spaces?: Array<{ id: string; 
     hostLocalSkills: { exportLocalSkill, replaceLocalSkill, listLocalSkills, getBotMetadata } as never,
     hostSpaces: spaces ? { listAccessibleSpaces: vi.fn(async () => spaces) } : undefined,
     artifactStore: store,
+    ...(dedicated ? { skillPackages: new SkillPackageStorage({ bucket: "skill-packages", prefix: "packages", store: packageStore }, store) } : {}),
   }));
   app.use((_error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     res.status(500).json({ error: "Internal Server Error" });
@@ -65,7 +68,7 @@ async function startRouter(realRepository = false, spaces?: Array<{ id: string; 
   await once(server, "listening");
   return {
     url: `http://127.0.0.1:${(server.address() as { port: number }).port}/api/evolve/skill-assets/SKILL-1/versions/SKVER-1`,
-    store, version, exportLocalSkill, replaceLocalSkill, listLocalSkills, getBotMetadata, repo,
+    store, packageStore, version, exportLocalSkill, replaceLocalSkill, listLocalSkills, getBotMetadata, repo,
     baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}/api/evolve`,
   };
 }
@@ -75,8 +78,8 @@ async function zip(content: string) {
 }
 
 describe("Skill historical snapshot availability", () => {
-  it("edits the current frozen Skill into a new immutable version", async () => {
-    const test = await startRouter(true);
+  it.each([false, true])("edits the current frozen Skill into a new immutable version (dedicated=%s)", async dedicated => {
+    const test = await startRouter(true, undefined, dedicated);
     const baseline = await zip("# Version 1\n");
     const baselineSha = `sha256:${createHash("sha256").update(baseline).digest("hex")}`;
     await test.store.putObject("manual/v1.zip", baseline, "application/zip");
@@ -106,6 +109,7 @@ describe("Skill historical snapshot availability", () => {
     }));
     const versions = await test.repo.listVersions("EDITABLE");
     expect(versions.map((item) => item.version_no)).toEqual([2, 1]);
+    expect(versions[0].package_ref).toMatch(dedicated ? /^oss:\/\/skill-packages\/packages\// : /^oss:\/\/clawevolve-artifacts\//);
     const oldContent = await fetch(`${test.baseUrl}/skill-assets/EDITABLE/versions/VERSION-1/content`, {
       headers: { "X-User-Id": "owner-1" },
     });
@@ -485,8 +489,8 @@ describe("Skill historical snapshot availability", () => {
     expect(test.exportLocalSkill).not.toHaveBeenCalled();
   });
 
-  it("registers an actual frozen file and serves its content and initial diff through HTTP", async () => {
-    const test = await startRouter(true);
+  it.each([false, true])("registers an actual frozen file and serves its content and initial diff through HTTP (dedicated=%s)", async dedicated => {
+    const test = await startRouter(true, undefined, dedicated);
     const packageBytes = await zip("# Frozen at registration\n");
     test.exportLocalSkill.mockResolvedValue({
       packageBytes, displayName: "historical-skill",
@@ -498,6 +502,8 @@ describe("Skill historical snapshot availability", () => {
     });
     expect(registration.status).toBe(201);
     const asset = await registration.json();
+    const saved = (await test.repo.listVersions(asset.assetId))[0];
+    expect(saved.package_ref).toMatch(dedicated ? /^oss:\/\/skill-packages\/packages\// : /^oss:\/\/clawevolve-artifacts\//);
     const detail = await fetch(`${test.baseUrl}/skill-assets/${asset.assetId}`, { headers });
     const { versions } = await detail.json();
     const url = `${test.baseUrl}/skill-assets/${asset.assetId}/versions/${versions[0].versionId}`;

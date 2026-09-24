@@ -1,3 +1,4 @@
+import { SkillPackageStorage } from "../services/object-storage/skill-package-storage.js";
 import { applySkillVersion } from "../services/evolve/skill-application.js";
 import type { EvolveHostCapabilities } from "../services/evolve/host-capabilities.js";
 import { coreStageBinding, coreStageRequiresAgentMessage, preparedStageSkillTarget } from "../services/evolve/stage-handler.js";
@@ -172,6 +173,7 @@ export type EvolveRouterDeps = {
   benchTemplateRepo?: BenchTemplateRepository | null;
   benchRunRepo?: BenchRunRepository | null;
   artifactStore?: ObjectStore;
+  skillPackages?: SkillPackageStorage;
   /** Backward-compatible signing-only dependency used by an embedding host. */
   artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   /** Signing-only dependency for artifacts uploaded from AIS containers. */
@@ -1528,6 +1530,7 @@ async function stageRuntimeInput(
   stage: StageKey,
   mode: StageExtensionMode,
   initialInput: unknown,
+  skillPackages: SkillPackageStorage,
 ): Promise<Record<string, unknown>> {
   const config = (parseJson(task.config_json) as ExtendedTaskConfig | null) ?? {};
   const retry = stageRetryLineage(step);
@@ -1565,7 +1568,7 @@ async function stageRuntimeInput(
     ? requirePreparedSkillCandidate(config.targetSkill)
     : null;
   const targetSkill = task.task_type === "stage_test" && config.stageTest?.fixture
-    ? stageTestFixtureInput(task.task_id, config.stageTest.fixture)
+    ? stageTestFixtureInput(task.task_id, config.stageTest.fixture, skillPackages)
     : config.targetSkill && preparedTarget ? {
     asset_id: config.targetSkill.assetId,
     skill_id: config.targetSkill.skillId,
@@ -2164,6 +2167,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   const benchTemplateRepo = deps.benchTemplateRepo ?? null;
   const benchRunRepo = deps.benchRunRepo ?? null;
   const unavailableArtifactStore = new UnavailableObjectStore();
+  const skillPackages = deps.skillPackages ?? new SkillPackageStorage(undefined, deps.artifactStore, deps.artifactUrlStore);
   const artifactStore = deps.artifactStore ?? unavailableArtifactStore;
   const artifactUrlStore = deps.artifactUrlStore ?? deps.artifactStore ?? unavailableArtifactStore;
   const aisArtifactUrlStore = deps.aisArtifactUrlStore ?? artifactUrlStore;
@@ -2663,7 +2667,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const diagnoseTemplate = nodeCommands.diagnose ?? defaultNodeCommand("diagnose");
     let targetSkill: FrozenSkillTarget | undefined;
     if (targetSkillAssetId) {
-      if (!skillAssetRepo || !hostLocalSkills || !deps.artifactStore?.putObject) {
+      if (!skillAssetRepo || !hostLocalSkills || !skillPackages.canWrite) {
         res.status(503).json({ error: "Skill 进化所需的 宿主或版本存储服务不可用" }); return;
       }
       try {
@@ -2675,7 +2679,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           skillAssetRepo,
           hostLocalSkills,
           hostSpaces: deps.hostSpaces,
-          artifactStore: { putObject: deps.artifactStore.putObject.bind(deps.artifactStore) },
+          skillPackages,
           identity: {
             userId: resolveRequestUserId(req) ?? String(userId),
             authorization: req.header("Authorization") || undefined,
@@ -2868,10 +2872,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const botEnv = String(req.body?.botEnv ?? "");
     let fixture: FrozenStageTestFixture | undefined;
     if (fixtureVersion !== undefined) {
-      if (!deps.artifactStore?.putObject) {
+      if (!skillPackages.canWrite) {
         res.status(503).json({ error: "Stage 测试 fixture 存储不可用" }); return;
       }
-      fixture = await freezeStageTestFixture(taskId, deps.artifactStore.putObject.bind(deps.artifactStore), fixtureVersion);
+      fixture = await freezeStageTestFixture(taskId, skillPackages, fixtureVersion);
     }
     const stageSelection: FrozenStageSelection = {
       diagnose: implementation.stage_key === "diagnose",
@@ -2883,11 +2887,11 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const benchDomains = requiresSkillTestCandidate
       ? { trainBenchDomainId: `stage_test_${taskId}_train`, testBenchDomainId: `stage_test_${taskId}_test` }
       : planResult && isRecord(planResult.benchDomains) ? planResult.benchDomains : null;
-    const testSkill = requiresSkillTestCandidate && fixture ? stageTestFixtureInput(taskId, fixture) : undefined;
+    const testSkill = requiresSkillTestCandidate && fixture ? stageTestFixtureInput(taskId, fixture, skillPackages) : undefined;
     const testTarget: FrozenSkillTarget | undefined = testSkill && fixture ? {
       assetId: testSkill.asset_id, skillId: testSkill.skill_id, name: testSkill.name,
       baseline: { ref: fixture.ref, sha256: fixture.sha256 },
-      candidate: { ref: `oss://${getArtifactBucket()}/evolve/skills/tasks/${taskId}/candidate/package.zip` },
+      candidate: { ref: skillPackages.ref(`evolve/skills/tasks/${taskId}/candidate/package.zip`) },
     } : undefined;
     const config: ExtendedTaskConfig = {
       stageTest: {
@@ -3871,8 +3875,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(409).json({ error: "候选 Skill 尚未生成" }); return;
     }
     const [baseline, candidate] = await Promise.all([
-      artifactStore.getObject(objectKeyFromEvolveRef(target.baseline.ref)),
-      artifactStore.getObject(objectKeyFromEvolveRef(target.candidate.artifact.ref)),
+      skillPackages.read(target.baseline.ref),
+      skillPackages.read(target.candidate.artifact.ref),
     ]);
     res.json({
       target: { assetId: target.assetId, skillId: target.skillId, name: target.name },
@@ -3931,7 +3935,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     } }) ?? [])) {
       res.status(403).json({ error: "当前用户已无权访问该 Skill 所属空间" }); return;
     }
-    const stored = await artifactStore.getObject(objectKeyFromEvolveRef(target.candidate.ref));
+    const stored = await skillPackages.read(target.candidate.ref);
     const sha256 = createHash("sha256").update(stored.content).digest("hex");
     if (stored.content.byteLength !== target.candidate.artifact.size
       || sha256 !== target.candidate.artifact.sha256) {
@@ -3990,7 +3994,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     try {
       applied = await applySkillVersion({
         repo: skillAssetRepo, host: hostLocalSkills, operationId: `task:${task.task_id}`,
-        readPackage: async ref => (await artifactStore.getObject(objectKeyFromEvolveRef(ref))).content,
+        readPackage: async ref => (await skillPackages.read(ref)).content,
         replace: {
           botId: task.bot_id, skillId: target.skillId, ownerUserId: asset.owner_user_id,
           expectedSha256: target.baseline.sha256,
@@ -4696,8 +4700,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       if (!target) { res.status(409).json({ error: "Skill 生命周期 Step 缺少冻结目标" }); return; }
       if (step.step_type === "skill_prepare") {
         const workspacePath = candidateWorkspacePath(task.task_id);
-        const packageUrl = await artifactUrlStore.createSignedUrl(
-          objectKeyFromEvolveRef(target.baseline.ref),
+        const packageUrl = await skillPackages.sign(
+          target.baseline.ref,
           "GET",
           EVOLVE_ARTIFACT_URL_TTL_SECONDS,
         );
@@ -4718,8 +4722,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         return;
       }
       const prepared = requirePreparedSkillCandidate(target);
-      const uploadUrl = await artifactUrlStore.createSignedUrl(
-        objectKeyFromEvolveRef(target.candidate.ref),
+      const uploadUrl = await skillPackages.sign(
+        target.candidate.ref,
         "PUT",
         EVOLVE_ARTIFACT_URL_TTL_SECONDS,
         { "Content-Type": "application/zip" },
@@ -4768,18 +4772,18 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           || !usesStageTestFixture(config.stageTest.flow, run.stage_key, run.extension_mode)) {
           res.status(409).json({ error: "Stage 测试 fixture 绑定不一致" }); return;
         }
-        try { stageTestFixtureInput(task.task_id, fixture); }
+        try { stageTestFixtureInput(task.task_id, fixture, skillPackages); }
         catch { res.status(409).json({ error: "Stage 测试 fixture 与冻结的任务资源不一致" }); return; }
         resources = { testSkillFixture: {
           kind: fixture.kind, fixtureId: fixture.fixtureId, version: fixture.version,
           taskId: task.task_id, sha256: fixture.sha256,
-          package: { method: "GET", url: await artifactUrlStore.createSignedUrl(
-            objectKeyFromEvolveRef(fixture.ref), "GET", EVOLVE_ARTIFACT_URL_TTL_SECONDS,
+          package: { method: "GET", url: await skillPackages.sign(
+            fixture.ref, "GET", EVOLVE_ARTIFACT_URL_TTL_SECONDS,
           ) },
         } };
       }
-      const packageUrl = await artifactUrlStore.createSignedUrl(
-        objectKeyFromEvolveRef(implementation.package_ref),
+      const packageUrl = await skillPackages.sign(
+        implementation.package_ref,
         "GET",
         EVOLVE_ARTIFACT_URL_TTL_SECONDS,
       );
@@ -4792,6 +4796,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         run.stage_key,
         run.extension_mode,
         rawInitialInput,
+        skillPackages,
       );
       const stageDefinition = findOfficialStage(run.stage_key);
       const inputError = stageDefinition
@@ -4908,7 +4913,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       protocolVersion: "1.0",
       ...(step.step_type === "hardening" && stageSkillRepo ? {
         businessInput: await signedLoopStageInput(
-          await stageRuntimeInput(repo, stageSkillRepo, task, step, "hardening", "replace", null),
+          await stageRuntimeInput(repo, stageSkillRepo, task, step, "hardening", "replace", null, skillPackages),
           artifactUrlStore,
         ),
       } : {}),

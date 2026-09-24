@@ -1,9 +1,9 @@
+import { SkillPackageStorage } from "../object-storage/skill-package-storage.js";
 import type { BotSkillGateway } from "../../contracts/bot-skill-gateway.js";
 import type { RequestIdentity } from "../../contracts/request-identity.js";
 import type { SpaceDirectory } from "../../contracts/space-directory.js";
 import { canReadSpaceRecord } from "./space-access.js";
 import type { SkillAssetRepository } from "../../repositories/skill-asset-repository.js";
-import { getArtifactBucket, type ObjectStore } from "../object-storage/oss-object-store.js";
 
 export type FrozenSkillTarget = {
   assetId: string;
@@ -87,9 +87,10 @@ export async function freezeSkillTarget(input: {
   skillAssetRepo: SkillAssetRepository;
   hostLocalSkills: BotSkillGateway;
   hostSpaces?: SpaceDirectory;
-  artifactStore: { putObject: NonNullable<ObjectStore["putObject"]> };
   identity: RequestIdentity;
+  skillPackages: SkillPackageStorage;
 }): Promise<FrozenSkillTarget> {
+  const packages = input.skillPackages;
   const asset = await input.skillAssetRepo.findAsset(input.assetId);
   const spaces = asset?.space_id ? await input.hostSpaces?.listAccessibleSpaces({ identity: input.identity }) ?? [] : [];
   if (!asset || !canReadSpaceRecord(asset, input.identity.userId, spaces) || asset.bot_id !== input.botId) {
@@ -105,7 +106,7 @@ export async function freezeSkillTarget(input: {
   const candidateKey = `evolve/skills/tasks/${input.taskId}/candidate/package.zip`;
   const registeredVersion = exported.sha256 === asset.current_package_sha256
     ? await input.skillAssetRepo.findVersionByNumber(asset.asset_id, asset.current_version_no) : null;
-  await input.artifactStore.putObject(baselineKey, exported.packageBytes, "application/zip");
+  await packages.put(baselineKey, exported.packageBytes);
   return {
     assetId: asset.asset_id,
     ownerUserId: asset.owner_user_id,
@@ -114,13 +115,13 @@ export async function freezeSkillTarget(input: {
     skillId: asset.external_skill_id,
     name: exported.displayName,
     baseline: {
-      ref: `oss://${getArtifactBucket()}/${baselineKey}`,
+      ref: packages.ref(baselineKey),
       sha256: exported.sha256,
       ...(registeredVersion?.package_sha256 === exported.sha256 ? {
         versionId: registeredVersion.version_id,
         versionNo: registeredVersion.version_no,
       } : {}),
     },
-    candidate: { ref: `oss://${getArtifactBucket()}/${candidateKey}` },
+    candidate: { ref: packages.ref(candidateKey) },
   };
 }
