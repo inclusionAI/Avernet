@@ -42,6 +42,7 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalMode,
     WorkOrderBizType,
     WorkOrderDecision,
     WorkOrderApproverStatus,
@@ -83,6 +84,81 @@ def _skill_editor_requests(db) -> SkillEditorRequestRepository:
 
 def _work_orders(db) -> WorkOrderRepository:
     return WorkOrderRepository(db, _skill_editor_requests(db))
+
+
+def test_auto_event_callback_gets_persisted_context_and_commits_notice(db) -> None:
+    repository = _work_orders(db)
+    contexts = []
+
+    created = repository.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="friend-auto-1",
+        event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="applicant-auto",
+        approver_user_ids=["actor-auto"],
+        recipient_user_ids=["applicant-auto"],
+        title="friend request",
+        content=None,
+        apply_reason=None,
+        biz_data=json.dumps({"request_ids": ["request-auto-1"]}),
+        env="dev",
+        callback_source_event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+        auto_approval_callback=contexts.append,
+    )
+
+    assert created.status.value == "APPROVED"
+    assert len(contexts) == 1
+    context = contexts[0]
+    assert context.work_order.id == created.work_order_id
+    assert context.work_order.work_order_no == created.work_order_no
+    assert context.work_order.status is WorkOrderStatus.APPROVED
+    assert context.approver.id > 0
+    assert context.approver.work_order_id == created.work_order_id
+    assert context.approver.approver_user_id == "actor-auto"
+    assert context.source_event_type == WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value
+
+    with db.orm_session() as session:
+        order = session.query(WorkOrderModel).one()
+        approver = session.query(WorkOrderApproverModel).one()
+        notification = session.query(WorkOrderNotificationModel).one()
+        assert order.status == WorkOrderStatus.APPROVED.value
+        assert order.approval_mode == WorkOrderApprovalMode.AUTO.value
+        assert approver.status == WorkOrderApproverStatus.APPROVED.value
+        assert notification.notification_category == NotificationCategory.NOTICE.value
+        assert notification.event_type == WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value
+
+
+def test_auto_event_callback_failure_rolls_back_all_local_rows(db) -> None:
+    repository = _work_orders(db)
+
+    def fail(_context) -> None:
+        raise RuntimeError("callback failed")
+
+    with pytest.raises(RuntimeError, match="callback failed"):
+        repository.create_work_order_event(
+            event_category=NotificationCategory.APPROVAL,
+            approval_mode=WorkOrderApprovalMode.AUTO,
+            biz_type=WorkOrderBizType.BOT_FRIEND.value,
+            biz_id="friend-auto-failure",
+            event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+            applicant_user_id="applicant-auto",
+            approver_user_ids=["actor-auto"],
+            recipient_user_ids=["applicant-auto"],
+            title="friend request",
+            content=None,
+            apply_reason=None,
+            biz_data=json.dumps({"request_ids": ["request-auto-failure"]}),
+            env="dev",
+            callback_source_event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+            auto_approval_callback=fail,
+        )
+
+    with db.orm_session() as session:
+        assert session.query(WorkOrderModel).count() == 0
+        assert session.query(WorkOrderApproverModel).count() == 0
+        assert session.query(WorkOrderNotificationModel).count() == 0
 
 
 def _space_skills(db) -> SpaceSkillRepository:

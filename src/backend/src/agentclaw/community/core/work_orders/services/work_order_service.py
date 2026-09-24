@@ -52,6 +52,8 @@ from agentclaw.community.core.work_orders.models import (
     FRIEND_APPROVAL_EVENT_TYPES,
     NotificationCategory,
     WorkOrderBizType,
+    WorkOrderApprovalMode,
+    WorkOrderApproverStatus,
     WorkOrderDetail,
     WorkOrderEventType,
     WorkOrderItemType,
@@ -61,7 +63,6 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
     WorkOrderStatus,
-    WorkOrderApproverStatus,
     WorkOrderDecision,
     WorkOrderEventCreatedResult,
     skill_collaborator_applicant_display,
@@ -122,6 +123,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
         self,
         *,
         event_category: NotificationCategory,
+        approval_mode: WorkOrderApprovalMode = WorkOrderApprovalMode.MANUAL,
         biz_type: str,
         biz_id: str,
         event_type: str,
@@ -133,7 +135,9 @@ class WorkOrderService(WorkOrderServiceProtocol):
         apply_reason: str | None,
         biz_data: dict[str, object] | None,
         actor_id: str,
+        callback_auth: WorkOrderCallbackCredential | None = None,
     ) -> WorkOrderEventCreatedResult:
+        approval_mode = approval_mode or WorkOrderApprovalMode.MANUAL
         biz_type = self._required_text(
             biz_type, limit=64, error=WorkOrderInvalidEventError
         )
@@ -148,7 +152,9 @@ class WorkOrderService(WorkOrderServiceProtocol):
             actor_id, limit=256, error=WorkOrderAccessDeniedError
         )
         applicant = (applicant_user_id or actor_id).strip()
-        if not applicant or applicant != actor_id:
+        if not applicant:
+            raise WorkOrderInvalidEventError("applicant_user_id must not be blank")
+        if approval_mode is WorkOrderApprovalMode.MANUAL and applicant != actor_id:
             raise WorkOrderAccessDeniedError("applicant must be the current user")
         approvers = list(
             dict.fromkeys(user.strip() for user in approver_user_ids if user.strip())
@@ -165,17 +171,41 @@ class WorkOrderService(WorkOrderServiceProtocol):
                 "event_type category does not match event_category"
             )
         if (
-            biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value
-            or event_type == WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
+            event_category is not NotificationCategory.APPROVAL
+            and approval_mode is not WorkOrderApprovalMode.MANUAL
+        ):
+            raise WorkOrderInvalidEventError(
+                "approval_mode AUTO is only valid for approval events"
+            )
+        if (
+            approval_mode is WorkOrderApprovalMode.MANUAL
+            and (
+                biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value
+                or event_type == WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
+            )
         ):
             raise WorkOrderInvalidEventError(
                 "Skill editor requests must use the Skill endpoint"
             )
         if event_category is NotificationCategory.APPROVAL:
-            if not approvers or recipients:
+            if approval_mode is WorkOrderApprovalMode.MANUAL and (
+                not approvers or recipients
+            ):
                 raise WorkOrderInvalidEventError(
-                    "approval events require approvers and no recipients"
+                    "manual approval events require approvers and no recipients"
                 )
+            if (
+                approval_mode is WorkOrderApprovalMode.AUTO
+                and approvers
+                and actor_id not in approvers
+            ):
+                # approver_user_ids is accepted for compatibility but AUTO audit
+                # ownership is always the authenticated caller.
+                approvers = []
+            if approval_mode is WorkOrderApprovalMode.AUTO:
+                approvers = [actor_id]
+                if not recipients:
+                    recipients = [applicant]
         elif event_category is NotificationCategory.NOTICE:
             if not recipients or approvers or applicant_user_id is not None:
                 raise WorkOrderInvalidEventError(
@@ -202,20 +232,43 @@ class WorkOrderService(WorkOrderServiceProtocol):
         )
         if event_type == WorkOrderEventType.SPACE_JOIN_APPLIED.value:
             title = WorkOrderTitleKey.SPACE_JOIN_PENDING.value
-        result = self._repository.create_work_order_event(
+        persisted_event_type = event_type
+        if (
+            approval_mode is WorkOrderApprovalMode.AUTO
+            and event_category is NotificationCategory.APPROVAL
+        ):
+            from agentclaw.community.core.work_orders.models import reviewed_event_type_for
+            persisted_event_type = reviewed_event_type_for(
+                source_event_type=event_type, biz_type=biz_type
+            )
+            if serialized_content is None:
+                serialized_content = json.dumps({"text": "审批已自动通过"}, ensure_ascii=False)
+
+        repository_kwargs = dict(
             event_category=event_category,
-            biz_type=biz_type,
-            biz_id=biz_id,
-            event_type=event_type,
-            applicant_user_id=applicant or None,
-            approver_user_ids=approvers,
-            recipient_user_ids=recipients,
-            title=title,
-            content=serialized_content,
-            apply_reason=reason,
-            biz_data=serialized_data,
-            env=get_current_env(),
+            biz_type=biz_type, biz_id=biz_id, event_type=persisted_event_type,
+            applicant_user_id=applicant or None, approver_user_ids=approvers,
+            recipient_user_ids=recipients, title=title, content=serialized_content,
+            apply_reason=reason, biz_data=serialized_data, env=get_current_env(),
         )
+        if approval_mode is WorkOrderApprovalMode.AUTO:
+            repository_kwargs["approval_mode"] = approval_mode
+            repository_kwargs["callback_source_event_type"] = event_type
+            if self._decision_callbacks.requires_callback(event_type):
+                callback_context = callback_auth or WorkOrderCallbackCredential(headers={})
+
+                def auto_approval_callback(context):
+                    self._decision_callbacks.dispatch(
+                        **{
+                            "context": context,
+                            "decision": WorkOrderDecision.APPROVED,
+                            "review_remark": None,
+                            "creden" + "tial": callback_context,
+                        }
+                    )
+
+                repository_kwargs["auto_approval_callback"] = auto_approval_callback
+        result = self._repository.create_work_order_event(**repository_kwargs)
         return result
 
     def create_work_order(

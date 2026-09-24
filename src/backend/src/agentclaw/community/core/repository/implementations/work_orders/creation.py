@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import uuid4
+
+from sqlalchemy import select, func
 
 from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
@@ -17,14 +20,18 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApproverRecord,
     WorkOrderApproverStatus,
+    WorkOrderApprovalContext,
     WorkOrderBizType,
     WorkOrderEventCreatedResult,
     WorkOrderEventStatus,
     WorkOrderStatus,
     WorkOrderEventType,
+    WorkOrderApprovalMode,
     WorkOrderMessageContent,
     notification_title_for,
+    reviewed_event_type_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -56,6 +63,7 @@ class _WorkOrderCreationRepository:
         self,
         *,
         event_category: NotificationCategory,
+        approval_mode: WorkOrderApprovalMode = WorkOrderApprovalMode.MANUAL,
         biz_type: str,
         biz_id: str,
         event_type: str,
@@ -67,53 +75,120 @@ class _WorkOrderCreationRepository:
         apply_reason: str | None,
         biz_data: str | None,
         env: str,
+        callback_source_event_type: str | None = None,
+        auto_approval_callback: Callable[[WorkOrderApprovalContext], None] | None = None,
     ) -> WorkOrderEventCreatedResult:
-        recipients = (
-            approver_user_ids
-            if event_category is NotificationCategory.APPROVAL
-            else recipient_user_ids
-        )
+        approval_mode = approval_mode or WorkOrderApprovalMode.MANUAL
+        if event_category is NotificationCategory.APPROVAL:
+            recipients = (
+                recipient_user_ids
+                if approval_mode is WorkOrderApprovalMode.AUTO
+                else approver_user_ids
+            )
+            if approval_mode is WorkOrderApprovalMode.AUTO and not recipients:
+                recipients = [applicant_user_id] if applicant_user_id else []
+        else:
+            recipients = recipient_user_ids
         if not recipients:
             raise WorkOrderNoReviewerError("no work-order recipient")
+        if (
+            event_category is NotificationCategory.APPROVAL
+            and approval_mode is WorkOrderApprovalMode.AUTO
+            and not approver_user_ids
+        ):
+            raise WorkOrderNoReviewerError("no auto-approval actor")
 
         with self._db.transactional_orm_session() as db:
             work_order_id: int | None = None
             work_order_no: str | None = None
+            result_status = WorkOrderEventStatus.CREATED
             if event_category is NotificationCategory.APPROVAL:
+                now = db.execute(select(func.now())).scalar_one()
+                is_auto = approval_mode is WorkOrderApprovalMode.AUTO
+                result_status = WorkOrderEventStatus.APPROVED if is_auto else WorkOrderEventStatus.PENDING
                 row = self._WorkOrder(
-                    work_order_no=self._new_no(),
-                    biz_type=biz_type,
-                    biz_id=biz_id,
-                    biz_data=biz_data,
-                    applicant_user_id=applicant_user_id,
+                    work_order_no=self._new_no(), biz_type=biz_type, biz_id=biz_id,
+                    biz_data=biz_data, applicant_user_id=applicant_user_id,
                     apply_reason=apply_reason,
-                    status=WorkOrderStatus.PENDING.value,
-                    env=env,
+                    status=WorkOrderStatus.APPROVED.value if is_auto else WorkOrderStatus.PENDING.value,
+                    approval_mode=approval_mode.value,
+                    reviewer_user_id=approver_user_ids[0] if is_auto else None,
+                    reviewed_at=now if is_auto else None, env=env,
                 )
                 db.add(row)
                 db.flush()
-                work_order_id = row.id
-                work_order_no = row.work_order_no
+                work_order_id, work_order_no = row.id, row.work_order_no
                 for user_id in approver_user_ids:
-                    db.add(
-                        self._Approver(
-                            work_order_id=row.id,
-                            approver_user_id=user_id,
-                            status=WorkOrderApproverStatus.PENDING.value,
-                            env=env,
+                    approver = self._Approver(
+                        work_order_id=row.id,
+                        approver_user_id=user_id,
+                        status=(
+                            WorkOrderApproverStatus.APPROVED.value
+                            if is_auto
+                            else WorkOrderApproverStatus.PENDING.value
+                        ),
+                        reviewed_at=now if is_auto else None,
+                        env=env,
+                    )
+                    db.add(approver)
+
+                if is_auto and auto_approval_callback is not None:
+                    db.flush()
+                    db.refresh(row)
+                    approver = (
+                        db.query(self._Approver)
+                        .filter(
+                            self._Approver.work_order_id == row.id,
+                            self._Approver.approver_user_id
+                            == approver_user_ids[0],
+                            self._Approver.env == env,
+                        )
+                        .one()
+                    )
+                    auto_approval_callback(
+                        WorkOrderApprovalContext(
+                            work_order=row.to_record(),
+                            approver=WorkOrderApproverRecord(
+                                id=approver.id,
+                                work_order_id=approver.work_order_id,
+                                approver_user_id=approver.approver_user_id,
+                                status=approver.status,
+                                review_remark=approver.review_remark,
+                                reviewed_at=approver.reviewed_at,
+                                env=approver.env,
+                                gmt_created=approver.gmt_created,
+                                gmt_modified=approver.gmt_modified,
+                            ),
+                            source_event_type=(
+                                callback_source_event_type or event_type
+                            ),
                         )
                     )
 
+            notification_category = (
+                NotificationCategory.NOTICE
+                if event_category is NotificationCategory.APPROVAL and approval_mode is WorkOrderApprovalMode.AUTO
+                else event_category
+            )
             notifications = []
             for user_id in recipients:
+                notification_event_type = event_type
+                if (
+                    event_category is NotificationCategory.APPROVAL
+                    and approval_mode is WorkOrderApprovalMode.AUTO
+                ):
+                    notification_event_type = reviewed_event_type_for(
+                        source_event_type=callback_source_event_type or event_type,
+                        biz_type=biz_type,
+                    )
                 notification = self._Notification(
                     work_order_id=work_order_id,
                     recipient_user_id=user_id,
-                    notification_category=event_category.value,
-                    event_type=event_type,
+                    notification_category=notification_category.value,
+                    event_type=notification_event_type,
                     biz_type=biz_type,
                     biz_id=biz_id,
-                    title=notification_title_for(event_type, title),
+                    title=notification_title_for(notification_event_type, title),
                     content=content,
                     env=env,
                 )
@@ -121,15 +196,10 @@ class _WorkOrderCreationRepository:
                 notifications.append(notification)
             db.flush()
             return WorkOrderEventCreatedResult(
-                event_category=event_category,
-                work_order_id=work_order_id,
+                event_category=event_category, work_order_id=work_order_id,
                 work_order_no=work_order_no,
                 notification_ids=[notification.id for notification in notifications],
-                status=(
-                    WorkOrderEventStatus.PENDING
-                    if event_category is NotificationCategory.APPROVAL
-                    else WorkOrderEventStatus.CREATED
-                ),
+                status=result_status,
             )
 
     def create_work_order(

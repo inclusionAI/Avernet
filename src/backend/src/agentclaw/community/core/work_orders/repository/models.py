@@ -11,6 +11,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationRecord,
     WorkOrderRecord,
     WorkOrderStatus,
+    WorkOrderApprovalMode,
 )
 from agentclaw.community.plugin_api.models import AutoIncrementBigInteger
 from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
@@ -28,6 +29,7 @@ class WorkOrderModel(Base):
     applicant_user_id = Column(String(256), nullable=False)
     apply_reason = Column(String(512), nullable=True)
     status = Column(String(32), nullable=False)
+    approval_mode = Column(String(16), nullable=True)
     reviewer_user_id = Column(String(256), nullable=True)
     review_remark = Column(String(512), nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
@@ -79,6 +81,10 @@ class WorkOrderModel(Base):
             reviewer_user_id=self.reviewer_user_id,
             review_remark=self.review_remark,
             reviewed_at=self.reviewed_at,
+            approval_mode=(
+                WorkOrderApprovalMode(self.approval_mode)
+                if self.approval_mode else None
+            ),
             env=self.env,
             gmt_created=self.gmt_created,
             gmt_modified=self.gmt_modified,

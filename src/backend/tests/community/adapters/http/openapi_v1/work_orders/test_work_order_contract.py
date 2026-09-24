@@ -29,6 +29,7 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalMode,
     WorkOrderBizType,
     WorkOrderDecision,
     WorkOrderDetail,
@@ -384,6 +385,40 @@ def test_create_work_order_event_accepts_json_objects(
         actor_id="owner-1",
     )
 
+
+def test_create_auto_work_order_event_forwards_mode_and_callback_auth(
+    client, work_order_service
+):
+    work_order_service.create_work_order_event.return_value = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.APPROVAL,
+        work_order_id=11,
+        work_order_no="WO-11",
+        notification_ids=[21],
+        status=WorkOrderEventStatus.APPROVED,
+    )
+    payload = {
+        "event_category": "APPROVAL",
+        "approval_mode": "AUTO",
+        "biz_type": "BOT_FRIEND",
+        "biz_id": "friend-1",
+        "event_type": "HUMAN2BOT_FRIEND_APPLIED",
+        "applicant_user_id": "applicant-1",
+        "approver_user_ids": [],
+        "recipient_user_ids": [],
+        "title": "Friend request",
+        "biz_data": {"request_ids": ["request-1"]},
+    }
+
+    response = client.post(
+        "/openapi/v1/bots/work-orders/events",
+        json=payload,
+        headers={"X-Request-Id": "request-1"},
+    )
+
+    assert response.status_code == 201
+    kwargs = work_order_service.create_work_order_event.call_args.kwargs
+    assert kwargs["approval_mode"] is WorkOrderApprovalMode.AUTO
+    assert kwargs["callback_auth"].headers == {"x-request-id": "request-1"}
 
 @pytest.mark.parametrize(
     "content",
@@ -890,6 +925,19 @@ def test_presentation_helpers_preserve_empty_values() -> None:
     assert display_title("custom title") == "custom title"
     assert json_object(None) is None
     assert json_object("not-json") == {"legacy_value": "not-json"}
+
+
+def test_display_title_marks_auto_approved_work_orders() -> None:
+    assert (
+        display_title(
+            "Bot 共同编辑申请已处理",
+            event_type=WorkOrderEventType.BOT_COLLABORATOR_REVIEWED.value,
+            biz_type=WorkOrderBizType.BOT_COLLABORATOR.value,
+            status=WorkOrderStatus.APPROVED,
+            approval_mode=WorkOrderApprovalMode.AUTO,
+        )
+        == "Bot 共同编辑申请已通过（自动审批）"
+    )
 
 
 def test_notification_content_text_has_priority_and_is_preserved(client, notification_service):

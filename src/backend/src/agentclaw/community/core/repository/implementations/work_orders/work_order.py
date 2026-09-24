@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 from injector import inject
 from sqlalchemy import and_, func, or_, select
@@ -36,6 +37,7 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalMode,
     WorkOrderApprovalContext,
     WorkOrderApproverRecord,
     WorkOrderBizType,
@@ -93,6 +95,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         self,
         *,
         event_category: NotificationCategory,
+        approval_mode: WorkOrderApprovalMode = WorkOrderApprovalMode.MANUAL,
         biz_type: str,
         biz_id: str,
         event_type: str,
@@ -104,9 +107,13 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         apply_reason: str | None,
         biz_data: str | None,
         env: str,
+        callback_source_event_type: str | None = None,
+        auto_approval_callback: Callable[[WorkOrderApprovalContext], None] | None = None,
     ) -> WorkOrderEventCreatedResult:
+        approval_mode = approval_mode or WorkOrderApprovalMode.MANUAL
         return self._creation.create_work_order_event(
             event_category=event_category,
+            approval_mode=approval_mode,
             biz_type=biz_type,
             biz_id=biz_id,
             event_type=event_type,
@@ -118,6 +125,8 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             apply_reason=apply_reason,
             biz_data=biz_data,
             env=env,
+            callback_source_event_type=callback_source_event_type,
+            auto_approval_callback=auto_approval_callback,
         )
 
     def create_work_order(
@@ -492,8 +501,14 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                         self._Notification.env == env,
                     ),
                 ).filter(
-                    self._WorkOrder.applicant_user_id == actor_id,
                     self._WorkOrder.env == env,
+                    or_(
+                        self._WorkOrder.applicant_user_id == actor_id,
+                        and_(
+                            self._WorkOrder.approval_mode == WorkOrderApprovalMode.AUTO.value,
+                            self._WorkOrder.reviewer_user_id == actor_id,
+                        ),
+                    ),
                 )
             else:
                 query = (

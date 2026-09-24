@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import Protocol, TYPE_CHECKING, runtime_checkable
+
 
 if TYPE_CHECKING:
     from agentclaw.community.core.work_orders.models import (
@@ -22,6 +24,7 @@ if TYPE_CHECKING:
         WorkOrderDecision,
         WorkOrderEventCreatedResult,
         NotificationCategory,
+        WorkOrderApprovalMode,
     )
 
 
@@ -32,6 +35,7 @@ class WorkOrderRepositoryProtocol(Protocol):
         self,
         *,
         event_category: NotificationCategory,
+        approval_mode: WorkOrderApprovalMode | None = None,
         biz_type: str,
         biz_id: str,
         event_type: str,
@@ -43,6 +47,8 @@ class WorkOrderRepositoryProtocol(Protocol):
         apply_reason: str | None,
         biz_data: str | None,
         env: str,
+        callback_source_event_type: str | None = None,
+        auto_approval_callback: Callable[[WorkOrderApprovalContext], None] | None = None,
     ) -> WorkOrderEventCreatedResult: ...
 
     @abstractmethod

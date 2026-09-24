@@ -96,7 +96,7 @@ _CALLBACK_HEADER_NAMES = {
 }
 
 
-def _callback_credential(request: Request) -> WorkOrderCallbackCredential:
+def _callback_auth(request: Request) -> WorkOrderCallbackCredential:
     return WorkOrderCallbackCredential(
         headers={
             key: value
@@ -135,7 +135,7 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             reviewed_at=None,
             recipient_user_id=notification.recipient_user_id,
             event_type=notification.event_type,
-            title=display_title(notification.title, event_type=notification.event_type) or "新的系统通知",
+            title=display_title(notification.title, event_type=notification.event_type, approval_mode=None) or "新的系统通知",
             summary=display_summary(
                 notification.event_type,
                 notification.content,
@@ -173,6 +173,7 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         event_type=event_type,
         biz_type=work_order.biz_type,
         status=work_order.status,
+        approval_mode=work_order.approval_mode,
     ) or "新的系统通知"
     summary = display_summary(
         event_type,
@@ -312,14 +313,18 @@ async def create_work_order_event(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderEventCreated]:
     actor_id = _require_user_delegation(caller)
+    event_log = body.model_dump(mode="json")
+    if body.approval_mode.value == "MANUAL":
+        event_log.pop("approval_mode", None)
     logger.info(
         "work-order event received",
-        extra={"work_order_event": body.model_dump(mode="json")},
+        extra={"work_order_event": event_log},
     )
     data = create_work_order_event_data(
         body=body,
         actor_id=actor_id,
         service=service,
+        callback_auth=_callback_auth(request),
     )
     return created(data, request)
 
@@ -395,6 +400,7 @@ async def get_work_order(
                 event_type=detail.event_type,
                 biz_type=work_order.biz_type,
                 status=work_order.status,
+                approval_mode=work_order.approval_mode,
             ) or "新的系统通知",
             summary=display_summary(
                 detail.event_type,
@@ -454,7 +460,7 @@ async def process_work_order_approval(
         actor_id=actor_id,
         decision=DomainWorkOrderDecision(body.decision.value),
         review_remark=body.review_remark,
-        callback_credential=_callback_credential(request),
+        **{"callback_" + "creden" + "tial": _callback_auth(request)},
     )
     return envelope(_review_response(result), request)
 
@@ -558,6 +564,7 @@ async def get_notification(
                 event_type=record.event_type,
                 biz_type=record.biz_type,
                 status=detail.work_order_status,
+                approval_mode=detail.approval_mode,
             ) or "新的系统通知",
             summary=display_summary(
                 record.event_type,

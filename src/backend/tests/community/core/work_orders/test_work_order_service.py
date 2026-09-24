@@ -28,6 +28,7 @@ from agentclaw.community.core.work_orders.errors import (
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderApprovalContext,
+    WorkOrderApprovalMode,
     WorkOrderApproverRecord,
     WorkOrderApproverStatus,
     WorkOrderBizType,
@@ -592,6 +593,78 @@ def test_create_friend_event_requires_callback_contract(
             content=None,
             apply_reason=None,
             biz_data=biz_data,
+            actor_id="actor-1",
+        )
+
+    repository.create_work_order_event.assert_not_called()
+
+
+def test_auto_friend_event_defers_callback_to_repository_with_real_context() -> None:
+    callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
+    callbacks.requires_callback.return_value = True
+    service, repository, _, _, _ = _service(decision_callbacks=callbacks)
+    repository.create_work_order_event.return_value = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.APPROVAL,
+        work_order_id=11,
+        work_order_no="WO-11",
+        notification_ids=[21],
+        status=WorkOrderEventStatus.APPROVED,
+    )
+    callback_context = WorkOrderCallbackCredential(headers={"X-Request-Id": "req-1"})
+
+    result = service.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="friend-auto",
+        event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="applicant-auto",
+        approver_user_ids=["ignored-approver"],
+        recipient_user_ids=[],
+        title="friend request",
+        content=None,
+        apply_reason=None,
+        biz_data={"request_ids": ["request-auto"]},
+        actor_id="actor-auto",
+        callback_auth=callback_context,
+    )
+
+    assert result.status is WorkOrderEventStatus.APPROVED
+    kwargs = repository.create_work_order_event.call_args.kwargs
+    assert kwargs["approver_user_ids"] == ["actor-auto"]
+    assert kwargs["callback_source_event_type"] == (
+        WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value
+    )
+    callback = kwargs["auto_approval_callback"]
+    context = _friend_context(
+        event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED,
+    )
+    callback(context)
+    callbacks.dispatch.assert_called_once()
+    dispatch_kwargs = callbacks.dispatch.call_args.kwargs
+    assert dispatch_kwargs["context"] is context
+    assert dispatch_kwargs["decision"] is WorkOrderDecision.APPROVED
+    assert dispatch_kwargs["review_remark"] is None
+    assert dispatch_kwargs["credential"] is callback_context
+
+
+def test_auto_mode_is_rejected_for_notice_events() -> None:
+    service, repository, _, _, _ = _service()
+
+    with pytest.raises(WorkOrderInvalidEventError, match="only valid for approval"):
+        service.create_work_order_event(
+            event_category=NotificationCategory.NOTICE,
+            approval_mode=WorkOrderApprovalMode.AUTO,
+            biz_type=WorkOrderBizType.GROUP_MENTION.value,
+            biz_id="group-1:s1",
+            event_type=WorkOrderEventType.HUMAN_GROUP_MENTIONED.value,
+            applicant_user_id=None,
+            approver_user_ids=[],
+            recipient_user_ids=["recipient-1"],
+            title="你被 @ 了",
+            content={"text": "hello"},
+            apply_reason=None,
+            biz_data=None,
             actor_id="actor-1",
         )
 
