@@ -28,6 +28,13 @@ function replaceStageIds(value: unknown, ids: Map<string, string>): unknown {
     key === 'stageSkillId' && typeof item === 'string' ? (ids.get(item) ?? item) : replaceStageIds(item, ids)]));
 }
 
+function referencedStageIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(referencedStageIds);
+  if (!value || typeof value !== 'object') return [];
+  return Object.entries(value).flatMap(([key, item]) =>
+    key === 'stageSkillId' && typeof item === 'string' ? [item] : referencedStageIds(item));
+}
+
 /** Managed databases must stop feature writes before running this migration.
  * Build complete copies first; SQLite swaps in a transaction, MySQL in one
  * atomic RENAME TABLE. Old tables remain available until references are updated.
@@ -54,7 +61,13 @@ export async function cleanupEvolveSchema(db: IDatabase): Promise<void> {
   }
   const developments = rows.get('ce_stage_developments')!;
   const implementations = rows.get('ce_stage_skill_implementations')!;
-  const keys = [...new Set([...developments, ...implementations].map(row => String(row.stage_skill_id)))].sort();
+  // A binding may legitimately reference an unavailable/deleted draft. Keep
+  // that failure local to the binding, rather than invalidating all config.
+  // Read original config rows so a retry allocates exactly the same IDs.
+  const bindingIds = rows.get('ce_app_config')!
+    .filter(row => row.config_key === 'skill_task_stage_bindings')
+    .flatMap(row => referencedStageIds(JSON.parse(String(row.config_json))));
+  const keys = [...new Set([...developments, ...implementations].map(row => String(row.stage_skill_id)).concat(bindingIds))].sort();
   const ids = new Map<string, string>();
   const used = new Set(keys.filter(key => /^[1-9][0-9]*$/.test(key) && Number.isSafeInteger(Number(key))).map(Number));
   let nextId = 1;

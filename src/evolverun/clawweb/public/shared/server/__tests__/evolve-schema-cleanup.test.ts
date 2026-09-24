@@ -134,6 +134,24 @@ describe('Evolve schema simplification', () => {
     } finally { await db.close(); }
   });
 
+  it('keeps unavailable bindings valid without inventing a development or reusing its reserved ID', async () => {
+    const db = await legacyDatabase();
+    try {
+      await seed(db);
+      await db.exec('UPDATE ce_app_config SET config_json = ?', [JSON.stringify({ bindings: [
+        { stageSkillId: 'STAGESKILL-OLD' }, { stageSkillId: 'STAGESKILL-Z-DELETED' },
+      ] })]);
+      await cleanupEvolveSchema(db);
+      const binding = JSON.parse((await db.query<{ config_json: string }>('SELECT config_json FROM ce_app_config'))[0].config_json);
+      expect(binding.bindings).toEqual([{ stageSkillId: '1' }, { stageSkillId: '2' }]);
+      expect(await db.query('SELECT id FROM ce_stage_developments')).toEqual([{ id: 1 }]);
+      const created = await db.exec(`INSERT INTO ce_stage_developments
+        (owner_user_id, display_name, flow_key, stage_key, extension_mode)
+        VALUES ('owner', 'new', 'skill_hardening', 'hardening', 'replace')`, []);
+      expect(created.insertId).toBe(3);
+    } finally { await db.close(); }
+  });
+
   it('ships all nine tables with the same columns and constraints as runtime migrations', async () => {
     const db = new SqliteDatabase(new Database(':memory:'));
     const delivery = new SqliteDatabase(new Database(':memory:'));
