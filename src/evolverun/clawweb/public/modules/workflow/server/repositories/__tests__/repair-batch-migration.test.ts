@@ -1,13 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
+import Database from 'better-sqlite3';
 import { migrations } from '../../../../../shared/server/schema.js';
 import { repairBatchMigrations } from '../../../../../shared/server/schema-repair-batch.js';
 import { sqliteDialect, mysqlDialect, zdasDialect } from '../../../../../shared/server/db/dialect.js';
 
 describe('repair-v2 additive schema', () => {
   it('upgrades the real legacy SQLite outcome DDL without dropping its records', () => {
-    const db = new DatabaseSync(':memory:');
+    const db = new Database(':memory:');
     try {
       const legacy = migrations.flatMap(m => m.sql).find(sql => sql.startsWith('CREATE TABLE IF NOT EXISTS workflow_healing_outcomes ('))!;
       db.exec(sqliteDialect.renderDdl(legacy));

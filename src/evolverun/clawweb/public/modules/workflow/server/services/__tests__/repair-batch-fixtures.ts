@@ -1,13 +1,12 @@
-import type Database from 'better-sqlite3';
-import { DatabaseSync } from 'node:sqlite';
+import Database from 'better-sqlite3';
 import { SqliteDatabase } from '../../../../../shared/server/db.js';
 import { migrations } from '../../../../../shared/server/schema.js';
 import { digestRepairJson, type RepairItem } from '../../contracts/repair-batch.js';
 import type { RepairExecutionPort, RepairGeneratedResult, RepairSourcePort } from '../../contracts/repair-workbench.js';
 
 export async function repairFixture(count = 2) {
-  const raw = new DatabaseSync(':memory:');
-  const db = new SqliteDatabase(raw as unknown as Database.Database);
+  const raw = new Database(':memory:');
+  const db = new SqliteDatabase(raw);
   raw.exec(`CREATE TABLE workflow_specs (workflow_id TEXT PRIMARY KEY); INSERT INTO workflow_specs VALUES ('wf-1'), ('wf-2');`);
   const legacy = migrations.flatMap(m => m.sql).find(sql => sql.startsWith('CREATE TABLE IF NOT EXISTS workflow_healing_outcomes ('))!;
   await db.exec(db.dialect.renderDdl(legacy));

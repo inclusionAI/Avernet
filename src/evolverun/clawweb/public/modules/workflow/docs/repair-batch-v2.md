@@ -106,7 +106,7 @@ vitest run --config vitest.repair-web.config.ts --configLoader runner
 公共 Host 包还有 `vitest.repair-runtime.config.ts`，用实际旧来源仓库、新服务和 HTTP 路由检查 39 项读取、
 冻结派发、任务查询和取消释放。浏览器验收使用真实 React 页面加明确标注的合成 HTTP 响应；这与真实 AIS 联调不同。
 
-测试通过 Node 24 内建 `node:sqlite` 的真实 SQLite 引擎执行现有 SqliteDatabase 的 query/exec/transaction，覆盖旧 DDL 升级、历史保留、审计/任务步骤失败回滚、并发建批、冻结输入、取消、失败保留候选、回报和派发重试，以及本机 HTTP 读写鉴权和完整反馈/diff 路径。由于本机共享 better-sqlite3 为 Node 22 ABI，此检查点没有验证该原生驱动在 Node 24 下运行。
+测试通过项目既有的 `better-sqlite3` 驱动执行真实 SQLite，并在最低支持版本 Node 20 下覆盖现有 SqliteDatabase 的 query/exec/transaction、旧 DDL 升级、历史保留、审计/任务步骤失败回滚、并发建批、冻结输入、取消、失败保留候选、回报和派发重试，以及本机 HTTP 读写鉴权和完整反馈/diff 路径。
 
 MySQL/ZDAS 仅有 DDL 渲染契约检查；真实目标数据库迁移、事务隔离、并发建批和恢复仍需环境验收。服务对共用同一 IDatabase 的 SQLite 调用排队，防止 BEGIN 重叠；跨连接和跨进程的互斥仍依赖数据库行锁及调用方的忙重试，不能用单连接并发测试代替目标环境证明。
 
