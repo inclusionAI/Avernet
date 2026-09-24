@@ -76,7 +76,7 @@ MessageDeliveryRepoPort also persists one environment-scoped versioned policy sn
 
 ## Allowed dependencies
 
-- Contract crates, database plugin API, event-store transaction composition,
+- Contract crates, database plugin API, session-store memory registry and event-store transaction composition,
   serialization and process-local synchronization utilities.
 
 ## Forbidden dependencies
@@ -128,3 +128,13 @@ per query, with a 16384 supplemental-row budget; budget or DB failures propagate
 The application receives no bodies; SQL still reads/parses candidate content
 JSON. No counters, initialization tasks, or write transactions are used. Supplemental positions/markers must be retained for
 the lifetime of the Session. Audience checks remain independent of this marker.
+
+## Direct A2A admission
+
+Direct requests use the same atomic admission plan with an empty group, one Send,
+a Directed audience and the caller's ChatRun run ID. Their sequence CAS belongs
+to the environment-scoped Session registry. Group sequence ownership stays in
+bcs_group_sessions. Batches cannot mix the two sequence sources. Memory composition
+shares `bcs-session-store::registry::MemorySessionRegistry` with the Session writer;
+this concrete store dependency is limited to atomic in-memory transaction composition.
+Delivery recovery supports at most eight IDs in a single lookup.

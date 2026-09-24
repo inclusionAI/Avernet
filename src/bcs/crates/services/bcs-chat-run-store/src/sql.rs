@@ -1,4 +1,5 @@
-//! SQL-backed `ChatRunRepoPort` with a Redis hot cache for streaming content.
+//! SQL-backed `ChatRunRepoPort` with a Redis hot cache for legacy streaming.
+//! Managed Direct A2A runs checkpoint all content/state to SQL and bypass overlays.
 //!
 //! Authority split (see spec):
 //! - MySQL/SQLite is authoritative for state, version, ownership, timestamps,
@@ -166,28 +167,7 @@ impl SqlChatRunRepo {
         if self.flavor != DbSqlFlavor::Sqlite {
             return Ok(());
         }
-        let create = "CREATE TABLE IF NOT EXISTS bcs_chat_runs (\
-            id INTEGER PRIMARY KEY AUTOINCREMENT,\
-            gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\
-            gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\
-            env TEXT NOT NULL,\
-            run_id TEXT NOT NULL,\
-            bot_uuid TEXT NOT NULL,\
-            from_bot_id TEXT NOT NULL,\
-            session_key TEXT NOT NULL,\
-            state TEXT NOT NULL,\
-            accumulated_content TEXT,\
-            error_message TEXT,\
-            original_request TEXT,\
-            completed_at_ms INTEGER,\
-            expires_at_ms INTEGER NOT NULL,\
-            version INTEGER NOT NULL,\
-            content_truncated INTEGER NOT NULL DEFAULT 0,\
-            client TEXT,\
-            response_mode TEXT NOT NULL,\
-            completion_policy TEXT NOT NULL,\
-            delivery_ack_at_ms INTEGER,\
-            CONSTRAINT uk_env_run_id UNIQUE (env, run_id))";
+        let create = super::sqlite_schema_v32::CREATE_CHAT_RUNS;
         self.db
             .execute(DbStatement::new(create))
             .await
@@ -481,6 +461,8 @@ fn row_to_record(row: &bcs_db_api::DbRow) -> Result<ChatRunRecord, ChatRunRepoEr
         db_get_column_opt::<u64>(row, "delivery_ack_at_ms").map_err(backend)?;
 
     Ok(ChatRunRecord {
+        delivery_id: row.get_string("delivery_id").map_err(backend)?,
+        source_message_id: row.get_string("source_message_id").map_err(backend)?,
         run_id,
         bot_uuid,
         from_bot_id,
@@ -512,7 +494,7 @@ fn row_to_record(row: &bcs_db_api::DbRow) -> Result<ChatRunRecord, ChatRunRepoEr
 /// intentionally NOT read back.
 fn select_columns(flavor: DbSqlFlavor) -> String {
     format!(
-        "run_id, bot_uuid, from_bot_id, session_key, state, accumulated_content, \
+        "run_id, bot_uuid, from_bot_id, session_key, delivery_id, source_message_id, state, accumulated_content, \
          error_message, {gmt_create} AS gmt_create_ts, {gmt_modified} AS gmt_modified_ts, \
          completed_at_ms, expires_at_ms, version, content_truncated, client, response_mode, \
          completion_policy, delivery_ack_at_ms",
@@ -580,13 +562,36 @@ async fn read_full(
 
 #[async_trait]
 impl ChatRunRepoPort for SqlChatRunRepo {
+    async fn compare_and_set_managed(&self, expected: u64, record: ChatRunRecord) -> Result<CasOutcome, ChatRunRepoError> {
+        if record.delivery_id.is_none() { return Err(ChatRunRepoError::Backend("managed delivery identity missing".into())); }
+        let result = self.db.execute(DbStatement::with_params(format!(
+            "UPDATE bcs_chat_runs SET state = ?, accumulated_content = ?, error_message = ?, completed_at_ms = ?, content_truncated = ?, version = version + 1, {} WHERE env = ? AND run_id = ? AND version = ? AND state NOT IN ({TERMINAL_STATES}) AND delivery_id = ?",
+            self.flavor.set_modified_now()), vec![
+            state_str(record.state).into(), record.accumulated_content.as_str().into(),
+            record.error_message.as_deref().into(), record.completed_at_ms.map(|n| DbValue::from(n as i64)).unwrap_or(DbValue::Null),
+            record.content_truncated.into(), self.env.as_str().into(), record.run_id.as_str().into(), (expected as i64).into(), record.delivery_id.as_deref().into(),
+        ])).await.map_err(backend)?;
+        if result.affected_rows == 0 { return classify_cas_failure(self.flavor, self.db.as_ref(), &record.run_id, &self.env).await; }
+        let updated = self.read_db(&record.run_id).await?.ok_or(ChatRunRepoError::NotFound)?;
+        // Managed writes always checkpoint to SQL; never rely on the streaming overlay.
+        self.delete_overlay(&record.run_id).await;
+        Ok(CasOutcome::Applied(updated))
+    }
+
+    async fn managed_recovery_page(&self, after: &str, limit: u32) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
+        let rows = self.db.query(DbStatement::with_params(format!(
+            "SELECT {} FROM bcs_chat_runs WHERE env = ? AND delivery_id IS NOT NULL AND state NOT IN ({TERMINAL_STATES}) AND run_id > ? ORDER BY run_id LIMIT ?", select_columns(self.flavor)),
+            vec![self.env.as_str().into(), after.into(), i64::from(limit.min(8)).into()])).await.map_err(backend)?;
+        rows.iter().map(row_to_record).collect()
+    }
+
     async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunRepoError> {
         self.ensure_schema().await?;
         let stmt = DbStatement::with_params(
             "INSERT INTO bcs_chat_runs (env, run_id, bot_uuid, from_bot_id, session_key, state, \
              accumulated_content, error_message, original_request, completed_at_ms, expires_at_ms, \
              version, content_truncated, client, response_mode, completion_policy, \
-             delivery_ack_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             delivery_ack_at_ms, delivery_id, source_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             vec![
                 DbValue::from(self.env.clone()),
                 DbValue::from(record.run_id.clone()),
@@ -605,6 +610,8 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                 DbValue::from(response_mode_str(record.response_mode)),
                 DbValue::from(completion_policy_str(record.completion_policy)),
                 record.delivery_ack_at_ms.map(|v| DbValue::from(v as i64)).unwrap_or(DbValue::Null),
+                record.delivery_id.clone().map(DbValue::from).unwrap_or(DbValue::Null),
+                record.source_message_id.clone().map(DbValue::from).unwrap_or(DbValue::Null),
             ],
         );
         match self.db.execute(stmt).await {
@@ -612,7 +619,9 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                 // Seed the whole-record overlay so `get` can serve this run
                 // cache-first from the very first poll; a write blip is
                 // benign (the read falls back to the just-inserted DB row).
-                let _ = self.write_overlay_record(&record.run_id, &record).await;
+                if record.delivery_id.is_none() {
+                    let _ = self.write_overlay_record(&record.run_id, &record).await;
+                }
                 Ok(())
             }
             Err(err) if err.is_duplicate_key() => {
@@ -636,7 +645,7 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         // overlay is re-seeded by the next delta write.
         if !self.is_suspect(run_id) {
             if let Some(record) = self.read_overlay_record(run_id).await {
-                return Ok(Some(record));
+                if record.delivery_id.is_none() { return Ok(Some(record)); }
             }
         }
         self.read_db(run_id).await
@@ -788,7 +797,7 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             .query(DbStatement::with_params(
                 &format!(
                     "SELECT {} FROM bcs_chat_runs \
-                     WHERE state NOT IN ({TERMINAL_STATES}) AND expires_at_ms < ? \
+                     WHERE state NOT IN ({TERMINAL_STATES}) AND expires_at_ms < ? AND delivery_id IS NULL \
                      AND env = ? \
                      AND NOT (completion_policy = 'detach_delivery_ack' \
                               AND delivery_ack_at_ms IS NOT NULL)",

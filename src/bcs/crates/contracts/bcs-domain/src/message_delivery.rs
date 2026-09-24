@@ -42,6 +42,12 @@ pub enum MessageDeliveryStatus {
     DiscardedContext,
 }
 
+impl MessageDeliveryStatus {
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled | Self::Expired | Self::RejectedCapacity | Self::Consumed | Self::DiscardedContext)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeliveryWaitReason {

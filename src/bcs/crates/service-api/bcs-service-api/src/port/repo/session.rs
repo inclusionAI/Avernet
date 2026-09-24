@@ -117,6 +117,19 @@ pub struct UpdateSessionParticipantMessageViewScopeWithEvent {
 /// Session 持久化 port。
 #[async_trait]
 pub trait SessionRepoPort: Send + Sync {
+    /// Claims a stable Direct A2A identity, even when queue admission is disabled.
+    /// Check identity invariants and required environment-scoped storage keys.
+    async fn validate_session_registry(&self) -> ServiceResult<()> {
+        Err(ServiceError::InternalError("session registry validation unsupported".into()))
+    }
+
+    async fn ensure_direct_session(&self, _id: &str) -> ServiceResult<super::session_registry::SessionRegistration> {
+        Err(ServiceError::InternalError("session registry is not configured".into()))
+    }
+    async fn session_registration(&self, _id: &str) -> ServiceResult<Option<super::session_registry::SessionRegistration>> {
+        Err(ServiceError::InternalError("session registry is not configured".into()))
+    }
+
     async fn create(&self, group_id: &str, params: NewSessionParams) -> ServiceResult<Session>;
     async fn create_with_event(&self, command: CreateSessionWithEvent) -> ServiceResult<Session> {
         let _ = command;

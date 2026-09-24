@@ -63,6 +63,7 @@ impl std::fmt::Display for ChatRunStoreError {
 impl std::error::Error for ChatRunStoreError {}
 
 pub struct ChatRunStore {
+    recovery_cursor: tokio::sync::Mutex<String>,
     repo: Arc<dyn ChatRunRepoPort>,
     #[allow(dead_code)]
     notifiers: Arc<RwLock<HashMap<String, Arc<Notify>>>>,
@@ -88,6 +89,47 @@ fn now_ms() -> u64 {
 }
 
 impl ChatRunStore {
+    pub(crate) async fn try_get(&self, id: &str) -> bcs_service_api::ServiceResult<Option<ChatRunRecord>> {
+        self.repo.get(id).await.map_err(|_| bcs_service_api::ServiceError::InternalError("chat run read failed".into()))
+    }
+    pub(crate) async fn save_managed(&self, base: &ChatRunRecord, mut next: ChatRunRecord) -> bcs_service_api::ServiceResult<ChatRunRecord> {
+        let change_content = next.accumulated_content != base.accumulated_content;
+        let change_state = next.state != base.state;
+        let change_error = next.error_message != base.error_message;
+        let mut expected = base.version;
+        for _ in 0..4 {
+            let (content, truncated) = Self::truncate_content(&next.accumulated_content);
+            next.accumulated_content = content;
+            next.content_truncated |= truncated;
+            next.updated_at_ms = now_ms();
+            if next.state.is_terminal() { next.completed_at_ms = Some(now_ms()); }
+            match self.repo.compare_and_set_managed(expected, next.clone()).await
+                .map_err(|_| bcs_service_api::ServiceError::InternalError("chat run projection write failed".into()))? {
+                CasOutcome::Applied(row) => {
+                    self.notify_waiters(&row.run_id).await;
+                    if row.state.is_terminal() { self.drop_notifier(&row.run_id).await; }
+                    return Ok(row);
+                }
+                CasOutcome::Terminal(Some(row)) => return Ok(row),
+                CasOutcome::Conflict(Some(row)) => {
+                    // A status projection can race a content checkpoint. Preserve
+                    // fields this operation did not change; never overwrite a
+                    // different content checkpoint from another writer.
+                    if change_content && row.accumulated_content != base.accumulated_content
+                        && row.accumulated_content != next.accumulated_content { break; }
+                    expected = row.version;
+                    if !change_content { next.accumulated_content = row.accumulated_content; next.content_truncated = row.content_truncated; }
+                    if !change_state || matches!((next.state, row.state),
+                        (ChatRunState::Pending, ChatRunState::Submitted | ChatRunState::Running)
+                        | (ChatRunState::Submitted, ChatRunState::Running)) { next.state = row.state; }
+                    if !change_error { next.error_message = row.error_message; }
+                }
+                _ => break,
+            }
+        }
+        Err(bcs_service_api::ServiceError::Conflict("chat run projection changed".into()))
+    }
+
     pub fn new() -> Self {
         Self::with_capacity(100_000)
     }
@@ -101,6 +143,7 @@ impl ChatRunStore {
     pub fn with_repo(repo: Arc<dyn ChatRunRepoPort>) -> Self {
         Self {
             repo,
+            recovery_cursor: tokio::sync::Mutex::new(String::new()),
             notifiers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -553,6 +596,7 @@ impl ChatRunStore {
             }
         };
         for record in active {
+            if record.delivery_id.is_some() { continue; }
             if self.force_fail(&record.run_id, "timeout").await {
                 expired.push((
                     record.run_id.clone(),
@@ -619,6 +663,23 @@ mod tests {
             ChatResponseMode::Full,
             ChatRunCompletionPolicy::WaitForFinal,
         )
+    }
+
+    #[tokio::test]
+    async fn stale_managed_projection_preserves_running_state_and_latest_content() {
+        let store = ChatRunStore::new();
+        let mut initial = record("managed-race");
+        initial.delivery_id = Some("managed-race".into());
+        store.create(initial.clone()).await.unwrap();
+        let mut running = initial.clone();
+        running.state = ChatRunState::Running;
+        running.accumulated_content = "checkpoint".into();
+        store.save_managed(&initial, running).await.unwrap();
+        let mut stale = initial.clone();
+        stale.state = ChatRunState::Submitted;
+        let merged = store.save_managed(&initial, stale).await.unwrap();
+        assert_eq!(merged.state, ChatRunState::Running);
+        assert_eq!(merged.accumulated_content, "checkpoint");
     }
 
     #[test]
@@ -748,5 +809,15 @@ mod tests {
         );
         let _ = store.cleanup_expired(0, u64::MAX).await;
         assert_eq!(store.notifiers.read().await.len(), 0);
+    }
+}
+
+impl ChatRunStore {
+    pub(crate) async fn recovery_page(&self) -> bcs_service_api::ServiceResult<Vec<ChatRunRecord>> {
+        let mut cursor = self.recovery_cursor.lock().await;
+        let rows = self.repo.managed_recovery_page(&cursor, 8).await
+            .map_err(|_| bcs_service_api::ServiceError::InternalError("managed recovery scan failed".into()))?;
+        *cursor = rows.last().map(|r| r.run_id.clone()).unwrap_or_default();
+        Ok(rows)
     }
 }

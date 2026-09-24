@@ -124,6 +124,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 31,
         name: "group_human_mention_notify_mode",
     },
+    SqliteMigration { version: 32, name: "session_registry" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -384,6 +385,13 @@ async fn apply_sqlite_migration_body(
                 "../../../../migrations/sqlite/031_group_human_mention_notify_mode.sql"
             )))
             .await?;
+            Ok(())
+        }
+        32 => {
+            let steps = include_str!("../../../../migrations/sqlite/032_session_registry.sql")
+                .split(';').map(str::trim).filter(|sql| !sql.is_empty())
+                .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql))).collect();
+            db.transaction(steps).await?;
             Ok(())
         }
         _ => Ok(()),

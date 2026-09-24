@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// HTTP chat schema version understood by this client/server contract.
-pub const BCS_CHAT_VERSION: &str = "2";
+pub const BCS_CHAT_VERSION: &str = "3";
 pub const BCS_CHAT_VERSION_HEADER: &str = "X-BCS-CHAT-VERSION";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,8 +42,21 @@ impl ChatRunState {
     }
 }
 
+/// Safe queue metadata; transport context and message content are never exposed.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ChatRunDeliverySummary {
+    pub delivery_id: String,
+    pub message_id: String,
+    pub status: String,
+    #[serde(default)]
+    pub wait_reason: Option<String>,
+    pub state_version: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ChatRunSubmitResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<ChatRunDeliverySummary>,
     pub run_id: String,
     pub bot_uuid: String,
     pub session_id: String,
@@ -64,6 +77,8 @@ pub struct ChatRunResponseContent {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ChatRunStatusResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<ChatRunDeliverySummary>,
     pub run_id: String,
     pub bot_uuid: String,
     pub from_bot_id: String,
@@ -91,6 +106,8 @@ impl ChatRunStatusResponse {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ChatRunCancelResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<ChatRunDeliverySummary>,
     pub run_id: String,
     pub cancelled: bool,
     pub state: ChatRunState,

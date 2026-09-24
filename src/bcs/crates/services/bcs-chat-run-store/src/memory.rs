@@ -84,6 +84,19 @@ impl MemoryChatRunRepo {
 
 #[async_trait]
 impl ChatRunRepoPort for MemoryChatRunRepo {
+    async fn compare_and_set_managed(&self, expected: u64, record: ChatRunRecord) -> Result<CasOutcome, ChatRunRepoError> {
+        let id = record.run_id.clone();
+        if record.state.is_terminal() { self.compare_and_set_terminal(&id, expected, record).await }
+        else { self.compare_and_set_state(&id, expected, record).await }
+    }
+
+    async fn managed_recovery_page(&self, after: &str, limit: u32) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
+        let guard = self.inner.read().await;
+        let mut rows: Vec<_> = guard.runs.values().filter(|r| r.delivery_id.is_some() && !r.state.is_terminal() && r.run_id.as_str() > after).collect();
+        rows.sort_by(|a,b| a.run_id.cmp(&b.run_id));
+        Ok(rows.into_iter().take(limit.min(8) as usize).cloned().collect())
+    }
+
     async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunRepoError> {
         let mut guard = self.inner.write().await;
         if guard.cap > 0 && guard.runs.len() >= guard.cap {

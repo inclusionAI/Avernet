@@ -16,7 +16,7 @@ pub use bots::{
 };
 pub use chat_run::{
     BCS_CHAT_VERSION, BCS_CHAT_VERSION_HEADER, ChatRunCancelResponse, ChatRunResponseContent,
-    ChatRunState, ChatRunStatusResponse, ChatRunSubmitResponse,
+    ChatRunDeliverySummary, ChatRunState, ChatRunStatusResponse, ChatRunSubmitResponse,
 };
 pub use friends::{
     AcceptFriendRequestResponse, CreateFriendRequestBody, CreateFriendRequestResponse,

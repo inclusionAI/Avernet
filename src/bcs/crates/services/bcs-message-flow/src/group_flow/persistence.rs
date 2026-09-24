@@ -209,6 +209,7 @@ pub(crate) fn persisted_message_visibility(group: Option<&Group>, sender_id: &st
         GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
     };
     let audience = match visibility_domain {
+        MessageVisibilityDomain::DirectA2a => Some(MessageAudience::FullOnly),
         MessageVisibilityDomain::Chat => None,
         MessageVisibilityDomain::ManagerWorker => Some(
             manager_worker_message_audience(

@@ -360,7 +360,9 @@ impl DeliveryRuntime {
                             let mut command = event(row, Event::StartSend);
                             if let Some(version) = policy_version { prepared.transport_context_json["policy_version"] = serde_json::json!(version); }
                             command.transport_context_json = Some(prepared.transport_context_json);
-                            command.deadline_at_ms = Some(now_ms().saturating_add(self.config.run_timeout.as_millis() as i64));
+                            command.deadline_at_ms = Some(if row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {
+                                row.semantic_projection_json.get("expires_at_ms").and_then(|v| v.as_i64()).ok_or(ManagedDeliveryError::Conflict)?
+                            } else { now_ms().saturating_add(self.config.run_timeout.as_millis() as i64) });
                             let Some(started) = storage!(self.transition(command.clone())) else { continue; };
                             let request_id = started.request_id.clone().ok_or(ManagedDeliveryError::Conflict)?;
                             match &mut prepared.command.frame {

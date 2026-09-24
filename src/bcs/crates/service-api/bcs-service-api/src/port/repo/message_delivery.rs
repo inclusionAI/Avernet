@@ -13,6 +13,8 @@ pub enum DeliveryWorkBatch { Expired, Control, Recovery }
 #[derive(Debug, Clone)]
 pub enum DeliveryLookup {
     Id(String),
+    /// Bounded lookup for projection recovery; at most 8 identities.
+    Ids(Vec<String>),
     Request(String),
     Run { bot: String, alias: String },
     Bound(String),

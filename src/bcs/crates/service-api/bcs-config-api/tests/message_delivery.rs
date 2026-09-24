@@ -20,7 +20,9 @@ fn durable_defaults_cover_future_bots_and_partial_overrides_inherit() {
     assert_eq!(policy.bot("special").max_running, 3);
     assert_eq!(policy.bot("special").max_queued, policy.defaults.max_queued);
     policy.flow_enabled.direct_a2a = true;
-    assert!(policy.validate().is_err());
+    policy.validate().unwrap();
+    assert!(policy.manages_direct_a2a("new-bot"));
+    assert!(!policy.manages_direct_a2a("excluded"));
 }
 
 #[test]

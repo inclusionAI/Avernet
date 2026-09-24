@@ -6,6 +6,9 @@
 //!           `list_running_service`, `add_participant`, `remove_participant`,
 //!           `update_participant_mode`, `list_group_ids_by_session_participant`.
 
+#[path = "mysql_registry.rs"]
+mod registry;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -41,7 +44,8 @@ const INSERT_SQL: &str = "INSERT INTO bcs_group_sessions \
      callback_status, callback_lease_token, callback_lease_owner, callback_lease_until_ms, \
      created_by, participants, completed_at, meta,
      current_msg_seq, participant_join_seq) \
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, NULL, ?, ?, NULL, ?, 0, NULL)";
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, NULL, ?, ?, NULL, ?, 0, NULL \
+    WHERE EXISTS (SELECT 1 FROM bcs_session_registry WHERE env = ? AND session_id = ? AND session_type = 'group' AND current_msg_seq IS NULL)";
 
 // ---------------------------------------------------------------------------
 // Public type
@@ -196,9 +200,13 @@ impl MySqlSessionStore {
         let env = self.env.clone();
         let participants_for_side_table = params.participants.clone();
 
-        let mut steps: Vec<DbTransactionStep> =
-            vec![DbTransactionStep::Execute(DbStatement::with_params(
-                INSERT_SQL,
+        // The registry insert serializes cross-type claims. A mismatched existing
+        // owner makes the conditional Group insert affect zero rows and rolls back.
+        let insert_sql = INSERT_SQL;
+        let mut steps: Vec<DbTransactionStep> = vec![
+            DbTransactionStep::Execute(self.registry_claim(&session_id, bcs_service_api::port::repo::session_registry::SessionType::Group)),
+            DbTransactionStep::ExecuteChecked { statement: DbStatement::with_params(
+                insert_sql,
                 vec![
                     DbValue::from(session_id.as_str()),
                     DbValue::from(group_id.as_str()),
@@ -216,8 +224,9 @@ impl MySqlSessionStore {
                     DbValue::from(params.created_by.as_deref()),
                     DbValue::from(participants_json.as_str()),
                     meta_value,
+                    env.as_str().into(), session_id.as_str().into(),
                 ],
-            ))];
+            ), expected_affected_rows: 1 }];
 
         // Same-transaction write to bcs_session_participants side table
         // so list_by_group JOIN queries can find participants set at creation.
@@ -244,7 +253,10 @@ impl MySqlSessionStore {
         self.db
             .transaction(steps)
             .await
-            .map_err(|e| ServiceError::InternalError(format!("session insert: {e}")))?;
+            .map_err(|e| match e {
+                DbError::ConditionFailed { .. } => ServiceError::Conflict("session_type_conflict".into()),
+                other => ServiceError::InternalError(format!("session insert: {other}")),
+            })?;
 
         Ok(session_value)
     }
@@ -563,210 +575,33 @@ impl GroupSessionMetricsSnapshotPort for MySqlSessionStore {
 
 #[async_trait]
 impl SessionRepoPort for MySqlSessionStore {
-    async fn create(&self, group_id: &str, params: NewSessionParams) -> ServiceResult<Session> {
-        // Explicit id path — single attempt, no retry.
-        if let Some(ref id) = params.id {
-            if !validate_session_id(id, group_id) {
-                return Err(ServiceError::SessionInvalidParams(format!(
-                    "session_id {id} not valid for group {group_id}"
-                )));
-            }
-            return self
-                .insert_session(
-                    id.clone(),
-                    group_id.to_string(),
-                    params,
-                    current_millis(),
-                    None,
-                )
-                .await;
-        }
+    async fn validate_session_registry(&self) -> ServiceResult<()> { self.repo_validate_session_registry().await }
+    async fn ensure_direct_session(&self, id: &str) -> ServiceResult<bcs_service_api::port::repo::session_registry::SessionRegistration> { self.repo_ensure_direct_session(id).await }
+    async fn session_registration(&self, id: &str) -> ServiceResult<Option<bcs_service_api::port::repo::session_registry::SessionRegistration>> { self.repo_session_registration(id).await }
 
-        // Auto-generate path: up to 3 retries on uk_session_id collision.
-        for _ in 0..3 {
-            let id = new_session_id(group_id)
-                .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
-            match self
-                .insert_session(
-                    id,
-                    group_id.to_string(),
-                    params.clone(),
-                    current_millis(),
-                    None,
-                )
-                .await
-            {
-                Ok(sess) => return Ok(sess),
-                Err(ServiceError::InternalError(ref msg))
-                    if msg.to_ascii_lowercase().contains("duplicate")
-                        || msg.contains("1062")
-                        || msg.contains("UNIQUE constraint failed") =>
-                {
-                    // uk_session_id collision — retry with a new id.
-                    continue;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        Err(ServiceError::SessionInvalidParams(
-            "session_id collision retry exhausted (3 attempts)".to_string(),
-        ))
-    }
+    async fn create(&self, group_id: &str, params: NewSessionParams) -> ServiceResult<Session> { self.repo_create(group_id, params).await }
 
-    async fn create_with_event(&self, command: CreateSessionWithEvent) -> ServiceResult<Session> {
-        let session_id = command.params.id.clone().ok_or_else(|| {
-            ServiceError::SessionInvalidParams(
-                "Eventful Session creation requires a preallocated session_id".to_string(),
-            )
-        })?;
-        if !validate_session_id(&session_id, &command.group_id) {
-            return Err(ServiceError::SessionInvalidParams(format!(
-                "session_id {session_id} not valid for group {}",
-                command.group_id
-            )));
-        }
-        self.insert_session(
-            session_id,
-            command.group_id,
-            command.params,
-            current_millis(),
-            Some(&command.event),
-        )
-        .await
-    }
+    async fn create_with_event(&self, command: CreateSessionWithEvent) -> ServiceResult<Session> { self.repo_create_with_event(command).await }
 
     async fn create_channel(
         &self,
         group_id: &str,
         channel_type: &str,
         params: NewSessionParams,
-    ) -> ServiceResult<Session> {
-        for _ in 0..3 {
-            let id = new_channel_session_id(group_id, channel_type)
-                .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
-            match self
-                .insert_session(
-                    id,
-                    group_id.to_string(),
-                    params.clone(),
-                    current_millis(),
-                    None,
-                )
-                .await
-            {
-                Ok(session) => return Ok(session),
-                Err(ServiceError::InternalError(ref message))
-                    if message.to_ascii_lowercase().contains("duplicate")
-                        || message.contains("1062")
-                        || message.contains("UNIQUE constraint failed") =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Err(ServiceError::SessionInvalidParams(
-            "session_id collision retry exhausted (3 attempts)".to_string(),
-        ))
-    }
+    ) -> ServiceResult<Session> { self.repo_create_channel(group_id, channel_type, params).await }
 
-    async fn get(&self, session_id: &str) -> Option<Session> {
-        self.try_get(session_id).await.ok().flatten()
-    }
+    async fn get(&self, session_id: &str) -> Option<Session> { self.repo_get(session_id).await }
 
-    async fn try_get(&self, session_id: &str) -> ServiceResult<Option<Session>> {
-        let select_cols = self.select_cols();
-        let sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? LIMIT 1"
-        );
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        rows.into_iter().next().map(|row| row_to_session(&row)).transpose()
-    }
+    async fn try_get(&self, session_id: &str) -> ServiceResult<Option<Session>> { self.repo_try_get(session_id).await }
 
-    async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool {
-        let sql = "SELECT 1 AS found FROM bcs_group_sessions \
-                   WHERE env = ? AND session_id = ? AND group_id = ? LIMIT 1";
-        self.db
-            .query(DbStatement::with_params(
-                sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(group_id),
-                ],
-            ))
-            .await
-            .map(|rows| !rows.is_empty())
-            .unwrap_or(false)
-    }
+    async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool { self.repo_belongs_to_group(session_id, group_id).await }
 
     async fn complete_if_running(
         &self,
         session_id: &str,
         output: Option<serde_json::Value>,
         error: Option<String>,
-    ) -> ServiceResult<Option<Session>> {
-        let now = current_millis();
-        let sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET status = 'completed', output = ?, error_message = ?, \
-                 completed_at = ?, {} \
-             WHERE env = ? AND session_id = ? AND status = 'running'",
-            self.flavor.set_modified_now(),
-        );
-
-        let output_value = json_to_db_value(&output);
-        let error_value = DbValue::from(error.as_deref());
-        let completed_at_value = DbValue::I64(now as i64);
-
-        let result = self
-            .db
-            .execute(DbStatement::with_params(
-                &sql,
-                vec![
-                    output_value,
-                    error_value,
-                    completed_at_value,
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-
-        if result.affected_rows == 0 {
-            // Already completed — CAS short-circuit, not an error.
-            return Ok(None);
-        }
-
-        // 1+ rows updated → re-SELECT to return the new state.
-        let select_cols = self.select_cols();
-        let select_sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? LIMIT 1"
-        );
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &select_sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-
-        match rows.into_iter().next() {
-            Some(row) => row_to_session(&row).map(Some),
-            None => Err(ServiceError::SessionNotFound(session_id.to_string())),
-        }
-    }
+    ) -> ServiceResult<Option<Session>> { self.repo_complete_if_running(session_id, output, error).await }
 
     async fn complete_running_service_activation(
         &self,
@@ -774,369 +609,33 @@ impl SessionRepoPort for MySqlSessionStore {
         expected_activation_count: i32,
         output: Option<serde_json::Value>,
         error: Option<String>,
-    ) -> ServiceResult<Option<Session>> {
-        let Some(mut candidate) = self.try_get(session_id).await? else { return Ok(None); };
-        if candidate.session_kind != SessionKind::ServiceInvocation
-            || candidate.status != SessionStatus::Running
-            || candidate.activation_count != expected_activation_count
-        {
-            return Ok(None);
-        }
-        let now = current_millis();
-        let sql = format!(
-            "UPDATE bcs_group_sessions SET status = 'completed', output = ?, \
-             error_message = ?, completed_at = ?, {} \
-             WHERE env = ? AND session_id = ? AND session_kind = 'service_invocation' \
-               AND status = 'running' AND activation_count = ?",
-            self.flavor.set_modified_now(),
-        );
-        let result = self.db.execute(DbStatement::with_params(sql, vec![
-            json_to_db_value(&output), DbValue::from(error.as_deref()), DbValue::U64(now),
-            DbValue::from(self.env.as_str()), DbValue::from(session_id),
-            DbValue::from(expected_activation_count),
-        ])).await.map_err(|error| ServiceError::InternalError(format!("Session activation completion: {error}")))?;
-        if result.affected_rows == 0 { return Ok(None); }
-        // A post-CAS SELECT could observe a new activation. Return the snapshot
-        // belonging to this transition for callback/notification callers.
-        candidate.status = SessionStatus::Completed;
-        candidate.output = output;
-        candidate.error_message = error;
-        candidate.completed_at = Some(now);
-        candidate.updated_at = now;
-        Ok(Some(candidate))
-    }
+    ) -> ServiceResult<Option<Session>> { self.repo_complete_running_service_activation(session_id, expected_activation_count, output, error).await }
 
     async fn complete_if_running_with_event(
         &self,
         command: CompleteSessionWithEvent,
-    ) -> ServiceResult<Option<Session>> {
-        let mut candidate = self
-            .get(&command.session_id)
-            .await
-            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
-        if candidate.status == SessionStatus::Completed {
-            return Ok(None);
-        }
-        if candidate.activation_count != command.expected_activation_count {
-            return Err(ServiceError::Conflict(format!(
-                "Session '{}' activation changed during completion",
-                command.session_id
-            )));
-        }
-        let now = current_millis();
-        candidate.status = SessionStatus::Completed;
-        candidate.output = command.output.clone();
-        candidate.error_message = command.error.clone();
-        candidate.updated_at = now;
-        candidate.completed_at = Some(now);
-        validate_session_event_scope(&candidate, &command.event)?;
-
-        let lock_sql = format!(
-            "SELECT session_id FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? AND status = 'running' \
-               AND activation_count = ?{}",
-            transaction_lock_suffix(self.flavor),
-        );
-        let update_sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET status = 'completed', output = ?, error_message = ?, \
-                 completed_at = ?, {} \
-             WHERE env = ? AND session_id = ? AND status = 'running' \
-               AND activation_count = ?",
-            self.flavor.set_modified_now(),
-        );
-        let mut steps = vec![
-            DbTransactionStep::Query(DbStatement::with_params(
-                lock_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::I64(i64::from(command.expected_activation_count)),
-                ],
-            )),
-            DbTransactionStep::Execute(DbStatement::with_transaction_params(
-                update_sql,
-                vec![
-                    DbTransactionParam::value(json_to_db_value(&command.output)),
-                    DbTransactionParam::value(DbValue::from(command.error.as_deref())),
-                    DbTransactionParam::value(DbValue::I64(now as i64)),
-                    DbTransactionParam::value(self.env.as_str()),
-                    DbTransactionParam::query_result(0, 0, "session_id"),
-                    DbTransactionParam::value(i64::from(command.expected_activation_count)),
-                ],
-            )),
-        ];
-        let event_plan = EventAppendTransactionPlan::build(
-            &command.event,
-            self.flavor,
-            steps.len(),
-        )
-        .map_err(|error| {
-            ServiceError::InternalError(format!("prepare Session completion Event: {error}"))
-        })?;
-        steps.extend(event_plan.steps);
-        self.db.transaction(steps).await.map_err(|error| {
-            ServiceError::Conflict(format!(
-                "Session '{}' changed during completion: {error}",
-                command.session_id
-            ))
-        })?;
-        Ok(Some(candidate))
-    }
+    ) -> ServiceResult<Option<Session>> { self.repo_complete_if_running_with_event(command).await }
 
     async fn reactivate(
         &self,
         session_id: &str,
         new_input: Option<serde_json::Value>,
-    ) -> ServiceResult<Session> {
-        // TODO(phase-2): wrap SELECT + check + UPDATE + re-SELECT in a DbPlugin transaction once supported.
-        let select_cols = self.select_cols();
-        let select_sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? LIMIT 1"
-        );
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &select_sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        let row = rows
-            .into_iter()
-            .next()
-            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
-        let current = row_to_session(&row)?;
+    ) -> ServiceResult<Session> { self.repo_reactivate(session_id, new_input).await }
 
-        // Validate state machine before mutating.
-        can_reactivate(
-            current.status,
-            current.session_kind,
-            current.callback_status.as_deref(),
-        )
-        .map_err(|msg| {
-            if msg == "callback is still pending" {
-                ServiceError::SessionCallbackPending(session_id.to_string())
-            } else {
-                ServiceError::SessionInvalidParams(format!("{session_id}: {msg}"))
-            }
-        })?;
-
-        // Use new_input if provided; otherwise preserve the existing input.
-        let new_input_value = match &new_input {
-            Some(j) => DbValue::String(j.to_string()),
-            None => match &current.input {
-                Some(j) => DbValue::String(j.to_string()),
-                None => DbValue::Null,
-            },
-        };
-
-        let update_sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET status = 'running', output = NULL, error_message = NULL, \
-                 callback_status = 'pending', input = ?, \
-                 callback_lease_owner = NULL, callback_lease_token = 0, \
-                 callback_lease_until_ms = NULL, \
-                 activation_count = activation_count + 1, \
-                 completed_at = NULL, {} \
-             WHERE env = ? AND session_id = ?",
-            self.flavor.set_modified_now(),
-        );
-        self.db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    new_input_value,
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-
-        // Re-SELECT to return the updated state.
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &select_sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        rows.into_iter()
-            .next()
-            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))
-            .and_then(|r| row_to_session(&r))
-    }
-
-    async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()> {
-        let sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET callback_status = ?, callback_lease_owner = NULL, \
-                 callback_lease_until_ms = NULL, {} \
-             WHERE env = ? AND session_id = ?",
-            self.flavor.set_modified_now(),
-        );
-        self.db
-            .execute(DbStatement::with_params(
-                &sql,
-                vec![
-                    DbValue::from(status),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        Ok(())
-    }
+    async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()> { self.repo_update_callback_status(session_id, status).await }
 
     async fn claim_callback(
         &self,
         command: ClaimSessionCallback,
-    ) -> ServiceResult<Option<SessionCallbackClaim>> {
-        let sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET callback_lease_owner = ?, \
-                 callback_lease_token = callback_lease_token + 1, \
-                 callback_lease_until_ms = ?, {} \
-             WHERE env = ? AND session_id = ? \
-               AND status = 'completed' AND session_kind = 'service_invocation' \
-               AND activation_count = ? AND callback_status = 'pending' \
-               AND callback_lease_token IS NOT NULL \
-               AND (callback_lease_until_ms IS NULL OR callback_lease_until_ms <= ?)",
-            self.flavor.set_modified_now(),
-        );
-        let result = self
-            .db
-            .execute(DbStatement::with_params(
-                &sql,
-                vec![
-                    DbValue::from(command.lease_owner.as_str()),
-                    DbValue::from(command.lease_until_ms),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::I64(i64::from(command.expected_activation_count)),
-                    DbValue::from(command.now_ms),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session callback claim: {e}")))?;
-        if result.affected_rows == 0 {
-            return Ok(None);
-        }
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                "SELECT callback_lease_token FROM bcs_group_sessions \
-                 WHERE env = ? AND session_id = ? AND activation_count = ? \
-                   AND callback_lease_owner = ?",
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::I64(i64::from(command.expected_activation_count)),
-                    DbValue::from(command.lease_owner.as_str()),
-                ],
-            ))
-            .await
-            .map_err(|e| {
-                ServiceError::InternalError(format!("session callback claim read: {e}"))
-            })?;
-        let row = rows.into_iter().next().ok_or_else(|| {
-            ServiceError::InternalError(
-                "Session callback claim disappeared before token read".to_string(),
-            )
-        })?;
-        let lease_token: i64 = db_get_column(&row, "callback_lease_token")
-            .map_err(|e| ServiceError::InternalError(format!("callback lease token: {e}")))?;
-        Ok(Some(SessionCallbackClaim { lease_token }))
-    }
+    ) -> ServiceResult<Option<SessionCallbackClaim>> { self.repo_claim_callback(command).await }
 
-    async fn complete_callback(&self, command: CompleteSessionCallback) -> ServiceResult<bool> {
-        if !matches!(
-            command.terminal_status.as_str(),
-            "succeeded" | "partial_failed" | "failed" | "not_applicable"
-        ) {
-            return Err(ServiceError::SessionInvalidParams(format!(
-                "invalid terminal callback status: {}",
-                command.terminal_status
-            )));
-        }
-        let sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET callback_status = ?, callback_lease_owner = NULL, \
-                 callback_lease_until_ms = NULL, {} \
-             WHERE env = ? AND session_id = ? \
-               AND status = 'completed' AND session_kind = 'service_invocation' \
-               AND activation_count = ? AND callback_status = 'pending' \
-               AND callback_lease_owner = ? AND callback_lease_token = ?",
-            self.flavor.set_modified_now(),
-        );
-        let result = self
-            .db
-            .execute(DbStatement::with_params(
-                &sql,
-                vec![
-                    DbValue::from(command.terminal_status.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::I64(i64::from(command.expected_activation_count)),
-                    DbValue::from(command.lease_owner.as_str()),
-                    DbValue::I64(command.lease_token),
-                ],
-            ))
-            .await
-            .map_err(|e| {
-                ServiceError::InternalError(format!("session callback completion: {e}"))
-            })?;
-        Ok(result.affected_rows == 1)
-    }
+    async fn complete_callback(&self, command: CompleteSessionCallback) -> ServiceResult<bool> { self.repo_complete_callback(command).await }
 
     async fn update_title(
         &self,
         session_id: &str,
         title: Option<String>,
-    ) -> ServiceResult<Session> {
-        let sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET session_title = ?, {} \
-             WHERE env = ? AND session_id = ?",
-            self.flavor.set_modified_now(),
-        );
-        let result = self
-            .db
-            .execute(DbStatement::with_params(
-                &sql,
-                vec![
-                    DbValue::from(title.as_deref()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        if result.affected_rows == 0 {
-            return Err(ServiceError::SessionNotFound(session_id.to_string()));
-        }
-        let select_cols = self.select_cols();
-        let select_sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? LIMIT 1"
-        );
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &select_sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        rows.into_iter()
-            .next()
-            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))
-            .and_then(|r| row_to_session(&r))
-    }
+    ) -> ServiceResult<Session> { self.repo_update_title(session_id, title).await }
 
     async fn list_by_group(
         &self,
@@ -1146,25 +645,7 @@ impl SessionRepoPort for MySqlSessionStore {
         limit: u64,
         title_contains: Option<&str>,
         participant_id: Option<&str>,
-    ) -> Vec<Session> {
-        match self
-            .try_list_by_group(
-                group_id,
-                status,
-                offset,
-                limit,
-                title_contains,
-                participant_id,
-            )
-            .await
-        {
-            Ok(sessions) => sessions,
-            Err(error) => {
-                tracing::warn!(%error, "list_by_group query failed");
-                Vec::new()
-            }
-        }
-    }
+    ) -> Vec<Session> { self.repo_list_by_group(group_id, status, offset, limit, title_contains, participant_id).await }
 
     async fn try_list_by_group(
         &self,
@@ -1174,91 +655,11 @@ impl SessionRepoPort for MySqlSessionStore {
         limit: u64,
         title_contains: Option<&str>,
         participant_id: Option<&str>,
-    ) -> ServiceResult<Vec<Session>> {
-        let mut conditions: Vec<String> =
-            vec!["s.env = ?".to_string(), "s.group_id = ?".to_string()];
-        let mut params: Vec<DbValue> =
-            vec![DbValue::from(self.env.as_str()), DbValue::from(group_id)];
+    ) -> ServiceResult<Vec<Session>> { self.repo_try_list_by_group(group_id, status, offset, limit, title_contains, participant_id).await }
 
-        if let Some(s) = status {
-            let status_str = match s {
-                SessionStatus::Running => "running",
-                SessionStatus::Completed => "completed",
-            };
-            conditions.push("s.status = ?".to_string());
-            params.push(DbValue::from(status_str));
-        }
+    async fn latest_running(&self, group_id: &str) -> Option<Session> { self.repo_latest_running(group_id).await }
 
-        if let Some(q) = title_contains {
-            conditions.push("s.session_title LIKE ?".to_string());
-            params.push(DbValue::from(format!("%{}%", q)));
-        }
-
-        let join_clause = if let Some(pid) = participant_id {
-            conditions.push("sp.bot_uuid = ?".to_string());
-            params.push(DbValue::from(pid));
-            "JOIN bcs_session_participants sp ON sp.env = s.env AND sp.session_id = s.session_id"
-        } else {
-            ""
-        };
-
-        params.push(DbValue::U64(limit));
-        params.push(DbValue::U64(offset));
-
-        let select_cols = self.select_cols_prefixed();
-
-        let sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions s {join} \
-             WHERE {where_clause} \
-             ORDER BY s.gmt_create DESC, s.id DESC LIMIT ? OFFSET ?",
-            select_cols = select_cols,
-            join = join_clause,
-            where_clause = conditions.join(" AND "),
-        );
-
-        let rows = self
-            .db
-            .query(DbStatement::with_params(&sql, params))
-            .await
-            .map_err(|error| {
-                ServiceError::InternalError(format!(
-                    "list sessions for Group '{group_id}': {error}"
-                ))
-            })?;
-        rows.iter().map(row_to_session).collect()
-    }
-
-    async fn latest_running(&self, group_id: &str) -> Option<Session> {
-        self.list_by_group(group_id, Some(SessionStatus::Running), 0, 1, None, None)
-            .await
-            .into_iter()
-            .next()
-    }
-
-    async fn count_running_service(&self, group_id: &str) -> u64 {
-        let sql = "SELECT COUNT(*) AS cnt FROM bcs_group_sessions \
-                   WHERE env = ? AND group_id = ? AND session_kind = 'service_invocation' AND status = 'running'";
-        let rows = match self
-            .db
-            .query(DbStatement::with_params(
-                sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(group_id)],
-            ))
-            .await
-        {
-            Ok(r) => r,
-            Err(_) => return 0,
-        };
-        rows.into_iter()
-            .next()
-            .and_then(|row| {
-                db_get_column_opt::<i64>(&row, "cnt")
-                    .ok()
-                    .flatten()
-                    .map(|v| v.max(0) as u64)
-            })
-            .unwrap_or(0)
-    }
+    async fn count_running_service(&self, group_id: &str) -> u64 { self.repo_count_running_service(group_id).await }
 
     /// Mirrors [`SessionRepoPort::try_list_by_group`] filter conditions exactly
     /// (env + group_id + optional status / title_contains / participant_id
@@ -1273,646 +674,54 @@ impl SessionRepoPort for MySqlSessionStore {
         status: Option<SessionStatus>,
         title_contains: Option<&str>,
         participant_id: Option<&str>,
-    ) -> ServiceResult<u64> {
-        let mut conditions: Vec<String> =
-            vec!["s.env = ?".to_string(), "s.group_id = ?".to_string()];
-        let mut params: Vec<DbValue> =
-            vec![DbValue::from(self.env.as_str()), DbValue::from(group_id)];
+    ) -> ServiceResult<u64> { self.repo_count_by_group(group_id, status, title_contains, participant_id).await }
 
-        if let Some(s) = status {
-            let status_str = match s {
-                SessionStatus::Running => "running",
-                SessionStatus::Completed => "completed",
-            };
-            conditions.push("s.status = ?".to_string());
-            params.push(DbValue::from(status_str));
-        }
-
-        if let Some(q) = title_contains {
-            conditions.push("s.session_title LIKE ?".to_string());
-            params.push(DbValue::from(format!("%{}%", q)));
-        }
-
-        let join_clause = if let Some(pid) = participant_id {
-            conditions.push("sp.bot_uuid = ?".to_string());
-            params.push(DbValue::from(pid));
-            "JOIN bcs_session_participants sp ON sp.env = s.env AND sp.session_id = s.session_id"
-        } else {
-            ""
-        };
-
-        let sql = format!(
-            "SELECT COUNT(*) AS cnt FROM bcs_group_sessions s {join} \
-             WHERE {where_clause}",
-            join = join_clause,
-            where_clause = conditions.join(" AND "),
-        );
-
-        let rows = self
-            .db
-            .query(DbStatement::with_params(&sql, params))
-            .await
-            .map_err(|e| {
-                ServiceError::InternalError(format!("count sessions for Group '{group_id}': {e}"))
-            })?;
-        let total = rows
-            .into_iter()
-            .next()
-            .and_then(|row| {
-                db_get_column_opt::<i64>(&row, "cnt")
-                    .ok()
-                    .flatten()
-                    .map(|v| v.max(0) as u64)
-            })
-            .unwrap_or(0);
-        Ok(total)
-    }
-
-    async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session> {
-        let select_cols = self.select_cols();
-        let sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_kind = 'service_invocation' AND status = 'running' \
-             ORDER BY gmt_create ASC LIMIT ? OFFSET ?"
-        );
-        let rows = match self
-            .db
-            .query(DbStatement::with_params(
-                &sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::U64(limit),
-                    DbValue::U64(offset),
-                ],
-            ))
-            .await
-        {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
-        rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
-    }
+    async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session> { self.repo_list_running_service(offset, limit).await }
 
     async fn list_running_service_after(
         &self,
         after_session_id: Option<&str>,
         limit: u64,
-    ) -> ServiceResult<Vec<Session>> {
-        if limit == 0 { return Ok(Vec::new()); }
-        let select_cols = self.select_cols();
-        let sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_kind = 'service_invocation' AND status = 'running' \
-               AND session_id > ? ORDER BY session_id ASC LIMIT ?"
-        );
-        let rows = self.db.query(DbStatement::with_params(sql, vec![
-            DbValue::from(self.env.as_str()), DbValue::from(after_session_id.unwrap_or("")),
-            DbValue::U64(limit),
-        ])).await.map_err(|error| ServiceError::InternalError(format!("Session recovery candidates: {error}")))?;
-        rows.iter().map(row_to_session).collect()
-    }
+    ) -> ServiceResult<Vec<Session>> { self.repo_list_running_service_after(after_session_id, limit).await }
 
     async fn list_recoverable_callbacks(
         &self,
         now_ms: u64,
         after_session_id: Option<&str>,
         limit: u64,
-    ) -> ServiceResult<Vec<Session>> {
-        let select_cols = self.select_cols();
-        let mut sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_kind = 'service_invocation' \
-             AND status = 'completed' AND callback_status = 'pending' \
-             AND callback_lease_token IS NOT NULL \
-             AND (callback_lease_until_ms IS NULL OR callback_lease_until_ms <= ?)"
-        );
-        let mut params = vec![DbValue::from(self.env.as_str()), DbValue::U64(now_ms)];
-        if let Some(after_session_id) = after_session_id {
-            sql.push_str(" AND session_id > ?");
-            params.push(DbValue::from(after_session_id));
-        }
-        sql.push_str(" ORDER BY session_id ASC LIMIT ?");
-        params.push(DbValue::U64(limit));
-
-        let rows = self
-            .db
-            .query(DbStatement::with_params(&sql, params))
-            .await
-            .map_err(|error| {
-                ServiceError::InternalError(format!("list recoverable Session callbacks: {error}"))
-            })?;
-        rows.iter().map(row_to_session).collect()
-    }
+    ) -> ServiceResult<Vec<Session>> { self.repo_list_recoverable_callbacks(now_ms, after_session_id, limit).await }
 
     async fn add_participant(
         &self,
         session_id: &str,
         participant: Participant,
-    ) -> ServiceResult<Session> {
-        // TODO(phase-2): wrap SELECT + UPDATE + materialize INSERT in a DbPlugin transaction once supported.
-        let select_cols = self.select_cols();
-        let select_sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? LIMIT 1"
-        );
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &select_sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        let row = rows
-            .into_iter()
-            .next()
-            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
-        let mut current = row_to_session(&row)?;
-
-        // Idempotent: if bot already in list, return current state unchanged.
-        if current
-            .participants
-            .iter()
-            .any(|p| p.bot_uuid == participant.bot_uuid)
-        {
-            return Ok(current);
-        }
-        let group_id = current.group_id.clone();
-        let bot_uuid = participant.bot_uuid.clone();
-        let role_str = participant_role_to_str(participant.role);
-
-        // Record join_seq for new-participant visible message window.
-        let join_seq = current.current_msg_seq;
-        let mut join_map: serde_json::Map<String, serde_json::Value> = current
-            .participant_join_seq
-            .as_ref()
-            .and_then(|v| v.as_object())
-            .cloned()
-            .unwrap_or_default();
-        join_map.insert(
-            bot_uuid.clone(),
-            serde_json::Value::Number(serde_json::Number::from(join_seq)),
-        );
-        let join_seq_json = serde_json::Value::Object(join_map);
-        let join_seq_str = join_seq_json.to_string();
-        current.participant_join_seq = Some(join_seq_json);
-
-        current.participants.push(participant);
-        current.updated_at = current_millis();
-        let new_json = serde_json::to_string(&current.participants)
-            .map_err(|e| ServiceError::SessionInvalidParams(format!("participants: {e}")))?;
-
-        let update_sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET participants = ?, participant_join_seq = ?, {} \
-             WHERE env = ? AND session_id = ?",
-            self.flavor.set_modified_now(),
-        );
-        self.db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    DbValue::from(new_json.as_str()),
-                    DbValue::from(join_seq_str.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-
-        // Materialized side-table: upsert presence row (idempotent).
-        let upsert_sql = format!(
-            "INSERT INTO bcs_session_participants \
-             (env, session_id, group_id, bot_uuid, role, gmt_create) \
-             VALUES (?, ?, ?, ?, ?, {}) \
-             {}",
-            self.flavor.now(),
-            self.flavor
-                .on_conflict_nothing(&["env", "session_id", "bot_uuid"]),
-        );
-        self.db
-            .execute(DbStatement::with_params(
-                &upsert_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(group_id.as_str()),
-                    DbValue::from(bot_uuid.as_str()),
-                    DbValue::from(role_str),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-
-        info!(
-            session_id = %session_id,
-            bot_uuid = %bot_uuid,
-            join_seq,
-            "participant added with join_seq recorded"
-        );
-        Ok(current)
-    }
+    ) -> ServiceResult<Session> { self.repo_add_participant(session_id, participant).await }
 
     async fn add_participant_with_event(
         &self,
         command: AddSessionParticipantWithEvent,
-    ) -> ServiceResult<Session> {
-        let (mut candidate, stored_participants_json) = self
-            .load_with_raw_participants(&command.session_id)
-            .await?
-            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
-        if candidate
-            .participants
-            .iter()
-            .any(|participant| participant.bot_uuid == command.participant.bot_uuid)
-        {
-            return Ok(candidate);
-        }
-        if serde_json::to_value(&candidate.participants).ok()
-            != serde_json::to_value(&command.expected_participants).ok()
-        {
-            return Err(ServiceError::Conflict(format!(
-                "Session '{}' participants changed during addition",
-                command.session_id
-            )));
-        }
+    ) -> ServiceResult<Session> { self.repo_add_participant_with_event(command).await }
 
-        let bot_uuid = command.participant.bot_uuid.clone();
-        let role = participant_role_to_str(command.participant.role);
-        let mut join_map = candidate
-            .participant_join_seq
-            .as_ref()
-            .and_then(serde_json::Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        join_map.insert(
-            bot_uuid.clone(),
-            serde_json::json!(candidate.current_msg_seq),
-        );
-        let join_seq_json = serde_json::Value::Object(join_map);
-        candidate.participant_join_seq = Some(join_seq_json.clone());
-        candidate.participants.push(command.participant);
-        candidate.updated_at = current_millis();
-        validate_session_event_scope(&candidate, &command.event)?;
-
-        let participants_json = serde_json::to_string(&candidate.participants)
-            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
-        let lock_sql = format!(
-            "SELECT session_id FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? AND participants = ?{}",
-            transaction_lock_suffix(self.flavor),
-        );
-        let update_sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET participants = ?, participant_join_seq = ?, {} \
-             WHERE env = ? AND session_id = ? AND participants = ?",
-            self.flavor.set_modified_now(),
-        );
-        let upsert_sql = format!(
-            "INSERT INTO bcs_session_participants \
-             (env, session_id, group_id, bot_uuid, role, gmt_create) \
-             VALUES (?, ?, ?, ?, ?, {}) {}",
-            self.flavor.now(),
-            self.flavor
-                .on_conflict_nothing(&["env", "session_id", "bot_uuid"]),
-        );
-        let mut steps = vec![
-            DbTransactionStep::Query(DbStatement::with_params(
-                lock_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::from(stored_participants_json.as_str()),
-                ],
-            )),
-            DbTransactionStep::Execute(DbStatement::with_transaction_params(
-                update_sql,
-                vec![
-                    DbTransactionParam::value(participants_json.as_str()),
-                    DbTransactionParam::value(join_seq_json.to_string()),
-                    DbTransactionParam::value(self.env.as_str()),
-                    DbTransactionParam::query_result(0, 0, "session_id"),
-                    DbTransactionParam::value(stored_participants_json.as_str()),
-                ],
-            )),
-            DbTransactionStep::Execute(DbStatement::with_params(
-                upsert_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::from(candidate.group_id.as_str()),
-                    DbValue::from(bot_uuid.as_str()),
-                    DbValue::from(role),
-                ],
-            )),
-        ];
-        let event_plan = EventAppendTransactionPlan::build(
-            &command.event,
-            self.flavor,
-            steps.len(),
-        )
-        .map_err(|error| {
-            ServiceError::InternalError(format!("prepare Session participant Event: {error}"))
-        })?;
-        steps.extend(event_plan.steps);
-        self.db.transaction(steps).await.map_err(|error| {
-            if transaction_lock_row_is_missing(&error) {
-                // The CAS lock row vanished: a concurrent writer changed or
-                // deleted the session between the pre-check read and the lock.
-                ServiceError::Conflict(format!(
-                    "Session '{}' changed during participant addition",
-                    command.session_id
-                ))
-            } else {
-                ServiceError::InternalError(format!("session db: {error}"))
-            }
-        })?;
-        Ok(candidate)
-    }
-
-    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session> {
-        // TODO(phase-2): wrap in a DbPlugin transaction once supported.
-        let select_cols = self.select_cols();
-        let select_sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? LIMIT 1"
-        );
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &select_sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        let row = rows
-            .into_iter()
-            .next()
-            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
-        let mut current = row_to_session(&row)?;
-
-        let before = current.participants.len();
-        current.participants.retain(|p| p.bot_uuid != bot_uuid);
-        if current.participants.len() == before {
-            return Err(ServiceError::SessionNotFound(format!(
-                "participant {bot_uuid} not in session {session_id}"
-            )));
-        }
-        current.updated_at = current_millis();
-        let new_json = serde_json::to_string(&current.participants)
-            .map_err(|e| ServiceError::SessionInvalidParams(format!("participants: {e}")))?;
-
-        let update_sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET participants = ?, {} \
-             WHERE env = ? AND session_id = ?",
-            self.flavor.set_modified_now(),
-        );
-        self.db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    DbValue::from(new_json.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-
-        self.db
-            .execute(DbStatement::with_params(
-                "DELETE FROM bcs_session_participants \
-                 WHERE env = ? AND session_id = ? AND bot_uuid = ?",
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(bot_uuid),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-
-        Ok(current)
-    }
+    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session> { self.repo_remove_participant(session_id, bot_uuid).await }
 
     async fn remove_participant_with_event(
         &self,
         command: RemoveSessionParticipantWithEvent,
-    ) -> ServiceResult<Session> {
-        let (mut candidate, stored_participants_json) = self
-            .load_with_raw_participants(&command.session_id)
-            .await?
-            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
-        if serde_json::to_value(&candidate.participants).ok()
-            != serde_json::to_value(&command.expected_participants).ok()
-        {
-            return Err(ServiceError::Conflict(format!(
-                "Session '{}' participants changed during removal",
-                command.session_id
-            )));
-        }
-        let before = candidate.participants.len();
-        candidate
-            .participants
-            .retain(|participant| participant.bot_uuid != command.bot_uuid);
-        if candidate.participants.len() == before {
-            return Err(ServiceError::SessionInvalidParams(format!(
-                "participant {} not in session {}",
-                command.bot_uuid, command.session_id
-            )));
-        }
-        candidate.updated_at = current_millis();
-        validate_session_event_scope(&candidate, &command.event)?;
-
-        let participants_json = serde_json::to_string(&candidate.participants)
-            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
-        let lock_sql = format!(
-            "SELECT session_id FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? AND participants = ?{}",
-            transaction_lock_suffix(self.flavor),
-        );
-        let update_sql = format!(
-            "UPDATE bcs_group_sessions SET participants = ?, {} \
-             WHERE env = ? AND session_id = ? AND participants = ?",
-            self.flavor.set_modified_now(),
-        );
-        let mut steps = vec![
-            DbTransactionStep::Query(DbStatement::with_params(
-                lock_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::from(stored_participants_json.as_str()),
-                ],
-            )),
-            DbTransactionStep::Execute(DbStatement::with_transaction_params(
-                update_sql,
-                vec![
-                    DbTransactionParam::value(participants_json.as_str()),
-                    DbTransactionParam::value(self.env.as_str()),
-                    DbTransactionParam::query_result(0, 0, "session_id"),
-                    DbTransactionParam::value(stored_participants_json.as_str()),
-                ],
-            )),
-            DbTransactionStep::Execute(DbStatement::with_params(
-                "DELETE FROM bcs_session_participants \
-                 WHERE env = ? AND session_id = ? AND bot_uuid = ?",
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::from(command.bot_uuid.as_str()),
-                ],
-            )),
-        ];
-        let event_plan = EventAppendTransactionPlan::build(
-            &command.event,
-            self.flavor,
-            steps.len(),
-        )
-        .map_err(|error| {
-            ServiceError::InternalError(format!("prepare Session participant Event: {error}"))
-        })?;
-        steps.extend(event_plan.steps);
-        self.db.transaction(steps).await.map_err(|error| {
-            if transaction_lock_row_is_missing(&error) {
-                // The CAS lock row vanished: a concurrent writer changed or
-                // deleted the session between the pre-check read and the lock.
-                ServiceError::Conflict(format!(
-                    "Session '{}' changed during participant removal",
-                    command.session_id
-                ))
-            } else {
-                ServiceError::InternalError(format!("session db: {error}"))
-            }
-        })?;
-        Ok(candidate)
-    }
+    ) -> ServiceResult<Session> { self.repo_remove_participant_with_event(command).await }
 
     async fn update_participant_mode(
         &self,
         session_id: &str,
         bot_uuid: &str,
         mode: ParticipantMode,
-    ) -> ServiceResult<Session> {
-        // TODO(phase-2): wrap in a DbPlugin transaction once supported.
-        let select_cols = self.select_cols();
-        let select_sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? LIMIT 1"
-        );
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &select_sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        let row = rows
-            .into_iter()
-            .next()
-            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
-        let mut current = row_to_session(&row)?;
-
-        let p = current
-            .participants
-            .iter_mut()
-            .find(|p| p.bot_uuid == bot_uuid)
-            .ok_or_else(|| {
-                ServiceError::SessionNotFound(format!(
-                    "participant {bot_uuid} not in session {session_id}"
-                ))
-            })?;
-        p.mode = Some(mode);
-        current.updated_at = current_millis();
-        let new_json = serde_json::to_string(&current.participants)
-            .map_err(|e| ServiceError::SessionInvalidParams(format!("participants: {e}")))?;
-
-        let update_sql = format!(
-            "UPDATE bcs_group_sessions \
-             SET participants = ?, {} \
-             WHERE env = ? AND session_id = ?",
-            self.flavor.set_modified_now(),
-        );
-        self.db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    DbValue::from(new_json.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-
-        // bcs_session_participants tracks presence only (not mode); no side-table update needed.
-        Ok(current)
-    }
+    ) -> ServiceResult<Session> { self.repo_update_participant_mode(session_id, bot_uuid, mode).await }
 
     async fn update_participant_message_view_scope(
         &self,
         session_id: &str,
         actor_id: &str,
         message_view_scope: MessageViewScope,
-    ) -> ServiceResult<Session> {
-        let select_cols = self.select_cols();
-        let select_sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? LIMIT 1"
-        );
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &select_sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
-        let row = rows
-            .into_iter()
-            .next()
-            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
-        let mut current = row_to_session(&row)?;
-        let participant = current
-            .participants
-            .iter_mut()
-            .find(|participant| participant.bot_uuid == actor_id)
-            .ok_or_else(|| {
-                ServiceError::SessionInvalidParams(format!(
-                    "participant {actor_id} not in session {session_id}"
-                ))
-            })?;
-        if !message_view_scope.is_valid_for(participant.actor_kind) {
-            return Err(ServiceError::SessionInvalidParams(
-                "Bot participants must use full message_view_scope".to_string(),
-            ));
-        }
-        participant.message_view_scope = message_view_scope;
-        current.updated_at = current_millis();
-        let participants_json = serde_json::to_string(&current.participants).map_err(|error| {
-            ServiceError::SessionInvalidParams(format!("participants: {error}"))
-        })?;
-        let update_sql = format!(
-            "UPDATE bcs_group_sessions SET participants = ?, {} \
-             WHERE env = ? AND session_id = ?",
-            self.flavor.set_modified_now(),
-        );
-        self.db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    DbValue::from(participants_json.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
-            ))
-            .await
-            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
-        Ok(current)
-    }
+    ) -> ServiceResult<Session> { self.repo_update_participant_message_view_scope(session_id, actor_id, message_view_scope).await }
 
     async fn update_participant_mode_and_message_view_scope(
         &self,
@@ -1920,307 +729,25 @@ impl SessionRepoPort for MySqlSessionStore {
         actor_id: &str,
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
-    ) -> ServiceResult<Session> {
-        let (mut current, stored_participants_json) = self
-            .load_with_raw_participants(session_id)
-            .await?
-            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
-        let participant = current
-            .participants
-            .iter_mut()
-            .find(|participant| participant.bot_uuid == actor_id)
-            .ok_or_else(|| {
-                ServiceError::SessionInvalidParams(format!(
-                    "participant {actor_id} not in session {session_id}"
-                ))
-            })?;
-        if !message_view_scope.is_valid_for(participant.actor_kind)
-            || mode.is_some_and(|mode| !mode.is_valid_for(participant.actor_kind))
-        {
-            return Err(ServiceError::SessionInvalidParams(
-                "Participant mode or message_view_scope is invalid for the actor kind".to_string(),
-            ));
-        }
-        participant.message_view_scope = message_view_scope;
-        if let Some(mode) = mode {
-            participant.mode = Some(mode);
-        }
-        current.updated_at = current_millis();
-        let participants_json = serde_json::to_string(&current.participants)
-            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
-        let update_sql = format!(
-            "UPDATE bcs_group_sessions SET participants = ?, {} \
-             WHERE env = ? AND session_id = ? AND participants = ?",
-            self.flavor.set_modified_now(),
-        );
-        let result = self
-            .db
-            .execute(DbStatement::with_params(
-                &update_sql,
-                vec![
-                    DbValue::from(participants_json.as_str()),
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(stored_participants_json.as_str()),
-                ],
-            ))
-            .await
-            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
-        if result.affected_rows != 1 {
-            return Err(ServiceError::Conflict(format!(
-                "Session '{session_id}' participants changed during message-view scope update"
-            )));
-        }
-        Ok(current)
-    }
+    ) -> ServiceResult<Session> { self.repo_update_participant_mode_and_message_view_scope(session_id, actor_id, mode, message_view_scope).await }
 
     async fn update_participant_message_view_scope_with_event(
         &self,
         command: UpdateSessionParticipantMessageViewScopeWithEvent,
-    ) -> ServiceResult<Session> {
-        let (mut candidate, stored_participants_json) = self
-            .load_with_raw_participants(&command.session_id)
-            .await?
-            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
-        if serde_json::to_value(&candidate.participants).ok()
-            != serde_json::to_value(&command.expected_participants).ok()
-        {
-            return Err(ServiceError::Conflict(format!(
-                "Session '{}' participants changed during scope update",
-                command.session_id
-            )));
-        }
-        let participant = candidate
-            .participants
-            .iter_mut()
-            .find(|participant| participant.bot_uuid == command.actor_id)
-            .ok_or_else(|| {
-                ServiceError::SessionInvalidParams(format!(
-                    "participant {} not in session {}",
-                    command.actor_id, command.session_id
-                ))
-            })?;
-        if !command
-            .message_view_scope
-            .is_valid_for(participant.actor_kind)
-        {
-            return Err(ServiceError::SessionInvalidParams(
-                "Bot participants must use full message_view_scope".to_string(),
-            ));
-        }
-        participant.message_view_scope = command.message_view_scope;
-        if let Some(mode) = command.mode {
-            if !mode.is_valid_for(participant.actor_kind) {
-                return Err(ServiceError::SessionInvalidParams(
-                    "Participant mode is invalid for the actor kind".to_string(),
-                ));
-            }
-            participant.mode = Some(mode);
-        }
-        candidate.updated_at = current_millis();
-        validate_session_event_scope(&candidate, &command.event)?;
+    ) -> ServiceResult<Session> { self.repo_update_participant_message_view_scope_with_event(command).await }
 
-        let participants_json = serde_json::to_string(&candidate.participants)
-            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
-        let lock_sql = format!(
-            "SELECT session_id FROM bcs_group_sessions \
-             WHERE env = ? AND session_id = ? AND participants = ?{}",
-            transaction_lock_suffix(self.flavor),
-        );
-        let update_sql = format!(
-            "UPDATE bcs_group_sessions SET participants = ?, {} \
-             WHERE env = ? AND session_id = ? AND participants = ?",
-            self.flavor.set_modified_now(),
-        );
-        let mut steps = vec![
-            DbTransactionStep::Query(DbStatement::with_params(
-                lock_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(command.session_id.as_str()),
-                    DbValue::from(stored_participants_json.as_str()),
-                ],
-            )),
-            DbTransactionStep::Execute(DbStatement::with_transaction_params(
-                update_sql,
-                vec![
-                    DbTransactionParam::value(participants_json.as_str()),
-                    DbTransactionParam::value(self.env.as_str()),
-                    DbTransactionParam::query_result(0, 0, "session_id"),
-                    DbTransactionParam::value(stored_participants_json.as_str()),
-                ],
-            )),
-        ];
-        let event_plan = EventAppendTransactionPlan::build(
-            &command.event,
-            self.flavor,
-            steps.len(),
-        )
-        .map_err(|error| {
-            ServiceError::InternalError(format!("prepare Session participant scope Event: {error}"))
-        })?;
-        steps.extend(event_plan.steps);
-        self.db.transaction(steps).await.map_err(|error| {
-            if transaction_lock_row_is_missing(&error) {
-                // The CAS lock row vanished: a concurrent writer changed or
-                // deleted the session between the pre-check read and the lock.
-                ServiceError::Conflict(format!(
-                    "Session '{}' changed during participant scope update",
-                    command.session_id
-                ))
-            } else {
-                ServiceError::InternalError(format!("session db: {error}"))
-            }
-        })?;
-        Ok(candidate)
-    }
-
-    async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String> {
-        let sql = "SELECT DISTINCT group_id FROM bcs_session_participants \
-                   WHERE env = ? AND bot_uuid = ?";
-        let rows = match self
-            .db
-            .query(DbStatement::with_params(
-                sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(bot_uuid)],
-            ))
-            .await
-        {
-            Ok(r) => r,
-            Err(_) => return Vec::new(),
-        };
-        rows.iter()
-            .filter_map(|row| db_get_column_opt::<String>(row, "group_id").ok().flatten())
-            .collect()
-    }
+    async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String> { self.repo_list_group_ids_by_session_participant(bot_uuid).await }
 
     async fn try_list_group_ids_by_session_participant(
         &self,
         bot_uuid: &str,
-    ) -> ServiceResult<Vec<String>> {
-        let sql = "SELECT DISTINCT group_id FROM bcs_session_participants \
-                   WHERE env = ? AND bot_uuid = ?";
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                sql,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(bot_uuid)],
-            ))
-            .await
-            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+    ) -> ServiceResult<Vec<String>> { self.repo_try_list_group_ids_by_session_participant(bot_uuid).await }
 
-        rows.iter()
-            .map(|row| {
-                db_get_column::<String>(row, "group_id").map_err(|error| {
-                    ServiceError::InternalError(format!("session db row: {error}"))
-                })
-            })
-            .collect()
-    }
+    async fn delete(&self, session_id: &str) -> ServiceResult<bool> { self.repo_delete(session_id).await }
 
-    async fn delete(&self, session_id: &str) -> ServiceResult<bool> {
-        let del_participants = "DELETE FROM bcs_session_participants \
-                               WHERE env = ? AND session_id = ?";
-        self.db
-            .execute(DbStatement::with_params(
-                del_participants,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+    async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> { self.repo_collect(session_id, bot_uuid).await }
 
-        let del_session = "DELETE FROM bcs_group_sessions WHERE env = ? AND session_id = ?";
-        let result = self
-            .db
-            .execute(DbStatement::with_params(
-                del_session,
-                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
-            ))
-            .await
-            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
-        Ok(result.affected_rows > 0)
-    }
-
-    async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
-        // Existence check via SELECT, NOT affected_rows: the MySQL connection does
-        // not set CLIENT_FOUND_ROWS (see bcs-config-api/src/mysql.rs to_mysql_url and
-        // bcs-db-mysql/src/manager.rs), so mysql_async reports CHANGED rows. A repeat
-        // collect (collected already 1) would yield affected_rows=0 and falsely look
-        // like a non-participant. SELECTing the side-table row first lets us
-        // distinguish non-participant (row absent) from already-collected (row present)
-        // independent of changed-rows semantics; the subsequent unconditional UPDATE is
-        // then idempotent by construction.
-        let check_sql = "SELECT 1 FROM bcs_session_participants \
-                         WHERE env = ? AND session_id = ? AND bot_uuid = ? LIMIT 1";
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                check_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(bot_uuid),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        if rows.is_empty() {
-            return Err(ServiceError::SessionNotFound(format!(
-                "participant {bot_uuid} not in session {session_id}"
-            )));
-        }
-        // First-collect-writes-time, repeat-collect-keeps-it (idempotent), expressed
-        // via the NULL-ness of collected_at itself: COALESCE writes `now` only when
-        // collected_at is NULL (never collected, or cleared by a prior uncollect) and
-        // preserves the existing value otherwise. This is dialect-portable: do NOT
-        // rewrite as `CASE WHEN collected = 0 THEN now ...` — MySQL evaluates a single
-        // UPDATE's SET left-to-right (so `collected` is already 1 by the time the CASE
-        // reads it) while SQLite evaluates all SET RHS against the pre-update row, so
-        // the CASE form silently never sets collected_at on MySQL while working on
-        // SQLite. Relying on collected_at's own NULL-ness avoids any cross-column
-        // old-value dependency.
-        let update_sql = format!(
-            "UPDATE bcs_session_participants \
-             SET collected = 1, \
-                 collected_at = COALESCE(collected_at, {}) \
-             WHERE env = ? AND session_id = ? AND bot_uuid = ?",
-            self.flavor.now()
-        );
-        self.db
-            .execute(DbStatement::with_params(
-                update_sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(bot_uuid),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        Ok(())
-    }
-
-    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
-        // Idempotent: the only caller-facing error is session-not-found, which
-        // the application layer checks via get() before calling. Here we run the
-        // UPDATE regardless of whether a side-table row / collected flag exists.
-        // Clearing collected_at means a later re-collect records a fresh event time.
-        let sql = "UPDATE bcs_session_participants \
-                   SET collected = 0, collected_at = NULL \
-                   WHERE env = ? AND session_id = ? AND bot_uuid = ?";
-        self.db
-            .execute(DbStatement::with_params(
-                sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                    DbValue::from(bot_uuid),
-                ],
-            ))
-            .await
-            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
-        Ok(())
-    }
+    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> { self.repo_uncollect(session_id, bot_uuid).await }
 
     async fn list_collected_by_group(
         &self,
@@ -2230,112 +757,16 @@ impl SessionRepoPort for MySqlSessionStore {
         title_contains: Option<&str>,
         offset: u64,
         limit: u64,
-    ) -> Vec<Session> {
-        let mut conditions: Vec<String> = vec![
-            "s.env = ?".to_string(),
-            "s.group_id = ?".to_string(),
-            "sp.group_id = ?".to_string(),
-            "sp.bot_uuid = ?".to_string(),
-            "sp.collected = 1".to_string(),
-        ];
-        let mut params: Vec<DbValue> = vec![
-            DbValue::from(self.env.as_str()),
-            DbValue::from(group_id),
-            DbValue::from(group_id),
-            DbValue::from(bot_uuid),
-        ];
+    ) -> Vec<Session> { self.repo_list_collected_by_group(group_id, bot_uuid, status, title_contains, offset, limit).await }
 
-        if let Some(s) = status {
-            let status_str = match s {
-                SessionStatus::Running => "running",
-                SessionStatus::Completed => "completed",
-            };
-            conditions.push("s.status = ?".to_string());
-            params.push(DbValue::from(status_str));
-        }
-
-        if let Some(q) = title_contains {
-            conditions.push("s.session_title LIKE ?".to_string());
-            params.push(DbValue::from(format!("%{}%", q)));
-        }
-
-        params.push(DbValue::U64(limit));
-        params.push(DbValue::U64(offset));
-
-        // Collected-list-specific column list: base prefixed columns plus the
-        // collect-event timestamp. We do NOT reuse select_cols_prefixed here
-        // (it omits collected_at); and we CAST the timestamp to an integer so
-        // MySQL's UNIX_TIMESTAMP(datetime(3)) — which returns a DOUBLE due to
-        // fractional seconds — decodes cleanly to i64 instead of failing
-        // row_to_session. SQLite's strftime already yields INTEGER.
-        let collected_at_expr = match self.flavor {
-            DbSqlFlavor::Mysql => format!("CAST((UNIX_TIMESTAMP(sp.collected_at))*1000 AS SIGNED)"),
-            DbSqlFlavor::Sqlite => format!("CAST(strftime('%s', sp.collected_at) AS INTEGER)*1000"),
-        };
-        let select_cols = format!(
-            "{}, {} AS collected_at_ms",
-            self.select_cols_prefixed(),
-            collected_at_expr,
-        );
-        let sql = format!(
-            "SELECT {select_cols} FROM bcs_group_sessions s \
-             JOIN bcs_session_participants sp \
-               ON sp.env = s.env AND sp.session_id = s.session_id \
-             WHERE {where_clause} \
-             ORDER BY COALESCE(sp.collected_at, s.gmt_create) DESC, s.id DESC LIMIT ? OFFSET ?",
-            select_cols = select_cols,
-            where_clause = conditions.join(" AND "),
-        );
-
-        let rows = match self.db.query(DbStatement::with_params(&sql, params)).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "list_collected_by_group query failed");
-                return Vec::new();
-            }
-        };
-        rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
-    }
-
-    async fn collected_at_map(&self, session_ids: &[&str], bot_uuid: &str) -> Vec<(String, u64)> {
-        if session_ids.is_empty() {
-            return Vec::new();
-        }
-        // CAST the timestamp to an integer for the same reason as the
-        // collected-list query: UNIX_TIMESTAMP(datetime(3)) is a DOUBLE on
-        // MySQL and would not decode to i64. SQLite's strftime is already INTEGER.
-        let collected_at_expr = match self.flavor {
-            DbSqlFlavor::Mysql => "CAST((UNIX_TIMESTAMP(collected_at))*1000 AS SIGNED)",
-            DbSqlFlavor::Sqlite => "CAST(strftime('%s', collected_at) AS INTEGER)*1000",
-        };
-        let placeholders = vec!["?"; session_ids.len()].join(", ");
-        let sql = format!(
-            "SELECT session_id, {ts} AS collected_at_ms FROM bcs_session_participants \
-             WHERE env = ? AND bot_uuid = ? AND collected = 1 \
-             AND session_id IN ({placeholders})",
-            ts = collected_at_expr,
-            placeholders = placeholders,
-        );
-        let mut params: Vec<DbValue> =
-            vec![DbValue::from(self.env.as_str()), DbValue::from(bot_uuid)];
-        for sid in session_ids {
-            params.push(DbValue::from(*sid));
-        }
-        let rows = match self.db.query(DbStatement::with_params(&sql, params)).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "collected_at_map query failed");
-                return Vec::new();
-            }
-        };
-        rows.iter()
-            .filter_map(|r| {
-                let sid: String = db_get_column(r, "session_id").ok()?;
-                let ts: i64 = db_get_column_opt::<i64>(r, "collected_at_ms")
-                    .ok()
-                    .flatten()?;
-                Some((sid, ts.max(0) as u64))
-            })
-            .collect()
-    }
+    async fn collected_at_map(&self, session_ids: &[&str], bot_uuid: &str) -> Vec<(String, u64)> { self.repo_collected_at_map(session_ids, bot_uuid).await }
 }
+
+#[path = "mysql_operations/operations_1.rs"]
+mod mysql_operations_operations_1;
+
+#[path = "mysql_operations/operations_2.rs"]
+mod mysql_operations_operations_2;
+
+#[path = "mysql_operations/operations_3.rs"]
+mod mysql_operations_operations_3;
