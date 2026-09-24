@@ -5,8 +5,8 @@ use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
 use bcs_service_api::{CreateStateMachineRerun, CreateStateMachineRerunOutcome};
 use mysql_async::Opts;
 
-const TABLES: [&str; 9] = ["bcs_messages", "bcs_collaboration_delivery_checkpoints", "bcs_collaboration_events", "bcs_collaboration_definition_blobs", "bcs_collaboration_definitions", "bcs_group_sessions",
-    "bcs_state_machine_definition_snapshots", "bcs_state_machine_node_runs", "bcs_state_machine_runs"];
+const TABLES: [&str; 10] = ["bcs_messages", "bcs_collaboration_delivery_checkpoints", "bcs_collaboration_events", "bcs_collaboration_definition_blobs", "bcs_collaboration_definitions", "bcs_group_sessions",
+    "bcs_state_machine_definition_snapshots", "bcs_state_machine_node_runs", "bcs_state_machine_runs", "bcs_session_registry"];
 
 #[tokio::test]
 #[ignore = "requires BCS_TEST_MYSQL_URL pointing to a disposable MySQL database"]
