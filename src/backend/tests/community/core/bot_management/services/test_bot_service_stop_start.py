@@ -68,6 +68,10 @@ def _make_service() -> BotService:
     # tests that exercise the flag override ``_drm_reader.read.return_value``.
     svc._drm_reader = MagicMock()
     svc._drm_reader.read.return_value = None
+    # teclaw provision provider: default mock so is_teclaw_bot returns False
+    svc._teclaw_provision_provider = lambda: MagicMock(
+        is_teclaw=lambda active_engine: False
+    )
     return svc
 
 

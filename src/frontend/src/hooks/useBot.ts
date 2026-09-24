@@ -726,6 +726,16 @@ export function useBot(options?: { autoFetchTotalBotCount?: boolean }) {
         return false;
       }
 
+      // teclaw 容器没有独立的 restart 原语，generic restart 路径会销毁容器后无法重建。
+      // 在前端直接拦截，避免触发不可逆的破坏性操作。
+      const bot = getBotById(botId);
+      if (bot?.active_engine === ENGINE_TYPE.TECLAW) {
+        toast.error(
+          '该设备不支持重启，可尝试更新配置恢复。若问题持续，请联系运维。',
+        );
+        return false;
+      }
+
       try {
         const res = await BotController.restartBot(
           {
