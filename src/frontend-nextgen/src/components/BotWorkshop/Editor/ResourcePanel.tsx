@@ -45,6 +45,8 @@ export function buildVisibleResourceTree(resources: BotEditorResource[], expande
 export function ResourcePanel({
   resources,
   editable,
+  desktop = false,
+  onOpenFolder,
   onCreateDirectory,
   onDelete,
   onUpload,
@@ -55,6 +57,8 @@ export function ResourcePanel({
 }: {
   resources: BotEditorResource[];
   editable: boolean;
+  desktop?: boolean;
+  onOpenFolder?: (path?: string) => Promise<void>;
   onCreateDirectory: (path: string) => Promise<void>;
   onDelete: (path: string) => Promise<void>;
   onUpload: (path: string, file: File) => Promise<void>;
@@ -105,6 +109,11 @@ export function ResourcePanel({
           </p>
         </div>
         <div className="flex max-w-full shrink-0 flex-wrap justify-end gap-2">
+          {desktop && onOpenFolder ? (
+            <Button variant="outline" size="sm" onClick={() => void onOpenFolder(directory || undefined)}>
+              打开本地目录
+            </Button>
+          ) : null}
           <Input
             ref={uploadRef}
             hidden
@@ -185,6 +194,7 @@ export function ResourcePanel({
                 <Button
                   variant="ghost"
                   size="icon"
+                  disabled={desktop && item.type === 'folder'}
                   aria-label={`下载${item.type === 'folder' ? '文件夹' : '文件'}${item.name}`}
                   leftIcon={<Download className="size-4" />}
                   onClick={() => void onDownload(item.path, item.type)}
@@ -193,6 +203,7 @@ export function ResourcePanel({
                   <Button
                     variant="ghost"
                     size="icon"
+                    disabled={desktop && (item.size ?? 0) > 1048576}
                     aria-label={`预览${item.name}`}
                     leftIcon={<Eye className="size-4" />}
                     onClick={() => void onPreview(item.path).then((result) => setPreview({ path: item.path, result }))}

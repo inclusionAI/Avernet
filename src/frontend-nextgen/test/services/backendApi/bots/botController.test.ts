@@ -1,6 +1,7 @@
 import {
   changeBotSpace,
   deleteBot,
+  getBot,
   listBotInventory,
   listBots,
   restartBot,
@@ -72,6 +73,7 @@ describe('botController OpenAPI contracts', () => {
     );
   });
   test.each([
+    ['detail as collaborator', () => getBot('bot-1', 'owner-1'), '/openapi/v1/bots/bot-1?owner_id=owner-1', 'GET'],
     ['change space', () => changeBotSpace('bot-1', 12, 'u1'), '/openapi/v1/bots/bot-1/space?user_id=u1', 'PUT'],
     ['delete', () => deleteBot('bot-1'), '/openapi/v1/bots/bot-1', 'DELETE'],
     ['restart', () => restartBot('bot-1'), '/openapi/v1/bots/bot-1/restart', 'POST'],

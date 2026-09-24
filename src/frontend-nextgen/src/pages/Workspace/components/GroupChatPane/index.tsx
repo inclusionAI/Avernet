@@ -1,8 +1,8 @@
 import { Button, Empty, Skeleton } from '@/components/ui';
-import { useTaskExecuteFromCard } from '@/hooks/useTaskExecuteFromCard';
-import { useTaskExecution } from '@/hooks/useTaskExecution';
+import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useCollabPanel } from '@/pages/Workspace/hooks/useCollabPanel';
-import { useGroupTaskComposerContext } from '@/pages/Workspace/hooks/useGroupTaskComposerContext';
+import { useGroupTaskExecution } from '@/pages/Workspace/hooks/useGroupTaskExecution';
+import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import { buildExplainPrompt, useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
@@ -11,10 +11,9 @@ import type { MentionConfig } from '@tc-chat/ui';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { RefreshCw, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { GroupHeader } from '../GroupHeader';
-import { CollabPanel } from './CollabPanel';
 import { FuseSlot } from './FuseSlot';
+import { GroupChatCollabPanel } from './GroupChatCollabPanel';
 import { GroupChatComposer } from './GroupChatComposer';
 import { GroupChatMessageList } from './GroupChatMessageList';
 import type { GroupChatPaneProps } from './GroupChatPane.types';
@@ -25,6 +24,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   const {
     group,
     submitPanelMessage,
+    submitTaskExecutionMessage,
     appendAssistantMessage = () => {},
     streamAssistantMessage,
     session,
@@ -36,8 +36,10 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     connectionStatus,
     groupBootstrapProcessing = false,
     send,
-    stop,
+    abortBot,
+    abortingBotIds,
     reconnect,
+    onOpenSessionList,
     reloadHistory,
     hasMoreHistory,
     isLoadingMoreHistory,
@@ -56,9 +58,6 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     userIdentityName,
   } = props;
 
-  const navigate = useNavigate();
-  const openCollaborationPermissions = () => navigate('/collaboration-privacy');
-
   const collabPanel = useCollabPanel(
     session,
     activeIdentity ?? null,
@@ -68,16 +67,14 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     updateMemberScope,
   );
 
-  const messages = (chat.messages ?? []).filter(
-    (m) => !(m.role === 'assistant' && m.status === 'pending' && !m.content && !m.blocks?.length),
-  );
+  const messages = filterVisibleGroupMessages(chat.messages ?? []);
   const isRequesting = !!chat.isRequesting;
-  const isLoadingHistory = supportState.phase === 'loading-history' || supportState.phase === 'preparing';
+  // 消息区两态强制（Spec AC-2，预览反馈第五轮）：空消息一律骨架屏，确认后的真空会话才显示空态。
+  const isLoadingHistory = useMessageAreaSkeleton({ messages, status: connectionStatus });
   const messageInteractions = useMessageInteractions({
     sessionId: session?.sessionId,
     messages,
     isRequesting,
-    onStop: stop,
   });
   const mentionConfig: MentionConfig | undefined = useMemo(
     () =>
@@ -89,16 +86,15 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     [activeIdentity?.id, activeIdentity?.kind, session?.participants],
   );
 
-  const taskComposerContext = useGroupTaskComposerContext(group, session, activeIdentity);
-
-  const taskExecution = useTaskExecution({ panelRef, context: taskComposerContext, submitPanelMessage });
-  useTaskExecuteFromCard({
+  const taskExecution = useGroupTaskExecution({
+    group,
+    session,
+    activeIdentity,
     panelRef,
-    context: taskComposerContext,
     submitPanelMessage,
+    submitTaskExecutionMessage,
     appendAssistantMessage,
     streamAssistantMessage,
-    onOpenCollaborationPermissions: openCollaborationPermissions,
   });
 
   const [draft, setDraft] = useState('');
@@ -182,8 +178,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         <GroupHeader
           selectedGroup={group}
           selectedSession={session}
-          supportState={supportState}
           connectionStatus={connectionStatus}
+          onOpenSessionList={onOpenSessionList}
           onReconnect={() => {
             void reconnect();
           }}
@@ -246,13 +242,18 @@ export function GroupChatPane(props: GroupChatPaneProps) {
                 onQuoteSelected={quoteSelectedMessage}
                 onExplainSelected={explainSelectedMessage}
                 onEditMessage={editMessage}
-                onStop={stop}
               />
             )}
           </div>
         )}
-        <CollabPanel panel={collabPanel} />
-
+        <GroupChatCollabPanel
+          panel={collabPanel}
+          session={session}
+          messages={messages}
+          abortingBotIds={abortingBotIds}
+          abortBot={abortBot}
+        />
+        {/* 输入框仅在 human 视角显示：Bot 视角由协作面板控制发言；Human absent 时由「加入」条接管。 */}
         {session && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly ? (
           <GroupChatComposer
             session={session}
@@ -261,7 +262,6 @@ export function GroupChatPane(props: GroupChatPaneProps) {
             mentionConfig={mentionConfig}
             showReconnectToolbar={showReconnectToolbar}
             onSend={handleGroupSend}
-            onStop={stop}
             onReconnect={() => {
               void reconnect();
             }}

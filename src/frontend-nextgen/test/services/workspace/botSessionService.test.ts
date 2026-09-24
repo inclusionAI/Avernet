@@ -191,6 +191,31 @@ describe('botSessionService', () => {
     expect((res as any).data.sessionId).toBe('sid-new');
   });
 
+  it('createSession 未指定标题时显式传新会话', async () => {
+    mocked.createBotSession.mockResolvedValue({
+      code: 200000,
+      data: {
+        session_id: 'sid-default-title',
+        title: '新会话',
+        agent_id: '',
+        model: '',
+        message_count: 0,
+        gmt_create: '',
+        gmt_modified: '',
+      },
+      message: 'OK',
+      request_id: 'r',
+    });
+
+    await botSessionService.createSession(bot, 'human_900003');
+
+    expect(mocked.createBotSession).toHaveBeenCalledWith(
+      '20260402_ab',
+      { user_id: '900003', owner_id: '2088' },
+      { title: '新会话' },
+    );
+  });
+
   it('deleteSession 调用 controller', async () => {
     mocked.deleteBotSession.mockResolvedValue({
       code: 200000,
@@ -334,7 +359,7 @@ describe('botSessionService', () => {
     });
 
     await botSessionService.createSession(friendBot, 'human_900003');
-    expect(mocked.createBotSession).toHaveBeenLastCalledWith('20260402_ab', baseParams, { title: undefined });
+    expect(mocked.createBotSession).toHaveBeenLastCalledWith('20260402_ab', baseParams, { title: '新会话' });
 
     await botSessionService.getSessionDetail(friendBot, 'human_900003', 's1');
     expect(mocked.getBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);

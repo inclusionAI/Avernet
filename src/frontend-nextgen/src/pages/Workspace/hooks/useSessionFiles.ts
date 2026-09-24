@@ -3,7 +3,7 @@ import type { AuthenticatedUserName } from '@/domain/userIdentity';
 import type { SessionFileView } from '@/services/workspace/sessionFileService';
 
 import { sessionFileService } from '@/services/workspace/sessionFileService';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 export interface UseSessionFilesResult {
@@ -26,24 +26,39 @@ export function useSessionFiles(
   const [files, setFiles] = useState<SessionFileView[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  // PR#413 评审跟进 P3（#257104461）：请求代次守卫——快速连续切会话时旧响应可能晚到，
+  // 过期响应直接丢弃，loading 只由最新请求收尾，避免旧会话数据短暂覆盖新会话列表。
+  const requestIdRef = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!sessionId) {
+      // 评审 P4 跟进（#257104636）：早退同样消耗代次——作废所有在途请求（晚到响应一律被守卫
+      // 丢弃），并同步收尾加载态（在途请求的 finally 被守卫拦截后不再回写状态）。
+      requestIdRef.current++;
       setFiles([]);
       setTotal(0);
+      setIsLoading(false);
       return;
     }
+    const requestId = ++requestIdRef.current;
     setIsLoading(true);
     try {
       // status=ready：仅拉取已就绪文件，避免 pending 文件计入并造成列表数量与展示不一致。
-      const res = await sessionFileService.loadFiles(sessionId, participants, {
-        limit: 100,
-        offset: 0,
-        status: 'ready',
-      }, authenticatedUser);
+      const res = await sessionFileService.loadFiles(
+        sessionId,
+        participants,
+        {
+          limit: 100,
+          offset: 0,
+          status: 'ready',
+        },
+        authenticatedUser,
+      );
+      if (requestIdRef.current !== requestId) return;
       if (res.ok) {
         // 文件接口仅返回上传者 actor_id，用 bots/query 批量反查展示名，未命中的回退 actor_id 兜底。
         const nameMap = await sessionFileService.resolveActorNames(res.data.items.map((f) => f.ownerActorId));
+        if (requestIdRef.current !== requestId) return;
         setFiles(
           res.data.items.map((f) => (nameMap[f.ownerActorId] ? { ...f, ownerName: nameMap[f.ownerActorId] } : f)),
         );
@@ -52,7 +67,7 @@ export function useSessionFiles(
         toast.error(res.error.friendlyMessage);
       }
     } finally {
-      setIsLoading(false);
+      if (requestIdRef.current === requestId) setIsLoading(false);
     }
   }, [authenticatedUser, participants, sessionId]);
 

@@ -71,6 +71,8 @@ jest.mock('@/pages/Workspace/hooks/useGroupWorkspace', () => ({
     canDissolveGroup: { allowed: false },
   }),
 }));
+// 会话数据可切换：接线守护用例需注入选中会话（resources 副屏渲染条件之一）。
+const sessionsMock = { selectedSession: null as { sessionId: string; title: string } | null };
 jest.mock('@/pages/Workspace/hooks/useGroupSessions', () => ({
   useGroupSessions: () => ({
     sessionsByGroupId: {},
@@ -81,8 +83,8 @@ jest.mock('@/pages/Workspace/hooks/useGroupSessions', () => ({
     errorByGroupId: {},
     loadMoreErrorByGroupId: {},
     reloadGroup: jest.fn(),
-    selectedSession: null,
-    selectedSessionId: null,
+    selectedSession: sessionsMock.selectedSession,
+    selectedSessionId: sessionsMock.selectedSession?.sessionId ?? null,
     openSession: jest.fn(),
     createSessionIn: jest.fn(),
     leaveSession: jest.fn(),
@@ -106,18 +108,22 @@ jest.mock('@/pages/Workspace/hooks/useOpenDefaultGroupSession', () => ({
   useOpenDefaultGroupSession: () => jest.fn(),
 }));
 
-// GroupChatPane 桩件：暴露一个按钮触发 onTogglePanel('manage')，模拟齿轮打开管理面板。
+// GroupChatPane 桩件：暴露按钮触发 onTogglePanel('manage'/'resources')，模拟齿轮与文件入口。
 jest.mock('@/pages/Workspace/components/GroupChatPane', () => ({
   GroupChatPane: ({ onTogglePanel }: { onTogglePanel: (panel: string) => void }) => (
     <div data-testid="group-chat-pane">
       <button type="button" onClick={() => onTogglePanel('manage')}>
         打开管理面板
       </button>
+      <button type="button" onClick={() => onTogglePanel('resources')}>
+        打开资源面板
+      </button>
     </div>
   ),
 }));
-jest.mock('@/pages/Workspace/components/GroupChatPane/SessionFilesModal', () => ({
-  SessionFilesModal: () => null,
+// SessionFilesSidebar 桩件渲染标记元素：守护 resources 面板接线（接线断裂时标记不出现）。
+jest.mock('@/pages/Workspace/components/GroupChatPane/SessionFilesSidebar', () => ({
+  SessionFilesSidebar: () => <div data-testid="session-files-sidebar" />,
 }));
 jest.mock('@/pages/Workspace/components/GroupMembersPanelSlot', () => ({
   GroupMembersPanelSlot: () => null,
@@ -195,5 +201,23 @@ describe('GroupWorkspaceArea 管理面板打开期间切群补拉详情', () => 
       />,
     );
     expect(mockReloadSelectedGroup).not.toHaveBeenCalled();
+  });
+
+  it('资源面板接线守护：resources 激活且选中会话时渲染会话文件副屏（桩件标记元素出现）', () => {
+    // 防回归：GroupWorkspaceArea 的 activePanel === 'resources' 分支必须挂载
+    // SessionFilesSidebar（副屏化重构后的接线契约，接线断裂时标记不出现）。
+    // 渲染条件：选中会话存在（mock 注入）。
+    sessionsMock.selectedSession = { sessionId: 's1', title: '验收会话' };
+    renderArea();
+    expect(screen.queryByTestId('session-files-sidebar')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '打开资源面板' }));
+    expect(screen.getByTestId('session-files-sidebar')).toBeInTheDocument();
+
+    // 切回管理面板：resources 副屏被替换（单副屏互斥）。
+    fireEvent.click(screen.getByRole('button', { name: '打开管理面板' }));
+    expect(screen.queryByTestId('session-files-sidebar')).not.toBeInTheDocument();
+
+    sessionsMock.selectedSession = null;
   });
 });

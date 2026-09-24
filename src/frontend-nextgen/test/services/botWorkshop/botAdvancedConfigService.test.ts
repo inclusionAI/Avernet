@@ -2,8 +2,26 @@ import { botEditorController } from '@/services/backendApi/bots/botEditorControl
 import { botAdvancedConfigService } from '@/services/botWorkshop/botAdvancedConfigService';
 
 jest.mock('@/services/backendApi/bots/botEditorController', () => ({
-  botEditorController: { createChannel: jest.fn(), updateChannel: jest.fn(), listChannels: jest.fn() },
+  botEditorController: {
+    createChannel: jest.fn(),
+    updateChannel: jest.fn(),
+    listChannels: jest.fn(),
+    listIdentityFiles: jest.fn(),
+  },
 }));
+
+test('配置初始请求透传 Bot Owner', async () => {
+  const listIdentityFiles = botEditorController.listIdentityFiles as jest.Mock;
+  const listChannels = botEditorController.listChannels as jest.Mock;
+  listIdentityFiles.mockResolvedValue({ data: { files: [] } });
+  listChannels.mockResolvedValue({ data: [] });
+
+  await botAdvancedConfigService.listIdentityFiles('bot-1', 'owner-1');
+  await botAdvancedConfigService.listChannels('bot-1', 'owner-1');
+
+  expect(listIdentityFiles).toHaveBeenCalledWith('bot-1', 'owner-1');
+  expect(listChannels).toHaveBeenCalledWith('bot-1', 'owner-1');
+});
 
 test('创建钉钉渠道时透传流式卡片配置', async () => {
   const createChannel = botEditorController.createChannel as jest.Mock;

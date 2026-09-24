@@ -6,7 +6,7 @@ import type { BackendApiEnvelope } from '../types';
  * BBS 接力公开任务列表项（GET {taskApiBase}/bbs/list 的 data 数组元素）。
  *
  * 后端已二次解析出 `title`/`goal`/`acceptances`（来自 `task_spec`）：
- * - `title` 解析自 `task_spec.metadata.title`；
+ * - `title` 解析自 `task_spec.context.title`；
  * - `goal` 解析自 `task_spec.goal.objective`；
  * - `acceptances` 解析自原始验收标准列表，元素为 `{id, description}`。
  *
@@ -20,7 +20,7 @@ export interface BbsTaskAcceptanceItem {
 
 export interface BbsTaskItem {
   task_id?: string;
-  /** 解析自 task_spec.metadata.title；缺失由 mapper 回退「未命名任务」。 */
+  /** 解析自 task_spec.context.title；缺失由 mapper 回退「未命名任务」。 */
   title?: string;
   /** 解析自 task_spec.goal.objective；缺失回退空串。 */
   goal?: string;

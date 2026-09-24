@@ -14,3 +14,8 @@ export function getBotEngineLabel(engine?: string): string | undefined {
   if (!normalized || NON_ENGINE_LABELS.has(normalized.toLowerCase())) return undefined;
   return BOT_ENGINE_LABELS[normalized.toLowerCase()] ?? normalized;
 }
+
+/** TEClaw 当前不支持会话收藏相关接口，侧栏需隐藏收藏入口并跳过收藏请求。 */
+export function supportsBotSessionFavorites(engine?: string): boolean {
+  return engine?.trim().toLowerCase() !== 'teclaw';
+}

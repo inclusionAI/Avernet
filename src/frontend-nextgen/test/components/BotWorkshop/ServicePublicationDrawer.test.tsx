@@ -60,3 +60,34 @@ test('在发布与阶段推进中展示并确认升级服务 Bot 版本', async 
 
   expect(upgrade).toHaveBeenCalledWith(17);
 });
+
+test('发布与阶段推进不混入重启发布和删除', () => {
+  mockedPublications.mockReturnValue({
+    items: [
+      {
+        publicationId: 18,
+        cardId: 'bot-2:18',
+        version: 1,
+        status: 'running',
+        internalStatus: 'success',
+        availableActions: ['publish_online', 'restart_publish', 'delete'],
+        createdAt: '',
+        updatedAt: '',
+      },
+    ],
+    loading: false,
+    reload: jest.fn(),
+    advance: jest.fn(),
+    restart: jest.fn(),
+    cancel: jest.fn(),
+    offline: jest.fn(),
+    retry: jest.fn(),
+    upgrade: jest.fn(),
+    deleteDraft: jest.fn(),
+  });
+  const bot = mapBotDto({ bot_id: 'bot-2', bot_name: 'Service Bot', engine: 'openclaw', bot_type: 'service' }).item;
+  render(<ServicePublicationDrawer bot={bot} onClose={jest.fn()} />);
+  expect(screen.getByRole('button', { name: '发布上线' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '重启发布' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '删除草稿' })).not.toBeInTheDocument();
+});

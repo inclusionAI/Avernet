@@ -2,8 +2,8 @@ import type { BotChannel, BotChannelInput, BotIdentityFile } from '@/domain/botA
 import { botEditorController } from '@/services/backendApi/bots/botEditorController';
 
 export const botAdvancedConfigService = {
-  async listIdentityFiles(botId: string): Promise<BotIdentityFile[]> {
-    const response = await botEditorController.listIdentityFiles(botId);
+  async listIdentityFiles(botId: string, ownerId?: string): Promise<BotIdentityFile[]> {
+    const response = await botEditorController.listIdentityFiles(botId, ownerId);
     return (response.data?.files ?? []).map((file) => ({ type: file.type, exists: file.exists }));
   },
   async getIdentityFile(botId: string, type: string): Promise<string> {
@@ -12,8 +12,8 @@ export const botAdvancedConfigService = {
   },
   saveIdentityFile: (botId: string, type: string, content: string) =>
     botEditorController.updateIdentityFile(botId, type, content),
-  async listChannels(botId: string): Promise<BotChannel[]> {
-    const response = await botEditorController.listChannels(botId);
+  async listChannels(botId: string, ownerId?: string): Promise<BotChannel[]> {
+    const response = await botEditorController.listChannels(botId, ownerId);
     const items = Array.isArray(response.data) ? response.data : response.data?.items ?? [];
     return items.map((item) => ({
       id: item.id,

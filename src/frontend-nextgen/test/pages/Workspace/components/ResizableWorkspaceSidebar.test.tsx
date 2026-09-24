@@ -196,4 +196,59 @@ describe('ResizableWorkspaceSidebar', () => {
     expect(screen.getByRole('separator', { name: '调整对话协作左栏宽度' })).toHaveAttribute('aria-valuemax', '360');
     expect(window.localStorage.getItem(WORKSPACE_SIDEBAR_STORAGE_KEY)).toBe('460');
   });
+
+  // ===== 管理副屏（side=right）参数化模式 =====
+
+  function renderManagePanelSidebar() {
+    return render(
+      <div>
+        <ResizableWorkspaceSidebar
+          ariaLabel="群管理面板"
+          side="right"
+          minWidth={320}
+          maxWidth={600}
+          defaultWidth={380}
+          storageKey="teamclaw:manage-panel-width"
+        >
+          <div>面板内容</div>
+        </ResizableWorkspaceSidebar>
+        <main>消息区</main>
+      </div>,
+    );
+  }
+
+  it('side=right：手柄在左缘、宽度阈值可访问、不渲染折叠按钮', () => {
+    // 容器 1400px 时 45% 比例钳制不触及 600 上限，验证独立宽度组生效
+    containerWidth = 1400;
+    renderManagePanelSidebar();
+
+    const sidebar = screen.getByLabelText('群管理面板');
+    expect(sidebar).toHaveStyle({ width: '380px' });
+    const separator = screen.getByRole('separator', { name: '调整群管理面板宽度' });
+    expect(separator).toHaveAttribute('aria-valuemin', '320');
+    expect(separator).toHaveAttribute('aria-valuemax', '600');
+    expect(separator).toHaveAttribute('aria-valuenow', '380');
+    // 右侧副屏手柄在左缘
+    expect(separator).toHaveClass('left-0', '-translate-x-1/2');
+    // 右侧副屏由面板开关控制显隐，不提供折叠/展开按钮
+    expect(screen.queryByRole('button', { name: /收起|展开/ })).not.toBeInTheDocument();
+  });
+
+  it('side=right：向左拖动变宽、持久化到独立 key，键盘方向语义反转', () => {
+    containerWidth = 1400;
+    renderManagePanelSidebar();
+    const sidebar = screen.getByLabelText('群管理面板');
+    const separator = screen.getByRole('separator', { name: '调整群管理面板宽度' });
+
+    // 向左拖 60px：380 → 440（右缘手柄方向反转：clientX 减小 = 变宽）
+    dispatchPointer(separator, 'pointerdown', { button: 0, clientX: 500 });
+    dispatchPointer(document, 'pointermove', { clientX: 440 });
+    expect(sidebar).toHaveStyle({ width: '440px' });
+    dispatchPointer(document, 'pointerup', { clientX: 440 });
+    expect(window.localStorage.getItem('teamclaw:manage-panel-width')).toBe('440');
+
+    // 键盘：ArrowLeft 对右侧面板 = 变宽（+8），与左侧栏相反
+    fireEvent.keyDown(separator, { key: 'ArrowLeft' });
+    expect(sidebar).toHaveStyle({ width: '448px' });
+  });
 });

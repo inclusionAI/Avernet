@@ -15,6 +15,9 @@ jest.mock('@/components/CollaborationSquare/BotCard', () => ({
 jest.mock('@/components/CollaborationSquare/BotProfileModal', () => ({
   BotProfileModal: () => null,
 }));
+jest.mock('@/components/CollaborationSquare/SquareIdentityPicker', () => ({
+  SquareIdentityPicker: () => <div data-testid="square-identity-picker" />,
+}));
 
 function buildVm(overrides: Partial<BotCatalogViewModel> = {}): BotCatalogViewModel {
   return {
@@ -44,43 +47,24 @@ function buildVm(overrides: Partial<BotCatalogViewModel> = {}): BotCatalogViewMo
   };
 }
 
-describe('PublicBotCatalogPanel identity display', () => {
-  it('uses the authenticated name only when the active human id matches', () => {
-    const { rerender } = render(
-      <PublicBotCatalogPanel
-        vm={buildVm()}
-        scrollRootRef={{ current: null }}
-        activeIdentity={{ id: 'human_900004', name: '900004', kind: 'user' }}
-        authenticatedUserId="900004"
-        authenticatedUserName="示例用户"
-      />,
-    );
-    expect(screen.getByText('当前工作身份：示例用户')).toBeInTheDocument();
+describe('PublicBotCatalogPanel identity picker', () => {
+  it('嵌入模块级身份选择器，替代原全局身份提示卡', () => {
+    render(<PublicBotCatalogPanel vm={buildVm()} scrollRootRef={{ current: null }} />);
 
-    rerender(
-      <PublicBotCatalogPanel
-        vm={buildVm()}
-        scrollRootRef={{ current: null }}
-        activeIdentity={{ id: 'human_447148', name: '其他用户', kind: 'user' }}
-        authenticatedUserId="900004"
-        authenticatedUserName="示例用户"
-      />,
-    );
-    expect(screen.getByText('当前工作身份：其他用户')).toBeInTheDocument();
-    expect(screen.queryByText('当前工作身份：示例用户')).not.toBeInTheDocument();
+    expect(screen.getByTestId('square-identity-picker')).toBeInTheDocument();
+    expect(screen.getByTestId('square-search')).toBeInTheDocument();
+    expect(screen.queryByText(/当前工作身份/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/左上角工作身份切换/)).not.toBeInTheDocument();
   });
 
-  it('does not replace a Bot identity whose compound id contains the human id', () => {
-    render(
-      <PublicBotCatalogPanel
-        vm={buildVm()}
-        scrollRootRef={{ current: null }}
-        activeIdentity={{ id: 'bot_xxx:900004', name: '协作 Bot', kind: 'bot' }}
-        authenticatedUserId="900004"
-        authenticatedUserName="示例用户"
-      />,
+  it('身份选择器位于搜索栏之前（提示卡原位置）', () => {
+    const { container } = render(<PublicBotCatalogPanel vm={buildVm()} scrollRootRef={{ current: null }} />);
+
+    const picker = screen.getByTestId('square-identity-picker');
+    const search = screen.getByTestId('square-search');
+    expect(container.contains(picker)).toBe(true);
+    expect(picker.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
     );
-    expect(screen.getByText('当前工作身份：协作 Bot')).toBeInTheDocument();
-    expect(screen.queryByText('当前工作身份：示例用户')).not.toBeInTheDocument();
   });
 });

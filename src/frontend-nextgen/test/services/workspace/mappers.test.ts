@@ -1,4 +1,4 @@
-import { mapGroupListItem, mapSessionListItem } from '@/services/workspace/mappers';
+import { mapBcsSessionItem, mapGroupListItem, mapSessionListItem } from '@/services/workspace/mappers';
 import { describe, expect, it } from '@jest/globals';
 
 describe('mappers', () => {
@@ -116,5 +116,55 @@ describe('mappers', () => {
       expect.objectContaining({ actorId: 'b1', kind: 'bot', name: 'Alpha', mode: 'auto' }),
       expect.objectContaining({ actorId: 'human_1', kind: 'human', name: '章梧', mode: 'absent' }),
     ]);
+  });
+});
+
+it('异常协作群列表字段降级为可渲染值，避免高级配置打开时白屏', () => {
+  const view = mapGroupListItem({
+    group_id: 'g-legacy',
+    kind: 'normal',
+    status: 'active',
+    visibility: 'private',
+    originator_actor_id: 'u1',
+    participant_count: { value: 2 },
+    driver_bot_uuid: { value: 'bot-1' },
+    strategy: { value: 'chat' },
+    name: { value: '异常群' },
+    created_at: { value: 1 },
+    updated_at: { value: 2 },
+  } as any);
+
+  expect(view).toMatchObject({
+    groupId: 'g-legacy',
+    name: '未命名群',
+    kind: 'free_chat',
+    participantCount: 0,
+    driverBotUuid: '',
+    createdAt: 0,
+    lastMessageAt: 0,
+  });
+});
+
+it('异常 BCS 会话字段降级为可渲染值', () => {
+  const view = mapBcsSessionItem(
+    {
+      session_id: { value: 's1' },
+      group_id: { value: 'g1' },
+      session_title: { value: '异常会话' },
+      participants: [{ bot_uuid: { value: 'b1' }, bot_name: { value: 'Bot' }, actor_kind: { value: 'bot' } }],
+      participant_count: { value: 1 },
+      created_at: { value: 1 },
+      updated_at: { value: 2 },
+    } as any,
+    'fallback-group',
+  );
+
+  expect(view).toMatchObject({
+    sessionId: '',
+    groupId: 'fallback-group',
+    title: '未命名会话',
+    participants: [{ actorId: '', name: '', kind: 'bot' }],
+    lastMessageAt: 0,
+    createdAt: 0,
   });
 });

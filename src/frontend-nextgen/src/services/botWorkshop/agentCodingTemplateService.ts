@@ -303,33 +303,13 @@ function mapTemplate(item: BotTemplateDto): AgentCodingTemplate | undefined {
   };
 }
 
-const STATIC_OFFICIAL_TEMPLATES: AgentCodingTemplate[] = [
-  {
-    key: 'app_coding',
-    versionId: 'applicationCoding',
-    name: '应用 Bot',
-    description: '面向应用的 AI 编程助手，关联代码仓库与研发工作流',
-    engine: 'claude_code',
-    templateType: 'applicationCoding',
-    source: 'official',
-    fields: [],
-    config: {},
-    capabilityTags: ['多引擎', '成员协作', 'Harness', '工作流'],
-    raw: {},
-    templateCategory: 'official',
-    manualUrl: 'https://yuque.antfin.com/aixcoding/manual/application-coding-bot',
-  },
-];
-
 export const agentCodingTemplateService = {
   async list(): Promise<AgentCodingTemplate[]> {
     const templates = await listAgentCodingTemplates();
     const remote = templates.map(mapTemplate).filter((item): item is AgentCodingTemplate => Boolean(item));
-    // 应用 Bot 等官方选项在旧版里是前端内置的，不能被模板工厂接口返回的同类型
-    // 数据替换掉。模板工厂返回的是另一组可配置模板，两组数据需要同时展示。
     // 仅按 key + versionId 去重，避免接口重复返回完全相同的模板时出现重复卡片。
-    const all = [...STATIC_OFFICIAL_TEMPLATES, ...remote];
-    return all.filter(
+    // 应用 Bot 不再前端写死：由模板工厂接口按需返回，未返回则不展示该入口。
+    return remote.filter(
       (item, index, items) =>
         items.findIndex((candidate) => candidate.key === item.key && candidate.versionId === item.versionId) === index,
     );

@@ -142,6 +142,46 @@ describe('BotTable conversation action', () => {
 
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
+  test('非 Owner 对话入口置灰并提示原因', () => {
+    const bot = mapBotDto({ bot_id: 'b4', bot_name: 'Shared Bot', engine: 'openclaw', actions: ['chat'] }).item;
+    const onConversation = jest.fn();
+    renderTable(bot, {
+      onConversation,
+      canOpenConversation: () => false,
+      getInventoryActions: () => ({ chat: { action: 'chat', visible: true, enabled: true } }),
+    });
+    expect(screen.getByRole('button', { name: '与 Shared Bot 对话' })).toBeDisabled();
+    expect(onConversation).not.toHaveBeenCalled();
+  });
+  test('团队空间新增 Owner 列并显示名称', () => {
+    const bot = {
+      ...mapBotDto({
+        bot_id: 'b5',
+        bot_name: 'Team Bot',
+        engine: 'openclaw',
+        owner_entity_id: '1001',
+        space: { space_id: '1', kind: 'team' },
+      }).item,
+      ownerName: '小华',
+    };
+    renderTable(bot);
+    expect(screen.getByRole('columnheader', { name: 'Owner' })).toBeInTheDocument();
+    expect(screen.getByText('小华')).toBeInTheDocument();
+  });
+});
+
+test('TeClaw 即使后端声明重启动作也置灰容器与引擎入口', () => {
+  const bot = mapBotDto({
+    bot_id: 'te-1',
+    bot_name: 'Te Bot',
+    engine: 'teclaw',
+    status: 'ACTIVE',
+    actions: ['restart', 'engine_restart', 'view'],
+  }).item;
+  renderTable(bot, { onAction: jest.fn().mockResolvedValue(undefined) });
+  fireEvent.click(screen.getByRole('button', { name: '管理 Te Bot' }));
+  expect(screen.getByRole('button', { name: /重启 Bot/ })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /重启引擎/ })).toBeDisabled();
 });
 
 describe('BotTable backend action contract', () => {
@@ -482,6 +522,27 @@ describe('Agent Coding Bot row actions', () => {
     expect(screen.queryByText('重启引擎')).not.toBeInTheDocument();
     expect(screen.queryByText('发布与阶段推进')).not.toBeInTheDocument();
     expect(screen.queryByText('授权')).not.toBeInTheDocument();
+  });
+
+  test('Coding Bot 点击整行进入对话而非详情', () => {
+    const bot = mapBotDto({
+      bot_id: 'general-row-click',
+      bot_name: 'GeneralCC 行点击 Bot',
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      bot_type: 'personal',
+      display_state: 'running',
+      actions: ['chat'],
+    }).item;
+    const onConversation = jest.fn();
+    const onView = jest.fn();
+
+    render(<BotTable bots={[bot]} onView={onView} onConversation={onConversation} />);
+
+    fireEvent.click(dataRow());
+
+    expect(onConversation).toHaveBeenCalledWith(bot);
+    expect(onView).not.toHaveBeenCalled();
   });
 });
 

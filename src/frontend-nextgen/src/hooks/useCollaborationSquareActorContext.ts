@@ -1,6 +1,11 @@
-import type { BotCatalogViewer, FriendRequestActor, HumanBotActionContext } from '@/domain/collaborationSquare/types';
+import type {
+  BotCatalogViewer,
+  FriendRequestActor,
+  HumanBotActionContext,
+  SquareResource,
+} from '@/domain/collaborationSquare/types';
 import { useHumanIdentity, type HumanIdentityStatus } from '@/hooks/useHumanIdentity';
-import { useWorkIdentityAccess } from '@/hooks/useWorkIdentityAccess';
+import { useSquareIdentity } from '@/hooks/useSquareIdentity';
 import { useEffect, useMemo, useRef } from 'react';
 
 interface CollaborationSquareActorContext {
@@ -10,24 +15,32 @@ interface CollaborationSquareActorContext {
   activeActor: FriendRequestActor | null;
 }
 
-export function useCollaborationSquareActorContext(resetSquare: () => void): CollaborationSquareActorContext {
+/**
+ * 发现菜单三 Tab 的操作身份来源（docs/specs/2026-09-23-discovery-tab-identity/spec.md）：
+ * - bot：模块级工作身份（useSquareIdentity，默认登录用户身份，可选 Bot 身份）；
+ * - group / task：固定登录用户身份，不以 Bot 身份操作；
+ * 不读取全局 workspaceStore.activeIdentityId——发现菜单已与左上角全局身份脱钩。
+ */
+export function useCollaborationSquareActorContext(
+  resource: SquareResource,
+  resetSquare: () => void,
+): CollaborationSquareActorContext {
   const { identity: humanIdentity, status: humanIdentityStatus } = useHumanIdentity();
-  const { activeIdentity } = useWorkIdentityAccess();
+  const { selectedIdentity, userIdentity } = useSquareIdentity();
+  const identity = resource === 'bot' ? selectedIdentity : userIdentity;
   const humanBotContext = useMemo<HumanBotActionContext | null>(
-    () =>
-      activeIdentity && humanIdentity?.userId ? { actorId: activeIdentity.id, userId: humanIdentity.userId } : null,
-    [activeIdentity, humanIdentity?.userId],
+    () => (identity && humanIdentity?.userId ? { actorId: identity.id, userId: humanIdentity.userId } : null),
+    [identity, humanIdentity?.userId],
   );
   const viewer = useMemo<BotCatalogViewer | null>(
     () =>
-      activeIdentity
+      identity
         ? {
-            viewerActorType: activeIdentity.kind === 'user' ? 'human' : 'bot',
-            viewerActorId:
-              activeIdentity.kind === 'user' ? humanIdentity?.userId ?? activeIdentity.id : activeIdentity.id,
+            viewerActorType: identity.kind === 'user' ? 'human' : 'bot',
+            viewerActorId: identity.kind === 'user' ? humanIdentity?.userId ?? identity.id : identity.id,
           }
         : null,
-    [activeIdentity, humanIdentity?.userId],
+    [identity, humanIdentity?.userId],
   );
   const activeActor = useMemo<FriendRequestActor | null>(
     () => (viewer ? { type: viewer.viewerActorType, id: viewer.viewerActorId } : null),

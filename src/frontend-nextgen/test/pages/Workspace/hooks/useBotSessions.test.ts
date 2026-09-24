@@ -13,6 +13,7 @@ const svc = botSessionService as unknown as {
   createSession: jest.Mock<any>;
   deleteSession: jest.Mock<any>;
   getSessionDetail: jest.Mock<any>;
+  updateSessionTitle: jest.Mock<any>;
 };
 
 const bot: ChatBotView = { botId: 'b:1', realBotId: 'b', ownerId: '1', displayName: 'B', online: true, chatable: true };
@@ -41,10 +42,14 @@ beforeEach(() => {
   svc.listFavoriteSessionsPage.mockResolvedValue({ ok: true, data: { items: [], total: 0 } });
   svc.createSession.mockResolvedValue({
     ok: true,
-    data: { sessionId: 's3', botId: 'b:1', title: '新', messageCount: 0, gmtModified: '', gmtCreate: '' },
+    data: { sessionId: 's3', botId: 'b:1', title: '新会话', messageCount: 0, gmtModified: '', gmtCreate: '' },
   });
   svc.deleteSession.mockResolvedValue({ ok: true, data: null });
   svc.getSessionDetail.mockResolvedValue({ ok: false });
+  svc.updateSessionTitle.mockResolvedValue({
+    ok: true,
+    data: { ...s1, title: '首条消息标题' },
+  });
 });
 
 it('展开 bot 时懒加载会话并缓存', async () => {
@@ -68,6 +73,7 @@ it('createSession 选中新建会话并前置', async () => {
     await result.current.createSession(bot);
   });
   await waitFor(() => expect(result.current.selectedBotSessionId).toBe('s3'));
+  expect(svc.createSession).toHaveBeenCalledWith(bot, 'human-1', '新会话');
 });
 
 it('deleteSession 后从列表移除', async () => {
@@ -77,6 +83,55 @@ it('deleteSession 后从列表移除', async () => {
     await result.current.deleteSession(bot, 's1');
   });
   await waitFor(() => expect(result.current.sessionsByBotId['b:1'].find((s) => s.sessionId === 's1')).toBeUndefined());
+});
+
+it('标题为新会话且 messageCount 为 0 时首发自动重命名并同步会话列表', async () => {
+  const { result } = renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
+  await waitFor(() => expect(result.current.sessionsByBotId['b:1']).toHaveLength(2));
+
+  let renamed = false;
+  await act(async () => {
+    renamed = await result.current.renameSessionOnFirstMessage(bot, { ...s1, title: '新会话' }, '  首条消息标题  ');
+  });
+
+  expect(renamed).toBe(true);
+  expect(svc.updateSessionTitle).toHaveBeenCalledWith(bot, 'human-1', 's1', '首条消息标题');
+  expect(result.current.sessionsByBotId['b:1'].find((item) => item.sessionId === 's1')?.title).toBe('首条消息标题');
+});
+
+it('首发自动重命名按 session 幂等，标题非新会话或 messageCount 大于 0 时跳过', async () => {
+  const { result } = renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
+  await waitFor(() => expect(result.current.sessionsByBotId['b:1']).toHaveLength(2));
+
+  await act(async () => {
+    await result.current.renameSessionOnFirstMessage(bot, { ...s1, title: '新会话' }, '第一条');
+    await result.current.renameSessionOnFirstMessage(bot, { ...s1, title: '新会话' }, '重复提交');
+    await result.current.renameSessionOnFirstMessage(bot, { ...s2, title: '已命名' }, '标题已改');
+    await result.current.renameSessionOnFirstMessage(bot, { ...s2, messageCount: 2 }, '已有消息');
+  });
+
+  expect(svc.updateSessionTitle).toHaveBeenCalledTimes(1);
+});
+
+it('首发自动重命名失败返回 false，且同一会话不在后续发送中重试', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  svc.updateSessionTitle.mockResolvedValueOnce({
+    ok: false,
+    error: { code: 'FAILED', friendlyMessage: '更新失败', canRetry: true },
+  });
+  const { result } = renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
+  await waitFor(() => expect(result.current.sessionsByBotId['b:1']).toHaveLength(2));
+
+  let renamed = true;
+  await act(async () => {
+    renamed = await result.current.renameSessionOnFirstMessage(bot, { ...s1, title: '新会话' }, '第一条');
+    await result.current.renameSessionOnFirstMessage(bot, { ...s1, title: '新会话' }, '第二条');
+  });
+
+  expect(renamed).toBe(false);
+  expect(svc.updateSessionTitle).toHaveBeenCalledTimes(1);
+  expect(warn).toHaveBeenCalledWith('[useBotSessionTitleActions] 首条消息自动重命名失败:', '更新失败');
+  warn.mockRestore();
 });
 
 function makeSessions(prefix: string, count: number): BotChatSessionView[] {
@@ -133,6 +188,17 @@ it('重复点击加载更多只发起一次请求', async () => {
   await act(async () => {
     await Promise.all([firstLoad!, secondLoad!]);
   });
+});
+
+it('TEClaw Bot 不请求已收藏会话列表', async () => {
+  const teclawBot: ChatBotView = { ...bot, engine: 'teclaw' };
+  const { result } = renderHook(() => useBotSessions([teclawBot], ['b:1'], 'human-1'));
+
+  await act(async () => {
+    await result.current.loadFavoriteSessions('b:1');
+  });
+
+  expect(svc.listFavoriteSessionsPage).not.toHaveBeenCalled();
 });
 
 it('收藏会话独立分页，加载失败后允许重试', async () => {

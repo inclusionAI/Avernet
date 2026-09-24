@@ -1,9 +1,9 @@
-import { Headphones, RefreshCw, Sparkles } from 'lucide-react';
-
 import { getCapabilities } from '@/capabilities';
-import { Badge, Empty } from '@/components/ui';
+import { Empty, Skeleton } from '@/components/ui';
+import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
 import type { IdentityView } from '@/domain/collaboration';
+import { useMessageAreaSkeleton } from '@/pages/Workspace/hooks/useMessageAreaSkeleton';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import {
   buildExplainPrompt,
@@ -16,12 +16,11 @@ import type { ChatBridge, ChatMessage, PanelAction, PanelHandle } from '@tc-chat
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import type { CommandConfig, FileChipConfig, SenderRef, SubmitContext } from '@tc-chat/ui/es/Sender';
 import { Sender, ToolbarButton } from '@tc-chat/ui/es/Sender';
+import { Headphones, RefreshCw, Sparkles } from 'lucide-react';
 import { useEffect, type ReactNode, type RefObject } from 'react';
 import { ChatMessageList } from './ChatMessageList';
 import { getMessageBlocks, getMessageTime, resolveSingleSender } from './chatPanelPresentation';
-
 export { resolveSingleSender } from './chatPanelPresentation';
-
 interface Props {
   target: ConversationTarget | null;
   /** 当前查看身份，用于在消息区展示真实发送者名称，避免使用有歧义的「你」。 */
@@ -61,8 +60,14 @@ interface Props {
    * SenderRef 是 BridgeInputRef 超集；原生 Sender 是 forwardRef（ChatLayout.Sender 非 forwardRef,ref 恒 null）。
    */
   inputRef?: RefObject<SenderRef>;
+  /** 当前会话标题（单聊选中会话后顶栏显示会话名，与协作群顶栏一致；缺省回退 target.name）。 */
+  sessionTitle?: string;
+  /** <lg 打开单聊会话列表。 */
+  onOpenSessionList?: () => void;
+  historyPagination?: { hasMore: boolean; isLoading: boolean; onLoadMore: () => void };
+  /** 打开会话文件面板（验收微调：文件管理入口迁至顶栏，与协作群位置规则一致；缺省不渲染入口）。 */
+  onManageFiles?: () => void;
 }
-
 export function ChatPanel({
   target,
   viewer,
@@ -92,6 +97,10 @@ export function ChatPanel({
   interactive,
   taskComposer,
   inputRef,
+  sessionTitle,
+  onOpenSessionList,
+  historyPagination,
+  onManageFiles,
 }: Props) {
   const messageInteractions = useMessageInteractions({
     sessionId: target?.id,
@@ -99,13 +108,15 @@ export function ChatPanel({
     isRequesting,
     onStop,
   });
+  // 消息区两态强制（Spec AC-3/AC-7，预览反馈第五轮）：空消息一律骨架屏，确认后的真空会话
+  // 才显示空态；demo 模式不接入（保持演示空态）。
+  const messageAreaSkeleton = useMessageAreaSkeleton({ messages, status: connectionStatus });
   const { editingMessageId, editMessage, cancelEdit, finishEdit } = useMessageEdit({
     sessionId: target?.id,
     isRequesting,
     onDraftChange,
     inputRef: senderRef,
   });
-
   const quoteSelectedMessage = (text: string) => {
     if (!target) return;
     const selectedMessage = messages.find((message) => message.id === messageInteractions.selection?.messageId);
@@ -139,13 +150,11 @@ export function ChatPanel({
     finishEdit();
     senderRef?.current?.focus();
   };
-
   // 把 bridge 的 inputRef.current 同步到 senderRef.current（native Sender ref），保证 aixcore 卡片
   // bridge.getInputRef().insert(text) 能填入主屏输入框（根因 5 修复）。
   useEffect(() => {
     if (inputRef) (inputRef as { current: SenderRef | null }).current = senderRef?.current ?? null;
   });
-
   // 空态欢迎文案的产品名经 capability 解析（Open=Avernet；internal=TeamClaw），不硬编码。
   const brand = getCapabilities().getProductBrand().value;
   if (!target) {
@@ -159,25 +168,24 @@ export function ChatPanel({
       </section>
     );
   }
-
   const isSupport = target.demoMode === 'teamclaw-support';
   const resolvedMode = mode ?? (isSupport ? 'support' : 'demo');
   const isInteractive = interactive ?? resolvedMode !== 'demo';
   const chatLabel = resolvedMode === 'bot' ? 'Bot 单聊' : '在线客服';
+  // 连接状态文案：输入为 useSessionDisplayStatus 合成语义（Spec: docs/specs/workspace-session-connection-display.md），
+  // 不再消费业务 phase——「准备中」等实现细节已在合成层收敛为 connecting；错误详情仍取 provider phase 的 error 信息。
   const connectionCopy =
     resolvedMode === 'demo'
       ? { label: '未接入', tone: 'neutral' as const, detail: '演示会话尚未接入在线服务' }
-      : supportState.phase === 'preparing'
-      ? { label: '准备中', tone: 'warning' as const, detail: `${chatLabel}环境正在准备` }
       : connectionStatus === 'connected'
-      ? { label: '在线', tone: 'success' as const, detail: '' }
+      ? { label: '已连接', tone: 'success' as const, detail: '' }
       : connectionStatus === 'reconnecting'
       ? { label: '重连中', tone: 'warning' as const, detail: `正在重连${retryCount ? `（第 ${retryCount} 次）` : ''}` }
       : connectionStatus === 'connecting'
       ? { label: '连接中', tone: 'warning' as const, detail: `正在建立${chatLabel}连接` }
-      : connectionStatus === 'error' || supportState.phase === 'error'
+      : connectionStatus === 'error'
       ? { label: '连接失败', tone: 'error' as const, detail: supportState.error || `${chatLabel}连接失败` }
-      : { label: '离线', tone: 'neutral' as const, detail: `${chatLabel}未建立` };
+      : { label: '已断开', tone: 'neutral' as const, detail: `${chatLabel}未建立` };
 
   const submit = (content: string, context?: SubmitContext) => {
     if (!content.trim() || isRequesting) return;
@@ -193,39 +201,42 @@ export function ChatPanel({
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <ChatLayout className="min-h-0 flex-1">
-        <ChatLayout.Header
-          className="flex h-16 border-b border-border bg-card px-3 sm:px-5"
-          slotLeft={
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                {target.avatar}
-              </span>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="m-0 truncate text-sm font-semibold">{target.name}</h2>
-                  <Badge tone={connectionCopy.tone}>{connectionCopy.label}</Badge>
-                </div>
-                <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">{target.summary}</p>
-              </div>
-            </div>
-          }
+        <ChatPanelHeader
+          target={target}
+          sessionTitle={sessionTitle}
+          connectionLabel={connectionCopy.label}
+          connectionTone={connectionCopy.tone}
+          onOpenSessionList={onOpenSessionList}
+          onManageFiles={onManageFiles}
         />
 
-        <ChatMessageList
-          messages={messages}
-          isRequesting={isRequesting}
-          isLoadingMessages={isLoadingMessages}
-          interactions={messageInteractions}
-          onStop={onStop}
-          onEditMessage={editMessage}
-          onQuoteSelected={quoteSelectedMessage}
-          onExplainSelected={explainSelectedMessage}
-          resolveSender={(message) =>
-            resolveSingleSender(message, target, viewer, userAvatarUrl, authenticatedUserId, authenticatedUserName)
-          }
-          getMessageTime={getMessageTime}
-          getMessageBlocks={getMessageBlocks}
-        />
+        {/* 消息区两态强制：空消息区一律骨架屏，空态文案仅对确认后的真空会话渲染；demo 保持原空态。 */}
+        {resolvedMode !== 'demo' && messageAreaSkeleton ? (
+          <div className="flex min-h-0 flex-1 flex-col space-y-3 px-3 py-6 sm:px-6" aria-label="加载会话消息">
+            <Skeleton.Block className="h-12 w-3/4 rounded-xl" />
+            <Skeleton.Block className="h-12 w-2/3 rounded-xl" />
+            <Skeleton.Block className="h-12 w-5/6 rounded-xl" />
+          </div>
+        ) : (
+          <ChatMessageList
+            messages={messages}
+            isRequesting={isRequesting}
+            isLoadingMessages={isLoadingMessages}
+            interactions={messageInteractions}
+            onStop={onStop}
+            onEditMessage={editMessage}
+            onQuoteSelected={quoteSelectedMessage}
+            onExplainSelected={explainSelectedMessage}
+            resolveSender={(message) =>
+              resolveSingleSender(message, target, viewer, userAvatarUrl, authenticatedUserId, authenticatedUserName)
+            }
+            getMessageTime={getMessageTime}
+            getMessageBlocks={getMessageBlocks}
+            hasMoreHistory={historyPagination?.hasMore}
+            isLoadingMoreHistory={historyPagination?.isLoading}
+            onLoadMoreHistory={historyPagination?.onLoadMore}
+          />
+        )}
 
         {/* 单聊输入框用原生 <Sender>(forwardRef,暴露 SenderRef)替代 <ChatLayout.Sender>(普通函数组件,非 forwardRef,
             ref 恒 null)。ref={senderRef} 经 useChatBridge.setInputRef 注册到全局桥,使 aixcore 卡片

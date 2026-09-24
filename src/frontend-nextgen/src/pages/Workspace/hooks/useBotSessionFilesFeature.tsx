@@ -1,14 +1,16 @@
 /** useBotSessionFilesFeature — 装配单聊会话文件的上传/管理/引用 + /clear /skill 命令,
- *  返回 ChatPanel 所需的 fileChip / command / fileToolbar / senderRef / 弹窗节点。 */
-import { BotSessionFilesModal } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFilesModal';
+ *  返回 ChatPanel 所需的 fileChip / command / fileToolbar / senderRef / 副屏面板节点。 */
+import { BotSessionFilesPanel } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel';
 import { BotUploadFilesModal } from '@/pages/Workspace/components/BotSessionFiles/UploadFilesModal';
+import { ResizableWorkspaceSidebar } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
+import { buildBotSessionCommandItems } from '@/pages/Workspace/hooks/botSessionCommandItems';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
 import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import type { CommandConfig, CommandItem, FileChipConfig, PendingFileChip, SenderRef } from '@tc-chat/ui/es/Sender';
-import { Eraser, FileIcon, Zap } from 'lucide-react';
+import { FileIcon, Zap } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -18,8 +20,12 @@ export interface UseBotSessionFilesFeatureResult {
   command: CommandConfig;
   fileToolbar: React.ReactNode;
   featureNode: React.ReactNode;
-  /** 打开文件管理 Modal（供 ComposerCapabilitiesMenu onManageFiles 调用）。 */
+  /** 打开文件管理副屏（验收微调：入口迁至顶栏，供 ChatPanel onManageFiles 调用）。 */
   openFileDrawer: () => void;
+  /** 关闭文件管理副屏（供 ChatPanel 顶栏入口的选中态切换）。 */
+  closeFileDrawer: () => void;
+  /** 文件管理副屏当前是否打开（供顶栏入口选中态反馈）。 */
+  fileDrawerOpen: boolean;
   /** 打开文件上传 Modal（供 ComposerCapabilitiesMenu onUpload 调用）。 */
   openUpload: () => void;
 }
@@ -30,7 +36,7 @@ export function useBotSessionFilesFeature(
   userId: string | null,
   onClear: () => Promise<void>,
 ): UseBotSessionFilesFeatureResult {
-  const botId = bot?.realBotId ?? null;
+  const botId = bot?.botType === 'desktop' ? null : bot?.realBotId ?? null;
   const sessionId = session?.sessionId ?? null;
   const ownerId = bot?.ownerId;
 
@@ -122,63 +128,20 @@ export function useBotSessionFilesFeature(
     [skillsState.skills],
   );
 
-  const commandItems = useMemo<CommandItem[]>(() => {
-    const skillCommand: CommandItem = {
-      id: '__skill_entry__',
-      name: 'skill',
-      description: '唤起技能面板',
-      icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" />,
-      preventInsert: true,
-      subConfig: {
-        label: '技能',
-        categories: [
-          {
-            key: '__skill_list__',
-            label: '技能',
-            icon: <Zap className="h-3.5 w-3.5" />,
-            items: skillItems,
-            emptyText: skillsState.isLoading ? '加载中…' : '暂无可用技能',
-          },
-        ],
-        onSelect: (item) => {
-          if (item.name) handleSelectSkill(item.name);
-        },
-        format: (item) => `/${item.name}`,
-      },
-    };
-    return [
-      ...(canUseSkills ? [skillCommand] : []),
-      {
-        id: '__file_entry__',
-        name: 'file',
-        description: '引用本会话已上传的文件',
-        icon: <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />,
-        preventInsert: true,
-        subConfig: {
-          label: '文件',
-          categories: [
-            {
-              key: '__session_file__',
-              label: '文件',
-              icon: <FileIcon className="h-3.5 w-3.5" />,
-              items: fileSubItems,
-              emptyText: files.isLoadingList ? '加载中…' : '暂无可引用文件,请先上传',
-            },
-          ],
-          onSelect: () => {},
-          format: () => '',
-        },
-      },
-      {
-        id: '__clear__',
-        name: 'clear',
-        description: '清空当前会话上下文',
-        icon: <Eraser className="h-3.5 w-3.5 text-muted-foreground" />,
-        preventInsert: true,
-        onSelect: () => void onClear(),
-      },
-    ];
-  }, [canUseSkills, skillItems, fileSubItems, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill]);
+  // /skill /file /clear 命令项装配抽取到 botSessionCommandItems.tsx（纯配置，行为不变）。
+  const commandItems = useMemo<CommandItem[]>(
+    () =>
+      buildBotSessionCommandItems({
+        canUseSkills,
+        skillItems,
+        fileSubItems,
+        skillsLoading: skillsState.isLoading,
+        filesLoading: files.isLoadingList,
+        onClear,
+        onSelectSkill: handleSelectSkill,
+      }),
+    [canUseSkills, skillItems, fileSubItems, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
+  );
 
   const command = useMemo<CommandConfig>(
     () => ({
@@ -195,11 +158,12 @@ export function useBotSessionFilesFeature(
     [commandItems],
   );
 
-  // 上传文件/文件管理已移入 ComposerCapabilitiesMenu（onUpload/onManageFiles），
-  // fileToolbar 不再渲染独立按钮，避免与 + 号菜单重复。
+  // 上传文件仍在 ComposerCapabilitiesMenu（onUpload）；文件管理入口已迁至单聊顶栏
+  // （ChatPanel onManageFiles → openFileDrawer），fileToolbar 不渲染独立按钮。
   const fileToolbar = useMemo(() => null, []);
 
   const openFileDrawer = useCallback(() => setDrawerOpen(true), []);
+  const closeFileDrawer = useCallback(() => setDrawerOpen(false), []);
   const openUpload = useCallback(() => setUploadOpen(true), []);
 
   const featureNode = (
@@ -216,24 +180,46 @@ export function useBotSessionFilesFeature(
         onAddToSession={addReadyUploadsToSession}
         removeTask={upload.removeTask}
       />
-      <BotSessionFilesModal
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        sessionName={session?.title || bot?.displayName || '当前会话'}
-        readyFiles={files.readyFiles}
-        isLoadingList={files.isLoadingList}
-        botId={botId}
-        sessionId={sessionId}
-        userId={userId}
-        ownerId={ownerId}
-        onUploadClick={() => setUploadOpen(true)}
-        onOpen={() => void files.refresh()}
-        onDelete={(f) => void files.deleteFile(f)}
-        onDownload={(f) => void files.downloadFile(f)}
-        onReference={handleReference}
-      />
+      {drawerOpen && (
+        // 验收微调：单聊文件管理由全屏 Modal 改为右侧副屏（与协作群 SessionFilesPanel 同构容器）。
+        <ResizableWorkspaceSidebar
+          ariaLabel="会话文件面板"
+          side="right"
+          minWidth={320}
+          maxWidth={600}
+          defaultWidth={380}
+          storageKey="teamclaw:bot-files-panel-width"
+          className="z-30 bg-background"
+        >
+          <BotSessionFilesPanel
+            sessionName={session?.title || bot?.displayName || '当前会话'}
+            readyFiles={files.readyFiles}
+            isLoadingList={files.isLoadingList}
+            botId={botId ?? undefined}
+            sessionId={sessionId ?? undefined}
+            userId={userId ?? undefined}
+            ownerId={ownerId}
+            onClose={closeFileDrawer}
+            onUploadClick={() => setUploadOpen(true)}
+            onOpen={() => void files.refresh()}
+            onDelete={(f) => void files.deleteFile(f)}
+            onDownload={(f) => void files.downloadFile(f)}
+            onReference={handleReference}
+          />
+        </ResizableWorkspaceSidebar>
+      )}
     </>
   );
 
-  return { senderRef, fileChip, command, fileToolbar, featureNode, openFileDrawer, openUpload };
+  return {
+    senderRef,
+    fileChip,
+    command,
+    fileToolbar,
+    featureNode,
+    openFileDrawer,
+    closeFileDrawer,
+    fileDrawerOpen: drawerOpen,
+    openUpload,
+  };
 }

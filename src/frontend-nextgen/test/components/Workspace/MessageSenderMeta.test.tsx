@@ -40,4 +40,18 @@ describe('MessageSenderLayout', () => {
     expect(meta).toHaveClass('justify-end', 'text-right');
     expect(meta).not.toHaveClass('pr-11');
   });
+
+  it('验收微调：名称/时间行与 28px 头像光学居中（mt-1.5）且与内容首行留呼吸间距（mb-2）', () => {
+    render(
+      <MessageSenderLayout
+        avatar={avatar}
+        align="left"
+        meta={<MessageSenderMeta name="风太OC" time="09-14 10:00" align="left" />}
+      >
+        <div data-testid="message-content">消息内容</div>
+      </MessageSenderLayout>,
+    );
+    const meta = screen.getByTestId('message-sender-meta');
+    expect(meta).toHaveClass('mt-1.5', 'mb-2');
+  });
 });

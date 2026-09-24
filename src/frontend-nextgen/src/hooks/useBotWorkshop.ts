@@ -8,8 +8,8 @@ import { botHealthCheckService } from '@/services/botHealthCheck';
 import type { BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService, getBotActionAvailability, getInventoryActionAvailability } from '@/services/botWorkshop';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
-import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { getBotManagementErrorMessage } from '@/services/botWorkshop/botWorkshopErrorPolicy';
+import { localBotService } from '@/services/botWorkshop/localBotService';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
@@ -18,17 +18,23 @@ import { toast } from 'sonner';
 import { useAgentCodingTemplates } from './useAgentCodingTemplates';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
 import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
+import { useBotWorkshopLocks } from './useBotWorkshopLocks';
 
 /** 动作名即路由键：新增动词时补一行 runner/toast，漏补会在编译期报错而非静默无操作。 */
 const RUN_ACTION_RUNNER: Record<BotManagementVerb, (bot: BotDomain) => Promise<void>> = {
+  open_folder: async (bot) => {
+    await localBotService.openFolder(bot.id);
+  },
   delete: (bot) => botWorkshopService.remove(bot),
   restart: (bot) => botWorkshopService.restart(bot),
-  engine_restart: (bot) => botWorkshopService.restartEngine(bot.id),
+  engine_restart: (bot) =>
+    bot.deployment === 'local' ? botWorkshopService.restart(bot) : botWorkshopService.restartEngine(bot.id),
   upgrade: (bot) => botWorkshopService.enableService(bot.id),
   restart_publish: (bot) => botWorkshopService.restartPublish(bot),
 };
 
 const RUN_ACTION_SUCCESS_TOAST: Record<BotManagementVerb, string> = {
+  open_folder: '打开目录请求已提交',
   delete: 'Bot 已删除',
   restart: '重启请求已提交',
   engine_restart: '重启请求已提交',
@@ -80,6 +86,7 @@ export function useBotWorkshop() {
           page,
           pageSize,
         });
+        result.items = await botManagementService.fillOwnerNames(result.items, currentOpenApiUserId);
         if (sequence !== loadSequence.current) return;
         state.setResult({
           items: result.items,
@@ -134,7 +141,30 @@ export function useBotWorkshop() {
   const runAction = useCallback(
     async (action: BotManagementVerb, bot: BotDomain) => {
       try {
+        if (bot.runtime?.engine === 'teclaw' && ['restart', 'engine_restart', 'restart_publish'].includes(action))
+          throw new Error('TeClaw 暂不支持重启操作');
         await RUN_ACTION_RUNNER[action](bot);
+        if (action === 'delete' && bot.deployment === 'local') {
+          useWorkspaceStore.setState((workspace) => {
+            const expandedBotIds = { ...workspace.expandedBotIds };
+            const expandedBotSectionKey = { ...workspace.expandedBotSectionKey };
+            delete expandedBotIds[bot.id];
+            delete expandedBotSectionKey[bot.id];
+            return {
+              expandedBotIds,
+              expandedBotSectionKey,
+              selectedBotSessionId: workspace.expandedBotIds[bot.id] ? null : workspace.selectedBotSessionId,
+              lastSessionByIdentity: Object.fromEntries(
+                Object.entries(workspace.lastSessionByIdentity).map(([id, memo]) => [
+                  id,
+                  memo.expandedBotId === bot.id
+                    ? { ...memo, expandedBotId: null, botSessionId: null, botSectionKey: null }
+                    : memo,
+                ]),
+              ),
+            };
+          });
+        }
         toast.success(RUN_ACTION_SUCCESS_TOAST[action]);
         await load();
       } catch (error) {
@@ -145,29 +175,12 @@ export function useBotWorkshop() {
     },
     [load],
   );
-  const claimLock = useCallback(
-    async (bot: BotDomain) => {
-      const toastId = toast.loading('正在抢占编辑锁...');
-      try {
-        await botManagementService.stealEditLock(bot);
-        toast.success('已成功获取编辑锁', { id: toastId });
-        await load();
-        const params = new URLSearchParams({
-          type: 'edit',
-          id: bot.id,
-          runtime_stage: resolveBotRuntimeStage(bot.lifecycle),
-        });
-        history.push(`/bot-workshop/detail?${params.toString()}`);
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : '抢占编辑锁失败', { id: toastId });
-        throw error;
-      }
-    },
-    [load],
-  );
+  const locks = useBotWorkshopLocks(load);
   return {
     ...state,
     spaceId,
+    currentSpaceKind: currentSpace?.spaceType === 'TEAM' ? 'team' : 'personal',
+    canOpenConversation: (bot: BotDomain) => Boolean(currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),
     loading: requestIdentity.loading || spaceLoading || !spaceInitialized || state.loading,
     error: requestIdentity.error ?? spaceError ?? state.error,
     retry: load,
@@ -209,7 +222,7 @@ export function useBotWorkshop() {
     },
     submitCreate: createFlow.submitCreate,
     runAction,
-    claimLock,
+    ...locks,
     ...accessControl,
     logActionFor: (bot: BotDomain) =>
       getBotActionAvailability(bot, { apiReady: { logs: true } }).find((action) => action.action === 'logs'),

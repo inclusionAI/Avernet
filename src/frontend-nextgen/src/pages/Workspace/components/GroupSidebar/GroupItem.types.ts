@@ -1,4 +1,4 @@
-import type { GroupView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
+import type { GroupView, IdentityView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
 
 export type SessionTab = 'all' | 'favorite';
@@ -21,6 +21,14 @@ export interface GroupItemProps {
   viewerKind: 'user' | 'bot';
   onManageGroup: (groupId: string) => void;
   onManageSession: (groupId: string, sessionId: string) => void;
+  /** 会话列表菜单：重命名会话（能力对齐管理面板，按 sessionId 参数化）。 */
+  onRenameSession?: (sessionId: string, title: string) => Promise<boolean>;
+  /** 会话列表菜单：删除会话。 */
+  onDeleteSession?: (sessionId: string) => Promise<boolean>;
+  /** 会话列表菜单：生成会话邀请链接。 */
+  onShareSession?: (sessionId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
+  /** 当前身份（会话编辑/删除权限判断：创建者或 driver/manager）。 */
+  activeIdentity?: IdentityView | null;
   onShareGroup: (groupId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
   onDissolveGroup: (groupId: string) => void;
   totalSessionCount?: number;

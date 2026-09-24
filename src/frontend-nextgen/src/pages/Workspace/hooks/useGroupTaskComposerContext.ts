@@ -10,12 +10,15 @@ export function useGroupTaskComposerContext(
 ) {
   return useMemo<TaskComposerContext | null>(() => {
     if (!group || !session || activeIdentity?.kind !== 'user') return null;
-    const ownerBot = group.participants.find((p) => p.kind === 'bot');
-    if (!ownerBot || !activeIdentity?.id) return null;
+    const fallbackOwnerBot =
+      group.participants.find((p) => p.kind === 'bot' && (p.role === 'driver' || p.role === 'manager')) ??
+      group.participants.find((p) => p.kind === 'bot');
+    const ownerBotId = group.driverBotUuid?.trim() || fallbackOwnerBot?.actorId;
+    if (!ownerBotId || !activeIdentity?.id) return null;
     return {
       sourceType: 'coop_group',
       ownerUserId: resolveUserId(activeIdentity.id),
-      ownerBotId: ownerBot.actorId,
+      ownerBotId,
       mainSessionId: session.sessionId,
       mainSessionName: session.title,
       sourceGroupId: group.groupId,

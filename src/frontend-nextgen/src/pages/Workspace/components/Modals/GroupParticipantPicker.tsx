@@ -77,7 +77,7 @@ export function GroupParticipantPicker({
         <span className="text-xs font-semibold text-foreground">
           成员 Bot <span className="text-destructive">*</span>
         </span>
-        <span className="rounded-lg border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+        <span className="rounded-lg border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
           已选 {selectedIds.length} 个
         </span>
       </div>
@@ -191,7 +191,7 @@ export function GroupParticipantPicker({
                   className={cn(
                     'h-auto min-w-0 w-full max-w-full justify-start gap-2 rounded-none border-0 px-3 py-2 text-left',
                     unknown
-                      ? 'cursor-not-allowed bg-muted/50 text-muted-foreground'
+                      ? 'cursor-not-allowed bg-muted/40 text-muted-foreground'
                       : cardMode
                       ? selected
                         ? 'rounded-lg border border-primary bg-primary/10 hover:bg-primary/10'
@@ -203,7 +203,7 @@ export function GroupParticipantPicker({
                   )}
                   onClick={() => onToggle(bot.id)}
                 >
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
                     {avatarText(bot.name)}
                   </span>
                   <span className="min-w-0 flex-1">

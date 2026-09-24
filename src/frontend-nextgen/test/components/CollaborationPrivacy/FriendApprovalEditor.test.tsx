@@ -32,9 +32,7 @@ describe('FriendApprovalEditor', () => {
     );
 
     expect(screen.getByRole('radiogroup', { name: '好友审批策略' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('radio', { name: '无需审批 新好友申请无需用户审批，直接通过' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '无需审批 新好友申请无需用户审批，直接通过' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: '全部审批 新好友申请都需要用户审批后方可通过' })).toBeInTheDocument();
     expect(screen.queryByText('部分组织免审批')).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '搜索组织范围' })).not.toBeInTheDocument();

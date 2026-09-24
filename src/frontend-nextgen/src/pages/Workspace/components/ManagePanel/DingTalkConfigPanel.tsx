@@ -1,4 +1,14 @@
-import { Badge, Button, Card, Input, Switch } from '@/components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  Input,
+  Switch,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type {
   DingTalkBindingState,
@@ -9,7 +19,8 @@ import { DINGTALK_BINDING_CONFLICT } from '@/services/workspace/channelBindingSe
 import { Bot, Info, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { ConfigSelect, SCOPE_OPTIONS, scopeLabel, VISIBILITY_OPTIONS, visibilityLabel } from './dingTalkConfigSelect';
+import { ConfigSelect, SCOPE_OPTIONS, VISIBILITY_OPTIONS } from './dingTalkConfigSelect';
+import { DingTalkReadonlyList } from './DingTalkReadonlyList';
 
 // 兼容历史导入路径：类型源点已迁至 service 层（避免 service 反向依赖组件）。
 export type { DingTalkBindingView, GroupDingTalkConfig } from '@/services/workspace/channelBindingService';
@@ -49,6 +60,8 @@ export function DingTalkConfigPanel({
   onDelete,
 }: DingTalkConfigPanelProps) {
   const [editing, setEditing] = useState(false);
+  // 方案 A+（D7）：未绑定不常驻空表单——点「绑定钉钉机器人」再进入表单。
+  const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<GroupDingTalkConfig>(EMPTY_CONFIG);
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState(false);
@@ -129,7 +142,7 @@ export function DingTalkConfigPanel({
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="m-0 text-xs font-medium text-foreground">启用流式卡片</p>
-          <p className="m-0 mt-0.5 text-[11px] text-muted-foreground">开启后使用流式卡片模板输出。</p>
+          <p className="m-0 mt-1 text-xs text-muted-foreground">开启后使用流式卡片模板输出。</p>
         </div>
         <Switch
           checked={form.enableStreamOutput}
@@ -163,111 +176,114 @@ export function DingTalkConfigPanel({
   );
 
   return (
-    <Card className="rounded-lg bg-card p-3 shadow-sm">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Bot className="h-4 w-4 text-primary" />
-          <p className="m-0 text-sm font-semibold text-foreground">钉钉机器人配置</p>
-        </div>
-        {loading ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-        ) : isConflict ? (
-          <Badge tone="warning">冲突</Badge>
-        ) : boundView ? (
-          <Badge tone={boundView.status === 'active' ? 'success' : 'neutral'}>
-            {boundView.status === 'active' ? '已启用' : '已停用'}
-          </Badge>
-        ) : (
-          <Badge tone="neutral">未绑定</Badge>
-        )}
-      </div>
-
-      <div className="mt-3">
-        {isConflict ? (
-          <p className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            当前群存在多条钉钉绑定，请联系管理员处理后在此操作。
-          </p>
-        ) : boundView && !editing ? (
-          <div className="space-y-3">
-            <dl className="overflow-hidden rounded-xl border border-border text-xs">
-              {(
-                [
-                  ['Robot Code', boundView.config.robotCode || '—'],
-                  ['app_key', boundView.config.appKey || '—'],
-                  [
-                    '流式卡片',
-                    boundView.config.enableStreamOutput
-                      ? `已开启 · 模板 ${boundView.config.cardTemplateId || '—'}`
-                      : '未开启',
-                  ],
-                  ['会话模式', scopeLabel(boundView.config.groupChatScope)],
-                  ['发送消息范围', visibilityLabel(boundView.config.outboundVisibility)],
-                ] as Array<[string, string]>
-              ).map(([label, value]) => (
-                <div
-                  key={label}
-                  className="flex items-baseline justify-between gap-3 border-b border-border px-3 py-2 last:border-b-0"
-                >
-                  <dt className="shrink-0 text-muted-foreground">{label}</dt>
-                  <dd className="m-0 break-all text-right font-medium text-foreground">{value}</dd>
-                </div>
-              ))}
-            </dl>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="m-0 text-xs font-medium text-foreground">启用状态</p>
-                <p className="m-0 mt-0.5 text-[11px] text-muted-foreground">停用后钉钉机器人不再接收本群消息。</p>
-              </div>
-              <Switch
-                checked={boundView.status === 'active'}
-                disabled={!canManage || toggling}
-                onCheckedChange={handleToggle}
-                aria-label="启用钉钉机器人"
-              />
-            </div>
-            {canManage && (
-              <div className="flex gap-2">
-                <Button variant="secondary" size="sm" onClick={startEdit}>
-                  编辑
-                </Button>
-                <ConfirmDialog
-                  title="解绑钉钉机器人"
-                  description="解绑后本群将不再向钉钉机器人投递消息，可重新绑定。"
-                  confirmText="确认解绑"
-                  confirmVariant="destructive"
-                  onConfirm={() => void handleDelete()}
-                >
-                  <Button variant="ghost" size="sm" loading={deleting} className="text-destructive">
-                    解绑
-                  </Button>
-                </ConfirmDialog>
-              </div>
+    <TooltipProvider>
+      <Card className="rounded-lg bg-card p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Bot className="h-4 w-4 text-primary" />
+            <p className="m-0 text-sm font-semibold text-foreground">钉钉机器人配置</p>
+            {!canManage && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className="inline-flex cursor-help items-center text-muted-foreground"
+                    tabIndex={0}
+                    aria-label="钉钉机器人配置编辑权限说明"
+                  >
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>仅群主/驾驶位可编辑钉钉机器人配置</TooltipContent>
+              </Tooltip>
             )}
           </div>
-        ) : (
-          <>
-            {renderForm()}
-            {!canManage ? (
-              <p className="mt-3 flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                仅群主/驾驶位可编辑钉钉机器人配置。
-              </p>
-            ) : (
+          {loading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          ) : isConflict ? (
+            <Badge tone="warning">冲突</Badge>
+          ) : boundView ? (
+            <Badge tone={boundView.status === 'active' ? 'success' : 'neutral'}>
+              {boundView.status === 'active' ? '已启用' : '已停用'}
+            </Badge>
+          ) : (
+            <Badge tone="neutral">未绑定</Badge>
+          )}
+        </div>
+
+        <div className="mt-3">
+          {isConflict ? (
+            <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+              <Info className="mt-1 h-3.5 w-3.5 shrink-0" />
+              当前群存在多条钉钉绑定，请联系管理员处理后在此操作。
+            </p>
+          ) : boundView && !editing ? (
+            <div className="space-y-3">
+              <DingTalkReadonlyList config={boundView.config} />
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="m-0 text-xs font-medium text-foreground">启用状态</p>
+                  <p className="m-0 mt-1 text-xs text-muted-foreground">停用后钉钉机器人不再接收本群消息。</p>
+                </div>
+                <Switch
+                  checked={boundView.status === 'active'}
+                  disabled={!canManage || toggling}
+                  onCheckedChange={handleToggle}
+                  aria-label="启用钉钉机器人"
+                />
+              </div>
+              {canManage && (
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" onClick={startEdit}>
+                    编辑
+                  </Button>
+                  <ConfirmDialog
+                    title="解绑钉钉机器人"
+                    description="解绑后本群将不再向钉钉机器人投递消息，可重新绑定。"
+                    confirmText="确认解绑"
+                    confirmVariant="destructive"
+                    onConfirm={() => void handleDelete()}
+                  >
+                    <Button variant="ghost" size="sm" loading={deleting} className="text-destructive">
+                      解绑
+                    </Button>
+                  </ConfirmDialog>
+                </div>
+              )}
+            </div>
+          ) : !isBound && !creating ? (
+            // 未绑定：表单骨架只读缺省 + 绑定入口（D7 修订——保留表单结构，不默认为编辑态）
+            <div className="space-y-3">
+              <DingTalkReadonlyList config={null} />
+              {canManage && (
+                <Button size="sm" onClick={() => setCreating(true)}>
+                  绑定钉钉机器人
+                </Button>
+              )}
+            </div>
+          ) : (
+            <>
+              {renderForm()}
               <div className="mt-3 flex gap-2">
                 <Button size="sm" loading={saving} onClick={() => void handleSave()}>
                   {isBound ? '保存修改' : '保存绑定'}
                 </Button>
-                {isBound && (
-                  <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+                {(isBound || creating) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setEditing(false);
+                      setCreating(false);
+                    }}
+                  >
                     取消
                   </Button>
                 )}
               </div>
-            )}
-          </>
-        )}
-      </div>
-    </Card>
+            </>
+          )}
+        </div>
+      </Card>
+    </TooltipProvider>
   );
 }

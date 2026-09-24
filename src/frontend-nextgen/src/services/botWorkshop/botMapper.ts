@@ -172,9 +172,11 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
   const item: BotDomain = {
     id,
     cardId: asString(dto.card_id),
+    avatarUrl: asString(dto.avatar_url),
     publicationVersion: asNumber(dto.publication_version),
     liveVersion: asNumber(dto.live_version),
     ownerId,
+    ownerName: asString(dto.owner_name),
     entityKey: asString(dto.card_id) ?? `${spaceId ?? 'unknown'}:${botType}:${id}`,
     name: asString(dto.bot_name) ?? asString(dto.name) ?? '未命名 Bot',
     description: asString(dto.bot_desc) ?? asString(dto.description),
@@ -199,16 +201,18 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
     healthScore: asNumber(dto.health_score),
     healthyInstances: asNumber(dto.healthy_instances),
     totalInstances: asNumber(dto.total_instances),
+    needsEditLock: typeof lockRaw?.need_lock === 'boolean' ? lockRaw.need_lock : undefined,
     lock:
       lockRaw && (lockRaw.locked === true || !('locked' in lockRaw))
         ? {
             status:
-              asString(lockRaw.holder_user_id) === currentUserId || asString(lockRaw.status) === 'mine'
+              (Boolean(currentUserId) && asString(lockRaw.holder_user_id) === currentUserId) ||
+              asString(lockRaw.status) === 'mine'
                 ? 'mine'
                 : 'other',
             holderUserId: asString(lockRaw.holder_user_id),
             holderName: asString(lockRaw.holder_name),
-            lockedAt: asString(lockRaw.locked_at) ?? asString(lockRaw.created_at),
+            lockedAt: asString(lockRaw.locked_at) ?? asString(lockRaw.acquired_at) ?? asString(lockRaw.created_at),
           }
         : undefined,
     completeness: warnings.length ? 'partial' : 'complete',

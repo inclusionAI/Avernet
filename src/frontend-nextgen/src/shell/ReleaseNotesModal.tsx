@@ -1,12 +1,11 @@
 // 版本发布说明 Modal（Open Core 纯 UI）。展示雨燕配置拉取的用户须知（红主题）+ 新版本发布（蓝主题）。
-// 富文本 HTML 来自受信内部运营平台（雨燕配置），通过 html-react-parser 转为 React 节点渲染，避免使用 dangerouslySetInnerHTML。
+// 富文本 HTML 来自受信内部运营平台（雨燕配置），用 dangerouslySetInnerHTML 渲染；不引入新 HTML 解析依赖（体积）。
 // 数据由 useReleaseNotes 提供（Open Core capability=null → 此 Modal 不被渲染）。
 // 禁 antd/裸 button，用项目 <Modal>/<Button>。≤150 行。
 import type { ReleaseNotesData } from '@/capabilities';
 import { Button, Modal, ModalContent } from '@/components/ui';
 import { X } from 'lucide-react';
 import { Fragment } from 'react';
-import parse from 'html-react-parser';
 
 interface ReleaseNotesModalProps {
   open: boolean;
@@ -22,9 +21,11 @@ function EmptyContent() {
 function RichText({ html }: { html?: string }) {
   if (!html) return <EmptyContent />;
   return (
-    <div className="prose prose-sm max-w-none break-words text-foreground [&_ol]:pl-4 [&_ul]:pl-4">
-      {parse(html)}
-    </div>
+    <div
+      className="prose prose-sm max-w-none break-words text-foreground [&_ol]:pl-4 [&_ul]:pl-4"
+      // eslint-disable-next-line react/no-danger -- 受信源：雨燕配置平台运营内容
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }
 

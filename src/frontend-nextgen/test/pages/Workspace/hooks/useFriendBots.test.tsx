@@ -40,6 +40,26 @@ it('queries Human friends with the Human actor type', async () => {
   ]);
 });
 
+it('marks a friend Bot as unavailable when metadata details are unresolved', async () => {
+  mockedListFriends.mockResolvedValue({
+    ok: true,
+    data: {
+      items: [{ id: 'missing-bot:900003', name: 'missing-bot:900003', online: false, detailsResolved: false }],
+      total: 1,
+    },
+  });
+
+  const { result } = renderHook(() => useFriendBots('human_900003', true, true));
+  await act(async () => Promise.resolve());
+
+  expect(result.current.friendBots[0]).toMatchObject({
+    botId: 'missing-bot:900003',
+    displayName: 'missing-bot:900003',
+    chatable: false,
+    isFriendBot: true,
+  });
+});
+
 it('queries Bot friends with the full Bot uuid as actor_id', async () => {
   const { result } = renderHook(() => useFriendBots('friend-owner-bot:900003', false, true));
 

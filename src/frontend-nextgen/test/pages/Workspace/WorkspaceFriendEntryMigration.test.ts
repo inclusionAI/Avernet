@@ -2,13 +2,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 describe('Workspace 好友入口迁移', () => {
-  it('任务执行受限时保留跳转协作权限的恢复入口', () => {
-    const workspaceSource = readFileSync(path.join(process.cwd(), 'src/pages/Workspace/index.tsx'), 'utf8');
-
-    expect(workspaceSource).toContain("navigate('/collaboration-privacy')");
-    expect(workspaceSource).toContain('onOpenCollaborationPermissions: openCollaborationPermissions');
-  });
-
   it('移除添加好友弹窗和重复目录状态机，只在协作群工具行保留发起协作', () => {
     const root = process.cwd();
     const workspaceSource = readFileSync(path.join(root, 'src/pages/Workspace/index.tsx'), 'utf8');

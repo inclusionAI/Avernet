@@ -1,4 +1,5 @@
 import { getCapabilities } from '@/capabilities';
+import type { LocalBotAuthorizationRequest } from '@/domain/botWorkshop';
 import { restartPublishStageOf } from '@/domain/botWorkshop';
 import {
   createBot,
@@ -20,6 +21,7 @@ import { runAfterCreateActions } from './agentCodingAfterCreateService';
 import { agentCodingTemplateService, supportsServiceBot, type AgentCodingTemplate } from './agentCodingTemplateService';
 import { botEditorService } from './botEditorService';
 import { mapBotDto, mapBotList } from './botMapper';
+import { localBotService } from './localBotService';
 import type {
   AvernetBotCreateRequest,
   BotCreateAuthorizationPollResult,
@@ -148,8 +150,8 @@ export const botWorkshopService = {
       hasMore: result.hasMore,
     };
   },
-  async detail(id: string): Promise<BotDomain | undefined> {
-    const response = await getBot(id);
+  async detail(id: string, ownerId?: string): Promise<BotDomain | undefined> {
+    const response = await getBot(id, ownerId);
     const dto = response.data;
     if (!dto) return undefined;
     const result = mapBotDto(dto as BackendUnknownRecord, id);
@@ -161,9 +163,9 @@ export const botWorkshopService = {
     localUserId?: string,
     currentSpace?: BotCreateSpace,
   ): BotCreateSpace[] {
-    if (currentSpace) return [currentSpace];
     const personal = personalSpace(localUserId);
     if (scenario === 'local') return [personal];
+    if (currentSpace) return [currentSpace];
     const spaces = personal.canCreate ? [personal] : [];
     if (currentSpaceId && currentSpaceId !== personal.id) {
       spaces.push({ id: currentSpaceId, name: '当前空间', ownership: 'team', canCreate: true });
@@ -182,8 +184,7 @@ export const botWorkshopService = {
         ? { ...input, spaceId: personalSpace().id, ownership: 'personal', serviceMode: 'non-service' }
         : input;
     const request = normalized.scenario === 'cloud' ? toCreateRequest(normalized) : undefined;
-    if (normalized.scenario === 'local')
-      throw new Error('本地 Bot 创建需要先选择已绑定设备和工作目录，当前 OpenAPI 工作流尚未接入此表单');
+    if (normalized.scenario === 'local') return localBotService.create(normalized);
     const response = await createBot(request as unknown as BackendUnknownRecord);
     const dto = response.data;
     if (!dto) throw new Error('创建接口未返回 Bot 数据');
@@ -225,11 +226,12 @@ export const botWorkshopService = {
   },
   async pollCreateAuthorization(
     botId: string,
-    request: AvernetBotCreateRequest,
+    request: AvernetBotCreateRequest | LocalBotAuthorizationRequest,
     agentCoding?: BotCreateInput['agentCoding'],
   ): Promise<BotCreateAuthorizationPollResult> {
     let response;
     try {
+      if ('machine_id' in request) return await localBotService.poll(botId, request);
       response = await pollBotAuthStatus(botId, request as unknown as BackendUnknownRecord);
     } catch (error) {
       if (error instanceof BackendRequestError && error.data && typeof error.data === 'object') {

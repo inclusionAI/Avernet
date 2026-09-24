@@ -214,7 +214,7 @@ describe('collaboration square accessible UI', () => {
     expect(source).not.toContain('当前以 Human 身份');
     expect(source).not.toContain('当前用户身份不可用');
     expect(source).toContain(
-      '可按 Bot 名称或 Owner 用户名称搜索公开 Bot，也可通过能力描述进行智能搜索，并以当前工作身份发起好友申请。',
+      '可按 Bot 名称或 Owner 用户名称搜索公开 Bot，也可通过能力描述进行智能搜索，为我或我的 Bot 申请加对方 Bot 为好友。',
     );
     expect(source).toContain('输入能力或职责描述后，将智能搜索匹配的公开 Bot。');
     expect(source).toContain('onModeChange={vm.setMode}');

@@ -13,7 +13,7 @@ export function MessageSenderMeta({ name, time, align }: MessageSenderMetaProps)
   return (
     <div
       data-testid="message-sender-meta"
-      className={`mb-1 flex min-w-0 flex-nowrap items-center gap-1.5 text-xs leading-4 text-muted-foreground ${alignmentClass}`}
+      className={`mt-1.5 mb-2 flex min-w-0 flex-nowrap items-center gap-1.5 text-xs leading-4 text-muted-foreground ${alignmentClass}`}
     >
       <span className="min-w-0 max-w-full truncate font-medium">
         {name || (align === 'right' ? '未命名成员' : '未命名 Bot')}
@@ -38,6 +38,8 @@ interface MessageSenderLayoutProps {
 /**
  * 将头像、发送者元信息和消息正文放入同一行级布局，避免元信息单独占据头像上方的垂直空间。
  * 右对齐消息反转内容顺序，但仍保持头像与名称/时间行的顶部对齐。
+ * 验收微调（2026-09-14）：名称/时间行 mt-1.5（6px）与 28px 头像光学居中对齐（原顶部对齐显得偏高）；
+ * mb-2（8px）与内容首行保留呼吸间距（原 mb-1 4px 过近）。
  */
 export function MessageSenderLayout({ avatar, align, meta, children }: MessageSenderLayoutProps) {
   const content = (

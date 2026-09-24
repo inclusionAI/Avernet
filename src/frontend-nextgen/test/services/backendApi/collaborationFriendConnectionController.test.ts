@@ -85,6 +85,30 @@ describe('collaboration friend connection controller', () => {
     });
   });
 
+  it('lists Bot friend users with target type and pagination', async () => {
+    backendRequest.mockResolvedValue({ code: 20000, data: { items: [], total: 0 } });
+
+    await listFriendConnections({
+      actor_type: 'bot',
+      actor_id: 'bot-a:327325',
+      target_type: 'human',
+      page: 1,
+      page_size: 100,
+    });
+
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/friend-connections', {
+      method: 'GET',
+      params: {
+        actor_type: 'bot',
+        actor_id: 'bot-a:327325',
+        target_type: 'human',
+        page: 1,
+        page_size: 100,
+      },
+      injectUserId: false,
+    });
+  });
+
   it.each([
     ['accept', acceptFriendConnectionRequest, 'accept'],
     ['reject', rejectFriendConnectionRequest, 'reject'],

@@ -7,11 +7,10 @@ export interface Bot {
   ext?: Record<string, unknown>;
   [key: string]: unknown;
 }
-export const DOMAIN_BOTS_PAGE_SIZE = 200;
-export async function searchDomainBots(params: { page: number; page_size: number }) {
+// 关联架构 Bot 全量查询：不再透传 page / page_size，由后端直接返回全部候选。
+export async function searchDomainBots() {
   return backendRequest<{ success?: boolean; data?: { items?: Bot[] } }>('/api/bots/search/domain-bots', {
     method: 'GET',
-    params,
     operation: 'search-domain-bots',
     target: 'legacy-agentclaw',
   });

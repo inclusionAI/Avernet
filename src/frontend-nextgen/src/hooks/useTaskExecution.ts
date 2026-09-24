@@ -9,7 +9,7 @@
  */
 import { TASK_API_BASE } from '@/services/tasks/taskConfig';
 import type { TaskComposerContext, TaskComposerForm } from '@/services/tasks/taskMapper';
-import { buildTaskPanelAixUI } from '@/services/tasks/taskPanelMessage';
+import { buildTaskLaunchMessage, buildTaskPanelAixUI } from '@/services/tasks/taskPanelMessage';
 import { executeTaskService, resolveWorkflowCommand, type WorkflowListItem } from '@/services/tasks/taskService';
 import { useTaskStore } from '@/stores/taskStore';
 import type { PanelHandle } from '@tc-chat/core';
@@ -22,6 +22,8 @@ export interface UseTaskExecutionOptions {
   context: TaskComposerContext | null;
   /** 按当前会话直发副屏 <AixUI> 消息（绕开全局桥 last-wins）。由各 pane 注入。 */
   submitPanelMessage: (content: string) => void;
+  /** relay 首棒触发出口；群聊必须定向到 holder，中心化不会调用。 */
+  submitTaskExecutionMessage?: (content: string, holderId: string) => void;
 }
 
 /** 工作流选中态（+ 号 chip + 发送拦截用）。command 来自 facade.command，作为指令 workflow_id 值。 */
@@ -58,6 +60,7 @@ export function useTaskExecution({
   panelRef,
   context,
   submitPanelMessage,
+  submitTaskExecutionMessage,
 }: UseTaskExecutionOptions): UseTaskExecutionResult {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,22 +100,31 @@ export function useTaskExecution({
           ctx: context,
           apiBaseUrl: TASK_API_BASE,
         });
-        submitPanelMessage(
-          buildTaskPanelAixUI(record.task_id, form.title, {
-            taskId: record.task_id,
-            apiBaseUrl: TASK_API_BASE,
-            bcsBaseUrl: '',
-            userId: context.ownerUserId,
-            // dashboard 图 DTO 可能不带任务列表元信息，透传创建时可用字段作为副屏 fallback。
-            taskInfoFallback: {
-              taskTypeLabel: form.taskType === 'workflow' ? '工作流任务' : '动态任务',
-              sourceLabel: context.sourceType === 'coop_group' ? '协作群' : 'Bot 会话',
-              ownerBotName: context.ownerBotId,
-              createdAt: record.create_time,
-              finishedAt: record.finish_time,
-            },
-          }),
-        );
+        const panelMessage = buildTaskPanelAixUI(record.task_id, form.title, {
+          taskId: record.task_id,
+          apiBaseUrl: TASK_API_BASE,
+          bcsBaseUrl: '',
+          userId: context.ownerUserId,
+          // dashboard 图 DTO 可能不带任务列表元信息，透传创建时可用字段作为副屏 fallback。
+          taskInfoFallback: {
+            taskTypeLabel: form.taskType === 'workflow' ? '工作流任务' : '动态任务',
+            sourceLabel: context.sourceType === 'coop_group' ? '协作群' : 'Bot 会话',
+            ownerBotName: context.ownerBotId,
+            createdAt: record.create_time,
+            finishedAt: record.finish_time,
+          },
+        });
+        const launchMessage = buildTaskLaunchMessage(panelMessage, record, {
+          holderId: context.ownerBotId,
+          instruction: form.instruction,
+          objective: form.objective,
+          acceptances: form.acceptances,
+        });
+        if (launchMessage.shouldTriggerBot) {
+          (submitTaskExecutionMessage ?? submitPanelMessage)(launchMessage.content, context.ownerBotId);
+        } else {
+          submitPanelMessage(launchMessage.content);
+        }
         return { ok: true, taskId: record.task_id } as const;
       } catch (err) {
         const msg = err instanceof Error ? err.message : '任务提交失败';
@@ -123,7 +135,7 @@ export function useTaskExecution({
         setSubmitting(false);
       }
     },
-    [context, panelRef, submitPanelMessage, submitting, validate],
+    [context, panelRef, submitPanelMessage, submitTaskExecutionMessage, submitting, validate],
   );
 
   // ── 受控选中态（+ 号 chip / 发送拦截）──

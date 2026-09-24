@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import { useWorkspacePage } from '@/pages/Workspace/hooks/useWorkspacePage';
+import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook } from '@testing-library/react';
 import { history, useSearchParams } from '@umijs/max';
@@ -14,6 +15,9 @@ jest.mock('@/services/workspace/sessionService', () => ({
 
 const mockedUseSearchParams = useSearchParams as jest.MockedFunction<typeof useSearchParams>;
 const mockedReplace = history.replace as jest.MockedFunction<typeof history.replace>;
+const mockedGetSessionDetail = sessionService.getSessionDetail as jest.MockedFunction<
+  typeof sessionService.getSessionDetail
+>;
 
 function mountWithParams(search: string) {
   mockedUseSearchParams.mockReturnValue([new URLSearchParams(search), jest.fn()] as unknown as ReturnType<
@@ -27,6 +31,10 @@ const userIdentity = { id: 'u1', kind: 'user' as const, displayName: '我', onli
 beforeEach(() => {
   jest.clearAllMocks();
   useWorkspaceStore.getState().reset();
+  mockedGetSessionDetail.mockResolvedValue({
+    ok: false,
+    error: { code: 'NOT_FOUND', friendlyMessage: 'not found', canRetry: false },
+  });
 });
 
 it('裸 URL 重挂载：群视图记忆不被强制回 chat，并投影回 URL', async () => {
@@ -49,6 +57,24 @@ it('裸 URL 重挂载：群视图记忆不被强制回 chat，并投影回 URL',
   expect(s.selectedSessionId).toBe('s1');
   // Store→URL 投影：把记忆的选中态写回可分享 URL。
   expect(mockedReplace).toHaveBeenCalledWith(expect.stringContaining('tab=group'));
+  expect(mockedReplace).toHaveBeenCalledWith(expect.stringContaining('group=g1'));
+  expect(mockedReplace).toHaveBeenCalledWith(expect.stringContaining('session=s1'));
+});
+
+it('Bot 身份的群视图记忆投影到 URL 时携带 current 身份参数', async () => {
+  useWorkspaceStore.setState({
+    identities: [userIdentity, { id: 'b1', kind: 'bot' as const, displayName: 'Bot 1', online: true }],
+    activeIdentityId: 'b1',
+    view: 'group',
+    selectedGroupId: 'g1',
+    selectedSessionId: 's1',
+    expandedGroupIds: { g1: true },
+  });
+
+  mountWithParams('');
+  await act(async () => Promise.resolve());
+
+  expect(mockedReplace).toHaveBeenCalledWith(expect.stringContaining('current=b1'));
   expect(mockedReplace).toHaveBeenCalledWith(expect.stringContaining('group=g1'));
   expect(mockedReplace).toHaveBeenCalledWith(expect.stringContaining('session=s1'));
 });
@@ -104,6 +130,74 @@ it('chat→group 视图切换：记忆的群/会话选中不被误清（无 ping
   // 旧代码在此命中「tab=group 且无 group 参数」分支 selectGroup(null)，选中被清掉。
   expect(s.selectedGroupId).toBe('g1');
   expect(s.selectedSessionId).toBe('s1');
+});
+
+it('同一 Workspace 实例内 URL 从单聊切到群聊时同步身份、视图和选中态', async () => {
+  let params = new URLSearchParams('tab=chat&current=u1&bot=target-bot&session=dm1');
+  mockedUseSearchParams.mockImplementation(() => [params, jest.fn()] as unknown as ReturnType<typeof useSearchParams>);
+  useWorkspaceStore.setState({
+    identities: [userIdentity, { id: 'b1', kind: 'bot' as const, displayName: 'Bot 1', online: true }],
+    activeIdentityId: 'u1',
+    view: 'chat',
+  });
+
+  const { rerender } = renderHook(() => useWorkspacePage());
+  await act(async () => Promise.resolve());
+
+  params = new URLSearchParams('tab=group&current=b1&group=g1&session=gs1&membership=session_only');
+  rerender();
+  await act(async () => Promise.resolve());
+
+  expect(useWorkspaceStore.getState()).toMatchObject({
+    activeIdentityId: 'b1',
+    view: 'group',
+    selectedGroupId: 'g1',
+    selectedSessionId: 'gs1',
+    membership: 'session_only',
+  });
+});
+
+it('群聊 URL 投影保留 membership 视角', async () => {
+  useWorkspaceStore.setState({
+    identities: [userIdentity],
+    activeIdentityId: 'u1',
+    view: 'group',
+    selectedGroupId: 'g1',
+    selectedSessionId: 's1',
+    membership: 'session_only',
+  });
+
+  mountWithParams('');
+  await act(async () => Promise.resolve());
+
+  expect(mockedReplace).toHaveBeenCalledWith(expect.stringContaining('membership=session_only'));
+});
+
+it('刷新恢复单聊后点击其他 Bot 不会把旧 bot 参数误当成身份切换', async () => {
+  const setParams = jest.fn();
+  mockedUseSearchParams.mockReturnValue([
+    new URLSearchParams('tab=chat&bot=b1&session=s1'),
+    setParams as unknown as ReturnType<typeof useSearchParams>[1],
+  ] as unknown as ReturnType<typeof useSearchParams>);
+  useWorkspaceStore.setState({
+    identities: [userIdentity, { id: 'b1', kind: 'bot' as const, displayName: '旧 Bot', online: true }],
+    activeIdentityId: 'u1',
+    view: 'chat',
+  });
+
+  const { rerender } = renderHook(() => useWorkspacePage());
+  await act(async () => Promise.resolve());
+  expect(useWorkspaceStore.getState().activeIdentityId).toBe('u1');
+
+  // 点击其他 Bot 时 toggleBotExpanded 会先清 selected session，URL 随后短暂收敛为 tab=chat。
+  mockedUseSearchParams.mockReturnValue([
+    new URLSearchParams('tab=chat'),
+    setParams as unknown as ReturnType<typeof useSearchParams>[1],
+  ] as unknown as ReturnType<typeof useSearchParams>);
+  rerender();
+  await act(async () => Promise.resolve());
+
+  expect(useWorkspaceStore.getState().activeIdentityId).toBe('u1');
 });
 
 it('冷启动外链 session=：identities 就绪后才执行一次性回填并切回用户身份', async () => {

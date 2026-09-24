@@ -172,7 +172,7 @@ export function MessageCopyAction({ onCopy, align, testId, onEdit, isEditable }:
 interface MessageSelectionToolbarProps {
   selection: MessageSelection | null;
   onCopy: (text: string) => void | boolean | Promise<void | boolean>;
-  onQuote: (text: string) => void;
+  onQuote?: (text: string) => void;
   onExplain?: (text: string) => void;
 }
 
@@ -191,12 +191,14 @@ export function MessageSelectionToolbar({ selection, onCopy, onQuote, onExplain 
         icon={<Copy className="h-3.5 w-3.5" />}
         onClick={() => void onCopy(selection.text)}
       />
-      <IconButton
-        label="追问选中文本"
-        size="sm"
-        icon={<MessageSquareQuote className="h-3.5 w-3.5" />}
-        onClick={() => onQuote(selection.text)}
-      />
+      {onQuote ? (
+        <IconButton
+          label="追问选中文本"
+          size="sm"
+          icon={<MessageSquareQuote className="h-3.5 w-3.5" />}
+          onClick={() => onQuote(selection.text)}
+        />
+      ) : null}
       {onExplain ? (
         <IconButton
           label="解释选中文本"

@@ -24,7 +24,9 @@ export function NotificationItem({ item, onClick }: NotificationItemProps) {
         <div className="min-w-0 flex-1">
           <p className="m-0 truncate text-sm font-medium text-foreground">{item.title}</p>
           {item.content && (
-            <p className="m-0 mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.content}</p>
+            <p className="m-0 mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
+              {item.content}
+            </p>
           )}
           <p className="m-0 mt-1 text-[10px] text-muted-foreground">{formatRelativeTime(item.gmtModified)}</p>
         </div>

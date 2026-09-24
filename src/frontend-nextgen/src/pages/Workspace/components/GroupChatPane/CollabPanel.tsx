@@ -13,7 +13,7 @@ import {
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { CollabPanelState } from '@/pages/Workspace/hooks/useCollabPanel';
 import { Loader2, UserPlus } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { BotControlRow } from './BotControlRow';
 import { LeaveBar } from './LeaveBar';
 
@@ -116,6 +116,7 @@ function JoinConfirmDialog({
 
 export interface CollabPanelProps {
   panel: CollabPanelState;
+  activeRuns?: ReactNode;
 }
 
 /**
@@ -123,7 +124,7 @@ export interface CollabPanelProps {
  * - bot 视角:Bot控制 / 用户协作 双 tab;
  * - human 视角且 human 姿态为 absent:仅「未加入当前会话」提示条。
  */
-export function CollabPanel({ panel }: CollabPanelProps) {
+export function CollabPanel({ panel, activeRuns }: CollabPanelProps) {
   const [tab, setTab] = useState<'bot' | 'human'>('bot');
   const [confirmJoin, setConfirmJoin] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -138,7 +139,7 @@ export function CollabPanel({ panel }: CollabPanelProps) {
       void panel.leaveSession().finally(() => setLeaving(false));
     };
     return (
-      <div className="border-t border-border bg-background px-3 pb-2 pt-2 sm:px-6">
+      <div className="border-t border-border bg-background px-3 pb-2 pt-2 sm:px-6" data-testid="collab-panel">
         <LeaveBar
           humanName={panel.humanName}
           onLeave={handleLeave}
@@ -146,6 +147,7 @@ export function CollabPanel({ panel }: CollabPanelProps) {
           viewScope={panel.humanViewScope}
           switchingViewScope={panel.switchingViewScope}
           onViewScopeChange={(scope) => void panel.setViewScope(scope)}
+          activeRuns={activeRuns}
         />
       </div>
     );

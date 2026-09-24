@@ -1,10 +1,11 @@
 // 工单详情抽屉：头部 Tag + 已读 Tag + 时间 + 标题；正文 content；
 // 详情 contentRaw（结构化对象）走 JsonBlock（着色 + 复制 + 展开/收起，key=itemId 重置折叠态），
-// 纯文本 content 原样展示；审批类附加 申请人/申请理由/审批人/审批意见/审批时间；通知类底部已读提示。
-// Footer 关闭 + 下一条未读(仅通知)。
+// 纯文本 content 原样展示；content 内含 session_url 时，正文下方渲染「打开会话」外链按钮（新标签页打开）；
+// 审批类附加 申请人/申请理由/审批人/审批意见/审批时间；通知类底部已读提示。Footer 关闭 + 下一条未读(仅通知)。
 import { Button, Drawer, DrawerContent, DrawerHeader, DrawerTitle, Skeleton } from '@/components/ui';
 import type { WorkOrder } from '@/domain/admin/models';
 import { formatAbsoluteTime } from '@/utils/format';
+import { ExternalLink } from 'lucide-react';
 import { Tag } from '../Tag';
 import { JsonBlock } from './JsonBlock';
 
@@ -49,10 +50,22 @@ export function WorkOrderDetailDrawer({
             {detail?.contentRaw ? (
               <JsonBlock key={detail.itemId} raw={detail.contentRaw} />
             ) : detail?.content ? (
-              <div className="rounded-lg bg-muted/60 p-4 text-xs leading-relaxed text-foreground">{detail.content}</div>
+              <div className="whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-4 text-xs leading-relaxed text-foreground">
+                {detail.content}
+              </div>
             ) : (
               <div className="rounded-lg bg-muted/60 p-4 text-xs text-muted-foreground">（暂无内容）</div>
             )}
+            {detail?.sessionUrl ? (
+              <div className="mt-3">
+                <Button asChild variant="outline" size="sm">
+                  <a href={detail.sessionUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink aria-hidden className="size-3.5" />
+                    打开会话
+                  </a>
+                </Button>
+              </div>
+            ) : null}
             {detail?.itemType === 'APPROVAL' ? (
               <dl className="mt-4 grid grid-cols-[80px_1fr] gap-x-3 gap-y-2 text-xs">
                 {detail.applicantName || detail.applicantUserId ? (

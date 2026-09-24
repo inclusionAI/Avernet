@@ -1,10 +1,9 @@
-import { Badge, IconButton } from '@/components/ui';
+import { IconButton } from '@/components/ui';
 import type { GroupView, SessionView } from '@/domain/collaboration';
-import type { GroupChatState } from '@/services/workspace/groupChatProvider';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
 import type { ProviderConnectionStatus } from '@tc-chat/adapters';
-import { FolderOpen, RefreshCw, Settings2, Share2 } from 'lucide-react';
+import { ChevronRight, FolderOpen, RefreshCw, Settings2, Share2 } from 'lucide-react';
 import { useState } from 'react';
 import { KIND_LABEL } from './GroupSidebar/GroupItem.types';
 import { ShareDialog } from './ManagePanel/ShareDialog';
@@ -14,9 +13,9 @@ export type GroupPanelKind = 'none' | 'members' | 'manage' | 'sessionManage' | '
 export interface GroupHeaderProps {
   selectedGroup: GroupView | null;
   selectedSession: SessionView | null;
-  supportState: GroupChatState;
   connectionStatus: ProviderConnectionStatus;
   onReconnect: () => void;
+  onOpenSessionList?: () => void;
   canManageGroup: PolicyResult;
   activePanel: GroupPanelKind;
   onTogglePanel: (panel: GroupPanelKind) => void;
@@ -25,10 +24,20 @@ export interface GroupHeaderProps {
   onRequestShareSession: () => Promise<DomainResult<{ invitationUrl: string }>>;
 }
 
-function connectionCopy(status: ProviderConnectionStatus, support: GroupChatState) {
-  if (support.phase === 'preparing') return { label: '准备中', tone: 'warning' as const };
-  if (support.phase === 'loading-history') return { label: '加载历史', tone: 'warning' as const };
-  if (support.phase === 'error') return { label: '连接失败', tone: 'error' as const };
+/** 连接状态文字色：保留色调语义，去除胶囊底（轻文字与顶栏风格一致）。 */
+const CONNECTION_TONE_TEXT: Record<'success' | 'warning' | 'error' | 'neutral', string> = {
+  success: 'text-success',
+  warning: 'text-warning',
+  error: 'text-destructive',
+  neutral: 'text-muted-foreground',
+};
+
+/**
+ * 连接状态文案映射：输入为 useSessionDisplayStatus 合成显示语义（Spec:
+ * docs/specs/workspace-session-connection-display.md），不再消费业务 phase——
+ * 「准备中 / 加载历史」等实现细节在合成层已收敛为 connecting，顶栏无 phase 分支。
+ */
+function connectionCopy(status: ProviderConnectionStatus) {
   switch (status) {
     case 'connected':
       return { label: '已连接', tone: 'success' as const };
@@ -36,8 +45,6 @@ function connectionCopy(status: ProviderConnectionStatus, support: GroupChatStat
       return { label: '连接中', tone: 'warning' as const };
     case 'reconnecting':
       return { label: '重连中', tone: 'warning' as const };
-    case 'disconnected':
-      return { label: '已断开', tone: 'neutral' as const };
     case 'error':
       return { label: '连接失败', tone: 'error' as const };
     default:
@@ -48,9 +55,9 @@ function connectionCopy(status: ProviderConnectionStatus, support: GroupChatStat
 export function GroupHeader({
   selectedGroup,
   selectedSession,
-  supportState,
   connectionStatus,
   onReconnect,
+  onOpenSessionList,
   activePanel,
   onTogglePanel,
   onRequestShareGroup,
@@ -60,7 +67,7 @@ export function GroupHeader({
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [shareTitle, setShareTitle] = useState('会话');
-  const copy = connectionCopy(connectionStatus, supportState);
+  const copy = connectionCopy(connectionStatus);
   const showReconnect =
     connectionStatus === 'disconnected' || connectionStatus === 'error' || connectionStatus === 'reconnecting';
   const memberCount = selectedGroup?.participants?.length || selectedGroup?.participantCount || 0;
@@ -88,12 +95,24 @@ export function GroupHeader({
   return (
     <>
       <header className="flex h-16 items-center gap-3 border-b border-border bg-card px-5">
+        {onOpenSessionList ? (
+          <IconButton
+            label="打开会话列表"
+            icon={<ChevronRight className="h-5 w-5" aria-hidden />}
+            size="sm"
+            className="shrink-0 lg:hidden"
+            onClick={onOpenSessionList}
+          />
+        ) : null}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h2 className="m-0 truncate text-sm font-semibold text-foreground">
               {selectedSession?.title ?? selectedGroup?.name ?? '未选择协作群'}
             </h2>
-            <Badge tone={copy.tone}>{copy.label}</Badge>
+            {/* v1.4：连接状态不收缩不换行——超长标题截断由 h2 独占，状态恒一行。 */}
+            <span className={`shrink-0 whitespace-nowrap text-xs ${CONNECTION_TONE_TEXT[copy.tone]}`}>
+              {copy.label}
+            </span>
           </div>
           <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">{subtitleLabel}</p>
         </div>
@@ -135,7 +154,6 @@ export function GroupHeader({
               icon={<Settings2 className="h-4 w-4" aria-hidden />}
               size="sm"
               variant={activePanel === 'sessionManage' ? 'primary' : 'ghost'}
-              data-manage-panel-trigger
               onClick={() => onTogglePanel(activePanel === 'sessionManage' ? 'none' : 'sessionManage')}
             />
           ) : selectedGroup ? (
@@ -144,7 +162,6 @@ export function GroupHeader({
               icon={<Settings2 className="h-4 w-4" aria-hidden />}
               size="sm"
               variant={activePanel === 'manage' ? 'primary' : 'ghost'}
-              data-manage-panel-trigger
               onClick={() => onTogglePanel(activePanel === 'manage' ? 'none' : 'manage')}
             />
           ) : null}

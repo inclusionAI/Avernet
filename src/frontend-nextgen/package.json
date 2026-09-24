@@ -24,6 +24,8 @@
   "dependencies": {
     "@codemirror/language": "^6.12.4",
     "@codemirror/view": "^6.43.9",
+    "@dicebear/bottts": "^9.4.2",
+    "@dicebear/core": "^9.4.2",
     "@lezer/highlight": "^1.2.3",
     "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-dialog": "^1.1.23",

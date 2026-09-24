@@ -43,11 +43,8 @@ jest.mock('@/services/workspace/identityService', () => ({
     isIdentityResolved: jest.fn(() => false),
   },
 }));
-// AppHeader 真实渲染（含汉堡按钮），但其重叶子组件桩化以免拉起真实服务。
-jest.mock('@/components/Admin/NotificationBell', () => ({ NotificationBell: () => <div data-testid="notif" /> }));
-jest.mock('@/shell/AccountBadge', () => ({ AccountBadge: () => <div data-testid="account" /> }));
-jest.mock('@/shell/HelpMenu', () => ({ HelpMenu: () => <div data-testid="help" /> }));
 // 内流一级侧栏桩化（避免 <lg 时内流与抽屉重复渲染同名导航项）；抽屉内容用的是真实 SidebarNavList。
+// 汉堡入口随 AppHeader 退役迁为 AppShell 内悬浮按钮，不再依赖顶栏 mock。
 jest.mock('@/shell/AppSidebar', () => ({ AppSidebar: () => <aside data-testid="app-sidebar" /> }));
 jest.mock('@/shell/SpaceSwitcher', () => ({ SpaceSwitcher: () => <div data-testid="space-switcher" /> }));
 jest.mock('@/shell/WorkspaceIdentitySwitcher', () => ({
@@ -149,7 +146,7 @@ describe('AppShell 工作身份路由保护', () => {
     expect(screen.getByTestId('page')).toBeInTheDocument();
   });
 
-  it('Bot 工作身份直访公开协作群时替换到公开 Bot 且不挂载页面', () => {
+  it('Bot 工作身份直访公开协作群时不再重定向，页面正常挂载（Tab 恒显，操作身份固定登录用户）', () => {
     mockLocation.pathname = '/collaboration-square/groups';
     useWorkspaceStore.setState({
       activeIdentityId: 'bot-1:900004',
@@ -158,8 +155,8 @@ describe('AppShell 工作身份路由保护', () => {
 
     renderShell();
 
-    expect(mockHistoryReplace).toHaveBeenCalledWith('/collaboration-square/bots');
-    expect(screen.queryByTestId('page')).not.toBeInTheDocument();
+    expect(mockHistoryReplace).not.toHaveBeenCalled();
+    expect(screen.getByTestId('page')).toBeInTheDocument();
   });
 
   it('用户工作身份可访问我的任务与公开协作群', () => {

@@ -1,6 +1,7 @@
 import { normalizeOpenApiUserId, resolveOpenApiUserId } from '@/domain/userIdentity';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { Bot, Terminal } from 'lucide-react';
 import { AvernetMarkLogo, AvernetWordmarkLogo } from './brandLogos';
 import type {
   AdminSections,
@@ -39,9 +40,9 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core 默认不暴露内部帮助链接，避免内部 URL 泄漏。
   getHelpLinks: () => ({ status: 'available', value: [] }),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
-  // Open Core 默认路由重定向：当前无收敛项——管理后台入口已开放（getShellVisibility.adminEntry=true），
-  // /admin 可达，不再重定向至 /manage。返回 null。internal overlay 仍显式 override 为 null
-  // 作为防御性回归护栏（见 src/extensions/internal.ts），防未来 Open 默认重引入 /admin 重定向经 spread 误伤 internal。
+  // Open Core 默认路由重定向：当前无收敛项——/space-admin、/ticket-center 由页面级 getAdminSections
+  // 守卫（阿里云形态 spaces=false 时 SpaceAdmin 页 replace 回落 /ticket-center），不在运行期重定向。
+  // 返回 null。internal overlay 仍显式 override 为 null 作为防御性回归护栏（见 src/extensions/internal.ts）。
   getRuntimeRouteRedirect: () => ({ status: 'available', value: null }),
   getBotHealthCapability: () => ({
     status: 'available',
@@ -152,8 +153,19 @@ export const defaultCapabilities: AppCapabilities = {
   getBotEngineOptions: (): CapabilityResult<BotEngineOption[]> => ({
     status: 'available',
     value: [
-      { value: 'openclaw', label: 'OpenClaw' },
-      { value: 'claude_code', label: 'Claudecode引擎-原生' },
+      {
+        value: 'openclaw',
+        label: 'OpenClaw',
+        description: '通用 AI 对话助手，适用于日常工作与知识问答',
+        icon: Bot,
+      },
+      {
+        value: 'claude_code',
+        label: 'Claudecode引擎-原生',
+        cardLabel: 'Claude Code',
+        description: '原生 Claude Code 引擎',
+        icon: Terminal,
+      },
     ],
   }),
   // Open Core / 阿里云不具备内部 SkillCenter 与能力工坊产品入口，只展示用户自己的 Skill。
@@ -190,13 +202,13 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: false,
   }),
-  // Open Core（阿里云部署）壳层可见性：展示【管理后台】导航项与页头通知中心
-  // （adminEntry/notificationBell=true），不展示侧栏空间切换器（spaceSwitcher=false）；
-  // 空间数据链路（initSpaceContext / 默认个人空间）与此开关无关，不受本默认值影响。
-  // internal overlay 覆盖为三项全 true（extensions/internal.ts），内部形态零变化。
+  // Open Core（阿里云部署）壳层可见性：展示页头通知中心（notificationBell=true），
+  // 不展示侧栏空间切换器（spaceSwitcher=false）；空间数据链路（initSpaceContext / 默认个人空间）
+  // 与此开关无关，不受本默认值影响。internal overlay 覆盖为两项全 true（extensions/internal.ts）。
+  // 注：原 adminEntry 已随【管理后台】导航项退役移除（split-admin-space-ticket-pages）。
   getShellVisibility: (): CapabilityResult<ShellVisibility> => ({
     status: 'available',
-    value: { adminEntry: true, spaceSwitcher: false, notificationBell: true },
+    value: { spaceSwitcher: false, notificationBell: true },
   }),
   // Open Core（阿里云部署）管理后台页内分区：隐藏【空间管理】Tab、仅保留【通知中心】
   // （管理后台入口已开放，空间管理收敛在页内完成；空间数据链路不受影响）。

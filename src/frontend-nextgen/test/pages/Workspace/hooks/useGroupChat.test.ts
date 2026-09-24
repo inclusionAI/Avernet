@@ -127,8 +127,8 @@ beforeEach(() => {
     disconnect: fn().mockResolvedValue(undefined),
     reconnect: fn().mockResolvedValue(undefined),
     request: fn().mockResolvedValue(undefined),
-    stop: fn(),
     abort: fn(),
+    abortBot: fn().mockResolvedValue({ aborted: true, abortedRunIds: ['run-1'] }),
     beginHistoryHydration: fn(),
     enterLiveMode: fn(),
     hasMoreHistory: false,
@@ -256,6 +256,21 @@ it('send forwards mention bot ids into chat.onRequest', () => {
   );
 });
 
+it('relay 首棒定向触发 holder Bot，显式关闭静默注入', () => {
+  const { result } = renderHook(() => useGroupChat(session));
+
+  result.current.submitTaskExecutionMessage('[task-execute]', 'driver-bot');
+
+  expect(mockChat.onRequest).toHaveBeenCalledWith(
+    expect.objectContaining({
+      content: '[task-execute]',
+      sessionId: 's1',
+      botUuid: 'driver-bot',
+      isInject: false,
+    }),
+  );
+});
+
 it('allows follow-up sends while a human-only request is in flight', () => {
   const humanSession: SessionView = {
     ...session,
@@ -340,12 +355,11 @@ it('send allows image-only message when attachments are present', () => {
   );
 });
 
-it('stop calls chat.abort, reconnect calls provider.reconnect', async () => {
-  // 让 isRequesting=true 使 stop 真正触达 abort
-  mockChat.isRequesting = true;
+it('abortBot calls the bot-scoped provider API, reconnect calls provider.reconnect', async () => {
   const { result } = renderHook(() => useGroupChat(session));
-  result.current.stop();
-  expect(mockChat.abort).toHaveBeenCalled();
+  await result.current.abortBot('bot-a');
+  expect(mockProvider.abortBot).toHaveBeenCalledWith('bot-a');
+  expect(mockChat.abort).not.toHaveBeenCalled();
   await result.current.reconnect();
   expect(mockProvider.reconnect).toHaveBeenCalled();
 });
@@ -380,6 +394,44 @@ it('view_scope_changed 推送路径同样刷新历史消息（loadHistory 再调
   expect(viewScopeListener).not.toBeNull();
   act(() => viewScopeListener?.());
   await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalledTimes(2));
+});
+
+it('deduplicates concurrent abort requests for the same bot', async () => {
+  let resolveAbort!: (value: { aborted: boolean; abortedRunIds: string[] }) => void;
+  mockProvider.abortBot.mockReturnValue(
+    new Promise((resolve) => {
+      resolveAbort = resolve;
+    }),
+  );
+  const { result } = renderHook(() => useGroupChat(session));
+
+  let first!: Promise<void>;
+  act(() => {
+    first = result.current.abortBot('bot-a');
+    void result.current.abortBot('bot-a');
+  });
+  expect(mockProvider.abortBot).toHaveBeenCalledTimes(1);
+  expect(result.current.abortingBotIds.has('bot-a')).toBe(true);
+
+  await act(async () => resolveAbort({ aborted: true, abortedRunIds: ['run-1'] }));
+  await first;
+  expect(result.current.abortingBotIds.has('bot-a')).toBe(false);
+});
+
+it('clears abort loading when switching sessions', async () => {
+  mockProvider.abortBot.mockReturnValue(new Promise(() => {}));
+  const { result, rerender } = renderHook(
+    ({ currentSession }: { currentSession: SessionView }) => useGroupChat(currentSession),
+    { initialProps: { currentSession: session } },
+  );
+
+  act(() => {
+    void result.current.abortBot('bot-a');
+  });
+  expect(result.current.abortingBotIds.has('bot-a')).toBe(true);
+
+  rerender({ currentSession: { ...session, sessionId: 's2' } });
+  await waitFor(() => expect(result.current.abortingBotIds.size).toBe(0));
 });
 
 it('loadMoreHistory prepends deduped older messages and syncs hasMore from provider', async () => {

@@ -30,10 +30,14 @@ export const routes = [
       { path: '/bot-workshop/logs', component: '@/pages/BotWorkshop/Logs' },
       { path: '/bot-workshop/detail', component: '@/pages/BotWorkshop/Detail' },
       { path: '/bot-workshop/health-check', component: '@/pages/BotWorkshop/HealthCheck' },
-      { path: '/admin', component: '@/pages/Admin' },
-      // 兼容旧深链：管理后台为单页 #/admin + tab，子路由重定向至 /admin（PRD 单页意图）。
-      { path: '/admin/spaces', redirect: '/admin' },
-      { path: '/admin/work-orders', redirect: '/admin' },
+      // split-admin-space-ticket-pages：管理后台单页拆分，空间管理/通知中心为独立路由，均不占导航位
+      //（入口 = 空间切换弹层设置 icon / 通知弹层「查看全部」）。
+      { path: '/space-admin', component: '@/pages/SpaceAdmin' },
+      { path: '/ticket-center', component: '@/pages/TicketCenter' },
+      // 兼容旧深链：原 /admin 单页（#/admin + ?tab=）拆分后重定向至对应新路由，旧书签不 404。
+      { path: '/admin', redirect: '/space-admin' },
+      { path: '/admin/spaces', redirect: '/space-admin' },
+      { path: '/admin/work-orders', redirect: '/ticket-center' },
       { path: '/components', component: '@/pages/ComponentExamples' },
       // 副屏引擎能力自测页（独立 ChatLayout，零对话依赖；对齐 /components 开发页约定）
       // 404 兜底：匹配 AppLayout 下未注册的子路由（如 /xyz），避免空白页。

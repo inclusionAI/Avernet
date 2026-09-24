@@ -5,14 +5,6 @@ import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-jest.mock('@/components/Admin/SpaceMemberList/UserSearchDropdown', () => ({
-  UserSearchDropdown: ({ onSelect }: { onSelect: (user: { userId: string; displayName: string }) => void }) => (
-    <button type="button" onClick={() => onSelect({ userId: '149608', displayName: '小明' })}>
-      选择员工
-    </button>
-  ),
-}));
-
 const bot = {
   ...mapBotDto({ bot_id: 'bot-1', bot_name: '团队 Bot', engine: 'openclaw', actions: ['view'] }).item,
   ownership: 'team' as const,
@@ -23,6 +15,7 @@ const baseProps = {
   spaces: [],
   loading: false,
   collaborators: [{ id: 1, userId: '1001', name: '成员甲', role: 'member' as const }],
+  members: [{ userId: '149608', name: '小明' }],
   onClose: jest.fn(),
   onChangeSpace: jest.fn().mockResolvedValue(undefined),
   onCreateTeamAndChangeSpace: jest.fn().mockResolvedValue(undefined),
@@ -40,10 +33,11 @@ test('授权为即时落库语义并在角色更新时展示局部加载', () =>
   expect(screen.getByLabelText('角色更新中')).toBeInTheDocument();
 });
 
-test('员工搜索选择后携带姓名和工号添加成员', () => {
+test('空间成员下拉选择后携带姓名和工号添加成员', () => {
   render(<BotAccessModal {...baseProps} mode="authorize" />);
 
-  fireEvent.click(screen.getByRole('button', { name: '选择员工' }));
+  fireEvent.focus(screen.getByRole('textbox', { name: '搜索空间成员' }));
+  fireEvent.click(screen.getByRole('button', { name: '小明（149608）' }));
   expect(screen.getByText(/小明（149608）/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '添加' }));
 

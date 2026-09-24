@@ -5,6 +5,7 @@ import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
 import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenController';
 import * as botSessionService from '@/services/workspace/botSessionService';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { waitFor } from '@testing-library/react';
 
 jest.mock('@/services/backendApi/bots/privateBotSessionController');
 // auto-mock(不带 factory),避免在 hoisted factory 内引用 jest.fn() —— 与 @jest/globals 一起会触发 TDZ。
@@ -35,7 +36,11 @@ const mockedGetIamToken = getBotIamToken as jest.Mock<any>;
 
 beforeEach(() => {
   jest.clearAllMocks();
-  jest.spyOn(botSessionService.botSessionService, 'listMessages').mockResolvedValue([]);
+  jest.spyOn(botSessionService.botSessionService, 'listMessagesPage').mockResolvedValue({
+    messages: [],
+    total: 0,
+    rawCount: 0,
+  });
   mockSdk.isConnected = false;
   mockSdk.connect.mockResolvedValue(undefined);
   mockSdk.request.mockResolvedValue(undefined);
@@ -204,13 +209,160 @@ describe('botChatProvider', () => {
     await expect(p.connect()).rejects.toThrow('conn boom');
   });
 
-  it('loadHistory 委托 botSessionService.listMessages', async () => {
-    (botSessionService.botSessionService.listMessages as jest.Mock<any>).mockResolvedValue([
-      { id: 'm1', role: 'user', content: 'hi', status: 'history', blocks: [] },
-    ]);
+  it('初始化连接信息期间 disconnect：初始化完成后不再建立旧会话 WebSocket', async () => {
+    let resolveConnection!: (value: unknown) => void;
+    mockedGetConnection.mockReturnValue(
+      new Promise((resolve) => {
+        resolveConnection = resolve;
+      }),
+    );
+    const provider = createBotChatProvider({ bot, userId: 'u', sessionId: 'sid-stale-init' });
+
+    const connecting = provider.connect();
+    provider.disconnect();
+    resolveConnection({
+      code: 200000,
+      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
+      message: 'OK',
+      request_id: 'r',
+    });
+
+    await expect(connecting).resolves.toBeUndefined();
+    expect(mockSdk.connect).not.toHaveBeenCalled();
+    expect(mockSdk.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('底层 WebSocket 连接中 disconnect：等待连接结束后再关闭，避免 CONNECTING 状态 close 触发 1006', async () => {
+    mockedGetConnection.mockResolvedValue({
+      code: 200000,
+      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
+      message: 'OK',
+      request_id: 'r',
+    });
+    let resolveSdkConnect!: () => void;
+    mockSdk.connect.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveSdkConnect = resolve;
+      }),
+    );
+    const provider = createBotChatProvider({ bot, userId: 'u', sessionId: 'sid-connecting' });
+
+    const connecting = provider.connect();
+    await waitFor(() => expect(mockSdk.connect).toHaveBeenCalledTimes(1));
+
+    provider.disconnect();
+    expect(mockSdk.disconnect).not.toHaveBeenCalled();
+
+    resolveSdkConnect();
+    await expect(connecting).resolves.toBeUndefined();
+    expect(mockSdk.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('并发 connect 共享同一底层连接', async () => {
+    mockedGetConnection.mockResolvedValue({
+      code: 200000,
+      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
+      message: 'OK',
+      request_id: 'r',
+    });
+    let resolveSdkConnect!: () => void;
+    mockSdk.connect.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveSdkConnect = resolve;
+      }),
+    );
+    const provider = createBotChatProvider({ bot, userId: 'u', sessionId: 'sid-single-flight' });
+
+    const first = provider.connect();
+    const second = provider.connect();
+    await waitFor(() => expect(mockSdk.connect).toHaveBeenCalledTimes(1));
+    resolveSdkConnect();
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+  });
+
+  it('单聊历史支持按页向上加载并根据原始消息总数维护 hasMore', async () => {
+    const listMessagesPage = botSessionService.botSessionService.listMessagesPage as jest.Mock<any>;
+    listMessagesPage
+      .mockResolvedValueOnce({
+        messages: [{ id: 'new', role: 'assistant', content: 'new', status: 'history' }],
+        total: 3,
+        rawCount: 2,
+      })
+      .mockResolvedValueOnce({
+        messages: [{ id: 'old', role: 'user', content: 'old', status: 'history' }],
+        total: 3,
+        rawCount: 1,
+      });
+    const p = createBotChatProvider({ bot, userId: 'u', sessionId: 'sid-1' }) as any;
+
+    await expect(p.loadHistory()).resolves.toEqual([expect.objectContaining({ id: 'new' })]);
+    expect(p.hasMoreHistory).toBe(true);
+    await expect(p.loadMoreHistory()).resolves.toEqual([expect.objectContaining({ id: 'old' })]);
+    expect(listMessagesPage).toHaveBeenNthCalledWith(1, bot, 'u', 'sid-1', 1, 50);
+    expect(listMessagesPage).toHaveBeenNthCalledWith(2, bot, 'u', 'sid-1', 2, 50);
+    expect(p.hasMoreHistory).toBe(false);
+  });
+
+  it('loadHistory 委托 botSessionService.listMessagesPage', async () => {
+    (botSessionService.botSessionService.listMessagesPage as jest.Mock<any>).mockResolvedValue({
+      messages: [{ id: 'm1', role: 'user', content: 'hi', status: 'history', blocks: [] }],
+      total: 1,
+      rawCount: 1,
+    });
     const p = createBotChatProvider({ bot, userId: 'u', sessionId: 'sid-1' });
     const out = await p.loadHistory();
-    expect(botSessionService.botSessionService.listMessages).toHaveBeenCalledWith(bot, 'u', 'sid-1');
+    expect(botSessionService.botSessionService.listMessagesPage).toHaveBeenCalledWith(bot, 'u', 'sid-1', 1, 50);
     expect(out).toHaveLength(1);
   });
+});
+
+it('desktop direct preserves localhost and skips cloud IAM for connect/send/refresh', async () => {
+  mockedGetConnection.mockResolvedValue({
+    code: 200000,
+    data: {
+      engine: 'hermes',
+      transport_mode: 'direct',
+      expires_at: 'x',
+      sockets: [{ kind: 'chat', url: 'ws://localhost:43210/api/hermes/ws' }],
+    },
+  });
+  const p = createBotChatProvider({ bot: { ...bot, botType: 'desktop' }, userId: 'u', sessionId: 'sid' });
+  await p.connect();
+  await p.request({ content: 'hello', sessionId: 'sid' });
+  const cfg = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0];
+  expect(cfg.url).toBe('ws://localhost:43210/api/hermes/ws');
+  expect(await cfg.credentialProvider()).toEqual({});
+  expect(mockedGetIamToken).not.toHaveBeenCalled();
+});
+
+it('desktop recovery rediscovers a changed localhost port and cancels on disconnect', async () => {
+  jest.useFakeTimers();
+  const discovery = (port: number) => ({
+    code: 200000,
+    data: {
+      engine: 'openclaw',
+      transport_mode: 'direct',
+      expires_at: 'x',
+      sockets: [{ kind: 'chat', url: `ws://localhost:${port}/api/openclaw/ws` }],
+    },
+  });
+  mockedGetConnection.mockResolvedValueOnce(discovery(41001)).mockResolvedValue(discovery(41002));
+  const p = createBotChatProvider({ bot: { ...bot, botType: 'desktop' }, userId: 'u', sessionId: 'sid' });
+  try {
+    await p.connect();
+    const listener = mockSdk.subscribeToConnectionStatus.mock.calls[0][0];
+    listener({ status: 'disconnected', retryCount: 0 });
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(mockedGetConnection).toHaveBeenCalledTimes(2);
+    expect((adapters.OpenClawProvider as jest.Mock<any>).mock.calls[1][0].url).toBe(
+      'ws://localhost:41002/api/openclaw/ws',
+    );
+    mockSdk.subscribeToConnectionStatus.mock.calls[1][0]({ status: 'disconnected', retryCount: 0 });
+    p.disconnect();
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(mockedGetConnection).toHaveBeenCalledTimes(2);
+  } finally {
+    p.disconnect();
+    jest.useRealTimers();
+  }
 });

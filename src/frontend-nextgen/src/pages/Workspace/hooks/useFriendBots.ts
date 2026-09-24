@@ -19,6 +19,7 @@ function toChatBotView(bot: {
   reachability?: string;
   engine?: string;
   botType?: string;
+  detailsResolved?: boolean;
 }): ChatBotView {
   const { realBotId, ownerId } = splitBotId(bot.id);
   return {
@@ -28,7 +29,7 @@ function toChatBotView(bot: {
     displayName: bot.name,
     online: bot.online,
     reachability: bot.reachability === 'unreachable' ? 'unreachable' : 'reachable',
-    chatable: true,
+    chatable: bot.detailsResolved !== false,
     engine: bot.engine,
     botType: bot.botType,
     isFriendBot: true,

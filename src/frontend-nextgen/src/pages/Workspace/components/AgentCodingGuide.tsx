@@ -19,7 +19,7 @@ export function AgentCodingGuide({ bot, onOpen }: AgentCodingGuideProps) {
         title={title}
         description="为提供更好的使用体验，该 Bot 会在其他页面中为你提供服务。"
         action={
-          <Button className="!text-sm cursor-pointer font-medium" size="sm" onClick={() => onOpen(bot)}>
+          <Button className="!text-sm font-medium" size="sm" onClick={() => onOpen(bot)}>
             前往使用
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Button>

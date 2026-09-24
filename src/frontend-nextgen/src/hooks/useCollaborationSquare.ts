@@ -31,7 +31,10 @@ import { useCreateGroupSessionFlow } from './useCreateGroupSessionFlow';
 
 export function useCollaborationSquare(resource: SquareResource) {
   const store = useCollaborationSquareStore();
-  const { humanIdentityStatus, humanBotContext, viewer, activeActor } = useCollaborationSquareActorContext(store.reset);
+  const { humanIdentityStatus, humanBotContext, viewer, activeActor } = useCollaborationSquareActorContext(
+    resource,
+    store.reset,
+  );
   const botGroupList = useCollaborationSquareList({
     resource,
     humanBotContext,
@@ -169,7 +172,7 @@ export function useCollaborationSquare(resource: SquareResource) {
             const result = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext, {
               isOwnedByLoggedInUser: Boolean(bot.isOwnedByLoggedInUser),
             });
-            history.push(getCollaborationBotConversationUrl(bot.id, result.sessionId));
+            history.push(getCollaborationBotConversationUrl(bot.id, result.sessionId, humanBotContext.actorId));
           },
           bot.id,
         );
@@ -191,7 +194,7 @@ export function useCollaborationSquare(resource: SquareResource) {
             if (activeActor.type === 'human') {
               const conversation = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
               notifySuccess('好友关系已建立，正在进入对话');
-              history.push(getCollaborationBotConversationUrl(bot.id, conversation.sessionId));
+              history.push(getCollaborationBotConversationUrl(bot.id, conversation.sessionId, humanBotContext.actorId));
             } else {
               notifySuccess('好友关系已建立');
             }

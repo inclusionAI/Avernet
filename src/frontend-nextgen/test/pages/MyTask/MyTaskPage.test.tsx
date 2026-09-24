@@ -69,7 +69,6 @@ function access(activeIdentity: WorkIdentityAccess['activeIdentity']): WorkIdent
   return {
     activeIdentity,
     activeIdentityKind: activeIdentity?.kind ?? null,
-    canViewPublicGroups: activeIdentity?.kind !== 'bot',
   };
 }
 

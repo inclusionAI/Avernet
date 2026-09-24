@@ -13,20 +13,17 @@ export const visibilityAudience: Record<
     label: string;
     description: string;
     editorTitle: string;
-    showcaseDescription: string;
   }
 > = {
   user: {
     label: '对用户可见性',
     description: '其他用户以个人身份，在协作广场可见当前 Bot 并申请好友。',
     editorTitle: 'Bot 可见性：对用户',
-    showcaseDescription: '其他用户以个人身份在协作广场可见当前 Bot，',
   },
   bot: {
     label: '对 Bot 可见性',
     description: '以 Bot 工作身份，在协作广场可见当前 Bot 并申请好友。',
     editorTitle: 'Bot 可见性：对 Bot',
-    showcaseDescription: '以 Bot 工作身份在协作广场可见当前 Bot，',
   },
 } as const;
 
@@ -53,7 +50,8 @@ export const organizationScopeCopy = {
 export const botFriendApprovalSection = {
   title: 'Bot 好友审批',
   descriptionLeading: '在其他用户或其他 Bot 发起好友申请后，统一控制是否需要审批。待审批的申请可前往「',
-  approvalEntryLabel: '管理后台 / 通知中心 / 待我处理',
-  approvalEntryPath: '/admin?tab=work-orders',
+  // split-admin-space-ticket-pages：管理后台拆分后，审批深链改指独立通知中心路由。
+  approvalEntryLabel: '通知中心 / 待我处理',
+  approvalEntryPath: '/ticket-center',
   descriptionTrailing: '」处理。',
 } as const;

@@ -9,11 +9,11 @@ export const GROUP_PANEL_COMPONENT_NAME = 'taskPanel.TaskLoopView';
  * 原 CreateGroupInput（POST /openapi/v1/collaboration/groups 请求参数）不在本函数内改动：
  * - 非自定义协作群(非 state_machine)：返回 null，由调用方回落原 createGroup 链路。
  * - state_machine：按已确认规则映射为 ExecuteTaskRequest：
- *   - task_spec.metadata.title ← input.name
+ *   - task_spec.context.title ← input.name
  *   - task_spec.context.background ← input.context
- *   - instruction === objective === acceptances[0].acceptance === background
+ *   - objective === acceptances[0].acceptance === background
  *     （建群无独立"目标-验收"语义，统一填 context 内容，不留空）
- *   - task_spec.context.extend_props = {}（建群无会话/群/父任务上下文）
+ *   - task_spec.context.extend_props 使用标准 deliverables/constraints/resources 结构
  *   - source_type = 'coop_group'；owner_bot_id = input.driverBotUuid；owner_user_id 由调用方补
  *   - execution_config：
  *     - task_type = 'yaml'
@@ -37,8 +37,11 @@ export function buildExecuteRequestFromGroup(input: CreateGroupInput, ownerUserI
 
   return {
     task_spec: {
-      metadata: { title: input.name.trim(), instruction: bg },
-      context: { background: bg, extend_props: {} },
+      context: {
+        title: input.name.trim(),
+        background: bg,
+        extend_props: { deliverables: bg ? [bg] : [], constraints: [], resources: [] },
+      },
       goal: {
         objective: bg,
         acceptances: bg ? [{ id: 'ac1', acceptance: bg }] : [],

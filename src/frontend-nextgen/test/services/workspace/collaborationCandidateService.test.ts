@@ -210,7 +210,13 @@ describe('collaborationCandidateService', () => {
 
     const res = await collaborationCandidateService.listFriends('actor-1', { actorType: 'bot' });
 
-    expect(res.ok && res.data.items[0]).toMatchObject({ id: 'b1:actor-1', name: 'Alpha' });
+    expect(res.ok && res.data.items[0]).toMatchObject({
+      id: 'b1:actor-1',
+      name: 'Alpha',
+      online: false,
+      status: 'hidden',
+      detailsResolved: false,
+    });
     expect(res.ok && res.data.hasMore).toBe(false);
   });
 

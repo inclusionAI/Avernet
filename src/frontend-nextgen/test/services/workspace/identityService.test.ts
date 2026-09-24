@@ -160,11 +160,9 @@ describe('identityService.loadIdentities', () => {
 
     expect(res.ok).toBe(true);
     expect((res as SuccessResult).data.identities).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: 'b-active', engine: 'OpenClaw', botType: 'personal' }),
-        expect.objectContaining({ id: 'b-type', engine: 'Hermes', botType: 'desktop' }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ id: 'b-active', engine: 'OpenClaw', botType: 'personal' })]),
     );
+    expect((res as SuccessResult).data.identities.some((identity) => identity.id === 'b-type')).toBe(false);
   });
 
   it('优先使用 engine 对象中的真实引擎类型，不把 provider/name 映射成引擎', async () => {
@@ -407,6 +405,18 @@ describe('identityService.loadIdentities', () => {
     const hidden = data.identities[2];
     expect(online).toMatchObject({ id: 'b-online', online: true, status: 'online', reachability: 'reachable' });
     expect(hidden).toMatchObject({ id: 'b-hidden', online: false, status: 'hidden', reachability: 'unreachable' });
+  });
+
+  it('rejects HTTP 200 business-error envelopes instead of synthesizing the me identity', async () => {
+    listMyBots.mockResolvedValue({ code: 50000, message: 'mine service failed', data: null });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(false);
+    expect((res as FailureResult).error).toMatchObject({
+      code: 'IDENTITY_LOAD_FAILED',
+      canRetry: true,
+    });
   });
 
   it('returns friendly error with canRetry on backend failure', async () => {

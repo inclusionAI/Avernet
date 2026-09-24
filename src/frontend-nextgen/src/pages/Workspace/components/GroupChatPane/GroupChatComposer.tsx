@@ -26,7 +26,6 @@ interface GroupChatComposerProps {
   mentionConfig: MentionConfig | undefined;
   showReconnectToolbar: boolean;
   onSend: (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => void;
-  onStop: () => void;
   onReconnect: () => void;
   /** 受控输入草稿（由 GroupChatPane 持有，便于副屏 onAction(fill_input) 回填）。 */
   draft: string;
@@ -96,7 +95,6 @@ export function GroupChatComposer({
   mentionConfig,
   showReconnectToolbar,
   onSend,
-  onStop,
   onReconnect,
   draft,
   onDraftChange,
@@ -125,6 +123,14 @@ export function GroupChatComposer({
       const files = Array.from(event.target.files ?? []);
       if (files.length > 0) images.addFiles(files);
       event.target.value = '';
+    },
+    [images],
+  );
+
+  const handlePasteFiles = useCallback(
+    (files: File[]) => {
+      const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+      if (imageFiles.length > 0) images.addFiles(imageFiles);
     },
     [images],
   );
@@ -176,11 +182,6 @@ export function GroupChatComposer({
     [images, isRequesting, onSend, session?.participants, session?.sessionId, execution, onDraftChange, quote],
   );
 
-  const cancel = useCallback(() => {
-    if (images.isUploading || images.isProcessing) return;
-    if (isRequesting) onStop();
-  }, [images.isProcessing, images.isUploading, isRequesting, onStop]);
-
   const submitImageOnlyOnEnter = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (event.key !== 'Enter' || event.shiftKey || draft.trim() || images.images.length === 0) return;
@@ -204,8 +205,8 @@ export function GroupChatComposer({
           void submit(content, context);
         }}
         onKeyDown={submitImageOnlyOnEnter}
-        onCancel={cancel}
-        loading={isRequesting || images.isProcessing || images.isUploading}
+        onPasteFile={handlePasteFiles}
+        loading={images.isProcessing || images.isUploading}
         disabled={!session || isRequesting}
         submitType="enter"
         mention={mentionConfig}
@@ -223,6 +224,7 @@ export function GroupChatComposer({
             ) : undefined,
         }}
         imageUpload={{
+          // 图片选择继续由「+ → 添加图片」统一提供；粘贴由 onPasteFile 单独接入，避免 SDK 重复渲染按钮。
           enabled: false,
           images: images.images,
           onAdd: images.addFiles,

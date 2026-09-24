@@ -1,12 +1,13 @@
 import { Button } from '@/components/ui';
 import { MessageSelectionToolbar } from '@/components/Workspace/MessageInteractionToolbar';
 import type { GroupView, SessionView } from '@/domain/collaboration';
+import { useHistoryPrependAnchor } from '@/pages/Workspace/hooks/useHistoryPrependAnchor';
 import type { MessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
 import { useStickToBottom } from '@/pages/Workspace/hooks/useStickToBottom';
 import type { ChatMessage } from '@tc-chat/core';
 import { BubbleList } from '@tc-chat/ui/es/BubbleList';
 import { ArrowDown } from 'lucide-react';
-import { useCallback, useRef, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { GroupChatBubble, ThinkingBubble } from './GroupChatBubble';
 
 interface GroupChatMessageListProps {
@@ -25,7 +26,6 @@ interface GroupChatMessageListProps {
   onQuoteSelected: (text: string) => void;
   onExplainSelected: (text: string) => void;
   onEditMessage: (message: ChatMessage) => void;
-  onStop: () => void;
 }
 
 /** 群聊消息列表及 Driver/Manager 启动提示。 */
@@ -45,18 +45,29 @@ export function GroupChatMessageList({
   onQuoteSelected,
   onExplainSelected,
   onEditMessage,
-  onStop,
 }: GroupChatMessageListProps) {
   const latestUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
+  const hasStreamingMessage = useMemo(
+    () => messages.some((message) => message.role === 'assistant' && message.status === 'streaming'),
+    [messages],
+  );
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hasStreamingMessage) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasStreamingMessage]);
   const lastMessage = messages[messages.length - 1];
+  const hasSettledAssistantResponse = lastMessage?.role === 'assistant' && lastMessage.status !== 'pending';
   const showThinkingBubble =
-    (isRequesting || groupBootstrapProcessing) &&
-    (!lastMessage || lastMessage.role !== 'assistant' || lastMessage.status !== 'streaming');
+    (isRequesting || groupBootstrapProcessing) && !hasStreamingMessage && !hasSettledAssistantResponse;
   const isStreaming = isRequesting || groupBootstrapProcessing;
   // BubbleList 的 isStreaming 贴底 effect 不随流式内容增长重跑（依赖只有 messages.length），
   // 应用层补跟随：用户在底部附近时任何内容增高都持续贴底。
   const listRootRef = useRef<HTMLDivElement | null>(null);
   useStickToBottom(listRootRef);
+  const loadMoreWithAnchor = useHistoryPrependAnchor(messages, listRootRef, onLoadMoreHistory);
   const setListRootRef = useCallback(
     (node: HTMLDivElement | null) => {
       listRootRef.current = node;
@@ -81,7 +92,7 @@ export function GroupChatMessageList({
         hasMore={hasMoreHistory}
         isLoadingMore={isLoadingMoreHistory}
         className="h-full bg-background px-3 py-3 sm:px-6 sm:py-4"
-        onLoadMore={onLoadMoreHistory}
+        onLoadMore={loadMoreWithAnchor}
         emptyPlaceholder="发送一条消息开始协作群对话"
         footer={
           showThinkingBubble ? <ThinkingBubble label={groupBootstrapProcessing ? processingLabel : undefined} /> : null
@@ -89,7 +100,9 @@ export function GroupChatMessageList({
         renderItem={(message, index) => {
           const isEditable = message.role === 'user' && message.id === latestUserMessageId;
           return (
-            <div data-message-id={message.id} className="group relative">
+            // 验收微调（2026-09-14）：底部间距 8→20px——为悬停操作栏（悬挂在消息块下方）让出归属空间，
+            // 避免操作栏视觉上贴近下一条消息的发送者行；顶部 8px 不变（密度收敛口径）。
+            <div data-message-id={message.id} className="group relative pt-2 pb-5">
               <GroupChatBubble
                 message={message}
                 isLastMessage={index === messages.length - 1}
@@ -103,7 +116,7 @@ export function GroupChatMessageList({
                 onCopy={(text) => interactions.copyText(text)}
                 onEdit={() => onEditMessage(message)}
                 isEditable={isEditable}
-                onStop={onStop}
+                now={now}
               />
             </div>
           );

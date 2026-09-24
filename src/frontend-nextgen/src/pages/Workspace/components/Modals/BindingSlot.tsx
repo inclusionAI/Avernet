@@ -65,7 +65,7 @@ export function BindingSlot({ visible, binding, botNameResolver }: BindingSlotPr
               重新编辑
             </Button>
           </div>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             已绑定 {boundCount} / {yamlValidation.participantDefinitions.length} 个角色
           </span>
         </>

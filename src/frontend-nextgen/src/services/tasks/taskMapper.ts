@@ -13,6 +13,9 @@ export interface TaskComposerForm {
   taskType: 'dynamic' | 'workflow';
   workflowId?: string;
   background?: string;
+  deliverables?: string[];
+  constraints?: string[];
+  resources?: string[];
 }
 
 export interface TaskComposerContext {
@@ -26,17 +29,17 @@ export interface TaskComposerContext {
 }
 
 export function buildExecuteRequest(form: TaskComposerForm, ctx: TaskComposerContext): ExecuteTaskRequest {
-  // 后端契约 TaskInfoRequestDTO（task API execute 端点，前缀由 capability getTaskApiBase 注入）：
-  // - task_spec.metadata 不含 task_id（后端自动生成 UUID）；
-  // - task_type 进 execution_config.task_type；来源渠道语义由 source_type + owner_bot_id 承载
-  //   （source_type 即原 source_channel_type，owner_bot_id 即原 source_channel_id），不再透传旧字段。
+  const deliverables = (form.deliverables ?? []).map((item) => item.trim()).filter(Boolean);
   return {
     task_spec: {
-      metadata: { title: form.title.trim(), instruction: form.instruction.trim() },
       context: {
+        title: form.title.trim(),
         background: form.background?.trim() ?? '',
-        // 会话/群/父任务上下文下沉 execution_config(扁平);建群任务此处为空。
-        extend_props: {},
+        extend_props: {
+          deliverables,
+          constraints: (form.constraints ?? []).map((item) => item.trim()).filter(Boolean),
+          resources: (form.resources ?? []).map((item) => item.trim()).filter(Boolean),
+        },
       },
       goal: {
         objective: form.objective.trim(),
@@ -51,7 +54,6 @@ export function buildExecuteRequest(form: TaskComposerForm, ctx: TaskComposerCon
     execution_config: {
       task_type: form.taskType,
       ...(form.taskType === 'workflow' && form.workflowId ? { workflow_id: form.workflowId } : {}),
-      // 会话/群/父任务上下文扁平放入 execution_config(新规范;历史记录读 teamclaw_context 兼容)。
       main_session_id: ctx.mainSessionId,
       main_session_name: ctx.mainSessionName,
       source_group_id: ctx.sourceGroupId,

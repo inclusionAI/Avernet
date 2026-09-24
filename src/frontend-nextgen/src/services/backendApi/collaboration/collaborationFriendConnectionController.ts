@@ -56,6 +56,9 @@ export interface ListFriendConnectionRequestsParams {
 export interface ListFriendConnectionsParams {
   actor_type: FriendConnectionActorType;
   actor_id: string;
+  target_type?: FriendConnectionActorType;
+  page?: number;
+  page_size?: number;
 }
 
 export interface DeleteFriendConnectionBody {

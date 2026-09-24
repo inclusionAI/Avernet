@@ -257,7 +257,8 @@ export const botEditorController = {
       'POST',
     ),
   listSkillSets: (botId: string) => request<SkillSetDto[]>(path(botId, 'skill-sets')),
-  listSkillSetResources: (botId: string) => request<SkillSetResourceDto[]>(path(botId, 'skill-sets/resources')),
+  listSkillSetResources: (botId: string, ownerId?: string) =>
+    request<SkillSetResourceDto[]>(path(botId, 'skill-sets/resources'), 'GET', { owner_id: ownerId }),
   createSkillSet: (botId: string, body: { name: string; description?: string }) =>
     backendRequest<BackendApiEnvelope<SkillSetDto>>(path(botId, 'skill-sets'), {
       method: 'POST',
@@ -270,8 +271,12 @@ export const botEditorController = {
   deleteSkillSet: (botId: string, setId: string) => request(path(botId, `skill-sets/${setId}`), 'DELETE'),
   setSkillSetActive: (botId: string, setId: string, active: boolean) =>
     request<SkillSetDto>(path(botId, `skill-sets/${setId}/${active ? 'activate' : 'deactivate'}`), 'POST'),
-  listSkillSetSkills: (botId: string, setId: string) =>
-    request<Array<{ skill_id: string; name: string; description?: string }>>(path(botId, `skill-sets/${setId}/skills`)),
+  listSkillSetSkills: (botId: string, setId: string, ownerId?: string) =>
+    request<Array<{ skill_id: string; name: string; description?: string }>>(
+      path(botId, `skill-sets/${setId}/skills`),
+      'GET',
+      { owner_id: ownerId },
+    ),
   setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean) =>
     request(path(botId, `skill-sets/${setId}/skills/${skillId}`), active ? 'PUT' : 'DELETE'),
   listSkillSetMcps: (botId: string, setId: string) =>
@@ -280,57 +285,74 @@ export const botEditorController = {
     ),
   setSkillSetMcp: (botId: string, setId: string, serverCode: string, active: boolean) =>
     request(path(botId, `skill-sets/${setId}/mcps/${encodeURIComponent(serverCode)}`), active ? 'PUT' : 'DELETE'),
-  listResources: (botId: string, directory = '') =>
-    request<BackendApiPage<ResourceDto>>(path(botId, 'resources'), 'GET', { path: directory, page: 1, page_size: 100 }),
-  createDirectory: (botId: string, resourcePath: string) =>
-    request<ResourceDto>(path(botId, 'resources/mkdir'), 'POST', { path: resourcePath }),
-  deleteResource: (botId: string, resourcePath: string) =>
-    request(path(botId, 'resources'), 'DELETE', { path: resourcePath }),
-  uploadResource: (botId: string, resourcePath: string, content: ArrayBuffer, overwrite = false) =>
+  listResources: (botId: string, directory = '', ownerId?: string) =>
+    request<BackendApiPage<ResourceDto>>(path(botId, 'resources'), 'GET', {
+      path: directory,
+      page: 1,
+      page_size: 100,
+      owner_id: ownerId,
+    }),
+  createDirectory: (botId: string, resourcePath: string, ownerId?: string) =>
+    request<ResourceDto>(path(botId, 'resources/mkdir'), 'POST', { path: resourcePath, owner_id: ownerId }),
+  deleteResource: (botId: string, resourcePath: string, ownerId?: string) =>
+    request(path(botId, 'resources'), 'DELETE', { path: resourcePath, owner_id: ownerId }),
+  uploadResource: (botId: string, resourcePath: string, content: ArrayBuffer, overwrite = false, ownerId?: string) =>
     backendRequest<BackendApiEnvelope<ResourceDto>>(path(botId, 'resources/upload'), {
       method: 'POST',
-      params: userScopedParams({ path: resourcePath, overwrite }),
+      params: userScopedParams({ path: resourcePath, overwrite, owner_id: ownerId }),
       rawBody: content,
       headers: { 'Content-Type': 'application/octet-stream' },
     }),
-  previewResource: (botId: string, resourcePath: string) =>
+  previewResource: (botId: string, resourcePath: string, ownerId?: string) =>
     request<{ path: string; content_type: string; content: string }>(path(botId, 'resources/preview'), 'GET', {
       path: resourcePath,
+      owner_id: ownerId,
     }),
-  downloadResource: (botId: string, resourcePath: string) =>
+  downloadResource: (botId: string, resourcePath: string, ownerId?: string) =>
     backendRequest<Blob>(path(botId, 'resources/download'), {
       method: 'GET',
-      params: userScopedParams({ path: resourcePath }),
+      params: userScopedParams({ path: resourcePath, owner_id: ownerId }),
       responseType: 'blob',
     }),
-  downloadResourceDirectory: (botId: string, resourcePath: string) =>
+  downloadResourceDirectory: (botId: string, resourcePath: string, ownerId?: string) =>
     backendRequest<Blob>(path(botId, 'resources/download-dir'), {
       method: 'GET',
-      params: userScopedParams({ path: resourcePath }),
+      params: userScopedParams({ path: resourcePath, owner_id: ownerId }),
       responseType: 'blob',
     }),
-  listRoutines: (botId: string) =>
-    request<BackendApiPage<RoutineDto>>(path(botId, 'routines'), 'GET', { page: 1, page_size: 100 }),
-  createRoutine: (botId: string, body: RoutineWrite) => request<RoutineDto>(path(botId, 'routines'), 'POST', {}, body),
-  updateRoutine: (botId: string, routineId: string, body: Partial<RoutineWrite>) =>
-    request<RoutineDto>(path(botId, `routines/${routineId}`), 'PATCH', {}, body),
-  deleteRoutine: (botId: string, routineId: string) => request(path(botId, `routines/${routineId}`), 'DELETE'),
-  runRoutine: (botId: string, routineId: string) => request(path(botId, `routines/${routineId}/run`), 'POST'),
-  listRoutineRuns: (botId: string, routineId: string) =>
+  listRoutines: (botId: string, ownerId?: string) =>
+    request<BackendApiPage<RoutineDto>>(path(botId, 'routines'), 'GET', {
+      page: 1,
+      page_size: 100,
+      owner_id: ownerId,
+    }),
+  createRoutine: (botId: string, body: RoutineWrite, ownerId?: string) =>
+    request<RoutineDto>(path(botId, 'routines'), 'POST', { owner_id: ownerId }, body),
+  updateRoutine: (botId: string, routineId: string, body: Partial<RoutineWrite>, ownerId?: string) =>
+    request<RoutineDto>(path(botId, `routines/${routineId}`), 'PATCH', { owner_id: ownerId }, body),
+  deleteRoutine: (botId: string, routineId: string, ownerId?: string) =>
+    request(path(botId, `routines/${routineId}`), 'DELETE', { owner_id: ownerId }),
+  runRoutine: (botId: string, routineId: string, ownerId?: string) =>
+    request(path(botId, `routines/${routineId}/run`), 'POST', { owner_id: ownerId }),
+  listRoutineRuns: (botId: string, routineId: string, ownerId?: string) =>
     request<BackendApiPage<RoutineRunDto>>(path(botId, `routines/${routineId}/runs`), 'GET', {
       page: 1,
       page_size: 20,
+      owner_id: ownerId,
     }),
-  listIdentityFiles: (botId: string) =>
-    request<{ bot_id: string; files: IdentityFileInfoDto[] }>(path(botId, 'identity')),
+  listIdentityFiles: (botId: string, ownerId?: string) =>
+    request<{ bot_id: string; files: IdentityFileInfoDto[] }>(path(botId, 'identity'), 'GET', {
+      owner_id: ownerId,
+    }),
   getIdentityFile: (botId: string, type: string) => request<IdentityFileDto>(path(botId, `identity/${type}`)),
   updateIdentityFile: (botId: string, type: string, content: string) =>
     request(path(botId, `identity/${type}`), 'PUT', {}, { content }),
-  listChannels: (botId: string) =>
+  listChannels: (botId: string, ownerId?: string) =>
     request<ChannelDto[] | BackendApiPage<ChannelDto>>(path(botId, 'channels'), 'GET', {
       page: 1,
       page_size: 100,
       stage: 'draft',
+      owner_id: ownerId,
     }),
   createChannel: (botId: string, body: BackendUnknownRecord) =>
     request<ChannelDto>(path(botId, 'channels'), 'POST', {}, body),
@@ -339,33 +361,44 @@ export const botEditorController = {
   setChannelStatus: (botId: string, channelId: number, status: 'active' | 'inactive') =>
     request<ChannelDto>(path(botId, `channels/${channelId}/status`), 'PUT', {}, { status }),
   deleteChannel: (botId: string, channelId: number) => request(path(botId, `channels/${channelId}`), 'DELETE'),
-  getCallerContext: (botId: string) =>
+  getCallerContext: (botId: string, ownerId?: string) =>
     request<{
       editable: boolean;
       mcp_call_types: Record<string, 'caller' | 'owner'>;
       cli_call_types: Record<string, 'caller' | 'owner'>;
-    }>(path(botId, 'caller-context'), 'GET', { stage: 'draft' }),
-  updateMcpCallType: (botId: string, serverCode: string, callType: 'caller' | 'owner') =>
+    }>(path(botId, 'caller-context'), 'GET', { stage: 'draft', owner_id: ownerId }),
+  updateMcpCallType: (botId: string, serverCode: string, callType: 'caller' | 'owner', ownerId?: string) =>
     request<{ server_code: string; call_type: 'caller' | 'owner'; bot_call_type: 'caller' | 'owner' }>(
       path(botId, `mcps/${encodeURIComponent(serverCode)}/call-type`),
       'PATCH',
-      {},
+      { owner_id: ownerId },
       { call_type: callType },
     ),
-  getEngineConfig: (botId: string) => request<BackendUnknownRecord>(path(botId, 'engine/config')),
-  getEngineStatus: (botId: string) => request<EngineStatusDto>(path(botId, 'engine/status')),
-  updateEngineConfig: (botId: string, body: BackendUnknownRecord) =>
-    request<BackendUnknownRecord>(path(botId, 'engine/config'), 'PUT', {}, body),
-  getApprovalConfig: (botId: string) => request<ApprovalConfigDto>(path(botId, 'lifecycle/approval')),
-  updateApprovalConfig: (botId: string, enabled: boolean) =>
-    request<ApprovalConfigDto>(path(botId, 'lifecycle/approval'), 'PUT', {}, { should_approval: enabled }),
+  getEngineConfig: (botId: string, ownerId?: string) =>
+    request<BackendUnknownRecord>(path(botId, 'engine/config'), 'GET', { owner_id: ownerId }),
+  getEngineStatus: (botId: string, ownerId?: string) =>
+    request<EngineStatusDto>(path(botId, 'engine/status'), 'GET', { owner_id: ownerId }),
+  updateEngineConfig: (botId: string, body: BackendUnknownRecord, ownerId?: string) =>
+    request<BackendUnknownRecord>(path(botId, 'engine/config'), 'PUT', { owner_id: ownerId }, body),
+  getApprovalConfig: (botId: string, ownerId?: string) =>
+    request<ApprovalConfigDto>(path(botId, 'lifecycle/approval'), 'GET', { owner_id: ownerId }),
+  updateApprovalConfig: (botId: string, enabled: boolean, ownerId?: string) =>
+    request<ApprovalConfigDto>(
+      path(botId, 'lifecycle/approval'),
+      'PUT',
+      { owner_id: ownerId },
+      {
+        should_approval: enabled,
+      },
+    ),
   listRenderScreens: (botId: string, ownerId?: string) =>
     request<{ total: number; items: RenderScreenDto[] }>(path(botId, 'render-screens'), 'GET', { owner_id: ownerId }),
-  createRenderScreen: (botId: string, body: { name: string; cdn_url: string }) =>
-    request<RenderScreenDto>(path(botId, 'render-screens'), 'POST', {}, body),
-  updateRenderScreen: (botId: string, id: number, body: { name: string; cdn_url: string }) =>
-    request<RenderScreenDto>(path(botId, `render-screens/${id}`), 'PATCH', {}, body),
-  deleteRenderScreen: (botId: string, id: number) => request(path(botId, `render-screens/${id}`), 'DELETE'),
+  createRenderScreen: (botId: string, body: { name: string; cdn_url: string }, ownerId?: string) =>
+    request<RenderScreenDto>(path(botId, 'render-screens'), 'POST', { owner_id: ownerId }, body),
+  updateRenderScreen: (botId: string, id: number, body: { name: string; cdn_url: string }, ownerId?: string) =>
+    request<RenderScreenDto>(path(botId, `render-screens/${id}`), 'PATCH', { owner_id: ownerId }, body),
+  deleteRenderScreen: (botId: string, id: number, ownerId?: string) =>
+    request(path(botId, `render-screens/${id}`), 'DELETE', { owner_id: ownerId }),
   getLifecycle: (botId: string) =>
     request<{ bot_id: string; items: ServicePublicationDto[] }>(path(botId, 'lifecycle')),
   upgradeLifecycle: (botId: string, publicationId: number) =>
@@ -380,9 +413,11 @@ export const botEditorController = {
   deleteLifecycleDraft: (botId: string) => request(path(botId, 'lifecycle'), 'DELETE'),
   getEditLock: (botId: string, ownerId?: string) =>
     request<EditLockDto>(path(botId, 'edit-lock'), 'GET', { owner_id: ownerId }),
-  /** POST `/edit-lock` acquire（wire `acquire_edit_lock`）；contended 409 → 走 steal */
+  /** 成功响应也可能 acquired=false；抢占必须另经用户确认。 */
   acquireEditLock: (botId: string, ownerId?: string) =>
     request<EditLockDto>(path(botId, 'edit-lock'), 'POST', { owner_id: ownerId }),
   stealEditLock: (botId: string, ownerId?: string) =>
     request<EditLockDto>(path(botId, 'edit-lock/steal'), 'POST', { owner_id: ownerId }),
+  releaseEditLock: (botId: string, ownerId?: string) =>
+    request<{ released: boolean }>(path(botId, 'edit-lock'), 'DELETE', { owner_id: ownerId }),
 };

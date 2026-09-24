@@ -15,11 +15,12 @@ export interface IdentityMemo {
   groupSessionId?: string | null;
   expandedGroupId?: string | null;
   membership?: GroupMembership;
-  botId?: string | null;
   botSessionId?: string | null;
   expandedBotId?: string | null;
   /** 展开 bot 卡片归属分区（mine/friend）；缺失时恢复为 mine。 */
   botSectionKey?: string | null;
+  expandedFriendUserId?: string | null;
+  friendUserSessionId?: string | null;
 }
 
 export interface WorkspaceState {
@@ -46,6 +47,10 @@ export interface WorkspaceState {
   /** 记录每个 botId 是被哪个 section（mine / friend）展开的，用于区分同名 bot 的展开归属。 */
   expandedBotSectionKey: Record<string, string>;
   selectedBotSessionId: string | null;
+  /** Bot 身份对话视图当前展开的好友用户（纯用户 ID，不带 human_）。 */
+  expandedFriendUserId: string | null;
+  /** Bot 身份对话视图当前选中的好友用户 Session。 */
+  selectedFriendUserSessionId: string | null;
   /** 点击会话时递增的计数器;chat hooks 监听变化以强制重新拉取历史消息。 */
   historyRefreshNonce: number;
   /** 消息视角切换后递增;chat hooks 监听变化以整体重建 ws 连接（重拉一次性 token）。 */
@@ -73,6 +78,8 @@ export interface WorkspaceState {
   toggleBotExpanded: (botId: string) => void;
   setBotExpandedSection: (botId: string, sectionKey: string) => void;
   selectBotSession: (sessionId: string | null) => void;
+  setExpandedFriendUser: (id: string | null) => void;
+  selectFriendUserSession: (sessionId: string | null) => void;
   bumpHistoryRefresh: () => void;
   bumpWsReconnect: () => void;
   setPendingGroupBootstrap: (value: WorkspaceState['pendingGroupBootstrap']) => void;
@@ -113,6 +120,8 @@ export const groupViewState = {
   expandedBotIds: {} as Record<string, true>,
   expandedBotSectionKey: {} as Record<string, string>,
   selectedBotSessionId: null as string | null,
+  expandedFriendUserId: null as string | null,
+  selectedFriendUserSessionId: null as string | null,
   sessionTabsByGroup: {} as Record<string, SessionTab>,
   sessionSearchText: '',
   connectionState: 'disconnected' as ConnectionState,

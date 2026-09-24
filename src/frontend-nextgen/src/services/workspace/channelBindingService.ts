@@ -74,20 +74,47 @@ export function buildCreateDingTalkBindingPayload(
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function safeString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function isGroupChatScope(value: unknown): value is DingTalkGroupChatScope {
+  return value === 'per_sender' || value === 'conversation_shared';
+}
+
+function isOutboundVisibility(value: unknown): value is DingTalkOutboundVisibility {
+  return value === 'full_transcript' || value === 'lead_only';
+}
+
+function isBindingStatus(value: unknown): value is DingTalkBindingView['status'] {
+  return value === 'active' || value === 'disabled';
+}
+
 /** 后端 DTO → 领域视图。client_secret 后端回显为 `<redacted>`，这里恒置空，编辑时需重新输入。 */
 export function mapBindingToView(dto: ChannelBindingDto): DingTalkBindingView {
-  const sm = dto.config?.send_mode;
-  const isStreaming = sm?.mode === 'streaming_card';
+  const rawConfig = isRecord(dto.config) ? dto.config : {};
+  const rawSendMode = rawConfig.send_mode;
+  const isStreaming =
+    isRecord(rawSendMode) && rawSendMode.mode === 'streaming_card' && typeof rawSendMode.card_template_id === 'string';
+  const accountRef = safeString(dto.account_ref);
   const config: GroupDingTalkConfig = {
-    robotCode: dto.config?.robot_code ?? dto.account_ref ?? '',
-    appKey: dto.config?.client_id ?? '',
+    robotCode: safeString(rawConfig.robot_code, accountRef),
+    appKey: safeString(rawConfig.client_id),
     appSecret: '',
     enableStreamOutput: isStreaming,
-    cardTemplateId: isStreaming && sm?.mode === 'streaming_card' ? sm.card_template_id ?? '' : '',
-    groupChatScope: dto.group_chat_scope ?? 'per_sender',
-    outboundVisibility: dto.outbound_visibility ?? 'full_transcript',
+    cardTemplateId: isStreaming ? rawSendMode.card_template_id : '',
+    groupChatScope: isGroupChatScope(dto.group_chat_scope) ? dto.group_chat_scope : 'per_sender',
+    outboundVisibility: isOutboundVisibility(dto.outbound_visibility) ? dto.outbound_visibility : 'full_transcript',
   };
-  return { bindingId: dto.id, status: dto.status, config };
+  return {
+    bindingId: safeString(dto.id),
+    status: isBindingStatus(dto.status) ? dto.status : 'disabled',
+    config,
+  };
 }
 
 /** 从 by-target 列表里解析出目标群的唯一 dingtalk 绑定；>1 条视为冲突。 */
@@ -95,8 +122,13 @@ export function resolveGroupDingTalkBinding(
   items: ChannelBindingDto[] | undefined,
   groupId: string,
 ): DingTalkBindingState {
-  const matched = (items ?? []).filter(
-    (dto) => dto.channel_type === 'dingtalk' && dto.target?.group?.group_id === groupId,
+  const matched = (Array.isArray(items) ? items : []).filter(
+    (dto) =>
+      isRecord(dto) &&
+      dto.channel_type === 'dingtalk' &&
+      isRecord(dto.target) &&
+      isRecord(dto.target.group) &&
+      dto.target.group.group_id === groupId,
   );
   if (matched.length === 0) return null;
   if (matched.length > 1) return DINGTALK_BINDING_CONFLICT;

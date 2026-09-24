@@ -41,6 +41,7 @@ export interface PendingPublication {
 }
 
 export interface CollaborationBot {
+  desktop?: boolean;
   id: string;
   name: string;
   engine: string;

@@ -100,7 +100,7 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
       <ModalContent
         size="lg"
         aria-describedby="create-bot-description"
-        className="overlay-scrollbar max-h-[calc(100vh-3rem)] max-w-[710px] p-4"
+        className="overlay-scrollbar max-h-[calc(100vh-3rem)] max-w-[710px] overscroll-y-none p-4"
       >
         <>
           <ModalHeader className="flex-row items-center gap-2.5 space-y-0">

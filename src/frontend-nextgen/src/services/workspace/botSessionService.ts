@@ -61,6 +61,13 @@ export interface BotSessionPageView {
 }
 
 export const BOT_SESSION_PAGE_SIZE = 10;
+export const BOT_MESSAGE_PAGE_SIZE = 50;
+
+export interface BotMessagePageView {
+  messages: ChatMessage[];
+  total: number;
+  rawCount: number;
+}
 
 export interface BotModelView {
   modelId: string;
@@ -121,18 +128,23 @@ export function listChatBots(identityViews: IdentityView[]): ChatBotView[] {
     });
 }
 
-function toSessionView(
-  s: {
-    session_id: string;
-    title: string;
-    message_count: number;
-    gmt_modified: string;
-    gmt_create: string;
-    model?: string;
-  },
-  botId: string,
-  favorite = false,
-): BotChatSessionView {
+export interface BotSessionSummaryView {
+  sessionId: string;
+  title: string;
+  messageCount: number;
+  gmtModified: string;
+  gmtCreate: string;
+  model?: string;
+}
+
+export function mapBotSessionSummary(s: {
+  session_id: string;
+  title: string;
+  message_count: number;
+  gmt_modified: string;
+  gmt_create: string;
+  model?: string;
+}): BotSessionSummaryView {
   // 后端返回的 title 有时拼接了 `_${session_id}` 后缀（更新标题后尤其明显），
   // 这里剥离掉该后缀，仅展示用户可见的标题；为空时回退为「新会话」（与 open-claw 一致）。
   const rawTitle = s.title ?? '';
@@ -143,12 +155,22 @@ function toSessionView(
       : rawTitle.trim();
   return {
     sessionId: s.session_id,
-    botId,
     title: trimmedTitle || '新会话',
     messageCount: s.message_count,
     gmtModified: s.gmt_modified,
     gmtCreate: s.gmt_create,
     model: s.model,
+  };
+}
+
+function toSessionView(
+  s: Parameters<typeof mapBotSessionSummary>[0],
+  botId: string,
+  favorite = false,
+): BotChatSessionView {
+  return {
+    ...mapBotSessionSummary(s),
+    botId,
     ...(favorite ? { favorite: true } : {}),
   };
 }
@@ -282,7 +304,11 @@ export const botSessionService = {
       return { ok: false, error: toDomainError(e) };
     }
   },
-  async createSession(bot: ChatBotView, userId: string, title?: string): Promise<DomainResult<BotChatSessionView>> {
+  async createSession(
+    bot: ChatBotView,
+    userId: string,
+    title: string = '新会话',
+  ): Promise<DomainResult<BotChatSessionView>> {
     try {
       const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
@@ -396,21 +422,33 @@ export const botSessionService = {
     const result = await this.listFavoriteSessionsPage(bot, userId, 1, 50);
     return result.ok ? { ok: true, data: result.data.items } : result;
   },
-  async listMessages(bot: ChatBotView, userId: string, sessionId: string): Promise<ChatMessage[]> {
+  async listMessagesPage(
+    bot: ChatBotView,
+    userId: string,
+    sessionId: string,
+    page = 1,
+    pageSize = BOT_MESSAGE_PAGE_SIZE,
+  ): Promise<BotMessagePageView> {
     const resp = await listBotSessionMessages(
       bot.realBotId,
       sessionId,
       withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
-        page: 1,
-        page_size: 50,
+        page,
+        page_size: pageSize,
       }),
     );
     const items = (resp.data?.items ?? []) as BotMessageDto[];
-    // Mapper 内部按 gmt_create 升序(旧→新)稳定排序(同时间戳保持入参页内顺序),
-    // 因此这里直接透传 items,不做额外反转,避免翻转破坏同时间戳的页内升序。
-    return mapBotSessionMessages(items);
+    return {
+      messages: mapBotSessionMessages(items),
+      total: resp.data?.total ?? items.length,
+      rawCount: items.length,
+    };
+  },
+  async listMessages(bot: ChatBotView, userId: string, sessionId: string): Promise<ChatMessage[]> {
+    const page = await this.listMessagesPage(bot, userId, sessionId);
+    return page.messages;
   },
 
   async listModels(bot: ChatBotView, userId: string): Promise<DomainResult<BotModelView[]>> {

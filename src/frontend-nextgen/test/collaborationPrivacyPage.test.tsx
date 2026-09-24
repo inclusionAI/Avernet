@@ -147,7 +147,7 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).toContain('参与协作群聊');
     expect(html).toContain('控制当前 Bot 是否可参与群聊。关闭后无法加入新协作群，已加入的协作群也不再回复。');
     expect(html).toContain('允许其他用户在群聊中通过「融合模式」查看公开画像并进行跨 Bot 增量洞察。');
-    expect(html).toContain('Bot 画像公开');
+    expect(html).toContain('公开 Bot 画像');
     expect(html).toContain('开启后，Bot 将每天自动扫描任务广场并认领可执行的任务。');
     expect(html).toContain('开启后，Bot 将每天基于用户数据（语雀、会议纪要等）挖掘潜在任务并推送。');
     expect(html).not.toContain('协作群可见');
@@ -395,7 +395,7 @@ describe('collaboration privacy accessible UI', () => {
       />,
     );
     expect(html).toContain('不可见');
-    expect(html).toContain('当前环境支持修改为“不可见”或“全部可见”。');
+    expect(html).toContain('“限定组织可申请”已下线，请重新选择“不可见”或“全部可见”。');
     expect(html).not.toContain('选择组织范围');
     expect(html).not.toContain('已选组织范围（1）');
     expect(html).not.toContain('示例集团 / 事业部 / 部门 / 团队');

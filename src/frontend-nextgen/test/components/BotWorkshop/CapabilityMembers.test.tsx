@@ -11,6 +11,23 @@ beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = jest.fn();
 });
 
+test('不可编辑时也能点击能力名称查看详情，且不会触发删除', () => {
+  const onDetail = jest.fn();
+  const onRemove = jest.fn();
+  render(
+    <CapabilityMembers
+      kind="skill"
+      items={[{ id: '42', name: '报告', active: true }]}
+      editable={false}
+      onDetail={onDetail}
+      onRemove={onRemove}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '查看报告详情' }));
+  expect(onDetail).toHaveBeenCalledWith('42', '报告');
+  expect(onRemove).not.toHaveBeenCalled();
+});
+
 test('MCP 调用身份点击后展示说明并由用户明确选择', () => {
   const onIdentity = jest.fn().mockResolvedValue(undefined);
   render(

@@ -7,11 +7,11 @@ import type {
   BotEditorRoutineInput,
   BotEditorRoutineRun,
   BotEditorSkill,
-  BotEngineConfig,
   BotRenderScreen,
   BotRenderScreenInput,
 } from '@/domain/botEditor';
 import { useBotEditorCandidates } from '@/hooks/useBotEditorCandidates';
+import { useBotEngineConfig } from '@/hooks/useBotEngineConfig';
 import { useBotLocalSkillUpload } from '@/hooks/useBotLocalSkillUpload';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { useCallback, useEffect, useState } from 'react';
@@ -23,6 +23,9 @@ export function useBotEditor(
   spaceId?: string,
   enabled = true,
   ownerId?: string,
+  isOwner = false,
+  deployment = 'cloud',
+  engine = '',
 ) {
   const [skills, setSkills] = useState<BotEditorSkill[]>([]);
   const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills);
@@ -33,7 +36,7 @@ export function useBotEditor(
   const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
   const [screens, setScreens] = useState<BotRenderScreen[]>([]);
   const [routines, setRoutines] = useState<BotEditorRoutine[]>([]);
-  const [engineConfig, setEngineConfig] = useState<BotEngineConfig>({});
+  const engineConfig = useBotEngineConfig(botId, ownerId, isOwner);
   const [engineStatus, setEngineStatus] = useState<BotEditorEngineStatus>();
   const [approvalRequired, setApprovalRequired] = useState(false);
   const [routineRuns, setRoutineRuns] = useState<BotEditorRoutineRun[]>([]);
@@ -45,18 +48,17 @@ export function useBotEditor(
     if (!botId || !enabled) return;
     setLoading(true);
     try {
-      const data = await botEditorService.load(botId, serviceBot, ownerId);
+      const data = await botEditorService.load(botId, serviceBot, ownerId, deployment, engine);
       setSkills(data.skills);
       setSkillSets(data.skillSets);
       setMcps(data.mcps);
       setResources(data.resources);
       setScreens(data.screens);
       setRoutines(data.routines);
-      setEngineConfig(data.engineConfig);
       setEngineStatus(data.engineStatus);
       setApprovalRequired(data.approvalRequired);
       if (serviceBot) {
-        const callerContext = await botEditorService.getCallerContext(botId).catch(() => undefined);
+        const callerContext = await botEditorService.getCallerContext(botId, ownerId).catch(() => undefined);
         setMcpCallTypes(callerContext?.mcpCallTypes ?? {});
         setCallerContextEditable(callerContext?.editable ?? false);
       } else {
@@ -69,7 +71,7 @@ export function useBotEditor(
     } finally {
       setLoading(false);
     }
-  }, [botId, enabled, serviceBot, spaceId, ownerId]);
+  }, [botId, enabled, serviceBot, spaceId, ownerId, deployment, engine]);
   useEffect(() => {
     void load();
   }, [botId, load]);
@@ -94,10 +96,12 @@ export function useBotEditor(
     resources,
     screens,
     routines,
-    engineConfig,
+    engineConfig: engineConfig.config,
     engineStatus,
     approvalRequired,
-    setEngineConfig,
+    setEngineConfig: engineConfig.setConfig,
+    engineConfigLoading: engineConfig.loading,
+    loadEngineConfig: engineConfig.load,
     loading,
     reload: load,
     toggleSkill: (skill: BotEditorSkill) =>
@@ -106,24 +110,24 @@ export function useBotEditor(
     uploadSkill: (file: File) => act(() => botEditorService.uploadSkill(botId!, file), 'Skill 已上传'),
     setMcpActive: (mcp: BotEditorMcp, active: boolean) =>
       act(() => botEditorService.setMcpActive(botId!, mcp, active), active ? 'MCP 已添加' : 'MCP 已移除'),
-    createDirectory: (path: string) => act(() => botEditorService.createDirectory(botId!, path), '目录已创建'),
+    createDirectory: (path: string) => act(() => botEditorService.createDirectory(botId!, path, ownerId), '目录已创建'),
     browseResources: async (directory = '') => {
       try {
-        setResources(await botEditorService.listResources(botId!, directory));
+        setResources(await botEditorService.listResources(botId!, directory, ownerId));
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '资源目录加载失败');
       }
     },
-    deleteResource: (path: string) => act(() => botEditorService.deleteResource(botId!, path), '资源已删除'),
+    deleteResource: (path: string) => act(() => botEditorService.deleteResource(botId!, path, ownerId), '资源已删除'),
     uploadResource: (path: string, file: File, overwrite = false) =>
-      act(() => botEditorService.uploadResource(botId!, path, file, overwrite), '资源已上传'),
-    previewResource: (path: string) => botEditorService.previewResource(botId!, path),
+      act(() => botEditorService.uploadResource(botId!, path, file, overwrite, ownerId), '资源已上传'),
+    previewResource: (path: string) => botEditorService.previewResource(botId!, path, ownerId),
     downloadResource: async (path: string, type: BotEditorResource['type']) => {
       try {
         const blob =
           type === 'folder'
-            ? await botEditorService.downloadResourceDirectory(botId!, path)
-            : await botEditorService.downloadResource(botId!, path);
+            ? await botEditorService.downloadResourceDirectory(botId!, path, ownerId)
+            : await botEditorService.downloadResource(botId!, path, ownerId);
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement('a');
         anchor.href = url;
@@ -137,7 +141,10 @@ export function useBotEditor(
     },
     saveScreen: (input: BotRenderScreenInput, id?: number) =>
       act(
-        () => (id ? botEditorService.updateScreen(botId!, id, input) : botEditorService.createScreen(botId!, input)),
+        () =>
+          id
+            ? botEditorService.updateScreen(botId!, id, input, ownerId)
+            : botEditorService.createScreen(botId!, input, ownerId),
         id ? '副屏配置已更新' : '副屏配置已创建',
       ),
     createSkillSet: (name: string) => act(() => botEditorService.createSkillSet(botId!, name), '能力集已创建'),
@@ -165,7 +172,7 @@ export function useBotEditor(
     updateMcpCallType: async (serverCode: string, callType: 'caller' | 'owner') => {
       setUpdatingCallType(serverCode);
       try {
-        const applied = await botEditorService.updateMcpCallType(botId!, serverCode, callType);
+        const applied = await botEditorService.updateMcpCallType(botId!, serverCode, callType, ownerId);
         setMcpCallTypes((current) => ({ ...current, [serverCode]: applied }));
         toast.success('调用身份已更新');
       } catch (error) {
@@ -178,7 +185,7 @@ export function useBotEditor(
     loadResourceDirectory: async (directory: string) => {
       setResourceLoadingPaths((current) => [...new Set([...current, directory])]);
       try {
-        const children = await botEditorService.listResources(botId!, directory);
+        const children = await botEditorService.listResources(botId!, directory, ownerId);
         setResources((current) => {
           const merged = new Map(current.map((item) => [item.path, item]));
           children.forEach((item) => merged.set(item.path, item));
@@ -192,28 +199,32 @@ export function useBotEditor(
       }
     },
     resourceLoadingPaths,
-    deleteScreen: (id: number) => act(() => botEditorService.deleteScreen(botId!, id), '副屏配置已删除'),
+    deleteScreen: (id: number) => act(() => botEditorService.deleteScreen(botId!, id, ownerId), '副屏配置已删除'),
     saveRoutine: (input: BotEditorRoutineInput, id?: string) =>
       act(
-        () => (id ? botEditorService.updateRoutine(botId!, id, input) : botEditorService.createRoutine(botId!, input)),
+        () =>
+          id
+            ? botEditorService.updateRoutine(botId!, id, input, ownerId)
+            : botEditorService.createRoutine(botId!, input, ownerId),
         id ? '定时任务已更新' : '定时任务已创建',
       ),
     toggleRoutine: (routine: BotEditorRoutine) =>
       act(
-        () => botEditorService.updateRoutine(botId!, routine.id, { ...routine, enabled: !routine.enabled }),
+        () => botEditorService.updateRoutine(botId!, routine.id, { ...routine, enabled: !routine.enabled }, ownerId),
         routine.enabled ? '定时任务已停用' : '定时任务已启用',
       ),
-    deleteRoutine: (id: string) => act(() => botEditorService.deleteRoutine(botId!, id), '定时任务已删除'),
-    runRoutine: (id: string) => act(() => botEditorService.runRoutine(botId!, id), '已触发执行'),
+    deleteRoutine: (id: string) => act(() => botEditorService.deleteRoutine(botId!, id, ownerId), '定时任务已删除'),
+    runRoutine: (id: string) => act(() => botEditorService.runRoutine(botId!, id, ownerId), '已触发执行'),
     routineRuns,
     loadRoutineRuns: async (id: string) => {
       try {
-        setRoutineRuns(await botEditorService.listRoutineRuns(botId!, id));
+        setRoutineRuns(await botEditorService.listRoutineRuns(botId!, id, ownerId));
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '执行记录加载失败');
       }
     },
-    saveEngineConfig: () => act(() => botEditorService.saveEngineConfig(botId!, engineConfig), '引擎配置已保存'),
-    saveApproval: (enabled: boolean) => act(() => botEditorService.saveApproval(botId!, enabled), '发布审批配置已更新'),
+    saveEngineConfig: engineConfig.save,
+    saveApproval: (enabled: boolean) =>
+      act(() => botEditorService.saveApproval(botId!, enabled, ownerId), '发布审批配置已更新'),
   };
 }

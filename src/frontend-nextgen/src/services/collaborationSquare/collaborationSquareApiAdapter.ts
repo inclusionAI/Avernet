@@ -138,8 +138,8 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
         {
           keyword: query.keyword.trim(),
           top_k: query.topK ?? 20,
-          min_score: query.minScore ?? 0.1,
-          runtime_state: query.runtimeState ?? 'online',
+          min_score: query.minScore ?? 0.01,
+          ...(query.viewerActorType === 'bot' ? {} : { runtime_state: query.runtimeState ?? 'online' }),
           ...(query.viewerActorType ? { viewer_actor_type: query.viewerActorType } : {}),
           ...(query.viewerActorId ? { viewer_actor_id: query.viewerActorId } : {}),
         },

@@ -9,6 +9,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 
 const mockInsertFileChips = jest.fn();
+const mockAddFiles = jest.fn();
 
 // 根因 4 的 Composer→<Sender ref> 绑定 leg 验证(GroupWorkspaceArea→GroupChatPane 上游 leg 由 typecheck + 手动 AC 9.4 覆盖)。
 // 桩 Sender 用 forwardRef + useImperativeHandle 暴露 SenderRef 子集,证明 inputRef prop 经 <Sender ref={inputRef}> 真绑定(forwardRef)。
@@ -20,6 +21,8 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
         _props: {
           className?: string;
           fileChip?: unknown;
+          imageUpload?: { enabled?: boolean };
+          onPasteFile?: (files: File[]) => void;
           onSubmit?: (content: string, context: { mentions: Array<{ id: string; name: string }> }) => void;
         },
         ref: React.Ref<unknown>,
@@ -41,7 +44,15 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
             data-testid="sender"
             className={_props.className}
             data-file-chip={_props.fileChip ? 'enabled' : 'disabled'}
+            data-image-upload={_props.imageUpload?.enabled ? 'enabled' : 'disabled'}
           >
+            <button
+              type="button"
+              data-testid="sender-paste-image"
+              onClick={() => _props.onPasteFile?.([new File(['image'], 'pasted.png', { type: 'image/png' })])}
+            >
+              paste image
+            </button>
             <button
               type="button"
               data-testid="sender-submit"
@@ -61,7 +72,7 @@ jest.mock('@/pages/Workspace/hooks/useGroupChatImageUpload', () => ({
     images: [],
     isProcessing: false,
     isUploading: false,
-    addFiles: () => {},
+    addFiles: mockAddFiles,
     removeImage: () => {},
     canAddMore: false,
     uploadAll: () => Promise.resolve([]),
@@ -123,6 +134,7 @@ const session: SessionView = {
 describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', () => {
   beforeEach(() => {
     mockInsertFileChips.mockClear();
+    mockAddFiles.mockClear();
   });
   it('输入区宽度使用容器全宽，不受固定 max-width 限制', () => {
     render(
@@ -133,7 +145,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         mentionConfig={undefined}
         showReconnectToolbar={false}
         onSend={() => {}}
-        onStop={() => {}}
         onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}
@@ -142,6 +153,27 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     const sender = document.querySelector('[data-testid="sender"]');
     expect(sender).toHaveClass('w-full');
     expect(sender).not.toHaveClass('max-w-4xl');
+  });
+
+  it('粘贴图片时将图片文件加入当前消息的待发送列表', () => {
+    render(
+      <GroupChatComposer
+        session={session}
+        isRequesting={false}
+        connectionStatus="connected"
+        mentionConfig={undefined}
+        showReconnectToolbar={false}
+        onSend={() => {}}
+        onReconnect={() => {}}
+        draft=""
+        onDraftChange={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('sender-paste-image'));
+
+    expect(mockAddFiles).toHaveBeenCalledTimes(1);
+    expect(mockAddFiles).toHaveBeenCalledWith([expect.objectContaining({ name: 'pasted.png', type: 'image/png' })]);
   });
 
   it('添加已上传文件至会话输入区时插入 Sender 文件胶囊', () => {
@@ -154,7 +186,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         mentionConfig={undefined}
         showReconnectToolbar={false}
         onSend={() => {}}
-        onStop={() => {}}
         onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}
@@ -177,7 +208,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         mentionConfig={undefined}
         showReconnectToolbar={false}
         onSend={onSend}
-        onStop={() => {}}
         onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}
@@ -202,7 +232,6 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
         mentionConfig={undefined}
         showReconnectToolbar={false}
         onSend={() => {}}
-        onStop={() => {}}
         onReconnect={() => {}}
         draft=""
         onDraftChange={() => {}}

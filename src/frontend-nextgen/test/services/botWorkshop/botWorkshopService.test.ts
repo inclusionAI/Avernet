@@ -1,5 +1,5 @@
 import { defaultCapabilities, extendCapabilities } from '@/capabilities';
-import { createBot, listBotInventory, pollBotAuthStatus } from '@/services/backendApi/bots/botController';
+import { createBot, getBot, listBotInventory, pollBotAuthStatus } from '@/services/backendApi/bots/botController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/botController', () => ({
   createBot: jest.fn(),
+  getBot: jest.fn(),
   listBotInventory: jest.fn(),
   pollBotAuthStatus: jest.fn(),
 }));
@@ -16,6 +17,7 @@ jest.mock('@/services/botWorkshop/botEditorService', () => ({
 }));
 
 const mockedCreateBot = createBot as jest.MockedFunction<typeof createBot>;
+const mockedGetBot = getBot as jest.MockedFunction<typeof getBot>;
 const mockedListBotInventory = listBotInventory as jest.MockedFunction<typeof listBotInventory>;
 const mockedPollBotAuthStatus = pollBotAuthStatus as jest.MockedFunction<typeof pollBotAuthStatus>;
 const mockedRestartLifecycle = botEditorService.restartLifecycle as jest.MockedFunction<
@@ -82,7 +84,23 @@ describe('botWorkshopService', () => {
     expect(item.id).toBe('20260806_wg6wkrk4');
   });
 
-  test('does not fake local creation before device workflow is available', async () => {
+  test('协作者查询详情时透传 Bot Owner', async () => {
+    mockedGetBot.mockResolvedValue({
+      code: 200000,
+      data: {
+        bot_id: 'bot-1',
+        bot_name: '协作 Bot',
+        owner_entity_id: 'owner-1',
+        engine: 'openclaw',
+        status: 'ACTIVE',
+      },
+    });
+
+    await expect(botWorkshopService.detail('bot-1', 'owner-1')).resolves.toMatchObject({ id: 'bot-1' });
+    expect(mockedGetBot).toHaveBeenCalledWith('bot-1', 'owner-1');
+  });
+
+  test('refuses local creation without a selected device and resolved directory', async () => {
     await expect(
       botWorkshopService.create({
         scenario: 'local',
@@ -94,7 +112,7 @@ describe('botWorkshopService', () => {
         serviceMode: 'service',
         initialize: true,
       }),
-    ).rejects.toThrow('需要先选择已绑定设备和工作目录');
+    ).rejects.toThrow('请选择设备并等待工作目录就绪');
   });
 
   test('maps a cloud service bot to the Avernet-compatible contract', async () => {
@@ -451,4 +469,16 @@ describe('botWorkshopService.restartPublish（服务卡 restarting 词表分裂�
     await expect(botWorkshopService.restartPublish(bot)).rejects.toThrow('当前发布状态不支持重启发布');
     expect(mockedRestartLifecycle).not.toHaveBeenCalled();
   });
+});
+
+test('desktop creation stays in personal space when launched from a team', () => {
+  const spaces = botWorkshopService.getCreateSpaces('local', 'team', 'owner', {
+    id: 'team',
+    name: 'Team',
+    ownership: 'team',
+    canCreate: true,
+  });
+  expect(spaces).toHaveLength(1);
+  expect(spaces[0].ownership).toBe('personal');
+  expect(spaces[0].id).not.toBe('team');
 });

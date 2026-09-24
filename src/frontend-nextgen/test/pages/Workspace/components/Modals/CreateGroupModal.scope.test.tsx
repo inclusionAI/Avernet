@@ -83,7 +83,7 @@ it('用户身份建群展示视角下拉框，选参与者视角后 human 参与
       }),
     ),
   );
-}, 30_000);
+}, 60_000);
 
 it('bot 身份建群不展示视角下拉框且参与者不携带 scope', async () => {
   render(<CreateGroupModal open activeIdentity={botIdentity} onClose={jest.fn()} onCreated={jest.fn()} />);

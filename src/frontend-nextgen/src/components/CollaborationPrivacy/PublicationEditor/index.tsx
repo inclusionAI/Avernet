@@ -150,7 +150,7 @@ export function PublicationEditor({
           />
           {!restrictedScopeEnabled && initialConfig.scope === 'restricted' && (
             <p className="text-xs text-muted-foreground">
-              当前可见性为“限定组织可申请”。当前环境支持修改为“不可见”或“全部可见”。
+              当前可见性“限定组织可申请”已下线，请重新选择“不可见”或“全部可见”。
             </p>
           )}
           {scope === 'restricted' && (

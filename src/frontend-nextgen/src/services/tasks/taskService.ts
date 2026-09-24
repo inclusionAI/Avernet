@@ -32,30 +32,37 @@ export async function executeTaskService({ form, ctx, apiBaseUrl }: ExecuteTaskA
   try {
     const req = buildExecuteRequest(form, ctx);
     const resp = unwrapEnvelope(await executeTask(req, apiBaseUrl));
-    // 后端 execute 响应精简为 { task_id, success, run_id, message }；副屏只用 task_id。
+    const isRelay = resp.extend_props?.orchestration_mode === 'relay';
+    const rootNodeId = resp.extend_props?.root_node_id;
     const record: TaskRecord = {
       task_id: resp.task_id,
       task_info: {
         task_spec: {
-          metadata: { title: form.title.trim(), instruction: form.instruction.trim() },
-          context: { background: form.background?.trim() ?? '', extend_props: {} },
+          context: {
+            title: req.task_spec.context.title,
+            background: req.task_spec.context.background,
+            extend_props: { ...req.task_spec.context.extend_props },
+          },
           goal: {
-            objective: form.objective.trim(),
-            acceptances: form.acceptances
-              .filter((item) => item.trim())
-              .map((description, index) => ({
-                id: `ac${index + 1}`,
-                description: description.trim(),
-              })),
+            objective: req.task_spec.goal.objective,
+            acceptances: req.task_spec.goal.acceptances.map((item) => ({
+              id: item.id,
+              description: item.acceptance,
+            })),
           },
         },
-        source_type: ctx.sourceType,
-        owner_user_id: ctx.ownerUserId,
-        owner_bot_id: ctx.ownerBotId,
-        task_type: form.taskType,
+        source_type: req.source_type,
+        owner_user_id: req.owner_user_id,
+        owner_bot_id: req.owner_bot_id,
+        task_type: req.execution_config.task_type,
         execution_config: {
-          task_type: form.taskType,
-          ...(form.taskType === 'workflow' && form.workflowId ? { workflow_id: form.workflowId } : {}),
+          ...req.execution_config,
+          ...(isRelay
+            ? {
+                orchestration_mode: 'relay' as const,
+                root_node_id: rootNodeId ?? resp.task_id,
+              }
+            : {}),
         },
       },
       status: 'EXECUTING',

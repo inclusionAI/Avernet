@@ -9,7 +9,7 @@ import {
   type AntCodeProject,
   type WorkflowItem,
 } from '@/services/backendApi/legacyAICodingController';
-import { DOMAIN_BOTS_PAGE_SIZE, searchDomainBots, type Bot } from '@/services/backendApi/legacyBotController';
+import { searchDomainBots, type Bot } from '@/services/backendApi/legacyBotController';
 import {
   listCodefuseModelsForUser,
   setCallerCodefuseAuth,
@@ -29,7 +29,6 @@ import {
  */
 export {
   BackendRequestError,
-  DOMAIN_BOTS_PAGE_SIZE,
   fetchArchitectDomainOptions,
   getWorkflows,
   listCodefuseModelsForUser,

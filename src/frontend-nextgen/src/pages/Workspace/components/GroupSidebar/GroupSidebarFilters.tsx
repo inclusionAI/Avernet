@@ -58,7 +58,7 @@ export function GroupSidebarFilters({
 
   return (
     <div className="my-2">
-      <div className="flex items-center gap-2 px-[18px]">
+      <div className="flex items-center gap-2 px-4">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           {/* 基础 Input 为 h-8（32px 标准）；此侧栏按 PR255 视觉规范与筛选按钮等高（h-9） */}

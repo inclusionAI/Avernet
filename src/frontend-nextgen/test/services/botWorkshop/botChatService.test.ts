@@ -322,4 +322,62 @@ describe('botChatService', () => {
       items: [{ id: 't1' }, { id: 't2', botId: 'source-bot' }],
     });
   });
+
+  it('IO 关键词模糊查询超过 90 天窗口时把开始时间钳制到 90 天内', async () => {
+    listBotChats.mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: { sessions: [], total: 0, page: 1, limit: 20, has_more: false },
+    });
+    const context = { botId: 'b1', botName: 'Bot', userId: 'u1' };
+    useBotChatStore.getState().openFor(context);
+    await botChatService.list(context, {
+      ...emptyBotChatFilters(),
+      keyword: 'hello',
+      fromDate: '2026-06-01T03:38',
+      toDate: '2026-09-15T03:38',
+    });
+    const params = listBotChats.mock.calls[0][1];
+    expect(params.match_mode).toBe('contains');
+    expect(params.to_date).toBe(new Date('2026-09-15T03:38').toISOString());
+    const expectedFrom = new Date(new Date('2026-09-15T03:38').getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    expect(params.from_date).toBe(expectedFrom);
+  });
+
+  it('IO 关键词模糊查询在 90 天窗口内时保持原始时间范围', async () => {
+    listBotChats.mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: { sessions: [], total: 0, page: 1, limit: 20, has_more: false },
+    });
+    const context = { botId: 'b1', botName: 'Bot', userId: 'u1' };
+    useBotChatStore.getState().openFor(context);
+    await botChatService.list(context, {
+      ...emptyBotChatFilters(),
+      keyword: 'hello',
+      fromDate: '2026-09-01T03:38',
+      toDate: '2026-09-15T03:38',
+    });
+    const params = listBotChats.mock.calls[0][1];
+    expect(params.from_date).toBe(new Date('2026-09-01T03:38').toISOString());
+  });
+
+  it('无 IO 关键词的精确查询不钳制时间范围', async () => {
+    listBotChats.mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: { sessions: [], total: 0, page: 1, limit: 20, has_more: false },
+    });
+    const context = { botId: 'b1', botName: 'Bot', userId: 'u1' };
+    useBotChatStore.getState().openFor(context);
+    await botChatService.list(context, {
+      ...emptyBotChatFilters(),
+      traceId: 'trace-1',
+      fromDate: '2026-06-01T03:38',
+      toDate: '2026-09-15T03:38',
+    });
+    const params = listBotChats.mock.calls[0][1];
+    expect(params.match_mode).toBe('exact');
+    expect(params.from_date).toBe(new Date('2026-06-01T03:38').toISOString());
+  });
 });

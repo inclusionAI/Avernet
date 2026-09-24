@@ -170,3 +170,35 @@ it('resolveGroupDingTalkBinding: 本群 >1 条 dingtalk 绑定 → conflict', ()
   ];
   expect(resolveGroupDingTalkBinding(items, 'grp-1')).toBe(DINGTALK_BINDING_CONFLICT);
 });
+
+it('mapBindingToView: 历史绑定字段异常时降级为可渲染的默认值', () => {
+  const view = mapBindingToView({
+    id: 'legacy-binding',
+    channel_type: 'dingtalk',
+    account_ref: 'fallback-robot',
+    target: { group: { group_id: 'grp-legacy' } },
+    group_chat_scope: { value: 'unexpected' },
+    outbound_visibility: { value: 'unexpected' },
+    env: '',
+    status: 'unknown',
+    config: {
+      robot_code: { value: 'not-a-string' },
+      client_id: null,
+      send_mode: { mode: 'streaming_card', card_template_id: { value: 'not-a-string' } },
+    },
+  } as unknown as ChannelBindingDto);
+
+  expect(view).toEqual({
+    bindingId: 'legacy-binding',
+    status: 'disabled',
+    config: {
+      robotCode: 'fallback-robot',
+      appKey: '',
+      appSecret: '',
+      enableStreamOutput: false,
+      cardTemplateId: '',
+      groupChatScope: 'per_sender',
+      outboundVisibility: 'full_transcript',
+    },
+  });
+});

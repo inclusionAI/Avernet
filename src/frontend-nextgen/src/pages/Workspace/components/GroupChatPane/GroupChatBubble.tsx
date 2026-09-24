@@ -5,6 +5,7 @@ import { getMessageText } from '@/pages/Workspace/hooks/useMessageInteractions';
 import type { ChatMessage } from '@tc-chat/core';
 import { Bubble } from '@tc-chat/ui/es/Bubble';
 import { aixUiPlugin, fileRefPlugin } from '@tc-chat/ui/es/MarkdownRender';
+import { GroupChatRunStatus } from './GroupChatRunStatus';
 import { getMessageBlocks, getMessageTime, resolveSender } from './messageHelpers';
 import { SystemMessageItem } from './SystemMessageItem';
 
@@ -25,6 +26,7 @@ export interface GroupChatBubbleProps {
   onEdit?: () => void;
   isEditable?: boolean;
   onStop?: () => void;
+  now?: number;
 }
 
 export function GroupChatBubble({
@@ -41,6 +43,7 @@ export function GroupChatBubble({
   onEdit,
   isEditable,
   onStop,
+  now = Date.now(),
 }: GroupChatBubbleProps) {
   if (message.role === 'system') {
     return <SystemMessageItem message={message} />;
@@ -62,46 +65,49 @@ export function GroupChatBubble({
   const messageActions = <MessageInteractionToolbar showCopy={false} {...messageActionsProps} />;
 
   return (
-    <div className="group relative">
-      <MessageSenderLayout
-        avatar={sender?.avatar}
-        align={message.role === 'user' ? 'right' : 'left'}
-        meta={
-          <MessageSenderMeta
-            name={sender?.name ?? (message.role === 'user' ? '未命名成员' : '未命名 Bot')}
-            time={getMessageTime(message)}
-            align={message.role === 'user' ? 'right' : 'left'}
-          />
-        }
-      >
-        <Bubble
-          className="message-bubble-compact [--aix-markdown-font-size:14px] [--aix-font-size-base:14px]"
-          sender={{
-            role: message.role,
-            align: message.role === 'user' ? 'right' : 'left',
-            name: undefined,
-            bubbleColor: message.role === 'user' ? 'hsl(var(--primary) / 0.1)' : undefined,
-            maxWidth: '48rem',
-          }}
-          timestamp={undefined}
-          blocks={getMessageBlocks(message, sessionId)}
-          preset="openclaw"
-          markdown={{ preset: 'full', extensions: [aixUiPlugin, fileRefPlugin] }}
-          tool={{ defaultCollapsed: !isStreamingMessage }}
-          isStreaming={isStreamingMessage}
-          actions={message.role === 'assistant' ? messageActions : undefined}
-        />
-      </MessageSenderLayout>
-      {onCopy || (message.role === 'user' && isEditable && onEdit) ? (
-        <MessageCopyAction
-          testId={`message-copy-action-${message.id}`}
+    <>
+      <div className="group relative">
+        <MessageSenderLayout
+          avatar={sender?.avatar}
           align={message.role === 'user' ? 'right' : 'left'}
-          onCopy={() => onCopy?.(messageText)}
-          onEdit={onEdit}
-          isEditable={message.role === 'user' && isEditable && Boolean(messageText.trim())}
-        />
-      ) : null}
-    </div>
+          meta={
+            <MessageSenderMeta
+              name={sender?.name ?? (message.role === 'user' ? '未命名成员' : '未命名 Bot')}
+              time={getMessageTime(message)}
+              align={message.role === 'user' ? 'right' : 'left'}
+            />
+          }
+        >
+          <Bubble
+            className="message-bubble-compact [--aix-markdown-font-size:14px] [--aix-font-size-base:14px]"
+            sender={{
+              role: message.role,
+              align: message.role === 'user' ? 'right' : 'left',
+              name: undefined,
+              bubbleColor: message.role === 'user' ? 'hsl(var(--primary) / 0.1)' : undefined,
+              maxWidth: '48rem',
+            }}
+            timestamp={undefined}
+            blocks={getMessageBlocks(message, sessionId)}
+            preset="openclaw"
+            markdown={{ preset: 'full', extensions: [aixUiPlugin, fileRefPlugin] }}
+            tool={{ defaultCollapsed: !isStreamingMessage }}
+            isStreaming={isStreamingMessage}
+            actions={message.role === 'assistant' ? messageActions : undefined}
+          />
+        </MessageSenderLayout>
+        {onCopy || (message.role === 'user' && isEditable && onEdit) ? (
+          <MessageCopyAction
+            testId={`message-copy-action-${message.id}`}
+            align={message.role === 'user' ? 'right' : 'left'}
+            onCopy={() => onCopy?.(messageText)}
+            onEdit={onEdit}
+            isEditable={message.role === 'user' && isEditable && Boolean(messageText.trim())}
+          />
+        ) : null}
+      </div>
+      <GroupChatRunStatus message={message} participants={participants} now={now} />
+    </>
   );
 }
 

@@ -1,6 +1,11 @@
 import type { BotChatDetailSelection, BotChatFilters, BotChatRelationScope } from '@/domain/botChats';
 import { resolveBotChatRelationScope } from '@/services/botWorkshop/botChatRelations';
-import { botChatService } from '@/services/botWorkshop/botChatService';
+import {
+  botChatService,
+  clampFuzzyQueryFromDate,
+  formatFriendlyDateTime,
+  fuzzyQueryWindowDays,
+} from '@/services/botWorkshop/botChatService';
 import { identityService, isTestUserIdentity, resolveUserId } from '@/services/workspace';
 import { useBotChatStore } from '@/stores/botChatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -67,6 +72,22 @@ export function useBotChats() {
   const query = useCallback(async () => {
     const current = useBotChatStore.getState();
     if (!current.context) return;
+    const { keyword, fromDate, toDate } = current.filters;
+    if (fromDate && toDate && new Date(fromDate).getTime() > new Date(toDate).getTime()) {
+      toast.warning('开始时间不能晚于结束时间，请调整后重试');
+      return;
+    }
+    if (keyword.trim() && fromDate && toDate) {
+      const clamped = clampFuzzyQueryFromDate(fromDate, toDate);
+      if (clamped !== fromDate) {
+        current.setFilter('fromDate', clamped);
+        toast.warning(
+          `输入/输出模糊搜索最长支持 ${fuzzyQueryWindowDays} 天，已自动将开始时间调整为 ${formatFriendlyDateTime(
+            clamped,
+          )}`,
+        );
+      }
+    }
     current.applyFilters();
     await botChatService.list(current.context, current.filters).catch(() => undefined);
   }, []);

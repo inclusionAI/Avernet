@@ -3,7 +3,7 @@ import { useWorkspace } from '@/hooks/useWorkspace';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 // `@tc-chat/adapters` 位于 node_modules 且为 ESM，jest 自动 mock 无法读取；
 // 带 jest.fn 的 factory 在 @jest/globals + babel 模块 hoisting 下触发 TDZ。
@@ -36,6 +36,45 @@ jest.mock('@tc-chat/adapters', () => ({
 // src 下 TS 模块，auto-mock 安全。下面通过 requireActual 拿到真实 workspaceService
 // 顶层对象引用，再 stub 其方法（避免完全 auto-mock 带来的 createProvider 缺失）。
 jest.mock('@/services/workspace/workspaceService');
+
+jest.mock('@/pages/Workspace/hooks/useBotFriendConversation', () => ({
+  useBotFriendConversation: () => ({
+    humanFriends: [],
+    botFriends: [],
+    humanLoading: false,
+    botLoading: false,
+    humanError: null,
+    botError: null,
+    settled: true,
+    reloadHuman: () => undefined,
+    reloadBot: () => undefined,
+    selectedFriend: null,
+    sessions: {
+      expandedFriendUserId: null,
+      sessions: [],
+      selectedSession: null,
+      loading: false,
+      error: null,
+      hasMore: false,
+      isLoadingMore: false,
+      loadMoreError: null,
+      toggleFriend: () => undefined,
+      selectSession: () => undefined,
+      retry: () => undefined,
+      loadMore: async () => undefined,
+    },
+    history: {
+      messages: [],
+      loading: false,
+      error: null,
+      hasMore: false,
+      isLoadingMore: false,
+      loadMoreError: null,
+      retry: () => undefined,
+      loadMore: async () => undefined,
+    },
+  }),
+}));
 
 // 副屏方式② CDN 桥：factory 不引用 jest（规避 TDZ），提供静默 Promise 桩，避免 useBotChat bot 路径真实拉取。
 jest.mock('@/services/bcs/libraryCdnInjector', () => ({
@@ -229,6 +268,19 @@ it('availableViews 对 user 身份为双 tab', async () => {
   await waitFor(() => expect(workspaceService.initWorkspace).toHaveBeenCalled());
   // 当前 activeIdentityId=me（user），应为 chat+group 双 tab
   expect(result.current.availableViews).toEqual(['chat', 'group']);
+});
+
+it('Bot 身份暴露对话双 Tab 与只读好友会话模型', async () => {
+  const { result } = renderHook(() => useWorkspace());
+  await waitFor(() => expect(workspaceService.initWorkspace).toHaveBeenCalled());
+
+  act(() => useWorkspaceStore.getState().setActiveIdentity('b:2088'));
+  await waitFor(() => expect(result.current.activeIdentityId).toBe('b:2088'));
+
+  expect(result.current.availableViews).toEqual(['chat', 'group']);
+  expect(result.current.botFriendConversation).toEqual(
+    expect.objectContaining({ humanFriends: [], botFriends: [], selectedFriend: null }),
+  );
 });
 
 it('mine 失败时不注入任何身份', async () => {

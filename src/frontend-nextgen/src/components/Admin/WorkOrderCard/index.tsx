@@ -72,7 +72,11 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
         </Tag>
         <div className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-foreground">{wo.title}</span>
-          {wo.content ? <div className="mt-1 truncate text-xs text-muted-foreground">{wo.content}</div> : null}
+          {wo.content ? (
+            <div className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
+              {wo.content}
+            </div>
+          ) : null}
           {wo.gmtModified ? (
             <div className="mt-1 text-xs text-muted-foreground">{formatAbsoluteTime(wo.gmtModified)}</div>
           ) : null}

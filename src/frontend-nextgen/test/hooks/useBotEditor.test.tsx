@@ -34,5 +34,11 @@ it('等待 Bot 详情就绪后使用 Owner 加载本地 Skill', async () => {
   );
   expect(mockedLoad).not.toHaveBeenCalled();
   rerender({ enabled: true, ownerId: 'owner-1' });
-  await waitFor(() => expect(mockedLoad).toHaveBeenCalledWith('bot-1', false, 'owner-1'));
+  await waitFor(() => expect(mockedLoad).toHaveBeenCalledWith('bot-1', false, 'owner-1', 'cloud', ''));
+});
+
+it('桌面引擎能力上下文传入 Service，避免请求 Hermes 不支持的功能', async () => {
+  mockedLoad.mockRejectedValue(new Error('test load stopped'));
+  renderHook(() => useBotEditor('bot-1', false, 'space-1', true, 'owner-1', true, 'local', 'hermes'));
+  await waitFor(() => expect(mockedLoad).toHaveBeenCalledWith('bot-1', false, 'owner-1', 'local', 'hermes'));
 });

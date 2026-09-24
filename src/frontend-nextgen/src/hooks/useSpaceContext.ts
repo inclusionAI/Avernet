@@ -1,7 +1,7 @@
 // 全局空间上下文 Hook：统一读写入口。
 // - useSpaceContext(selector): 选读 store（各模块用：const spaceId = useSpaceContext(s=>s.currentSpaceId)）
 // - ensurePersonalSpaceOnAppEntry(): App 挂载（进入项目）时由 AppShell 调用，单飞初始化一次个人空间（幂等，失败静默）
-// - initSpaceContext(): 进入管理区域时调用，拉已加入空间（scope=accessible）→首次无个人空间则 ensure+重拉→还原/默认
+// - initSpaceContext(): 空间切换器挂载 / 进入 Bot 分组路由 / 打开切换气泡时调用，拉已加入空间（scope=accessible）→首次无个人空间则 ensure+重拉→还原/默认（幂等+并发单飞：同帧多触发只发一次请求）
 //   （localStorage tc_personal_space_ensured 幂等标记，避免每次进管理页重复「查+建」往返）
 // - refreshSpaceContext(): 切换器气泡每次打开时调用，重拉最新列表（保留当前选中；失效则回落个人空间）
 // - switchSpaceContext(id): 切换器选择时调用，更新 store + 写 localStorage
@@ -71,10 +71,12 @@ export function useSpaceContext<T>(selector: (s: ReturnType<typeof useSpaceConte
   return useSpaceContextStore(selector);
 }
 
-/** 进入管理区域时初始化：拉可见全集→过滤已加入→还原/默认。幂等（成功后跳过；失败可重试）。 */
-export async function initSpaceContext(): Promise<void> {
+/** 进行中的初始化请求：并发单飞（SpaceSwitcher 挂载、AppShell bot 路由 effect、气泡打开可能同帧触发） */
+let inflightInit: Promise<void> | null = null;
+
+/** 初始化实现：拉可见全集→过滤已加入→还原/默认（由 initSpaceContext 包装幂等 + 并发单飞）。 */
+async function doInitSpaceContext(): Promise<void> {
   const store = useSpaceContextStore.getState();
-  if (store.initialized) return;
   store.setLoading(true);
   store.setError(undefined);
   const r = await fetchJoinedSpaces();
@@ -105,6 +107,20 @@ export async function initSpaceContext(): Promise<void> {
   if (initialId !== stored) writeStoredId(initialId);
   store.setInitialized(true);
   store.setLoading(false);
+}
+
+/**
+ * 初始化空间上下文：拉可见全集→过滤已加入→还原/默认。
+ * 幂等（成功后 initialized 跳过；失败可重试）+ 并发单飞（进行中时并发调用共享同一次请求）。
+ */
+export function initSpaceContext(): Promise<void> {
+  const store = useSpaceContextStore.getState();
+  if (store.initialized) return Promise.resolve();
+  if (inflightInit) return inflightInit;
+  inflightInit = doInitSpaceContext().finally(() => {
+    inflightInit = null;
+  });
+  return inflightInit;
 }
 
 /** 气泡每次打开时刷新：重拉已加入子集。当前空间失效（被移出/删除）时回落个人空间并修正持久化。 */

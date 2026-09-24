@@ -13,7 +13,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { cn } from '@/utils/cn';
-import { MoreHorizontal, Plus, Settings2, Share2, Trash2, Users } from 'lucide-react';
+import { ChevronDown, ChevronRight, MoreHorizontal, Plus, Settings2, Share2, Trash2, Users } from 'lucide-react';
 import React, { useState } from 'react';
 import { AvatarTile } from '../AvatarTile';
 import { ShareDialog } from '../ManagePanel/ShareDialog';
@@ -48,6 +48,10 @@ export const GroupItem = React.memo(function GroupItem({
   onCreateSession,
   onManageGroup,
   onManageSession,
+  onRenameSession,
+  onDeleteSession,
+  onShareSession,
+  activeIdentity,
   onShareGroup,
   onDissolveGroup,
   totalSessionCount,
@@ -101,7 +105,7 @@ export const GroupItem = React.memo(function GroupItem({
       <div
         className={cn(
           'group relative flex min-h-16 items-center gap-3 px-4 py-2.5 transition-colors',
-          selected || expanded ? 'bg-primary/5' : 'bg-background hover:bg-accent/50',
+          selected || expanded ? 'bg-muted' : 'hover:bg-accent/50',
         )}
       >
         {selected && (
@@ -115,9 +119,15 @@ export const GroupItem = React.memo(function GroupItem({
           onClick={handleCardClick}
           className="flex h-auto min-w-0 flex-1 items-center justify-start gap-3 rounded-none px-0 py-1 text-left hover:bg-transparent"
         >
+          {/* v1.4：选中/展开态头像品牌浅底弱化强调（浅蓝底+蓝图标，实心反色试装后按用户反馈调轻）。 */}
           <AvatarTile
             label={group.name}
-            className="rounded-full bg-secondary text-secondary-foreground ring-1 ring-border"
+            className={cn(
+              'rounded-full ring-1',
+              selected || expanded
+                ? 'bg-primary/15 text-primary ring-primary/30'
+                : 'bg-secondary text-secondary-foreground ring-border',
+            )}
             fallbackContent={<Users className="h-4 w-4" aria-hidden="true" />}
           />
           <div className="min-w-0 flex-1">
@@ -125,38 +135,47 @@ export const GroupItem = React.memo(function GroupItem({
               <TooltipProvider delayDuration={300}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="min-w-0 flex-1 truncate text-sm font-normal text-foreground">{group.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{group.name}</span>
                   </TooltipTrigger>
                   <TooltipContent>{group.name}</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             </div>
-            <TooltipProvider delayDuration={0}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div
-                    aria-label={`协作群标签：${metadataLabel}`}
-                    className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4"
-                  >
-                    {group.isPublic && (
-                      <Badge tone="success" className={SIDEBAR_TAG_CLASS}>
-                        公开
-                      </Badge>
-                    )}
-                    <Badge tone={KIND_TONE[group.kind]} className={SIDEBAR_TAG_CLASS}>
-                      {KIND_LABEL[group.kind]}
-                    </Badge>
-                    <Badge tone="primary" className={SIDEBAR_TAG_CLASS}>
-                      {membershipLabel}
-                    </Badge>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>{metadataLabel}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <div
+              aria-label={`协作群标签：${metadataLabel}`}
+              className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4 group-hover:pr-20"
+            >
+              {group.isPublic && (
+                <Badge tone="success" className={SIDEBAR_TAG_CLASS}>
+                  公开
+                </Badge>
+              )}
+              <Badge tone={KIND_TONE[group.kind]} className={SIDEBAR_TAG_CLASS}>
+                {KIND_LABEL[group.kind]}
+              </Badge>
+              <Badge tone="primary" className={SIDEBAR_TAG_CLASS}>
+                {membershipLabel}
+              </Badge>
+            </div>
           </div>
         </Button>
-        <div className="flex shrink-0 items-center gap-0.5" onClick={(event) => event.stopPropagation()}>
+        {/* v1.5：操作区绝对定位悬浮不占位（用户验收决策）——badge/群名用满行宽，
+            解决 v1.4 透明占位把不可收缩的 badge 组挤出截断（「仅参与临…」）。
+            满行覆盖（用户预览四轮决策）：inset-y-0 撑满行高、右缘止于箭头左缘
+            （行右 30px = 16px padding + 14px 箭头；箭头是前景不罩半透明层），
+            底色走 global.css 工具类（渐变叠底色真实合成，与行视觉零色差、不透字；
+            选中/展开 = muted 实色；可见性由 opacity 控制，无需 group-hover 变体修饰
+            手写类），左缘 20px mask 渐隐；显隐语义保留。按钮组在满高容器内垂直居中。 */}
+        <div
+          className={cn(
+            'absolute inset-y-0 right-[30px] z-10 flex items-center gap-0.5 pl-5',
+            'mask-[linear-gradient(to_right,transparent,black_20px)]',
+            selected || expanded ? 'sidebar-actions-cover-selected' : 'sidebar-actions-cover-hover',
+            'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
+            (selected || expanded || sessionTab === 'favorite' || actionsOpen) && 'opacity-100',
+          )}
+          onClick={(event) => event.stopPropagation()}
+        >
           {viewerKind === 'user' ? (
             <MessageViewScopeMenuButton onSelect={(scope) => onCreateSession(group.groupId, scope)} />
           ) : (
@@ -219,6 +238,13 @@ export const GroupItem = React.memo(function GroupItem({
             </PopoverContent>
           </Popover>
         </div>
+        {/* 折叠/展开箭头固定在行最右（操作区之后），与 Bot 行同构，不随操作区显隐跳动；
+            展开实心箭头主色、收起空心箭头弱化色。 */}
+        {expanded ? (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        )}
       </div>
 
       {expanded && (
@@ -237,6 +263,10 @@ export const GroupItem = React.memo(function GroupItem({
           onSelectSession={onSelectSession}
           onToggleFavorite={onToggleFavorite}
           onManageSession={onManageSession}
+          onRenameSession={onRenameSession}
+          onDeleteSession={onDeleteSession}
+          onShareSession={onShareSession}
+          activeIdentity={activeIdentity}
         />
       )}
 

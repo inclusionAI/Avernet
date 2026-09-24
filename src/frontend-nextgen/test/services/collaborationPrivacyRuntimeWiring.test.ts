@@ -790,7 +790,7 @@ describe('collaboration privacy runtime wiring', () => {
 
     await expect(
       adapter.updateDirectSetting({ botId: 'bot-real-1', setting: 'taskClaimingEnabled', value: true }),
-    ).rejects.toThrow('任务认领开关请通过 enable/disableTaskClaim 提交(grant/revoke + PATCH task_claim_mode 双写)');
+    ).rejects.toThrow('任务认领设置暂时无法保存，请稍后重试');
     expect(patchManagedBot).not.toHaveBeenCalled();
 
     await expect(

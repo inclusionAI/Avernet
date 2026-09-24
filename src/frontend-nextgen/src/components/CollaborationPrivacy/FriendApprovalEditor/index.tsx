@@ -15,12 +15,17 @@ import { OrganizationScopeSearch } from '../OrganizationScopeSearch';
 const modes: Array<{ value: FriendApprovalMode; label: string; description: string }> = [
   { value: 'none', label: '无需审批', description: '新好友申请无需用户审批，直接通过' },
   { value: 'all', label: '全部审批', description: '新好友申请都需要用户审批后方可通过' },
-  { value: 'partial_exempt', label: '部分组织免审批', description: '限定组织的用户申请可直接通过；其余组织的用户申请仍需当前用户审批' },
+  {
+    value: 'partial_exempt',
+    label: '部分组织免审批',
+    description: '限定组织的用户申请可直接通过；其余组织的用户申请仍需当前用户审批',
+  },
 ];
 
 interface FriendApprovalEditorProps {
   open: boolean;
   initialConfig: FriendApprovalConfig;
+  desktop?: boolean;
   onSearch: (keyword: string, signal?: AbortSignal) => Promise<OrganizationSearchEntry[]>;
   loading?: boolean;
   onClose: () => void;
@@ -34,6 +39,7 @@ function getEditableMode(mode: FriendApprovalMode, partialExemptEnabled: boolean
 export function FriendApprovalEditor({
   open,
   initialConfig,
+  desktop = false,
   onSearch,
   loading,
   onClose,
@@ -56,7 +62,9 @@ export function FriendApprovalEditor({
     }
   }, [open, initialConfig, partialExemptEnabled]);
 
-  const availableModes = partialExemptEnabled ? modes : modes.filter((option) => option.value !== 'partial_exempt');
+  const availableModes = modes.filter(
+    (option) => (!desktop || option.value !== 'none') && (partialExemptEnabled || option.value !== 'partial_exempt'),
+  );
   const selectedKeys = new Set(selected.map((path) => path.join('\u0000')));
   const activeEntries = selectedEntries.filter((entry) => selectedKeys.has(entry.path.join('\u0000')));
   const exemptDepartmentNos =
@@ -106,7 +114,7 @@ export function FriendApprovalEditor({
                 selectedEntries={selectedEntries}
                 onEntriesChange={setSelectedEntries}
               />
-              {invalid && <p className="mt-2 text-xs text-destructive">部分组织免审批时，请至少选择一个组织范围</p>}
+              {invalid && <p className="mt-2 text-xs text-destructive">至少选择一个免审批组织范围</p>}
             </section>
           )}
           {unchanged && !invalid && <p className="text-xs text-muted-foreground">配置未发生变化，无需保存</p>}
@@ -115,7 +123,11 @@ export function FriendApprovalEditor({
           <Button variant="secondary" disabled={loading} onClick={onClose}>
             取消
           </Button>
-          <Button loading={loading} disabled={invalid || unchanged} onClick={() => nextConfig && onSubmit(nextConfig)}>
+          <Button
+            loading={loading}
+            disabled={invalid || unchanged || (desktop && mode === 'none')}
+            onClick={() => nextConfig && onSubmit(nextConfig)}
+          >
             保存策略
           </Button>
         </ModalFooter>

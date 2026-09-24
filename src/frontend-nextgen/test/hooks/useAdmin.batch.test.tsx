@@ -3,9 +3,9 @@
 // 加载态 / 同一 tick 重入阻断 / 失败子集重试。沿用既有 useAdmin.test.tsx 的 mock 口径
 // （auto-mock @/services/admin barrel；notify 不 mock，spy 真实 sonner，断言 toast 入参）。
 import type { SearchedUser } from '@/capabilities';
+import type { SpaceMember } from '@/domain/admin/models';
 import { useAdmin } from '@/hooks/useAdmin';
 import { adminService } from '@/services/admin';
-import type { SpaceMember } from '@/domain/admin/models';
 import { useAdminStore } from '@/stores/adminStore';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
@@ -21,7 +21,17 @@ const toastSuccess = jest.spyOn(toast, 'success').mockImplementation(() => 'ok' 
 
 const as = adminService as unknown as Record<string, jest.Mock<any>>;
 
-const space = { spaceId: 100, spaceCode: 's', spaceName: 'x', spaceType: 'TEAM', memberCount: 0, ownerCount: 0, botCount: 0, gmtModified: '', currentUserRole: 'ADMIN' } as const;
+const space = {
+  spaceId: 100,
+  spaceCode: 's',
+  spaceName: 'x',
+  spaceType: 'TEAM',
+  memberCount: 0,
+  ownerCount: 0,
+  botCount: 0,
+  gmtModified: '',
+  currentUserRole: 'ADMIN',
+} as const;
 
 function member(userId: string): SpaceMember {
   return {
@@ -98,7 +108,13 @@ describe('useAdmin.addMembers：聚合 toast / 单次 refresh / 重入阻断 / �
 
     await act(async () => {
       await result.current.addMembers(
-        [searchedUser('u1'), searchedUser('u2'), searchedUser('p', '花名P'), searchedUser('q', '花名Q'), searchedUser('r')],
+        [
+          searchedUser('u1'),
+          searchedUser('u2'),
+          searchedUser('p', '花名P'),
+          searchedUser('q', '花名Q'),
+          searchedUser('r'),
+        ],
         'MEMBER',
       );
     });
@@ -153,7 +169,10 @@ describe('useAdmin.addMembers：聚合 toast / 单次 refresh / 重入阻断 / �
   it('in-flight 阻断重入：pending 期间再次调用不新增 addMembersBatch，并暴露 addMembersLoading/disabledReason', async () => {
     let resolveBatch!: (v: unknown) => void;
     as.addMembersBatch.mockImplementation(
-      () => new Promise((r) => { resolveBatch = r; }),
+      () =>
+        new Promise((r) => {
+          resolveBatch = r;
+        }),
     );
 
     const { result } = renderHook(() => useAdmin());

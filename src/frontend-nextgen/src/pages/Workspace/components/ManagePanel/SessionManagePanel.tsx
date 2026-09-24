@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Input } from '@/components/ui';
+import { Button, Card } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { GroupView, IdentityView, SessionView } from '@/domain/collaboration';
 import type { PolicyResult } from '@/services/workspace/groupService';
@@ -6,6 +6,7 @@ import type { DomainResult } from '@/services/workspace/identityService';
 import { Link as LinkIcon, LogOut, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { EditableName } from './EditableName';
 import { ManagePanelHeader } from './ManagePanelHeader';
 import { MemberList } from './MemberList';
 import { ShareDialog } from './ShareDialog';
@@ -47,7 +48,6 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
     onDelete,
     onLeaveSession,
   } = props;
-  const [title, setTitle] = useState(session.title);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -64,12 +64,6 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
       if (await props.onAddMember(actorId)) success += 1;
     }
     return success;
-  };
-
-  const handleSaveTitle = () => {
-    const next = title.trim();
-    if (!next || next === session.title) return;
-    void onRename(session.sessionId, next);
   };
 
   const handleShare = async () => {
@@ -91,40 +85,42 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
 
       <div className="app-scrollbar flex-1 overflow-y-auto p-4">
         <div className="space-y-3">
-          <Card className="rounded-lg bg-card p-3 shadow-sm">
-            <div className="mb-3 flex items-center gap-2">
-              <Badge tone="primary">{GROUP_KIND_LABEL[props.groupKind]}</Badge>
-            </div>
-            <label className="block">
-              <span className="mb-1.5 block text-xs text-muted-foreground">会话标题</span>
-              <div className="flex gap-2">
-                <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-                <Button variant="secondary" size="sm" onClick={handleSaveTitle}>
-                  保存
-                </Button>
-              </div>
-            </label>
-            <div className="mt-3 space-y-2 rounded-lg bg-muted px-3 py-2">
+          <Card className="rounded-lg bg-card p-3">
+            <p className="m-0 mb-2 text-sm font-medium text-foreground">基础信息</p>
+            <p className="m-0 mb-1 text-xs text-muted-foreground">会话标题</p>
+            <EditableName
+              value={session.title}
+              canEdit={isSessionDriverOrManager}
+              editLabel="编辑会话标题"
+              onSave={(next) => void onRename(session.sessionId, next)}
+            />
+            <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
               <div>
-                <p className="m-0 text-[11px] font-medium text-muted-foreground">成员数量</p>
-                <p className="m-0 mt-1 text-xs font-medium text-foreground">
+                <p className="m-0 text-muted-foreground">类型</p>
+                <p className="m-0 mt-1 font-medium text-foreground">{GROUP_KIND_LABEL[props.groupKind]}</p>
+              </div>
+              <div>
+                <p className="m-0 text-muted-foreground">成员数量</p>
+                <p className="m-0 mt-1 font-medium text-foreground">
                   {session.participantCount || session.participants.length}
                 </p>
               </div>
+            </div>
+            <div className="mt-3 space-y-3 text-xs">
               <div>
-                <p className="m-0 text-[11px] font-medium text-muted-foreground">群 ID</p>
+                <p className="m-0 text-muted-foreground">群 ID</p>
                 <p className="m-0 mt-1 break-all font-mono text-xs text-foreground">{session.groupId}</p>
               </div>
               <div>
-                <p className="m-0 text-[11px] font-medium text-muted-foreground">会话 ID</p>
+                <p className="m-0 text-muted-foreground">会话 ID</p>
                 <p className="m-0 mt-1 break-all font-mono text-xs text-foreground">{session.sessionId}</p>
               </div>
             </div>
           </Card>
 
-          <Card className="rounded-lg bg-card p-3 shadow-sm">
-            <p className="m-0 mb-2 text-sm font-semibold text-foreground">会话成员管理</p>
+          <Card className="rounded-lg bg-card p-3">
             <MemberList
+              headerLabel="会话成员"
               participants={session.participants}
               participantCount={session.participantCount}
               activeIdentity={activeIdentity}
@@ -133,28 +129,27 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
               canManage={isSessionDriverOrManager}
               disabledReason={canManage.disabledReason}
               emptyText="暂无成员"
-              addLabel="添加会话成员"
+              addLabel="添加成员"
               groupKind={props.groupKind}
               showMode
+              badgePolicy="session"
               onAddMany={handleAddMany}
               onRemove={props.onRemoveMember}
             />
           </Card>
 
-          <Card className="rounded-lg bg-card p-3 shadow-sm">
-            <p className="m-0 mb-2 text-sm font-semibold text-foreground">操作</p>
-            <div className="flex flex-col gap-2">
+          <Card className="rounded-lg bg-card p-3">
+            <p className="m-0 mb-1 text-sm font-medium text-foreground">操作</p>
+            <div className="flex flex-col divide-y divide-border">
               <Button
                 variant="ghost"
                 onClick={() => void handleShare()}
-                className="h-auto w-full justify-start rounded-lg border border-primary/25 bg-background px-3 py-2 text-left text-xs text-primary hover:bg-primary/10 hover:text-primary"
+                className="h-auto w-full justify-start px-2 py-2 text-left text-xs text-primary hover:bg-primary/10 hover:text-primary"
               >
                 <LinkIcon className="h-4 w-4 shrink-0" />
                 <span className="flex flex-col items-start">
                   <span>分享会话</span>
-                  <span className="text-[11px] font-normal text-muted-foreground">
-                    生成会话邀请链接，供成员通过链接加入
-                  </span>
+                  <span className="text-xs font-normal text-muted-foreground">人类角色可以通过链接加入会话</span>
                 </span>
               </Button>
               {isSessionDriverOrManager ? (
@@ -167,12 +162,12 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
                 >
                   <Button
                     variant="ghost"
-                    className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
+                    className="h-auto w-full justify-start px-2 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
                   >
                     <Trash2 className="h-4 w-4 shrink-0" />
                     <span className="flex flex-col items-start">
                       <span>删除会话</span>
-                      <span className="text-[11px] font-normal text-muted-foreground">此操作不可恢复，请谨慎操作</span>
+                      <span className="text-xs font-normal text-muted-foreground">此操作不可恢复，请谨慎操作</span>
                     </span>
                   </Button>
                 </ConfirmDialog>
@@ -191,12 +186,12 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
                   <Button
                     variant="ghost"
                     disabled={!activeIdentity}
-                    className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
+                    className="h-auto w-full justify-start px-2 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
                   >
                     <LogOut className="h-4 w-4 shrink-0" />
                     <span className="flex flex-col items-start">
                       <span>退出会话</span>
-                      <span className="text-[11px] font-normal text-muted-foreground">退出后将不再接收该会话消息</span>
+                      <span className="text-xs font-normal text-muted-foreground">退出后将不再接收该会话消息</span>
                     </span>
                   </Button>
                 </ConfirmDialog>

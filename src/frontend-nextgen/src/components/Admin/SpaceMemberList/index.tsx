@@ -27,7 +27,9 @@ export interface SpaceMemberListProps {
   onAddMembers: (
     users: SearchedUser[],
     role: 'ADMIN' | 'MEMBER',
-  ) => void | Promise<{ succeeded: SpaceMember[]; failed: { userId: string; userName?: string; reason: string }[] } | undefined>;
+  ) => void | Promise<
+    { succeeded: SpaceMember[]; failed: { userId: string; userName?: string; reason: string }[] } | undefined
+  >;
   /** 批量添加 in-flight 加载态（来自 hook）；用于按钮禁用 + 加载文案。 */
   addMembersLoading?: boolean;
   addMembersDisabledReason?: string;

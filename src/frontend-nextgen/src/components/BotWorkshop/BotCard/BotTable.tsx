@@ -22,6 +22,7 @@ export interface BotTableProps {
   onView: (bot: BotDomain) => void;
   onEdit?: (bot: BotDomain) => void;
   onConversation?: (bot: BotDomain) => void;
+  canOpenConversation?: (bot: BotDomain) => boolean;
   onOpenLogs?: (bot: BotDomain) => void;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
@@ -29,6 +30,7 @@ export interface BotTableProps {
   onManagePublication?: (bot: BotDomain) => void;
   onAction?: (action: BotCardManagementAction, bot: BotDomain) => Promise<void>;
   onClaimLock?: (bot: BotDomain) => Promise<void>;
+  onReleaseLock?: (bot: BotDomain) => Promise<void>;
 
   /** 可用性逐 bot 不同,一律以 accessor 传入,表格内按行求值。 */
   getInventoryActions?: (bot: BotDomain) => BotInventoryActions | undefined;
@@ -44,6 +46,7 @@ const BotTable: React.FC<BotTableProps> = ({
   onView,
   onEdit,
   onConversation,
+  canOpenConversation,
   onOpenLogs,
   onHealthCheck,
   onChangeSpace,
@@ -51,18 +54,20 @@ const BotTable: React.FC<BotTableProps> = ({
   onManagePublication,
   onAction,
   onClaimLock,
+  onReleaseLock,
   getInventoryActions,
   getHealthCheckAvailability,
   getLogAction,
   getCollaborationMode,
 }) => {
+  const showOwner = bots.some((bot) => bot.spaceKind === 'team');
   const columns: DataTableColumn<BotDomain>[] = React.useMemo(
     () => [
       {
         id: 'info',
         header: '机器人信息',
         width: 'w-[280px]',
-        cell: (bot) => <BotInfoCell bot={bot} onClaimLock={onClaimLock} />,
+        cell: (bot) => <BotInfoCell bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />,
       },
       {
         // 不写死宽度:table-fixed 下由该列吸收剩余空间
@@ -88,6 +93,18 @@ const BotTable: React.FC<BotTableProps> = ({
         width: 'w-[220px]',
         cell: (bot) => <BotTagsCell bot={bot} />,
       },
+      ...(showOwner
+        ? [
+            {
+              id: 'owner',
+              header: 'Owner',
+              width: 'w-[140px]',
+              cell: (bot: BotDomain) => (
+                <span className="truncate text-xs text-foreground">{bot.ownerName || bot.ownerId || '—'}</span>
+              ),
+            },
+          ]
+        : []),
       {
         id: 'primary-actions',
         header: '主要操作',
@@ -99,6 +116,7 @@ const BotTable: React.FC<BotTableProps> = ({
             onView={onView}
             onEdit={onEdit}
             onConversation={onConversation}
+            conversationAllowed={canOpenConversation?.(bot) ?? true}
             onOpenLogs={onOpenLogs}
             onHealthCheck={onHealthCheck}
             inventoryActions={getInventoryActions?.(bot)}
@@ -132,9 +150,11 @@ const BotTable: React.FC<BotTableProps> = ({
       },
     ],
     [
+      showOwner,
       onView,
       onEdit,
       onConversation,
+      canOpenConversation,
       onOpenLogs,
       onHealthCheck,
       onChangeSpace,
@@ -142,6 +162,7 @@ const BotTable: React.FC<BotTableProps> = ({
       onManagePublication,
       onAction,
       onClaimLock,
+      onReleaseLock,
       getInventoryActions,
       getHealthCheckAvailability,
       getLogAction,
@@ -155,9 +176,15 @@ const BotTable: React.FC<BotTableProps> = ({
         onRowClick(bot);
         return;
       }
+      // Coding Bot：点击整行与「去使用」一致，直接进入对话（跳转 coding-chat）；
+      // 其它引擎仍进详情页。对话不可用时回退详情，避免整行点不开。
+      if (bot.runtime.isAgentCodingBot && onConversation && (canOpenConversation?.(bot) ?? true)) {
+        onConversation(bot);
+        return;
+      }
       onView(bot);
     },
-    [onRowClick, onView],
+    [onRowClick, onView, onConversation, canOpenConversation],
   );
 
   return (

@@ -1,15 +1,15 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { Textarea } from '@/components/ui/Textarea';
 import { useBotEngineOptions } from '@/hooks/useBotEngineOptions';
 import type { BotCreateInput, BotCreateSpace } from '@/services/botWorkshop';
 import { supportsServiceBot, type AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
-// 「初始化配置」开关已下线，其唯一用处的 Sparkles 图标随之停用（见表单底部注释块）。
-// import { Sparkles } from 'lucide-react';
+import { cn } from '@/utils/cn';
 import type React from 'react';
 import { AgentCodingSection } from './agentCoding/AgentCodingSection';
+import { CreateBotEngineSelector } from './CreateBotEngineSelector';
+import { DesktopDeviceFields } from './DesktopDeviceFields';
 
 interface CreateBotFormFieldsProps {
   values: BotCreateInput;
@@ -28,6 +28,9 @@ interface CreateBotFormFieldsProps {
   onSubmit: (event: React.FormEvent) => void;
 }
 
+const inputFocusClass =
+  'focus-visible:border-muted-foreground/40 focus-visible:ring-1 focus-visible:ring-muted-foreground/15 focus-visible:ring-offset-0 placeholder:text-muted-foreground/50';
+
 export function CreateBotFormFields({
   values,
   setValues,
@@ -44,7 +47,12 @@ export function CreateBotFormFields({
   onCancel,
   onSubmit,
 }: CreateBotFormFieldsProps) {
-  const engineOptions = useBotEngineOptions();
+  const configuredEngines = useBotEngineOptions();
+  const engineOptions =
+    values.scenario === 'local'
+      ? configuredEngines.filter((option) => ['openclaw', 'hermes'].includes(option.value))
+      : configuredEngines;
+  const hasEngineOptions = engineOptions.length > 0;
   const isLocal = values.scenario === 'local';
   const isAgentCoding = values.engine === 'aicoding';
   const isApplicationCoding = values.agentCoding?.kind === 'applicationCoding';
@@ -52,11 +60,61 @@ export function CreateBotFormFields({
   const agentCodingServiceDisabled = isApplicationCoding || !templateSupportsService;
   const serviceDisabled = isLocal || values.engine === 'hermes' || (isAgentCoding && agentCodingServiceDisabled);
   const nameHasInvalidCharacter = values.name.includes('@');
+  const serviceHint = isLocal
+    ? '本地 Bot 暂不支持'
+    : values.engine === 'hermes'
+    ? 'Hermes 暂不支持'
+    : isApplicationCoding || (isAgentCoding && !templateSupportsService)
+    ? '当前模板未开启服务 Bot 能力'
+    : '开启后不可变更';
+
+  const handleEngineChange = (engine: string) => {
+    if (engine !== 'aicoding') onAgentCodingErrorChange(undefined);
+    setValues((current) => ({
+      ...current,
+      engine,
+      agentCoding: engine === 'aicoding' ? current.agentCoding : undefined,
+      serviceMode: ['hermes', 'aicoding'].includes(engine) ? 'non-service' : current.serviceMode,
+    }));
+  };
+
+  const renderEnginePanel = (option: (typeof engineOptions)[number]) =>
+    option.value === 'aicoding' && option.createPanel === 'agent-coding' ? (
+      <>
+        <AgentCodingSection
+          templates={agentCodingTemplates}
+          loading={agentCodingTemplatesLoading}
+          error={agentCodingTemplatesError}
+          value={values.agentCoding}
+          disabled={creating}
+          onChange={(agentCoding) => {
+            onAgentCodingErrorChange(undefined);
+            setValues((current) => ({
+              ...current,
+              agentCoding,
+              serviceMode:
+                agentCoding?.kind === 'template' && supportsServiceBot(agentCoding.template as AgentCodingTemplate)
+                  ? current.serviceMode
+                  : 'non-service',
+            }));
+          }}
+          onValidationChange={onAgentCodingErrorChange}
+          onRetry={onRetryAgentCodingTemplates}
+          onValidateReady={onValidateReady}
+        />
+        {agentCodingError && !error && values.agentCoding?.kind !== 'applicationCoding' ? (
+          <p role="alert" className="mt-2 text-xs text-destructive">
+            {agentCodingError}
+          </p>
+        ) : null}
+      </>
+    ) : null;
 
   return (
-    <form className="space-y-5" onSubmit={onSubmit}>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="space-y-2 text-xs font-medium text-foreground sm:col-span-2">
+    <form className="space-y-4" onSubmit={onSubmit}>
+      {isLocal ? <DesktopDeviceFields values={values} setValues={setValues} /> : null}
+      <div className="space-y-4">
+        <label className="block space-y-2 text-xs font-medium text-foreground">
           <span className="flex items-center justify-between gap-2">
             <span>
               Bot 名称 <span className="text-destructive">*</span>
@@ -64,11 +122,10 @@ export function CreateBotFormFields({
             <span className="text-[10px] font-normal text-muted-foreground">{values.name.length}/40</span>
           </span>
           <Input
-            autoFocus
             value={values.name}
             maxLength={40}
             placeholder="例如：项目知识助手"
-            className="focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30 focus-visible:ring-offset-0"
+            className={inputFocusClass}
             onChange={(event) => setValues((current) => ({ ...current, name: event.target.value }))}
             aria-invalid={Boolean(error || nameHasInvalidCharacter)}
           />
@@ -77,144 +134,72 @@ export function CreateBotFormFields({
           ) : null}
         </label>
 
-        <label className="space-y-2 text-xs font-medium text-foreground sm:col-span-2">
+        <label className="block space-y-2 text-xs font-medium text-foreground">
           <span className="flex items-center justify-between gap-2">
             <span>描述</span>
             <span className="text-[10px] font-normal text-muted-foreground">{values.description.length}/200</span>
           </span>
           <Textarea
             rows={2}
-            className="min-h-[60px] focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30 focus-visible:ring-offset-0"
+            className={cn('min-h-[60px]', inputFocusClass)}
             value={values.description}
             maxLength={200}
             placeholder="简要说明这个 Bot 能帮助你完成什么"
             onChange={(event) => setValues((current) => ({ ...current, description: event.target.value }))}
           />
         </label>
+      </div>
 
-        <div className="flex flex-col gap-2 text-xs font-medium text-foreground">
-          <span id="create-bot-engine-label" className="block">
-            引擎类型
-          </span>
-          <Select
+      <div className="flex flex-col gap-2 text-xs font-medium text-foreground">
+        <span id="create-bot-engine-label" className="block">
+          引擎类型
+        </span>
+        {hasEngineOptions ? (
+          <CreateBotEngineSelector
+            options={engineOptions}
             value={values.engine}
-            onValueChange={(engine) =>
-              setValues((current) => ({
-                ...current,
-                engine,
-                agentCoding: engine === 'aicoding' ? current.agentCoding : undefined,
-                serviceMode: ['hermes', 'aicoding'].includes(engine) ? 'non-service' : current.serviceMode,
-              }))
-            }
-          >
-            <SelectTrigger
-              aria-labelledby="create-bot-engine-label"
-              className="focus-visible:ring-1 focus-visible:ring-ring/40 focus-visible:ring-offset-0"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="rounded-lg p-1.5 shadow-lg">
-              {engineOptions.map((option) => (
-                <SelectItem
-                  key={option.value}
-                  value={option.value}
-                  className="rounded-md py-2 pl-3 pr-8 text-sm data-[highlighted]:bg-primary/10 data-[highlighted]:text-foreground [&>span]:left-auto [&>span]:right-2"
-                >
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+            onChange={handleEngineChange}
+            renderPanel={renderEnginePanel}
+          />
+        ) : (
+          <p role="alert" className="text-xs font-normal text-destructive">
+            当前环境未提供可创建引擎
+          </p>
+        )}
+      </div>
 
-        <div className="flex flex-col text-xs font-medium text-foreground">
+      {/* 归属空间与提供服务拆为同构字段并排一行：提供服务不再用独立卡片，结构对齐归属空间，单行更紧凑。 */}
+      <div className="grid items-start gap-4 sm:grid-cols-2">
+        <div className="flex flex-col gap-2 text-xs font-medium text-foreground">
           <span id="create-bot-space-label" className="block">
             归属空间
           </span>
           <div
             aria-labelledby="create-bot-space-label"
-            className="mt-2 flex h-9 items-center rounded-md border border-input bg-muted/30 px-3 text-xs font-normal"
+            className="flex h-9 w-full items-center truncate rounded-md border border-input bg-muted/30 px-3 text-xs font-normal text-foreground"
           >
             {spaces[0]?.name ?? '当前空间不可用'}
           </div>
-          <span className="mt-1.5 block text-[10px] font-normal text-muted-foreground">
+          <span className="block text-[10px] font-normal text-muted-foreground">
             跟随当前工作空间，不支持在创建时切换
           </span>
         </div>
 
-        {isAgentCoding ? (
-          <div className="sm:col-span-2">
-            <AgentCodingSection
-              templates={agentCodingTemplates}
-              loading={agentCodingTemplatesLoading}
-              error={agentCodingTemplatesError}
-              value={values.agentCoding}
-              disabled={creating}
-              onChange={(agentCoding) => {
-                onAgentCodingErrorChange(undefined);
-                setValues((current) => ({
-                  ...current,
-                  agentCoding,
-                  serviceMode:
-                    agentCoding?.kind === 'template' && supportsServiceBot(agentCoding.template as AgentCodingTemplate)
-                      ? current.serviceMode
-                      : 'non-service',
-                }));
-              }}
-              onValidationChange={onAgentCodingErrorChange}
-              onRetry={onRetryAgentCodingTemplates}
-              onValidateReady={onValidateReady}
+        <div className="flex flex-col gap-2 text-xs font-medium text-foreground">
+          <span className="block">提供服务</span>
+          {/* h-9 透明等高行：让开关行与左侧值框同高、开关垂直居中与框内文字对齐，下行提示也随之对齐；无边框无底色，非卡片。 */}
+          <div className="flex h-9 w-full items-center">
+            <Switch
+              checked={values.serviceMode === 'service'}
+              disabled={serviceDisabled}
+              onCheckedChange={(checked) =>
+                setValues((current) => ({ ...current, serviceMode: checked ? 'service' : 'non-service' }))
+              }
+              aria-label="是否提供服务"
             />
-            {agentCodingError && !error && values.agentCoding?.kind !== 'applicationCoding' ? (
-              <p role="alert" className="mt-2 text-xs text-destructive">
-                {agentCodingError}
-              </p>
-            ) : null}
           </div>
-        ) : null}
-      </div>
-
-      {/* sm:w-[calc(50%_-_0.5rem)] 与上方 grid gap-4 sm:grid-cols-2 的单列等宽，使边框对齐引擎类型选择器。 */}
-      <div className="rounded-lg border border-border bg-muted/30 p-4 sm:w-[calc(50%_-_0.5rem)]">
-        <label className="flex items-center justify-between gap-4">
-          <span>
-            <span className="block text-xs font-medium text-foreground">提供服务</span>
-            <span className="mt-1 block text-[10px] text-muted-foreground">
-              {isLocal
-                ? '本地 Bot 暂不支持'
-                : values.engine === 'hermes'
-                ? 'Hermes 暂不支持'
-                : isApplicationCoding || (isAgentCoding && !templateSupportsService)
-                ? '当前模板未开启服务 Bot 能力'
-                : '开启后不可变更'}
-            </span>
-          </span>
-          <Switch
-            checked={values.serviceMode === 'service'}
-            disabled={serviceDisabled}
-            onCheckedChange={(checked) =>
-              setValues((current) => ({ ...current, serviceMode: checked ? 'service' : 'non-service' }))
-            }
-            aria-label="是否提供服务"
-          />
-        </label>
-        {/* 「初始化配置」开关已下线：该值从未被 toCreateRequest 读取，不影响创建请求体。
-            BotCreateInput.initialize 类型字段与默认值 true 暂予保留，待独立 change 清理。
-        <label className="flex items-center justify-between gap-4 sm:border-l sm:border-border sm:pl-4">
-          <span>
-            <span className="flex items-center gap-1 text-xs font-medium text-foreground">
-              <Sparkles aria-hidden className="size-3" />
-              初始化配置
-            </span>
-            <span className="mt-1 block text-[10px] text-muted-foreground">预装基础能力与资源</span>
-          </span>
-          <Switch
-            checked={values.initialize}
-            onCheckedChange={(initialize) => setValues((current) => ({ ...current, initialize }))}
-            aria-label="初始化配置"
-          />
-        </label>
-        */}
+          <span className="block text-[10px] font-normal text-muted-foreground">{serviceHint}</span>
+        </div>
       </div>
 
       <div className="flex items-center justify-between gap-3">
@@ -229,7 +214,11 @@ export function CreateBotFormFields({
           <Button type="button" variant="secondary" disabled={creating} onClick={onCancel}>
             取消
           </Button>
-          <Button type="submit" loading={creating}>
+          <Button
+            type="submit"
+            disabled={!hasEngineOptions || creating || (isLocal && !values.local?.mountPath)}
+            loading={creating}
+          >
             {isLocal ? '创建本地 Bot' : '创建云端 Bot'}
           </Button>
         </div>

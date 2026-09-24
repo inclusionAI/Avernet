@@ -1,6 +1,6 @@
 import { Button, Empty, Input, Skeleton } from '@/components/ui';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
-import type { GroupView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
+import type { GroupView, IdentityView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { Search } from 'lucide-react';
 import { ListErrorState } from '../ListErrorState';
@@ -59,6 +59,14 @@ export interface GroupSidebarProps {
   onManageGroup: (groupId: string) => void;
   /** 会话管理：打开管理面板。 */
   onManageSession: (groupId: string, sessionId: string) => void;
+  /** 会话列表菜单：重命名会话（能力对齐管理面板，按 sessionId 参数化）。 */
+  onRenameSession?: (sessionId: string, title: string) => Promise<boolean>;
+  /** 会话列表菜单：删除会话。 */
+  onDeleteSession?: (sessionId: string) => Promise<boolean>;
+  /** 会话列表菜单：生成会话邀请链接。 */
+  onShareSession?: (sessionId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
+  /** 当前身份（会话编辑/删除权限判断：创建者或 driver/manager）。 */
+  activeIdentity?: IdentityView | null;
   /** 分享群。 */
   onShareGroup: (groupId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
   /** 解散群（已在组件内二次确认，此处直接执行）。 */
@@ -107,6 +115,10 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     onCreateGroup,
     onManageGroup,
     onManageSession,
+    onRenameSession,
+    onDeleteSession,
+    onShareSession,
+    activeIdentity,
     onShareGroup,
     onDissolveGroup,
   } = props;
@@ -116,7 +128,7 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/20">
         <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
-          <div className="flex h-10 items-center gap-2 px-[18px]">
+          <div className="flex h-10 items-center gap-2 px-4">
             <WorkspacePrimaryTabs value={view} options={availableViews} onChange={onViewChange} />
           </div>
           <GroupSidebarFilters
@@ -155,15 +167,16 @@ export function GroupSidebarList(props: GroupSidebarProps) {
 
         {/* 列表区 */}
         {isLoading ? (
-          <div className="overflow-hidden border-y border-border bg-background">
+          /* 验收微调：加载骨架去边框与行底，与列表通透风格一致。 */
+          <div className="overflow-hidden">
             {[1, 2, 3].map((i) => (
-              <Skeleton.Block key={i} className="h-14 w-full rounded-none border-b border-border last:border-b-0" />
+              <Skeleton.Block key={i} className="h-14 w-full rounded-none" />
             ))}
           </div>
         ) : groups.length === 0 ? (
           groupsError ? null : groupSearchText !== '' || kindFilter !== 'all' || membership !== 'direct' ? (
             <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
-              <p className="m-0 text-base font-medium text-foreground">没有匹配的协作群</p>
+              <p className="m-0 text-sm font-medium text-foreground">没有匹配的协作群</p>
               <p className="mt-2 text-sm text-muted-foreground">试试调整搜索词或筛选条件。</p>
             </div>
           ) : (
@@ -179,7 +192,8 @@ export function GroupSidebarList(props: GroupSidebarProps) {
             />
           )
         ) : (
-          <div className="divide-y divide-border/70 overflow-hidden border-b border-border bg-muted/10">
+          /* 验收微调：群列表容器去条目分割线与容器底色/边框（与 Bot 侧一致，靠留白与 hover 区分行）。 */
+          <div className="overflow-hidden">
             {groups.map((group) => {
               const sessions = sessionsByGroupId[group.groupId];
               return (
@@ -201,6 +215,10 @@ export function GroupSidebarList(props: GroupSidebarProps) {
                   onCreateSession={onCreateSession}
                   onManageGroup={onManageGroup}
                   onManageSession={onManageSession}
+                  onRenameSession={onRenameSession}
+                  onDeleteSession={onDeleteSession}
+                  onShareSession={onShareSession}
+                  activeIdentity={activeIdentity}
                   onShareGroup={onShareGroup}
                   onDissolveGroup={onDissolveGroup}
                   totalSessionCount={totalSessionsByGroupId[group.groupId]}

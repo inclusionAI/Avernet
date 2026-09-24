@@ -3,13 +3,13 @@
 // in-flight 禁用、部分失败重试。经 extendCapabilities 注入可信搜索目录驱动真实 UserSearchDropdown
 // （该下拉内部行为已由 UserSearchDropdown.test.tsx 覆盖，这里聚焦父级 chip 管理）。
 // 关键：useUserSearch 300ms 防抖 → 必须用 findByRole（自轮询等渲染）而非同步 getByRole。
+import type { SearchedUser } from '@/capabilities';
 import { extendCapabilities } from '@/capabilities';
 import { SpaceMemberList } from '@/components/Admin/SpaceMemberList';
-import type { SearchedUser } from '@/capabilities';
 import type { Space, SpaceMember } from '@/domain/admin/models';
 import { readUserId } from '@/services/admin/userIdentity';
-import '@testing-library/jest-dom';
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
 jest.mock('@/services/admin/userIdentity'); // readUserId 自动 mock（固定自己=工号 'self'）
@@ -38,7 +38,14 @@ const space = {
 } as unknown as Space;
 
 function mem(userId: string): SpaceMember {
-  return { userId, userName: userId, role: 'ADMIN', botPermissionCount: 0, isCreator: false, gmtModified: '' } as SpaceMember;
+  return {
+    userId,
+    userName: userId,
+    role: 'ADMIN',
+    botPermissionCount: 0,
+    isCreator: false,
+    gmtModified: '',
+  } as SpaceMember;
 }
 
 interface BatchResult {

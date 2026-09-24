@@ -12,14 +12,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { toast } from 'sonner';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
 import {
+  buildActorEcho,
   buildEchoAttachments,
   buildGroupChatBridgeRequest,
   buildGroupUserMessageExtra,
 } from './groupChatRequestBuilder';
-import { useConnectionStatusSmoothing } from './useConnectionStatusSmoothing';
 import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
+import { useGroupChatAbort } from './useGroupChatAbort';
+import { useGroupChatDisplayStatus } from './useGroupChatDisplayStatus';
+import { useGroupChatHistorySync } from './useGroupChatHistorySync';
 import { useHumanOnlyChatRequests } from './useHumanOnlyChatRequests';
-import { useManifestHistoryLoader } from './useManifestHistoryLoader';
 import { useProviderStateSubscriptions } from './useProviderStateSubscriptions';
 import { useViewScopeChangedNotice } from './useViewScopeChangedNotice';
 import { useWsReconnectNonce } from './useWsReconnectNonce';
@@ -30,7 +32,7 @@ import { useWsReconnectNonce } from './useWsReconnectNonce';
  * 是基于 SDK `useChat` 与 `createGroupChatProvider` 的薄包装：
  * - 透传 `chat` (useChat 结果) 供 GroupChatPane SDK UI 直接消费
  * - 透传 `supportState` (Provider 阶段) 与 `connectionStatus` (WebSocket 连接 5 态)
- * - 暴露 `send/stop/reconnect` 命令，仅在 Hook 内做最小裁剪（trim、请求中短路；human-only 不阻塞输入）
+ * - 暴露 `send/abortBot/reconnect` 命令，终止范围固定为当前 Session 下的目标 Bot
  * - 不拼装会话显示字段（业务字段层由调用方 / 组件负责）
  *
  * Provider 连接、history hydration 与 WS 暂存由 useManifestHistoryLoader 统一协调；
@@ -56,16 +58,16 @@ export function useGroupChat(session: SessionView | null) {
 
   const [supportState, setSupportState] = useState<GroupChatState>({ phase: 'idle', error: null });
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
-  const smoothedConnectionStatus = useConnectionStatusSmoothing(connectionStatus);
-  const [hasMoreHistory, setHasMoreHistory] = useState(false);
-  const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
 
   // Provider 依赖 sessionId + groupId + identityId；任一缺失则不创建（Hook 进入空闲态）。
   const provider = useMemo(() => {
     if (!sessionId || !groupId || !identityId) return null;
     return createGroupChatProvider({ sessionId, groupId, identityId, wsOrigin: resolveGroupWsOrigin() });
   }, [sessionId, groupId, identityId]);
-
+  const { abortBot, abortingBotIds, unsupportedAbortBotId, dismissAbortUnsupported } = useGroupChatAbort(
+    provider,
+    sessionId,
+  );
   const chat = useChat({
     // provider 为 null 时 Hook 仍需调用 useChat 以保持 Hook 数量稳定；这里以 never 兜底，
     // 实际当 provider 为 null 时 sendMessage 等命令不会触发（调用方不应渲染对话面板）。
@@ -75,6 +77,13 @@ export function useGroupChat(session: SessionView | null) {
     // 改由下方 effect 显式 loadHistory + setMessages，保留完整 ChatMessage 语义。
     placeholderMessage: '',
     panelRef,
+  });
+  // 显示状态合成（Spec AC-1/AC-2，就绪绑定消息可见性；进入信号/自动重连由合成 hook 自治管理）。
+  const displayStatus = useGroupChatDisplayStatus({
+    sessionId,
+    provider,
+    rawStatus: connectionStatus,
+    messages: chat.messages,
   });
   const { isSendBlocked, markRequest } = useHumanOnlyChatRequests(chat, session?.participants ?? []);
   const groupBootstrapProcessing = useGroupBootstrapProcessing({
@@ -95,11 +104,7 @@ export function useGroupChat(session: SessionView | null) {
     panelRef,
     inputRef: inputRef as RefObject<BridgeInputRef | null>,
     buildRequestParams: (content, extra) =>
-      buildGroupChatBridgeRequest(sessionId ?? '', content, extra, {
-        senderId: activeIdentity?.id ?? undefined,
-        senderName: activeIdentity?.displayName ?? undefined,
-        senderAvatarUrl: activeIdentity?.avatarUrl,
-      }),
+      buildGroupChatBridgeRequest(sessionId ?? '', content, extra, buildActorEcho(activeIdentity)),
   });
 
   // 订阅 Provider 阶段状态 + WebSocket 连接状态（拆至 useProviderStateSubscriptions，行为不变）。
@@ -112,13 +117,13 @@ export function useGroupChat(session: SessionView | null) {
     panelRef.current?.closePanelForce();
   }, [provider, sessionId]);
 
-  useManifestHistoryLoader({
+  // 历史装载同步（分页状态 + loader 串行流程，拆至 useGroupChatHistorySync 控制体积）。
+  const { hasMoreHistory, isLoadingMoreHistory, setHasMoreHistory, setIsLoadingMoreHistory } = useGroupChatHistorySync({
     provider,
     sessionId,
     historyRefreshNonce,
-    setHasMoreHistory,
-    setIsLoadingMoreHistory,
     setMessages: chat.setMessages,
+    onEnterOutcome: displayStatus.onEnterOutcome,
   });
 
   // 重新进入会话时合并本地持久化的前置 assistant 消息（已抽入 useTaskPreflightAssistant）。
@@ -144,18 +149,9 @@ export function useGroupChat(session: SessionView | null) {
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
       userMessage: {
         content: trimmed,
-        extra: buildGroupUserMessageExtra(echoAttachments, {
-          senderId: activeIdentity?.id ?? undefined,
-          senderName: activeIdentity?.displayName ?? undefined,
-          senderAvatarUrl: activeIdentity?.avatarUrl,
-        }),
+        extra: buildGroupUserMessageExtra(echoAttachments, buildActorEcho(activeIdentity)),
       },
     });
-  };
-
-  const stop = () => {
-    if (!chat.isRequesting) return;
-    chat.abort();
   };
 
   const reconnect = async () => {
@@ -209,31 +205,39 @@ export function useGroupChat(session: SessionView | null) {
     (content: string) => {
       if (sessionId)
         chat.onRequest(
+          buildGroupChatBridgeRequest(sessionId, content, { isInject: true }, buildActorEcho(activeIdentity)),
+        );
+    },
+    [activeIdentity, chat, sessionId],
+  );
+  const submitTaskExecutionMessage = useCallback(
+    (content: string, holderId: string) => {
+      if (sessionId)
+        chat.onRequest(
           buildGroupChatBridgeRequest(
             sessionId,
             content,
-            { isInject: true },
-            {
-              senderId: activeIdentity?.id ?? undefined,
-              senderName: activeIdentity?.displayName ?? undefined,
-              senderAvatarUrl: activeIdentity?.avatarUrl,
-            },
+            { isInject: false, botUuid: holderId },
+            buildActorEcho(activeIdentity),
           ),
         );
     },
     [activeIdentity, chat, sessionId],
   );
-
   return {
     chat,
     panelRef,
     inputRef,
     chatBridge,
     supportState,
-    connectionStatus: smoothedConnectionStatus,
+    connectionStatus: displayStatus.status,
     send,
-    stop,
+    abortBot,
+    abortingBotIds,
+    unsupportedAbortBotId,
+    dismissAbortUnsupported,
     submitPanelMessage,
+    submitTaskExecutionMessage,
     appendAssistantMessage,
     streamAssistantMessage,
     reconnect,

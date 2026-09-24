@@ -56,12 +56,49 @@ describe('TaskLoopCard', () => {
     };
     render(<TaskLoopCard {...cardProps({ type: 'task_ready', task })} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '执行' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
 
     expect(mockedSubmit).toHaveBeenCalledWith('执行任务', {
       __taskAction: 'execute',
       task,
     });
+  });
+
+  it('normalizes legacy scalar list fields before dispatching execute action', () => {
+    render(
+      <TaskLoopCard
+        {...cardProps({
+          type: 'task_ready',
+          task: {
+            task_type: 'dynamic',
+            goal: '完成存储行业尽调',
+            deliverables: '一份存储行业尽调报告' as unknown as string[],
+            acceptance_criteria: '明确中短期投资价值' as unknown as string[],
+            constraints: '至少30%判断来自最近三个月信息' as unknown as string[],
+            resources: '',
+          },
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    expect(mockedSubmit).toHaveBeenCalledWith(
+      '执行任务',
+      expect.objectContaining({
+        __taskAction: 'execute',
+        task: expect.objectContaining({
+          goal: '完成存储行业尽调',
+          deliverables: ['一份存储行业尽调报告'],
+          acceptance_criteria: ['明确中短期投资价值'],
+          constraints: ['至少30%判断来自最近三个月信息'],
+          resources: [],
+        }),
+      }),
+    );
+    const extra = mockedSubmit.mock.calls[0]?.[1] as { task?: { deliverables?: string[] } } | undefined;
+    // Keeps the downstream useTaskExecuteFromCard path safe even when a legacy card emits scalar strings.
+    expect(extra?.task?.deliverables?.join('；')).toBe('一份存储行业尽调报告');
   });
 
   it('dispatches ordinary card actions without exposing internal card identifiers', () => {

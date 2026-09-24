@@ -4,7 +4,8 @@ import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { useInviteCodeGate } from '@/hooks/useInviteCodeGate';
 import { useInviteCodePrompt } from '@/hooks/useInviteCodePrompt';
-import { KeyRound, MessagesSquare, ShieldCheck, Sparkles } from 'lucide-react';
+import { cn } from '@/utils/cn';
+import { CircleAlert, KeyRound, MessagesSquare, ShieldCheck, Sparkles } from 'lucide-react';
 import React, { useState } from 'react';
 
 /** 绑定价值主张（对齐 ExternalLoginPromptModal loginBenefits 观感，不新增业务承诺）。 */
@@ -19,8 +20,10 @@ const bindingBenefits = [
  * 唯一出路「提交邀请码」→ `useInviteCodeGate.submitCode`（`POST /openapi/v1/collaboration/invite-codes/bind` 成功 →
  * 整页 reload 回流）。**不可关闭**：`showClose=false` + 拦截 ESC / 遮罩点击 / 外部交互 / 焦点离开全套关闭意图
  * （Radix Dialog 受控 `open`，无关闭出路）——未绑码用户必须提交有效邀请码才能使用产品。
- * 视觉：居中品牌区（`getProductBrand()` loginWordmark 缺省回退 Logo）+ 标题副文案 + 邀请码输入（图标 + 大尺寸 +
- * 字距）+ 价值主张清单 + 通栏主 CTA + 无码求助副文案，均走 `@/components/ui` 白名单 + 语义 token，产品名经 capability 解析不硬编码。
+ * 视觉:双区结构——身份区(居中品牌 wordmark + 标题 + 副文案)与行动区(能力脊背 + 邀请码凭据输入 +
+ * 通栏主 CTA + 求助副文案)以发丝分隔。能力脊背以单一细线串联品牌描边节点,编码「一码解锁一连串能力」;
+ * 邀请码输入作凭据化处理(等宽字距 + 凹陷底 + 钥匙色块,聚焦时底色清空、品牌环亮起)。
+ * 均走 `@/components/ui` 白名单 + 语义 token,产品名经 capability 解析不硬编码。
  */
 export function InviteCodeBindingModal(): React.ReactElement {
   const { open } = useInviteCodePrompt();
@@ -50,27 +53,62 @@ export function InviteCodeBindingModal(): React.ReactElement {
         onInteractOutside={(e) => e.preventDefault()}
         onFocusOutside={(e) => e.preventDefault()}
       >
+        {/* 身份区:品牌 + 标题 + 副文案 */}
         <div className="flex flex-col items-center gap-3 text-center">
           <BrandVisual className="h-10 w-auto" />
           <ModalHeader className="items-center space-y-1.5 pr-0 text-center">
-            <ModalTitle className="text-base">输入邀请码以开始使用 {brand.name}</ModalTitle>
-            <ModalDescription className="max-w-xs text-balance">
+            <ModalTitle className="text-lg font-semibold tracking-tight text-foreground">
+              输入邀请码以开始使用 {brand.name}
+            </ModalTitle>
+            <ModalDescription className="max-w-xs text-balance text-sm">
               你已成功登录，输入邀请码即可解锁全部能力。
             </ModalDescription>
           </ModalHeader>
         </div>
-        <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium leading-5" htmlFor="invite-code-input">
+
+        <div aria-hidden className="h-px bg-border" />
+
+        {/* 行动区:能力脊背(为何) → 邀请码凭据(如何) */}
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <span aria-hidden className="h-3.5 w-1 rounded-full bg-primary/60" />
+            <span className="text-xs font-semibold tracking-wide text-foreground/80">绑定后解锁</span>
+          </div>
+          <ul className="flex flex-col pl-0">
+            {bindingBenefits.map(({ icon: Icon, title, description }, idx) => {
+              const isLast = idx === bindingBenefits.length - 1;
+              return (
+                <li key={title} className="flex gap-3">
+                  <span aria-hidden className="flex flex-col items-center">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-primary ring-1 ring-inset ring-primary/25">
+                      <Icon className="size-4" />
+                    </span>
+                    {!isLast && <span className="mt-1 w-px grow bg-border" />}
+                  </span>
+                  <span className={cn('flex min-w-0 flex-col gap-0.5', !isLast && 'pb-3.5')}>
+                    <span className="text-sm font-medium leading-5 text-foreground">{title}</span>
+                    <span className="text-xs leading-4 text-muted-foreground">{description}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium leading-5 text-foreground" htmlFor="invite-code-input">
             邀请码
           </label>
           <div className="relative">
-            <KeyRound
+            <span
               aria-hidden
-              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            />
+              className="pointer-events-none absolute left-1.5 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-md bg-primary/10 text-primary"
+            >
+              <KeyRound className="size-4" />
+            </span>
             <Input
               id="invite-code-input"
-              className="h-10 pl-9 text-sm tracking-widest"
+              className="h-12 rounded-lg border-input bg-muted/40 pl-12 font-mono text-base tracking-[0.3em] text-foreground placeholder:font-sans placeholder:tracking-normal placeholder:text-muted-foreground focus-visible:border-brand focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-brand/25"
               placeholder="请输入邀请码"
               value={code}
               onChange={handleChange}
@@ -81,34 +119,20 @@ export function InviteCodeBindingModal(): React.ReactElement {
             />
           </div>
           {submitError ? (
-            <p role="alert" className="text-xs leading-4 text-destructive">
-              {submitError.message}
+            <p role="alert" className="flex items-start gap-1.5 text-xs leading-4 text-destructive">
+              <CircleAlert aria-hidden className="mt-px size-3.5 shrink-0" />
+              <span>{submitError.message}</span>
             </p>
           ) : (
             <p className="text-xs leading-4 text-muted-foreground">输入你收到的邀请码，绑定后即可使用全部功能。</p>
           )}
         </div>
-        <ul className="flex flex-col gap-2.5">
-          {bindingBenefits.map(({ icon: Icon, title, description }) => (
-            <li key={title} className="flex items-center gap-3 rounded-lg bg-muted/50 px-3.5 py-2.5">
-              <span
-                aria-hidden
-                className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"
-              >
-                <Icon className="size-4" />
-              </span>
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-sm font-medium leading-5">{title}</span>
-                <span className="truncate text-xs leading-4 text-muted-foreground">{description}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-        <ModalFooter className="pt-1 sm:flex-col sm:justify-stretch">
+
+        <ModalFooter className="pt-1">
           <Button
             variant="default"
             size="lg"
-            className="w-full"
+            className="h-10 w-full"
             loading={submitting}
             disabled={!canSubmit}
             onClick={handleSubmit}
@@ -116,7 +140,7 @@ export function InviteCodeBindingModal(): React.ReactElement {
             {submitting ? '正在提交…' : '提交邀请码'}
           </Button>
         </ModalFooter>
-        <p className="text-center text-xs text-muted-foreground">没有邀请码？请联系管理员/扫码领取。</p>
+        <p className="text-center text-xs text-muted-foreground">没有邀请码？请联系管理员 / 扫码领取</p>
       </ModalContent>
     </Modal>
   );

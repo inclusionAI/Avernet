@@ -82,4 +82,14 @@ describe('CollabPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认加入' }));
     expect(panel.joinSession).toHaveBeenCalled();
   });
+
+  it('human 发言模式把活动终止项放在身份说明行内', () => {
+    const panel = makePanel({
+      botActorId: null,
+      human: { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' },
+      humanJoined: true,
+    });
+    render(<CollabPanel panel={panel} activeRuns={<button type="button">终止甲输出</button>} />);
+    expect(screen.getByTestId('collab-panel')).toContainElement(screen.getByRole('button', { name: '终止甲输出' }));
+  });
 });

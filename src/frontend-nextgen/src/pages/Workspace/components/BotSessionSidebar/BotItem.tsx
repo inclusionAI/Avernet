@@ -1,6 +1,6 @@
 import { Badge, Button, IconButton, Skeleton } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
-import { getBotEngineLabel } from '@/domain/botEngine';
+import { getBotEngineLabel, supportsBotSessionFavorites } from '@/domain/botEngine';
 import { getBotTypeLabel } from '@/domain/botType';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
@@ -56,16 +56,18 @@ export const BotItem = React.memo(function BotItem({
   onReloadBot,
 }: BotItemProps) {
   const [sessionTab, setSessionTab] = useState<'all' | 'favorite'>('all');
+  const canFavoriteSessions = supportsBotSessionFavorites(bot.engine);
   const favoritePrefetchRef = useRef(false);
   useEffect(() => {
     if (!expanded) {
       favoritePrefetchRef.current = false;
       return;
     }
-    if (!bot.chatable || favoriteSessionMeta !== undefined || favoritePrefetchRef.current) return;
+    if (!canFavoriteSessions || !bot.chatable || favoriteSessionMeta !== undefined || favoritePrefetchRef.current)
+      return;
     favoritePrefetchRef.current = true;
     void onLoadFavorites(bot.botId);
-  }, [bot.botId, bot.chatable, expanded, favoriteSessionMeta, onLoadFavorites]);
+  }, [bot.botId, bot.chatable, canFavoriteSessions, expanded, favoriteSessionMeta, onLoadFavorites]);
   const toggle = () => {
     if (!bot.chatable) return;
     if (bot.isAgentCodingBot) {
@@ -91,7 +93,7 @@ export const BotItem = React.memo(function BotItem({
       <div
         className={cn(
           'group relative flex min-h-16 items-center gap-3 px-4 py-2.5 transition-colors',
-          isCurrent || expanded ? 'bg-primary/5' : 'bg-background hover:bg-accent/50',
+          isCurrent || expanded ? 'bg-muted' : 'hover:bg-accent/50',
         )}
       >
         {(isCurrent || expanded) && (
@@ -106,24 +108,26 @@ export const BotItem = React.memo(function BotItem({
           onClick={toggle}
           className={cn(
             'flex h-auto min-w-0 flex-1 items-center justify-start gap-3 rounded-none px-0 py-1 text-left hover:bg-transparent',
-            isUnavailable && 'cursor-not-allowed',
+            isUnavailable && 'cursor-not-allowed opacity-50',
           )}
         >
+          {/* v1.4：选中/展开态头像品牌浅底弱化强调（浅蓝底+蓝文字+浅蓝环，实心反色试装后按用户反馈调轻）。 */}
           <AvatarTile
             src={bot.avatarUrl}
             label={bot.displayName}
+            className={isCurrent || expanded ? 'bg-primary/15 text-primary ring-1 ring-primary/30' : undefined}
             fallbackContent={<span className="text-[10px] font-semibold tracking-[0.08em]">BOT</span>}
           />
           <div className="min-w-0 flex-1">
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="block truncate text-sm font-normal text-foreground">{bot.displayName}</span>
+                  <span className="block truncate text-sm font-medium text-foreground">{bot.displayName}</span>
                 </TooltipTrigger>
-                <TooltipContent>{bot.chatable ? bot.displayName : '该 Bot 暂不支持单聊'}</TooltipContent>
+                <TooltipContent>{bot.chatable ? bot.displayName : '该 Bot 状态异常'}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
-            <div className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4 text-muted-foreground">
+            <div className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4 text-muted-foreground group-hover:pr-20">
               {(bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : botEngineLabel) && (
                 <Badge tone="primary" className={SIDEBAR_TAG_CLASS}>
                   {bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : botEngineLabel}
@@ -134,19 +138,28 @@ export const BotItem = React.memo(function BotItem({
                   {botTypeLabel}
                 </Badge>
               )}
-              {isUnavailable && <span className="shrink-0">暂不支持单聊</span>}
+              {isUnavailable && (
+                <Badge tone="neutral" className={SIDEBAR_TAG_CLASS}>
+                  状态异常
+                </Badge>
+              )}
             </div>
           </div>
-          {bot.chatable &&
-            !bot.isAgentCodingBot &&
-            (expanded ? (
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            ))}
         </Button>
         {bot.chatable && !bot.isAgentCodingBot && (
-          <div className="flex shrink-0 items-center gap-0.5" onClick={(event) => event.stopPropagation()}>
+          /* v1.5：操作区绝对定位悬浮不占位（与协作群 GroupItem 同构）——badge/Bot 名用满行宽，
+             解决透明占位把不可收缩的 badge 挤出截断。满行遮盖（inset-y-0 撑满行高、右缘止于
+             箭头左缘），底色走 global.css 工具类与行同合成方式（零色差、不透字）；显隐语义保留。 */
+          <div
+            className={cn(
+              'absolute inset-y-0 right-[30px] z-10 flex items-center gap-0.5 pl-5',
+              'mask-[linear-gradient(to_right,transparent,black_20px)]',
+              isCurrent || expanded ? 'sidebar-actions-cover-selected' : 'sidebar-actions-cover-hover',
+              'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
+              (isCurrent || expanded || sessionTab === 'favorite') && 'opacity-100',
+            )}
+            onClick={(event) => event.stopPropagation()}
+          >
             <IconButton
               label="新建会话"
               size="sm"
@@ -157,20 +170,35 @@ export const BotItem = React.memo(function BotItem({
                 onCreateSession(bot.botId);
               }}
             />
-            <SessionScopeFilter
-              compact
-              value={sessionTab}
-              onChange={handleSessionScopeChange}
-              allCount={allSessionMeta?.total}
-              favoriteCount={favoriteSessionMeta?.total}
-            />
+            {canFavoriteSessions && (
+              <SessionScopeFilter
+                compact
+                value={sessionTab}
+                onChange={handleSessionScopeChange}
+                allCount={allSessionMeta?.total}
+                favoriteCount={favoriteSessionMeta?.total}
+              />
+            )}
           </div>
         )}
+        {/* v1.4：展开/收起箭头固定在行最右（操作区之后），不随操作区显隐跳动。 */}
+        {bot.chatable &&
+          !bot.isAgentCodingBot &&
+          (expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          ))}
       </div>
 
       {expanded && bot.chatable && (
-        <div aria-label={`Bot会话列表：${bot.displayName}`} className="border-t border-border/60 bg-background">
-          <div className="overflow-hidden bg-background">
+        /* v1.4：展开会话区容器整体缩进 + 树形连接线（1px 竖线贴会话区
+           左缘起点，颜色取 border 全值）——贴边避免线两侧空白造成的割裂感。
+           验收微调：去掉缩进区极浅底色，消除条带感。 */
+        /* 验收微调：树形干线改由每行 SessionCard 自带（含末行截断），容器不再渲染贯穿线。 */
+        <div aria-label={`Bot会话列表：${bot.displayName}`} className="pl-6">
+          {/* 验收微调：去掉 overflow-hidden——行内拐角导轨需向缩进区延伸，不能被裁剪。 */}
+          <div>
             {sessionTab === 'all' && allSessionMeta?.error ? (
               <ListErrorState message={allSessionMeta.error} onRetry={() => void onReloadBot?.(bot.botId)} />
             ) : sessionTab === 'favorite' && favoriteSessionMeta?.error ? (
@@ -205,13 +233,15 @@ export const BotItem = React.memo(function BotItem({
                   onRename={(sid, title) => onRenameSession(bot.botId, sid, title)}
                   onClearContext={(sid) => onClearSessionContext(bot.botId, sid)}
                   favorite={s.favorite}
+                  showFavorite={canFavoriteSessions}
                   onToggleFavorite={(sid) => onToggleFavorite(bot.botId, sid)}
                 />
               ))
             )}
           </div>
           {((sessionTab === 'all' ? allSessionMeta : favoriteSessionMeta)?.hasMore ?? false) && (
-            <div className="flex justify-center border-t border-border/60 bg-muted/20 px-[18px] pb-2 pt-2">
+            /* 验收微调：加载更多行去背景与分割线，仅保留整体留白。 */
+            <div className="flex justify-center px-4 pb-2 pt-2">
               <Button
                 variant="ghost"
                 size="sm"

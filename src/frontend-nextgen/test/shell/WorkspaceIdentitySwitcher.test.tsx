@@ -37,10 +37,12 @@ describe('WorkspaceIdentitySwitcher', () => {
 
     expect(screen.getByText('工作身份')).toBeInTheDocument();
     expect(
-      screen.queryByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
+      screen.queryByText(
+        '当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。',
+      ),
     ).not.toBeInTheDocument();
     const trigger = screen.getByRole('button', { name: '当前协作身份：开源用户' });
-    expect(trigger).toHaveClass('rounded-lg', 'border', 'bg-muted/60', 'min-h-9', 'px-2.5', 'py-1.5');
+    expect(trigger).toHaveClass('rounded-lg', 'border', 'bg-muted/40', 'min-h-9', 'px-2.5', 'py-1.5');
     expect(screen.getByText('开源用户')).toBeInTheDocument();
     expect(screen.queryByText('验收用户')).not.toBeInTheDocument();
     expect(screen.getByText('用户')).toBeInTheDocument();

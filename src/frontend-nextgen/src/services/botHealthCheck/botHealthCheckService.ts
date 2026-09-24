@@ -15,6 +15,8 @@ function getHealthCapability(): BotHealthCapability {
 }
 
 export function resolveBotHealthActionAvailability(bot: BotDomain, userId?: string): BotActionAvailability {
+  if (bot.deployment === 'local')
+    return { action: 'health-check', visible: false, enabled: false, disabledReason: '桌面 Bot 不支持健康检查' };
   if (bot.runtime.engine !== 'openclaw') {
     return { action: 'health-check', visible: false, enabled: false, disabledReason: '当前引擎不支持健康检查' };
   }

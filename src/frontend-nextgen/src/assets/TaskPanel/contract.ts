@@ -57,7 +57,7 @@ export type TaskSpecAcceptanceDto =
 
 export interface TaskSpecDto {
   metadata?: { title?: string; instruction?: string };
-  context?: { background?: string; extend_props?: Record<string, unknown> };
+  context?: { title?: string; background?: string; extend_props?: Record<string, unknown> };
   goal?: {
     objective?: string;
     acceptances?: TaskSpecAcceptanceDto[];
@@ -82,9 +82,9 @@ export interface TaskNodeDto {
     artifacts?: TaskArtifactDto[];
     child_task_id?: string | null;
     acceptance_result?: {
-      verdict: 'PASS' | 'FAIL' | 'DONE' | null;
-      acceptances_metric: string[];
-      gaps: string[];
+      verdict: 'DONE' | 'FAILED' | null;
+      done_items: unknown[];
+      gap_items: unknown[];
     } | null;
     extend_props?: Record<string, unknown>;
     action_log?: NodeActionEventDto[];

@@ -17,6 +17,7 @@ interface CapabilityMembersProps {
   onIdentity?: (id: string, identity: 'caller' | 'owner') => Promise<void>;
   onAdd?: () => void;
   onRemove?: (id: string) => Promise<void>;
+  onDetail?: (id: string, name: string) => void;
 }
 
 export function CapabilityMembers({
@@ -30,6 +31,7 @@ export function CapabilityMembers({
   updatingIdentityId,
   onAdd,
   onRemove,
+  onDetail,
 }: CapabilityMembersProps) {
   const [removingId, setRemovingId] = useState<string>();
   return (
@@ -67,7 +69,18 @@ export function CapabilityMembers({
               ) : (
                 <Terminal className="size-3.5 text-success" />
               )}
-              <span className="min-w-0 flex-1 truncate text-xs">{item.name}</span>
+              {onDetail ? (
+                <Button
+                  variant="link"
+                  className="h-auto min-w-0 flex-1 justify-start truncate p-0 text-xs"
+                  aria-label={`查看${item.name}详情`}
+                  onClick={() => onDetail(id, item.name)}
+                >
+                  <span className="truncate">{item.name}</span>
+                </Button>
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-xs">{item.name}</span>
+              )}
               {'version' in item && item.version ? <Badge>{item.version}</Badge> : null}
               {kind === 'mcp' && identityEditable ? (
                 <Popover>

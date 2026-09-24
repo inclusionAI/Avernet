@@ -1,58 +1,36 @@
-import BotAvatar from '@/components/BotWorkshop/BotAvatar';
 import { CapabilityPanel } from '@/components/BotWorkshop/Editor/CapabilityPanel';
 import { ChannelConfigPanel } from '@/components/BotWorkshop/Editor/ChannelConfigPanel';
 import { DebugChatPanel } from '@/components/BotWorkshop/Editor/DebugChatPanel';
 import { IdentityConfigPanel } from '@/components/BotWorkshop/Editor/IdentityConfigPanel';
+import { LinkPanel } from '@/components/BotWorkshop/Editor/LinkPanel';
 import { MoreConfigPanel, type MoreConfigTab } from '@/components/BotWorkshop/Editor/MoreConfigPanel';
 import { RenderScreenPanel } from '@/components/BotWorkshop/Editor/RenderScreenPanel';
 import { ResourcePanel } from '@/components/BotWorkshop/Editor/ResourcePanel';
 import { RoutinePanel } from '@/components/BotWorkshop/Editor/RoutinePanel';
 import TaskEscort from '@/components/BotWorkshop/TaskEscort';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
 import type { BotRuntimeStage } from '@/domain/botWorkshop';
+import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { useBotAdvancedConfig } from '@/hooks/useBotAdvancedConfig';
 import { useBotEditor } from '@/hooks/useBotEditor';
 import { useBotWorkshopDetail } from '@/hooks/useBotWorkshopDetail';
 import { useBotWorkshopEditorIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
+import { useDesktopFolder } from '@/hooks/useDesktopFolder';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
+import { desktopCapabilityPolicy } from '@/services/botWorkshop/desktopCapabilityPolicy';
 import { cn } from '@/utils/cn';
 import { useLocation } from '@umijs/max';
-import {
-  ArrowLeft,
-  Clock,
-  Database,
-  FileText,
-  LayoutGrid,
-  Network,
-  Save,
-  Settings,
-  ShieldCheck,
-  Smartphone,
-} from 'lucide-react';
-import React, { useState } from 'react';
-
-type MainTab = 'capability' | 'resource' | 'routine' | 'escort';
-const mainTabs: Array<{ key: MainTab; label: string; icon: React.ReactNode }> = [
-  { key: 'capability', label: '能力集', icon: <LayoutGrid className="size-3.5 shrink-0" /> },
-  { key: 'resource', label: '资源', icon: <Database className="size-3.5 shrink-0" /> },
-  { key: 'routine', label: '定时任务', icon: <Clock className="size-3.5 shrink-0" /> },
-  { key: 'escort', label: '任务护航', icon: <ShieldCheck className="size-3.5 shrink-0" /> },
-];
-const moreTabs: Array<{ key: MoreConfigTab; label: string; icon: React.ReactNode }> = [
-  { key: 'engine', label: '引擎配置', icon: <Settings className="size-3.5 shrink-0" /> },
-  { key: 'md', label: 'MD 文档', icon: <FileText className="size-3.5 shrink-0" /> },
-  { key: 'node', label: '节点', icon: <Database className="size-3.5 shrink-0" /> },
-  { key: 'channel', label: '渠道', icon: <Network className="size-3.5 shrink-0" /> },
-  { key: 'approval', label: '发布审批', icon: <ShieldCheck className="size-3.5 shrink-0" /> },
-  { key: 'screen', label: '副屏', icon: <Smartphone className="size-3.5 shrink-0" /> },
-];
+import React, { useEffect, useState } from 'react';
+import { DetailHeader } from './DetailHeader';
+import { mainTabs, moreTabs, type MainTab } from './detailTabs';
 
 const BotWorkshopDetailPage: React.FC = () => {
   const params = new URLSearchParams(useLocation().search);
   const id = params.get('id');
+  const openDesktopFolder = useDesktopFolder(id);
+  const ownerId = params.get('owner_id')?.trim() || undefined;
   const editable = params.get('type') === 'edit';
   const runtimeStageParam = params.get('runtime_stage');
   const runtimeStage: BotRuntimeStage | undefined =
@@ -61,17 +39,36 @@ const BotWorkshopDetailPage: React.FC = () => {
       : undefined;
   const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const requestIdentity = useBotWorkshopEditorIdentity();
-  const detail = useBotWorkshopDetail(id, editable, requestIdentity.ready);
+  const detail = useBotWorkshopDetail(id, editable, requestIdentity.ready, ownerId);
+  const addressedOwnerId = ownerId ?? detail.bot?.ownerId;
+  const isOwner = isSameHumanIdentity(addressedOwnerId, requestIdentity.userId);
   const editor = useBotEditor(
     id,
     detail.bot?.serviceMode === 'service',
     currentSpaceId === undefined ? undefined : String(currentSpaceId),
     requestIdentity.ready && detail.bot?.id === id,
-    detail.bot?.ownerId,
+    addressedOwnerId,
+    isOwner,
+    detail.bot?.deployment,
+    detail.bot?.runtime.engine,
   );
-  const advanced = useBotAdvancedConfig(id, requestIdentity.ready);
+  const desktopPolicy = desktopCapabilityPolicy(detail.bot?.deployment ?? '', detail.bot?.runtime.engine ?? '');
+  const advanced = useBotAdvancedConfig(
+    id,
+    requestIdentity.ready && !!detail.bot,
+    ownerId,
+    desktopPolicy.markdown,
+    desktopPolicy.channels,
+  );
   const [tab, setTab] = useState<MainTab>('capability');
   const [more, setMore] = useState<MoreConfigTab>();
+  useEffect(() => {
+    if (!isOwner && more === 'engine') setMore(undefined);
+  }, [isOwner, more]);
+  useEffect(() => {
+    setTab('capability');
+    setMore(undefined);
+  }, [id]);
   if (!id)
     return (
       <Empty
@@ -101,66 +98,64 @@ const BotWorkshopDetailPage: React.FC = () => {
   const bot = detail.bot;
   return (
     <main className="flex h-full min-h-0 flex-col bg-background">
-      <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="返回 Bot 工坊"
-          onClick={detail.back}
-          leftIcon={<ArrowLeft className="size-4" />}
-        />
-        <BotAvatar name={bot.name} />
-        <div className="min-w-0 flex-1">
-          <h1 className="m-0 truncate text-base font-semibold">{bot.name}</h1>
-          <p className="m-0 mt-0.5 text-xs text-muted-foreground">
-            {bot.runtime.engine} · {bot.deployment === 'local' ? '本地' : '云端'}
-          </p>
-        </div>
-        <Badge tone={editable ? 'primary' : 'neutral'}>{editable ? '编辑模式' : '只读模式'}</Badge>
-        <Button leftIcon={<Save className="size-4" />} onClick={detail.back}>
-          保存并退出
-        </Button>
-      </header>
+      <DetailHeader bot={bot} editable={editable} isOwner={isOwner} onBack={detail.back} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <nav
           aria-label="Bot 编辑模块"
           className="app-scrollbar flex w-16 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-border bg-muted/30 py-4"
         >
-          {mainTabs.map((item) => (
-            <Button
-              key={item.key}
-              variant="ghost"
-              size="icon"
-              className={cn(
-                'h-11 w-full flex-col gap-1 text-xs font-normal',
-                tab === item.key && !more && 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
-              )}
-              aria-label={item.label}
-              onClick={() => {
-                setTab(item.key);
-                setMore(undefined);
-              }}
-            >
-              {item.icon}
-              <span>{item.label}</span>
-            </Button>
-          ))}
-          {moreTabs.map((item) => (
-            <Button
-              key={item.key}
-              variant="ghost"
-              size="icon"
-              className={cn(
-                'h-11 w-full flex-col gap-1 text-xs font-normal',
-                more === item.key && 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
-              )}
-              aria-label={item.label}
-              onClick={() => setMore(item.key)}
-            >
-              {item.icon}
-              <span>{item.label}</span>
-            </Button>
-          ))}
+          {mainTabs
+            .filter((item) => item.key !== 'routine' || desktopPolicy.routines)
+            .map((item) => (
+              <Button
+                key={item.key}
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'h-11 w-full flex-col gap-1 text-xs font-normal',
+                  tab === item.key && !more && 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
+                )}
+                aria-label={item.label}
+                onClick={() => {
+                  setTab(item.key);
+                  setMore(undefined);
+                }}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </Button>
+            ))}
+          {moreTabs
+            .filter(
+              (item) =>
+                ({
+                  engine: desktopPolicy.engineConfig && isOwner,
+                  md: desktopPolicy.markdown,
+                  node: desktopPolicy.nodes,
+                  channel: desktopPolicy.channels,
+                  approval: desktopPolicy.approval,
+                  screen: desktopPolicy.screens,
+                }[item.key]),
+            )
+            .map((item) => (
+              <Button
+                key={item.key}
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'h-11 w-full flex-col gap-1 text-xs font-normal',
+                  more === item.key && 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
+                )}
+                aria-label={item.label}
+                onClick={() => {
+                  setMore(item.key);
+                  if (item.key === 'engine') void editor.loadEngineConfig();
+                }}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </Button>
+            ))}
         </nav>
         <section className="app-scrollbar min-w-0 flex-1 border-r border-border bg-background overflow-y-auto lg:w-[42%] lg:max-w-[720px] lg:flex-none">
           {editor.loading ? (
@@ -188,6 +183,8 @@ const BotWorkshopDetailPage: React.FC = () => {
               onSave={editor.saveScreen}
               onDelete={editor.deleteScreen}
             />
+          ) : more === 'engine' && editor.engineConfigLoading ? (
+            <Spin tip="正在加载引擎配置…" />
           ) : more ? (
             <MoreConfigPanel
               tab={more}
@@ -202,6 +199,12 @@ const BotWorkshopDetailPage: React.FC = () => {
             />
           ) : tab === 'capability' ? (
             <CapabilityPanel
+              desktop={bot.deployment === 'local'}
+              onLocalToggle={editor.toggleSkill}
+              onLocalDelete={editor.deleteSkill}
+              onLocalUpload={editor.uploadSkill}
+              botId={bot.id}
+              ownerId={bot.ownerId}
               skillSets={editor.skillSets}
               mySkills={editor.skills.filter((skill) => skill.source === 'local')}
               availableMcps={editor.availableMcps}
@@ -227,17 +230,22 @@ const BotWorkshopDetailPage: React.FC = () => {
               onMcpCallType={editor.updateMcpCallType}
             />
           ) : tab === 'resource' ? (
-            <ResourcePanel
-              resources={editor.resources}
-              editable={editable}
-              onCreateDirectory={editor.createDirectory}
-              onDelete={editor.deleteResource}
-              onUpload={editor.uploadResource}
-              onPreview={editor.previewResource}
-              onDownload={editor.downloadResource}
-              onLoadDirectory={editor.loadResourceDirectory}
-              loadingPaths={editor.resourceLoadingPaths}
-            />
+            <>
+              <ResourcePanel
+                desktop={bot.deployment === 'local'}
+                onOpenFolder={openDesktopFolder}
+                resources={editor.resources}
+                editable={editable && desktopPolicy.resourceWritable}
+                onCreateDirectory={editor.createDirectory}
+                onDelete={editor.deleteResource}
+                onUpload={editor.uploadResource}
+                onPreview={editor.previewResource}
+                onDownload={editor.downloadResource}
+                onLoadDirectory={editor.loadResourceDirectory}
+                loadingPaths={editor.resourceLoadingPaths}
+              />
+              {bot.deployment === 'local' ? <LinkPanel botId={bot.id} editable={editable && isOwner} /> : null}
+            </>
           ) : tab === 'routine' ? (
             <RoutinePanel
               routines={editor.routines}
@@ -254,7 +262,7 @@ const BotWorkshopDetailPage: React.FC = () => {
           )}
         </section>
         <div className="hidden min-w-0 flex-1 lg:flex">
-          <DebugChatPanel bot={bot} runtimeStage={runtimeStage} />
+          <DebugChatPanel bot={bot} runtimeStage={runtimeStage} ownerId={addressedOwnerId} />
         </div>
       </div>
     </main>

@@ -6,18 +6,21 @@ import { useBotChatStore } from '@/stores/botChatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { history, useLocation } from '@umijs/max';
+import { toast } from 'sonner';
 
 jest.mock('@umijs/max', () => ({
   history: { push: jest.fn() },
   useLocation: jest.fn(),
 }));
 jest.mock('@/services/botWorkshop/botChatService', () => ({
+  ...jest.requireActual('@/services/botWorkshop/botChatService'),
   botChatService: {
     list: jest.fn(),
     detail: jest.fn(),
     related: jest.fn(),
   },
 }));
+jest.mock('sonner', () => ({ toast: { error: jest.fn(), warning: jest.fn() } }));
 jest.mock('@/services/workspace', () => ({
   identityService: { loadIdentities: jest.fn() },
   isTestUserIdentity: jest.fn(() => false),
@@ -250,4 +253,80 @@ it('关联列表加载更多时请求下一页并使用追加模式', async () =
     2,
     true,
   );
+});
+
+it('时间范围的开始时间晚于结束时间时提示且不发起查询', async () => {
+  mockedUseLocation.mockReturnValue({
+    pathname: '/bot-workshop/logs',
+    search: '?bot_id=default&bot_name=My%20Bot',
+    hash: '',
+    state: null,
+    key: 'logs-invalid-range',
+  });
+  seedLoginIdentity(ActingUserId);
+
+  const { result } = renderHook(() => useBotChats());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+  mockedList.mockClear();
+
+  useBotChatStore.getState().setFilter('fromDate', '2026-09-15T03:38');
+  useBotChatStore.getState().setFilter('toDate', '2026-06-01T03:38');
+  await act(async () => {
+    await result.current.query();
+  });
+
+  expect(mockedList).not.toHaveBeenCalled();
+  expect(toast.warning).toHaveBeenCalledWith('开始时间不能晚于结束时间，请调整后重试');
+});
+
+it('IO 关键词查询超过 90 天窗口时提示开始时间已自动调整', async () => {
+  mockedUseLocation.mockReturnValue({
+    pathname: '/bot-workshop/logs',
+    search: '?bot_id=default&bot_name=My%20Bot',
+    hash: '',
+    state: null,
+    key: 'logs-clamped-range',
+  });
+  seedLoginIdentity(ActingUserId);
+
+  const { result } = renderHook(() => useBotChats());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+  mockedList.mockClear();
+
+  useBotChatStore.getState().setFilter('keyword', 'hello');
+  useBotChatStore.getState().setFilter('fromDate', '2026-06-01T03:38');
+  useBotChatStore.getState().setFilter('toDate', '2026-09-15T03:38');
+  await act(async () => {
+    await result.current.query();
+  });
+
+  expect(mockedList).toHaveBeenCalledTimes(1);
+  expect(toast.warning).toHaveBeenCalledWith(
+    '输入/输出模糊搜索最长支持 90 天，已自动将开始时间调整为 2026-06-17 03:38',
+  );
+});
+
+it('IO 关键词查询在 90 天窗口内时不提示', async () => {
+  mockedUseLocation.mockReturnValue({
+    pathname: '/bot-workshop/logs',
+    search: '?bot_id=default&bot_name=My%20Bot',
+    hash: '',
+    state: null,
+    key: 'logs-normal-range',
+  });
+  seedLoginIdentity(ActingUserId);
+
+  const { result } = renderHook(() => useBotChats());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+  mockedList.mockClear();
+
+  useBotChatStore.getState().setFilter('keyword', 'hello');
+  useBotChatStore.getState().setFilter('fromDate', '2026-09-01T03:38');
+  useBotChatStore.getState().setFilter('toDate', '2026-09-15T03:38');
+  await act(async () => {
+    await result.current.query();
+  });
+
+  expect(mockedList).toHaveBeenCalledTimes(1);
+  expect(toast.warning).not.toHaveBeenCalled();
 });

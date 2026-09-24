@@ -128,11 +128,15 @@ export function listMyCollaborationBots(params: ListMyBotsParams = {}, signal?: 
 }
 
 // 批量查询协作 Bot 详情；bots/query 直接使用完整复合 Bot ID。
-export function queryCollaborationBots(body: QueryCollaborationBotsRequest | QueryCollaborationBotsBody) {
+export function queryCollaborationBots(
+  body: QueryCollaborationBotsRequest | QueryCollaborationBotsBody,
+  signal?: AbortSignal,
+) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<CollaborationBotDto>>>(COLLABORATION_BOT_ENDPOINTS.query, {
     method: 'POST',
     data: body,
     injectUserId: false,
+    signal,
   });
 }
 

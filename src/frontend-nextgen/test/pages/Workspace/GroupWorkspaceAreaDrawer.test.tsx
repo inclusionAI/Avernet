@@ -113,8 +113,8 @@ jest.mock('@/pages/Workspace/hooks/useOpenDefaultGroupSession', () => ({
 jest.mock('@/pages/Workspace/components/GroupChatPane', () => ({
   GroupChatPane: () => <div data-testid="group-chat-pane" />,
 }));
-jest.mock('@/pages/Workspace/components/GroupChatPane/SessionFilesModal', () => ({
-  SessionFilesModal: () => null,
+jest.mock('@/pages/Workspace/components/GroupChatPane/SessionFilesSidebar', () => ({
+  SessionFilesSidebar: () => null,
 }));
 jest.mock('@/pages/Workspace/components/MembersPanel', () => ({ MembersPanel: () => null }));
 jest.mock('@/pages/Workspace/components/Modals/CreateGroupModal', () => ({

@@ -29,9 +29,11 @@ export interface BotRuntimeDomain extends BotRuntime {
 export interface BotDomain {
   id: string;
   cardId?: string;
+  avatarUrl?: string;
   publicationVersion?: number;
   liveVersion?: number;
   ownerId?: string;
+  ownerName?: string;
   entityKey: string;
   name: string;
   description?: string;
@@ -53,6 +55,8 @@ export interface BotDomain {
   healthyInstances?: number;
   totalInstances?: number;
   lock?: BotLock;
+  /** 库存接口声明需要协作锁，未持锁时也保留获取入口。 */
+  needsEditLock?: boolean;
   completeness: BotCompleteness;
   warnings: string[];
   actions: string[];
@@ -108,6 +112,7 @@ export interface BotCreateInput {
   ownership: BotOwnership;
   serviceMode: BotServiceMode;
   initialize: boolean;
+  local?: { machineId: string; mountPath: string };
   agentCoding?: AgentCodingDraft;
 }
 
@@ -136,12 +141,20 @@ export interface AvernetBotCreateRequest {
   };
 }
 
+export interface LocalBotAuthorizationRequest {
+  bot_name: string;
+  bot_desc: string;
+  engine: string;
+  machine_id: string;
+  mount_path: string;
+}
+
 export interface BotCreateAuthorization {
   type: 'authorization_required';
   botId: string;
   iframeUrl: string;
   redirectUrl: string;
-  request: AvernetBotCreateRequest;
+  request: AvernetBotCreateRequest | LocalBotAuthorizationRequest;
   agentCoding?: AgentCodingDraft;
 }
 
@@ -184,10 +197,11 @@ export type BotInventoryAction =
   | 'restart'
   | 'engine_restart'
   | 'upgrade'
-  | 'restart_publish';
+  | 'restart_publish'
+  | 'open_folder';
 
 /** 卡片管理菜单可分发的动词（菜单路由键），是 BotInventoryAction 中管理类动词的子集。 */
-export type BotManagementVerb = 'delete' | 'restart' | 'engine_restart' | 'upgrade' | 'restart_publish';
+export type BotManagementVerb = 'delete' | 'restart' | 'engine_restart' | 'upgrade' | 'restart_publish' | 'open_folder';
 
 /** 重启发布的发布阶段：仅 prestable/online 存在已发布 runtime（Avernet #1911 词表口径）。 */
 export type BotPublishRestartStage = 'prestable' | 'online';

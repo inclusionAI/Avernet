@@ -1,3 +1,4 @@
+import { supportsBotSessionFavorites } from '@/domain/botEngine';
 import { appendUnique } from '@/services/workspace/botSessionHelpers';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { BOT_SESSION_PAGE_SIZE, botSessionService } from '@/services/workspace/botSessionService';
@@ -112,6 +113,7 @@ export function useBotSessionMap(
 
   const loadFavoriteSessions = useCallback(
     async (bot: ChatBotView, userId: string): Promise<void> => {
+      if (!supportsBotSessionFavorites(bot.engine)) return;
       const generation = generationRef.current;
       const key = bot.botId;
       const requestKey = `${key}:favorite`;
@@ -164,6 +166,7 @@ export function useBotSessionMap(
 
   const loadMoreSessions = useCallback(
     async (bot: ChatBotView, userId: string, mode: 'all' | 'favorite') => {
+      if (mode === 'favorite' && !supportsBotSessionFavorites(bot.engine)) return;
       const key = bot.botId;
       const requestKey = `${key}:${mode}`;
       const meta = mode === 'all' ? pageMetaByBotId[key] : favoritePageMetaByBotId[key];

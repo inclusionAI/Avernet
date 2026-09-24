@@ -122,7 +122,7 @@ export function CollaborationTemplatePicker(props: CollaborationTemplatePickerPr
                         {active && <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />}
                       </div>
                       {template.description && (
-                        <div className="line-clamp-2 text-[11px] leading-4 text-muted-foreground">
+                        <div className="line-clamp-2 text-xs leading-4 text-muted-foreground">
                           {template.description}
                         </div>
                       )}
@@ -135,7 +135,7 @@ export function CollaborationTemplatePicker(props: CollaborationTemplatePickerPr
         </Popover>
       )}
       {isTemplate && loadingYaml && (
-        <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+        <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden />
           加载内容...
         </span>

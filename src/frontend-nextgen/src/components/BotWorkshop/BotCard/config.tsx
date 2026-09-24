@@ -1,6 +1,6 @@
 import type { BotManagementVerb } from '@/domain/botWorkshop';
 import type { BotDomain } from '@/services/botWorkshop';
-import { Power, RefreshCw, RotateCw, Server, Trash2 } from 'lucide-react';
+import { FolderOpen, Power, RefreshCw, RotateCw, Server, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export type BotCardManagementAction = BotManagementVerb;
@@ -16,6 +16,7 @@ export const lifecycleLabel: Record<BotDomain['lifecycle'], string> = {
 };
 
 export const actionLabel: Record<BotCardManagementAction, string> = {
+  open_folder: '打开本地目录',
   delete: '删除',
   restart: '重启 Bot',
   engine_restart: '重启引擎',
@@ -24,6 +25,7 @@ export const actionLabel: Record<BotCardManagementAction, string> = {
 };
 
 export const actionIcon: Record<BotCardManagementAction, ReactNode> = {
+  open_folder: <FolderOpen className="size-4" />,
   delete: <Trash2 className="size-4" />,
   restart: <RefreshCw className="size-4" />,
   engine_restart: <Power className="size-4" />,

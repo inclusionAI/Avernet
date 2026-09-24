@@ -17,10 +17,10 @@ export const VISIBILITY_OPTIONS: { value: DingTalkOutboundVisibility; label: str
   { value: 'lead_only', label: '仅 Driver 消息' },
 ];
 
-export const scopeLabel = (v: GroupDingTalkConfig['groupChatScope']) =>
-  SCOPE_OPTIONS.find((o) => o.value === v)?.label ?? v;
-export const visibilityLabel = (v: GroupDingTalkConfig['outboundVisibility']) =>
-  VISIBILITY_OPTIONS.find((o) => o.value === v)?.label ?? v;
+export const scopeLabel = (v: GroupDingTalkConfig['groupChatScope']): string =>
+  SCOPE_OPTIONS.find((o) => o.value === v)?.label ?? '—';
+export const visibilityLabel = (v: GroupDingTalkConfig['outboundVisibility']): string =>
+  VISIBILITY_OPTIONS.find((o) => o.value === v)?.label ?? '—';
 
 /**
  * 钉钉配置下拉选择（会话模式 / 发送消息范围），对齐 open-claw 的 Select 样式，

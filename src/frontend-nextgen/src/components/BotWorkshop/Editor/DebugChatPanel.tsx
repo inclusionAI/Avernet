@@ -44,7 +44,15 @@ function ThinkingReply({ botName }: { botName: string }) {
   );
 }
 
-export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeStage?: BotRuntimeStage }) {
+export function DebugChatPanel({
+  bot,
+  runtimeStage,
+  ownerId,
+}: {
+  bot: BotDomain;
+  runtimeStage?: BotRuntimeStage;
+  ownerId?: string;
+}) {
   const identityId = useWorkspaceStore((state) => state.activeIdentityId);
   const [sessions, setSessions] = useState<BotChatSessionView[]>([]);
   const [session, setSession] = useState<BotChatSessionView | null>(null);
@@ -55,15 +63,19 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
     () => ({
       botId: bot.id,
       realBotId: bot.id,
-      ownerId: bot.ownerId,
+      ownerId: ownerId ?? bot.ownerId,
       displayName: bot.name,
       online: bot.lifecycle === 'running',
       chatable: true,
       runtimeStage: runtimeStage ?? resolveBotRuntimeStage(bot.lifecycle),
     }),
-    [bot.id, bot.lifecycle, bot.name, bot.ownerId, runtimeStage],
+    [bot.id, bot.lifecycle, bot.name, bot.ownerId, ownerId, runtimeStage],
   );
-  const debug = useBotChat(chatBot, session, undefined, botEditorService.registerRenderScreenLibraries);
+  const registerRenderScreenLibraries = useCallback(
+    (botId: string) => botEditorService.registerRenderScreenLibraries(botId, ownerId ?? bot.ownerId),
+    [bot.ownerId, ownerId],
+  );
+  const debug = useBotChat(chatBot, session, undefined, registerRenderScreenLibraries);
   const loadSessions = useCallback(async () => {
     if (!identityId) {
       setLoading(false);
@@ -114,7 +126,7 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
   return (
     <aside className="flex h-full min-w-0 flex-1 flex-col border-l border-border bg-card">
       <div className="flex items-center gap-3 border-b border-border p-4">
-        <BotAvatar name={bot.name} />
+        <BotAvatar name={bot.name} avatarUrl={bot.avatarUrl} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="m-0 truncate text-sm font-semibold">调试对话</p>
@@ -146,17 +158,17 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
             <SelectValue placeholder="请选择或新建会话" />
           </SelectTrigger>
           <SelectContent>
-            {sessions.map((item) => (
-              <SelectItem key={item.sessionId} value={item.sessionId}>
-                {item.title}
-              </SelectItem>
-            ))}
             <SelectItem value="__create_session__">
               <span className="inline-flex items-center gap-2 text-primary">
                 {creatingSession ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
                 新建会话
               </span>
             </SelectItem>
+            {sessions.map((item) => (
+              <SelectItem key={item.sessionId} value={item.sessionId}>
+                {item.title}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>

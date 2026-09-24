@@ -10,7 +10,8 @@ export interface UseSessionManagementResult {
   addMember: (actorId: string) => Promise<boolean>;
   removeMember: (actorId: string) => Promise<boolean>;
   leaveSession: (actorId: string) => Promise<boolean>;
-  createShare: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  /** 生成会话邀请链接；缺省作用于当前选中会话，列表菜单可显式传 sessionId 分享未选中会话。 */
+  createShare: (sessionId?: string) => Promise<DomainResult<{ invitationUrl: string }>>;
 }
 
 function notifyError(res: { ok: false; error: { friendlyMessage: string } }): void {
@@ -74,17 +75,21 @@ export function useSessionManagement(
     [applySessionUpdate, session],
   );
 
-  const createShare = useCallback(async () => {
-    if (!session) {
-      return {
-        ok: false as const,
-        error: { code: 'SESSION_MISSING', friendlyMessage: '未选择会话', canRetry: false },
-      };
-    }
-    const res = await invitationService.createSessionShare(session.sessionId);
-    if (!res.ok) notifyError(res);
-    return res;
-  }, [session]);
+  const createShare = useCallback(
+    async (sessionId?: string) => {
+      const targetId = sessionId ?? session?.sessionId;
+      if (!targetId) {
+        return {
+          ok: false as const,
+          error: { code: 'SESSION_MISSING', friendlyMessage: '未选择会话', canRetry: false },
+        };
+      }
+      const res = await invitationService.createSessionShare(targetId);
+      if (!res.ok) notifyError(res);
+      return res;
+    },
+    [session],
+  );
 
   return { addMember, removeMember, leaveSession, createShare };
 }

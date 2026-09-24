@@ -32,17 +32,11 @@ export function ServicePublicationDrawer({
   const run = (action: ServicePublicationAction, item: ServicePublication) => {
     if (action === 'publish_staging') return publications.advance('prestable');
     if (action === 'publish_online') return publications.advance('online');
-    if (action === 'restart_publish') return publications.restart(item.status === 'running' ? 'online' : 'prestable');
     if (action === 'cancel_staging') return publications.cancel();
     if (action === 'offline') return publications.offline();
     if (action === 'retry') return publications.retry();
     if (action === 'upgrade')
       return publications.upgrade(item.publicationId).then(async () => {
-        await onChanged?.();
-      });
-    if (action === 'delete')
-      return publications.deleteDraft().then(async () => {
-        onClose();
         await onChanged?.();
       });
     return Promise.resolve();
@@ -113,40 +107,40 @@ export function ServicePublicationDrawer({
                     </div>
                   ) : null}
                   <div className="flex flex-wrap gap-2">
-                    {item.availableActions.map((action) => (
-                      <ConfirmDialog
-                        key={action}
-                        title={label[action]}
-                        description={
-                          action === 'upgrade'
-                            ? `将基于当前运行版本 V${item.version} 创建新的升级草稿，确认继续？`
-                            : `确认对 V${item.version} 执行“${label[action]}”？`
-                        }
-                        confirmText={action === 'upgrade' ? '确认升级' : '确定'}
-                        confirmVariant={
-                          action === 'offline' || action === 'cancel_staging' || action === 'delete'
-                            ? 'destructive'
-                            : 'primary'
-                        }
-                        onConfirm={() => run(action, item)}
-                      >
-                        <Button
-                          variant={
-                            action === 'publish_staging' || action === 'publish_online' ? 'primary' : 'secondary'
+                    {item.availableActions
+                      .filter((action) => action !== 'restart_publish' && action !== 'delete')
+                      .map((action) => (
+                        <ConfirmDialog
+                          key={action}
+                          title={label[action]}
+                          description={
+                            action === 'upgrade'
+                              ? `将基于当前运行版本 V${item.version} 创建新的升级草稿，确认继续？`
+                              : `确认对 V${item.version} 执行“${label[action]}”？`
                           }
-                          size="sm"
-                          leftIcon={
-                            action === 'retry' || action === 'restart_publish' || action === 'upgrade' ? (
-                              <RotateCw className="size-3" />
-                            ) : (
-                              <ArrowRight className="size-3" />
-                            )
+                          confirmText={action === 'upgrade' ? '确认升级' : '确定'}
+                          confirmVariant={
+                            action === 'offline' || action === 'cancel_staging' ? 'destructive' : 'primary'
                           }
+                          onConfirm={() => run(action, item)}
                         >
-                          {label[action]}
-                        </Button>
-                      </ConfirmDialog>
-                    ))}
+                          <Button
+                            variant={
+                              action === 'publish_staging' || action === 'publish_online' ? 'primary' : 'secondary'
+                            }
+                            size="sm"
+                            leftIcon={
+                              action === 'retry' || action === 'upgrade' ? (
+                                <RotateCw className="size-3" />
+                              ) : (
+                                <ArrowRight className="size-3" />
+                              )
+                            }
+                          >
+                            {label[action]}
+                          </Button>
+                        </ConfirmDialog>
+                      ))}
                   </div>
                 </CardContent>
               </Card>

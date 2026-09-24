@@ -23,11 +23,22 @@ export function useBotSessionFiles(
 ): UseBotSessionFilesResult {
   const store = useBotSessionFileStore();
   const lastSessionKeyRef = useRef<string | null>(null);
+  // PR#413 评审跟进 P3（#257104461）：请求代次守卫——快速连续切会话时旧响应可能晚到，
+  // 过期响应直接丢弃，避免旧会话数据经全局 store 短暂覆盖新会话列表。
+  const requestIdRef = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!botId || !sessionId || !userId) return;
+    if (!botId || !sessionId || !userId) {
+      // 评审 P4 跟进（#257104636）：早退同样消耗代次——作废所有在途请求（晚到响应一律被守卫
+      // 丢弃），并同步收尾加载态（在途请求的收尾被守卫拦截后不再回写 store）。
+      requestIdRef.current++;
+      store.setIsLoadingList(false);
+      return;
+    }
+    const requestId = ++requestIdRef.current;
     store.setIsLoadingList(true);
     const readyRes = await botSessionFileService.loadReady(botId, sessionId, userId, ownerId);
+    if (requestIdRef.current !== requestId) return;
     store.setIsLoadingList(false);
     if (readyRes.ok) store.setReadyFiles(readyRes.data.items);
     else toast.error(readyRes.error.friendlyMessage);

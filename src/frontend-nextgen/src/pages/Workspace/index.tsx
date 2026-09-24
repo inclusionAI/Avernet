@@ -1,12 +1,12 @@
 import { ChatPanel } from '@/components/Workspace/ChatPanel';
 import { BotModelSelectorContainer } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
-import { IconButton } from '@/components/ui';
 import { useComposerSend } from '@/hooks/useComposerSend';
 import { useMinWidth } from '@/hooks/useMediaQuery';
 import { useTaskExecuteFromCard } from '@/hooks/useTaskExecuteFromCard';
 import { useTaskExecution } from '@/hooks/useTaskExecution';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { BotFriendWorkspaceArea } from '@/pages/Workspace/BotFriendWorkspaceArea';
 import { AgentCodingGuide } from '@/pages/Workspace/components/AgentCodingGuide';
 import { ChatSessionSidebarSlot } from '@/pages/Workspace/components/ChatSessionSidebarSlot';
 import type { TaskComposerContext } from '@/services/tasks/taskMapper';
@@ -14,10 +14,10 @@ import { buildAgentCodingChatPath } from '@/services/workspace';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { resolveUserId } from '@/services/workspace/botSessionService';
 import type { ResourceReference } from '@tc-chat/core';
-import { PanelLeft } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GroupWorkspaceArea } from './GroupWorkspaceArea';
+import { useBotFriendChatUrlSync } from './hooks/useBotFriendChatUrlSync';
 import { useBotSessionFilesFeature } from './hooks/useBotSessionFilesFeature';
 import { useChatUrlSync } from './hooks/useChatUrlSync';
 import { useWorkspacePage } from './hooks/useWorkspacePage';
@@ -27,9 +27,6 @@ const WorkspacePage: React.FC = () => {
   const { view, setView } = workspacePage;
   const { availableViews } = workspace;
   const navigate = useNavigate();
-  const openCollaborationPermissions = useCallback(() => {
-    navigate('/collaboration-privacy');
-  }, [navigate]);
   const openAgentCodingBot = (bot: ChatBotView) =>
     navigate(buildAgentCodingChatPath({ botId: bot.botId, spaceId: bot.spaceId, spaceName: bot.spaceName }));
   // <lg 二级会话列表抽屉开关。聊天/协作群两种视图共用同一开关，由当前视图渲染对应抽屉。
@@ -51,8 +48,10 @@ const WorkspacePage: React.FC = () => {
 
   // 真实用户 Bot 单聊：任务发起上下文（owner/session）。测试用户无任务入口。
   const selectedBotSession = workspace.botSessions.selectedSession;
+  const selectedChatBot =
+    [...workspace.chatBots, ...workspace.friendBots].find((b) => b.botId === selectedBotSession?.botId) ?? null;
   const taskComposerContext = useMemo<TaskComposerContext | null>(() => {
-    if (workspace.isTestUser) return null;
+    if (workspace.isTestUser || activeIdentity?.kind === 'bot') return null;
     const ownerBotId = selectedBotSession?.botId ?? workspace.botChatTarget?.id;
     if (!ownerBotId || !workspace.activeIdentityId) return null;
     return {
@@ -63,7 +62,13 @@ const WorkspacePage: React.FC = () => {
       mainSessionName: selectedBotSession?.title,
       parentTaskId: null,
     };
-  }, [workspace.isTestUser, workspace.botChatTarget, workspace.activeIdentityId, selectedBotSession]);
+  }, [
+    activeIdentity?.kind,
+    workspace.isTestUser,
+    workspace.botChatTarget,
+    workspace.activeIdentityId,
+    selectedBotSession,
+  ]);
 
   const taskExecution = useTaskExecution({
     panelRef: workspace.panelRef,
@@ -77,10 +82,13 @@ const WorkspacePage: React.FC = () => {
     submitPanelMessage: workspace.submitPanelMessage,
     appendAssistantMessage: workspace.appendAssistantMessage,
     streamAssistantMessage: workspace.streamAssistantMessage,
-    onOpenCollaborationPermissions: openCollaborationPermissions,
   });
   const taskComposerDisabledReason = !taskComposerContext && !workspace.isTestUser ? '请先选择一个 Bot 会话' : null;
   const handleSend = useComposerSend(taskExecution, {
+    beforeSend: async (content) => {
+      if (!selectedChatBot || !selectedBotSession) return;
+      await workspace.botSessions.renameSessionOnFirstMessage(selectedChatBot, selectedBotSession, content);
+    },
     sendMessage: (content, context) => {
       const botChat = workspace.botChat;
       if (!botChat) return;
@@ -99,10 +107,6 @@ const WorkspacePage: React.FC = () => {
     },
     clearDraft: () => workspace.setDraft(''),
   });
-  const selectedChatBot =
-    [...workspace.chatBots, ...workspace.friendBots].find(
-      (b) => b.botId === workspace.botSessions.selectedSession?.botId,
-    ) ?? null;
   const fileFeature = useBotSessionFilesFeature(
     selectedChatBot,
     workspace.botSessions.selectedSession,
@@ -118,8 +122,7 @@ const WorkspacePage: React.FC = () => {
     <ComposerCapabilitiesMenu
       execution={taskExecution}
       enableWorkflow
-      onUpload={fileFeature.openUpload}
-      onManageFiles={fileFeature.openFileDrawer}
+      onUpload={selectedChatBot?.botType === 'desktop' ? undefined : fileFeature.openUpload}
       disabled={!taskComposerContext}
       disabledReason={taskComposerDisabledReason}
       selectedWorkflow={taskExecution.selectedWorkflow}
@@ -133,9 +136,16 @@ const WorkspacePage: React.FC = () => {
   const isChatView = view === 'chat';
   const expandedBotId = Object.keys(workspace.expandedBotIds)[0];
   useChatUrlSync(
-    isChatView,
+    isChatView && activeIdentity?.kind !== 'bot' && workspacePage.urlHydrated !== false,
+    workspace.activeIdentityId,
     workspace.botSessions.selectedSession?.botId ?? expandedBotId,
     workspace.botSessions.selectedSession?.sessionId,
+  );
+  useBotFriendChatUrlSync(
+    isChatView && activeIdentity?.kind === 'bot' && workspacePage.urlHydrated !== false,
+    workspace.activeIdentityId,
+    workspace.botFriendConversation.sessions.expandedFriendUserId,
+    workspace.botFriendConversation.sessions.selectedSession?.sessionId ?? null,
   );
 
   const renderChatArea = () => {
@@ -168,6 +178,19 @@ const WorkspacePage: React.FC = () => {
         />
       );
     }
+    if (activeIdentity?.kind === 'bot') {
+      return (
+        <BotFriendWorkspaceArea
+          workspace={workspace}
+          view={view}
+          onViewChange={setView}
+          availableViews={availableViews}
+          mobileListOpen={mobileListOpen}
+          onMobileListClose={() => setMobileListOpen(false)}
+          onOpenMobileList={() => setMobileListOpen(true)}
+        />
+      );
+    }
     // 真实用户:BotSessionSidebar + ChatPanel(bot 单聊)。
     const botChat = workspace.botChat;
     return (
@@ -188,6 +211,7 @@ const WorkspacePage: React.FC = () => {
           <ChatPanel
             target={workspace.botChatTarget}
             viewer={workspace.activeIdentity}
+            sessionTitle={workspace.botSessions.selectedSession?.title}
             authenticatedUserId={workspace.currentUserId}
             authenticatedUserName={workspace.currentUserDisplayName}
             userAvatarUrl={workspace.currentUserAvatarUrl}
@@ -205,6 +229,13 @@ const WorkspacePage: React.FC = () => {
             onStop={botChat.stop}
             onReconnect={() => void botChat.reconnect()}
             onPanelAction={workspace.handlePanelAction}
+            onOpenSessionList={() => setMobileListOpen(true)}
+            historyPagination={{
+              hasMore: botChat.hasMoreHistory,
+              isLoading: botChat.isLoadingMoreHistory,
+              onLoadMore: () => void botChat.loadMoreHistory(),
+            }}
+            onManageFiles={selectedChatBot?.botType === 'desktop' ? undefined : fileFeature.openFileDrawer}
             modelSelector={
               <BotModelSelectorContainer
                 chatBots={[...workspace.chatBots, ...workspace.friendBots]}
@@ -214,7 +245,7 @@ const WorkspacePage: React.FC = () => {
               />
             }
             taskComposer={taskComposerNode}
-            fileChip={fileFeature.fileChip}
+            fileChip={selectedChatBot?.botType === 'desktop' ? undefined : fileFeature.fileChip}
             command={fileFeature.command}
             fileToolbar={fileFeature.fileToolbar}
             senderRef={fileFeature.senderRef}
@@ -230,13 +261,6 @@ const WorkspacePage: React.FC = () => {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-10 shrink-0 items-center justify-end border-b border-border px-2 lg:hidden">
-        <IconButton
-          label="打开会话列表"
-          icon={<PanelLeft className="h-5 w-5" />}
-          onClick={() => setMobileListOpen(true)}
-        />
-      </div>
       <div className="flex min-h-0 flex-1">
         {isChatView ? (
           renderChatArea()
@@ -250,6 +274,7 @@ const WorkspacePage: React.FC = () => {
             userIdentityName={workspace.currentUserDisplayName}
             mobileListOpen={mobileListOpen}
             onCloseMobileList={() => setMobileListOpen(false)}
+            onOpenMobileList={() => setMobileListOpen(true)}
           />
         )}
       </div>

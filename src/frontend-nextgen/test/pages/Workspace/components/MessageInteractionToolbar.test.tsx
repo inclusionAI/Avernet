@@ -107,6 +107,23 @@ describe('MessageSelectionToolbar', () => {
     expect(onExplain).toHaveBeenCalledWith('选中的内容');
   });
 
+  it('supports a copy-only selection toolbar for read-only history', () => {
+    render(
+      <MessageSelectionToolbar
+        selection={{
+          messageId: 'm1',
+          text: '只读内容',
+          rect: { left: 40, top: 100, width: 60, height: 20, right: 100, bottom: 120 } as DOMRect,
+        }}
+        onCopy={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '复制选中文本' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '追问选中文本' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '解释选中文本' })).not.toBeInTheDocument();
+  });
+
   it('does not render when selection is empty', () => {
     render(<MessageSelectionToolbar selection={null} onCopy={jest.fn()} onQuote={jest.fn()} />);
     expect(screen.queryByRole('toolbar', { name: '文本选择操作' })).not.toBeInTheDocument();

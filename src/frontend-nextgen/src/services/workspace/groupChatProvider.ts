@@ -55,6 +55,15 @@ type SessionFrameTransport = {
   send: (frame: unknown) => Promise<unknown>;
 };
 
+export interface GroupChatAbortResult {
+  aborted: boolean;
+  abortedRunIds: string[];
+}
+
+interface BotAbortCapableProvider {
+  abortBot(input: { groupId: string; sessionId: string; botId: string }): Promise<GroupChatAbortResult>;
+}
+
 interface GroupChatProviderOptions {
   sessionId: string;
   /** 群 ID——BCS connect 帧的 group_id（旧「我的协作」协议）。 */
@@ -305,12 +314,20 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   }
 
   abort(): void {
-    this.inner?.abort(this.options.groupId);
+    this.inner?.abort();
   }
 
-  /** Hook 暴露的别名——与 demo 形态一致。 */
-  stop(): void {
-    this.abort();
+  /** 只接收目标 Bot；group/session scope 固定取 Provider 构造参数，组件无法跨会话伪造。 */
+  async abortBot(botId: string): Promise<GroupChatAbortResult> {
+    const inner = await this.ensureInitialized();
+    if (!inner.isConnected) {
+      await inner.connect({ groupId: this.options.groupId, sessionId: this.options.sessionId });
+    }
+    return (inner as SdkGroupChatProvider & BotAbortCapableProvider).abortBot({
+      groupId: this.options.groupId,
+      sessionId: this.options.sessionId,
+      botId,
+    });
   }
 
   async loadHistory(): Promise<ChatMessage[]> {

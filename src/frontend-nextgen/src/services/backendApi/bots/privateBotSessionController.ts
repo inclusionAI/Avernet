@@ -25,6 +25,9 @@ export interface BotMessageDto {
   role: BotMessageRole;
   content: string;
   gmt_create: string;
+  /** 同一 assistant 回复轮次的稳定标识；不同后端版本可能返回其一。 */
+  run_id?: string;
+  history_meta?: { conversationRoundId?: string };
   metadata?: Record<string, unknown>;
 }
 export interface BotMessagePageDto {
@@ -47,6 +50,7 @@ export interface BotSocketDto {
   url: string;
 }
 export interface BotConnectionDto {
+  transport_mode?: 'direct' | 'relay';
   engine: string;
   expires_at: string;
   sockets: BotSocketDto[];

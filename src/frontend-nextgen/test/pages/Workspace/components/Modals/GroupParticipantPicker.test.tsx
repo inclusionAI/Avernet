@@ -54,7 +54,7 @@ it('renders an unresolved collaboration friend as a disabled unknown option', ()
 
   const option = screen.getByRole('button', { name: /b2:900003/ });
   expect(option).toBeDisabled();
-  expect(option).toHaveClass('bg-muted/50');
+  expect(option).toHaveClass('bg-muted/40');
   expect(screen.getByText('未知')).toBeInTheDocument();
 
   fireEvent.click(option);

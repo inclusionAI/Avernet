@@ -123,8 +123,8 @@ export function CapabilityPickerModal({
   };
   return (
     <Modal open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-      <ModalContent size="lg">
-        <ModalHeader>
+      <ModalContent size="lg" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden">
+        <ModalHeader className="shrink-0">
           <ModalTitle>添加 {kind === 'skill' ? 'Skill' : 'MCP'}</ModalTitle>
           <ModalDescription>
             {kind === 'mcp'
@@ -134,146 +134,148 @@ export function CapabilityPickerModal({
               : '从市场或能力工坊选择，可一次添加多个能力。'}
           </ModalDescription>
         </ModalHeader>
-        <Segmented
-          value={source}
-          onChange={(value) => {
-            setSource(value as Source);
-            setSelected([]);
-            setKeyword('');
-          }}
-          options={[
-            { value: 'market', label: kind === 'skill' ? '引用市场 Skill' : '引用市场 MCP' },
-            ...(kind === 'skill' ? [{ value: 'workshop' as const, label: '引用工坊 Skill' }] : []),
-            ...(kind === 'skill' ? [{ value: 'mine' as const, label: '我的 Skill' }] : []),
-          ].filter((option) => sources.includes(option.value as Source))}
-          className="w-fit"
-        />
-        {kind === 'skill' && source === 'market' ? (
+        <div className="app-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto">
           <Segmented
-            value={marketSource}
+            value={source}
             onChange={(value) => {
-              setMarketSource(value);
+              setSource(value as Source);
               setSelected([]);
               setKeyword('');
             }}
             options={[
-              { value: 'skillcenter-market', label: 'SkillCenter' },
-              { value: 'teamclaw-market', label: 'TeamClaw' },
-            ]}
+              { value: 'market', label: kind === 'skill' ? '引用市场 Skill' : '引用市场 MCP' },
+              ...(kind === 'skill' ? [{ value: 'workshop' as const, label: '引用工坊 Skill' }] : []),
+              ...(kind === 'skill' ? [{ value: 'mine' as const, label: '我的 Skill' }] : []),
+            ].filter((option) => sources.includes(option.value as Source))}
             className="w-fit"
           />
-        ) : null}
-        {kind === 'mcp' ? (
-          <Segmented
-            value={mcpMarketSource}
-            onChange={(value) => {
-              setMcpMarketSource(value);
-              setSelected([]);
-              setKeyword('');
-            }}
-            options={[
-              { value: 'internal', label: '内部 MCP' },
-              { value: 'open-platform', label: '开放平台' },
-            ]}
-            className="w-fit"
-          />
-        ) : null}
-        {kind === 'skill' && source === 'mine' && onUploadFolder ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3">
-            <p className="m-0 min-w-0 flex-1 text-xs text-muted-foreground">
-              仅显示当前 Bot 上传的本地 Skill（含已激活和未激活项），勾选并确认后加入当前能力集。
-            </p>
-            <Button
-              variant="secondary"
-              leftIcon={<FolderUp className="size-4" />}
-              disabled={uploading || !canPickDirectory}
-              onClick={() => void uploadFolder()}
-            >
-              {uploading ? '上传中…' : canPickDirectory ? '上传本地目录' : '当前浏览器不支持'}
-            </Button>
-          </div>
-        ) : null}
-        <div className="relative">
-          <Search aria-hidden className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder={`搜索${source === 'mine' ? '我的' : source === 'market' ? '市场' : '能力工坊'}中的 ${
-              kind === 'skill' ? 'Skill' : 'MCP'
-            }`}
-          />
-        </div>
-        {remoteSearch ? (
-          <div className="text-xs text-muted-foreground" role="status">
-            已选 {selected.length}/20，单次最多添加 20 个 Skill
-            {skillCenter.loading ? ' · 加载中…' : ''}
-            {skillCenter.error ? (
-              <>
-                <span role="alert">{skillCenter.error}</span>
-                <Button variant="ghost" onClick={skillCenter.retry}>
-                  重试
-                </Button>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-        <div className="app-scrollbar grid max-h-[420px] grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
-          {loading ? (
-            <div className="col-span-full py-10 text-center text-xs text-muted-foreground" role="status">
-              正在加载可引用的 {kind === 'skill' ? 'Skill' : 'MCP'}…
+          {kind === 'skill' && source === 'market' ? (
+            <Segmented
+              value={marketSource}
+              onChange={(value) => {
+                setMarketSource(value);
+                setSelected([]);
+                setKeyword('');
+              }}
+              options={[
+                { value: 'skillcenter-market', label: 'SkillCenter' },
+                { value: 'teamclaw-market', label: 'TeamClaw' },
+              ]}
+              className="w-fit"
+            />
+          ) : null}
+          {kind === 'mcp' ? (
+            <Segmented
+              value={mcpMarketSource}
+              onChange={(value) => {
+                setMcpMarketSource(value);
+                setSelected([]);
+                setKeyword('');
+              }}
+              options={[
+                { value: 'internal', label: '内部 MCP' },
+                { value: 'open-platform', label: '开放平台' },
+              ]}
+              className="w-fit"
+            />
+          ) : null}
+          {kind === 'skill' && source === 'mine' && onUploadFolder ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3">
+              <p className="m-0 min-w-0 flex-1 text-xs text-muted-foreground">
+                仅显示当前 Bot 上传的本地 Skill（含已激活和未激活项），勾选并确认后加入当前能力集。
+              </p>
+              <Button
+                variant="secondary"
+                leftIcon={<FolderUp className="size-4" />}
+                disabled={uploading || !canPickDirectory}
+                onClick={() => void uploadFolder()}
+              >
+                {uploading ? '上传中…' : canPickDirectory ? '上传本地目录' : '当前浏览器不支持'}
+              </Button>
             </div>
-          ) : visibleItems.length ? (
-            visibleItems.map((item) => {
-              const id = itemId(item);
-              const active = selected.includes(id);
-              const alreadyAdded = existingIds.includes(id);
-              return (
-                <Button
-                  key={id}
-                  variant="secondary"
-                  className={`h-auto min-h-24 items-start justify-start whitespace-normal p-3 text-left ${
-                    active ? 'border-primary bg-accent' : ''
-                  }`}
-                  disabled={alreadyAdded || (remoteSearch && selected.length >= 20 && !active)}
-                  onClick={() =>
-                    setSelected((current) => (active ? current.filter((value) => value !== id) : [...current, id]))
-                  }
-                >
-                  <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted">
-                    {kind === 'skill' ? <Shapes className="size-4" /> : <Plug className="size-4" />}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2">
-                      <span className="truncate text-xs font-medium">{item.name}</span>
-                      {'version' in item && item.version ? <Badge>{item.version}</Badge> : null}
-                      {alreadyAdded ? <Badge tone="primary">已添加</Badge> : null}
+          ) : null}
+          <div className="relative">
+            <Search aria-hidden className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="pl-9"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder={`搜索${source === 'mine' ? '我的' : source === 'market' ? '市场' : '能力工坊'}中的 ${
+                kind === 'skill' ? 'Skill' : 'MCP'
+              }`}
+            />
+          </div>
+          {remoteSearch ? (
+            <div className="text-xs text-muted-foreground" role="status">
+              已选 {selected.length}/20，单次最多添加 20 个 Skill
+              {skillCenter.loading ? ' · 加载中…' : ''}
+              {skillCenter.error ? (
+                <>
+                  <span role="alert">{skillCenter.error}</span>
+                  <Button variant="ghost" onClick={skillCenter.retry}>
+                    重试
+                  </Button>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {loading ? (
+              <div className="col-span-full py-10 text-center text-xs text-muted-foreground" role="status">
+                正在加载可引用的 {kind === 'skill' ? 'Skill' : 'MCP'}…
+              </div>
+            ) : visibleItems.length ? (
+              visibleItems.map((item) => {
+                const id = itemId(item);
+                const active = selected.includes(id);
+                const alreadyAdded = existingIds.includes(id);
+                return (
+                  <Button
+                    key={id}
+                    variant="secondary"
+                    className={`h-auto min-h-24 items-start justify-start whitespace-normal p-3 text-left ${
+                      active ? 'border-primary bg-accent' : ''
+                    }`}
+                    disabled={alreadyAdded || (remoteSearch && selected.length >= 20 && !active)}
+                    onClick={() =>
+                      setSelected((current) => (active ? current.filter((value) => value !== id) : [...current, id]))
+                    }
+                  >
+                    <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted">
+                      {kind === 'skill' ? <Shapes className="size-4" /> : <Plug className="size-4" />}
                     </span>
-                    <span className="mt-1 line-clamp-2 text-xs font-normal text-muted-foreground">
-                      {item.description || '暂无描述'}
-                    </span>
-                    {kind === 'skill' ? (
-                      <span className="mt-2 inline-flex items-center gap-1 text-xs text-primary">
-                        <ExternalLink className="size-3" /> 查看 Skill 详情
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate text-xs font-medium">{item.name}</span>
+                        {'version' in item && item.version ? <Badge>{item.version}</Badge> : null}
+                        {alreadyAdded ? <Badge tone="primary">已添加</Badge> : null}
                       </span>
-                    ) : null}
-                  </span>
-                  {active ? <Check className="size-4 shrink-0 text-primary" /> : null}
-                </Button>
-              );
-            })
-          ) : (
-            <div className="col-span-full">
-              <Empty compact title="暂无可添加能力" description="请更换来源或搜索条件。" />
-            </div>
-          )}
+                      <span className="mt-1 line-clamp-2 text-xs font-normal text-muted-foreground">
+                        {item.description || '暂无描述'}
+                      </span>
+                      {kind === 'skill' ? (
+                        <span className="mt-2 inline-flex items-center gap-1 text-xs text-primary">
+                          <ExternalLink className="size-3" /> 查看 Skill 详情
+                        </span>
+                      ) : null}
+                    </span>
+                    {active ? <Check className="size-4 shrink-0 text-primary" /> : null}
+                  </Button>
+                );
+              })
+            ) : (
+              <div className="col-span-full">
+                <Empty compact title="暂无可添加能力" description="请更换来源或搜索条件。" />
+              </div>
+            )}
+          </div>
+          {remoteSearch && skillCenter.hasMore ? (
+            <Button variant="secondary" disabled={skillCenter.loading} onClick={() => void skillCenter.loadMore()}>
+              {skillCenter.loading ? '加载中…' : '加载更多'}
+            </Button>
+          ) : null}
         </div>
-        {remoteSearch && skillCenter.hasMore ? (
-          <Button variant="secondary" disabled={skillCenter.loading} onClick={() => void skillCenter.loadMore()}>
-            {skillCenter.loading ? '加载中…' : '加载更多'}
-          </Button>
-        ) : null}
-        <ModalFooter>
+        <ModalFooter className="shrink-0 border-t border-border pt-4">
           <Button variant="secondary" onClick={close}>
             取消
           </Button>

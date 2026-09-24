@@ -11,6 +11,7 @@ import React from 'react';
 // 捕获 <ChatLayout.Panel> 收到的 props（断言 bridge 透传）。mock 前缀通过 jest.factory 检查。
 let mockPanelRenders: Array<Record<string, unknown>> = [];
 let mockBubbleRenders: Array<Record<string, unknown>> = [];
+let mockListRenders: Array<Record<string, unknown>> = [];
 
 // Stub SDK UI primitives: tests focus on ChatPanel header/connection copy + Sender presence,
 // not on SDK bubble/markdown rendering. Stubs avoid pulling ESM @tc-chat/ui into jsdom.
@@ -27,22 +28,24 @@ jest.mock('@tc-chat/ui/es/ChatLayout', () => {
     createElement('div', { 'data-testid': 'chat-layout', className }, children);
   const Header = ({ slotLeft, slotRight }: { slotLeft?: unknown; slotRight?: unknown }) =>
     createElement('div', null, createElement('div', null, slotLeft), createElement('div', null, slotRight));
-  const List = ({
-    emptyPlaceholder,
-    messages = [],
-    renderItem,
-  }: {
+  const List = (props: {
     emptyPlaceholder?: unknown;
     messages?: unknown[];
     renderItem?: (message: unknown, index: number) => unknown;
-  }) =>
-    createElement(
+    hasMore?: boolean;
+    isLoadingMore?: boolean;
+    onLoadMore?: () => void;
+  }) => {
+    mockListRenders.push(props);
+    const { emptyPlaceholder, messages = [], renderItem } = props;
+    return createElement(
       'div',
       null,
       messages.length
         ? messages.map((message, index) => createElement(Fragment, { key: index }, renderItem?.(message, index)))
         : emptyPlaceholder,
     );
+  };
   const Sender = (props: { placeholder?: string; disabled?: boolean; className?: string }) =>
     createElement('input', {
       'data-testid': 'sender',
@@ -120,6 +123,34 @@ const baseProps = {
 };
 
 describe('ChatPanel interactive', () => {
+  it('窄屏会话列表入口位于单聊标题左侧并使用右箭头图标', () => {
+    const onOpenSessionList = jest.fn();
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        onOpenSessionList={onOpenSessionList}
+        {...baseProps}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: '打开会话列表' });
+    expect(button).toHaveClass('lg:hidden');
+    fireEvent.click(button);
+    expect(onOpenSessionList).toHaveBeenCalledTimes(1);
+    expect(button.querySelector('svg')).toHaveClass('lucide-chevron-right');
+  });
+
   it('demo 模式 Sender 禁用', () => {
     render(
       <ChatPanel
@@ -145,7 +176,9 @@ describe('ChatPanel interactive', () => {
         mode="bot"
         interactive
         connectionStatus="connected"
-        messages={[]}
+        // 两态强制（Spec: workspace-session-connection-display）：空消息区一律骨架屏、
+        // 仅确认后的真空会话渲染空态，故本用例（验证列表高度链路 CSS）须以非空消息渲染列表。
+        messages={[{ id: 'm1', role: 'user', content: '历史消息', status: 'history' }] as never}
         isRequesting={false}
         isLoadingMessages={false}
         retryCount={0}
@@ -186,7 +219,7 @@ describe('ChatPanel interactive', () => {
     expect(sender).not.toHaveClass('max-w-4xl');
   });
 
-  it('bot 模式(交互) connectionStatus=connected 文案为在线', () => {
+  it('bot 模式(交互) connectionStatus=connected 文案为已连接', () => {
     render(
       <ChatPanel
         target={botModeTarget as any}
@@ -204,7 +237,99 @@ describe('ChatPanel interactive', () => {
         {...baseProps}
       />,
     );
-    expect(screen.getByText('在线')).toBeInTheDocument();
+    expect(screen.getByText('已连接')).toBeInTheDocument();
+    // v1.4：超长标题下连接状态不换行不被挤占（shrink-0 + nowrap，收缩只由标题承担）
+    expect(screen.getByText('已连接')).toHaveClass('shrink-0', 'whitespace-nowrap');
+  });
+
+  it('sessionTitle 传入时顶栏显示会话标题（与协作群顶栏一致），缺省回退 Bot 名称', () => {
+    const { rerender } = render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        sessionTitle="Q3 经营数据复盘"
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'Q3 经营数据复盘' })).toBeInTheDocument();
+
+    rerender(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: botModeTarget.name })).toBeInTheDocument();
+  });
+
+  it('验收微调：文件管理入口位于会话顶栏右侧（与协作群位置规则一致），点击回调触发', () => {
+    const onManageFiles = jest.fn();
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        sessionTitle="Q3 经营数据复盘"
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        onManageFiles={onManageFiles}
+        {...baseProps}
+      />,
+    );
+    // 顶栏右侧渲染会话文件入口（FolderOpen 图标，对齐协作群 GroupHeader 的按钮语义）。
+    const fileButton = screen.getByRole('button', { name: '会话文件' });
+    expect(fileButton).toBeInTheDocument();
+    fireEvent.click(fileButton);
+    expect(onManageFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('验收微调：未提供 onManageFiles 时不渲染顶栏文件入口（单聊降级）', () => {
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '会话文件' })).not.toBeInTheDocument();
   });
   it('用户消息优先使用顶栏真实用户头像，Bot 消息仍使用 Bot 头像', () => {
     const userAvatarUrl = 'https://example.test/user-avatar.png';
@@ -474,6 +599,38 @@ describe('ChatPanel interactive', () => {
     );
     await waitFor(() => expect(screen.getByTestId('message-copy-action-a-copy-feedback')).toHaveTextContent('已复制'));
     expect(writeText).toHaveBeenCalledWith('这是回复');
+  });
+
+  it('把单聊历史分页状态与顶部加载回调透传给 ChatLayout.List', () => {
+    mockListRenders.length = 0;
+    const onLoadMoreMessages = jest.fn();
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[{ id: 'm1', role: 'assistant', content: '消息', status: 'history' }] as never}
+        isRequesting={false}
+        isLoadingMessages={false}
+        historyPagination={{ hasMore: true, isLoading: true, onLoadMore: onLoadMoreMessages }}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+      />,
+    );
+
+    expect(mockListRenders.at(-1)).toMatchObject({
+      hasMore: true,
+      isLoadingMore: true,
+    });
+    const onLoadMore = mockListRenders.at(-1)?.onLoadMore as (() => void) | undefined;
+    expect(typeof onLoadMore).toBe('function');
+    onLoadMore?.();
+    expect(onLoadMoreMessages).toHaveBeenCalledTimes(1);
   });
 
   it('把 chatBridge 透传给 ChatLayout.Panel（主→副通道接线）', () => {
