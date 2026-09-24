@@ -51,6 +51,7 @@ def plugin(mock_client):
                 "LOCAL_K8S_NAMESPACE": "default",
                 "LOCAL_K8S_IMAGE": "bot-runtime:latest",
                 "LOCAL_K8S_CONTAINER_PORT": "8080",
+                "LOCAL_K8S_OUTBOUND_RULE": "",
             },
             clear=False,
         ),
@@ -159,6 +160,105 @@ class TestLocalK8sPluginCreate:
         svc = mock_core.create_namespaced_service.call_args[1]["body"]
         assert svc.spec.type == "NodePort"
         assert svc.spec.ports[0].node_port == 30080
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_create_sync_sandbox_uses_outbound_rule_from_env(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """LOCAL_K8S_OUTBOUND_RULE 应作为入参 fallback 写入 ConfigMap。"""
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="set",
+                    header_name="X-Token",
+                    value="secret",
+                )
+            ]
+        )
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": rule.model_dump_json()},
+            clear=False,
+        ):
+            mock_apps = MagicMock()
+            mock_apps_cls.return_value = mock_apps
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+
+            mock_pod = MagicMock()
+            mock_pod.status.phase = "Running"
+            mock_pod.metadata.name = "bot-pod"
+            mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+            plugin.create_sync_sandbox(template_id="openclaw-default")
+
+        configmap = mock_core.create_namespaced_config_map.call_args[1]["body"]
+        yaml_text = configmap.data["header-rules.yaml"]
+        assert "example.com" in yaml_text
+        assert "X-Token" in yaml_text
+        assert "secret" in yaml_text
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_create_sync_sandbox_outbound_rule_arg_overrides_env(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """入参 outbound_operation_rule 优先级高于 LOCAL_K8S_OUTBOUND_RULE。"""
+        env_rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["env.example.com"],
+                    action="set",
+                    header_name="X-Env",
+                    value="env",
+                )
+            ]
+        )
+        arg_rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["arg.example.com"],
+                    action="set",
+                    header_name="X-Arg",
+                    value="arg",
+                )
+            ]
+        )
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": env_rule.model_dump_json()},
+            clear=False,
+        ):
+            mock_apps = MagicMock()
+            mock_apps_cls.return_value = mock_apps
+            mock_core = MagicMock()
+            mock_core_cls.return_value = mock_core
+
+            mock_pod = MagicMock()
+            mock_pod.status.phase = "Running"
+            mock_pod.metadata.name = "bot-pod"
+            mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+            plugin.create_sync_sandbox(
+                template_id="openclaw-default",
+                outbound_operation_rule=arg_rule,
+            )
+
+        configmap = mock_core.create_namespaced_config_map.call_args[1]["body"]
+        yaml_text = configmap.data["header-rules.yaml"]
+        assert "arg.example.com" in yaml_text
+        assert "X-Arg" in yaml_text
+        assert "env.example.com" not in yaml_text
 
     def test_create_sync_sandbox_missing_image_raises(self, mock_client) -> None:
         """Missing image should raise ValueError."""
@@ -437,3 +537,80 @@ class TestLocalK8sSandbox:
             container_name="bot-runtime",
         )
         assert sandbox.update_outbound_rule(None, MagicMock()) is True
+
+
+class TestResolveOutboundRule:
+    """Tests for _resolve_outbound_rule helper."""
+
+    def test_resolve_outbound_rule_returns_none_when_missing(self) -> None:
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _resolve_outbound_rule,
+        )
+
+        with patch.dict(os.environ, {}, clear=True):
+            assert _resolve_outbound_rule() is None
+
+    def test_resolve_outbound_rule_returns_none_for_whitespace(self) -> None:
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _resolve_outbound_rule,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": "   \n  "},
+            clear=True,
+        ):
+            assert _resolve_outbound_rule() is None
+
+    def test_resolve_outbound_rule_parses_valid_json(self) -> None:
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _resolve_outbound_rule,
+        )
+
+        rule = OutBoundOperationRule(
+            header_operation_rules=[
+                HeaderOperationRule(
+                    domains=["example.com"],
+                    action="remove",
+                    header_name="X-Old",
+                    value="",
+                )
+            ]
+        )
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": rule.model_dump_json()},
+            clear=True,
+        ):
+            resolved = _resolve_outbound_rule()
+            assert resolved is not None
+            assert resolved.header_operation_rules is not None
+            assert len(resolved.header_operation_rules) == 1
+            assert resolved.header_operation_rules[0].domains == ["example.com"]
+            assert resolved.header_operation_rules[0].action == "remove"
+
+    def test_resolve_outbound_rule_raises_on_invalid_json(self) -> None:
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _resolve_outbound_rule,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": "not-json"},
+            clear=True,
+        ):
+            with pytest.raises(ValueError, match="LOCAL_K8S_OUTBOUND_RULE"):
+                _resolve_outbound_rule()
+
+    def test_resolve_outbound_rule_raises_on_bad_schema(self) -> None:
+        from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+            _resolve_outbound_rule,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_OUTBOUND_RULE": '{"header_operation_rules": [{"domains": 42}]}'},
+            clear=True,
+        ):
+            with pytest.raises(ValueError, match="LOCAL_K8S_OUTBOUND_RULE"):
+                _resolve_outbound_rule()

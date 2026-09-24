@@ -20,6 +20,7 @@
 | LOCAL_K8S_IMAGE_PULL_POLICY | - | 否 | 显式镜像拉取策略；未设置时，镜像 tag 为 ``latest`` 或为空则默认 ``Always``，否则默认 ``IfNotPresent`` |
 | LOCAL_K8S_NODE_PORT | - | 否 | 固定 NodePort；不填则由 K8s 自动分配 |
 | LOCAL_K8S_EXTRA_ENVS | - | 否 | JSON 对象，注入到 Pod 容器的环境变量（可被 envs 入参覆盖） |
+| LOCAL_K8S_OUTBOUND_RULE | - | 否 | JSON 对象，作为 ``OutBoundOperationRule`` 的环境变量 fallback |
 | LOCAL_K8S_SIDECAR_IMAGE | avernet-engine-sidecar:latest | 否 | engine sidecar 镜像 |
 
 colima + k3s 最小示例（NodePort，无需额外映射端口）：
@@ -40,6 +41,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import yaml
+from pydantic import ValidationError
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
 from secbaas.community.api.device_manage import (
@@ -90,6 +92,7 @@ ENV_MEMORY_LIMIT = "LOCAL_K8S_MEMORY_LIMIT"
 ENV_IMAGE_PULL_POLICY = "LOCAL_K8S_IMAGE_PULL_POLICY"
 ENV_NODE_PORT = "LOCAL_K8S_NODE_PORT"
 ENV_EXTRA_ENVS = "LOCAL_K8S_EXTRA_ENVS"
+ENV_OUTBOUND_RULE = "LOCAL_K8S_OUTBOUND_RULE"
 
 
 def _env(name: str, default: Any = None) -> Any:
@@ -239,6 +242,31 @@ def _resolve_extra_envs() -> dict[str, str]:
             f"got {type(parsed).__name__}"
         )
     return {str(k): str(v) for k, v in parsed.items()}
+
+
+def _resolve_outbound_rule() -> OutBoundOperationRule | None:
+    """读取 LOCAL_K8S_OUTBOUND_RULE（JSON 对象）作为 outbound rule 的 fallback。
+
+    示例：
+        LOCAL_K8S_OUTBOUND_RULE='{"header_operation_rules": [
+            {"domains": ["example.com"], "action": "set",
+             "header_name": "X-Token", "value": "secret"}
+        ]}'
+    """
+    raw = _env(ENV_OUTBOUND_RULE)
+    if not raw or not raw.strip():
+        return None
+    try:
+        return OutBoundOperationRule.model_validate_json(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"local_k8s: {ENV_OUTBOUND_RULE} must be a valid JSON object"
+        ) from exc
+    except ValidationError as exc:
+        raise ValueError(
+            f"local_k8s: {ENV_OUTBOUND_RULE} does not match "
+            f"OutBoundOperationRule schema"
+        ) from exc
 
 
 def _convert_outbound_rules(rule: OutBoundOperationRule | None) -> str:
@@ -619,9 +647,12 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         if metadata:
             merged_envs.setdefault("BOT_ID", metadata.get("bot_id", ""))
 
+        # 优先使用入参中的 outbound rule，否则回退到 LOCAL_K8S_OUTBOUND_RULE 环境变量。
+        effective_rule = outbound_operation_rule or _resolve_outbound_rule()
+
         configmap_name = self._create_header_rules_configmap(
             deployment_name=deployment_name,
-            outbound_operation_rule=outbound_operation_rule,
+            outbound_operation_rule=effective_rule,
         )
         self._create_deployment(
             deployment_name=deployment_name,
