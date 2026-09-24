@@ -11,6 +11,7 @@ acquired/not-acquired (see ``arca_ttl`` unit tests for the SQL-assertion
 pattern).
 """
 
+from contextlib import contextmanager
 from datetime import datetime
 
 # ==================== Fixtures ====================
@@ -18,7 +19,9 @@ from datetime import timedelta as _timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import create_engine, text
 from sqlalchemy.dialects import mysql, sqlite
+from sqlalchemy.orm import Session
 
 from secbaas.community.core.repository.distributed_lock import (
     DistributedLockRepository,
@@ -547,6 +550,72 @@ class TestTryAcquireLock:
         )
 
         assert result is True
+
+    def test_acquire_takes_over_expired_lock_refreshes_identity_map(self):
+        """Confirm-read must refresh the row loaded by the precheck.
+
+        The precheck and the Core upsert share one SQLAlchemy Session.  Without
+        ``populate_existing=True``, the confirming SELECT returns the stale
+        identity-mapped object and incorrectly reports that takeover failed.
+        """
+        engine = create_engine("sqlite:///:memory:")
+        # SQLite does not auto-generate a value for SQLAlchemy's BigInteger
+        # primary key.  Create the equivalent test schema with SQLite's
+        # INTEGER rowid alias so the real upsert can reach its conflict-update
+        # branch instead of failing while constructing the candidate insert.
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE ac_lock_table (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        gmt_create DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        gmt_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        lock_name VARCHAR(128) NOT NULL UNIQUE,
+                        lock_holder VARCHAR(128) NOT NULL,
+                        expire_time DATETIME,
+                        env VARCHAR(64)
+                    )
+                    """
+                )
+            )
+
+        with Session(engine) as seed_session:
+            seed_session.add(
+                DistributedLockModel(
+                    id=1,
+                    lock_name="identity-map-lock",
+                    lock_holder="old-holder",
+                    expire_time=PAST,
+                    env="dev",
+                )
+            )
+            seed_session.commit()
+
+        @contextmanager
+        def orm_session():
+            with Session(engine) as session:
+                try:
+                    yield session
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    raise
+
+        database = MagicMock()
+        database.orm_session.side_effect = orm_session
+        repo = OrmDistributedLockRepository(database=database)
+
+        result = repo.try_acquire_lock(
+            lock_name="identity-map-lock",
+            lock_holder="new-holder",
+            expire_time=FUTURE,
+        )
+
+        assert result is True
+        with Session(engine) as verify_session:
+            row = verify_session.query(DistributedLockModel).one()
+            assert row.lock_holder == "new-holder"
 
     def test_acquire_handles_oceanbase_lock_wait_timeout(self):
         from sqlalchemy.exc import DatabaseError as SADatabaseError
