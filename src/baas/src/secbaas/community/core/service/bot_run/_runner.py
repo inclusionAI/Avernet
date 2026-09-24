@@ -723,9 +723,7 @@ class BotRunner:
         try:
             # 使用统一 binding 解析入口；lifecycle_stage 由 metadata[bot_options]
             # 自动提取，与正常 deliver_message/chat 路径保持一致。
-            binding_info = await self._resolve_binding(
-                bot_id=bot_id, metadata=metadata
-            )
+            binding_info = await self._resolve_binding(bot_id=bot_id, metadata=metadata)
         except Exception as e:
             logger.warning(
                 "[runner.abort] binding resolution failed: run_id=%s bot_id=%s %s",
