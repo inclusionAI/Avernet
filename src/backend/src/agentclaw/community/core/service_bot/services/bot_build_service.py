@@ -69,7 +69,6 @@ from agentclaw.community.core.workspace.engines import parse_build_rsync_exclude
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bot_dir,
-    get_bot_nas_dir,
 )
 from agentclaw.community.core.workspace.skill_layout import FILESYSTEM_POOL_ENGINES
 from agentclaw.community.log import get_logger
@@ -385,7 +384,7 @@ class BotBuildService:
             # Step 1: 计算源目录和目标目录（统一走 NAS 存储）
             # ============================================================
             source_nas_engine_type = bot.get("active_engine") or engine_type
-            nas_storage_id = get_bot_nas_dir(
+            nas_storage_id = self._path_factory.get_bot_nas_dir(
                 entity_id=entity_id,
                 bot_id=bot_id,
                 engine_type=source_nas_engine_type,
@@ -491,6 +490,10 @@ class BotBuildService:
                 "entity_id": entity_id,
                 "entity_type": entity_type,
                 "version": version_str,
+                # 部署声明的显式跳过（非静默态）: producer/发布流程可据此分支
+                "nas_migration_skipped": bool(
+                    migration_success and not source_dir.exists()
+                ),
                 "migration_path": runtime_artifact_root,
                 "build_target_path": str(target_dir),
                 "mcp_success": mcp_success,
@@ -1284,6 +1287,41 @@ class BotBuildService:
                 except OSError:
                     pass
 
+    def _chmod_nas_dir(
+        self,
+        nas_dir: Path | str | None,
+        *,
+        error_message: str,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        """chmod 755 a NAS staging dir when it exists (plain first, sudo fallback).
+
+        Absence is not an error here — the caller decides whether a missing
+        root is a declared no-NAS deployment (explicit skip) or a broken
+        mount (loud failure); chmod never preempts that decision with an
+        unrelated error. Plain chmod before sudo: a user-owned root needs
+        no escalation, and the sudo fallback covers root-owned mounts.
+        """
+        if nas_dir is None:
+            return
+        nas_path = Path(str(nas_dir))
+        if not nas_path.exists():
+            return
+        try:
+            self._run_local_command(
+                cmd=["chmod", "755", str(nas_path)],
+                command_name="chmod",
+                error_message=error_message,
+                timeout_seconds=timeout_seconds,
+            )
+        except Exception:
+            self._run_local_command(
+                cmd=["sudo", "chmod", "755", str(nas_path)],
+                command_name="sudo chmod",
+                error_message=error_message,
+                timeout_seconds=timeout_seconds,
+            )
+
     def _migrate_bot_instance(
         self,
         device_id: str,
@@ -1314,25 +1352,10 @@ class BotBuildService:
         )
 
         if is_nas:
-            # Fix the staging root's permission only when it is present:
-            # a required-but-missing root fails loudly at the source check
-            # below instead of dying first in an unrelated chmod. Plain
-            # chmod before sudo — a user-owned root needs no escalation,
-            # and the sudo fallback covers root-owned mounts.
-            nas_dir_path = Path(str(nas_storage_id)) if nas_storage_id else None
-            if nas_dir_path is not None and nas_dir_path.exists():
-                try:
-                    self._run_local_command(
-                        cmd=["chmod", "755", str(nas_storage_id)],
-                        command_name="chmod",
-                        error_message="chmod source directory failed",
-                    )
-                except Exception:
-                    self._run_local_command(
-                        cmd=["sudo", "chmod", "755", str(nas_storage_id)],
-                        command_name="sudo chmod",
-                        error_message="chmod source directory failed",
-                    )
+            self._chmod_nas_dir(
+                nas_storage_id,
+                error_message="chmod source directory failed",
+            )
 
         if not source_dir.exists():
             if is_nas and not self._publish_policy.nas_migration_required:
@@ -1341,10 +1364,19 @@ class BotBuildService:
                 # instance migration by explicit configuration. Never
                 # infer this from the host — that would fork build
                 # semantics per environment.
+                #
+                # The versioned target MUST still exist on disk before we
+                # report success — the build result pins
+                # build_target_path and later stage steps write their
+                # configs under it; a reported success referencing a
+                # never-created path is a silent failure (exactly what
+                # this policy exists to forbid).
+                target_dir.mkdir(parents=True, exist_ok=True)
                 logger.info(
                     f"[BotBuildService._migrate_bot_instance] "
                     f"NAS staging not required by deployment policy; "
-                    f"skipping instance migration: {source_dir}"
+                    f"skipping instance migration (target scaffolded): "
+                    f"{source_dir} -> {target_dir}"
                 )
                 return True
             logger.warning(
@@ -1863,7 +1895,7 @@ class BotBuildService:
         # Never trust a DB path as an arbitrary rsync source. Reconstruct the
         # exact versioned artifact path from the Bot identity and version.
         artifact_dir = get_bot_dir(entity_id, bot_id, entity_type) / str(source_version) / build_plan.migration_subpath
-        draft_nas_dir = get_bot_nas_dir(
+        draft_nas_dir = self._path_factory.get_bot_nas_dir(
             entity_id=entity_id,
             bot_id=bot_id,
             engine_type=build_plan.engine_type,
@@ -1873,23 +1905,21 @@ class BotBuildService:
         if not artifact_dir.exists():
             raise BotBuildMigrationError(f"历史构造物目录不存在: {artifact_dir}")
 
-        # Same NAS-existence guard and non-sudo-first order as
-        # _migrate_bot_instance 1261 — see there for the full rationale.
-        if draft_nas_dir.exists():
-            try:
-                self._run_local_command(
-                    cmd=["chmod", "755", str(draft_nas_dir)],
-                    command_name="chmod",
-                    error_message="chmod draft NAS directory failed",
-                    timeout_seconds=remaining_timeout(),
-                )
-            except Exception:
-                self._run_local_command(
-                    cmd=["sudo", "chmod", "755", str(draft_nas_dir)],
-                    command_name="sudo chmod",
-                    error_message="chmod draft NAS directory failed",
-                    timeout_seconds=remaining_timeout(),
-                )
+        # A missing draft NAS mount is a broken mount, not a resource-decl
+        # skip: restore_draft's whole product is "the device can see this
+        # workspace". mkdir onto the unmounted path would record success
+        # while the device never sees the data (EACCES / local-disk only)
+        # — the silent accident this build path must never hide.
+        if not draft_nas_dir.exists():
+            raise BotBuildMigrationError(
+                f"draft NAS mount point missing: {draft_nas_dir} — refusing "
+                f"to restore onto an unmounted path; check the NAS mount"
+            )
+        self._chmod_nas_dir(
+            draft_nas_dir,
+            error_message="chmod draft NAS directory failed",
+            timeout_seconds=remaining_timeout(),
+        )
         draft_dir.mkdir(parents=True, exist_ok=True)
 
         excludes = [f"--exclude={item}" for item in build_plan.rsync_excludes]

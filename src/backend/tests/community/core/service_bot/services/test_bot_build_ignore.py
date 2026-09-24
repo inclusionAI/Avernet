@@ -94,7 +94,8 @@ def build_service(tmp_path, monkeypatch, record):
     ))
     service._get_migration_path_base = lambda **_: "/artifact"
     service._migrate_bot_instance = MagicMock(return_value=True)
-    monkeypatch.setattr(module, "get_bot_nas_dir", lambda **_: tmp_path)
+    # NAS dir 经注入的 path factory 解析（DI: WorkspaceConfig.arca_root）
+    service._path_factory = MagicMock(get_bot_nas_dir=lambda **_: tmp_path)
     monkeypatch.setattr(module, "get_bot_dir", lambda **_: tmp_path)
     return service
 

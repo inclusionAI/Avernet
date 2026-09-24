@@ -9,6 +9,7 @@ Provides Bot build/migration API:
 - 调用 core/service_bot/services/ 中的业务逻辑
 - Request/Response 类型来自同级 schemas.py
 """
+import asyncio
 import fnmatch
 from pathlib import PurePosixPath
 
@@ -84,7 +85,11 @@ async def build_bot(
         if not bot:
             return ApiResponse(success=False, message=f"Bot不存在: {bot_id}", error_code=404, data=None)
 
-        result = build_service.build(
+        # build() 是同步且含子进程/轮询（_wait_for_device_ready 最坏
+        # ~60s）；路由是 async handler，直接调用会冻结整个事件循环。
+        # to_thread 把构建移到工作线程（review F5）。
+        result = await asyncio.to_thread(
+            build_service.build,
             bot=bot,
             version=req.version,
         )

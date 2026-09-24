@@ -75,7 +75,6 @@ def _arrange_real_build_paths(
     nas_root = tmp_path / "nas"
     artifact_root = tmp_path / "artifacts"
     nas_root.mkdir()
-    monkeypatch.setattr(build_module, "get_bot_nas_dir", lambda **_: nas_root)
     monkeypatch.setattr(build_module, "get_bot_dir", lambda **_: artifact_root)
     _install_passthrough_sudo(monkeypatch, tmp_path)
     return nas_root, artifact_root
@@ -178,6 +177,8 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
         registry=registry,
         channel_service=channel_service,
     )
+    # NAS dir 经注入的 path factory 解析（DI: WorkspaceConfig.arca_root）
+    service._path_factory.get_bot_nas_dir = lambda **_: nas_root
 
     result = service.build(
         bot={

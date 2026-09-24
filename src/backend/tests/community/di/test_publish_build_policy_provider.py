@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+import pytest
+
 from agentclaw.community.core.service_bot.services.bot_build_policy import (
     PublishBuildPolicyConfig,
 )
@@ -20,16 +22,9 @@ from agentclaw.community.di.modules.publish_build_config_module import (
 )
 
 
-def _set_block(monkeypatch, block: dict) -> None:
-    # sibling 模块接缝：patch 模块自己的 `_block`（同 desktop_skill_recovery 惯例）。
-    monkeypatch.setattr(
-        publish_build_config_module, "_block", lambda: dict(block)
-    )
-
-
 def test_absent_block_resolves_to_required_defaults(monkeypatch):
     # 一个不声明 publish_build 的部署按生产语义走：全 required。
-    _set_block(monkeypatch, {})
+    _set_raw_block(monkeypatch, {})
     module = PublishBuildConfigModule()
     assert module.publish_build_policy() == PublishBuildPolicyConfig(
         nas_migration_required=True,
@@ -38,7 +33,7 @@ def test_absent_block_resolves_to_required_defaults(monkeypatch):
 
 
 def test_yaml_overrides_are_respected_per_key(monkeypatch):
-    _set_block(
+    _set_raw_block(
         monkeypatch,
         {
             "nas_migration_required": False,
@@ -52,8 +47,39 @@ def test_yaml_overrides_are_respected_per_key(monkeypatch):
 
 
 def test_partial_override_keeps_other_key_default(monkeypatch):
-    _set_block(monkeypatch, {"nas_migration_required": False})
+    _set_raw_block(monkeypatch, {"nas_migration_required": False})
     module = PublishBuildConfigModule()
     policy = module.publish_build_policy()
     assert policy.nas_migration_required is False
     assert policy.mcp_catalog_required is True
+
+def test_empty_scalar_is_rejected_at_config_load(monkeypatch):
+    # ``nas_migration_required:``（空值 None）必须响亮失败：静默取默认会让
+    # required 部署无声跳过迁移，把坏挂载藏起来。
+    _set_raw_block(monkeypatch, {"nas_migration_required": None})
+    with pytest.raises(ValueError, match="nas_migration_required"):
+        PublishBuildConfigModule().publish_build_policy()
+
+
+def test_string_boolean_is_rejected(monkeypatch):
+    # YAML 引号误裹成字符串时，bool("false") 真值语义会把宽容部署反转成
+    # 响亮失败 —— 配置加载期拒绝而不是运行期惊吓。
+    _set_raw_block(monkeypatch, {"mcp_catalog_required": "false"})
+    with pytest.raises(ValueError, match="mcp_catalog_required"):
+        PublishBuildConfigModule().publish_build_policy()
+
+
+def test_unknown_keys_are_rejected(monkeypatch):
+    _set_raw_block(
+        monkeypatch,
+        {
+            "nas_migration_required": False,
+            "nas_migraton_required": False,  # typo 键必须报错而不是静默忽略
+        },
+    )
+    with pytest.raises(ValueError, match="nas_migraton_required"):
+        PublishBuildConfigModule().publish_build_policy()
+
+
+def _set_raw_block(monkeypatch, block: dict) -> None:
+    monkeypatch.setattr(publish_build_config_module, "_block", lambda: dict(block))

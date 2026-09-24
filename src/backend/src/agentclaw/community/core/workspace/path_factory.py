@@ -27,22 +27,6 @@ SQLITE_PERSONAL_ROOT = Path.home() / ".moltis"
 # NAS挂载根目录
 DEFAULT_ARCA_ROOT = Path("/home/admin/.merge_nas")
 
-
-def _get_arca_root() -> Path:
-    """Read arca_root from env, then the process-cached config provider.
-
-    Same override chain as ``_get_aidesktop_root``: deployments without the
-    prod NAS mount (singlebox / local-k8s with a shared hostPath dir) point
-    this at their own root; business code derives bot NAS paths through this
-    seam instead of mounting the prod path into every environment.
-    """
-    value = os.getenv("ARCA_ROOT")
-    if not value:
-        from agentclaw.community.core.config.provider import load_config
-
-        value = load_config().user_config.get("arca_root")
-    return Path(value).expanduser() if value else DEFAULT_ARCA_ROOT
-
 def _get_aidesktop_root() -> Path:
     """Read aidesktop_root from env, then the process-cached config provider."""
     value = os.getenv("AIDESKTOP_ROOT")
@@ -156,13 +140,17 @@ def get_bot_nas_dir(
     bot_id: str,
     engine_type: str,
     entity_type: str = "staff",
+    arca_root: str | Path | None = None,
 ) -> Path:
     """Bot 远端 NAS 挂载目录: {arca_root}/get_bot_nas_storage_id
 
-    arca_root 经 ``_get_arca_root`` 解析（env ARCA_ROOT → user_config.arca_root
-    → DEFAULT_ARCA_ROOT），无 NAS 挂载的部署指向自己的共享目录即可。
+    ``arca_root`` 由调用方经注入传入（``WorkspaceConfig.arca_root``，
+    DI 边界做 expanduser/abspath）；缺省回落 ``DEFAULT_ARCA_ROOT``。
+    无 NAS 挂载的部署在 workspace 块指向自己的共享目录即可。本函数
+    不读 env / 不碰配置链 —— core 里环境差异只经注入参数进来。
     """
-    return _get_arca_root() / get_bot_nas_storage_id(entity_id, bot_id, engine_type, entity_type)
+    root = Path(arca_root).expanduser() if arca_root else DEFAULT_ARCA_ROOT
+    return root / get_bot_nas_storage_id(entity_id, bot_id, engine_type, entity_type)
 
 
 def get_bot_nas_storage_id(
@@ -371,8 +359,15 @@ class WorkspacePathFactory:
     """
 
     @inject
-    def __init__(self, skill_repo_sync: SkillRepoSyncPlugin) -> None:
+    def __init__(
+        self,
+        skill_repo_sync: SkillRepoSyncPlugin,
+        arca_root: str = DEFAULT_ARCA_ROOT,
+    ) -> None:
         self._skill_repo_sync = skill_repo_sync
+        # 部署的 NAS staging 根（WorkspaceConfig.arca_root 经 DI 注入；
+        # 直接构造回落 prod 默认）。core 不读 env —— 环境差异只经参数进来。
+        self._arca_root = arca_root
 
     def get_entity_identity_dir(
         self, entity_id: str, entity_type: str = "staff", engine_type: str = "openclaw"
@@ -393,7 +388,9 @@ class WorkspacePathFactory:
         self, entity_id: str, bot_id: str, engine_type: str, entity_type: str = "staff"
     ) -> Path:
         # NAS 路径 (/home/admin/.merge_nas/...) 跟 aidesktop 无关, 不翻译。
-        return get_bot_nas_dir(entity_id, bot_id, engine_type, entity_type)
+        return get_bot_nas_dir(
+            entity_id, bot_id, engine_type, entity_type, arca_root=self._arca_root
+        )
 
     def get_bot_nas_storage_id(
         self, entity_id: str, bot_id: str, engine_type: str, entity_type: str = "staff"

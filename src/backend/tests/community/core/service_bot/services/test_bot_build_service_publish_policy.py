@@ -185,3 +185,24 @@ class TestWaitForDeviceReady:
             timeout_seconds=0.05,
             poll_interval_seconds=0.01,
         )
+
+def test_optional_skip_still_scaffolds_target_dir(tmp_path: Path):
+    # 谎报修除（review F1）: 部署声明无 NAS 显式跳过迁移时，versioned
+    # target 仍必须真实存在 —— build 结果钉着 build_target_path，success
+    # 不能引用从未创建的路径。
+    service = _make_service(PERMISSIVE_POLICY)
+    service._run_local_command = MagicMock()
+    target_dir = tmp_path / "target"
+
+    ok = service._migrate_bot_instance(
+        device_id="device-1",
+        source_dir=tmp_path / "nas-root" / "bot-a",
+        target_dir=target_dir,
+        version_str="v1",
+        is_nas=True,
+        nas_storage_id=tmp_path / "nas-root",
+        build_plan=_make_plan(),
+        provider=MagicMock(),
+    )
+    assert ok is True
+    assert target_dir.exists(), "skip 必须留下真实存在的 versioned target"
