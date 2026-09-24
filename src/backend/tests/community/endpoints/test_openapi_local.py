@@ -35,6 +35,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.local_bot_workflow_service import (
     LocalBotWorkflowServiceProtocol,
 )
+from agentclaw.community.api.local_progress_service import LocalProgressServiceProtocol
 from agentclaw.community.core.bot_inventory.types import LocalAuthStatusResult
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -183,6 +184,19 @@ def _seed_happy_services(world) -> None:
         },
     )
 
+    def get_progress(_self, **_kwargs):
+        return {
+            "status": "starting",
+            "progress": 75,
+            "steps": [{"name": "启动", "status": "running"}],
+        }
+
+    bind_overrides(
+        world,
+        LocalProgressServiceProtocol,
+        {"get": get_progress},
+    )
+
 
 _CREATE_BODY = {
     "bot_name": "Local",
@@ -273,6 +287,19 @@ _HAPPY_CASES = (
         CaseInput(path_params=_PATH_PARAMS, query_params=_query(), headers=_HEADERS),
         200,
         {"data": {"deleted": True}},
+    ),
+    (
+        "GET",
+        f"{_BOT_PATH}/start-progress",
+        CaseInput(path_params=_PATH_PARAMS, query_params=_query(), headers=_HEADERS),
+        200,
+        {
+            "data": {
+                "status": "starting",
+                "progress": 75,
+                "steps": [{"name": "启动", "status": "running"}],
+            }
+        },
     ),
 )
 
