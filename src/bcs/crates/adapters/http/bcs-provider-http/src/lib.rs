@@ -279,7 +279,7 @@ impl InteractionProviderPort for HttpProviderTransport {
         );
         params.insert(
             "kind".to_string(),
-            Value::String(interaction_kind_slug(command.kind).to_string()),
+            Value::String(command.kind.as_slug().to_string()),
         );
         params.insert(
             "idempotencyKey".to_string(),
@@ -320,14 +320,6 @@ impl InteractionProviderPort for HttpProviderTransport {
             retryable: ack.retryable,
             error: ack.error,
         })
-    }
-}
-
-fn interaction_kind_slug(kind: InteractionKind) -> &'static str {
-    match kind {
-        InteractionKind::Exec => "exec",
-        InteractionKind::AskUser => "ask_user",
-        InteractionKind::ModeSwitch => "mode_switch",
     }
 }
 
