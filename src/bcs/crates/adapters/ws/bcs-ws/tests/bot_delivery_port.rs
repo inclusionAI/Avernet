@@ -274,3 +274,161 @@ async fn kick_returns_false_when_bot_not_connected() {
         .await;
     assert!(!kicked);
 }
+
+fn interaction_resolve_command(bot_id: &str, run_id: &str, interaction_id: &str) -> bcs_service_api::InteractionProviderCommand {
+    bcs_service_api::InteractionProviderCommand {
+        target: BotDeliveryTarget::WebSocket {
+            bot_id: bot_id.to_string(),
+        },
+        provider_bypass_headers: Vec::new(),
+        bcs_run_id: run_id.to_string(),
+        provider_run_id: run_id.to_string(),
+        bcs_session_id: "group-1:aaaaaaaa".to_string(),
+        group_id: "group-1".to_string(),
+        bot_id: bot_id.to_string(),
+        interaction_id: interaction_id.to_string(),
+        kind: bcs_service_api::InteractionKind::Exec,
+        idempotency_key: format!("idem-{interaction_id}"),
+        resolution: serde_json::json!({}),
+    }
+}
+
+#[tokio::test]
+async fn resolve_interaction_returns_ack_on_success_response() {
+    use bcs_service_api::InteractionProviderPort;
+
+    let registry = std::sync::Arc::new(BotConnectionRegistry::new());
+    let (tx, mut rx) = mpsc::channel(8);
+    registry.connect("bot-resolve-1".to_string(), tx).await;
+
+    let responder_registry = registry.clone();
+    let responder = tokio::spawn(async move {
+        let sent = rx.recv().await.expect("frame sent to bot");
+        let frame: serde_json::Value = serde_json::from_str(&sent).unwrap();
+        assert_eq!(frame["method"], "interaction.resolve");
+        assert_eq!(frame["params"]["bcsRunId"], "run-1");
+        assert_eq!(frame["params"]["runId"], "run-1");
+        assert_eq!(frame["params"]["interactionId"], "int-1");
+        assert_eq!(frame["params"]["kind"], "exec");
+        assert_eq!(frame["params"]["idempotencyKey"], "idem-int-1");
+        let request_id = frame["id"].as_str().unwrap().to_string();
+        responder_registry
+            .resolve_pending_interaction_request(
+                &request_id,
+                ResponseFrame::ok(request_id.clone(), serde_json::Value::Null),
+            )
+            .await;
+    });
+
+    let command = {
+        let mut command = interaction_resolve_command("bot-resolve-1", "run-1", "int-1");
+        command.resolution = serde_json::json!({"approved": true});
+        command
+    };
+    let ack = registry.resolve_interaction(command).await.unwrap();
+    assert!(ack.ok);
+    assert_eq!(ack.retryable, None);
+    assert_eq!(ack.error, None);
+
+    responder.await.unwrap();
+}
+
+#[tokio::test]
+async fn resolve_interaction_fails_immediately_when_bot_not_connected() {
+    use bcs_service_api::InteractionProviderPort;
+
+    let registry = BotConnectionRegistry::new();
+
+    let command = interaction_resolve_command("bot-never-connected", "run-disconnected", "int-disconnected");
+    let error = registry
+        .resolve_interaction(command)
+        .await
+        .expect_err("unconnected bot must fail immediately, without waiting for the transport timeout");
+    assert!(matches!(error, ServiceError::BotNotConnected(_)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn resolve_interaction_times_out_when_bot_does_not_respond() {
+    use bcs_service_api::InteractionProviderPort;
+
+    let registry = BotConnectionRegistry::new();
+    let (tx, _rx) = mpsc::channel(8);
+    registry.connect("bot-resolve-timeout".to_string(), tx).await;
+
+    // Bot is connected but never replies. `start_paused = true` runs the
+    // test on a paused tokio clock: the 15s `tokio::time::timeout` inside
+    // `resolve_interaction` is auto-advanced without real waiting.
+    let command = interaction_resolve_command("bot-resolve-timeout", "run-timeout", "int-timeout");
+    let error = registry
+        .resolve_interaction(command)
+        .await
+        .expect_err("must time out when the bot never sends a ResponseFrame");
+    assert!(matches!(error, ServiceError::InternalError(_)));
+    assert!(error.to_string().contains("timed out"));
+}
+
+#[tokio::test]
+async fn resolve_interaction_maps_unknown_method_to_non_retryable() {
+    use bcs_service_api::InteractionProviderPort;
+
+    let registry = std::sync::Arc::new(BotConnectionRegistry::new());
+    let (tx, mut rx) = mpsc::channel(8);
+    registry.connect("bot-resolve-unsupported".to_string(), tx).await;
+
+    let responder_registry = registry.clone();
+    let responder = tokio::spawn(async move {
+        let sent = rx.recv().await.expect("frame sent to bot");
+        let frame: serde_json::Value = serde_json::from_str(&sent).unwrap();
+        let request_id = frame["id"].as_str().unwrap().to_string();
+        responder_registry
+            .resolve_pending_interaction_request(
+                &request_id,
+                ResponseFrame::error(
+                    request_id.clone(),
+                    "unknown_method",
+                    "interaction.resolve is not supported",
+                ),
+            )
+            .await;
+    });
+
+    let command = interaction_resolve_command("bot-resolve-unsupported", "run-unsupported", "int-unsupported");
+    let ack = registry.resolve_interaction(command).await.unwrap();
+    assert!(!ack.ok);
+    assert_eq!(ack.retryable, Some(false));
+
+    responder.await.unwrap();
+}
+
+#[tokio::test]
+async fn resolve_interaction_maps_business_rejection_to_retryable() {
+    use bcs_service_api::InteractionProviderPort;
+
+    let registry = std::sync::Arc::new(BotConnectionRegistry::new());
+    let (tx, mut rx) = mpsc::channel(8);
+    registry.connect("bot-resolve-rejected".to_string(), tx).await;
+
+    let responder_registry = registry.clone();
+    let responder = tokio::spawn(async move {
+        let sent = rx.recv().await.expect("frame sent to bot");
+        let frame: serde_json::Value = serde_json::from_str(&sent).unwrap();
+        let request_id = frame["id"].as_str().unwrap().to_string();
+        responder_registry
+            .resolve_pending_interaction_request(
+                &request_id,
+                ResponseFrame::error(
+                    request_id.clone(),
+                    "resolution_conflict",
+                    "another resolution is already in flight",
+                ),
+            )
+            .await;
+    });
+
+    let command = interaction_resolve_command("bot-resolve-rejected", "run-rejected", "int-rejected");
+    let ack = registry.resolve_interaction(command).await.unwrap();
+    assert!(!ack.ok);
+    assert_eq!(ack.retryable, Some(true));
+
+    responder.await.unwrap();
+}

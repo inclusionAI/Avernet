@@ -5,7 +5,8 @@ use bcs_domain::BotDeliveryTarget;
 use bcs_protocol::{BcsFrame, ChatAbortParams, ChatAbortResult, RequestFrame, ResponseFrame};
 use bcs_service_api::{
     BotAbortDeliveryCommand, BotAbortDeliveryResult, BotConnectionControlPort, BotDeliveryCommand,
-    BotDeliveryPort, BotDeliveryResult, KickReason, ServiceError, ServiceResult,
+    BotDeliveryPort, BotDeliveryResult, InteractionKind, InteractionProviderAck,
+    InteractionProviderCommand, InteractionProviderPort, KickReason, ServiceError, ServiceResult,
 };
 use tokio::sync::{RwLock, mpsc, oneshot};
 use tracing::{debug, warn};
@@ -63,6 +64,7 @@ pub struct BotConnectionRegistry {
     connections: RwLock<HashMap<String, BotConnection>>,
     pending_requests: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>,
     pending_abort_requests: RwLock<HashMap<String, oneshot::Sender<ResponseFrame>>>,
+    pending_interaction_requests: RwLock<HashMap<String, oneshot::Sender<ResponseFrame>>>,
 }
 
 impl BotConnectionRegistry {
@@ -300,6 +302,137 @@ impl BotConnectionRegistry {
         };
         let _ = tx.send(response);
         true
+    }
+
+    pub async fn resolve_pending_interaction_request(
+        &self,
+        request_id: &str,
+        response: ResponseFrame,
+    ) -> bool {
+        let mut pending = self.pending_interaction_requests.write().await;
+        let Some(tx) = pending.remove(request_id) else {
+            return false;
+        };
+        let _ = tx.send(response);
+        true
+    }
+}
+
+/// WS 是常驻连接,往返延迟应远低于 HTTP 回调场景(HttpProviderTransport
+/// 用 65s);对齐 chat.abort 的量级。
+const INTERACTION_RESOLVE_TIMEOUT_MS: u64 = 15_000;
+
+#[async_trait]
+impl InteractionProviderPort for BotConnectionRegistry {
+    async fn resolve_interaction(
+        &self,
+        command: InteractionProviderCommand,
+    ) -> ServiceResult<InteractionProviderAck> {
+        let BotDeliveryTarget::WebSocket { bot_id } = &command.target else {
+            return Err(ServiceError::InvalidOperation {
+                message: "websocket registry cannot resolve an HTTP Provider interaction".to_string(),
+                request_id: Some(command.bcs_run_id),
+            });
+        };
+
+        let mut params = match command.resolution {
+            serde_json::Value::Object(map) => map,
+            _ => {
+                return Err(ServiceError::InvalidOperation {
+                    message: "interaction resolution must be a JSON object".to_string(),
+                    request_id: Some(command.bcs_run_id),
+                });
+            }
+        };
+        params.insert(
+            "bcsRunId".to_string(),
+            serde_json::Value::String(command.bcs_run_id.clone()),
+        );
+        params.insert(
+            "runId".to_string(),
+            serde_json::Value::String(command.provider_run_id),
+        );
+        params.insert(
+            "interactionId".to_string(),
+            serde_json::Value::String(command.interaction_id),
+        );
+        params.insert(
+            "kind".to_string(),
+            serde_json::Value::String(command.kind.as_slug().to_string()),
+        );
+        params.insert(
+            "idempotencyKey".to_string(),
+            serde_json::Value::String(command.idempotency_key),
+        );
+
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let frame = BcsFrame::Request(RequestFrame::new(
+            request_id.clone(),
+            "interaction.resolve",
+            Some(serde_json::Value::Object(params)),
+        ));
+        let frame_json = serde_json::to_string(&frame).map_err(|error| {
+            ServiceError::InternalError(format!("serialize interaction.resolve frame: {error}"))
+        })?;
+
+        let (tx, rx) = oneshot::channel();
+        self.pending_interaction_requests
+            .write()
+            .await
+            .insert(request_id.clone(), tx);
+
+        if self.send_frame_json(bot_id, frame_json).await.is_err() {
+            self.pending_interaction_requests
+                .write()
+                .await
+                .remove(&request_id);
+            return Err(ServiceError::BotNotConnected(bot_id.clone()));
+        }
+
+        let response = match tokio::time::timeout(
+            std::time::Duration::from_millis(INTERACTION_RESOLVE_TIMEOUT_MS),
+            rx,
+        )
+        .await
+        {
+            Ok(Ok(response)) => response,
+            Ok(Err(_)) => {
+                return Err(ServiceError::InternalError(
+                    "interaction.resolve response channel closed".to_string(),
+                ));
+            }
+            Err(_) => {
+                self.pending_interaction_requests
+                    .write()
+                    .await
+                    .remove(&request_id);
+                return Err(ServiceError::InternalError(format!(
+                    "interaction.resolve request timed out after {INTERACTION_RESOLVE_TIMEOUT_MS}ms"
+                )));
+            }
+        };
+
+        if !response.ok {
+            let unsupported = response
+                .error
+                .as_ref()
+                .is_some_and(|error| is_unknown_method_code(&error.code));
+            let message = response.error.map_or_else(
+                || "Bot rejected interaction.resolve".to_string(),
+                |error| format!("{}: {}", error.code, error.message),
+            );
+            return Ok(InteractionProviderAck {
+                ok: false,
+                retryable: Some(!unsupported),
+                error: Some(message),
+            });
+        }
+
+        Ok(InteractionProviderAck {
+            ok: true,
+            retryable: None,
+            error: None,
+        })
     }
 }
 

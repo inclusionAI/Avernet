@@ -592,6 +592,15 @@ async fn handle_response_frame(
         return Ok(());
     }
 
+    if state
+        .bot_connections
+        .resolve_pending_interaction_request(run_id, res.clone())
+        .await
+    {
+        debug!(request_id = %run_id, ok = res.ok, "matched interaction.resolve ResponseFrame");
+        return Ok(());
+    }
+
     // Check if this is a one-shot pending request (e.g., chat.history)
     let payload = if res.ok {
         res.payload.clone().unwrap_or(Value::Null)
