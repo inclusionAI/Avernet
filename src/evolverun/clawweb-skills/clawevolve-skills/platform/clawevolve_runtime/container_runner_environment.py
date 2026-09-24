@@ -12,8 +12,16 @@ class ContainerRunnerEnvironment:
 
     def startup_environment(self) -> dict[str, str]:
         workspace = self.env.get("OPENCLAW_WORKSPACE") or "/home/admin/.openclaw/workspace"
+        state = (self.env.get("OPENCLAW_STATE_DIR")
+                 or self.env.get("OPENCLAW_HOME")
+                 or "/home/admin/.openclaw")
         return {"OPENCLAW_WORKSPACE": workspace,
-                "OPENCLAW_HOME": self.env.get("OPENCLAW_HOME") or str(Path(workspace).parent)}
+                # OPENCLAW_HOME remains the legacy ClawEvolve state-root alias.
+                # Modern OpenClaw commands must use the explicit state/config
+                # variables, otherwise they append another `.openclaw` level.
+                "OPENCLAW_HOME": state,
+                "OPENCLAW_STATE_DIR": state,
+                "OPENCLAW_CONFIG_PATH": self.env.get("OPENCLAW_CONFIG_PATH") or str(Path(state) / "openclaw.json")}
 
     def validate_user(self, user: str) -> None:
         if user != "admin":

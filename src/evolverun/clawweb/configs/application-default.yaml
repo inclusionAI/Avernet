@@ -8,6 +8,7 @@ database:
 baas:
   iamtoken: ""
   baseUrl: ""
+  commandTimeoutSeconds: 60
   environments:
     pre:
       apiKey: ""

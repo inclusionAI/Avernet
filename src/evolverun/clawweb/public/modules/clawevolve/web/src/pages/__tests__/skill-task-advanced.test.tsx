@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter, useNavigate } from 'react-router-dom'
 import Evolve from '../Evolve'
 
-const api = vi.hoisted(() => ({ evolve: { capabilities: async () => ({ skillManagement: true, stageCustomization: true }),
+const api = vi.hoisted(() => ({ evolve: { capabilities: vi.fn(),
   getSkillAsset: vi.fn(), getSkillTaskDefaults: vi.fn(), taskDefinitions: vi.fn(), listSkillAssets: vi.fn(),
   stageCatalog: vi.fn(), listStageSkills: vi.fn(), createTask: vi.fn(), createDiagnosis: vi.fn(),
 }, bots: { list: vi.fn() } }))
@@ -36,6 +36,7 @@ async function ready(type = 'diagnose') { await waitFor(() => expect(submit(type
 beforeEach(() => {
   vi.stubGlobal('React', React)
   vi.resetAllMocks()
+  api.evolve.capabilities.mockResolvedValue({ skillManagement: true, stageCustomization: true })
   api.evolve.getSkillAsset.mockResolvedValue(asset)
   api.evolve.getSkillTaskDefaults.mockResolvedValue(defaults)
   api.evolve.taskDefinitions.mockResolvedValue({ tasks: [], variants: { insight_improvement: [] } })
@@ -113,6 +114,28 @@ describe('fixed Skill advanced task form', () => {
     if (type === 'full') expect(create.mock.calls[0][0]).toMatchObject({ taskType: 'full', goal: defaults.optimize.goal,
       stageSelection: { diagnose: true, hardening: false, plan: true, optimize: true }, stageExtensions })
     else expect(create.mock.calls[0][0]).toMatchObject({ stageExtensions })
+  })
+
+  it('keeps direct-goal evolution visible and submits it without Diagnose', async () => {
+    open('full')
+    await ready('full')
+    fireEvent.click(screen.getByRole('button', { name: /按目标进化/ }))
+    expect(screen.queryByRole('combobox', { name: '诊断模型' })).toBeNull()
+    expect(screen.getByRole('combobox', { name: '一句话模式模型' })).toBeTruthy()
+    fireEvent.click(submit('full'))
+    await waitFor(() => expect(api.evolve.createTask).toHaveBeenCalledOnce())
+    expect(api.evolve.createTask.mock.calls[0][0]).toMatchObject({
+      taskType: 'full',
+      inputMode: 'direct_goal',
+      goal: defaults.optimize.goal,
+      stageSelection: { diagnose: false, hardening: false, plan: true, optimize: true },
+    })
+  })
+
+  it('keeps direct-goal evolution visible when Stage customization is unavailable', async () => {
+    api.evolve.capabilities.mockResolvedValue({ skillManagement: false, stageCustomization: false })
+    render(<MemoryRouter initialEntries={['/evolve/new?type=full']}><Evolve /></MemoryRouter>)
+    expect(await screen.findByRole('button', { name: /按目标进化/ })).toBeTruthy()
   })
 
   it('opens the fixed Skill hardening form with editable goal, model and frozen Stage defaults', async () => {

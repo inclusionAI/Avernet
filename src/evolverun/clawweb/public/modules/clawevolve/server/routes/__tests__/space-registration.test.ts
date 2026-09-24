@@ -131,6 +131,18 @@ async function createTeamStage() {
 }
 
 describe("Space registration with real repositories", () => {
+  it.each(["/stage-skills", "/stage-developments"])("forwards browser context for %s space checks", async path => {
+    const referer = "https://workbench.example/evolve/new";
+    const origin = "https://workbench.example";
+    const response = await fetch(`${baseUrl}${path}`, {
+      headers: { "X-User-Id": owner, Referer: referer, Origin: origin },
+    });
+    expect(await bodyOf(response)).toEqual({ items: [] });
+    expect(hostSpaces.listAccessibleSpaces).toHaveBeenCalledWith({ identity: expect.objectContaining({
+      userId: owner, referer, origin,
+    }) });
+  });
+
   it.each([
     { selection: "default PERSONAL", spaceId: undefined, expected: personalView },
     { selection: "explicit TEAM", spaceId: team.id, expected: teamView },

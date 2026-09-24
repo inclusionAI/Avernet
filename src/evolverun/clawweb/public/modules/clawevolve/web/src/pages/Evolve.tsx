@@ -1023,6 +1023,20 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             <TaskModelFields title="执行模型" model={hardeningModel} configuredModel={localModel} onModelChange={setHardeningModel} />
           </>}
 
+          {taskType === 'full' && !improvementSource && effectiveStageSelection.plan && <FullFlowFields
+            mode={fullInputMode}
+            onModeChange={(value) => {
+              setFullInputMode(value)
+              setStageSelection((current) => ({ ...current, diagnose: value === 'diagnose_goal' }))
+            }}
+            goal={evolutionGoal}
+            onGoalChange={setEvolutionGoal}
+            model={directGoalModel}
+            onModelChange={setDirectGoalModel}
+            configuredModel={localModel}
+            openVersion={openVersion}
+          />}
+
           {(taskType === 'diagnose' || (taskType === 'full' && !improvementSource && fullInputMode === 'diagnose_goal')) && <DiagnoseFields
             sessionSource={diagnoseSessionSource}
             serviceSourceAvailable={serviceSourceAvailable}
@@ -1058,15 +1072,6 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             onSessionFilterEnabledChange={setSessionFilterEnabled}
             sessionIdentifiersText={sessionIdentifiersText}
             onSessionIdentifiersTextChange={setSessionIdentifiersText}
-          />}
-          {taskType === 'full' && !improvementSource && effectiveStageSelection.plan && <FullFlowFields
-            diagnoseEnabled={effectiveStageSelection.diagnose}
-            goal={evolutionGoal}
-            onGoalChange={setEvolutionGoal}
-            model={directGoalModel}
-            onModelChange={setDirectGoalModel}
-            configuredModel={localModel}
-            openVersion={openVersion}
           />}
           {taskType === 'optimize' && <><OptimizeFields botSelected={Boolean(botId)} tasks={diagnosisTasks} selectedTaskIds={sourceDiagnosisTaskIds} onTaskIdsChange={setSourceDiagnosisTaskIds} /><TaskModelFields title="优化模型" model={workflowModel} configuredModel={localModel} onModelChange={setWorkflowModel} /></>}
           {taskType === 'bench' && <><BenchFields domains={benchDomains} domainId={benchDomainId} onDomainIdChange={setBenchDomainId} error={benchDomainsError} /><TaskModelFields title="Bench 模型" model={workflowModel} configuredModel={localModel} onModelChange={setWorkflowModel} /></>}
@@ -1564,8 +1569,9 @@ function PackRestoreFields({ packs, selectedPackId, onPackIdChange, loading, err
   )
 }
 
-function FullFlowFields({ diagnoseEnabled, goal, onGoalChange, model, onModelChange, configuredModel, openVersion }: {
-  diagnoseEnabled: boolean;
+function FullFlowFields({ mode, onModeChange, goal, onGoalChange, model, onModelChange, configuredModel, openVersion }: {
+  mode: FullInputMode;
+  onModeChange: (value: FullInputMode) => void;
   goal: string;
   onGoalChange: (value: string) => void;
   model: string;
@@ -1580,7 +1586,26 @@ function FullFlowFields({ diagnoseEnabled, goal, onGoalChange, model, onModelCha
   const knownModel = modelOptions.includes(model as (typeof modelOptions)[number])
   return (
     <>
-      {!diagnoseEnabled && <section className="border-t border-gray-100 pt-6">
+      <section className="border-t border-gray-100 pt-6">
+        <h2 className="text-sm font-semibold text-gray-900">进化方式</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {([
+            ['diagnose_goal', '先诊断再进化', '分析历史 Session，再结合目标生成 Bench 并优化。'],
+            ['direct_goal', '按目标进化', '跳过 Session 诊断，根据一句话目标生成 Bench 并优化。'],
+          ] as const).map(([value, title, description]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onModeChange(value)}
+              className={`rounded-xl border p-4 text-left transition ${mode === value ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500/10' : 'border-gray-200 bg-white hover:border-blue-200'}`}
+            >
+              <span className={`block text-sm font-semibold ${mode === value ? 'text-blue-800' : 'text-gray-900'}`}>{title}</span>
+              <span className="mt-1.5 block text-xs leading-5 text-gray-500">{description}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+      {mode === 'direct_goal' && <section className="border-t border-gray-100 pt-6">
         <h2 className="text-sm font-semibold text-gray-900">规划模型</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <EvolveModelFields
@@ -1609,7 +1634,7 @@ function FullFlowFields({ diagnoseEnabled, goal, onGoalChange, model, onModelCha
             onChange={(event) => onGoalChange(event.target.value)}
             placeholder="例如：通过优化相关 Skill 和工具调用流程，使工具调用失败与异步任务未完成问题的任务完成率达到90%以上，优先解决诊断阶段识别出的高频根因。"
           />
-          <span className="mt-1 block text-xs leading-5 text-gray-400">{!diagnoseEnabled
+          <span className="mt-1 block text-xs leading-5 text-gray-400">{mode === 'direct_goal'
             ? 'Plan 将根据该目标生成预期验证 Case、Spec 与 Bench Domain。'
             : 'Diagnose 提供事实和高频根因，Plan 将结合该目标生成 Spec 与 Bench Case。'}{goal.length}/2000</span>
         </label>

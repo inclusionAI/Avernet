@@ -13,6 +13,8 @@ INVOCATION_ID=""
 ARGS_BASE64=""
 LAUNCH_URL=""
 LAUNCH_SHA256=""
+BOOTSTRAP_STEP_ID=""
+DETACHED_BOOTSTRAP="${CLAWEVOLVE_DETACHED_BOOTSTRAP:-false}"
 COMMAND_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -22,9 +24,15 @@ while [[ $# -gt 0 ]]; do
     --args-base64) ARGS_BASE64="${2:-}"; shift 2 ;;
     --launch-url) LAUNCH_URL="${2:-}"; shift 2 ;;
     --launch-sha256) LAUNCH_SHA256="${2:-}"; shift 2 ;;
+    --bootstrap-step-id) BOOTSTRAP_STEP_ID="${2:-}"; shift 2 ;;
     *) printf '{"ok":false,"error":"unknown argument"}\n' >&2; exit 2 ;;
   esac
 done
+
+[[ "$DETACHED_BOOTSTRAP" == "true" || "$DETACHED_BOOTSTRAP" == "false" ]] || {
+  printf '{"ok":false,"error":"invalid detached bootstrap mode"}\n' >&2
+  exit 2
+}
 
 if [[ -n "$LAUNCH_URL" || -n "$LAUNCH_SHA256" ]]; then
   if [[ -z "$LAUNCH_URL" || -z "$LAUNCH_SHA256" || -n "$STAGE" || -n "$INVOCATION_ID" || -n "$ARGS_BASE64" ]]; then
@@ -195,6 +203,16 @@ if (( ! INIT_MODE )); then
 else
   INVOCATION_ID="INIT"
 fi
+if [[ "$DETACHED_BOOTSTRAP" == "true" ]]; then
+  validate_id "bootstrap-step-id" "$BOOTSTRAP_STEP_ID"
+  [[ "$BOOTSTRAP_STEP_ID" == "$STEP_ID" ]] || {
+    printf '{"ok":false,"error":"bootstrap step-id mismatch"}\n' >&2
+    exit 2
+  }
+elif [[ -n "$BOOTSTRAP_STEP_ID" ]]; then
+  printf '{"ok":false,"error":"bootstrap-step-id is internal"}\n' >&2
+  exit 2
+fi
 if [[ "$STAGE" == "optimize" ]]; then
   [[ "$ROUND" =~ ^[0-9]+$ ]] && (( ROUND >= 1 && ROUND <= 100 )) || {
     printf '{"ok":false,"error":"invalid round"}\n' >&2
@@ -262,7 +280,18 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$(dirname "$INVOCATION_STATE_DIR")"
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+if [[ "$DETACHED_BOOTSTRAP" == "true" ]]; then
+  # The synchronous request process creates the invocation lock, then hands
+  # ownership to this detached process before acknowledging BaaS.
+  for _ in {1..100}; do
+    [[ "$(cat "$LOCK_DIR/owner_pid" 2>/dev/null || true)" == "$$" ]] && break
+    sleep 0.01
+  done
+  [[ "$(cat "$LOCK_DIR/owner_pid" 2>/dev/null || true)" == "$$" ]] || {
+    printf '{"ok":false,"error":"detached bootstrap lock handoff failed"}\n' >&2
+    exit 1
+  }
+elif ! mkdir "$LOCK_DIR" 2>/dev/null; then
   LOCK_PID=""
   if [[ -f "$LOCK_DIR/owner_pid" ]]; then
     LOCK_PID="$(tr -cd '0-9' < "$LOCK_DIR/owner_pid")"
@@ -604,6 +633,49 @@ sync_debug_skills() {
   log_line "debug skill migration completed: copied=${copied} root=${CLAWEVOLVE_SKILLS_ROOT}"
   cleanup_legacy_release_skills
 }
+
+if [[ "$DETACHED_BOOTSTRAP" == "false" && "$STAGE" != "runtime-cleanup" && "$STAGE" != "init" ]]; then
+  # A first install or release upgrade may take minutes on the Bot workspace.
+  # Acknowledge the synchronous BaaS execute-command request first, then let
+  # this invocation's detached child synchronize Skills and launch the Stage.
+  RUNNER_PATH="${SCRIPT_DIR}/clawevolve_async_runner.sh"
+  TASK_LAUNCHER="${SCRIPT_DIR}/clawevolve_task_launcher.sh"
+  if ! RUNNER_SYNTAX_ERROR="$(bash -n "$RUNNER_PATH" 2>&1)"; then
+    log_line "detached bootstrap syntax validation failed: ${RUNNER_SYNTAX_ERROR}"
+    printf '{"ok":false,"code":"RUNNER_INVALID","error":"runner syntax validation failed","task_id":"%s","step_id":"%s"}\n' \
+      "$TASK_ID" "$STEP_ID" >&2
+    exit 1
+  fi
+  if [[ ! -x "$TASK_LAUNCHER" ]] || ! LAUNCHER_SYNTAX_ERROR="$(bash -n "$TASK_LAUNCHER" 2>&1)"; then
+    log_line "task launcher validation failed before detached bootstrap: ${LAUNCHER_SYNTAX_ERROR:-not executable}"
+    printf '{"ok":false,"code":"TASK_LAUNCHER_INVALID","error":"task launcher validation failed","task_id":"%s","step_id":"%s"}\n' \
+      "$TASK_ID" "$STEP_ID" >&2
+    exit 1
+  fi
+  BOOTSTRAP_COMMAND=(
+    env CLAWEVOLVE_DETACHED_BOOTSTRAP=true
+    bash "$RUNNER_PATH"
+    --stage "$STAGE"
+    --invocation-id "$INVOCATION_ID"
+    --args-base64 "$ARGS_BASE64"
+    --bootstrap-step-id "$STEP_ID"
+  )
+  if command -v setsid >/dev/null 2>&1; then
+    setsid nohup "${BOOTSTRAP_COMMAND[@]}" >> "$LOG_FILE" 2>&1 < /dev/null &
+  else
+    nohup "${BOOTSTRAP_COMMAND[@]}" >> "$LOG_FILE" 2>&1 < /dev/null &
+  fi
+  PID=$!
+  printf '%s\n' "$PID" > "$LOCK_DIR/owner_pid"
+  printf '%s\n' "$PID" > "$PID_FILE"
+  printf '%s\n' "$PID" > "$PGID_FILE"
+  printf '%s\n' "$PID" > "$CURRENT_PID_FILE"
+  printf '%s\n' "$PID" > "$CURRENT_PGID_FILE"
+  log_line "detached bootstrap started: pid=${PID} stage=${STAGE} invocation=${INVOCATION_ID}"
+  printf '{"ok":true,"status":"started","pid":%s,"task_id":"%s","step_id":"%s","invocation_id":"%s"}\n' \
+    "$PID" "$TASK_ID" "$STEP_ID" "$INVOCATION_ID"
+  exit 0
+fi
 
 if [[ "$STAGE" == "runtime-cleanup" ]]; then
   log_line "runtime cleanup: skip skill synchronization"

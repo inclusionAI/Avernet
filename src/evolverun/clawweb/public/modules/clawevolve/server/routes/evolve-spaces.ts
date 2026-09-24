@@ -5,7 +5,13 @@ import type { SpaceDirectory } from "../contracts/space-directory.js";
 
 export function spaceRequestIdentity(req: Request): RequestIdentity | null {
   const userId = String(req.header("X-User-Id") ?? "").trim();
-  return userId ? { userId, authorization: req.header("Authorization"), cookie: req.header("Cookie") } : null;
+  return userId ? {
+    userId,
+    authorization: req.header("Authorization"),
+    cookie: req.header("Cookie"),
+    referer: req.header("Referer") || undefined,
+    origin: req.header("Origin") || undefined,
+  } : null;
 }
 
 export function createEvolveSpacesRouter(port?: SpaceDirectory): Router {

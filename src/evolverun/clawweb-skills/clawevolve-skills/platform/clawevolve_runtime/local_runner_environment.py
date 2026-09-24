@@ -22,6 +22,7 @@ class LocalRunnerEnvironment:
             raise ValueError("local Runner paths must be directories")
         workspace_path.relative_to(state_path)
         return {"OPENCLAW_STATE_DIR": str(state_path), "OPENCLAW_HOME": str(state_path),
+                "OPENCLAW_CONFIG_PATH": str(state_path / "openclaw.json"),
                 "OPENCLAW_WORKSPACE": str(workspace_path), "ENGINE_RUNTIME_LAYOUT_HOME": str(state_path.parent),
                 "SECBAAS_SANDBOX_BACKEND": "local_proc"}
 

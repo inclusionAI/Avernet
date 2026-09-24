@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from clawevolve_plan.cli import _bind_runtime_paths, _parser
+from clawevolve_plan.cli import _bind_runtime_paths, _parser, _runtime_openclaw_home
 from clawevolve_plan.discovery.service import resolve_workspace_root
 
 
@@ -32,3 +32,10 @@ def test_container_paths_are_bound_to_the_current_local_bot(tmp_path: Path, monk
         assert args.evolve_results_dir == str(openclaw_home / "workspace" / "clawevolve_results")
         assert os.environ["CLAWEVOLVE_TARGET_WORKSPACE"] == str(candidate)
         assert resolve_workspace_root({}) == candidate.resolve()
+
+
+def test_runtime_home_prefers_explicit_openclaw_state_dir(monkeypatch) -> None:
+    monkeypatch.setenv("OPENCLAW_STATE_DIR", "/runtime/state")
+    monkeypatch.setenv("OPENCLAW_HOME", "/legacy/home")
+
+    assert _runtime_openclaw_home() == Path("/runtime/state")

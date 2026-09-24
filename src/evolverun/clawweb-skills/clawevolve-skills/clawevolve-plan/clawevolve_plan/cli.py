@@ -192,6 +192,9 @@ def _runtime_openclaw_home(explicit: str = "") -> Path | None:
     raw = str(explicit or "").strip()
     if raw:
         return Path(raw).expanduser()
+    state = str(os.environ.get("OPENCLAW_STATE_DIR", "")).strip()
+    if state:
+        return Path(state).expanduser()
     roots: list[Path] = []
     for value in (
         os.environ.get("OPENCLAW_HOME", ""),

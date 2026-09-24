@@ -158,7 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--openclaw-home",
-        default=os.environ.get("OPENCLAW_HOME", ""),
+        default=os.environ.get("OPENCLAW_STATE_DIR") or os.environ.get("OPENCLAW_HOME", ""),
         help=(
             "本地测试可选。指定要读取的 .openclaw 根目录；未提供时使用 ~/.openclaw。"
             "线上启动脚本不变，仅需额外追加该参数。"
