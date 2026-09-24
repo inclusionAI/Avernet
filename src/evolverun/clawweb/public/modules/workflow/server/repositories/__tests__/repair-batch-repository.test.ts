@@ -1,6 +1,5 @@
 // @vitest-environment node
-import type Database from 'better-sqlite3';
-import { DatabaseSync } from 'node:sqlite';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SqliteDatabase } from '../../../../../shared/server/db.js';
 import { migrations } from '../../../../../shared/server/schema.js';
@@ -22,13 +21,11 @@ const frozen = (items = [item()], revision = 1): RepairBatchInput => ({
 
 describe('repair item/revision storage using real SQLite', () => {
   let db: SqliteDatabase;
-  let raw: DatabaseSync;
+  let raw: Database.Database;
   let repo: RepairBatchRepository;
   beforeEach(async () => {
-    raw = new DatabaseSync(':memory:');
-    // Both drivers expose exec/prepare/all/run/close; exercise the production adapter
-    // against real SQLite without rebuilding a Node-22 native addon in shared deps.
-    db = new SqliteDatabase(raw as unknown as Database.Database);
+    raw = new Database(':memory:');
+    db = new SqliteDatabase(raw);
     raw.exec(`CREATE TABLE workflow_specs (workflow_id TEXT PRIMARY KEY);
       INSERT INTO workflow_specs VALUES ('wf-1'), ('wf-2');
       CREATE TABLE workflow_healing_outcomes (

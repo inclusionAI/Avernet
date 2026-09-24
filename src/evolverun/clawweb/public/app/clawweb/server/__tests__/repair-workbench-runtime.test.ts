@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
-import type Database from 'better-sqlite3';
+import Database from 'better-sqlite3';
 import express from 'express';
 import { SqliteDatabase, runMigrations } from '../../../../shared/server/db.js';
 import { createWorkflowRepairRuntime } from '../repair-workbench-runtime.js';
@@ -9,8 +8,8 @@ import type { RepairDispatchRequest } from '../../../../modules/workflow/server/
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jobId: string }>) {
-  const raw = new DatabaseSync(':memory:');
-  const db = new SqliteDatabase(raw as unknown as Database.Database);
+  const raw = new Database(':memory:');
+  const db = new SqliteDatabase(raw);
   cleanup.push(() => db.close());
   await runMigrations(db, 'sqlite');
   // Existing analysis tables are provisioned separately from Shared migrations,

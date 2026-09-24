@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
-import type Database from "better-sqlite3";
-import { DatabaseSync } from 'node:sqlite';
+import Database from "better-sqlite3";
 import '../../test/setup.js';
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "../../repositories/evolve-repository.js";
@@ -26,7 +25,7 @@ async function seedTask(taskId: string, taskType: string, createdBy: string): Pr
 }
 
 beforeEach(async () => {
-  db = new SqliteDatabase(new DatabaseSync(":memory:") as unknown as Database.Database);
+  db = new SqliteDatabase(new Database(":memory:"));
   await runMigrations(db, "sqlite");
   repo = new EvolveRepository(db);
 
