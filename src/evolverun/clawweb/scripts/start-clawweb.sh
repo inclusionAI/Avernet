@@ -120,14 +120,33 @@ if [ "$DATABASE_MODE" = "sqlite" ] && [ -z "${SQLITE_PATH:-}" ]; then
   mkdir -p "$local_state_dir"
   export SQLITE_PATH="$local_state_dir/engine.db"
 fi
+if [ "$DATABASE_MODE" = "sqlite" ]; then
+  export CLAWWEB_EVOLVE_ARTIFACT_STORE="${CLAWWEB_EVOLVE_ARTIFACT_STORE:-filesystem}"
+  export CLAWWEB_EVOLVE_ARTIFACT_ROOT="${CLAWWEB_EVOLVE_ARTIFACT_ROOT:-$ocb_clawweb/.build/local/evolve-artifacts}"
+fi
 
 # The Avernet workspace has a committed lockfile. The OCB composition workspace
 # intentionally has no committed lockfile because its public workspaces are linked
 # at runtime, so use npm install there to generate/update the local composition lock.
-(
-  cd "$clawweb_root"
-  npm ci --include=optional --no-audit --no-fund
-)
+dependency_fingerprint() {
+  {
+    node -p '`${process.platform}-${process.arch}-${process.versions.modules}`'
+    shasum -a 256 "$clawweb_root/package-lock.json"
+  } | shasum -a 256 | awk '{print $1}'
+}
+installed_dependency_fingerprint="$(dependency_fingerprint)"
+dependency_stamp="$clawweb_root/node_modules/.clawweb-dependency-stamp"
+if [ -f "$dependency_stamp" ] \
+  && [ "$(tr -d '\r\n' < "$dependency_stamp")" = "$installed_dependency_fingerprint" ] \
+  && [ -f "$clawweb_root/node_modules/better-sqlite3/package.json" ]; then
+  echo "[dependencies] reusing Avernet node_modules"
+else
+  (
+    cd "$clawweb_root"
+    npm ci --include=optional --no-audit --no-fund
+  )
+  dependency_fingerprint > "$dependency_stamp"
+fi
 
 cd "$ocb_clawweb"
 npm install --include=dev --include=optional --no-audit --no-fund

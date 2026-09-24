@@ -1,15 +1,18 @@
+import type { LaunchStorage } from "../evolve/runner-launch.js";
+let storage: LaunchStorage;
+import { buildRunnerLaunch } from "../evolve-dispatcher.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  buildArcaRunnerMessage,
+  buildDirectRunnerMessage as buildMessage,
   buildBaasEvolveCommand,
   cancelEvolveExecution,
-  dispatchEvolveCommand,
+  dispatchEvolveCommand as dispatchCommand,
   dispatchEvolveTaskLogArchive,
   resolveEvolveBaasTargetConfig,
   resolveEvolveRunnerConfig,
   resolveEvolveTransport,
-  parseArcaRunnerCallback,
-  usesArcaDirectRunner,
+  parseDirectRunnerCallback,
+  usesDirectRunnerMessage,
   type EvolveDispatchInput,
 } from "../evolve-dispatcher.js";
 import { normalizeEvolutionGoal, quoteCommandArgument } from "../evolve/command.js";
@@ -20,6 +23,10 @@ vi.mock("@avernet/clawweb-shared/server/db", () => ({
     iamtoken: "test-iam-token",
     baseUrl: "https://baas.example.com",
     environments: {
+      dev: {
+        apiKey: "dev-api-key",
+        baseUrl: "http://127.0.0.1:8890",
+      },
       pre: {
         apiKey: "pre-api-key",
         baseUrl: "https://baas-pre.example.com",
@@ -40,6 +47,10 @@ vi.mock("@avernet/clawweb-shared/server/db", () => ({
 }));
 
 beforeEach(() => {
+  storage = { artifactStore: {
+    putObject: async () => ({ etag: null }), getObject: async () => { throw new Error("unused"); },
+    createSignedUrl: async (key) => `https://artifacts.example/${key}`,
+  } };
   vi.stubEnv("SERVER_ENV", "pre");
 });
 
@@ -132,7 +143,7 @@ describe("buildBaasEvolveCommand", () => {
   it("routes by stage and sends only rendered arguments to the runner", () => {
     const result = buildBaasEvolveCommand(input(), "/opt/clawevolve/clawevolve_async_runner.sh");
     const payload = result.match(/--args-base64 '([^']*)'/)?.[1];
-    expect(result).toMatch(/^CLAWEVOLVE_RUNTIME_MAINTENANCE=true bash \/opt\/clawevolve\/clawevolve_async_runner\.sh --stage optimize --args-base64 /);
+    expect(result).toMatch(/^CLAWEVOLVE_RUNTIME_MAINTENANCE=true bash \/opt\/clawevolve\/clawevolve_async_runner\.sh --stage optimize --invocation-id STEP-001 --args-base64 /);
     expect(Buffer.from(payload!, "base64").toString("utf8")).toBe(input().command.split(" ").slice(3).join(" "));
   });
 
@@ -141,6 +152,14 @@ describe("buildBaasEvolveCommand", () => {
     const result = buildBaasEvolveCommand(input({ command }), "/runner.sh");
     const payload = result.match(/--args-base64 '([^']*)'/)?.[1];
     expect(Buffer.from(payload!, "base64").toString("utf8")).toBe(command.split(" ").slice(3).join(" "));
+  });
+
+  it("isolates each HITL resume with its stable delivery identity", () => {
+    const result = buildBaasEvolveCommand(input({
+      messageId: "STEP-001:hitl:HITL-001",
+    }), "/runner.sh");
+
+    expect(result).toContain("--invocation-id STEP-001:hitl:HITL-001");
   });
 
   it("accepts rendered commands longer than the former 1000 character limit", () => {
@@ -166,10 +185,11 @@ describe("buildBaasEvolveCommand", () => {
       .toThrow("指令非法");
   });
 
-  it("supports plan and diagnose commands through the same runner", () => {
+  it("supports plan, diagnose and hardening commands through the same runner", () => {
     for (const [stepType, command] of [
       ["plan", "/clawevolve-plan --strategy conservative --task-id EV-001 --step-id STEP-001"],
       ["diagnose", "/clawevolve-diagnose --model gpt-4o-mini --task-id EV-001 --step-id STEP-001"],
+      ["hardening", "/clawevolve-hardening --task-id EV-001 --step-id STEP-001 --target /tmp/skill"],
     ] as const) {
       const result = buildBaasEvolveCommand(input({ stepType, command }), "/runner.sh");
       const payload = result.match(/--args-base64 '([^']*)'/)?.[1];
@@ -200,6 +220,15 @@ describe("buildBaasEvolveCommand", () => {
 });
 
 describe("resolveEvolveTransport", () => {
+  it("keeps a custom core on the Agent message path without replacing the native Handler command", () => {
+    expect(resolveEvolveTransport({
+      stepType: "optimize", runtime: baasRuntime, forceMessage: false, agentMessageOnly: true,
+    })).toBe("message");
+    expect(usesDirectRunnerMessage({
+      stepType: "optimize", runtime: arcaRuntime, forceMessage: false, agentMessageOnly: true,
+    })).toBe(false);
+  });
+
   const baasRuntime = { provider: "baas" as const, botType: "personal", hasServiceBot: false };
   const arcaRuntime = { provider: "arca" as const };
 
@@ -213,6 +242,11 @@ describe("resolveEvolveTransport", () => {
 
   it.each(["diagnose", "plan"])("uses execute-command for personal BaaS %s", (stepType) => {
     expect(resolveEvolveTransport({ stepType, runtime: baasRuntime })).toBe("baas_execute_command");
+  });
+
+  it("runs Skill hardening through the same native Runner path as Diagnose", () => {
+    expect(resolveEvolveTransport({ stepType: "hardening", runtime: baasRuntime })).toBe("baas_execute_command");
+    expect(usesDirectRunnerMessage({ stepType: "hardening", runtime: arcaRuntime })).toBe(true);
   });
 
   it("routes service Bot Diagnose by its BaaS provider instead of bot type", () => {
@@ -233,21 +267,43 @@ describe("resolveEvolveTransport", () => {
     expect(resolveEvolveTransport({ stepType: "optimize", runtime: baasRuntime, forceMessage: true })).toBe("baas_execute_command");
   });
 
-  it.each(["diagnose", "plan", "optimize", "apply", "bench"])("uses Message for ARCA %s", (stepType) => {
+  it.each(["diagnose", "hardening", "plan", "optimize", "bench"])(
+    "uses the Message transport for local dev BaaS %s",
+    (stepType) => {
+      const dispatchInput = { stepType, transport: "message" as const, runnerEnvironment: "local" as const, runtime: runtime("dev") };
+      expect(resolveEvolveTransport(dispatchInput)).toBe("message");
+      expect(usesDirectRunnerMessage(dispatchInput)).toBe(true);
+    },
+  );
+
+  it.each(["diagnose", "hardening", "plan", "optimize", "apply", "bench"])("uses Message for ARCA %s", (stepType) => {
     expect(resolveEvolveTransport({ stepType, runtime: arcaRuntime })).toBe("message");
   });
 });
 
-describe("ARCA direct-runner coverage", () => {
-  it.each(["diagnose", "plan", "optimize", "bench", "bench_plan", "pack", "restore", "runtime_cleanup"])(
+describe("direct-runner Message coverage", () => {
+  it("uses identical Runner messages for local BaaS and ARCA Hardening", async () => {
+    const request = input({ stepType: "hardening", command: "/clawevolve-hardening --task-id EV-001 --step-id STEP-001" });
+    expect(await buildDirectRunnerMessage({ ...request, transport: "message" as const, runnerEnvironment: "local" as const, runtime: runtime("dev", "baas") }))
+      .toBe(await buildDirectRunnerMessage({ ...request, transport: "message" as const, runnerEnvironment: "local" as const, runtime: runtime("dev", "arca") }));
+  });
+
+  it.each(["skill_prepare", "skill_finalize", "stage_extension"])("runs %s through the platform code entrypoint", (stepType) => {
+    for (const provider of ["baas", "arca"] as const) {
+      expect(usesDirectRunnerMessage({ stepType, transport: "message" as const, runnerEnvironment: "local" as const, runtime: runtime("dev", provider) })).toBe(true);
+    }
+  });
+
+  it.each(["diagnose", "hardening", "plan", "optimize", "bench", "bench_plan", "pack", "restore", "runtime_cleanup"])(
     "dispatches %s directly without an initializer",
     (businessStepType) => {
-      expect(usesArcaDirectRunner({ runtime: { provider: "ARCA" }, stepType: businessStepType })).toBe(true);
+      expect(usesDirectRunnerMessage({ runtime: { provider: "ARCA" }, stepType: businessStepType })).toBe(true);
     },
   );
 
   it.each([
     ["diagnose", "/clawevolve-diagnose --judge-backend subagent --task-id EV-001 --step-id STEP-001", "clawevolve-diagnose", true, "--judge-backend subagent --task-id EV-001 --step-id STEP-001"],
+    ["hardening", "/clawevolve-hardening --task-id EV-001 --step-id STEP-001 --target /tmp/skill", "clawevolve-hardening", true, "--task-id EV-001 --step-id STEP-001 --target /tmp/skill"],
     ["plan", "/clawevolve-plan --task-id EV-001 --step-id STEP-001", "clawevolve-plan", true, "--task-id EV-001 --step-id STEP-001"],
     ["bench", "/clawevolve-bench --task-id EV-001 --step-id STEP-001", "clawevolve-bench", true, "--task-id EV-001 --step-id STEP-001"],
     ["bench_plan", "/clawevolve-workflow --stage bench-plan --task-id EV-001 --step-id STEP-001", "bench-plan", true, "--task-id EV-001 --step-id STEP-001"],
@@ -255,41 +311,43 @@ describe("ARCA direct-runner coverage", () => {
     ["pack", "/clawevolve-pack --mode pack --task-id EV-001 --step-id STEP-001", "clawevolve-pack", false, "--mode pack --task-id EV-001 --step-id STEP-001"],
     ["restore", "/clawevolve-pack --mode restore --task-id EV-001 --step-id STEP-001", "clawevolve-pack", false, "--mode restore --task-id EV-001 --step-id STEP-001"],
     ["runtime_cleanup", "/clawevolve-runtime-cleanup --task-id EV-001 --step-id STEP-001", "runtime-cleanup", false, "--task-id EV-001 --step-id STEP-001"],
-  ] as const)("wraps %s in the registered Runner stage", (stepType, command, stage, maintenance, expectedArgs) => {
-    const message = buildArcaRunnerMessage(input({
+  ] as const)("wraps %s in the registered Runner stage", async (stepType, command, stage, maintenance, expectedArgs) => {
+    const message = await buildDirectRunnerMessage(input({
       stepType, command, runtime: runtime("pre", "arca"),
     }));
     expect(message).toContain("必须使用 exec 工具原样执行下面唯一一条命令");
-    expect(message).toContain(`CLAWEVOLVE_RUNTIME_MAINTENANCE=${maintenance} bash /opt/clawevolve/pre/clawevolve_async_runner.sh --stage ${stage}`);
-    const payload = message.match(/--args-base64 '([^']*)'/)?.[1];
-    expect(Buffer.from(payload!, "base64").toString("utf8")).toBe(expectedArgs);
+    expect(message).toContain("bash /opt/clawevolve/pre/clawevolve_async_runner.sh --launch-url");
+    expect(message).not.toContain("--args-base64");
+    expect(buildRunnerLaunch(input({ stepType, command }))).toMatchObject({
+      stage, runtimeMaintenance: maintenance, args: expectedArgs,
+    });
     expect(message.split("\n").at(-1)).not.toContain("\n");
   });
 
-  it("rejects secrets, API Judge, debug mode and unsupported steps", () => {
-    expect(() => buildArcaRunnerMessage(input({
+  it("rejects secrets, API Judge, debug mode and unsupported steps", async () => {
+    await expect(buildDirectRunnerMessage(input({
       stepType: "diagnose", command: "/clawevolve-diagnose --judge-backend api",
       runtime: runtime("pre", "arca"), secrets: { diagnoseApiKey: "secret" },
-    }))).toThrow("禁止传递");
-    expect(() => buildArcaRunnerMessage(input({
+    }))).rejects.toThrow("禁止传递");
+    await expect(buildDirectRunnerMessage(input({
       stepType: "diagnose", command: "/clawevolve-diagnose --judge-backend api",
       runtime: runtime("pre", "arca"),
-    }))).toThrow("只支持 Agent Judge");
-    expect(() => buildArcaRunnerMessage(input({
+    }))).rejects.toThrow("只支持 Agent Judge");
+    await expect(buildDirectRunnerMessage(input({
       stepType: "plan", command: "/clawevolve-plan --debug true",
       runtime: runtime("pre", "arca"),
-    }))).toThrow("--debug true");
-    expect(() => buildArcaRunnerMessage(input({
+    }))).rejects.toThrow("--debug true");
+    await expect(buildDirectRunnerMessage(input({
       stepType: "apply", command: "/clawevolve-apply",
       runtime: runtime("pre", "arca"),
-    }))).toThrow("不支持 apply");
+    }))).rejects.toThrow("不支持 apply");
   });
 
   it("parses the Runner result from common Callback result shapes", () => {
     const expected = { taskId: "EV-001", stepId: "STEP-001" };
-    expect(parseArcaRunnerCallback(runnerStdout(), null, expected)?.status).toBe("started");
-    expect(parseArcaRunnerCallback({ payloads: [{ text: runnerStdout() }] }, null, expected)?.pid).toBe(123);
-    expect(parseArcaRunnerCallback({ payloads: [{ text: runnerStdout("wrong") }] }, null, expected)).toBeNull();
+    expect(parseDirectRunnerCallback(runnerStdout(), null, expected)?.status).toBe("started");
+    expect(parseDirectRunnerCallback({ payloads: [{ text: runnerStdout() }] }, null, expected)?.pid).toBe(123);
+    expect(parseDirectRunnerCallback({ payloads: [{ text: runnerStdout("wrong") }] }, null, expected)).toBeNull();
   });
 });
 
@@ -477,6 +535,54 @@ describe("dispatchEvolveCommand environment routing", () => {
     }));
   });
 
+  it("starts the same Runner through the local BaaS Message fallback", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      data: { message_id: "message-local-1", session_id: "session-local-1" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await dispatchEvolveCommand(input({
+      stepType: "diagnose",
+      command: "/clawevolve-diagnose --judge-backend subagent --task-id EV-001 --step-id STEP-001",
+      transport: "message" as const, runnerEnvironment: "local" as const, runtime: runtime("dev", "baas"),
+    }));
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body));
+    expect(String(url)).toContain("/openapi/v1/messages");
+    expect(body.message).toContain("bash /opt/clawevolve/pre/clawevolve_async_runner.sh");
+    expect(body.message).toContain("--launch-url");
+    expect(body.message).not.toContain("\n/clawevolve-diagnose ");
+  });
+
+  it("uses a stable per-interaction message ID while preserving the Stage callback identity", async () => {
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({
+        code: 0, data: { message_id: body.message_id, session_id: `session-${body.message_id}` },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const first = input({ stepType: "stage_extension", transport: "message" as const, runnerEnvironment: "local" as const, runtime: runtime("dev", "baas") });
+    const resumed = { ...first, messageId: `${first.stepId}:hitl:HITL-001` };
+    const firstResult = await dispatchEvolveCommand(first);
+    const resumedResult = await dispatchEvolveCommand(resumed);
+    const retryResult = await dispatchEvolveCommand(resumed);
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies.map((body) => body.message_id)).toEqual([
+      first.stepId, resumed.messageId, resumed.messageId,
+    ]);
+    for (let index = 0; index < bodies.length; index++) {
+      const request = index === 0 ? first : resumed;
+      expect(bodies[index].message).toBe(await buildDirectRunnerMessage(request));
+      expect(bodies[index].callback_url).toBe(first.callbackUrl);
+    }
+    expect(firstResult.runId).toBe(first.stepId);
+    expect(resumedResult.runId).toBe(resumed.messageId);
+    expect(retryResult.runId).toBe(resumedResult.runId);
+  });
+
   it("dispatches ARCA through a direct Runner Message and records the additive marker", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       code: 0,
@@ -492,7 +598,7 @@ describe("dispatchEvolveCommand environment routing", () => {
 
     const [, init] = fetchMock.mock.calls[0] ?? [];
     const body = JSON.parse(String(init?.body));
-    expect(body.message).toContain("CLAWEVOLVE_RUNTIME_MAINTENANCE=true bash /opt/clawevolve/pre/clawevolve_async_runner.sh --stage clawevolve-plan");
+    expect(body.message).toContain("bash /opt/clawevolve/pre/clawevolve_async_runner.sh --launch-url");
     expect(body.message).not.toContain("\n/clawevolve-plan ");
     expect(body.metadata?.bot_options).toEqual({ lifecycle_stage: "draft" });
     expect(result.platformResponse.evolve_dispatch).toEqual(expect.objectContaining({
@@ -612,6 +718,34 @@ describe("dispatchEvolveCommand environment routing", () => {
     expect(Buffer.from(payload!, "base64").toString("utf8")).toBe("--task-id EV-001 --step-id STEP-001");
   });
 
+  it.each([
+    ["plan", "clawevolve-plan"],
+    ["optimize", "clawevolve-workflow"],
+  ])("stops a local BaaS %s Message Runner through the same launcher", async (stepType) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      code: 0, data: { message_id: `stop-${stepType}`, session_id: `session-${stepType}` },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await cancelEvolveExecution({
+      taskId: "EV-001",
+      stepId: "STEP-001",
+      stepType,
+      userId: "197444",
+      botId: "bot-001",
+      sessionId: `session-${stepType}`,
+      platformResponse: { evolve_dispatch: { provider: "baas", transport: "message", runner_mode: "direct" } },
+      transport: "message" as const, runnerEnvironment: "local" as const, runtime: runtime("dev", "baas"),
+    });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body));
+    expect(body.message).toContain("bash /opt/clawevolve/pre/clawevolve_async_runner.sh --stage stop");
+    const payload = body.message.match(/--args-base64 '([^']*)'/)?.[1];
+    expect(Buffer.from(payload!, "base64").toString("utf8")).toBe("--task-id EV-001 --step-id STEP-001");
+    expect(result.transport).toBe("message");
+  });
+
   it("injects the Diagnose LLM key through env without putting it in command arguments", async () => {
     const secret = "diagnose-secret-key";
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
@@ -666,7 +800,7 @@ describe("dispatchEvolveCommand environment routing", () => {
     expect(requestBody.env).toBeUndefined();
   });
 
-  it.each([undefined, "dev", "unknown"])("fails closed for unsupported runtime env %s", async (env) => {
+  it.each([undefined, "unknown"])("fails closed for unsupported runtime env %s", async (env) => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -754,3 +888,8 @@ describe("dispatchEvolveCommand environment routing", () => {
     expect(result.platformResponse.evolve_dispatch?.release_lane).toBe("dev");
   });
 });
+
+function buildDirectRunnerMessage(input: EvolveDispatchInput, config?: Parameters<typeof buildMessage>[1]) {
+  return buildMessage(input, config, storage);
+}
+function dispatchEvolveCommand(input: EvolveDispatchInput) { return dispatchCommand(input, storage); }

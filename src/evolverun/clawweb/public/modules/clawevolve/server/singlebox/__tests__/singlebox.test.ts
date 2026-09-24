@@ -48,6 +48,7 @@ it("uses readonly Backend Bots, starts local Bash, and advances Diagnose to Plan
   expect((await fetch(base + "/health")).status).toBe(200);
   expect((await fetch(base + "/health", { headers: { origin: "https://other.example" } })).status).toBe(403);
   expect((await (await fetch(base + "/api/tclog/bots")).json()).bots.map((bot: { botId: string }) => bot.botId)).toEqual(["bot-2", "bot"]);
+  expect(await (await fetch(base + "/api/bots")).json()).toEqual(await (await fetch(base + "/api/tclog/bots")).json());
   for (const [botId, botEnv] of [["foreign", "dev"], ["bot", "prod"], ["missing", "dev"]]) {
     expect((await post("/api/evolve/tasks", { userId: "owner", botId, botEnv, taskType: "diagnose" })).status).toBe(422);
   }

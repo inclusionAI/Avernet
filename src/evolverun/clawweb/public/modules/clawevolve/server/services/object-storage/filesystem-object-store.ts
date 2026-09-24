@@ -19,11 +19,13 @@ function safeObjectKey(value: string): string {
 
 export class FilesystemObjectStore implements ObjectStore {
   private readonly root: string;
+  private readonly publicBaseUrl: string;
   private readonly signingKey = randomBytes(32);
 
-  constructor(root: string, private readonly publicBaseUrl = "", private readonly maxObjectBytes = MAX_OBJECT_BYTES) {
+  constructor(root: string, publicBaseUrl = "", private readonly maxObjectBytes = MAX_OBJECT_BYTES) {
     if (!Number.isSafeInteger(maxObjectBytes) || maxObjectBytes < 1) throw new Error("Invalid artifact size limit");
     this.root = resolve(root);
+    this.publicBaseUrl = publicBaseUrl.replace(/\/+$/, "");
   }
 
   private pathFor(objectKey: string): string {

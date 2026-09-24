@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import express from "express";
 import Database from "better-sqlite3";
+import JSZip from "jszip";
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "../../repositories/evolve-repository.js";
 import { BenchDomainRepository } from "../../repositories/bench-domain-repository.js";
 import { BenchTemplateRepository } from "../../repositories/bench-template-repository.js";
 import { BenchRunRepository } from "../../repositories/bench-run-repository.js";
+import { SkillAssetRepository } from "../../repositories/skill-asset-repository.js";
+import { StageSkillRepository } from "../../repositories/stage-skill-repository.js";
 import { InsightImprovementRepository } from "@avernet/clawinsight/server/repositories/insight-improvement-repository";
 import { createEvolveRouter } from "../evolve.js";
 
@@ -15,6 +19,8 @@ let improvementRepo: InsightImprovementRepository;
 let benchDomainRepo: BenchDomainRepository;
 let benchTemplateRepo: BenchTemplateRepository;
 let benchRunRepo: BenchRunRepository;
+let skillAssetRepo: SkillAssetRepository;
+let stageSkillRepo: StageSkillRepository;
 let server: ReturnType<express.Application["listen"]> | null;
 let baseUrl: string;
 let seededImprovementId: number | null;
@@ -23,6 +29,12 @@ const dispatchTaskLogArchive = vi.fn();
 const cancelExecution = vi.fn();
 const createSignedUrl = vi.fn();
 const getObject = vi.fn();
+const putObject = vi.fn();
+const hostLocalSkills = {
+  listLocalSkills: vi.fn(),
+  exportLocalSkill: vi.fn(),
+  replaceLocalSkill: vi.fn(),
+};
 
 beforeEach(async () => {
   db = new SqliteDatabase(new Database(":memory:"));
@@ -32,6 +44,8 @@ beforeEach(async () => {
   benchDomainRepo = new BenchDomainRepository(db);
   benchTemplateRepo = new BenchTemplateRepository(db);
   benchRunRepo = new BenchRunRepository(db);
+  skillAssetRepo = new SkillAssetRepository(db);
+  stageSkillRepo = new StageSkillRepository(db);
   seededImprovementId = null;
   dispatch.mockReset();
   dispatch.mockResolvedValue({ runId: "run-1", sessionId: "session-1" });
@@ -45,12 +59,24 @@ beforeEach(async () => {
   createSignedUrl.mockReset();
   createSignedUrl.mockResolvedValue("https://oss.example.test/signed");
   getObject.mockReset();
+  putObject.mockReset();
+  putObject.mockResolvedValue({ etag: "etag" });
+  hostLocalSkills.listLocalSkills.mockReset();
+  hostLocalSkills.exportLocalSkill.mockReset();
+  hostLocalSkills.exportLocalSkill.mockResolvedValue({
+    packageBytes: Buffer.from("local-skill-package"),
+    sha256: `sha256:${"a".repeat(64)}`,
+    displayName: "local-skill",
+  });
+  hostLocalSkills.replaceLocalSkill.mockReset();
+  hostLocalSkills.replaceLocalSkill.mockResolvedValue({ sha256: `sha256:${"b".repeat(64)}` });
   const app = express();
   app.use(express.json());
   app.use("/api/evolve", createEvolveRouter(repo, {
     dispatch, dispatchTaskLogArchive, cancelExecution, improvementRepo, benchDomainRepo, benchTemplateRepo, benchRunRepo,
-    artifactStore: { getObject, createSignedUrl },
+    artifactStore: { getObject, putObject, createSignedUrl },
     artifactUrlStore: { createSignedUrl },
+    skillAssetRepo, stageSkillRepo, hostLocalSkills,
     modelConfig: { defaultModel: "GLM-5.1", models: ["GLM-5.1"] },
   }));
   const startedServer = await new Promise<ReturnType<express.Application["listen"]>>((resolve) => {
@@ -74,7 +100,7 @@ async function createDiagnosis(model = "GLM-5.1") {
     body: JSON.stringify({
       taskName: "诊断任务示例",
       remark: "验证任务名称和备注",
-      userId: "user-1", botId: "bot-1", apiKey: "temporary-secret",
+      userId: "user-1", botId: "bot-1", apiKey: "test-token",
       model, diagnoseIntent: "扫描最近3天的历史 session；抽取4个 bad case 和1个 good case；重点关注影响任务完成率的主要问题。",
     }),
   });
@@ -160,6 +186,35 @@ async function callback(taskId: string, stepId: string, body: Record<string, unk
   return { response, body: await response.json() as Record<string, unknown> };
 }
 
+async function seedStageImplementation(
+  mode: "preprocess" | "postprocess" | "replace" = "preprocess",
+  stage: "diagnose" | "plan" | "optimize" = "diagnose",
+  flow?: "skill_evolution" | "bot_evolution",
+  executionContract?: string,
+) {
+  const implementationId = `IMPL-${stage}-${mode}`;
+  if (flow) {
+    await stageSkillRepo.createDevelopment({
+      stageSkillId: `STAGESKILL-${stage}-${mode}`, ownerUserId: "user-1",
+      displayName: "与流程选择无关的任意名称", flow, stage, mode,
+    });
+  }
+  await stageSkillRepo.createImplementation({
+    stageSkillId: `STAGESKILL-${stage}-${mode}`,
+    implementationId,
+    ownerUserId: "user-1",
+    displayName: `${stage} ${mode}`,
+    stage,
+    mode,
+    versionNo: 1,
+    packageRef: `oss://clawevolve-artifacts/evolve/stage-implementations/${implementationId}/v1/package.zip`,
+    packageSha256: "c".repeat(64),
+    staticValidation: { status: "passed", ...(executionContract ? { executionContract } : {}) },
+  });
+  await stageSkillRepo.registerImplementation(implementationId);
+  return implementationId;
+}
+
 async function seedPlannedDiagnosis(taskId = "EV-PLANNED-SOURCE") {
   await repo.createTask({
     taskId, taskType: "diagnose", userId: "user-1", botId: "bot-1",
@@ -176,7 +231,7 @@ async function seedPlannedDiagnosis(taskId = "EV-PLANNED-SOURCE") {
 
 function diagnoseOutput(summary = "issue", total = 1) {
   return {
-    diagnosis: { summary },
+    diagnosis: { summary, issues: [] },
     cases: {
       total, goodCount: 0, badCount: total,
       items: Array.from({ length: total }, (_, index) => ({
@@ -184,6 +239,160 @@ function diagnoseOutput(summary = "issue", total = 1) {
       })),
     },
   };
+}
+
+function planOutput() {
+  return {
+    goal: { summary: "提升任务完成率", metrics: [] },
+    spec: { version: "v0", content_type: "text", content: "诊断后的优化规格" },
+    benchCases: { trainCount: 0, testCount: 0, items: [] },
+    benchDomains: { trainBenchDomainId: "TRAIN-001", testBenchDomainId: "TEST-001" },
+  };
+}
+
+function optimizeOutput(producerStepId: string) {
+  return {
+    diff: { summary: "完成一轮候选优化", files: [{ path: "skills/example/SKILL.md", change: "modified" }] },
+    metrics: [],
+    baseline: {
+      train: {
+        role: "train", producerStepId, source: "generated", ownerUserId: "user-1",
+        domainId: "TRAIN-001", benchRunId: "BENCH-BASELINE-TRAIN", metrics: {},
+      },
+      test: {
+        role: "test", producerStepId, source: "generated", ownerUserId: "user-1",
+        domainId: "TEST-001", benchRunId: "BENCH-BASELINE-TEST", metrics: {},
+      },
+    },
+    roundDecision: { stop: true, reason: "集成测试完成" },
+  };
+}
+
+async function runSkillEvolutionToWaitingAcceptance(input: {
+  assetId: string;
+  externalSkillId: string;
+  candidateBytes?: Buffer;
+  scoreComparison?: { name: string; baseline: number; candidate: number; delta: number };
+}) {
+  await seedArcaBot();
+  await skillAssetRepo.createAsset({
+    assetId: input.assetId,
+    versionId: `${input.assetId}-BASE`,
+    ownerUserId: "user-1",
+    botId: "bot-arca",
+    externalSkillId: input.externalSkillId,
+    displayName: "待优化 Skill",
+    packageRef: `oss://clawevolve-artifacts/evolve/skills/${input.assetId}/versions/v1/package.zip`,
+    packageSha256: `sha256:${"0".repeat(64)}`,
+  });
+  const created = await fetch(`${baseUrl}/api/evolve/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+    body: JSON.stringify({
+      taskType: "full",
+      taskName: "Skill 自进化主链",
+      userId: "user-1",
+      botId: "bot-arca",
+      botEnv: "pre",
+      judgeBackend: "subagent",
+      model: "GLM-5.2",
+      diagnoseIntent: "检查真实效果。",
+      goal: "提升真实任务完成率。",
+      maxSessions: 5,
+      maxRounds: 1,
+      targetSkillAssetId: input.assetId,
+    }),
+  });
+  const task = await created.json() as Record<string, unknown>;
+  expect(created.status).toBe(201);
+  expect(hostLocalSkills.exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({
+    botId: "bot-arca",
+    skillId: input.externalSkillId,
+  }));
+  expect(putObject).toHaveBeenCalledWith(
+    expect.stringMatching(new RegExp(`evolve/skills/tasks/${task.task_id}/baseline/package\\.zip$`)),
+    Buffer.from("local-skill-package"),
+    "application/zip",
+  );
+
+  const prepare = (task.steps as Array<{ stepId: string; stepType: string }>)[0];
+  expect(prepare.stepType).toBe("skill_prepare");
+  const prepared = await callback(String(task.task_id), prepare.stepId, {
+    status: "succeeded",
+    output: {
+      prepared: true,
+      workspace: `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`,
+      targetSkillPath: `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace/skills/skills-local/local-skill`,
+    },
+  });
+  expect(prepared.body.nextStep).toEqual(expect.objectContaining({ stepType: "diagnose" }));
+
+  const diagnosed = await callback(
+    String(task.task_id),
+    String((prepared.body.nextStep as Record<string, unknown>).stepId),
+    { status: "succeeded", output: diagnoseOutput("发现可优化问题", 1) },
+  );
+  expect(diagnosed.body.nextStep).toEqual(expect.objectContaining({ stepType: "plan" }));
+  const planStep = await repo.findStep(String((diagnosed.body.nextStep as Record<string, unknown>).stepId));
+  expect(planStep?.command).toContain(`--workspace '/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace'`);
+  expect(planStep?.command).toContain(`--target '/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace/skills/skills-local/local-skill'`);
+
+  const planned = await callback(
+    String(task.task_id),
+    String((diagnosed.body.nextStep as Record<string, unknown>).stepId),
+    { status: "succeeded", output: planOutput() },
+  );
+  expect(planned.body.nextStep).toEqual(expect.objectContaining({ stepType: "optimize", roundNo: 1 }));
+
+  const optimizeStepId = String((planned.body.nextStep as Record<string, unknown>).stepId);
+  const optimizeStep = await repo.findStep(optimizeStepId);
+  expect(optimizeStep?.command).toContain(`--workspace '/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace'`);
+  const optimized = await callback(String(task.task_id), optimizeStepId, {
+    status: "succeeded",
+    output: { ...optimizeOutput(optimizeStepId), ...(input.scoreComparison ? { scoreComparison: input.scoreComparison } : {}) },
+  });
+  expect(optimized.body.nextStep).toEqual(expect.objectContaining({ stepType: "skill_finalize" }));
+
+  const savedAfterOptimize = JSON.parse((await repo.findTask(String(task.task_id)))!.config_json);
+  const candidateRef = String(savedAfterOptimize.targetSkill.candidate.ref);
+  const candidate = input.candidateBytes ?? Buffer.from(`candidate-${input.assetId}`);
+  const candidateSha = createHash("sha256").update(candidate).digest("hex");
+  const finalizeStepId = String((optimized.body.nextStep as Record<string, unknown>).stepId);
+  const finalizeInputResponse = await fetch(
+    `${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${finalizeStepId}/input`,
+  );
+  expect(finalizeInputResponse.status).toBe(200);
+  expect(await finalizeInputResponse.json()).toEqual(expect.objectContaining({
+    action: "finalize",
+    candidateWorkspace: `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`,
+    targetSkill: expect.objectContaining({
+      skillId: input.externalSkillId,
+      path: `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace/skills/skills-local/local-skill`,
+    }),
+    candidatePackage: expect.objectContaining({ ref: candidateRef, method: "PUT" }),
+  }));
+  const finalized = await callback(
+    String(task.task_id),
+    finalizeStepId,
+    {
+      status: "succeeded",
+      output: {
+        artifact: {
+          ref: candidateRef,
+          size: candidate.byteLength,
+          sha256: candidateSha,
+          contentType: "application/zip",
+        },
+      },
+    },
+  );
+  expect(finalized.body).toEqual(expect.objectContaining({
+    taskStatus: "waiting_acceptance",
+    nextStep: null,
+  }));
+  expect((await repo.findTask(String(task.task_id)))?.status).toBe("waiting_acceptance");
+  getObject.mockResolvedValue({ content: candidate, etag: null, contentType: "application/zip" });
+  return { taskId: String(task.task_id), candidate, candidateSha };
 }
 
 async function seedImprovement(
@@ -234,7 +443,7 @@ async function createDiagnosisFromImprovement(input: Partial<Record<string, unkn
       remark: "来自效果中心",
       userId: owner,
       botId: "bot-1",
-      apiKey: "temporary-secret",
+      apiKey: "test-token",
       model: "GLM-5.1",
       diagnoseIntent: "扫描最近3天的历史 session；抽取4个 bad case 和1个 good case；重点关注影响任务完成率的主要问题。",
       improvementId: seededImprovementId,
@@ -245,7 +454,2294 @@ async function createDiagnosisFromImprovement(input: Partial<Record<string, unkn
   return { response, body: await response.json() as Record<string, unknown> };
 }
 
+describe("ClawEvolve exact Session ID scope", () => {
+  const sessionIds = ["e7169ab4-e3f5-467c-9b4c-343e48eacc85", "agent:main:session:acceptance-0911-日报-范围:user:evolve-local-user"];
+  const headers = { "Content-Type": "application/json", "X-User-Id": "user-1" };
+  const create = (extra: Record<string, unknown> = {}) => fetch(`${baseUrl}/api/evolve/tasks`, {
+    method: "POST", headers,
+    body: JSON.stringify({ taskType: "diagnose", taskName: "精确来源", userId: "user-1", botId: "bot-1",
+      judgeBackend: "subagent", diagnoseIntent: "只分析平台指定来源", ...extra }),
+  });
+  const expectScope = (command: string) => {
+    for (const value of sessionIds) expect(command).toContain(`--session-id '${value}'`);
+    expect(command.match(/--session-id(?:\s|=)/g)).toHaveLength(2);
+  };
+
+  it("freezes IDs for ordinary Diagnose creation and template retry, ignoring retry overrides", async () => {
+    const response = await create({ sessionIds: [...sessionIds, sessionIds[0]], sessionSource: "local" });
+    expect(response.status).toBe(201);
+    const task = await response.json();
+    expect(task.config.sessionSource).toEqual({ mode: "local", session_ids: sessionIds });
+    expectScope(task.steps[0].command);
+    expectScope(dispatch.mock.calls.at(-1)![0].command);
+    const frozen = (await repo.findTask(task.task_id))!.config_json;
+    await callback(task.task_id, task.steps[0].stepId, { status: "failed", error: { code: "TEST", message: "retry" } });
+    const retry = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${task.steps[0].stepId}/retry`, {
+      method: "POST", headers, body: JSON.stringify({ sessionIds: ["other"], sessionSource: "service_export" }),
+    });
+    expect(retry.status).toBe(201);
+    expectScope((await retry.json()).step.command);
+    expectScope(dispatch.mock.calls.at(-1)![0].command);
+    expect((await repo.findTask(task.task_id))!.config_json).toBe(frozen);
+  });
+
+  it("carries Stage-test frozen IDs through preprocess callback and built-in retry", async () => {
+    const implementationId = await seedStageImplementation("preprocess", "diagnose", "skill_evolution");
+    const response = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers, body: JSON.stringify({ botId: "bot-1", caseInput: {
+        diagnose_goal: "只分析指定日报", session_source: { mode: "local", session_ids: [...sessionIds, sessionIds[0]] },
+      } }),
+    });
+    expect(response.status).toBe(201);
+    const task = await response.json();
+    const config = JSON.parse((await repo.findTask(task.taskId))!.config_json!);
+    expect(config.sessionSource).toEqual({ mode: "local", session_ids: sessionIds });
+    expect(config.caseInput.session_source).toEqual(config.sessionSource);
+    const report = { status: "succeeded", output: { hitl: false, result: { summary: "已检查", changed: false } } };
+    expect((await callback(task.taskId, task.stepId, report)).response.status).toBe(200);
+    const diagnosed = (await repo.listSteps(task.taskId)).find((step) => step.step_type === "diagnose")!;
+    expectScope(diagnosed.command);
+    const calls = dispatch.mock.calls.length;
+    await callback(task.taskId, task.stepId, report);
+    expect(dispatch).toHaveBeenCalledTimes(calls);
+    await callback(task.taskId, diagnosed.step_id, { status: "failed", error: { code: "TEST", message: "retry" } });
+    const retry = await fetch(`${baseUrl}/api/evolve/tasks/${task.taskId}/steps/${diagnosed.step_id}/retry`, {
+      method: "POST", headers, body: "{}",
+    });
+    expect(retry.status).toBe(201);
+    expectScope((await retry.json()).step.command);
+    expect(putObject).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([undefined, []])("keeps unscoped creation compatible: %j", async (ids) => {
+    const response = await create({ sessionIds: ids });
+    expect(response.status).toBe(201);
+    const task = await response.json();
+    expect(task.steps[0].command).not.toContain("--session-id");
+    expect(task.config.sessionSource.mode).toBe("local");
+  });
+
+  it.each([
+    { sessionIds: ["../meeting"] }, { sessionIds: "id" }, { sessionIds: null },
+    { sessionIds: ["id;touch"] }, { sessionIds: ["id"], sessionSource: "service_export" },
+    { sessionIds: ["id"], taskType: "full", inputMode: "direct_goal", goal: "改进目标",
+      stageSelection: { diagnose: false, plan: true, optimize: true } },
+  ])("rejects invalid ordinary scope before side effects: %j", async (extra) => {
+    const response = await create(extra);
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/session|Session/);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(putObject).not.toHaveBeenCalled();
+    expect(await repo.listTasks()).toEqual([]);
+  });
+
+  it.each([
+    ["diagnose", "preprocess", { mode: "local", session_ids: ["../meeting"] }],
+    ["diagnose", "preprocess", { mode: "local", session_ids: null }],
+    ["diagnose", "preprocess", { mode: "service_export", session_ids: ["id"] }],
+    ["plan", "replace", { mode: "local", session_ids: ["id"] }],
+  ] as const)("rejects invalid Stage scope before fixture/task/dispatch: %s/%s/%j", async (stage, mode, source) => {
+    const implementationId = await seedStageImplementation(mode, stage, "skill_evolution");
+    const response = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers, body: JSON.stringify({ botId: "bot-1", caseInput: {
+        ...(stage === "diagnose" ? { diagnose_goal: "检查" } : { goal: "改进", diagnose_result: diagnoseOutput() }),
+        session_source: source,
+      } }),
+    });
+    expect(response.status).toBe(400);
+    expect(putObject).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(await repo.listTasks()).toEqual([]);
+  });
+});
+
+describe("ClawEvolve exact Session ID retry boundaries", () => {
+  it.each([
+    { mode: "local", session_ids: ["../unsafe"] },
+    { mode: "service_export", session_ids: ["id"] },
+  ])("rejects invalid frozen scope without creating a retry: %j", async (source) => {
+    const taskId = "EV-BAD-SCOPE";
+    const stepId = "STEP-BAD-SCOPE";
+    const configJson = JSON.stringify({ sessionSource: source });
+    await repo.createTask({ taskId, taskType: "diagnose", userId: "user-1", botId: "bot-1", taskName: "冻结错误范围",
+      remark: null, configJson, createdBy: "user-1" });
+    await repo.createStep({ taskId, stepId, stepType: "diagnose", stepNo: 1,
+      command: `/clawevolve-diagnose --judge-backend subagent --task-id ${taskId} --step-id ${stepId}` });
+    await repo.updateStepStatus(stepId, { status: "failed", errorMessage: "retry" });
+    const response = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/steps/${stepId}/retry`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" }, body: "{}",
+    });
+    expect(response.status).toBe(409);
+    expect((await repo.listSteps(taskId))).toHaveLength(1);
+    expect((await repo.findTask(taskId))!.config_json).toBe(configJson);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("rebuilds scope from frozen config without modifying an old command or quoted intent", async () => {
+    const taskId = "EV-SCOPED-RETRY";
+    const stepId = "STEP-SCOPED-OLD";
+    const command = `/clawevolve-diagnose --judge-backend subagent --intent '提及 --session-id 并非修改来源' --session-id old --session-id='extra' --task-id ${taskId} --step-id ${stepId}`;
+    const config = { sessionSource: { mode: "local", session_ids: ["frozen-id"] }, runtimeMaintenance: false };
+    await repo.createTask({ taskId, taskType: "diagnose", userId: "user-1", botId: "bot-1", taskName: "历史命令重试",
+      remark: null, configJson: JSON.stringify(config), createdBy: "user-1" });
+    await repo.createStep({ taskId, stepId, stepType: "diagnose", stepNo: 1, command });
+    await repo.updateStepStatus(stepId, { status: "failed", errorMessage: "retry" });
+    const response = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/steps/${stepId}/retry`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" }, body: "{}",
+    });
+    expect(response.status).toBe(201);
+    const retried = await response.json();
+    expect(retried.step.command).toContain(`--intent '提及 --session-id 并非修改来源'`);
+    expect(retried.step.command).toContain("--session-id 'frozen-id'");
+    expect(retried.step.command).not.toContain("--session-id old");
+    expect(retried.step.command).not.toContain("extra");
+    expect((await repo.findStep(stepId))!.command).toBe(command);
+    expect(JSON.parse((await repo.findTask(taskId))!.config_json!)).toEqual(config);
+  });
+
+  it("rejects nonempty scope if runtime selection requires service export", async () => {
+    await seedServiceBotWithBaasDraftBinding();
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ taskName: "服务态范围", userId: "user-1", botId: "bot-service-runtime", botEnv: "prod",
+        judgeBackend: "subagent", diagnoseIntent: "指定来源", sessionSource: "local", sessionIds: ["id"] }),
+    });
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain("sessionIds");
+    expect(await repo.listTasks()).toEqual([]);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(putObject).not.toHaveBeenCalled();
+  });
+});
+
+describe("ClawEvolve frozen Diagnose Plan Source", () => {
+  it.each(["valid", "future", "failed", "foreign-owner", "wrong-task", "wrong-stage", "preprocess", "no-run"] as const)(
+    "bounds the full logical Plan producer by owner/task/run/precedence: %s", async (kind) => {
+      await repo.createTask({ taskId: "EV-LOGICAL", taskType: "full", userId: "user-1", botId: "bot-1",
+        taskName: "来源边界", configJson: "{}", createdBy: "user-1" });
+      await repo.createTask({ taskId: "EV-OTHER", taskType: "full", userId: "user-1", botId: "bot-1",
+        taskName: "其他来源", configJson: "{}", createdBy: "user-1" });
+      await stageSkillRepo.createImplementation({ stageSkillId: "STAGESKILL-BOUNDARY", implementationId: "IMPL-BOUNDARY",
+        ownerUserId: kind === "foreign-owner" ? "other" : "user-1", displayName: "来源边界", stage: "plan", mode: "replace",
+        versionNo: 1, packageRef: "oss://clawevolve-artifacts/test.zip", packageSha256: "a".repeat(64), staticValidation: { status: "passed" } });
+      await repo.createStep({ taskId: "EV-LOGICAL", stepId: "STEP-LOGICAL-PLAN", stepType: "stage_extension",
+        stepNo: kind === "future" ? 3 : 1, command: "/clawevolve-stage" });
+      await repo.updateStepStatus("STEP-LOGICAL-PLAN", { status: kind === "failed" ? "failed" : "succeeded", output: planOutput() });
+      if (kind !== "no-run") await stageSkillRepo.createExtensionRun({ stepId: "STEP-LOGICAL-PLAN",
+        taskId: kind === "wrong-task" ? "EV-OTHER" : "EV-LOGICAL", stage: kind === "wrong-stage" ? "diagnose" : "plan",
+        mode: kind === "preprocess" ? "preprocess" : "replace", implementationId: "IMPL-BOUNDARY" });
+      await repo.createStep({ taskId: "EV-LOGICAL", stepId: "STEP-LOGICAL-OPT", stepType: "optimize", stepNo: 2, roundNo: 1, command: "/clawevolve-workflow" });
+      const response = await fetch(`${baseUrl}/api/evolve/internal/tasks/EV-LOGICAL/steps/STEP-LOGICAL-OPT/input`);
+      expect(response.status).toBe(200);
+      const input = await response.json();
+      expect(input.inputs.diagnoses[0].plan).toEqual(kind === "valid" ? { stepId: "STEP-LOGICAL-PLAN", output: planOutput() } : null);
+      expect(dispatch).not.toHaveBeenCalled();
+    });
+
+  it("delivers the real Plan replacement producer across the full three-extension chain", async () => {
+    await seedArcaBot();
+    await skillAssetRepo.createAsset({ assetId: "SKILL-FULL-EXT", versionId: "SKVER-FULL-EXT",
+      ownerUserId: "user-1", botId: "bot-arca", externalSkillId: "daily-report-zh", displayName: "日报",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-FULL-EXT/versions/v1/package.zip",
+      packageSha256: `sha256:${"0".repeat(64)}` });
+    const pre = await seedStageImplementation("preprocess", "diagnose", "skill_evolution");
+    const replace = await seedStageImplementation("replace", "plan", "skill_evolution", "clawevolve.plan-business/v1");
+    const post = await seedStageImplementation("postprocess", "optimize", "skill_evolution");
+    for (const impl of [pre, replace, post]) await stageSkillRepo.updateIntegrationTest(impl, `TEST-${impl}`, "test_passed");
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ taskType: "full", taskName: "三扩展真实编排", userId: "user-1", botId: "bot-arca", botEnv: "pre",
+        judgeBackend: "subagent", model: "GLM-5.2", diagnoseIntent: "检查日报", goal: "只加固目标 Skill", maxRounds: 1,
+        targetSkillAssetId: "SKILL-FULL-EXT", stageExtensions: {
+          diagnose: { preprocess: { enabled: true, implementationId: pre } },
+          plan: { replace: { enabled: true, implementationId: replace } },
+          optimize: { postprocess: { enabled: true, implementationId: post } },
+        } }),
+    });
+    const created = await response.json();
+    expect(response.status, JSON.stringify(created)).toBe(201);
+    const taskId = created.task_id;
+    const workspace = `/home/admin/.openclaw/clawevolve_workspaces/${taskId}/workspace`;
+    const prepared = await callback(taskId, created.steps[0].stepId, { status: "succeeded",
+      output: { prepared: true, workspace, targetSkillPath: `${workspace}/skills/skills-local/local-skill` } });
+    expect(prepared.response.status).toBe(200);
+    const preId = (prepared.body.nextStep as { stepId: string }).stepId;
+    const inputFor = async (id: string) => {
+      const result = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${id}/input`);
+      const body = await result.json(); expect(result.status, JSON.stringify(body)).toBe(200); return body;
+    };
+    const preInput = await inputFor(preId);
+    expect(preInput.input.target_skill.workspace).toBe(workspace);
+    const preReport = await callback(taskId, preId, { status: "succeeded", output: { hitl: false,
+      result: { changed: false, summary: "协议测试前置结果；不是模型成功证据" } } });
+    const diagId = (preReport.body.nextStep as { stepId: string }).stepId;
+    const diagnosed = await callback(taskId, diagId, { status: "succeeded", output: diagnoseOutput() });
+    expect(diagnosed.response.status).toBe(200);
+    const planId = (diagnosed.body.nextStep as { stepId: string }).stepId;
+    const planInput = await inputFor(planId);
+    expect(planInput.implementation.executionContract).toBe("clawevolve.plan-business/v1");
+    expect(planInput.inputs).toBeUndefined();
+    expect(planInput.input.diagnose_result).toMatchObject(diagnoseOutput());
+    expect(planInput.input.target_skill).toEqual(preInput.input.target_skill);
+    const output = planOutput();
+    const planned = await callback(taskId, planId, { status: "succeeded", output: { hitl: false, result: output } });
+    expect(planned.response.status).toBe(200);
+    const optimizeId = (planned.body.nextStep as { stepId: string }).stepId;
+    const optimizeInput = await inputFor(optimizeId);
+    expect(optimizeInput.inputs.diagnoses[0].plan).toEqual({ stepId: planId, output });
+    expect(optimizeInput.task.config.targetSkill.candidate.prepared.workspacePath).toBe(workspace);
+    expect((await repo.findStep(optimizeId))!.command).toContain(`--workspace '${workspace}'`);
+    const nativePlanSteps = (await repo.listSteps(taskId)).filter((step) => step.step_type === "plan");
+    expect(nativePlanSteps).toHaveLength(1);
+    expect(nativePlanSteps[0]).toMatchObject({ step_id: planId });
+    expect(nativePlanSteps[0].command).toMatch(/^\/clawevolve-plan(?:\s|$)/);
+    expect(await stageSkillRepo.findExtensionRun(planId)).toBeNull();
+    const optimized = await callback(taskId, optimizeId, { status: "succeeded", output: optimizeOutput(optimizeId) });
+    expect(optimized.response.status).toBe(200);
+    const postId = (optimized.body.nextStep as { stepId: string }).stepId;
+    const postInput = await inputFor(postId);
+    expect(postInput.input.plan_result).toEqual(output);
+    const optimizeReadback = await (await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${optimizeId}/output`)).json();
+    // Compare the accepted result, including platform warnings for this protocol-only Bench fixture.
+    expect(postInput.input.builtin_result).toEqual(optimizeReadback.output);
+    expect(postInput.input.builtin_result).toMatchObject(optimizeOutput(optimizeId));
+    expect(postInput.input.target_skill).toEqual(preInput.input.target_skill);
+    const postReport = { status: "succeeded", output: { hitl: false,
+      result: { result_patch: { roundDecision: { stop: true, reason: "后置协议测试结束" } } } } };
+    const postprocessed = await callback(taskId, postId, postReport);
+    expect(postprocessed.response.status, JSON.stringify(postprocessed.body)).toBe(200);
+    expect(postprocessed.body.nextStep).toMatchObject({ stepType: "skill_finalize" });
+    const finalId = (postprocessed.body.nextStep as { stepId: string }).stepId;
+    expect((await inputFor(finalId)).candidateWorkspace).toBe(workspace);
+    const dispatched = dispatch.mock.calls.length;
+    expect((await callback(taskId, postId, postReport)).body.duplicate).toBe(true);
+    expect(dispatch).toHaveBeenCalledTimes(dispatched);
+    expect((await repo.listSteps(taskId)).filter((step) => step.step_type === "skill_finalize")).toHaveLength(1);
+    // The postprocessor is not the Bench producer. Freeze the exact built-in
+    // predecessor even when this protocol fixture has no reported score.
+    const auditConfig = JSON.parse((await repo.findTask(taskId))!.config_json);
+    expect(auditConfig.skillAuditTestBench).toEqual({ taskId, stepId: optimizeId, round: 1, scoreComparison: null });
+    const finalized = await callback(taskId, finalId, { status: 'succeeded', output: { artifact: {
+      ref: auditConfig.targetSkill.candidate.ref, size: 1, sha256: '7'.repeat(64), contentType: 'application/zip',
+    } } });
+    expect(finalized.response.status).toBe(200);
+    const event = (await skillAssetRepo.listEvents('user-1')).find(item => item.task_id === taskId && item.event_type === 'optimization')!;
+    expect(JSON.parse(event.detail_json!).testBench).toEqual(auditConfig.skillAuditTestBench);
+  });
+
+  it("runs standalone Plan from constructed input and preserves opaque HITL identifiers", async () => {
+    const implementationId = await seedStageImplementation("replace", "plan", "skill_evolution", "clawevolve.plan-business/v1");
+    const start = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { goal: "澄清摘要 Skill 中指代不明的处理要求" } }),
+    });
+    const started = await start.json();
+    expect(start.status, JSON.stringify(started)).toBe(201);
+    const input = await (await fetch(`${baseUrl}/api/evolve/internal/tasks/${started.taskId}/steps/${started.stepId}/input`)).json();
+    expect(input.implementation.executionContract).toBe("clawevolve.plan-business/v1");
+    expect(input.inputs).toBeUndefined();
+    expect(input.resources.testSkillFixture).toMatchObject({ fixtureId: "skill-description-v2", version: 2 });
+    expect(input.input.target_skill).toMatchObject({ name: "stage-test-text-summary", fixture_id: "skill-description-v2" });
+    expect(input.task).toMatchObject({ ownerUserId: "user-1" });
+    expect(input.input.model).toBe("GLM-5.1");
+    expect(input.runtime).toBeUndefined();
+    const tested = await (await fetch(`${baseUrl}/api/evolve/tasks/${started.taskId}`, { headers: { "X-User-Id": "user-1" } })).json();
+    expect(tested.steps).toHaveLength(1);
+    const question = { tag: "plan_scope", format: "html", content: '<form><input name="scope"></form>' };
+    const invalidPause = await callback(started.taskId, started.stepId, { status: "succeeded", output: { hitl: true, question } });
+    expect(invalidPause.response.status).toBe(422);
+    expect(await stageSkillRepo.listInteractions(started.taskId)).toHaveLength(0);
+    const pause = await callback(started.taskId, started.stepId, { status: "succeeded", output: { hitl: true, question },
+      progress: { business_resume: { request_id: "1".repeat(64), question_sha256: "2".repeat(64),
+        phase: "discovery", call_id: "initial", state_path: "/platform-only/state.json" } } });
+    expect(pause.response.status).toBe(200);
+    const interactionId = (pause.body.interaction as { interactionId: string }).interactionId;
+    const answer = { scope: "只改目标说明", request_id: "不能用这个表单字段替换平台标识" };
+    const answered = await fetch(`${baseUrl}/api/evolve/tasks/${started.taskId}/steps/${started.stepId}/interactions/${interactionId}/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" }, body: JSON.stringify({ answer }),
+    });
+    expect(answered.status).toBe(200);
+    const resumed = await (await fetch(`${baseUrl}/api/evolve/internal/tasks/${started.taskId}/steps/${started.stepId}/input`)).json();
+    expect(resumed.input.human_input.history).toEqual([{
+      question: { ...question, business_resume: { request_id: "1".repeat(64), question_sha256: "2".repeat(64) } }, answer,
+    }]);
+    expect(resumed.inputs).toBeUndefined();
+    const secondPause = await callback(started.taskId, started.stepId, { status: "succeeded", output: { hitl: true, question },
+      progress: { business_resume: { request_id: "3".repeat(64), question_sha256: "2".repeat(64) } } });
+    expect(secondPause.response.status).toBe(200);
+    const secondId = (secondPause.body.interaction as { interactionId: string }).interactionId;
+    expect(secondId).not.toBe(interactionId);
+    const secondAnswer = await fetch(`${baseUrl}/api/evolve/tasks/${started.taskId}/steps/${started.stepId}/interactions/${secondId}/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" }, body: JSON.stringify({ answer: "保留默认行为" }),
+    });
+    expect(secondAnswer.status).toBe(200);
+    const resumedAgain = await (await fetch(`${baseUrl}/api/evolve/internal/tasks/${started.taskId}/steps/${started.stepId}/input`)).json();
+    expect(resumedAgain.input.human_input.history).toHaveLength(2);
+    expect(resumedAgain.input.human_input.history.at(-1)).toEqual({
+      question: { ...question, business_resume: { request_id: "3".repeat(64), question_sha256: "2".repeat(64) } }, answer: "保留默认行为",
+    });
+    expect(resumedAgain.inputs).toBeUndefined();
+  });
+});
+
+describe("ClawEvolve Stage extensions and Skill candidates", () => {
+  it("freezes the fixed Bot flow and permits direct-goal mode to skip Diagnose", async () => {
+    const created = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "full", taskName: "按目标直接进化", userId: "user-1", botId: "bot-1",
+        goal: "生成本次改进方案。", maxRounds: 3,
+        inputMode: "direct_goal",
+        stageSelection: { diagnose: false, plan: true, optimize: true },
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    expect(created.status).toBe(201);
+    expect(task.config).toEqual(expect.objectContaining({
+      flow: {
+        key: "bot_evolution",
+        version: "v1",
+        stages: { diagnose: false, hardening: false, plan: true, optimize: true },
+      },
+    }));
+    const plan = (task.steps as Array<{ stepId: string; stepType: string }>)[0];
+    expect(plan.stepType).toBe("plan");
+  });
+
+  it("keeps the existing Diagnose task able to stop after Diagnose", async () => {
+    const created = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "diagnose", taskName: "只执行诊断", userId: "user-1", botId: "bot-1",
+        model: "GLM-5.1", judgeBackend: "subagent", maxSessions: 10,
+        diagnoseIntent: "检查最近的失败 Session。",
+        stageSelection: { diagnose: true, plan: false, optimize: false },
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    expect(created.status).toBe(201);
+    expect(task.config).toEqual(expect.objectContaining({
+      flow: {
+        key: "bot_evolution",
+        version: "v1",
+        stages: { diagnose: true, hardening: false, plan: false, optimize: false },
+      },
+    }));
+    const diagnose = (task.steps as Array<{ stepId: string; stepType: string }>)[0];
+    expect(diagnose.stepType).toBe("diagnose");
+
+    const diagnosed = await callback(String(task.task_id), diagnose.stepId, {
+      status: "succeeded", output: diagnoseOutput(),
+    });
+    expect(diagnosed.response.status).toBe(200);
+    expect(diagnosed.body.nextStep).toBeNull();
+    expect((await repo.findTask(String(task.task_id)))?.status).toBe("completed");
+    expect((await repo.listSteps(String(task.task_id))).some((step) => step.step_type === "plan")).toBe(false);
+  });
+
+  it("rejects invalid Stage switch dependencies and extensions on disabled Stages", async () => {
+    const invalidDependency = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "full", taskName: "无规划优化", userId: "user-1", botId: "bot-1",
+        goal: "提升完成率。", maxRounds: 3,
+        stageSelection: { diagnose: true, plan: false, optimize: true },
+      }),
+    });
+    expect(invalidDependency.status).toBe(400);
+    expect((await invalidDependency.json()).error).toContain("必须执行规划和优化");
+
+    const implementationId = await seedStageImplementation("preprocess", "diagnose");
+    const disabledExtension = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "full", taskName: "关闭诊断", userId: "user-1", botId: "bot-1",
+        goal: "提升完成率。", inputMode: "direct_goal", maxRounds: 3,
+        stageSelection: { diagnose: false, plan: true, optimize: true },
+        stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId } } },
+      }),
+    });
+    expect(disabledExtension.status).toBe(422);
+    expect((await disabledExtension.json()).error).toContain("已关闭");
+
+    const replaceImplementationId = await seedStageImplementation("replace", "diagnose");
+    const conflictingExtensions = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "full", taskName: "冲突的自定义实现", userId: "user-1", botId: "bot-1",
+        goal: "提升完成率。", maxRounds: 3,
+        diagnoseIntent: "检查最近的失败 Session。",
+        stageExtensions: { diagnose: {
+          preprocess: { enabled: true, implementationId },
+          replace: { enabled: true, implementationId: replaceImplementationId },
+        } },
+      }),
+    });
+    expect(conflictingExtensions.status).toBe(422);
+    expect((await conflictingExtensions.json()).error).toContain("整体替换不能与前置处理或后置处理同时启用");
+  });
+
+  it("runs preprocess, the real built-in Stage, and only then passes integration testing", async () => {
+    const implementationId = await seedStageImplementation("preprocess", "diagnose");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        botId: "bot-1",
+        caseInput: { diagnose_goal: "检查真实 Session 中的失败原因" },
+      }),
+    });
+    const startedText = await started.text();
+    expect(started.status, startedText).toBe(201);
+    const task = JSON.parse(startedText) as { taskId: string; stepId: string };
+    expect((await repo.findStep(task.stepId))?.step_type).toBe("stage_extension");
+    const testConfig = JSON.parse((await repo.findTask(task.taskId))!.config_json!);
+    expect(testConfig.targetSkill).toBeUndefined();
+    expect(testConfig.flow).toBeUndefined();
+    expect(testConfig.sessionSource).toEqual({ mode: "local" });
+    expect(hostLocalSkills.exportLocalSkill).not.toHaveBeenCalled();
+
+    const preprocessed = await callback(task.taskId, task.stepId, {
+      status: "succeeded",
+      output: { hitl: false, result: { summary: "测试输入已准备", changed: false } },
+    });
+    expect(preprocessed.response.status).toBe(200);
+    const diagnoseStep = (await repo.listSteps(task.taskId)).find((step) => step.step_type === "diagnose");
+    expect(diagnoseStep).toBeTruthy();
+    expect((await stageSkillRepo.findImplementation(implementationId))?.integration_test_status).toBe("testing");
+
+    const diagnosed = await callback(task.taskId, diagnoseStep!.step_id, {
+      status: "succeeded", output: diagnoseOutput(),
+    });
+    expect(diagnosed.response.status).toBe(200);
+    expect((await repo.findTask(task.taskId))?.status).toBe("completed");
+    const verified = await stageSkillRepo.findImplementation(implementationId);
+    expect(verified?.status).toBe("registered");
+    expect(verified?.integration_test_status).toBe("test_passed");
+    expect((await repo.listSteps(task.taskId)).map((step) => step.step_type)).toEqual(["stage_extension", "diagnose"]);
+  });
+
+  it.each([
+    ["diagnose", "preprocess"], ["plan", "replace"],
+  ] as const)("freezes a real isolated fixture for Skill development %s/%s tests", async (stage, mode) => {
+    const implementationId = await seedStageImplementation(mode, stage, "skill_evolution");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: stage === "diagnose"
+        ? { diagnose_goal: "检查真实目标" }
+        : { goal: "明确目标说明", diagnose_result: diagnoseOutput() } }),
+    });
+    expect(started.status).toBe(201);
+    const { taskId, stepId } = await started.json();
+    expect(putObject).toHaveBeenCalledTimes(1);
+    const [key, bytes, contentType] = putObject.mock.calls[0];
+    expect(key).toBe(`evolve/stage-tests/${taskId}/fixtures/skill-description-v2/package.zip`);
+    expect(contentType).toBe("application/zip");
+    const zip = await JSZip.loadAsync(bytes);
+    expect(Object.keys(zip.files)).toEqual(["SKILL.md"]);
+    expect(await zip.file("SKILL.md")!.async("string")).toContain("name: stage-test-text-summary");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const config = JSON.parse((await repo.findTask(taskId))!.config_json!);
+    expect(config.targetSkill).toBeUndefined();
+    expect(config.flow).toBeUndefined();
+    expect(config.caseInput.target_skill).toBeUndefined();
+    expect(config.stageTest.fixture).toEqual({
+      kind: "stage_test_fixture", fixtureId: "skill-description-v2", version: 2,
+      taskId, sha256, ref: `oss://clawevolve-artifacts/${key}`,
+    });
+    const response = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${stepId}/input`);
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.task).toEqual({ taskId, taskType: "stage_test", targetBotId: "bot-1" });
+    expect(payload.input.task).toEqual({ task_id: taskId, task_type: "stage_test", target_bot_id: "bot-1" });
+    expect(payload.resources).toEqual({ testSkillFixture: {
+      kind: "stage_test_fixture", fixtureId: "skill-description-v2", version: 2,
+      taskId, sha256, package: { method: "GET", url: "https://oss.example.test/signed" },
+    } });
+    const workspace = `/home/admin/.openclaw/clawevolve_workspaces/${taskId}/workspace`;
+    expect(payload.input.target_skill).toEqual({
+      kind: "stage_test_fixture", fixture_id: "skill-description-v2",
+      asset_id: `fixture:${taskId}:skill-description-v2`, skill_id: "fixture:skill-description-v2",
+      name: "stage-test-text-summary", workspace,
+      path: `${workspace}/skills/skills-local/stage-test-text-summary`, baseline_sha256: sha256,
+    });
+    expect(createSignedUrl).toHaveBeenCalledWith(key, "GET", expect.any(Number));
+    expect(hostLocalSkills.exportLocalSkill).not.toHaveBeenCalled();
+    expect(hostLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
+    expect((await repo.listSteps(taskId)).some((s) => ["skill_prepare", "skill_finalize"].includes(s.step_type))).toBe(false);
+    expect((await repo.findTask(taskId))?.status).not.toBe("completed");
+    // These are protocol reports, not evidence of a model executing the fixture.
+    const completed = { status: "succeeded", output: { hitl: false, result: stage === "diagnose"
+      ? { summary: "已检查测试副本", changed: false } : planOutput() } };
+    expect((await callback(taskId, stepId, completed)).response.status).toBe(200);
+    const dispatchCount = dispatch.mock.calls.length;
+    expect((await callback(taskId, stepId, completed)).response.status).toBe(200);
+    expect(dispatch.mock.calls.length).toBe(dispatchCount);
+    if (stage === "diagnose") {
+      expect((await stageSkillRepo.findImplementation(implementationId))?.integration_test_status).toBe("testing");
+      const builtin = (await repo.listSteps(taskId)).find((s) => s.step_type === "diagnose")!;
+      expect((await callback(taskId, builtin.step_id, { status: "succeeded", output: diagnoseOutput() })).response.status).toBe(200);
+    }
+    expect((await repo.findTask(taskId))?.status).toBe("completed");
+    expect((await stageSkillRepo.findImplementation(implementationId))?.integration_test_status).toBe("test_passed");
+    expect((await repo.listSteps(taskId)).some((s) => ["skill_prepare", "skill_finalize", "optimize"].includes(s.step_type))).toBe(false);
+    for (const decision of ["accept", "reject"]) {
+      const response = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/skill-decision`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+        body: JSON.stringify({ decision }),
+      });
+      expect(response.status).toBe(409);
+    }
+    expect(await skillAssetRepo.listAssets("user-1")).toEqual([]);
+    expect(await db.query("SELECT event_id FROM ce_skill_events")).toEqual([]);
+    expect(await db.query("SELECT version_id FROM ce_skill_versions")).toEqual([]);
+    expect(hostLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
+  });
+
+  it.each(["targetSkillAssetId", "target_skill"])("rejects obsolete Stage test target binding %s before dispatch", async (field) => {
+    const implementationId = await seedStageImplementation("replace", "diagnose");
+    const response = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: {
+        diagnose_goal: "检查 Session",
+        ...(field === "target_skill" ? { target_skill: { path: "/original-skill" } } : {}),
+      }, ...(field === "targetSkillAssetId" ? { targetSkillAssetId: "SKILL-TARGET" } : {}) }),
+    });
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain("不绑定待进化 Skill");
+    expect((await stageSkillRepo.findImplementation(implementationId))?.integration_test_task_id).toBeNull();
+    expect(hostLocalSkills.exportLocalSkill).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["bot_evolution", "diagnose", "preprocess"],
+    ["bot_evolution", "plan", "replace"],
+    [undefined, "diagnose", "preprocess"],
+    [undefined, "plan", "replace"],
+    ["skill_evolution", "diagnose", "replace"],
+    ["skill_evolution", "plan", "preprocess"],
+  ] as const)("does not inject a fixture for %s development %s/%s", async (flow, stage, mode) => {
+    const implementationId = await seedStageImplementation(mode, stage, flow);
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", flow: "skill_evolution", caseInput: {
+        diagnose_goal: "Skill 说明加固", goal: "Skill 说明加固", diagnose_result: diagnoseOutput(),
+      } }),
+    });
+    expect(started.status).toBe(201);
+    const { taskId, stepId } = await started.json();
+    const response = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${stepId}/input`);
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.resources).toBeUndefined();
+    expect(payload.input.target_skill).toBeUndefined();
+    expect(putObject).not.toHaveBeenCalled();
+    expect(hostLocalSkills.exportLocalSkill).not.toHaveBeenCalled();
+  });
+
+  it.each(["resources", "testSkillFixture", "stageTest"])("rejects user-supplied fixture control field %s before creating a test", async (field) => {
+    const implementationId = await seedStageImplementation("preprocess", "diagnose", "skill_evolution");
+    for (const inCase of [false, true]) {
+      const forged = { testSkillFixture: { package: { method: "GET", url: "https://attacker.invalid/package.zip" } } };
+      const response = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+        body: JSON.stringify({ botId: "bot-1", ...(!inCase ? { [field]: forged } : {}),
+          caseInput: { diagnose_goal: "目标", ...(inCase ? { [field]: forged } : {}) } }),
+      });
+      expect(response.status).toBe(400);
+    }
+    expect((await stageSkillRepo.findImplementation(implementationId))?.integration_test_task_id).toBeNull();
+    expect(putObject).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the same fixture and answered HITL through dispatch recovery and an unstarted canceled retry", async () => {
+    const implementationId = await seedStageImplementation("replace", "plan", "skill_evolution");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { goal: "明确目标", diagnose_result: diagnoseOutput() } }),
+    });
+    const { taskId, stepId } = await started.json();
+    let signature = 0;
+    createSignedUrl.mockImplementation(async (key: string) => `https://oss.example.test/${key}?sig=${++signature}`);
+    const readInput = async (id: string) => {
+      const response = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${id}/input?fixtureId=evil&url=https://attacker.invalid`);
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const original = await readInput(stepId);
+    const renewed = await readInput(stepId);
+    expect(renewed.resources.testSkillFixture.package.url).not.toBe(original.resources.testSkillFixture.package.url);
+    expect(renewed.input.target_skill).toEqual(original.input.target_skill);
+    const waiting = await callback(taskId, stepId, { status: "succeeded", output: {
+      hitl: true, question: { tag: "scope", format: "text", content: "范围？" },
+    } });
+    const interactionId = String((waiting.body.interaction as Record<string, unknown>).interactionId);
+    const answered = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/steps/${stepId}/interactions/${interactionId}/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ answer: "只检查说明" }),
+    });
+    expect(answered.status).toBe(200);
+    const resumed = await readInput(stepId);
+    expect(resumed.input.target_skill).toEqual(original.input.target_skill);
+    expect(resumed.input.human_input).toBeTruthy();
+    await repo.markDispatchFailed(stepId, "恢复投递时设备已失效");
+    const retry = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/steps/${stepId}/retry`, {
+      method: "POST", headers: { "X-User-Id": "user-1" },
+    });
+    expect(retry.status).toBe(201);
+    const newStepId = (await retry.json()).step.stepId;
+    expect(newStepId).not.toBe(stepId);
+    const retried = await readInput(newStepId);
+    expect(retried.input.target_skill).toEqual(original.input.target_skill);
+    expect(retried.resources.testSkillFixture.sha256).toBe(original.resources.testSkillFixture.sha256);
+    expect(retried.input.human_input).toEqual(resumed.input.human_input);
+    const canceled = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/steps/${newStepId}/cancel`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ reason: "发现旧服务未携带已答表单，取消未开始的无效重试" }),
+    });
+    expect(canceled.status).toBe(200);
+    const secondRetry = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/steps/${newStepId}/retry`, {
+      method: "POST", headers: { "X-User-Id": "user-1" },
+    });
+    expect(secondRetry.status).toBe(201);
+    const secondRetryStepId = (await secondRetry.json()).step.stepId;
+    const secondRetried = await readInput(secondRetryStepId);
+    expect(secondRetried.input.human_input).toEqual(resumed.input.human_input);
+    expect(putObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps answered HITL when retrying a custom core protocol failure", async () => {
+    const implementationId = await seedStageImplementation("replace", "plan", "skill_evolution");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { goal: "明确目标", diagnose_result: diagnoseOutput() } }),
+    });
+    const { taskId, stepId } = await started.json();
+    const waiting = await callback(taskId, stepId, { status: "succeeded", output: {
+      hitl: true, question: { tag: "scope", format: "text", content: "范围？" },
+    } });
+    const interactionId = String((waiting.body.interaction as Record<string, unknown>).interactionId);
+    const answered = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/steps/${stepId}/interactions/${interactionId}/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ answer: "只检查说明" }),
+    });
+    expect(answered.status).toBe(200);
+    const resumedResponse = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${stepId}/input`);
+    const resumed = await resumedResponse.json();
+    expect(resumed.input.human_input).toBeTruthy();
+    const failed = await callback(taskId, stepId, {
+      status: "failed",
+      error: { code: "STAGE_CORE_EXECUTION_FAILED", message: "result.json missing", retryable: true },
+    });
+    expect(failed.response.status).toBe(200);
+    const retry = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/steps/${stepId}/retry`, {
+      method: "POST", headers: { "X-User-Id": "user-1" },
+    });
+    expect(retry.status).toBe(201);
+    const retryStepId = (await retry.json()).step.stepId;
+    const retriedResponse = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${retryStepId}/input`);
+    const retried = await retriedResponse.json();
+    expect(retried.input.human_input).toEqual(resumed.input.human_input);
+  });
+
+  it("does not create or dispatch a fixture test when package persistence fails", async () => {
+    const implementationId = await seedStageImplementation("preprocess", "diagnose", "skill_evolution");
+    putObject.mockRejectedValueOnce(new Error("fixture storage unavailable"));
+    const response = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "目标" } }),
+    });
+    expect(response.status).toBe(500);
+    expect((await stageSkillRepo.findImplementation(implementationId))?.integration_test_task_id).toBeNull();
+    expect(await db.query("SELECT task_id FROM ce_tasks")).toEqual([]);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("does not grant fixture resources through another owner's development or implementation", async () => {
+    const implementationId = await seedStageImplementation("preprocess", "diagnose", "skill_evolution");
+    const create = (owner: string) => fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": owner },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "目标" } }),
+    });
+    expect((await create("user-2")).status).toBe(404);
+    await db.exec("UPDATE ce_stage_developments SET owner_user_id = 'user-2'");
+    expect((await create("user-1")).status).toBe(409);
+    expect(putObject).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("refuses to sign a fixture ref that escaped its frozen task boundary", async () => {
+    const implementationId = await seedStageImplementation("preprocess", "diagnose", "skill_evolution");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "目标" } }),
+    });
+    const { taskId, stepId } = await started.json();
+    const config = JSON.parse((await repo.findTask(taskId))!.config_json!);
+    config.stageTest.fixture.ref = "oss://clawevolve-artifacts/evolve/stage-tests/OTHER/fixtures/skill-description-v1/package.zip";
+    await repo.updateTaskConfig(taskId, config);
+    createSignedUrl.mockClear();
+    const response = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${stepId}/input`);
+    expect(response.status).toBe(409);
+    expect(createSignedUrl).not.toHaveBeenCalled();
+    expect((await fetch(`${baseUrl}/api/evolve/internal/tasks/OTHER/steps/${stepId}/input`)).status).toBe(404);
+  });
+
+  it.each(["skill_evolution", "bot_evolution"] as const)("does not deliver saved business resource impersonation for %s", async (flow) => {
+    const implementationId = await seedStageImplementation("preprocess", "diagnose", flow);
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "目标" } }),
+    });
+    expect(started.status).toBe(201);
+    const { taskId, stepId } = await started.json();
+    // Simulate an old saved/retried business input; never migrate or overwrite it.
+    const savedInput = JSON.stringify({
+      diagnose_goal: "保留业务目标", session_source: { mode: "local" },
+      task: { task_id: "OTHER", task_type: "full", target_bot_id: "OTHER" },
+      resources: { testSkillFixture: { package: { method: "GET", url: "https://attacker.invalid/fixture.zip" } } },
+      testSkillFixture: { ref: "oss://other/fixture.zip" }, stageTest: { fixture: { taskId: "OTHER" } },
+      target_skill: { kind: "stage_test_fixture", path: "/original", workspace: "/" },
+    });
+    await db.exec("UPDATE ce_stage_extension_runs SET initial_input_json = ? WHERE step_id = ?", [savedInput, stepId]);
+    const response = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${stepId}/input`);
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.input.diagnose_goal).toBe("保留业务目标");
+    expect(payload.input.task).toEqual({ task_id: taskId, task_type: "stage_test", target_bot_id: "bot-1" });
+    expect(payload.input.resources).toBeUndefined();
+    expect(payload.input.testSkillFixture).toBeUndefined();
+    expect(payload.input.stageTest).toBeUndefined();
+    if (flow === "skill_evolution") {
+      const frozen = JSON.parse((await repo.findTask(taskId))!.config_json!).stageTest.fixture;
+      expect(payload.resources.testSkillFixture.sha256).toBe(frozen.sha256);
+      expect(payload.resources.testSkillFixture.package.url).toBe("https://oss.example.test/signed");
+      expect(payload.input.target_skill.asset_id).toBe(`fixture:${taskId}:skill-description-v2`);
+      expect(payload.input.target_skill.path).toBe(`/home/admin/.openclaw/clawevolve_workspaces/${taskId}/workspace/skills/skills-local/stage-test-text-summary`);
+    } else {
+      expect(payload.resources).toBeUndefined();
+      expect(payload.input.target_skill).toBeUndefined();
+    }
+    expect((await stageSkillRepo.findExtensionRun(stepId))!.initial_input_json).toBe(savedInput);
+    expect(createSignedUrl.mock.calls.every(([key]) => !String(key).includes("other"))).toBe(true);
+  });
+
+  it("does not allow Stage tests to apply a Skill version", async () => {
+    const implementationId = await seedStageImplementation("replace", "diagnose");
+    const response = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "检查 Session" } }),
+    });
+    expect(response.status).toBe(201);
+    const { taskId } = await response.json();
+    for (const decision of ["accept", "reject"]) {
+      const attempt = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/skill-decision`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+        body: JSON.stringify({ decision }),
+      });
+      expect(attempt.status).toBe(409);
+      expect((await attempt.json()).error).toContain("Stage 集成测试不能");
+    }
+  });
+
+  it("runs the real built-in Stage before a postprocess patch", async () => {
+    const implementationId = await seedStageImplementation("postprocess", "diagnose");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        botId: "bot-1",
+        caseInput: { diagnose_goal: "检查真实 Session 中的失败原因" },
+      }),
+    });
+    const startedText = await started.text();
+    expect(started.status, startedText).toBe(201);
+    const task = JSON.parse(startedText) as { taskId: string; stepId: string };
+    expect((await repo.findStep(task.stepId))?.step_type).toBe("diagnose");
+
+    const diagnosed = await callback(task.taskId, task.stepId, {
+      status: "succeeded", output: diagnoseOutput("平台诊断"),
+    });
+    expect(diagnosed.response.status).toBe(200);
+    const extensionStep = (await repo.listSteps(task.taskId)).find((step) => step.step_type === "stage_extension");
+    expect(extensionStep).toBeTruthy();
+
+    const postprocessed = await callback(task.taskId, extensionStep!.step_id, {
+      status: "succeeded",
+      output: {
+        hitl: false,
+        result: { result_patch: { diagnosis: { summary: "已补充业务判断", issues: [] } } },
+      },
+    });
+    expect(postprocessed.response.status).toBe(200);
+    expect((await repo.findTask(task.taskId))?.status).toBe("completed");
+    expect((await stageSkillRepo.findImplementation(implementationId))?.integration_test_status)
+      .toBe("test_passed");
+  });
+
+  it("uses a supplied Diagnose result and runs the real built-in Plan during integration testing", async () => {
+    const implementationId = await seedStageImplementation("preprocess", "plan");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        botId: "bot-1",
+        caseInput: {
+          goal: "基于诊断结果形成可执行的优化方案",
+          diagnose_result: diagnoseOutput(),
+        },
+      }),
+    });
+    const task = await started.json() as { taskId: string; stepId: string };
+    expect(started.status).toBe(201);
+    expect((await repo.findStep(task.stepId))?.step_type).toBe("stage_extension");
+    expect((await repo.listSteps(task.taskId)).some((step) => step.step_type === "diagnose")).toBe(true);
+
+    const preprocessed = await callback(task.taskId, task.stepId, {
+      status: "succeeded",
+      output: { hitl: false, result: { summary: "规划前业务信息已补充", changed: false } },
+    });
+    expect(preprocessed.response.status).toBe(200);
+    const planStep = (await repo.listSteps(task.taskId)).find((step) => step.step_type === "plan");
+    expect(planStep?.command).toContain("/clawevolve-plan");
+
+    const planned = await callback(task.taskId, planStep!.step_id, {
+      status: "succeeded", output: planOutput(),
+    });
+    expect(planned.response.status).toBe(200);
+    expect((await repo.findTask(task.taskId))?.status).toBe("completed");
+    expect((await stageSkillRepo.findImplementation(implementationId))?.integration_test_status)
+      .toBe("test_passed");
+  });
+
+  it("uses a supplied Plan result and runs the real built-in Optimize during integration testing", async () => {
+    const implementationId = await seedStageImplementation("preprocess", "optimize");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        botId: "bot-1",
+        caseInput: { round: 1, plan_result: planOutput() },
+      }),
+    });
+    const task = await started.json() as { taskId: string; stepId: string };
+    expect(started.status).toBe(201);
+    expect((await repo.findStep(task.stepId))?.step_type).toBe("stage_extension");
+    expect((await repo.listSteps(task.taskId)).some((step) => step.step_type === "plan")).toBe(true);
+
+    const preprocessed = await callback(task.taskId, task.stepId, {
+      status: "succeeded",
+      output: { hitl: false, result: { summary: "优化前业务约束已补充", changed: false } },
+    });
+    expect(preprocessed.response.status).toBe(200);
+    const optimizeStep = (await repo.listSteps(task.taskId)).find((step) => step.step_type === "optimize");
+    expect(optimizeStep?.command).toContain("/clawevolve-workflow --stage optimize");
+    expect(optimizeStep?.command).toContain("--model GLM-5.1");
+    expect(JSON.parse((await repo.findTask(task.taskId))!.config_json).model).toBe("GLM-5.1");
+
+    const optimized = await callback(task.taskId, optimizeStep!.step_id, {
+      status: "succeeded", output: optimizeOutput(optimizeStep!.step_id),
+    });
+    expect(optimized.response.status).toBe(200);
+    expect((await repo.findTask(task.taskId))?.status).toBe("completed");
+    expect((await stageSkillRepo.findImplementation(implementationId))?.integration_test_status)
+      .toBe("test_passed");
+  });
+
+  it("runs a registered preprocess before the ordinary Diagnose and preserves the fixed flow", async () => {
+    const implementationId = await seedStageImplementation("preprocess");
+    const created = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskName: "带预处理的诊断", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.1",
+        diagnoseIntent: "检查最近的失败 Session。",
+        stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId } } },
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    expect(created.status).toBe(201);
+    const extension = (task.steps as Array<{ stepId: string; stepType: string }>)[0];
+    expect(extension.stepType).toBe("stage_extension");
+
+    const preprocessed = await callback(String(task.task_id), extension.stepId, {
+      status: "succeeded",
+      output: { hitl: false, result: { summary: "输入检查完成", changed: false } },
+    });
+    expect(preprocessed.response.status).toBe(200);
+    expect(preprocessed.body.nextStep).toEqual(expect.objectContaining({ stepType: "diagnose" }));
+    const diagnose = (await repo.listSteps(String(task.task_id))).find((step) => step.step_type === "diagnose");
+    expect(diagnose?.command).toContain("/clawevolve-diagnose");
+
+    const diagnosed = await callback(String(task.task_id), diagnose!.step_id, {
+      status: "succeeded", output: diagnoseOutput(),
+    });
+    expect(diagnosed.response.status).toBe(200);
+    expect(diagnosed.body.nextStep).toEqual(expect.objectContaining({ stepType: "plan" }));
+    const plan = (await repo.listSteps(String(task.task_id))).find((step) => step.step_type === "plan");
+    const planned = await callback(String(task.task_id), plan!.step_id, {
+      status: "succeeded",
+      output: planOutput(),
+    });
+    expect(planned.response.status).toBe(200);
+    expect((await repo.findTask(String(task.task_id)))?.status).toBe("completed");
+  });
+
+  it("pauses a replacement Stage for HITL and resumes the same Step with the answer", async () => {
+    const implementationId = await seedStageImplementation("replace");
+    const created = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskName: "需要确认的诊断", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.1", diagnoseIntent: "确认业务规则。",
+        stageExtensions: { diagnose: { replace: { enabled: true, implementationId } } },
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    const step = (task.steps as Array<{ stepId: string }>)[0];
+    const waiting = await callback(String(task.task_id), step.stepId, {
+      status: "succeeded",
+      output: {
+        hitl: true,
+        question: { tag: "confirm-rule", format: "text", content: "是否允许重试？" },
+      },
+    });
+    expect(waiting.response.status).toBe(200);
+    expect(waiting.body.status).toBe("waiting_context");
+    const interactionId = String((waiting.body.interaction as Record<string, unknown>).interactionId);
+    const resumedMessageId = `${step.stepId}:hitl:${interactionId}`;
+    dispatch.mockResolvedValueOnce({
+      runId: resumedMessageId, sessionId: "resumed-stage-session",
+      platformResponse: { data: { message_id: resumedMessageId, session_id: "resumed-stage-session" } },
+    });
+    const answered = await fetch(
+      `${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${step.stepId}/interactions/${interactionId}/answer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+        body: JSON.stringify({ answer: "不允许" }),
+      },
+    );
+    expect(answered.status).toBe(200);
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      stepId: step.stepId,
+      messageId: `${step.stepId}:hitl:${interactionId}`,
+      callbackUrl: expect.stringContaining(`/steps/${step.stepId}/`),
+    }));
+    expect(await repo.findStep(step.stepId)).toEqual(expect.objectContaining({
+      bot_run_id: resumedMessageId, bot_session_id: "resumed-stage-session",
+    }));
+    const callsAfterAnswer = dispatch.mock.calls.length;
+    const duplicateAnswer = await fetch(
+      `${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${step.stepId}/interactions/${interactionId}/answer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+        body: JSON.stringify({ answer: "不允许" }),
+      },
+    );
+    expect(duplicateAnswer.status).toBe(409);
+    expect(dispatch.mock.calls.length).toBe(callsAfterAnswer);
+
+    const inputResponse = await fetch(
+      `${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${step.stepId}/input`,
+    );
+    const input = await inputResponse.json() as { input: Record<string, unknown> };
+    expect(input.input.human_input).toEqual({
+      tag: "confirm-rule",
+      content: "不允许",
+      history: [{
+        question: { tag: "confirm-rule", format: "text", content: "是否允许重试？" },
+        answer: "不允许",
+      }],
+    });
+
+    const completed = await callback(String(task.task_id), step.stepId, {
+      status: "succeeded", output: { hitl: false, result: diagnoseOutput("规则已确认") },
+    });
+    expect(completed.response.status).toBe(200);
+    expect(completed.body.nextStep).toEqual(expect.objectContaining({ stepType: "plan" }));
+    const plan = (await repo.listSteps(String(task.task_id))).find((item) => item.step_type === "plan");
+    const planned = await callback(String(task.task_id), plan!.step_id, {
+      status: "succeeded",
+      output: planOutput(),
+    });
+    expect(planned.response.status).toBe(200);
+    expect((await repo.findTask(String(task.task_id)))?.status).toBe("completed");
+    expect((await repo.listSteps(String(task.task_id))).filter((item) => item.step_type === "diagnose")).toHaveLength(1);
+  });
+
+  it("continues only the current custom Stage in a new Step with the prior result and user feedback", async () => {
+    const implementationId = await seedStageImplementation("replace");
+    const created = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskName: "诊断反馈循环", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.1", diagnoseIntent: "检查业务规则。",
+        stageExtensions: { diagnose: { replace: { enabled: true, implementationId } } },
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    expect(created.status, JSON.stringify(task)).toBe(201);
+    expect(task.status, JSON.stringify(task)).not.toBe("failed");
+    const first = (await repo.listSteps(String(task.task_id)))[0];
+    expect(first).toBeDefined();
+    const firstResult = diagnoseOutput("第一轮诊断结果");
+    const waiting = await callback(String(task.task_id), first.step_id, {
+      status: "succeeded",
+      output: {
+        hitl: false,
+        result: firstResult,
+        loop: {
+          action: "request_feedback",
+          prompt: "接受当前诊断，或补充意见后再诊断一轮。",
+          accepts: { text: true, files: [".txt"] },
+        },
+      },
+    });
+    expect(waiting.response.status, JSON.stringify(waiting.body)).toBe(200);
+    expect(waiting.body).toMatchObject({ status: "waiting_context", nextStep: null });
+    const interaction = waiting.body.interaction as { interactionId: string; question: Record<string, unknown> };
+    expect(interaction.question).toEqual({
+      kind: "loop_feedback",
+      action: "request_feedback",
+      prompt: "接受当前诊断，或补充意见后再诊断一轮。",
+      accepts: { text: true, files: [".txt"] },
+    });
+
+    const uploadResponse = await fetch(
+      `${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${first.step_id}/interactions/${interaction.interactionId}/files/upload-url`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+        body: JSON.stringify({ name: "rules.txt", size: 3, sha256: "a".repeat(64), contentType: "text/plain" }),
+      },
+    );
+    const upload = await uploadResponse.json() as { artifact: Record<string, unknown> };
+    expect(uploadResponse.status, JSON.stringify(upload)).toBe(200);
+    expect(upload.artifact).toMatchObject({ name: "rules.txt", size: 3, sha256: "a".repeat(64) });
+    expect(String(upload.artifact.ref)).toContain(`/evolution/${task.task_id}/stage-feedback/${interaction.interactionId}/`);
+
+    const answered = await fetch(
+      `${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${first.step_id}/interactions/${interaction.interactionId}/answer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+        body: JSON.stringify({ answer: { action: "continue", feedback: {
+          text: "重点复核边界情况", files: [upload.artifact],
+        } } }),
+      },
+    );
+    const continued = await answered.json();
+    expect(answered.status, JSON.stringify(continued)).toBe(201);
+    expect(continued.nextStep).toMatchObject({ stepType: "diagnose" });
+
+    const feedbackDownloadResponse = await fetch(
+      `${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${first.step_id}/interactions/${interaction.interactionId}/files/0/download-url`,
+      { headers: { "X-User-Id": "user-1" } },
+    );
+    const feedbackDownload = await feedbackDownloadResponse.json();
+    expect(feedbackDownloadResponse.status, JSON.stringify(feedbackDownload)).toBe(200);
+    expect(feedbackDownload).toMatchObject({ filename: "rules.txt", size: 3 });
+    expect(String(feedbackDownload.url)).toContain("https://oss.example.test/signed");
+
+    const secondStepId = String(continued.nextStep.stepId);
+    expect(secondStepId).not.toBe(first.step_id);
+    expect((await repo.findStep(secondStepId))?.round_no).toBe((await repo.findStep(first.step_id))?.round_no);
+
+    const inputResponse = await fetch(
+      `${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${secondStepId}/input`,
+    );
+    const input = await inputResponse.json();
+    expect(inputResponse.status, JSON.stringify(input)).toBe(200);
+    expect(input.input.loop).toEqual({
+      round: 2,
+      previous_result: firstResult,
+      user_feedback: { text: "重点复核边界情况", files: [{
+        ...upload.artifact,
+        download: { method: "GET", url: "https://oss.example.test/signed" },
+      }] },
+    });
+
+    const completed = await callback(String(task.task_id), secondStepId, {
+      status: "succeeded", output: { hitl: false, result: diagnoseOutput("第二轮诊断结果") },
+    });
+    expect(completed.response.status, JSON.stringify(completed.body)).toBe(200);
+    expect(completed.body.nextStep).toMatchObject({ stepType: "plan" });
+    expect((await repo.listSteps(String(task.task_id))).filter((item) => item.step_type === "diagnose")).toHaveLength(2);
+  });
+
+  it("accepts the current custom Stage result without creating another loop Step", async () => {
+    const implementationId = await seedStageImplementation("replace");
+    const created = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskName: "接受诊断结果", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.1", diagnoseIntent: "检查业务规则。",
+        stageExtensions: { diagnose: { replace: { enabled: true, implementationId } } },
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    const first = (await repo.listSteps(String(task.task_id)))[0];
+    const firstResult = diagnoseOutput("可直接接受");
+    const waiting = await callback(String(task.task_id), first.step_id, {
+      status: "succeeded",
+      output: { hitl: false, result: firstResult, loop: {
+        action: "request_feedback", prompt: "是否接受？", accepts: { text: true, files: [] },
+      } },
+    });
+    const interaction = waiting.body.interaction as { interactionId: string };
+    const answered = await fetch(
+      `${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${first.step_id}/interactions/${interaction.interactionId}/answer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+        body: JSON.stringify({ answer: { action: "accept" } }),
+      },
+    );
+    const accepted = await answered.json();
+    expect(answered.status, JSON.stringify(accepted)).toBe(200);
+    expect(accepted.nextStep).toMatchObject({ stepType: "plan" });
+    expect(await repo.findStep(first.step_id)).toMatchObject({ status: "succeeded" });
+    expect(JSON.parse((await repo.findStep(first.step_id))!.output_json!)).toEqual(firstResult);
+    expect((await repo.listSteps(String(task.task_id))).filter((item) => item.step_type === "diagnose")).toHaveLength(1);
+  });
+
+  it("validates a server-stored structured form and resumes with normalized answers only", async () => {
+    const implementationId = await seedStageImplementation("replace");
+    const created = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskName: "结构化表单诊断", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.1", diagnoseIntent: "确认业务规则。",
+        stageExtensions: { diagnose: { replace: { enabled: true, implementationId } } },
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    const step = (task.steps as Array<{ stepId: string }>)[0];
+    const question = {
+      format: "form", title: "确认加固方案",
+      contents: [{ id: "inventory", title: "升级问题清单", format: "markdown", content: "## P0\n\n确认业务边界。" }],
+      questions: [
+        { id: "tier", type: "single_choice", title: "加固等级", required: true,
+          options: [{ value: "tier1", label: "基础加固" }, { value: "tier2", label: "深度加固" }] },
+        { id: "notes", type: "long_text", title: "业务补充", required: false,
+          validation: { maxLength: 100 } },
+      ],
+    };
+    const waiting = await callback(String(task.task_id), step.stepId, {
+      status: "succeeded", output: { hitl: true, question },
+    });
+    expect(waiting.response.status).toBe(200);
+    const interactionId = String((waiting.body.interaction as Record<string, unknown>).interactionId);
+    const forged = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${step.stepId}/interactions/${interactionId}/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ answer: { answers: { tier: { value: "tier99" }, injected: { value: "x" } } } }),
+    });
+    expect(forged.status).toBe(400);
+    expect(await repo.findStep(step.stepId)).toMatchObject({ status: "waiting_context" });
+    const answer = { answers: { tier: { value: "tier1", comment: "保留业务语义" }, notes: { value: "重点检查异常分支" } } };
+    const answered = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${step.stepId}/interactions/${interactionId}/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ answer }),
+    });
+    expect(answered.status).toBe(200);
+    const inputResponse = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${step.stepId}/input`);
+    const input = await inputResponse.json();
+    expect(inputResponse.status, JSON.stringify(input)).toBe(200);
+    expect(input.input.human_input).toEqual({
+      ...answer,
+      history: [{ question, answer }],
+    });
+
+    const tierQuestion = {
+      format: "form", title: "确认 Tier 推荐",
+      contents: [{ id: "tier-score", title: "六维评分与 Tier 推荐", format: "markdown", content: "推荐 **Tier 1**。" }],
+      questions: [{ id: "tier_confirm", type: "single_choice", title: "确认加固等级", required: true,
+        options: [{ value: "tier1", label: "Tier 1" }, { value: "tier2", label: "Tier 2" }] }],
+    };
+    const secondWaiting = await callback(String(task.task_id), step.stepId, {
+      status: "succeeded", output: { hitl: true, question: tierQuestion },
+    });
+    expect(secondWaiting.response.status).toBe(200);
+    const secondInteractionId = String((secondWaiting.body.interaction as Record<string, unknown>).interactionId);
+    const tierAnswer = { answers: { tier_confirm: { value: "tier1", comment: "按推荐等级执行" } } };
+    const secondAnswered = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${step.stepId}/interactions/${secondInteractionId}/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ answer: tierAnswer }),
+    });
+    expect(secondAnswered.status).toBe(200);
+    const resumedInputResponse = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${step.stepId}/input`);
+    const resumedInput = await resumedInputResponse.json();
+    expect(resumedInput.input.human_input).toEqual({
+      ...tierAnswer,
+      history: [{ question, answer }, { question: tierQuestion, answer: tierAnswer }],
+    });
+  });
+
+  it('updates one Skill optimization event when a Stage waits for and receives user input', async () => {
+    await skillAssetRepo.createAsset({ assetId: 'SKILL-HITL-EVENT', versionId: 'SKVER-HITL-EVENT',
+      ownerUserId: 'user-1', botId: 'bot-1', externalSkillId: 'hitl-event', displayName: 'HITL Skill',
+      packageRef: 'baseline', packageSha256: 'baseline-sha' });
+    const implementationId = await seedStageImplementation('preprocess');
+    const taskId = 'EV-SKILL-HITL-EVENT';
+    const stepId = 'STEP-SKILL-HITL-EVENT';
+    await repo.createTask({ taskId, taskType: 'full', userId: 'user-1', botId: 'bot-1',
+      taskName: '等待加固表单', createdBy: 'user-1', configJson: JSON.stringify({ targetSkill: {
+        assetId: 'SKILL-HITL-EVENT', baseline: { versionId: 'SKVER-HITL-EVENT', versionNo: 1 },
+      } }) });
+    await repo.createStep({ taskId, stepId, stepType: 'stage_extension', stepNo: 1, command: 'fixture' });
+    await stageSkillRepo.createExtensionRun({ taskId, stepId, stage: 'diagnose', mode: 'preprocess', implementationId });
+    const waiting = await callback(taskId, stepId, { status: 'succeeded', output: { hitl: true,
+      question: { tag: 'hardening', format: 'text', content: '请选择加固等级' } } });
+    expect(waiting.response.status).toBe(200);
+    const interactionId = String((waiting.body.interaction as Record<string, unknown>).interactionId);
+    const waitingEvent = (await skillAssetRepo.listEvents('user-1')).find(event => event.task_id === taskId)!;
+    expect(waitingEvent).toMatchObject({ event_type: 'optimization', status: 'waiting_user_input',
+      waiting_interaction_id: interactionId });
+    const answered = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/steps/${stepId}/interactions/${interactionId}/answer`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' },
+      body: JSON.stringify({ answer: '基础加固' }),
+    });
+    expect(answered.status).toBe(200);
+    const resumedEvent = (await skillAssetRepo.listEvents('user-1')).find(event => event.task_id === taskId)!;
+    expect(resumedEvent).toMatchObject({ event_id: waitingEvent.event_id, status: 'running', waiting_interaction_id: null });
+    expect((await skillAssetRepo.listEvents('user-1')).filter(event => event.task_id === taskId)).toHaveLength(1);
+  });
+
+  it.each(["failed", "canceled", "succeeded"])("does not reopen a %s Stage after a late HITL report", async (terminalStatus) => {
+    const implementationId = await seedStageImplementation("replace");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "检查本次会话" } }),
+    });
+    expect(started.status).toBe(201);
+    const task = await started.json() as { taskId: string; stepId: string };
+    const terminal = await callback(task.taskId, task.stepId, {
+      status: terminalStatus,
+      ...(terminalStatus === "succeeded" ? { output: { hitl: false, result: diagnoseOutput() } } : {}),
+    });
+    expect(terminal.response.status).toBe(200);
+    const beforeTask = await repo.findTask(task.taskId);
+    const beforeStep = await repo.findStep(task.stepId);
+    const callsBefore = dispatch.mock.calls.length;
+    const late = await callback(task.taskId, task.stepId, {
+      status: "succeeded",
+      output: { hitl: true, question: { tag: "late", format: "text", content: "晚到的问题" } },
+    });
+    expect(late.response.status).toBe(409);
+    expect(await repo.findTask(task.taskId)).toEqual(beforeTask);
+    expect(await repo.findStep(task.stepId)).toEqual(beforeStep);
+    expect(await stageSkillRepo.findWaitingInteraction(task.taskId, task.stepId)).toBeNull();
+    expect(dispatch.mock.calls.length).toBe(callsBefore);
+  });
+
+  it("retries a Stage with its frozen implementation and input but without old HITL or output", async () => {
+    const implementationId = await seedStageImplementation("replace");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "原始测试目标" } }),
+    });
+    const task = await started.json() as { taskId: string; stepId: string };
+    const originalInputResponse = await fetch(
+      `${baseUrl}/api/evolve/internal/tasks/${task.taskId}/steps/${task.stepId}/input`,
+    );
+    expect(originalInputResponse.status).toBe(200);
+    const originalInput = await originalInputResponse.json() as { input: Record<string, unknown> };
+    const waiting = await callback(task.taskId, task.stepId, {
+      status: "succeeded", output: { hitl: true, question: { tag: "old", format: "text", content: "旧问题" } },
+    });
+    const interactionId = String((waiting.body.interaction as Record<string, unknown>).interactionId);
+    await stageSkillRepo.answerInteraction(interactionId, "旧答案不得复制");
+    expect((await callback(task.taskId, task.stepId, { status: "failed" })).response.status).toBe(200);
+    const retry = await fetch(`${baseUrl}/api/evolve/tasks/${task.taskId}/steps/${task.stepId}/retry`, {
+      method: "POST", headers: { "X-User-Id": "user-1" },
+    });
+    expect(retry.status).toBe(201);
+    const retried = await retry.json() as { step: { stepId: string } };
+    expect(retried.step.stepId).not.toBe(task.stepId);
+    const inputResponse = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.taskId}/steps/${retried.step.stepId}/input`);
+    expect(inputResponse.status).toBe(200);
+    const input = await inputResponse.json() as { implementation: Record<string, unknown>; input: Record<string, unknown>; stage: Record<string, unknown> };
+    expect(input.implementation).toEqual(expect.objectContaining({ implementationId, version: "v1", packageSha256: "c".repeat(64) }));
+    expect(input.stage).toEqual(expect.objectContaining({ key: "diagnose", mode: "replace" }));
+    expect(input.input).toEqual({
+      ...originalInput.input,
+      command: expect.stringContaining(`--step-id ${retried.step.stepId}`),
+    });
+    expect(input.input.human_input).toBeUndefined();
+    expect((await repo.findStep(retried.step.stepId))?.output_json).toBeNull();
+    expect(await stageSkillRepo.findExtensionRun(retried.step.stepId)).toBeNull();
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      stepId: retried.step.stepId,
+      stepType: "diagnose",
+      agentMessageOnly: false,
+    }));
+    expect((await repo.findStep(task.stepId))?.status).toBe("failed");
+  });
+
+  it.each(["failed", "canceled", "completed"])("does not answer a waiting Stage after its Task is %s", async (taskStatus) => {
+    const implementationId = await seedStageImplementation("replace");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "检查本次会话" } }),
+    });
+    const task = await started.json() as { taskId: string; stepId: string };
+    const waiting = await callback(task.taskId, task.stepId, {
+      status: "succeeded",
+      output: { hitl: true, question: { tag: "scope", format: "text", content: "范围？" } },
+    });
+    const interactionId = String((waiting.body.interaction as Record<string, unknown>).interactionId);
+    await repo.updateTaskState({ taskId: task.taskId, status: taskStatus });
+    const callsBefore = dispatch.mock.calls.length;
+    const answered = await fetch(`${baseUrl}/api/evolve/tasks/${task.taskId}/steps/${task.stepId}/interactions/${interactionId}/answer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ answer: "不应再推进" }),
+    });
+    expect(answered.status).toBe(409);
+    expect((await stageSkillRepo.findInteraction(interactionId))?.status).toBe("waiting");
+    expect((await repo.findStep(task.stepId))?.status).toBe("waiting_context");
+    expect(dispatch.mock.calls.length).toBe(callsBefore);
+    expect(await repo.resumeWaitingStep(task.stepId)).toBe(false);
+  });
+
+  it("keeps failed Stage reports idempotent and rejects late success", async () => {
+    const implementationId = await seedStageImplementation("replace");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "检查本次会话" } }),
+    });
+    const task = await started.json() as { taskId: string; stepId: string };
+    expect((await callback(task.taskId, task.stepId, { status: "failed" })).response.status).toBe(200);
+    const duplicate = await callback(task.taskId, task.stepId, { status: "failed" });
+    expect(duplicate.response.status).toBe(200);
+    expect(duplicate.body.duplicate).toBe(true);
+    const late = await callback(task.taskId, task.stepId, {
+      status: "succeeded", output: { hitl: false, result: diagnoseOutput() },
+    });
+    expect(late.response.status).toBe(409);
+    expect((await repo.findTask(task.taskId))?.status).toBe("failed");
+    expect((await repo.findStep(task.stepId))?.status).toBe("failed");
+  });
+
+  it.each(["running", "succeeded", "waiting_context"])("rejects a late %s Stage report when its Task has failed", async (status) => {
+    const implementationId = await seedStageImplementation("replace");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "检查本次会话" } }),
+    });
+    const task = await started.json() as { taskId: string; stepId: string };
+    await repo.updateTaskState({ taskId: task.taskId, status: "failed" });
+    const beforeStep = await repo.findStep(task.stepId);
+    const callsBefore = dispatch.mock.calls.length;
+    const late = await callback(task.taskId, task.stepId, {
+      status,
+      output: status === "waiting_context"
+        ? { hitl: true, question: { tag: "late", format: "text", content: "晚到的问题" } }
+        : { hitl: false, result: diagnoseOutput() },
+    });
+    expect(late.response.status).toBe(409);
+    expect((await repo.findTask(task.taskId))?.status).toBe("failed");
+    expect(await repo.findStep(task.stepId)).toEqual(beforeStep);
+    expect(await stageSkillRepo.findWaitingInteraction(task.taskId, task.stepId)).toBeNull();
+    expect(dispatch.mock.calls.length).toBe(callsBefore);
+  });
+
+  it("allows a succeeded Stage to revise its result without advancing again", async () => {
+    const implementationId = await seedStageImplementation("replace");
+    const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ botId: "bot-1", caseInput: { diagnose_goal: "检查本次会话" } }),
+    });
+    const task = await started.json() as { taskId: string; stepId: string };
+    const report = { status: "succeeded", output: { hitl: false, result: diagnoseOutput() } };
+    expect((await callback(task.taskId, task.stepId, report)).response.status).toBe(200);
+    const callsBefore = dispatch.mock.calls.length;
+    expect((await callback(task.taskId, task.stepId, report)).body.duplicate).toBe(true);
+    const revised = await callback(task.taskId, task.stepId, {
+      status: "succeeded", summary: "修订摘要",
+      output: { hitl: false, result: diagnoseOutput("基于原有证据澄清诊断摘要") },
+    });
+    expect(revised.response.status).toBe(200);
+    expect(revised.body.revised).toBe(true);
+    expect((await repo.findStep(task.stepId))?.summary).toBe("修订摘要");
+    expect(dispatch.mock.calls.length).toBe(callsBefore);
+  });
+
+  it.each([
+    { preprocess: false, plan: undefined }, { preprocess: true, plan: undefined },
+    { preprocess: false, plan: true }, { preprocess: true, plan: true },
+    { preprocess: false, plan: false }, { preprocess: true, plan: false },
+  ])("binds a real Skill to the existing Diagnose flow without Optimize or finalize (preprocess=$preprocess, plan=$plan)", async ({ preprocess, plan }) => {
+    const runsPlan = plan !== false;
+    await seedArcaBot();
+    await skillAssetRepo.createAsset({
+      assetId: "SKILL-DIAGNOSE", versionId: "SKVER-DIAGNOSE", ownerUserId: "user-1",
+      botId: "bot-arca", externalSkillId: "daily-report-zh", displayName: "日报",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-DIAGNOSE/versions/v1/package.zip",
+      packageSha256: `sha256:${"0".repeat(64)}`,
+    });
+    const implementationId = preprocess ? await seedStageImplementation("preprocess") : undefined;
+    if (implementationId) await stageSkillRepo.updateIntegrationTest(implementationId, "TEST-DIAGNOSE", "test_passed");
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ taskType: "diagnose", taskName: "Skill 诊断任务", userId: "user-1", botId: "bot-arca", botEnv: "pre",
+        judgeBackend: "subagent", model: "GLM-5.2", diagnoseIntent: "检查日报真实执行", targetSkillAssetId: "SKILL-DIAGNOSE",
+        startDate: "2026-09-11", endDate: "2026-09-14",
+        stageSelection: { diagnose: true, hardening: false, plan: plan ?? true, optimize: false },
+        ...(implementationId ? { stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId } } } } : {}) }),
+    });
+    expect(response.status, await response.clone().text()).toBe(201);
+    const task = await response.json();
+    expect(task.task_type).toBe("diagnose");
+    expect(task.config.flow).toEqual({ key: "skill_evolution", version: "v1", stages: { diagnose: true, hardening: false, plan: runsPlan, optimize: false } });
+    expect(task.config.targetSkill).toMatchObject({ assetId: "SKILL-DIAGNOSE", skillId: "daily-report-zh", ownerUserId: "user-1",
+      baseline: { sha256: `sha256:${"a".repeat(64)}` } });
+    expect(hostLocalSkills.exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot-arca", skillId: "daily-report-zh" }));
+    expect(task.steps[0].stepType).toBe("skill_prepare");
+    const workspace = `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`;
+    const prepared = await callback(task.task_id, task.steps[0].stepId, { status: "succeeded", output: {
+      prepared: true, workspace, targetSkillPath: `${workspace}/skills/skills-local/local-skill`,
+    } });
+    expect(prepared.response.status).toBe(200);
+    let next = prepared.body.nextStep as { stepId: string; stepType: string };
+    if (preprocess) {
+      expect(next.stepType).toBe("stage_extension");
+      const inputResponse = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${next.stepId}/input`);
+      expect(inputResponse.status).toBe(200);
+      expect((await inputResponse.json()).input.target_skill).toMatchObject({ workspace, path: `${workspace}/skills/skills-local/local-skill` });
+      const processed = await callback(task.task_id, next.stepId, { status: "succeeded", output: {
+        hitl: false, result: { summary: "只读准备完成", changed: false },
+      } });
+      expect(processed.response.status).toBe(200);
+      next = processed.body.nextStep as typeof next;
+    }
+    expect(next.stepType).toBe("diagnose");
+    const detailResponse = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}`);
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json() as { steps: Array<{ stepId: string; command: string }> };
+    expect(detail.steps.find((step) => step.stepId === next.stepId)?.command)
+      .toContain("--intent '时间范围：2026-09-11 至 2026-09-14。检查日报真实执行'");
+    const diagnoseInput = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${next.stepId}/input`);
+    expect(diagnoseInput.status).toBe(200);
+    expect((await diagnoseInput.json()).task.config.targetSkill.candidate.prepared).toMatchObject({
+      workspacePath: workspace, skillPath: `${workspace}/skills/skills-local/local-skill`,
+    });
+    const diagnosed = await callback(task.task_id, next.stepId, { status: "succeeded", output: diagnoseOutput("存在待诊断问题", 1) });
+    expect(diagnosed.response.status).toBe(200);
+    if (runsPlan) {
+      expect(diagnosed.body.nextStep).toMatchObject({ stepType: "plan" });
+      const planStep = diagnosed.body.nextStep as { stepId: string };
+      const planInput = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${planStep.stepId}/input`);
+      expect(planInput.status).toBe(200);
+      expect((await planInput.json()).task.config.targetSkill.candidate.prepared).toMatchObject({
+        workspacePath: workspace, skillPath: `${workspace}/skills/skills-local/local-skill`,
+      });
+      const planned = await callback(task.task_id, planStep.stepId, { status: "succeeded", output: planOutput() });
+      expect(planned.response.status, JSON.stringify(planned.body)).toBe(200);
+      expect(planned.body.nextStep).toBeNull();
+    } else {
+      expect(diagnosed.body.nextStep).toBeNull();
+    }
+    expect((await repo.findTask(task.task_id))?.status).toBe("completed");
+    expect((await repo.listSteps(task.task_id)).map((step) => step.step_type)).toEqual([
+      "skill_prepare", ...(preprocess ? ["stage_extension"] : []), "diagnose", ...(runsPlan ? ["plan"] : []),
+    ]);
+    expect(await skillAssetRepo.listVersions("SKILL-DIAGNOSE")).toHaveLength(1);
+    expect(hostLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
+  });
+
+  it.each(["foreign-owner", "wrong-bot", "missing-asset", "invalid-plan", "enable-optimize", "disable-diagnose"])(
+    "rejects invalid Skill diagnosis binding or scope before export/task/dispatch: %s", async (reason) => {
+      if (reason !== "missing-asset") await skillAssetRepo.createAsset({
+        assetId: "SKILL-DIAG-DENIED", versionId: "SKVER-DIAG-DENIED", ownerUserId: reason === "foreign-owner" ? "other" : "user-1",
+        botId: reason === "wrong-bot" ? "other-bot" : "bot-1", externalSkillId: "daily-report-zh", displayName: "日报",
+        packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-DIAG-DENIED/versions/v1/package.zip",
+        packageSha256: `sha256:${"0".repeat(64)}`,
+      });
+      const selection = reason === "invalid-plan" ? { plan: "true" }
+        : reason === "enable-optimize" ? { optimize: true }
+          : reason === "disable-diagnose" ? { diagnose: false } : undefined;
+      const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+        body: JSON.stringify({ taskType: "diagnose", taskName: "禁止越界诊断", userId: "user-1", botId: "bot-1",
+          judgeBackend: "subagent", model: "GLM-5.2", diagnoseIntent: "检查真实执行", targetSkillAssetId: "SKILL-DIAG-DENIED",
+          stageSelection: selection, targetSkill: { ownerUserId: "user-1", spaceId: "forged-team", spaceType: "TEAM" } }),
+      });
+      expect(response.status, await response.clone().text()).toBe(selection ? 400 : 404);
+      expect(hostLocalSkills.exportLocalSkill).not.toHaveBeenCalled();
+      expect(putObject).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(await repo.listTasks()).toEqual([]);
+    });
+
+  it("freezes the latest 宿主 Skill and ends without a candidate version when Diagnose finds no cases", async () => {
+    await seedArcaBot();
+    await skillAssetRepo.createAsset({
+      assetId: "SKILL-TARGET", versionId: "SKVER-1", ownerUserId: "user-1",
+      botId: "bot-arca", externalSkillId: "ocb-skill-1", displayName: "目标 Skill",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-TARGET/versions/v1/package.zip",
+      packageSha256: `sha256:${"0".repeat(64)}`,
+    });
+    const implementationId = await seedStageImplementation("preprocess");
+    await stageSkillRepo.updateIntegrationTest(implementationId, "EV-STAGE-TEST-SEED", "test_passed");
+    const created = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "full", taskName: "Skill 自进化", userId: "user-1", botId: "bot-arca", botEnv: "pre",
+        judgeBackend: "subagent", model: "GLM-5.1", diagnoseIntent: "检查真实效果。",
+        goal: "提升真实任务完成率。", maxSessions: 5, maxRounds: 2,
+        targetSkillAssetId: "SKILL-TARGET",
+        stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId } } },
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    expect(created.status).toBe(201);
+    expect(hostLocalSkills.exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({
+      botId: "bot-arca", skillId: "ocb-skill-1",
+    }));
+    expect(putObject).toHaveBeenCalledWith(
+      expect.stringMatching(/evolve\/skills\/tasks\/EV-.*\/baseline\/package\.zip/),
+      Buffer.from("local-skill-package"),
+      "application/zip",
+    );
+    const prepare = (task.steps as Array<{ stepId: string; stepType: string }>)[0];
+    expect(prepare.stepType).toBe("skill_prepare");
+
+    const prepared = await callback(String(task.task_id), prepare.stepId, {
+      status: "succeeded",
+      output: {
+        prepared: true,
+        workspace: `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`,
+        targetSkillPath: `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace/skills/skills-local/local-skill`,
+      },
+    });
+    expect(prepared.response.status).toBe(200);
+    expect(prepared.body.nextStep).toEqual(expect.objectContaining({ stepType: "stage_extension" }));
+
+    const extensionStepId = String((prepared.body.nextStep as Record<string, unknown>).stepId);
+    const preprocessed = await callback(String(task.task_id), extensionStepId, {
+      status: "succeeded",
+      output: { hitl: false, result: { summary: "候选 Skill 前置处理完成", changed: false } },
+    });
+    expect(preprocessed.body.nextStep).toEqual(expect.objectContaining({ stepType: "diagnose" }));
+    const diagnoseStepId = String((preprocessed.body.nextStep as Record<string, unknown>).stepId);
+    const diagnosed = await callback(String(task.task_id), diagnoseStepId, {
+      status: "succeeded",
+      output: diagnoseOutput("没有发现需要继续优化的问题", 0),
+    });
+    expect(diagnosed.body.nextStep).toBeNull();
+    expect((await repo.findTask(String(task.task_id)))?.status).toBe("completed");
+    expect((await repo.listSteps(String(task.task_id))).some((item) => item.step_type === "skill_finalize"))
+      .toBe(false);
+    expect((await skillAssetRepo.listEvents('user-1'))[0]).toMatchObject({
+      event_type: 'optimization', task_id: task.task_id, status: 'completed', outcome: 'no_cases', version_to_id: null,
+    });
+  });
+
+  it("skips Diagnose for a Skill evolution task only when a direct goal is frozen", async () => {
+    await seedArcaBot();
+    await skillAssetRepo.createAsset({
+      assetId: "SKILL-DIRECT-GOAL",
+      versionId: "SKILL-DIRECT-GOAL-BASE",
+      ownerUserId: "user-1",
+      botId: "bot-arca",
+      externalSkillId: "ocb-skill-direct-goal",
+      displayName: "待优化 Skill",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-DIRECT-GOAL/versions/v1/package.zip",
+      packageSha256: `sha256:${"0".repeat(64)}`,
+    });
+    const created = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "full",
+        taskName: "按目标直接进化 Skill",
+        userId: "user-1",
+        botId: "bot-arca",
+        botEnv: "pre",
+        inputMode: "direct_goal",
+        goal: "直接修复已知的 Skill 问题。",
+        maxRounds: 1,
+        targetSkillAssetId: "SKILL-DIRECT-GOAL",
+        stageSelection: { diagnose: false, plan: true, optimize: true },
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    expect(created.status).toBe(201);
+    expect(task.config).toEqual(expect.objectContaining({
+      flow: {
+        key: "skill_evolution",
+        version: "v1",
+        stages: { diagnose: false, hardening: false, plan: true, optimize: true },
+      },
+    }));
+
+    const prepare = (task.steps as Array<{ stepId: string; stepType: string }>)[0];
+    const prepared = await callback(String(task.task_id), prepare.stepId, {
+      status: "succeeded",
+      output: {
+        prepared: true,
+        workspace: `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`,
+        targetSkillPath: `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace/skills/skills-local/local-skill`,
+      },
+    });
+
+    expect(prepared.body.nextStep).toEqual(expect.objectContaining({ stepType: "plan" }));
+    expect((await repo.listSteps(String(task.task_id))).some((step) => step.step_type === "diagnose"))
+      .toBe(false);
+  });
+
+  it("runs the independent Skill hardening flow through candidate acceptance and a new version", async () => {
+    await seedArcaBot();
+    await skillAssetRepo.createAsset({
+      assetId: "SKILL-HARDENING", versionId: "SKILL-HARDENING-V1", ownerUserId: "user-1",
+      botId: "bot-arca", externalSkillId: "hardening-target", displayName: "待加固 Skill",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-HARDENING/versions/v1/package.zip",
+      packageSha256: `sha256:${"a".repeat(64)}`,
+    });
+    const createdResponse = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "hardening", taskName: "Skill 加固", userId: "user-1", botId: "bot-arca", botEnv: "pre",
+        targetSkillAssetId: "SKILL-HARDENING", goal: "补齐输入输出与失败处理。", model: "hardening-model",
+        stageSelection: { diagnose: false, hardening: true, plan: false, optimize: false },
+        runtimeMaintenance: false,
+      }),
+    });
+    expect(createdResponse.status, await createdResponse.clone().text()).toBe(201);
+    const task = await createdResponse.json();
+    expect(task.config.flow).toEqual({ key: "skill_hardening", version: "v1", stages: {
+      diagnose: false, hardening: true, plan: false, optimize: false,
+    } });
+    expect(task.config.model).toBe("hardening-model");
+    expect(task.steps.map((step: { stepType: string }) => step.stepType)).toEqual(["skill_prepare"]);
+
+    const workspace = `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`;
+    const prepared = await callback(task.task_id, task.steps[0].stepId, { status: "succeeded", output: {
+      prepared: true,
+      workspace,
+      targetSkillPath: `${workspace}/skills/skills-local/local-skill`,
+    } });
+    expect(prepared.response.status, JSON.stringify(prepared.body)).toBe(200);
+    expect(prepared.body.nextStep).toMatchObject({ stepType: "hardening" });
+    const hardeningStepId = String(prepared.body.nextStep.stepId);
+    const hardeningStep = await repo.findStep(hardeningStepId);
+    expect(hardeningStep?.command).toContain("/clawevolve-hardening");
+    expect(hardeningStep?.command).toContain("--model hardening-model");
+    expect(hardeningStep?.command).toContain(`--target '${workspace}/skills/skills-local/local-skill'`);
+
+    const hardened = await callback(task.task_id, hardeningStepId, { status: "succeeded", output: {
+      summary: "补齐输入契约和失败处理。", changed: true, changed_files: ["SKILL.md"],
+    } });
+    expect(hardened.response.status).toBe(200);
+    expect(hardened.body.nextStep).toMatchObject({ stepType: "skill_finalize" });
+
+    const saved = JSON.parse((await repo.findTask(task.task_id))!.config_json);
+    const candidate = Buffer.from("hardened-candidate");
+    const candidateSha = createHash("sha256").update(candidate).digest("hex");
+    const finalized = await callback(task.task_id, hardened.body.nextStep.stepId, { status: "succeeded", output: {
+      artifact: {
+        ref: saved.targetSkill.candidate.ref,
+        size: candidate.byteLength,
+        sha256: candidateSha,
+        contentType: "application/zip",
+      },
+    } });
+    expect(finalized.body).toMatchObject({ taskStatus: "waiting_acceptance", nextStep: null });
+    expect((await skillAssetRepo.listEvents("user-1"))[0]).toMatchObject({
+      event_type: "hardening", task_id: task.task_id, status: "waiting_acceptance", version_from_no: 1,
+    });
+
+    getObject.mockResolvedValue({ content: candidate, etag: null, contentType: "application/zip" });
+    const accepted = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}/skill-decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1", "Idempotency-Key": "hardening-accept" },
+      body: JSON.stringify({ decision: "accept" }),
+    });
+    expect(accepted.status, await accepted.clone().text()).toBe(200);
+    expect(await accepted.json()).toMatchObject({ status: "completed", decision: "accept", version: { version: "v2" } });
+    expect((await skillAssetRepo.listEvents("user-1"))[0]).toMatchObject({
+      event_type: "hardening", status: "completed", outcome: "applied", version_to_no: 2,
+    });
+  });
+
+  it("does not freeze or offer a rejected Skill candidate after the final Optimize round", async () => {
+    await seedArcaBot();
+    await skillAssetRepo.createAsset({
+      assetId: "SKILL-REJECTED", versionId: "SKVER-REJECTED-BASE", ownerUserId: "user-1",
+      botId: "bot-arca", externalSkillId: "ocb-skill-rejected", displayName: "待优化 Skill",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-REJECTED/versions/v1/package.zip",
+      packageSha256: `sha256:${"0".repeat(64)}`,
+    });
+    const created = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "full", taskName: "Skill 候选未提升", userId: "user-1", botId: "bot-arca", botEnv: "pre",
+        judgeBackend: "subagent", model: "GLM-5.2", diagnoseIntent: "检查真实效果。",
+        goal: "提升真实任务完成率。", maxSessions: 5, maxRounds: 1,
+        targetSkillAssetId: "SKILL-REJECTED",
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    expect(created.status).toBe(201);
+
+    const prepare = (task.steps as Array<{ stepId: string; stepType: string }>)[0];
+    const prepared = await callback(String(task.task_id), prepare.stepId, {
+      status: "succeeded",
+      output: {
+        prepared: true,
+        workspace: `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`,
+        targetSkillPath: `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace/skills/skills-local/local-skill`,
+      },
+    });
+    const diagnosed = await callback(String(task.task_id), String((prepared.body.nextStep as Record<string, unknown>).stepId), {
+      status: "succeeded", output: diagnoseOutput("发现可优化问题", 1),
+    });
+    const planned = await callback(String(task.task_id), String((diagnosed.body.nextStep as Record<string, unknown>).stepId), {
+      status: "succeeded", output: planOutput(),
+    });
+    const optimizeStepId = String((planned.body.nextStep as Record<string, unknown>).stepId);
+    const optimized = await callback(String(task.task_id), optimizeStepId, {
+      status: "succeeded",
+      output: {
+        ...optimizeOutput(optimizeStepId),
+        benchDecision: "not_improved",
+        accepted: false,
+        roundDecision: { stop: false, reason: "候选 Test Bench 未提升" },
+      },
+    });
+
+    expect(optimized.response.status).toBe(200);
+    expect(optimized.body.nextStep).toBeNull();
+    expect((await repo.findTask(String(task.task_id)))?.status).toBe("completed");
+    expect((await skillAssetRepo.listEvents('user-1'))[0]).toMatchObject({
+      event_type: 'optimization', task_id: task.task_id, status: 'completed', outcome: 'not_improved', version_to_id: null,
+    });
+    expect((await repo.listSteps(String(task.task_id))).some((item) => item.step_type === "skill_finalize"))
+      .toBe(false);
+  });
+
+  it("freezes the terminal Optimize producer Test Bench at the real Skill finalization boundary", async () => {
+    const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-BENCH-AUDIT', externalSkillId: 'ocb-bench-audit',
+      scoreComparison: { name: 'test_score', baseline: .5, candidate: .75, delta: .25 } });
+    const step = (await repo.listSteps(result.taskId)).find(item => item.step_type === 'optimize')!;
+    const event = (await skillAssetRepo.listEvents('user-1')).find(item => item.event_type === 'optimization')!;
+    expect(JSON.parse(event.detail_json!).testBench).toEqual({ taskId: result.taskId, stepId: step.step_id, round: 1,
+      scoreComparison: { name: 'test_score', baseline: .5, candidate: .75, delta: .25 } });
+  });
+
+  it("runs the successful Skill evolution control chain through finalization and acceptance", async () => {
+    const result = await runSkillEvolutionToWaitingAcceptance({
+      assetId: "SKILL-FULL-ACCEPT",
+      externalSkillId: "ocb-skill-full-accept",
+    });
+    const before = await skillAssetRepo.listEvents('user-1');
+    expect(before.map(e => [e.event_type, e.status, e.outcome])).toEqual([
+      ['optimization', 'waiting_acceptance', null], ['registered', 'completed', 'registered'],
+    ]);
+    const finalStep = (await repo.listSteps(result.taskId)).find(step => step.step_type === 'skill_finalize')!;
+    await callback(result.taskId, finalStep.step_id, { status: 'succeeded', output: JSON.parse(finalStep.output_json!) });
+    expect(await skillAssetRepo.listEvents('user-1')).toEqual(before);
+
+    const accepted = await fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ decision: "accept" }),
+    });
+
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual(expect.objectContaining({
+      taskId: result.taskId,
+      status: "completed",
+      decision: "accept",
+    }));
+    expect(hostLocalSkills.replaceLocalSkill).toHaveBeenCalledWith(expect.objectContaining({
+      botId: "bot-arca",
+      skillId: "ocb-skill-full-accept",
+      packageBytes: result.candidate,
+      expectedSha256: `sha256:${"a".repeat(64)}`,
+    }));
+    expect((await skillAssetRepo.listVersions("SKILL-FULL-ACCEPT"))[0]).toMatchObject({
+      source_task_id: result.taskId,
+      package_sha256: `sha256:${result.candidateSha}`,
+    });
+    const recorded = await skillAssetRepo.listEvents('user-1');
+    expect(recorded.map(e => e.event_type)).toEqual(['optimization', 'registered']);
+    expect(recorded[0]).toMatchObject({ task_id: result.taskId, asset_id: 'SKILL-FULL-ACCEPT', actor_id: 'user-1',
+      status: 'completed', outcome: 'applied', version_to_no: 2 });
+    const duplicate = await fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision: 'accept' }) });
+    expect(await duplicate.json()).toMatchObject({ duplicate: true });
+    expect(await skillAssetRepo.listEvents('user-1')).toEqual(recorded);
+    expect(hostLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps host unchanged when the finalized Skill candidate is rejected by the user", async () => {
+    const result = await runSkillEvolutionToWaitingAcceptance({
+      assetId: "SKILL-FULL-REJECT",
+      externalSkillId: "ocb-skill-full-reject",
+    });
+
+    const rejected = await fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ decision: "reject" }),
+    });
+
+    expect(rejected.status).toBe(200);
+    expect(await rejected.json()).toEqual({
+      taskId: result.taskId,
+      status: "completed",
+      decision: "reject",
+    });
+    expect(hostLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
+    expect(await skillAssetRepo.listVersions("SKILL-FULL-REJECT")).toHaveLength(1);
+    const events = await skillAssetRepo.listEvents('user-1');
+    expect(events[0]).toMatchObject({ event_type: 'optimization', status: 'completed', outcome: 'rejected',
+      actor_id: 'user-1', task_id: result.taskId, version_to_id: null });
+    const repeat = await fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision: 'reject' }) });
+    expect(await repeat.json()).toMatchObject({ duplicate: true });
+    expect(await skillAssetRepo.listEvents('user-1')).toEqual(events);
+  });
+
+  it.each([409, 503])('audits actual host application failure %s without a version and deduplicates the logical retry', async (status) => {
+    const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-FAIL-AUDIT', externalSkillId: 'fail-audit' });
+    hostLocalSkills.replaceLocalSkill.mockRejectedValue(Object.assign(new Error('safe failure'), { status }));
+    const decide = (userId: string, key = 'same-request') => fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': userId, 'Idempotency-Key': key }, body: JSON.stringify({ decision: 'accept' }) });
+    expect((await decide('other-user')).status).toBe(403);
+    expect(hostLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
+    for (let retry = 0; retry < 2; retry++) expect((await decide('user-1')).status).toBe(status);
+    expect(await skillAssetRepo.listVersions('SKILL-FAIL-AUDIT')).toHaveLength(1);
+    expect((await repo.findTask(result.taskId))?.status).toBe('waiting_acceptance');
+    const events = await skillAssetRepo.listEvents('user-1');
+    expect(events.map(e => e.event_type)).toEqual(['optimization', 'registered']);
+    expect(events[0]).toMatchObject({ status: 'waiting_acceptance',
+      outcome: status === 409 ? 'conflict' : 'version_apply_failed', task_id: result.taskId, version_to_id: null });
+    expect(await skillAssetRepo.listEvents('other-user')).toEqual([]);
+    expect((await decide('user-1', 'new-user-submission')).status).toBe(status);
+    expect((await skillAssetRepo.listEvents('user-1')).filter(e => e.event_type === 'optimization')).toHaveLength(1);
+  });
+
+  it('does not call host if accepting the decision cannot be durably audited', async () => {
+    const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-AUDIT-DOWN', externalSkillId: 'audit-down' });
+    await db.exec("CREATE TRIGGER audit_down BEFORE UPDATE ON ce_skill_events WHEN NEW.outcome = 'accepted' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+    const response = await fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision: 'accept' }) });
+    expect(response.status).toBe(500);
+    expect(hostLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
+    expect(await skillAssetRepo.listVersions('SKILL-AUDIT-DOWN')).toHaveLength(1);
+  });
+
+  it('repairs an interrupted task-state commit without duplicating an already applied version or audit event', async () => {
+    const candidate = await new JSZip().file('SKILL.md', '# exact candidate\n').generateAsync({ type: 'nodebuffer' });
+    const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-COMMIT-RETRY', externalSkillId: 'commit-retry', candidateBytes: candidate });
+    await db.exec("CREATE TRIGGER task_commit_down BEFORE UPDATE ON ce_tasks WHEN NEW.status = 'completed' BEGIN SELECT RAISE(ABORT, 'task commit unavailable'); END");
+    const decide = () => fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1', 'Idempotency-Key': 'same-operation' }, body: JSON.stringify({ decision: 'accept' }) });
+    expect((await decide()).status).toBe(500);
+    expect((await repo.findTask(result.taskId))?.status).toBe('waiting_acceptance');
+    expect(await skillAssetRepo.listVersions('SKILL-COMMIT-RETRY')).toHaveLength(2);
+    const events = await skillAssetRepo.listEvents('user-1');
+    expect(events[0]).toMatchObject({ event_type: 'optimization', version_to_no: 2, task_id: result.taskId });
+    await db.exec('DROP TRIGGER task_commit_down');
+    hostLocalSkills.exportLocalSkill.mockResolvedValueOnce({ packageBytes: candidate, sha256: result.candidateSha, displayName: 'commit-retry' });
+    const retried = await decide();
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({ duplicate: true, status: 'completed' });
+    expect(hostLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(1);
+    const completedEvents = await skillAssetRepo.listEvents('user-1');
+    expect(completedEvents).toHaveLength(events.length);
+    expect(completedEvents[0]).toMatchObject({ event_id: events[0].event_id, status: 'completed',
+      outcome: 'applied', version_to_no: 2 });
+    expect(await skillAssetRepo.listVersions('SKILL-COMMIT-RETRY')).toHaveLength(2);
+  });
+
+  it('blocks rejection after a partial application and keeps drift retries auditable and idempotent', async () => {
+    const candidate = await new JSZip().file('SKILL.md', '# exact candidate').generateAsync({ type: 'nodebuffer' });
+    const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-PARTIAL-DECISION', externalSkillId: 'partial-decision', candidateBytes: candidate });
+    const decide = (decision: string) => fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1', 'Idempotency-Key': 'partial' },
+      body: JSON.stringify({ decision }),
+    });
+    await db.exec("CREATE TRIGGER fail_task_commit BEFORE UPDATE ON ce_tasks WHEN NEW.status = 'completed' BEGIN SELECT RAISE(ABORT, 'task commit unavailable'); END");
+    expect((await decide('accept')).status).toBe(500);
+    await db.exec('DROP TRIGGER fail_task_commit');
+    expect((await decide('reject')).status).toBe(409);
+    const drift = await new JSZip().file('SKILL.md', '# externally changed').generateAsync({ type: 'nodebuffer' });
+    hostLocalSkills.exportLocalSkill.mockResolvedValue({ packageBytes: drift, sha256: 'drift', displayName: 'partial' });
+    expect((await decide('accept')).status).toBe(409);
+    expect((await decide('accept')).status).toBe(409);
+    expect((await repo.findTask(result.taskId))?.status).toBe('waiting_acceptance');
+    expect(hostLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(1);
+    expect(await skillAssetRepo.listVersions('SKILL-PARTIAL-DECISION')).toHaveLength(2);
+    const events = await skillAssetRepo.listEvents('user-1');
+    expect(events.filter(event => event.event_type === 'optimization')).toHaveLength(1);
+    expect(events.find(event => event.event_type === 'optimization')).toMatchObject({
+      status: 'waiting_acceptance', outcome: 'conflict', version_to_no: 2,
+    });
+    hostLocalSkills.exportLocalSkill.mockResolvedValue({ packageBytes: candidate, sha256: result.candidateSha, displayName: 'partial' });
+    expect((await decide('accept')).status).toBe(200);
+    const completedEvents = await skillAssetRepo.listEvents('user-1');
+    expect(completedEvents).toHaveLength(events.length);
+    expect(completedEvents[0]).toMatchObject({ event_id: events[0].event_id, status: 'completed',
+      outcome: 'applied', version_to_no: 2 });
+  });
+
+  it.each(['accept', 'reject'] as const)('keeps concurrent accept/reject exclusive when %s commits first', async (winner) => {
+    const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-CONCURRENT', externalSkillId: 'concurrent' });
+    const decide = (decision: string) => fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision }),
+    });
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const blocked = new Promise<void>(resolve => { entered = resolve; });
+    if (winner === 'accept') {
+      hostLocalSkills.replaceLocalSkill.mockImplementationOnce(async () => { entered(); await gate; return { sha256: 'applied' }; });
+    } else {
+      const read = getObject.getMockImplementation()!;
+      getObject.mockImplementationOnce(async (...args) => { entered(); await gate; return read(...args); });
+    }
+    const accepting = decide('accept');
+    await blocked;
+    try { expect((await decide('reject')).status).toBe(winner === 'accept' ? 409 : 200); }
+    finally { release(); }
+    expect((await accepting).status).toBe(winner === 'accept' ? 200 : 409);
+    expect(hostLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(winner === 'accept' ? 1 : 0);
+    expect(JSON.parse((await repo.findTask(result.taskId))!.config_json).skillDecision.decision).toBe(winner);
+    const events = await skillAssetRepo.listEvents('user-1');
+    const businessEvent = events.find(event => event.event_type === 'optimization')!;
+    expect(JSON.parse(businessEvent.detail_json!).decision).toBe(winner);
+    expect(businessEvent.outcome).toBe(winner === 'accept' ? 'applied' : 'rejected');
+    const repeated = await decide(winner);
+    expect(await repeated.json()).toMatchObject({ duplicate: true });
+    expect(await skillAssetRepo.listEvents('user-1')).toEqual(events);
+  });
+
+  it('deduplicates concurrent acceptance completion without losing the applied audit', async () => {
+    const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-DOUBLE-ACCEPT', externalSkillId: 'double-accept' });
+    let release!: () => void;
+    let entered!: () => void;
+    let calls = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const bothEntered = new Promise<void>(resolve => { entered = resolve; });
+    hostLocalSkills.replaceLocalSkill.mockImplementation(async () => {
+      if (++calls === 2) entered();
+      await gate;
+      return { sha256: 'same-applied-candidate' };
+    });
+    const decide = () => fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision: 'accept' }),
+    });
+    const first = decide();
+    const second = decide();
+    await bothEntered;
+    release();
+    expect((await Promise.all([first, second])).map(response => response.status)).toEqual([200, 200]);
+    expect((await repo.findTask(result.taskId))?.status).toBe('completed');
+    expect(await skillAssetRepo.listVersions('SKILL-DOUBLE-ACCEPT')).toHaveLength(2);
+    const events = await skillAssetRepo.listEvents('user-1');
+    expect(events.filter(event => event.event_type === 'optimization')).toHaveLength(1);
+    expect(events.find(event => event.event_type === 'optimization')).toMatchObject({
+      status: 'completed', outcome: 'applied', version_to_no: 2,
+    });
+  });
+
+  it('keeps accepted intent exclusive if version audit persistence fails after host writes', async () => {
+    const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-PARTIAL-AUDIT', externalSkillId: 'partial-audit' });
+    await db.exec("CREATE TRIGGER fail_version_audit BEFORE UPDATE ON ce_skill_events WHEN NEW.version_to_no = 2 AND OLD.version_to_no IS NULL BEGIN SELECT RAISE(ABORT, 'version audit unavailable'); END");
+    const decide = (decision: string) => fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision }),
+    });
+    expect((await decide('accept')).status).toBe(500);
+    expect((await decide('reject')).status).toBe(409);
+    expect(hostLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(1);
+    expect(await skillAssetRepo.listVersions('SKILL-PARTIAL-AUDIT')).toHaveLength(1);
+    expect((await repo.findTask(result.taskId))?.status).toBe('waiting_acceptance');
+    const events = await skillAssetRepo.listEvents('user-1');
+    expect(events.filter(event => event.event_type === 'optimization')).toHaveLength(1);
+    expect(events.find(event => event.event_type === 'optimization')).toMatchObject({
+      status: 'waiting_acceptance', outcome: 'accepted', version_to_no: null,
+    });
+  });
+
+  it.each(['builtin', 'replace', 'postprocess'] as const)('atomically terminates a no-cases %s report and safely replays after audit failure', async (mode) => {
+    const taskId = 'EV-AUDIT-NO-CASES';
+    const stepId = 'STEP-AUDIT-NO-CASES';
+    await skillAssetRepo.createAsset({ assetId: 'AUDIT-NO-CASES', versionId: 'BASE-NO-CASES', ownerUserId: 'user-1',
+      botId: 'bot-1', externalSkillId: 'no-cases', displayName: 'no cases', packageRef: 'base', packageSha256: 'base' });
+    const implementationId = mode === 'builtin' ? null : await seedStageImplementation(mode);
+    await repo.createTask({ taskId, taskType: 'full', userId: 'user-1', botId: 'bot-1', taskName: 'audit no cases', createdBy: 'user-1',
+      configJson: JSON.stringify({ targetSkill: { assetId: 'AUDIT-NO-CASES' },
+        ...(implementationId ? { stageExtensions: { diagnose: { [mode]: { enabled: true, implementationId } } } } : {}) }) });
+    if (mode === 'postprocess') {
+      await repo.createStep({ taskId, stepId: 'BUILTIN-DIAGNOSE', stepType: 'diagnose', stepNo: 1, command: 'fixture' });
+      await repo.updateStepStatus('BUILTIN-DIAGNOSE', { status: 'succeeded', output: diagnoseOutput('empty', 0) });
+    }
+    await repo.createStep({ taskId, stepId, stepType: mode === 'builtin' ? 'diagnose' : 'stage_extension', stepNo: 2, command: 'fixture' });
+    if (implementationId && mode !== 'builtin') {
+      await stageSkillRepo.createExtensionRun({ taskId, stepId, stage: 'diagnose', mode, implementationId });
+    }
+    await repo.updateTaskState({ taskId, status: 'running' });
+    const output = mode === 'builtin' ? diagnoseOutput('empty', 0)
+      : { hitl: false, result: mode === 'replace' ? diagnoseOutput('empty', 0) : { result_patch: {} } };
+    const report = { status: 'succeeded', output };
+    await db.exec("CREATE TRIGGER fail_finish_audit BEFORE UPDATE ON ce_skill_events WHEN NEW.outcome = 'no_cases' BEGIN SELECT RAISE(ABORT, 'finish audit unavailable'); END");
+    const failed = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${stepId}/report`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report),
+    });
+    expect(failed.status, await failed.text()).toBe(500);
+    expect((await repo.findStep(stepId))?.status).toBe('created');
+    expect((await repo.findTask(taskId))?.status).toBe('running');
+    await db.exec('DROP TRIGGER fail_finish_audit');
+    expect((await callback(taskId, stepId, report)).response.status).toBe(200);
+    expect((await repo.findTask(taskId))?.status).toBe('completed');
+    const events = await skillAssetRepo.listEvents('user-1');
+    expect(events.filter(event => event.event_type === 'optimization')).toMatchObject([{
+      status: 'completed', outcome: 'no_cases',
+    }]);
+    expect((await callback(taskId, stepId, report)).response.status).toBe(200);
+    expect(await skillAssetRepo.listEvents('user-1')).toEqual(events);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(hostLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
+    expect(await repo.listSteps(taskId)).toHaveLength(mode === 'postprocess' ? 2 : 1);
+  });
+
+  it("records the exact ClawEvolve package digest separately from host's live digest", async () => {
+    await skillAssetRepo.createAsset({
+      assetId: "SKILL-ACCEPT", versionId: "SKVER-BASE", ownerUserId: "user-1",
+      botId: "bot-1", externalSkillId: "ocb-skill-2", displayName: "待确认 Skill",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-ACCEPT/versions/v1/package.zip",
+      packageSha256: `sha256:${"0".repeat(64)}`,
+    });
+    const candidate = Buffer.from("candidate-package-bytes");
+    const candidateSha = createHash("sha256").update(candidate).digest("hex");
+    const candidateRef = "oss://clawevolve-artifacts/evolve/skills/tasks/EV-SKILL-ACCEPT/candidate/package.zip";
+    await repo.createTask({
+      taskId: "EV-SKILL-ACCEPT", taskType: "full", userId: "user-1", botId: "bot-1",
+      taskName: "确认 Skill", createdBy: "user-1", configJson: JSON.stringify({
+        targetSkill: {
+          assetId: "SKILL-ACCEPT", skillId: "ocb-skill-2", name: "待确认 Skill",
+          baseline: {
+            ref: "oss://clawevolve-artifacts/evolve/skills/tasks/EV-SKILL-ACCEPT/baseline/package.zip",
+            sha256: `sha256:${"a".repeat(64)}`,
+          },
+          workspacePath: "/home/admin/.openclaw/clawevolve_workspaces/EV-SKILL-ACCEPT/workspace",
+          skillPath: "/home/admin/.openclaw/clawevolve_workspaces/EV-SKILL-ACCEPT/workspace/skills/skills-local/ocb-skill-2",
+          candidate: {
+            ref: candidateRef,
+            artifact: { ref: candidateRef, size: candidate.byteLength, sha256: candidateSha, contentType: "application/zip" },
+          },
+        },
+      }),
+    });
+    await repo.updateTaskState({ taskId: "EV-SKILL-ACCEPT", status: "waiting_acceptance" });
+    getObject.mockResolvedValue({ content: candidate, etag: null, contentType: "application/zip" });
+
+    const accepted = await fetch(`${baseUrl}/api/evolve/tasks/EV-SKILL-ACCEPT/skill-decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ decision: "accept" }),
+    });
+    expect(accepted.status).toBe(200);
+    expect(hostLocalSkills.replaceLocalSkill).toHaveBeenCalledWith(expect.objectContaining({
+      expectedSha256: `sha256:${"a".repeat(64)}`,
+      packageBytes: candidate,
+    }));
+    const versions = await skillAssetRepo.listVersions("SKILL-ACCEPT");
+    expect(versions[0].package_sha256).toBe(`sha256:${candidateSha}`);
+    const savedConfig = JSON.parse((await repo.findTask("EV-SKILL-ACCEPT"))!.config_json);
+    expect(savedConfig.skillDecision.hostPackageSha256).toBe(`sha256:${"b".repeat(64)}`);
+  });
+
+  it("finishes acceptance when host already contains the exact candidate after a partial retry", async () => {
+    await skillAssetRepo.createAsset({
+      assetId: "SKILL-RETRY", versionId: "SKVER-RETRY-BASE", ownerUserId: "user-1",
+      botId: "bot-1", externalSkillId: "ocb-skill-retry", displayName: "retry-skill",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-RETRY/versions/v1/package.zip",
+      packageSha256: `sha256:${"0".repeat(64)}`,
+    });
+    const sourceZip = new JSZip();
+    sourceZip.file("SKILL.md", "# accepted candidate\n");
+    sourceZip.file("assets/data.bin", Buffer.from([1, 2, 3]));
+    const candidate = await sourceZip.generateAsync({ type: "nodebuffer" });
+    const liveZip = new JSZip();
+    liveZip.file("assets/data.bin", Buffer.from([1, 2, 3]));
+    liveZip.file("SKILL.md", "# accepted candidate\n");
+    const live = await liveZip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    const candidateSha = createHash("sha256").update(candidate).digest("hex");
+    const candidateRef = "oss://clawevolve-artifacts/evolve/skills/tasks/EV-SKILL-RETRY/candidate/package.zip";
+    await repo.createTask({
+      taskId: "EV-SKILL-RETRY", taskType: "full", userId: "user-1", botId: "bot-1",
+      taskName: "重试确认 Skill", createdBy: "user-1", configJson: JSON.stringify({
+        targetSkill: {
+          assetId: "SKILL-RETRY", skillId: "ocb-skill-retry", name: "retry-skill",
+          baseline: {
+            ref: "oss://clawevolve-artifacts/evolve/skills/tasks/EV-SKILL-RETRY/baseline/package.zip",
+            sha256: `sha256:${"a".repeat(64)}`,
+          },
+          workspacePath: "/home/admin/.openclaw/clawevolve_workspaces/EV-SKILL-RETRY/workspace",
+          skillPath: "/home/admin/.openclaw/clawevolve_workspaces/EV-SKILL-RETRY/workspace/skills/skills-local/retry-skill",
+          candidate: {
+            ref: candidateRef,
+            artifact: { ref: candidateRef, size: candidate.byteLength, sha256: candidateSha, contentType: "application/zip" },
+          },
+        },
+      }),
+    });
+    await repo.updateTaskState({ taskId: "EV-SKILL-RETRY", status: "waiting_acceptance" });
+    getObject.mockResolvedValue({ content: candidate, etag: null, contentType: "application/zip" });
+    await db.exec("CREATE TRIGGER audit_down BEFORE UPDATE ON ce_skill_events WHEN NEW.version_to_no = 2 AND OLD.version_to_no IS NULL BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+    const interrupted = await fetch(`${baseUrl}/api/evolve/tasks/EV-SKILL-RETRY/skill-decision`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision: 'accept' }) });
+    expect(interrupted.status).toBe(500);
+    expect(hostLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(1);
+    expect(await skillAssetRepo.listVersions('SKILL-RETRY')).toHaveLength(1);
+    expect((await skillAssetRepo.findAsset('SKILL-RETRY'))?.current_version_no).toBe(1);
+    expect((await skillAssetRepo.listEvents('user-1'))[0]).toMatchObject({
+      event_type: 'optimization', status: 'waiting_acceptance', outcome: 'accepted', version_to_no: null,
+    });
+    await db.exec('DROP TRIGGER audit_down');
+    hostLocalSkills.replaceLocalSkill.mockRejectedValueOnce(Object.assign(new Error("conflict"), { status: 409 }));
+    hostLocalSkills.exportLocalSkill.mockResolvedValueOnce({
+      packageBytes: live,
+      sha256: `sha256:${"c".repeat(64)}`,
+      displayName: "retry-skill",
+    });
+
+    const accepted = await fetch(`${baseUrl}/api/evolve/tasks/EV-SKILL-RETRY/skill-decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ decision: "accept" }),
+    });
+
+    expect(accepted.status).toBe(200);
+    expect((await skillAssetRepo.listVersions("SKILL-RETRY"))[0]).toMatchObject({
+      source_task_id: "EV-SKILL-RETRY",
+      package_sha256: `sha256:${candidateSha}`,
+    });
+    const savedConfig = JSON.parse((await repo.findTask("EV-SKILL-RETRY"))!.config_json);
+    expect(savedConfig.skillDecision.hostPackageSha256).toBe(`sha256:${"c".repeat(64)}`);
+    expect((await skillAssetRepo.listEvents('user-1')).filter(e => e.event_type === 'optimization')).toHaveLength(1);
+    expect((await skillAssetRepo.listEvents('user-1')).find(e => e.event_type === 'optimization')).toMatchObject({
+      status: 'completed', outcome: 'applied', version_to_no: 2,
+    });
+  });
+
+  it("does not complete a retried acceptance after the recorded version has drifted in host", async () => {
+    await skillAssetRepo.createAsset({
+      assetId: "SKILL-RECORDED-DRIFT", versionId: "SKVER-RECORDED-BASE", ownerUserId: "user-1",
+      botId: "bot-1", externalSkillId: "ocb-skill-recorded", displayName: "recorded-skill",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-RECORDED-DRIFT/versions/v1/package.zip",
+      packageSha256: `sha256:${"0".repeat(64)}`,
+    });
+    const candidateZip = new JSZip();
+    candidateZip.file("SKILL.md", "# accepted candidate\n");
+    const candidate = await candidateZip.generateAsync({ type: "nodebuffer" });
+    const candidateSha = createHash("sha256").update(candidate).digest("hex");
+    const candidateRef = "oss://clawevolve-artifacts/evolve/skills/tasks/EV-SKILL-RECORDED-DRIFT/candidate/package.zip";
+    const baselineRef = "oss://clawevolve-artifacts/evolve/skills/tasks/EV-SKILL-RECORDED-DRIFT/baseline/package.zip";
+    await repo.createTask({
+      taskId: "EV-SKILL-RECORDED-DRIFT", taskType: "full", userId: "user-1", botId: "bot-1",
+      taskName: "确认后发生漂移", createdBy: "user-1", configJson: JSON.stringify({
+        targetSkill: {
+          assetId: "SKILL-RECORDED-DRIFT", skillId: "ocb-skill-recorded", name: "recorded-skill",
+          baseline: { ref: baselineRef, sha256: `sha256:${"a".repeat(64)}` },
+          candidate: {
+            ref: candidateRef,
+            artifact: { ref: candidateRef, size: candidate.byteLength, sha256: candidateSha, contentType: "application/zip" },
+          },
+        },
+      }),
+    });
+    await skillAssetRepo.createAcceptedVersion({
+      versionId: "SKVER-RECORDED-ACCEPTED",
+      assetId: "SKILL-RECORDED-DRIFT",
+      packageRef: candidateRef,
+      packageSha256: `sha256:${candidateSha}`,
+      sourceTaskId: "EV-SKILL-RECORDED-DRIFT",
+      baselinePackageRef: baselineRef,
+      baselinePackageSha256: `sha256:${"a".repeat(64)}`,
+    });
+    await repo.updateTaskState({ taskId: "EV-SKILL-RECORDED-DRIFT", status: "waiting_acceptance" });
+    getObject.mockResolvedValue({ content: candidate, etag: null, contentType: "application/zip" });
+    const driftedZip = new JSZip();
+    driftedZip.file("SKILL.md", "# changed after acceptance\n");
+    hostLocalSkills.exportLocalSkill.mockResolvedValueOnce({
+      packageBytes: await driftedZip.generateAsync({ type: "nodebuffer" }),
+      sha256: `sha256:${"d".repeat(64)}`,
+      displayName: "recorded-skill",
+    });
+
+    const response = await fetch(`${baseUrl}/api/evolve/tasks/EV-SKILL-RECORDED-DRIFT/skill-decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ decision: "accept" }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "SKILL_VERSION_CONFLICT" });
+    expect((await repo.findTask("EV-SKILL-RECORDED-DRIFT"))?.status).toBe("waiting_acceptance");
+  });
+});
+
 describe("ClawEvolve step protocol", () => {
+  it("atomically claims a dispatched Step and rejects a late claim after cancellation", async () => {
+    await repo.createTask({
+      taskId: "EV-CLAIM", taskType: "full", userId: "user-1", botId: "bot-1",
+      taskName: "claim", remark: null, configJson: "{}", createdBy: "user-1",
+    });
+    await repo.createStep({
+      stepId: "STEP-CLAIM", taskId: "EV-CLAIM", stepType: "optimize",
+      stepNo: 1, roundNo: 1, command: "/clawevolve-workflow --step-id STEP-CLAIM",
+    });
+    await repo.markExternalDispatched("STEP-CLAIM", "run-claim", {});
+
+    const claimed = await fetch(
+      `${baseUrl}/api/evolve/internal/tasks/EV-CLAIM/steps/STEP-CLAIM/claim`,
+      { method: "POST" },
+    );
+    expect(claimed.status).toBe(200);
+    expect(await claimed.json()).toEqual({
+      ok: true, taskId: "EV-CLAIM", stepId: "STEP-CLAIM", status: "running",
+    });
+
+    await repo.updateStepStatus("STEP-CLAIM", { status: "canceled" });
+    const late = await fetch(
+      `${baseUrl}/api/evolve/internal/tasks/EV-CLAIM/steps/STEP-CLAIM/claim`,
+      { method: "POST" },
+    );
+    expect(late.status).toBe(409);
+    expect(await late.json()).toEqual(expect.objectContaining({
+      code: "STEP_NOT_DISPATCHABLE", status: "canceled",
+    }));
+  });
+
   it("rejects API Judge for ARCA before creating or dispatching a task", async () => {
     await seedArcaBot();
     const response = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
@@ -383,7 +2879,12 @@ describe("ClawEvolve step protocol", () => {
     expect((await repo.findStep(businessStep.stepId))?.status).toBe("dispatched");
   });
 
-  it("creates a Bench evolution task with train and test domains", async () => {
+  it.each([
+    { model: "antchat/GLM-5.2", explicitModel: undefined },
+    { model: "antchat/Custom", explicitModel: undefined },
+    { model: "antchat/Custom", explicitModel: "antchat/Explicit" },
+  ])("creates a Bench evolution task with train and test domains ($model, $explicitModel)", async ({ model, explicitModel }) => {
+    const expectedModel = explicitModel ?? model;
     for (const domainId of ["blog-train", "blog-test"]) {
       await benchDomainRepo.create({ domainId, name: domainId, ownerUserId: "user-1" });
       await benchTemplateRepo.create({
@@ -397,7 +2898,11 @@ describe("ClawEvolve step protocol", () => {
       body: JSON.stringify({
         taskName: "Blog Bench Evolution", userId: "user-1", botId: "bot-1",
         objective: "提升博客质量并保证测试集不回退",
-        trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test", model: "antchat/GLM-5.2", maxRounds: 3,
+        trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test", model, maxRounds: 3,
+        ...(explicitModel ? { nodeCommandYamls: {
+          bench_plan: `version: "1.0"\ncommand: /clawevolve-workflow --stage bench-plan --model ${explicitModel}\n`,
+          optimize: `version: "1.0"\ncommand: /clawevolve-workflow --stage optimize --model ${explicitModel}\n`,
+        } } : {}),
       }),
     });
     const body = await response.json() as Record<string, unknown>;
@@ -409,14 +2914,14 @@ describe("ClawEvolve step protocol", () => {
     expect(steps[0].command).toContain("--train-domain-id blog-train");
     expect(steps[0].command).toContain("--test-domain-id blog-test");
     expect(steps[0].command).toContain("--owner-id user-1");
-    expect(steps[0].command).toContain("--model antchat/GLM-5.2");
+    expect([...steps[0].command.matchAll(/(?:^|\s)--model(?:=|\s+)([^\s]+)/g)].map((match) => match[1])).toEqual([expectedModel]);
     expect(steps[0].command).not.toContain("--final-action loop");
     expect(steps[0].command).not.toContain("提升博客质量");
     const saved = await repo.findTask(String(body.task_id));
     const config = JSON.parse(saved!.config_json) as Record<string, unknown>;
     expect(config).toEqual(expect.objectContaining({
       trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test",
-      model: "antchat/GLM-5.2",
+      model,
       objective: "提升博客质量并保证测试集不回退",
       pinnedBenchDomains: expect.objectContaining({
         "blog-train": [{ templateName: "blog-train-case", templateVersion: 1 }],
@@ -458,7 +2963,8 @@ describe("ClawEvolve step protocol", () => {
     expect(updatedSteps[1].command).toContain("/clawevolve-workflow --stage optimize");
     expect(updatedSteps[1].command).toContain("--train-bench-domain-id blog-train");
     expect(updatedSteps[1].command).toContain("--test-bench-domain-id blog-test");
-    expect(updatedSteps[1].command).toContain("--model antchat/GLM-5.2");
+    expect([...updatedSteps[1].command.matchAll(/(?:^|\s)--model(?:=|\s+)([^\s]+)/g)].map((match) => match[1])).toEqual([expectedModel]);
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ command: updatedSteps[1].command }));
   });
 
   it("creates a Bench task from a published domain using existing tables", async () => {
@@ -593,7 +3099,13 @@ describe("ClawEvolve step protocol", () => {
     }));
   });
 
-  it("records reused Candidate Bench roles as warnings and schedules the explicitly requested next round", async () => {
+  it.each([
+    { model: "antchat/GLM-5.2", command: undefined, expectedModel: "antchat/GLM-5.2" },
+    { model: "antchat/GLM-5.2", command: "/clawevolve-workflow --stage optimize", expectedModel: "antchat/GLM-5.2" },
+    { model: "antchat/GLM-5.2", command: "/clawevolve-workflow --stage optimize --model antchat/GLM-5.1", expectedModel: "antchat/GLM-5.1" },
+    { model: "antchat/GLM-5.2", command: "/clawevolve-workflow --stage optimize --model=antchat/GLM-5.1", expectedModel: "antchat/GLM-5.1" },
+    { model: undefined, command: undefined, expectedModel: undefined },
+  ])("records reused Candidate Bench roles as warnings and schedules the explicitly requested next round ($command, $model)", async ({ model, command, expectedModel }) => {
     const taskId = "EV-OPTIMIZE-WARNING";
     const round1StepId = "STEP-OPTIMIZE-R1";
     const round2StepId = "STEP-OPTIMIZE-R2";
@@ -601,7 +3113,8 @@ describe("ClawEvolve step protocol", () => {
       taskId, taskType: "optimize", userId: "user-1", botId: "bot-1",
       taskName: "Optimize warnings", remark: null,
       configJson: JSON.stringify({
-        maxRounds: 3, dispatchMode: "run",
+        maxRounds: 3, dispatchMode: "run", model,
+        ...(command ? { nodeCommands: { optimize: command } } : {}),
         trainBenchDomainId: "train-domain", testBenchDomainId: "test-domain",
       }),
       createdBy: "user-1",
@@ -649,6 +3162,9 @@ describe("ClawEvolve step protocol", () => {
 
     expect(report.response.status).toBe(200);
     expect(report.body.nextStep).toEqual(expect.objectContaining({ stepType: "optimize", roundNo: 3 }));
+    const nextCommand = String(dispatch.mock.calls.at(-1)?.[0]?.command);
+    const modelOptions = [...nextCommand.matchAll(/(?:^|\s)--model(?:=|\s+)([^\s]+)/g)].map((match) => match[1]);
+    expect(modelOptions).toEqual(expectedModel ? [expectedModel] : []);
     const saved = JSON.parse((await repo.findStep(round2StepId))!.output_json!);
     expect(saved.clawwebWarnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "OPTIMIZE_BASELINE_RUN_WARNING" }),
@@ -764,7 +3280,85 @@ describe("ClawEvolve step protocol", () => {
       command: expect.stringContaining(`--task-id ${String(body.task_id)} --step-id ${steps[0].stepId}`),
     }));
     expect(dispatch.mock.calls[0]?.[0].command).toContain("--model GLM-5.1");
-    expect(JSON.stringify(body)).not.toContain("temporary-secret");
+    expect(JSON.stringify(body)).not.toContain("test-token");
+  });
+
+  it("includes structured diagnosis dates in the default command intent", async () => {
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({
+        taskType: "diagnose", taskName: "指定日期诊断", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.2", goal: "检查日报准确性",
+        diagnoseIntent: "检查日报准确性", startDate: "2026-09-11", endDate: "2026-09-14",
+      }),
+    });
+    expect(response.status).toBe(201);
+    const task = await response.json() as { task_id: string };
+    const detail = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}`);
+    expect(detail.status).toBe(200);
+    const body = await detail.json() as { steps: Array<{ stepType: string; command: string }> };
+    const command = body.steps.find((step) => step.stepType === "diagnose")?.command;
+    expect(command).toMatch(/--intent '[^']*2026-09-11[^']*2026-09-14[^']*'/);
+    expect(command).toContain("检查日报准确性");
+    expect(dispatch.mock.calls.at(-1)?.[0].command).toBe(command);
+  });
+
+  it("preserves structured diagnosis dates when retrying a failed default command", async () => {
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({
+        taskType: "diagnose", taskName: "日期诊断重试", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.2", goal: "检查日报准确性",
+        diagnoseIntent: "检查日报准确性", startDate: "2026-09-11", endDate: "2026-09-14",
+      }),
+    });
+    expect(response.status).toBe(201);
+    const task = await response.json() as { task_id: string; steps: Array<{ stepId: string }> };
+    const failedStepId = task.steps[0].stepId;
+    const failed = await callback(task.task_id, failedStepId, {
+      status: "failed", error: { code: "TEST_FAILURE", message: "retry fixture" },
+    });
+    expect(failed.response.status).toBe(200);
+    const retried = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${failedStepId}/retry`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: "{}",
+    });
+    expect(retried.status).toBe(201);
+    const body = await retried.json() as { step: { command: string } };
+    expect(body.step.command).toContain("--intent '时间范围：2026-09-11 至 2026-09-14。检查日报准确性'");
+    expect(dispatch.mock.calls.at(-1)?.[0].command).toBe(body.step.command);
+  });
+
+  it.each([
+    { name: "advanced form range", intent: "扫描2026-09-11 至 2026-09-14的历史 session；检查日报。", dates: { startDate: "2026-09-11", endDate: "2026-09-14" }, expected: "扫描2026-09-11 至 2026-09-14的历史 session；检查日报。" },
+    { name: "no structured dates", intent: "检查日报准确性", dates: {}, expected: "检查日报准确性" },
+    { name: "same-day range", intent: "检查日报准确性", dates: { startDate: "2026-09-11", endDate: "2026-09-11" }, expected: "时间范围：2026-09-11 至 2026-09-11。检查日报准确性" },
+  ])("keeps compatible diagnosis intent for $name", async ({ intent, dates, expected }) => {
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({ taskType: "full", taskName: "诊断日期兼容", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.2", goal: "检查日报准确性", diagnoseIntent: intent, ...dates }),
+    });
+    expect(response.status).toBe(201);
+    const body = await response.json() as { steps: Array<{ command: string }> };
+    expect(body.steps[0].command).toContain(`--intent '${expected}' --judge-backend`);
+    expect(dispatch.mock.calls.at(-1)?.[0].command).toBe(body.steps[0].command);
+  });
+
+  it.each([
+    { startDate: "2026-09-11" }, { endDate: "2026-09-14" },
+    { startDate: "2026-09-14", endDate: "2026-09-11" },
+  ])("rejects incomplete or reversed structured diagnosis dates: %j", async (dates) => {
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({ taskType: "diagnose", taskName: "非法诊断日期", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.2", diagnoseIntent: "检查日报准确性", ...dates }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "开始和结束日期必须同时提供，且开始日期不能晚于结束日期" });
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("creates Bot Diagnose with the default Subagent Judge and no API key", async () => {
@@ -785,6 +3379,7 @@ describe("ClawEvolve step protocol", () => {
     const body = await response.json() as { steps: Array<{ command: string }> };
     expect(body.steps[0].command).toContain("--judge-backend subagent");
     expect(body.steps[0].command).toContain("--max-sessions 12");
+    expect(body.steps[0].command).toContain("--source-bot-id bot-1");
     expect(body.steps[0].command).not.toContain("--api-key");
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       command: expect.stringContaining("--judge-backend subagent"),
@@ -1455,7 +4050,7 @@ describe("ClawEvolve step protocol", () => {
       }),
     });
     expect(response.status).toBe(400);
-    expect((await response.json()).error).toBe("按目标进化必须提供非空 goal");
+    expect((await response.json()).error).toBe("启用 Plan 时必须提供非空 goal");
     expect(dispatch).not.toHaveBeenCalled();
   });
 
@@ -1534,8 +4129,8 @@ describe("ClawEvolve step protocol", () => {
     expect(response.status).toBe(201);
     const dispatched = dispatch.mock.calls.at(-1)?.[0];
     expect(dispatched.command).not.toContain("--api-key");
-    expect(dispatched.command).not.toContain("temporary-secret");
-    expect(dispatched.secrets).toEqual({ diagnoseApiKey: "temporary-secret" });
+    expect(dispatched.command).not.toContain("test-token");
+    expect(dispatched.secrets).toEqual({ diagnoseApiKey: "test-token" });
   });
 
   it("returns prior successful steps and exposes their output", async () => {
@@ -1786,6 +4381,28 @@ describe("ClawEvolve step protocol", () => {
     await expect(response.json()).resolves.toEqual({ error: "诊断进化必须选择一个已完成 Plan 的诊断任务" });
   });
 
+  it.each([
+    { nodeCommand: undefined, expectedModel: "antchat/Custom" },
+    { nodeCommand: "/clawevolve-workflow --stage optimize --model antchat/Explicit", expectedModel: "antchat/Explicit" },
+  ])("propagates the selected Optimize model unless a node command explicitly selects one ($expectedModel)", async ({ nodeCommand, expectedModel }) => {
+    const sourceTaskId = await seedPlannedDiagnosis();
+    const response = await fetch(`${baseUrl}/api/evolve/optimizations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({
+        taskName: "模型传播回归", userId: "user-1", botId: "bot-1",
+        sourceDiagnosisTaskIds: [sourceTaskId], model: "antchat/Custom", maxRounds: 1,
+        ...(nodeCommand ? { nodeCommandYamls: { optimize: `version: "1.0"\ncommand: ${nodeCommand}\n` } } : {}),
+      }),
+    });
+    expect(response.status, await response.clone().text()).toBe(201);
+    const body = await response.json() as { config: { model: string }; steps: Array<{ command: string }> };
+    expect(body.config.model).toBe("antchat/Custom");
+    for (const command of [body.steps[0].command, String(dispatch.mock.calls.at(-1)?.[0]?.command)]) {
+      expect([...command.matchAll(/(?:^|\s)--model(?:=|\s+)([^\s]+)/g)].map((match) => match[1])).toEqual([expectedModel]);
+    }
+  });
+
   it("rejects workflow control parameters in a node YAML", async () => {
     const sourceTaskId = await seedPlannedDiagnosis("EV-CONTROL-SOURCE");
     const response = await fetch(`${baseUrl}/api/evolve/optimizations`, {
@@ -1908,6 +4525,7 @@ describe("ClawEvolve step protocol", () => {
     expect(response.status).toBe(201);
     const retried = await response.json() as { step: { command: string } };
     expect(retried.step.command).toContain("--judge-backend subagent");
+    expect(retried.step.command).toContain("--source-bot-id bot-1");
     expect(retried.step.command).not.toContain("--api-key");
   });
 
@@ -2316,7 +4934,7 @@ describe("ClawEvolve step protocol", () => {
         } },
       },
     });
-    expect(report.response.status).toBe(200);
+    expect(report.response.status, JSON.stringify(report.body)).toBe(200);
     expect(await repo.listPacks("owner-1", "bot-1")).toHaveLength(0);
   });
 
@@ -2522,6 +5140,19 @@ describe("ClawEvolve step protocol", () => {
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe(content.toString("utf8"));
     expect(getObject).toHaveBeenCalledWith("evolution/EV-DIFF-OBJECT/rounds/round-001/diff.patch");
+
+    getObject.mockResolvedValue({ content: Buffer.alloc(0), etag: null, contentType: "text/x-diff; charset=utf-8" });
+    const emptyResponse = await fetch(`${baseUrl}/api/evolve/tasks/EV-DIFF-OBJECT/steps/STEP-DIFF-OBJECT/diff`);
+    expect(emptyResponse.status).toBe(409);
+    await expect(emptyResponse.json()).resolves.toEqual({ error: "Diff 内容与登记摘要不一致" });
+
+    const corruptedContent = Buffer.from(content);
+    corruptedContent[corruptedContent.length - 1] = 33;
+    expect(corruptedContent.byteLength).toBe(content.byteLength);
+    getObject.mockResolvedValue({ content: corruptedContent, etag: null, contentType: "text/x-diff; charset=utf-8" });
+    const corruptedResponse = await fetch(`${baseUrl}/api/evolve/tasks/EV-DIFF-OBJECT/steps/STEP-DIFF-OBJECT/diff`);
+    expect(corruptedResponse.status).toBe(409);
+    await expect(corruptedResponse.json()).resolves.toEqual({ error: "Diff 内容与登记摘要不一致" });
   });
 });
 
@@ -2619,5 +5250,46 @@ describe("ClawEvolve task log archive side channel", () => {
     ]);
     expect(historyBody.items[1]?.status).toBe("succeeded");
     expect(dispatchTaskLogArchive).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("business output preflight", () => {
+  it("does not classify a Loop storage outage as an Agent protocol mistake", async () => {
+    await repo.createTask({ taskId: "PREFLIGHT-DB", taskName: "Protocol preflight", taskType: "hardening", userId: "owner",
+      botId: "bot", createdBy: "owner", configJson: "{}" });
+    await repo.createStep({ taskId: "PREFLIGHT-DB", stepId: "PREFLIGHT-DB-S", stepType: "stage_extension", stepNo: 1, command: "test" });
+    vi.spyOn(stageSkillRepo, "findExtensionRun").mockRejectedValueOnce(new Error("database unavailable"));
+    const response = await fetch(`${baseUrl}/api/evolve/internal/tasks/PREFLIGHT-DB/steps/PREFLIGHT-DB-S/validate-output`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ output: {
+        hitl: false, result: { summary: "Complete" },
+        loop: { action: "request_feedback", prompt: "Continue?", accepts: { text: true, files: [] } },
+      } }),
+    });
+    expect(response.status).toBe(500);
+    expect(await db.query("SELECT * FROM ce_stage_interactions WHERE task_id = ?", ["PREFLIGHT-DB"])).toEqual([]);
+  });
+
+  it("uses report's form validation without changing Steps or creating interactions", async () => {
+    await repo.createTask({ taskId: "PREFLIGHT", taskName: "Protocol preflight", taskType: "hardening", userId: "owner",
+      botId: "bot", createdBy: "owner", configJson: "{}" });
+    await repo.createStep({ taskId: "PREFLIGHT", stepId: "PREFLIGHT-S", stepType: "hardening", stepNo: 1, command: "test" });
+    const before = await repo.findStep("PREFLIGHT-S");
+    for (const field of [{ id: "q", type: "text", title: "Q" }, { id: "q", type: "single_choice", title: "Q" }]) {
+      const response = await fetch(`${baseUrl}/api/evolve/internal/tasks/PREFLIGHT/steps/PREFLIGHT-S/validate-output`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          output: { hitl: true, question: { format: "form", title: "Confirm", questions: [field] } },
+        }),
+      });
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({ code: "STAGE_OUTPUT_CONTRACT_INVALID" });
+    }
+    const response = await fetch(`${baseUrl}/api/evolve/internal/tasks/PREFLIGHT/steps/PREFLIGHT-S/validate-output`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        output: { hitl: true, question: { format: "form", title: "Confirm", questions: [{ id: "q", type: "short_text", title: "Q" }] } },
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(await repo.findStep("PREFLIGHT-S")).toEqual(before);
+    expect(await db.query("SELECT * FROM ce_stage_interactions WHERE task_id = ?", ["PREFLIGHT"])).toEqual([]);
   });
 });

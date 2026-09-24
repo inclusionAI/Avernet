@@ -1,3 +1,4 @@
+import { coreStageRequiresAgentMessage } from "./stage-handler.js";
 import type {
   EvolveBotRuntime,
   EvolveRepository,
@@ -81,6 +82,7 @@ export async function dispatchPendingBusinessStep(input: {
     callbackUrl: input.callbackUrl(step.step_id),
     runtime,
     forceMessage: config.forceMessage === true,
+    agentMessageOnly: coreStageRequiresAgentMessage(input.task, step.step_type),
     runtimeMaintenance: config.runtimeMaintenance !== false,
     ...(step.step_type === "optimize" && step.round_no != null ? {
       optimizeArgs: {

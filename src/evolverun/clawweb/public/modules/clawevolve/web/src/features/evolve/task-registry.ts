@@ -1,13 +1,14 @@
 import type { EvolveTaskType } from '@avernet/clawweb-shared/web/types'
 
 export const evolveTaskTypes = [
-  'diagnose', 'optimize', 'apply', 'full', 'bench', 'bench_optimize', 'pack', 'pack_restore', 'runtime_cleanup', 'repair',
+  'diagnose', 'hardening', 'optimize', 'apply', 'full', 'bench', 'bench_optimize', 'pack', 'pack_restore', 'runtime_cleanup', 'repair',
 ] as const
 
 export type { EvolveTaskType } from '@avernet/clawweb-shared/web/types'
 
 export const evolveTaskRegistry: Record<EvolveTaskType, { type: EvolveTaskType; label: string }> = {
   diagnose: { type: 'diagnose', label: 'Bot诊断' },
+  hardening: { type: 'hardening', label: 'Skill加固' },
   optimize: { type: 'optimize', label: '诊断后优化' },
   apply: { type: 'apply', label: '应用' },
   full: { type: 'full', label: 'Bot自进化' },

@@ -29,20 +29,8 @@ export type BotPermissionUpsert = {
   canEdit: number
 }
 
-export type TCLogBot = {
-  botId: string
-  botName?: string | null
-  env?: string | null
-  deviceProvider?: 'baas' | 'arca' | string | null
-  activeEngine?: string | null
-  botType?: string | null
-  hasServiceBot?: boolean
-  displayBotId: string
-  status: 'active' | 'all' | string
-  source: string
-  ownerId?: string | null
-  accessType?: 'owner' | 'collaborator'
-}
+export type { DirectoryBot } from "../server/services/bot-directory.js"
+export type TCLogBot = import("../server/services/bot-directory.js").DirectoryBot
 
 export type TCLogTrace = {
   traceId: string
@@ -2074,6 +2062,7 @@ export type WorkflowHealth = {
 }
 export type EvolveTaskType =
   | 'diagnose'
+  | 'hardening'
   | 'optimize'
   | 'apply'
   | 'full'

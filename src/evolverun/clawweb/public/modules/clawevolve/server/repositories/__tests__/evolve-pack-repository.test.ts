@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import { type IDatabase, SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
+import { migrations } from "@avernet/clawweb-shared/server/schema";
 import { EvolveRepository } from "../evolve-repository.js";
 
 describe("Evolve Pack registry", () => {
@@ -78,8 +79,11 @@ describe("Evolve Pack registry", () => {
     });
 
     await db.exec("DROP TABLE ce_packs");
-    await db.exec("DELETE FROM schema_version WHERE version >= 90");
-    await runMigrations(db, "sqlite");
+    // Exercise the Pack DDL and backfill itself; deleting the entire later
+    // ledger while retaining its renamed columns is not a historical database.
+    for (const migration of migrations.filter(item => [90, 92].includes(item.version))) {
+      for (const sql of migration.sql) await db.exec(db.dialect.renderDdl(sql));
+    }
 
     expect(await repo.listPacks("user-1")).toEqual([
       expect.objectContaining({

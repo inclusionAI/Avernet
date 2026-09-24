@@ -1,6 +1,6 @@
 import { parse as parseYaml } from "yaml";
 
-export type NodeCommandKey = "diagnose" | "plan" | "bench" | "bench_plan" | "optimize";
+export type NodeCommandKey = "diagnose" | "hardening" | "plan" | "bench" | "bench_plan" | "optimize";
 export type NodeCommandYamls = Partial<Record<NodeCommandKey, string>>;
 
 const MAX_RENDERED_COMMAND_BYTES = 64 * 1024;
@@ -127,6 +127,14 @@ export function quoteCommandArgument(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+export function diagnoseIntentWithDates(intent: string, startDate?: string, endDate?: string): string {
+  if (!startDate || !endDate) return intent;
+  const range = `${startDate} 至 ${endDate}`;
+  // The advanced form already includes this range. Keep its wording intact.
+  if (intent.includes(range)) return intent;
+  return `时间范围：${range}。${intent}`;
+}
+
 export function parseNodeCommandYaml(value: unknown, node: NodeCommandKey): string | undefined {
   if (value == null || value === "") return undefined;
   if (typeof value !== "string") throw new Error(`${node} 节点 YAML 必须是字符串`);
@@ -141,6 +149,7 @@ export function parseNodeCommandYaml(value: unknown, node: NodeCommandKey): stri
   const command = record.command.trim();
   const expected: Partial<Record<NodeCommandKey, RegExp>> = {
     diagnose: /^\/clawevolve-diagnose(?:\s|$)/,
+    hardening: /^\/clawevolve-hardening(?:\s|$)/,
     plan: /^\/clawevolve-plan(?:\s|$)/,
     bench: /^\/clawevolve-bench(?:\s|$)/,
     bench_plan: /^\/clawevolve-workflow\s+--stage\s+bench-plan(?:\s|$)/,

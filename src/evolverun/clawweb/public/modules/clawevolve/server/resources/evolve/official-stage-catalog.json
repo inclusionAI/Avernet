@@ -1,0 +1,455 @@
+{
+  "schemaVersion": "clawevolve.stage-contracts/v1",
+  "stages": [
+    {
+      "stage": "diagnose",
+      "name": "诊断",
+      "description": "读取本次任务的诊断目标和真实 Session，找出具有代表性的成功与失败案例，为后续规划提供可追溯的问题证据。",
+      "extensionModes": ["preprocess", "postprocess", "replace"],
+      "postprocessWritablePaths": ["diagnosis", "cases"],
+      "inputSchema": {
+        "type": "object",
+        "required": ["task", "diagnose_goal", "session_source"],
+        "properties": {
+          "task": {
+            "type": "object",
+            "description": "平台生成的本次任务信息",
+            "required": ["task_id", "task_type", "target_bot_id"],
+            "properties": {
+              "task_id": { "type": "string", "description": "本次任务标识" },
+              "task_type": { "type": "string", "enum": ["diagnose", "full", "stage_test"], "description": "诊断、完整进化或 Stage 集成测试" },
+              "target_bot_id": { "type": "string", "description": "实际运行当前处理的 Bot" }
+            }
+          },
+          "diagnose_goal": { "type": "string", "description": "本次需要重点诊断的问题" },
+          "session_source": {
+            "type": "object",
+            "description": "平台准备好的真实 Session 读取方式",
+            "required": ["mode"],
+            "properties": {
+              "mode": { "type": "string", "enum": ["local", "service_export"], "description": "读取当前 Bot 本地 Session，或读取平台导出的服务态 Session" },
+              "session_ids": {
+                "type": "array",
+                "description": "可选精确来源上限：当前 Bot 索引中的 sessionId 或完整 sessionKey。非空时仅支持 local；全部映射在正文读取前验证，未知、歧义或越界明确失败。缺省或空数组保持原行为。",
+                "items": { "type": "string", "description": "原样匹配，不解析自然语言；1至512字符，字母/数字/下划线/点/冒号/连字符（含中文）；禁止路径、空白、..、以点开头及.json/.jsonl后缀" }
+              }
+            }
+          },
+          "target_skill": {
+            "type": "object",
+            "description": "正式 Skill 进化提供独立候选；Skill 流程开发记录的 diagnose/preprocess 或 plan/replace 独立测试提供明确标注来源的固定 fixture，不是正式资产",
+            "required": ["asset_id", "skill_id", "name", "workspace", "path", "baseline_sha256"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["stage_test_fixture"], "description": "仅测试 fixture 提供此字段；缺省保持正式 Skill 候选语义" },
+              "fixture_id": { "type": "string", "enum": ["skill-description-v1", "skill-description-v2"], "description": "kind=stage_test_fixture 时由平台提供的固定测试资源标识；不对应正式资产" },
+              "asset_id": { "type": "string", "description": "正式候选为登记资产标识；测试为 fixture:{taskId}:{fixtureId}，不登记资产" },
+              "skill_id": { "type": "string", "description": "正式候选为 Host Local Skill 标识；测试为 fixture:{fixtureId}，不是 Host 身份" },
+              "name": { "type": "string", "description": "Skill 名称" },
+              "workspace": { "type": "string", "description": "本次任务独立候选 Workspace" },
+              "path": { "type": "string", "description": "候选 Workspace 内的 Skill 目录" },
+              "baseline_sha256": { "type": "string", "description": "正式候选为从 Host 冻结的原包校验值；测试为固定 ZIP 的 SHA256，不代表 Host 内容" }
+            }
+          },
+          "human_input": {
+            "type": "object",
+            "description": "用户回答上一次问题后由平台补充；首次执行不提供",
+            "properties": {
+              "tag": { "type": "string", "description": "与上一次问题对应的标识" },
+              "content": { "type": "string", "description": "文本问题的回答" },
+              "fields": { "type": "object", "description": "HTML 表单提交的字段" },
+              "answers": { "type": "object", "description": "结构化表单中由平台校验并归一化的回答" }
+            }
+          }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["diagnosis", "cases"],
+        "properties": {
+          "diagnosis": {
+            "type": "object",
+            "description": "诊断结论与依据",
+            "required": ["summary", "issues"],
+            "properties": {
+              "summary": { "type": "string", "description": "本次诊断结论摘要" },
+              "issues": {
+                "type": "array",
+                "description": "从真实 Session 中识别的问题",
+                "items": {
+                  "type": "object",
+                  "required": ["code", "title", "severity", "caseCount", "suggestion"],
+                  "properties": {
+                    "code": { "type": "string", "description": "稳定的问题标识" },
+                    "title": { "type": "string", "description": "问题名称" },
+                    "severity": { "type": "string", "description": "问题严重程度" },
+                    "caseCount": { "type": "integer", "description": "支持该结论的 Case 数量" },
+                    "suggestion": { "type": "string", "description": "给规划 Stage 的改进建议" }
+                  }
+                }
+              }
+            }
+          },
+          "cases": {
+            "type": "object",
+            "description": "供规划 Stage 使用的成功与失败案例",
+            "required": ["total", "goodCount", "badCount", "items"],
+            "properties": {
+              "total": { "type": "integer", "description": "Case 总数" },
+              "goodCount": { "type": "integer", "description": "成功 Case 数量" },
+              "badCount": { "type": "integer", "description": "失败 Case 数量" },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["caseId", "type"],
+                  "properties": {
+                    "caseId": { "type": "string", "description": "诊断 Case 标识" },
+                    "type": { "type": "string", "enum": ["good", "bad"], "description": "成功或失败案例" },
+                    "summary": { "type": "string", "description": "该 Case 的诊断摘要" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "stage": "plan",
+      "name": "规划",
+      "description": "基于诊断案例和进化目标形成可执行的优化 Spec，并生成训练集、测试集及其 Bench 选择，作为 Optimize Loop 的冻结输入。",
+      "extensionModes": ["preprocess", "postprocess", "replace"],
+      "postprocessWritablePaths": ["goal", "spec", "benchCases", "benchDomains"],
+      "inputSchema": {
+        "type": "object",
+        "required": ["task", "goal"],
+        "properties": {
+          "task": {
+            "type": "object",
+            "description": "平台生成的本次任务信息",
+            "required": ["task_id", "task_type", "target_bot_id"],
+            "properties": {
+              "task_id": { "type": "string", "description": "本次任务标识" },
+              "task_type": { "type": "string", "enum": ["diagnose", "full", "stage_test"], "description": "诊断、完整进化或 Stage 集成测试" },
+              "target_bot_id": { "type": "string", "description": "实际运行当前处理的 Bot" }
+            }
+          },
+          "goal": { "type": "string", "description": "本次进化目标与限制" },
+          "diagnose_result": { "type": "object", "description": "诊断 Stage 的最终结果；按目标直接进化时不提供" },
+          "target_skill": {
+            "type": "object",
+            "description": "正式 Skill 进化提供独立候选；Skill 流程开发记录的 diagnose/preprocess 或 plan/replace 独立测试提供明确标注来源的固定 fixture，不是正式资产",
+            "required": ["asset_id", "skill_id", "name", "workspace", "path", "baseline_sha256"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["stage_test_fixture"], "description": "仅测试 fixture 提供此字段；缺省保持正式 Skill 候选语义" },
+              "fixture_id": { "type": "string", "enum": ["skill-description-v1", "skill-description-v2", "skill-description-v3"], "description": "kind=stage_test_fixture 时由平台提供的固定测试资源标识；v3 为真实 Plan Source 调用 daily-report-zh 的原文隔离副本，不对应正式资产" },
+              "asset_id": { "type": "string", "description": "正式候选为登记资产标识；测试为 fixture:{taskId}:{fixtureId}，不登记资产" },
+              "skill_id": { "type": "string", "description": "正式候选为 Host Local Skill 标识；测试为 fixture:{fixtureId}，不是 Host 身份" },
+              "name": { "type": "string", "description": "Skill 名称" },
+              "workspace": { "type": "string", "description": "本次任务独立候选 Workspace" },
+              "path": { "type": "string", "description": "候选 Workspace 内的 Skill 目录" },
+              "baseline_sha256": { "type": "string", "description": "正式候选为从 Host 冻结的原包校验值；测试为固定 ZIP 的 SHA256，不代表 Host 内容" }
+            }
+          },
+          "human_input": {
+            "type": "object",
+            "description": "用户回答上一次问题后由平台补充；首次执行不提供",
+            "properties": {
+              "tag": { "type": "string", "description": "与上一次问题对应的标识" },
+              "content": { "type": "string", "description": "文本问题的回答" },
+              "fields": { "type": "object", "description": "HTML 表单提交的字段" },
+              "answers": { "type": "object", "description": "结构化表单中由平台校验并归一化的回答" }
+            }
+          }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["goal", "spec", "benchCases", "benchDomains"],
+        "properties": {
+          "goal": {
+            "type": "object",
+            "description": "规划后冻结的目标和衡量方式",
+            "required": ["summary", "metrics"],
+            "properties": {
+              "summary": { "type": "string", "description": "本次进化目标摘要" },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["key", "name", "operator", "target", "unit"],
+                  "properties": {
+                    "key": { "type": "string", "description": "指标标识" },
+                    "name": { "type": "string", "description": "指标名称" },
+                    "operator": { "type": "string", "enum": [">="], "description": "当前支持的达标比较方式" },
+                    "target": { "type": "number", "description": "目标值" },
+                    "unit": { "type": "string", "description": "指标单位" }
+                  }
+                }
+              }
+            }
+          },
+          "spec": {
+            "type": "object",
+            "description": "Optimize Loop 使用的冻结优化方案",
+            "required": ["version", "content_type", "content"],
+            "properties": {
+              "version": { "type": "string", "description": "Spec 版本，例如 v0" },
+              "content_type": { "type": "string", "enum": ["text"], "description": "当前固定为文本" },
+              "content": { "type": "string", "description": "完整优化方案" }
+            }
+          },
+          "benchCases": {
+            "type": "object",
+            "description": "训练与测试 Case 及其已发布 Bench 模板",
+            "required": ["trainCount", "testCount", "items"],
+            "properties": {
+              "trainCount": { "type": "integer", "description": "训练 Case 数量" },
+              "testCount": { "type": "integer", "description": "测试 Case 数量" },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["sourceCaseId", "taskId", "split", "template"],
+                  "properties": {
+                    "sourceCaseId": { "type": "string", "description": "来源诊断 Case" },
+                    "taskId": { "type": "string", "description": "Bench Case 标识" },
+                    "split": { "type": "string", "enum": ["train", "test"], "description": "训练集或测试集" },
+                    "template": {
+                      "type": "object",
+                      "required": ["ownerUserId", "domainId", "templateName"],
+                      "properties": {
+                        "ownerUserId": { "type": "string", "description": "Bench 模板所有者" },
+                        "domainId": { "type": "string", "description": "Bench Domain 标识" },
+                        "templateName": { "type": "string", "description": "已发布的模板名称" },
+                        "version": { "type": "integer", "description": "已发布模板版本" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "benchDomains": {
+            "type": "object",
+            "required": ["trainBenchDomainId", "testBenchDomainId"],
+            "properties": {
+              "trainBenchDomainId": { "type": "string", "description": "训练 Bench Domain" },
+              "testBenchDomainId": { "type": "string", "description": "测试 Bench Domain" },
+              "trainBenchDomainFullURL": { "type": "string", "description": "训练 Bench 页面地址" },
+              "testBenchDomainFullURL": { "type": "string", "description": "测试 Bench 页面地址" },
+              "validationIndependent": { "type": "boolean", "description": "测试集是否与训练集隔离" },
+              "validationMode": { "type": "string", "description": "Bench 隔离方式" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "stage": "hardening",
+      "name": "Skill 加固",
+      "description": "检查并改进目标 Skill 的指令、契约、异常处理和引用完整性，在不改变业务意图的前提下形成可审阅的候选版本。",
+      "extensionModes": ["preprocess", "postprocess", "replace"],
+      "postprocessWritablePaths": ["summary"],
+      "inputSchema": {
+        "type": "object",
+        "required": ["task", "target_skill"],
+        "properties": {
+          "task": {
+            "type": "object",
+            "description": "平台生成的本次任务信息",
+            "required": ["task_id", "task_type", "target_bot_id"],
+            "properties": {
+              "task_id": { "type": "string", "description": "本次任务标识" },
+              "task_type": { "type": "string", "enum": ["hardening", "stage_test"], "description": "Skill 加固或 Stage 集成测试" },
+              "target_bot_id": { "type": "string", "description": "实际运行当前处理的 Bot" }
+            }
+          },
+          "goal": { "type": "string", "description": "本次加固目标；未填写时按平台默认加固要求执行" },
+          "model": { "type": "string", "description": "任务创建时选择的执行模型，供 Skill 加固实现按需使用" },
+          "target_skill": {
+            "type": "object",
+            "description": "本次任务独立的待加固 Skill 候选；集成测试使用明确标记的隔离 fixture",
+            "required": ["asset_id", "skill_id", "name", "workspace", "path", "baseline_sha256"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["stage_test_fixture"], "description": "仅测试 fixture 提供此字段" },
+              "fixture_id": { "type": "string", "enum": ["skill-description-v1", "skill-description-v2", "skill-description-v3"], "description": "仅集成测试使用的固定素材标识" },
+              "asset_id": { "type": "string", "description": "登记的 Skill 资产标识" },
+              "skill_id": { "type": "string", "description": "原始 Skill 标识" },
+              "name": { "type": "string", "description": "Skill 名称" },
+              "workspace": { "type": "string", "description": "本次任务独立候选 Workspace" },
+              "path": { "type": "string", "description": "候选 Workspace 内的 Skill 目录" },
+              "baseline_sha256": { "type": "string", "description": "任务开始时冻结的原始内容校验值" }
+            }
+          },
+          "human_input": {
+            "type": "object",
+            "description": "用户回答上一次问题后由平台补充；首次执行不提供",
+            "properties": {
+              "tag": { "type": "string", "description": "与上一次问题对应的标识" },
+              "content": { "type": "string", "description": "文本问题的回答" },
+              "fields": { "type": "object", "description": "HTML 表单提交的字段" },
+              "answers": { "type": "object", "description": "结构化表单中由平台校验并归一化的回答" }
+            }
+          }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["summary", "changed"],
+        "properties": {
+          "summary": { "type": "string", "description": "本次实际完成的加固总结" },
+          "changed": { "type": "boolean", "description": "是否修改了候选 Skill" },
+          "changed_files": {
+            "type": "array",
+            "description": "实际修改的候选 Skill 相对路径",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    {
+      "stage": "optimize",
+      "name": "优化",
+      "description": "按照冻结的 Spec 修改候选内容，运行训练与测试 Bench，并根据结果决定是否继续下一轮，直到达标或达到最大轮数。",
+      "extensionModes": ["preprocess", "postprocess", "replace"],
+      "postprocessWritablePaths": ["diff", "roundDecision", "spec"],
+      "inputSchema": {
+        "type": "object",
+        "required": ["task", "round", "plan_result"],
+        "properties": {
+          "task": {
+            "type": "object",
+            "description": "平台生成的本次任务信息",
+            "required": ["task_id", "task_type", "target_bot_id"],
+            "properties": {
+              "task_id": { "type": "string", "description": "本次任务标识" },
+              "task_type": { "type": "string", "enum": ["diagnose", "full", "stage_test"], "description": "诊断、完整进化或 Stage 集成测试" },
+              "target_bot_id": { "type": "string", "description": "实际运行当前处理的 Bot" }
+            }
+          },
+          "round": { "type": "integer", "description": "当前优化轮次" },
+          "plan_result": { "type": "object", "description": "规划 Stage 冻结的目标、Spec 与 Bench" },
+          "previous_round_result": { "type": "object", "description": "第二轮及以后提供的上一轮结果" },
+          "target_skill": {
+            "type": "object",
+            "description": "仅在 Skill 进化时提供；当前任务独立的待进化 Skill 候选",
+            "required": ["asset_id", "skill_id", "name", "workspace", "path", "baseline_sha256"],
+            "properties": {
+              "asset_id": { "type": "string", "description": "ClawEvolve 中登记的 Skill 资产标识" },
+              "skill_id": { "type": "string", "description": "Host 中的 Local Skill 标识" },
+              "name": { "type": "string", "description": "Skill 名称" },
+              "workspace": { "type": "string", "description": "本次任务独立候选 Workspace" },
+              "path": { "type": "string", "description": "候选 Workspace 内的 Skill 目录" },
+              "baseline_sha256": { "type": "string", "description": "任务开始时从 Host 冻结的原始内容校验值" }
+            }
+          },
+          "human_input": {
+            "type": "object",
+            "description": "用户回答上一次问题后由平台补充；首次执行不提供",
+            "properties": {
+              "tag": { "type": "string", "description": "与上一次问题对应的标识" },
+              "content": { "type": "string", "description": "文本问题的回答" },
+              "fields": { "type": "object", "description": "HTML 表单提交的字段" },
+              "answers": { "type": "object", "description": "结构化表单中由平台校验并归一化的回答" }
+            }
+          }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "required": ["diff", "metrics", "baseline", "roundDecision"],
+        "properties": {
+          "diff": {
+            "type": "object",
+            "description": "本轮实际修改",
+            "required": ["summary", "files"],
+            "properties": {
+              "summary": { "type": "string", "description": "修改摘要" },
+              "files": {
+                "type": "array",
+                "description": "原生 Optimize 返回的实际文件变更",
+                "items": {
+                  "type": "object",
+                  "required": ["path", "change"],
+                  "properties": {
+                    "path": { "type": "string", "description": "修改文件的工作区相对路径" },
+                    "change": { "type": "string", "description": "原生文件变更类型，如 added、modified、deleted" }
+                  }
+                }
+              }
+            }
+          },
+          "metrics": {
+            "type": "array",
+            "description": "本轮候选在训练与测试 Bench 上的指标",
+            "items": {
+              "type": "object",
+              "required": ["benchRunId", "ownerUserId", "domainId"],
+              "properties": {
+                "key": { "type": "string", "description": "指标标识" },
+                "name": { "type": "string", "description": "指标名称" },
+                "role": { "type": "string", "enum": ["candidate_train", "candidate_test"], "description": "训练候选或测试候选" },
+                "value": { "type": "number", "description": "指标值" },
+                "ownerUserId": { "type": "string", "description": "Bench 所有者" },
+                "domainId": { "type": "string", "description": "Bench Domain 标识" },
+                "benchRunId": { "type": "string", "description": "真实 Bench Run 标识" }
+              }
+            }
+          },
+          "baseline": {
+            "type": "object",
+            "description": "本轮用于比较的训练与测试基线",
+            "required": ["train", "test"],
+            "properties": {
+              "train": {
+                "type": "object",
+                "required": ["role", "producerStepId", "source", "ownerUserId", "domainId", "benchRunId", "metrics"],
+                "properties": {
+                  "role": { "type": "string", "enum": ["train"] },
+                  "producerStepId": { "type": "string", "description": "产生该基线的 Step" },
+                  "source": { "type": "string", "enum": ["generated", "reused"], "description": "本轮生成或沿用上轮" },
+                  "ownerUserId": { "type": "string" },
+                  "domainId": { "type": "string" },
+                  "benchRunId": { "type": "string" },
+                  "metrics": { "type": "object", "description": "基线指标" }
+                }
+              },
+              "test": {
+                "type": "object",
+                "required": ["role", "producerStepId", "source", "ownerUserId", "domainId", "benchRunId", "metrics"],
+                "properties": {
+                  "role": { "type": "string", "enum": ["test"] },
+                  "producerStepId": { "type": "string", "description": "产生该基线的 Step" },
+                  "source": { "type": "string", "enum": ["generated", "reused"], "description": "本轮生成或沿用上轮" },
+                  "ownerUserId": { "type": "string" },
+                  "domainId": { "type": "string" },
+                  "benchRunId": { "type": "string" },
+                  "metrics": { "type": "object", "description": "基线指标" }
+                }
+              }
+            }
+          },
+          "roundDecision": {
+            "type": "object",
+            "required": ["stop"],
+            "properties": {
+              "stop": { "type": "boolean", "description": "是否结束 Optimize Loop" },
+              "reason": { "type": "string", "description": "继续或停止的原因" }
+            }
+          },
+          "spec": {
+            "type": "object",
+            "description": "本轮使用或修订后的 Spec",
+            "required": ["version", "content_type", "content"],
+            "properties": {
+              "version": { "type": "string" },
+              "content_type": { "type": "string", "enum": ["text"] },
+              "content": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

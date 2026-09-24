@@ -304,7 +304,7 @@ export async function startSinglebox(config: SingleboxConfig) {
     if (creation) {
       const body = request.body ?? {};
       if (body.userId !== config.userId || typeof body.botId !== "string" || typeof body.botEnv !== "string"
-        || (body.taskType && !["diagnose", "full"].includes(body.taskType)) || body.judgeBackend === "api" || body.apiKey
+        || (body.taskType && !["diagnose", "hardening", "full"].includes(body.taskType)) || body.judgeBackend === "api" || body.apiKey
         || body.input || body.nodeCommandYamls || body.sessionSource === "service_export" || body.improvementId || body.improvementRequestId || body.source === "improvement") {
         response.status(422).json({ error: "Openversion requires an owned personal Bot and configured local model; custom commands and governance sources are unavailable" }); return;
       }
@@ -332,7 +332,7 @@ export async function startSinglebox(config: SingleboxConfig) {
       if (restoreRetry ? request.body?.confirmRestore !== true || Object.keys(request.body).some((key) => key !== "confirmRestore")
         : cleanupRetry
         ? request.body?.forceCleanup !== true || Object.keys(request.body).some((key) => key !== "forceCleanup")
-        : !((({ diagnose: ["diagnose", "plan"], full: ["diagnose", "plan", "optimize"], optimize: ["optimize"], bench_optimize: ["bench_plan", "optimize"] } as Record<string, string[]>)[task.task_type]?.includes(step.step_type)) || (task.task_type === "bench" && step.step_type === "bench") || (task.task_type === "pack" && step.step_type === "pack")) || Object.keys(request.body ?? {}).length > 0) {
+        : !((({ diagnose: ["diagnose", "plan"], hardening: ["hardening"], full: ["diagnose", "plan", "optimize"], optimize: ["optimize"], bench_optimize: ["bench_plan", "optimize"] } as Record<string, string[]>)[task.task_type]?.includes(step.step_type)) || (task.task_type === "bench" && step.step_type === "bench") || (task.task_type === "pack" && step.step_type === "pack")) || Object.keys(request.body ?? {}).length > 0) {
         response.status(422).json({ error: "Local retry requires an allowed stage and its confirmation; parameter overrides are unavailable" }); return;
       }
       try {
@@ -367,7 +367,7 @@ export async function startSinglebox(config: SingleboxConfig) {
   app.get("/health", (_request, response) => {
     response.json({ status: "ok", db: db.dbType, mode: "openversion", botSource: config.botSource ?? "singlebox" });
   });
-  app.get("/api/tclog/bots", async (_request, response) => {
+  app.get(["/api/bots", "/api/tclog/bots"], async (_request, response) => {
     const bots = (await repo.listEvolveBots(config.userId)).filter((bot) => bot.activeEngine?.toLowerCase() === "openclaw" && bot.botType?.toLowerCase() === "personal");
     response.json({ ownerId: config.userId, bots: bots.map((bot) => ({ ...bot,
       displayBotId: bot.botId, ownerId: config.userId, accessType: "owner", status: "active",

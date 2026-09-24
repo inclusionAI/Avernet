@@ -266,6 +266,7 @@ export function TaskList({ version = 'internalversion' }: { version?: 'openversi
                 const lifecycle = taskLifecycle(task)
                 const display = taskDisplayType(task)
                 const status = statusView(task.status)
+                const targetSkill = task.config.targetSkill as { name?: string; skillId?: string } | undefined
                 return (
                   <tr key={task.task_id} className="group transition hover:bg-gray-50/70">
                     <td className="px-5 py-4">
@@ -289,8 +290,8 @@ export function TaskList({ version = 'internalversion' }: { version?: 'openversi
                       <div className="flex items-center gap-3">
                         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Icon name="bot" /></span>
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-gray-900">{botNameCache[`${task.user_id}:${task.bot_id}`] || task.bot_name || '未命名 Bot'}</p>
-                          <p className="mt-0.5 truncate font-mono text-[11px] text-gray-400">{task.user_id} / {task.bot_id}</p>
+                          <p className="truncate font-medium text-gray-900">{targetSkill?.name || botNameCache[`${task.user_id}:${task.bot_id}`] || task.bot_name || '未命名 Bot'}</p>
+                          <p className="mt-0.5 truncate font-mono text-[11px] text-gray-400">{targetSkill ? `${task.bot_id} / ${targetSkill.skillId || 'Skill'}` : `${task.user_id} / ${task.bot_id}`}</p>
                         </div>
                       </div>
                     </td>

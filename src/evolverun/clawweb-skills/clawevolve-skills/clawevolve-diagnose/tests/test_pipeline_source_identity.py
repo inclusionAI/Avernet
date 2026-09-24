@@ -21,7 +21,7 @@ from clawevolve_diagnose.run import runner
 def test_pipeline_preserves_source_identity_in_plan_handoff(
     monkeypatch, tmp_path, source, requested_bot, expected_bot
 ):
-    # The local environment lacks OCB metadata and contains a temporary Agent.
+    # The local environment lacks Bot metadata and contains a temporary Agent.
     # Exercise the actual pipeline and resolver, including Plan Source output.
     monkeypatch.setattr(
         runner, "discover_layout", lambda *_: {"agent_id": "temporary-business-agent"}

@@ -302,10 +302,10 @@ def _replace_directory(source: Path, target: Path) -> None:
 def _activate_candidate_skill(workspace: Path, target: Path) -> Path:
     """Point the target Skill's discovery entry at the task-local candidate.
 
-    Source workspaces may contain absolute discovery links managed by OCB.  A
+    Source workspaces may contain absolute discovery links managed by the host.  A
     byte-for-byte workspace copy must not retain that link for the Skill being
     evolved, otherwise an Agent following ``workspace/skills/<name>`` can edit
-    the live OCB package before acceptance.
+    the live Skill package before acceptance.
     """
     relative = target.relative_to(workspace)
     if len(relative.parts) == 3 and relative.parts[:2] == ("skills", "skills-local"):

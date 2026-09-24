@@ -13,7 +13,10 @@ import {
   type BaasCommandEnvironment,
   type BaasCommandTargetConfig,
 } from "./baas-command-transport.js";
+import { freezeRunnerLaunch, type RunnerLaunch, type LaunchStorage } from "./evolve/runner-launch.js";
 import { evolveStepBaasStage, stepUsesBaasRuntime } from "./evolve/task-registry.js";
+
+export type EvolveTransport = "baas_execute_command" | "message";
 
 type BotPlatformResponse = {
   code?: number;
@@ -51,24 +54,33 @@ export type EvolveDispatchSecrets = {
 };
 
 export type EvolveDispatchInput = {
+  transport?: EvolveTransport;
+  runnerEnvironment?: "local" | "container";
   taskId: string; stepPk: number; stepId: string; stepType: string;
+  /** Stable delivery identity; HITL resumes are new messages for the same Step. */
+  messageId?: string;
   userId: string; botId: string; command: string; mode: "message" | "run";
   callbackUrl?: string;
   runtime?: EvolveBotRuntime | null;
   optimizeArgs?: OptimizeDispatchArgs;
   forceMessage?: boolean;
+  /** Legacy core-replacement paths that still execute through the outer Agent message transport. */
+  agentMessageOnly?: boolean;
   runtimeMaintenance?: boolean;
   secrets?: EvolveDispatchSecrets;
 };
 
 export type EvolveTaskLogDispatchInput = {
+  transport?: EvolveTransport;
+  runnerEnvironment?: "local" | "container";
   taskId: string; archiveId: string; userId: string; botId: string;
   callbackUrl: string; clawwebUrl: string; runtime: EvolveBotRuntime;
 };
 
 const RUNTIME_MAINTENANCE_DISABLED_STEPS = new Set(["pack", "restore", "runtime_cleanup"]);
-const ARCA_DIRECT_RUNNER_STEPS = new Set([
-  "diagnose", "plan", "bench", "bench_plan", "optimize", "pack", "restore", "runtime_cleanup",
+const DIRECT_RUNNER_MESSAGE_STEPS = new Set([
+  "diagnose", "hardening", "plan", "bench", "bench_plan", "optimize", "pack", "restore", "runtime_cleanup",
+  "stage_extension", "skill_prepare", "skill_finalize",
 ]);
 
 export function resolveRuntimeMaintenance(stepType: string, requested?: boolean): boolean {
@@ -76,6 +88,10 @@ export function resolveRuntimeMaintenance(stepType: string, requested?: boolean)
 }
 
 export type EvolveCancelInput = {
+  transport?: EvolveTransport;
+  runnerEnvironment?: "local" | "container";
+  command?: string;
+  agentMessageOnly?: boolean;
   taskId: string; stepId: string; stepType: string; userId: string; botId: string;
   sessionId: string | null; platformResponse: unknown;
   runtime?: EvolveBotRuntime | null;
@@ -90,16 +106,30 @@ type DispatchResult = {
 class EvolveDispatchValidationError extends Error {}
 const MAX_EVOLVE_COMMAND_BYTES = 64 * 1024;
 const SAFE_EVOLVE_SCRIPT_PATH = /^\/[A-Za-z0-9._/-]+$/;
-export function resolveEvolveTransport(input: Pick<EvolveDispatchInput, "stepType" | "runtime" | "forceMessage">): "baas_execute_command" | "message" {
-  return input.runtime?.provider === "baas" && stepUsesBaasRuntime(input.stepType)
+const SAFE_RUNNER_INVOCATION_ID = /^[A-Za-z0-9._:-]{1,256}$/;
+/** Pass a trusted Host selection; target paths and environment preparation belong to the Runner. */
+function runnerCommand(command: string, environment: EvolveDispatchInput["runnerEnvironment"]): string {
+  if (environment === undefined) return command;
+  if (environment !== "local" && environment !== "container") throw new Error("Invalid Runner environment");
+  return `CLAWEVOLVE_RUNNER_ENVIRONMENT=${environment} ${command}`;
+}
+
+export function resolveEvolveTransport(input: Pick<EvolveDispatchInput, "stepType" | "runtime" | "forceMessage" | "agentMessageOnly" | "transport">): "baas_execute_command" | "message" {
+  if (input.agentMessageOnly) return "message";
+  if (input.transport) return input.transport;
+  return input.runtime?.provider?.toLowerCase() === "baas" && stepUsesBaasRuntime(input.stepType)
     ? "baas_execute_command"
     : "message";
 }
 
-export function usesArcaDirectRunner(input: Pick<EvolveDispatchInput, "stepType" | "runtime" | "forceMessage">): boolean {
-  return input.runtime?.provider?.toLowerCase() === "arca"
+export function usesDirectRunnerMessage(input: Pick<EvolveDispatchInput, "stepType" | "runtime" | "forceMessage" | "agentMessageOnly" | "transport">): boolean {
+  const provider = input.runtime?.provider?.toLowerCase();
+  const isSupportedRuntime = provider === "arca"
+    || (provider === "baas" && resolveEvolveTransport(input) === "message");
+  return !input.agentMessageOnly
+    && isSupportedRuntime
     && resolveEvolveTransport(input) === "message"
-    && ARCA_DIRECT_RUNNER_STEPS.has(input.stepType);
+    && DIRECT_RUNNER_MESSAGE_STEPS.has(input.stepType);
 }
 
 export function resolveEvolveBaasTargetConfig(
@@ -136,10 +166,7 @@ export function resolveEvolveRunnerConfig(
   };
 }
 
-export function buildBaasEvolveCommand(input: EvolveDispatchInput, scriptPath: string): string {
-  if (!SAFE_EVOLVE_SCRIPT_PATH.test(scriptPath) || scriptPath.split("/").includes("..")) {
-    throw new EvolveDispatchValidationError("BaaS evolveScriptPath 必须是绝对路径");
-  }
+export function buildRunnerLaunch(input: EvolveDispatchInput): RunnerLaunch {
   const command = input.command.trim();
   if (!/^\/claw[^\s]*/.test(command)
     || Buffer.byteLength(command, "utf8") > MAX_EVOLVE_COMMAND_BYTES || /[\0\r\n]/.test(command)) {
@@ -149,40 +176,46 @@ export function buildBaasEvolveCommand(input: EvolveDispatchInput, scriptPath: s
   let args = separator < 0 ? "" : command.slice(separator).trim();
   if (input.stepType === "bench_plan") args = args.replace(/^--stage\s+bench-plan(?:\s+|$)/, "");
   if (input.stepType === "optimize") args = args.replace(/^--stage\s+optimize(?:\s+|$)/, "");
-  const encoded = Buffer.from(args, "utf8").toString("base64");
   const stage = evolveStepBaasStage(input.stepType);
   if (!stage) throw new EvolveDispatchValidationError(`BaaS 不支持 ${input.stepType} 阶段`);
+  const invocationId = input.messageId ?? input.stepId;
+  if (!SAFE_RUNNER_INVOCATION_ID.test(invocationId)) {
+    throw new EvolveDispatchValidationError("Runner invocationId 不合法");
+  }
   const runtimeMaintenance = resolveRuntimeMaintenance(input.stepType, input.runtimeMaintenance);
-  return `CLAWEVOLVE_RUNTIME_MAINTENANCE=${runtimeMaintenance} bash ${scriptPath} --stage ${stage} --args-base64 '${encoded}'`;
+  return { schemaVersion: "clawevolve.runner-launch.v1", taskId: input.taskId, stepId: input.stepId,
+    stage, invocationId, runtimeMaintenance, args };
 }
 
-export function buildArcaRunnerMessage(
+export function buildBaasEvolveCommand(input: EvolveDispatchInput, scriptPath: string): string {
+  if (!SAFE_EVOLVE_SCRIPT_PATH.test(scriptPath) || scriptPath.split("/").includes("..")) {
+    throw new EvolveDispatchValidationError("BaaS evolveScriptPath 必须是绝对路径");
+  }
+  const { stage, invocationId, runtimeMaintenance, args } = buildRunnerLaunch(input);
+  const encoded = Buffer.from(args, "utf8").toString("base64");
+  return runnerCommand(`CLAWEVOLVE_RUNTIME_MAINTENANCE=${runtimeMaintenance} bash ${scriptPath} --stage ${stage} --invocation-id ${invocationId} --args-base64 '${encoded}'`, input.runnerEnvironment);
+}
+
+export async function buildDirectRunnerMessage(
   input: EvolveDispatchInput,
   config: ResolvedBaasConfig = resolveBaasConfig(),
-): string {
-  if (!usesArcaDirectRunner(input)) {
-    throw new EvolveDispatchValidationError(`ARCA Direct Runner 不支持 ${input.stepType} 阶段`);
+  storage: LaunchStorage = {},
+): Promise<string> {
+  if (!usesDirectRunnerMessage(input)) {
+    throw new EvolveDispatchValidationError(`Direct Runner Message 不支持 ${input.stepType} 阶段`);
   }
   if (Object.values(input.secrets ?? {}).some((value) => String(value ?? "").trim())) {
-    throw new EvolveDispatchValidationError("ARCA Direct Runner 禁止传递 API Key 或 secrets");
+    throw new EvolveDispatchValidationError("Direct Runner Message 禁止传递 API Key 或 secrets");
   }
   if (input.stepType === "diagnose" && readDiagnoseJudgeBackend(input.command) === "api") {
-    throw new EvolveDispatchValidationError("ARCA 模式只支持 Agent Judge，不支持 API Judge");
+    throw new EvolveDispatchValidationError("Direct Runner Message 只支持 Agent Judge，不支持 API Judge");
   }
   if (/(?:^|\s)--debug(?:=|\s+)true(?:\s|$)/i.test(input.command)) {
-    throw new EvolveDispatchValidationError("ARCA Direct Runner 不支持 --debug true");
+    throw new EvolveDispatchValidationError("Direct Runner Message 不支持 --debug true");
   }
   const runner = resolveEvolveRunnerConfig(config);
-  const command = buildBaasEvolveCommand(input, runner.evolveScriptPath);
-  const encoded = command.match(/--args-base64 '([^']*)'/)?.[1];
-  const original = input.command.trim();
-  const separator = original.search(/\s/);
-  let expectedArgs = separator < 0 ? "" : original.slice(separator).trim();
-  if (input.stepType === "bench_plan") expectedArgs = expectedArgs.replace(/^--stage\s+bench-plan(?:\s+|$)/, "");
-  if (input.stepType === "optimize") expectedArgs = expectedArgs.replace(/^--stage\s+optimize(?:\s+|$)/, "");
-  if (!encoded || Buffer.from(encoded, "base64").toString("utf8") !== expectedArgs) {
-    throw new EvolveDispatchValidationError("ARCA Runner 参数 Base64 回读校验失败");
-  }
+  const launch = await freezeRunnerLaunch(buildRunnerLaunch(input), storage);
+  const command = runnerCommand(`bash ${runner.evolveScriptPath} --launch-url '${launch.url}' --launch-sha256 ${launch.sha256}`, input.runnerEnvironment);
   const message = [
     "这是 ClawEvolve 系统任务。",
     "必须使用 exec 工具原样执行下面唯一一条命令，不得添加 sudo，不得修改参数，不得执行其他命令。",
@@ -191,7 +224,7 @@ export function buildArcaRunnerMessage(
     command,
   ].join("\n");
   if (Buffer.byteLength(message, "utf8") > MAX_EVOLVE_COMMAND_BYTES) {
-    throw new EvolveDispatchValidationError(`ARCA ${input.stepType} Runner Message 超过 ${MAX_EVOLVE_COMMAND_BYTES} 字节`);
+    throw new EvolveDispatchValidationError(`${input.stepType} Runner Message 超过 ${MAX_EVOLVE_COMMAND_BYTES} 字节`);
   }
   return message;
 }
@@ -248,7 +281,7 @@ function callbackRunnerTexts(value: unknown): string[] {
   return texts;
 }
 
-export function parseArcaRunnerCallback(
+export function parseDirectRunnerCallback(
   result: unknown,
   metadata: unknown,
   input: RunnerIdentity,
@@ -263,7 +296,7 @@ export async function cancelEvolveExecution(input: EvolveCancelInput): Promise<{
   const response = input.platformResponse && typeof input.platformResponse === "object"
     ? input.platformResponse as BotPlatformResponse : {};
   const transport = input.runtime
-    ? resolveEvolveTransport({ stepType: input.stepType, runtime: input.runtime })
+    ? resolveEvolveTransport({ stepType: input.stepType, runtime: input.runtime, forceMessage: false, agentMessageOnly: input.agentMessageOnly, transport: input.transport })
     : response.evolve_dispatch?.transport ?? "message";
   if (transport === "baas_execute_command") {
     const runtime = input.runtime;
@@ -289,14 +322,27 @@ export async function cancelEvolveExecution(input: EvolveCancelInput): Promise<{
   const effectiveOwnerId = input.runtime?.ownerId || input.userId;
   const routedBotId = input.botId.endsWith(`:${effectiveOwnerId}`) ? input.botId : `${input.botId}:${effectiveOwnerId}`;
   let message = `终止当前任务。任务 ID: ${input.taskId}，Step ID: ${input.stepId}。请立即停止当前执行，不再继续后续操作。`;
-  if (response.evolve_dispatch?.provider?.toLowerCase() === "arca"
+  if (response.evolve_dispatch?.transport === "message"
     && response.evolve_dispatch.runner_mode === "direct") {
     if (!/^[A-Za-z0-9._:-]{1,256}$/.test(input.taskId) || !/^[A-Za-z0-9._:-]{1,256}$/.test(input.stepId)) {
       throw new Error("ARCA Runner stop 参数非法");
     }
     const runner = resolveEvolveRunnerConfig(resolveBaasConfig());
     const stopArgs = `--task-id ${input.taskId} --step-id ${input.stepId}`;
-    const stopCommand = `bash ${runner.evolveScriptPath} --stage stop --args-base64 '${Buffer.from(stopArgs, "utf8").toString("base64")}'`;
+    const stopCommand = runnerCommand(`bash ${runner.evolveScriptPath} --stage stop --args-base64 '${Buffer.from(stopArgs, "utf8").toString("base64")}'`, input.runnerEnvironment);
+    message = [
+      "这是 ClawEvolve 系统停止任务。",
+      "必须使用 exec 工具原样执行下面唯一一条命令，不得添加 sudo，不得修改参数，不得执行其他命令。",
+      "执行完成后只返回脚本 stdout 的最后一行 JSON。",
+      "",
+      stopCommand,
+    ].join("\n");
+  } else if (!input.agentMessageOnly && (input.stepType === "plan" || input.stepType === "optimize")) {
+    if (!/^[A-Za-z0-9._:-]{1,256}$/.test(input.taskId) || !/^[A-Za-z0-9._:-]{1,256}$/.test(input.stepId)) {
+      throw new Error("Message Stage stop 参数非法");
+    }
+    const skillDirectory = input.stepType === "plan" ? "clawevolve-plan" : "clawevolve-workflow";
+    const stopCommand = `bash skills/skills-local/${skillDirectory}/scripts/run.sh --stop --task-id ${input.taskId} --step-id ${input.stepId}`;
     message = [
       "这是 ClawEvolve 系统停止任务。",
       "必须使用 exec 工具原样执行下面唯一一条命令，不得添加 sudo，不得修改参数，不得执行其他命令。",
@@ -411,14 +457,14 @@ async function dispatchMessage(input: EvolveDispatchInput): Promise<DispatchResu
           bot_id: routedBotId,
           message: input.command,
           ...(input.callbackUrl ? { callback_url: input.callbackUrl } : {}),
-          message_id: input.stepId,
+          message_id: input.messageId ?? input.stepId,
           metadata: {
             title: `Claw进化 ${input.stepType === "skill_init" ? "Skill 初始化" : input.stepType} · ${input.taskId} · ${input.stepId}`,
             // ClawEvolve never executes against the published service instance.
             // Make the draft target explicit instead of relying on the platform's
             // default lifecycle (online), including for legacy "message" tasks.
             bot_options: { lifecycle_stage: "draft" },
-            sender_options: { from: "owner" }, timeout: 1800, ignore_content: false,
+            sender_options: { from: "owner" }, timeout: 1800, ignore_content: true,
             biz_task_id: input.taskId,
             biz_scene: input.stepType === "skill_init" ? "claw_evolve_init" : "claw_evolve",
           },
@@ -465,17 +511,17 @@ async function dispatchMessage(input: EvolveDispatchInput): Promise<DispatchResu
   }
 }
 
-async function dispatchArcaRunnerMessage(input: EvolveDispatchInput): Promise<DispatchResult> {
+async function dispatchDirectRunnerMessage(input: EvolveDispatchInput, storage: LaunchStorage): Promise<DispatchResult> {
   const config = resolveBaasConfig();
   const runner = resolveEvolveRunnerConfig(config);
-  const result = await dispatchMessage({ ...input, command: buildArcaRunnerMessage(input, config) });
+  const result = await dispatchMessage({ ...input, command: await buildDirectRunnerMessage(input, config, storage) });
   return {
     ...result,
     platformResponse: {
       ...result.platformResponse,
       evolve_dispatch: {
         ...result.platformResponse.evolve_dispatch!,
-        provider: "arca",
+        provider: input.runtime?.provider ?? "unknown",
         transport: "message",
         release_lane: runner.environment,
         runner_mode: "direct",
@@ -484,12 +530,12 @@ async function dispatchArcaRunnerMessage(input: EvolveDispatchInput): Promise<Di
   };
 }
 
-export async function dispatchEvolveCommand(input: EvolveDispatchInput): Promise<DispatchResult> {
+export async function dispatchEvolveCommand(input: EvolveDispatchInput, storage: LaunchStorage = {}): Promise<DispatchResult> {
   if (resolveEvolveTransport(input) === "baas_execute_command") {
     return dispatchBaasCommand(input);
   }
-  if (usesArcaDirectRunner(input)) {
-    return dispatchArcaRunnerMessage(input);
+  if (usesDirectRunnerMessage(input)) {
+    return dispatchDirectRunnerMessage(input, storage);
   }
   return dispatchMessage(input);
 }
@@ -517,8 +563,9 @@ function buildTaskLogRunnerCommand(input: EvolveTaskLogDispatchInput, evolveScri
 export async function dispatchEvolveTaskLogArchive(input: EvolveTaskLogDispatchInput): Promise<DispatchResult> {
   const config = resolveBaasConfig();
   const runner = resolveEvolveRunnerConfig(config);
-  const command = buildTaskLogRunnerCommand(input, runner.evolveScriptPath);
-  if (input.runtime.provider?.toLowerCase() === "baas") {
+  const command = runnerCommand(buildTaskLogRunnerCommand(input, runner.evolveScriptPath), input.runnerEnvironment);
+  const transport = input.transport ?? (input.runtime.provider?.toLowerCase() === "baas" ? "baas_execute_command" : "message");
+  if (transport === "baas_execute_command") {
     if (!input.runtime.deviceId) throw new Error("BaaS Bot 缺少 device_id，无法获取日志");
     const target = resolveEvolveBaasTargetConfig(config, input.runtime.env);
     const { response, body } = await executeBaasCommand<BotPlatformResponse>({
@@ -545,7 +592,8 @@ export async function dispatchEvolveTaskLogArchive(input: EvolveTaskLogDispatchI
       },
     };
   }
-  if (input.runtime.provider?.toLowerCase() !== "arca") {
+  if (input.runtime.provider?.toLowerCase() !== "arca"
+    && !(input.runtime.provider?.toLowerCase() === "baas" && transport === "message")) {
     throw new Error(`当前 Bot 运行环境不支持日志归档: ${input.runtime.provider ?? "unknown"}`);
   }
   const message = [
@@ -573,7 +621,7 @@ export async function dispatchEvolveTaskLogArchive(input: EvolveTaskLogDispatchI
       ...result.platformResponse,
       evolve_dispatch: {
         ...result.platformResponse.evolve_dispatch!,
-        provider: "arca", transport: "message", release_lane: runner.environment, runner_mode: "direct",
+        provider: input.runtime.provider, transport: "message", release_lane: runner.environment, runner_mode: "direct",
       },
     },
   };

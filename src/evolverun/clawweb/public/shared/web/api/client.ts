@@ -93,6 +93,7 @@ import type {
   SmartOnboardingValidateRequest,
   SmartOnboardingValidateResult,
   TCLogBot,
+  DirectoryBot,
   TCLogQueryParams,
   TCLogQueryResponse,
   TCLogTaskListParams,
@@ -148,6 +149,7 @@ export type EvolveStep = {
   stepType: string
   stepNo: number
   roundNo: number | null
+  stageLoop?: { rootStepId: string; round: number; previousStepId: string | null } | null
   command: string
   status: string
   botRunId: string | null
@@ -377,7 +379,7 @@ export type WorkflowAutoAnalysisSetting = {
 
 export type EvolveTask = {
   task_id: string
-  task_type: EvolveTaskType | 'session_analysis' | 'session_export'
+  task_type: EvolveTaskType | 'session_analysis' | 'session_export' | 'stage_test'
   task_name: string | null
   remark: string | null
   user_id: string
@@ -390,6 +392,42 @@ export type EvolveTask = {
   gmt_create: number | string
   gmt_modified: number | string
   steps?: EvolveStep[]
+  interactions?: Array<{
+    interactionId: string
+    stepId: string
+    attempt: number
+    status: 'waiting' | 'answered'
+    question: { tag: string; format: 'text' | 'html'; content: string } | {
+      format: 'form'
+      title: string
+      description?: string
+      contents?: Array<{
+        id: string
+        title: string
+        format: 'markdown'
+        content: string
+      }>
+      questions: Array<{
+        id: string
+        type: 'single_choice' | 'multiple_choice' | 'short_text' | 'long_text'
+        title: string
+        description?: string
+        required: boolean
+        options?: Array<{ value: string; label: string; description?: string; recommended?: boolean }>
+        placeholder?: string
+        visibleWhen?: { questionId: string; operator: 'equals' | 'includes'; value: string }
+        validation?: { minSelections?: number; maxSelections?: number; minLength?: number; maxLength?: number }
+      }>
+    } | {
+      kind: 'loop_feedback'
+      action: 'request_feedback'
+      prompt: string
+      accepts: { text: boolean; files: string[] }
+    }
+    answer: unknown
+    createdAt: number | string
+    updatedAt: number | string
+  }>
   source?: EvolveTaskSource | null
   initialPack?: {
     packId: string
@@ -399,6 +437,124 @@ export type EvolveTask = {
     status: string
     artifact: { ref: string; size: number; sha256: string; contentType: string }
   } | null
+}
+
+export type EvolveStageMode = 'preprocess' | 'postprocess' | 'replace'
+export type EvolveStageSelection = Record<'diagnose' | 'plan' | 'optimize', boolean>
+  & Partial<Record<'hardening', boolean>>
+export type EvolveTaskStageExtensions = Partial<Record<
+  'diagnose' | 'hardening' | 'plan' | 'optimize',
+  Partial<Record<EvolveStageMode, { enabled: boolean; implementationId: string }>>
+>>
+
+export type EvolveStageCatalog = {
+  schemaVersion: string
+  flows: Array<{
+    key: 'bot_evolution' | 'skill_evolution' | 'skill_hardening'
+    name: string
+    purpose: string
+    stages: Array<{
+      key: string
+      name: string
+      purpose: string
+      enabled: boolean
+      canDisable: boolean
+      disabledReason?: string
+    }>
+  }>
+  stages: Array<{
+    stage: string
+    name: string
+    description: string
+    extensionModes: EvolveStageMode[]
+    postprocessWritablePaths: string[]
+    inputSchema: Record<string, unknown>
+    resultSchema: Record<string, unknown>
+  }>
+}
+
+export type EvolveStageDevelopment = {
+  stageSkillId: string
+  ownerId: string
+  displayName: string
+  flow: 'bot_evolution' | 'skill_evolution' | 'skill_hardening'
+  stage: string
+  stageName: string
+  mode: EvolveStageMode
+  createdAt: number | string
+  updatedAt: number | string
+}
+
+export type EvolveStageSkill = {
+  ownerId?: string
+  stageSkillId: string
+  implementationId: string
+  displayName: string
+  stage: string
+  stageName: string
+  mode: EvolveStageMode
+  version: string
+  status: 'validated' | 'testing' | 'test_passed' | 'test_failed' | 'registered' | 'deleted'
+  packageSha256: string
+  staticValidation: {
+    status?: string
+    checks?: Array<{ id: string; label: string; status: string; message: string }>
+  }
+  integrationTestTaskId: string | null
+  integrationTestStatus: 'untested' | 'testing' | 'test_passed' | 'test_failed'
+  createdAt: number | string
+  updatedAt: number | string
+}
+
+export type EvolveSkillVersion = {
+  versionId: string
+  version: string
+  status: string
+  sourceTaskId: string | null
+  packageSha256: string
+  creationKind?: 'registered' | 'task' | 'edit' | 'upload' | 'rollback'
+  createdBy?: string | null
+  sourceVersion?: { versionId: string; version: string } | null
+  createdAt: number | string
+}
+
+export type EvolveSkillAsset = {
+  description?: string | null
+  ownerId?: string | null
+  createdAt?: number | string
+  assetId: string
+  botId: string
+  skillId: string
+  name: string
+  currentVersion: string
+  canEdit?: boolean
+  updatedAt: number | string
+  versions?: EvolveSkillVersion[]
+}
+
+export type EvolveScoreComparison = { name: string | null; baseline: number | null; candidate: number | null; delta: number | null }
+
+export type EvolveSkillEvent = {
+  eventId: string
+  assetId: string
+  name: string
+  description: string | null
+  ownerId: string | null
+  botId: string
+  actorId: string | null
+  actorType: 'user' | 'system'
+  type: 'registered' | 'diagnosis' | 'hardening' | 'optimization'
+  status: 'running' | 'waiting_user_input' | 'waiting_acceptance' | 'completed' | 'failed' | 'canceled'
+  outcome: string | null
+  taskId: string | null
+  versionFrom: { versionId: string; version: string } | null
+  versionTo: { versionId: string; version: string } | null
+  waitingInteractionId: string | null
+  summary: string | null
+  testBench: { taskId: string; stepId: string; round: number; scoreComparison: EvolveScoreComparison | null } | null
+  startedAt: number | string
+  completedAt: number | string | null
+  updatedAt: number | string
 }
 
 export type EvolveTaskLogArchive = {
@@ -445,7 +601,7 @@ export type EvolveVersion = {
   promotionStatus: string | null
   stateSource: 'skill_output' | 'legacy_inferred' | null
   reviewStatus: string | null
-  scoreComparison: { name: string | null; baseline: number | null; candidate: number | null; delta: number | null } | null
+  scoreComparison: EvolveScoreComparison | null
   specVersion: string | null
   diff: { summary: string | null; files: Array<Record<string, unknown>>; available: boolean; artifactAvailable: boolean } | null
   reportedPack: {
@@ -930,6 +1086,154 @@ export const api = {
     },
   },
   evolve: {
+    stageCatalog(input?: {
+      taskType?: 'diagnose' | 'full'
+      inputMode?: 'diagnose_goal' | 'direct_goal'
+      hasGoal?: boolean
+    }): Promise<EvolveStageCatalog> {
+      const query = new URLSearchParams()
+      if (input?.taskType) query.set('taskType', input.taskType)
+      if (input?.inputMode) query.set('inputMode', input.inputMode)
+      if (input?.hasGoal != null) query.set('hasGoal', String(input.hasGoal))
+      return fetchJson(`${BASE}/evolve/stage-catalog${query.size ? `?${query.toString()}` : ''}`)
+    },
+    createStageDevelopment(input: { stage: string; mode: EvolveStageMode; flow: 'bot_evolution' | 'skill_evolution' | 'skill_hardening' }): Promise<EvolveStageDevelopment> {
+      return fetchJson(`${BASE}/evolve/stage-developments`, { method: 'POST', body: JSON.stringify(input) })
+    },
+    listStageDevelopments(): Promise<{ items: EvolveStageDevelopment[] }> {
+      return fetchJson(`${BASE}/evolve/stage-developments`)
+    },
+    getStageDevelopment(id: string): Promise<EvolveStageDevelopment> {
+      return fetchJson(`${BASE}/evolve/stage-developments/${encodeURIComponent(id)}`)
+    },
+    deleteStageDevelopment(id: string): Promise<{ deleted: boolean }> {
+      return fetchJson(`${BASE}/evolve/stage-developments/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    },
+    downloadStageDevelopmentPackage(id: string): Promise<Blob> {
+      return fetchBlob(`${BASE}/evolve/stage-skills/developer-package?developmentId=${encodeURIComponent(id)}`)
+    },
+    listStageSkills(): Promise<{ items: EvolveStageSkill[] }> {
+      return fetchJson(`${BASE}/evolve/stage-skills`)
+    },
+    getStageSkill(implementationId: string): Promise<EvolveStageSkill> {
+      return fetchJson(`${BASE}/evolve/stage-skills/${encodeURIComponent(implementationId)}`)
+    },
+    getStageSkillContent(implementationId: string, path?: string): Promise<{
+      files: Array<{ path: string; size: number; text: boolean }>
+      selected: { path: string; content: string } | null
+    }> {
+      const query = path ? `?path=${encodeURIComponent(path)}` : ''
+      return fetchJson(`${BASE}/evolve/stage-skills/${encodeURIComponent(implementationId)}/content${query}`)
+    },
+    downloadStageDeveloperPackage(stage: string, mode: EvolveStageMode, flow: 'bot_evolution' | 'skill_evolution' | 'skill_hardening'): Promise<Blob> {
+      const query = new URLSearchParams({ stage, mode, flow })
+      return fetchBlob(`${BASE}/evolve/stage-skills/developer-package?${query.toString()}`)
+    },
+    uploadStageSkill(input: {
+      stage: string
+      mode: EvolveStageMode
+      stageSkillId?: string
+      package: File
+    }): Promise<EvolveStageSkill> {
+      const body = new FormData()
+      body.set('stage', input.stage)
+      body.set('mode', input.mode)
+      if (input.stageSkillId) body.set('stageSkillId', input.stageSkillId)
+      body.set('package', input.package)
+      return fetchJson(`${BASE}/evolve/stage-skills/uploads`, { method: 'POST', body })
+    },
+    runStageSkillTest(implementationId: string, input: {
+      botId: string
+      botEnv?: string
+      caseInput: Record<string, unknown>
+    }): Promise<{ taskId: string; stepId: string }> {
+      return fetchJson(`${BASE}/evolve/stage-skills/${encodeURIComponent(implementationId)}/integration-tests`, {
+        method: 'POST', body: JSON.stringify(input),
+      })
+    },
+    registerStageSkill(implementationId: string): Promise<EvolveStageSkill> {
+      return fetchJson(`${BASE}/evolve/stage-skills/${encodeURIComponent(implementationId)}/register`, {
+        method: 'POST', body: '{}',
+      })
+    },
+    deleteStageSkill(implementationId: string): Promise<{ deleted: boolean }> {
+      return fetchJson(`${BASE}/evolve/stage-skills/${encodeURIComponent(implementationId)}`, { method: 'DELETE' })
+    },
+    listAvailableLocalSkills(botId: string): Promise<{ items: Array<{ skillId: string; displayName: string; description?: string | null }> }> {
+      return fetchJson(`${BASE}/evolve/skill-assets/available?botId=${encodeURIComponent(botId)}`)
+    },
+    listSkillAssets(): Promise<{ items: EvolveSkillAsset[] }> {
+      return fetchJson(`${BASE}/evolve/skill-assets`)
+    },
+    listSkillEvents(): Promise<{ items: EvolveSkillEvent[] }> {
+      return fetchJson(`${BASE}/evolve/skill-events`)
+    },
+    registerSkillAsset(input: { botId: string; skillId: string }): Promise<EvolveSkillAsset> {
+      return fetchJson(`${BASE}/evolve/skill-assets`, { method: 'POST', body: JSON.stringify(input) })
+    },
+    getSkillAsset(assetId: string): Promise<EvolveSkillAsset> {
+      return fetchJson(`${BASE}/evolve/skill-assets/${encodeURIComponent(assetId)}`)
+    },
+    getSkillAssetHistory(assetId: string): Promise<{ events: EvolveSkillEvent[] }> {
+      return fetchJson(`${BASE}/evolve/skill-assets/${encodeURIComponent(assetId)}/history`)
+    },
+    getSkillVersionContent(assetId: string, versionId: string, path?: string): Promise<{
+      files: Array<{ path: string; size: number; text: boolean }>
+      selected: { path: string; content: string } | null
+    }> {
+      const query = path ? `?path=${encodeURIComponent(path)}` : ''
+      return fetchJson(`${BASE}/evolve/skill-assets/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(versionId)}/content${query}`)
+    },
+    getSkillVersionDiff(assetId: string, versionId: string): Promise<{
+      baseline: { sha256: string | null } | null
+      files: Array<{ path: string; change: 'added' | 'modified' | 'deleted'; before: string | null; after: string | null }>
+    }> {
+      return fetchJson(`${BASE}/evolve/skill-assets/${encodeURIComponent(assetId)}/versions/${encodeURIComponent(versionId)}/diff`)
+    },
+    createSkillVersion(assetId: string, input: {
+      mode: 'edit'; baseVersionId: string; edits: Array<{ path: string; content: string }>
+    } | {
+      mode: 'rollback'; baseVersionId: string; sourceVersionId: string
+    }): Promise<EvolveSkillVersion> {
+      return fetchJson(`${BASE}/evolve/skill-assets/${encodeURIComponent(assetId)}/versions`, {
+        method: 'POST', body: JSON.stringify(input),
+      })
+    },
+    uploadSkillVersion(assetId: string, baseVersionId: string, file: File): Promise<EvolveSkillVersion> {
+      const body = new FormData()
+      body.set('mode', 'upload')
+      body.set('baseVersionId', baseVersionId)
+      body.set('package', file)
+      return fetchJson(`${BASE}/evolve/skill-assets/${encodeURIComponent(assetId)}/versions`, { method: 'POST', body })
+    },
+    answerStageInteraction(taskId: string, stepId: string, interactionId: string, answer: unknown): Promise<{ status: string }> {
+      return fetchJson(`${BASE}/evolve/tasks/${encodeURIComponent(taskId)}/steps/${encodeURIComponent(stepId)}/interactions/${encodeURIComponent(interactionId)}/answer`, {
+        method: 'POST', body: JSON.stringify({ answer }),
+      })
+    },
+    getStageFeedbackUploadUrl(taskId: string, stepId: string, interactionId: string, input: {
+      name: string; size: number; sha256: string; contentType: string
+    }): Promise<{
+      method: 'PUT'; url: string; headers: Record<string, string>
+      artifact: { name: string; content_type: string; size: number; sha256: string; ref: string }
+    }> {
+      return fetchJson(`${BASE}/evolve/tasks/${encodeURIComponent(taskId)}/steps/${encodeURIComponent(stepId)}/interactions/${encodeURIComponent(interactionId)}/files/upload-url`, {
+        method: 'POST', body: JSON.stringify(input),
+      })
+    },
+    getTaskSkillDiff(taskId: string): Promise<{
+      target: { assetId: string; skillId: string; name: string }
+      baseline: { sha256: string }
+      candidate: { sha256: string }
+      files: Array<{ path: string; change: 'added' | 'modified' | 'deleted'; before: string | null; after: string | null }>
+    }> {
+      return fetchJson(`${BASE}/evolve/tasks/${encodeURIComponent(taskId)}/skill-diff`)
+    },
+    decideSkillVersion(taskId: string, decision: 'accept' | 'reject', idempotencyKey = crypto.randomUUID()): Promise<{ status: string; decision: string }> {
+      return fetchJson(`${BASE}/evolve/tasks/${encodeURIComponent(taskId)}/skill-decision`, {
+        method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ decision }),
+      })
+    },
     taskDefinitions(): Promise<{
       tasks: Array<{ type: string; label: string; nodes: Array<{ key: string; label: string; defaultCommand: string }> }>;
       variants: { insight_improvement: Array<{ key: string; label: string; defaultCommand: string }> };
@@ -1001,6 +1305,8 @@ export const api = {
       runtimeMaintenance?: boolean;
       openclawExecutionMode?: 'local' | 'gateway';
       improvementId?: number; improvementRequestId?: string;
+      stageExtensions?: EvolveTaskStageExtensions;
+      stageSelection?: EvolveStageSelection;
     }): Promise<{ task_id: string; status: string }> {
       return fetchJson(`${BASE}/evolve/diagnoses`, { method: 'POST', body: JSON.stringify(input) })
     },
@@ -1016,6 +1322,20 @@ export const api = {
       forceMessage?: boolean;
       runtimeMaintenance?: boolean;
       openclawExecutionMode?: 'local' | 'gateway';
+      targetSkillAssetId?: string;
+      stageExtensions?: EvolveTaskStageExtensions;
+      stageSelection?: EvolveStageSelection;
+    } | {
+      taskType: 'hardening';
+      taskName: string; remark?: string;
+      userId: string; botId: string; botEnv?: string;
+      goal: string; targetSkillAssetId: string;
+      nodeCommandYamls?: Record<string, string>;
+      forceMessage?: boolean;
+      runtimeMaintenance?: boolean;
+      openclawExecutionMode?: 'local' | 'gateway';
+      stageExtensions?: EvolveTaskStageExtensions;
+      stageSelection?: EvolveStageSelection;
     } | {
       taskType: 'full';
       inputMode: 'direct_goal';
@@ -1025,6 +1345,9 @@ export const api = {
       forceMessage?: boolean;
       runtimeMaintenance?: boolean;
       openclawExecutionMode?: 'local' | 'gateway';
+      targetSkillAssetId?: string;
+      stageExtensions?: EvolveTaskStageExtensions;
+      stageSelection?: EvolveStageSelection;
     } | {
       taskType: 'full';
       taskName: string; remark?: string;
@@ -1032,6 +1355,9 @@ export const api = {
       forceMessage?: boolean;
       runtimeMaintenance?: boolean;
       openclawExecutionMode?: 'local' | 'gateway';
+      targetSkillAssetId?: string;
+      stageExtensions?: EvolveTaskStageExtensions;
+      stageSelection?: EvolveStageSelection;
       input: {
         type: 'insight_improvement';
         improvementId: number;
@@ -1206,6 +1532,15 @@ export const api = {
       return fetchJson(`${BASE}/evolve/suggestions/apply-tasks?${sp.toString()}`)
     },
 
+  },
+  bots: {
+    list(params?: { ownerId?: string; status?: 'active' | 'all' }): Promise<{ ownerId: string; bots: DirectoryBot[] }> {
+      const sp = new URLSearchParams()
+      if (params?.ownerId) sp.set('ownerId', params.ownerId)
+      if (params?.status) sp.set('status', params.status)
+      const qs = sp.toString()
+      return fetchJson<{ ownerId: string; bots: DirectoryBot[] }>(`${BASE}/bots${qs ? `?${qs}` : ''}`)
+    },
   },
   tclog: {
     bots(params?: { ownerId?: string; status?: 'active' | 'all' }): Promise<{ ownerId: string; bots: TCLogBot[] }> {

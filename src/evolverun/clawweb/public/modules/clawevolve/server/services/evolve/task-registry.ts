@@ -1,17 +1,21 @@
 import type { NodeCommandKey } from "./command.js";
 
 export const EVOLVE_TASK_TYPES = [
-  "diagnose", "optimize", "apply", "full", "bench", "bench_optimize", "pack", "pack_restore", "runtime_cleanup", "repair",
+  "diagnose", "hardening", "optimize", "apply", "full", "bench", "bench_optimize", "pack", "pack_restore", "runtime_cleanup", "repair",
   "suggestion_apply",
   "run_analysis",
+  "stage_test",
 ] as const;
 
 export type EvolveTaskType = typeof EVOLVE_TASK_TYPES[number];
 
 export const EVOLVE_STEP_TYPES = [
-  "skill_init", "diagnose", "plan", "optimize", "apply", "bench", "bench_plan", "pack", "restore", "runtime_cleanup", "repair_plan", "repair_apply",
+  "skill_init", "diagnose", "hardening", "plan", "optimize", "apply", "bench", "bench_plan", "pack", "restore", "runtime_cleanup", "repair_plan", "repair_apply",
   "suggestion_apply",
   "run_analysis",
+  "stage_extension",
+  "skill_prepare",
+  "skill_finalize",
 ] as const;
 
 export type EvolveStepType = typeof EVOLVE_STEP_TYPES[number];
@@ -37,6 +41,7 @@ export const EVOLVE_NODE_REGISTRY: Record<NodeCommandKey, EvolveNodeDefinition> 
     label: "Bot 诊断",
     defaultCommand: "/clawevolve-diagnose --api-key {{api_key}} --intent {{diagnose_intent}}",
   },
+  hardening: { key: "hardening", label: "Skill 加固", defaultCommand: "/clawevolve-hardening" },
   plan: { key: "plan", label: "进化规划", defaultCommand: "/clawevolve-plan" },
   bench: { key: "bench", label: "Bench 评测", defaultCommand: "/clawevolve-bench --suite all" },
   bench_plan: { key: "bench_plan", label: "Baseline 与 Spec v0", defaultCommand: "/clawevolve-workflow --stage bench-plan --suite all" },
@@ -45,6 +50,7 @@ export const EVOLVE_NODE_REGISTRY: Record<NodeCommandKey, EvolveNodeDefinition> 
 
 export const EVOLVE_TASK_REGISTRY: Record<EvolveTaskType, EvolveTaskDefinition> = {
   diagnose: { type: "diagnose", label: "Bot诊断", initialStepType: "diagnose", supportsRetry: true, supportsCancel: true, nodes: ["diagnose", "plan"] },
+  hardening: { type: "hardening", label: "Skill加固", initialStepType: "skill_prepare", supportsRetry: true, supportsCancel: true, nodes: ["hardening"] },
   optimize: { type: "optimize", label: "诊断后优化", initialStepType: "optimize", supportsRetry: true, supportsCancel: true, nodes: ["optimize"] },
   apply: { type: "apply", label: "应用优化", initialStepType: "apply", supportsRetry: true, supportsCancel: true, nodes: [] },
   full: { type: "full", label: "Bot自进化", initialStepType: "diagnose", supportsRetry: true, supportsCancel: true, nodes: ["diagnose", "plan", "optimize"] },
@@ -56,6 +62,7 @@ export const EVOLVE_TASK_REGISTRY: Record<EvolveTaskType, EvolveTaskDefinition> 
   repair: { type: "repair", label: "Bot修复", initialStepType: "repair_plan", supportsRetry: false, supportsCancel: false, nodes: [] },
   suggestion_apply: { type: "suggestion_apply", label: "应用进化建议", initialStepType: "suggestion_apply", supportsRetry: true, supportsCancel: false, nodes: [] },
   run_analysis: { type: "run_analysis", label: "运行日志分析", initialStepType: "run_analysis", supportsRetry: true, supportsCancel: false, nodes: [] },
+  stage_test: { type: "stage_test", label: "自定义 Stage 集成测试", initialStepType: "stage_extension", supportsRetry: true, supportsCancel: true, nodes: [] },
 };
 
 export const INSIGHT_IMPROVEMENT_NODES = ["plan", "optimize"] as const satisfies readonly NodeCommandKey[];
@@ -75,6 +82,7 @@ export function isEvolveTaskType(value: unknown): value is EvolveTaskType {
 const EVOLVE_STEP_REGISTRY: Record<EvolveStepType, { baasStage: string; usesBaasRuntime: boolean }> = {
   skill_init: { baasStage: "skill-init", usesBaasRuntime: false },
   diagnose: { baasStage: "clawevolve-diagnose", usesBaasRuntime: true },
+  hardening: { baasStage: "clawevolve-hardening", usesBaasRuntime: true },
   plan: { baasStage: "clawevolve-plan", usesBaasRuntime: true },
   optimize: { baasStage: "optimize", usesBaasRuntime: true },
   apply: { baasStage: "clawevolve-apply", usesBaasRuntime: false },
@@ -87,6 +95,9 @@ const EVOLVE_STEP_REGISTRY: Record<EvolveStepType, { baasStage: string; usesBaas
   repair_apply: { baasStage: "repair-apply", usesBaasRuntime: false },
   suggestion_apply: { baasStage: "suggestion-apply", usesBaasRuntime: false },
   run_analysis: { baasStage: "run-analysis", usesBaasRuntime: false },
+  stage_extension: { baasStage: "stage-execute", usesBaasRuntime: true },
+  skill_prepare: { baasStage: "stage-execute", usesBaasRuntime: true },
+  skill_finalize: { baasStage: "stage-execute", usesBaasRuntime: true },
 };
 
 export function stepUsesBaasRuntime(stepType: string): boolean {

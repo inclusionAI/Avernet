@@ -10,6 +10,7 @@ let root = "";
 let db: SqliteDatabase | undefined;
 const requiredSkillEntries = [
   "clawevolve-diagnose/scripts/run.sh",
+  "clawevolve-hardening/scripts/run.sh",
   "clawevolve-plan/scripts/run.sh",
   "clawevolve-pack/scripts/pack.sh",
   "clawevolve-deploy/scripts/deploy.sh",

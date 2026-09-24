@@ -1,6 +1,6 @@
 import type { ResolvedBaasConfig, ResolvedBaasEnvironmentConfig } from "@avernet/clawweb-shared/server/db";
 
-export type BaasCommandEnvironment = "pre" | "prod";
+export type BaasCommandEnvironment = "dev" | "pre" | "prod";
 
 export type BaasCommandTargetConfig = ResolvedBaasEnvironmentConfig
   & Pick<ResolvedBaasConfig, "iamtoken">
@@ -29,6 +29,7 @@ export function normalizeBaasCommandEnvironment(
   value: string | null | undefined,
 ): BaasCommandEnvironment {
   const normalized = value?.trim().toLowerCase();
+  if (normalized === "dev") return "dev";
   if (normalized === "pre" || normalized === "prepub") return "pre";
   if (normalized === "prod" || normalized === "gray") return "prod";
   throw new Error(`目标 Bot 运行环境缺失或不支持: ${value ?? "unknown"}`);

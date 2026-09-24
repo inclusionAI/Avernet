@@ -7,7 +7,7 @@ export {
   cancelEvolveExecution,
   dispatchEvolveCommand,
   dispatchEvolveTaskLogArchive,
-  parseArcaRunnerCallback,
+  parseDirectRunnerCallback,
   resolveEvolveTransport,
   type EvolveDispatchInput,
   type EvolveTaskLogDispatchInput,
@@ -27,3 +27,10 @@ export type {
   AisStatus,
   SessionAisOptions,
 } from "./contracts/ais-executor.js";
+export type { EvolveExtension, HostSkillTarget, HostStageImplementation, SkillTaskHostAction, SkillTaskHostPreset, SkillTaskHostPresetContext, TaskHostPresentation, TaskHostPresentationContext } from "./contracts/evolve-extension.js";
+export { FilesystemObjectStore } from "./services/object-storage/filesystem-object-store.js";
+export { createFilesystemObjectStoreRouter } from "./services/object-storage/filesystem-object-store-router.js";
+
+export type { RequestIdentity } from "./contracts/request-identity.js";
+export type { SpaceDirectory, AccessibleSpace } from "./contracts/space-directory.js";
+export type { BotSkillGateway, BotSkillSummary } from "./contracts/bot-skill-gateway.js";
