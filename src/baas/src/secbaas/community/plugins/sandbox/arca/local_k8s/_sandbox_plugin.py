@@ -17,7 +17,7 @@
 | LOCAL_K8S_CPU_LIMIT | 1 | 否 | CPU limit |
 | LOCAL_K8S_MEMORY_REQUEST | 1Gi | 否 | 内存 request |
 | LOCAL_K8S_MEMORY_LIMIT | 2Gi | 否 | 内存 limit |
-| LOCAL_K8S_IMAGE_PULL_POLICY | IfNotPresent | 否 | 镜像拉取策略 |
+| LOCAL_K8S_IMAGE_PULL_POLICY | - | 否 | 显式镜像拉取策略；未设置时，镜像 tag 为 ``latest`` 或为空则默认 ``Always``，否则默认 ``IfNotPresent`` |
 | LOCAL_K8S_NODE_PORT | - | 否 | 固定 NodePort；不填则由 K8s 自动分配 |
 | LOCAL_K8S_EXTRA_ENVS | - | 否 | JSON 对象，注入到 Pod 容器的环境变量（可被 envs 入参覆盖） |
 | LOCAL_K8S_SIDECAR_IMAGE | avernet-engine-sidecar:latest | 否 | engine sidecar 镜像 |
@@ -180,8 +180,38 @@ def _container_port() -> int:
     )
 
 
-def _image_pull_policy() -> str:
-    return _env(ENV_IMAGE_PULL_POLICY, "IfNotPresent")
+def _image_pull_policy(image: str) -> str:
+    """根据用户显式配置和镜像 tag 决定 imagePullPolicy。
+
+    优先级：
+    1. ``LOCAL_K8S_IMAGE_PULL_POLICY`` 环境变量显式设置时，直接采用。
+    2. 镜像 tag 为 ``latest`` 或镜像未指定 tag 时，使用 ``Always``，
+       避免 K8s 复用本地过期的 ``latest`` 镜像。
+    3. 其它明确 tag 使用 ``IfNotPresent``，减少重复拉取。
+    """
+    env_policy = _env(ENV_IMAGE_PULL_POLICY)
+    if env_policy:
+        return env_policy
+    tag = _extract_image_tag(image)
+    if not tag or tag == "latest":
+        return "Always"
+    return "IfNotPresent"
+
+
+def _extract_image_tag(image: str) -> str:
+    """从容器镜像引用中提取 tag（不含 digest 部分）。
+
+    支持 ``registry:port/namespace/image:tag`` 形式，正确区分_registry_端口和 tag。
+    """
+    # Strip digest if present; tag precedes '@'.
+    name_part = image.split("@", 1)[0]
+    # Tag is the last ':' after the last '/'.
+    last_slash = name_part.rfind("/")
+    name_and_tag = name_part[last_slash + 1 :]
+    if ":" in name_and_tag:
+        _, tag = name_and_tag.rsplit(":", 1)
+        return tag
+    return ""
 
 
 def _node_port() -> int | None:
@@ -402,7 +432,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         container = V1Container(
             name=self.CONTAINER_NAME,
             image=image,
-            image_pull_policy=_image_pull_policy(),
+            image_pull_policy=_image_pull_policy(image),
             ports=[{"containerPort": container_port}],  # type: ignore[arg-type]
             env=_env_list_from_dict(envs),
             resources=V1ResourceRequirements(
@@ -414,7 +444,7 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         sidecar = V1Container(
             name=_SIDECAR_CONTAINER_NAME,
             image=sidecar_image,
-            image_pull_policy=_image_pull_policy(),
+            image_pull_policy=_image_pull_policy(sidecar_image),
             ports=[
                 {"containerPort": _SIDECAR_PROXY_PORT},  # type: ignore[arg-type]
                 {"containerPort": _SIDECAR_ADMIN_PORT},  # type: ignore[arg-type]

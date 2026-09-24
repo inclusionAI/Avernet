@@ -18,6 +18,9 @@ from secbaas.community.plugins.sandbox.arca.local_k8s import (
     LocalK8sArcaSandbox,
     LocalK8sArcaSandboxPlugin,
 )
+from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+    _image_pull_policy,
+)
 from secbaas.community.spi.sandbox.arca import ArcaSandboxInfo
 
 
@@ -257,6 +260,75 @@ class TestLocalK8sPluginResolve:
             )
 
         assert conn.http_url == "http://localhost:30082/health"
+
+
+class TestImagePullPolicy:
+    """Tests for `_image_pull_policy` default behavior based on image tag."""
+
+    @pytest.mark.parametrize(
+        ("image", "expected"),
+        [
+            ("avernet-engine:latest", "Always"),
+            ("avernet-engine", "Always"),
+            ("registry.local:5000/avernet-engine:latest", "Always"),
+            ("registry.local:5000/avernet-engine", "Always"),
+            ("avernet-engine:1.2.3", "IfNotPresent"),
+            ("registry.local:5000/avernet-engine:1.2.3", "IfNotPresent"),
+        ],
+    )
+    def test_default_policy_depends_on_tag(self, image: str, expected: str) -> None:
+        """latest or missing tag defaults to Always; explicit tag defaults to IfNotPresent."""
+        with patch.dict(os.environ, {}, clear=True):
+            assert _image_pull_policy(image) == expected
+
+    @pytest.mark.parametrize(
+        ("image", "env_policy", "expected"),
+        [
+            ("avernet-engine:latest", "IfNotPresent", "IfNotPresent"),
+            ("avernet-engine:1.2.3", "Always", "Always"),
+            ("avernet-engine:latest", "Never", "Never"),
+        ],
+    )
+    def test_explicit_env_policy_overrides_default(
+        self, image: str, env_policy: str, expected: str
+    ) -> None:
+        """LOCAL_K8S_IMAGE_PULL_POLICY is respected regardless of image tag."""
+        with patch.dict(
+            os.environ, {"LOCAL_K8S_IMAGE_PULL_POLICY": env_policy}, clear=True
+        ):
+            assert _image_pull_policy(image) == expected
+
+    @patch("kubernetes.client.AppsV1Api")
+    @patch("kubernetes.client.CoreV1Api")
+    def test_deployment_uses_expected_policy(
+        self,
+        mock_core_cls,
+        mock_apps_cls,
+        plugin,
+        mock_client,
+    ) -> None:
+        """End-to-end: create_sync_sandbox applies the resolved policy to containers."""
+        mock_apps = MagicMock()
+        mock_apps_cls.return_value = mock_apps
+        mock_core = MagicMock()
+        mock_core_cls.return_value = mock_core
+
+        mock_pod = MagicMock()
+        mock_pod.status.phase = "Running"
+        mock_pod.metadata.name = "bot-pod"
+        mock_core.list_namespaced_pod.return_value.items = [mock_pod]
+
+        with patch.dict(os.environ, {}, clear=False):
+            plugin.create_sync_sandbox(
+                template_id="openclaw-default",
+                image="custom-image:latest",
+            )
+
+        deployment = mock_apps.create_namespaced_deployment.call_args[1]["body"]
+        bot_container = deployment.spec.template.spec.containers[0]
+        sidecar_container = deployment.spec.template.spec.containers[1]
+        assert bot_container.image_pull_policy == "Always"
+        assert sidecar_container.image_pull_policy == "Always"
 
 
 class TestLocalK8sSandbox:
