@@ -147,7 +147,6 @@ from agentclaw.community.adapters.http.session_resources import internal_router 
 from agentclaw.community.adapters.http.tc_file_upload_integrations.resource_context_router import router as tc_resource_context_router  # noqa: E402
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
-from agentclaw.community.adapters.http.cron.internal_router import router as cron_guard_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding import notify_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.architect_rebind_router import router as architect_rebind_router  # noqa: E402
@@ -951,7 +950,6 @@ app.include_router(digital_employee_router)
 app.include_router(caller_identity_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
-app.include_router(cron_guard_internal_router)
 app.include_router(spaces_internal_router)
 app.include_router(service_bot_router)
 app.include_router(service_bot_publish_router)
