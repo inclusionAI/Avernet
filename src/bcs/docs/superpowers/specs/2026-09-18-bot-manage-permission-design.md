@@ -2,6 +2,7 @@
 
 - 初稿日期：2026-09-18
 - 合并修订：2026-09-22
+- 功能补充：2026-09-24，明确 Human 视角下 owner/manager Bot 的共同建群 sponsorship
 - 状态：Draft / 核心需求与转交范围已确认，工程默认值待评审；不是实现授权
 - 负责模块：BCS
 - 初稿代码基线：`acac76d251`；2026-09-22 审阅后重新核对的代码基线：`08bb8f79cf55062f82f113641690012d199d0df9`（当前分支与已 fetch 的 `origin/dev` 的 merge-base）
@@ -9,7 +10,7 @@
 - 本文合并管理权限与 ownership 转交设计，保留已有 PR 的文档路径，作为本主题唯一设计来源
 - 本轮只修改文档，不修改业务代码、OpenAPI schema 或数据库，不生成实施计划，不自动 commit/push
 
-阅读导航：第 1 节区分已确认需求与建议默认值；第 4—8 节定义角色、数据及业务平权；第 9—11 节定义转交流程；第 12—17 节定义授权边界、传播、迁移与成本；第 18 节保留全部 43 项验收用例。
+阅读导航：第 1 节区分已确认需求与建议默认值；第 4—8 节定义角色、数据、业务平权及 Human 共同建群；第 9—11 节定义转交流程；第 12—17 节定义授权边界、传播、迁移与成本；第 18 节保留全部 51 项验收用例。
 
 ## 1. 目标、已确认需求与工程默认值
 
@@ -21,6 +22,7 @@
 2. managed Bot 与 owned Bot 在同一资源角色下业务操作平权，包括 Group/Session 视角、消息、文件与实时连接；不把普通 Bot 的管理者升级成整个 Group 的管理者。
 3. 当前控制权以边权限为事实源，不在 metadata、Frontend 或 Backend 再维护独立的 owner/manager 名单；创建来源与可转移 ownership 分离。
 4. 覆盖 BCS V1 和仍挂载的相关 legacy HTTP / Workbench WS 路径；Frontend 是契约消费方，页面布局和跨模块业务实现不在本轮范围内。
+5. Human 直接作为协作发起方时，可以把自己 owner 或 manager 的 Bot 同时拉入同一个 Group；这些 Bot 之间不需要互为好友。
 
 **“平权”指业务管理操作平权，不包含处分 ownership，也不赋予全局管理员权限。** 本稿采用只有当前 owner 能发起转交的默认值。
 
@@ -36,7 +38,7 @@
 
 | 问题 | 本稿采用的语义 |
 | --- | --- |
-| manager 能否配置其他管理员？ | 草案暂按可以添加、撤销其他 manager、自撤权设计；不能经 manager API 改变当前 owner。**这是实施前必须由需求方及权限安全评审明确确认的首要默认值，尚未获确认。** |
+| manager 能否配置其他管理员？ | 草案暂按可以添加、撤销其他 manager、自撤权设计；不能经 manager API 改变当前 owner。**这是实施前必须由需求方及权限安全评审明确确认的首要默认值，尚未获确认。** 团队同步不会调用此 direct 授权语义，而是只替换 team 来源的 manager。 |
 | manager 能否执行破坏性业务操作？ | 与 owner 在同 Bot、同资源角色下平权，仍受删除等业务条件限制；不能发起 ownership 转交。 |
 | manager 和转交接收方的主体要求 | 必须是当前身份作用域内已存在、未删除的 BCS Human，User ID 来自可信身份映射；禁止 Bot/App/AccessKey/组织/通配主体，不凭任意输入创建用户，不依赖私有目录。 |
 | 接收方是否必须先是 manager？ | 不要求。禁止转给自己；不能用 hidden/visibility 配置代替账户可用性判断。 |
@@ -50,7 +52,7 @@
 
 ### 1.4 非目标
 
-不迁移 Backend/Engine 资产归属、Skill、部署、Provider 绑定/凭据、计费或 runtime token；不提供多 owner、组织继承、临时 manager 授权、细粒度 reader/writer、manager 申请审批或默认多视角消息聚合。本功能不是离职清权或整机资产移交方案。
+不迁移 Backend/Engine 资产归属、Skill、部署、Provider 绑定/凭据、计费或 runtime token；不提供隐式组织继承，但提供显式、可信来源的 team manager sync；不提供多 owner、临时 manager 授权、细粒度 reader/writer、manager 申请审批或默认多视角消息聚合。本功能不是离职清权或整机资产移交方案。
 
 ## 2. 架构约束与现状证据
 
@@ -73,7 +75,7 @@
 | `crates/service-api/bcs-service-api/src/application/v1/authorization.rs` | `HumanOrOwnedBot` 对同时携带 User/Bot 的调用做同步 `bot.owner_id == user.id` 判断。 |
 | `crates/services/bcs-session/src/launch.rs` | Session 创建还有独立的 owned Bot 检查；只改 V1 facade 会在下游再次被拒。 |
 | `crates/application/v1/bcs-app-invitation/src/lib.rs` | Bot 好友管理、邀请、审批与 acting actor 仍检查 exact owner；新基线的 approve/revoke_friend 会继续向 ConnectService 转发 request_auth，不能改造权限时丢失该合同。 |
-| `crates/services/bcs-bot/src/application/bot.rs`、`crates/services/bcs-group/src/application/management.rs` | legacy Bot 管理、群管理和 Workbench 授权还有下游 owner/creator 判断。 |
+| `crates/services/bcs-bot/src/application/bot.rs`、`crates/services/bcs-group/src/application/management/mod.rs` | legacy Bot 管理、群管理和 Workbench 授权还有下游 owner/creator 判断。 |
 | `crates/adapters/http/bcs-http/src/router.rs` | legacy 入口仍有 `/bots/my`、`/groups/my`，不能只验收 V1。 |
 | `migrations/mysql/014_edge_permission.sql` | edge 唯一键为 `(from_id,to_id,env,grant_ref_id)`，未包含 `grant_kind`。 |
 | `api-contracts/v1/openapi/bots.yaml` | mine/修改以 `created_by` 判 owner，普通 PATCH 不允许写该字段。 |
@@ -85,6 +87,14 @@
 | `crates/plugin-api/bcs-db-api/src/transaction.rs` | 已有条件写、事务结果绑定与原子事务合同，可在 store 实现条件状态切换；application 不操作 DB plugin。 |
 | `crates/service-api/bcs-service-api/src/port/friend_auth_sync.rs` | owner_work_no 是 legacy metadata；合同明确 TC adapter 使用 Bot actor ID 的 owner 后缀寻址，不等于当前 BCS ownership。 |
 | `crates/adapters/ws/bcs-ws/src/web/frontend_delivery.rs` | 当前 publish 按 visibility/audience 广播并处理 run fallback，没有逐目标查询新的角色事实；第 14/17 节的持续授权读取是拟新增热路径开销。 |
+
+| `crates/services/bcs-group/src/application/management/create.rs` | 当前 V1 建群对 Human originator 的受保护 Bot 只接受 `public` 或 `created_by == staff_no`；manager Bot 不是好友时会被拒绝。 |
+| `crates/services/bcs-group/src/application/management/guards.rs` | Bot-originated 建群/加成员仍按 public/friendship；Human-originated 的新 sponsorship 不能修改这条 Bot-originated 规则。 |
+| `crates/application/v1/bcs-app-group/src/create.rs` | Human originator 会把参与者交给 GroupManagement；需要在同一 application/Core 边界传递 owner/manager sponsorship 语义。 |
+| `crates/application/v1/bcs-app-group/src/authorization.rs` | `resolve_view_actor`、`can_read_group_detail`、`human_actable_actor_id` 当前仍主要按 `created_by`/creator，建群放开后若不扩展会出现“能建但读不了”的不一致。 |
+| `crates/services/bcs-session/src/launch.rs` | Human Group access 与 creator resolution 当前使用 `list_bots_by_creator`，初始 Session 或后续以 Human 视角发起 Session 可能再次拒绝 managed Bot。 |
+| `api-contracts/v1/openapi/groups.yaml` | 当前 create_group 描述只写 Human owns participant Bot；需要增加 Human owner/manager sponsorship 与 Bot-originated friendship 的区分。 |
+| `crates/service-api/bcs-service-api/src/port/repo/organization.rs` | 当前 OrganizationMember 以 `bot_uuid` 表示团队成员，BCS 没有通用 Human team-membership 查询；team manager sync 必须接收可信的团队成员快照/版本，不能从现有 Bot membership 表直接推断 Human。 |
 
 正式合同参照 `api-contracts/v1/openapi/{bots,groups,sessions,session-files,connections,friendships,invitations}.yaml`。`CLAUDE.md` 的历史概要不能替代这些版本化合同。
 
@@ -175,6 +185,18 @@ can_transfer_ownership(U, B) = role(U, B) == owner
 
 以上为 manager 示例；owner 使用相同的固定形状，仅 grant_kind 为 owner。增加 `GrantKind::Owner` / `GrantKind::Manager`，序列化为 owner/manager；role edge 均为 Human → physical Bot，不引用 PermissionProfile。
 
+Manager role edge 必须携带来源元数据：
+
+```text
+management_source_kind = direct | team | ownership_transfer
+management_source_id   = manual | <team_id> | <transfer_id>
+```
+
+- 原 `PUT /bots/{bot_id}/managers/{user_id}` 产生 `direct/manual` 来源；它不接受可选 `team` 参数。
+- team sync 产生 `team/<team_id>` 来源；同一个 Human 可以因多个团队拥有多条来源边。
+- ownership 转交产生 `ownership_transfer/<transfer_id>` 来源；它不被 team sync 自动删除。
+- `mine` 和管理者列表返回的是去重后的有效角色，owner 优先；管理者详情可附带 `sources` 供审计/诊断，不把来源暴露成新的权限等级。
+
 这是拟新增的领域编码，不是当前已经支持的请求 JSON。`grant_ref_id = 0` 是 Owner/Manager 类别内的固定占位值，不指向 PermissionProfile；不在此轮把现有必填 ref 全面改成 nullable。
 
 - 合法形状固定为 Human → physical Bot、上述 ref/rules/policy；authority evaluator 必须校验完整形状，不能只比较一段 JSON 或权限名。
@@ -184,7 +206,7 @@ can_transfer_ownership(U, B) = role(U, B) == owner
 
 ### 5.2 ownership 与转交记录
 
-1. `edge_grants` 支持 owner/manager，基础唯一键升级为 `(from_id,to_id,env,grant_kind,grant_ref_id)`；所有 upsert 和 ID 回查同步更新。
+1. `edge_grants` 支持 owner/manager；role edge 的唯一性必须纳入来源，至少使用 `(from_id,to_id,env,grant_kind,management_source_kind,management_source_id)`，并同步更新所有 upsert、revoked 恢复和 ID 回查。`grant_ref_id=0` 仍为 role edge 占位值。
 2. `bcs_bots` 新增 `ownership_version`，必填，未初始化为 0；新 owner 初始化为 1，每次成功转交递增。其他 manager 变更不递增此版本。
 3. 新增 `bot_ownership_transfers`。复用 DbPlugin，但不把转交硬塞进 Connect 的 permission_requests 工作流。
 
@@ -226,7 +248,7 @@ transfer 的终态结果就是本操作的持久审计：双方、操作者、�
 
 增加专门的 manager mutation repository 契约（所有转交事务另见第 10 节），提供“校验当前授权 + 变更边 + 写审计”的单事务语义。不是在 application 层依次调用三个独立写入方法。
 
-- 同一目标 Bot 的管理员变更与 ownership 初始化、转交和删除使用同一序列化边界；在事务内再次确认执行者是当前 owner 或有效 manager，且 ownership 已初始化且完整。
+- 同一目标 Bot 的管理员变更、team manager sync、ownership 初始化、转交和删除使用同一序列化边界；在事务内再次确认执行者是当前 owner 或有效 manager，且 ownership 已初始化且完整。team sync 只改 `team/*` 来源，不能覆盖 direct 或 ownership_transfer 来源。
 - MySQL 使用相同目标 Bot 行的事务锁及当前读，SQLite 使用等价的写事务/条件写；Memory 实现采用同一临界区。不依赖进程内锁保证多实例一致性。
 - 只对实际状态变化追加审计；重复授予/撤销返回当前状态，不重复制造业务事件。
 - 复用 `permission_requests` 记录已决定的管理授权审计：新增 `request_kind=manager`；撤销记录使用 `revoke`，指向相应 manager edge。记录真实操作者、被授权人、目标 Bot、env、edge_id 和决定时间，不覆盖以前的记录。
@@ -245,7 +267,50 @@ transfer 的终态结果就是本操作的持久审计：双方、操作者、�
 | `PUT /bots/{bot_id}/managers/{user_id}` | 幂等授予一个 Human 管理权；请求无业务 body。 |
 | `DELETE /bots/{bot_id}/managers/{user_id}` | 幂等撤销该 Human 的显式管理权，不删除用户或 Bot。 |
 
-采用逐项幂等变更，而不是盲目整表覆盖：管理页面编辑列表时提交增删差集，避免两个管理员各自覆盖对方的新授权。整表 replace/CAS 本轮不引入。
+采用逐项幂等变更，而不是盲目整表覆盖：管理页面编辑列表时提交增删差集，避免两个管理员各自覆盖对方的新授权。原 direct manager API 不新增可选 `team` 参数；它始终表示人工 direct 授权。
+
+### 6.1 Team manager sync API
+
+可信平台的正常同步统一使用一个 team 来源快照接口：
+
+```http
+PUT /api/v1/bots/{bot_id}/manager-sources/teams/{team_id}
+```
+
+普通 team 快照同步：
+
+```json
+{
+  "operation": "sync",
+  "manager_user_ids": ["user-a", "user-c"],
+  "idempotency_key": "sync-uuid"
+}
+```
+
+Bot 从旧 team 移到新 team：
+
+```json
+{
+  "operation": "move",
+  "new_team_id": "team-new",
+  "manager_user_ids": ["user-a", "user-c"],
+  "idempotency_key": "move-sync-uuid"
+}
+```
+
+接口语义：
+
+- `operation` 是业务语义字段，取 `sync` 或 `move`；**不能用 `idempotency_key` 区分操作类型**。`idempotency_key` 只用于同一请求重试去重。
+- `operation=sync` 用请求中的 `manager_user_ids` 替换当前 `{team_id}` 的 `team/{team_id}` manager 来源；列表中新增的用户建立来源边，列表中消失的用户撤销来源边。
+- `operation=move` 在同一个 Bot 事务内移除 URL 中的旧 `{team_id}` 来源、建立 `new_team_id` 来源，并用 `manager_user_ids` 作为新 team 的完整快照；其他 team、direct、ownership_transfer 和 owner 来源不变。
+- `manager_user_ids` 表示该 team 当前对该 Bot 的 manager 列表，不表示 team 的全部成员。字段名不能使用含义更宽的 `member_user_ids`。
+- 外部平台当前没有可提供的 `membership_version` 时，本字段不作为必填输入。此时可信平台必须保证同一 Bot/team 的快照通知按顺序投递、至少一次投递，并且每次通知都是完整快照；BCS 通过 `idempotency_key` 处理重复通知，并按接收顺序应用不同快照。
+- 如果未来平台可以提供单调版本，可增加可选 `membership_version`；提供后 BCS 应拒绝旧版本覆盖新版本。没有版本时，BCS 不能声称能够识别网络乱序的旧快照，需由可信平台保证有序投递或通过后续完整快照修复。
+- `operation=move` 的 `new_team_id` 必须非空且不能等于 URL 中的旧 team；同一个 move 请求使用相同 `idempotency_key` 重试时返回原结果，不重复撤销/建立来源边。
+- `owner`、direct manager、ownership-transfer manager 永远不被该接口撤销。多个 team 的有效 team manager 是所有当前 team 来源 manager 的并集。
+- 该接口只接受可信平台的内部服务身份，不接受普通 Human、前端或公开 OpenAPI 调用。成员快照不可验证、操作类型非法、move 目标非法分别返回明确的 4xx 错误。
+
+POST/DELETE 可以保留为内部运维和故障修复接口，例如按单个 user 增加/撤销某个 `team/{team_id}` 来源，但不能作为可信平台的正常同步入口；它们必须使用相同的来源语义、审计、幂等和可信服务鉴权，不能操作 direct 或 ownership-transfer 来源。
 
 GET 的 `data` 示例：
 
@@ -267,6 +332,7 @@ GET 的 `data` 示例：
 - 被授权人的 `user_id` 必须解析为已存在的、同环境 Human Actor；不凭输入创建任意 Human。不依赖私有组织目录完成公共本地流程。
 - 外部只以 user_id 操作管理关系，不接受任意 edge_id、grant_kind、规则模板或反向关系写入。
 - 管理员可撤销自己；成功后下一请求不再拥有委托权。已失权调用者再次 DELETE 不能利用幂等性绕过鉴权，应得到 403。
+- Team sync 的权限错误、成员快照不可验证、版本冲突和事务失败分别映射为 `403/invalid_manager_sync_source`、`400/invalid_membership_snapshot`、`409/manager_sync_conflict` 和 `500`；不会把空列表当成成功的全量撤权。
 
 ## 7. `mine` 契约
 
@@ -366,6 +432,30 @@ Service API 用独立 `MyBot` / `MyBotAccessRelation` 投影，`list_mine` 返�
 - 获取 Group 列表中的 session-only 摘要，不意味着已满足更严格的 Group 详情访问条件；保持已有 owner 行为。
 - 用户 Human 自己上传的文件不属于其 managed Bot。管理该 Bot 不获得另一 Human 的文件 ownership。
 - 收藏归属于选定 Bot，而非为每个 manager 新建私人副本；真实操作人另记审计。
+
+### 8.3 Human-originated 的受控 Bot 共同建群
+
+Human 直接作为协作 originator 发起建群时，引入独立的“Human sponsorship”资格，不要求被拉入的 Bot 之间存在好友关系：
+
+```text
+human_can_sponsor_bot(U, B)
+  = B.status != hidden
+    AND (
+      B.visibility == public
+      OR authority(U, B) == owner
+      OR authority(U, B) == manager
+    )
+```
+
+具体规则：
+
+1. 当 `originator = human_{U}` 时，`driver_bot_uuid` 以及所有 Bot participants 都按上述规则检查。受保护/私有 Bot 只要当前 Human U 对其有 owner 或 manager role，即可被拉入同一 Group；public Bot 保留原有可加入行为。
+2. 同一 Human 同时控制 owner Bot 与 manager Bot 时，二者可以共同建群，即使二者没有 friend edge。该 sponsorship 是当前 Human 对 Bot 的控制面事实，不创建 Bot↔Bot friend edge、不修改 friendship 状态、不产生 A2A runtime grant。
+3. Hidden Bot 仍然拒绝；Group 的 driver、manager、worker、consultant 等资源角色继续独立校验。Human 的 manager role 只证明“可以代表该 Bot 参与本次建群”，不自动成为 Group Manager。
+4. 该规则适用于 Human-originated 的 Group 创建，以及 Human 以 Group 管理者身份添加受控 Bot；不改变 Bot-originated 创建或加成员规则。
+5. 当 `originator` 是 Bot 时，仍按该 Bot 的 public/friendship/reachability 规则检查目标 Bot。Human 与两个 Bot 的共同 owner/manager 关系不能替代 Bot-originated 的 friendship。
+6. 建群成功后的 Group 详情、Group 列表、初始 Session、Session launch、消息/文件访问和 `view_bot_id` 解析必须复用相同的 owner/manager authority；不能出现“Human 可以创建 Group，但因为后续只查 created_by 而无法读取/发起 Session”的裂缝。
+7. Human sponsorship 只扩大本次 BCS 协作资源的资格，不改变 Bot 的 `created_by`、visibility、friend list、manager list 或外部资产归属。
 
 ## 9. ownership 转交状态机
 
@@ -647,11 +737,13 @@ ownership 转交还需遵守：
 
 - Bot mine、get/query 保持原目录语义、patch、candidate/eligible/search perspective、legacy status/delete/chat 等 owner 操作，以及 manager/ownership API。
 - Group list/detail/create/update/delete/participants，以及 originator、invite、workspace、消息与 Workbench chat/abort 入口。
+- Human-originated Group create/add-member 的 sponsorship：owner/manager Bot 可共同入群而无需 Bot↔Bot friend edge；Bot-originated create/add-member 继续使用 public/friendship 规则；初始 Session 和后续 Human 视角访问必须保持同一 authority。
 - Session list/detail/launch/reactivate/update/delete/complete/participants/messages/collect/files/token。
 - Friendship acting actor、request decider/cancel、invitation 和相关权限的下游 owner gate。
 - Workbench HTTP/WS、session-bound token、connection registry、frontend delivery/run fallback 和 SSE 受保护通道。
 - owner 初始化、onboard、ensure-human、Provider 注册/切换与当前 owner 通知消费方；好友审批接收人需解析当前 BCS owner，历史展示继续读 created_by，禁止机械替换全部创建来源字段。
 - Memory/SQLite/MySQL repository、strict errors、Noop/recording fixtures、bootstrap 与独立测试装配。
+- Team manager sync 的可信调用方、团队成员快照/版本、Bot 团队绑定和 source-scoped manager 查询；当前 OrganizationMember 只表示 Bot 成员，不能替代 Human team membership。
 
 Frontend 联动位置已发现：`src/frontend-nextgen/src/services/backendApi/collaboration/collaborationBotController.ts`、`services/workspace/identityService.ts`、`services/workspace/groupService.ts` 与 `collaborationPrivacy/mappers.ts`（后两组相对于同一 frontend-nextgen/src）。它们需接收并保留标签、展示 owner/manager、复用身份切换，失权 403 后刷新身份列表。不能再通过 Bot ID 后缀或前端 `created_by == me` 判断当前 owner 或筛掉 manager；`assets/TaskPanel/GroupDrillDown.tsx` 也存在这种视角推导，需要按显式可控集合改造。
 
@@ -665,6 +757,7 @@ Frontend 同步接入转交按钮、收件列表、确认/拒绝/取消与唯一
 
 - `api-contracts/v1/openapi/bots.yaml`、`domain-models.yaml`、`openapi.yaml`：mine item、管理 API、ownership/version、错误响应与安全元数据；新增 ownership-transfer fragment。
 - `groups.yaml`、`sessions.yaml`、`session-files.yaml`、`connections.yaml`、`friendships.yaml`、`invitations.yaml`：owned-or-managed 与仍然保留的参与/角色限制。
+  `groups.yaml` 还必须明确 Human originator 的 owner/manager sponsorship 与 Bot originator 的 friendship 规则不是同一个谓词。
 - `gateway-principal/contract.md` 及相关 identity-policy 标注：不改变身份声明的真实归属，明确应用层动态代行授权。
 - edge permission 旧设计的“任意有效边均为调用授权”描述，标注本文对新增 Owner/Manager 的隔离修订；保留新基线 ConnectService 的 request_auth 传递及好友同步独立边界。
 - `CHANGELOG.md`、相关 crate `CONTEXT.md`、conformance 映射、HTTP endpoint 与 CLI coverage 清单。
@@ -714,6 +807,7 @@ Frontend 同步接入转交按钮、收件列表、确认/拒绝/取消与唯一
 | reject/cancel | 固定 1 Bot/1 transfer/必要身份检查，至多 1 transfer 终态写；不遍历 manager 集合 |
 | 收件/发件分页 | count + page 至多 2 次 scoped 查询，最多返回 100 条；不逐条额外查 Bot/权限，使用名称快照与批量投影 |
 | mine | owner/manager 一次集合查询加现有批量 Bot hydration；不能每个 Bot 单独查 owner/transfer |
+| team manager sync | 1 个 Bot 级事务；批量读取当前 team 来源、成员快照与版本，批量 upsert/revoke 差异；不得对每个 Human/团队执行 N+1 查询，成员规模超过实现上限时拒绝或分批协议化 |
 
 DbPlugin 的一次 transaction 调用内部仍可能有多条 SQL 往返，不能将其报告为“只有一条 DB 查询”。索引 count 的实际扫描行数可能随收件箱历史增长；验证深分页/大量历史的 EXPLAIN，不能把返回 100 条说成只扫描 100 行。
 
@@ -740,7 +834,7 @@ DbPlugin 的一次 transaction 调用内部仍可能有多条 SQL 往返，不�
 
 ## 18. 验收与验证要求
 
-### 18.1 管理权限验收（AC01—AC21）
+### 18.1 管理权限验收（AC01—AC29）
 
 | 编号 | 场景与预期 |
 | --- | --- |
@@ -765,6 +859,14 @@ DbPlugin 的一次 transaction 调用内部仍可能有多条 SQL 往返，不�
 | AC19 | 转交并撤销原 owner 的 manager 后，所有 action 均不能因旧 is_creator、created_by、Bot ID 后缀或重新 onboard 恢复权限。 |
 | AC20 | 管理审计记录不可通过 Connect approve/reject/cancel 操纵；操作者记 Human，非伪造 creator。 |
 | AC21 | mine 每个 item 必须序列化非空 access_relation，值仅为 owner/manager；覆盖多页、物理 Bot 与本人 Human、创建者不同但当前 owner、创建者相同但仅 manager 的情况；无权 Bot 不返回，OpenAPI required/enum 与 DTO 一致。 |
+| AC22 | Human A owns Bot X and manages Bot Y；X/Y 均为 protected 且没有 friend edge；Human A 以 Human originator 创建 Group(X,Y) 成功，不创建 X↔Y friend edge。 |
+| AC23 | 上述 Group 创建后，Human A 可读取 Group/初始 Session，并可用 X 或 Y 的合法 owner/manager View Actor 访问；不得因后续只查 created_by 而返回 403。 |
+| AC24 | Bot-originated 创建仍不使用共同 Human sponsorship；Bot X 拉 Bot Y 时，仍需目标 public 或既有 Bot friendship/reachability。 |
+| AC25 | Human A 以 manager 身份将 managed Bot Y 添加到已有 Group 成功；Y 为 hidden 或 A 已撤销 manager 后均拒绝；Group 角色权限仍单独生效。 |
+| AC26 | 原 direct manager API 不接受 `team` 参数；成功授予的 manager source 为 direct/manual，team sync 不会删除。 |
+| AC27 | operation=move 将 Bot 从 team-old 移到 team-new：A 是旧团队 manager 且仍是新团队成员时保留 team manager；B 不在新团队且不在其他当前团队时撤销 team manager；owner/direct/ownership_transfer 来源不变。 |
+| AC28 | Bot 同时属于多个团队时，team manager 为所有当前团队成员的并集；移除一个团队不撤销仍由其他团队提供的 manager source。 |
+| AC29 | 未授权调用方、非法 operation/move 目标、过期 membership snapshot 或部分写失败均不产生部分 manager 变更；重复 idempotency_key 不重复写入；无 membership_version 时按有序完整快照语义运行，提供版本后拒绝旧版本覆盖新状态。 |
 
 ### 18.2 ownership 转交验收（OT01—OT22）
 
@@ -797,7 +899,7 @@ DbPlugin 的一次 transaction 调用内部仍可能有多条 SQL 往返，不�
 
 - Domain：枚举 round-trip、管理边形状、禁止主体与 owner/manager 标签优先级。
 - Authority/Repo conformance：Memory、SQLite、MySQL 同一套授权/撤权/转交/并发/失败合同；MySQL live run 验证完整迁移、生成列唯一键、大小写身份、事务锁，不能用静态 SQL 测试代替。
-- Application：Bot、Group、Session、Invitation、文件与 shared launch 的 owner/manager 成对测试和 ownership 用例，断言 Hook/Repo 确实被调用。
+- Application：Bot、Group、Session、Invitation、文件与 shared launch 的 owner/manager 成对测试和 ownership 用例，断言 Hook/Repo 确实被调用；Group create/add-member 覆盖 Human sponsorship 与 Bot-originated friendship 分支；team sync 覆盖来源隔离、迁移、并集和 CAS。
 - Delivery：V1/legacy HTTP envelope、共享 ownership_not_initialized=409、owner_changed 已提交失效/重试的错误码、混合身份、分页与 WS/SSE 连续授权合同；逐目标推送查询计数、跨帧撤权与持续故障 fail-closed 断言必需。
 - Integration：真实本地持久化、重启、双服务实例、好友/manager 并存、转交并发/回滚及撤权完整用户故事；前端身份和转交收件交互。
 - 架构：依赖边界、delivery 仅调 application、core 无 transport/DbPlugin、授权检查通过注册 Hook、配置/环境访问约束和 conformance entries。
@@ -836,8 +938,12 @@ Singlebox 产物必须随后使用 verifier 检查上述 reports 目录；保留
 | 4. manager API 错误码 | 第 6 节明确 HTTP 409 / ownership_not_initialized，并引用第 11.2 节共享映射，保留资源特有错误区别。 |
 | 5. manager 再授权风险 | 保留待决，不据审阅意见擅自收紧或视为已确认；第 1.3 节与本节将其标作进入实施前最优先的产品/安全决策。 |
 
-本轮验证包括基线/祖先关系、证据文件差异及当前代码阅读、5 个源文件行数、全部 6 个 JSON 示例、43 个验收编号、源码路径、章节引用、Markdown 围栏/空白与 git diff。没有修改业务代码、OpenAPI schema、配置或数据库。
+本轮验证包括基线/祖先关系、证据文件差异及当前代码阅读、5 个源文件行数、全部 8 个 JSON 示例、51 个验收编号、源码路径、章节引用、Markdown 围栏/空白与 git diff。没有修改业务代码、OpenAPI schema、配置或数据库。
 
 Cargo、MySQL live conformance、双实例、WS/SSE E2E、负载与 Singlebox 未运行：本轮只是文档修订和静态事实复核。第 17 节是实现预算，不是压测结果；不能据此声称运行时行为或吞吐已验证。
 
 实施前必须由需求方及权限安全评审明确记录 manager 再授权的接受/收紧决定，并评审第 1.3 节其余默认值、第 5/10/16 节数据约束/事务/迁移及第 17.2 节热路径预算。文档审阅不替代产品授权；确认设计后再形成实施计划，本文不是业务代码实现授权。
+
+同时须评审第 8.3 节 Human sponsorship：这是“共同 Human 控制”对 Bot↔Bot friendship 的受控例外，只适用于 Human-originated 协作，不得在 Bot-originated 路径中隐式复用。
+
+还需评审第 6.1 节 team manager sync 的可信调用方、membership snapshot 来源，以及 direct/ownership_transfer manager 是否按来源隔离保留。
