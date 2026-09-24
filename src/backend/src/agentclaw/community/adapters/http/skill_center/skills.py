@@ -798,7 +798,7 @@ async def upload_skill(
             parsed_paths = json.loads(file_paths)
             logger.info(f"[skills.upload_skill] Parsed file_paths: {parsed_paths}")
         except json.JSONDecodeError as e:
-            logger.error(f"[skills.upload_skill] Failed to parse file_paths JSON: {e}")
+            logger.info(f"[skills.upload_skill] Failed to parse file_paths JSON: {e}")
             return UploadSkillResponse(
                 success=False,
                 error_code=SkillUploadErrorCode.FILE_PATHS_INVALID,
@@ -898,7 +898,11 @@ async def upload_skill(
     except HTTPException:
         raise
     except (ValueError, LocalSkillInvalidPackageError, LocalSkillTooLargeError) as e:
-        logger.error(f"[skills.upload_skill] Validation error: {e}")
+        validation_message = f"[skills.upload_skill] Validation error: {e}"
+        if _classify_upload_validation_error(e) is None:
+            logger.error(validation_message)
+        else:
+            logger.info(validation_message)
         return _build_upload_error_response(e)
     except Exception as e:
         logger.error(
