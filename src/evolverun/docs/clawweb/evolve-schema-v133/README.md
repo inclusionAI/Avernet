@@ -1,5 +1,9 @@
 # Evolve Schema delivery (v122–v134)
 
+Historical delivery only. New deployments must use the
+[v135 schema delivery](../evolve-schema-v135/README.md), which removes redundant
+fields and indexes and documents the existing-data migration.
+
 This bundle is for the ClawWeb database. It does not change a provider's backend
 database. Canonical migrations are in `clawweb/public/shared/server/schema.ts`.
 SQL types are rendered with that package's MySQL dialect. Managed hosts that

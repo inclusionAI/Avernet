@@ -52,7 +52,7 @@ the native Stage chain, or pre/post Stage result contracts.
 
 ## Database delivery
 
-See [the v133 schema delivery](evolve-schema-v133/README.md) for first install,
+See [the v135 schema delivery](evolve-schema-v135/README.md) for first install,
 existing database upgrades, deployment order and rollback constraints.
 
 ## Execution environment selection
