@@ -334,6 +334,7 @@
     },
     "workspace": {
       "aicoding_root": "<CWD>/data/workspace/aicoding",
+      "arca_root": "/home/admin/.merge_nas",
       "claude_code_root": "<CWD>/data/workspace/claude_code",
       "claude_code_session_root": "/home/admin/.claude",
       "deepseek_harness_root": "/home/admin/.dsh",
