@@ -884,7 +884,7 @@ fn response_payload_run_id(res: &ResponseFrame) -> Option<&str> {
 /// reserve_run_event_seq 占用——那一步只服务于流式消息事件的重放语义，
 /// Interaction 事件不应共用。
 /// pub(super) 可见性:bot 模块下的同级子模块 run_event_v3 需要调用它
-/// (对照 run_event_v3.rs 已有的 pub(super) fn normalize_v3_event 先例)。
+/// (run_event_v3.rs 自身的 pub(super) 函数同属这一可见性约定)。
 pub(super) async fn validate_v3_run_scope(
     state: &BotDispatchState,
     bot_id: &str,

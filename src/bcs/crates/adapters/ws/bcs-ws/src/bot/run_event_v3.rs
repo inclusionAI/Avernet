@@ -5,6 +5,7 @@ use bcs_protocol::stream::{
 };
 use bcs_protocol::{ChatEventState, EventFrame};
 use serde_json::Value;
+use tracing::warn;
 
 use super::dispatcher::{BotDispatchState, BotWsDispatchError, Result, validate_v3_run_scope};
 
@@ -55,9 +56,9 @@ fn to_app_interaction_kind(kind: WireInteractionKind) -> bcs_service_api::Intera
     }
 }
 
-/// Handle a V3 Interaction event (HITL uplink). Unlike `normalize_v3_event`,
+/// Handle a V3 Interaction event (HITL uplink). Unlike the agent/chat path,
 /// this does not produce a `NormalizedBotEvent`: Interaction is request-response,
-/// not a streaming message, so it never enters the agent/chat pipeline
+/// not a streaming message, so it never enters the streaming-event pipeline
 /// (no terminal_fingerprint, no reserve_run_event_seq). Idempotency is
 /// entirely owned by `InteractionService`.
 pub(super) async fn handle_interaction_event_v3(
@@ -75,7 +76,32 @@ pub(super) async fn handle_interaction_event_v3(
         .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 interaction missing seq".into()))?;
 
     let context = validate_v3_run_scope(state, bot_id, &event.run_id, session_id, seq, outer_seq).await?;
-    if context.terminal || context.deadline_ms <= bcs_protocol::now_ms() {
+    if context.terminal {
+        // The terminal event already went through the bot-terminal observer
+        // path, which owns interaction cleanup for normally-finished runs.
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "V3 event run is terminal or expired".into(),
+        ));
+    }
+    let now_ms = bcs_protocol::now_ms();
+    if context.deadline_ms <= now_ms {
+        // Mirror the HTTP SSE ingest bookkeeping (drive_sse_frame): an
+        // interaction frame arriving after the run deadline invalidates the
+        // run's still-pending interactions, so the workbench stops offering
+        // an approval card that can no longer be resolved. This is internal
+        // store bookkeeping only — no frame is sent to the bot (the spec
+        // forbids downstream notification on run-deadline expiry).
+        if let Err(error) = state
+            .interactions
+            .invalidate_run(&event.run_id, "run_deadline", now_ms)
+            .await
+        {
+            warn!(
+                run_id = %event.run_id,
+                %error,
+                "failed to invalidate expired interactions"
+            );
+        }
         return Err(BotWsDispatchError::InvalidFrameFormat(
             "V3 event run is terminal or expired".into(),
         ));
@@ -90,7 +116,10 @@ pub(super) async fn handle_interaction_event_v3(
                     provider_run_id: event.run_id.clone(),
                     interaction_id: event.interaction_id.clone(),
                     kind: to_app_interaction_kind(event.kind),
-                    bcs_session_id: context.bcs_session_id.clone().unwrap_or_default(),
+                    bcs_session_id: context
+                        .bcs_session_id
+                        .clone()
+                        .expect("validate_v3_run_scope guarantees a session id (identity match)"),
                     group_id: context.group_id.clone(),
                     bot_id: bot_id.to_string(),
                     run_deadline_ms: context.deadline_ms,

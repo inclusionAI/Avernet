@@ -318,8 +318,11 @@ impl BotConnectionRegistry {
     }
 }
 
-/// WS 是常驻连接,往返延迟应远低于 HTTP 回调场景(HttpProviderTransport
-/// 用 65s);对齐 chat.abort 的量级。
+/// Bot WebSocket 是常驻连接,interaction.resolve 属于控制类请求-回执
+/// (bot 只需确认"已收到"),往返延迟应远低于 HTTP 回调场景
+/// (HttpProviderTransport 的回调 client 为 65s 总超时,chat.abort 下行
+/// 为 60s)。15s 为 spec 定的传输层超时:容忍慢引擎的正常确认,同时
+/// 避免故障 bot 把 HITL resolve 挂 60s 以上。
 const INTERACTION_RESOLVE_TIMEOUT_MS: u64 = 15_000;
 
 #[async_trait]
