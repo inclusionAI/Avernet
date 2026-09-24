@@ -957,6 +957,38 @@ impl GroupHistoryBotRequestPort for HistoryRequestMux {
     }
 }
 
+pub struct InteractionProviderMux {
+    websocket: Arc<dyn InteractionProviderPort>,
+    provider: Arc<HttpProviderTransport>,
+}
+
+impl InteractionProviderMux {
+    pub fn new(
+        websocket: Arc<dyn InteractionProviderPort>,
+        provider: Arc<HttpProviderTransport>,
+    ) -> Self {
+        Self {
+            websocket,
+            provider,
+        }
+    }
+}
+
+#[async_trait]
+impl InteractionProviderPort for InteractionProviderMux {
+    async fn resolve_interaction(
+        &self,
+        command: InteractionProviderCommand,
+    ) -> ServiceResult<InteractionProviderAck> {
+        match &command.target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.resolve_interaction(command).await,
+            BotDeliveryTarget::HttpProvider { .. } => {
+                self.provider.resolve_interaction(command).await
+            }
+        }
+    }
+}
+
 fn provider_request_from_frame(
     target: &BotDeliveryTarget,
     frame: &BcsFrame,

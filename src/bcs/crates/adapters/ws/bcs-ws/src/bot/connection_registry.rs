@@ -5,8 +5,8 @@ use bcs_domain::BotDeliveryTarget;
 use bcs_protocol::{BcsFrame, ChatAbortParams, ChatAbortResult, RequestFrame, ResponseFrame};
 use bcs_service_api::{
     BotAbortDeliveryCommand, BotAbortDeliveryResult, BotConnectionControlPort, BotDeliveryCommand,
-    BotDeliveryPort, BotDeliveryResult, InteractionKind, InteractionProviderAck,
-    InteractionProviderCommand, InteractionProviderPort, KickReason, ServiceError, ServiceResult,
+    BotDeliveryPort, BotDeliveryResult, InteractionProviderAck, InteractionProviderCommand,
+    InteractionProviderPort, KickReason, ServiceError, ServiceResult,
 };
 use tokio::sync::{RwLock, mpsc, oneshot};
 use tracing::{debug, warn};
