@@ -24,6 +24,7 @@ def prepare_bench_artifacts(
     *,
     discovery_notes: str = "",
     task_id: str = "",
+    business_core: Any = None,
 ) -> tuple[Path, Path, list[str], dict[str, Any], dict[str, Any]]:
     """Generate contracts/templates and publish the available Bench domains."""
     split_cases = assign_train_test_splits(list(plan.get("cases") or []))
@@ -38,6 +39,7 @@ def prepare_bench_artifacts(
         output_dir=output_dir,
         task_id=task_id or args.task_id,
         allow_fallback=bool(getattr(args, "skip_clawweb_report", False)),
+        business_core=business_core,
     )
     contracts = {
         str(contract.get("case_id")): contract

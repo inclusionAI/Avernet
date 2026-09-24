@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .. import logger
+from ..core import CoreWaiting, select_business_core
 from ..integration.clawweb import post_step_report
 from ..input.contract import PlanSourceError
 from ..bench.template_builder import ensure_split_packages
@@ -69,9 +70,19 @@ def run_plan_command(
     if getattr(args, "skip_clawweb_report", False):
         step_reporter = _skipped_step_reporter
     final_report_gate = FinalStepReportGate(step_reporter)
+    business_core = None
     try:
         task_id = validate_task_id(args.task_id)
         step_id = validate_step_id(args.step_id)
+        business_core = select_business_core(args)
+        if business_core is not None:
+            def report_core_result(task_id: str, step_id: str, **payload: Any):
+                if payload.get("status") == "succeeded" and isinstance(payload.get("output"), dict):
+                    payload["output"] = business_core.final_output(payload["output"])
+                return step_reporter(task_id, step_id, **payload)
+            final_report_gate = FinalStepReportGate(report_core_result)
+            if business_core.base_input.get("loop"):
+                args.overwrite = True
         evolve_results_dir = getattr(args, "evolve_results_dir", "") or ""
         run_root_dir, input_dir, output_dir = output_dirs(task_id, evolve_results_dir)
         logger.configure(output_dir / "clawevolve-plan.log", secrets=secrets)
@@ -155,8 +166,15 @@ def run_plan_command(
             output_dir=output_dir,
             step_reporter=final_report_gate,
             invocation_identity=invocation_identity,
+            business_core=business_core,
         )
         return PlanCommandResult(0 if result.get("status") == "ok" else 2, result)
+    except CoreWaiting as waiting:
+        if business_core is None:
+            raise
+        report = business_core.report_waiting(args, waiting)
+        return PlanCommandResult(0, {"status": "waiting_for_input", "task_id": task_id,
+            "step_id": step_id, "clawweb_step_report": report})
     except Exception as exc:  # noqa: BLE001 - command boundary returns parseable JSON.
         payload = _handle_plan_failure(
             exc,

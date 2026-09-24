@@ -593,6 +593,34 @@ class DirectGoalGreenfieldAcceptanceTests(unittest.TestCase):
 
 
 class DirectGoalServiceTests(unittest.TestCase):
+    def test_custom_business_receives_contract_without_native_default_strategy(self):
+        from clawevolve_plan.direct_goal.prompt import direct_goal_schema_example
+        with tempfile.TemporaryDirectory(prefix="plan-direct-custom-") as td:
+            workspace = make_workspace(Path(td))
+            input_dir = workspace / "clawevolve_results" / "EV-1" / "plan" / "input"
+            native_before = direct_goal_schema_example(goal=GOAL, workspace_root=workspace)
+            core = SimpleNamespace(base_input={"target_skill": {"path": str(workspace / TARGET)}})
+
+            def fake_business(context, phase, data, requirements, *, output_path, key):
+                self.assertIs(context, core)
+                self.assertEqual(phase, "direct_goal")
+                self.assertEqual(data["goal"], GOAL)
+                self.assertNotIn("最小安全边界", json.dumps(requirements, ensure_ascii=False))
+                self.assertEqual(requirements.keys(), native_before.keys())
+                output_path.write_text(json.dumps(direct_payload(workspace)), encoding="utf-8")
+                return SimpleNamespace(status="success", elapsed_seconds=0, response_text="", stdout_text="")
+
+            with (
+                patch.dict(os.environ, {"CLAWEVOLVE_INVOCATION_CWD": str(workspace)}),
+                patch("clawevolve_plan.direct_goal.service.run_business_call", side_effect=fake_business) as call,
+                patch("clawevolve_plan.direct_goal.service.run_openclaw_agent_message") as native,
+            ):
+                result = build_direct_goal_plan(goal=GOAL, task_id="EV-1", bot_id="bot-direct", input_dir=input_dir, business_core=core)
+            self.assertTrue(result.plan_path.is_file())
+            call.assert_called_once()
+            native.assert_not_called()
+            self.assertEqual(direct_goal_schema_example(goal=GOAL, workspace_root=workspace), native_before)
+
     def test_agent_output_materializes_all_direct_goal_inputs(self):
         with tempfile.TemporaryDirectory(prefix="plan-direct-service-") as td:
             root = Path(td)

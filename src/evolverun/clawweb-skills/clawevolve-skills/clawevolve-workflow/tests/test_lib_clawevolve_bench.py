@@ -104,6 +104,29 @@ class ClawEvolveBenchClientTest(unittest.TestCase):
 
             self.assertIn("log_tail=inner bench failure", str(raised.exception))
 
+    def test_workspace_environment_is_overridden_only_for_local_proc(self):
+        for version, backend in [("internalversion", "local_proc"), ("internalversion", ""), ("openversion", "")]:
+            with self.subTest(version=version, backend=backend), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                work_dir = root / "work"
+                skill_root = self._skill_root(root / "skills")
+                original = {"CLAWWEB_VERSION": version, "SECBAAS_SANDBOX_BACKEND": backend,
+                            "OPENCLAW_WORKSPACE": "/original-workspace"}
+                def fake_run(command, **kwargs):
+                    if backend == "local_proc":
+                        self.assertEqual(kwargs["env"]["OPENCLAW_WORKSPACE"], str(root.resolve()))
+                        self.assertEqual(kwargs["env"]["CLAWWEB_VERSION"], version)
+                    else:
+                        self.assertIsNone(kwargs["env"])
+                    self.assertEqual(module.os.environ["OPENCLAW_WORKSPACE"], "/original-workspace")
+                    (work_dir / "workflow_result.json").write_text(json.dumps({"status": "succeeded",
+                        "benchRunId": "bench-1", "domainId": "domain", "metrics": {},
+                        "inputPath": "/tmp/input", "resultPath": "/tmp/result.json"}))
+                    return subprocess.CompletedProcess(command, 0)
+                with mock.patch.dict(module.os.environ, original), mock.patch.object(module.subprocess, "run", side_effect=fake_run):
+                    module.run_clawevolve_bench(owner_id="owner", domain_id="domain", work_dir=work_dir,
+                        model="model", workspace=root, skill_base_dir=skill_root)
+
     def test_passes_openclaw_execution_mode(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

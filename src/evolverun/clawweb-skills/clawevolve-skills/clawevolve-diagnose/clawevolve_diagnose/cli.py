@@ -119,6 +119,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source-user-id", default="", help=argparse.SUPPRESS)
     p.add_argument("--source-bot-id", default="", help=argparse.SUPPRESS)
     p.add_argument(
+        "--session-id",
+        dest="session_ids",
+        action="append",
+        default=[],
+        help="平台冻结的精确 Session 范围；可重复传入。",
+    )
+    p.add_argument(
         "--source-download-network",
         choices=("office", "production"),
         default="office",
@@ -151,7 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--openclaw-home",
-        default="",
+        default=os.environ.get("OPENCLAW_HOME", ""),
         help=(
             "本地测试可选。指定要读取的 .openclaw 根目录；未提供时使用 ~/.openclaw。"
             "线上启动脚本不变，仅需额外追加该参数。"

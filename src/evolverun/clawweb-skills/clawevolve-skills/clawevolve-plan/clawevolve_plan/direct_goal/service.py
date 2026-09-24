@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import logger
+from ..core import run_business_call
 from ..agent_artifact import (
     StructuredArtifactError,
     StructuredArtifactResult,
@@ -23,7 +24,7 @@ from ..input.contract import (
     digest_json,
     validate_plan_source,
 )
-from .prompt import build_direct_goal_prompt, direct_goal_schema_example
+from .prompt import build_direct_goal_prompt, direct_goal_schema_example, direct_goal_business_requirements
 from .renderer import render_direct_goal_notes
 from .schema import (
     SCHEMA_VERSION,
@@ -50,6 +51,7 @@ def build_direct_goal_plan(
     task_id: str,
     bot_id: str,
     input_dir: Path,
+    business_core: Any = None,
 ) -> DirectGoalResult:
     normalized_goal = _validate_goal(goal)
     workspace_root = resolve_workspace_root({}, workspace_hint=input_dir)
@@ -60,7 +62,7 @@ def build_direct_goal_plan(
     notes_path = input_dir / "discovery_notes.md"
     input_dir.mkdir(parents=True, exist_ok=True)
 
-    reused = _try_reuse_direct_goal(
+    reused = None if business_core is not None else _try_reuse_direct_goal(
         raw_path=raw_path,
         plan_path=plan_path,
         discovery_json_path=discovery_json_path,
@@ -104,12 +106,21 @@ def build_direct_goal_plan(
         goal_digest=goal_digest(normalized_goal),
         prompt_chars=len(prompt),
     )
-    result = run_openclaw_agent_message(
+    def call_agent(message: str, invocation_id: str, validation_error: str = ""):
+        if business_core is not None:
+            target = business_core.base_input.get("target_skill") or {}
+            return run_business_call(business_core, "direct_goal", {
+                "goal": normalized_goal, "workspace_root": str(workspace_root),
+                "allowed_targets": [target["path"]] if target.get("path") else [str(workspace_root)],
+                "validation_error": validation_error,
+            }, direct_goal_business_requirements(goal=normalized_goal, workspace_root=workspace_root), output_path=candidate_path,
+                key="correction" if validation_error else "initial")
+        return run_openclaw_agent_message(message=message, workspace_root=workspace_root,
+            task_id=invocation_id, timeout_seconds=1200, output_path=candidate_path)
+
+    result = call_agent(
         message=prompt,
-        workspace_root=workspace_root,
-        task_id=f"{task_id}-direct-goal",
-        timeout_seconds=1200,
-        output_path=candidate_path,
+        invocation_id=f"{task_id}-direct-goal",
     )
     logger.info(
         "direct goal agent done",
@@ -157,12 +168,10 @@ def build_direct_goal_plan(
                 "planned_deliverables.path must be workspace-relative; do not repeat the absolute workspace_root prefix.",
             ],
         )
-        correction = run_openclaw_agent_message(
+        correction = call_agent(
             message=correction_prompt,
-            workspace_root=workspace_root,
-            task_id=f"{task_id}-direct-goal-correction",
-            timeout_seconds=1200,
-            output_path=candidate_path,
+            invocation_id=f"{task_id}-direct-goal-correction",
+            validation_error=str(first_error),
         )
         try:
             artifact = _materialize_direct_goal_candidate(

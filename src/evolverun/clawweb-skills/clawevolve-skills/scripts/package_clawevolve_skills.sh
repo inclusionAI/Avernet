@@ -25,7 +25,7 @@ next_release_version() {
 }
 
 RELEASE_VERSION="${1:-$(next_release_version)}"
-[[ "$RELEASE_VERSION" =~ ^[A-Za-z0-9._-]{1,128}$ ]] || {
+[[ -n "$RELEASE_VERSION" && ${#RELEASE_VERSION} -le 128 && "$RELEASE_VERSION" =~ ^[A-Za-z0-9._-]+$ ]] || {
   echo "invalid release version: ${RELEASE_VERSION}" >&2
   exit 2
 }
@@ -81,6 +81,16 @@ for name in "${SKILLS[@]}"; do
   printf '%s\t%s\t%s\n' "$name" "$RELEASE_VERSION" "$digest" >> "$STAGING_DIR/manifest.tsv"
 done
 
+[[ -f "${PROJECT_DIR}/platform/clawevolve_runtime/runner.py" ]] || {
+  echo "platform execution runtime is missing" >&2
+  exit 1
+}
+cp -R "${PROJECT_DIR}/platform" "$STAGING_DIR/skills/platform"
+find "$STAGING_DIR/skills/platform" -type d \( -name '__pycache__' -o -name '.pytest_cache' -o -name '.git' \) -prune -exec rm -rf {} +
+rm -rf "$STAGING_DIR/skills/platform/tasks"
+find "$STAGING_DIR/skills/platform" -type f \( -name '.DS_Store' -o -name '*.pyc' -o -name '*.log' -o -name '.nfs*' -o -name '.clawevolve-version' \) -delete
+PLATFORM_DIGEST="$(skill_digest "${PROJECT_DIR}/platform")"
+
 TMP_OUTPUT="${OUTPUT}.tmp.$$"
 python3 - "$STAGING_DIR" "$TMP_OUTPUT" <<'PY'
 import sys
@@ -94,6 +104,11 @@ with tarfile.open(output, "w", format=tarfile.GNU_FORMAT, dereference=False) as 
 PY
 mv "$TMP_OUTPUT" "$OUTPUT"
 cp "${SCRIPT_DIR}/clawevolve_async_runner.sh" "${RELEASE_BUILD_DIR}/clawevolve_async_runner.sh"
+cp "${SCRIPT_DIR}/clawevolve_runner_launch.py" "${RELEASE_BUILD_DIR}/clawevolve_runner_launch.py"
+mkdir -p "${RELEASE_BUILD_DIR}/platform/clawevolve_runtime"
+for runtime_file in __init__.py runner_environment.py local_runner_environment.py container_runner_environment.py container_runner_environment.sh; do
+  cp "${PROJECT_DIR}/platform/clawevolve_runtime/${runtime_file}" "${RELEASE_BUILD_DIR}/platform/clawevolve_runtime/${runtime_file}"
+done
 chmod +x "${RELEASE_BUILD_DIR}/clawevolve_async_runner.sh"
 cp "${SCRIPT_DIR}/clawevolve_message_initializer.sh" "${RELEASE_BUILD_DIR}/clawevolve_message_initializer.sh"
 chmod +x "${RELEASE_BUILD_DIR}/clawevolve_message_initializer.sh"
@@ -118,6 +133,7 @@ ARCHIVE_SHA256="$(shasum -a 256 "$OUTPUT" | awk '{print $1}')"
   while IFS=$'\t' read -r name version digest; do
     printf 'skill\t%s\t%s\t%s\n' "$name" "$version" "$digest"
   done < "$STAGING_DIR/manifest.tsv"
+  printf 'runtime\tplatform\t%s\t%s\n' "$RELEASE_VERSION" "$PLATFORM_DIGEST"
 } > "${RELEASE_BUILD_DIR}/RELEASE_VERSION"
 mv "$RELEASE_BUILD_DIR" "$RELEASE_DIR"
 OUTPUT="${RELEASE_DIR}/${ARCHIVE_NAME}"

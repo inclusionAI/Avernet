@@ -71,12 +71,13 @@ class LocalSessionJudgeProvider:
     faithful query construction, ranking, and quota selection outside OCSA.
     """
 
-    def __init__(self, runtime: JudgeRuntimeConfig, artifact_dir: Path | None = None):
+    def __init__(self, runtime: JudgeRuntimeConfig, artifact_dir: Path | None = None, *, analyzer_factory=None):
         self.runtime = runtime
         self.artifact_dir = artifact_dir
+        self.analyzer_factory = analyzer_factory
         self._active_analyzer: Any | None = None
         self.judge_order = "chronological"
-        if normalize_judge_backend(self.runtime.backend) == "subagent":
+        if analyzer_factory is not None or normalize_judge_backend(self.runtime.backend) == "subagent":
             # OpenClaw subagent calls are process/session based. Keep the first
             # keyless implementation strictly sequential for stability.
             self.max_concurrent_tasks = 1
@@ -193,7 +194,7 @@ class LocalSessionJudgeProvider:
                 ),
                 direct_api_base_url=self.runtime.base_url if backend == "api" else "",
             )
-            analyzer = create_session_analyzer(
+            analyzer = (self.analyzer_factory or create_session_analyzer)(
                 self.runtime,
                 preference,
                 max_concurrent_tasks=self.max_concurrent_tasks,
@@ -207,6 +208,8 @@ class LocalSessionJudgeProvider:
                 max_concurrent_tasks=self.max_concurrent_tasks,
             )
         except Exception as exc:  # noqa: BLE001 - keep bot-facing skill structured on judge setup failure.
+            if self.analyzer_factory is not None:
+                raise
             safe_error = _safe_runtime_error(exc, self.runtime)
             return LocalSessionJudgeResult(
                 diagnoses=[],
@@ -399,6 +402,8 @@ class LocalSessionJudgeProvider:
                     try:
                         chunk_diagnoses = future.result()
                     except Exception as exc:  # noqa: BLE001 - analyzer normally catches per-session errors.
+                        if self.analyzer_factory is not None:
+                            raise
                         _progress(
                             f"local judge failed chunk {chunk_index}/{len(chunks)} "
                             f"size={len(chunk)} error={_safe_runtime_error(exc, self.runtime)}"

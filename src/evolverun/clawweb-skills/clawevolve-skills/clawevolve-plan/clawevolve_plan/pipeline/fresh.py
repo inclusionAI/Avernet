@@ -42,17 +42,18 @@ def run_fresh_plan(
     output_dir: Path,
     step_reporter: StepReporter,
     invocation_identity: dict[str, Any],
+    business_core: Any = None,
 ) -> dict[str, Any]:
     """Generate plan artifacts from Source, Diagnose, or Direct Goal input."""
 
     plan, input_archive, notes_path, discovery_notes, plan_path = (
         _load_and_validate_inputs(
-            args, input_dir, output_dir, invocation_identity=invocation_identity
+            args, input_dir, output_dir, invocation_identity=invocation_identity, business_core=business_core
         )
     )
     template_dir, zip_path, template_names, template_manifest, upload_result = (
         prepare_bench_artifacts(
-            args, plan, output_dir, discovery_notes=discovery_notes, task_id=task_id
+            args, plan, output_dir, discovery_notes=discovery_notes, task_id=task_id, business_core=business_core
         )
     )
 
@@ -167,6 +168,7 @@ def _load_and_validate_inputs(
     output_dir: Path,
     *,
     invocation_identity: dict[str, Any] | None = None,
+    business_core: Any = None,
 ) -> tuple[dict[str, Any], dict[str, Any], str, str, Path]:
     if invocation_identity is None:
         from .invocation import build_invocation_identity
@@ -195,6 +197,7 @@ def _load_and_validate_inputs(
             task_id=args.task_id,
             bot_id=str(getattr(args, "bot_id", "") or ""),
             input_dir=input_dir,
+            business_core=business_core,
         )
         source_plan_path = direct.plan_path
         plan_label = "plan_source"
@@ -247,6 +250,7 @@ def _load_and_validate_inputs(
             plan_path=source_plan_path,
             input_dir=input_dir,
             task_id=args.task_id,
+            business_core=business_core,
         )
         args.discovery_notes = str(discovery.notes_path)
         args.target = discovery.targets

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
+from pathlib import Path
 import traceback
 from typing import Any
 
 from .. import logger as diag_logger
+from ..core import BusinessSessionAnalyzer, CoreWaiting, select_business_core
 from ..integration.clawweb_events import post_step_report
 from ..integration.output import build_execution_output, build_success_summary
 from ..models import RunRequest
@@ -15,7 +18,7 @@ from .runner import (
     run_pipeline,
 )
 from ..utils import redact_secrets
-from .ids import require_step_id, require_task_id, resolve_output_dir
+from .ids import require_step_id, require_task_id, resolve_output_dir, resolve_runtime_openclaw_home
 from .invocation import normalize_invocation_message, scrub_message_secrets, unsupported_flag_args
 from .payloads import error_payload, rewrite_summary_with_upload, success_payload
 from .step_reports import (
@@ -55,7 +58,14 @@ def run_diagnose_command(
     try:
         task_id = require_task_id(args.task_id)
         step_id = require_step_id(args.step_id)
-        output_dir = resolve_output_dir(args.output_dir, task_id)
+        args.openclaw_home = resolve_runtime_openclaw_home(
+            getattr(args, "openclaw_home", "")
+        )
+        output_dir = resolve_output_dir(
+            args.output_dir,
+            task_id,
+            openclaw_home=args.openclaw_home,
+        )
         resolved_api_key, api_key_source = _resolve_api_key_for_run(args.api_key)
         args.api_key = resolved_api_key
         args._api_key_source = api_key_source
@@ -80,7 +90,10 @@ def run_diagnose_command(
         final_report_will_be_sent_after="pipeline_returns_or_raises",
         preflight_report_sent=False,
     )
+    business_core = None
+    final_report_attempted = False
     try:
+        business_core = select_business_core(args)
         diag_logger.info(
             "diagnose pipeline invoke start",
             task_id=req.task_id,
@@ -88,7 +101,11 @@ def run_diagnose_command(
             path="real",
             output_dir=req.output_dir,
         )
-        result = run_pipeline(req)
+        if business_core is None:
+            result = run_pipeline(req)
+        else:
+            result = run_pipeline(req, analyzer_factory=lambda runtime, preference, **kwargs:
+                BusinessSessionAnalyzer(business_core, preference))
         # Defensive final-boundary validation also protects callers/tests that
         # supply a pre-built RunResult instead of using the real pipeline.
         raise_if_all_judge_assessments_failed(
@@ -114,21 +131,35 @@ def run_diagnose_command(
             good_count=((diagnose_output.get("cases") or {}).get("goodCount") if isinstance(diagnose_output, dict) else None),
             bad_count=((diagnose_output.get("cases") or {}).get("badCount") if isinstance(diagnose_output, dict) else None),
         )
+        final_report_attempted = True
         final_report = post_success_report(
             step_reporter,
             task_id=req.task_id,
             step_id=req.step_id,
             summary=build_success_summary(result),
-            output=diagnose_output,
+            output=business_core.final_output(diagnose_output) if business_core is not None else diagnose_output,
         )
+        if (final_report.get("http_status") in (400, 422)
+                or final_report.get("status") == "invalid_payload"):
+            # The result was explicitly rejected, so it is safe to report the
+            # Step as failed. A lost response or 5xx may already have committed
+            # success and must retain the existing uncertain-report behavior.
+            final_report_attempted = False
+            raise ValueError(f"ClawWeb rejected Diagnose result: {final_report.get('error', final_report)}")
         result.summary["clawweb_upload"] = {"final": final_report}
         rewrite_summary_with_upload(result)
         return DiagnoseCommandResult(0, success_payload(result))
+    except CoreWaiting as waiting:
+        if business_core is None:
+            raise
+        report = business_core.report_waiting(args, waiting)
+        return DiagnoseCommandResult(0, {"status": "waiting_for_input", "task_id": task_id,
+            "step_id": step_id, "clawweb_step_report": report})
     except Exception as exc:  # noqa: BLE001 - slash-command skills must fail in a parseable way.
         safe_error = redact_secrets(f"{type(exc).__name__}: {exc}", [req.api_key])
         safe_traceback = redact_secrets(traceback.format_exc(), [req.api_key])
         diag_logger.error(
-            "diagnose pipeline raised; final failure report will be sent",
+            "diagnose command raised",
             task_id=req.task_id,
             step_id=req.step_id,
             path="real",
@@ -137,7 +168,7 @@ def run_diagnose_command(
             report_policy="final_only",
         )
         judge_failed = isinstance(exc, JudgeExecutionFailedError)
-        final_report = post_failure_report(
+        final_report = {"status": "uncertain", "error": safe_error} if final_report_attempted else post_failure_report(
             step_reporter,
             task_id=req.task_id,
             step_id=req.step_id,
@@ -252,6 +283,11 @@ def _build_run_request(args: Any, *, task_id: str, step_id: str, output_dir: Any
         session_source=getattr(args, "source", "local"),
         source_user_id=getattr(args, "source_user_id", ""),
         source_bot_id=getattr(args, "source_bot_id", ""),
+        session_ids=[
+            str(item).strip()
+            for item in getattr(args, "session_ids", [])
+            if str(item).strip()
+        ],
         source_download_network=getattr(args, "source_download_network", "office"),
         clawweb_url=getattr(args, "clawweb_url", ""),
         session_identifiers=session_identifiers,

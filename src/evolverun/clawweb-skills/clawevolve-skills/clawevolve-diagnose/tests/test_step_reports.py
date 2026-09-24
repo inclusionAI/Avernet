@@ -15,6 +15,14 @@ from clawevolve_diagnose.run.step_reports import post_failure_report  # noqa: E4
 
 
 class DiagnoseStepReportTests(unittest.TestCase):
+    def test_success_report_delivers_business_output_without_local_source(self):
+        output = {"hitl": False, "result": {"cases": {"items": []}}}
+        payload = _build_step_report_payload(status="succeeded", summary="done",
+            output=output, progress=None, error=None)
+        self.assertNotIn("planSource", payload)
+        self.assertIs(payload["output"], output)
+        self.assertNotIn("planSource", output)
+
     def test_failure_report_uses_clawweb_structured_error_contract(self):
         reports: list[dict] = []
 

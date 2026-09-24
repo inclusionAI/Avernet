@@ -20,6 +20,8 @@ def _args(tmp_path: Path) -> Any:
             "test-key",
             "--output-dir",
             str(tmp_path),
+            "--clawweb-url",
+            "",
             "--intent",
             "诊断测试",
         ]
@@ -132,3 +134,29 @@ def test_all_judges_failed_reports_failure_instead_of_success(
     assert reports[0]["error"]["code"] == "DIAGNOSE_JUDGE_EXECUTION_FAILED"
     assert "scope upgrade pending approval" in reports[0]["error"]["message"]
     assert result.payload["status"] == "error"
+
+
+def test_rejected_result_fails_step_without_weakening_schema(monkeypatch: Any, tmp_path: Path) -> None:
+    reports = []
+    def reporter(task_id, step_id, **payload):
+        reports.append(payload)
+        if payload["status"] == "succeeded":
+            return {"status": "deferred", "http_status": 422, "error": "cases must be nonempty"}
+        return {"status": "posted"}
+    monkeypatch.setattr(command_module, "run_pipeline", lambda request: _successful_result(tmp_path))
+    result = command_module.run_diagnose_command(_args(tmp_path), step_reporter=reporter)
+    assert result.exit_code == 1
+    assert [r["status"] for r in reports] == ["succeeded", "failed"]
+    assert "cases must be nonempty" in reports[-1]["error"]["message"]
+
+
+def test_uncertain_report_does_not_overwrite_possible_success(monkeypatch: Any, tmp_path: Path) -> None:
+    for status in (409, 503, None):
+        reports = []
+        def reporter(task_id, step_id, **payload):
+            reports.append(payload)
+            return {"status": "deferred", "http_status": status, "error": "uncertain response"}
+        monkeypatch.setattr(command_module, "run_pipeline", lambda request: _successful_result(tmp_path))
+        result = command_module.run_diagnose_command(_args(tmp_path), step_reporter=reporter)
+        assert [r["status"] for r in reports] == ["succeeded"]
+        assert result.payload["clawweb_upload"]["final"]["status"] == "deferred"

@@ -1,9 +1,13 @@
+import base64
+import os
 from pathlib import Path
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "clawevolve_async_runner.sh"
 TASK_LAUNCHER = ROOT / "scripts" / "clawevolve_task_launcher.sh"
+TASK_LOG_RUNNER = ROOT / "scripts" / "clawevolve_task_log_runner.sh"
 
 
 def _runner_source() -> str:
@@ -21,10 +25,71 @@ def test_release_source_is_relative_to_runner_directory() -> None:
     assert 'local release_file="/mnt/sys/linux/clawevolve/RELEASE_VERSION"' not in source
 
 
+def test_hardening_uses_the_native_runner_entrypoint() -> None:
+    source = _runner_source()
+
+    assert "clawevolve-hardening)" in source
+    assert 'resolve_skill_file "clawevolve-hardening" "scripts/run.sh"' in source
+    assert 'EXEC_COMMAND=(bash "$STAGE_RUNNER" "${COMMAND_ARGS[@]}")' in source
+
+
+def test_local_process_backend_uses_the_same_runner_without_linux_only_tools() -> None:
+    source = _runner_source()
+    launcher = TASK_LAUNCHER.read_text(encoding="utf-8")
+
+    assert 'SECBAAS_SANDBOX_BACKEND' not in source
+    assert 'shell-init --check-user' in source
+    assert "mapfile " not in source
+    assert 'command -v sha256sum' in source
+    assert 'command -v setsid' in source
+    assert 'SYNC_LOCK_DIR="${CLAWEVOLVE_SKILLS_ROOT}/.sync.lock.d"' in source
+    assert 'prepare-task --script-directory' in launcher
+    assert 'LOCAL_PROCESS_MODE' not in launcher
+
+
+def test_macos_bash_accepts_realistic_task_and_step_ids() -> None:
+    task_id = "EV-202609211312-2F3C0E03"
+    step_id = "STEP-202609211312-B18AF120"
+    args = base64.b64encode(
+        f"--task-id {task_id} --step-id {step_id}".encode("utf-8")
+    ).decode("ascii")
+    env = os.environ | {
+        "SECBAAS_SANDBOX_BACKEND": "local_proc",
+        "OPENCLAW_WORKSPACE": str(ROOT),
+    }
+
+    completed = subprocess.run(
+        ["/bin/bash", str(RUNNER), "--stage", "unknown-stage", "--args-base64", args],
+        text=True,
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+
+    assert "invalid task-id" not in completed.stderr
+    assert "invalid step-id" not in completed.stderr
+
+
+def test_portable_shell_id_validation_avoids_bash_3_interval_regexes() -> None:
+    for script in (RUNNER, TASK_LAUNCHER, TASK_LOG_RUNNER):
+        source = script.read_text(encoding="utf-8")
+        assert "{1,128}" not in source
+        assert "{1,256}" not in source
+
+
+def test_hitl_resumes_use_per_invocation_launch_state() -> None:
+    source = _runner_source()
+
+    assert '--invocation-id) INVOCATION_ID="${2:-}"; shift 2 ;;' in source
+    assert 'INVOCATION_STATE_DIR="${STATE_DIR}/invocations/${INVOCATION_ID}"' in source
+    assert 'LAUNCHED_FILE="${INVOCATION_STATE_DIR}/launched"' in source
+    assert 'CURRENT_PID_FILE="${STATE_DIR}/pid"' in source
+
+
 def test_release_skills_install_into_private_runtime_root() -> None:
     source = _runner_source()
 
-    assert 'OPENCLAW_WORKSPACE="${OPENCLAW_WORKSPACE:-/home/admin/.openclaw/workspace}"' in source
+    assert 'eval "$RUNNER_ENVIRONMENT_SETUP"' in source
     assert 'CLAWEVOLVE_SKILLS_ROOT="${SKILL_BASE_DIR:-${OPENCLAW_WORKSPACE}/clawevolve-skills}"' in source
     assert 'SKILL_BASE_DIR must be an absolute non-root path' in source
     assert 'export SKILL_BASE_DIR="$CLAWEVOLVE_SKILLS_ROOT"' in source
@@ -56,7 +121,9 @@ def test_debug_mode_migrates_managed_skills_instead_of_executing_legacy_root() -
 
     assert "sync_debug_skills()" in source
     assert 'source_dir="$LEGACY_SKILLS_LOCAL_ROOT/$name"' in source
-    assert 'if [[ ! -f "$source_dir/SKILL.md" ]]' in source
+    assert 'local entrypoint="SKILL.md"' in source
+    assert 'entrypoint="clawevolve_runtime/runner.py"' in source
+    assert 'if [[ ! -f "$source_dir/$entrypoint" ]]' in source
     assert 'incoming="$CLAWEVOLVE_SKILLS_ROOT/.${name}.incoming.$$"' in source
     assert 'mv "$incoming" "$CLAWEVOLVE_SKILLS_ROOT/$name"' in source
     assert 'candidate="${CLAWEVOLVE_SKILLS_ROOT}/${skill_name}/${relative_path}"' in source
@@ -78,7 +145,7 @@ def test_legacy_cleanup_is_bounded_and_best_effort() -> None:
 
 def test_runtime_maintenance_is_once_per_task_and_default_enabled() -> None:
     source = _runner_source()
-    launcher = TASK_LAUNCHER.read_text(encoding="utf-8")
+    launcher = (ROOT / "platform/clawevolve_runtime/container_runner_environment.sh").read_text(encoding="utf-8")
 
     assert 'RUNTIME_MAINTENANCE="${CLAWEVOLVE_RUNTIME_MAINTENANCE:-true}"' in source
     assert 'TASK_LAUNCHER="${SCRIPT_DIR}/clawevolve_task_launcher.sh"' in source
@@ -101,7 +168,7 @@ def test_runtime_maintenance_is_once_per_task_and_default_enabled() -> None:
     completed = launcher.index("runtime maintenance completed: marker=", cleaner)
     assert restart < cleaner < completed
     assert 'GATEWAY_RESTARTED_FOR_TASK="true"' in launcher
-    assert "OPENCLAW_RUNTIME_MAINTENANCE_FAILED" in launcher
+    assert "OPENCLAW_RUNTIME_MAINTENANCE_FAILED" in TASK_LAUNCHER.read_text(encoding="utf-8")
 
 
 def test_gateway_restart_is_deferred_until_after_dispatch_ack_boundary() -> None:
@@ -131,7 +198,7 @@ def test_launcher_is_validated_before_started_and_dead_launch_is_not_reused() ->
 
 def test_runtime_cleanup_uses_release_handler_and_disables_maintenance() -> None:
     source = _runner_source()
-    launcher = TASK_LAUNCHER.read_text(encoding="utf-8")
+    launcher = (ROOT / "platform/clawevolve_runtime/container_runner_environment.sh").read_text(encoding="utf-8")
     package = (ROOT / "scripts" / "package_clawevolve_skills.sh").read_text(encoding="utf-8")
 
     assert 'if [[ "$STAGE" == "runtime-cleanup" ]]' in source

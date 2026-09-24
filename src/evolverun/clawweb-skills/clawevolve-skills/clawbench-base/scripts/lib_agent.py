@@ -4,6 +4,11 @@ OpenClaw agent execution helpers for PinchBench.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform"))
+from clawevolve_runtime.runner_environment import resolve_runner_environment
+
 import json
 import fnmatch
 import logging
@@ -13,7 +18,6 @@ import re
 import stat
 import subprocess
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib import error, request
 
@@ -827,7 +831,7 @@ def prepare_task_workspace(
 
 def _openclaw_state_root() -> Path:
     if os.environ.get("CLAWWEB_VERSION") != "openversion":
-        return Path.home() / ".openclaw"
+        return resolve_runner_environment().state_root(Path.home() / ".openclaw")
     # COSEC: the local dispatcher supplies the selected Bot profile; never fall back to another Bot.
     value = os.environ.get("OPENCLAW_STATE_DIR", "").strip()
     if not value:
@@ -840,7 +844,7 @@ def _openclaw_state_root() -> Path:
 
 def _openclaw_workspace() -> Path:
     if os.environ.get("CLAWWEB_VERSION") != "openversion":
-        return Path.home() / ".openclaw" / "workspace"
+        return resolve_runner_environment().workspace(Path.home() / ".openclaw" / "workspace")
     value = os.environ.get("OPENCLAW_WORKSPACE", "").strip()
     if not value:
         raise RuntimeError("openversion requires OPENCLAW_WORKSPACE")
@@ -852,6 +856,7 @@ def _openclaw_workspace() -> Path:
 
 def _get_agent_store_dir(agent_id: str) -> Path:
     base_dir = _openclaw_state_root() / "agents"
+    resolve_runner_environment().validate_agent_store(base_dir, agent_id)
     if os.environ.get("CLAWWEB_VERSION") == "openversion":
         if not re.fullmatch(r"[A-Za-z0-9_.:-]+", agent_id) or ".." in agent_id:
             raise RuntimeError("Invalid local agent ID")

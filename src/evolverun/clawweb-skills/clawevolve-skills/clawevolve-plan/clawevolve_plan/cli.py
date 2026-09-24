@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import sys
+from pathlib import Path
 
 from . import logger
 from .constants import DEFAULT_DIAGNOSE_HANDOFF_DIR
@@ -73,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_parse_error_payload(exc), ensure_ascii=False, indent=2))
         return int(exc.code) if isinstance(exc.code, int) else 2
 
+    _bind_runtime_paths(args)
     os.environ["CLAWEVOLVE_CLAWWEB_URL"] = str(args.clawweb_url).rstrip("/")
     os.environ["CLAWWEB_URL"] = str(args.clawweb_url).rstrip("/")
     if args.model:
@@ -101,6 +103,11 @@ def _parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--evolve-results-dir", default="", help="Optional local results root; internal default is unchanged.")
+    parser.add_argument(
+        "--workspace",
+        default="",
+        help="Platform-frozen target workspace. Container paths are rebound to the current local Bot when required.",
+    )
     parser.add_argument(
         "--run-dir",
         default="",
@@ -179,6 +186,54 @@ def _parser() -> argparse.ArgumentParser:
         help="Overwrite an existing task output directory. Default is idempotent: return existing plan artifacts.",
     )
     return parser
+
+
+def _runtime_openclaw_home(explicit: str = "") -> Path | None:
+    raw = str(explicit or "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    roots: list[Path] = []
+    for value in (
+        os.environ.get("OPENCLAW_HOME", ""),
+        os.environ.get("CLAWEVOLVE_INVOCATION_CWD", ""),
+    ):
+        if value:
+            roots.append(Path(value).expanduser())
+    roots.extend([Path.cwd(), Path(__file__).resolve()])
+    for root in roots:
+        for candidate in (root, *root.parents):
+            if candidate.name == ".openclaw":
+                return candidate
+    return None
+
+
+def _bind_runtime_paths(args: argparse.Namespace, *, openclaw_home: str = "") -> None:
+    """Bind platform container paths to the Bot that executes this Plan Step."""
+
+    home = _runtime_openclaw_home(openclaw_home)
+    if home is None:
+        return
+    container_home = Path("/home/admin/.openclaw")
+
+    def bind(value: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        path = Path(raw).expanduser()
+        try:
+            relative = path.relative_to(container_home)
+        except ValueError:
+            return str(path)
+        return str(home / relative)
+
+    args.workspace = bind(getattr(args, "workspace", ""))
+    args.run_dir = bind(getattr(args, "run_dir", ""))
+    args.discovery_notes = bind(getattr(args, "discovery_notes", ""))
+    args.target = [bind(value) for value in getattr(args, "target", [])]
+    explicit_results = bind(getattr(args, "evolve_results_dir", ""))
+    args.evolve_results_dir = explicit_results or str(home / "workspace" / "clawevolve_results")
+    if args.workspace:
+        os.environ["CLAWEVOLVE_TARGET_WORKSPACE"] = args.workspace
 
 
 def _default_secrets() -> list[str]:

@@ -269,4 +269,4 @@ POST {clawweb_url}/api/evolve/internal/tasks/{task_id}/steps/{step_id}/report
 - 优先级是基于本轮已分析样本的启发式排序，不代表 Bot 全量历史的绝对问题分布；应结合 `diagnosis_scope` 阅读。
 - Diagnose 中 `case_split` 仍是早期 train/validation 标记；正式 train/test 以 plan 的重新划分为准。
 - Session judge 质量依赖输入 session 可读性和模型/agent 能力；低质量 session 会被 warning 或低分过滤。
-- ClawWeb step report 失败只记录 deferred，当前不做异步补偿队列。
+- ClawWeb 明确以 HTTP 400/422 拒绝成功报告时，保留校验原因并上报 Step 失败；网络超时、5xx 等不确定响应保留 deferred，避免覆盖可能已经接收的成功结果。当前不做异步补偿队列。

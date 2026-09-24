@@ -17,12 +17,15 @@ def _diagnose_and_sample(
     layout: dict[str, Any],
     judge_runtime: JudgeRuntimeConfig,
     output_dir: Path,
+    *,
+    analyzer_factory=None,
 ) -> tuple[list[Diagnosis], list[Diagnosis], dict[str, Any]]:
     """Run the selected session judge, sample eval cases, and enrich evidence."""
 
     progress("diagnose source selected", source="local", input_sessions=len(rows))
     judge_result = LocalSessionJudgeProvider(
-        judge_runtime, artifact_dir=output_dir / "judge"
+        judge_runtime, artifact_dir=output_dir / "judge",
+        **({"analyzer_factory": analyzer_factory} if analyzer_factory is not None else {}),
     ).analyze_until_selectable(
         rows, bot_id, pref
     )

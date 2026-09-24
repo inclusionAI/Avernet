@@ -190,7 +190,7 @@ class DiscoveryAgentTransportTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(result.diagnostics["agentRegistration"], "already-exists")
         self.assertNotIn("agentCleanup", result.diagnostics)
-        self.assertFalse(any(cmd[1:3] == ["agents", "delete"] for cmd in commands))
+        self.assertFalse(any(cmd[1:4] == ["gateway", "call", "agents.delete"] for cmd in commands))
 
     def test_extracts_final_assistant_text_from_openclaw_payloads_envelope(self):
         agent_id = "clawevolve-plan-payloads"

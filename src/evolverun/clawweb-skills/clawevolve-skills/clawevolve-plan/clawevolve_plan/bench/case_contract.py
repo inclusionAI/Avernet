@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .. import logger
+from ..core import run_business_call
 from ..io import atomic_write_json
 from ..discovery.agent import DiscoveryAgentError, prepare_plan_workspace, run_openclaw_agent_message
 
@@ -38,6 +39,7 @@ def build_case_contracts(
     user_intent: dict[str, Any] | None, discovery_notes: str, output_dir: Path,
     task_id: str,
     allow_fallback: bool = True,
+    business_core: Any = None,
 ) -> dict[str, Any]:
     """Generate and validate one case contract per Agent invocation.
 
@@ -93,12 +95,18 @@ def build_case_contracts(
             )
             try:
                 prepare_plan_workspace(workspace)
-                run = run_openclaw_agent_message(
-                    message=prompt,
-                    workspace_root=workspace,
-                    task_id=task_id,
-                    timeout_seconds=900,
-                )
+                if business_core is not None:
+                    run = run_business_call(business_core, "case_contract", {
+                        "case": case, "goal": goal_text, "user_intent": user_intent,
+                        "discovery_notes": discovery_notes, "validation_error": validation_error,
+                    }, _prompt_contract_schema(), key=f"{case_id}:{attempt}")
+                else:
+                    run = run_openclaw_agent_message(
+                        message=prompt,
+                        workspace_root=workspace,
+                        task_id=task_id,
+                        timeout_seconds=900,
+                    )
             except DiscoveryAgentError as exc:
                 attempts.append({
                     "attempt": attempt,

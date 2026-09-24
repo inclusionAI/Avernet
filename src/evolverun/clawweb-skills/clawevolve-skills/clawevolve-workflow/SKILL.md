@@ -5,6 +5,10 @@ description: ClawEvolve 运行时工作流与阶段执行器。用于在 BaaS Ru
 
 # ClawEvolve Workflow
 
+## Optimize 核心实现选择
+
+按下文运行原工作流脚本。脚本在 Tune、Review 的业务调用处选择默认或自定义实现，继续负责原有准备、评测、验收、产物与上报；Agent 无需另行调度或提交结果。
+
 将本 Skill 作为 ClawEvolve 运行态实现，不直接作为远端 BaaS execute-command 入口。
 
 统一入口 `clawevolve_async_runner.sh` 负责同步 Skill、运行控制和 stage 路由。本 Skill 的阶段执行器位于 `scripts/handlers/`，负责阶段业务与结果上报。

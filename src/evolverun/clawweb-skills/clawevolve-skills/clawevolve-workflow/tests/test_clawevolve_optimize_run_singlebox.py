@@ -12,6 +12,28 @@ handler = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(handler)
 
 
+@pytest.mark.parametrize("relative", [".openclaw/workspace", ".openclaw/clawevolve_workspaces/EV-local/workspace"])
+def test_local_process_workspace_uses_existing_platform_path_mapping(monkeypatch, tmp_path, relative):
+    from clawevolve_runtime import runtime
+
+    monkeypatch.setenv("SECBAAS_SANDBOX_BACKEND", "local_proc")
+    monkeypatch.delenv("CLAWWEB_VERSION", raising=False)
+    monkeypatch.setattr(runtime, "RUNTIME_LAYOUT_HOME", tmp_path)
+    args = SimpleNamespace(workspace=f"/home/admin/{relative}")
+    assert handler._resolve_workspace(args) == tmp_path / relative
+
+
+def test_local_process_default_workspace_stays_with_selected_bot(monkeypatch, tmp_path):
+    from clawevolve_runtime import runtime
+
+    monkeypatch.setenv("SECBAAS_SANDBOX_BACKEND", "local_proc")
+    monkeypatch.delenv("CLAWWEB_VERSION", raising=False)
+    monkeypatch.setattr(runtime, "RUNTIME_LAYOUT_HOME", tmp_path)
+    assert handler._resolve_workspace(SimpleNamespace(workspace="")) == tmp_path / ".openclaw/workspace"
+    physical = tmp_path / "already-bound/workspace"
+    assert handler._resolve_workspace(SimpleNamespace(workspace=str(physical))) == physical
+
+
 def test_task_model_is_used_for_tune_and_review_when_no_stage_override(monkeypatch):
     monkeypatch.setattr(handler, "TUNE_AGENT_MODEL", "")
     monkeypatch.setattr(handler, "REVIEW_AGENT_MODEL", "")
@@ -49,10 +71,13 @@ def test_tune_and_review_keep_explicit_override_precedence(monkeypatch):
     assert handler._optimizer_model(args, "review") == "provider/review-env"
 
 
-def test_openversion_does_not_scan_or_kill_host_processes(monkeypatch):
-    monkeypatch.setenv("CLAWWEB_VERSION", "openversion")
+@pytest.mark.parametrize("version,backend", [("openversion", "local_proc"), ("internalversion", "local_proc")])
+def test_local_runtimes_do_not_scan_or_kill_host_processes(monkeypatch, version, backend):
+    monkeypatch.setenv("CLAWWEB_VERSION", version)
+    monkeypatch.setenv("SECBAAS_SANDBOX_BACKEND", backend)
     with patch.object(handler.subprocess, "run") as run, patch.object(handler.os, "kill") as kill:
         assert handler._cleanup_orphan_openclaw_agents() == 0
+        assert handler._foreach_orphan_cleanup() == 0
         run.assert_not_called()
         kill.assert_not_called()
 
@@ -171,3 +196,33 @@ def test_openversion_tune_prompt_uses_flat_root(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAWWEB_VERSION", "internalversion")
     prompt = handler._build_tune_prompt(SimpleNamespace(round=1), paths)
     assert f"可写范围仅限 `{tmp_path}/skills/skills-local/**`" in prompt
+
+
+def test_openversion_process_cleanup_keeps_original_behavior(monkeypatch):
+    monkeypatch.setenv("CLAWWEB_VERSION", "openversion")
+    monkeypatch.delenv("SECBAAS_SANDBOX_BACKEND", raising=False)
+    with patch.object(handler.subprocess, "run") as run:
+        assert handler._cleanup_orphan_openclaw_agents() == 0
+        run.assert_not_called()
+        assert handler._foreach_orphan_cleanup() == 0
+        assert run.call_args.args[0] == ["pkill", "-9", "-f", "openclaw.*agent"]
+
+
+@pytest.mark.parametrize("backend", ["local_proc", ""])
+def test_startup_restore_uses_mapped_workspace_only_locally(monkeypatch, tmp_path, backend):
+    monkeypatch.setenv("SECBAAS_SANDBOX_BACKEND", backend)
+    logical = "/home/admin/.openclaw/clawevolve_workspaces/EV-local/workspace"
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    args = SimpleNamespace(workspace=logical)
+    paths = {"skill_base": tmp_path, "workspace": candidate, "task_id": "EV-local", "round_dir": tmp_path}
+    with patch.object(handler, "resolve_paths", return_value=paths), \
+            patch.object(handler, "find_script", return_value=tmp_path / "deploy.sh"), \
+            patch.object(handler, "_assert_restore_runtime_compatible", return_value={"compatible": True}), \
+            patch.object(handler, "_log"), \
+            patch.object(handler.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="", stderr="")) as run:
+        result = handler._restore_workspace_from_artifact(args, tmp_path / "snapshot.zip", "retry recovery")
+    assert result["restored"]
+    command = run.call_args.args[0]
+    assert str(command[command.index("--workspace") + 1]) == (str(candidate) if backend else logical)
+    assert "--skip-evolve-results" in command

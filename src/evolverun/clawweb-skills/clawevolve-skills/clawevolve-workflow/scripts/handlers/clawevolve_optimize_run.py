@@ -40,8 +40,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "platform"))
+from clawevolve_runtime.runner_environment import resolve_runner_environment
 from lib_clawevolve_bench import run_clawevolve_bench
 from lib_artifact_url_client import ArtifactUrlClient
+from lib_business_core import CoreWaiting, select_business_core, run_business_call, resolve_runtime_path, is_waiting as _business_is_waiting
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 配置 — Artifact 引用
@@ -96,7 +99,8 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
 def _cleanup_orphan_openclaw_agents() -> int:
     # COSEC: a local developer host may run unrelated Bots. PPID/RSS cannot
     # establish ownership; cancellation must use tracked child processes only.
-    if os.environ.get("CLAWWEB_VERSION") == "openversion":
+    if (os.environ.get("CLAWWEB_VERSION") == "openversion"
+            or not resolve_runner_environment().allows_untracked_cleanup()):
         return 0
     killed = 0
     try:
@@ -243,9 +247,7 @@ def _resolve_workspace(args=None) -> Path:
         if explicit and Path(explicit).expanduser().resolve(strict=True) != workspace:
             raise ValueError("Optimize workspace does not match the selected Bot")
         return workspace
-    if explicit:
-        return Path(explicit).expanduser()
-    return FIXED_WORKSPACE
+    return resolve_runner_environment().resolve_workspace(explicit, FIXED_WORKSPACE, resolve_runtime_path)
 
 
 def _resolve_skill_base(args=None) -> Path:
@@ -4559,7 +4561,7 @@ def _restore_workspace_from_artifact(args, artifact_path: Path, reason: str) -> 
     cmd = [
         "bash", str(script),
         "--image", str(artifact_path),
-        "--workspace", args.workspace or paths["workspace"],
+        "--workspace", resolve_runner_environment().deployment_workspace(args.workspace, paths["workspace"]),
         "--skip-evolve-results",
         "--force-overwrite",
         "--evolve-run-id", paths["task_id"],
@@ -4623,6 +4625,8 @@ def _check_disk_space(args, min_gb: float = 1.0) -> dict:
 
 def _foreach_orphan_cleanup() -> int:
     """Aggressive variant of orphan cleanup that also attempts pkill for openclaw agents."""
+    if not resolve_runner_environment().allows_untracked_cleanup():
+        return 0
     count = _cleanup_orphan_openclaw_agents()
     try:
         # Best-effort pkill by full command line pattern (not process name).
@@ -4810,7 +4814,7 @@ def _prepare_openversion_source(args, workspace: Path) -> None:
     for value in (task_id, step_id):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", value) or ".." in value:
             raise ValueError("Invalid local Task/Step")
-    url = f"{base}/api/evolve/internal/tasks/{task_id}/steps/{step_id}/input"
+    url = f"{base}/api/evolve/internal/tasks/{task_id}/steps/{step_id}/input?view=native"
     with urllib.request.urlopen(url, timeout=30) as response:
         frozen = json.load(response)
     if (frozen.get("task", {}).get("taskId") != task_id
@@ -6977,7 +6981,7 @@ def action_restore(args):
     cmd = [
         "bash", str(script),
         "--image", str(rollback_artifact),
-        "--workspace", args.workspace or paths["workspace"],
+        "--workspace", resolve_runner_environment().deployment_workspace(args.workspace, paths["workspace"]),
         "--skip-evolve-results",
         "--force-overwrite",
         "--evolve-run-id", paths["task_id"],
@@ -7269,6 +7273,10 @@ def action_upload_clawweb(args):
                 "retryable": False,
             },
         }
+
+    core = getattr(args, "_business_core", None)
+    if core is not None and payload.get("status") == "succeeded":
+        payload["output"] = core.final_output(payload["output"])
 
     manifest_path = upload_dir / "clawweb_manifest.json"
 
@@ -8294,8 +8302,8 @@ def _load_mutation_operator_library(paths: dict | None = None) -> dict:
     return {**data, "operators": normalized, "_source_path": str(path)}
 
 
-def _build_tune_prompt(args, paths: dict) -> str:
-    skill_md = _resolve_skill_md(paths["skill_base"], "clawevolve-tune")
+def _build_tune_prompt(args, paths: dict, *, business_input: bool = False):
+    skill_md = "" if business_input else _resolve_skill_md(paths["skill_base"], "clawevolve-tune")
     skill_write_root = _skill_write_root()
     layout_note = ("当前运行模式：openversion。用户 Skill 直接使用 skills/<name>/SKILL.md；不创建 skills-local、active 或激活软链。公共目录、软链和 Release Skill 仍只读。"
                    if os.environ.get("CLAWWEB_VERSION") == "openversion" else "")
@@ -8308,6 +8316,13 @@ def _build_tune_prompt(args, paths: dict) -> str:
     evolution_history_text = _build_evolution_history_text(args, paths)
     failure_profile_text = _optimization_failure_profile_text(args)
     scene_playbook_text = _optimization_scene_playbook_text(args)
+    if business_input:
+        return {"workspace": str(paths["workspace"]), "round": args.round,
+            "skill_write_root": skill_write_root, "objective": objective_md,
+            "input_spec": safe_spec, "spec_source": spec_source,
+            "optimization_bench_result": opt_result_text, "failure_profile": failure_profile_text,
+            "scene_playbook": scene_playbook_text, "mutation_operator_library": operator_library,
+            "evolution_history": evolution_history_text}
 
     return f"""你正在执行 clawevolve-tune skill。请严格按照以下 SKILL 指令完成调优任务。
 
@@ -8383,14 +8398,14 @@ source={spec_source}
 不要修改 round/tune 目录以外的非 workspace 文件。完成后在回复末尾输出: TUNE_COMPLETE"""
 
 
-def _build_review_prompt(args, paths: dict) -> str:
+def _build_review_prompt(args, paths: dict, *, business_input: bool = False):
     """Build the smallest useful Review prompt.
 
     Review is deliberately downstream of Bench.  It explains the observed
     score change and writes the next-round Spec; it is not a second acceptance
     gate and must not reconstruct the removed gate/signal/provenance contract.
     """
-    skill_md = _resolve_skill_md(paths["skill_base"], "clawevolve-review")
+    skill_md = "" if business_input else _resolve_skill_md(paths["skill_base"], "clawevolve-review")
     objective_md = _read_text(Path(paths["optimize_input_dir"]) / "objective.md")
     validation_task_ids = _known_validation_task_ids(paths)
     input_spec_contract, input_spec_source = _load_input_spec_contract(args, paths)
@@ -8410,6 +8425,12 @@ def _build_review_prompt(args, paths: dict) -> str:
     )
     decision = str(acc.get("bench_decision") or acc.get("decision") or "baseline_unavailable")
     review_status = str(acc.get("review_status") or "pending")
+    if business_input:
+        return {"workspace": str(paths["workspace"]), "round": args.round,
+            "objective": objective_md, "input_spec": json.loads(input_spec),
+            "spec_source": input_spec_source, "acceptance": safe_acc,
+            "optimization_bench_result": opt_result_text, "validation_aggregate": val_result_text,
+            "tune_report": tune_report, "diff": diff_patch, "evolution_history": evolution_history_text}
 
     return f"""你正在执行 clawevolve-review。Review 只负责解释本轮结果并生成下一轮 Spec，不能改变本轮 Bench 决策。
 
@@ -8526,21 +8547,26 @@ def action_auto_tune(args):
     agent_id = f"{TUNE_AGENT_NAME}-{_safe_slug(paths['task_id'])}-r{args.round:03d}-{uuid.uuid4().hex[:8]}"
     workspace = Path(paths["workspace"])
 
-    prompt = _build_tune_prompt(args, paths)
+    business_core = select_business_core(args)
+    prompt = _build_tune_prompt(args, paths, business_input=business_core is not None)
 
     _mark_step(args, "ensure-tune", "RUNNING")
     tune_timeout = getattr(args, "tune_timeout", TUNE_AGENT_TIMEOUT)
     agent_idle_timeout = getattr(args, "agent_idle_timeout", DEFAULT_AGENT_IDLE_TIMEOUT_SECONDS)
     _log(args, "ensure-tune", f"agent={agent_id}, model={model}, workspace={workspace}, outputs={tune_dir}, prompt={len(prompt)}B, total_timeout={tune_timeout}s, idle_timeout={agent_idle_timeout}s")
 
-    result = _openclaw_agent_message(
-        agent_id=agent_id, message=prompt, workspace=workspace,
-        timeout_seconds=tune_timeout, model=model,
-        base_url=TUNE_AGENT_BASE_URL, api_key=TUNE_AGENT_API_KEY,
-        completion_marker="TUNE_COMPLETE",
-        expected_outputs=STEP_OUTPUTS["ensure-tune"](paths, args),
-        idle_timeout_seconds=agent_idle_timeout,
-    )
+    if business_core is not None:
+        result = run_business_call(business_core, "tune", prompt, STEP_OUTPUTS["ensure-tune"](paths, args),
+            round_id=args.round, model=model)
+    else:
+        result = _openclaw_agent_message(
+            agent_id=agent_id, message=prompt, workspace=workspace,
+            timeout_seconds=tune_timeout, model=model,
+            base_url=TUNE_AGENT_BASE_URL, api_key=TUNE_AGENT_API_KEY,
+            completion_marker="TUNE_COMPLETE",
+            expected_outputs=STEP_OUTPUTS["ensure-tune"](paths, args),
+            idle_timeout_seconds=agent_idle_timeout,
+        )
     session_archive = _archive_openclaw_agent_session(
         result, tune_dir / "agent_session"
     )
@@ -8598,21 +8624,26 @@ def action_auto_review(args):
     agent_id = f"{REVIEW_AGENT_NAME}-{_safe_slug(paths['task_id'])}-r{args.round:03d}-{uuid.uuid4().hex[:8]}"
     workspace = Path(paths["workspace"])
 
-    prompt = _build_review_prompt(args, paths)
+    business_core = select_business_core(args)
+    prompt = _build_review_prompt(args, paths, business_input=business_core is not None)
 
     _mark_step(args, "ensure-review", "RUNNING")
     review_timeout = getattr(args, "review_timeout", REVIEW_AGENT_TIMEOUT)
     agent_idle_timeout = getattr(args, "agent_idle_timeout", DEFAULT_AGENT_IDLE_TIMEOUT_SECONDS)
     _log(args, "ensure-review", f"agent={agent_id}, model={model}, workspace={workspace}, outputs={spec_dir}, prompt={len(prompt)}B, total_timeout={review_timeout}s, idle_timeout={agent_idle_timeout}s")
 
-    result = _openclaw_agent_message(
-        agent_id=agent_id, message=prompt, workspace=workspace,
-        timeout_seconds=review_timeout, model=model,
-        base_url=REVIEW_AGENT_BASE_URL, api_key=REVIEW_AGENT_API_KEY,
-        completion_marker="SPEC_COMPLETE",
-        expected_outputs=[_review_decision_path(paths)],
-        idle_timeout_seconds=agent_idle_timeout,
-    )
+    if business_core is not None:
+        result = run_business_call(business_core, "review", prompt, [_review_decision_path(paths)],
+            round_id=args.round, model=model)
+    else:
+        result = _openclaw_agent_message(
+            agent_id=agent_id, message=prompt, workspace=workspace,
+            timeout_seconds=review_timeout, model=model,
+            base_url=REVIEW_AGENT_BASE_URL, api_key=REVIEW_AGENT_API_KEY,
+            completion_marker="SPEC_COMPLETE",
+            expected_outputs=[_review_decision_path(paths)],
+            idle_timeout_seconds=agent_idle_timeout,
+        )
     session_archive = _archive_openclaw_agent_session(
         result, spec_dir / "agent_session"
     )
@@ -8737,14 +8768,14 @@ def action_ensure_tune(args):
     before_path = _workspace_manifest_path(paths, "before")
     if missing and not before_path.exists():
         _capture_workspace_manifest(paths, "before")
-    if not missing:
+    if not missing and not _business_is_waiting(args, "ensure-tune"):
         change_summary = _write_round_change_summary(args)
         out = {"status": "SUCCESS", "message": "tune outputs exist", "outputs": [str(p) for p in STEP_OUTPUTS["ensure-tune"](paths, args)], "change_summary": change_summary}
         _mark_step(args, "ensure-tune", "SUCCESS", out)
         _log(args, "ensure-tune", f"outputs already exist, skipping; noop={change_summary.get('is_noop')}")
         _print_json(out)
         return
-    if state.get("candidate_mutation_state") in {"possibly_applied", "applied"}:
+    if state.get("candidate_mutation_state") in {"possibly_applied", "applied"} and not _business_is_waiting(args, "ensure-tune"):
         _restore_round_snapshot_before_tune_retry(args, paths, state, reason="Tune retry recovery")
         state = _load_json(state_path, {})
     state["workspace_mode"] = "live"
@@ -8762,6 +8793,10 @@ def action_ensure_review(args):
     paths = resolve_paths(args)
     missing = [str(p) for p in STEP_OUTPUTS["ensure-review"](paths, args) if not p.exists()]
     decision_path = _review_decision_path(paths)
+    pending_business = _business_is_waiting(args, "ensure-review")
+    if pending_business:
+        action_auto_review(args)
+        return
     if missing and decision_path.is_file():
         render_result = _render_review_outputs(paths, args.round)
         if render_result.get("ok"):
@@ -8840,6 +8875,9 @@ WATCHDOG_STEP_POLICIES = {
 
 
 def _step_policy(args, name: str) -> dict:
+    # Never turn a selected implementation failure into a builtin/no-op result.
+    if getattr(args, "_business_core", None) is not None and name in {"ensure-tune", "ensure-review"}:
+        return {"max_attempts": 1, "fatal": True, "fallback": None}
     # Per-step retry counts and fallbacks are baked into WATCHDOG_STEP_POLICIES.
     return dict(WATCHDOG_STEP_POLICIES.get(name, {"max_attempts": DEFAULT_WATCHDOG_MAX_RETRIES, "fatal": False, "fallback": None}))
 
@@ -9336,7 +9374,7 @@ def _step_semantic_error(args, name: str) -> str:
 
 
 def _call_action_for_round_watchdog(args, name: str, fn, round_started_at: float | None = None) -> dict:
-    if getattr(args, "resume", True) and not getattr(args, "force", False) and _step_done(args, name):
+    if getattr(args, "resume", True) and not getattr(args, "force", False) and not _business_is_waiting(args, name) and _step_done(args, name):
         out = {"action": name, "status": "SKIPPED", "reason": "outputs already exist"}
         print(json.dumps(out, ensure_ascii=False))
         _mark_step(args, name, "SKIPPED", {"reason": "outputs already exist"})
@@ -9383,6 +9421,8 @@ def _call_action_for_round_watchdog(args, name: str, fn, round_started_at: float
                 _mark_step(args, name, "SUCCESS", {"attempt": attempt, "finished_at": _now()})
             _log(args, name, f"SUCCESS attempt {attempt}")
             return {"action": name, "status": "SUCCESS", "attempt": attempt}
+        except CoreWaiting:
+            raise
         except KeyboardInterrupt:
             raise
         except SystemExit as exc:
@@ -9525,6 +9565,7 @@ def _recover_current_round_before_retry_archive(args) -> None:
 
 
 def action_watchdog_run_round(args):
+    select_business_core(args)
     round_started_at = time.time()
     _recover_current_round_before_retry_archive(args)
     archived_round = _archive_round_for_new_step(args)
@@ -9558,6 +9599,8 @@ def action_watchdog_run_round(args):
         out = {"status": status, "round": args.round, "roundDir": str(paths["round_dir"]), "failed_steps": failed_steps, "accepted": state.get("accepted")}
         _print_json(out)
         return out
+    except CoreWaiting:
+        raise
     except KeyboardInterrupt:
         raise
     except BaseException as exc:
@@ -9907,7 +9950,14 @@ def main():
     }
 
     try:
+        select_business_core(args)
         actions[args.action](args)
+    except CoreWaiting as waiting:
+        args.clawweb_url = (args.clawweb_url or args.clawweb_url_camel
+            or _env("CLAWEVOLVE_CLAWWEB_URL") or _env("CLAWWEB_URL"))
+        report = args._business_core.report_waiting(args, waiting)
+        _print_json({"status": "waiting_for_input", "task_id": args.task_id,
+            "step_id": args.step_id, "clawweb_step_report": report})
     except SystemExit:
         raise
     except Exception as e:

@@ -38,7 +38,7 @@ class JudgeExecutionFailedError(RuntimeError):
     """Raised when sessions were found but every semantic Judge call failed."""
 
 
-def run_pipeline(req: RunRequest) -> RunResult:
+def run_pipeline(req: RunRequest, *, analyzer_factory=None) -> RunResult:
     """Run the real diagnose pipeline.
 
     This runner owns real local acquisition + session judge + artifact generation.
@@ -138,9 +138,12 @@ def run_pipeline(req: RunRequest) -> RunResult:
         analysis_session_limit=pref.max_sessions or "default",
     )
 
-    max_sessions = _local_session_scan_limit(req, pref)
+    max_sessions = max(
+        _local_session_scan_limit(req, pref),
+        len(req.session_ids),
+    )
     explicit_sessions = bool(req.session_identifiers)
-    source_bot_id = ""
+    source_bot_id = req.source_bot_id
     source_meta: dict[str, Any] = {}
     if req.session_source == "service_export":
         if req.debug_session_path:
@@ -249,6 +252,7 @@ def run_pipeline(req: RunRequest) -> RunResult:
             since=pref.since,
             until=pref.until,
             parse_content=judge_runtime.backend == "api",
+            session_ids=req.session_ids,
         )
         progress(
             "local session discovery done",
@@ -259,6 +263,21 @@ def run_pipeline(req: RunRequest) -> RunResult:
             oldest_session_id=rows[-1].session_id if rows else "",
             oldest_created_at=rows[-1].created_at if rows else "",
             oldest_path=rows[-1].path if rows else "",
+        )
+
+    if req.session_ids:
+        requested = {str(session_id).strip() for session_id in req.session_ids if str(session_id).strip()}
+        rows = [row for row in rows if row.session_id in requested]
+        found = {row.session_id for row in rows}
+        missing = sorted(requested - found)
+        if missing:
+            warnings.append(f"frozen session ids not found: {', '.join(missing)}")
+        progress(
+            "frozen session scope applied",
+            requested_session_ids=sorted(requested),
+            found_session_ids=sorted(found),
+            missing_session_ids=missing,
+            session_rows=len(rows),
         )
 
     bot_id, bot_meta = resolve_runtime_bot_id(source_bot_id, rows, layout)
@@ -289,6 +308,7 @@ def run_pipeline(req: RunRequest) -> RunResult:
         layout,
         judge_runtime,
         out,
+        **({"analyzer_factory": analyzer_factory} if analyzer_factory is not None else {}),
     )
     selection_report["diagnose_source"] = (
         "service_session_export"

@@ -1,0 +1,101 @@
+{
+  "id": "optimize-v1",
+  "skill_name": "stage-test-text-summary",
+  "goal": "明确摘要 Skill 中“按它整理要点”的指代：遵循用户格式要求，只使用原文事实，缺失信息单列。仅修改该 Skill 的 SKILL.md，使测试任务完成率达到 100%。",
+  "strategy": "仅补充第 2 步的明确指代与输出检查，不改变摘要业务范围、不修改评分器或测试数据。",
+  "context": {
+    "input_mode": "direct_goal",
+    "root_cause_clusters": [
+      {
+        "evolution_failure_mode": "workflow_planning_failure",
+        "root_cause_summary": "第 2 步“按它”指代不明，格式要求可能遗漏。",
+        "affected_case_count": 4,
+        "example_case_ids": [
+          "summary_train_complete",
+          "summary_train_missing",
+          "summary_test_complete",
+          "summary_test_missing"
+        ],
+        "optimization_suggestion": "将指代明确为用户提供的格式要求，并复核原文事实。"
+      }
+    ],
+    "cases": [
+      {
+        "case_id": "summary_train_complete",
+        "template_id": "summary_train_complete",
+        "case_type": "prospective",
+        "split": "train",
+        "query": "请使用 stage-test-text-summary 整理以下原文，按“已知事项”和“待确认事项”两部分输出：项目青松周二完成接口联调，负责人林晨，下一步周五验收。",
+        "expected_behavior": "包含项目青松、周二完成接口联调、负责人林晨、周五验收，不新增事实",
+        "success_criteria": [
+          "包含项目青松、周二完成接口联调、负责人林晨、周五验收，不新增事实",
+          "按用户指定的两部分结构输出"
+        ],
+        "forbidden_behavior": [
+          "编造原文没有的事实"
+        ],
+        "scoring_hints": [
+          "检查原文事实、缺失信息和格式要求"
+        ],
+        "failure_mode": "workflow_planning_failure"
+      },
+      {
+        "case_id": "summary_train_missing",
+        "template_id": "summary_train_missing",
+        "case_type": "prospective",
+        "split": "train",
+        "query": "请使用 stage-test-text-summary 整理以下原文，按“已知事项”和“待确认事项”两部分输出：项目白鹭已完成方案评审，部署日期未定。",
+        "expected_behavior": "包含已完成方案评审，将部署日期列为待确认，不编造负责人或日期",
+        "success_criteria": [
+          "包含已完成方案评审，将部署日期列为待确认，不编造负责人或日期",
+          "按用户指定的两部分结构输出"
+        ],
+        "forbidden_behavior": [
+          "编造原文没有的事实"
+        ],
+        "scoring_hints": [
+          "检查原文事实、缺失信息和格式要求"
+        ],
+        "failure_mode": "workflow_planning_failure"
+      },
+      {
+        "case_id": "summary_test_complete",
+        "template_id": "summary_test_complete",
+        "case_type": "prospective",
+        "split": "test",
+        "query": "请使用 stage-test-text-summary 整理以下原文，按“已知事项”和“待确认事项”两部分输出：项目星河周三修复登录问题，负责人周宁，下一步下周一回归。",
+        "expected_behavior": "包含项目星河、周三修复登录问题、负责人周宁、下周一回归，不新增事实",
+        "success_criteria": [
+          "包含项目星河、周三修复登录问题、负责人周宁、下周一回归，不新增事实",
+          "按用户指定的两部分结构输出"
+        ],
+        "forbidden_behavior": [
+          "编造原文没有的事实"
+        ],
+        "scoring_hints": [
+          "检查原文事实、缺失信息和格式要求"
+        ],
+        "failure_mode": "workflow_planning_failure"
+      },
+      {
+        "case_id": "summary_test_missing",
+        "template_id": "summary_test_missing",
+        "case_type": "prospective",
+        "split": "test",
+        "query": "请使用 stage-test-text-summary 整理以下原文，按“已知事项”和“待确认事项”两部分输出：项目海风完成首轮测试，遗留问题的负责人和解决时间尚未明确。",
+        "expected_behavior": "包含首轮测试完成，将遗留问题负责人和解决时间列为待确认，不编造姓名或时间",
+        "success_criteria": [
+          "包含首轮测试完成，将遗留问题负责人和解决时间列为待确认，不编造姓名或时间",
+          "按用户指定的两部分结构输出"
+        ],
+        "forbidden_behavior": [
+          "编造原文没有的事实"
+        ],
+        "scoring_hints": [
+          "检查原文事实、缺失信息和格式要求"
+        ],
+        "failure_mode": "workflow_planning_failure"
+      }
+    ]
+  }
+}

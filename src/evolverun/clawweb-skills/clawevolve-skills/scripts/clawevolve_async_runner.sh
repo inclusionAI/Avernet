@@ -3,27 +3,36 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ "$(id -u)" == "0" ]]; then
-  exec runuser -u admin -- bash "$0" "$@"
-fi
-if [[ "$(id -un)" != "admin" ]]; then
-  printf '{"ok":false,"error":"runner must execute as admin"}\n' >&2
-  exit 1
-fi
-
-OPENCLAW_WORKSPACE="${OPENCLAW_WORKSPACE:-/home/admin/.openclaw/workspace}"
+RUNNER_ENVIRONMENT="${SCRIPT_DIR}/platform/clawevolve_runtime/runner_environment.py"
+[[ -r "$RUNNER_ENVIRONMENT" ]] || RUNNER_ENVIRONMENT="${SCRIPT_DIR}/../platform/clawevolve_runtime/runner_environment.py"
+RUNNER_ENVIRONMENT_SETUP="$(python3 "$RUNNER_ENVIRONMENT" shell-init --check-user -- "$0" "$@")"
+eval "$RUNNER_ENVIRONMENT_SETUP"
 
 STAGE=""
+INVOCATION_ID=""
 ARGS_BASE64=""
+LAUNCH_URL=""
+LAUNCH_SHA256=""
 COMMAND_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --stage) STAGE="${2:-}"; shift 2 ;;
+    --invocation-id) INVOCATION_ID="${2:-}"; shift 2 ;;
     --args-base64) ARGS_BASE64="${2:-}"; shift 2 ;;
+    --launch-url) LAUNCH_URL="${2:-}"; shift 2 ;;
+    --launch-sha256) LAUNCH_SHA256="${2:-}"; shift 2 ;;
     *) printf '{"ok":false,"error":"unknown argument"}\n' >&2; exit 2 ;;
   esac
 done
+
+if [[ -n "$LAUNCH_URL" || -n "$LAUNCH_SHA256" ]]; then
+  if [[ -z "$LAUNCH_URL" || -z "$LAUNCH_SHA256" || -n "$STAGE" || -n "$INVOCATION_ID" || -n "$ARGS_BASE64" ]]; then
+    printf '{"ok":false,"error":"frozen launch cannot be combined with inline arguments"}\n' >&2
+    exit 2
+  fi
+  exec python3 "$SCRIPT_DIR/clawevolve_runner_launch.py" "$LAUNCH_URL" "$LAUNCH_SHA256"
+fi
 
 [[ "$STAGE" =~ ^[a-z][a-z0-9-]{0,63}$ ]] || {
   printf '{"ok":false,"error":"invalid stage"}\n' >&2
@@ -53,7 +62,9 @@ then
   printf '{"ok":false,"error":"invalid args payload"}\n' >&2
   exit 2
 fi
-mapfile -d '' -t COMMAND_ARGS < "$ARGS_PARTS_FILE"
+while IFS= read -r -d '' part; do
+  COMMAND_ARGS+=("$part")
+done < "$ARGS_PARTS_FILE"
 rm -f "$ARGS_PARTS_FILE"
 
 TASK_ID=""
@@ -64,6 +75,7 @@ DEBUG_SEEN=0
 RUNTIME_MAINTENANCE="${CLAWEVOLVE_RUNTIME_MAINTENANCE:-true}"
 CLAWWEB_URL_VALUE=""
 CLAWWEB_URL_SEEN=0
+STAGE_ACTION_SEEN=0
 FORWARD_ARGS=()
 for ((i=0; i<${#COMMAND_ARGS[@]}; i++)); do
   arg="${COMMAND_ARGS[$i]}"
@@ -77,8 +89,16 @@ for ((i=0; i<${#COMMAND_ARGS[@]}; i++)); do
   fi
   case "$key" in
     --action)
-      printf '{"ok":false,"error":"action is managed by the stage runner"}\n' >&2
-      exit 2
+      if [[ ( "$STAGE" != "stage-execute" && "$STAGE" != "clawevolve-stage" ) \
+        || "$STAGE_ACTION_SEEN" != "0" \
+        || ( "$value" != "execute" && "$value" != "prepare" && "$value" != "finalize" ) ]]; then
+        printf '{"ok":false,"error":"action is managed by the stage runner"}\n' >&2
+        exit 2
+      fi
+      STAGE_ACTION_SEEN=1
+      [[ "$arg" == --*=* ]] || i=$((i + 1))
+      FORWARD_ARGS+=("--action" "$value")
+      continue
       ;;
     --debug)
       (( DEBUG_SEEN == 0 )) || {
@@ -111,7 +131,10 @@ for ((i=0; i<${#COMMAND_ARGS[@]}; i++)); do
   esac
   FORWARD_ARGS+=("$arg")
 done
-COMMAND_ARGS=("${FORWARD_ARGS[@]}")
+COMMAND_ARGS=()
+if (( ${#FORWARD_ARGS[@]} > 0 )); then
+  COMMAND_ARGS=("${FORWARD_ARGS[@]}")
+fi
 
 [[ "$RUNTIME_MAINTENANCE" == "true" || "$RUNTIME_MAINTENANCE" == "false" ]] || {
   printf '{"ok":false,"error":"CLAWEVOLVE_RUNTIME_MAINTENANCE must be true or false"}\n' >&2
@@ -157,7 +180,8 @@ if [[ "$STAGE" == "init" ]]; then
 fi
 
 validate_id() {
-  [[ "$2" =~ ^[A-Za-z0-9._:-]{1,256}$ ]] || {
+  local value="$2"
+  [[ -n "$value" && ${#value} -le 256 && "$value" =~ ^[A-Za-z0-9._:-]+$ ]] || {
     printf '{"ok":false,"error":"invalid %s"}\n' "$1" >&2
     exit 2
   }
@@ -166,6 +190,10 @@ validate_id() {
 if (( ! INIT_MODE )); then
   validate_id "task-id" "$TASK_ID"
   validate_id "step-id" "$STEP_ID"
+  if [[ -z "$INVOCATION_ID" ]]; then INVOCATION_ID="$STEP_ID"; fi
+  validate_id "invocation-id" "$INVOCATION_ID"
+else
+  INVOCATION_ID="INIT"
 fi
 if [[ "$STAGE" == "optimize" ]]; then
   [[ "$ROUND" =~ ^[0-9]+$ ]] && (( ROUND >= 1 && ROUND <= 100 )) || {
@@ -209,10 +237,12 @@ fi
 
 if (( INIT_MODE )); then
   STATE_DIR="${OPENCLAW_WORKSPACE}/clawevolve_results/runner_init"
+  INVOCATION_STATE_DIR="$STATE_DIR"
 else
   STATE_DIR="${OPENCLAW_WORKSPACE}/clawevolve_results/${TASK_ID}/runner_state/${STEP_ID}"
+  INVOCATION_STATE_DIR="${STATE_DIR}/invocations/${INVOCATION_ID}"
 fi
-LOCK_DIR="${STATE_DIR}.start.lock"
+LOCK_DIR="${INVOCATION_STATE_DIR}.start.lock"
 SKILL_EXTRACT_DIR=""
 
 cleanup() {
@@ -231,7 +261,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$(dirname "$STATE_DIR")"
+mkdir -p "$(dirname "$INVOCATION_STATE_DIR")"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   LOCK_PID=""
   if [[ -f "$LOCK_DIR/owner_pid" ]]; then
@@ -270,11 +300,13 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   fi
 fi
 printf '%s\n' "$$" > "$LOCK_DIR/owner_pid"
-mkdir -p "$STATE_DIR"
+mkdir -p "$STATE_DIR" "$INVOCATION_STATE_DIR"
 
-PID_FILE="${STATE_DIR}/pid"
-PGID_FILE="${STATE_DIR}/pgid"
-LAUNCHED_FILE="${STATE_DIR}/launched"
+PID_FILE="${INVOCATION_STATE_DIR}/pid"
+PGID_FILE="${INVOCATION_STATE_DIR}/pgid"
+LAUNCHED_FILE="${INVOCATION_STATE_DIR}/launched"
+CURRENT_PID_FILE="${STATE_DIR}/pid"
+CURRENT_PGID_FILE="${STATE_DIR}/pgid"
 LOG_FILE="${STATE_DIR}/run.log"
 log_line() {
   local timestamp
@@ -334,6 +366,7 @@ other_evolve_runner_is_active() {
       || "$cmdline" == *"clawevolve_async_runner.sh"* \
       || "$cmdline" == *"clawevolve-workflow"* \
       || "$cmdline" == *"clawevolve-diagnose"* \
+      || "$cmdline" == *"clawevolve-hardening"* \
       || "$cmdline" == *"clawevolve-plan"* ]]; then
       return 0
     fi
@@ -358,6 +391,14 @@ cleanup_legacy_release_skills() {
   fi
   legacy_cleanup_root="${CLAWEVOLVE_SKILLS_ROOT}/.legacy-cleanup"
   mkdir -p "$legacy_cleanup_root"
+  # Retire only our version-marked orchestration Skill after its code runtime
+  # is installed. Unmanaged user Skills are outside this migration's ownership.
+  entry="${CLAWEVOLVE_SKILLS_ROOT}/clawevolve-stage"
+  if [[ -f "${CLAWEVOLVE_SKILLS_ROOT}/platform/clawevolve_runtime/runner.py" \
+    && -d "$entry" && ! -L "$entry" && -f "$entry/.clawevolve-version" ]]; then
+    quarantine="${legacy_cleanup_root}/clawevolve-stage.$$.$RANDOM"
+    mv "$entry" "$quarantine" || return 1
+  fi
   while IFS= read -r -d '' stale; do
     rm -rf "$stale" 2>> "$LOG_FILE" || log_line "legacy cleanup retry deferred: ${stale}"
   done < <(find "$legacy_cleanup_root" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
@@ -422,8 +463,10 @@ sync_skills() {
   archive_file="$(awk -F '\t' '$1 == "archive_file" { print $2; exit }' "$release_file")"
   archive_sha256="$(awk -F '\t' '$1 == "archive_sha256" { print $2; exit }' "$release_file")"
   [[ "$format_version" == "1" \
-    && "$release_version" =~ ^[A-Za-z0-9._-]{1,128}$ \
-    && "$archive_file" =~ ^clawevolve-skills-[A-Za-z0-9._-]{1,128}\.tar$ \
+    && -n "$release_version" && ${#release_version} -le 128 \
+    && "$release_version" =~ ^[A-Za-z0-9._-]+$ \
+    && ${#archive_file} -le 151 \
+    && "$archive_file" =~ ^clawevolve-skills-[A-Za-z0-9._-]+\.tar$ \
     && "$archive_sha256" =~ ^[a-f0-9]{64}$ ]] || {
     printf 'invalid RELEASE_VERSION manifest\n' >&2
     return 1
@@ -438,8 +481,9 @@ sync_skills() {
   if [[ "$installed_release" == "$release_version" ]]; then
     release_healthy=1
     while IFS=$'\t' read -r record name manifest_skill_version packaged_digest; do
-      [[ "$record" == "skill" ]] || continue
-      if [[ ! -f "$runtime_root/$name/SKILL.md" ]]; then
+      [[ "$record" == "skill" || "$record" == "runtime" ]] || continue
+      if [[ ( "$record" == "skill" && ! -f "$runtime_root/$name/SKILL.md" ) \
+        || ( "$record" == "runtime" && ! -f "$runtime_root/$name/clawevolve_runtime/runner.py" ) ]]; then
         release_healthy=0
         log_line "skill release repair required: release=${release_version} missing_or_invalid=${name}"
         break
@@ -457,7 +501,12 @@ sync_skills() {
     return 0
   fi
   [[ -f "$archive" ]] || { printf 'skill package not found: %s\n' "$archive" >&2; return 1; }
-  [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$archive_sha256" ]] || {
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual_archive_sha256="$(sha256sum "$archive" | awk '{print $1}')"
+  else
+    actual_archive_sha256="$(shasum -a 256 "$archive" | awk '{print $1}')"
+  fi
+  [[ "$actual_archive_sha256" == "$archive_sha256" ]] || {
     printf 'skill package checksum mismatch for release %s\n' "$release_version" >&2
     return 1
   }
@@ -469,15 +518,22 @@ sync_skills() {
   tar -C "$SKILL_EXTRACT_DIR" -xf "$archive"
   chmod -R u+rwX "$SKILL_EXTRACT_DIR/skills"
   while IFS=$'\t' read -r record name manifest_skill_version packaged_digest; do
-    [[ "$record" == "skill" ]] || continue
+    [[ "$record" == "skill" || "$record" == "runtime" ]] || continue
     [[ "$name" =~ ^[A-Za-z0-9._-]+$ \
-      && "$manifest_skill_version" =~ ^[A-Za-z0-9._-]{1,128}$ \
+      && -n "$manifest_skill_version" && ${#manifest_skill_version} -le 128 \
+      && "$manifest_skill_version" =~ ^[A-Za-z0-9._-]+$ \
       && ( -z "$packaged_digest" || "$packaged_digest" =~ ^[a-f0-9]{64}$ ) ]] || {
       printf 'invalid skill manifest entry\n' >&2; return 1;
     }
     source_dir="$SKILL_EXTRACT_DIR/skills/$name"
     installed_path="$runtime_root/$name"
-    [[ -f "$source_dir/SKILL.md" ]] || { printf 'skill missing from package: %s\n' "$name" >&2; return 1; }
+    if [[ "$record" == "skill" ]]; then
+      [[ -f "$source_dir/SKILL.md" ]] || { printf 'skill missing from package: %s\n' "$name" >&2; return 1; }
+    else
+      [[ "$name" == "platform" && -f "$source_dir/clawevolve_runtime/runner.py" ]] || {
+        printf 'platform runtime missing from package: %s\n' "$name" >&2; return 1;
+      }
+    fi
     incoming="$runtime_root/.${name}.incoming.$$"
     backup="$runtime_root/.${name}.backup.$$"
     # These names include this process PID and normally cannot exist. A stale
@@ -517,11 +573,20 @@ sync_debug_skills() {
     return 1
   }
   while IFS=$'\t' read -r record name packaged_version packaged_digest; do
-    [[ "$record" == "skill" ]] || continue
+    [[ "$record" == "skill" || "$record" == "runtime" ]] || continue
     [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || continue
     source_dir="$LEGACY_SKILLS_LOCAL_ROOT/$name"
-    if [[ ! -f "$source_dir/SKILL.md" ]]; then
-      [[ -f "$CLAWEVOLVE_SKILLS_ROOT/$name/SKILL.md" ]] && continue
+    local entrypoint="SKILL.md"
+    if [[ "$record" == "runtime" ]]; then
+      [[ "$name" == "platform" ]] || { printf 'unknown platform runtime: %s\n' "$name" >&2; return 1; }
+      entrypoint="clawevolve_runtime/runner.py"
+    fi
+    if [[ ! -f "$source_dir/$entrypoint" ]]; then
+      [[ -f "$CLAWEVOLVE_SKILLS_ROOT/$name/$entrypoint" ]] && continue
+      if [[ "$record" == "runtime" ]]; then
+        printf 'platform runtime is not installed for debug execution\n' >&2
+        return 1
+      fi
       log_line "debug skill unavailable in private and legacy roots: ${name}"
       continue
     fi
@@ -544,8 +609,16 @@ if [[ "$STAGE" == "runtime-cleanup" ]]; then
   log_line "runtime cleanup: skip skill synchronization"
 else
   mkdir -p "$CLAWEVOLVE_SKILLS_ROOT"
-  exec 9>"${CLAWEVOLVE_SKILLS_ROOT}/.sync.lock"
-  flock -x 9
+  SYNC_LOCK_DIR="${CLAWEVOLVE_SKILLS_ROOT}/.sync.lock.d"
+  while ! mkdir "$SYNC_LOCK_DIR" 2>/dev/null; do
+    SYNC_LOCK_PID="$(tr -cd '0-9' < "$SYNC_LOCK_DIR/owner_pid" 2>/dev/null || true)"
+    if [[ -n "$SYNC_LOCK_PID" ]] && ! kill -0 "$SYNC_LOCK_PID" 2>/dev/null; then
+      rm -rf "$SYNC_LOCK_DIR" 2>/dev/null || true
+      continue
+    fi
+    sleep 0.1
+  done
+  printf '%s\n' "$$" > "$SYNC_LOCK_DIR/owner_pid"
   if (( DEBUG_MODE )); then
     sync_debug_skills
   else
@@ -556,8 +629,7 @@ else
     fi
     sync_skills
   fi
-  flock -u 9
-  exec 9>&-
+  rm -rf "$SYNC_LOCK_DIR"
 fi
 
 # Environment adaptation, runtime cleanup, and Gateway restart run inside the
@@ -572,8 +644,8 @@ if [[ -f "$LAUNCHED_FILE" ]]; then
     exit 0
   fi
   log_line "stale launcher state: launched marker exists but pid is not running pid=${PID:-missing}"
-  printf '{"ok":false,"code":"RUNNER_LAUNCH_STALE","error":"launcher exited after dispatch; create a new Step to retry","pid":"%s","task_id":"%s","step_id":"%s"}\n' \
-    "$PID" "$TASK_ID" "$STEP_ID" >&2
+  printf '{"ok":false,"code":"RUNNER_LAUNCH_STALE","error":"launcher exited after dispatch; retry this invocation with a new delivery identity","pid":"%s","task_id":"%s","step_id":"%s","invocation_id":"%s"}\n' \
+    "$PID" "$TASK_ID" "$STEP_ID" "$INVOCATION_ID" >&2
   exit 1
 fi
 
@@ -604,9 +676,27 @@ resolve_skill_file() {
 
 RUN_CWD=""
 case "$STAGE" in
+  stage-execute|clawevolve-stage)
+    # clawevolve-stage is only a historical command alias, never a Skill.
+    STAGE_RUNNER="${CLAWEVOLVE_SKILLS_ROOT}/platform/clawevolve_runtime/runner.py"
+    [[ -f "$STAGE_RUNNER" && -r "$STAGE_RUNNER" ]] || {
+      printf '{"ok":false,"error":"platform Stage execution runtime is not installed"}\n' >&2
+      exit 1
+    }
+    RUN_CWD="$OPENCLAW_WORKSPACE"
+    EXEC_COMMAND=(python3 -u -B "$STAGE_RUNNER" "${COMMAND_ARGS[@]}")
+    ;;
   clawevolve-diagnose)
     if ! STAGE_RUNNER="$(resolve_skill_file "clawevolve-diagnose" "scripts/run.sh")"; then
       printf '{"ok":false,"error":"clawevolve-diagnose scripts/run.sh not found or unreadable in installed or release skill"}\n' >&2
+      exit 1
+    fi
+    RUN_CWD="$OPENCLAW_WORKSPACE"
+    EXEC_COMMAND=(bash "$STAGE_RUNNER" "${COMMAND_ARGS[@]}")
+    ;;
+  clawevolve-hardening)
+    if ! STAGE_RUNNER="$(resolve_skill_file "clawevolve-hardening" "scripts/run.sh")"; then
+      printf '{"ok":false,"error":"clawevolve-hardening scripts/run.sh not found or unreadable in installed or release skill"}\n' >&2
       exit 1
     fi
     RUN_CWD="$OPENCLAW_WORKSPACE"
@@ -715,10 +805,16 @@ if [[ -n "$CLAWWEB_URL_VALUE" ]]; then
   LAUNCH_COMMAND+=(--clawweb-url "$CLAWWEB_URL_VALUE")
 fi
 LAUNCH_COMMAND+=(-- "${EXEC_COMMAND[@]}")
-setsid nohup "${LAUNCH_COMMAND[@]}" >> "$LOG_FILE" 2>&1 < /dev/null &
+if command -v setsid >/dev/null 2>&1; then
+  setsid nohup "${LAUNCH_COMMAND[@]}" >> "$LOG_FILE" 2>&1 < /dev/null &
+else
+  nohup "${LAUNCH_COMMAND[@]}" >> "$LOG_FILE" 2>&1 < /dev/null &
+fi
 PID=$!
 printf '%s\n' "$PID" > "$PID_FILE"
 printf '%s\n' "$PID" > "$PGID_FILE"
+printf '%s\n' "$PID" > "$CURRENT_PID_FILE"
+printf '%s\n' "$PID" > "$CURRENT_PGID_FILE"
 touch "$LAUNCHED_FILE"
 
-printf '{"ok":true,"status":"started","pid":%s,"task_id":"%s","step_id":"%s"}\n' "$PID" "$TASK_ID" "$STEP_ID"
+printf '{"ok":true,"status":"started","pid":%s,"task_id":"%s","step_id":"%s","invocation_id":"%s"}\n' "$PID" "$TASK_ID" "$STEP_ID" "$INVOCATION_ID"

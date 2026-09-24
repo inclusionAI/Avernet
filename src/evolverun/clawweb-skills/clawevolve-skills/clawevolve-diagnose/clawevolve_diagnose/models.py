@@ -222,6 +222,7 @@ class RunRequest:
     session_source: str = "local"
     source_user_id: str = ""
     source_bot_id: str = ""
+    session_ids: list[str] = field(default_factory=list)
     source_download_network: str = "office"
     clawweb_url: str = ""
     session_identifiers: list[str] = field(default_factory=list)

@@ -15,6 +15,7 @@ from typing import Any
 
 from .. import logger
 from ..io import atomic_write_text
+from .cleanup import agent_cleanup_command
 
 
 class DiscoveryAgentError(RuntimeError):
@@ -476,14 +477,7 @@ def _cleanup_registered_agent(
     env: dict[str, str],
     diagnostics: dict[str, Any],
 ) -> None:
-    cmd = [
-        openclaw_path,
-        "agents",
-        "delete",
-        agent_id,
-        "--force",
-        "--json",
-    ]
+    cmd = agent_cleanup_command(openclaw_path, agent_id, env)
     diagnostics["deleteCmd"] = _redacted_cmd(cmd)
     proc = _run_command(
         cmd,

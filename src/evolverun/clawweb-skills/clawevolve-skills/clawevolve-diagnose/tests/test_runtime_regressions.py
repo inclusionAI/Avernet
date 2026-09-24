@@ -634,6 +634,52 @@ def test_explicit_local_session_resolution_fails_when_any_selector_is_missing(
         )
 
 
+def test_explicit_session_scope_is_filtered_before_the_discovery_limit(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    from clawevolve_diagnose.acquisition import sessions as sessions_module
+
+    monkeypatch.setattr(
+        sessions_module,
+        "_should_skip_by_first_question",
+        lambda *_args, **_kwargs: False,
+    )
+
+    newest = tmp_path / "newest.jsonl"
+    target = tmp_path / "target.jsonl"
+    newest.write_text('{"type":"message"}\n', encoding="utf-8")
+    target.write_text('{"type":"message"}\n', encoding="utf-8")
+    (tmp_path / "sessions.json").write_text(
+        json.dumps({
+            "agent:main:newest": {
+                "sessionId": "newest",
+                "sessionFile": str(newest),
+                "sessionStartedAt": "2026-09-17T12:00:00Z",
+                "chatType": "direct",
+                "label": "最新但不在冻结范围内",
+            },
+            "agent:main:target": {
+                "sessionId": "target",
+                "sessionFile": str(target),
+                "sessionStartedAt": "2026-09-11T12:00:00Z",
+                "chatType": "direct",
+                "label": "用户选中的真实会话",
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    rows = sessions_module.discover_sessions(
+        {"session_dirs": [str(tmp_path)]},
+        max_sessions=1,
+        parse_content=False,
+        session_ids=["target"],
+    )
+
+    assert [row.session_id for row in rows] == ["target"]
+
+
 def test_local_judge_excludes_analysis_failures_from_eval_candidates(
     monkeypatch: Any,
 ) -> None:

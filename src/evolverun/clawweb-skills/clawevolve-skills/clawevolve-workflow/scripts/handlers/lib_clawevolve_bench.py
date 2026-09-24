@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "platform"))
+from clawevolve_runtime.runner_environment import resolve_runner_environment
+
 import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 
 
@@ -106,8 +110,9 @@ def run_clawevolve_bench(
         cmd += ["--evolve-step-id", evolve_step_id]
     if trace_role:
         cmd += ["--trace-role", trace_role]
+    child_env = resolve_runner_environment().bench_environment(workspace)
     with log_path.open("w", encoding="utf-8") as log:
-        proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, text=True, timeout=timeout_seconds + 900)
+        proc = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, text=True, env=child_env, timeout=timeout_seconds + 900)
     try:
         result = json.loads(result_path.read_text(encoding="utf-8"))
     except Exception as exc:

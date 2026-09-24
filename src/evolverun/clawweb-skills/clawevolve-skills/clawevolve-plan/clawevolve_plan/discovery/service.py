@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import logger
+from ..core import run_business_call
 from ..agent_artifact import (
     StructuredArtifactError,
     StructuredArtifactResult,
@@ -40,6 +42,7 @@ def run_auto_discovery(
     plan_path: Path,
     input_dir: Path,
     task_id: str,
+    business_core: Any = None,
 ) -> AutoDiscoveryResult:
     workspace_root = resolve_workspace_root(plan, workspace_hint=input_dir)
     source_path = _resolve_discovery_source_path(plan_path)
@@ -48,7 +51,7 @@ def run_auto_discovery(
     notes_path = input_dir / "discovery_notes.md"
     discovery_json_path.parent.mkdir(parents=True, exist_ok=True)
 
-    reused = _try_reuse_discovery(
+    reused = None if business_core is not None else _try_reuse_discovery(
         discovery_json_path=discovery_json_path,
         notes_path=notes_path,
         workspace_root=workspace_root,
@@ -93,11 +96,22 @@ def run_auto_discovery(
         prompt_chars=len(prompt),
         prompt_bytes=prompt_bytes,
     )
-    result = run_openclaw_agent_message(
+    def call_agent(message: str, invocation_id: str, validation_error: str = ""):
+        if business_core is not None:
+            target = business_core.base_input.get("target_skill") or {}
+            return run_business_call(business_core, "discovery", {
+                "source_path": str(source_path), "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                "workspace_root": str(workspace_root), "allowed_targets": [target["path"]] if target.get("path") else [str(workspace_root)],
+                "validation_error": validation_error,
+            }, discovery_schema_example(workspace_root), output_path=candidate_path,
+                key="correction" if validation_error else "initial")
+        return run_openclaw_agent_message(
+            message=message, workspace_root=workspace_root, task_id=invocation_id, output_path=candidate_path,
+        )
+
+    result = call_agent(
         message=prompt,
-        workspace_root=workspace_root,
-        task_id=task_id,
-        output_path=candidate_path,
+        invocation_id=task_id,
     )
     logger.info(
         "auto discovery agent exited",
@@ -168,11 +182,10 @@ def run_auto_discovery(
             prompt_chars=len(correction_prompt),
             prompt_bytes=correction_prompt_bytes,
         )
-        correction = run_openclaw_agent_message(
+        correction = call_agent(
             message=correction_prompt,
-            workspace_root=workspace_root,
-            task_id=f"{task_id}-discovery-correction",
-            output_path=candidate_path,
+            invocation_id=f"{task_id}-discovery-correction",
+            validation_error=str(first_error),
         )
         try:
             artifact = _materialize_discovery_candidate(
@@ -398,6 +411,9 @@ def _workspace_candidates(
     plan: dict[str, Any], *, workspace_hint: str | Path | None = None
 ) -> list[str]:
     candidates: list[str] = []
+    explicit_workspace = os.environ.get("CLAWEVOLVE_TARGET_WORKSPACE")
+    if explicit_workspace:
+        candidates.append(explicit_workspace)
     agent_context = (
         plan.get("agent_context") if isinstance(plan.get("agent_context"), dict) else {}
     )

@@ -5,6 +5,8 @@ description: Generate and publish planning artifacts for an OpenClaw self-evolut
 
 # clawEvolve-plan
 
+核心实现由原生 Plan 脚本根据平台冻结的绑定选择；直接运行下述原有入口即可。
+
 This skill is the fixed second stage of the OpenClaw self-evolution loop:
 
 **select input mode → bounded agentic analysis/discovery → render and validate ClawBench templates → record disabled Bench upload → write `objective.md` and `spec-v0.md`**.
@@ -18,7 +20,7 @@ When the bot receives `/clawevolve-plan ...`, it must run a two-phase protocol:
 1. **Analysis/discovery phase**: historical Plan Sources receive bounded evidence discovery; Direct Goal receives one Agent call that interprets the goal, creates prospective cases, and discovers narrow workspace targets.
 2. **Script phase**: run exactly one foreground `scripts/run.sh` command, wait for final stdout JSON, then report only the final result and next patch-loop instruction.
 
-The agent must not redesign this pipeline, skip required discovery, manually generate templates/specs outside the script, or retry with changed parameters while a command is still running.
+The agent must not redesign this pipeline, skip required discovery, manually generate templates/specs outside the script, probe platform paths before execution, or retry with changed parameters while a command is still running.
 
 ## Phase 0: resolve required inputs
 
@@ -35,6 +37,7 @@ A valid plan run needs:
 - `--task-id <task-id>`: required ClawWeb task ID for step report upload. 参数名是中划线；**ID 值必须逐字符保持用户触发 skill 时传入的原样**，禁止任何 normalize/slugify/sanitize，尤其禁止把中划线 `-` 改成下划线 `_`。
 
 - `--step-id <step-id>`: required ClawWeb step ID for step report upload. 参数名是中划线；**ID 值必须逐字符保持用户触发 skill 时传入的原样**，禁止任何 normalize/slugify/sanitize，尤其禁止把中划线 `-` 改成下划线 `_`.
+- `--workspace <platform-frozen-workspace>`: 平台为本次任务准备的目标工作区。收到该参数时原样传给脚本；脚本会把平台容器路径绑定到当前执行 Bot 的对应工作区，不需要 Agent 自行探测或改写路径。
 - `--goal '<optimization objective>'`: the only natural-language goal input. When present, it is the sole current optimization objective and overrides the Diagnose acquisition intent; Diagnose text remains evidence provenance only. Explicit percentages and metric subjects must be preserved as the canonical primary metric across objective, spec, and the final report. It may be empty only when Source/Diagnose already supplies usable planning context; it is mandatory for Direct Goal. Do not add another intent/idea/mode parameter.
 - Discovery notes and `--target` are internal compatibility inputs. Do not ask the user for them. Source/Diagnose invokes normal bounded discovery; Direct Goal derives both from its single Agent result.
 - optional `--overwrite`: regenerate an existing task-id plan directory; without it the script is idempotent and returns existing artifacts instead of overwriting.
@@ -49,6 +52,7 @@ User-facing parameters are passthrough values. When the user triggers this skill
 
 - `--task-id`
 - `--step-id`
+- `--workspace` when provided
 - `--run-dir` when provided
 - `--goal` when provided
 

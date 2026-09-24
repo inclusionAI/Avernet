@@ -5,6 +5,9 @@ description: Diagnose a bot by analyzing a bounded range of its original OpenCla
 
 # clawevolve-diagnose
 
+## 平台核心实现选择
+
+按下文运行原诊断脚本。脚本在会话分析调用处选择默认或自定义业务实现，继续负责采集、筛选、产物生成与上报；Agent 无需另行调度或提交结果。
 
 ## 最高优先级执行规则
 
@@ -82,11 +85,14 @@ cd clawevolve-diagnose && bash scripts/run.sh '/clawevolve-diagnose --api-key **
 | `--intent` | 否 | 空 | 本次诊断的自然语言意图；可描述问题类型、case 数量、时间范围和筛选偏好。自然语言只能通过该参数传入。 |
 | `--max-sessions` | 否 | 10 | 快速过滤后最多保留并送 Judge 分析的最新 session 数；个人/服务 Bot 共用。 |
 | `--session-identifier` | 否，可重复 | 空 | 按 Session ID 或 Session Key 精确选择；先按 ID、未命中再按 Key，最多 20 个。 |
+
+
+| `--session-id` | 否 | 空 | 平台冻结的精确 Session 范围；可重复传入。存在时必须只分析这些 Session，不得改为最新会话或扩大范围。 |
 | `--debug-session-path` | 否 | 空 | 调试入口：只从指定 session JSONL 文件读取并分析该 session。 |
-| `--openclaw-home` | 否 | `~/.openclaw` | 本地测试可指定 OpenClaw 根目录。 |
+| `--openclaw-home` | 否 | 当前 Bot 安装目录中的 `.openclaw` 根目录 | 本地测试可显式指定 OpenClaw 根目录；平台执行时自动绑定当前 Bot，不得改成其他用户目录。 |
 | `--clawweb-url` | 否 | 部署默认值 | ClawWeb Step Report 基础地址。 |
 | `--skip-clawweb-report` | 否 | false | 仅本地测试使用，跳过网络上报。 |
-| `--output-dir` | 否 | `/home/admin/.openclaw/workspace/clawevolve_results/{task_id}/diagnose/output/` | 隐藏兼容参数；一般不要主动添加。 |
+| `--output-dir` | 否 | `<当前 Bot .openclaw>/workspace/clawevolve_results/{task_id}/diagnose/output/` | 隐藏兼容参数；一般不要主动添加。 |
 
 已废弃/不支持：`--execution-id`、`--execution_id`、`--task_id`、`--step_id`、`--llm-model`、`--evolve-run-id`。必须使用 `--task-id`、`--step-id`。遇到旧下划线参数应让脚本报错，不要自动替换。
 
@@ -95,7 +101,7 @@ cd clawevolve-diagnose && bash scripts/run.sh '/clawevolve-diagnose --api-key **
 
 ## ClawWeb 上报契约
 
-`--task-id` 和 `--step-id` 校验通过后，脚本会向 ClawWeb 上报 step report；主流程成功上报 `succeeded`，失败上报 `failed`，上传失败只记录为 deferred，不掩盖本地 diagnose 结果。
+`--task-id` 和 `--step-id` 校验通过后，脚本会向 ClawWeb 上报 step report；主流程成功上报 `succeeded`，失败上报 `failed`。平台明确以 HTTP 400/422 拒绝成功结果或本地报告载荷不合法时，记录拒绝原因并上报 `failed`；网络超时或其他不确定响应保留 deferred，不用失败报告覆盖可能已接收的成功结果。
 
 固定接口：
 

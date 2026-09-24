@@ -210,6 +210,49 @@ if __name__ == "__main__":
     unittest.main()
 
 class SingleboxProfileTests(unittest.TestCase):
+    def test_benchmark_local_candidate_and_existing_runtime_sources(self):
+        import os
+        from types import SimpleNamespace
+        for version, backend in [("internalversion", ""), ("internalversion", "local_proc"), ("openversion", "")]:
+            with self.subTest(version=version, backend=backend), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                home = root / "home"
+                state = root / "selected-bot/.openclaw" if backend or version == "openversion" else home / ".openclaw"
+                candidate = state / "clawevolve_workspaces/EV-1/workspace"
+                (candidate / "skills/daily-report").mkdir(parents=True)
+                (candidate / "skills/daily-report/SKILL.md").write_text("candidate")
+                (home / ".openclaw/workspace/skills/daily-report").mkdir(parents=True)
+                (home / ".openclaw/workspace/skills/daily-report/SKILL.md").write_text("unrelated default")
+                bench = root / "bench-workspace"
+                env = {"CLAWWEB_VERSION": version, "SECBAAS_SANDBOX_BACKEND": backend,
+                       "OPENCLAW_STATE_DIR": str(state), "OPENCLAW_WORKSPACE": str(candidate)}
+                with patch.dict(os.environ, env), patch.object(Path, "home", return_value=home), \
+                        patch.object(lib_agent, "_get_agent_workspace", return_value=bench):
+                    actual = lib_agent.prepare_task_workspace(root, "run-1", SimpleNamespace(workspace_files=[], task_id="case-1"), "bench-test", link_skills=True)
+                    expected = candidate if backend == "local_proc" or version == "openversion" else home / ".openclaw/workspace"
+                    self.assertEqual((actual / "skills").resolve(), (expected / "skills").resolve())
+                    self.assertEqual((actual / "skills/daily-report/SKILL.md").read_text(),
+                                     "candidate" if expected == candidate else "unrelated default")
+                    self.assertEqual(lib_agent._openclaw_state_root().resolve(), state.resolve())
+
+    def test_local_binding_rejects_missing_or_outside_paths(self):
+        import os
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state = root / "bot"
+            state.mkdir()
+            outside = root / "outside"
+            outside.mkdir()
+            env = {"SECBAAS_SANDBOX_BACKEND": "local_proc", "CLAWWEB_VERSION": "internalversion",
+                   "OPENCLAW_STATE_DIR": str(state), "OPENCLAW_WORKSPACE": ""}
+            with patch.dict(os.environ, env):
+                with self.assertRaises(RuntimeError): lib_agent._openclaw_workspace()
+                with patch.dict(os.environ, {"OPENCLAW_WORKSPACE": str(outside)}):
+                    with self.assertRaises(ValueError): lib_agent._openclaw_workspace()
+                with self.assertRaises(RuntimeError): lib_agent._get_agent_store_dir("../outside")
+                with patch.dict(os.environ, {"OPENCLAW_STATE_DIR": ""}):
+                    with self.assertRaises(RuntimeError): lib_agent._openclaw_state_root()
+
     def test_transcript_uses_selected_bot_not_home_profile(self):
         import os
         with tempfile.TemporaryDirectory() as td:

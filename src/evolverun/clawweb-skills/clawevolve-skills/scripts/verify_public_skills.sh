@@ -19,6 +19,7 @@ legacy_version_file="$(find "${skills_root}" -mindepth 2 -maxdepth 2 -type f -na
 
 required_entries=(
   "clawevolve-diagnose/scripts/run.sh"
+  "clawevolve-hardening/scripts/run.sh"
   "clawevolve-plan/scripts/run.sh"
   "clawevolve-pack/scripts/pack.sh"
   "clawevolve-deploy/scripts/deploy.sh"

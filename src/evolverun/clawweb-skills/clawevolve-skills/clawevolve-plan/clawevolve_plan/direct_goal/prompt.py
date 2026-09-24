@@ -9,6 +9,13 @@ from ..discovery.prompt import open_skill_layout_instruction
 from .schema import requested_bench_template_count
 
 
+def direct_goal_business_requirements(*, goal: str, workspace_root: Path) -> dict[str, Any]:
+    """Expose the output shape without the native Plan's default policy."""
+    example = direct_goal_schema_example(goal=goal, workspace_root=workspace_root)
+    example["goal_analysis"]["constraints"] = ["用户明确提供的约束"]
+    return example
+
+
 def direct_goal_schema_example(*, goal: str, workspace_root: Path) -> dict[str, Any]:
     requested_count = requested_bench_template_count(goal)
     openversion = os.environ.get("CLAWWEB_VERSION") == "openversion"

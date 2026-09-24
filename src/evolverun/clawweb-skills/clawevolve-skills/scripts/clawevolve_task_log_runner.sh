@@ -2,6 +2,10 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNNER_ENVIRONMENT="${SCRIPT_DIR}/platform/clawevolve_runtime/runner_environment.py"
+[[ -r "$RUNNER_ENVIRONMENT" ]] || RUNNER_ENVIRONMENT="${SCRIPT_DIR}/../platform/clawevolve_runtime/runner_environment.py"
+RUNNER_ENVIRONMENT_SETUP="$(python3 "$RUNNER_ENVIRONMENT" shell-init -- "$0" "$@")"
+eval "$RUNNER_ENVIRONMENT_SETUP"
 TASK_ID=""
 ARCHIVE_ID=""
 CLAWWEB_URL=""
@@ -13,8 +17,8 @@ while [[ $# -gt 0 ]]; do
     *) printf 'unknown task log runner argument: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
-[[ "$TASK_ID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || { printf 'invalid task-id\n' >&2; exit 2; }
-[[ "$ARCHIVE_ID" =~ ^[A-Za-z0-9._:-]{1,128}$ ]] || { printf 'invalid archive-id\n' >&2; exit 2; }
+[[ -n "$TASK_ID" && ${#TASK_ID} -le 128 && "$TASK_ID" =~ ^[A-Za-z0-9._:-]+$ ]] || { printf 'invalid task-id\n' >&2; exit 2; }
+[[ -n "$ARCHIVE_ID" && ${#ARCHIVE_ID} -le 128 && "$ARCHIVE_ID" =~ ^[A-Za-z0-9._:-]+$ ]] || { printf 'invalid archive-id\n' >&2; exit 2; }
 [[ "$CLAWWEB_URL" =~ ^https?://[^[:space:]]+$ ]] || { printf 'invalid clawweb-url\n' >&2; exit 2; }
 
 if [[ "$(id -u)" == "0" ]]; then

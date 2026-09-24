@@ -624,6 +624,7 @@ def discover_sessions(
     until: str = "",
     *,
     parse_content: bool = True,
+    session_ids: list[str] | None = None,
 ) -> list[SessionRow]:
     """Discover local user sessions from sessions.json only, newest first."""
 
@@ -645,7 +646,11 @@ def discover_sessions(
     )
 
     store_rows, store_stats = _discover_sessions_from_session_stores(
-        roots, max_sessions, time_window, parse_content=parse_content
+        roots,
+        max_sessions,
+        time_window,
+        parse_content=parse_content,
+        session_ids=session_ids,
     )
     logger.info(
         "session discovery complete from sessions store",
@@ -735,6 +740,7 @@ def _discover_sessions_from_session_stores(
     time_window: "_DiscoveryTimeWindow",
     *,
     parse_content: bool = True,
+    session_ids: list[str] | None = None,
 ) -> tuple[list[SessionRow], dict[str, Any]]:
     """Build session rows from OpenClaw sessions.json/session.json stores."""
 
@@ -748,6 +754,10 @@ def _discover_sessions_from_session_stores(
         "store_parse_empty": 0,
         "store_rows_from_metadata_only": 0,
         "store_prompt_filtered_or_empty": 0,
+        "store_session_id_filtered": 0,
+    }
+    requested_session_ids = {
+        str(session_id).strip() for session_id in (session_ids or []) if str(session_id).strip()
     }
     candidates: list[_SessionStoreCandidate] = []
     seen_candidate_keys: set[str] = set()
@@ -765,6 +775,9 @@ def _discover_sessions_from_session_stores(
                 if candidate is None:
                     continue
                 stats["store_user_entries"] += 1
+                if requested_session_ids and candidate.session_id not in requested_session_ids:
+                    stats["store_session_id_filtered"] += 1
+                    continue
                 in_window, reason = time_window.contains(candidate.started_at)
                 if not in_window:
                     filtered = stats["store_time_filtered"]
