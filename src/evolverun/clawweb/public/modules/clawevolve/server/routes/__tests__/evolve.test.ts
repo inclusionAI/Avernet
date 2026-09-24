@@ -193,14 +193,16 @@ async function seedStageImplementation(
   executionContract?: string,
 ) {
   const implementationId = `IMPL-${stage}-${mode}`;
+  let stageSkillId = `STAGESKILL-${stage}-${mode}`;
   if (flow) {
-    await stageSkillRepo.createDevelopment({
-      stageSkillId: `STAGESKILL-${stage}-${mode}`, ownerUserId: "user-1",
+    const development = await stageSkillRepo.createDevelopment({
+      ownerUserId: "user-1",
       displayName: "与流程选择无关的任意名称", flow, stage, mode,
     });
+    stageSkillId = String(development.id);
   }
   await stageSkillRepo.createImplementation({
-    stageSkillId: `STAGESKILL-${stage}-${mode}`,
+    stageSkillId,
     implementationId,
     ownerUserId: "user-1",
     displayName: `${stage} ${mode}`,
@@ -998,7 +1000,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       expect(response.status).toBe(409);
     }
     expect(await skillAssetRepo.listAssets("user-1")).toEqual([]);
-    expect(await db.query("SELECT event_id FROM ce_skill_events")).toEqual([]);
+    expect(await db.query("SELECT id FROM ce_skill_events")).toEqual([]);
     expect(await db.query("SELECT version_id FROM ce_skill_versions")).toEqual([]);
     expect(hostLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
   });
@@ -1717,7 +1719,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     });
     expect(answered.status).toBe(200);
     const resumedEvent = (await skillAssetRepo.listEvents('user-1')).find(event => event.task_id === taskId)!;
-    expect(resumedEvent).toMatchObject({ event_id: waitingEvent.event_id, status: 'running', waiting_interaction_id: null });
+    expect(resumedEvent).toMatchObject({ id: waitingEvent.id, status: 'running', waiting_interaction_id: null });
     expect((await skillAssetRepo.listEvents('user-1')).filter(event => event.task_id === taskId)).toHaveLength(1);
   });
 
@@ -2376,7 +2378,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(hostLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(1);
     const completedEvents = await skillAssetRepo.listEvents('user-1');
     expect(completedEvents).toHaveLength(events.length);
-    expect(completedEvents[0]).toMatchObject({ event_id: events[0].event_id, status: 'completed',
+    expect(completedEvents[0]).toMatchObject({ id: events[0].id, status: 'completed',
       outcome: 'applied', version_to_no: 2 });
     expect(await skillAssetRepo.listVersions('SKILL-COMMIT-RETRY')).toHaveLength(2);
   });
@@ -2408,7 +2410,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect((await decide('accept')).status).toBe(200);
     const completedEvents = await skillAssetRepo.listEvents('user-1');
     expect(completedEvents).toHaveLength(events.length);
-    expect(completedEvents[0]).toMatchObject({ event_id: events[0].event_id, status: 'completed',
+    expect(completedEvents[0]).toMatchObject({ id: events[0].id, status: 'completed',
       outcome: 'applied', version_to_no: 2 });
   });
 
@@ -2474,7 +2476,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
 
   it('keeps accepted intent exclusive if version audit persistence fails after host writes', async () => {
     const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-PARTIAL-AUDIT', externalSkillId: 'partial-audit' });
-    await db.exec("CREATE TRIGGER fail_version_audit BEFORE UPDATE ON ce_skill_events WHEN NEW.version_to_no = 2 AND OLD.version_to_no IS NULL BEGIN SELECT RAISE(ABORT, 'version audit unavailable'); END");
+    await db.exec("CREATE TRIGGER fail_version_audit BEFORE UPDATE ON ce_skill_events WHEN NEW.version_to_id IS NOT NULL AND OLD.version_to_id IS NULL BEGIN SELECT RAISE(ABORT, 'version audit unavailable'); END");
     const decide = (decision: string) => fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision }),
     });
@@ -2616,7 +2618,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     });
     await repo.updateTaskState({ taskId: "EV-SKILL-RETRY", status: "waiting_acceptance" });
     getObject.mockResolvedValue({ content: candidate, etag: null, contentType: "application/zip" });
-    await db.exec("CREATE TRIGGER audit_down BEFORE UPDATE ON ce_skill_events WHEN NEW.version_to_no = 2 AND OLD.version_to_no IS NULL BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+    await db.exec("CREATE TRIGGER audit_down BEFORE UPDATE ON ce_skill_events WHEN NEW.version_to_id IS NOT NULL AND OLD.version_to_id IS NULL BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
     const interrupted = await fetch(`${baseUrl}/api/evolve/tasks/EV-SKILL-RETRY/skill-decision`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision: 'accept' }) });
     expect(interrupted.status).toBe(500);

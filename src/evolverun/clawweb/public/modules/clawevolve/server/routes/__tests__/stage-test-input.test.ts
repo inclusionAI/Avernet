@@ -77,8 +77,9 @@ describe("Optimize StageTest constructed input", () => {
   }
 
   it("prepares a task-owned Skill copy before Optimize and delivers that same copy to postprocess", async () => {
-    await stages.createDevelopment({ stageSkillId: "STAGE-OPT", ownerUserId: "owner", displayName: "Skill优化后置",
+    const development = await stages.createDevelopment({ ownerUserId: "owner", displayName: "Skill优化后置",
       flow: "skill_evolution", stage: "optimize", mode: "postprocess" });
+    await db.exec("UPDATE ce_stage_skill_implementations SET stage_skill_id = ? WHERE implementation_id = ?", [String(development.id), "IMPL-OPT"]);
     const created = await start();
     expect(created.status).toBe(201);
     const { taskId, stepId } = created.body;

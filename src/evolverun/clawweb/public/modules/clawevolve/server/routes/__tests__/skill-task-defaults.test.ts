@@ -85,9 +85,9 @@ describe("GET Skill task defaults", () => {
     extensions.splice(0);
     await seedAsset();
     await seedStage();
-    await db.exec("UPDATE ce_stage_skill_implementations SET stage_skill_id = 'STAGESKILL-EXAMPLE'");
+    await db.exec("UPDATE ce_stage_skill_implementations SET stage_skill_id = '1'");
     const value = (action: string) => JSON.stringify({ bindings: [{ spaceType: "TEAM", spaceId: team.id,
-      action, stage: "diagnose", mode: "preprocess", stageSkillId: "STAGESKILL-EXAMPLE" }] });
+      action, stage: "diagnose", mode: "preprocess", stageSkillId: "1" }] });
     await config.create({ config_key: "skill_task_stage_bindings", config_json: value("optimize") });
     const first = await (await getDefaults()).json();
     expect(first.optimize.stageExtensions.diagnose.preprocess.implementationId).toBe("eligible");
@@ -110,7 +110,7 @@ describe("GET Skill task defaults", () => {
     expect((await getDefaults()).status).toBe(503);
     await config.update("skill_task_stage_bindings", { config_json: JSON.stringify({ bindings: [{
       spaceType: "TEAM", spaceId: team.id, action: "hardening", stage: "hardening", mode: "replace",
-      stageSkillId: "STAGESKILL-MISSING",
+      stageSkillId: "2",
     }] }) });
     const result = await (await getDefaults()).json();
     expect(result.hardening.unavailableReason).toContain("没有可访问");

@@ -53,8 +53,9 @@ rollback snapshot and is not a compatibility source.
   accepted/rejected decisions remain task-scoped and cannot duplicate on retry.
 
 The common writer requires the caller's database transaction and propagates
-persistence errors. Registration and task business keys are unique; `task_id` is
-also unique, enforcing one event per top-level Skill task.
+persistence errors. Registration and task business keys are unique, enforcing one event per top-level
+Skill task. Events use the row primary key as their public ID. Version numbers
+are read from immutable version records rather than duplicated on events.
 Decision/version/final-report audit transactions sharing one SQLite connection
 are queued locally; MySQL/ZDAS use database row locks for cross-worker exclusion.
 Snapshots retain Skill name/description, tenant authorization identity, Bot and

@@ -68,7 +68,7 @@ function implementationView(row: Awaited<ReturnType<StageSkillRepository["findIm
 
 function developmentView(row: StageDevelopmentRow) {
   return {
-    stageSkillId: row.stage_skill_id, ownerId: row.owner_user_id,
+    stageSkillId: String(row.id), ownerId: row.owner_user_id,
     spaceId: row.space_id ?? null, spaceType: row.space_type ?? null, spaceName: row.space_name ?? null,
     displayName: row.display_name, flow: row.flow_key, stage: row.stage_key,
     stageName: findOfficialStage(row.stage_key)?.name ?? row.stage_key,
@@ -137,7 +137,6 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
     const displayName = typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
     if (displayName.length > 255) { res.status(400).json({ error: "名称不能超过 255 个字符" }); return; }
     const row = await input.repo.createDevelopment({
-      stageSkillId: `STAGESKILL-${randomUUID().slice(0, 12).toUpperCase()}`,
       ownerUserId: owner, displayName: displayName || `${stage.name}${names[mode]}自定义实现`,
       ...spaceColumns(space),
       flow, stage: stage.stage, mode,
@@ -166,7 +165,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
     const owner = actor(req);
     const row = await input.repo.findDevelopment(String(req.params.id));
     if (!owner || !row || row.owner_user_id !== owner || !await readable(row, req)
-      || !await input.repo.deleteDraft(row.stage_skill_id, owner)) {
+      || !await input.repo.deleteDraft(String(row.id), owner)) {
       res.status(409).json({ error: "开发记录不存在或已有上传版本，请在详情中管理版本" }); return;
     }
     res.json({ deleted: true });
@@ -259,7 +258,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
         || binding.stage_key !== stage || binding.extension_mode !== mode) {
         res.status(404).json({ error: "要升级的 Stage Skill 不存在，或与当前 Stage/接入方式不一致" }); return;
       }
-      const stageSkillId = binding.stage_skill_id;
+      const stageSkillId = development ? String(development.id) : existingStageSkill!.stage_skill_id;
       const displayName = binding.display_name;
       const implementationId = `IMPL-${randomUUID().slice(0, 12).toUpperCase()}`;
       const versionNo = await input.repo.nextVersion(stageSkillId);

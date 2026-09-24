@@ -55,6 +55,7 @@ async function seedWorkflow(db: SqliteDatabase, hasOwner: boolean) {
 }
 
 async function seedStages(db: SqliteDatabase, through: number) {
+  const modern = !(await columns(db, 'ce_skill_assets')).includes('current_package_ref');
   const skillIdColumn = (await columns(db, 'ce_skill_assets')).includes('external_skill_id')
     ? 'external_skill_id' : 'ocb_skill_id';
   await db.exec(`INSERT INTO ce_stage_skill_implementations
@@ -72,9 +73,9 @@ async function seedStages(db: SqliteDatabase, through: number) {
       '{"question":"keep"}', '{"answer":"keep"}', 103, 104)`);
   await db.exec(`INSERT INTO ce_skill_assets
     (asset_id, owner_user_id, bot_id, ${skillIdColumn}, display_name, current_version_no,
-     current_package_ref, current_package_sha256, gmt_create, gmt_modified)
+     ${modern ? '' : 'current_package_ref, current_package_sha256,'} gmt_create, gmt_modified)
     VALUES ('asset-keep', 'user-keep', 'bot-keep', 'skill-keep', 'Keep skill', 3,
-      'fixture:skill', 'skill-digest', 105, 106)`);
+      ${modern ? '' : "'fixture:skill', 'skill-digest',"} 105, 106)`);
   await db.exec(`INSERT INTO ce_skill_versions
     (version_id, asset_id, version_no, package_ref, package_sha256, source_task_id,
      baseline_package_ref, baseline_package_sha256, status, gmt_create)
@@ -86,15 +87,15 @@ async function seedStages(db: SqliteDatabase, through: number) {
   if (through >= 122) {
     await db.exec("UPDATE ce_skill_assets SET description = 'Historical description'");
     await db.exec(`INSERT INTO ce_stage_developments
-      (stage_skill_id, owner_user_id, display_name, flow_key, stage_key, extension_mode, gmt_create, gmt_modified)
-      VALUES ('development-keep', 'user-keep', 'Keep development', 'evolve', 'plan', 'replace', 108, 109)`);
+      (${modern ? '' : 'stage_skill_id,'} owner_user_id, display_name, flow_key, stage_key, extension_mode, gmt_create, gmt_modified)
+      VALUES (${modern ? '' : "'development-keep',"} 'user-keep', 'Keep development', 'evolve', 'plan', 'replace', 108, 109)`);
   }
   if (through >= 123) {
     await db.exec(`INSERT INTO ce_skill_audit_events
-      (event_id, idempotency_key, asset_id, owner_user_id, bot_id, ${skillIdColumn},
+      (${modern ? '' : 'event_id,'} idempotency_key, asset_id, owner_user_id, bot_id, ${skillIdColumn},
        display_name, description, task_id, version_id, version_no, event_type,
        actor_id, actor_type, result, detail_json, gmt_create)
-      VALUES ('event-keep', 'idempotency-keep', 'asset-keep', 'user-keep', 'bot-keep',
+      VALUES (${modern ? '' : "'event-keep',"} 'idempotency-keep', 'asset-keep', 'user-keep', 'bot-keep',
         'skill-keep', 'Keep skill', 'Historical audit', 'task-keep', 'version-keep', 3,
         'registered', 'user-keep', 'user', 'success', '{"keep":true}', 110)`);
   }
@@ -106,10 +107,21 @@ async function rows(db: SqliteDatabase, tables: readonly string[]) {
   ] as const)));
 }
 
-function migratedSeed(seed: Row): Row {
-  if (!('ocb_skill_id' in seed)) return seed;
-  const { ocb_skill_id, ...rest } = seed;
-  return { ...rest, external_skill_id: ocb_skill_id };
+function migratedSeed(table: string, seed: Row): Row {
+  const result = { ...seed };
+  if ('ocb_skill_id' in result) {
+    result.external_skill_id = result.ocb_skill_id;
+    delete result.ocb_skill_id;
+  }
+  if (table === 'ce_skill_assets') {
+    delete result.current_package_ref;
+    delete result.current_package_sha256;
+  }
+  if (table === 'ce_skill_audit_events') delete result.event_id;
+  if (table === 'ce_skill_versions') delete result.source_version_no;
+  if (table === 'ce_stage_developments') delete result.stage_skill_id;
+  if (table === 'ce_stage_skill_implementations') result.stage_skill_id = expect.stringMatching(/^[1-9][0-9]*$/);
+  return result;
 }
 
 async function assertMergedSchema(db: SqliteDatabase) {
@@ -153,7 +165,7 @@ describe('Evolve merge migration compatibility (real SQLite)', () => {
     const delivery = new SqliteDatabase(new Database(':memory:'));
     try {
       await runMigrations(canonical, 'sqlite');
-      const ddl = readFileSync(new URL('../../../../../docs/clawweb/evolve-schema-v133/01-new-tables.mysql.sql', import.meta.url), 'utf8');
+      const ddl = readFileSync(new URL('../../../../../docs/clawweb/evolve-schema-v135/01-new-tables.mysql.sql', import.meta.url), 'utf8');
       for (const sql of ddl.replace(/^--.*$/gm, '').split(';').map(s => s.trim()).filter(Boolean)) {
         await delivery.exec(delivery.dialect.renderDdl(sql));
       }
@@ -197,7 +209,7 @@ describe('Evolve merge migration compatibility (real SQLite)', () => {
           [featureLine ? 129 : 121])).toEqual(ledger);
         for (const [table, seeds] of Object.entries(before)) {
           expect(await db.query(`SELECT * FROM ${table} ORDER BY rowid`), table)
-            .toEqual(seeds.map(seed => expect.objectContaining(migratedSeed(seed))));
+            .toEqual(seeds.map(seed => expect.objectContaining(migratedSeed(table, seed))));
         }
         await assertIdempotent(db);
       } finally {
@@ -264,7 +276,7 @@ describe('Evolve merge migration compatibility (real SQLite)', () => {
       for (const [table, seeds] of Object.entries(before)) {
         // Existing columns and values must survive; later migrations may add columns.
         expect(await db.query(`SELECT * FROM ${table} ORDER BY rowid`), table)
-          .toEqual(seeds.map(seed => expect.objectContaining(migratedSeed(seed))));
+          .toEqual(seeds.map(seed => expect.objectContaining(migratedSeed(table, seed))));
       }
       expect(await db.query("SELECT owner_id FROM workflow_specs WHERE workflow_id = 'merge-workflow'"))
         .toEqual([{ owner_id: isFeature ? null : 'existing-owner' }]);

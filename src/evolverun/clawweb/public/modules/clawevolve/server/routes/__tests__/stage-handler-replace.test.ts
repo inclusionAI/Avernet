@@ -124,14 +124,16 @@ async function seedStageImplementation(
   executionContract?: string,
 ) {
   const implementationId = `IMPL-${stage}-${mode}`;
+  let stageSkillId = `STAGESKILL-${stage}-${mode}`;
   if (flow) {
-    await stageSkillRepo.createDevelopment({
-      stageSkillId: `STAGESKILL-${stage}-${mode}`, ownerUserId: "user-1",
+    const development = await stageSkillRepo.createDevelopment({
+      ownerUserId: "user-1",
       displayName: "与流程选择无关的任意名称", flow, stage, mode,
     });
+    stageSkillId = String(development.id);
   }
   await stageSkillRepo.createImplementation({
-    stageSkillId: `STAGESKILL-${stage}-${mode}`,
+    stageSkillId,
     implementationId,
     ownerUserId: "user-1",
     displayName: `${stage} ${mode}`,

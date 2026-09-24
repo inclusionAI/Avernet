@@ -1,3 +1,5 @@
+import type { IDatabase } from './db.js';
+import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
 /**
  * Schema DDL for ClawWeb.
  *
@@ -92,7 +94,7 @@ export const sqliteTriggers: string[] = [
  * OceanBase/MySQL cannot index TEXT columns. SQLite treats VARCHAR
  * identically to TEXT so this is fully compatible.
  */
-export const migrations: ReadonlyArray<{ version: number; description: string; sql: string[]; sqliteOnly?: boolean; mysqlOnly?: boolean }> = [
+export const migrations: ReadonlyArray<{ version: number; description: string; sql: string[]; sqliteOnly?: boolean; mysqlOnly?: boolean; migrate?: (db: IDatabase) => Promise<void> }> = [
   {
     version: 1,
     description: "ClawFlow: flow_events, flow_metrics, triggered_alerts",
@@ -3282,5 +3284,11 @@ END`,
       `CREATE UNIQUE INDEX IF NOT EXISTS uk_ce_app_config_key ON ce_app_config (config_key)`,
       `CREATE INDEX IF NOT EXISTS idx_ce_app_config_enabled ON ce_app_config (enabled)`,
     ],
+  },
+  {
+    version: 135,
+    description: "Remove redundant Evolve fields and indexes, preserve feature data",
+    sql: [],
+    migrate: cleanupEvolveSchema,
   },
 ];

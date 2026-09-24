@@ -1,0 +1,165 @@
+-- Fresh installation only. Existing feature databases must run migration v135.
+-- No ordinary indexes. No schema ledger updates. Not validated on a managed database.
+
+CREATE TABLE IF NOT EXISTS ce_stage_skill_implementations (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  space_name VARCHAR(190) DEFAULT NULL COMMENT '空间名称快照',
+  space_type VARCHAR(16) DEFAULT NULL COMMENT '空间类型：PERSONAL或TEAM',
+  space_id VARCHAR(128) DEFAULT NULL COMMENT '所属空间ID',
+  integration_test_status VARCHAR(32) NOT NULL DEFAULT 'untested' COMMENT '集成测试状态',
+  stage_skill_id VARCHAR(64) NOT NULL COMMENT '所属Stage开发记录ID',
+  implementation_id VARCHAR(64) NOT NULL COMMENT '执行实现标识，用于冻结任务和运行包引用',
+  owner_user_id VARCHAR(128) NOT NULL COMMENT '记录归属用户ID',
+  display_name VARCHAR(128) NOT NULL COMMENT '显示名称快照',
+  stage_key VARCHAR(32) NOT NULL COMMENT '目标阶段标识',
+  extension_mode VARCHAR(32) NOT NULL COMMENT '扩展方式：preprocess、postprocess或replace',
+  version_no BIGINT NOT NULL COMMENT '版本号',
+  status VARCHAR(32) NOT NULL DEFAULT 'validated' COMMENT '当前状态',
+  package_ref TEXT NOT NULL COMMENT '版本包存储引用',
+  package_sha256 VARCHAR(64) NOT NULL COMMENT '版本包校验值',
+  static_validation_json TEXT NOT NULL COMMENT '静态校验结果JSON',
+  integration_test_task_id VARCHAR(64) COMMENT '集成测试任务ID',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  UNIQUE (implementation_id),
+  UNIQUE (stage_skill_id, version_no)
+) COMMENT='Stage Skill实现版本';
+
+CREATE TABLE IF NOT EXISTS ce_stage_extension_runs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  step_id VARCHAR(64) NOT NULL COMMENT '关联步骤ID',
+  task_id VARCHAR(64) NOT NULL COMMENT '关联任务ID',
+  stage_key VARCHAR(32) NOT NULL COMMENT '目标阶段标识',
+  extension_mode VARCHAR(32) NOT NULL COMMENT '扩展方式：preprocess、postprocess或replace',
+  implementation_id VARCHAR(64) NOT NULL COMMENT '执行实现标识，用于冻结任务和运行包引用',
+  initial_input_json TEXT COMMENT '冻结的初始输入JSON',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  UNIQUE (step_id)
+) COMMENT='Stage扩展执行记录';
+
+CREATE TABLE IF NOT EXISTS ce_stage_interactions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  interaction_id VARCHAR(64) NOT NULL COMMENT '交互标识，用于表单回答和反馈文件关联',
+  task_id VARCHAR(64) NOT NULL COMMENT '关联任务ID',
+  step_id VARCHAR(64) NOT NULL COMMENT '关联步骤ID',
+  attempt_no BIGINT NOT NULL COMMENT '步骤内交互序号，从1开始',
+  status VARCHAR(32) NOT NULL DEFAULT 'waiting' COMMENT '当前状态',
+  request_json TEXT NOT NULL COMMENT '交互请求JSON',
+  response_json TEXT COMMENT '用户回答JSON',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  UNIQUE (interaction_id),
+  UNIQUE (step_id, attempt_no)
+) COMMENT='Stage用户交互记录';
+
+CREATE TABLE IF NOT EXISTS ce_skill_assets (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  pending_application_json TEXT COMMENT '待完成的版本写回信息JSON，用于恢复重试',
+  space_name VARCHAR(190) DEFAULT NULL COMMENT '空间名称快照',
+  space_type VARCHAR(16) DEFAULT NULL COMMENT '空间类型：PERSONAL或TEAM',
+  space_id VARCHAR(128) DEFAULT NULL COMMENT '所属空间ID',
+  description TEXT COMMENT '描述快照',
+  asset_id VARCHAR(64) NOT NULL COMMENT 'Skill资产标识，用于任务及版本包关联',
+  owner_user_id VARCHAR(128) NOT NULL COMMENT '记录归属用户ID',
+  bot_id VARCHAR(128) NOT NULL COMMENT '来源Bot ID',
+  external_skill_id VARCHAR(190) NOT NULL COMMENT '宿主系统中的Skill标识',
+  display_name VARCHAR(190) NOT NULL COMMENT '显示名称快照',
+  current_version_no BIGINT NOT NULL DEFAULT 1 COMMENT '当前生效版本号',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  UNIQUE (asset_id),
+  UNIQUE (owner_user_id, bot_id, external_skill_id)
+) COMMENT='Skill资产';
+
+CREATE TABLE IF NOT EXISTS ce_skill_versions (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  created_by VARCHAR(128) COMMENT '创建操作人ID',
+  source_version_id VARCHAR(64) COMMENT '来源版本标识',
+  creation_kind VARCHAR(16) NOT NULL DEFAULT 'task' COMMENT '创建方式：registered、task、edit、upload或rollback',
+  version_id VARCHAR(64) NOT NULL COMMENT '版本标识，手工版本同时用于写回重试去重',
+  asset_id VARCHAR(64) NOT NULL COMMENT 'Skill资产标识，用于任务及版本包关联',
+  version_no BIGINT NOT NULL COMMENT '版本号',
+  package_ref TEXT NOT NULL COMMENT '版本包存储引用',
+  package_sha256 VARCHAR(80) NOT NULL COMMENT '版本包校验值',
+  source_task_id VARCHAR(64) COMMENT '产生版本的任务ID',
+  baseline_package_ref TEXT COMMENT '版本生成时的基线包引用',
+  baseline_package_sha256 VARCHAR(80) COMMENT '基线包校验值',
+  status VARCHAR(32) NOT NULL COMMENT '当前状态',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  UNIQUE (version_id),
+  UNIQUE (asset_id, version_no)
+) COMMENT='Skill版本快照';
+
+CREATE TABLE IF NOT EXISTS ce_stage_developments (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  space_name VARCHAR(190) DEFAULT NULL COMMENT '空间名称快照',
+  space_type VARCHAR(16) DEFAULT NULL COMMENT '空间类型：PERSONAL或TEAM',
+  space_id VARCHAR(128) DEFAULT NULL COMMENT '所属空间ID',
+  owner_user_id VARCHAR(128) NOT NULL COMMENT '记录归属用户ID',
+  display_name VARCHAR(128) NOT NULL COMMENT '显示名称快照',
+  flow_key VARCHAR(32) NOT NULL COMMENT '所属流程标识',
+  stage_key VARCHAR(32) NOT NULL COMMENT '目标阶段标识',
+  extension_mode VARCHAR(32) NOT NULL COMMENT '扩展方式：preprocess、postprocess或replace',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间'
+) COMMENT='Stage开发记录';
+
+CREATE TABLE IF NOT EXISTS ce_skill_audit_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  idempotency_key VARCHAR(64) NOT NULL COMMENT '历史操作幂等标识',
+  asset_id VARCHAR(64) NOT NULL COMMENT 'Skill资产标识，用于任务及版本包关联',
+  owner_user_id VARCHAR(128) NOT NULL COMMENT '记录归属用户ID',
+  bot_id VARCHAR(128) NOT NULL COMMENT '来源Bot ID',
+  external_skill_id VARCHAR(190) NOT NULL COMMENT '宿主系统中的Skill标识',
+  display_name VARCHAR(190) NOT NULL COMMENT '显示名称快照',
+  description TEXT COMMENT '描述快照',
+  task_id VARCHAR(64) COMMENT '关联任务ID',
+  version_id VARCHAR(64) COMMENT '版本标识，手工版本同时用于写回重试去重',
+  version_no BIGINT COMMENT '版本号',
+  event_type VARCHAR(32) NOT NULL COMMENT '业务事件类型',
+  actor_id VARCHAR(128) COMMENT '操作主体ID',
+  actor_type VARCHAR(16) NOT NULL COMMENT '操作主体类型：user或system',
+  result VARCHAR(64) NOT NULL COMMENT '历史操作结果',
+  detail_json TEXT COMMENT '详情JSON',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间'
+) COMMENT='Skill历史操作审计记录';
+
+CREATE TABLE IF NOT EXISTS ce_skill_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  business_key VARCHAR(190) NOT NULL COMMENT '一次注册或任务的业务去重键',
+  asset_id VARCHAR(64) NOT NULL COMMENT 'Skill资产标识，用于任务及版本包关联',
+  owner_user_id VARCHAR(128) NOT NULL COMMENT '记录归属用户ID',
+  bot_id VARCHAR(128) NOT NULL COMMENT '来源Bot ID',
+  external_skill_id VARCHAR(190) NOT NULL COMMENT '宿主系统中的Skill标识',
+  display_name VARCHAR(190) NOT NULL COMMENT '显示名称快照',
+  description TEXT COMMENT '描述快照',
+  task_id VARCHAR(64) COMMENT '关联任务ID',
+  event_type VARCHAR(32) NOT NULL COMMENT '业务事件类型',
+  status VARCHAR(32) NOT NULL COMMENT '当前状态',
+  outcome VARCHAR(64) COMMENT '处理结果',
+  actor_id VARCHAR(128) COMMENT '操作主体ID',
+  actor_type VARCHAR(16) NOT NULL COMMENT '操作主体类型：user或system',
+  version_from_id VARCHAR(64) COMMENT '起始版本标识',
+  version_to_id VARCHAR(64) COMMENT '结果版本标识',
+  waiting_interaction_id VARCHAR(64) COMMENT '当前等待回答的交互标识',
+  summary TEXT COMMENT '事件摘要',
+  detail_json TEXT COMMENT '详情JSON',
+  started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '业务事件开始时间',
+  completed_at TIMESTAMP NULL DEFAULT NULL COMMENT '业务事件结束时间',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  UNIQUE (business_key)
+) COMMENT='Skill业务事件';
+
+CREATE TABLE IF NOT EXISTS ce_app_config (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+  config_key VARCHAR(64) NOT NULL COMMENT '配置键',
+  config_json TEXT NOT NULL COMMENT '配置内容JSON',
+  version BIGINT NOT NULL DEFAULT 1 COMMENT '配置修订号',
+  enabled BIGINT NOT NULL DEFAULT 1 COMMENT '是否启用：1启用，0禁用',
+  description TEXT COMMENT '描述快照',
+  updated_by VARCHAR(190) COMMENT '最近修改人ID',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  UNIQUE (config_key)
+) COMMENT='Evolve通用JSON配置';

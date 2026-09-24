@@ -91,7 +91,7 @@ function eventView(
   const version = (id: string | null, no: number | null) => id && no != null
     ? { versionId: id, version: `v${no}` } : null;
   return {
-    eventId: event.event_id,
+    eventId: String(event.id),
     assetId: event.asset_id,
     name: event.display_name,
     description: event.description,
@@ -299,7 +299,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
         version: { kind: "manual", data: {
           versionId, assetId: asset.asset_id, baseVersionId,
           packageRef: `oss://${getArtifactBucket()}/${key}`, packageSha256: `sha256:${packageDigest}`,
-          creationKind, sourceVersionId: sourceVersion.version_id, sourceVersionNo: Number(sourceVersion.version_no),
+          creationKind, sourceVersionId: sourceVersion.version_id,
           createdBy: requestIdentity.userId,
         } },
       });

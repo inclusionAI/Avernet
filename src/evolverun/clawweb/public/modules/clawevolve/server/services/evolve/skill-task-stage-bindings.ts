@@ -33,7 +33,7 @@ export function parseSkillTaskStageBindings(value: unknown): SkillTaskStageBindi
       || typeof item.spaceId !== "string" || !item.spaceId.trim() || item.spaceId !== item.spaceId.trim() || item.spaceId.length > 128
       || (item.action !== "diagnose" && item.action !== "hardening" && item.action !== "optimize")
       || typeof item.stage !== "string" || !isStageExtensionMode(item.mode)
-      || typeof item.stageSkillId !== "string" || !/^STAGESKILL-[A-Z0-9-]+$/.test(item.stageSkillId)
+      || typeof item.stageSkillId !== "string" || !/^[1-9][0-9]*$/.test(item.stageSkillId)
       || item.stageSkillId.length > 64) throw invalid(`bindings[${index}] 字段无效`);
     const stage = findOfficialStage(item.stage);
     if (!stage || !stage.extensionModes.includes(item.mode)) throw invalid(`bindings[${index}] Stage 或扩展方式不受支持`);

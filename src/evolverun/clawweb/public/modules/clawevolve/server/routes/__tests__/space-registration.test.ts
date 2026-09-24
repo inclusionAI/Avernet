@@ -286,14 +286,14 @@ describe("Space registration with real repositories", () => {
     await assets.createAsset({ assetId: "legacy-asset", versionId: "legacy-version", ownerUserId: owner,
       botId: "bot-fixture", externalSkillId: "legacy-skill", displayName: "Historical Skill",
       packageRef: "fixture:legacy-package", packageSha256: "legacy-checksum" });
-    await stages.createDevelopment({ stageSkillId: "legacy-stage", ownerUserId: owner,
+    const development = await stages.createDevelopment({ ownerUserId: owner,
       displayName: "Historical Stage", flow: "bot_evolution", stage: "diagnose", mode: "preprocess" });
-    await stages.createImplementation({ stageSkillId: "legacy-stage", implementationId: "legacy-implementation",
+    await stages.createImplementation({ stageSkillId: String(development.id), implementationId: "legacy-implementation",
       ownerUserId: owner, displayName: "Historical Stage", stage: "diagnose", mode: "preprocess", versionNo: 1,
       packageRef: "fixture:legacy-package", packageSha256: "legacy-checksum", staticValidation: {} });
     vi.mocked(hostSpaces.listAccessibleSpaces).mockResolvedValue([]);
 
-    const paths = ["/skill-assets/legacy-asset", "/stage-skills/legacy-implementation", "/stage-developments/legacy-stage"];
+    const paths = ["/skill-assets/legacy-asset", "/stage-skills/legacy-implementation", `/stage-developments/${development.id}`];
     for (const path of paths) {
       expect(await bodyOf(await get(path))).toMatchObject(noSpaceView);
       expect((await get(path, member)).status, path).toBe(404);

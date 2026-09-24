@@ -604,6 +604,7 @@ async function runMigrations(db: IDatabase, dbType: DbType): Promise<void> {
     if (migration.version <= current) continue;
     if (migration.sqliteOnly && dbType !== "sqlite") continue;
     if (migration.mysqlOnly && dbType !== "mysql" && dbType !== "zdas") continue;
+    if (migration.migrate) await migration.migrate(db);
     for (const ddl of migration.sql) {
       try {
         await db.exec(db.dialect.renderDdl(ddl));

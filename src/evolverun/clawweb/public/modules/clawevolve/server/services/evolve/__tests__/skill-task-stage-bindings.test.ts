@@ -3,7 +3,7 @@ import type { SkillTaskHostPresetContext } from "../../../contracts/evolve-exten
 import { parseSkillTaskStageBindings, resolveSkillTaskStageBindings, type SkillTaskStageBinding } from "../skill-task-stage-bindings.js";
 
 const binding: SkillTaskStageBinding = { spaceType: "TEAM", spaceId: "team-alpha", action: "optimize",
-  stage: "diagnose", mode: "preprocess", stageSkillId: "STAGESKILL-EXAMPLE" };
+  stage: "diagnose", mode: "preprocess", stageSkillId: "1" };
 const context: SkillTaskHostPresetContext = {
   action: "optimize", actorUserId: "reader",
   targetSkill: { assetId: "asset", botId: "bot", ownerUserId: "owner", displayName: "Target", spaceType: "TEAM", spaceId: "team-alpha" },

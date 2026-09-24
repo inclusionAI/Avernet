@@ -69,7 +69,7 @@ internal Message adapter. Stage scheduling and business contracts are shared.
 
 `ce_app_config` stores generic JSON values under unique `config_key` entries.
 Its repository validates JSON syntax only. The Stage-binding consumer validates
-`skill_task_stage_bindings` using this schema (opaque IDs shown as examples):
+`skill_task_stage_bindings` using this schema (space IDs remain opaque; Stage IDs reference development record primary keys):
 
 ```json
 {
@@ -80,7 +80,7 @@ Its repository validates JSON syntax only. The Stage-binding consumer validates
       "action": "optimize",
       "stage": "diagnose",
       "mode": "preprocess",
-      "stageSkillId": "STAGESKILL-EXAMPLE"
+      "stageSkillId": "1"
     }
   ]
 }
