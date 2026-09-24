@@ -82,6 +82,10 @@ NON_SECRET_VALUE_RE = re.compile(
     r"os\.getenv\([^)]*\)|process\.env\.[A-Z0-9_]+)$"
 )
 
+# These values name entries in the existing secret resolver, not credentials.
+SECRET_REFERENCE_RE = re.compile(r"^other_manual_agentclaw_[a-z0-9_]+$")
+PYTHON_ATTRIBUTE_RE = re.compile(r"^\(*[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\)*$")
+
 
 def _entropy(value: str) -> float:
     counts: dict[str, int] = {}
@@ -98,7 +102,8 @@ def _looks_like_plaintext_value(value: str) -> bool:
     # such as `"KEY=" + value` as a literal credential.
     if any(char.isspace() for char in value):
         return False
-    if len(value) < 12 or PLACEHOLDER_RE.fullmatch(value) or NON_SECRET_VALUE_RE.fullmatch(value):
+    if (len(value) < 12 or PLACEHOLDER_RE.fullmatch(value)
+            or NON_SECRET_VALUE_RE.fullmatch(value) or SECRET_REFERENCE_RE.fullmatch(value)):
         return False
     # A high-entropy value is a strong signal. Password/secret assignments are
     # also suspicious at a lower threshold because human-generated secrets can
@@ -190,6 +195,9 @@ def _findings(diff: str) -> list[Finding]:
                 if assignment is None:
                     continue
                 value = assignment.group("quoted") or assignment.group("bare") or ""
+                if (path.endswith(".py") and assignment.group("quoted") is None
+                        and PYTHON_ATTRIBUTE_RE.fullmatch(value)):
+                    continue
                 if _looks_like_plaintext_value(value):
                     findings.append(Finding(path, line, rule, _redact_content(content)))
                     break

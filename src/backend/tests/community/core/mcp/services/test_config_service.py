@@ -670,7 +670,7 @@ class TestMCPConfigServiceBuildPayload:
         repo = MagicMock()
         repo.get_by_user_and_server_code.return_value = {
             "extra_config": {
-                "api_key": "authorization=user-secret",
+                "api_key": "test-token",
                 "headers": {"X-User-Secret": "secret"},
                 "transport_protocol": "SSE",
             }
