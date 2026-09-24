@@ -20,8 +20,8 @@ export const evolveTables = [
   integration_test_task_id VARCHAR(64) COMMENT '集成测试任务ID',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间',
   gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '修改时间',
-  UNIQUE (implementation_id),
-  UNIQUE (stage_skill_id, version_no)
+  UNIQUE INDEX uk_implementation_id (implementation_id),
+  UNIQUE INDEX uk_stage_skill_version (stage_skill_id, version_no)
 ) COMMENT='Stage Skill实现版本'`,
   `CREATE TABLE IF NOT EXISTS ce_stage_extension_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT COMMENT '主键ID',
@@ -32,7 +32,7 @@ export const evolveTables = [
   implementation_id VARCHAR(64) NOT NULL COMMENT '执行实现标识，用于冻结任务和运行包引用',
   initial_input_json TEXT COMMENT '冻结的初始输入JSON',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间',
-  UNIQUE (step_id)
+  UNIQUE INDEX uk_step_id (step_id)
 ) COMMENT='Stage扩展执行记录'`,
   `CREATE TABLE IF NOT EXISTS ce_stage_interactions (
   id INTEGER PRIMARY KEY AUTOINCREMENT COMMENT '主键ID',
@@ -45,8 +45,8 @@ export const evolveTables = [
   response_json TEXT COMMENT '用户回答JSON',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间',
   gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '修改时间',
-  UNIQUE (interaction_id),
-  UNIQUE (step_id, attempt_no)
+  UNIQUE INDEX uk_interaction_id (interaction_id),
+  UNIQUE INDEX uk_step_attempt (step_id, attempt_no)
 ) COMMENT='Stage用户交互记录'`,
   `CREATE TABLE IF NOT EXISTS ce_skill_assets (
   id INTEGER PRIMARY KEY AUTOINCREMENT COMMENT '主键ID',
@@ -63,8 +63,8 @@ export const evolveTables = [
   current_version_no INTEGER NOT NULL DEFAULT 1 COMMENT '当前生效版本号',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间',
   gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '修改时间',
-  UNIQUE (asset_id),
-  UNIQUE (owner_user_id, bot_id, external_skill_id)
+  UNIQUE INDEX uk_asset_id (asset_id),
+  UNIQUE INDEX uk_owner_bot_skill (owner_user_id, bot_id, external_skill_id)
 ) COMMENT='Skill资产'`,
   `CREATE TABLE IF NOT EXISTS ce_skill_versions (
   id INTEGER PRIMARY KEY AUTOINCREMENT COMMENT '主键ID',
@@ -81,8 +81,8 @@ export const evolveTables = [
   baseline_package_sha256 VARCHAR(80) COMMENT '基线包校验值',
   status VARCHAR(32) NOT NULL COMMENT '当前状态',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间',
-  UNIQUE (version_id),
-  UNIQUE (asset_id, version_no)
+  UNIQUE INDEX uk_version_id (version_id),
+  UNIQUE INDEX uk_asset_version (asset_id, version_no)
 ) COMMENT='Skill版本快照'`,
   `CREATE TABLE IF NOT EXISTS ce_stage_developments (
   id INTEGER PRIMARY KEY AUTOINCREMENT COMMENT '主键ID',
@@ -140,7 +140,7 @@ export const evolveTables = [
   completed_at TIMESTAMP NULL DEFAULT NULL COMMENT '业务事件结束时间',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间',
   gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '修改时间',
-  UNIQUE (business_key)
+  UNIQUE INDEX uk_business_key (business_key)
 ) COMMENT='Skill业务事件'`,
   `CREATE TABLE IF NOT EXISTS ce_app_config (
   id INTEGER PRIMARY KEY AUTOINCREMENT COMMENT '主键ID',
@@ -152,6 +152,6 @@ export const evolveTables = [
   updated_by VARCHAR(190) COMMENT '最近修改人ID',
   gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '创建时间',
   gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '修改时间',
-  UNIQUE (config_key)
+  UNIQUE INDEX uk_config_key (config_key)
 ) COMMENT='Evolve通用JSON配置'`
 ] as const;
