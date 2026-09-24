@@ -856,3 +856,18 @@ class TestBuildChatMetadataTitleModel:
         )
         assert "title" not in result
         assert "model" not in result
+
+    def test_sender_options_copied_as_dict(self):
+        """sender_options 以嵌套 dict 原样透传（materialize 路径按 dict 读 from）。"""
+        result = build_chat_metadata(
+            {"sender_options": {"from": "owner"}},
+            run_id="run-1",
+            eval_session_log=NoopEvalSessionLog(),
+        )
+        assert result["sender_options"] == {"from": "owner"}
+
+    def test_absent_sender_options_omitted(self):
+        result = build_chat_metadata(
+            {}, run_id="run-2", eval_session_log=NoopEvalSessionLog()
+        )
+        assert "sender_options" not in result

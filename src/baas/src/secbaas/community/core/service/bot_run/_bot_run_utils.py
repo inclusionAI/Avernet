@@ -256,7 +256,7 @@ def build_chat_metadata(
     metadata: dict[str, Any] | None,
     run_id: str,
     eval_session_log: EvalSessionLog,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """从 metadata 中构造 chat_metadata，用于透传到 WS chat 请求。
 
     参考 _report_log_relation 的取值逻辑，提取 biz_task_id / biz_scene。
@@ -264,6 +264,9 @@ def build_chat_metadata(
     EvalSessionLogProtocol Plugin 增加观测字段。
     title/model 复制到 chat_metadata，供 send 时
     _materialize_session 恢复会话属性（引擎忽略未知字段）。
+    sender_options 原样复制（嵌套 dict）：session_pending 路径下
+    chat_metadata 会作为 metadata 流入 _materialize_session →
+    resolve_user_id，按 dict 读取 .get("from") 解析 owner 身份。
     """
     metadata = metadata or {}
     biz_task_id = (
@@ -281,7 +284,7 @@ def build_chat_metadata(
             if metadata.get("biz_scene") is not None
             else "default"
         )
-    chat_metadata: dict[str, str] = {
+    chat_metadata: dict[str, Any] = {
         "biz_task_id": str(biz_task_id),
         "biz_scene": str(biz_scene),
     }
@@ -300,6 +303,10 @@ def build_chat_metadata(
         chat_metadata["title"] = str(metadata["title"])
     if metadata.get("model"):
         chat_metadata["model"] = str(metadata["model"])
+    # 同样在 enrich 之后写入；必须是嵌套 dict 而非 JSON 字符串，
+    # materialize 路径的 resolve_user_id 按 dict 读取 .get("from")。
+    if metadata.get("sender_options"):
+        chat_metadata["sender_options"] = metadata["sender_options"]
     return chat_metadata
 
 
