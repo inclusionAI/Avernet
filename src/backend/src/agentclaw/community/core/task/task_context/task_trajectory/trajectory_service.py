@@ -102,6 +102,9 @@ from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConf
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
+    from agentclaw.community.core.task.task_context.task_artifact.artifact_service import (
+        TaskArtifactServiceProtocol,
+    )
     from agentclaw.community.core.task.task_context.task_graph_service import (
         TaskGraphService,
     )
@@ -364,6 +367,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         graph: "TaskGraphService | None" = None,
         bcs: "BcsClientPort | None" = None,
         bcs_bot_tokens: "BcsBotTokenProvider | None" = None,
+        artifact_service: "TaskArtifactServiceProtocol | None" = None,
     ) -> None:
         """``graph`` + ``bcs`` (the RUNNING-node session probe's collaborators)
         are optional lightweight-DI deps: either unbound/None → the probe is
@@ -375,7 +379,12 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         (``BcsBotTokenProvider``):BCS 会话历史读口有参与者级 ACL(401 "valid Human
         identity or Bot token is required")——服务 HMAC 签名不是会话参与者;探测带
         持有者 bot 的 Bearer 才能读到明细。未注入/解析不到 → 裸 HMAC 尝试,401 再
-        按既有路径 WARNING 跳过(降级不阻断主分析)。"""
+        按既有路径 WARNING 跳过(降级不阻断主分析)。
+
+        ``artifact_service``(spec 2026-09-23-task-artifact-manifest §4 读侧)是
+        末位事件产物富化(``_attach_node_artifacts``)的可选依赖:未绑定/None → 事件
+        ``artifacts`` 保持 None(缺字段=无信号),轨迹本体零变化;``TaskPersistenceModule``
+        经 try/except-get 兜底接线(样板 bcs_bot_tokens)。"""
         self._assembler = assembler
         self._repo = repo
         self._analyzer = analyzer
@@ -383,6 +392,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         self._graph = graph
         self._bcs = bcs
         self._bcs_bot_tokens = bcs_bot_tokens
+        self._artifact_service = artifact_service
 
     async def get_trajectory(
         self,
@@ -422,6 +432,7 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         if not do_analysis:
             trajectory = self._assembler.assemble(task_id)
             self._attach_node_outputs(trajectory)
+            self._attach_node_artifacts(trajectory)
             records = self._safe_list_records(task_id)
             self._attach_session_msgs(trajectory, records)
             return trajectory
@@ -448,6 +459,9 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
         #     当前产出(task_execution_graph 查询接口)。旁路,失败降级不抛;两模式
         #     返回的 timeline 同形态(含快路径直接返回的持久化分析)。
         self._attach_node_outputs(trajectory)
+        # 1a'. 产物 manifest 读时富化(spec 2026-09-23-task-artifact-manifest §4):
+        #     同旁路同兜底,快路径与慢路径返回的 timeline 同形态。
+        self._attach_node_artifacts(trajectory)
 
         # 1b. Read ALL the task's event rows ONCE — feeding both the timeline
         #     fingerprint and the ext_info_lookup below. Read failure → WARNING
@@ -611,6 +625,46 @@ class TaskTrajectoryService(TaskTrajectoryServiceProtocol):
                 if out:
                     ev.output = dict(out)
         self._attach_submit_goal(trajectory, root_spec)
+
+    def _attach_node_artifacts(self, trajectory: TaskTrajectory) -> None:
+        """把每个子任务(task_id+node_id)的**产物 manifest**挂到它在 timeline 中的
+        **最后一条**事件上(spec 2026-09-23-task-artifact-manifest §4 读时富化)。
+
+        数据源 = ``TaskArtifactServiceProtocol.list_artifacts_for_task``(descriptor
+        形状 = ``TaskArtifact.to_dict()`` manifest dict,DTO/HTML 直接透传);倒序扫
+        timeline 找每个 node 的末位事件(last_seen 去重,样板 ``_attach_node_outputs``);
+        分桶为空/服务未接线 → 不挂(事件保持 ``artifacts=None``,缺字段=无信号)。
+
+        旁路保障:``artifact_service`` 未接线(轻量 DI)→ 静默跳过;读失败 → WARNING
+        + 返回未富化;一律**不**影响 ``get_trajectory`` 本体返回、不写库、不进
+        ``timeline_version`` 指纹(纯内存读态)。
+        """
+        if getattr(self, "_artifact_service", None) is None or not trajectory.timeline:
+            return
+        try:
+            arts = self._artifact_service.list_artifacts_for_task(trajectory.task_id)
+        except Exception as ex:  # noqa: BLE001  artifact 读失败 → 不富化,轨迹本体照常
+            logger.warning(
+                "[task][trajectory] 产物富化读取失败,跳过 task=%s: %s: %s",
+                trajectory.task_id, type(ex).__name__, ex,
+            )
+            return
+        by_node: dict[str, list[dict]] = {}
+        for art in arts:
+            try:
+                by_node.setdefault(art.scope.node_id, []).append(art.to_dict())
+            except Exception:  # noqa: BLE001  单行 to_dict 失败 → 跳过该行
+                continue
+        if not by_node:
+            return
+        last_seen: set[str] = set()
+        for ev in reversed(trajectory.timeline):
+            if ev.node_id in last_seen:
+                continue  # 该节点更早的事件:production 只挂最后一条
+            last_seen.add(ev.node_id)
+            descriptors = by_node.get(ev.node_id)
+            if descriptors:
+                ev.artifacts = list(descriptors)
 
     def _attach_submit_goal(self, trajectory: TaskTrajectory, root_spec) -> None:
         """把 timeline **第一条 submit 事件**的 ``action_input`` 富化为 TaskSpec 的

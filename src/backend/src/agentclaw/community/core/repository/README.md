@@ -161,6 +161,8 @@ provides:
   - TaskCallbackRepositoryProtocol
   - TaskCallbackCorrelationRepositoryProtocol
   - TaskTrajectoryRepositoryProtocol
+  - TaskArtifactRepositoryProtocol
+  - TaskArtifactRepository    # @inject impl — same role, same surface
   - TaskDiscoveryLockRepositoryProtocol
   # publishing
   - BotPublishRepositoryProtocol

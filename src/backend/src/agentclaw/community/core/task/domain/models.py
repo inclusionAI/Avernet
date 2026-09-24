@@ -216,6 +216,11 @@ class DoneOutput:
     actual_goal: Goal
     output: dict[str, Any]
     acceptance_result: AcceptanceResult
+    # 节点产物 manifest dict 列表(spec 2026-09-23-task-artifact-manifest §4 读侧):
+    # get_task_context 三条件判定不动 —— 由组装处在 TaskContext 产出后经
+    # artifact_service 分桶补挂(artifact 未接线/读失败 → 默认空列表,保底不破坏
+    # 既有调用方);不持久化、不进既有 output 字段。
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -260,6 +265,13 @@ class RuntimeInfo:
     actual_goal: Goal | None = None          # 实际执行目标
     output: dict[str, Any] = field(default_factory=dict)
     acceptance_result: AcceptanceResult | None = None
+    # 产物 id 读时富化口径(spec 2026-09-23-task-artifact-manifest §4;不落库 ——
+    # repository/serializers 的 runtime_to_dict/from_dict 刻意不读不写这两个字段,
+    # 样本 TrajectoryEvent.session_msgs 的"读时富化不落库"先例)。HTTP DTO 不再单列
+    # 重复的 id 投影:TaskNodeDTO.artifacts 已带全部 artifact_id 与 is_primary 标记,
+    # id 列表/primary id 可由前端自取 —— 本字段仅为后续编排核消费保留的领域口径。
+    output_artifact_ids: list[str] = field(default_factory=list)   # 该节点全部产物 artifact_id
+    primary_output_artifact_id: str | None = None                  # 该节点当前可见产物 id(latest_for_node)
     progress_reason: str | None = None  # why this node/assignee was advanced
     failure_reason: str | None = None   # why planning/search/delivery/execution failed
     extend_props: dict[str, Any] = field(default_factory=dict)  # miss_events/崩溃栈/超时/hung_reason(stuck)

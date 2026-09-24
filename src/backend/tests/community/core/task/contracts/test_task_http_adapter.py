@@ -23,6 +23,9 @@ from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.principal import require_user_id
@@ -93,7 +96,25 @@ class _StubDiscoverModule(Module):
     """BotDiscover/BotPublic 服务端口 stub:search 返空(端口未激活,不阻断装配)。
 
     TaskModule.task_service 依赖 BotDiscoverServiceProtocol + BotPublicServiceProtocol(非 singlebox
-    走 ``default`` 分支,bot_public 未实际使用但 DI 仍需绑定,否则 injector 直实例化 Protocol 抛 TypeError)。"""
+    走 ``default`` 分支,bot_public 未实际使用但 DI 仍需绑定,否则 injector 直实例化 Protocol 抛 TypeError)。
+
+    另含 dashboard 产物读侧富化协议的空数据 stub(harness 挂载公开面 dashboard 路由,
+    请求期 resolve 需要;契约断言不涉及产物,读方法返空即可)。"""
+
+    @singleton
+    @provider
+    def artifact_service(self) -> TaskArtifactServiceProtocol:
+        class _A:
+            def publish_output(self, *args, **kwargs):  # 写侧 no-op(TaskModule 折叠 fire 复用同协议)
+                return 0
+
+            def list_artifacts_for_task(self, task_id):  # noqa: ANN001
+                return []
+
+            def primary_artifact_ids_by_node(self, task_id):  # noqa: ANN001
+                return {}
+
+        return _A()  # type: ignore[return-value]
 
     @singleton
     @provider

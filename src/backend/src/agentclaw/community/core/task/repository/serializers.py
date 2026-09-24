@@ -93,6 +93,9 @@ def task_spec_from_dict(value: dict[str, Any]) -> TaskSpec:
 
 
 def runtime_to_dict(runtime: RuntimeInfo) -> dict[str, Any]:
+    # ``output_artifact_ids`` / ``primary_output_artifact_id`` 为读时富化领域口径
+    # (spec 2026-09-23-task-artifact-manifest §4):刻意不进持久化 dict,序列化/
+    # 反序列化对此零感应(runtime_from_dict 同样不恢复,缺字段=无信号)。
     return {
         "run_mode": runtime.run_mode,
         "assignee": runtime.assignee,

@@ -719,7 +719,14 @@ def apply_relay_plan_result(
 
 
 def get_task_context(self, task_id: str) -> TaskContext:
-    """Project the latest persisted business facts without graph topology."""
+    """Project the latest persisted business facts without graph topology.
+
+    DoneOutput 的产物轨(spec 2026-09-23-task-artifact-manifest §4):三条件判定
+    逻辑不动,产物 manifest 由组装处在 ``outputs`` 产出后经 ``artifact_service``
+    分桶补挂(``bind_artifact_service`` 写侧接线的同一协议,读侧方法见
+    ``TaskArtifactService``);服务未接线/读失败 → 保持默认空列表(缺字段=无信号,
+    保底不破坏既有调用方),不写库、不进 GraphContext 其它字段。
+    """
     with self._lock_for(task_id):
         graph = self._require_graph(task_id)
         root = self._require_node(graph, graph.task_id)
@@ -745,8 +752,31 @@ def get_task_context(self, task_id: str) -> TaskContext:
                     acceptance_result=runtime.acceptance_result,
                 )
             )
+        _attach_done_output_artifacts(self, task_id, outputs)
         return TaskContext(
             spec=root.task_spec,
             all_done_output=outputs,
             gaps=[str(item) for item in graph.extend_props.get("gaps", [])],
         )
+
+
+def _attach_done_output_artifacts(self, task_id: str, outputs: list[DoneOutput]) -> None:
+    """组装后补挂 ``DoneOutput.artifacts``(读时富化,观测旁路)。
+
+    服务未传 or ``artifact_service`` 未接线(轻量 DI / standalone)或读失败 → 各行
+    保持默认空列表,不抛、不写库;单行 ``to_dict`` 失败跳过该行。
+    """
+    artifact_service = getattr(self, "_artifact_service", None)
+    if artifact_service is None or not outputs:
+        return
+    try:
+        by_node: dict[str, list] = {}
+        for art in artifact_service.list_artifacts_for_task(task_id):
+            try:
+                by_node.setdefault(art.scope.node_id, []).append(art.to_dict())
+            except Exception:  # noqa: BLE001  单行坏 manifest → 跳过该行
+                continue
+        for item in outputs:
+            item.artifacts = by_node.get(item.node_id, [])
+    except Exception:  # noqa: BLE001  读侧富化失败 → 保持默认空,不破坏 context 组装
+        return

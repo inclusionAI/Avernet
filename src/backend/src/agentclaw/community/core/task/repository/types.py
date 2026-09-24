@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from agentclaw.community.core.task.domain.models import (
     AcceptanceResult,
@@ -287,3 +287,73 @@ class TaskCallbackCorrelationRecord:
     node_id: str
     retry: int
     gmt_create: Optional[datetime] = None
+
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.task.task_context.task_artifact.models import (
+        TaskArtifact,
+    )
+
+
+@dataclass(frozen=True)
+class TaskArtifactRecord:
+    """Table-faithful record for one ``task_artifact`` row(不可变产物 manifest)。
+
+    spec:``2026-09-23-task-artifact-manifest``。``content`` 为 kind-tagged
+    content dict(领域红线:经 ``from_content_dict`` 分派,未知 kind 抛
+    ``TaskArtifactContentError``);``content_hash`` 为 ``"sha256:<hex64>"``
+    内容寻址摘要,构成 dedupe 唯一键的一部分(同 (task,node,attempt) 同
+    内容的重复发布在库层收敛)。``created_at`` 为业务毫秒时间戳(排序键,
+    对齐轨迹行 int-ms 约定);``gmt_*`` 为 storage 审计列。不可变语义:
+    无 update 方法,修订 = 新行 + ``supersedes``。
+    """
+
+    id: int
+    artifact_id: str
+    task_id: str
+    node_id: str
+    attempt: int
+    artifact_kind: str
+    content_kind: str
+    content: dict
+    content_hash: str
+    created_at: int = 0
+    supersedes: Optional[str] = None
+    derived_from: Optional[list] = None
+    created_by: Optional[str] = None
+    gmt_create: Optional[datetime] = None
+    gmt_modified: Optional[datetime] = None
+
+    def to_artifact(self) -> "TaskArtifact":
+        """Project onto the domain manifest (content 经分派红线)。"""
+        from agentclaw.community.core.task.domain.errors import (
+            TaskArtifactContentError,
+        )
+        from agentclaw.community.core.task.task_context.task_artifact.models import (
+            ArtifactKind,
+            ArtifactLineage,
+            ArtifactScope,
+            TaskArtifact,
+            from_content_dict,
+        )
+        try:
+            kind = ArtifactKind(self.artifact_kind)
+        except ValueError as exc:
+            raise TaskArtifactContentError(
+                f"unknown artifact kind: {self.artifact_kind!r}") from exc
+        return TaskArtifact(
+            artifact_id=self.artifact_id,
+            kind=kind,
+            scope=ArtifactScope(
+                task_id=self.task_id,
+                node_id=self.node_id,
+                attempt=self.attempt,
+            ),
+            content=from_content_dict(self.content),
+            lineage=ArtifactLineage(
+                derived_from=list(self.derived_from or []),
+                supersedes=self.supersedes,
+            ),
+            created_by=self.created_by,
+            created_at=self.created_at,
+        )

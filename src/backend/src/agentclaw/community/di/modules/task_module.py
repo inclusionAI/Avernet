@@ -52,6 +52,9 @@ from agentclaw.community.core.task.task_center.recovery_lifecycle import (
     TaskRecoveryLifecycle,
 )
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
+from agentclaw.community.core.task.task_context.task_artifact.artifact_service import (
+    TaskArtifactServiceProtocol,
+)
 from agentclaw.community.core.task.task_context.task_graph_service import (
     TaskGraphService,
 )
@@ -168,6 +171,14 @@ class TaskModule(Module):
         """
         try:
             graph.bind_repository(injector.get(TaskGraphRepositoryProtocol))
+        except Exception:  # noqa: BLE101 standalone/lightweight test injector
+            pass
+        # Artifact 双写(PR3):artifact repo 未装配(轻量 injector)→ None →
+        # fold fire 点跳过 + INFO,主流程不受影响(决策 #14 可选依赖先例)。
+        try:
+            graph.bind_artifact_service(
+                injector.get(TaskArtifactServiceProtocol)
+            )
         except Exception:  # noqa: BLE101 standalone/lightweight test injector
             pass
         bot = self._resolve_optional_port(

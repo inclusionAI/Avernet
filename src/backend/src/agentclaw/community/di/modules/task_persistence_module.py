@@ -51,11 +51,18 @@ from agentclaw.community.core.repository.implementations.task.task_node_reposito
 from agentclaw.community.core.repository.implementations.task.task_node_run_info_repository import (
     TaskNodeRunInfoRepository,
 )
+from agentclaw.community.core.repository.implementations.task.task_artifact_repository import (
+    TaskArtifactRepository,
+)
 from agentclaw.community.core.repository.implementations.task.task_trajectory_repository import (
     TaskTrajectoryRepository,
 )
+from agentclaw.community.core.repository.protocols.platform import (
+    SessionResourceRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.task import (
     TaskActionLogRepositoryProtocol,
+    TaskArtifactRepositoryProtocol,
     TaskCallbackCorrelationRepositoryProtocol,
     TaskCallbackRepositoryProtocol,
     TaskGraphRepositoryProtocol,
@@ -64,6 +71,10 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
     TaskTrajectoryRepositoryProtocol,
+)
+from agentclaw.community.core.task.task_context.task_artifact.artifact_service import (
+    TaskArtifactService,
+    TaskArtifactServiceProtocol,
 )
 from agentclaw.community.core.task.task_context.task_trajectory.assembler import (
     TaskTrajectoryAssembler,
@@ -131,6 +142,39 @@ class TaskPersistenceModule(Module):
             TaskCallbackCorrelationRepositoryProtocol,
             to=TaskCallbackCorrelationRepository,
             scope=singleton,
+        )
+        # Task artifact manifest repo (spec 2026-09-23-task-artifact-manifest,
+        # PR2): immutable artifact rows; dedupe-idempotent create_or_get.
+        binder.bind(
+            TaskArtifactRepositoryProtocol,
+            to=TaskArtifactRepository,
+            scope=singleton,
+        )
+
+    @singleton
+    @provider
+    def task_artifact_service(
+        self, injector: Injector
+    ) -> "TaskArtifactServiceProtocol":
+        """构造 Artifact 双写服务(spec 2026-09-23-task-artifact-manifest,PR3)。
+
+        仓储必装配期为 ``configure()`` 里的 TaskArtifactRepositoryProtocol
+        singleton;`SessionResourceRepositoryProtocol` 为可选(File 就绪闸用,
+        SessionResourcesModule 绑定;轻量 injector 未装 → None → 文件引用一律
+        拒发布 + WARNING,Text 双写不受影响)。
+        """
+        session_resources = None
+        try:
+            session_resources = injector.get(SessionResourceRepositoryProtocol)
+        except Exception as exc:  # noqa: BLE101 轻量 DI 未装 SessionResourcesModule
+            logger.info(
+                "[task-persistence] SessionResourceRepositoryProtocol 未绑定"
+                " → Artifact 文件分支就绪闸不可用(文件引用将拒发布):%s: %s",
+                type(exc).__name__, exc,
+            )
+        return TaskArtifactService(
+            repo=injector.get(TaskArtifactRepositoryProtocol),
+            session_resource_repo=session_resources,
         )
 
     @singleton
@@ -237,6 +281,18 @@ class TaskPersistenceModule(Module):
                 type(exc).__name__, exc,
             )
             bcs_bot_tokens = None
+        # 产物 manifest 读时富化(spec 2026-09-23-task-artifact-manifest §4;样板
+        # bcs_bot_tokens 的 try/except-get):优先取本模块的 ``task_artifact_service``
+        # provider 单例;轻量 injector 未绑 → None → 末位事件 artifacts 保持 None
+        # (缺字段=无信号),轨迹本体零变化。
+        try:
+            artifact_service = injector.get(TaskArtifactServiceProtocol)
+        except Exception as exc:  # noqa: BLE001 未装配 artifact provider
+            logger.info(
+                "[task-persistence] TaskArtifactServiceProtocol 未绑定 → 轨迹读侧产物富化关闭:%s: %s",
+                type(exc).__name__, exc,
+            )
+            artifact_service = None
         return TaskTrajectoryService(
             assembler=injector.get(TaskTrajectoryAssembler),
             repo=injector.get(TaskTrajectoryRepositoryProtocol),
@@ -245,6 +301,7 @@ class TaskPersistenceModule(Module):
             graph=graph,
             bcs=bcs,
             bcs_bot_tokens=bcs_bot_tokens,
+            artifact_service=artifact_service,
         )
 
     @singleton

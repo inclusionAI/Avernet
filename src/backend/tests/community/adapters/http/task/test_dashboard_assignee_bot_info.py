@@ -17,6 +17,9 @@ from agentclaw.community.adapters.http.openapi_v1.principal import require_user_
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.task import (
     TaskCallbackRepositoryProtocol, TaskInfoRepositoryProtocol,
 )
@@ -66,6 +69,23 @@ class _FakeCallbackRepo:
 
 
 class _StubModule(Module):
+    @singleton
+    @provider
+    def artifact_service(self) -> TaskArtifactServiceProtocol:
+        # dashboard 产物读侧富化的空数据 stub(读写两方法皆"无产物";本组测试只关注
+        # assignee 富化,产物轨为空 = 各节点 artifacts=[])。
+        class _A:
+            def publish_output(self, *args, **kwargs):  # 写侧 no-op(TaskModule 折叠 fire 复用同协议)
+                return 0
+
+            def list_artifacts_for_task(self, task_id):  # noqa: ANN001
+                return []
+
+            def primary_artifact_ids_by_node(self, task_id):  # noqa: ANN001
+                return {}
+
+        return _A()  # type: ignore[return-value]
+
     @singleton
     @provider
     def discover(self) -> BotDiscoverServiceProtocol:

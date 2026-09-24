@@ -285,6 +285,8 @@ from agentclaw.community.core.task.domain.errors import (
     GraphAlreadyInitializedError,
     GraphIntegrityError,
     NodeNotFoundError,
+    TaskArtifactContentError,
+    TaskArtifactPublishError,
     TaskError,
     TaskNotFoundError,
     TaskStateError,
@@ -837,6 +839,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # and ENVELOPE_ERRORS returns on the first isinstance match in insertion order.
     TrajectoryAnalysisNotConfiguredError: (503, "Trajectory analysis bot is not configured"),
     TrajectoryAnalysisError: (504, "Trajectory analysis failed"),
+    # Task artifacts(产物 manifest)。两个都是持久层/不变量故障而非调用方错误:
+    # 500 而非 4xx——发布失败 = 持久化写故障(TaskArtifactPublishError,spec 的
+    # "必须上抛"路径);内容形态非法 = 库行损坏(TaskArtifactContentError,读侧
+    # from_content_dict 红线炸出)。具体信息进日志,公共信封仍固定文案。
+    TaskArtifactPublishError: (500, "Task artifact publish failed"),
+    TaskArtifactContentError: (500, "Task artifact content corrupted"),
     TaskError: (500, "Internal error"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A

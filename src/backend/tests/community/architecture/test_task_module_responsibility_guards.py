@@ -23,6 +23,7 @@ _OWNER_CLASSES = {
     "TaskHarness": "task_harness/harness.py",
     "TaskGraphService": "task_context/task_graph_service.py",
     "TaskTrajectoryService": "task_context/task_trajectory/trajectory_service.py",
+    "TaskArtifactService": "task_context/task_artifact/artifact_service.py",
     "StaticPlanRuntime": "task_plan/static_plan.py",
     "CentralizedExecutionAdapter": "task_runner/execution_adapters.py",
     "RelayExecutionAdapter": "task_runner/execution_adapters.py",

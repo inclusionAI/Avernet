@@ -448,6 +448,43 @@ def _safe_lookup(
         return None
 
 
+def _brief_event_artifacts(arts: list) -> list[dict[str, Any]]:
+    """事件行 ``artifacts``(manifest dict 形状,``TaskArtifact.to_dict()``)→ 喂分析
+    大模型的摘要投影(spec 2026-09-23-task-artifact-manifest §4;让 bot 看到产物侧现场)。
+
+    Text → ``{kind, media_type, text_preview}``(preview ≤200 字截断);File →
+    ``{kind, media_type, file_name, resource_id, size_bytes}``(元数据,引用稳定
+    resource_id,不引用 URL)。非 dict 形态防御跳过;空输入 → 空 list(调用方按
+    缺键语义不加 ``artifacts`` 行)。
+    """
+    briefs: list[dict[str, Any]] = []
+    for art in arts or []:
+        if not isinstance(art, dict):
+            continue
+        raw_content = art.get("content")
+        content = raw_content if isinstance(raw_content, dict) else {}
+        kind = str(art.get("kind") or "")
+        media = str(content.get("media_type") or "")
+        if content.get("kind") == "file":
+            briefs.append({
+                "kind": kind,
+                "media_type": media,
+                "file_name": str(content.get("file_name") or ""),
+                "resource_id": str(content.get("resource_id") or ""),
+                "size_bytes": content.get("size_bytes"),
+            })
+        else:
+            text = str(content.get("text") or "")
+            briefs.append({
+                "kind": kind,
+                "media_type": media,
+                "text_preview": (
+                    text if len(text) <= 200 else text[:200] + "…"
+                ),
+            })
+    return briefs
+
+
 def _build_ext_info_brief(
     timeline: list[TrajectoryEvent],
     ext_info_lookup: Callable[[TrajectoryEvent], dict | None],
@@ -796,6 +833,11 @@ class TaskTrajectoryAnalyzer:
             # 最后一条事件携带;有则透传给 bot(缺省 = 无产出信号,不加键)。
             if getattr(ev, "output", None):
                 row["output"] = ev.output
+            # 读时富化的节点产物 manifest(service._attach_node_artifacts,spec
+            # 2026-09-23-task-artifact-manifest §4):仅最后一条事件携带;有则
+            # 摘要投影透传给 bot(缺省 = 无产物信号,不加键)。
+            if getattr(ev, "artifacts", None):
+                row["artifacts"] = _brief_event_artifacts(ev.artifacts)
             timeline_brief.append(row)
         ext_info_brief = _build_ext_info_brief(trajectory.timeline, ext_info_lookup)
 
@@ -836,6 +878,9 @@ ext_info_brief：调度理由摘要(dispatch rationale)、RESET SLA 指标(elaps
   interface_error 事件的"为何"信号、以及节点产出(output)等——请用这些信息填写 boost_reason,并把其中
   的异常指标纳入根因推导;缺少某个键表示该信号不存在,不是 null。
 timeline_brief：轨迹事件明细(逐条:action_type/action_result/error_type/error_msg/status_to/attempt/output)。
+  各节点产物经可选 artifacts 字段携带(spec 产物 manifest 读侧,仅节点最后一条事件出现):Text 产物以
+  text_preview 截断文本摘要展示,File 产物引用稳定 resource_id 元数据(不携带下载链接 —— 如需佐证请引用
+  file_name/resource_id);缺少该键表示该节点没有已发布产物,不是 null。
 running_sessions：见上文"未结束节点的现场研判"。
 
 ## 输出格式

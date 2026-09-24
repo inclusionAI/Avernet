@@ -46,6 +46,12 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 from agentclaw.community.core.task.task_context import task_graph_support
+from agentclaw.community.core.task.task_context.task_artifact.artifact_service import (
+    TaskArtifactServiceProtocol,
+)
+from agentclaw.community.core.task.task_context.task_artifact.models import (
+    ArtifactKind,
+)
 
 _LOG = logging.getLogger(__name__)
 
@@ -149,6 +155,10 @@ class TaskGraphService:
         self._registry_lock = threading.RLock()
         self._report_local = threading.local()
         self._run_id_counter = 0
+        # Artifact 双写服务(可选依赖;spec 2026-09-23-task-artifact-manifest):
+        # None = 未接线 → fire 点跳过 + INFO(对齐 task_context_service 可选依赖
+        # 先例);组合根经 bind_artifact_service 挂接(DI provider try/except-get)。
+        self._artifact_service: "TaskArtifactServiceProtocol | None" = None
 
     # ===== internal helpers =====
     def bind_repository(self, graph_repo: TaskGraphRepositoryProtocol) -> None:
@@ -158,6 +168,42 @@ class TaskGraphService:
     @property
     def has_repository(self) -> bool:
         return self._graph_repo is not None
+
+    def bind_artifact_service(
+        self, artifact_service: "TaskArtifactServiceProtocol | None"
+    ) -> None:
+        """Attach the artifact dual-write service at the composition root.
+
+        Passing ``None`` is legal (observable unbind → fire points skip with
+        INFO), matching the optional-dependency precedent of the trajectory
+        emit seams (决策 #14 精神:未接线不阻断主流程,双写自然静默关闭)。
+        """
+        self._artifact_service = artifact_service
+
+    def _fire_output_artifacts(
+        self,
+        task_id: str,
+        node_id: str,
+        *,
+        kind: "ArtifactKind | None",
+        output: dict[str, Any],
+        attempt: int,
+        created_by: str | None,
+        relay: bool,
+    ) -> None:
+        """fire 点统一退路:未接线 → INFO 跳过;发布异常按 relay/集中化分工
+        (relay→service 内已降 WARNING;集中化 TaskArtifactPublishError 上抛,
+        由 API 层 envelope 映射 500,spec"持久化失败必须上抛")。"""
+        if self._artifact_service is None:
+            _LOG.info(
+                "[task][artifact] artifact_service 未接线,跳过产物双写"
+                " task=%s node=%s", task_id, node_id,
+            )
+            return
+        self._artifact_service.publish_output(
+            task_id, node_id, attempt, output,
+            kind=kind, created_by=created_by, relay_mode=relay,
+        )
 
     def bind_task_info_repository(
         self, task_info_repo: TaskInfoRepositoryProtocol
@@ -600,6 +646,8 @@ class TaskGraphService:
         派发写:patch.run_mode(str)/assignee 落库 + 置 RUNNING。
         """
 
+        fired: dict[str, Any] = {}
+
         def mutation(graph):
             node = self._require_node(graph, patch.node_id)
             prev_status = node.status
@@ -698,6 +746,17 @@ class TaskGraphService:
                 node.run_info.failure_reason = patch.failure_reason or None
             if patch.extend_props_patch is not None:
                 node.run_info.extend_props.update(patch.extend_props_patch)
+            if patch.output_patch:
+                # fold 后快照经 capture 闭包传递:mutation 会在版本冲突时重放,
+                # fire 只消费最终成功那次(在 _mutate 返回后)—— 重放天然只
+                # fire 一次(spec I7 第一重闸)。attempt 在 extend_props fold
+                # 之后取:同批携带 harness_retries++ 的 patch 即刻生效。
+                fired["output"] = dict(node.run_info.output)
+                fired["attempt"] = int(
+                    node.run_info.extend_props.get("harness_retries", 0) or 0
+                )
+                fired["created_by"] = node.run_info.assignee
+                fired["relay"] = relay_mode
             if (
                 new_status == Status.RUNNING
                 and prev_status != Status.RUNNING
@@ -731,7 +790,12 @@ class TaskGraphService:
                 True,
             )
 
-        return self._mutate_with_version_retry(patch.task_id, mutation)
+        result = self._mutate_with_version_retry(patch.task_id, mutation)
+        if fired:
+            self._fire_output_artifacts(
+                patch.task_id, patch.node_id, kind=None, **fired,
+            )
+        return result
 
     def append_action_event(
         self,
@@ -779,18 +843,42 @@ class TaskGraphService:
     ) -> TaskExecutionGraph:
         """图级原子写口,以可重放 patch 处理跨实例版本冲突。"""
 
+        fired: dict[str, Any] = {}
+        relay_mode_holder: list[bool] = []
+
         def mutation(graph):
+            relay_mode_holder.append(
+                (graph.extend_props.get("execution_config", {}) or {})
+                .get("orchestration_mode") == "relay"
+            )
             if patch.loop_round_increment is not None:
                 graph.loop_round += patch.loop_round_increment
             if patch.status is not None:
                 graph.status = patch.status
             if patch.output_patch is not None:
                 graph.output.update(patch.output_patch)
+                if patch.output_patch:
+                    fired["output"] = dict(graph.output)
+                    fired["attempt"] = int(graph.loop_round or 0)
+                    fired["created_by"] = None
+                    fired["relay"] = relay_mode_holder[-1]
             if patch.extend_props_patch is not None:
                 graph.extend_props.update(patch.extend_props_patch)
             return graph, None, True
 
-        return self._mutate_with_version_retry(task_id, mutation)
+        graph = self._mutate_with_version_retry(task_id, mutation)
+        if fired:
+            root_id = next(
+                (
+                    n.node_id for n in graph.tasks
+                    if n.node_id not in {r.dst_id for r in graph.relations}
+                ),
+                task_id,
+            )
+            self._fire_output_artifacts(
+                task_id, root_id, kind=ArtifactKind.GRAPH_ROLLUP, **fired,
+            )
+        return graph
 
     def delete_task_node(self, task_id: str, node_id: str) -> None:
         """删除单个节点(及其 DEPENDENCY 后代子树 + 相关边)。根(``task_id``)永不可删。

@@ -116,6 +116,11 @@ class TrajectoryEvent:
     analysis: str | None = None              # 内嵌 TrajectoryAnalysis JSON(发射时 None)
     output: dict[str, Any] | None = None      # 读时富化:节点当前产出(仅该节点最后一条事件;不落库)
     session_msgs: list[dict[str, Any]] | None = None  # 读时富化:子任务会话消息(同上;源自末位事件 ext_info.session_msgs,展示/DTO 用,不落库)
+    # 读时富化:节点产物 manifest dict 列表(spec 2026-09-23-task-artifact-manifest §4;
+    # 由 service 经 artifact_service 挂到该节点的最后一条事件上,库行无此列,组装原始值
+    # 为 None,富化失败/未接线也保持 None —— 同 output/session_msgs 的"缺字段=无信号"口径;
+    # 不进 timeline_version 指纹(指纹只敏感于事件行,读态富化零干扰)。
+    artifacts: list[dict[str, Any]] | None = None
 
 
 @dataclass

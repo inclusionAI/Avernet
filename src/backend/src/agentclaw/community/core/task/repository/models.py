@@ -35,6 +35,7 @@ from agentclaw.community.core.task.repository.types import (
     TaskNodeRecord,
     TaskNodeRelationRecord,
     TaskNodeRunInfoRecord,
+    TaskArtifactRecord,
     TaskTrajectoryRecord,
     TrajectoryEventRecord,
 )
@@ -491,4 +492,79 @@ class TaskCallbackCorrelationModel(Base):
             node_id=self.node_id,
             retry=self.retry,
             gmt_create=self.gmt_create,
+        )
+
+
+class TaskArtifactModel(Base):
+    """ORM for ``task_artifact`` — immutable artifact manifest rows (one row
+    per publish; revisions = new rows chained via ``supersedes``).
+
+    Independent entity: NO foreign key / NO association column (trajectory
+    precedent). ``content`` stores the kind-tagged content dict as JSON
+    (MEDIUMTEXT on MySQL — 文本全文不截断,防 64KB TEXT 上限);``content_hash``
+    ("sha256:<hex64>") participates in the dedupe unique key so repeated
+    fires of the same (task, node, attempt, content) collapse to the stored
+    row. ``created_at`` is the business int-ms clock (timeline ordering key);
+    ``gmt_create``/``gmt_modified`` are storage audit columns — on this NEW
+    table the column is named ``gmt_modified`` directly (no legacy
+    ``gmt_modify`` bridge needed).
+    """
+
+    __tablename__ = "task_artifact"
+
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
+    task_id = Column(_TASK_ID, nullable=False)
+    node_id = Column(_NODE_ID, nullable=False)
+    artifact_id = Column(_binary_string(128), nullable=False)
+    artifact_kind = Column(String(64), nullable=False)
+    content_kind = Column(String(32), nullable=False)
+    content = Column(
+        Text().with_variant(mysql.MEDIUMTEXT(), "mysql"), nullable=False
+    )
+    attempt = Column(Integer, nullable=False, default=0)
+    content_hash = Column(String(71), nullable=False)
+    supersedes = Column(String(128), nullable=True)
+    derived_from = Column(Text, nullable=True)  # JSON array(str artifact_id)
+    created_by = Column(String(128), nullable=True)
+    created_at = Column(
+        BigInteger().with_variant(Integer, "sqlite"), nullable=False, default=0
+    )
+    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("uk_task_artifact_id", "artifact_id", unique=True),
+        Index(
+            "uk_task_artifact_dedupe",
+            "task_id", "node_id", "attempt", "content_hash",
+            unique=True,
+        ),
+        Index(
+            "idx_task_artifact_node",
+            "task_id", "node_id", "attempt", "created_at",
+        ),
+        Index("idx_task_artifact_task", "task_id", "created_at"),
+    )
+
+    def to_record(self) -> TaskArtifactRecord:
+        import json as _json
+
+        return TaskArtifactRecord(
+            id=self.id,
+            artifact_id=self.artifact_id,
+            task_id=self.task_id,
+            node_id=self.node_id,
+            attempt=self.attempt,
+            artifact_kind=self.artifact_kind,
+            content_kind=self.content_kind,
+            content=_json.loads(self.content) if self.content else {},
+            content_hash=self.content_hash,
+            supersedes=self.supersedes,
+            derived_from=_json.loads(self.derived_from) if self.derived_from else None,
+            created_by=self.created_by,
+            created_at=self.created_at,
+            gmt_create=self.gmt_create,
+            gmt_modified=self.gmt_modified,
         )

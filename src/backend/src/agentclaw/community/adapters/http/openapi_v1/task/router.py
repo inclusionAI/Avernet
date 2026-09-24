@@ -49,6 +49,9 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_info_request_from_dto,
     trajectory_to_dto,
 )
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactServiceProtocol,
+)
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
 )
@@ -121,18 +124,37 @@ async def get_task_dashboard(
         bool, Query(description="是否返回各节点动作级历史快照(诊断用,默认关)")
     ] = False,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+    artifact_service: TaskArtifactServiceProtocol = Injected(TaskArtifactServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
     """任务执行详情可视化(整图或按 node_id 子树投影),只读。
 
     include_action_log=true 时返回各节点动作级历史快照(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/
     TRANSITION 全量 payload),默认关(诊断页开)。任务/节点不存在 → TaskNotFoundError/NodeNotFoundError
-    → @envelope_errors 映射 404。"""
+    → @envelope_errors 映射 404。
+
+    产物读侧 Descriptor(spec 2026-09-23-task-artifact-manifest §4):经 TaskArtifactServiceProtocol
+    读时富化 TaskNodeDTO.artifacts(is_primary = latest_for_node),无新端点/无 admission 登记;
+    老 run_info.output 字段双轨并存不动。注入协议未绑定时由 Injected 解析报错(与该端点其余
+    服务注入同惯例,轻量测试 injector 须绑定该协议)。"""
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     if include_action_log:
         graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
     else:
         graph = service.get_task_dashboard(task_id, node_id)
-    return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
+    # 产物轨读时富化:分桶 per-node + primary 集合(与老 output 双轨并存,spec §4)。
+    by_node: dict[str, list] = {}
+    for art in artifact_service.list_artifacts_for_task(task_id):
+        by_node.setdefault(art.scope.node_id, []).append(art)
+    primary = set(artifact_service.primary_artifact_ids_by_node(task_id).values())
+    return envelope(
+        graph_to_dto(
+            graph,
+            include_action_log=include_action_log,
+            artifacts_by_node=by_node,
+            primary_artifact_ids=primary,
+        ),
+        request,
+    )
 
 
 @router.get("/trajectory", response_model=Envelope[TaskTrajectoryDTO])

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task.repository.types import (
         BbsTaskOverviewRecord,
         TaskCallbackCorrelationRecord,
+        TaskArtifactRecord,
         TaskActionLogRecord,
         TaskCallbackRecord,
         TaskInfoRecord,
@@ -613,4 +614,60 @@ class TaskCallbackCorrelationRepositoryProtocol(Protocol):
         self, event_id: str
     ) -> Optional["TaskCallbackCorrelationRecord"]:
         """Return the correlation row for ``event_id`` or ``None`` when unknown."""
+        ...
+
+
+@runtime_checkable
+class TaskArtifactRepositoryProtocol(Protocol):
+    """Persistence contract for ``task_artifact``(不可变产物 manifest 表)。
+
+    语义(spec 2026-09-23-task-artifact-manifest):
+    ``create_or_get`` 以 (task_id, node_id, attempt, content_hash) 唯一键幂等 ——
+    冲突时返回已存行,不打翻旧行(双写 fold 重放的库层兜底);**不提供任何
+    update-主字段方法**(内容修订 = 新 artifact_id + ``supersedes``,旧行保留
+    供审计)。分支可空元数据(size/sha256/derived_from)以 None 表达。
+    """
+
+    @abstractmethod
+    def create_or_get(
+        self, record: "TaskArtifactRecord"
+    ) -> "TaskArtifactRecord":
+        """Idempotent publish:行已存在(dedupe 唯一键冲突)→ 返回已存行;
+        否则 INSERT 并返回带真实 id 的新行。持久化失败原样上抛(不吞)。"""
+        ...
+
+    @abstractmethod
+    def get_by_artifact_id(
+        self, artifact_id: str
+    ) -> Optional["TaskArtifactRecord"]:
+        """按稳定 artifact_id 取行;未知 → None。"""
+        ...
+
+    @abstractmethod
+    def list_by_node(
+        self,
+        task_id: str,
+        node_id: str,
+        *,
+        attempt: Optional[int] = None,
+    ) -> list["TaskArtifactRecord"]:
+        """某节点产物行,``ORDER BY attempt DESC, created_at DESC, id DESC``
+        (最新在前);``attempt`` 给定则只取该 attempt 系列(重试序隔离的读侧)。"""
+        ...
+
+    @abstractmethod
+    def list_by_task(self, task_id: str) -> list["TaskArtifactRecord"]:
+        """整个任务的产物行(supersede 链读侧全量;顺序同 list_by_node)。"""
+        ...
+
+    @abstractmethod
+    def latest_for_node(
+        self,
+        task_id: str,
+        node_id: str,
+        *,
+        kind: Optional[str] = None,
+    ) -> Optional["TaskArtifactRecord"]:
+        """该节点当前可见产物(primary 判定的数据源):``attempt`` 最大者中
+        ``created_at/id`` 最新的一行;``kind`` 给定则限业务用途。无 → None。"""
         ...

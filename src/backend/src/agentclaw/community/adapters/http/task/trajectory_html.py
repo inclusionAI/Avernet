@@ -192,6 +192,33 @@ def _render_event(ev: "object") -> str:
         parts.append(f"<pre>{html.escape(payload)}</pre>")
         parts.append("</details>")
 
+    # 产物 manifest(读时富化;仅每个 node 的最后一条事件携带,可折叠;spec
+    # 2026-09-23-task-artifact-manifest §4 Text 截断展示 / File 仅元数据)。
+    # spec 红线:页面**不渲染任何 URL/下载链接** —— manifest 不承载访存能力,
+    # File 只显示 file_name + 稳定 resource_id,访问经既有会话文件接口动态换取。
+    artifacts = getattr(ev, "artifacts", None)
+    if artifacts:
+        parts.append('<details class="ev-input">')
+        parts.append(f"<summary>产物 · artifacts({len(artifacts)})</summary>")
+        for art in artifacts:
+            if not isinstance(art, dict):
+                continue  # 非预期形态 → 跳过该条(防御)
+            content = art.get("content") if isinstance(art.get("content"), dict) else {}
+            kind = html.escape(str(art.get("kind") or ""))
+            media = html.escape(str(content.get("media_type") or ""))
+            if content.get("kind") == "file":
+                rid = html.escape(str(content.get("resource_id") or ""))
+                fname = html.escape(str(content.get("file_name") or ""))
+                parts.append(
+                    f"<pre>[{kind} · {media}] 文件产物 {fname} · resource_id {rid}"
+                    "(经既有会话文件接口访问,此处不提供下载链接)</pre>"
+                )
+            else:
+                text = str(content.get("text") or "")
+                preview = text if len(text) <= 500 else text[:500] + "…"
+                parts.append(f"<pre>[{kind} · {media}]\n{html.escape(preview)}</pre>")
+        parts.append("</details>")
+
     # 会话消息(读时富化;仅每个 node 的最后一条事件携带,可折叠;role|content 逐行)
     session_msgs = getattr(ev, "session_msgs", None)
     if session_msgs:

@@ -99,7 +99,7 @@ def format_task_node_business_instruction(
                 f"S1/8 解析任务最新上下文：GET {backend}/api/v1/collaboration/tasks/{task_id}/context，保存 TaskContext(spec, all_done_output, gaps)。本棒只做当前节点，不修改任何前序节点或根节点运行事实。",
                 "S2/8 计算当前GAP：在本地对齐根 spec.goal.acceptances、all_done_output 的实际目标/最终产出/节点验收事实和既有 gaps，推理当前仍未覆盖的根任务范围；本阶段不调用 HTTP 上报接口。",
                 "S3/8 Bot能力匹配：输入本地 TaskContext、当前 TaskNode.task_spec、IDENTITY.md 职责、已激活 Skills 和工具真实可用状态，输出实际可执行的 actual_goal 或零覆盖 DECLINED。职责覆盖和工具/Skill事实覆盖必须同时成立；通用模型知识、搜索或抓取工具不能扩大职责边界。本阶段不调用 HTTP 上报接口。",
-                "S4/8 任务执行并统一上报：只执行 actual_goal；driver 汇总协作群分内产出，逐条形成节点级验收事实；验收事实必须分桶：已满足项写入 acceptance_result.done_items，未满足项写入 acceptance_result.gap_items，两个数组的并集必须覆盖 actual_goal.acceptances，done_items 不得包含 passed=false 的项。执行完成后再一次性上报 EXECUTION_RESULT。零覆盖时不生成业务产出，上报严格 DECLINED。报告/文档类交付物必须把完整 Markdown 全文放入 payload.output.result。",
+                "S4/8 任务执行并统一上报：只执行 actual_goal；driver 汇总协作群分内产出，逐条形成节点级验收事实；验收事实必须分桶：已满足项写入 acceptance_result.done_items，未满足项写入 acceptance_result.gap_items，两个数组的并集必须覆盖 actual_goal.acceptances，done_items 不得包含 passed=false 的项。执行完成后再一次性上报 EXECUTION_RESULT。零覆盖时不生成业务产出，上报严格 DECLINED。报告/文档类交付物必须把完整 Markdown 全文放入 payload.output.result。产出文件(PDF/图片/压缩包/数据集等)必须先经会话文件链路上传并取得 sr_ 前缀的 resource_id,再以 {resource_id, file_name, size_bytes} 形状把该引用对象放入 payload.output;未就绪(非 ready)的文件引用不会登记为产物,但不阻断文本产物与验收事实的正常上报。",
                 f"POST {callback} 上报 EXECUTION_RESULT；event_id 必须新生成。ACCEPTED 请求体示例：",
                 json.dumps(execution_payload, ensure_ascii=False),
                 "DECLINED 请求体示例如下；DECLINED payload 只能携带 execution_decision，不得携带 actual_goal、output、acceptance_result 或 gaps，不可伪造业务产出，原因写入 failure_reason：",

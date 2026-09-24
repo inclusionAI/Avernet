@@ -11,8 +11,15 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from agentclaw.community.core.task.repository.serializers import task_spec_from_dict
+from agentclaw.community.core.task.task_context.task_artifact.models import (
+    FileArtifactContent,
+    TextArtifactContent,
+)
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.task.task_context.task_artifact.models import (
+        TaskArtifact,
+    )
     from agentclaw.community.core.task.task_context.task_trajectory.models import TaskTrajectory
 
 
@@ -294,6 +301,88 @@ class RuntimeInfoDTO(BaseModel):
     )
 
 
+class ArtifactDescriptorDTO(BaseModel):
+    """单条任务产物的读侧 Descriptor(spec 2026-09-23-task-artifact-manifest §4)。
+
+    双轨并存期的"产物轨":与老 run_info.output 字段并存(老轨不动)。Text 分支经
+    text 投影(截断只发生在读投影);File 分支仅元数据 file dict —— 绝不携带
+    URL/Token/对象存储 key(访问能力由调用方经既有会话文件链路动态换取)。
+    is_primary = 该 node latest_for_node(读时富化,不落库)。
+    """
+
+    artifact_id: str = Field(..., description="产物稳定 id(art_ 前缀;不可变,修订发新行)")
+    kind: str = Field(..., description="业务用途轴 node_result/graph_rollup/internal_control")
+    content_kind: str = Field(..., description="内容技术分支 text/file")
+    media_type: str = Field("", description="MIME 技术轴(与 kind 正交)")
+    attempt: int = Field(0, description="该行发布时的节点执行次数(harness_retries 口径)")
+    supersedes: str | None = Field(
+        None, description="被本行替代的上一行 artifact_id(无则 None)"
+    )
+    derived_from: list[str] = Field(
+        default_factory=list, description="上游派生产物 id(实际使用 M2 前置)"
+    )
+    created_by: str | None = Field(None, description="产出生(bot_id/system;可空)")
+    created_at: int = Field(0, description="发布时间(ms epoch)")
+    is_primary: bool = Field(
+        False, description="是否该 node 当前可见产物(latest_for_node;读时富化,不落库)"
+    )
+    text: str | None = Field(
+        None, description="Text 分支投影(截断上限 4096 字符;File 分支为 None)"
+    )
+    file: dict[str, Any] | None = Field(
+        None,
+        description="File 分支元数据 resource_id/file_name/size_bytes/sha256;不携带 URL",
+    )
+
+
+#: Text 分支读投影的截断上限(spec:Text 全文落库不截断,截断只发生在读投影/DTO)。
+_ARTIFACT_TEXT_PROJECTION_MAX = 4096
+
+
+def artifact_to_dto(
+    art: "TaskArtifact", *, is_primary: bool = False
+) -> ArtifactDescriptorDTO:
+    """领域 ``TaskArtifact`` → 读侧 ``ArtifactDescriptorDTO``(Rule 22 边界翻译位)。
+
+    Text → ``text`` 投影(超 4096 截断加省略号);File → ``file`` 元数据 dict(media_type
+    在两分支均在 DTO 顶层)。
+    """
+    content = art.content
+    text: str | None = None
+    file: dict[str, Any] | None = None
+    content_kind = ""
+    if isinstance(content, TextArtifactContent):
+        content_kind = "text"
+        raw = content.text or ""
+        text = (
+            raw if len(raw) <= _ARTIFACT_TEXT_PROJECTION_MAX
+            else raw[:_ARTIFACT_TEXT_PROJECTION_MAX] + "…"
+        )
+    elif isinstance(content, FileArtifactContent):
+        content_kind = "file"
+        file = {
+            "resource_id": content.resource_id,
+            "file_name": content.file_name,
+            "size_bytes": content.size_bytes,
+            "sha256": content.sha256,
+        }
+    lineage = art.lineage
+    return ArtifactDescriptorDTO(
+        artifact_id=art.artifact_id,
+        kind=str(getattr(art.kind, "value", art.kind)),
+        content_kind=content_kind,
+        media_type=content.media_type,
+        attempt=int(art.scope.attempt or 0),
+        supersedes=lineage.supersedes,
+        derived_from=list(lineage.derived_from or []),
+        created_by=art.created_by,
+        created_at=int(art.created_at or 0),
+        is_primary=is_primary,
+        text=text,
+        file=file,
+    )
+
+
 class TaskNodeDTO(BaseModel):
     """分解树中的单个任务节点(规格 + 运行时信息)。"""
 
@@ -306,6 +395,11 @@ class TaskNodeDTO(BaseModel):
     task_spec: TaskSpecDTO = Field(..., description="节点任务规格")
     run_info: RuntimeInfoDTO = Field(
         default_factory=RuntimeInfoDTO, description="节点运行时信息"
+    )
+    artifacts: list[ArtifactDescriptorDTO] = Field(
+        default_factory=list,
+        description="节点产物 Descriptor 列表(spec 2026-09-23-task-artifact-manifest 读侧;"
+                    "dashboard 读时富化不落库;与老 run_info.output 双轨并存)",
     )
 
 
@@ -399,6 +493,11 @@ class DoneOutputDTO(BaseModel):
     actual_goal: GoalDTO
     output: dict[str, Any] = Field(default_factory=dict)
     acceptance_result: AcceptanceResultDTO
+    artifacts: list = Field(
+        default_factory=list,
+        description="节点产物 manifest dict 列表(spec 2026-09-23-task-artifact-manifest"
+                    " 读侧;get_task_context 组装后补挂,服务未接线时保持空列表)",
+    )
 
 
 class LatestTaskContextDTO(BaseModel):
@@ -439,6 +538,7 @@ def task_context_to_dto(context) -> LatestTaskContextDTO:
                     done_items=list(item.acceptance_result.done_items),
                     gap_items=list(item.acceptance_result.gap_items),
                 ),
+                artifacts=list(getattr(item, "artifacts", None) or []),
             )
             for item in context.all_done_output
         ],
@@ -637,7 +737,27 @@ _INTERNAL_GRAPH_EXT_PROPS = frozenset({"execution_config", "runtime_profile"})
 _INTERNAL_NODE_EXT_PROPS = frozenset({"dispatching", "dispatching_at"})
 
 
-def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGraphDTO:
+def graph_to_dto(
+    graph,
+    *,
+    include_action_log: bool = False,
+    artifacts_by_node: "dict[str, list[TaskArtifact]] | None" = None,
+    primary_artifact_ids: "set[str] | None" = None,
+) -> TaskExecutionGraphDTO:
+    """``TaskExecutionGraph``(领域)→ ``TaskExecutionGraphDTO``(Rule 22 边界翻译位)。
+
+    读侧产物轨(spec 2026-09-23-task-artifact-manifest §4):``artifacts_by_node``
+    为 dashboard handler 经 ``TaskArtifactServiceProtocol`` 组装的 node_id → 产物
+    manifest 分桶;``None`` → 各节点 ``artifacts=[]``(既有调用零变化,双轨期老
+    ``output`` 字段照常翻译)。``primary_artifact_ids`` 给定则其内 artifact 标
+    ``is_primary=True``;缺省按分桶首行推导(等价 ``latest_for_node`` —— 桶序即仓储
+    attempt DESC / created_at DESC / id DESC 读序)。
+    """
+    artifacts_by_node = artifacts_by_node or {}
+    if primary_artifact_ids is None:
+        primary_artifact_ids = {
+            bucket[0].artifact_id for bucket in artifacts_by_node.values() if bucket
+        }
     nodes: list[TaskNodeDTO] = []
     for n in graph.tasks:
         ar = n.run_info.acceptance_result
@@ -714,6 +834,12 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                         else []
                     ),
                 ),
+                artifacts=[
+                    artifact_to_dto(
+                        art, is_primary=(art.artifact_id in primary_artifact_ids)
+                    )
+                    for art in artifacts_by_node.get(n.node_id, [])
+                ],
             )
         )
     relations = [
@@ -973,6 +1099,12 @@ class TrajectoryEventDTO(BaseModel):
                     "读时自末位事件 ext_info.session_msgs 富化,仅该 node 最后一条事件携带,"
                     "未物化/无会话为 None)",
     )
+    artifacts: list = Field(
+        default_factory=list,
+        description="子任务产物 manifest dict 列表(spec 2026-09-23-task-artifact-manifest"
+                    " 读侧;读时经 artifact_service 富化到该 node 最后一条事件,不落库;"
+                    "descriptor dict 形状直接透传,不经 pydantic 校验)",
+    )
 
 
 class TaskTrajectoryDTO(BaseModel):
@@ -1029,6 +1161,7 @@ def trajectory_to_dto(trajectory: "TaskTrajectory") -> TaskTrajectoryDTO:
                 analysis=ev.analysis,
                 output=ev.output,
                 session_msgs=ev.session_msgs,
+                artifacts=list(getattr(ev, "artifacts", None) or []),
             )
             for ev in trajectory.timeline
         ],

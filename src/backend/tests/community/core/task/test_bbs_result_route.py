@@ -21,6 +21,9 @@ from agentclaw.community.adapters.http.task.router import router as task_interna
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
@@ -35,7 +38,25 @@ from agentclaw.community.core.task.task_context.task_graph_service import TaskGr
 
 
 class _StubDiscoverModule(Module):
-    """BotDiscover/BotPublic 服务端口 stub:search 返空(端口未激活,不阻断装配)。"""
+    """BotDiscover/BotPublic 服务端口 stub:search 返空(端口未激活,不阻断装配)。
+
+    另含 dashboard 产物读侧富化协议的空数据 stub(harness 同时挂载公开面 dashboard
+    路由,协议未绑定会在请求期 resolve 失败;BBS 用例无产物断言,读方法返空即可)。"""
+
+    @singleton
+    @provider
+    def artifact_service(self) -> TaskArtifactServiceProtocol:
+        class _A:
+            def publish_output(self, *args, **kwargs):  # 写侧 no-op(TaskModule 折叠 fire 复用同协议)
+                return 0
+
+            def list_artifacts_for_task(self, task_id):  # noqa: ANN001
+                return []
+
+            def primary_artifact_ids_by_node(self, task_id):  # noqa: ANN001
+                return {}
+
+        return _A()  # type: ignore[return-value]
 
     @singleton
     @provider

@@ -60,3 +60,24 @@ class TrajectoryAnalysisNotConfiguredError(TaskError):
     ——与 ``TrajectoryAnalysisError`` 的 504 bot 超时区分:503 = 修配置,504 = bot 挂了/慢)。``do_analysis=false``
     纯读路径不触发此错(无需 bot)。不回填(本就没执行分析)。
     """
+
+
+class TaskArtifactContentError(TaskError):
+    """产物 manifest 内容形态非法(持久化的 kind-tagged content 出现未知分支/缺关键键)。
+
+    读侧红线:``from_content_dict`` / ``artifact_from_dict`` 遇未知 ``kind`` 抛此错
+    —— 库中脏值不得静默进领域(见 task_context/task_artifact/models.py 的不变量 2)。
+    HTTP 面经 ``ENVELOPE_ERRORS`` 映射 500(存储行损坏属内部不变量破坏,非调用方可修复)。
+    """
+
+
+class TaskArtifactPublishError(TaskError):
+    """产物双写(Artifact 发布)持久化失败。
+
+    设计稿要求"持久化写入失败必须向上返回错误,不能吞掉后返回成功":集中化模式下
+    fold 后 fire 的 manifest INSERT 失败抛此错(观测旁路决策 #14 的吞错豁免不适用
+    —— 阶段二起 artifacts 是读侧依赖,静默缺行会令 attempt 序列 / supersedes 血缘
+    链无法重建)。检索模式下例外降级 WARNING(见 spec 偏离记录:relay successor
+    immutable,上抛后的重试 patch 会被不可变保护拒绝,形成收口残局)。
+    HTTP 面经 ``ENVELOPE_ERRORS`` 映射 500(持久层故障)。
+    """
