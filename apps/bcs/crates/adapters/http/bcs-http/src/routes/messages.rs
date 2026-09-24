@@ -50,10 +50,9 @@ pub async fn get_chat_run(
         })
         .await?;
 
-    Ok(Json(chat_run_status_to_json(
-        status,
-        chat_version_supports_submitted(&headers),
-    )))
+    let mut response = chat_run_status_to_json(status.clone(), chat_version_supports_submitted(&headers));
+    attach_delivery(&mut response, &status, &headers);
+    Ok(Json(response))
 }
 
 pub async fn cancel_chat_run(
@@ -71,7 +70,9 @@ pub async fn cancel_chat_run(
         })
         .await?;
 
-    Ok(Json(chat_run_cancel_to_json(status)))
+    let mut response = chat_run_cancel_to_json(status.clone());
+    attach_delivery(&mut response, &status, &headers);
+    Ok(Json(response))
 }
 
 pub async fn fuse_context(
@@ -236,5 +237,40 @@ fn to_wire_conflict(conflict: app::Conflict) -> wire::Conflict {
             })
             .collect(),
         severity: conflict.severity,
+    }
+}
+
+
+pub(super) fn chat_version_supports_delivery(headers: &HeaderMap) -> bool {
+    headers.get(wire::BCS_CHAT_VERSION_HEADER).and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u32>().ok()).is_some_and(|v| v >= 3)
+}
+
+fn attach_delivery(response: &mut Value, status: &A2aRunStatus, headers: &HeaderMap) {
+    if chat_version_supports_delivery(headers) {
+        if let Some(delivery) = status.response.as_ref().and_then(|v| v.get("delivery")) {
+            response["delivery"] = delivery.clone();
+        }
+    }
+}
+
+#[cfg(test)]
+mod direct_queue_contract {
+    use super::*;
+
+    #[test]
+    fn delivery_summary_is_only_added_for_v3_clients() {
+        let status = A2aRunStatus { run_id: "run".into(), status: "pending".into(), response: Some(serde_json::json!({
+            "state":"pending", "content":"", "delivery":{"delivery_id":"delivery", "message_id":"message", "status":"queued", "wait_reason":"bot_capacity", "state_version":1}
+        })) };
+        for version in [None, Some("2"), Some("3")] {
+            let mut headers = HeaderMap::new();
+            if let Some(version) = version { headers.insert(wire::BCS_CHAT_VERSION_HEADER, version.parse().unwrap()); }
+            let mut response = chat_run_status_to_json(status.clone(), chat_version_supports_submitted(&headers));
+            attach_delivery(&mut response, &status, &headers);
+            assert_eq!(response.get("delivery").is_some(), version == Some("3"));
+            assert_eq!(response["state"], "pending");
+            assert!(response.get("semantic_projection_json").is_none());
+        }
     }
 }

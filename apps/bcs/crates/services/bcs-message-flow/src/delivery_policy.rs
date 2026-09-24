@@ -11,6 +11,7 @@ pub struct LiveDeliveryPolicy {
     pub snapshot: Arc<tokio::sync::RwLock<DeliveryPolicyRecord>>,
     repository: Arc<dyn MessageDeliveryRepoPort>,
     updates: Arc<tokio::sync::Semaphore>,
+    session_registry: Option<Arc<dyn bcs_service_api::SessionManagementService>>,
     pub scheduler_available: Arc<AtomicBool>,
 }
 
@@ -49,6 +50,7 @@ impl LiveDeliveryPolicy {
     pub async fn refresh_for_takeover(&self) -> ServiceResult<()> {
         let mut current = self.snapshot.write().await;
         let stored = Self::load_compatible(self.repository.as_ref()).await?;
+        self.validate_direct_readiness(&stored.policy).await?;
         *current = stored;
         Ok(())
     }
@@ -59,6 +61,7 @@ impl LiveDeliveryPolicy {
         let mut current = self.snapshot.write().await;
         let stored = Self::load_compatible(self.repository.as_ref()).await?;
         if stored.version > current.version {
+            self.validate_direct_readiness(&stored.policy).await?;
             stored.policy.validate().map_err(|_| ServiceError::InternalError("invalid durable delivery policy".into()))?;
             *current = stored;
         }
@@ -66,7 +69,7 @@ impl LiveDeliveryPolicy {
     }
 
     pub fn new(repository: Arc<dyn MessageDeliveryRepoPort>, initial: DeliveryPolicyRecord) -> Self {
-        Self { snapshot: Arc::new(tokio::sync::RwLock::new(initial)), repository, updates: Arc::new(tokio::sync::Semaphore::new(8)),
+        Self { session_registry: None, snapshot: Arc::new(tokio::sync::RwLock::new(initial)), repository, updates: Arc::new(tokio::sync::Semaphore::new(8)),
             scheduler_available: Arc::new(AtomicBool::new(false)) }
     }
 
@@ -120,6 +123,7 @@ impl LiveDeliveryPolicy {
         let changed_fields = changed_fields(&current.policy, &policy).join(",");
         let outcome = async {
             policy.validate().map_err(|e| invalid(&e.to_string()))?;
+            self.validate_direct_readiness(&policy).await?;
             if current.version != expected { return Err(invalid("delivery_policy_version_conflict")); }
             if policy.needs_scheduler() && !self.scheduler_available.load(Ordering::SeqCst) {
                 return Err(invalid("delivery_scheduler_unavailable: durable storage and a healthy scheduler are required"));
@@ -168,4 +172,19 @@ fn changed_fields(before: &DeliveryPolicy, after: &DeliveryPolicy) -> Vec<&'stat
     changed!("max_context_messages", before.max_context_messages, after.max_context_messages);
     changed!("max_context_bytes", before.max_context_bytes, after.max_context_bytes);
     fields
+}
+
+
+impl LiveDeliveryPolicy {
+    pub fn with_session_registry(mut self, sessions: Option<Arc<dyn bcs_service_api::SessionManagementService>>) -> Self {
+        self.session_registry = sessions; self
+    }
+
+    pub async fn validate_direct_readiness(&self, policy: &DeliveryPolicy) -> ServiceResult<()> {
+        if policy.flow_enabled.direct_a2a {
+            self.session_registry.as_ref().ok_or_else(|| invalid("direct session registry unavailable"))?
+                .validate_session_registry().await.map_err(|_| invalid("session_registry_invalid"))?;
+        }
+        Ok(())
+    }
 }

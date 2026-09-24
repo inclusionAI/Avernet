@@ -67,6 +67,10 @@ pub struct ChatRunRecord {
     pub bot_uuid: String,
     pub from_bot_id: String,
     pub session_key: String,
+    #[serde(default)]
+    pub delivery_id: Option<String>,
+    #[serde(default)]
+    pub source_message_id: Option<String>,
     pub state: ChatRunState,
     pub accumulated_content: String,
     pub error_message: Option<String>,
@@ -113,6 +117,8 @@ impl ChatRunRecord {
             bot_uuid,
             from_bot_id,
             session_key,
+            delivery_id: None,
+            source_message_id: None,
             state: ChatRunState::Pending,
             accumulated_content: String::new(),
             error_message: None,
@@ -168,6 +174,17 @@ pub enum ChatRunRepoError {
 /// for streaming deltas, `compare_and_set_terminal` for the final transition.
 #[async_trait]
 pub trait ChatRunRepoPort: Send + Sync + 'static {
+    /// Durable managed projection/checkpoint. Includes content even before terminal;
+    /// delivery settlement may recover after this write without losing final text.
+    async fn compare_and_set_managed(&self, _expected_version: u64, _record: ChatRunRecord) -> Result<CasOutcome, ChatRunRepoError> {
+        Err(ChatRunRepoError::Backend("managed projection unsupported".into()))
+    }
+
+    /// Cursor page of nonterminal managed runs. Limit is capped at 8 by the caller.
+    async fn managed_recovery_page(&self, _after: &str, _limit: u32) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
+        Err(ChatRunRepoError::Backend("managed recovery unsupported".into()))
+    }
+
     async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunRepoError>;
 
     async fn get(&self, run_id: &str) -> Result<Option<ChatRunRecord>, ChatRunRepoError>;

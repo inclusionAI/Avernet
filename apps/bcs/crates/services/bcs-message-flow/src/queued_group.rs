@@ -128,6 +128,9 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             .flow
             .upgrade()
             .ok_or_else(|| invalid("queue owner stopped"))?;
+        if delivery.flow_kind == DeliveryFlowKind::DirectA2a {
+            return flow.direct_chat.as_ref().ok_or_else(|| invalid("direct queue preparation unavailable"))?.prepare_direct(&flow, delivery).await;
+        }
         let limits = match &flow.delivery_policy { Some(p) => p.snapshot.read().await.policy.clone(), None => Default::default() };
         let max_messages = delivery.context_selection_json.as_ref().and_then(|v| v.get("max_messages")).and_then(|v| v.as_u64()).unwrap_or(limits.max_context_messages as u64);
         let contexts = self

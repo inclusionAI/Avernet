@@ -282,16 +282,17 @@ pub async fn bot_chat_async(
         error_kind: None,
     });
 
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(serde_json::json!({
+    let mut response = serde_json::json!({
             "run_id": accepted.run_id,
             "bot_uuid": accepted.bot_uuid,
             "session_id": accepted.session_id,
             "status": accepted.status,
             "expires_at_ms": accepted.expires_at_ms,
-        })),
-    ))
+        });
+    if super::messages::chat_version_supports_delivery(&headers) {
+        if let Some(delivery) = accepted.delivery { response["delivery"] = delivery; }
+    }
+    Ok((StatusCode::ACCEPTED, Json(response)))
 }
 
 fn record_authenticated_async_chat_trace(
@@ -497,6 +498,7 @@ fn map_service_error(err: ServiceError) -> LegacyChatError {
         ServiceError::InvalidOperation { message, .. } => {
             LegacyChatError::new(StatusCode::BAD_REQUEST, message, "InvalidOperation")
         }
+        ServiceError::Conflict(message) => LegacyChatError::new(StatusCode::CONFLICT, message, "Conflict"),
         ServiceError::InternalError(message) => {
             LegacyChatError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,

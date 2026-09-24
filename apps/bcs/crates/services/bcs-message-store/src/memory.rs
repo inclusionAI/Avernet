@@ -24,6 +24,7 @@ pub struct MemoryMessageRepo {
     sessions: RwLock<HashMap<String, SessionMessages>>,
     event_store: Option<Arc<MemoryEventStore>>,
     env: String,
+    registry: Option<Arc<bcs_session_store::registry::MemorySessionRegistry>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -34,6 +35,10 @@ struct SessionMessages {
 }
 
 impl MemoryMessageRepo {
+    pub fn with_session_registry(mut self, registry: Arc<bcs_session_store::registry::MemorySessionRegistry>) -> Self {
+        self.registry = Some(registry); self
+    }
+
     async fn append_with_identity(
         &self,
         msg: NewMessage,
@@ -520,7 +525,7 @@ fn worker_task_display_visible(message: &PersistedMessage, worker_id: &str) -> b
 fn validate_new_message_visibility(msg: &NewMessage) -> Result<(), MessageRepoError> {
     if matches!(
         msg.visibility_domain,
-        MessageVisibilityDomain::ManagerWorker | MessageVisibilityDomain::StateMachine
+        MessageVisibilityDomain::ManagerWorker | MessageVisibilityDomain::StateMachine | MessageVisibilityDomain::DirectA2a
     ) && msg.audience.is_none()
     {
         return Err(MessageRepoError::StorageError(
@@ -568,8 +573,10 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
     }
     async fn lookup(&self, scope: bcs_service_api::port::repo::message_delivery::DeliveryLookup) -> Result<Vec<bcs_domain::message_delivery::PersistedMessageDelivery>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         use bcs_service_api::port::repo::message_delivery::DeliveryLookup as Q;
+        if matches!(&scope, Q::Ids(ids) if ids.len() > 8) { return Err(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Invalid("delivery recovery batch too large".into())); }
         let rows = self.list_deliveries(None).await?;
         Ok(rows.into_iter().filter(|d| match &scope {
+            Q::Ids(ids) => ids.contains(&d.delivery_id),
             Q::Id(id) => d.delivery_id == *id,
             Q::Request(id) => d.request_id.as_ref() == Some(id),
             Q::Run { bot, alias } => d.target_bot_id == *bot && (d.run_id.as_ref() == Some(alias) || d.request_id.as_ref() == Some(alias) || d.transport_context_json.as_ref().and_then(|v| v.get("downstream_run_id")).and_then(|v| v.as_str()) == Some(alias.as_str())),
@@ -664,7 +671,9 @@ impl MemoryMessageRepo {
     ) -> Result<Vec<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>,
         bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         use bcs_service_api::port::repo::message_delivery::{DeliveryAdmissionResult, MessageDeliveryRepoError as Error};
-        if admission.windows(2).any(|w| w[0].message.session_id != w[1].message.session_id) { return Err(Error::Invalid("batch must share a session".into())); }
+        if admission.windows(2).any(|w| w[0].message.session_id != w[1].message.session_id || (w[0].flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a) != (w[1].flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a)) { return Err(Error::Invalid("batch must share a session".into())); }
+        let mut registry = match &self.registry { Some(registry) => Some(registry.entries.lock().await), None => None };
+        let mut registry_staged = registry.as_deref().cloned();
         let mut sessions = self.sessions.write().await;
         let mut staged = sessions.clone();
         let env = if self.env.is_empty() { "local" } else { &self.env };
@@ -695,10 +704,21 @@ impl MemoryMessageRepo {
                 }
             }
             let entry = staged.entry(command.message.session_id.clone()).or_default();
+            let direct = command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a;
+            if direct {
+                let row = registry_staged.as_mut().and_then(|r| r.get_mut(&command.message.session_id))
+                    .ok_or_else(|| Error::Invalid("session_registry_missing".into()))?;
+                bcs_session_store::registry::check_type(row, bcs_service_api::port::repo::session_registry::SessionType::DirectA2a)
+                    .map_err(|_| Error::Invalid("session_registry_invalid".into()))?;
+                entry.seq = row.current_msg_seq.ok_or_else(|| Error::Invalid("session_registry_invalid".into()))?;
+            }
             entry.seq = entry.seq.checked_add(1 + i64::from(command.display_message.is_some())).ok_or_else(|| Error::Invalid("sequence exhausted".into()))?;
+            if direct { registry_staged.as_mut().unwrap().get_mut(&command.message.session_id).unwrap().current_msg_seq = Some(entry.seq); }
             let message = super::delivery::canonical(&command, entry.seq);
             let (deliveries, context_changes) = super::delivery::plan_admission(env, &command, entry.seq, &rows, None)?;
             super::delivery::apply_changes(&mut rows, &context_changes)?;
+            if deliveries.iter().any(|new| rows.iter().any(|old| old.delivery_id == new.delivery_id
+                || (new.run_id.is_some() && new.run_id == old.run_id))) { return Err(Error::Conflict); }
             rows.extend(deliveries.clone());
             if let Some(display) = super::delivery::canonical_display(&command, entry.seq - 1) {
                 entry.messages.push(display);
@@ -718,10 +738,12 @@ impl MemoryMessageRepo {
             let store = self.event_store.as_ref().ok_or_else(|| Error::Storage("event store is not configured".into()))?;
             store.commit_business_mutations(&events, || {
                 *sessions = staged;
+                if let (Some(current), Some(staged)) = (registry.as_deref_mut(), registry_staged) { *current = staged; }
                 Ok(())
             }).await.map_err(|e| Error::Storage(e.to_string()))?;
         } else {
             *sessions = staged;
+            if let (Some(current), Some(staged)) = (registry.as_deref_mut(), registry_staged) { *current = staged; }
         }
         Ok(result)
     }

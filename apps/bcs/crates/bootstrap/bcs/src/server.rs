@@ -2276,7 +2276,7 @@ impl Default for BcsServerState {
             config.message_history.manager_worker_cutoff_timestamp;
         let session_repo = Arc::new(MemorySessionRepo::new().with_event_store(event_repo.clone()));
         let message_repo: Arc<dyn MessageRepoPort> =
-            Arc::new(MemoryMessageRepo::new().with_event_store(event_repo.clone()));
+            Arc::new(MemoryMessageRepo::new().with_event_store(event_repo.clone()).with_session_registry(session_repo.session_registry()));
         let group_session_metrics_snapshot: Arc<dyn GroupSessionMetricsSnapshotPort> =
             session_repo.clone();
         let session_management: Arc<dyn SessionManagementService> = Arc::new(
@@ -2313,6 +2313,7 @@ impl Default for BcsServerState {
                 a2a_run_port.clone(),
             )
             .with_organization(organization_core.clone())
+            .with_session_management(session_management.clone())
             .with_interceptors(interceptors.clone())
             .with_run_lifecycle_hook(direct_chat_run_lifecycle_hook(metrics.as_ref()))
             .with_bot_run_context(bot_run_context.clone()),
@@ -2320,7 +2321,7 @@ impl Default for BcsServerState {
         let a2a_chat: Arc<dyn A2aChatService> = a2a_chat_impl.clone();
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
-        let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
+        let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl.clone();
         let proposal_base_url = config
             .bcs_endpoint
             .clone()
@@ -3914,7 +3915,7 @@ impl BcsServer {
             config.message_history.manager_worker_cutoff_timestamp;
         let session_repo = Arc::new(MemorySessionRepo::new().with_event_store(event_repo.clone()));
         let message_repo: Arc<dyn MessageRepoPort> =
-            Arc::new(MemoryMessageRepo::new().with_event_store(event_repo.clone()));
+            Arc::new(MemoryMessageRepo::new().with_event_store(event_repo.clone()).with_session_registry(session_repo.session_registry()));
         let group_session_metrics_snapshot: Arc<dyn GroupSessionMetricsSnapshotPort> =
             session_repo.clone();
         let session_management: Arc<dyn SessionManagementService> = Arc::new(
@@ -4013,6 +4014,7 @@ impl BcsServer {
                 a2a_run_port.clone(),
             )
             .with_organization(organization_core.clone())
+            .with_session_management(session_management.clone())
             .with_interceptors(interceptors.clone())
             .with_run_lifecycle_hook(direct_chat_run_lifecycle_hook(metrics.as_ref()))
             .with_bot_run_context(bot_run_context.clone()),
@@ -4020,7 +4022,7 @@ impl BcsServer {
         let a2a_chat: Arc<dyn A2aChatService> = a2a_chat_impl.clone();
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
-        let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
+        let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl.clone();
         let use_cases = build_use_case_bundle(
             &config,
             message_flow_builder.system_queue_port(),
@@ -4882,6 +4884,7 @@ impl BcsServer {
                 a2a_run_port.clone(),
             )
             .with_organization(organization_core.clone())
+            .with_session_management(session_management.clone())
             .with_interceptors(interceptors.clone())
             .with_run_lifecycle_hook(direct_chat_run_lifecycle_hook(metrics.as_ref()))
             .with_bot_run_context(bot_run_context.clone()),
@@ -4889,7 +4892,7 @@ impl BcsServer {
         let a2a_chat: Arc<dyn A2aChatService> = a2a_chat_impl.clone();
         let a2a_chat_runs: Arc<dyn A2aChatRunService> = a2a_chat_impl.clone();
         let a2a_chat_runs = maybe_wrap_a2a_chat_runs(&config, a2a_chat_runs);
-        let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
+        let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl.clone();
         let use_cases = build_use_case_bundle(
             &config,
             message_flow_builder.system_queue_port(),
@@ -4919,7 +4922,7 @@ impl BcsServer {
             provider_stream_gray_list.clone(),
             profile_store.clone(),
         );
-        let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone());
+        let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone()).with_direct_chat(a2a_chat_impl);
         let channel_slot = message_flow_builder.channel_slot();
         let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire_with_leader(message_flow_builder, &config, leader_election.clone()).await?;
         let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
@@ -6355,6 +6358,7 @@ mod tests {
             cmd: bcs_service_api::AsyncA2aChatCommand,
         ) -> bcs_service_api::ServiceResult<bcs_service_api::AsyncA2aChatAccepted> {
             Ok(bcs_service_api::AsyncA2aChatAccepted {
+            delivery: None,
                 run_id: cmd.run_id,
                 bot_uuid: cmd.target_bot_id,
                 session_id: cmd.session_key,

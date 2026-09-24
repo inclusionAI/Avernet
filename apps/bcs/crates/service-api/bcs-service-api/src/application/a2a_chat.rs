@@ -77,6 +77,8 @@ pub struct AsyncA2aChatCommand {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AsyncA2aChatAccepted {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<Value>,
     pub run_id: String,
     pub bot_uuid: String,
     pub session_id: String,

@@ -17,6 +17,7 @@ pub enum MessageVisibilityDomain {
     Chat,
     ManagerWorker,
     StateMachine,
+    DirectA2a,
 }
 
 /// Audience declared by ManagerWorker and StateMachine producers.
@@ -94,6 +95,7 @@ impl HumanMessageView {
         }
         match visibility_domain {
             MessageVisibilityDomain::Chat => true,
+            MessageVisibilityDomain::DirectA2a => audience.is_some_and(|a| a.contains(&self.actor_id)),
             MessageVisibilityDomain::ManagerWorker | MessageVisibilityDomain::StateMachine => {
                 match audience {
                     Some(MessageAudience::Public) => true,
