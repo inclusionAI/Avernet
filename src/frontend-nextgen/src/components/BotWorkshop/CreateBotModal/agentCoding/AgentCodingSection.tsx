@@ -115,10 +115,7 @@ export function AgentCodingSection({
   };
 
   return (
-    <section
-      className="relative z-10 mt-1 overflow-visible rounded-xl border border-primary/30 bg-background px-3 py-3"
-      data-testid="agent-coding-section"
-    >
+    <section className="relative z-10 overflow-visible bg-background" data-testid="agent-coding-section">
       <div>
         <div className="flex items-center justify-between gap-3">
           <Segmented

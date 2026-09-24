@@ -144,10 +144,10 @@ export function pollBotAuthStatus(bot_id: string, body: MutateBotRequest) {
 }
 
 // 查询 Bot 详情。
-export function getBot(bot_id: string) {
+export function getBot(bot_id: string, owner_id?: string) {
   return backendRequest<BackendApiEnvelope<BotDto>>(BOT_ENDPOINTS.detail(bot_id), {
     method: 'GET',
-    params: userScopedParams(),
+    params: userScopedParams({ owner_id }),
   });
 }
 

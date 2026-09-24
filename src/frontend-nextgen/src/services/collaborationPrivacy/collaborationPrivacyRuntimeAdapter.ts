@@ -458,7 +458,9 @@ export function createCollaborationPrivacyRuntimeAdapter(
 
     async updateDirectSetting(command: DirectSettingCommand, signal) {
       if (command.setting === 'taskClaimingEnabled') {
-        throw new Error('任务认领开关请通过 enable/disableTaskClaim 提交(grant/revoke + PATCH task_claim_mode 双写)');
+        // 防御性断言：任务认领开关必须经 enable/disableTaskClaim（grant/revoke + PATCH task_claim_mode 双写）提交；
+        // 技术细节只留在注释与日志，不进用户可见文案。
+        throw new Error('任务认领设置暂时无法保存，请稍后重试');
       }
 
       if (command.setting === 'dreamModelEnabled') {

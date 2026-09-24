@@ -16,6 +16,7 @@ interface BotWorkshopToolbarProps {
   onDeploymentChange: (value?: BotDeployment) => void;
   onServiceModeChange: (value?: BotServiceMode) => void;
   onCreateCloud: () => void;
+  onCreateLocal?: () => void;
   total?: number;
   onReset: () => void;
 }
@@ -30,6 +31,7 @@ const BotWorkshopToolbar: React.FC<BotWorkshopToolbarProps> = ({
   onDeploymentChange,
   onServiceModeChange,
   onCreateCloud,
+  onCreateLocal,
   total,
   onReset,
 }) => {
@@ -117,6 +119,11 @@ const BotWorkshopToolbar: React.FC<BotWorkshopToolbarProps> = ({
             <span className="text-xs tabular-nums text-muted-foreground">共 {total} 条</span>
           ) : null}
         </div>
+        {onCreateLocal ? (
+          <Button variant="outline" onClick={onCreateLocal}>
+            创建本地 Bot
+          </Button>
+        ) : null}
         <Button leftIcon={<Cloud className="size-4" />} onClick={onCreateCloud} className="w-full sm:w-auto">
           创建云端 Bot
         </Button>

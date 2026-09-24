@@ -12,7 +12,7 @@ const mockInitSpaceContext = jest.fn(async () => undefined);
 const mockEnsurePersonalSpaceOnAppEntry = jest.fn(async () => undefined);
 
 jest.mock('@umijs/max', () => ({
-  history: { push: jest.fn() },
+  history: { push: jest.fn(), replace: jest.fn() },
   useLocation: () => ({ pathname: mockPathname }),
 }));
 jest.mock('@/hooks/useSpaceContext', () => ({
@@ -42,12 +42,11 @@ jest.mock('@/services/workspace/identityService', () => ({
     isIdentityResolved: jest.fn(() => false),
   },
 }));
-jest.mock('@/shell/AppHeader', () => ({
-  AppHeader: ({ currentUser }: { currentUser?: { displayName: string } | null }) => (
-    <div data-testid="app-header">{currentUser?.displayName}</div>
+jest.mock('@/shell/AppSidebar', () => ({
+  AppSidebar: ({ currentUser }: { currentUser?: { displayName: string } | null }) => (
+    <div data-testid="app-sidebar">{currentUser?.displayName}</div>
   ),
 }));
-jest.mock('@/shell/AppSidebar', () => ({ AppSidebar: () => <div data-testid="app-sidebar" /> }));
 
 const { AppShell } = require('@/shell/AppShell') as typeof import('@/shell/AppShell');
 
@@ -58,11 +57,11 @@ beforeEach(() => {
   mockInitWorkspace.mockClear();
 });
 
-it('Open Core 体验提示位于 AppHeader 前', () => {
+it('Open Core 体验提示位于单侧边栏内容前（shell 顶部通栏）', () => {
   const view = render(<AppShell>工作内容</AppShell>);
   const notice = view.getByRole('status', { name: '开源体验环境提示' });
-  const header = view.getByTestId('app-header');
-  expect(notice.compareDocumentPosition(header) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const sidebar = view.getByTestId('app-sidebar');
+  expect(notice.compareDocumentPosition(sidebar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 it('关闭体验提示不重挂载页面业务状态', () => {
@@ -89,25 +88,25 @@ it('关闭体验提示不重挂载页面业务状态', () => {
   expect(view.getByTestId('stateful-page')).toHaveTextContent('1');
 });
 
-it('仅进入管理区域时初始化空间上下文', async () => {
+it('进入 Bot 分组路由时初始化空间上下文，协作路由不触发', async () => {
   const view = render(<AppShell>工作内容</AppShell>);
   await waitFor(() => expect(mockInitSpaceContext).not.toHaveBeenCalled());
 
   mockPathname = '/bot-workshop';
-  view.rerender(<AppShell>管理内容</AppShell>);
+  view.rerender(<AppShell>Bot 内容</AppShell>);
   await waitFor(() => expect(mockInitSpaceContext).toHaveBeenCalledTimes(1));
 });
 
-it('挂载即初始化一次个人空间（不等进入管理区域）', async () => {
+it('挂载即初始化一次个人空间（不等进入 Bot 分组）', async () => {
   mockEnsurePersonalSpaceOnAppEntry.mockClear(); // mock 为文件级共享：清掉前一用例的累计调用
-  render(<AppShell>工作内容</AppShell>); // 初始 pathname=/workspace（工作区域）也需触发
+  render(<AppShell>工作内容</AppShell>); // 初始 pathname=/workspace（协作分组）也需触发
   await waitFor(() => expect(mockEnsurePersonalSpaceOnAppEntry).toHaveBeenCalledTimes(1));
 });
 
-it('将 mine 返回的 Human 身份传给顶栏账号区', async () => {
+it('将 mine 返回的 Human 身份传给侧栏底部用户行', async () => {
   const view = render(<AppShell>工作内容</AppShell>);
 
-  await waitFor(() => expect(view.getByTestId('app-header')).toHaveTextContent('验收用户'));
+  await waitFor(() => expect(view.getByTestId('app-sidebar')).toHaveTextContent('验收用户'));
 });
 
 it('挂载即通过 initWorkspace 写回协作身份，避免 human capability ready 跳过落库', async () => {
@@ -121,12 +120,12 @@ it('挂载即通过 initWorkspace 写回协作身份，避免 human capability r
   await waitFor(() => expect(mockInitWorkspace).toHaveBeenCalledTimes(1));
 });
 
-it('登录回归：/auth/user（checkAuth）晚于 mine 落位时，顶栏账号区随 externalAuthStore 刷新', async () => {
+it('登录回归：/auth/user（checkAuth）晚于 mine 落位时，侧栏用户行随 externalAuthStore 刷新', async () => {
   // Open Core（oauth-provider）：/auth/user 与 mine 并跑且常更晚返回；capability 契约规定
-  // externalAuthStore.user 优先。AppShell 一次性快照 currentUser 会把 mine 兜底身份冻结进顶栏
+  // externalAuthStore.user 优先。AppShell 一次性快照 currentUser 会把 mine 兜底身份冻结进侧栏
   // （登录后头像/花名不一致，需切 tab 触发 re-render 才纠正）。
   const view = render(<AppShell>工作内容</AppShell>);
-  await waitFor(() => expect(view.getByTestId('app-header')).toHaveTextContent('验收用户'));
+  await waitFor(() => expect(view.getByTestId('app-sidebar')).toHaveTextContent('验收用户'));
 
   act(() => {
     useExternalAuthStore.getState().setAuthenticated({
@@ -137,5 +136,5 @@ it('登录回归：/auth/user（checkAuth）晚于 mine 落位时，顶栏账号
     });
   });
 
-  await waitFor(() => expect(view.getByTestId('app-header')).toHaveTextContent('福惠'));
+  await waitFor(() => expect(view.getByTestId('app-sidebar')).toHaveTextContent('福惠'));
 });

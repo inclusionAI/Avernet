@@ -2,10 +2,8 @@ import { getCapabilities } from '@/capabilities';
 import { getAvailableViews, type WorkspaceView } from '@/domain/collaboration/availableViews';
 import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { useAgentCodingBotSelection } from '@/pages/Workspace/hooks/useAgentCodingBotSelection';
-import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
-import { useBotSessions } from '@/pages/Workspace/hooks/useBotSessions';
-import { useFriendBots } from '@/pages/Workspace/hooks/useFriendBots';
-import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
+import { useBotFriendConversation } from '@/pages/Workspace/hooks/useBotFriendConversation';
+import { useHumanBotConversation } from '@/pages/Workspace/hooks/useHumanBotConversation';
 import { isTestUserIdentity, TEST_USER_SUPPORT_TARGET_ID, workspaceService } from '@/services/workspace';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import type { ConversationTarget, SupportChatState } from '@/services/workspace/workspaceModel';
@@ -19,8 +17,9 @@ import { buildSingleChatBridgeRequest } from './singleChatBridgeRequest';
 import { useHumanIdentity } from './useHumanIdentity';
 import { TEST_SUPPORT_TARGET } from './useWorkspace.constants';
 import type { UseWorkspaceOptions } from './useWorkspace.options';
-import { useWorkspaceIdentityBootstrap } from './useWorkspaceIdentityBootstrap';
 import { useWorkspaceDisplayIdentities } from './useWorkspaceDisplayIdentities';
+import { useWorkspaceIdentityBootstrap } from './useWorkspaceIdentityBootstrap';
+import { useWorkspaceSupportStatus } from './useWorkspaceSupportStatus';
 import { buildBotChatTarget, mapIdentityViewToIdentity } from './workspaceIdentityMapper';
 export type { UseWorkspaceOptions } from './useWorkspace.options';
 export function useWorkspace(options: UseWorkspaceOptions = {}) {
@@ -65,32 +64,21 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const {
     chatBots,
     hasAgentCodingBots,
-    isLoading: isMyBotsLoading,
-    error: myBotsError,
-    reload: reloadMyBots,
-  } = useOwnedBots(activeIdentityId, isUserIdentity);
-  const {
+    isMyBotsLoading,
+    myBotsError,
+    reloadMyBots,
     friendBots,
-    isLoading: isFriendBotsLoading,
-    error: friendBotsError,
-    reload: reloadFriendBots,
-  } = useFriendBots(activeIdentityId, isUserIdentity, view !== 'group');
-  const allChatBots = useMemo(
-    () => [...chatBots, ...friendBots.filter((b) => !chatBots.some((m) => m.botId === b.botId))],
-    [chatBots, friendBots],
+    isFriendBotsLoading,
+    friendBotsError,
+    reloadFriendBots,
+    botSessions,
+    selectedChatBot,
+    botChat,
+  } = useHumanBotConversation({ activeIdentityId, isUserIdentity, view, expandedBotIds, panelRef });
+  const botFriendConversation = useBotFriendConversation(
+    activeIdentityView,
+    activeIdentityView?.kind === 'bot' && view === 'chat',
   );
-  const expandedBotIdList = useMemo(() => Object.keys(expandedBotIds), [expandedBotIds]);
-  const botSessions = useBotSessions(
-    allChatBots,
-    expandedBotIdList,
-    activeIdentityId,
-    isMyBotsLoading || isFriendBotsLoading,
-  );
-  const selectedChatBot = useMemo(
-    () => allChatBots.find((b) => b.botId === botSessions.selectedSession?.botId) ?? null,
-    [allChatBots, botSessions.selectedSession],
-  );
-  const botChat = useBotChat(selectedChatBot, botSessions.selectedSession, panelRef);
   const isSupportTarget = isTestUser && activeTargetId === TEST_USER_SUPPORT_TARGET_ID;
   const chat = useChat({
     provider,
@@ -122,13 +110,23 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   }, [activeTargetId]);
 
   const brand = getCapabilities().getProductBrand().value; // 产品名经 capability 解析（Open=Avernet；internal=TeamClaw），不硬编码
+  // 客服显示状态合成（Spec: workspace-session-connection-display AC-7；连接即就绪 + raw connected 兜底）。
+  const supportDisplayStatus = useWorkspaceSupportStatus({
+    isSupportTarget,
+    targetId: activeTargetId ?? null,
+    rawStatus: chat.connectionStatus,
+  });
+  const { markEnterStarted, markEnterFailed } = supportDisplayStatus;
+
   useEffect(() => {
     if (!isSupportTarget) return;
+    markEnterStarted();
     provider.connect().catch((error) => {
+      markEnterFailed();
       toast.error(error instanceof Error ? error.message : `${brand.name} 客服连接失败`);
     });
     return () => provider.disconnect();
-  }, [isSupportTarget, provider, brand.name]);
+  }, [isSupportTarget, provider, brand.name, markEnterStarted, markEnterFailed]);
 
   const { selectedAgentCodingBot, onSelectAgentCodingBot, onToggleBotExpanded } = useAgentCodingBotSelection({
     activeIdentityId,
@@ -175,8 +173,8 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const botChatTarget = useMemo<ConversationTarget | null>(() => {
     if (isTestUser) return TEST_SUPPORT_TARGET;
     if (!selectedChatBot) return null;
-    return buildBotChatTarget(selectedChatBot);
-  }, [isTestUser, selectedChatBot]);
+    return buildBotChatTarget(selectedChatBot, botSessions.selectedSession);
+  }, [isTestUser, selectedChatBot, botSessions.selectedSession]);
 
   const submitPanelMessage = useCallback(
     (content: string) => {
@@ -221,6 +219,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     botSessions,
     botChat,
     botChatTarget,
+    botFriendConversation,
     selectedAgentCodingBot,
     onSelectAgentCodingBot,
     onToggleBotExpanded,
@@ -228,7 +227,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     supportMessages: chat.messages,
     supportIsRequesting: chat.isRequesting,
     supportIsLoadingMessages: chat.isDefaultMessagesRequesting,
-    supportConnectionStatus: chat.connectionStatus,
+    supportConnectionStatus: supportDisplayStatus.status,
     supportRetryCount: chat.retryCount,
     supportState,
     draft,

@@ -5,6 +5,7 @@ import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSe
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { toast } from 'sonner';
 
 const bot: ChatBotView = { botId: 'b:1', realBotId: 'b', ownerId: '1', displayName: 'B', online: true, chatable: true };
 const session: BotChatSessionView = {
@@ -31,10 +32,12 @@ jest.mock('@tc-chat/adapters', () => ({
   },
 }));
 jest.mock('@/services/workspace/botChatProvider');
+jest.mock('sonner');
 // 副屏方式② CDN 桥：bare auto-mock（factory 不引用 jest，规避 TDZ）；运行时用 require 取出 jest.fn 断言。
 jest.mock('@/services/bcs/libraryCdnInjector');
 
 const mockedFactory = createBotChatProvider as unknown as jest.Mock;
+const mockedToastError = toast.error as jest.Mock;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const cdnModule: any = require('@/services/bcs/libraryCdnInjector');
 
@@ -48,6 +51,9 @@ beforeEach(() => {
   const fn = () => jest.fn<any>();
   mockProvider = {
     loadHistory: fn().mockResolvedValue([]),
+    loadMoreHistory: fn().mockResolvedValue([]),
+    hasMoreHistory: false,
+    isLoadingMoreHistory: false,
     connect: fn().mockResolvedValue(undefined),
     disconnect: fn().mockResolvedValue(undefined),
     reconnect: fn().mockResolvedValue(undefined),
@@ -98,6 +104,46 @@ it('切换到新会话(sessionId 变化)先清空副屏再 connect,避免旧会�
   expect(closePanelForce.mock.calls.length).toBeGreaterThan(callsAfterMount);
 });
 
+it('快速切换会话后忽略旧 Provider 的晚到连接错误，不展示 1006 Toast', async () => {
+  let rejectOldConnect!: (error: Error) => void;
+  const oldProvider = {
+    ...mockProvider,
+    connect: jest.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectOldConnect = reject;
+        }),
+    ),
+    disconnect: jest.fn(),
+  };
+  const newProvider = {
+    ...mockProvider,
+    connect: jest.fn().mockResolvedValue(undefined),
+    disconnect: jest.fn(),
+  };
+  mockedFactory.mockReset().mockReturnValueOnce(oldProvider).mockReturnValueOnce(newProvider);
+  const sessionA: BotChatSessionView = { ...session, sessionId: 's-a' };
+  const sessionB: BotChatSessionView = { ...session, sessionId: 's-b' };
+  const { rerender } = renderHook(({ currentSession }) => useBotChat(bot, currentSession), {
+    initialProps: { currentSession: sessionA },
+  });
+  await waitFor(() => expect(oldProvider.connect).toHaveBeenCalledTimes(1));
+
+  rerender({ currentSession: sessionB });
+  await waitFor(() => expect(newProvider.connect).toHaveBeenCalledTimes(1));
+  rejectOldConnect(new Error('WebSocket closed before connection established: 1006'));
+  await act(async () => Promise.resolve());
+
+  expect(oldProvider.disconnect).toHaveBeenCalledTimes(1);
+  expect(mockedToastError).not.toHaveBeenCalledWith('WebSocket closed before connection established: 1006');
+});
+
+it('当前会话连接失败仍展示错误 Toast', async () => {
+  mockProvider.connect.mockRejectedValueOnce(new Error('当前连接失败'));
+  renderHook(() => useBotChat(bot, session));
+  await waitFor(() => expect(mockedToastError).toHaveBeenCalledWith('当前连接失败'));
+});
+
 it('重复点击同一会话(historyRefreshNonce 递增)不清空副屏,保留当前会话副屏内容', async () => {
   const closePanelForce = jest.fn();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -117,6 +163,25 @@ it('historyRefreshNonce 递增时(重复点击同一会话)重新拉取历史消
   await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalledTimes(2));
   // 同一会话重载历史不应触发重连
   expect(mockProvider.connect).toHaveBeenCalledTimes(1);
+});
+
+it('向上加载更早历史时调用 provider 并前置合并消息', async () => {
+  mockProvider.hasMoreHistory = true;
+  mockProvider.loadMoreHistory.mockResolvedValue([{ id: 'old', role: 'assistant', content: 'old' }]);
+  const { result } = renderHook(() => useBotChat(bot, session));
+  await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalledTimes(1));
+
+  await act(async () => {
+    await (result.current as any).loadMoreHistory();
+  });
+
+  expect(mockProvider.loadMoreHistory).toHaveBeenCalledTimes(1);
+  const updater = mockChat.setMessages.mock.calls.at(-1)?.[0];
+  expect(typeof updater).toBe('function');
+  expect(updater([{ id: 'new', role: 'assistant', content: 'new' }])).toEqual([
+    expect.objectContaining({ id: 'old' }),
+    expect.objectContaining({ id: 'new' }),
+  ]);
 });
 
 it('send 调用 chat.onRequest 并透传 content/sessionId', () => {

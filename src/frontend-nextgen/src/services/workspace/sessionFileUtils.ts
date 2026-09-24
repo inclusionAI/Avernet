@@ -59,6 +59,9 @@ export const SESSION_FILE_ALLOWED_EXT = [
 /** 单次最多上传文件数。 */
 export const SESSION_FILE_MAX_BATCH = 20;
 
+/** 文本自绘预览的字节上限：超限截断并提示下载查看全文（防大文件卡顿）。 */
+export const SESSION_FILE_TEXT_PREVIEW_MAX_BYTES = 512 * 1024;
+
 /** 单文件超过此值走分片上传（与网关 prepare multipart 目标一致）。 */
 export const SESSION_FILE_MULTIPART_THRESHOLD = 8 * 1024 * 1024;
 
@@ -237,9 +240,12 @@ export function resolveOwnerDisplayName(
   return rawId;
 }
 
-export type SessionFilePreviewKind = 'image' | 'pdf' | 'text' | 'other';
+export type SessionFilePreviewKind = 'image' | 'video' | 'pdf' | 'html' | 'text' | 'other';
 
 export const PREVIEW_IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif', 'svg'] as const;
+
+/** 视频类（内嵌播放器；上传白名单不含视频，仅预览来自其他渠道的文件）。 */
+export const PREVIEW_VIDEO_EXT = ['mp4', 'webm', 'mov'] as const;
 
 export const PREVIEW_TEXT_EXT = [
   'txt',
@@ -255,7 +261,6 @@ export const PREVIEW_TEXT_EXT = [
   'conf',
   'env',
   'xml',
-  'html',
   'js',
   'jsx',
   'ts',
@@ -281,12 +286,23 @@ export const PREVIEW_TEXT_EXT = [
   'ps1',
 ] as const;
 
-/** 判断文件是否支持站内预览：图片 / PDF / 文本类支持，其余提示下载后查看。 */
+/** JSON 美化：合法 JSON 缩进重排便于阅读；非法（含截断半截）原样返回不抛错。 */
+export function prettifyJsonText(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+/** 判断文件是否支持站内预览：图片 / 视频 / PDF / 网页 / 文本类支持，其余提示下载后查看。 */
 export function getPreviewKind(name: string, mimeType?: string): SessionFilePreviewKind {
   const ext = getFileExt(name);
   const mime = (mimeType || '').toLowerCase();
   if ((PREVIEW_IMAGE_EXT as readonly string[]).includes(ext) || mime.startsWith('image/')) return 'image';
+  if ((PREVIEW_VIDEO_EXT as readonly string[]).includes(ext) || mime.startsWith('video/')) return 'video';
   if (ext === 'pdf' || mime === 'application/pdf') return 'pdf';
+  if (ext === 'html' || mime === 'text/html') return 'html';
   if ((PREVIEW_TEXT_EXT as readonly string[]).includes(ext) || mime.startsWith('text/')) return 'text';
   return 'other';
 }

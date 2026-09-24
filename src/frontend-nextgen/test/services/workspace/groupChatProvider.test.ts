@@ -22,7 +22,8 @@ const fakeSdkProvider = jest.fn<any>().mockImplementation((cfg: any) => {
     transport: { send, onMessage: jest.fn<any>() },
     request: jest.fn<any>().mockResolvedValue(undefined),
     abort: jest.fn<any>(),
-    connect: jest.fn<any>(),
+    abortBot: jest.fn<any>().mockResolvedValue({ aborted: true, abortedRunIds: ['run-1'] }),
+    connect: jest.fn<any>().mockResolvedValue(undefined),
     disconnect: jest.fn<any>(),
     onMessage: undefined,
     onComplete: undefined,
@@ -51,7 +52,8 @@ beforeEach(() => {
       transport: { send, onMessage: jest.fn<any>() },
       request: jest.fn<any>().mockResolvedValue(undefined),
       abort: jest.fn<any>(),
-      connect: jest.fn<any>(),
+      abortBot: jest.fn<any>().mockResolvedValue({ aborted: true, abortedRunIds: ['run-1'] }),
+      connect: jest.fn<any>().mockResolvedValue(undefined),
       disconnect: jest.fn<any>(),
       onMessage: undefined,
       onComplete: undefined,
@@ -136,7 +138,7 @@ describe('groupChatProvider', () => {
   });
 
   // 集成层（通过 fakeSdkProvider 注入）：attach 只取一次 token，再 connect
-  it('creates SDK provider once with token-loaded URL, then forwards request/stop', async () => {
+  it('creates SDK provider once with token-loaded URL, then forwards request/abortBot', async () => {
     sc.createSessionToken.mockResolvedValue({
       code: 20000,
       message: '',
@@ -172,7 +174,9 @@ describe('groupChatProvider', () => {
     expect(cfg.sessionId).toBe('s1');
 
     // BCS 协议：connect 携带 groupId（SDK connect 帧 = { group_id }）
-    const inner = provider as unknown as { inner: { connect: jest.Mock; request: jest.Mock; abort: jest.Mock } };
+    const inner = provider as unknown as {
+      inner: { connect: jest.Mock; request: jest.Mock; abortBot: jest.Mock };
+    };
     expect(inner.inner.connect).toHaveBeenCalledWith({ groupId: 'g1', sessionId: 's1' });
 
     await provider.request({ content: 'hi', sessionId: 's1' });
@@ -183,8 +187,8 @@ describe('groupChatProvider', () => {
       senderId: 'me',
       botUuid: 'human_me',
     });
-    provider.stop();
-    expect(inner.inner.abort).toHaveBeenCalledWith('g1');
+    await provider.abortBot('bot-a');
+    expect(inner.inner.abortBot).toHaveBeenCalledWith({ groupId: 'g1', sessionId: 's1', botId: 'bot-a' });
   });
 
   it('human request strips sender id and forwards mention bot ids', async () => {

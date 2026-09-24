@@ -11,6 +11,7 @@ import {
   collaborationSquareTaskService,
 } from '@/services/collaborationSquare';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
+import { useSquareIdentityStore } from '@/stores/squareIdentityStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { history } from '@umijs/max';
@@ -72,6 +73,7 @@ describe('useCollaborationSquare Bot Search', () => {
     jest.useFakeTimers();
     (history.push as jest.Mock).mockClear();
     useCollaborationSquareStore.getState().reset();
+    useSquareIdentityStore.getState().reset();
     useWorkspaceStore.getState().reset();
     useWorkspaceStore
       .getState()
@@ -405,7 +407,7 @@ describe('useCollaborationSquare Bot Search', () => {
     });
 
     expect(discoverBots).toHaveBeenLastCalledWith(
-      { keyword: '代码', topK: 20, minScore: 0.1, runtimeState: 'online', ...viewerFields },
+      { keyword: '代码', topK: 20, minScore: 0.01, runtimeState: 'online', ...viewerFields },
       humanContext,
       expect.any(AbortSignal),
     );
@@ -513,7 +515,7 @@ describe('useCollaborationSquare Bot Search', () => {
     jest.spyOn(collaborationSquareGroupService, 'listGroupPage').mockResolvedValue(groupPage([group]));
     const createGroupSession = jest
       .spyOn(collaborationSquareGroupService, 'createGroupSession')
-      .mockResolvedValue({ sessionId: 'session-real-group', defaultRole: '顾问' });
+      .mockResolvedValue({ sessionId: 'session-real-group', defaultRole: '顾问', memberSource: 'session_temp' });
     const legacyCreateGroupSession = jest.spyOn(collaborationSquareService, 'createGroupSession');
     const { result, unmount } = renderHook(() => useCollaborationSquare('group'));
 
@@ -538,7 +540,7 @@ describe('useCollaborationSquare Bot Search', () => {
     });
     expect(legacyCreateGroupSession).not.toHaveBeenCalled();
     expect(history.push).toHaveBeenCalledWith(
-      '/workspace?tab=group&group=group-real-session&session=session-real-group&defaultRole=%E9%A1%BE%E9%97%AE',
+      '/workspace?tab=group&current=human_900003&group=group-real-session&session=session-real-group&membership=session_only',
     );
 
     unmount();
@@ -665,7 +667,9 @@ describe('useCollaborationSquare Bot Search', () => {
 
     expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext, { isOwnedByLoggedInUser: false });
     expect(legacyConversation).not.toHaveBeenCalled();
-    expect(history.push).toHaveBeenCalledWith('/workspace?tab=chat&bot=bot-1%3A2088&session=session-1');
+    expect(history.push).toHaveBeenCalledWith(
+      '/workspace?tab=chat&current=human_900003&bot=bot-1%3A2088&session=session-1',
+    );
 
     unmount();
   });
@@ -690,7 +694,9 @@ describe('useCollaborationSquare Bot Search', () => {
 
     expect(requestFriendship).not.toHaveBeenCalled();
     expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext, { isOwnedByLoggedInUser: true });
-    expect(history.push).toHaveBeenCalledWith('/workspace?tab=chat&bot=owned-bot&session=session-owned');
+    expect(history.push).toHaveBeenCalledWith(
+      '/workspace?tab=chat&current=human_900003&bot=owned-bot&session=session-owned',
+    );
 
     unmount();
   });
@@ -738,7 +744,9 @@ describe('useCollaborationSquare Bot Search', () => {
     });
 
     expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext);
-    expect(history.push).toHaveBeenCalledWith('/workspace?tab=chat&bot=bot-direct-friend&session=session-direct');
+    expect(history.push).toHaveBeenCalledWith(
+      '/workspace?tab=chat&current=human_900003&bot=bot-direct-friend&session=session-direct',
+    );
 
     unmount();
   });
@@ -751,6 +759,8 @@ describe('useCollaborationSquare Bot Search', () => {
         [{ id: 'human_900003', kind: 'user', displayName: '当前用户', online: true }, botIdentity],
         botIdentity.id,
       );
+    // 发现菜单已与全局身份脱钩：Bot viewer 由模块级身份选择设定（2026-09-23-discovery-tab-identity）
+    useSquareIdentityStore.getState().selectIdentity(botIdentity.id);
     const bot = resultBot('bot-target');
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
     const requestFriendship = jest
@@ -788,6 +798,8 @@ describe('useCollaborationSquare Bot Search', () => {
         [{ id: 'human_900003', kind: 'user', displayName: '当前用户', online: true }, botIdentity],
         botIdentity.id,
       );
+    // 发现菜单已与全局身份脱钩：Bot viewer 由模块级身份选择设定（2026-09-23-discovery-tab-identity）
+    useSquareIdentityStore.getState().selectIdentity(botIdentity.id);
     const friend = { ...resultBot('bot-friend'), relationshipStatus: 'friend' as const };
     const self = resultBot('bot-viewer');
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([friend, self]));
@@ -838,6 +850,7 @@ describe('useCollaborationSquare Task Plaza', () => {
     jest.useFakeTimers();
     (history.push as jest.Mock).mockClear();
     useCollaborationSquareStore.getState().reset();
+    useSquareIdentityStore.getState().reset();
     useWorkspaceStore.getState().reset();
     useWorkspaceStore
       .getState()

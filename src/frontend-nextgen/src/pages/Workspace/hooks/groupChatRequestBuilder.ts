@@ -1,3 +1,4 @@
+import type { IdentityView } from '@/domain/collaboration';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import type { GroupChatRequest } from '@/services/workspace/groupChatProvider';
 import { sessionFileService } from '@/services/workspace/sessionFileService';
@@ -14,6 +15,18 @@ export interface GroupMessageActorEcho {
   senderId?: string;
   senderName?: string;
   senderAvatarUrl?: string;
+}
+
+/**
+ * 当前活跃身份 → 发送者回显。直接 send / 桥 buildRequestParams / 副屏注入三条路径共用同一映射，
+ * 避免各处重复 `activeIdentity?.xxx` 造成漂移，并收敛 useGroupChat 行数。
+ */
+export function buildActorEcho(identity: IdentityView | null | undefined): GroupMessageActorEcho {
+  return {
+    senderId: identity?.id ?? undefined,
+    senderName: identity?.displayName ?? undefined,
+    senderAvatarUrl: identity?.avatarUrl,
+  };
 }
 
 /** 群聊用户消息 extra（仅本地回显）：displayTime、发送者展示信息与附件内容地址。 */

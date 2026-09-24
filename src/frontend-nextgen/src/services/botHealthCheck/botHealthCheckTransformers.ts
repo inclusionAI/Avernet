@@ -28,12 +28,12 @@ export const dimensionDescriptions: Record<BotHealthDimensionKey, string> = {
 };
 
 export const scanDimToKey: Record<string, BotHealthDimensionKey> = {
-  'full:L1': 'configuration',
-  'full:L2': 'taskUnderstanding',
-  'full:L3': 'planningExecution',
-  'full:L4': 'capabilityInvocation',
-  'full:L5': 'contextLearning',
-  'full:L6': 'taskDelivery',
+  'full:l1': 'configuration',
+  'full:l2': 'taskUnderstanding',
+  'full:l3': 'planningExecution',
+  'full:l4': 'capabilityInvocation',
+  'full:l5': 'contextLearning',
+  'full:l6': 'taskDelivery',
 };
 
 const statusLabels = new Set(['passed', 'warning', 'error', 'scanning', 'unknown']);
@@ -78,7 +78,7 @@ export function inferStatus(
   return 'unknown';
 }
 
-export function inferDimensionKey(scanDim?: string | null): BotHealthDimensionKey {
+export function inferDimensionKey(scanDim?: string | null): BotHealthDimensionKey | undefined {
   const value = (scanDim ?? '').toLowerCase();
   if (scanDimToKey[value]) return scanDimToKey[value];
   if (value.includes('config')) return 'configuration';
@@ -94,7 +94,7 @@ export function inferDimensionKey(scanDim?: string | null): BotHealthDimensionKe
     return 'contextLearning';
   }
   if (value.includes('delivery') || value.includes('交付')) return 'taskDelivery';
-  return 'configuration';
+  return undefined;
 }
 
 export function parseJsonField<T>(value: unknown): T | undefined {

@@ -5,8 +5,8 @@
 //   - 单次 refreshMembers
 //   - in-flight 期间以 addingMembersRef 同步阻断重入（防双击/重复提交）；addMembersLoading 暴露给 Component
 // 被 useAdmin 组合，避免 useAdmin 超文件体积阈值（Hook ≤ 250 行）。
-import { notifyError, notifySuccess } from '@/components/ui/notify';
 import type { SearchedUser } from '@/capabilities';
+import { notifyError, notifySuccess } from '@/components/ui/notify';
 import type { Space, SpaceMember } from '@/domain/admin/models';
 import { adminService } from '@/services/admin';
 import { useCallback, useRef, useState } from 'react';
@@ -21,7 +21,10 @@ export interface UseSpaceMemberActionsArgs {
 export interface SpaceMemberActions {
   refreshMembers: () => Promise<void>;
   addMember: (userId: string, role?: 'ADMIN' | 'MEMBER', userName?: string) => Promise<void>;
-  addMembers: (users: SearchedUser[], role?: 'ADMIN' | 'MEMBER') => Promise<
+  addMembers: (
+    users: SearchedUser[],
+    role?: 'ADMIN' | 'MEMBER',
+  ) => Promise<
     { succeeded: SpaceMember[]; failed: { userId: string; userName?: string; reason: string }[] } | undefined
   >;
   removeMember: (userId: string) => Promise<void>;

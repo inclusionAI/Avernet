@@ -1,17 +1,18 @@
 import { getCapabilities } from '@/capabilities';
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui';
-import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { GroupPanelKind } from '@/pages/Workspace/components/GroupHeader';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import React, { useState } from 'react';
+import { GroupChatAbortUnsupportedDialog } from './components/GroupChatAbortUnsupportedDialog';
 import { GroupChatPane } from './components/GroupChatPane';
-import { SessionFilesModal } from './components/GroupChatPane/SessionFilesModal';
+import { SessionFilesSidebar } from './components/GroupChatPane/SessionFilesSidebar';
 import { GroupMembersPanelSlot } from './components/GroupMembersPanelSlot';
 import { GroupSidebar, GroupSidebarList, type GroupSidebarProps } from './components/GroupSidebar';
 import { CreateGroupModal } from './components/Modals/CreateGroupModal';
 import { WorkspaceManagePanels } from './components/WorkspaceManagePanels';
+import type { GroupWorkspaceAreaProps } from './GroupWorkspaceArea.types';
 import { useGroupChat } from './hooks/useGroupChat';
 import { useGroupCreateDialog } from './hooks/useGroupCreateDialog';
 import { useGroupManagement } from './hooks/useGroupManagement';
@@ -19,7 +20,6 @@ import { useGroupSessions } from './hooks/useGroupSessions';
 import { useGroupWorkspace } from './hooks/useGroupWorkspace';
 import { useOpenDefaultGroupSession } from './hooks/useOpenDefaultGroupSession';
 import { useSessionManagement } from './hooks/useSessionManagement';
-
 export function GroupWorkspaceArea({
   view,
   onViewChange,
@@ -29,17 +29,8 @@ export function GroupWorkspaceArea({
   userIdentityName,
   mobileListOpen,
   onCloseMobileList,
-}: {
-  view: 'chat' | 'group';
-  onViewChange: (v: 'chat' | 'group') => void;
-  availableViews: WorkspaceView[];
-  userAvatarUrl?: string;
-  userIdentityId?: string | null;
-  userIdentityName?: string | null;
-  /** <lg 二级协作群列表抽屉开关（由 Workspace 持有，聊天/协作群视图共用同一开关）。 */
-  mobileListOpen: boolean;
-  onCloseMobileList: () => void;
-}) {
+  onOpenMobileList,
+}: GroupWorkspaceAreaProps) {
   const ws = useGroupWorkspace();
   const expandedGroupIds = React.useMemo(
     () => ws.groups.filter((g) => ws.expandedGroupIds[g.groupId]).map((g) => g.groupId),
@@ -62,9 +53,7 @@ export function GroupWorkspaceArea({
   });
   const sessionTabsByGroup = useWorkspaceStore((s) => s.sessionTabsByGroup);
   const setSessionTabForGroup = useWorkspaceStore((s) => s.setSessionTabForGroup);
-
   const { selectedGroup, canManageGroup: canManage } = ws;
-
   // 管理面板打开期间跟随选中群补拉详情：打开面板（齿轮/「…」菜单）或面板保持打开时切群，
   // 都会为新选中群拉取 participants 等详情；否则列表项 participants 为空且 participantCount>0，
   // 「群成员管理」card 会一直停留在「加载中…」。面板关闭时不拉取（保持按需拉取约定）。
@@ -182,6 +171,10 @@ export function GroupWorkspaceArea({
     onCreateGroup: handleCreateGroup,
     onManageGroup: handleManageGroup,
     onManageSession: handleManageSession,
+    onRenameSession: sessions.renameSession,
+    onDeleteSession: sessions.deleteSession,
+    onShareSession: sessionManage.createShare,
+    activeIdentity: ws.activeIdentity,
     onShareGroup: handleShareGroupFromSidebar,
     onDissolveGroup: handleDissolveGroupFromSidebar,
   };
@@ -220,10 +213,13 @@ export function GroupWorkspaceArea({
         groupBootstrapProcessing={chat.groupBootstrapProcessing}
         send={chat.send}
         submitPanelMessage={chat.submitPanelMessage}
+        submitTaskExecutionMessage={chat.submitTaskExecutionMessage}
         appendAssistantMessage={chat.appendAssistantMessage}
         streamAssistantMessage={chat.streamAssistantMessage}
-        stop={chat.stop}
+        abortBot={chat.abortBot}
+        abortingBotIds={chat.abortingBotIds}
         reconnect={chat.reconnect}
+        onOpenSessionList={onOpenMobileList}
         reloadHistory={chat.reloadHistory}
         hasMoreHistory={chat.hasMoreHistory}
         isLoadingMoreHistory={chat.isLoadingMoreHistory}
@@ -238,6 +234,10 @@ export function GroupWorkspaceArea({
         userAvatarUrl={userAvatarUrl}
         userIdentityId={userIdentityId}
         userIdentityName={userIdentityName}
+      />
+      <GroupChatAbortUnsupportedDialog
+        open={Boolean(chat.unsupportedAbortBotId)}
+        onClose={chat.dismissAbortUnsupported}
       />
       {selectedGroup ? (
         <GroupMembersPanelSlot
@@ -278,7 +278,8 @@ export function GroupWorkspaceArea({
         onShareSession={sessionManage.createShare}
       />
       {activePanel === 'resources' && sessions.selectedSession && (
-        <SessionFilesModal
+        /* 验收微调：会话文件由全屏 Modal 改为右侧副屏（与单聊侧同构容器）。 */
+        <SessionFilesSidebar
           sessionId={sessions.selectedSession.sessionId}
           sessionName={sessions.selectedSession.title}
           participants={sessions.selectedSession.participants}

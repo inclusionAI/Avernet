@@ -50,6 +50,28 @@ describe('WorkOrderCard 详情入口', () => {
     expect(screen.queryByRole('button', { name: '查看' })).not.toBeInTheDocument();
   });
 
+  it('通知正文保留原始换行且不做单行截断', () => {
+    const text =
+      '群：测试消息视角1（ID：bcs_grp_44cfd103f69941f0a922d0a55dc3b40b）\n' +
+      '会话：新会话（ID：bcs_grp_44cfd103f69941f0a922d0a55dc3b40b:c039b5b3）\n' +
+      '皮皮虾: 章梧 你好呀！👋 这是 at 你的测试消息~\n\nat 功能正常工作 ✅';
+
+    render(
+      <WorkOrderCard
+        workOrder={buildWorkOrder({
+          item_type: 'NOTICE',
+          event_type: 'GROUP_MESSAGE_AT',
+          content: { text },
+          can_approve: false,
+        })}
+      />,
+    );
+
+    const content = screen.getByText((_, element) => element?.tagName === 'DIV' && element.textContent === text);
+    expect(content).toHaveClass('whitespace-pre-wrap', 'break-words');
+    expect(content).not.toHaveClass('truncate');
+  });
+
   it('通知类未查看时显示查看', () => {
     render(
       <WorkOrderCard

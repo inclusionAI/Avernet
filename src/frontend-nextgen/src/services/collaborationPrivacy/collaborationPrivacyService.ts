@@ -139,6 +139,7 @@ export class CollaborationPrivacyService {
 
   async updateFriendApproval(command: FriendApprovalCommand, signal?: AbortSignal) {
     const bot = this.requireWritableBot(command.botId);
+    if (bot.desktop && command.config.mode === 'none') throw new Error('桌面 Bot 不支持好友无需确认');
     if (bot.publication.user.scope === 'none' && bot.publication.bot.scope === 'none') {
       throw new Error('至少开启一种 Bot 可见性后，才能修改好友审批策略');
     }

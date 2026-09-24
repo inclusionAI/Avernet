@@ -35,14 +35,9 @@ export function useGroupCreateDialog({
           run: initialRun,
         });
       }
-      if (initialSessionId) {
-        // Start selection/session loading immediately from the create response;
-        // the group-list refresh can finish in parallel with Driver/Manager startup.
-        selectGroup(groupId);
-        await openSessionForGroup(groupId, initialSessionId);
-        await refreshGroups();
-        return;
-      }
+      // 先让新群进入当前 membership 的群列表，再写入选中态。若先选中新群，
+      // useSelectedGroupDetail 会把“列表暂未包含新群”误判成 session_only 深链，
+      // 导致刷新结果、URL 与侧栏选中态发生竞态。
       await refreshGroups();
       selectGroup(groupId);
       await openSessionForGroup(groupId, initialSessionId);

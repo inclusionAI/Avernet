@@ -78,8 +78,10 @@ export interface WorkOrder {
   eventType: string;
   title: string;
   content: string;
-  /** 详情抽屉用的原始 JSON 文本（对象 content 经 JSON.stringify，列表/通知不填充）。 */
+  /** 详情抽屉用的原始 JSON 文本（非文本型对象 content 经 JSON.stringify，列表/通知文本不填充）。 */
   contentRaw?: string;
+  /** content 内的会话跳转链接（session_url）：抽屉据此渲染「打开会话」外链按钮，新标签页打开。 */
+  sessionUrl?: string;
   status: WorkOrderStatus;
   /** 状态中文 label（mapper 填充，单一源 workOrderMeta） */
   statusLabel: string;

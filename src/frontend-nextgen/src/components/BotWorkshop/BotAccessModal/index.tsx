@@ -1,12 +1,10 @@
-import type { SearchedUser } from '@/capabilities';
-import { UserSearchDropdown } from '@/components/Admin/SpaceMemberList/UserSearchDropdown';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import type { BotDomain } from '@/domain/botWorkshop';
-import type { BotCollaborator, BotSpaceOption } from '@/services/botWorkshop/botManagementService';
+import type { BotCollaborator, BotSpaceMember, BotSpaceOption } from '@/services/botWorkshop/botManagementService';
 import { Loader2, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -17,6 +15,7 @@ interface Props {
   loading: boolean;
   operation?: string;
   collaborators: BotCollaborator[];
+  members: BotSpaceMember[];
   onClose: () => void;
   onChangeSpace: (id: number) => Promise<void>;
   onCreateTeamAndChangeSpace: (name: string) => Promise<void>;
@@ -27,21 +26,31 @@ interface Props {
 }
 
 export function BotAccessModal(props: Props) {
-  const { mode, bot, spaces, loading, operation, collaborators, onClose } = props;
+  const { mode, bot, spaces, loading, operation, collaborators, members, onClose } = props;
   const [spaceId, setSpaceId] = useState('');
-  const [selectedUser, setSelectedUser] = useState<SearchedUser>();
+  const [selectedUser, setSelectedUser] = useState<BotSpaceMember>();
+  const [memberQuery, setMemberQuery] = useState('');
+  const [memberOpen, setMemberOpen] = useState(false);
   const [spaceMode, setSpaceMode] = useState<'existing' | 'create'>('existing');
   const [teamName, setTeamName] = useState('');
   const [reason, setReason] = useState('');
   useEffect(() => {
     setSpaceId('');
     setSelectedUser(undefined);
+    setMemberQuery('');
+    setMemberOpen(false);
     setSpaceMode('existing');
     setTeamName('');
     setReason('');
   }, [bot?.id, mode]);
   if (!mode || !bot) return null;
   const title = mode === 'space' ? '变更归属空间' : mode === 'authorize' ? '授权协作' : '申请操作权限';
+  const availableMembers = members.filter(
+    (member) => !collaborators.some((item) => item.userId === member.userId) && member.userId !== bot.ownerId,
+  );
+  const filteredMembers = availableMembers.filter((member) =>
+    `${member.name} ${member.userId}`.toLowerCase().includes(memberQuery.trim().toLowerCase()),
+  );
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
       <ModalContent size="lg">
@@ -107,12 +116,47 @@ export function BotAccessModal(props: Props) {
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <UserSearchDropdown
-                className="min-w-0 flex-1"
-                disabled={operation === 'add'}
-                disabledUserIds={collaborators.map((item) => item.userId)}
-                onSelect={setSelectedUser}
-              />
+              <div className="relative min-w-0 flex-1">
+                <Input
+                  aria-label="搜索空间成员"
+                  value={memberQuery}
+                  disabled={loading || operation === 'add'}
+                  placeholder="搜索空间成员姓名或工号"
+                  onFocus={() => setMemberOpen(true)}
+                  onChange={(event) => {
+                    setMemberQuery(event.target.value);
+                    setSelectedUser(undefined);
+                    setMemberOpen(true);
+                  }}
+                  onBlur={() => setMemberOpen(false)}
+                />
+                {memberOpen ? (
+                  <div className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-md">
+                    {filteredMembers.length ? (
+                      filteredMembers.map((member) => (
+                        <Button
+                          key={member.userId}
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-start"
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            setSelectedUser(member);
+                            setMemberQuery(member.name);
+                            setMemberOpen(false);
+                          }}
+                        >
+                          {member.name}（{member.userId}）
+                        </Button>
+                      ))
+                    ) : (
+                      <p className="m-0 p-2 text-xs text-muted-foreground">
+                        {loading ? '加载空间成员中…' : '无可授权的空间成员'}
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
               <Button
                 variant="secondary"
                 leftIcon={<Plus className="size-4" />}
@@ -120,13 +164,12 @@ export function BotAccessModal(props: Props) {
                 disabled={!selectedUser}
                 onClick={() =>
                   selectedUser &&
-                  void props
-                    .onAddCollaborator(
-                      selectedUser.userId,
-                      selectedUser.nickName || selectedUser.realName || selectedUser.displayName,
-                      'member',
-                    )
-                    .then((added) => added && setSelectedUser(undefined))
+                  void props.onAddCollaborator(selectedUser.userId, selectedUser.name, 'member').then((added) => {
+                    if (added) {
+                      setSelectedUser(undefined);
+                      setMemberQuery('');
+                    }
+                  })
                 }
               >
                 添加
@@ -135,8 +178,7 @@ export function BotAccessModal(props: Props) {
             {selectedUser ? (
               <p className="m-0 text-xs text-muted-foreground">
                 待添加：
-                {selectedUser.nickName || selectedUser.realName || selectedUser.displayName || selectedUser.userId}（
-                {selectedUser.userId}）
+                {selectedUser.name}（{selectedUser.userId}）
               </p>
             ) : null}
             {collaborators.length ? (
@@ -174,7 +216,7 @@ export function BotAccessModal(props: Props) {
                 </div>
               ))
             ) : (
-              <Empty compact title="暂无协作者" description="输入用户 ID 授予 Bot 操作权限。" />
+              <Empty compact title="暂无协作者" description="从当前空间成员中选择协作者。" />
             )}
           </div>
         )}

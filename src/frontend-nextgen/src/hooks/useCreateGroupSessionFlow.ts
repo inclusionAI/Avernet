@@ -1,6 +1,7 @@
 import type { CreateGroupSessionFormValues } from '@/components/CollaborationSquare/CreateGroupSessionModal';
 import { notifySuccess } from '@/components/ui/notify';
 import type { PublicGroup } from '@/domain/collaborationSquare/types';
+import { serializeWorkspaceRoute } from '@/domain/workspaceRoute';
 import { collaborationSquareGroupService } from '@/services/collaborationSquare';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
 import { history } from '@umijs/max';
@@ -40,10 +41,14 @@ export function useCreateGroupSessionFlow(
         );
         notifySuccess('会话创建成功');
         setTarget(null);
-        const params = new URLSearchParams({ tab: 'group', group: group.id, session: result.sessionId });
-        if (result.memberSource) params.set('membership', 'session_only');
-        if (result.defaultRole) params.set('defaultRole', result.defaultRole);
-        history.push(`/workspace?${params.toString()}`);
+        const search = serializeWorkspaceRoute({
+          view: 'group',
+          currentIdentityId: humanBotContext?.actorId,
+          groupId: group.id,
+          sessionId: result.sessionId,
+          membership: result.memberSource ? 'session_only' : 'direct',
+        });
+        history.push(`/workspace?${search}`);
       });
     },
     [humanBotContext, runBusy, target],

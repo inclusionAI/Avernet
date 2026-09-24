@@ -157,4 +157,144 @@ describe('botHealthCheckService', () => {
       ],
     });
   });
+
+  test('keeps canonical full dimensions separate when newer L1 and older L3 records coexist', () => {
+    const summary = mapBotHealthSummary(
+      {
+        bot_id: 'b1',
+        entity_id: 'u1',
+        items: [
+          {
+            scan_dim: 'full:L1',
+            health_score: 25,
+            grade: 'critical',
+            status: 'completed',
+            check_items: [
+              { check_item: 'AGENTS.md', status: 'completed', result: 'fail', score: 20 },
+              { check_item: 'SOUL.md', status: 'completed', result: 'fail', score: 35 },
+              { check_item: 'TOOLS.md', status: 'completed', result: 'fail', score: 20 },
+            ],
+            gmt_create: '2026-05-22T13:54:39Z',
+          },
+          {
+            scan_dim: 'full:L3',
+            health_score: 87,
+            grade: 'excellent',
+            status: 'completed',
+            check_items: [
+              { check_item: '任务规划能力', status: 'completed', result: 'pass', score: 80 },
+              { check_item: '执行推进能力', status: 'completed', result: 'pass', score: 80 },
+              { check_item: '任务闭环能力', status: 'completed', result: 'pass', score: 100 },
+            ],
+            gmt_create: '2026-05-20T00:00:00Z',
+          },
+        ],
+      },
+      {
+        bot_id: 'b1',
+        entity_id: 'u1',
+        total: 0,
+        page: 1,
+        size: 20,
+        items: [],
+      },
+      {
+        dimensions: ['configuration', 'planningExecution'],
+        showRadar: true,
+        showLogDetails: true,
+        showRawSnapshot: true,
+      },
+    );
+
+    expect(summary.dimensions).toEqual([
+      expect.objectContaining({
+        key: 'configuration',
+        scanDim: 'full:L1',
+        score: 25,
+        status: 'error',
+        passedCount: 0,
+        errorCount: 3,
+        updatedAt: '2026-05-22T13:54:39Z',
+      }),
+      expect.objectContaining({
+        key: 'planningExecution',
+        scanDim: 'full:L3',
+        score: 87,
+        status: 'passed',
+        passedCount: 3,
+        errorCount: 0,
+        updatedAt: '2026-05-20T00:00:00Z',
+      }),
+    ]);
+    expect(summary.healthScore).toBe(56);
+    expect(summary.overallStatus).toBe('critical');
+    expect(summary.latestAt).toBe('2026-05-22T13:54:39Z');
+  });
+
+  test('keeps a missing capability dimension unknown instead of treating it as healthy', () => {
+    const summary = mapBotHealthSummary(
+      { bot_id: 'b1', entity_id: 'u1', items: [] },
+      { bot_id: 'b1', entity_id: 'u1', total: 0, page: 1, size: 20, items: [] },
+      {
+        dimensions: ['configuration'],
+        showRadar: false,
+        showLogDetails: false,
+        showRawSnapshot: false,
+      },
+    );
+
+    expect(summary.dimensions[0]).toMatchObject({
+      key: 'configuration',
+      scanDim: 'full:L1',
+      score: null,
+      status: 'unknown',
+    });
+    expect(summary.overallStatus).toBe('unknown');
+  });
+
+  test('does not relabel an unknown backend dimension as configuration health', () => {
+    const summary = mapBotHealthSummary(
+      {
+        bot_id: 'b1',
+        entity_id: 'u1',
+        items: [
+          {
+            scan_dim: 'legacy-unrecognized-dimension',
+            health_score: 99,
+            grade: 'excellent',
+            status: 'completed',
+            gmt_create: '2026-05-23T00:00:00Z',
+          },
+        ],
+      },
+      { bot_id: 'b1', entity_id: 'u1', total: 0, page: 1, size: 20, items: [] },
+      {
+        dimensions: ['configuration'],
+        showRadar: false,
+        showLogDetails: false,
+        showRawSnapshot: false,
+      },
+    );
+
+    expect(summary.dimensions[0]).toMatchObject({
+      key: 'configuration',
+      scanDim: 'full:L1',
+      score: null,
+      status: 'unknown',
+    });
+    expect(summary.healthScore).toBeNull();
+    expect(summary.latestAt).toBeNull();
+  });
+});
+
+test('desktop OpenClaw does not expose cloud health diagnosis', () => {
+  const bot = mapBotDto({
+    bot_id: 'desktop',
+    bot_type: 'desktop',
+    engine: 'openclaw',
+    status: 'ACTIVE',
+    owner_entity_id: 'owner',
+  }).item;
+  expect(resolveBotHealthActionAvailability(bot, 'owner')).toMatchObject({ visible: false, enabled: false });
+  expect(toHealthCheckTarget(bot, 'owner')).toBeUndefined();
 });

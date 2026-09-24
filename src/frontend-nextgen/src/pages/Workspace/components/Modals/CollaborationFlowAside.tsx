@@ -40,7 +40,7 @@ export function CollaborationFlowAside({ leaderOptions, binding }: Collaboration
             highlightedBinding={binding.activeParticipantKey || undefined}
           />
         ) : (
-          <div className="flex h-[400px] w-full items-center justify-center rounded-xl border border-dashed border-border bg-muted/30 text-center text-xs text-muted-foreground">
+          <div className="flex h-[400px] w-full items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 text-center text-xs text-muted-foreground">
             此次校验未返回流程预览数据
           </div>
         )}

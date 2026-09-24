@@ -64,9 +64,9 @@ export interface TaskNodeView {
   };
   stepTraces: StepTraceView[];
   acceptanceResult?: {
-    verdict: 'PASS' | 'FAIL' | 'DONE' | null;
-    acceptancesMetric: string[];
-    gaps: string[];
+    verdict: 'DONE' | 'FAILED' | null;
+    doneItems: unknown[];
+    gapItems: unknown[];
   } | null;
 }
 

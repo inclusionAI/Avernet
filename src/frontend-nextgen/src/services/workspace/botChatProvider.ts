@@ -3,7 +3,13 @@ import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenContro
 import { OpenClawProvider, type ConnectionStatusEvent, type OpenClawProviderConfig } from '@tc-chat/adapters';
 import type { ChatMessage, ChatProvider, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { installCompleteFallback } from './botChatCompleteFallback';
-import { botSessionService, resolveUserId, withFriendBotRequestParams, type ChatBotView } from './botSessionService';
+import {
+  BOT_MESSAGE_PAGE_SIZE,
+  botSessionService,
+  resolveUserId,
+  withFriendBotRequestParams,
+  type ChatBotView,
+} from './botSessionService';
 
 export interface BotChatRequest {
   content: string;
@@ -55,13 +61,23 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private readonly options: BotChatProviderOptions;
   private inner: OpenClawProvider | null = null;
   private initializePromise: Promise<OpenClawProvider> | null = null;
+  private connectionPromise: Promise<void> | null = null;
+  /** disconnect() 递增；异步 connect 在每个 await 后校验，过期连接静默清理。 */
+  private connectionEpoch = 0;
   private readonly getIamTokenFn: typeof getBotIamToken;
   private iamToken = '';
+  private directDesktop = false;
+  private desktopReconnectTimer?: ReturnType<typeof setTimeout>;
+  private manuallyDisconnected = false;
   private connectionListeners = new Set<(event: ConnectionStatusEvent) => void>();
   private stateListeners = new Set<(state: BotChatState) => void>();
   private unsubscribeInnerConnection?: () => void;
   private state: BotChatState = { phase: 'idle', error: null };
   private teardownFallback?: () => void;
+  private historyPage = 0;
+  private loadedHistoryRawCount = 0;
+  private historyTotal = 0;
+  private loadingMoreHistory = false;
 
   constructor(options: BotChatProviderOptions) {
     this.options = options;
@@ -73,6 +89,12 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   }
   get supportState(): BotChatState {
     return this.state;
+  }
+  get hasMoreHistory(): boolean {
+    return this.loadedHistoryRawCount < this.historyTotal;
+  }
+  get isLoadingMoreHistory(): boolean {
+    return this.loadingMoreHistory;
   }
 
   subscribeToSupportState(listener: (state: BotChatState) => void): () => void {
@@ -100,6 +122,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     );
     const socket = resp.data?.sockets?.find((s) => s.kind === 'chat');
     if (!socket?.url) throw new Error('Bot 连接信息为空,请稍后重试');
+    this.directDesktop = resp.data?.transport_mode === 'direct';
     return socket.url;
   }
 
@@ -118,19 +141,21 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     const url = await this.getChatUrl();
     // 连接凭证(URL query token,管 WS 握手)与请求身份凭证(x-iam-token,管 chat.send 帧)是两套:
     // URL 已内含握手凭证;此处须单独拉取 IAM token 并注入 SDK,否则发送会被服务端拒(身份不明)。
-    this.iamToken = await this.getIamTokenFn(
-      this.options.bot.realBotId,
-      resolveUserId(this.options.userId),
-      this.options.bot.ownerId,
-      this.options.bot.runtimeStage ?? 'online',
-    );
+    this.iamToken = this.directDesktop
+      ? ''
+      : await this.getIamTokenFn(
+          this.options.bot.realBotId,
+          resolveUserId(this.options.userId),
+          this.options.bot.ownerId,
+          this.options.bot.runtimeStage ?? 'online',
+        );
     const factory = this.options.createSdkProvider ?? ((cfg) => new OpenClawProvider(cfg));
     const inner = factory({
       url,
       sessionKey: this.options.sessionId,
       xIAMToken: this.iamToken,
       immediateConnect: true,
-      reconnectAttempts: 3,
+      reconnectAttempts: this.directDesktop ? 0 : 3,
       heartbeatInterval: 30_000,
       heartbeatTimeout: 5 * 60_000,
       connectionTimeout: 10_000,
@@ -140,6 +165,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       // 需换签走 reconnect() 重走 initialize() 重新 getBotConnection)。仅返回 xIAMToken,
       // 不返回 xProxypassToken——避免 SDK 给内含 token 的 url 再次追加 x-proxypass-token。
       credentialProvider: async () => {
+        if (this.directDesktop) return {};
         const refreshed = await this.getIamTokenFn(
           this.options.bot.realBotId,
           resolveUserId(this.options.userId),
@@ -159,44 +185,89 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     this.unsubscribeInnerConnection = inner.subscribeToConnectionStatus((event) => {
       if (event.status === 'connected') this.setState({ phase: 'ready', error: null });
       if (event.status === 'error') this.setState({ phase: 'error', error: event.error?.message || '连接失败' });
+      if (this.directDesktop && (event.status === 'error' || event.status === 'disconnected'))
+        this.scheduleDesktopReconnect();
       this.emitConnection(event);
     });
     this.inner = inner;
     return inner;
   }
 
-  async connect(): Promise<void> {
+  connect(): Promise<void> {
+    this.manuallyDisconnected = false;
+    if (this.connectionPromise) return this.connectionPromise;
+    const epoch = this.connectionEpoch;
+    let trackedPromise!: Promise<void>;
+    trackedPromise = this.connectAtEpoch(epoch).finally(() => {
+      if (this.connectionPromise === trackedPromise) this.connectionPromise = null;
+    });
+    this.connectionPromise = trackedPromise;
+    return trackedPromise;
+  }
+
+  private async connectAtEpoch(epoch: number): Promise<void> {
     this.emitConnection({ status: 'connecting', retryCount: 0 });
+    let inner: OpenClawProvider | null = null;
     try {
-      await this.ensureInitialized();
-      await this.inner?.connect();
+      inner = await this.ensureInitialized();
+      if (epoch !== this.connectionEpoch) {
+        this.disconnectInner(inner);
+        return;
+      }
+      await inner.connect();
+      if (epoch !== this.connectionEpoch) this.disconnectInner(inner);
     } catch (error) {
+      if (epoch !== this.connectionEpoch) {
+        if (inner) this.disconnectInner(inner);
+        return;
+      }
       const normalized = error instanceof Error ? error : new Error(String(error));
       this.setState({ phase: 'error', error: normalized.message });
       this.emitConnection({ status: 'error', retryCount: 0, error: normalized });
+      if (this.directDesktop) this.scheduleDesktopReconnect();
       throw normalized;
     }
   }
 
   disconnect(): void {
-    if (!this.inner) return;
+    this.manuallyDisconnected = true;
+    if (this.desktopReconnectTimer) clearTimeout(this.desktopReconnectTimer);
+    this.desktopReconnectTimer = undefined;
+    this.connectionEpoch += 1;
     this.teardownFallback?.();
-    this.inner.disconnect();
+    this.teardownFallback = undefined;
+    this.unsubscribeInnerConnection?.();
+    this.unsubscribeInnerConnection = undefined;
+    // CONNECTING 状态直接 close 会让 SDK reject 1006。进行中的 connect 自己在 epoch
+    // 失效后完成清理；已稳定/空闲的连接仍立即断开。
+    if (!this.connectionPromise) this.inner?.disconnect();
     this.emitConnection({ status: 'disconnected', retryCount: 0 });
+  }
+
+  private disconnectInner(inner: OpenClawProvider): void {
+    if (this.inner === inner) {
+      this.teardownFallback?.();
+      this.teardownFallback = undefined;
+      this.unsubscribeInnerConnection?.();
+      this.unsubscribeInnerConnection = undefined;
+    }
+    inner.disconnect();
   }
 
   async request(params: BotChatRequest, messageId?: string): Promise<void> {
     const inner = await this.ensureInitialized();
     // 发送前刷新 IAM token,确保 WS 请求帧携带最新身份凭证(与 supportProvider / open-claw 一致)。
-    const freshIamToken = await this.getIamTokenFn(
-      this.options.bot.realBotId,
-      resolveUserId(this.options.userId),
-      this.options.bot.ownerId,
-      this.options.bot.runtimeStage ?? 'online',
-    );
+    const freshIamToken = this.directDesktop
+      ? ''
+      : await this.getIamTokenFn(
+          this.options.bot.realBotId,
+          resolveUserId(this.options.userId),
+          this.options.bot.ownerId,
+          this.options.bot.runtimeStage ?? 'online',
+        );
     this.iamToken = freshIamToken;
     updateProviderIamToken(inner, freshIamToken);
-    if (!inner.isConnected) await inner.connect();
+    if (!inner.isConnected) await this.connect();
     await inner.request(
       {
         query: params.content,
@@ -218,11 +289,17 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   async loadHistory(): Promise<ChatMessage[]> {
     this.setState({ phase: 'loading-history', error: null });
     try {
-      const history = await botSessionService.listMessages(
+      const page = await botSessionService.listMessagesPage(
         this.options.bot,
         this.options.userId,
         this.options.sessionId,
+        1,
+        BOT_MESSAGE_PAGE_SIZE,
       );
+      this.historyPage = 1;
+      this.loadedHistoryRawCount = page.rawCount;
+      this.historyTotal = page.total;
+      const history = page.messages;
       // loadHistory 可能在 connect() 之前预取,此时未连上 → 保持 'idle',
       // 待 SDK 触发 'connected' 事件再切到 'ready';已连上则直接 'ready'。
       this.setState({ phase: this.isConnected ? 'ready' : 'idle', error: null });
@@ -234,13 +311,47 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     }
   }
 
+  async loadMoreHistory(): Promise<ChatMessage[]> {
+    if (!this.hasMoreHistory || this.loadingMoreHistory) return [];
+    this.loadingMoreHistory = true;
+    try {
+      const nextPage = this.historyPage + 1;
+      const page = await botSessionService.listMessagesPage(
+        this.options.bot,
+        this.options.userId,
+        this.options.sessionId,
+        nextPage,
+        BOT_MESSAGE_PAGE_SIZE,
+      );
+      this.historyPage = nextPage;
+      this.loadedHistoryRawCount += page.rawCount;
+      this.historyTotal = page.total;
+      return page.messages;
+    } finally {
+      this.loadingMoreHistory = false;
+    }
+  }
+
+  private scheduleDesktopReconnect(): void {
+    if (this.manuallyDisconnected || this.desktopReconnectTimer) return;
+    const epoch = this.connectionEpoch;
+    this.desktopReconnectTimer = setTimeout(() => {
+      this.desktopReconnectTimer = undefined;
+      if (this.manuallyDisconnected || epoch !== this.connectionEpoch || this.isConnected) return;
+      // A desktop restart can change the host port. Rebuild from discovery,
+      // instead of asking the SDK to retry its stale WebSocket URL.
+      void this.reconnect().catch(() => this.scheduleDesktopReconnect());
+    }, 5000);
+  }
+
   async reconnect(): Promise<void> {
-    this.unsubscribeInnerConnection?.();
-    this.unsubscribeInnerConnection = undefined;
-    this.inner?.disconnect();
+    const pendingConnection = this.connectionPromise;
+    this.disconnect();
+    const epoch = this.connectionEpoch;
+    if (pendingConnection) await pendingConnection.catch(() => undefined);
+    if (epoch !== this.connectionEpoch) return;
     this.inner = null;
     this.initializePromise = null;
-    this.teardownFallback?.();
     await this.connect();
   }
 

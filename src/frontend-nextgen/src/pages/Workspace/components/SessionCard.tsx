@@ -2,7 +2,7 @@ import { Button } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { cn } from '@/utils/cn';
 import { MessageSquare } from 'lucide-react';
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 function parseDate(input: number | string | undefined): Date | null {
   if (input === undefined || input === '' || input === 0) return null;
@@ -76,8 +76,10 @@ interface SessionCardProps {
   dateTooltip?: string;
   selected: boolean;
   onSelect: () => void;
-  /** 右侧操作区（如更多菜单），由调用方决定可见性。 */
+  /** 右侧操作区（如更多菜单），与日期位置互换、悬停浮现。 */
   trailing?: React.ReactNode;
+  /** 常显操作（如收藏星标）——与日期同排常显，不参与悬停显隐。 */
+  persistentAction?: React.ReactNode;
   /** 无副行内容时使用更紧凑的单行布局。 */
   compact?: boolean;
   /** 对话使用消息 Icon，协作群会话保留圆点。 */
@@ -94,20 +96,66 @@ export const SessionCard = React.memo(function SessionCard({
   selected,
   onSelect,
   trailing,
+  persistentAction,
   compact = false,
   dateTooltip,
   indicator = 'dot',
   className,
 }: SessionCardProps) {
+  // v1.4：标题截断检测（scrollWidth > clientWidth，ResizeObserver 跟随容器宽度变化，
+  // 模式同 SystemMessageItem）——仅在真实截断时挂 Tooltip 补全完整标题。
+  const titleRef = useRef<HTMLSpanElement>(null);
+  const [titleOverflowing, setTitleOverflowing] = useState(false);
+  useEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    const check = () => setTitleOverflowing(el.scrollWidth > el.clientWidth + 1);
+    check();
+    // 测试环境无 ResizeObserver 时仅保留初始检测，跳过动态观察。
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [title]);
+
+  const titleNode = (
+    <span
+      ref={titleRef}
+      className={cn(
+        'block truncate text-xs leading-5',
+        selected ? 'font-medium text-primary' : 'font-normal text-foreground',
+      )}
+    >
+      {title}
+    </span>
+  );
+
   return (
+    // v1.4：会话行保持全宽行式。
+    // 验收微调：树形导轨改为每行自带——干线（data-session-tree-rail）+ 拐角横线（elbow）
+    // 均由行渲染；非末行干线贯穿整行，末行经 :last-child 变体止于拐角高度，
+    // 消除末行下方的多余线段；选中态行首显示 2px 品牌条。
     <div
       className={cn(
-        'group relative flex items-stretch border-b border-border/70 text-sm transition-colors last:border-b-0',
-        compact ? 'min-h-12' : 'min-h-[60px]',
-        selected ? 'bg-primary/10' : 'bg-background hover:bg-primary/5',
+        'group relative flex items-stretch text-sm transition-colors',
+        // 末行干线止于拐角高度：树形导轨不再垂到列表底部（jsdom 不计算 CSS 行为，测试锁定类名契约）。
+        'last:[&_[data-session-tree-rail]]:bottom-1/2',
+        compact ? 'min-h-12' : 'min-h-15',
+        selected ? 'bg-primary/10' : 'hover:bg-primary/5',
         className,
       )}
     >
+      {/* 干线：对齐容器缩进 16px 处（行内 -left-2），非末行贯穿整行、末行止于拐角。 */}
+      <span data-session-tree-rail aria-hidden="true" className="absolute -left-2 top-0 bottom-0 w-px bg-border" />
+      {/* 拐角横线 8px：左端紧贴干线、右端无缝接到会话卡片行首——完整下钻路径。 */}
+      <span data-session-tree-elbow aria-hidden="true" className="absolute -left-2 top-1/2 h-px w-2 bg-border" />
+      {selected && (
+        <span
+          data-session-left-bar
+          aria-hidden="true"
+          className="absolute bottom-1 left-0 top-1 w-0.5 rounded-r-sm bg-primary"
+        />
+      )}
       <Button
         variant="ghost"
         aria-pressed={selected}
@@ -116,7 +164,7 @@ export const SessionCard = React.memo(function SessionCard({
         className={cn(
           'flex h-auto min-w-0 flex-1 justify-start gap-2 rounded-none px-2.5 text-left hover:bg-transparent focus-visible:z-10',
           compact ? 'items-center' : 'items-start',
-          compact ? 'min-h-12 py-2' : 'min-h-[60px] py-2.5',
+          compact ? 'min-h-12 py-2' : 'min-h-15 py-2.5',
         )}
       >
         <span
@@ -145,14 +193,14 @@ export const SessionCard = React.memo(function SessionCard({
           )}
         </span>
         <div className="min-w-0 flex-1">
-          <span
-            className={cn(
-              'block truncate text-xs leading-5',
-              selected ? 'font-medium text-primary' : 'font-normal text-foreground',
-            )}
-          >
-            {title}
-          </span>
+          {/* Tooltip 结构常挂（span 不因溢出态切换而重建，保证 ref/ResizeObserver 稳定）；
+              仅在真实截断时渲染内容，未截断悬停不弹窗。 */}
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>{titleNode}</TooltipTrigger>
+              {titleOverflowing && <TooltipContent>{title}</TooltipContent>}
+            </Tooltip>
+          </TooltipProvider>
           {subtitle && (
             <span
               className={cn(
@@ -165,26 +213,43 @@ export const SessionCard = React.memo(function SessionCard({
           )}
         </div>
       </Button>
-      {(dateText || trailing) && (
+      {/* v1.4：右侧结构 = 常显操作（收藏星标）+ 日期 + 悬停浮现的更多操作。
+          日期占流常显；操作按钮绝对定位叠放右缘，悬停/键盘聚焦时原位浮现且日期淡出，
+          消除非悬停时的透明占位空块；触屏设备（hover:none）操作按钮回到流内与日期并排常显。
+          验收微调：日期改定宽右对齐槽位（min-w-9=36px，贴合最长常见格式「09/02/14:30」约 30px）——
+          星标在日期左侧，槽位定宽后星标 x 位置不随「昨天/周X/MM/DD」等格式宽度漂移；
+          槽宽从 48px 收紧到 36px，避免短日期（昨天/周X）在星标与日期间留出大空隙。 */}
+      {(dateText || trailing || persistentAction) && (
         <div
           className={cn(
-            'flex shrink-0 gap-2 pr-3 text-xs text-muted-foreground',
+            'relative flex shrink-0 gap-2 pr-3 text-xs text-muted-foreground',
             compact ? 'items-center' : 'items-center pt-2',
           )}
         >
+          {persistentAction && <span className="flex items-center">{persistentAction}</span>}
           {dateText && dateTooltip ? (
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="whitespace-nowrap leading-5">{dateText}</span>
+                  <span className="min-w-9 shrink-0 whitespace-nowrap text-right leading-5 transition-opacity [@media(hover:hover)]:group-hover:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-0">
+                    {dateText}
+                  </span>
                 </TooltipTrigger>
                 <TooltipContent>{dateTooltip}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           ) : (
-            dateText && <span className="whitespace-nowrap leading-5">{dateText}</span>
+            dateText && (
+              <span className="min-w-9 shrink-0 whitespace-nowrap text-right leading-5 transition-opacity [@media(hover:hover)]:group-hover:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-0">
+                {dateText}
+              </span>
+            )
           )}
-          {trailing}
+          {trailing && (
+            <span className="absolute right-3 flex items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:relative [@media(hover:none)]:opacity-100">
+              {trailing}
+            </span>
+          )}
         </div>
       )}
     </div>

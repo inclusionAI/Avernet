@@ -48,6 +48,34 @@ const STRATEGY_TO_KIND: Record<GroupStrategy, GroupKind> = {
   manager_worker: 'task_master_slave',
   state_machine: 'task_dag',
 };
+
+function safeString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function safeNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function isGroupStrategy(value: unknown): value is GroupStrategy {
+  return value === 'chat' || value === 'manager_worker' || value === 'state_machine';
+}
+
+function isParticipantRole(value: unknown): value is string {
+  return typeof value === 'string';
+}
+
+function isParticipantKind(value: unknown): value is 'human' | 'bot' {
+  return value === 'human' || value === 'bot';
+}
+
+function isParticipantMode(value: unknown): value is 'auto' | 'muted' | 'present' | 'absent' {
+  return value === 'auto' || value === 'muted' || value === 'present' || value === 'absent';
+}
+
+function isMessageViewScope(value: unknown): value is 'full' | 'participant' {
+  return value === 'full' || value === 'participant';
+}
 const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
   owner: 'owner',
   driver: 'driver',
@@ -58,18 +86,20 @@ const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
 };
 
 export function mapGroupListItem(dto: GroupListItemDto): GroupView {
+  const strategy = isGroupStrategy(dto.strategy) ? dto.strategy : 'chat';
+  const membership = dto.membership === 'direct' || dto.membership === 'session_only' ? dto.membership : undefined;
   return {
-    groupId: dto.group_id,
-    name: dto.name ?? '未命名群',
-    kind: STRATEGY_TO_KIND[dto.strategy],
+    groupId: safeString(dto.group_id),
+    name: safeString(dto.name, '未命名群'),
+    kind: STRATEGY_TO_KIND[strategy],
     status: dto.status === 'dissolved' ? 'dissolved' : 'active',
     participants: [],
     sessions: [],
-    lastMessageAt: dto.updated_at,
-    createdAt: dto.created_at,
-    participantCount: dto.participant_count,
-    driverBotUuid: dto.driver_bot_uuid,
-    ...(dto.membership ? { membership: dto.membership } : {}),
+    lastMessageAt: safeNumber(dto.updated_at),
+    createdAt: safeNumber(dto.created_at),
+    participantCount: safeNumber(dto.participant_count),
+    driverBotUuid: safeString(dto.driver_bot_uuid),
+    ...(membership ? { membership } : {}),
     isPublic: dto.visibility === 'public',
     deliveryPolicy: 'send_to_driver',
   };
@@ -83,30 +113,36 @@ export function mapParticipant(dto: {
   mode: 'auto' | 'muted' | 'present' | 'absent';
   message_view_scope?: 'full' | 'participant';
 }): ParticipantView {
-  return {
-    actorId: dto.actor_id,
-    kind: dto.actor_kind,
-    name: dto.name ?? dto.actor_id,
-    role: ROLE_NATIVE_TO_DOMAIN[dto.role] ?? 'member',
-    mode: dto.mode,
-    ...(dto.message_view_scope ? { messageViewScope: dto.message_view_scope } : {}),
+  const actorId = safeString(dto.actor_id);
+  const participant: ParticipantView = {
+    actorId,
+    kind: isParticipantKind(dto.actor_kind) ? dto.actor_kind : 'bot',
+    name: safeString(dto.name, actorId),
+    role: ROLE_NATIVE_TO_DOMAIN[isParticipantRole(dto.role) ? dto.role : ''] ?? 'member',
+    mode: isParticipantMode(dto.mode) ? dto.mode : 'auto',
   };
+  if (isMessageViewScope(dto.message_view_scope)) participant.messageViewScope = dto.message_view_scope;
+  return participant;
 }
 
 export function mapSessionListItem(dto: GroupSessionDto): SessionView {
+  const participants = Array.isArray(dto.participants) ? dto.participants : [];
+  const status = dto.status === 'completed' ? 'completed' : 'running';
   return {
-    sessionId: dto.session_id,
-    groupId: dto.group_id,
-    title: dto.title ?? '未命名会话',
+    sessionId: safeString(dto.session_id),
+    groupId: safeString(dto.group_id),
+    title: safeString(dto.title, '未命名会话'),
     kind: dto.kind === 'service_invocation' ? 'service_invocation' : 'chat',
-    status: dto.status ?? 'running',
-    participants: (dto.participants ?? []).map(mapParticipant),
-    ...(dto.participant_count !== undefined ? { participantCount: dto.participant_count } : {}),
-    lastMessageAt: dto.updated_at,
-    createdAt: dto.created_at,
-    favorite: dto.collected ?? false,
-    ...(dto.created_by ? { createdBy: dto.created_by } : {}),
-    ...(dto.caller_principal ? { callerPrincipal: dto.caller_principal } : {}),
+    status,
+    participants: participants.map(mapParticipant),
+    ...(typeof dto.participant_count === 'number' && Number.isFinite(dto.participant_count)
+      ? { participantCount: dto.participant_count }
+      : {}),
+    lastMessageAt: safeNumber(dto.updated_at),
+    createdAt: safeNumber(dto.created_at),
+    favorite: dto.collected === true,
+    ...(typeof dto.created_by === 'string' ? { createdBy: dto.created_by } : {}),
+    ...(typeof dto.caller_principal === 'string' ? { callerPrincipal: dto.caller_principal } : {}),
   };
 }
 
@@ -144,26 +180,31 @@ export interface BcsSessionRaw {
 /** BCS raw 会话项 → SessionView 兜底映射（execute 建群链路专用，不碰预发 mapSessionListItem）。
  *  BCS 用 session_id/id、session_title、session_kind、bot_uuid/bot_name，按实际结构兜底取值。 */
 export function mapBcsSessionItem(raw: BcsSessionRaw, fallbackGroupId: string): SessionView {
+  const participants = Array.isArray(raw.participants) ? raw.participants : [];
+  const sessionId = safeString(raw.session_id, safeString(raw.id));
+  const groupId = safeString(raw.group_id, fallbackGroupId);
   return {
-    sessionId: raw.session_id ?? raw.id ?? '',
-    groupId: raw.group_id ?? fallbackGroupId,
-    title: raw.session_title ?? raw.title ?? '未命名会话',
+    sessionId,
+    groupId,
+    title: safeString(raw.session_title, safeString(raw.title, '未命名会话')),
     kind: raw.session_kind === 'service_invocation' ? 'service_invocation' : 'chat',
-    status: raw.status ?? 'running',
-    participants: (raw.participants ?? []).map((p) =>
+    status: raw.status === 'completed' ? 'completed' : 'running',
+    participants: participants.map((p) =>
       mapParticipant({
-        actor_id: p.bot_uuid ?? p.actor_id ?? p.bot_id ?? '',
-        actor_kind: p.actor_kind ?? 'bot',
-        name: p.bot_name ?? p.name ?? p.bot_uuid ?? p.actor_id ?? '',
-        role: p.role ?? 'observer',
-        mode: p.mode ?? 'auto',
+        actor_id: safeString(p.bot_uuid, safeString(p.actor_id, safeString(p.bot_id))),
+        actor_kind: isParticipantKind(p.actor_kind) ? p.actor_kind : 'bot',
+        name: safeString(p.bot_name, safeString(p.name, safeString(p.bot_uuid, safeString(p.actor_id)))),
+        role: safeString(p.role, 'observer'),
+        mode: isParticipantMode(p.mode) ? p.mode : 'auto',
       }),
     ),
-    ...(raw.participant_count !== undefined ? { participantCount: raw.participant_count } : {}),
-    lastMessageAt: raw.updated_at ?? 0,
-    createdAt: raw.created_at ?? 0,
-    favorite: raw.collected ?? false,
-    ...(raw.created_by ? { createdBy: raw.created_by } : {}),
-    ...(raw.caller_principal ? { callerPrincipal: raw.caller_principal } : {}),
+    ...(typeof raw.participant_count === 'number' && Number.isFinite(raw.participant_count)
+      ? { participantCount: raw.participant_count }
+      : {}),
+    lastMessageAt: safeNumber(raw.updated_at),
+    createdAt: safeNumber(raw.created_at),
+    favorite: raw.collected === true,
+    ...(typeof raw.created_by === 'string' ? { createdBy: raw.created_by } : {}),
+    ...(typeof raw.caller_principal === 'string' ? { callerPrincipal: raw.caller_principal } : {}),
   };
 }

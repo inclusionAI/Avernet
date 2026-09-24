@@ -6,6 +6,7 @@ import {
 } from '@/components/Workspace/MessageInteractionToolbar';
 import { getMessageSpacingClass } from '@/components/Workspace/messagePresentation';
 import { MessageSenderLayout, MessageSenderMeta } from '@/components/Workspace/MessageSenderMeta';
+import { useHistoryPrependAnchor } from '@/pages/Workspace/hooks/useHistoryPrependAnchor';
 import type { MessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
 import { getLatestUserMessageId, getMessageText } from '@/pages/Workspace/hooks/useMessageInteractions';
 import { useStickToBottom } from '@/pages/Workspace/hooks/useStickToBottom';
@@ -29,6 +30,11 @@ interface ChatMessageListProps {
   resolveSender: (message: ChatMessage) => { name: string; avatar: ReactNode };
   getMessageTime: (message: ChatMessage) => string | undefined;
   getMessageBlocks: (message: ChatMessage) => Block[];
+  hasMoreHistory?: boolean;
+  isLoadingMoreHistory?: boolean;
+  onLoadMoreHistory?: () => void;
+  readOnly?: boolean;
+  emptyPlaceholder?: string;
 }
 
 export function ChatMessageList({
@@ -43,6 +49,11 @@ export function ChatMessageList({
   resolveSender,
   getMessageTime,
   getMessageBlocks,
+  hasMoreHistory,
+  isLoadingMoreHistory,
+  onLoadMoreHistory,
+  readOnly = false,
+  emptyPlaceholder,
 }: ChatMessageListProps) {
   const latestUserMessageId = getLatestUserMessageId(messages);
   const messagesRef = useRef(messages);
@@ -59,6 +70,8 @@ export function ChatMessageList({
     },
     [interactions.rootRef],
   );
+
+  const loadMoreWithAnchor = useHistoryPrependAnchor(messages, listRootRef, onLoadMoreHistory);
 
   const getCurrentMessageText = (messageId: string, fallbackText: string) => {
     const currentMessage = messagesRef.current.find((message) => message.id === messageId);
@@ -83,7 +96,10 @@ export function ChatMessageList({
             computeItemKey={(message) => message.id}
             isStreaming={isRequesting}
             followOutput="auto"
-            emptyPlaceholder="发送一条消息开始对话"
+            hasMore={hasMoreHistory}
+            isLoadingMore={isLoadingMoreHistory}
+            onLoadMore={loadMoreWithAnchor}
+            emptyPlaceholder={emptyPlaceholder ?? (readOnly ? '暂无历史消息' : '发送一条消息开始对话')}
             renderItem={(message, index) => {
               if (message.role === 'system') {
                 return <SystemNotice>{message.content}</SystemNotice>;
@@ -125,12 +141,12 @@ export function ChatMessageList({
                       actions={
                         message.role === 'assistant' ? (
                           <MessageInteractionToolbar
-                            onEdit={() => onEditMessage(message)}
+                            onEdit={readOnly ? undefined : () => onEditMessage(message)}
                             isEditable={false}
                             showCopy={false}
                             onCopy={() => interactions.copyText(getCurrentMessageText(message.id, messageText))}
-                            isStreaming={isLastMessage && isRequesting}
-                            onStop={onStop}
+                            isStreaming={!readOnly && isLastMessage && isRequesting}
+                            onStop={readOnly ? undefined : onStop}
                           />
                         ) : undefined
                       }
@@ -140,9 +156,12 @@ export function ChatMessageList({
                     testId={`message-copy-action-${message.id}`}
                     align={message.role === 'user' ? 'right' : 'left'}
                     onCopy={() => interactions.copyText(getCurrentMessageText(message.id, messageText))}
-                    onEdit={() => onEditMessage(message)}
+                    onEdit={readOnly ? undefined : () => onEditMessage(message)}
                     isEditable={
-                      message.role === 'user' && message.id === latestUserMessageId && Boolean(messageText.trim())
+                      !readOnly &&
+                      message.role === 'user' &&
+                      message.id === latestUserMessageId &&
+                      Boolean(messageText.trim())
                     }
                   />
                 </div>
@@ -154,8 +173,8 @@ export function ChatMessageList({
       <MessageSelectionToolbar
         selection={interactions.selection}
         onCopy={(text) => interactions.copyText(text, '选中文本')}
-        onQuote={onQuoteSelected}
-        onExplain={onExplainSelected}
+        onQuote={readOnly ? undefined : onQuoteSelected}
+        onExplain={readOnly ? undefined : onExplainSelected}
       />
       {interactions.unreadCount > 0 ? (
         <Button

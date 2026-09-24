@@ -7,7 +7,8 @@ import { useChat, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { ChatMessage, PanelHandle, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
-import { useConnectionStatusSmoothing } from './useConnectionStatusSmoothing';
+import { prependUniqueMessages } from './groupChatHistoryUtils';
+import { useSessionDisplayStatus, type SessionEnterOutcome } from './useSessionDisplayStatus';
 
 export interface SendFileRefs {
   resourceReferences?: ResourceReference[];
@@ -51,7 +52,15 @@ export function useBotChat(
 
   const [supportState, setSupportState] = useState<BotChatState>({ phase: 'idle', error: null });
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
-  const smoothedConnectionStatus = useConnectionStatusSmoothing(connectionStatus);
+  // 进入流程信号（连接 / 历史双完成才就绪，任一失败即 failed）：useSessionDisplayStatus 的输入。
+  // 单聊 connect 与 loadHistory 并行（AC-3 边界），手动 reconnect / reloadHistory 成功后也回写信号，
+  // 避免失败态恢复后卡在「连接中」。
+  const [connectDone, setConnectDone] = useState(false);
+  const [historyDone, setHistoryDone] = useState(false);
+  const [enterFailed, setEnterFailed] = useState(false);
+  const [historyEmpty, setHistoryEmpty] = useState(false);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
 
   const provider = useMemo(() => {
     if (!bot || !sessionId || !identityId) return null;
@@ -82,16 +91,39 @@ export function useBotChat(
     placeholderMessage: '',
     panelRef,
   });
+  const enterOutcome: SessionEnterOutcome = enterFailed
+    ? 'failed'
+    : connectDone && historyDone && (historyEmpty || chat.messages.length > 0)
+    ? 'ready'
+    : 'pending';
+  const displayStatus = useSessionDisplayStatus({
+    sessionKey: sessionId,
+    rawStatus: connectionStatus,
+    enterOutcome,
+  });
 
   const prevRef = useRef<string | null>(null);
   useEffect(() => {
     if (!provider || !sessionId) return;
     if (prevRef.current === sessionId) return;
+    let cancelled = false;
     prevRef.current = sessionId;
+    setConnectDone(false);
+    setEnterFailed(false);
     // 切换会话:清空副屏 tab,避免旧会话副屏残留叠加到新会话(对齐 useGroupChat connect effect)。
     panelRef?.current?.closePanelForce();
-    provider.connect().catch((error: unknown) => toast.error(error instanceof Error ? error.message : 'Bot 连接失败'));
+    provider
+      .connect()
+      .then(() => {
+        if (!cancelled) setConnectDone(true);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setEnterFailed(true);
+        toast.error(error instanceof Error ? error.message : 'Bot 连接失败');
+      });
     return () => {
+      cancelled = true;
       prevRef.current = null;
       void provider.disconnect();
     };
@@ -112,15 +144,26 @@ export function useBotChat(
   useEffect(() => {
     if (!provider || !sessionId) return;
     let cancelled = false;
+    setHasMoreHistory(false);
+    setIsLoadingMoreHistory(false);
+    setHistoryDone(false);
+    setHistoryEmpty(false);
+    setEnterFailed(false);
     provider
       .loadHistory()
       .then((history: ChatMessage[]) => {
         if (!cancelled) {
-          chat.setMessages(mergeTaskPreflightMessages(history, listTaskPreflightMessages(sessionId)));
+          const merged = mergeTaskPreflightMessages(history, listTaskPreflightMessages(sessionId));
+          chat.setMessages(merged);
+          setHasMoreHistory(provider.hasMoreHistory);
+          setHistoryEmpty(merged.length === 0);
+          setHistoryDone(true);
         }
       })
       .catch((error: unknown) => {
-        if (!cancelled) toast.error(error instanceof Error ? error.message : '加载历史消息失败');
+        if (cancelled) return;
+        setEnterFailed(true);
+        toast.error(error instanceof Error ? error.message : '加载历史消息失败');
       });
     return () => {
       cancelled = true;
@@ -153,19 +196,54 @@ export function useBotChat(
     if (!provider) return;
     try {
       await provider.reconnect();
+      // 手动重连成功回写进入信号：失败态恢复后不卡「连接中」；历史信号由 reloadHistory 回写。
+      setEnterFailed(false);
+      setConnectDone(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '重连失败');
     }
   };
+  const loadMoreHistory = async () => {
+    if (!provider || !sessionId || isLoadingMoreHistory || !hasMoreHistory) return;
+    setIsLoadingMoreHistory(true);
+    try {
+      const older = await provider.loadMoreHistory();
+      if (older.length > 0) {
+        chat.setMessages((current) => prependUniqueMessages(current, older));
+      }
+      setHasMoreHistory(provider.hasMoreHistory);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '加载更多历史消息失败');
+    } finally {
+      setIsLoadingMoreHistory(false);
+    }
+  };
+
   const reloadHistory = async () => {
     if (!provider || !sessionId) return;
     try {
       const h = await provider.loadHistory();
       chat.setMessages(h);
+      setHasMoreHistory(provider.hasMoreHistory);
+      setEnterFailed(false);
+      setHistoryEmpty(h.length === 0);
+      setHistoryDone(true);
     } catch (e) {
+      setEnterFailed(true);
       toast.error(e instanceof Error ? e.message : '加载历史消息失败');
     }
   };
 
-  return { chat, supportState, connectionStatus: smoothedConnectionStatus, send, stop, reconnect, reloadHistory };
+  return {
+    chat,
+    supportState,
+    connectionStatus: displayStatus.status,
+    send,
+    stop,
+    reconnect,
+    reloadHistory,
+    hasMoreHistory,
+    isLoadingMoreHistory,
+    loadMoreHistory,
+  };
 }

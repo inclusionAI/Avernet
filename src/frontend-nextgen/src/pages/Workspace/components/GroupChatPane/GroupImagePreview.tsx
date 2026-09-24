@@ -29,7 +29,7 @@ export function GroupImagePreview({ images, uploadStates, maxCount, onRemove }: 
                 src={image.previewUrl}
                 alt={image.name}
                 className={cn(
-                  'h-11 w-11 rounded-md border border-border bg-muted/50 object-cover',
+                  'h-11 w-11 rounded-md border border-border bg-muted/40 object-cover',
                   isError && 'opacity-50',
                 )}
               />

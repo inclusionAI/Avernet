@@ -63,8 +63,9 @@ export function calculateStats(
   };
 }
 
-function mapDimension(item: HarnessDimReportItemDto): BotHealthDimension {
+function mapDimension(item: HarnessDimReportItemDto): BotHealthDimension | undefined {
   const key = inferDimensionKey(item.scan_dim);
+  if (!key) return undefined;
   const label = dimensionLabels[key];
   const checkItems = parseCheckItems(item.check_items) ?? [];
   const findings = parseFindings(item.findings);
@@ -103,8 +104,9 @@ function mapDimension(item: HarnessDimReportItemDto): BotHealthDimension {
   };
 }
 
-function mapHistory(item: HarnessDimHistoryRecordItemDto): BotHealthHistoryItem {
+function mapHistory(item: HarnessDimHistoryRecordItemDto): BotHealthHistoryItem | undefined {
   const dimension = mapDimension(item);
+  if (!dimension) return undefined;
   const key = dimension.key;
   return {
     id: String(item.id ?? `${key}-${dimension.scanDim}`),
@@ -128,12 +130,12 @@ export function buildPlaceholderDimension(key: BotHealthDimensionKey): BotHealth
   return {
     key,
     label: dimensionLabels[key],
-    scanDim: scanDimToKey[level] ?? '',
+    scanDim: `full:${level}`,
     description: dimensionDescriptions[key],
     score: null,
     grade: null,
     scanStatus: null,
-    status: 'passed',
+    status: 'unknown',
     checkedCount: 0,
     passedCount: 0,
     warningCount: 0,
@@ -189,17 +191,14 @@ export function mapBotHealthSummary(
   history: HarnessDimHistoryResponseDto,
   capability: BotHealthCapability,
 ): BotHealthCheckSummary {
-  const dimensions = ensureAllDimensions(
-    filterDimension(
-      (report.items ?? []).map((item) => mapDimension(item)),
-      capability,
-    ),
-    capability.dimensions,
-  );
-  const historyItems = filterDimension(
-    (history.items ?? []).map((item) => mapHistory(item)),
-    capability,
-  );
+  const mappedDimensions = (report.items ?? [])
+    .map((item) => mapDimension(item))
+    .filter((item): item is BotHealthDimension => item !== undefined);
+  const mappedHistory = (history.items ?? [])
+    .map((item) => mapHistory(item))
+    .filter((item): item is BotHealthHistoryItem => item !== undefined);
+  const dimensions = ensureAllDimensions(filterDimension(mappedDimensions, capability), capability.dimensions);
+  const historyItems = filterDimension(mappedHistory, capability);
   const scores = dimensions.map((item) => item.score).filter((item): item is number => typeof item === 'number');
   const healthScore = scores.length ? Math.round(scores.reduce((sum, item) => sum + item, 0) / scores.length) : null;
   return {

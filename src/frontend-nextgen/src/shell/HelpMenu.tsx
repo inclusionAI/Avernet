@@ -1,4 +1,5 @@
-// 顶栏帮助菜单（Open Core 纯 UI）。问号 IconButton + Popover。
+// 顶层帮助/更多浮层菜单（Open Core 纯 UI）。「帮助」问号或「更多」省略 IconButton + Popover（refactor-global-nav-shell：
+// variant='more' 随侧栏底部用户行迁入，内容不动；variant='help' 保留历史词表）。
 // 菜单项统一「图标+文字」行：ReleaseNote / 用户手册 / 平台指标(开 Drawer) / 答疑机器人(末项) / 产品获取(hover 子菜单)。
 // - 外链经 getHelpLinks capability（Open Core=[]，internal overlay 注入内网 URL）。
 // - 版本发布说明经 useReleaseNotes（OpenCore 不支持→不渲染；internal 红点+Modal）。
@@ -16,6 +17,7 @@ import {
   HelpCircle,
   MessageCircle,
   Monitor,
+  MoreHorizontal,
   PackageOpen,
   ScrollText,
   Smartphone,
@@ -100,7 +102,7 @@ function ProductSubmenu({ items }: { items: HelpLink[] }) {
   );
 }
 
-export function HelpMenu() {
+export function HelpMenu({ variant = 'help' }: { variant?: 'help' | 'more' } = {}) {
   const [open, setOpen] = useState(false);
   const [metricsOpen, setMetricsOpen] = useState(false);
   const links = getCapabilities().getHelpLinks().value;
@@ -112,12 +114,17 @@ export function HelpMenu() {
   const showRelease = release.supported;
 
   const hasAny = !!manual || !!robot || product.length > 0;
+  const isMore = variant === 'more';
 
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <IconButton label="帮助" icon={<HelpCircle className="h-4 w-4" />} />
+          {isMore ? (
+            <IconButton label="更多" icon={<MoreHorizontal className="h-4 w-4" />} />
+          ) : (
+            <IconButton label="帮助" icon={<HelpCircle className="h-4 w-4" />} />
+          )}
         </PopoverTrigger>
         <PopoverContent align="end" className="w-56 p-1.5">
           {hasAny ? (

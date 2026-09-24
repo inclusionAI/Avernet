@@ -84,5 +84,6 @@ export function registerSidePanelWiring(): void {
 }
 
 export const appExtension = {
+  avatarEditor: React.lazy(() => import('@/components/BotWorkshop/BotAvatar/AvatarEditor')),
   capabilities: defaultCapabilities,
 };

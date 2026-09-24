@@ -38,7 +38,7 @@ export function ParticipantBindingPanel({
     <div className="overflow-hidden rounded-lg border border-border bg-background">
       <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2.5">
         <span className="text-xs font-semibold text-foreground">角色绑定</span>
-        <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+        <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
           已绑定 {boundCount} / {definitions.length} 个角色，共 {botCount} 个 Bot
         </span>
       </div>

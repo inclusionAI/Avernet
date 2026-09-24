@@ -89,7 +89,7 @@ export function GroupLeaderSelect({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs">{option.name}</span>
                       {option.description ? (
-                        <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
+                        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
                           {option.description}
                         </span>
                       ) : null}

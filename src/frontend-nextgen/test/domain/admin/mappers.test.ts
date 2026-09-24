@@ -189,6 +189,34 @@ describe('mapWorkOrderDto', () => {
     expect(item.canApprove).toBe(false);
   });
 
+  it('content 内含 session_url 时抽出到 item.sessionUrl（顶层优先、对象兜底），contentRaw 仍原样保留该字段', () => {
+    // 详情 content 为对象、session_url 藏在对象内
+    const fromObj = mapWorkOrderDto({
+      work_order_id: 7,
+      event_type: 'SPACE_JOIN_APPLIED',
+      content: { space_name: '风控团队', session_url: 'https://chat.example.com/s/abc123' },
+      status: 'PENDING',
+    }).item;
+    expect(fromObj.sessionUrl).toBe('https://chat.example.com/s/abc123');
+    // contentRaw 仍含 session_url，JSON 块照常展示原始数据
+    expect(fromObj.contentRaw).toContain('"session_url"');
+    expect(fromObj.contentRaw).toContain('https://chat.example.com/s/abc123');
+
+    // 顶层 session_url 优先于 content 对象内的同名值
+    const fromTop = mapWorkOrderDto({
+      work_order_id: 8,
+      event_type: 'SPACE_JOIN_APPLIED',
+      content: { session_url: 'https://inner.example.com/s' },
+      session_url: 'https://top.example.com/s',
+      status: 'PENDING',
+    }).item;
+    expect(fromTop.sessionUrl).toBe('https://top.example.com/s');
+
+    // 无 session_url 时不填充
+    const none = mapWorkOrderDto({ work_order_id: 9, content: '纯文本通知', status: 'PENDING' }).item;
+    expect(none.sessionUrl).toBeUndefined();
+  });
+
   it('列表 content 为字符串时原样透传、不触发对象解析', () => {
     const { item } = mapWorkOrderDto({ ...workOrderDto });
     expect(item.content).toBe('用户「张三」申请加入空间「风控团队」');
@@ -196,6 +224,24 @@ describe('mapWorkOrderDto', () => {
     expect(item.contentRaw).toBeUndefined();
     expect(item.applicantName).toBeUndefined();
     expect(item.applyReason).toBe('申请加入空间参与 Skill 建设');
+  });
+
+  it('通知 content 为 { text } 时提取多行正文，并按纯文本而非 JSON 展示', () => {
+    const text =
+      '群：测试消息视角1（ID：bcs_grp_44cfd103f69941f0a922d0a55dc3b40b）\n' +
+      '会话：新会话（ID：bcs_grp_44cfd103f69941f0a922d0a55dc3b40b:c039b5b3）\n' +
+      '皮皮虾: 章梧 你好呀！👋 这是 at 你的测试消息~\n\nat 功能正常工作 ✅';
+
+    const { item } = mapWorkOrderDto({
+      item_type: 'NOTICE',
+      notification_category: 'NOTICE',
+      event_type: 'GROUP_MESSAGE_AT',
+      content: { text },
+      status: 'PENDING',
+    });
+
+    expect(item.content).toBe(text);
+    expect(item.contentRaw).toBeUndefined();
   });
 
   it('通知详情 VO：content 为 { legacy_value } 透传文案、work_order_status 字段名、无 item_type 按 event_type 推断', () => {

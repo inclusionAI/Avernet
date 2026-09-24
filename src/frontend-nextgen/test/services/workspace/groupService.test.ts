@@ -293,6 +293,33 @@ describe('BCS group routing by bcs_grp_ prefix', () => {
     expect(urls.some((u: string) => u.endsWith('/groups/bcs_grp_abc'))).toBe(true);
   });
 
+  it('BCS 群详情字段异常时仍返回可渲染的 GroupView', async () => {
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+    global.fetch = jest.fn<typeof fetch>().mockImplementation(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes('/sessions')) return jsonOk({ code: 200000, message: 'OK', data: { items: [] } });
+      return jsonOk({
+        code: 200000,
+        message: 'OK',
+        data: {
+          id: 'bcs_grp_legacy',
+          label: { value: '异常群名' },
+          participants: [{ bot_uuid: { value: 'bot-1' }, bot_name: { value: '异常 Bot' }, role: 'worker' }],
+        },
+      });
+    });
+
+    const res = await groupService.loadGroupDetailOrBcs('bcs_grp_legacy', 'human-me');
+
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.data.name).toBe('未命名群');
+    expect(res.ok && res.data.participants[0]).toMatchObject({
+      actorId: '',
+      name: '',
+      kind: 'bot',
+    });
+  });
+
   it('routes non-prefixed group to generic listGroupSessions path with view_bot_id', async () => {
     sc.listGroupSessions.mockResolvedValue({
       code: 20000,

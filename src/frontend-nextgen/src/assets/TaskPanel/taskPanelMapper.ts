@@ -120,6 +120,42 @@ function resolveOutputDimensions(output: unknown, opts?: { onlyResult?: boolean 
     .filter((item): item is TaskOutputDimension => item !== null);
 }
 
+/** 优先取真实 output；仅在 output 为空时才使用 output_summary。 */
+function nonEmptyOutputSource(output: unknown, outputSummary: string | null | undefined): unknown {
+  if (isEmptyOutput(output, outputSummary)) return null;
+  if (output !== null && output !== undefined && !Array.isArray(output) && typeof output === 'object') {
+    return Object.keys(output as Record<string, unknown>).length ? output : outputSummary ?? null;
+  }
+  if (output !== null && output !== undefined && typeof output !== 'string') return output;
+  if (typeof output === 'string' && output.trim()) return output;
+  return outputSummary ?? null;
+}
+
+/** 将单键 result/markdown 输出提升为可直接渲染的 Markdown 文本。 */
+function normalizeNodeOutput(output: unknown): unknown {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return output;
+  const record = output as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length !== 1) return output;
+  const value = record[keys[0]];
+  return (keys[0] === 'result' || keys[0] === 'markdown') && typeof value === 'string' ? value : output;
+}
+
+/** 根节点无产物时汇总各节点真实产出，供 Relay 串行任务展示完整交付物。 */
+function collectNodeOutputs(nodes: TaskNodeDto[]): Record<string, unknown> | null {
+  const outputs: Record<string, unknown> = {};
+  for (const node of nodes) {
+    const runInfo = node.run_info;
+    if (!runInfo) continue;
+    const output = nonEmptyOutputSource(runInfo.output, runInfo.output_summary);
+    const value = output === null ? null : normalizeNodeOutput(output);
+    if (value !== null && value !== undefined && !isEmptyOutput(value, null)) {
+      outputs[node.node_id] = value;
+    }
+  }
+  return Object.keys(outputs).length ? outputs : null;
+}
+
 function getExtendString(extendProps: Record<string, unknown> | undefined, ...keys: string[]): string | null {
   for (const key of keys) {
     const value = extendProps?.[key];
@@ -183,8 +219,8 @@ function mapNodeTaskSpec(spec: TaskNodeDto['task_spec']): TaskNodeView['taskSpec
     .filter(Boolean);
 
   return {
-    title: spec?.metadata?.title ?? null,
-    instruction: spec?.metadata?.instruction ?? null,
+    title: spec?.context?.title?.trim() || spec?.metadata?.title?.trim() || spec?.goal?.objective?.trim() || null,
+    instruction: spec?.metadata?.instruction?.trim() || null,
     target: spec?.goal?.objective ?? null,
     acceptances,
   };
@@ -383,7 +419,17 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     context: rootSpec?.context ?? topLevelSpec?.context,
     goal: rootSpec?.goal ?? topLevelSpec?.goal,
   } as TaskDashboardResponse['task_spec'];
-  const meta = spec.metadata ?? { title: d.task_id ?? rootNode?.node_id ?? '', instruction: '' };
+  const contextTitle = spec.context?.title?.trim();
+  const meta = {
+    title:
+      contextTitle ||
+      spec.metadata?.title?.trim() ||
+      spec.goal?.objective?.trim() ||
+      d.task_id ||
+      rootNode?.node_id ||
+      '',
+    instruction: spec.metadata?.instruction?.trim() || '',
+  };
   const goal = spec.goal ?? { objective: '', acceptances: [] };
   const acceptances = (goal.acceptances ?? [])
     .map((a) => (typeof a === 'string' ? a : a.acceptance ?? a.description ?? ''))
@@ -397,6 +443,7 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
   // execution_config 优先取顶层(后端 dashboard 归一投影);历史记录回退 extend_props.execution_config。
   const execCfgRaw = d.execution_config ?? extProps?.execution_config;
   const execCfg = (execCfgRaw && typeof execCfgRaw === 'object' ? execCfgRaw : {}) as Record<string, unknown>;
+  const isRelayMode = execCfg.orchestration_mode === 'relay';
   const template =
     execCfg && typeof execCfg === 'object'
       ? (execCfg as { workflow_id?: string }).workflow_id ?? ((execCfg as { yaml?: string }).yaml ? 'yaml' : null)
@@ -434,17 +481,31 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     getExtendString(rootExt, 'session_id', 'group_session_id', 'main_session_id') ??
     getExtendString(graphExtProps, 'session_id', 'group_session_id', 'main_session_id');
   const rootGroupName = getExtendString(rootExt, 'group_name');
-  // 默认产物 Tab 展示根节点(d.tasks[0].run_info)的 output：与节点详情「输出摘要」同套渲染逻辑。
-  const defaultRootOutputRender = isEmptyOutput(rootRunInfo?.output, rootRunInfo?.output_summary)
+  // 产物 Tab：动态/中心化任务保持根节点优先。分布式 Relay 的交付物是所有
+  // 接力节点产出的综合结果，即使根节点已有部分产出，也不能只展示第一棒；
+  // 因此 Relay 依次优先使用图级聚合 output 与各节点真实 output。
+  const rootNodeOutput = nonEmptyOutputSource(rootRunInfo?.output, rootRunInfo?.output_summary);
+  const graphLevelOutput = isEmptyOutput(d.output, null) ? null : d.output;
+  const aggregatedNodeOutput = collectNodeOutputs(graphTasks);
+  const rootOutputSource = isRelayMode
+    ? graphLevelOutput ?? aggregatedNodeOutput
+    : !isEmptyOutput(rootNodeOutput, null)
+    ? rootNodeOutput
+    : graphLevelOutput ?? aggregatedNodeOutput;
+  const defaultRootOutputRender = isEmptyOutput(rootOutputSource, null)
     ? null
-    : resolveOutputRender(rootRunInfo?.output, rootRunInfo?.output_summary);
+    : resolveOutputRender(rootOutputSource, rootRunInfo?.output_summary);
 
   const nodes: TaskNodeView[] = graphTasks
     .slice()
     .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
     .map((n) => {
       const ri = n.run_info ?? {};
-      const title = n.task_spec?.metadata?.title ?? n.node_id;
+      const title =
+        n.task_spec?.context?.title?.trim() ||
+        n.task_spec?.metadata?.title?.trim() ||
+        n.task_spec?.goal?.objective?.trim() ||
+        n.node_id;
       const isRootNode = n.node_id === graphRootNode?.node_id || n.node_id === d.task_id;
       // 派发未命中事件透出为节点元数据(视图层仅作展示/提示用);「未分配」判定统一由赋值是否为空决定,
       // 不在此处按 miss_events 清空 session 继承(避免影响 yaml/workflow 共享根会话的回填)。
@@ -544,8 +605,8 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
         acceptanceResult: effectiveRunInfo.acceptance_result
           ? {
               verdict: effectiveRunInfo.acceptance_result.verdict,
-              acceptancesMetric: effectiveRunInfo.acceptance_result.acceptances_metric ?? [],
-              gaps: effectiveRunInfo.acceptance_result.gaps ?? [],
+              doneItems: effectiveRunInfo.acceptance_result.done_items ?? [],
+              gapItems: effectiveRunInfo.acceptance_result.gap_items ?? [],
             }
           : null,
       };
@@ -563,7 +624,7 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
   const rootOutputRender = implNodeOutput
     ? implDimensions[0]?.content ?? null
     : selectedOutputNode?.outputRender ?? defaultRootOutputRender;
-  const rootDimensions = implNodeOutput ? implDimensions : resolveOutputDimensions(rootRunInfo?.output);
+  const rootDimensions = implNodeOutput ? implDimensions : resolveOutputDimensions(rootOutputSource);
   const rootOutputDimensions = rootDimensions.length ? rootDimensions : undefined;
 
   const graphOwnerBotId = getExtendString(graphExtProps, 'owner_bot_id') ?? d.owner_bot_id ?? '';

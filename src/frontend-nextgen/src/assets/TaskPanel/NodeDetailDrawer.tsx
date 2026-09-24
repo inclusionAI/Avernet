@@ -27,6 +27,24 @@ function getRunModeLabel(runMode?: string | null): string {
   return runMode ? RUN_MODE_LABELS[runMode] ?? runMode : '未标记执行模态';
 }
 
+function formatAcceptanceItem(item: unknown): string {
+  if (typeof item === 'string') return item;
+  if (item && typeof item === 'object') {
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === 'string' ? record.id : '';
+    const summary =
+      typeof record.summary === 'string'
+        ? record.summary
+        : typeof record.description === 'string'
+        ? record.description
+        : '';
+    const value = [id, summary].filter(Boolean).join('：');
+    if (value) return value;
+    return JSON.stringify(item, null, 2);
+  }
+  return String(item ?? '');
+}
+
 const StepItem: React.FC<{ step: TaskNodeView['stepTraces'][number]; index: number; isLast: boolean }> = ({
   step,
   index,
@@ -355,28 +373,20 @@ export const NodeDetailDrawer: React.FC<{
                 marginBottom: 10,
                 padding: '8px 10px',
                 borderRadius: 8,
-                background:
-                  node.acceptanceResult.verdict === 'PASS' || node.acceptanceResult.verdict === 'DONE'
-                    ? `${C.success}12`
-                    : `${C.danger}12`,
-                color:
-                  node.acceptanceResult.verdict === 'PASS' || node.acceptanceResult.verdict === 'DONE'
-                    ? C.success
-                    : C.danger,
+                background: node.acceptanceResult.verdict === 'DONE' ? `${C.success}12` : `${C.danger}12`,
+                color: node.acceptanceResult.verdict === 'DONE' ? C.success : C.danger,
                 fontSize: 12,
                 fontWeight: 650,
               }}
             >
-              {node.acceptanceResult.verdict === 'PASS' || node.acceptanceResult.verdict === 'DONE'
-                ? '✓ 验收通过'
-                : '！验收未通过'}
+              {node.acceptanceResult.verdict === 'DONE' ? '✓ 验收通过' : '！验收未通过'}
             </div>
-            {node.acceptanceResult.gaps.length > 0 && (
+            {node.acceptanceResult.gapItems.length > 0 && (
               <LabelValue
                 label="差距"
-                value={node.acceptanceResult.gaps.map((item, index) => (
+                value={node.acceptanceResult.gapItems.map((item, index) => (
                   <div key={index} style={{ color: C.warning }}>
-                    ! {item}
+                    ! {formatAcceptanceItem(item)}
                   </div>
                 ))}
               />

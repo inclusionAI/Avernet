@@ -73,7 +73,16 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
         </ModalHeader>
 
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="点击或拖拽选择文件"
           onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              inputRef.current?.click();
+            }
+          }}
           onDrop={(e) => {
             e.preventDefault();
             setIsDragOver(false);
@@ -85,19 +94,19 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
           }}
           onDragLeave={() => setIsDragOver(false)}
           className={cn(
-            'flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors',
-            isDragOver ? 'border-primary bg-primary/10' : 'border-border bg-muted/50 hover:bg-muted',
+            'flex flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors',
+            isDragOver ? 'border-primary bg-primary/10' : 'border-border bg-muted/40 hover:bg-muted',
           )}
         >
           <FileText className="mb-2 h-8 w-8 text-primary" />
           <p className="text-sm font-medium text-foreground">点击或拖拽选择文件</p>
           <p className="mt-1 text-xs text-muted-foreground">选中文件后将自动上传，完成后可添加至会话</p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">单次最多上传 {SESSION_FILE_MAX_BATCH} 个</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">单次最多上传 {SESSION_FILE_MAX_BATCH} 个</p>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => pickFiles(e.target.files)} />
         </div>
 
         <div className="mt-4">
-          <p className="mb-1.5 text-[11px] text-muted-foreground">支持文件类型</p>
+          <p className="mb-1.5 text-xs text-muted-foreground">支持文件类型</p>
           <div className="flex flex-wrap gap-1.5">
             {SESSION_FILE_ALLOWED_EXT.map((ext) => (
               <span key={ext} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
@@ -126,11 +135,11 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
                         </TooltipTrigger>
                         <TooltipContent>{task.name}</TooltipContent>
                       </Tooltip>
-                      <span className="flex-none text-[11px] text-muted-foreground">{formatFileSize(task.size)}</span>
+                      <span className="flex-none text-xs text-muted-foreground">{formatFileSize(task.size)}</span>
                     </div>
-                    {task.phase === 'staged' && <span className="text-[11px] text-muted-foreground">待上传</span>}
+                    {task.phase === 'staged' && <span className="text-xs text-muted-foreground">待上传</span>}
                     {(task.phase === 'preparing' || task.phase === 'completing') && (
-                      <span className="flex items-center gap-1 text-[11px] text-primary">
+                      <span className="flex items-center gap-1 text-xs text-primary">
                         <LoaderCircle className="h-3 w-3 animate-spin" />
                         {task.phase === 'preparing' ? '准备中' : '组装中'}
                       </span>
@@ -140,16 +149,14 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
                         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                           <div className="h-full bg-primary" style={{ width: `${task.progress}%` }} />
                         </div>
-                        <span className="w-9 text-right text-[11px] tabular-nums text-muted-foreground">
+                        <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
                           {task.progress}%
                         </span>
                       </div>
                     )}
-                    {task.phase === 'ready' && <span className="text-[11px] text-success">已完成</span>}
+                    {task.phase === 'ready' && <span className="text-xs text-success">已完成</span>}
                     {task.phase === 'failed' && (
-                      <span className="text-[11px] text-destructive">
-                        上传失败{task.error ? `：${task.error}` : ''}
-                      </span>
+                      <span className="text-xs text-destructive">上传失败{task.error ? `：${task.error}` : ''}</span>
                     )}
                   </div>
                   <div className="flex flex-none items-center gap-1">

@@ -124,7 +124,7 @@ export function BotSessionList(props: BotSessionSidebarProps) {
       <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/20">
         <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
           {showViewSwitch && (
-            <div className="flex h-10 items-center gap-2 px-[18px]">
+            <div className="flex h-10 items-center gap-2 px-4">
               <WorkspacePrimaryTabs
                 value={view as WorkspaceView}
                 options={availableViews ?? []}
@@ -132,7 +132,7 @@ export function BotSessionList(props: BotSessionSidebarProps) {
               />
             </div>
           )}
-          <div className="my-2 px-[18px]">
+          <div className="my-2 px-4">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -146,9 +146,10 @@ export function BotSessionList(props: BotSessionSidebarProps) {
           </div>
         </div>
         {(isSessionsLoading || isMyBotsLoading) && chatBots.length === 0 && friendBots.length === 0 ? (
-          <div className="overflow-hidden border-y border-border bg-background">
+          /* 验收微调：加载骨架去边框与行底，与列表通透风格一致。 */
+          <div className="overflow-hidden">
             {[1, 2, 3].map((i) => (
-              <Skeleton.Block key={i} className="h-14 w-full rounded-none border-b border-border last:border-b-0" />
+              <Skeleton.Block key={i} className="h-14 w-full rounded-none" />
             ))}
           </div>
         ) : !isUserIdentity && filteredMine.length === 0 && filteredFriends.length === 0 ? (

@@ -17,6 +17,40 @@ describe('applyIdentityLoadResult', () => {
     expect(useWorkspaceStore.getState().identities).toHaveLength(1);
   });
 
+  it('refreshes identity metadata when ids and order stay unchanged', () => {
+    useWorkspaceStore.setState({
+      identities: [{ id: 'bot-1', kind: 'bot', displayName: '旧名称', online: true, engine: 'openclaw' }],
+      activeIdentityId: 'bot-1',
+    });
+
+    applyIdentityLoadResult({
+      identities: [
+        {
+          id: 'bot-1',
+          kind: 'bot',
+          displayName: '新名称',
+          avatarUrl: 'new-avatar',
+          online: false,
+          status: 'hidden',
+          reachability: 'unreachable',
+          engine: 'teclaw',
+          botType: 'service',
+        },
+      ],
+      defaultActiveId: 'bot-1',
+    });
+
+    expect(useWorkspaceStore.getState().identities[0]).toMatchObject({
+      displayName: '新名称',
+      avatarUrl: 'new-avatar',
+      online: false,
+      status: 'hidden',
+      reachability: 'unreachable',
+      engine: 'teclaw',
+      botType: 'service',
+    });
+  });
+
   it('falls back when the active identity is no longer present', () => {
     useWorkspaceStore.setState({
       identities: [{ id: 'bot-old', kind: 'bot', displayName: 'Old Bot', online: true }],

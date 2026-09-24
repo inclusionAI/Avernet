@@ -150,6 +150,7 @@ export default function CollaborationPrivacyPage() {
         )}
         {privacy.friendEditorBot && overview && (
           <FriendApprovalEditor
+            desktop={privacy.friendEditorBot.desktop}
             open
             initialConfig={privacy.friendEditorBot.friendApproval}
             onSearch={(keyword, signal) => privacy.searchDepartments(keyword, signal)}

@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Input, Switch } from '@/components/ui';
+import { Button, Card, Switch } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { GroupView, IdentityView } from '@/domain/collaboration';
 import type { DingTalkBindingState } from '@/services/workspace/channelBindingService';
@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import type { GroupDingTalkConfig } from './DingTalkConfigPanel';
 import { DingTalkConfigPanel } from './DingTalkConfigPanel';
+import { EditableName } from './EditableName';
 import { ManagePanelHeader } from './ManagePanelHeader';
 import { ManagePanelTabs } from './ManagePanelTabs';
 import { MemberList } from './MemberList';
@@ -58,7 +59,6 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
     onLeaveGroup,
   } = props;
   const [tab, setTab] = useState<'basic' | 'advanced'>('basic');
-  const [name, setName] = useState(group.name);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -82,12 +82,6 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
     const res = await props.onShare();
     setSharing(false);
     if (res.ok) setShareUrl(res.data.invitationUrl);
-  };
-
-  const handleSaveName = () => {
-    const next = name.trim();
-    if (!next || next === group.name) return;
-    void onUpdate({ name: next });
   };
 
   const handleVisibilityChange = (checked: boolean) => {
@@ -116,45 +110,45 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
       <div className="app-scrollbar flex-1 overflow-y-auto p-4">
         {tab === 'basic' ? (
           <div className="space-y-3">
-            <Card className="rounded-lg bg-card p-3 shadow-sm">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <Badge tone="primary">{KIND_LABEL[group.kind]}</Badge>
-                <Badge tone={group.isPublic ? 'success' : 'neutral'}>{group.isPublic ? '公开群' : '私密群'}</Badge>
-              </div>
-              <label className="block">
-                <span className="mb-1.5 block text-xs font-medium text-muted-foreground">群名称</span>
-                <div className="flex gap-2">
-                  <Input value={name} onChange={(event) => setName(event.target.value)} />
-                  <Button variant="secondary" size="sm" onClick={handleSaveName}>
-                    保存
-                  </Button>
-                </div>
-              </label>
-              <div className="mt-3 space-y-2 rounded-lg bg-muted px-3 py-2">
+            <Card className="rounded-lg bg-card p-3">
+              <p className="m-0 mb-2 text-sm font-medium text-foreground">基础信息</p>
+              <p className="m-0 mb-1 text-xs text-muted-foreground">群名称</p>
+              <EditableName
+                value={group.name}
+                canEdit={canManageGroup}
+                editLabel="编辑群名称"
+                onSave={(next) => void onUpdate({ name: next })}
+              />
+              <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
                 <div>
-                  <p className="m-0 text-[11px] font-medium text-muted-foreground">成员数量</p>
-                  <p className="m-0 mt-1 text-xs font-medium text-foreground">
+                  <p className="m-0 text-muted-foreground">类型</p>
+                  <p className="m-0 mt-1 font-medium text-foreground">{KIND_LABEL[group.kind]}</p>
+                </div>
+                <div>
+                  <p className="m-0 text-muted-foreground">可见性</p>
+                  <p className="m-0 mt-1 font-medium text-foreground">{group.isPublic ? '公开群' : '私密群'}</p>
+                </div>
+                <div>
+                  <p className="m-0 text-muted-foreground">成员数量</p>
+                  <p className="m-0 mt-1 font-medium text-foreground">
                     {group.participantCount || group.participants.length}
                   </p>
                 </div>
                 <div>
-                  <p className="m-0 text-[11px] font-medium text-muted-foreground">创建时间</p>
-                  <p className="m-0 mt-1 text-xs font-medium text-foreground">
+                  <p className="m-0 text-muted-foreground">创建时间</p>
+                  <p className="m-0 mt-1 font-medium text-foreground">
                     {new Date(group.createdAt).toLocaleDateString()}
                   </p>
                 </div>
-                <div>
-                  <p className="m-0 text-[11px] font-medium text-muted-foreground">群 ID</p>
-                  <p className="m-0 mt-1 break-all font-mono text-xs text-foreground">{group.groupId}</p>
-                </div>
               </div>
-            </Card>
-
-            <Card className="rounded-lg bg-card p-3 shadow-sm">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="m-0 text-sm font-semibold text-foreground">公开群</p>
-                  <p className="m-0 mt-0.5 text-[11px] text-muted-foreground">公开群允许通过邀请链接加入。</p>
+              <div className="mt-3 text-xs">
+                <p className="m-0 text-muted-foreground">群 ID</p>
+                <p className="m-0 mt-1 break-all font-mono text-xs text-foreground">{group.groupId}</p>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="m-0 text-xs font-medium text-foreground">公开群</p>
+                  <p className="m-0 mt-1 text-xs text-muted-foreground">公开群允许通过邀请链接加入。</p>
                 </div>
                 <Switch
                   checked={group.isPublic}
@@ -168,9 +162,9 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
               ) : null}
             </Card>
 
-            <Card className="rounded-lg bg-card p-3 shadow-sm">
-              <p className="m-0 mb-2 text-sm font-semibold text-foreground">群成员管理</p>
+            <Card className="rounded-lg bg-card p-3">
               <MemberList
+                headerLabel="群成员"
                 participants={group.participants}
                 participantCount={group.participantCount}
                 activeIdentity={activeIdentity}
@@ -186,18 +180,18 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
               />
             </Card>
 
-            <Card className="rounded-lg bg-card p-3 shadow-sm">
-              <p className="m-0 mb-2 text-sm font-semibold text-foreground">操作</p>
-              <div className="flex flex-col gap-2">
+            <Card className="rounded-lg bg-card p-3">
+              <p className="m-0 mb-1 text-sm font-medium text-foreground">操作</p>
+              <div className="flex flex-col divide-y divide-border">
                 <Button
                   variant="ghost"
                   onClick={() => void handleShare()}
-                  className="h-auto w-full justify-start rounded-lg border border-primary/25 bg-background px-3 py-2 text-left text-xs text-primary hover:bg-primary/10 hover:text-primary"
+                  className="h-auto w-full justify-start px-2 py-2 text-left text-xs text-primary hover:bg-primary/10 hover:text-primary"
                 >
                   <LinkIcon className="h-4 w-4 shrink-0" />
                   <span className="flex flex-col items-start">
                     <span>分享协作群</span>
-                    <span className="text-[11px] font-normal text-muted-foreground">用户可以通过链接加入群组</span>
+                    <span className="text-xs font-normal text-muted-foreground">人类角色可以通过链接加入协作群</span>
                   </span>
                 </Button>
                 {canManageGroup ? (
@@ -210,14 +204,12 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
                   >
                     <Button
                       variant="ghost"
-                      className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
+                      className="h-auto w-full justify-start px-2 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
                     >
                       <Trash2 className="h-4 w-4 shrink-0" />
                       <span className="flex flex-col items-start">
                         <span>删除协作群</span>
-                        <span className="text-[11px] font-normal text-muted-foreground">
-                          此操作不可恢复，请谨慎操作
-                        </span>
+                        <span className="text-xs font-normal text-muted-foreground">此操作不可恢复，请谨慎操作</span>
                       </span>
                     </Button>
                   </ConfirmDialog>
@@ -236,12 +228,12 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
                     <Button
                       variant="ghost"
                       disabled={!activeIdentity}
-                      className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
+                      className="h-auto w-full justify-start px-2 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
                     >
                       <LogOut className="h-4 w-4 shrink-0" />
                       <span className="flex flex-col items-start">
                         <span>退出协作群</span>
-                        <span className="text-[11px] font-normal text-muted-foreground">退出后将不再接收该群消息</span>
+                        <span className="text-xs font-normal text-muted-foreground">退出后将不再接收该群消息</span>
                       </span>
                     </Button>
                   </ConfirmDialog>

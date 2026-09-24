@@ -7,7 +7,7 @@ export function toggleRecordExclusive(prev: Record<string, true>, key: string): 
   return { [key]: true };
 }
 
-/** 记录某身份的当前选中态到 memo（null 值保留上次记忆，不覆盖）。 */
+/** 记录某身份的当前选中态到 memo；null 表示用户已明确清空。 */
 export function rememberLastSession(
   prev: Record<string, IdentityMemo>,
   identityId: string,
@@ -20,19 +20,21 @@ export function rememberLastSession(
     selectedBotSessionId: string | null;
     expandedBotId: string | null;
     expandedBotSection: string | null;
+    expandedFriendUserId: string | null;
+    selectedFriendUserSessionId: string | null;
   },
 ): typeof prev {
-  const last = prev[identityId] ?? {};
   const entry: IdentityMemo = {
     view: opts.view,
-    groupId: opts.selectedGroupId ?? last.groupId ?? null,
-    groupSessionId: opts.selectedSessionId ?? last.groupSessionId ?? null,
-    expandedGroupId: opts.expandedGroupId ?? last.expandedGroupId ?? null,
+    groupId: opts.selectedGroupId,
+    groupSessionId: opts.selectedSessionId,
+    expandedGroupId: opts.expandedGroupId,
     membership: opts.membership,
-    botId: opts.expandedBotId ?? last.botId ?? null,
-    botSessionId: opts.selectedBotSessionId ?? last.botSessionId ?? null,
-    expandedBotId: opts.expandedBotId ?? last.expandedBotId ?? null,
-    botSectionKey: opts.expandedBotSection ?? last.botSectionKey ?? null,
+    botSessionId: opts.selectedBotSessionId,
+    expandedBotId: opts.expandedBotId,
+    botSectionKey: opts.expandedBotSection,
+    expandedFriendUserId: opts.expandedFriendUserId,
+    friendUserSessionId: opts.selectedFriendUserSessionId,
   };
   return { ...prev, [identityId]: entry };
 }
@@ -51,8 +53,12 @@ export function restoreIdentitySelection(
   const expandedGroupIds = memoForNext?.expandedGroupId ? { [memoForNext.expandedGroupId]: true as const } : {};
   const membership = memoForNext?.membership ?? 'direct';
   const selectedBotSessionId = memoForNext?.botSessionId ?? null;
-  const expandedBotIds = memoForNext?.botId ? { [memoForNext.botId]: true as const } : {};
-  const expandedBotSectionKey = memoForNext?.botId ? { [memoForNext.botId]: memoForNext.botSectionKey ?? 'mine' } : {};
+  const expandedBotIds = memoForNext?.expandedBotId ? { [memoForNext.expandedBotId]: true as const } : {};
+  const expandedBotSectionKey = memoForNext?.expandedBotId
+    ? { [memoForNext.expandedBotId]: memoForNext.botSectionKey ?? 'mine' }
+    : {};
+  const expandedFriendUserId = memoForNext?.expandedFriendUserId ?? null;
+  const selectedFriendUserSessionId = memoForNext?.friendUserSessionId ?? null;
   return {
     memoForNext,
     restoredView,
@@ -63,6 +69,8 @@ export function restoreIdentitySelection(
     selectedBotSessionId,
     expandedBotIds,
     expandedBotSectionKey,
+    expandedFriendUserId,
+    selectedFriendUserSessionId,
   };
 }
 

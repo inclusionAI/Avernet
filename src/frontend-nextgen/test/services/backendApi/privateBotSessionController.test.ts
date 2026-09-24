@@ -27,6 +27,29 @@ describe('privateBotSessionController', () => {
     expect(opts).toEqual({ method: 'GET', params: { user_id: 'u1', owner_id: '2088', page: 1, page_size: 50 } });
   });
 
+  it('只读好友用户会话携带 owner 与 f_user_id', async () => {
+    backendRequest.mockResolvedValue({ code: 200000, data: { items: [], total: 0 }, message: 'OK', request_id: 'r' });
+
+    await listBotSessions('bot-a', {
+      user_id: '327325',
+      owner_id: '327325',
+      f_user_id: '447147',
+      page: 1,
+      page_size: 10,
+    });
+
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/bots/bot-a/sessions', {
+      method: 'GET',
+      params: {
+        user_id: '327325',
+        owner_id: '327325',
+        f_user_id: '447147',
+        page: 1,
+        page_size: 10,
+      },
+    });
+  });
+
   it('createBotSession 走 POST 与 body', async () => {
     backendRequest.mockResolvedValue({ code: 200000, data: { session_id: 's1' }, message: 'OK', request_id: 'r' });
     const signal = new AbortController().signal;

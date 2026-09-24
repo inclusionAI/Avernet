@@ -1,11 +1,21 @@
 import type { SquareResource } from '@/domain/collaborationSquare/types';
+import { serializeWorkspaceRoute } from '@/domain/workspaceRoute';
 
 export function getCollaborationSquareErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '操作失败，请稍后重试';
 }
 
-export function getCollaborationBotConversationUrl(botId: string, sessionId: string): string {
-  return `/workspace?tab=chat&bot=${encodeURIComponent(botId)}&session=${encodeURIComponent(sessionId)}`;
+export function getCollaborationBotConversationUrl(
+  botId: string,
+  sessionId: string,
+  currentIdentityId?: string,
+): string {
+  return `/workspace?${serializeWorkspaceRoute({
+    view: 'chat',
+    currentIdentityId,
+    targetBotId: botId,
+    sessionId,
+  })}`;
 }
 
 /**
@@ -13,10 +23,17 @@ export function getCollaborationBotConversationUrl(botId: string, sessionId: str
  * - groupId 已知时带上 group= 以便 workspace 直接选中该群；
  * - 仅 session=（无 group=）时 workspace 会异步反查 groupId（邀请链接等场景）。
  */
-export function getCollaborationGroupConversationUrl(groupId: string | null | undefined, sessionId: string): string {
-  const params = new URLSearchParams({ tab: 'group', session: sessionId });
-  if (groupId) params.set('group', groupId);
-  return `/workspace?${params.toString()}`;
+export function getCollaborationGroupConversationUrl(
+  groupId: string | null | undefined,
+  sessionId: string,
+  currentIdentityId?: string,
+): string {
+  return `/workspace?${serializeWorkspaceRoute({
+    view: 'group',
+    currentIdentityId,
+    groupId,
+    sessionId,
+  })}`;
 }
 
 export function getCollaborationSquareShareUrl(

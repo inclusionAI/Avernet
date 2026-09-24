@@ -99,6 +99,7 @@ it('首屏不加载市场候选，用户打开添加能力时再一次性加载'
   expect(controller.searchMarketMcpServers).not.toHaveBeenCalled();
   expect(controller.listRepositorySkills).not.toHaveBeenCalled();
   expect(controller.listConsumableSpaceSkills).not.toHaveBeenCalled();
+  expect(controller.getEngineConfig).not.toHaveBeenCalled();
 
   await botEditorService.loadCapabilityCandidates('bot-1', '12', 'skill');
 
@@ -181,9 +182,9 @@ it('通过 Bot OpenAPI 加载并注册副屏 CDN', async () => {
     },
   });
 
-  await expect(botEditorService.registerRenderScreenLibraries('bot-1')).resolves.toBe(1);
+  await expect(botEditorService.registerRenderScreenLibraries('bot-1', 'owner-1')).resolves.toBe(1);
 
-  expect(controller.listRenderScreens).toHaveBeenCalledWith('bot-1');
+  expect(controller.listRenderScreens).toHaveBeenCalledWith('bot-1', 'owner-1');
   expect(getLibraryCdn('demo-library')).toBe('https://cdn.example.com/demo.js');
 });
 
@@ -205,7 +206,7 @@ it('首屏只加载资源根目录，不递归遍历子目录', async () => {
     expect.objectContaining({ path: '.claude/skills-local', parentPath: '' }),
   ]);
   expect(controller.listResources).toHaveBeenCalledTimes(1);
-  expect(controller.listResources).toHaveBeenCalledWith('bot-1', '');
+  expect(controller.listResources).toHaveBeenCalledWith('bot-1', '', undefined);
 });
 
 it('按请求目录记录资源父级，不根据资源 path 字符串猜测层级', async () => {
@@ -256,13 +257,14 @@ it('读取并持久化 MCP caller 模式，不在前端模拟', async () => {
     data: { server_code: 'mcp.weather', call_type: 'owner', bot_call_type: 'owner' },
   });
 
-  await expect(botEditorService.getCallerContext('bot-1')).resolves.toEqual({
+  await expect(botEditorService.getCallerContext('bot-1', 'owner-1')).resolves.toEqual({
     editable: true,
     mcpCallTypes: { 'mcp.weather': 'caller' },
     cliCallTypes: {},
   });
-  await expect(botEditorService.updateMcpCallType('bot-1', 'mcp.weather', 'owner')).resolves.toBe('owner');
-  expect(controller.updateMcpCallType).toHaveBeenCalledWith('bot-1', 'mcp.weather', 'owner');
+  await expect(botEditorService.updateMcpCallType('bot-1', 'mcp.weather', 'owner', 'owner-1')).resolves.toBe('owner');
+  expect(controller.getCallerContext).toHaveBeenCalledWith('bot-1', 'owner-1');
+  expect(controller.updateMcpCallType).toHaveBeenCalledWith('bot-1', 'mcp.weather', 'owner', 'owner-1');
 });
 
 it('我的 Skill 仅请求当前 Bot 的 LOCAL 分页，保留激活和未激活项并透传 owner', async () => {
@@ -295,6 +297,30 @@ it('我的 Skill 仅请求当前 Bot 的 LOCAL 分页，保留激活和未激活
     page: 2,
     page_size: 20,
   });
+});
+
+it('协作者加载编辑配置时为非敏感 Bot 子资源透传 owner', async () => {
+  controller.listSkillSetSkills.mockResolvedValue({ data: [] });
+  controller.getApprovalConfig.mockResolvedValue({ data: { should_approval: true } });
+
+  await botEditorService.load('bot-1', true, 'owner-1');
+
+  expect(controller.listSkillSetResources).toHaveBeenCalledWith('bot-1', 'owner-1');
+  expect(controller.listSkillSetSkills).toHaveBeenCalledWith('bot-1', '600005', 'owner-1');
+  expect(controller.listResources).toHaveBeenCalledWith('bot-1', '', 'owner-1');
+  expect(controller.listRenderScreens).toHaveBeenCalledWith('bot-1', 'owner-1');
+  expect(controller.listRoutines).toHaveBeenCalledWith('bot-1', 'owner-1');
+  expect(controller.getEngineConfig).not.toHaveBeenCalled();
+  expect(controller.getEngineStatus).toHaveBeenCalledWith('bot-1', 'owner-1');
+  expect(controller.getApprovalConfig).toHaveBeenCalledWith('bot-1', 'owner-1');
+});
+
+it('引擎配置仅通过独立方法按需加载并透传 owner', async () => {
+  controller.getEngineConfig.mockResolvedValue({ data: { token: 'sensitive' } });
+
+  await expect(botEditorService.loadEngineConfig('bot-1', 'owner-1')).resolves.toEqual({ token: 'sensitive' });
+
+  expect(controller.getEngineConfig).toHaveBeenCalledWith('bot-1', 'owner-1');
 });
 
 it('超过 20 项时明确拒绝，不静默截断提交', async () => {

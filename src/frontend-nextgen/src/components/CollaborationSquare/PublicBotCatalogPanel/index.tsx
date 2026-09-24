@@ -1,13 +1,12 @@
 import SquareBotCard from '@/components/CollaborationSquare/BotCard';
 import { BotProfileModal } from '@/components/CollaborationSquare/BotProfileModal';
+import { SquareIdentityPicker } from '@/components/CollaborationSquare/SquareIdentityPicker';
 import SquareSearchBar from '@/components/CollaborationSquare/SquareSearchBar';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { BotCatalogViewModel } from '@/domain/collaborationSquare/types';
-import { resolveAuthenticatedDisplayName } from '@/domain/userIdentity';
 import { getPublicBotActionKey, getPublicBotTargetId } from '@/domain/collaborationSquare/types';
 import { Bot, RefreshCw, Search } from 'lucide-react';
 import { useEffect, useRef } from 'react';
@@ -22,9 +21,6 @@ export interface PublicBotCatalogPanelProps {
    * 不发请求、不展示列表。协作广场页不透传（保持空关键词加载默认目录）。
    */
   smartEmptyHint?: string;
-  activeIdentity?: { id: string; name: string; kind: 'user' | 'bot' };
-  authenticatedUserId?: string | null;
-  authenticatedUserName?: string | null;
 }
 
 function BotLoadingState() {
@@ -43,23 +39,10 @@ function BotLoadingState() {
  * 公开 Bot 面板公共展示组件：搜索栏 + 加载/错误/空/智能空提示态 + 卡片网格 + 无限滚动 + 画像弹层。
  * 由协作广场页（`SquarePageShell` bot 分支）使用，数据由调用方以 {@link BotCatalogViewModel} 形式注入。
  */
-export function PublicBotCatalogPanel({
-  vm,
-  scrollRootRef,
-  smartEmptyHint,
-  activeIdentity,
-  authenticatedUserId,
-  authenticatedUserName,
-}: PublicBotCatalogPanelProps) {
+export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: PublicBotCatalogPanelProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const { hasMore, loading, loadingMore, error, loadMore } = vm;
   const activeActor = vm.activeActor;
-  const activeIdentityDisplayName = activeIdentity
-    ? resolveAuthenticatedDisplayName(
-        { id: activeIdentity.id, kind: activeIdentity.kind, name: activeIdentity.name },
-        authenticatedUserId ? { userId: authenticatedUserId, name: authenticatedUserName } : null,
-      )
-    : '';
   const smartEmpty = Boolean(smartEmptyHint) && vm.mode === 'smart' && !vm.query.trim();
   const showGrid = Boolean(activeActor) && !loading && !error && !smartEmpty && vm.bots.length > 0;
 
@@ -80,19 +63,7 @@ export function PublicBotCatalogPanel({
 
   return (
     <>
-      {activeIdentity && (
-        <Card className="mb-4 border-primary/20 bg-primary/5">
-          <div className="flex items-center gap-2 p-3 text-xs text-foreground">
-            <span className="font-medium">当前工作身份：{activeIdentityDisplayName}</span>
-            <Badge tone={activeIdentity.kind === 'user' ? 'primary' : 'neutral'}>
-              {activeIdentity.kind === 'user' ? '用户' : 'Bot'}
-            </Badge>
-            <span className="text-muted-foreground">
-              搜索结果、好友关系和申请操作将以该身份处理；请使用左上角工作身份切换。
-            </span>
-          </div>
-        </Card>
-      )}
+      <SquareIdentityPicker />
       <SquareSearchBar
         resource="bot"
         query={vm.query}

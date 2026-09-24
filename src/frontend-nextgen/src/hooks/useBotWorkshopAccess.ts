@@ -3,6 +3,7 @@ import { getBotCollaborationMode } from '@/services/botWorkshop';
 import {
   botManagementService,
   type BotCollaborator,
+  type BotSpaceMember,
   type BotSpaceOption,
 } from '@/services/botWorkshop/botManagementService';
 import { useCallback, useState } from 'react';
@@ -12,28 +13,34 @@ interface AccessState {
   mode?: 'space' | 'authorize' | 'request';
   bot?: BotDomain;
   spaces: BotSpaceOption[];
+  members: BotSpaceMember[];
   loading: boolean;
   operation?: string;
 }
 
 export function useBotWorkshopAccess(currentUserId: string | undefined, reload: () => Promise<void>) {
-  const [access, setAccess] = useState<AccessState>({ spaces: [], loading: false });
+  const [access, setAccess] = useState<AccessState>({ spaces: [], members: [], loading: false });
   const [collaborators, setCollaborators] = useState<BotCollaborator[]>([]);
   const openAccess = useCallback(
     async (mode: AccessState['mode'], bot: BotDomain) => {
       if (!mode) return;
-      setAccess({ mode, bot, spaces: [], loading: mode !== 'request' });
+      setAccess({ mode, bot, spaces: [], members: [], loading: mode !== 'request' });
       try {
         if (mode === 'space' && currentUserId) {
           const spaces = await botManagementService.listSpaces(currentUserId);
-          setAccess({ mode, bot, spaces, loading: false });
+          setAccess({ mode, bot, spaces, members: [], loading: false });
         } else if (mode === 'authorize') {
-          setCollaborators(await botManagementService.listCollaborators(bot.id));
-          setAccess({ mode, bot, spaces: [], loading: false });
+          if (!bot.spaceId || !currentUserId) throw new Error('缺少空间或用户身份，无法授权');
+          const [editors, members] = await Promise.all([
+            botManagementService.listCollaborators(bot.id),
+            botManagementService.listSpaceMembers(bot.spaceId, currentUserId),
+          ]);
+          setCollaborators(editors);
+          setAccess({ mode, bot, spaces: [], members, loading: false });
         }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '权限信息加载失败');
-        setAccess({ mode, bot, spaces: [], loading: false });
+        setAccess({ mode, bot, spaces: [], members: [], loading: false });
       }
     },
     [currentUserId],
@@ -46,7 +53,7 @@ export function useBotWorkshopAccess(currentUserId: string | undefined, reload: 
   return {
     access,
     collaborators,
-    closeAccess: () => setAccess({ spaces: [], loading: false }),
+    closeAccess: () => setAccess({ spaces: [], members: [], loading: false }),
     canChangeSpace: isOwner,
     openSpaceChange: (bot: BotDomain) => void openAccess('space', bot),
     collaborationModeFor,
@@ -63,7 +70,7 @@ export function useBotWorkshopAccess(currentUserId: string | undefined, reload: 
       try {
         await botManagementService.changeSpace(access.bot, spaceId, currentUserId);
         toast.success('归属空间已变更');
-        setAccess({ spaces: [], loading: false });
+        setAccess({ spaces: [], members: [], loading: false });
         await reload();
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '变更空间失败');
@@ -80,7 +87,7 @@ export function useBotWorkshopAccess(currentUserId: string | undefined, reload: 
         const space = await botManagementService.createTeamSpace(name, currentUserId);
         await botManagementService.changeSpace(access.bot, space.id, currentUserId);
         toast.success(`已创建「${space.name}」并变更 Bot 归属`);
-        setAccess({ spaces: [], loading: false });
+        setAccess({ spaces: [], members: [], loading: false });
         await reload();
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '创建团队并变更空间失败');
@@ -89,6 +96,10 @@ export function useBotWorkshopAccess(currentUserId: string | undefined, reload: 
     },
     addCollaborator: async (userId: string, name: string | undefined, role: BotCollaborator['role']) => {
       if (!access.bot) return false;
+      if (!access.members.some((member) => member.userId === userId)) {
+        toast.error('只能授权当前空间内的成员');
+        return false;
+      }
       setAccess((value) => ({ ...value, operation: 'add' }));
       try {
         const added = await botManagementService.addCollaborator(access.bot.id, userId, name, role);
@@ -132,7 +143,7 @@ export function useBotWorkshopAccess(currentUserId: string | undefined, reload: 
       if (!access.bot) return;
       await botManagementService.requestAccess(access.bot, reason);
       toast.success('操作权限申请已提交');
-      setAccess({ spaces: [], loading: false });
+      setAccess({ spaces: [], members: [], loading: false });
     },
   };
 }

@@ -1,5 +1,6 @@
 import { defaultCapabilities } from '@/capabilities/defaultCapabilities';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
+import { Bot, Terminal } from 'lucide-react';
 
 describe('Open Core default capabilities', () => {
   test('健康检查默认只开放配置健康度，不展示内部多维视图', () => {
@@ -83,8 +84,23 @@ describe('Open Core default capabilities', () => {
   test('getBotEngineOptions 默认 OpenClaw + Claudecode引擎-原生（阿里云部署依赖原生 CC 直建入口）', () => {
     const r = defaultCapabilities.getBotEngineOptions();
     expect(r.status).toBe('available');
-    expect(r.value.map((o) => o.value)).toEqual(['openclaw', 'claude_code']);
-    expect(r.value.map((o) => o.label)).toEqual(['OpenClaw', 'Claudecode引擎-原生']);
+    expect(r.value).toEqual([
+      expect.objectContaining({
+        value: 'openclaw',
+        label: 'OpenClaw',
+        description: '通用 AI 对话助手，适用于日常工作与知识问答',
+        icon: Bot,
+      }),
+      expect.objectContaining({
+        value: 'claude_code',
+        label: 'Claudecode引擎-原生',
+        cardLabel: 'Claude Code',
+        description: '原生 Claude Code 引擎',
+        icon: Terminal,
+      }),
+    ]);
+    expect(r.value.map((option) => option.tag)).toEqual([undefined, undefined]);
+    expect(r.value.map((option) => option.createPanel)).toEqual([undefined, undefined]);
   });
 
   test('getBotSkillPickerSources 默认仅我的 Skill（Open Core / 阿里云隐藏内部来源）', () => {
@@ -136,10 +152,10 @@ describe('Open Core default capabilities', () => {
     expect(defaultCapabilities.getPartialFriendApprovalEnabled()).toEqual({ status: 'available', value: false });
   });
 
-  test('getShellVisibility 默认 adminEntry/notificationBell=true、spaceSwitcher=false（Open Core 展示管理后台与通知中心，不展示空间切换器）', () => {
+  test('getShellVisibility 默认 notificationBell=true、spaceSwitcher=false（Open Core 展示通知中心，不展示空间切换器；adminEntry 已随管理后台导航项退役移除）', () => {
     const r = defaultCapabilities.getShellVisibility();
     expect(r.status).toBe('available');
-    expect(r.value).toEqual({ adminEntry: true, spaceSwitcher: false, notificationBell: true });
+    expect(r.value).toEqual({ spaceSwitcher: false, notificationBell: true });
   });
 
   test('getAdminSections 默认 spaces=false/workOrders=true（Open Core 隐藏空间管理 Tab，仅留工单中心）', () => {

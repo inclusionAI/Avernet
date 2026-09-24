@@ -149,7 +149,7 @@ describe('SquarePageShell three-way dispatch', () => {
     expect(navigation).toContainElement(screen.getByRole('link', { name: /公开 Bot/ }));
   });
 
-  test('Bot 工作身份隐藏公开协作群入口，保留公开 Bot 与任务广场', () => {
+  test('Bot 工作身份下三 Tab 恒显（公开协作群固定登录用户身份，不再隐藏入口）', () => {
     useWorkspaceStore.setState({
       activeIdentityId: 'bot-1:900004',
       identities: [{ id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true }],
@@ -158,7 +158,7 @@ describe('SquarePageShell three-way dispatch', () => {
     render(<SquarePageShell resource="bot" />);
 
     expect(screen.getByRole('link', { name: /公开 Bot/ })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /公开协作群/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /公开协作群/ })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /任务广场/ })).toBeInTheDocument();
   });
 

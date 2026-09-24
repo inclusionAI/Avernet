@@ -183,9 +183,11 @@ it('从列表进入编辑页时携带列表 display_state 映射出的运行阶�
   const { result } = renderHook(() => useBotWorkshop());
   await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
 
-  result.current.openDetail({ id: 'service-bot-1', lifecycle: 'draft' } as BotDomain, 'edit');
+  result.current.openDetail({ id: 'service-bot-1', ownerId: 'owner-1', lifecycle: 'draft' } as BotDomain, 'edit');
 
-  expect(history.push).toHaveBeenCalledWith('/bot-workshop/detail?type=edit&id=service-bot-1&runtime_stage=draft');
+  expect(history.push).toHaveBeenCalledWith(
+    '/bot-workshop/detail?type=edit&id=service-bot-1&runtime_stage=draft&owner_id=owner-1',
+  );
 });
 
 it('点击健康检查时导航到独立健康检查页面', async () => {
@@ -249,7 +251,7 @@ it('点击对话时跳转到用户单聊并展开对应 Bot', () => {
     result.current.openConversation(bot);
   });
 
-  expect(history.push).toHaveBeenCalledWith('/workspace?tab=chat&bot=bot-1%3A2088');
+  expect(history.push).toHaveBeenCalledWith('/workspace?tab=chat&current=human_u1&bot=bot-1%3A2088');
   const state = useWorkspaceStore.getState();
   expect(state.activeIdentityId).toBe('human_u1');
   expect(state.view).toBe('chat');
@@ -341,4 +343,25 @@ it('删除接口返回不支持操作时展示中文提示', async () => {
     'Operation not supported for this bot',
   );
   expect(toast.error).toHaveBeenCalledWith('该 Bot 不允许删除');
+});
+
+it('本地 Bot 删除成功后清除当前会话及身份下的会话记忆', async () => {
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  (botWorkshopService.remove as jest.Mock).mockResolvedValue(undefined);
+  useWorkspaceStore.setState({
+    expandedBotIds: { 'bot-1': true },
+    expandedBotSectionKey: { 'bot-1': 'mine' },
+    selectedBotSessionId: 'session-1',
+    lastSessionByIdentity: {
+      u1: { expandedBotId: 'bot-1', botSessionId: 'session-1' },
+      u2: { expandedBotId: 'bot-2', botSessionId: 'session-2' },
+    },
+  });
+  const { result } = renderHook(() => useBotWorkshop());
+  await act(async () => result.current.runAction('delete', { id: 'bot-1', deployment: 'local' } as BotDomain));
+  const state = useWorkspaceStore.getState();
+  expect(state.selectedBotSessionId).toBeNull();
+  expect(state.expandedBotIds).toEqual({});
+  expect(state.lastSessionByIdentity.u1.botSessionId).toBeNull();
+  expect(state.lastSessionByIdentity.u2.botSessionId).toBe('session-2');
 });

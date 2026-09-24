@@ -55,6 +55,28 @@ describe('workspaceStore', () => {
     expect(st.expandedBotIds).toEqual({ b1: true });
   });
 
+  it('setActiveIdentity remembers and restores Bot friend-user selection', () => {
+    const store = useWorkspaceStore.getState();
+    store.setIdentities(
+      [
+        { id: 'human_327325', kind: 'user', displayName: '我', online: true },
+        { id: 'bot-a:327325', kind: 'bot', displayName: '皮皮虾', online: true },
+      ],
+      'bot-a:327325',
+    );
+    store.setView('chat');
+    store.setExpandedFriendUser('447147');
+    store.selectFriendUserSession('session-1');
+    store.setActiveIdentity('human_327325');
+    store.setActiveIdentity('bot-a:327325');
+
+    expect(useWorkspaceStore.getState()).toMatchObject({
+      view: 'chat',
+      expandedFriendUserId: '447147',
+      selectedFriendUserSessionId: 'session-1',
+    });
+  });
+
   it('setActiveIdentity 记忆并恢复 membership 视角(群成员/会话成员)', () => {
     const s = useWorkspaceStore.getState();
     s.setIdentities(
@@ -126,7 +148,8 @@ describe('workspaceStore', () => {
     expect(useWorkspaceStore.getState().membership).toBe('direct');
   });
 
-  it('setActiveIdentity 对 bot 身份钳制 view 为 group', () => {
+  it('setActiveIdentity 对 bot 身份保留 chat 视图', () => {
+    useWorkspaceStore.getState().reset();
     const s = useWorkspaceStore.getState();
     s.setIdentities(
       [
@@ -137,7 +160,7 @@ describe('workspaceStore', () => {
     );
     s.setView('chat');
     s.setActiveIdentity('b1');
-    expect(useWorkspaceStore.getState().view).toBe('group');
+    expect(useWorkspaceStore.getState().view).toBe('chat');
   });
 
   it('setActiveIdentity 对 test-user 钳制 view 为 chat', () => {
@@ -195,6 +218,29 @@ describe('workspaceStore', () => {
     expect(useWorkspaceStore.getState().sessionTabsByGroup).toEqual({ g1: 'all', g2: 'favorite' });
     useWorkspaceStore.getState().resetWorkspace();
     expect(useWorkspaceStore.getState().sessionTabsByGroup).toEqual({});
+  });
+
+  it('用户显式收起 Bot 后，身份往返不会复活旧 Bot 和会话', () => {
+    const s = useWorkspaceStore.getState();
+    s.setIdentities(
+      [
+        { id: 'u-clear', kind: 'user', displayName: '我', online: true },
+        { id: 'b-clear', kind: 'bot', displayName: 'B', online: true },
+      ],
+      'u-clear',
+    );
+    s.setView('chat');
+    s.toggleBotExpanded('target-bot');
+    s.selectBotSession('dm-1');
+    s.setActiveIdentity('b-clear');
+    s.setActiveIdentity('u-clear');
+
+    useWorkspaceStore.getState().toggleBotExpanded('target-bot');
+    useWorkspaceStore.getState().setActiveIdentity('b-clear');
+    useWorkspaceStore.getState().setActiveIdentity('u-clear');
+
+    expect(useWorkspaceStore.getState().expandedBotIds).toEqual({});
+    expect(useWorkspaceStore.getState().selectedBotSessionId).toBeNull();
   });
 
   it('setActiveIdentity 记忆并恢复 friend 分区的 bot 展开归属', () => {

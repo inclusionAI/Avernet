@@ -146,7 +146,7 @@ function toTaskOutputText(raw: unknown): string | undefined {
  *
  * 字段映射（确定的）：
  * - `id` ← `task_id`；缺失/空白 → `null`。
- * - `name` ← `title`（后端已二次解析自 `task_spec.metadata.title`）；缺失回退「未命名任务」。
+ * - `name` ← `title`（后端已二次解析自 `task_spec.context.title`）；缺失回退「未命名任务」。
  * - `goal` ← `goal`（解析自 `task_spec.goal.objective`）；缺失回退空串。
  * - `acceptanceCriteria` ← `acceptances[].description`（取 description 成 `string[]`，过滤空/缺失）；缺失 → `[]`。
  * - `status` ← {@link mapBbsTaskStatus}；未知态 → `null`（不入列）。

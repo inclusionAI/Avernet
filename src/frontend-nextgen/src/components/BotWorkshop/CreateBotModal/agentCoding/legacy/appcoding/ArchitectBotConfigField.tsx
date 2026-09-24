@@ -9,7 +9,7 @@
  */
 
 import type { Bot } from '@/services/botWorkshop/agentCodingLegacyService';
-import { DOMAIN_BOTS_PAGE_SIZE, searchDomainBots } from '@/services/botWorkshop/agentCodingLegacyService';
+import { searchDomainBots } from '@/services/botWorkshop/agentCodingLegacyService';
 import { useEffect, useState } from 'react';
 import DomainBotSelect from './DomainBotSelect';
 
@@ -41,7 +41,8 @@ export function ArchitectBotConfigField({
     const fetchDomainBots = async () => {
       setDomainBotsLoading(true);
       try {
-        const res = await searchDomainBots({ page: 1, page_size: DOMAIN_BOTS_PAGE_SIZE });
+        // 全量查询关联架构 Bot，不再传 page / page_size。
+        const res = await searchDomainBots();
         if (cancelled) return;
 
         if (res.success && res.data?.items) {

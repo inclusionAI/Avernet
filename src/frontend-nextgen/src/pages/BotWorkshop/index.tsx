@@ -32,6 +32,7 @@ const BotWorkshopPage: React.FC = () => {
             onDeploymentChange={workshop.setDeployment}
             onServiceModeChange={workshop.setServiceMode}
             onCreateCloud={workshop.openCreateCloud}
+            onCreateLocal={workshop.openCreateLocal}
             total={workshop.total}
             onReset={() => {
               workshop.setKeyword('');
@@ -42,7 +43,7 @@ const BotWorkshopPage: React.FC = () => {
           />
         </div>
         {workshop.loading ? (
-          <BotTableSkeleton />
+          <BotTableSkeleton showOwner={workshop.currentSpaceKind === 'team'} />
         ) : workshop.error ? (
           <Empty
             title="Bot 列表加载失败"
@@ -71,6 +72,7 @@ const BotWorkshopPage: React.FC = () => {
                 onView={workshop.openDetail}
                 onEdit={(bot) => workshop.openDetail(bot, 'edit')}
                 onConversation={workshop.openConversation}
+                canOpenConversation={workshop.canOpenConversation}
                 onHealthCheck={workshop.openHealthCheck}
                 getHealthCheckAvailability={workshop.getHealthCheckAvailability}
                 onOpenLogs={showBotLogs ? workshop.openLogs : undefined}
@@ -83,6 +85,7 @@ const BotWorkshopPage: React.FC = () => {
                 onManagePublication={setPublicationBot}
                 onAction={workshop.runAction}
                 onClaimLock={workshop.claimLock}
+                onReleaseLock={workshop.releaseLock}
                 getInventoryActions={(bot) => ({
                   view: workshop.inventoryActionFor(bot, 'view'),
                   chat: workshop.inventoryActionFor(bot, 'chat'),
@@ -121,6 +124,7 @@ const BotWorkshopPage: React.FC = () => {
           loading={workshop.access.loading}
           operation={workshop.access.operation}
           collaborators={workshop.collaborators}
+          members={workshop.access.members}
           onClose={workshop.closeAccess}
           onChangeSpace={workshop.changeSpace}
           onCreateTeamAndChangeSpace={workshop.createTeamAndChangeSpace}
@@ -131,7 +135,10 @@ const BotWorkshopPage: React.FC = () => {
         />
         <ServicePublicationDrawer
           bot={publicationBot}
-          onClose={() => setPublicationBot(undefined)}
+          onClose={() => {
+            setPublicationBot(undefined);
+            void workshop.retry({ silent: true });
+          }}
           onChanged={workshop.retry}
         />
       </div>

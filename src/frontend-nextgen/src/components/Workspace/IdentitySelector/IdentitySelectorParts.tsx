@@ -1,14 +1,71 @@
-import { Avatar, Badge, Button } from '@/components/ui';
+import { Avatar, Badge, Button, type ButtonProps } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { getBotEngineLabel } from '@/domain/botEngine';
 import { getBotTypeLabel } from '@/domain/botType';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { cn } from '@/utils/cn';
-import { Check } from 'lucide-react';
+import { Check, ChevronDown, Info } from 'lucide-react';
+import { forwardRef } from 'react';
 
 function isAvatarUrl(avatar: string): boolean {
   return /^https?:\/\//.test(avatar);
+}
+
+export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed';
+
+/**
+ * 非折叠布局的头部标签区（sidebar / default 两形态）：
+ * - 标题与说明 Tooltip 支持定制（headerLabel / headerTooltip，缺省保持全局默认文案）；
+ * - default 形态在未定制标题且身份多于 1 个时显示「可切换其他协作身份」副提示。
+ * 从 index.tsx 抽出（TC-G005 文件体积拆分，行为不变）。
+ */
+export function IdentitySectionHeader({
+  layout,
+  headerLabel,
+  headerTooltip,
+  showSwitchHint,
+}: {
+  layout: IdentitySelectorLayout;
+  headerLabel?: string;
+  headerTooltip?: string;
+  showSwitchHint: boolean;
+}) {
+  const sidebarLayout = layout === 'sidebar';
+  const defaultTooltipText =
+    headerTooltip ??
+    '当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。';
+  return (
+    <TooltipProvider delayDuration={300}>
+      <div
+        className={cn(
+          'flex items-center gap-1 px-1 text-xs text-foreground',
+          sidebarLayout ? 'pb-1 font-semibold' : 'font-medium',
+        )}
+      >
+        <span>{sidebarLayout ? headerLabel ?? '工作身份' : headerLabel ?? '当前协作身份'}</span>
+        {showSwitchHint ? (
+          <span className="text-[10px] font-normal text-muted-foreground">可切换其他协作身份</span>
+        ) : null}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              role="img"
+              aria-label={sidebarLayout ? '工作身份说明' : '协作身份说明'}
+              tabIndex={0}
+              className={cn(
+                'inline-flex cursor-help items-center text-muted-foreground',
+                sidebarLayout && 'relative top-px text-muted-foreground/70',
+              )}
+            >
+              <Info className={sidebarLayout ? 'h-3 w-3' : 'h-3.5 w-3.5'} aria-hidden />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{defaultTooltipText}</TooltipContent>
+        </Tooltip>
+      </div>
+    </TooltipProvider>
+  );
 }
 
 export function IdentityAvatar({
@@ -91,12 +148,12 @@ export function IdentityDetails({
         ) : null}
       </span>
       {!summaryOnly && identity.kind === 'user' && (
-        <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
           工号：{resolveOpenApiUserId(identity.id)}
         </span>
       )}
       {!summaryOnly && identity.kind === 'bot' && (
-        <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground">
+        <span className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <span className="truncate">{engineLabel || '引擎类型暂无'}</span>
           <BotRuntimeStatus identity={identity} />
         </span>
@@ -104,6 +161,62 @@ export function IdentityDetails({
     </span>
   );
 }
+
+interface IdentityTriggerButtonProps extends Omit<ButtonProps, 'children' | 'variant'> {
+  identity: Identity;
+  open: boolean;
+  layout: IdentitySelectorLayout;
+  userAvatarUrl?: string;
+}
+
+export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTriggerButtonProps>(
+  ({ identity, open, layout, userAvatarUrl, className, ...buttonProps }, ref) => {
+    const sidebarLayout = layout === 'sidebar';
+    const collapsedLayout = layout === 'collapsed';
+    const navigationLayout = sidebarLayout || collapsedLayout;
+
+    return (
+      <Button
+        ref={ref}
+        {...buttonProps}
+        variant={navigationLayout ? 'ghost' : 'outline'}
+        aria-expanded={open}
+        aria-label={`当前协作身份：${identity.name}`}
+        className={cn(
+          collapsedLayout
+            ? 'h-8 w-8 shrink-0 rounded-full border border-border bg-muted/40 p-0 text-xs font-semibold text-primary hover:bg-muted hover:text-primary'
+            : 'h-auto w-full justify-between gap-2 text-left',
+          sidebarLayout
+            ? 'min-h-9 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-foreground hover:bg-muted hover:text-foreground'
+            : !collapsedLayout && 'min-h-10 rounded-lg px-2 py-1',
+          navigationLayout && open && 'border-primary',
+          className,
+        )}
+      >
+        {collapsedLayout ? (
+          identity.kind === 'user' ? (
+            <IdentityAvatar identity={identity} size="xs" userAvatarUrl={userAvatarUrl} />
+          ) : (
+            <span aria-hidden>{Array.from(identity.name.trim())[0] ?? '?'}</span>
+          )
+        ) : (
+          <>
+            <IdentityAvatar identity={identity} size={sidebarLayout ? 'xs' : 'sm'} userAvatarUrl={userAvatarUrl} />
+            <IdentityDetails identity={identity} compact={sidebarLayout} summaryOnly={sidebarLayout} />
+            <ChevronDown
+              className={cn(
+                sidebarLayout ? 'h-3.5 w-3.5' : 'h-4 w-4',
+                'shrink-0 text-muted-foreground transition-transform',
+                open && 'rotate-180',
+              )}
+            />
+          </>
+        )}
+      </Button>
+    );
+  },
+);
+IdentityTriggerButton.displayName = 'IdentityTriggerButton';
 
 function IdentityOption({
   identity,
@@ -152,7 +265,7 @@ export function IdentitySection({
   if (identities.length === 0) return null;
   return (
     <section aria-labelledby={`identity-section-${title}`}>
-      <h3 id={`identity-section-${title}`} className="px-2.5 pb-1 text-[10px] font-medium text-muted-foreground">
+      <h3 id={`identity-section-${title}`} className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">
         {title}
       </h3>
       <div className="space-y-1">

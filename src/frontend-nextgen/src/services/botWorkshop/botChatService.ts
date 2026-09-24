@@ -6,7 +6,28 @@ import { mapBotChatDetail, mapBotChatPage } from './botChatMapper';
 const optional = (value: string) => value.trim() || undefined;
 const isoDate = (value: string) => (value ? new Date(value).toISOString() : undefined);
 
+// 后端对 contains 模糊查询限制 90 天时间跨度，超出即返回 Invalid log query；
+// 拼参数前把起始日期钳制进窗口，避免查询被网关拒绝。
+export const fuzzyQueryWindowDays = 90;
+
+const toLocalDateTimeInput = (date: Date) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+};
+
+export const clampFuzzyQueryFromDate = (fromDate: string, toDate: string): string => {
+  if (!fromDate || !toDate) return fromDate;
+  const from = new Date(fromDate).getTime();
+  const to = new Date(toDate).getTime();
+  if (Number.isNaN(from) || Number.isNaN(to)) return fromDate;
+  const earliest = to - fuzzyQueryWindowDays * 24 * 60 * 60 * 1000;
+  return from < earliest ? toLocalDateTimeInput(new Date(earliest)) : fromDate;
+};
+
+export const formatFriendlyDateTime = (value: string) => value.replace('T', ' ');
+
 function buildParams(context: BotChatContext, filters: BotChatFilters, page: number, limit: number): BotChatListParams {
+  const fuzzy = Boolean(filters.keyword);
   return {
     user_id: context.userId,
     owner_id: context.ownerId && context.ownerId !== context.userId ? context.ownerId : undefined,
@@ -19,7 +40,7 @@ function buildParams(context: BotChatContext, filters: BotChatFilters, page: num
     group_id: optional(filters.groupId),
     match_mode: filters.keyword ? 'contains' : 'exact',
     include_output_match: Boolean(filters.keyword),
-    from_date: isoDate(filters.fromDate),
+    from_date: isoDate(fuzzy ? clampFuzzyQueryFromDate(filters.fromDate, filters.toDate) : filters.fromDate),
     to_date: isoDate(filters.toDate),
     page,
     limit,

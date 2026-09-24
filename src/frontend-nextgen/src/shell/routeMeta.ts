@@ -1,12 +1,17 @@
 import { getCapabilities } from '@/capabilities';
 
-export type RouteSection = 'work' | 'manage' | 'dev';
+/**
+ * 路由分组（refactor-global-nav-shell）：collab=协作分组、bot=Bot 分组、legacy=老功能过渡组
+ * （废弃入口保底可达）、dev=开发页（不进侧栏分组导航）。原 work/manage 双区域模型随顶栏区域 Tab 退役。
+ */
+export type RouteSection = 'collab' | 'bot' | 'legacy' | 'dev';
 
 export interface RouteMeta {
   path: string;
   title: string;
   section: RouteSection;
-  navKey: string;
+  /** 对应侧栏导航项 id；不占导航位的路由（如 /space-admin、/ticket-center）缺省。 */
+  navKey?: string;
   openCore: boolean;
 }
 
@@ -18,92 +23,85 @@ export const routeMetaList: RouteMeta[] = [
   {
     path: '/workspace',
     title: '对话协作',
-    section: 'work',
+    section: 'collab',
     navKey: 'workspace',
     openCore: true,
   },
   {
     path: '/work/my-task',
-    title: '我的任务',
-    section: 'work',
+    title: '任务列表',
+    section: 'legacy',
     navKey: 'my-task',
     openCore: true,
   },
   {
     path: '/collaboration-square',
-    title: '协作广场',
-    section: 'work',
+    title: '发现',
+    section: 'collab',
     navKey: 'collaboration-square',
     openCore: true,
   },
   {
     path: '/collaboration-square/bots',
-    title: '协作广场 Bot',
-    section: 'work',
+    title: '发现 Bot',
+    section: 'collab',
     navKey: 'collaboration-square',
     openCore: true,
   },
   {
     path: '/collaboration-square/groups',
-    title: '协作广场群组',
-    section: 'work',
+    title: '发现群组',
+    section: 'collab',
     navKey: 'collaboration-square',
     openCore: true,
   },
   {
     path: '/collaboration-square/tasks',
-    title: '协作广场任务',
-    section: 'work',
+    title: '发现任务',
+    section: 'collab',
     navKey: 'collaboration-square',
     openCore: true,
   },
   {
     path: '/collaboration-privacy',
     title: '协作权限',
-    section: 'work',
+    section: 'legacy',
     navKey: 'collaboration-privacy',
     openCore: true,
   },
   {
     path: '/bot-workshop',
-    title: 'Bot 工坊',
-    section: 'manage',
+    title: 'Bot管理',
+    section: 'bot',
     navKey: 'bot-workshop',
     openCore: true,
   },
   {
     path: '/bot-workshop/detail',
     title: 'Bot 详情',
-    section: 'manage',
+    section: 'bot',
     navKey: 'bot-workshop',
     openCore: true,
   },
   {
     path: '/bot-workshop/logs',
     title: 'Bot 日志',
-    section: 'manage',
+    section: 'bot',
     navKey: 'bot-workshop',
     openCore: true,
   },
+  // split-admin-space-ticket-pages：管理后台单页拆分——两页面均不占导航位（故不设 navKey，
+  // 侧栏不因路由高亮任何菜单项）；section 取 legacy 保持分段语义完备。原 /admin 系列 meta 随单页壳退役。
   {
-    path: '/admin',
-    title: '管理后台',
-    section: 'manage',
-    navKey: 'admin',
-    openCore: true,
-  },
-  {
-    path: '/admin/spaces',
+    path: '/space-admin',
     title: '空间管理',
-    section: 'manage',
-    navKey: 'admin',
+    section: 'legacy',
     openCore: true,
   },
   {
-    path: '/admin/work-orders',
+    path: '/ticket-center',
     title: '通知中心',
-    section: 'manage',
-    navKey: 'admin',
+    section: 'legacy',
     openCore: true,
   },
   {

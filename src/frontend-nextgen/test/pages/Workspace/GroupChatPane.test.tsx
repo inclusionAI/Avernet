@@ -160,7 +160,9 @@ function renderPane(overrides: Partial<React.ComponentProps<typeof GroupChatPane
         connectionStatus="connected"
         send={() => {}}
         submitPanelMessage={() => {}}
-        stop={() => {}}
+        submitTaskExecutionMessage={() => {}}
+        abortBot={() => Promise.resolve()}
+        abortingBotIds={new Set()}
         reconnect={() => {}}
         reloadHistory={() => {}}
         canManageGroup={{ allowed: false }}
@@ -244,6 +246,43 @@ describe('GroupChatPane', () => {
     expect(screen.getByTestId('sender')).toHaveAttribute('data-mention-ids', 'ALL-Bots,human_2,bot-a');
   });
 
+  it('把活动 Bot 终止入口固定在消息列表外、输入框上方', () => {
+    const humanIdentity = { id: 'human_1', kind: 'user' as const, displayName: '章梧', online: true };
+    const activeSession: SessionView = {
+      ...session,
+      participants: [
+        { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' },
+        { actorId: 'bot-a', kind: 'bot', name: '甲', role: 'member', mode: 'auto' },
+      ],
+    };
+    const { unmount } = renderPane({
+      session: activeSession,
+      activeIdentity: humanIdentity,
+      userIdentityId: humanIdentity.id,
+      chat: makeChat({
+        messages: [
+          {
+            id: 'm1',
+            role: 'assistant',
+            content: 'working',
+            status: 'streaming',
+            extra: { botUuid: 'bot-a', runId: 'run-1' },
+          },
+        ],
+      }),
+    });
+
+    const strip = screen.getByLabelText('正在输出的 Bot');
+    const messageList = screen.getByTestId('bubble-list');
+    const collabPanel = screen.getByTestId('collab-panel');
+    const sender = screen.getByTestId('sender');
+    expect(messageList).not.toContainElement(strip);
+    expect(collabPanel).toContainElement(strip);
+    expect(strip.compareDocumentPosition(sender) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('button', { name: '终止 甲 的输出' })).toBeInTheDocument();
+    unmount();
+  });
+
   it('human 提交 @ALL-Bots 时展开为全部 bot ids 并传给 send', () => {
     const humanIdentity = { id: 'human_1', kind: 'user' as const, displayName: '章梧', online: true };
     const humanPresentSession: SessionView = {
@@ -289,7 +328,9 @@ describe('GroupChatPane', () => {
           connectionStatus="connected"
           send={send}
           submitPanelMessage={() => {}}
-          stop={() => {}}
+          submitTaskExecutionMessage={() => {}}
+          abortBot={() => Promise.resolve()}
+          abortingBotIds={new Set()}
           reconnect={() => {}}
           reloadHistory={() => {}}
           canManageGroup={{ allowed: false }}

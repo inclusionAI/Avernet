@@ -88,11 +88,12 @@ function toUnavailableFriendBot(id: string, name?: string): CollaborationBotView
   return {
     id,
     name: name ?? id,
-    online: true,
-    status: 'online',
+    online: false,
+    status: 'hidden',
     reachability: 'reachable',
     visibility: 'private',
     isFriend: true,
+    detailsResolved: false,
   };
 }
 

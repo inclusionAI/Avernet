@@ -29,9 +29,12 @@ const UNKNOWN_SUFFIX = 'UNKNOWN' as const;
 /**
  * 工单详情 content 为结构化对象（SPACE_JOIN 形态：space_id/space_name/applicant_user_id/
  * applicant_name/reason）；列表/通知 content 已是字符串，原样透传不走此处。
- * 把对象合成一行展示文案——只给「动作 + 空间」，申请人/理由交给 drawer 的 dl 行，避免重复。
+ * 提取对象中的展示文案；空间申请对象只给「动作 + 空间」，申请人/理由交给 drawer 的 dl 行，避免重复。
  */
 function synthesizeContentDisplay(contentObj: BackendUnknownRecord): string {
+  // 消息类通知使用 { text: string } 承载正文；优先按纯文本透传，保留内部换行。
+  const text = asString(contentObj.text);
+  if (text) return text;
   // NOTICE 类详情（如 SPACE_JOIN_REVIEWED）content 形如 { legacy_value: "你加入空间「X」的申请已通过。" }，
   // legacy_value 已是后端合成好的展示文案，直接透传，避免落到 space_name/reason 分支返回空串。
   // 注：新契约下展示文案优先取顶层 summary（见 mapWorkOrderDto），legacy_value 仅作旧 payload 兜底。
@@ -158,7 +161,8 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
       : contentObj
       ? synthesizeContentDisplay(contentObj)
       : '';
-  const contentRaw = contentObj ? JSON.stringify(contentObj, null, 2) : undefined;
+  // { text } 是消息正文信封，应按纯文本展示；其他结构化对象仍保留 JSON 详情。
+  const contentRaw = contentObj && !asString(contentObj.text) ? JSON.stringify(contentObj, null, 2) : undefined;
   // 列表/详情均有顶层 summary（与 content 同级，后端合成好的展示文案）：有则优先，替代 content.legacy_value。
   const summary = asString(dto.summary);
   // apply_reason / applicant_* 在详情里藏在 content 内，在列表里位于顶层；顶层优先、对象兜底。
@@ -166,6 +170,8 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
   const applicantUserId =
     asString(dto.applicant_user_id) ?? (contentObj ? asString(contentObj.applicant_user_id) : undefined);
   const applicantName = asString(dto.applicant_name) ?? (contentObj ? asString(contentObj.applicant_name) : undefined);
+  // session_url：详情藏 content 对象内，列表 VO 可能在顶层；顶层优先、对象兜底。仅非空字符串透传，抽屉据此渲染外链按钮。
+  const sessionUrl = asString(dto.session_url) ?? (contentObj ? asString(contentObj.session_url) : undefined);
 
   const typeMeta =
     itemType === 'APPROVAL'
@@ -193,6 +199,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
     title: asString(dto.title) ?? '',
     content: summary ?? contentDisplay,
     contentRaw,
+    sessionUrl,
     status,
     statusLabel: WORK_ORDER_STATUS_LABEL[status],
     typeLabel: typeMeta.label,

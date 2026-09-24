@@ -39,6 +39,14 @@ function makePanel(overrides: Partial<CollabPanelState> = {}): CollabPanelState 
 }
 
 describe('隐身条视角切换按钮', () => {
+  it('窄屏时隐身与视角按钮下移到状态信息下方', () => {
+    render(<CollabPanel panel={makePanel()} />);
+    const action = screen.getByRole('button', { name: '在会话中隐身' }).parentElement as HTMLElement;
+    const root = action.parentElement as HTMLElement;
+    expect(root).toHaveClass('flex-col');
+    expect(action).toHaveClass('w-full', 'justify-start', 'sm:justify-end');
+  });
+
   it('human present 且回显 full：渲染「切换到参与者视角」按钮，点击切到 participant', () => {
     const panel = makePanel();
     render(<CollabPanel panel={panel} />);

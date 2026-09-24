@@ -34,7 +34,9 @@ export interface AddMembersModalProps {
   onAddMembers: (
     users: SearchedUser[],
     role: 'ADMIN' | 'MEMBER',
-  ) => void | Promise<{ succeeded: SpaceMember[]; failed: { userId: string; userName?: string; reason: string }[] } | undefined>;
+  ) => void | Promise<
+    { succeeded: SpaceMember[]; failed: { userId: string; userName?: string; reason: string }[] } | undefined
+  >;
   addMembersLoading?: boolean;
   addMembersDisabledReason?: string;
 }

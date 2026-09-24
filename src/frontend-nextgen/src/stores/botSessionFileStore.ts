@@ -64,5 +64,8 @@ export const useBotSessionFileStore = create<BotSessionFileState>((set) => ({
   clearTasks: () => set({ uploadTasks: [] }),
   setIsUploading: (isUploading) => set({ isUploading }),
   setIsLoadingList: (isLoadingList) => set({ isLoadingList }),
-  resetForSession: () => set({ ...empty }),
+  // PR#413 评审跟进 P3（#257104460）：切会话时序为 refresh 先置 loading=true、随后 reset
+  // 清空旧列表、响应回来再关 loading。reset 保留 isLoadingList——否则在途期间列表为空且
+  // loading=false，命中 Empty 空态而非 Skeleton（短暂闪「暂无会话文件」）。
+  resetForSession: () => set({ readyFiles: [], uploadTasks: [], isUploading: false }),
 }));

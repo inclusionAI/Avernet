@@ -144,6 +144,26 @@ describe('useSpaceContextActions', () => {
     expect(useSpaceContextStore.getState().initialized).toBe(true);
   });
 
+  it('init：并发单飞——初始化进行中时并发调用共享同一次请求（挂载与路由 effect 同帧触发）', async () => {
+    let resolveList!: (v: Awaited<ReturnType<typeof adminService.listSpaces>>) => void;
+    mockedListSpaces.mockImplementationOnce(
+      () =>
+        new Promise((res) => {
+          resolveList = res;
+        }),
+    );
+    const p1 = initSpaceContext();
+    const p2 = initSpaceContext(); // SpaceSwitcher 挂载 + AppShell bot 路由 effect 同帧发起，应被单飞吸收
+    resolveList({
+      data: { items: [personal], total: 1, page: 1, pageSize: 100, hasMore: false, warnings: [] },
+    });
+    await Promise.all([p1, p2]);
+    const s = useSpaceContextStore.getState();
+    expect(mockedListSpaces).toHaveBeenCalledTimes(1);
+    expect(s.initialized).toBe(true);
+    expect(s.currentSpaceId).toBe(10000);
+  });
+
   it('init：幂等——initialized 后重复调用不再拉接口', async () => {
     mockedListSpaces.mockResolvedValueOnce({
       data: { items: [personal], total: 1, page: 1, pageSize: 100, hasMore: false, warnings: [] },

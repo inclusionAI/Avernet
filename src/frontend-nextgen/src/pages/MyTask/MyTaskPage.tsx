@@ -121,7 +121,7 @@ export default function MyTaskPage() {
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6 2xl:px-8">
         <PageHeader
-          title="我的任务"
+          title="任务列表"
           description={
             isUserIdentity ? '当前以用户身份查看任务列表' : isBotIdentity ? '当前以 Bot 身份查看定时任务' : undefined
           }

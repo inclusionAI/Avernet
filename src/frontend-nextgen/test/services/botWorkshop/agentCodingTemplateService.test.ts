@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe('agentCodingTemplateService', () => {
-  it('保留内置应用 Bot，并将模板工厂返回的 applicationCoding 模板一并拼接', async () => {
+  it('不再前端写死应用 Bot，仅展示模板工厂返回的模板并去重', async () => {
     listTemplates.mockResolvedValue([
       {
         engine_type: 'claude_code',
@@ -51,16 +51,10 @@ describe('agentCodingTemplateService', () => {
     const templates = await agentCodingTemplateService.list();
     const applicationTemplates = templates.filter((item) => item.templateType === 'applicationCoding');
 
-    expect(applicationTemplates).toHaveLength(2);
+    // 不再内置 app_coding 应用 Bot
+    expect(templates.find((item) => item.key === 'app_coding')).toBeUndefined();
+    expect(applicationTemplates).toHaveLength(1);
     expect(applicationTemplates[0]).toEqual(
-      expect.objectContaining({
-        key: 'app_coding',
-        versionId: 'applicationCoding',
-        name: '应用 Bot',
-        source: 'official',
-      }),
-    );
-    expect(applicationTemplates[1]).toEqual(
       expect.objectContaining({
         key: 'applicationCoding',
         versionId: '2800006',

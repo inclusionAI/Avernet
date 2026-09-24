@@ -16,6 +16,10 @@ export interface AcceptanceCriteria {
 export interface TaskExecConfig {
   yaml?: string;
   workflow_id?: string;
+  /** 后端运维配置在任务创建时盖章；前端只能读取，不能在 execute 请求中指定。 */
+  orchestration_mode?: 'centralized' | 'relay';
+  /** relay 根节点句柄；仅用于把首棒注入当前主 Bot 会话。 */
+  root_node_id?: string;
   MAX_DEPTH?: number;
   MAX_LOOP?: number;
   MAX_HARNESS?: number;
@@ -29,8 +33,8 @@ export interface TaskExecConfig {
 }
 
 export interface TaskSpec {
-  metadata: { task_id?: string; title: string; instruction: string };
   context: {
+    title: string;
     background: string;
     extend_props: {
       teamclaw_context?: {

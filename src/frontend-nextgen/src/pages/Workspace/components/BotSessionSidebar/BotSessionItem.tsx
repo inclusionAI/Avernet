@@ -25,6 +25,7 @@ interface Props {
   onClearContext: (sessionId: string) => Promise<boolean>;
   onDelete: (sessionId: string) => Promise<boolean>;
   favorite?: boolean;
+  showFavorite?: boolean;
   onToggleFavorite: (sessionId: string) => Promise<boolean>;
 }
 
@@ -36,6 +37,7 @@ export const BotSessionItem = React.memo(function BotSessionItem({
   onClearContext,
   onDelete,
   favorite,
+  showFavorite = true,
   onToggleFavorite,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -47,13 +49,6 @@ export const BotSessionItem = React.memo(function BotSessionItem({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const [favoriteToggling, setFavoriteToggling] = useState(false);
-  const handleToggleFavorite = async () => {
-    setMenuOpen(false);
-    setFavoriteToggling(true);
-    await onToggleFavorite(session.sessionId);
-    setFavoriteToggling(false);
-  };
   const startRename = () => {
     setMenuOpen(false);
     setTitleDraft(session.title);
@@ -95,12 +90,36 @@ export const BotSessionItem = React.memo(function BotSessionItem({
     <>
       <SessionCard
         title={session.title}
-        subtitle={session.messageCount > 0 ? `${session.messageCount} 条消息` : '暂无消息'}
+        /* v1.4：条数副行弱化（移至单聊顶栏 summary），单聊/群聊会话行统一紧凑单行。 */
+        subtitle=""
+        compact
         dateText={formatSessionTime(session.gmtModified || session.gmtCreate)}
         dateTooltip={formatSessionTimeTooltip(session.gmtModified || session.gmtCreate)}
         selected={selected}
         indicator="message"
         onSelect={() => onSelect(session.sessionId)}
+        persistentAction={
+          showFavorite ? (
+            // v1.4：收藏星标——已收藏常显（黄色实心）；未收藏默认隐藏，
+            // 悬停/键盘聚焦/会话选中时显现，触屏常显；点击直达切换不触发行选中。
+            <IconButton
+              label={favorite ? '取消收藏' : '收藏会话'}
+              size="sm"
+              icon={
+                <Star className={cn('h-4 w-4', favorite ? 'fill-warning text-warning' : 'text-muted-foreground')} />
+              }
+              className={cn(
+                !favorite &&
+                  'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
+                !favorite && selected && 'opacity-100',
+              )}
+              onClick={(e) => {
+                e.stopPropagation();
+                void onToggleFavorite(session.sessionId);
+              }}
+            />
+          ) : undefined
+        }
         trailing={
           <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
             <Popover open={menuOpen} onOpenChange={setMenuOpen}>
@@ -108,17 +127,6 @@ export const BotSessionItem = React.memo(function BotSessionItem({
                 <IconButton label="会话更多操作" size="sm" icon={<MoreHorizontal className="h-4 w-4" />} />
               </PopoverTrigger>
               <PopoverContent align="end" className="w-44 p-1">
-                <Button
-                  variant="ghost"
-                  disabled={favoriteToggling}
-                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
-                  onClick={() => void handleToggleFavorite()}
-                >
-                  <Star
-                    className={cn('h-3.5 w-3.5', favorite ? 'fill-warning text-warning' : 'text-muted-foreground')}
-                  />
-                  {favorite ? '取消收藏' : '收藏会话'}
-                </Button>
                 <Button
                   variant="ghost"
                   className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"

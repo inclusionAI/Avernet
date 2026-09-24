@@ -7,12 +7,16 @@ import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Switch } from '@/components/ui/Switch';
 import type { BotCapabilitySet, BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
+import type { CapabilityDetailTarget } from '@/services/botWorkshop/botCapabilityDetailService';
 import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { CapabilityDetailDrawer } from './CapabilityDetailDrawer';
 import { CapabilityMembers } from './CapabilityMembers';
 import { CapabilityPickerModal } from './CapabilityPickerModal';
 
 export interface CapabilitySetManagerProps {
+  botId?: string;
+  ownerId?: string;
   sets: BotCapabilitySet[];
   mySkills: BotEditorSkill[];
   marketSkills: BotEditorSkill[];
@@ -63,6 +67,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
   const [picker, setPicker] = useState<Picker>();
+  const [detailTarget, setDetailTarget] = useState<CapabilityDetailTarget>();
   const canAddMcp = getCapabilities().getBotMcpPickerEnabled().value;
   const openPicker = (set: BotCapabilitySet, kind: Picker['kind']) => {
     setPicker({ set, kind });
@@ -145,6 +150,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                     <CapabilityMembers
                       kind="skill"
                       items={set.skills}
+                      onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'skill', id, name }) : undefined}
                       editable={editable}
                       onAdd={set.isDefault ? undefined : () => openPicker(set, 'skill')}
                       onRemove={(id) => onSkill(set.id, id, false)}
@@ -152,6 +158,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                     <CapabilityMembers
                       kind="mcp"
                       items={set.mcps}
+                      onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'mcp', id, name }) : undefined}
                       editable={editable}
                       identities={props.mcpCallTypes}
                       identityEditable={props.callerContextEditable}
@@ -171,6 +178,13 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
           <Empty title="暂无能力集" description="新建能力集后，可从市场或能力工坊引用 Skill 与 MCP。" />
         )}
       </div>
+      <CapabilityDetailDrawer
+        editable={editable}
+        botId={props.botId}
+        ownerId={props.ownerId}
+        target={detailTarget}
+        onClose={() => setDetailTarget(undefined)}
+      />
       <Modal open={createOpen} onOpenChange={setCreateOpen}>
         <ModalContent>
           <ModalHeader>

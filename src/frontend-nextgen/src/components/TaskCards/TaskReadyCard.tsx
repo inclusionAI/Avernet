@@ -1,7 +1,7 @@
 import { Button, Textarea } from '@/components/ui';
 import { useTaskCardAction } from '@/hooks/useTaskCardAction';
 import { cn } from '@/utils/cn';
-import { Bookmark, ExternalLink, Lightbulb, Pencil, Play, Trash2 } from 'lucide-react';
+import { Bookmark, Check, ExternalLink, Lightbulb, Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { asItems, normalizeReadyTask } from './shared';
 import {
@@ -257,8 +257,8 @@ export function TaskReadyCard({ data }: { data: TaskCardData }) {
               暂存
             </Button>
             <Button variant="ghost" onClick={() => handleAction('execute')} className={taskCardExecuteBtnClass}>
-              <Play className="h-2.5 w-2.5" aria-hidden />
-              执行
+              <Check className="h-2.5 w-2.5" aria-hidden />
+              确认
             </Button>
           </div>
         </div>

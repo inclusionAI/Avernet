@@ -22,7 +22,7 @@ export function SessionToolbar({
     <div
       role="group"
       aria-label="会话范围筛选"
-      className={`flex min-h-9 items-center border-b border-border/60 bg-muted/30 px-3 pr-[18px] ${className ?? ''}`}
+      className={`flex min-h-9 items-center border-b border-border/60 bg-muted/20 px-3 pr-5 ${className ?? ''}`}
     >
       <SessionTabs
         value={value}

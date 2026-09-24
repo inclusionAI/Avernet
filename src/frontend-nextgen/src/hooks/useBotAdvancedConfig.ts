@@ -3,7 +3,13 @@ import { botAdvancedConfigService } from '@/services/botWorkshop/botAdvancedConf
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
-export function useBotAdvancedConfig(botId: string | null, enabled = true) {
+export function useBotAdvancedConfig(
+  botId: string | null,
+  enabled = true,
+  ownerId?: string,
+  markdown = true,
+  channelsEnabled = true,
+) {
   const [files, setFiles] = useState<BotIdentityFile[]>([]);
   const [channels, setChannels] = useState<BotChannel[]>([]);
   const [loading, setLoading] = useState(false);
@@ -11,13 +17,13 @@ export function useBotAdvancedConfig(botId: string | null, enabled = true) {
     if (!botId || !enabled) return;
     setLoading(true);
     const [fileResult, channelResult] = await Promise.allSettled([
-      botAdvancedConfigService.listIdentityFiles(botId),
-      botAdvancedConfigService.listChannels(botId),
+      markdown ? botAdvancedConfigService.listIdentityFiles(botId, ownerId) : Promise.resolve([]),
+      channelsEnabled ? botAdvancedConfigService.listChannels(botId, ownerId) : Promise.resolve([]),
     ]);
     setFiles(fileResult.status === 'fulfilled' ? fileResult.value : []);
     setChannels(channelResult.status === 'fulfilled' ? channelResult.value : []);
     setLoading(false);
-  }, [botId, enabled]);
+  }, [botId, enabled, ownerId, markdown, channelsEnabled]);
   useEffect(() => {
     void load();
   }, [load]);

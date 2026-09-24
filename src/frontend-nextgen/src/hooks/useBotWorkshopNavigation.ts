@@ -1,3 +1,4 @@
+import { serializeWorkspaceRoute } from '@/domain/workspaceRoute';
 import type { BotDomain } from '@/services/botWorkshop';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { buildAgentCodingChatPath, workspaceService } from '@/services/workspace';
@@ -12,6 +13,7 @@ export function useBotWorkshopNavigation() {
     const bot = typeof botOrId === 'string' ? undefined : botOrId;
     const params = new URLSearchParams({ type, id });
     if (bot) params.set('runtime_stage', resolveBotRuntimeStage(bot.lifecycle));
+    if (bot?.ownerId) params.set('owner_id', bot.ownerId);
     history.push(`/bot-workshop/detail?${params.toString()}`);
   }, []);
   const openConversation = useCallback((bot: BotDomain) => {
@@ -26,14 +28,15 @@ export function useBotWorkshopNavigation() {
       return;
     }
     const botId = bot.id.includes(':') || !bot.ownerId ? bot.id : `${bot.id}:${bot.ownerId}`;
-    workspaceService.persistIdentity(user.id);
-    current.setActiveIdentityId(user.id);
+    workspaceService.switchIdentity(user.id);
     const workspace = useWorkspaceStore.getState();
     workspace.setView('chat');
     workspace.selectBotSession(null);
     if (!workspace.expandedBotIds[botId]) workspace.toggleBotExpanded(botId);
     workspace.setBotExpandedSection(botId, 'mine');
-    history.push(`/workspace?${new URLSearchParams({ tab: 'chat', bot: botId }).toString()}`);
+    history.push(
+      `/workspace?${serializeWorkspaceRoute({ view: 'chat', currentIdentityId: user.id, targetBotId: botId })}`,
+    );
   }, []);
   return { openDetail, openConversation };
 }

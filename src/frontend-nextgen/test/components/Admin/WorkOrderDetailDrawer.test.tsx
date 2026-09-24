@@ -107,6 +107,24 @@ describe('WorkOrderDetailDrawer 审批类补充字段', () => {
     expect(screen.queryByText('审批意见')).not.toBeInTheDocument();
   });
 
+  it('通知 content.text 的换行按纯文本格式完整渲染', () => {
+    const text =
+      '群：测试消息视角1（ID：bcs_grp_44cfd103f69941f0a922d0a55dc3b40b）\n' +
+      '会话：新会话（ID：bcs_grp_44cfd103f69941f0a922d0a55dc3b40b:c039b5b3）\n' +
+      '皮皮虾: 章梧 你好呀！👋 这是 at 你的测试消息~\n\nat 功能正常工作 ✅';
+    const detail = buildWorkOrder({
+      item_type: 'NOTICE',
+      event_type: 'GROUP_MESSAGE_AT',
+      content: { text },
+    });
+
+    render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
+
+    const content = screen.getByText((_, element) => element?.tagName === 'DIV' && element.textContent === text);
+    expect(content).toHaveClass('whitespace-pre-wrap', 'break-words');
+    expect(screen.queryByText('JSON')).not.toBeInTheDocument();
+  });
+
   it('通知类不渲染审批补充字段，渲染未读提示文案', () => {
     render(
       <WorkOrderDetailDrawer
@@ -229,5 +247,35 @@ describe('WorkOrderDetailDrawer JSON 负载块（JsonBlock）', () => {
       JSON.stringify({ space_id: 6, space_name: '测试空间2', reason: 'test' }, null, 2),
     );
     expect(screen.queryByRole('button', { name: '展开' })).not.toBeInTheDocument();
+  });
+});
+
+describe('WorkOrderDetailDrawer session_url 外链', () => {
+  it('content 含 session_url 时渲染「打开会话」外链按钮（新标签页打开，href 正确）', () => {
+    const detail = buildWorkOrder({
+      item_type: undefined,
+      event_type: 'SPACE_JOIN_APPLIED',
+      content: { space_name: '风控团队', session_url: 'https://chat.example.com/s/abc123' },
+    });
+    render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
+
+    const link = screen.getByRole('link', { name: '打开会话' });
+    expect(link).toHaveAttribute('href', 'https://chat.example.com/s/abc123');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('无 session_url 时不渲染「打开会话」外链按钮', () => {
+    render(
+      <WorkOrderDetailDrawer
+        open
+        loading={false}
+        detail={buildWorkOrder({ content: '纯文本通知，无会话链接' })}
+        onClose={noop}
+        onNextUnread={noop}
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: '打开会话' })).not.toBeInTheDocument();
   });
 });

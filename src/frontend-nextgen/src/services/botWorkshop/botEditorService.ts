@@ -17,6 +17,7 @@ import {
   mapSkill,
   toRoutineWrite,
 } from './botEditorMappers';
+import { desktopCapabilityPolicy } from './desktopCapabilityPolicy';
 import { isImageResourcePath } from './resourcePreview';
 
 async function listAllConsumableSpaceSkills(spaceId: string): Promise<SpaceSkillDto[]> {
@@ -52,23 +53,23 @@ async function listAllLocalBotSkills(botId: string, ownerId?: string): Promise<S
 }
 
 export const botEditorService = {
-  async getCallerContext(botId: string) {
-    const response = await botEditorController.getCallerContext(botId);
+  async getCallerContext(botId: string, ownerId?: string) {
+    const response = await botEditorController.getCallerContext(botId, ownerId);
     return {
       editable: response.data?.editable ?? false,
       mcpCallTypes: response.data?.mcp_call_types ?? {},
       cliCallTypes: response.data?.cli_call_types ?? {},
     };
   },
-  async updateMcpCallType(botId: string, serverCode: string, callType: 'caller' | 'owner') {
-    const response = await botEditorController.updateMcpCallType(botId, serverCode, callType);
+  async updateMcpCallType(botId: string, serverCode: string, callType: 'caller' | 'owner', ownerId?: string) {
+    const response = await botEditorController.updateMcpCallType(botId, serverCode, callType, ownerId);
     if (!response.data) throw new Error('修改调用身份后未返回结果');
     return response.data.call_type;
   },
-  async registerRenderScreenLibraries(botId: string) {
+  async registerRenderScreenLibraries(botId: string, ownerId?: string) {
     if (!botId) return 0;
     try {
-      const response = await botEditorController.listRenderScreens(botId);
+      const response = await botEditorController.listRenderScreens(botId, ownerId);
       const screens = response.data?.items ?? [];
       storeBotCdnConfigs(botId, screens);
       return screens.length;
@@ -77,28 +78,27 @@ export const botEditorService = {
       return 0;
     }
   },
-  async load(botId: string, serviceBot = false, ownerId?: string) {
-    const [skills, skillSetResources, resources, screens, routines, engineConfig, engineStatus, approval] =
-      await Promise.allSettled([
-        listAllLocalBotSkills(botId, ownerId),
-        botEditorController.listSkillSetResources(botId),
-        botEditorService.listResources(botId),
-        botEditorController.listRenderScreens(botId),
-        botEditorController.listRoutines(botId),
-        botEditorController.getEngineConfig(botId),
-        botEditorController.getEngineStatus(botId),
-        serviceBot
-          ? botEditorController.getApprovalConfig(botId)
-          : Promise.resolve({ data: { should_approval: false } }),
-      ]);
+  async load(botId: string, serviceBot = false, ownerId?: string, deployment = 'cloud', engine = '') {
+    const policy = desktopCapabilityPolicy(deployment, engine);
+    const [skills, skillSetResources, resources, screens, routines, engineStatus, approval] = await Promise.allSettled([
+      listAllLocalBotSkills(botId, ownerId),
+      botEditorController.listSkillSetResources(botId, ownerId),
+      botEditorService.listResources(botId, '', ownerId),
+      policy.screens ? botEditorController.listRenderScreens(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
+      policy.routines ? botEditorController.listRoutines(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
+      botEditorController.getEngineStatus(botId, ownerId),
+      serviceBot
+        ? botEditorController.getApprovalConfig(botId, ownerId)
+        : Promise.resolve({ data: { should_approval: false } }),
+    ]);
     const sets: BotCapabilitySet[] = [];
     let skillSetDetailErrors = 0;
     if (skillSetResources.status === 'fulfilled') {
       const details = await Promise.all(
         (skillSetResources.value.data ?? []).map(async (set) => {
-          const setSkills = await Promise.allSettled([botEditorController.listSkillSetSkills(botId, set.id)]).then(
-            ([result]) => result,
-          );
+          const setSkills = await Promise.allSettled([
+            botEditorController.listSkillSetSkills(botId, set.id, ownerId),
+          ]).then(([result]) => result);
           skillSetDetailErrors += Number(setSkills.status === 'rejected');
           return {
             id: set.id,
@@ -137,7 +137,6 @@ export const botEditorService = {
       resources: resources.status === 'fulfilled' ? resources.value : [],
       screens: screens.status === 'fulfilled' ? dataOr(screens.value.data?.items, []).map(mapScreen) : [],
       routines: routines.status === 'fulfilled' ? dataOr(routines.value.data?.items, []).map(mapRoutine) : [],
-      engineConfig: engineConfig.status === 'fulfilled' ? dataOr(engineConfig.value.data, {}) : ({} as BotEngineConfig),
       engineStatus:
         engineStatus.status === 'fulfilled'
           ? {
@@ -148,7 +147,7 @@ export const botEditorService = {
           : undefined,
       approvalRequired: approval.status === 'fulfilled' ? Boolean(approval.value.data?.should_approval) : false,
       errors:
-        [skills, skillSetResources, resources, screens, routines, engineConfig, engineStatus, approval].filter(
+        [skills, skillSetResources, resources, screens, routines, engineStatus, approval].filter(
           (item) => item.status === 'rejected',
         ).length + skillSetDetailErrors,
     };
@@ -279,37 +278,41 @@ export const botEditorService = {
     }
     return botEditorController.setSkillSetMcp(botId, setId, serverCode, active);
   },
-  createDirectory: (botId: string, path: string) => botEditorController.createDirectory(botId, path),
-  async listResources(botId: string, directory = '') {
+  createDirectory: (botId: string, path: string, ownerId?: string) =>
+    botEditorController.createDirectory(botId, path, ownerId),
+  async listResources(botId: string, directory = '', ownerId?: string) {
     return (
-      (await botEditorController.listResources(botId, directory)).data?.items?.map((item) =>
+      (await botEditorController.listResources(botId, directory, ownerId)).data?.items?.map((item) =>
         mapResource(item, directory),
       ) ?? []
     );
   },
-  deleteResource: (botId: string, path: string) => botEditorController.deleteResource(botId, path),
-  uploadResource: (botId: string, path: string, file: File, overwrite = false) =>
-    file.arrayBuffer().then((body) => botEditorController.uploadResource(botId, path, body, overwrite)),
-  async previewResource(botId: string, path: string) {
+  deleteResource: (botId: string, path: string, ownerId?: string) =>
+    botEditorController.deleteResource(botId, path, ownerId),
+  uploadResource: (botId: string, path: string, file: File, overwrite = false, ownerId?: string) =>
+    file.arrayBuffer().then((body) => botEditorController.uploadResource(botId, path, body, overwrite, ownerId)),
+  async previewResource(botId: string, path: string, ownerId?: string) {
     if (isImageResourcePath(path)) {
-      const blob = await botEditorController.downloadResource(botId, path);
+      const blob = await botEditorController.downloadResource(botId, path, ownerId);
       return { kind: 'image' as const, blob, contentType: blob.type || 'application/octet-stream' };
     }
-    const preview = (await botEditorController.previewResource(botId, path)).data;
+    const preview = (await botEditorController.previewResource(botId, path, ownerId)).data;
     return {
       kind: 'text' as const,
       content: preview?.content ?? '',
       contentType: preview?.content_type ?? 'text/plain',
     };
   },
-  downloadResource: (botId: string, path: string) => botEditorController.downloadResource(botId, path),
-  downloadResourceDirectory: (botId: string, path: string) =>
-    botEditorController.downloadResourceDirectory(botId, path),
-  createScreen: (botId: string, input: BotRenderScreenInput) =>
-    botEditorController.createRenderScreen(botId, { name: input.name, cdn_url: input.cdnUrl }),
-  updateScreen: (botId: string, id: number, input: BotRenderScreenInput) =>
-    botEditorController.updateRenderScreen(botId, id, { name: input.name, cdn_url: input.cdnUrl }),
-  deleteScreen: (botId: string, id: number) => botEditorController.deleteRenderScreen(botId, id),
+  downloadResource: (botId: string, path: string, ownerId?: string) =>
+    botEditorController.downloadResource(botId, path, ownerId),
+  downloadResourceDirectory: (botId: string, path: string, ownerId?: string) =>
+    botEditorController.downloadResourceDirectory(botId, path, ownerId),
+  createScreen: (botId: string, input: BotRenderScreenInput, ownerId?: string) =>
+    botEditorController.createRenderScreen(botId, { name: input.name, cdn_url: input.cdnUrl }, ownerId),
+  updateScreen: (botId: string, id: number, input: BotRenderScreenInput, ownerId?: string) =>
+    botEditorController.updateRenderScreen(botId, id, { name: input.name, cdn_url: input.cdnUrl }, ownerId),
+  deleteScreen: (botId: string, id: number, ownerId?: string) =>
+    botEditorController.deleteRenderScreen(botId, id, ownerId),
   async listLifecycle(botId: string) {
     return (await botEditorController.getLifecycle(botId)).data?.items.map(mapPublication) ?? [];
   },
@@ -323,14 +326,14 @@ export const botEditorService = {
   offlineLifecycle: (botId: string) => botEditorController.offlineLifecycle(botId),
   retryLifecycle: (botId: string) => botEditorController.retryLifecycle(botId),
   deleteLifecycleDraft: (botId: string) => botEditorController.deleteLifecycleDraft(botId),
-  createRoutine: (botId: string, input: BotEditorRoutineInput) =>
-    botEditorController.createRoutine(botId, toRoutineWrite(input)),
-  updateRoutine: (botId: string, id: string, input: BotEditorRoutineInput) =>
-    botEditorController.updateRoutine(botId, id, toRoutineWrite(input)),
-  deleteRoutine: (botId: string, id: string) => botEditorController.deleteRoutine(botId, id),
-  runRoutine: (botId: string, id: string) => botEditorController.runRoutine(botId, id),
-  async listRoutineRuns(botId: string, id: string) {
-    const response = await botEditorController.listRoutineRuns(botId, id);
+  createRoutine: (botId: string, input: BotEditorRoutineInput, ownerId?: string) =>
+    botEditorController.createRoutine(botId, toRoutineWrite(input), ownerId),
+  updateRoutine: (botId: string, id: string, input: BotEditorRoutineInput, ownerId?: string) =>
+    botEditorController.updateRoutine(botId, id, toRoutineWrite(input), ownerId),
+  deleteRoutine: (botId: string, id: string, ownerId?: string) => botEditorController.deleteRoutine(botId, id, ownerId),
+  runRoutine: (botId: string, id: string, ownerId?: string) => botEditorController.runRoutine(botId, id, ownerId),
+  async listRoutineRuns(botId: string, id: string, ownerId?: string) {
+    const response = await botEditorController.listRoutineRuns(botId, id, ownerId);
     return (response.data?.items ?? []).map((run) => ({
       id: run.run_id,
       status: run.status,
@@ -338,6 +341,12 @@ export const botEditorService = {
       finishedAt: run.finished_at,
     }));
   },
-  saveEngineConfig: (botId: string, config: BotEngineConfig) => botEditorController.updateEngineConfig(botId, config),
-  saveApproval: (botId: string, enabled: boolean) => botEditorController.updateApprovalConfig(botId, enabled),
+  saveEngineConfig: (botId: string, config: BotEngineConfig, ownerId?: string) =>
+    botEditorController.updateEngineConfig(botId, config, ownerId),
+  async loadEngineConfig(botId: string, ownerId?: string) {
+    const response = await botEditorController.getEngineConfig(botId, ownerId);
+    return dataOr(response.data, {}) as BotEngineConfig;
+  },
+  saveApproval: (botId: string, enabled: boolean, ownerId?: string) =>
+    botEditorController.updateApprovalConfig(botId, enabled, ownerId),
 };

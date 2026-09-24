@@ -96,12 +96,10 @@ describe('PermissionCard', () => {
 
     const tooltip = await screen.findByRole('tooltip');
     expect(tooltip).toHaveTextContent(
-      '在其他用户或其他 Bot 发起好友申请后，统一控制是否需要审批。待审批的申请可前往「管理后台 / 通知中心 / 待我处理」处理。',
+      // split-admin-space-ticket-pages：审批入口随管理域拆分改指独立通知中心路由
+      '在其他用户或其他 Bot 发起好友申请后，统一控制是否需要审批。待审批的申请可前往「通知中心 / 待我处理」处理。',
     );
-    expect(screen.getByRole('link', { name: '管理后台 / 通知中心 / 待我处理' })).toHaveAttribute(
-      'href',
-      '/admin?tab=work-orders',
-    );
+    expect(screen.getByRole('link', { name: '通知中心 / 待我处理' })).toHaveAttribute('href', '/ticket-center');
     expect(screen.queryByRole('button', { name: '对用户可见性说明' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '对 Bot 可见性说明' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '好友审批策略说明' })).not.toBeInTheDocument();
@@ -139,7 +137,7 @@ describe('PermissionCard', () => {
     expect(screen.getByText('暂不可用')).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: '关闭任务认领' })).toBeEnabled();
     expect(screen.getByRole('switch', { name: '开启Dream Mode' })).toBeEnabled();
-    expect(screen.getByRole('switch', { name: '开启Bot 画像公开' })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: '开启公开 Bot 画像' })).toBeDisabled();
     expect(
       screen.getByText('控制当前 Bot 是否可参与群聊。关闭后无法加入新协作群，已加入的协作群也不再回复。'),
     ).toBeInTheDocument();
@@ -151,8 +149,8 @@ describe('PermissionCard', () => {
       screen.getByText('开启后，Bot 将每天基于用户数据（语雀、会议纪要等）挖掘潜在任务并推送。'),
     ).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: '关闭参与协作群聊' })).toBeEnabled();
-    expect(screen.getByRole('switch', { name: '开启Bot 画像公开' })).toBeDisabled();
-    expect(screen.getByText('Bot 画像公开')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: '开启公开 Bot 画像' })).toBeDisabled();
+    expect(screen.getByText('公开 Bot 画像')).toBeInTheDocument();
     expect(screen.getByText('Bot 可见性')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Bot 可见性功能说明' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Bot 好友审批功能说明' })).toBeInTheDocument();
@@ -167,8 +165,8 @@ describe('PermissionCard', () => {
     renderCard({ ...bot, profilePublic: false, profilePublicStatus: 'unavailable' });
 
     const status = screen.getByText('暂不可用');
-    const statusTrigger = screen.getByRole('button', { name: 'Bot 画像公开暂不可用原因' });
-    const profileSwitch = screen.getByRole('switch', { name: '开启Bot 画像公开' });
+    const statusTrigger = screen.getByRole('button', { name: '公开 Bot 画像暂不可用原因' });
+    const profileSwitch = screen.getByRole('switch', { name: '开启公开 Bot 画像' });
     expect(status).not.toHaveRole('button');
     expect(statusTrigger.parentElement).toContainElement(profileSwitch);
     await user.hover(statusTrigger);
@@ -180,7 +178,7 @@ describe('PermissionCard', () => {
   it('restores the Bot profile visibility toggle and sends the confirmed target value', () => {
     const { onToggleDirect } = renderCard();
 
-    fireEvent.click(screen.getByRole('switch', { name: '关闭Bot 画像公开' }));
+    fireEvent.click(screen.getByRole('switch', { name: '关闭公开 Bot 画像' }));
 
     expect(onToggleDirect).toHaveBeenCalledWith(bot, 'profilePublic', false);
   });

@@ -5,8 +5,8 @@ describe('availableViews', () => {
   it('用户身份:会话+协作群', () => {
     expect(getAvailableViews({ id: 'me', kind: 'user' })).toEqual(['chat', 'group']);
   });
-  it('bot 身份:仅协作群', () => {
-    expect(getAvailableViews({ id: 'b1', kind: 'bot' })).toEqual(['group']);
+  it('bot 身份:会话+协作群', () => {
+    expect(getAvailableViews({ id: 'bot-a:327325', kind: 'bot' })).toEqual(['chat', 'group']);
   });
   it('测试用户:仅会话', () => {
     expect(getAvailableViews({ id: 'test-user', kind: 'user' })).toEqual(['chat']);

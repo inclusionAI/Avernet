@@ -18,7 +18,10 @@ const TooltipContent = React.forwardRef<
       className={cn(
         'z-[var(--z-tooltip)] overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-card)] px-2.5 py-1.5 text-xs text-[var(--color-fg)] shadow-lg',
         'selection:bg-[var(--color-primary-soft)] selection:text-[var(--color-fg)]',
-        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+        // 无退出动画（缺陷修复）：hover 显隐行内按钮（hidden/group-hover）的场景下，
+        // 行失焦瞬间按钮 display:none 使锚点矩形归零，退出动画残留的气泡会被重定位到
+        // 页面左上角闪烁。关闭即同步卸载（同帧完成，先于锚点隐藏的绘制），杜绝孤儿气泡。
+        'data-[state=open]:animate-in data-[state=open]:fade-in-0',
         className,
       )}
       {...props}

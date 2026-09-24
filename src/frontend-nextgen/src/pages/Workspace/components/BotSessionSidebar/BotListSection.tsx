@@ -72,7 +72,9 @@ export function BotListSection({
 
   return (
     <div>
-      <div className="flex min-h-9 items-center border-b border-border/70 bg-muted/10">
+      {/* 验收微调：分组头去掉常驻灰底与下边框（靠留白与字重区分分组头）；
+          hover 反馈由按钮自身 hover:bg-accent/50 承担。 */}
+      <div className="flex min-h-9 items-center">
         <Button
           variant="ghost"
           size="sm"
@@ -80,7 +82,7 @@ export function BotListSection({
           aria-expanded={!collapsed}
           aria-label={`${title} (${count})`}
           aria-controls={`bot-section-${sectionKey}`}
-          className="flex h-auto min-h-9 min-w-0 flex-1 items-center gap-1 rounded-none border-0 bg-transparent px-[18px] py-2 text-xs font-medium text-foreground hover:bg-accent/50"
+          className="flex h-auto min-h-9 min-w-0 flex-1 items-center gap-1 rounded-none border-0 bg-transparent px-4 py-2 text-xs font-medium text-foreground hover:bg-accent/50"
         >
           {collapsed ? (
             <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -98,9 +100,10 @@ export function BotListSection({
           {error ? (
             <ListErrorState message={error} onRetry={onRetry} />
           ) : isLoading ? (
-            <div className="overflow-hidden border-y border-border bg-background">
+            /* 验收微调：加载骨架去边框与行底，与列表通透风格一致。 */
+            <div className="overflow-hidden">
               {[1, 2].map((i) => (
-                <Skeleton.Block key={i} className="h-16 w-full rounded-none border-b border-border last:border-b-0" />
+                <Skeleton.Block key={i} className="h-16 w-full rounded-none" />
               ))}
             </div>
           ) : bots.length === 0 ? (
@@ -108,7 +111,8 @@ export function BotListSection({
               <span className="text-xs text-muted-foreground">暂无 Bot</span>
             </div>
           ) : (
-            <div className="divide-y divide-border/70">
+            /* 验收微调：Bot 条目间分割线去除，靠留白与 hover 区分行。 */
+            <div>
               {bots.map((bot) => (
                 <BotItem
                   key={`${sectionKey}:${bot.botId}`}

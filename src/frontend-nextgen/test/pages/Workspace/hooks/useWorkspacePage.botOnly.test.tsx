@@ -216,8 +216,91 @@ it('target=_blank 新开页面:身份滞后加载时,协作群外链仍能切回
   expect(state.selectedSessionId).toBe('s1');
 });
 
-it('群深链带 bot= 且命中 Bot 身份：以该 Bot 身份打开群/会话（不强制切回用户）', async () => {
-  // BCN 外链落地透传 bot={bot_uuid}：指定视角身份。持久化身份是人类时也应切到该 Bot。
+it('群深链带 current= 时恢复对应 Bot 身份和群会话', async () => {
+  mockedUseSearchParams.mockReturnValue([
+    new URLSearchParams('tab=group&group=g1&session=s1&current=bot_old:2088'),
+    jest.fn(),
+  ] as unknown as ReturnType<typeof useSearchParams>);
+  useWorkspaceStore.setState({ activeIdentityId: 'human_2088', view: 'chat' });
+
+  renderHook(() => useWorkspacePage());
+  await act(async () => Promise.resolve());
+
+  const state = useWorkspaceStore.getState();
+  expect(state.activeIdentityId).toBe('bot_old:2088');
+  expect(state.view).toBe('group');
+  expect(state.selectedGroupId).toBe('g1');
+  expect(state.selectedSessionId).toBe('s1');
+});
+
+it('Bot 身份单聊深链使用 human= 恢复好友用户和会话', async () => {
+  mockedUseSearchParams.mockReturnValue([
+    new URLSearchParams('tab=chat&current=bot_old:2088&human=447147&session=s1'),
+    jest.fn(),
+  ] as unknown as ReturnType<typeof useSearchParams>);
+  useWorkspaceStore.setState({ activeIdentityId: 'human_2088', view: 'chat' });
+
+  renderHook(() => useWorkspacePage());
+  await act(async () => Promise.resolve());
+
+  const state = useWorkspaceStore.getState();
+  expect(state.activeIdentityId).toBe('bot_old:2088');
+  expect(state.view).toBe('chat');
+  expect(state.expandedFriendUserId).toBe('447147');
+  expect(state.selectedFriendUserSessionId).toBe('s1');
+  expect(state.expandedBotIds).toEqual({});
+  expect(state.selectedBotSessionId).toBeNull();
+});
+
+it('URL 身份切换复用完整身份转移语义，清理旧身份临时状态', async () => {
+  mockedUseSearchParams.mockReturnValue([
+    new URLSearchParams('tab=group&current=bot_old:2088&group=g1&session=s1'),
+    jest.fn(),
+  ] as unknown as ReturnType<typeof useSearchParams>);
+  useWorkspaceStore.setState({
+    activeIdentityId: 'human_2088',
+    view: 'chat',
+    groupSearchText: '旧搜索',
+    pendingGroupBootstrap: {
+      groupId: 'old-group',
+      sessionId: 'old-session',
+      run: {
+        runId: 'old-run',
+        botUuid: 'old-bot',
+        activityKind: 'group_bootstrap',
+        state: 'running',
+        startedAt: '2026-09-15T00:00:00Z',
+      },
+    },
+  });
+
+  renderHook(() => useWorkspacePage());
+  await act(async () => Promise.resolve());
+
+  expect(useWorkspaceStore.getState()).toMatchObject({
+    activeIdentityId: 'bot_old:2088',
+    groupSearchText: '',
+    pendingGroupBootstrap: null,
+    selectedGroupId: 'g1',
+    selectedSessionId: 's1',
+  });
+});
+
+it('缺少 bot= 的单聊 session 参数不会污染群聊会话选中态', async () => {
+  mockedUseSearchParams.mockReturnValue([
+    new URLSearchParams('tab=chat&current=human_2088&session=orphan-group-session'),
+    jest.fn(),
+  ] as unknown as ReturnType<typeof useSearchParams>);
+  useWorkspaceStore.setState({ selectedSessionId: null });
+
+  renderHook(() => useWorkspacePage());
+  await act(async () => Promise.resolve());
+
+  expect(useWorkspaceStore.getState().selectedSessionId).toBeNull();
+});
+
+it('兼容旧群深链的 bot= 身份参数：命中 Bot 身份时仍可打开群/会话', async () => {
+  // current= 上线前的群链接曾复用 bot= 表示视角身份，读取兼容期内不能失效。
   mockedUseSearchParams.mockReturnValue([
     new URLSearchParams('tab=group&group=g1&session=s1&bot=bot_old:2088&membership=session_only'),
     jest.fn(),

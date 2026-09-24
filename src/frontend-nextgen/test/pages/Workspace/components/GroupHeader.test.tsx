@@ -4,7 +4,7 @@ import { GroupHeader, type GroupHeaderProps } from '@/pages/Workspace/components
 import { expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const group: GroupView = {
   groupId: 'g1',
@@ -38,9 +38,9 @@ const session: SessionView = {
 const buildProps = (partial: Partial<GroupHeaderProps> = {}): GroupHeaderProps => ({
   selectedGroup: group,
   selectedSession: session,
-  supportState: { phase: 'ready', error: null },
   connectionStatus: 'connected',
   onReconnect: jest.fn(),
+  onOpenSessionList: jest.fn(),
   canManageGroup: { allowed: true },
   activePanel: 'none',
   onTogglePanel: jest.fn(),
@@ -50,8 +50,20 @@ const buildProps = (partial: Partial<GroupHeaderProps> = {}): GroupHeaderProps =
   ...partial,
 });
 
+it('窄屏会话列表入口位于标题左侧并使用右箭头图标', () => {
+  const onOpenSessionList = jest.fn();
+  render(<GroupHeader {...buildProps({ onOpenSessionList })} />);
+
+  const button = screen.getByRole('button', { name: '打开会话列表' });
+  expect(button).toHaveClass('lg:hidden');
+  fireEvent.click(button);
+  expect(onOpenSessionList).toHaveBeenCalledTimes(1);
+  expect(button.querySelector('svg')).toHaveClass('lucide-chevron-right');
+});
+
 it('选中会话时标题用会话名称，副标题展示群名/成员数/群类型', () => {
   render(<GroupHeader {...buildProps()} />);
+  expect(screen.getByRole('heading', { name: '发布排期讨论' })).toHaveClass('text-sm', 'font-semibold');
   expect(screen.getByRole('heading', { name: '发布排期讨论' })).toBeInTheDocument();
   expect(screen.getByText('主站群 · 2 个成员 · 自定义协同')).toBeInTheDocument();
   expect(screen.queryByText('协作群 · 群组对话')).not.toBeInTheDocument();

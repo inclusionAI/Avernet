@@ -22,11 +22,6 @@ const moduleNameMapper = {
   '^@babel/runtime/helpers/esm/(.*)$': '<rootDir>/node_modules/@babel/runtime/helpers/$1',
   '^react-syntax-highlighter/dist/esm/styles/prism$':
     '<rootDir>/node_modules/react-syntax-highlighter/dist/cjs/styles/prism/index.js',
-  // react-markdown / remark-gfm / html-react-parser 是 ESM-only，Jest 默认不转译 node_modules。
-  // 测试里用 CJS 桩替代，既避免 ESM 解析错误，也省掉转译庞大依赖树的开销；生产构建仍用真实包。
-  '^react-markdown$': '<rootDir>/test/mocks/react-markdown.js',
-  '^remark-gfm$': '<rootDir>/test/mocks/remark-gfm.js',
-  '^html-react-parser$': '<rootDir>/test/mocks/html-react-parser.js',
 };
 
 // @tc-chat/{adapters,core,utils} 只发了 ESM dist（main===module===dist/index.js，无 CJS 产物），

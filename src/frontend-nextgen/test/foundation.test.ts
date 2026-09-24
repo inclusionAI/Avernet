@@ -8,9 +8,18 @@ describe('foundation architecture helpers', () => {
   test('通过显式 route meta 识别二级路由归属', () => {
     // Open Core 形态下 /market/mcp/* 已剥离到 internal overlay，基线不收录
     expect(getRouteMeta('/market/mcp/detail')).toBeUndefined();
-    expect(getRouteMeta('/collaboration-square/bots')?.section).toBe('work');
+    // refactor-global-nav-shell：/collaboration-square 归协作（collab）分组
+    expect(getRouteMeta('/collaboration-square/bots')?.section).toBe('collab');
     expect(getRouteMeta('/bot-workshop/logs')?.navKey).toBe('bot-workshop');
     expect(getRouteMeta('/bot-workshop/logs')?.title).toBe('Bot 日志');
+  });
+
+  test('split-admin-space-ticket-pages：/space-admin、/ticket-center 独立 meta，/admin meta 随单页壳退役', () => {
+    expect(getRouteMeta('/space-admin')?.title).toBe('空间管理');
+    expect(getRouteMeta('/space-admin')?.section).toBe('legacy');
+    expect(getRouteMeta('/ticket-center')?.title).toBe('通知中心');
+    expect(getRouteMeta('/ticket-center')?.section).toBe('legacy');
+    expect(getRouteMeta('/admin')).toBeUndefined();
   });
 
   test('BotRuntime 解析默认 Bot 并保留引擎主维度', () => {

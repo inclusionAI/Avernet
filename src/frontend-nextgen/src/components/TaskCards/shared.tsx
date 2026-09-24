@@ -5,7 +5,15 @@
 import type { TaskCardData, TaskReadyData } from './types';
 
 export function asItems(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  if (typeof value === 'string') {
+    const item = value.trim();
+    return item ? [item] : [];
+  }
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -23,10 +31,11 @@ export function readTaskCardData(params: Record<string, unknown>) {
 }
 
 /**
- * 顶层 task_ready 但未带 task 时用顶层字段补齐；否则沿用 data.task（保持引用，供 execute 携带原对象）。
+ * 顶层 task_ready 但未带 task 时用顶层字段补齐；再统一归一化列表字段，
+ * 防止旧版卡片把列表写成字符串后执行链路调用 Array.prototype.join 崩溃。
  */
 export function normalizeReadyTask(data: TaskCardData): TaskReadyData {
-  return (data.task ?? {
+  const raw = (data.task ?? {
     task_type: 'dynamic',
     goal: data.goal,
     deliverables: data.deliverables,
@@ -34,4 +43,12 @@ export function normalizeReadyTask(data: TaskCardData): TaskReadyData {
     constraints: data.constraints,
     resources: data.resources,
   }) as TaskReadyData;
+
+  return {
+    ...raw,
+    deliverables: asItems(raw.deliverables),
+    acceptance_criteria: asItems(raw.acceptance_criteria),
+    constraints: asItems(raw.constraints),
+    resources: asItems(raw.resources),
+  };
 }

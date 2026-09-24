@@ -27,12 +27,17 @@ export interface GroupChatPaneProps {
   send: (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => void;
   /** 按当前群会话直发副屏 <AixUI> 消息（绕开全局桥 last-wins）。由 useGroupChat 提供。 */
   submitPanelMessage: (content: string) => void;
+  /** relay 首棒定向触发群 driver/manager Bot；不得使用 isInject 静默消息。 */
+  submitTaskExecutionMessage: (content: string, holderId: string) => void;
   /** 演示用：本地追加 assistant 回复，不通过聊天网络请求。 */
   appendAssistantMessage?: (content: string) => void;
   /** 演示用：以流式方式追加 assistant 回复，不通过聊天网络请求。 */
   streamAssistantMessage?: (content: string) => Promise<void>;
-  stop: () => void;
+  abortBot: (botId: string) => Promise<void>;
+  abortingBotIds: ReadonlySet<string>;
   reconnect: () => Promise<void> | void;
+  /** <lg 打开协作群会话列表。 */
+  onOpenSessionList?: () => void;
   /** 重新加载会话历史：error 状态下的「重新加载历史」走此出口（直连 provider.loadHistory）。 */
   reloadHistory: () => Promise<void> | void;
   /** 历史消息是否还有更早一页可加载（顶部「加载更多」显隐）。 */

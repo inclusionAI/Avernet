@@ -1,10 +1,10 @@
 import type { BotMessageDto } from '@/services/backendApi/bots/privateBotSessionController';
-import type { ChatMessage, MessageRole, TextBlock, ToolExecutionBlock, ToolStep } from '@tc-chat/core';
+import type { Block, ChatMessage, MessageRole, TextBlock, ToolExecutionBlock, ToolStep } from '@tc-chat/core';
 import { isToolError, stringifyToolValue } from './messageMapperHelpers';
 
 function toRole(role: BotMessageDto['role']): MessageRole | null {
   if (role === 'user' || role === 'assistant' || role === 'system') return role;
-  return null; // tool_use / tool_result 暂不渲染(YAGNI)
+  return null;
 }
 
 function parseTimestamp(raw: string): number {
@@ -26,10 +26,23 @@ interface ToolMessageMetadata {
   status?: unknown;
   error?: unknown;
   is_error?: unknown;
+  history_meta?: { conversationRoundId?: unknown };
 }
 
 function getToolMetadata(message: BotMessageDto): ToolMessageMetadata {
   return (message.metadata ?? {}) as ToolMessageMetadata;
+}
+
+function getRoundId(message: BotMessageDto): string | null {
+  const candidates = [
+    message.run_id,
+    message.history_meta?.conversationRoundId,
+    getToolMetadata(message).history_meta?.conversationRoundId,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return null;
 }
 
 function getToolStep(message: BotMessageDto, index: number): ToolStep | null {
@@ -45,77 +58,202 @@ function getToolStep(message: BotMessageDto, index: number): ToolStep | null {
     id: callIdText,
     tool: toolName,
     title: toolName,
-    status: message.role === 'tool_result' && isToolError(getToolMetadata(message)) ? 'error' : 'success',
+    status: message.role === 'tool_result' && isToolError(metadata) ? 'error' : 'success',
     input: stringifyToolValue(metadata.arguments ?? metadata.input ?? metadata.tool_args),
     output: stringifyToolValue(result ?? metadata.error),
   };
 }
 
-/** BotMessageDto[] → ChatMessage[]。入参来自后端「最新页在前、页内正序」,本函数按 gmt_create 升序排列
- *  为「旧→新」并完成 role/content 映射与空值过滤;无时间戳时保持原入参相对顺序(稳定排序)。 */
+function createAssistantMessage(message: BotMessageDto, index: number, roundId: string | null): ChatMessage {
+  const createdAt = message.gmt_create ? Date.parse(message.gmt_create) : undefined;
+  return {
+    id: message.message_id || `bot-history-${index}-${createdAt ?? 0}`,
+    role: 'assistant',
+    content: '',
+    status: 'history',
+    createdAt: Number.isFinite(createdAt) ? createdAt : undefined,
+    blocks: [],
+    ...(roundId
+      ? {
+          extra: {
+            conversationRoundId: roundId,
+            runId: roundId,
+          },
+        }
+      : {}),
+  };
+}
+
+function assignRoundId(message: ChatMessage, roundId: string): void {
+  message.extra = {
+    ...(message.extra ?? {}),
+    conversationRoundId: roundId,
+    runId: roundId,
+  };
+}
+
+function containsOnlyToolBlocks(message: ChatMessage): boolean {
+  return (
+    !message.content &&
+    Boolean(message.blocks?.length) &&
+    message.blocks!.every((block) => block.type === 'tool_execution')
+  );
+}
+
+function appendText(message: ChatMessage, content: string): void {
+  if (!content) return;
+  const blocks = (message.blocks ?? []) as Block[];
+  const lastBlock = blocks[blocks.length - 1];
+  if (lastBlock?.type === 'text') {
+    (lastBlock as TextBlock).content += content;
+  } else {
+    blocks.push({ type: 'text', content } as TextBlock);
+  }
+  message.blocks = blocks;
+  message.content = `${message.content ?? ''}${content}`;
+}
+
+function mergeToolStep(existing: ToolStep, incoming: ToolStep): ToolStep {
+  const existingTerminal = existing.status === 'success' || existing.status === 'error';
+  return {
+    ...existing,
+    ...incoming,
+    tool: existing.tool !== 'tool' ? existing.tool : incoming.tool,
+    title: existing.title !== 'tool' ? existing.title : incoming.title,
+    input: existing.input ?? incoming.input,
+    output: incoming.output ?? existing.output,
+    status: existingTerminal && incoming.status === 'success' ? existing.status : incoming.status,
+  };
+}
+
+function upsertToolStep(message: ChatMessage, incoming: ToolStep): void {
+  const blocks = (message.blocks ?? []) as Block[];
+  for (const block of blocks) {
+    if (block.type !== 'tool_execution') continue;
+    const toolBlock = block as ToolExecutionBlock;
+    const stepIndex = toolBlock.steps.findIndex((step) => step.id === incoming.id);
+    if (stepIndex >= 0) {
+      toolBlock.steps[stepIndex] = mergeToolStep(toolBlock.steps[stepIndex], incoming);
+      message.blocks = blocks;
+      return;
+    }
+  }
+
+  const lastBlock = blocks[blocks.length - 1];
+  if (lastBlock?.type === 'tool_execution') {
+    (lastBlock as ToolExecutionBlock).steps.push(incoming);
+  } else {
+    blocks.push({ type: 'tool_execution', steps: [incoming] } as ToolExecutionBlock);
+  }
+  message.blocks = blocks;
+}
+
+/**
+ * BotMessageDto[] → ChatMessage[]。
+ *
+ * 后端消息先按时间升序恢复为旧→新，再将同一 assistant 轮次的文本与工具消息聚合：
+ * - 有 run_id / conversationRoundId 时按轮次聚合；
+ * - 无轮次字段时，连续 tool_use / tool_result 仍聚合为一个 tool_execution 消息；
+ * - user / system 或无轮次 assistant 文本会结束当前隐式聚合；
+ * - 同 tool_call_id 的 tool_use / tool_result 合并为一个 ToolStep。
+ */
 export function mapBotSessionMessages(items: BotMessageDto[]): ChatMessage[] {
-  const indexed = items.map((m, index) => ({ m, index }));
+  const indexed = items.map((message, index) => ({ message, index }));
   indexed.sort((a, b) => {
-    const ta = parseTimestamp(a.m.gmt_create);
-    const tb = parseTimestamp(b.m.gmt_create);
-    const aValid = Number.isFinite(ta);
-    const bValid = Number.isFinite(tb);
-    if (aValid && bValid) return ta - tb;
+    const aTime = parseTimestamp(a.message.gmt_create);
+    const bTime = parseTimestamp(b.message.gmt_create);
+    const aValid = Number.isFinite(aTime);
+    const bValid = Number.isFinite(bTime);
+    if (aValid && bValid) return aTime - bTime;
     if (aValid !== bValid) return aValid ? -1 : 1;
     return a.index - b.index;
   });
 
-  const out: ChatMessage[] = [];
-  const toolMessagesByCallId = new Map<string, ChatMessage>();
-  indexed.forEach(({ m, index }) => {
-    if (m.role === 'tool_use' || m.role === 'tool_result') {
-      const step = getToolStep(m, index);
-      if (step) {
-        const existingMessage = toolMessagesByCallId.get(step.id);
-        if (!existingMessage) {
-          const createdAt = m.gmt_create ? Date.parse(m.gmt_create) : undefined;
-          const chatMessage: ChatMessage = {
-            id: m.message_id || `bot-history-${index}-${createdAt ?? 0}`,
-            role: 'assistant',
-            content: '',
-            status: 'history',
-            createdAt: Number.isFinite(createdAt) ? createdAt : undefined,
-            blocks: [{ type: 'tool_execution', steps: [step] } as ToolExecutionBlock],
-          };
-          out.push(chatMessage);
-          toolMessagesByCallId.set(step.id, chatMessage);
-        } else {
-          const toolBlock = existingMessage.blocks?.[0] as ToolExecutionBlock | undefined;
-          const existingStep = toolBlock?.steps[0];
-          if (toolBlock && existingStep) {
-            const terminalStatus = existingStep.status === 'success' || existingStep.status === 'error';
-            toolBlock.steps[0] = {
-              ...existingStep,
-              ...step,
-              tool: existingStep.tool !== 'tool' ? existingStep.tool : step.tool,
-              title: existingStep.title !== 'tool' ? existingStep.title : step.title,
-              input: existingStep.input ?? step.input,
-              output: existingStep.output ?? step.output,
-              status: terminalStatus && step.status === 'success' ? existingStep.status : step.status,
-            };
-          }
-        }
+  const result: ChatMessage[] = [];
+  const toolOwnerByCallId = new Map<string, { message: ChatMessage; roundId: string | null }>();
+  let activeAssistant: ChatMessage | null = null;
+  let activeRoundId: string | null = null;
+
+  for (const { message, index } of indexed) {
+    const isToolMessage = message.role === 'tool_use' || message.role === 'tool_result';
+    const roundId = getRoundId(message);
+
+    if (isToolMessage) {
+      const step = getToolStep(message, index);
+      if (!step) continue;
+
+      const existingOwner = toolOwnerByCallId.get(step.id);
+      const belongsToExistingOwner =
+        existingOwner && (roundId === null || existingOwner.roundId === null || existingOwner.roundId === roundId);
+      if (belongsToExistingOwner) {
+        upsertToolStep(existingOwner.message, step);
+        continue;
       }
-      return;
+
+      const canReuseActive =
+        activeAssistant !== null &&
+        ((roundId !== null && activeRoundId === roundId) ||
+          (roundId === null && (activeRoundId !== null || activeAssistant.blocks?.at(-1)?.type === 'tool_execution')));
+      let targetMessage: ChatMessage | null = activeAssistant;
+      if (!canReuseActive || !targetMessage) {
+        targetMessage = createAssistantMessage(message, index, roundId);
+        activeAssistant = targetMessage;
+        activeRoundId = roundId;
+        result.push(targetMessage);
+      }
+      upsertToolStep(targetMessage, step);
+      toolOwnerByCallId.set(step.id, { message: targetMessage, roundId });
+      continue;
     }
-    const role = toRole(m.role);
-    if (!role) return;
-    const content = m.content ?? '';
-    if (!content) return;
-    const createdAt = m.gmt_create ? Date.parse(m.gmt_create) : undefined;
-    out.push({
-      id: m.message_id || `bot-history-${index}-${createdAt ?? 0}`,
-      role,
+
+    const role = toRole(message.role);
+    if (!role) continue;
+    const content = message.content ?? '';
+
+    if (role === 'user' || role === 'system') {
+      activeAssistant = null;
+      activeRoundId = null;
+      toolOwnerByCallId.clear();
+      if (!content) continue;
+      const createdAt = message.gmt_create ? Date.parse(message.gmt_create) : undefined;
+      result.push({
+        id: message.message_id || `bot-history-${index}-${createdAt ?? 0}`,
+        role,
+        content,
+        status: 'history',
+        createdAt: Number.isFinite(createdAt) ? createdAt : undefined,
+        blocks: [{ type: 'text', content }] as TextBlock[],
+      });
+      continue;
+    }
+
+    if (!content) continue;
+    if (roundId) {
+      if (activeAssistant && activeRoundId === null && containsOnlyToolBlocks(activeAssistant)) {
+        activeRoundId = roundId;
+        assignRoundId(activeAssistant, roundId);
+      }
+      if (!activeAssistant || activeRoundId !== roundId) {
+        activeAssistant = createAssistantMessage(message, index, roundId);
+        activeRoundId = roundId;
+        result.push(activeAssistant);
+      }
+      appendText(activeAssistant, content);
+      continue;
+    }
+
+    const createdAt = message.gmt_create ? Date.parse(message.gmt_create) : undefined;
+    result.push({
+      id: message.message_id || `bot-history-${index}-${createdAt ?? 0}`,
+      role: 'assistant',
       content,
       status: 'history',
       createdAt: Number.isFinite(createdAt) ? createdAt : undefined,
       blocks: [{ type: 'text', content }] as TextBlock[],
     });
-  });
-  return out;
+    activeAssistant = null;
+    activeRoundId = null;
+  }
+
+  return result;
 }

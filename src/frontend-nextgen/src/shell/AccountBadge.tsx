@@ -1,6 +1,6 @@
-// 顶部栏右上角账号身份栏。消费 useHumanIdentity 解析当前登录用户真实花名/头像。
+// 侧栏底部用户行账号身份栏（原顶栏右上角，refactor-global-nav-shell 迁入）。消费 useHumanIdentity 解析当前登录用户真实花名/头像。
 // Open Core：listMyBots human[0]；内部 overlay：staff_id + __TERN__.user。本组件零感知差异。
-// 用户状态由其他业务区域表达，顶栏只展示头像和名称。Open Core（无 internal import）。
+// 用户状态由其他业务区域表达，侧栏只展示头像和名称。Open Core（无 internal import）。
 // 退出登录：仅 Open Core（oauth-provider=阿里云部署）形态渲染；经 useAccountLogout 收口，
 // 编排（POST /openapi/v1/auth/logout → 成功刷新；失败 toast）在 useExternalAuth 内。
 import { Button, Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
@@ -46,15 +46,27 @@ function ReadyAccountBadge({
   canLogout,
   isLoggingOut,
   logout,
+  collapsed = false,
 }: {
   user: AccountUser;
   canLogout: boolean;
   isLoggingOut: boolean;
   logout: () => Promise<void>;
+  /** 折叠态侧栏（w-14 icon 列）：仅渲染头像，tooltip/菜单语义保持。 */
+  collapsed?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const badgeButton = (
+  const badgeButton = collapsed ? (
+    <Button
+      variant="ghost"
+      aria-label={user.displayName}
+      title={undefined}
+      className="h-10 w-10 justify-center rounded-full p-0"
+    >
+      <Avatar name={user.displayName} src={user.avatarUrl} size={32} />
+    </Button>
+  ) : (
     <Button
       variant="ghost"
       className="h-auto justify-start gap-2.5 rounded-lg px-3 py-0 pl-1"
@@ -101,7 +113,10 @@ function ReadyAccountBadge({
   );
 }
 
-export function AccountBadge({ currentUser }: { currentUser?: AccountUser | null } = {}) {
+export function AccountBadge({
+  currentUser,
+  collapsed = false,
+}: { currentUser?: AccountUser | null; collapsed?: boolean } = {}) {
   const { identity, status } = useHumanIdentity();
   const { canLogout, isLoggingOut, logout } = useAccountLogout();
 
@@ -114,7 +129,17 @@ export function AccountBadge({ currentUser }: { currentUser?: AccountUser | null
         canLogout={canLogout}
         isLoggingOut={isLoggingOut}
         logout={logout}
+        collapsed={collapsed}
       />
+    );
+  }
+
+  // 加载/未登录折叠态：仅渐变圆 icon，不占宽度
+  if (collapsed && (status === 'loading' || status === 'error' || !identity)) {
+    return (
+      <Button variant="ghost" aria-label="账号身份" className="h-10 w-10 justify-center rounded-full p-0">
+        <AvatarIcon spinning={status === 'loading'} />
+      </Button>
     );
   }
 
@@ -154,6 +179,7 @@ export function AccountBadge({ currentUser }: { currentUser?: AccountUser | null
       canLogout={canLogout}
       isLoggingOut={isLoggingOut}
       logout={logout}
+      collapsed={collapsed}
     />
   );
 }

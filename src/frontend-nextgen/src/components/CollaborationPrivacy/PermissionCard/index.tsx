@@ -126,7 +126,7 @@ export function PermissionCard({
                 onChange={(checked) => onToggleDirect(bot, 'collaborationStatus', checked ? 'online' : 'hidden')}
               />
               <SettingRow
-                label="Bot 画像公开"
+                label="公开 Bot 画像"
                 description="允许其他用户在群聊中通过「融合模式」查看公开画像并进行跨 Bot 增量洞察。"
                 checked={bot.profilePublic}
                 disabled={!bot.joinedBcn || bot.profilePublicStatus === 'unavailable'}

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useBotSessionMap } from './useBotSessionMap';
 import type { UseBotSessionsResult } from './useBotSessions.types';
+import { useBotSessionTitleActions } from './useBotSessionTitleActions';
 import { useDirectSessionFallback } from './useDirectSessionFallback';
 const notifyError = (err: DomainError): void => {
   toast.error(err.friendlyMessage);
@@ -36,6 +37,11 @@ export function useBotSessions(
     setRawByBotId,
     loadedRef,
   } = useBotSessionMap(chatBots, expandedBotIds, activeIdentityId);
+  const { renameSession, renameSessionOnFirstMessage } = useBotSessionTitleActions(
+    activeIdentityId,
+    updateBotSessions,
+    updateBotFavoriteSessions,
+  );
 
   useDirectSessionFallback(
     activeIdentityId,
@@ -73,7 +79,7 @@ export function useBotSessions(
     [chatBots, toggleBotExpandedFromMap, selectBotSession],
   );
   const createSession = useCallback(
-    async (bot: ChatBotView, title?: string): Promise<BotChatSessionView | null> => {
+    async (bot: ChatBotView, title: string = '新会话'): Promise<BotChatSessionView | null> => {
       if (!activeIdentityId) return null;
       const res = await botSessionService.createSession(bot, activeIdentityId, title);
       if (!res.ok) {
@@ -120,26 +126,6 @@ export function useBotSessions(
     },
     [activeIdentityId, updateBotFavoriteSessions, updateBotSessions, selectBotSession],
   );
-  const renameSession = useCallback(
-    async (bot: ChatBotView, sessionId: string, title: string): Promise<boolean> => {
-      if (!activeIdentityId) return false;
-      const res = await botSessionService.updateSessionTitle(bot, activeIdentityId, sessionId, title);
-      if (!res.ok) {
-        notifyError(errOf(res));
-        return false;
-      }
-      updateBotSessions(bot.botId, (list) =>
-        list.map((session) => (session.sessionId === sessionId ? { ...session, title: res.data.title } : session)),
-      );
-      updateBotFavoriteSessions(bot.botId, (list) =>
-        list.map((session) => (session.sessionId === sessionId ? { ...session, title: res.data.title } : session)),
-      );
-      toast.success('会话已重命名');
-      return true;
-    },
-    [activeIdentityId, updateBotFavoriteSessions, updateBotSessions],
-  );
-
   const clearContext = useCallback(
     async (bot: ChatBotView, sessionId: string): Promise<boolean> => {
       if (!activeIdentityId) return false;
@@ -234,6 +220,7 @@ export function useBotSessions(
     createSession,
     deleteSession,
     renameSession,
+    renameSessionOnFirstMessage,
     clearContext,
     toggleFavorite,
     loadFavoriteSessions,

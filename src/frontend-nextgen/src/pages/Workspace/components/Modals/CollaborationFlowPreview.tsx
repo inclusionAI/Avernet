@@ -89,7 +89,7 @@ function CollaborationNode({ data }: { data: FlowNodeData }) {
         </span>
         <span
           className={cn(
-            'max-w-[46%] flex-shrink-0 truncate rounded-full border px-2 py-0.5 text-[11px] font-semibold',
+            'max-w-[46%] flex-shrink-0 truncate rounded-full border px-2 py-0.5 text-xs font-semibold',
             theme.role,
           )}
         >
@@ -167,7 +167,7 @@ export function CollaborationFlowPreview({
         preventScrolling
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#dbeafe" gap={20} size={1} />
+        <Background color="hsl(var(--primary) / 0.05)" gap={20} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>

@@ -7,6 +7,7 @@ import React from 'react';
 export interface BotPrimaryActionsCellProps {
   bot: BotDomain;
   onConversation?: (bot: BotDomain) => void;
+  conversationAllowed?: boolean;
   onView: (bot: BotDomain) => void;
   onEdit?: (bot: BotDomain) => void;
   onOpenLogs?: (bot: BotDomain) => void;
@@ -44,6 +45,7 @@ function IconAction({ label, disabledReason, disabled, children }: IconActionPro
 const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   bot,
   onConversation,
+  conversationAllowed = true,
   onView,
   onEdit,
   onOpenLogs,
@@ -56,8 +58,12 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
   const lockedByOther = bot.lock?.status === 'other';
 
   // Agent Coding Bot 的「去使用」固定可用,不受 chat action 可用性约束(与卡片实现一致)。
-  const chatDisabled = isAgentCodingBot ? false : !inventoryActions.chat?.enabled;
-  const chatDisabledReason = isAgentCodingBot ? undefined : inventoryActions.chat?.disabledReason;
+  const chatDisabled = !conversationAllowed || (isAgentCodingBot ? false : !inventoryActions.chat?.enabled);
+  const chatDisabledReason = !conversationAllowed
+    ? '仅 Bot Owner 可进入对话协作'
+    : isAgentCodingBot
+    ? undefined
+    : inventoryActions.chat?.disabledReason;
 
   const chatButton = (
     <Button

@@ -128,17 +128,17 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
                   <span
                     className={
                       disabled
-                        ? 'text-xs font-semibold text-muted-foreground'
+                        ? 'text-xs font-medium text-muted-foreground'
                         : kind === option.value
-                        ? 'text-xs font-semibold text-primary'
-                        : 'text-xs font-semibold text-foreground'
+                        ? 'text-xs font-medium text-primary'
+                        : 'text-xs font-medium text-foreground'
                     }
                   >
                     {option.label}
                   </span>
                   <span
                     className={cn(
-                      'text-left text-[11px] leading-4',
+                      'text-left text-xs leading-4',
                       disabled
                         ? 'text-muted-foreground'
                         : kind === option.value
@@ -162,10 +162,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             checked={viaExecute}
             onCheckedChange={(checked) => onViaExecuteChange(checked)}
           />
-          <label
-            htmlFor="create-group-via-execute"
-            className="cursor-pointer select-none text-xs font-semibold text-foreground"
-          >
+          <label htmlFor="create-group-via-execute" className="select-none text-xs font-semibold text-foreground">
             是否以任务执行
           </label>
         </div>

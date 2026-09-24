@@ -9,7 +9,7 @@
 // 登记，对齐 open-claw。经 registerSidePanelWiring() 在 app 启动早期 import，
 // 使 window.aixBridge 在任意会话页挂载前就位；useChatBridge 注册的 submit/abort 等挂在这同一实例上。
 //
-// 任务执行拦截：卡片 task_ready「执行」按钮调 aixBridge.submit('执行任务', {__taskAction:'execute', task})
+// 任务执行拦截：卡片 task_ready「确认」按钮调 aixBridge.submit('执行任务', {__taskAction:'execute', task})
 // 时，submit 拦截层识别 __taskAction==='execute'，不透传原 submit，改调注入的 onTaskExecute(task) 回调
 // （由 useWorkspace/useGroupChat 注入，带 taskComposerContext → executeTaskService → 成功后经
 // submitPanelMessage 发 <AixUI type="panel"> 给 bot 落库 → loadHistory 拉回持久）。
@@ -18,7 +18,7 @@ import { ChatBridge, chatBridgeHelper } from '@tc-chat/core';
 export const chatBridge = new ChatBridge({ installGlobal: true });
 chatBridgeHelper.set('main', chatBridge);
 
-/** 任务执行拦截回调：卡片点「执行」时被调用，task 为卡片传出的 task_ready.task JSON。 */
+/** 任务执行拦截回调：卡片点「确认」时被调用，task 为卡片传出的 task_ready.task JSON。 */
 type TaskExecuteHandler = (task: Record<string, unknown>) => void;
 
 let taskExecuteHandler: TaskExecuteHandler | null = null;

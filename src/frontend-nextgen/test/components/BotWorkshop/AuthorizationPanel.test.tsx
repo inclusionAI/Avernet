@@ -2,9 +2,9 @@
 
 import { AuthorizationPanel } from '@/components/BotWorkshop/CreateBotModal/AuthorizationPanel';
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
-test('AgentPass 授权按老版交互使用无外框的全屏 iframe', () => {
+test('AgentPass 授权加载期间保留背景列表，加载完成后再展示全屏 iframe', () => {
   render(
     <AuthorizationPanel
       authorization={{
@@ -25,8 +25,16 @@ test('AgentPass 授权按老版交互使用无外框的全屏 iframe', () => {
 
   const iframe = screen.getByTitle('Bot 授权');
   expect(iframe).toHaveAttribute('src', 'https://agentpass.example/authorize');
-  expect(iframe).toHaveClass('h-full', 'w-full', 'border-none');
+  expect(iframe).toHaveClass('h-full', 'w-full', 'border-none', 'opacity-0', 'pointer-events-none');
   expect(iframe.parentElement).toHaveClass('fixed', 'inset-0', 'z-[200]');
+  expect(iframe.parentElement).not.toHaveClass('bg-background');
   expect(iframe.parentElement?.parentElement).toBe(document.body);
+  expect(screen.getByRole('status', { name: '正在加载 AgentPass 授权页面' })).toBeInTheDocument();
+
+  fireEvent.load(iframe);
+
+  expect(iframe).toHaveClass('opacity-100');
+  expect(iframe).not.toHaveClass('opacity-0', 'pointer-events-none');
+  expect(screen.queryByRole('status', { name: '正在加载 AgentPass 授权页面' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '打开授权页面' })).not.toBeInTheDocument();
 });

@@ -5,6 +5,7 @@ import React from 'react';
 export interface BotInfoCellProps {
   bot: BotDomain;
   onClaimLock?: (bot: BotDomain) => Promise<void>;
+  onReleaseLock?: (bot: BotDomain) => Promise<void>;
 }
 
 function getInitial(name: string): string {
@@ -14,20 +15,24 @@ function getInitial(name: string): string {
 }
 
 /** 名称不再是独立按钮：整行已可点击进入详情，避免行内嵌套可交互元素。 */
-const BotInfoCell: React.FC<BotInfoCellProps> = ({ bot, onClaimLock }) => {
+const BotInfoCell: React.FC<BotInfoCellProps> = ({ bot, onClaimLock, onReleaseLock }) => {
   return (
     <div className="flex min-w-0 items-center gap-3">
       <span
         aria-hidden
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold leading-none text-primary"
       >
-        {getInitial(bot.name)}
+        {bot.avatarUrl ? (
+          <img src={bot.avatarUrl} alt="" className="size-full rounded-full object-cover" />
+        ) : (
+          getInitial(bot.name)
+        )}
       </span>
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-sm font-medium text-foreground">{bot.name}</span>
           <span className="inline-flex shrink-0">
-            <BotEditLockAction bot={bot} onClaimLock={onClaimLock} />
+            <BotEditLockAction bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />
           </span>
         </div>
         <span className="truncate text-xs text-muted-foreground">{bot.entityKey}</span>

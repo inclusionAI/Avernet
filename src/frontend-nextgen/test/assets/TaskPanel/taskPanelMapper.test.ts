@@ -414,6 +414,58 @@ describe('taskPanelMapper root output dimensions (产物输出处理)', () => {
     expect(task.rootOutputDimensions?.[3].content).toBe('直接字符串维度的产出内容');
   });
 
+  it('分布式接力产物始终聚合所有节点，即使根节点已有部分产出', () => {
+    const dashboard = {
+      task_id: 'task-relay-output',
+      run_id: 1,
+      status: 'DONE',
+      loop_round: 2,
+      execution_config: { orchestration_mode: 'relay' },
+      tasks: [
+        {
+          node_id: 'node-root',
+          task_id: 'task-relay-output',
+          sequence: 1,
+          status: 'DONE',
+          run_info: { output: { result: '根棒环境核验产出' } },
+          task_spec: {
+            context: { title: '存储行业尽调', background: '' },
+            goal: { objective: '产出尽调报告', acceptances: [] },
+          },
+        },
+        {
+          node_id: 'relay-research',
+          task_id: 'task-relay-output',
+          sequence: 2,
+          status: 'DONE',
+          run_info: { output: { result: '# 尽调报告\n\n完整正文' } },
+          task_spec: {
+            context: { title: '行业研究' },
+            goal: { objective: '完成尽调报告', acceptances: [] },
+          },
+        },
+        {
+          node_id: 'relay-verify',
+          task_id: 'task-relay-output',
+          sequence: 3,
+          status: 'SUCCESS',
+          run_info: { output: { result: '近期数据验证补充报告' } },
+          task_spec: {
+            context: { title: '数据验证' },
+            goal: { objective: '补齐近期数据', acceptances: [] },
+          },
+        },
+      ],
+      relations: [],
+    } as unknown as TaskDashboardResponse;
+
+    const task = mapDashboard(dashboard);
+    expect(task.rootOutputDimensions?.map((item) => item.key)).toEqual(['node-root', 'relay-research', 'relay-verify']);
+    expect(task.rootOutputDimensions?.[0].content).toBe('根棒环境核验产出');
+    expect(task.rootOutputDimensions?.[1].content).toBe('# 尽调报告\n\n完整正文');
+    expect(task.rootOutputDimensions?.[2].content).toBe('近期数据验证补充报告');
+  });
+
   it('根节点 output 为非结构化(字符串/null)时不产生维度卡片，回退 markdown 渲染', () => {
     const dashboard = {
       task_id: 'task-plain',
@@ -786,5 +838,57 @@ describe('taskPanelMapper actual_run_mode 覆盖(run_mode 权限绕过)', () => 
     // 非法 actual_run_mode 降级 → 沿用 run_mode=coop_group
     expect(node.runMode).toBe('coop_group');
     expect(node.groupId).toBe(groupId);
+  });
+});
+
+describe('taskPanelMapper canonical TaskSpec', () => {
+  it('节点标题优先读取 context.title，且不依赖 legacy metadata', () => {
+    const dashboard = {
+      task_id: 'task-context-title',
+      run_id: 1,
+      status: 'RUNNING',
+      needs_attention: false,
+      task_type: 'dynamic',
+      source_type: 'bot',
+      owner_user_id: 'user-1',
+      owner_bot_id: 'bot-1',
+      task_spec: {
+        context: { title: '根任务标题', background: '', extend_props: {} },
+        goal: { objective: '根目标', acceptances: [] },
+      },
+      create_time: '2026-09-21T10:00:00+08:00',
+      finish_time: null,
+      loop_round: 1,
+      progress: { total: 1, pending: 0, planning: 0, running: 1, done: 0, failed: 0, hung: 0, skipped: 0, percent: 0 },
+      tasks: [
+        {
+          node_id: 'task-context-title',
+          task_id: 'task-context-title',
+          sequence: 0,
+          status: 'DONE',
+          task_spec: {
+            context: { title: '根任务标题', background: '', extend_props: {} },
+            goal: { objective: '根目标', acceptances: [] },
+          },
+        },
+        {
+          node_id: 'node-1',
+          task_id: 'task-context-title',
+          sequence: 1,
+          status: 'RUNNING',
+          task_spec: {
+            context: { title: '下一棒标题', background: '', extend_props: {} },
+            goal: { objective: '下一棒目标', acceptances: [] },
+          },
+        },
+      ],
+      relations: [],
+    } as TaskDashboardResponse;
+
+    const task = mapDashboard(dashboard);
+    expect(task.name).toBe('根任务标题');
+    expect(task.nodes[1]!.name).toBe('下一棒标题');
+    expect(task.nodes[1]!.taskSpec!.title).toBe('下一棒标题');
+    expect(task.nodes[1]!.taskSpec!.target).toBe('下一棒目标');
   });
 });

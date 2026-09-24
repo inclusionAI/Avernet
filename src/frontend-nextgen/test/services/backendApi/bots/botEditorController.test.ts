@@ -43,11 +43,16 @@ describe('botEditorController', () => {
       '/openapi/v1/bots/bot-1/routines/routine-1/runs?page=1&page_size=20',
       'GET',
     ],
-    ['identity files', () => botEditorController.listIdentityFiles('bot-1'), '/openapi/v1/bots/bot-1/identity', 'GET'],
+    [
+      'identity files',
+      () => botEditorController.listIdentityFiles('bot-1', 'owner-1'),
+      '/openapi/v1/bots/bot-1/identity?owner_id=owner-1',
+      'GET',
+    ],
     [
       'channels',
-      () => botEditorController.listChannels('bot-1'),
-      '/openapi/v1/bots/bot-1/channels?page=1&page_size=100&stage=draft',
+      () => botEditorController.listChannels('bot-1', 'owner-1'),
+      '/openapi/v1/bots/bot-1/channels?page=1&page_size=100&stage=draft&owner_id=owner-1',
       'GET',
     ],
     [
@@ -134,6 +139,21 @@ describe('botEditorController', () => {
       expect.objectContaining({ method: 'GET' }),
     );
   });
+  test.each([
+    ['skill set resources', () => botEditorController.listSkillSetResources('bot-1', 'owner-1')],
+    ['skill set members', () => botEditorController.listSkillSetSkills('bot-1', '7', 'owner-1')],
+    ['resources', () => botEditorController.listResources('bot-1', '', 'owner-1')],
+    ['routines', () => botEditorController.listRoutines('bot-1', 'owner-1')],
+    ['approval', () => botEditorController.getApprovalConfig('bot-1', 'owner-1')],
+    ['engine config', () => botEditorController.getEngineConfig('bot-1', 'owner-1')],
+    ['engine status', () => botEditorController.getEngineStatus('bot-1', 'owner-1')],
+    ['caller context', () => botEditorController.getCallerContext('bot-1', 'owner-1')],
+  ])('%s passes the addressed Bot owner separately from the current user', async (_label, invoke) => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
+    await invoke();
+    const url = new URL(String(fetch.mock.calls[0][0]), 'http://localhost');
+    expect(url.searchParams.get('owner_id')).toBe('owner-1');
+  });
   test('upgrades a running service publication through OpenAPI', async () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
     await botEditorController.upgradeLifecycle('bot-1', 17);
@@ -143,6 +163,14 @@ describe('botEditorController', () => {
     );
   });
 
+  test('releases a service Bot edit lock through OpenAPI', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
+    await botEditorController.releaseEditLock('bot-1', 'owner-1');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/edit-lock?owner_id=owner-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
   test('steals a service Bot edit lock through OpenAPI', async () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
     await botEditorController.stealEditLock('bot-1', 'owner-1');
@@ -153,17 +181,17 @@ describe('botEditorController', () => {
   });
   test('updates approval through the lifecycle OpenAPI', async () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
-    await botEditorController.updateApprovalConfig('bot-1', true);
+    await botEditorController.updateApprovalConfig('bot-1', true, 'owner-1');
     expect(fetch).toHaveBeenCalledWith(
-      '/openapi/v1/bots/bot-1/lifecycle/approval',
+      '/openapi/v1/bots/bot-1/lifecycle/approval?owner_id=owner-1',
       expect.objectContaining({ method: 'PUT', body: JSON.stringify({ should_approval: true }) }),
     );
   });
   test('updates the MCP caller mode through OpenAPI', async () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
-    await botEditorController.updateMcpCallType('bot-1', 'mcp/weather', 'caller');
+    await botEditorController.updateMcpCallType('bot-1', 'mcp/weather', 'caller', 'owner-1');
     expect(fetch).toHaveBeenCalledWith(
-      '/openapi/v1/bots/bot-1/mcps/mcp%2Fweather/call-type',
+      '/openapi/v1/bots/bot-1/mcps/mcp%2Fweather/call-type?owner_id=owner-1',
       expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ call_type: 'caller' }) }),
     );
   });
@@ -200,12 +228,13 @@ describe('botEditorController', () => {
   });
   test('writes render screen through Bot-addressed OpenAPI', async () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
-    await botEditorController.createRenderScreen('bot-1', {
-      name: 'overview',
-      cdn_url: 'https://cdn.example/screen.js',
-    });
+    await botEditorController.createRenderScreen(
+      'bot-1',
+      { name: 'overview', cdn_url: 'https://cdn.example/screen.js' },
+      'owner-1',
+    );
     expect(fetch).toHaveBeenCalledWith(
-      '/openapi/v1/bots/bot-1/render-screens',
+      '/openapi/v1/bots/bot-1/render-screens?owner_id=owner-1',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ name: 'overview', cdn_url: 'https://cdn.example/screen.js' }),

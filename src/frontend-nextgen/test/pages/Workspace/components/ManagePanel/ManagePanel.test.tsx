@@ -83,9 +83,9 @@ it('group panel exposes base info tabs and member management', () => {
   expect(screen.getByText('创建时间')).toBeInTheDocument();
   expect(screen.getByText('群 ID')).toBeInTheDocument();
   expect(screen.getByText('g1')).toBeInTheDocument();
-  expect(screen.getByText('群成员管理')).toBeInTheDocument();
+  expect(screen.getByText('群成员（1）')).toBeInTheDocument();
   expect(screen.getByText('分享协作群')).toBeInTheDocument();
-  expect(screen.getByText('用户可以通过链接加入群组')).toBeInTheDocument();
+  expect(screen.getByText('人类角色可以通过链接加入协作群')).toBeInTheDocument();
   expect(screen.queryByText(/Human/)).not.toBeInTheDocument();
   expect(screen.getByText('删除协作群')).toBeInTheDocument();
 });
@@ -124,26 +124,36 @@ it('group panel root fills the manage panel width so advanced cards do not leave
   expect(container.querySelector('aside')).toHaveClass('w-full');
 });
 
-it('group panel uses a clear 16/14/12/11px typography hierarchy', () => {
+it('group panel uses a clear 16/12px typography hierarchy', () => {
   render(<GroupManagePanel {...groupProps()} />);
 
   expect(screen.getByText('群管理')).toHaveClass('text-base', 'font-semibold');
   expect(screen.getByRole('tab', { name: '基础信息' })).toHaveClass('text-xs', 'font-medium');
-  expect(screen.getByText('群成员管理')).toHaveClass('text-sm', 'font-semibold');
-  expect(screen.getByText('公开群', { selector: 'p' })).toHaveClass('text-sm', 'font-semibold');
-  expect(screen.getByText('公开群允许通过邀请链接加入。')).toHaveClass('text-[11px]');
+  expect(screen.getByText('群成员（1）')).toHaveClass('text-sm', 'font-medium');
+  expect(screen.getByText('公开群', { selector: 'p' })).toHaveClass('text-xs', 'font-medium');
+  expect(screen.getByText('公开群允许通过邀请链接加入。')).toHaveClass('text-xs');
   expect(screen.getByText('g1')).toHaveClass('text-xs', 'font-mono');
   expect(screen.getByRole('button', { name: /分享协作群/ })).toHaveClass('text-xs');
-  expect(screen.getByText('用户可以通过链接加入群组')).toHaveClass('text-[11px]');
+  expect(screen.getByText('人类角色可以通过链接加入协作群')).toHaveClass('text-xs');
+});
+
+it('non-manager can open group advanced config without Tooltip context crash', () => {
+  const denied: PolicyResult = { allowed: false, disabledReason: '仅群主/主节点可管理该协作群' };
+
+  render(<GroupManagePanel {...groupProps()} canManage={denied} />);
+  expect(() => fireEvent.click(screen.getByRole('tab', { name: '高级配置' }))).not.toThrow();
+  expect(screen.getByText('钉钉机器人配置')).toBeInTheDocument();
 });
 
 it('group advanced config keeps card headings above control content', () => {
   render(<GroupManagePanel {...groupProps()} />);
   fireEvent.click(screen.getByRole('tab', { name: '高级配置' }));
 
+  // 未绑定：D7 入口按钮触发表单后再断言表单内字段层级
   expect(screen.getByText('钉钉机器人配置')).toHaveClass('text-sm', 'font-semibold');
+  fireEvent.click(screen.getByRole('button', { name: '绑定钉钉机器人' }));
   expect(screen.getByText('启用流式卡片')).toHaveClass('text-xs', 'font-medium');
-  expect(screen.getByText('开启后使用流式卡片模板输出。')).toHaveClass('text-[11px]');
+  expect(screen.getByText('开启后使用流式卡片模板输出。')).toHaveClass('text-xs');
 });
 
 it('group panel hides advanced tab when advanced config is disabled', () => {
@@ -180,6 +190,50 @@ it('group panel hides 退出协作群 for non-member viewer', () => {
   expect(screen.queryByText('删除协作群')).not.toBeInTheDocument();
 });
 
+// ===== 方案 A+：群名称两态编辑（D5 查看优先）=====
+
+it('group panel shows name as read-only text with explicit edit entry (view-first)', () => {
+  render(<GroupManagePanel {...groupProps()} />);
+  // 面板头副标题与编辑组件都会出现群名，selector 限定编辑组件的查看态文本（text-sm）
+  expect(screen.getByText('我的群', { selector: 'p.text-sm' })).toBeInTheDocument();
+  // 查看态不出现输入框：低频编辑不常驻输入组件
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '编辑群名称' })).toBeInTheDocument();
+});
+
+it('group panel name edit entry opens input and save calls onUpdate', () => {
+  const handlers = groupProps();
+  render(<GroupManagePanel {...handlers} />);
+  fireEvent.click(screen.getByRole('button', { name: '编辑群名称' }));
+  const input = screen.getByRole('textbox');
+  expect((input as HTMLInputElement).value).toBe('我的群');
+  fireEvent.change(input, { target: { value: '新群名' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  expect(handlers.onUpdate).toHaveBeenCalledWith({ name: '新群名' });
+  // 保存后回到查看态
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+});
+
+it('group panel name edit cancel restores view state without calling onUpdate', () => {
+  const handlers = groupProps();
+  render(<GroupManagePanel {...handlers} />);
+  fireEvent.click(screen.getByRole('button', { name: '编辑群名称' }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '临时名' } });
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(screen.getByText('我的群', { selector: 'p.text-sm' })).toBeInTheDocument();
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  expect(handlers.onUpdate).not.toHaveBeenCalled();
+});
+
+it('group panel hides name edit entry when cannot manage', () => {
+  const denied: PolicyResult = { allowed: false, disabledReason: '无权限' };
+  render(<GroupManagePanel {...groupProps()} canManage={denied} />);
+  expect(screen.getByText('我的群', { selector: 'p.text-sm' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '编辑群名称' })).not.toBeInTheDocument();
+});
+
+// ===== 方案 A+：会话标题两态编辑（同构）=====
+
 const sessionProps = (): SessionManagePanelProps => ({
   session,
   groupName: group.name,
@@ -196,14 +250,43 @@ const sessionProps = (): SessionManagePanelProps => ({
   onShare: jest.fn(async () => ({ ok: true as const, data: { invitationUrl: 'http://example.com/s1' } })),
 });
 
+it('session panel shows title as read-only text with explicit edit entry (view-first)', () => {
+  render(<SessionManagePanel {...sessionProps()} />);
+  expect(screen.getByText('会话')).toBeInTheDocument();
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '编辑会话标题' })).toBeInTheDocument();
+});
+
+it('session panel title edit saves via onRename', () => {
+  const handlers = sessionProps();
+  render(<SessionManagePanel {...handlers} />);
+  fireEvent.click(screen.getByRole('button', { name: '编辑会话标题' }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: '新标题' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  expect(handlers.onRename).toHaveBeenCalledWith('s1', '新标题');
+});
+
+// ===== 方案 A+：高级配置未绑定态按钮触发（D7）=====
+
+it('dingtalk unbound state shows binding entry instead of open form', () => {
+  render(<GroupManagePanel {...groupProps()} />);
+  fireEvent.click(screen.getByRole('tab', { name: '高级配置' }));
+  // 未绑定：入口按钮可见，表单输入框不存在
+  expect(screen.getByRole('button', { name: '绑定钉钉机器人' })).toBeInTheDocument();
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+  // 点击入口进入表单（表单含多个输入框，以 Robot Code 首字段断言表单已展开）
+  fireEvent.click(screen.getByRole('button', { name: '绑定钉钉机器人' }));
+  expect(screen.getByPlaceholderText('请输入钉钉开放平台 Robot Code')).toBeInTheDocument();
+});
+
 it('session panel uses the same typography hierarchy as group management', () => {
   render(<SessionManagePanel {...sessionProps()} />);
 
   expect(screen.getByText('会话管理')).toHaveClass('text-base', 'font-semibold');
-  expect(screen.getByText('会话成员管理')).toHaveClass('text-sm', 'font-semibold');
+  expect(screen.getByText('会话成员（1）')).toHaveClass('text-sm', 'font-medium');
   expect(screen.getByText('s1')).toHaveClass('text-xs', 'font-mono');
   expect(screen.getByRole('button', { name: /分享会话/ })).toHaveClass('text-xs');
-  expect(screen.getByText('生成会话邀请链接，供成员通过链接加入')).toHaveClass('text-[11px]');
+  expect(screen.getByText('人类角色可以通过链接加入会话')).toHaveClass('text-xs');
 });
 
 it('session panel renders basic info, members, share and delete', () => {
@@ -217,7 +300,11 @@ it('session panel renders basic info, members, share and delete', () => {
   expect(screen.getByText('g1')).toBeInTheDocument();
   expect(screen.getByText('会话 ID')).toBeInTheDocument();
   expect(screen.getByText('s1')).toBeInTheDocument();
-  expect(screen.getByText('会话成员管理')).toBeInTheDocument();
+  expect(screen.getByText('会话成员（1）')).toBeInTheDocument();
+  // 验收微调：添加按钮文案精简为「添加成员」；成员行徽标走会话精简档（driver 显示群主，不再显示参与状态）。
+  expect(screen.getByRole('button', { name: '添加成员' })).toBeInTheDocument();
+  expect(screen.getByTestId('member-me').textContent).toContain('群主');
+  expect(screen.getByTestId('member-me').textContent).not.toContain('参与');
   expect(screen.getByText('分享会话')).toBeInTheDocument();
   expect(screen.getByText('删除会话')).toBeInTheDocument();
   expect(screen.queryByText('高级配置')).not.toBeInTheDocument();
@@ -296,9 +383,8 @@ it.each(['manage', 'sessionManage'] as const)('%s 入口将认证名称传递到
   expect(screen.queryByText('旧用户名称')).not.toBeInTheDocument();
 });
 
-// 点击面板外部自动收起：pointerdown 命中面板本体 / 齿轮开关（data-manage-panel-trigger）/
-// 浮层（role=dialog|menu|alertdialog）之外的区域时触发 onClose；命中面板本体或开关时不关闭。
-describe('WorkspaceManagePanels 点击外部自动收起', () => {
+// 管理面板关闭方式：点击面板外部或显式关闭按钮均可收起。
+describe('WorkspaceManagePanels 关闭方式', () => {
   const buildProps = (activePanel: 'manage' | 'sessionManage', onClose: () => void): WorkspaceManagePanelsProps => {
     const groupHandlers = groupProps();
     const sessionHandlers = sessionProps();
@@ -331,63 +417,40 @@ describe('WorkspaceManagePanels 点击外部自动收起', () => {
     };
   };
 
-  it('点击面板外部区域时关闭管理面板', () => {
+  it.each(['manage', 'sessionManage'] as const)('%s 面板：点击外部区域自动收起，X 按钮也可关闭', (activePanel) => {
     const onClose = jest.fn();
     render(
       <div>
         <div data-testid="outside">外部区域</div>
-        <WorkspaceManagePanels {...buildProps('manage', onClose)} />
+        <WorkspaceManagePanels {...buildProps(activePanel, onClose)} />
       </div>,
     );
     fireEvent.pointerDown(screen.getByTestId('outside'));
     expect(onClose).toHaveBeenCalledTimes(1);
+    // 面板右上角 X 按钮仍可关闭
+    fireEvent.click(screen.getByRole('button', { name: '关闭管理面板' }));
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
+});
 
-  it('点击面板本体时不关闭', () => {
-    const onClose = jest.fn();
-    render(<WorkspaceManagePanels {...buildProps('manage', onClose)} />);
-    const panel = document.querySelector('[data-manage-panel="true"]');
-    expect(panel).not.toBeNull();
-    fireEvent.pointerDown(panel as Element);
-    expect(onClose).not.toHaveBeenCalled();
-  });
+it('group advanced config tolerates malformed historical DingTalk binding fields without blanking the panel', () => {
+  const malformedBinding = {
+    bindingId: 'legacy-binding',
+    status: 'unknown',
+    config: {
+      robotCode: { value: 'legacy' },
+      appKey: null,
+      appSecret: '',
+      enableStreamOutput: true,
+      cardTemplateId: { value: 'legacy-template' },
+      groupChatScope: { value: 'unexpected' },
+      outboundVisibility: { value: 'unexpected' },
+    },
+  } as unknown as GroupManagePanelProps['dingTalkBinding'];
 
-  it('点击面板开关（data-manage-panel-trigger）时不由外部收起逻辑关闭', () => {
-    const onClose = jest.fn();
-    render(
-      <div>
-        <button type="button" data-manage-panel-trigger>
-          齿轮
-        </button>
-        <WorkspaceManagePanels {...buildProps('sessionManage', onClose)} />
-      </div>,
-    );
-    fireEvent.pointerDown(screen.getByRole('button', { name: '齿轮' }));
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('点击浮层（role=dialog）内部时不关闭', () => {
-    const onClose = jest.fn();
-    render(
-      <div>
-        <div role="dialog">浮层内容</div>
-        <WorkspaceManagePanels {...buildProps('manage', onClose)} />
-      </div>,
-    );
-    fireEvent.pointerDown(screen.getByRole('dialog'));
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('activePanel=none 时不监听外部点击', () => {
-    const onClose = jest.fn();
-    const props = { ...buildProps('manage', onClose), activePanel: 'none' as const };
-    render(
-      <div>
-        <div data-testid="outside">外部区域</div>
-        <WorkspaceManagePanels {...props} />
-      </div>,
-    );
-    fireEvent.pointerDown(screen.getByTestId('outside'));
-    expect(onClose).not.toHaveBeenCalled();
-  });
+  expect(() => {
+    render(<GroupManagePanel {...groupProps()} dingTalkBinding={malformedBinding} />);
+    fireEvent.click(screen.getByRole('tab', { name: '高级配置' }));
+  }).not.toThrow();
+  expect(screen.getByText('钉钉机器人配置')).toBeInTheDocument();
 });

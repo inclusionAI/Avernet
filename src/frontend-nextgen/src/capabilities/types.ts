@@ -143,9 +143,21 @@ export type TaskClaimGrantStrategy = 'skip' | 'secbaas-relay';
  * 字符串契约一致（openclaw/aicoding/hermes/teclaw），label 为两处消费方
  * 共用的展示文案。选项见 `getBotEngineOptions` capability。
  */
+export type BotEngineOptionTag = 'beta' | 'pro';
+
 export interface BotEngineOption {
   value: string;
   label: string;
+  /** 创建弹窗卡片短文案；筛选下拉继续读取 label。 */
+  cardLabel?: string;
+  /** 创建弹窗卡片描述。 */
+  description?: string;
+  /** 创建弹窗卡片图标。 */
+  icon?: ComponentType<{ className?: string }>;
+  /** 可选展示角标；本期引擎清单默认不配置。 */
+  tag?: BotEngineOptionTag;
+  /** 声明该引擎在创建弹窗中需要展开的专属面板。 */
+  createPanel?: 'agent-coding';
 }
 
 /** Bot 编辑页添加 Skill 时允许展示的来源。 */
@@ -191,12 +203,12 @@ export interface PersonalSpaceInitOptions {
 
 /**
  * 壳层入口形态级可见性（见 `getShellVisibility` capability）。
- * - `adminEntry`：侧栏【管理后台】导航项与 /admin 路由可达性（直访经 getRuntimeRouteRedirect 收敛）
  * - `spaceSwitcher`：侧栏管理区域底部的空间切换器（隐藏不影响 initSpaceContext 空间数据链路）
  * - `notificationBell`：页头右上角通知中心（未读轮询随组件不挂载自然停止）
+ * 注：原 `adminEntry` 已随【管理后台】导航项退役移除（split-admin-space-ticket-pages：
+ * 管理域拆分至 /space-admin、/ticket-center 独立路由，不占导航位；形态开关归 getAdminSections）。
  */
 export interface ShellVisibility {
-  adminEntry: boolean;
   spaceSwitcher: boolean;
   notificationBell: boolean;
 }
@@ -303,9 +315,11 @@ export interface AppCapabilities {
   getTaskClaimGrantStrategy: () => CapabilityResult<TaskClaimGrantStrategy>;
   /**
    * 内部专属侧栏一级导航项（Open Core 不应展示的内部入口）。
+   * 返回项 MUST 携带 `section`（'collab' | 'bot' | 'legacy'），合并点按同名分组末尾追加
+   * （`getMergedNavigationItems`，refactor-global-nav-shell）。
    * Open Core 默认 `[]`（不渲染任何内部导航项，符合 open-core-export-plan §5.2
    * 「导航中的内部入口」必须按开源模式分隔的强约束）；
-   * internal overlay 经 `src/extensions/internal.ts` 注入「能力工坊」「能力市场」两项，
+   * internal overlay 经 `src/extensions/internal.ts` 注入「能力管理」「能力市场」两项（section: 'bot'），
    * 字面量与图标实例随 overlay 物理剥离（`.internal-paths`），不进 Open Core 产物。
    * AppShell 合并 `navigationItems`（Open Core 基线）与本能力返回值后渲染侧栏。
    */
@@ -363,11 +377,11 @@ export interface AppCapabilities {
    */
   getPartialFriendApprovalEnabled: () => CapabilityResult<boolean>;
   /**
-   * 壳层入口可见性（管理后台导航 / 空间切换器 / 通知中心，见 `ShellVisibility`）。
-   * Open Core（阿里云部署）默认 `adminEntry=true`、`notificationBell=true`、`spaceSwitcher=false`
-   * （defaultCapabilities：展示管理后台与通知中心，不展示侧栏空间切换器）；
+   * 壳层入口可见性（空间切换器 / 通知中心，见 `ShellVisibility`）。
+   * Open Core（阿里云部署）默认 `notificationBell=true`、`spaceSwitcher=false`
+   * （defaultCapabilities：展示通知中心，不展示侧栏空间切换器）；
    * internal overlay 经 `src/extensions/internal.ts` 覆盖为全 true——内部形态渲染结果与改造前一致。
-   * 同步签名，不发请求。消费方（navigation / SidebarNavList / AppHeader）不得以 `if (isInternal)` 替代。
+   * 同步签名，不发请求。消费方（SidebarNavList / AppSidebar）不得以 `if (isInternal)` 替代。
    */
   getShellVisibility: () => CapabilityResult<ShellVisibility>;
   /**

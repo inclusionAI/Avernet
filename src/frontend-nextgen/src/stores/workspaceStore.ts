@@ -39,6 +39,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           selectedBotSessionId: state.selectedBotSessionId,
           expandedBotId: currentExpandedBotId,
           expandedBotSection: currentExpandedBotSection,
+          expandedFriendUserId: state.expandedFriendUserId,
+          selectedFriendUserSessionId: state.selectedFriendUserSessionId,
         })
       : state.lastSessionByIdentity;
     const {
@@ -50,6 +52,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       selectedBotSessionId,
       expandedBotIds,
       expandedBotSectionKey,
+      expandedFriendUserId,
+      selectedFriendUserSessionId,
     } = restoreIdentitySelection(updatedMemo, id, views, state.view);
     set({
       activeIdentityId: id ?? null,
@@ -67,6 +71,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       expandedGroupIds,
       expandedBotIds,
       expandedBotSectionKey,
+      expandedFriendUserId,
+      selectedFriendUserSessionId,
       lastSessionByIdentity: updatedMemo,
       view: restoredView,
     });
@@ -93,6 +99,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setBotExpandedSection: (botId, sectionKey) =>
     set((state) => ({ expandedBotSectionKey: { ...state.expandedBotSectionKey, [botId]: sectionKey } })),
   selectBotSession: (sessionId) => set({ selectedBotSessionId: sessionId }),
+  setExpandedFriendUser: (id) =>
+    set((state) => {
+      const nextId = state.expandedFriendUserId === id ? null : id;
+      return { expandedFriendUserId: nextId, selectedFriendUserSessionId: null };
+    }),
+  selectFriendUserSession: (sessionId) => set({ selectedFriendUserSessionId: sessionId }),
   bumpHistoryRefresh: () => set((state) => ({ historyRefreshNonce: state.historyRefreshNonce + 1 })),
   bumpWsReconnect: () => set((state) => ({ wsReconnectNonce: state.wsReconnectNonce + 1 })),
   setPendingGroupBootstrap: (value) => set({ pendingGroupBootstrap: value }),

@@ -43,6 +43,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
   const [confirming, setConfirming] = useState(false);
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const isServiceBot = bot.serviceMode === 'service';
+  const restartUnsupported = bot.runtime.engine === 'teclaw';
   // 重启词表（Avernet PR #1911）：动作名即路由键。服务卡由后端词表决定三个
   // 重启动词各自落在哪张卡（draft→restart，predeploy/online→restart_publish）；词表与
   // disabled_actions 均未声明时不渲染（对齐 bot-workshop-page.md §10.3 卡片操作口径）。
@@ -64,6 +65,19 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
           />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-52 space-y-1 p-2">
+          {bot.deployment === 'local' && bot.actions.includes('open_folder') ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              onClick={() => {
+                setOpen(false);
+                void onAction('open_folder', bot);
+              }}
+            >
+              打开本地目录
+            </Button>
+          ) : null}
           {bot.serviceMode === 'service' && onManagePublication ? (
             <Button
               variant="ghost"
@@ -94,13 +108,13 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
               {actionLabel.upgrade}
             </Button>
           ) : null}
-          {!isServiceBot || restartDeclared ? (
+          {restartUnsupported || !isServiceBot || restartDeclared ? (
             <Button
               variant="ghost"
               size="sm"
               className="w-full justify-start"
               leftIcon={actionIcon.restart}
-              disabled={lockedByOther || !bot.actions.includes('restart')}
+              disabled={restartUnsupported || lockedByOther || !bot.actions.includes('restart')}
               onClick={() => {
                 setOpen(false);
                 setConfirmAction('restart');
@@ -108,7 +122,9 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
             >
               <ActionHelp
                 description={
-                  restartDisabledReason && !bot.actions.includes('restart')
+                  restartUnsupported
+                    ? 'TeClaw 暂不支持重启容器'
+                    : restartDisabledReason && !bot.actions.includes('restart')
                     ? restartDisabledReason
                     : '指重新启动当前 Bot 实例，重新加载当前会话状态、配置或运行流程。'
                 }
@@ -123,7 +139,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
               size="sm"
               className="w-full justify-start"
               leftIcon={actionIcon.restart_publish}
-              disabled={lockedByOther || !bot.actions.includes('restart_publish')}
+              disabled={restartUnsupported || lockedByOther || !bot.actions.includes('restart_publish')}
               onClick={() => {
                 setOpen(false);
                 setConfirmAction('restart_publish');
@@ -131,7 +147,9 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
             >
               <ActionHelp
                 description={
-                  restartPublishDisabledReason && !bot.actions.includes('restart_publish')
+                  restartUnsupported
+                    ? 'TeClaw 暂不支持重启发布'
+                    : restartPublishDisabledReason && !bot.actions.includes('restart_publish')
                     ? restartPublishDisabledReason
                     : '指重新启动该服务已发布环境（预发/线上）的运行时，不影响草稿机器。'
                 }
@@ -140,19 +158,25 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
               </ActionHelp>
             </Button>
           ) : null}
-          {!isAgentCodingBot && !isServiceBot ? (
+          {!isAgentCodingBot && (!isServiceBot || restartUnsupported) ? (
             <Button
               variant="ghost"
               size="sm"
               className="w-full justify-start"
               leftIcon={actionIcon.engine_restart}
-              disabled={lockedByOther || !bot.actions.includes('engine_restart')}
+              disabled={restartUnsupported || lockedByOther || !bot.actions.includes('engine_restart')}
               onClick={() => {
                 setOpen(false);
                 setConfirmAction('engine_restart');
               }}
             >
-              <ActionHelp description="指重新启动 Bot 所依赖的底层运行引擎（如 OpenClaw、ClaudeCode 等）。">
+              <ActionHelp
+                description={
+                  restartUnsupported
+                    ? 'TeClaw 暂不支持重启引擎'
+                    : '指重新启动 Bot 所依赖的底层运行引擎（如 OpenClaw、ClaudeCode 等）。'
+                }
+              >
                 {actionLabel.engine_restart}
               </ActionHelp>
             </Button>

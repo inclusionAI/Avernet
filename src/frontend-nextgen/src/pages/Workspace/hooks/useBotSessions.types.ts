@@ -14,6 +14,7 @@ export interface UseBotSessionsResult {
   createSession: (bot: ChatBotView, title?: string) => Promise<BotChatSessionView | null>;
   deleteSession: (bot: ChatBotView, sessionId: string) => Promise<boolean>;
   renameSession: (bot: ChatBotView, sessionId: string, title: string) => Promise<boolean>;
+  renameSessionOnFirstMessage: (bot: ChatBotView, session: BotChatSessionView, content: string) => Promise<boolean>;
   clearContext: (bot: ChatBotView, sessionId: string) => Promise<boolean>;
   toggleFavorite: (botId: string, sessionId: string) => Promise<boolean>;
   loadFavoriteSessions: (botId: string) => Promise<void>;

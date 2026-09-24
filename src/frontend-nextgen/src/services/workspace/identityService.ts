@@ -2,6 +2,7 @@ import type { IdentityView } from '@/domain/collaboration';
 import { normalizeOpenApiUserId } from '@/domain/userIdentity';
 import { listBots } from '@/services/backendApi/bots/botController';
 import { listMyBots } from '@/services/backendApi/collaboration/collaborationBotController';
+import { isEnvelopeSuccessAnyDialect } from '@/services/backendApi/types';
 import { ENABLE_TEST_USER, TEST_USER_IDENTITY } from './testUser';
 
 export interface DomainError {
@@ -112,6 +113,30 @@ function readPageItems<T = unknown>(response: unknown): T[] {
   return [];
 }
 
+function hasPageItemsContainer(response: unknown): boolean {
+  const root = asRecord(response);
+  const data = root?.data;
+  if (Array.isArray(data)) return true;
+  const dataRecord = asRecord(data);
+  return Boolean(
+    Array.isArray(dataRecord?.items) ||
+      Array.isArray(dataRecord?.bots) ||
+      Array.isArray(root?.items) ||
+      Array.isArray(root?.bots),
+  );
+}
+
+function identityLoadFailure(friendlyMessage = '加载可协作身份失败，请稍后重试。'): DomainResult<LoadIdentitiesResult> {
+  return {
+    ok: false,
+    error: {
+      code: 'IDENTITY_LOAD_FAILED',
+      friendlyMessage,
+      canRetry: true,
+    },
+  };
+}
+
 function readBotSupplement(value: unknown): (BotSupplement & { botId: string }) | null {
   const record = asRecord(value);
   const botId = readBotId(value);
@@ -178,6 +203,8 @@ async function enrichBotMetadata<T extends { id: string; kind: string; engine?: 
 async function doLoadIdentities(): Promise<DomainResult<LoadIdentitiesResult>> {
   try {
     const resp = await listMyBots({ offset: 0, limit: 50 });
+    if (!isEnvelopeSuccessAnyDialect(resp)) return identityLoadFailure();
+    if (!hasPageItemsContainer(resp)) return identityLoadFailure('身份接口返回格式异常，请稍后重试。');
     const mineItems = readPageItems(resp);
     const humanItem = mineItems.find((item) => asRecord(item)?.kind === 'human');
     const humanUserId = normalizeOpenApiUserId(readBotId(humanItem));
@@ -205,7 +232,9 @@ async function doLoadIdentities(): Promise<DomainResult<LoadIdentitiesResult>> {
       humanUserId,
     );
     const humans = mapped.filter((i) => i.kind === 'user');
-    const bots = mapped.filter((i) => i.kind === 'bot');
+    const bots = mapped.filter(
+      (i) => i.kind === 'bot' && !(i.botType === 'desktop' && i.engine?.toLowerCase() === 'hermes'),
+    );
     // 真实「我」取自 mine 接口返回的 human 项（真实姓名/头像/在线状态）；
     // 仅当 mine 未返回 human 时回退到合成的「我」。
     const me: IdentityView = humans[0] ?? { id: 'me', kind: 'user', displayName: '我', online: true };
@@ -217,14 +246,7 @@ async function doLoadIdentities(): Promise<DomainResult<LoadIdentitiesResult>> {
     resolved = true;
     return { ok: true, data: { identities: withTestUser, defaultActiveId: initial } };
   } catch {
-    return {
-      ok: false,
-      error: {
-        code: 'IDENTITY_LOAD_FAILED',
-        friendlyMessage: '加载可协作身份失败，请稍后重试。',
-        canRetry: true,
-      },
-    };
+    return identityLoadFailure();
   }
 }
 

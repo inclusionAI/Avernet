@@ -5,9 +5,24 @@
  * @tc-chat/ui 的 Markdown 节点自带 bottom margin，且 styled-components
  * 的样式优先级高于页面 utility；仅收口每个 Markdown 内容容器的末尾节点，
  * 不影响正文段落之间的阅读间距，也不改变消息数据或交互语义。
+ * 2026-09-14 回归补强：长分析消息常以表格/列表/代码块结尾，渲染器为这类块
+ * 包裹滚动/组件容器，主题 margin 挂在内层元素（--table-margin / --margin-ul-ol /
+ * --margin-pre 的 bottom 16-24px），仅压顶层 :last-child 收不住——补第二级
+ * 选择器（末尾块内部的末尾元素），仍只作用于末尾边缘，正文内部间距不受影响。
  */
-.message-bubble-compact .x-markdown > :last-child {
+.message-bubble-compact .x-markdown > :last-child,
+.message-bubble-compact .x-markdown > :last-child > :last-child {
   margin-bottom: 0 !important;
+}
+
+/*
+ * 悬停操作栏（message-actions，SDK 绝对定位悬挂在内容容器底线下方）上提 6px 贴合
+ * 自己的内容末尾：原 translateY(100%) 完全悬挂在消息块外，视觉上更靠近下一条消息
+ * 的发送者行而非本条内容（归属感错乱，2026-09-14 验收反馈）。上提量与行内 pt-1(4px)
+ * 叠加后操作栏顶缘贴近内容底行；与下一条消息的间隔由消息项 pb-5 承担。
+ */
+.message-bubble-compact .message-actions {
+  transform: translateY(calc(100% - 6px)) !important;
 }
 
 /* ==========================================================================
@@ -98,6 +113,24 @@
   --z-popover: 750;
   --z-tooltip: 800;
   --z-toast: 900;
+
+  /* @tc-chat SDK 变量桥（消息流色值/字号对齐项目 token）：SDK Bubble / MarkdownRender
+     的样式取 var(--aix-*, 内置字面量 fallback)，未桥接时落到 slate/blue 字面色并在
+     暗色下对比度不足。桥到语义 token 后亮/暗随 token 自动切换。
+     受控偏离与决策见 docs/design-migration/workspace-chat-pane-sdk-bridge.md。 */
+  --aix-color-primary: hsl(var(--primary));
+  --aix-color-primary-light: hsl(var(--primary) / 0.08);
+  --aix-color-primary-dark: hsl(var(--primary));
+  --aix-color-text: hsl(var(--foreground));
+  --aix-color-text-strong: hsl(var(--foreground));
+  --aix-color-text-muted: hsl(var(--muted-foreground));
+
+  /* 字号桥：正文 14px 为受控偏离（showcase §5.3 写 12px，群聊可读性取 14px）；
+     label/xs 从 SDK 13px/11px 对齐项目 12px 档。 */
+  --aix-markdown-font-size: 14px;
+  --aix-font-size-base: 14px;
+  --aix-font-size-label: 12px;
+  --aix-font-size-xs: 12px;
 
   color-scheme: light;
 }
@@ -528,12 +561,12 @@ div[data-qiankun='aix-card'] * {
 }
 .markdown-body h1 {
   font-size: 1.5em;
-  border-bottom: 1px solid var(--border, #e2e2e2);
+  border-bottom: 1px solid hsl(var(--border));
   padding-bottom: 0.3em;
 }
 .markdown-body h2 {
   font-size: 1.3em;
-  border-bottom: 1px solid var(--border, #e2e2e2);
+  border-bottom: 1px solid hsl(var(--border));
   padding-bottom: 0.3em;
 }
 .markdown-body h3 {
@@ -545,7 +578,7 @@ div[data-qiankun='aix-card'] * {
 .markdown-body h5,
 .markdown-body h6 {
   font-size: 0.9em;
-  color: var(--muted-foreground, #6b6b6b);
+  color: hsl(var(--muted-foreground));
 }
 .markdown-body p {
   margin: 0.5em 0;
@@ -561,13 +594,13 @@ div[data-qiankun='aix-card'] * {
 .markdown-body blockquote {
   margin: 0.5em 0;
   padding: 0.25em 1em;
-  border-left: 3px solid var(--border, #e2e2e2);
-  color: var(--muted-foreground, #6b6b6b);
+  border-left: 3px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
 }
 .markdown-body code {
   padding: 0.15em 0.35em;
   border-radius: 0.25rem;
-  background: var(--muted, #f5f5f5);
+  background: hsl(var(--muted));
   font-size: 0.875em;
   font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
 }
@@ -575,7 +608,7 @@ div[data-qiankun='aix-card'] * {
   margin: 0.5em 0;
   padding: 0.75em;
   border-radius: 0.5rem;
-  background: var(--muted, #f5f5f5);
+  background: hsl(var(--muted));
   overflow-x: auto;
 }
 .markdown-body pre code {
@@ -584,29 +617,74 @@ div[data-qiankun='aix-card'] * {
   font-size: 0.85em;
 }
 .markdown-body a {
-  color: var(--brand, #3b5bdb);
+  color: hsl(var(--brand));
   text-decoration: underline;
 }
 .markdown-body a:hover {
   opacity: 0.8;
 }
+
+/* 卡片式表格：外圈圆角边框 + 内部分隔线（separate 才能裁圆角），对齐旧详情样式 */
 .markdown-body table {
   margin: 0.5em 0;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   width: 100%;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  overflow: hidden;
 }
 .markdown-body th,
 .markdown-body td {
-  border: 1px solid var(--border, #e2e2e2);
+  border-bottom: 1px solid hsl(var(--border));
+  border-right: 1px solid hsl(var(--border));
   padding: 0.4em 0.6em;
   text-align: left;
 }
+.markdown-body th:last-child,
+.markdown-body td:last-child {
+  border-right: 0;
+}
+.markdown-body tr:last-child th,
+.markdown-body tr:last-child td {
+  border-bottom: 0;
+}
 .markdown-body th {
-  background: var(--muted, #f5f5f5);
+  background: hsl(var(--muted));
   font-weight: 600;
 }
 .markdown-body img {
   max-width: 100%;
+}
+
+/* hr 不写样式会落 Tailwind preflight 的 currentColor（黑线）；统一走 border token */
+.markdown-body hr {
+  margin: 1em 0;
+  border: 0;
+  border-top: 1px solid hsl(var(--border));
+}
+
+/* 能力详情抽屉文档（.skill-doc）：旧详情样式——深色代码块、标题不下划线 */
+.markdown-body.skill-doc h1,
+.markdown-body.skill-doc h2 {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.markdown-body.skill-doc h1 {
+  font-size: 1.8em;
+  font-weight: 700;
+}
+.markdown-body.skill-doc h2 {
+  font-size: 1.4em;
+  font-weight: 700;
+}
+.markdown-body.skill-doc pre {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+.markdown-body.skill-doc pre code {
+  background: none;
+  color: inherit;
 }
 
 /* ==========================================================================
@@ -633,4 +711,19 @@ div:has(> .task-loop-card-root) {
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
+}
+
+/* ==========================================================================
+   侧栏行悬浮操作区的满行遮盖底（v1.5，用户预览四轮决策）
+   ==========================================================================
+   操作区绝对定位悬浮在行内容之上（不占位），需要不透明底完全遮住被盖文字。
+   色差约束：行 hover 视觉 = 页面底叠 accent/50，选中/展开 = muted 实色；
+   遮盖底必须与行视觉完全一致（零色差）。Tailwind 的多个 bg-* class 是
+   background-color 互斥覆盖无法叠加，故用「渐变层叠底色」表达真实合成：
+   background 简写中 <image>, <color> 语义即 image 叠在 color 上。 */
+.sidebar-actions-cover-hover {
+  background: linear-gradient(hsl(var(--accent) / 0.5), hsl(var(--accent) / 0.5)), hsl(var(--background));
+}
+.sidebar-actions-cover-selected {
+  background: hsl(var(--muted));
 }

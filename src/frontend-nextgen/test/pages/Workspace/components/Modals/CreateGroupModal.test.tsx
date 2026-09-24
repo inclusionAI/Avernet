@@ -7,6 +7,11 @@ import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
+// 建群表单重度使用 Radix Select/Popover 等组件，jsdom 下异步渲染开销大：
+// 并行全量（--maxWorkers=50%）下个别用例在默认 30s 随机临界超时。
+// 统一放宽至 60s（仅本文件生效，不改全局 testTimeout，不改任何断言）。
+jest.setTimeout(60000);
+
 // The production editor is lazy-loaded; this test exercises modal orchestration,
 // not CodeMirror loading. A labelled textarea keeps the public Jest suite deterministic.
 jest.mock('@/pages/Workspace/components/Modals/YamlEditor', () => ({
@@ -372,6 +377,18 @@ it('disables confirm until at least one participant is selected', async () => {
   renderModal();
   await screen.findByRole('button', { name: /Alpha/ });
   expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled();
+});
+
+it('keeps the create actions outside the scroll region after selecting a bot', async () => {
+  renderModal();
+
+  fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+
+  const scrollRegion = screen.getByTestId('create-group-modal-body');
+  const footer = screen.getByTestId('create-group-modal-footer');
+  expect(scrollRegion).toHaveClass('min-h-0', 'overflow-y-auto');
+  expect(scrollRegion).not.toContainElement(footer);
+  expect(footer).toContainElement(screen.getByRole('button', { name: '确认创建' }));
 });
 
 it('user identity cannot choose custom collaboration', async () => {

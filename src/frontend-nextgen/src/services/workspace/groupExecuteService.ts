@@ -12,7 +12,7 @@
  * 说明：GROUP_CREATE_VIA_EXECUTE 开关由 useCreateGroup 控制，仅 state_machine 自定义协作群
  * 进入 execute 链路；chat / manager_worker 仍走 groupService.createGroup。
  */
-import type { GroupSessionPage, GroupView, ParticipantRole } from '@/domain/collaboration';
+import type { GroupSessionPage, GroupView, ParticipantRole, ParticipantView } from '@/domain/collaboration';
 import { extractLoginUrl, isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
 import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
 import { executeTask } from '@/services/backendApi/tasks/taskController';
@@ -27,6 +27,10 @@ import { mapBcsSessionItem, type BcsParticipantRaw, type BcsSessionRaw } from '.
 
 function toDomainError(code: string, friendlyMessage: string): DomainError {
   return { code, friendlyMessage, canRetry: false };
+}
+
+function safeString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
 }
 
 const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
@@ -142,29 +146,30 @@ export async function loadBcsGroupDetail(groupId: string, viewBotId?: string): P
     const g = (detailJson?.data ?? detailJson) as BcsGroupDetailRaw;
     const sessionJson = await sResp.json().catch(() => null);
     const sJson = (sessionJson?.data ?? sessionJson) as { items?: BcsSessionRaw[] } | BcsSessionRaw[] | null;
-    const strategy: string = g.group_strategy ?? g.collaboration?.strategy ?? 'chat';
+    const strategy = safeString(g.group_strategy, safeString(g.collaboration?.strategy, 'chat'));
     const kind: GroupView['kind'] =
       strategy === 'manager_worker' ? 'task_master_slave' : strategy === 'state_machine' ? 'task_dag' : 'free_chat';
-    const participants = (g.participants ?? []).map((p) => ({
-      actorId: p.bot_uuid ?? p.actor_id ?? p.bot_id ?? '',
-      kind: p.actor_kind ?? 'bot',
-      name: p.bot_name ?? p.name ?? p.bot_uuid ?? p.actor_id ?? '',
-      role: ROLE_NATIVE_TO_DOMAIN[p.role ?? 'worker'] ?? 'member',
-      mode: p.mode ?? 'auto',
+    const participants: ParticipantView[] = (Array.isArray(g.participants) ? g.participants : []).map((p) => ({
+      actorId: safeString(p.bot_uuid, safeString(p.actor_id, safeString(p.bot_id))),
+      kind: p.actor_kind === 'human' ? 'human' : 'bot',
+      name: safeString(p.bot_name, safeString(p.name, safeString(p.bot_uuid, safeString(p.actor_id)))),
+      role: ROLE_NATIVE_TO_DOMAIN[safeString(p.role, 'worker')] ?? 'member',
+      mode: p.mode === 'muted' || p.mode === 'absent' || p.mode === 'present' ? p.mode : 'auto',
     }));
     const sessionItems = Array.isArray(sJson) ? sJson : sJson?.items ?? [];
-    const sessions = sessionItems.map((s) => mapBcsSessionItem(s, g.id ?? g.group_id ?? groupId));
+    const resolvedGroupId = safeString(g.id, safeString(g.group_id, groupId));
+    const sessions = sessionItems.map((s) => mapBcsSessionItem(s, resolvedGroupId));
     const group: GroupView = {
-      groupId: g.id ?? g.group_id ?? groupId,
-      name: g.label ?? g.name ?? g.group_name ?? '未命名群',
+      groupId: resolvedGroupId,
+      name: safeString(g.label, safeString(g.name, safeString(g.group_name, '未命名群'))),
       kind,
       status: g.status === 'dissolved' ? 'dissolved' : 'active',
       participants,
       sessions,
-      lastMessageAt: g.updated_at ?? 0,
-      createdAt: g.created_at ?? 0,
+      lastMessageAt: typeof g.updated_at === 'number' ? g.updated_at : 0,
+      createdAt: typeof g.created_at === 'number' ? g.created_at : 0,
       participantCount: participants.length,
-      ownerUserId: g.originator ?? g.originator_actor_id ?? g.driver_bot_owner ?? '',
+      ownerUserId: safeString(g.originator, safeString(g.originator_actor_id, safeString(g.driver_bot_owner))),
       ...(g.membership ? { membership: g.membership } : {}),
       isPublic: g.visibility === 'public',
       deliveryPolicy: 'send_to_driver',
