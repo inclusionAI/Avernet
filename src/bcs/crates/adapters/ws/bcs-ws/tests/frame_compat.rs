@@ -272,6 +272,58 @@ impl bcs_service_api::GroupDispatchContextPort for RecordingGroupDispatchContext
     }
 }
 
+#[derive(Default)]
+struct RecordingInteractionService {
+    requested: Mutex<Vec<bcs_service_api::ProviderInteractionRequestedCommand>>,
+    resolved: Mutex<Vec<bcs_service_api::ProviderInteractionResolvedCommand>>,
+}
+
+#[async_trait]
+impl bcs_service_api::InteractionService for RecordingInteractionService {
+    async fn on_provider_requested(
+        &self,
+        command: bcs_service_api::ProviderInteractionRequestedCommand,
+    ) -> ServiceResult<bcs_service_api::InteractionRequestedOutcome> {
+        self.requested.lock().await.push(command);
+        Ok(bcs_service_api::InteractionRequestedOutcome::Stored)
+    }
+
+    async fn on_provider_resolved(
+        &self,
+        command: bcs_service_api::ProviderInteractionResolvedCommand,
+    ) -> ServiceResult<()> {
+        self.resolved.lock().await.push(command);
+        Ok(())
+    }
+
+    async fn resolve(
+        &self,
+        _command: bcs_service_api::ResolveInteractionCommand,
+    ) -> Result<bcs_service_api::ResolveInteractionResult, bcs_service_api::InteractionServiceError> {
+        Err(bcs_service_api::InteractionServiceError::NotFound)
+    }
+
+    async fn list_pending(
+        &self,
+        _bcs_session_id: &str,
+    ) -> ServiceResult<Vec<bcs_service_api::InteractionFrontendEvent>> {
+        Ok(Vec::new())
+    }
+
+    async fn invalidate_run(
+        &self,
+        _bcs_run_id: &str,
+        _reason: &str,
+        _invalidated_at_ms: u64,
+    ) -> ServiceResult<usize> {
+        Ok(0)
+    }
+
+    async fn cleanup_terminal(&self, _terminal_before_ms: u64) -> ServiceResult<usize> {
+        Ok(0)
+    }
+}
+
 #[async_trait]
 impl SystemMessageService for RecordingSystemMessageService {
     async fn notify(
@@ -641,6 +693,7 @@ struct TestState {
     group: Arc<RecordingGroupCoreService>,
     system_message: Arc<RecordingSystemMessageService>,
     bot_run_context: Arc<RecordingBotRunContext>,
+    interactions: Arc<RecordingInteractionService>,
     dispatch_state: Arc<BotDispatchState>,
 }
 
@@ -651,6 +704,7 @@ fn new_state() -> TestState {
     let group = Arc::new(RecordingGroupCoreService::default());
     let system_message = Arc::new(RecordingSystemMessageService::default());
     let bot_run_context = Arc::new(RecordingBotRunContext::default());
+    let interactions = Arc::new(RecordingInteractionService::default());
     let dispatch_state = Arc::new(BotDispatchState {
         bot_runtime: bot_runtime.clone(),
         message_flow: message_flow.clone(),
@@ -667,6 +721,7 @@ fn new_state() -> TestState {
         system_message: Some(system_message.clone()),
         coordination_processed: Arc::new(Mutex::new(HashMap::new())),
         agent_credential_backfill: None,
+        interactions: interactions.clone(),
     });
 
     TestState {
@@ -676,6 +731,7 @@ fn new_state() -> TestState {
         group,
         system_message,
         bot_run_context,
+        interactions,
         dispatch_state,
     }
 }
@@ -1303,6 +1359,227 @@ async fn bot_v3_duplicate_terminal_frame_is_idempotent() {
     .await
     .expect("duplicate terminal frame should be ignored");
     assert_eq!(state.message_flow.bot_events.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn bot_v3_interaction_requested_forwards_to_interaction_service() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered_bot_id = None;
+
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-v3-interaction",
+        "bot.connect",
+        Some(serde_json::json!({
+            "bot_id": "bot-interaction",
+            "protocol_version": 3,
+            "client_kind": "bcs-bridge"
+        })),
+    ));
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+    recv_response(&mut rx).await;
+
+    state
+        .bot_run_context
+        .put_context(BotRunContext {
+            run_id: "run-interaction".to_string(),
+            bot_id: "bot-interaction".to_string(),
+            group_id: "group-2".to_string(),
+            bcs_session_id: Some("group-2:11223344".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+
+    let payload = serde_json::json!({
+        "runId": "run-interaction",
+        "sessionId": "group-2:11223344",
+        "seq": 1,
+        "ts": 100,
+        "interactionId": "int-1",
+        "phase": "requested",
+        "kind": "exec",
+        "command": "rm -rf /tmp/x"
+    });
+    let event = BcsFrame::Event(EventFrame::new("interaction", Some(payload), Some(1)));
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&event).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+
+    let requested = state.interactions.requested.lock().await;
+    assert_eq!(requested.len(), 1);
+    assert_eq!(requested[0].bcs_run_id, "run-interaction");
+    assert_eq!(requested[0].interaction_id, "int-1");
+    assert_eq!(requested[0].bcs_session_id, "group-2:11223344");
+    assert_eq!(requested[0].group_id, "group-2");
+    assert_eq!(requested[0].bot_id, "bot-interaction");
+    assert!(matches!(
+        requested[0].provider_target,
+        BotDeliveryTarget::WebSocket { ref bot_id } if bot_id == "bot-interaction"
+    ));
+    assert!(matches!(requested[0].kind, bcs_service_api::InteractionKind::Exec));
+}
+
+#[tokio::test]
+async fn bot_v3_interaction_resolved_forwards_to_interaction_service() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered_bot_id = None;
+
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-v3-interaction-resolved",
+        "bot.connect",
+        Some(serde_json::json!({
+            "bot_id": "bot-interaction-2",
+            "protocol_version": 3,
+            "client_kind": "bcs-bridge"
+        })),
+    ));
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+    recv_response(&mut rx).await;
+
+    state
+        .bot_run_context
+        .put_context(BotRunContext {
+            run_id: "run-interaction-2".to_string(),
+            bot_id: "bot-interaction-2".to_string(),
+            group_id: "group-3".to_string(),
+            bcs_session_id: Some("group-3:aabbccdd".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+
+    let payload = serde_json::json!({
+        "runId": "run-interaction-2",
+        "sessionId": "group-3:aabbccdd",
+        "seq": 1,
+        "ts": 100,
+        "interactionId": "int-2",
+        "phase": "resolved",
+        "kind": "ask_user",
+        "resolution": {"answer": "yes"}
+    });
+    let event = BcsFrame::Event(EventFrame::new("interaction", Some(payload), Some(1)));
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&event).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+
+    let resolved = state.interactions.resolved.lock().await;
+    assert_eq!(resolved.len(), 1);
+    assert_eq!(resolved[0].interaction_id, "int-2");
+    assert!(matches!(resolved[0].kind, bcs_service_api::InteractionKind::AskUser));
+}
+
+#[tokio::test]
+async fn bot_v3_interaction_rejects_terminal_run() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut registered_bot_id = None;
+
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-v3-interaction-terminal",
+        "bot.connect",
+        Some(serde_json::json!({
+            "bot_id": "bot-interaction-3",
+            "protocol_version": 3,
+            "client_kind": "bcs-bridge"
+        })),
+    ));
+    dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .unwrap();
+    recv_response(&mut rx).await;
+
+    state
+        .bot_run_context
+        .put_context(BotRunContext {
+            run_id: "run-interaction-3".to_string(),
+            bot_id: "bot-interaction-3".to_string(),
+            group_id: "group-4".to_string(),
+            bcs_session_id: Some("group-4:99887766".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: true,
+        })
+        .await;
+
+    let payload = serde_json::json!({
+        "runId": "run-interaction-3",
+        "sessionId": "group-4:99887766",
+        "seq": 1,
+        "ts": 100,
+        "interactionId": "int-3",
+        "phase": "requested",
+        "kind": "exec"
+    });
+    let event = BcsFrame::Event(EventFrame::new("interaction", Some(payload), Some(1)));
+    let error = dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&event).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await
+    .expect_err("terminal run must reject new interaction requests");
+    assert!(error.to_string().contains("terminal or expired"));
+
+    assert_eq!(state.interactions.requested.lock().await.len(), 0);
+}
+
+#[tokio::test]
+async fn bot_v3_interaction_from_unregistered_bot_is_dropped_safely() {
+    let state = new_state();
+    let (tx, _rx) = mpsc::channel(8);
+    let mut registered_bot_id: Option<String> = None;
+
+    let payload = serde_json::json!({
+        "runId": "run-orphan",
+        "sessionId": "group-5:00000000",
+        "seq": 1,
+        "ts": 100,
+        "interactionId": "int-orphan",
+        "phase": "requested",
+        "kind": "exec"
+    });
+    let event = BcsFrame::Event(EventFrame::new("interaction", Some(payload), Some(1)));
+    let outcome = dispatch_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&event).unwrap(),
+        &tx,
+        &mut registered_bot_id,
+    )
+    .await;
+    assert!(outcome.is_ok(), "unregistered-bot events must be dropped without error, matching agent/chat behavior");
+    assert_eq!(state.interactions.requested.lock().await.len(), 0);
 }
 
 #[tokio::test]

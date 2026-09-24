@@ -32,7 +32,7 @@ use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, Span, debug, info, info_span, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use super::run_event_v3::{NormalizedBotEvent, normalize_v3_event};
+use super::run_event_v3::NormalizedBotEvent;
 use crate::bot::{BotConnectionRegistry, normalize_client_kind};
 use crate::shared::RunChannelManager;
 
@@ -126,6 +126,7 @@ pub struct BotDispatchState {
     pub system_message: Option<Arc<dyn SystemMessageService>>,
     pub coordination_processed: Arc<Mutex<HashMap<String, u64>>>,
     pub agent_credential_backfill: Option<Arc<dyn super::AgentCredentialBackfillPort>>,
+    pub interactions: Arc<dyn bcs_service_api::InteractionService>,
 }
 
 async fn resolve_bot_event_scope(
@@ -940,7 +941,18 @@ async fn handle_event_frame(
         v3_session_id,
         v3_seq,
     ) = if is_v3 {
-        normalize_v3_event(event)?
+        match super::run_event_v3::classify_v3_event(event)? {
+            super::run_event_v3::V3RunEvent::Interaction(interaction) => {
+                return super::run_event_v3::handle_interaction_event_v3(
+                    state,
+                    &bot_id,
+                    interaction,
+                    event.seq,
+                )
+                .await;
+            }
+            super::run_event_v3::V3RunEvent::Normalized(normalized) => normalized,
+        }
     } else {
         let Some(normalized) = normalize_legacy_event(event) else {
             match event.event.as_str() {
