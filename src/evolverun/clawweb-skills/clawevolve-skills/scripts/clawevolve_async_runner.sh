@@ -681,16 +681,11 @@ if [[ "$STAGE" == "runtime-cleanup" ]]; then
   log_line "runtime cleanup: skip skill synchronization"
 else
   mkdir -p "$CLAWEVOLVE_SKILLS_ROOT"
-  SYNC_LOCK_DIR="${CLAWEVOLVE_SKILLS_ROOT}/.sync.lock.d"
-  while ! mkdir "$SYNC_LOCK_DIR" 2>/dev/null; do
-    SYNC_LOCK_PID="$(tr -cd '0-9' < "$SYNC_LOCK_DIR/owner_pid" 2>/dev/null || true)"
-    if [[ -n "$SYNC_LOCK_PID" ]] && ! kill -0 "$SYNC_LOCK_PID" 2>/dev/null; then
-      rm -rf "$SYNC_LOCK_DIR" 2>/dev/null || true
-      continue
-    fi
-    sleep 0.1
-  done
-  printf '%s\n' "$$" > "$SYNC_LOCK_DIR/owner_pid"
+  # Keep the same lock inode across invocations. Deleting a directory lock can
+  # fail on the mounted workspace; fcntl also works without a flock CLI on macOS.
+  # The shell retains fd 9 after the Python helper exits and throughout sync.
+  exec 9>"${CLAWEVOLVE_SKILLS_ROOT}/.sync.lock"
+  python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)'
   if (( DEBUG_MODE )); then
     sync_debug_skills
   else
@@ -701,7 +696,8 @@ else
     fi
     sync_skills
   fi
-  rm -rf "$SYNC_LOCK_DIR"
+  python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_UN)'
+  exec 9>&-
 fi
 
 # Environment adaptation, runtime cleanup, and Gateway restart run inside the
