@@ -1,9 +1,9 @@
 // @vitest-environment node
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
-import { migrations } from '@avernet/clawweb-shared/server/schema';
-import { repairBatchMigrations } from '@avernet/clawweb-shared/server/schema-repair-batch';
+import { SqliteDatabase } from '../../../../../shared/server/db.js';
+import { migrations } from '../../../../../shared/server/schema.js';
+import { repairBatchMigrations } from '../../../../../shared/server/schema-repair-batch.js';
 import { RepairBatchRepository } from '../repair-batch-repository.js';
 import { digestRepairJson, validateRepairBatchInput, type RepairBatchInput, type RepairItem } from '../../contracts/repair-batch.js';
 

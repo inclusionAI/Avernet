@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
-import { migrations } from '@avernet/clawweb-shared/server/schema';
-import { repairBatchMigrations } from '@avernet/clawweb-shared/server/schema-repair-batch';
-import { sqliteDialect, mysqlDialect, zdasDialect } from '@avernet/clawweb-shared/server/db/dialect';
+import { migrations } from '../../../../../shared/server/schema.js';
+import { repairBatchMigrations } from '../../../../../shared/server/schema-repair-batch.js';
+import { sqliteDialect, mysqlDialect, zdasDialect } from '../../../../../shared/server/db/dialect.js';
 
 describe('repair-v2 additive schema', () => {
   it('upgrades the real legacy SQLite outcome DDL without dropping its records', () => {

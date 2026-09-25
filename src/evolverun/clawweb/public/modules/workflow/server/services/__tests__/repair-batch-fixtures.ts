@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
-import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
-import { migrations } from '@avernet/clawweb-shared/server/schema';
-import { repairBatchMigrations } from '@avernet/clawweb-shared/server/schema-repair-batch';
+import { SqliteDatabase } from '../../../../../shared/server/db.js';
+import { migrations } from '../../../../../shared/server/schema.js';
+import { repairBatchMigrations } from '../../../../../shared/server/schema-repair-batch.js';
 import { digestRepairJson, type RepairItem } from '../../contracts/repair-batch.js';
 import type { RepairExecutionPort, RepairGeneratedResult, RepairSourcePort } from '../../contracts/repair-workbench.js';
 
