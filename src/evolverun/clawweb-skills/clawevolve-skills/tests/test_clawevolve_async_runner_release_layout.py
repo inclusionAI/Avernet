@@ -42,7 +42,7 @@ def test_local_process_backend_uses_the_same_runner_without_linux_only_tools() -
     assert "mapfile " not in source
     assert 'command -v sha256sum' in source
     assert 'command -v setsid' in source
-    assert 'SYNC_LOCK_DIR="${CLAWEVOLVE_SKILLS_ROOT}/.sync.lock.d"' in source
+    assert 'exec 9>"${CLAWEVOLVE_SKILLS_ROOT}/.sync.lock"' in source
     assert 'prepare-task --script-directory' in launcher
     assert 'LOCAL_PROCESS_MODE' not in launcher
 

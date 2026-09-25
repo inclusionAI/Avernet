@@ -49,3 +49,12 @@ change is required.
 Conformance coverage: `tests/test_runner_launch.py`,
 `tests/test_clawevolve_async_runner_release_layout.py`, and ClawWeb's dispatcher and
 `runner-launch.test.ts` tests.
+
+Release synchronization holds an exclusive file lock on `.sync.lock` in the
+private runtime root. The shell retains the file descriptor while Python's
+standard `fcntl.flock` acquires/releases it on both Linux and macOS. The lock file
+is never unlinked, so mounted-filesystem directory cleanup cannot abort a healthy
+release check. Process exit also releases the lock. This changes only the release
+sync lock; invocation deduplication and Stage execution keep their existing flow.
+When replacing a directory-lock release, let existing bootstrap processes finish
+first; the two release versions do not share a lock primitive.
