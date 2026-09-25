@@ -14,7 +14,16 @@
     "./web/*": {
       "types": "./dist/web/*.d.ts",
       "import": "./dist/web/*.js"
-    }
+    },
+    "./server/services/bot-runtime": {
+      "types": "./dist/server/services/bot-runtime/index.d.ts",
+      "import": "./dist/server/services/bot-runtime/index.js"
+    },
+    "./server/services/bot-runtime/legacy": {
+      "types": "./dist/server/services/bot-runtime/legacy.d.ts",
+      "import": "./dist/server/services/bot-runtime/legacy.js"
+    },
+    "./server/services/bot-runtime/*": null
   },
   "files": [
     "dist/"
@@ -44,6 +53,7 @@
     "react": "^19.2.6",
     "typescript": "~6.0.2",
     "vitest": "3.2.7",
-    "@vitest/coverage-v8": "3.2.7"
+    "@vitest/coverage-v8": "3.2.7",
+    "ws": "^8.21.3"
   }
 }
