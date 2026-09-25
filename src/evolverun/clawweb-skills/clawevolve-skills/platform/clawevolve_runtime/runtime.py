@@ -254,27 +254,16 @@ def _candidate_paths(payload: dict[str, Any], task_id: str) -> tuple[Path, Path]
     return workspace, target
 
 
-def _copy_source_workspace(source: Path, destination: Path) -> None:
-    if source.resolve() != SOURCE_WORKSPACE.resolve() or not source.is_dir():
-        raise RuntimeFailure("source workspace is unavailable")
+def _initialize_candidate_workspace(destination: Path) -> None:
+    """Create an empty task workspace for the frozen target Skill package."""
+    if destination.is_symlink():
+        raise RuntimeFailure("candidate workspace must not be a symlink")
     if destination.exists():
-        if destination.is_symlink():
-            raise RuntimeFailure("candidate workspace must not be a symlink")
         # The directory is task-scoped and has already passed _candidate_paths.
         # Without the marker it can only be an interrupted prepare, so rebuild it
         # from the frozen package instead of leaving the task permanently stuck.
         shutil.rmtree(destination)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.parent / f".{destination.name}.incoming.{os.getpid()}"
-    if temporary.exists():
-        shutil.rmtree(temporary)
-    shutil.copytree(
-        source,
-        temporary,
-        symlinks=True,
-        ignore=shutil.ignore_patterns("clawevolve_results", ".nfs*"),
-    )
-    os.replace(temporary, destination)
+    destination.mkdir(parents=True)
 
 
 def _replace_directory(source: Path, target: Path) -> None:
@@ -302,10 +291,9 @@ def _replace_directory(source: Path, target: Path) -> None:
 def _activate_candidate_skill(workspace: Path, target: Path) -> Path:
     """Point the target Skill's discovery entry at the task-local candidate.
 
-    Source workspaces may contain absolute discovery links managed by the host.  A
-    byte-for-byte workspace copy must not retain that link for the Skill being
-    evolved, otherwise an Agent following ``workspace/skills/<name>`` can edit
-    the live Skill package before acceptance.
+    An Agent following ``workspace/skills/<name>`` must reach the candidate,
+    never the live Skill package. Also repair candidates from older runtimes
+    that copied host-managed absolute discovery links.
     """
     relative = target.relative_to(workspace)
     if len(relative.parts) == 3 and relative.parts[:2] == ("skills", "skills-local"):
@@ -358,7 +346,7 @@ def _prepare(args: argparse.Namespace) -> dict[str, Any]:
         if _read_json(marker) != marker_value or not target.is_dir():
             raise RuntimeFailure("existing candidate does not match frozen task input")
     else:
-        _copy_source_workspace(_runtime_path(payload.get("sourceWorkspace")), workspace)
+        _initialize_candidate_workspace(workspace)
         package = payload.get("targetSkill", {}).get("package", {})
         package_bytes = _http(str(package.get("method") or "GET"), str(package.get("url") or ""))
         if _sha256_bytes(package_bytes) != baseline:
@@ -369,8 +357,7 @@ def _prepare(args: argparse.Namespace) -> dict[str, Any]:
             _replace_directory(extracted, target)
         _activate_candidate_skill(workspace, target)
         _atomic_json(marker, marker_value)
-    # Reassert isolation for candidates prepared by older runtime versions and
-    # for source workspaces whose managed discovery link changes over time.
+    # Reassert the task-local discovery entry when resuming an existing candidate.
     _activate_candidate_skill(workspace, target)
     _ensure_task_results_link(workspace)
     # ClawWeb owns the logical /home/admin contract paths.  Local runtimes may
