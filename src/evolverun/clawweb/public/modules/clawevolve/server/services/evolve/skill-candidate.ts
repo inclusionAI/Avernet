@@ -102,8 +102,8 @@ export async function freezeSkillTarget(input: {
     ownerUserId: asset.owner_user_id,
     identity: input.identity,
   });
-  const baselineKey = `evolve/skills/tasks/${input.taskId}/baseline/package.zip`;
-  const candidateKey = `evolve/skills/tasks/${input.taskId}/candidate/package.zip`;
+  const baselineKey = `skills/tasks/${input.taskId}/baseline/package.zip`;
+  const candidateKey = `skills/tasks/${input.taskId}/candidate/package.zip`;
   const registeredVersion = exported.sha256 === asset.current_package_sha256
     ? await input.skillAssetRepo.findVersionByNumber(asset.asset_id, asset.current_version_no) : null;
   await packages.put(baselineKey, exported.packageBytes);

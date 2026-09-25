@@ -312,7 +312,7 @@ async function runSkillEvolutionToWaitingAcceptance(input: {
     skillId: input.externalSkillId,
   }));
   expect(putObject).toHaveBeenCalledWith(
-    expect.stringMatching(new RegExp(`evolve/skills/tasks/${task.task_id}/baseline/package\\.zip$`)),
+    expect.stringMatching(new RegExp(`skills/tasks/${task.task_id}/baseline/package\\.zip$`)),
     Buffer.from("local-skill-package"),
     "application/zip",
   );
@@ -942,7 +942,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     const { taskId, stepId } = await started.json();
     expect(putObject).toHaveBeenCalledTimes(1);
     const [key, bytes, contentType] = putObject.mock.calls[0];
-    expect(key).toBe(`evolve/stage-tests/${taskId}/fixtures/skill-description-v2/package.zip`);
+    expect(key).toBe(`stage-tests/${taskId}/fixtures/skill-description-v2/package.zip`);
     expect(contentType).toBe("application/zip");
     const zip = await JSZip.loadAsync(bytes);
     expect(Object.keys(zip.files)).toEqual(["SKILL.md"]);
@@ -2023,7 +2023,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       botId: "bot-arca", skillId: "ocb-skill-1",
     }));
     expect(putObject).toHaveBeenCalledWith(
-      expect.stringMatching(/evolve\/skills\/tasks\/EV-.*\/baseline\/package\.zip/),
+      expect.stringMatching(/^skills\/tasks\/EV-.*\/baseline\/package\.zip$/),
       Buffer.from("local-skill-package"),
       "application/zip",
     );

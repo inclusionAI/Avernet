@@ -41,7 +41,7 @@ function fixtureObjectKey(taskId: string, version: FixtureVersion): string {
     throw new Error("Stage 测试 Task 标识不安全");
   }
   if (!Object.hasOwn(FIXTURES, version)) throw new Error("Stage 测试 fixture 版本不一致");
-  return `evolve/stage-tests/${taskId}/fixtures/${FIXTURES[version].id}/package.zip`;
+  return `stage-tests/${taskId}/fixtures/${FIXTURES[version].id}/package.zip`;
 }
 
 /** A real test input package, never a precomputed Stage result or a host asset. */

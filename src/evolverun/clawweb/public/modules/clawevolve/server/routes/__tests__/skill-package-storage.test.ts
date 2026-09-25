@@ -58,7 +58,7 @@ it("uploads a Stage package, persists its location and signs both implementation
   form.set("package", new Blob([new Uint8Array(bytes)], { type: "application/zip" }), "skill.zip");
   const implementation = await request("/stage-skills/uploads", form);
   const stored = await new StageSkillRepository(db).findImplementation(implementation.implementationId);
-  expect(stored!.package_ref).toBe(`oss://skill-packages/packages/evolve/stage-implementations/${implementation.implementationId}/v1/package.zip`);
+  expect(stored!.package_ref).toBe(`oss://skill-packages/packages/stage-implementations/${implementation.implementationId}/v1/package.zip`);
   expect(stored!.package_sha256.replace(/^sha256:/, "")).toBe(createHash("sha256").update(bytes).digest("hex"));
   const content = await request(`/stage-skills/${implementation.implementationId}/content`);
   expect(content.selected.content).toContain("Read supplied input");
@@ -67,9 +67,9 @@ it("uploads a Stage package, persists its location and signs both implementation
   });
   const input = await request(`/internal/tasks/${task.taskId}/steps/${task.stepId}/input`);
   expect(input.protocolVersion).toBe("clawevolve.stage-runtime/v1");
-  expect(input.implementation.package.url).toBe(`https://download.example.test/packages/evolve/stage-implementations/${implementation.implementationId}/v1/package.zip`);
+  expect(input.implementation.package.url).toBe(`https://download.example.test/packages/stage-implementations/${implementation.implementationId}/v1/package.zip`);
   expect(input.resources.testSkillFixture.package.url)
-    .toBe(`https://download.example.test/packages/evolve/stage-tests/${task.taskId}/fixtures/skill-description-v2/package.zip`);
+    .toBe(`https://download.example.test/packages/stage-tests/${task.taskId}/fixtures/skill-description-v2/package.zip`);
   expect(input.input.target_skill.name).toBe("stage-test-text-summary");
   expect(legacy.putObject).not.toHaveBeenCalled();
   expect(legacy.getObject).not.toHaveBeenCalled();
