@@ -168,7 +168,8 @@ def test_runtime_maintenance_is_once_per_task_and_default_enabled() -> None:
     completed = launcher.index("runtime maintenance completed: marker=", cleaner)
     assert restart < cleaner < completed
     assert 'GATEWAY_RESTARTED_FOR_TASK="true"' in launcher
-    assert "OPENCLAW_RUNTIME_MAINTENANCE_FAILED" in TASK_LAUNCHER.read_text(encoding="utf-8")
+    reporter = ROOT / "scripts/clawevolve_startup_failure.py"
+    assert "OPENCLAW_RUNTIME_MAINTENANCE_FAILED" in reporter.read_text(encoding="utf-8")
 
 
 def test_gateway_restart_is_deferred_until_after_dispatch_ack_boundary() -> None:

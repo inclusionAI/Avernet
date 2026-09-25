@@ -60,6 +60,8 @@ def test_release_installs_code_runtime_and_retires_managed_stage_skill(release, 
 
 
 def test_release_manifest_covers_the_exact_platform_files(release):
+    reporter = "clawevolve_startup_failure.py"
+    assert (release / reporter).read_bytes() == (ROOT / "scripts" / reporter).read_bytes()
     records = [line.split("\t") for line in (release / "RELEASE_VERSION").read_text().splitlines()]
     runtime = next(row for row in records if row[:2] == ["runtime", "platform"])
     assert not any(row[:2] == ["skill", "clawevolve-stage"] for row in records)

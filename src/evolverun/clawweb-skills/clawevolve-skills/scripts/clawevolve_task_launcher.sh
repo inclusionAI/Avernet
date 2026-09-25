@@ -4,8 +4,6 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER_ENVIRONMENT="${SCRIPT_DIR}/platform/clawevolve_runtime/runner_environment.py"
 [[ -r "$RUNNER_ENVIRONMENT" ]] || RUNNER_ENVIRONMENT="${SCRIPT_DIR}/../platform/clawevolve_runtime/runner_environment.py"
-RUNNER_ENVIRONMENT_SETUP="$(python3 "$RUNNER_ENVIRONMENT" shell-init)"
-eval "$RUNNER_ENVIRONMENT_SETUP"
 TASK_ID=""
 STEP_ID=""
 LOG_FILE=""
@@ -15,6 +13,24 @@ RUNTIME_MAINTENANCE="true"
 PREFLIGHT_ACTIVE_EVOLVE_GUARD="false"
 REFRESH_GATEWAY_BEFORE_HANDLER="false"
 GATEWAY_RESTARTED_FOR_TASK="false"
+
+on_exit() {
+  local status="$1"
+  trap - EXIT
+  if (( status != 0 && ${BASH_SUBSHELL:-0} == 0 )) \
+    && [[ -n "$TASK_ID" && -n "$STEP_ID" && -n "$CLAWWEB_URL" ]]; then
+    python3 "$SCRIPT_DIR/clawevolve_startup_failure.py" \
+      --clawweb-url "$CLAWWEB_URL" --task-id "$TASK_ID" --step-id "$STEP_ID" \
+      --phase launcher --exit-code "$status" \
+      || printf 'Task startup failed; failure report was not acknowledged\n' >&2
+  fi
+  return "$status"
+}
+# Successful exec replaces this shell and clears the trap. Until then every
+# nonzero exit, including explicit exit and failed exec, belongs to startup.
+trap 'on_exit $?' EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,56 +69,21 @@ log_line() {
   printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >> "$LOG_FILE"
 }
 
-report_startup_failure() {
-  local message="$1"
-  [[ -n "$CLAWWEB_URL" ]] || return 0
-  python3 - "$CLAWWEB_URL" "$TASK_ID" "$STEP_ID" "$message" >> "$LOG_FILE" 2>&1 <<'PY' || true
-import json
-import sys
-import urllib.request
-
-base, task_id, step_id, message = sys.argv[1:]
-url = f"{base.rstrip('/')}/api/evolve/internal/tasks/{task_id}/steps/{step_id}/report"
-payload = {
-    "status": "failed",
-    "summary": "OpenClaw运行时准备失败",
-    "error": {
-        "code": "OPENCLAW_RUNTIME_MAINTENANCE_FAILED",
-        "message": message[:4000],
-        "retryable": True,
-    },
-}
-request = urllib.request.Request(
-    url,
-    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-    headers={"Content-Type": "application/json"},
-    method="POST",
-)
-with urllib.request.urlopen(request, timeout=30) as response:
-    print(json.dumps({"runtime_maintenance_failure_report_status": response.status}))
-PY
-}
-
-on_error() {
-  local status=$?
-  local line="${BASH_LINENO[0]:-unknown}"
-  local failed_command="${BASH_COMMAND:-unknown}"
-  trap - ERR
-  local message="runtime maintenance or handler launch failed: exit=${status} line=${line} command=${failed_command}"
-  log_line "$message"
-  report_startup_failure "$message"
-  exit "$status"
-}
-trap on_error ERR
-
+RUNNER_ENVIRONMENT_SETUP="$(python3 "$RUNNER_ENVIRONMENT" shell-init)"
+eval "$RUNNER_ENVIRONMENT_SETUP"
 python3 "$RUNNER_ENVIRONMENT" prepare-task --script-directory "$SCRIPT_DIR" -- \
   --task-id "$TASK_ID" --step-id "$STEP_ID" --log-file "$LOG_FILE" \
   --runtime-maintenance "$RUNTIME_MAINTENANCE" \
   --preflight-active-evolve-guard "$PREFLIGHT_ACTIVE_EVOLVE_GUARD" \
   --refresh-gateway-before-handler "$REFRESH_GATEWAY_BEFORE_HANDLER"
-trap - ERR
 if [[ -n "$RUN_CWD" ]]; then
   cd "$RUN_CWD"
 fi
 log_line "runtime ready; starting handler"
+# Bash 3 can clear EXIT even when exec fails. Allow exec to return, then report
+# that failure explicitly; successful exec never reaches these last two lines.
+shopt -s execfail
+set +e
 exec "${HANDLER_COMMAND[@]}"
+on_exit "$?"
+exit "$?"

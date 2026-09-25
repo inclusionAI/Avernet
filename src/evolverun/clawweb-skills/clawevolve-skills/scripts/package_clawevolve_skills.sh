@@ -105,6 +105,7 @@ PY
 mv "$TMP_OUTPUT" "$OUTPUT"
 cp "${SCRIPT_DIR}/clawevolve_async_runner.sh" "${RELEASE_BUILD_DIR}/clawevolve_async_runner.sh"
 cp "${SCRIPT_DIR}/clawevolve_runner_launch.py" "${RELEASE_BUILD_DIR}/clawevolve_runner_launch.py"
+cp "${SCRIPT_DIR}/clawevolve_startup_failure.py" "${RELEASE_BUILD_DIR}/clawevolve_startup_failure.py"
 mkdir -p "${RELEASE_BUILD_DIR}/platform/clawevolve_runtime"
 for runtime_file in __init__.py runner_environment.py local_runner_environment.py container_runner_environment.py container_runner_environment.sh; do
   cp "${PROJECT_DIR}/platform/clawevolve_runtime/${runtime_file}" "${RELEASE_BUILD_DIR}/platform/clawevolve_runtime/${runtime_file}"
