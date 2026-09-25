@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import express from 'express';
-import { SqliteDatabase, runMigrations } from '@avernet/clawweb-shared/server/db';
+import { SqliteDatabase, runMigrations } from '../../../../shared/server/db.js';
 import { createWorkflowRepairRuntime } from '../repair-workbench-runtime.js';
-import type { RepairDispatchRequest } from '@avernet/workflow/server/contracts/repair-workbench';
+import type { RepairDispatchRequest } from '../../../../modules/workflow/server/contracts/repair-workbench.js';
 
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
