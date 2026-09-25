@@ -3,6 +3,27 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The parent supplies its validated callback context before acknowledging dispatch.
+# Install the exit guard before environment initialization in the detached child.
+BOOTSTRAP_REPORT_TASK_ID="${CLAWEVOLVE_BOOTSTRAP_TASK_ID:-}"
+BOOTSTRAP_REPORT_STEP_ID="${CLAWEVOLVE_BOOTSTRAP_STEP_ID:-}"
+BOOTSTRAP_REPORT_URL="${CLAWEVOLVE_BOOTSTRAP_URL:-}"
+unset CLAWEVOLVE_BOOTSTRAP_TASK_ID CLAWEVOLVE_BOOTSTRAP_STEP_ID CLAWEVOLVE_BOOTSTRAP_URL
+report_bootstrap_exit() {
+  local status="$1"
+  if (( status != 0 && ${BASH_SUBSHELL:-0} == 0 )) \
+    && [[ -n "$BOOTSTRAP_REPORT_TASK_ID" && -n "$BOOTSTRAP_REPORT_STEP_ID" && -n "$BOOTSTRAP_REPORT_URL" ]]; then
+    python3 "$SCRIPT_DIR/clawevolve_startup_failure.py" \
+      --clawweb-url "$BOOTSTRAP_REPORT_URL" --task-id "$BOOTSTRAP_REPORT_TASK_ID" \
+      --step-id "$BOOTSTRAP_REPORT_STEP_ID" --phase bootstrap --exit-code "$status" \
+      || printf 'Runner startup failed; failure report was not acknowledged\n' >&2
+  fi
+  return "$status"
+}
+trap 'report_bootstrap_exit $?' EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+
 RUNNER_ENVIRONMENT="${SCRIPT_DIR}/platform/clawevolve_runtime/runner_environment.py"
 [[ -r "$RUNNER_ENVIRONMENT" ]] || RUNNER_ENVIRONMENT="${SCRIPT_DIR}/../platform/clawevolve_runtime/runner_environment.py"
 RUNNER_ENVIRONMENT_SETUP="$(python3 "$RUNNER_ENVIRONMENT" shell-init --check-user -- "$0" "$@")"
@@ -275,6 +296,7 @@ cleanup() {
       rm -rf "$cleanup_lock" 2>/dev/null || true
     fi
   fi
+  report_bootstrap_exit "$exit_status"
   return "$exit_status"
 }
 trap cleanup EXIT
@@ -654,6 +676,9 @@ if [[ "$DETACHED_BOOTSTRAP" == "false" && "$STAGE" != "runtime-cleanup" && "$STA
   fi
   BOOTSTRAP_COMMAND=(
     env CLAWEVOLVE_DETACHED_BOOTSTRAP=true
+    "CLAWEVOLVE_BOOTSTRAP_TASK_ID=$TASK_ID"
+    "CLAWEVOLVE_BOOTSTRAP_STEP_ID=$STEP_ID"
+    "CLAWEVOLVE_BOOTSTRAP_URL=$CLAWWEB_URL_VALUE"
     bash "$RUNNER_PATH"
     --stage "$STAGE"
     --invocation-id "$INVOCATION_ID"

@@ -58,3 +58,26 @@ release check. Process exit also releases the lock. This changes only the releas
 sync lock; invocation deduplication and Stage execution keep their existing flow.
 When replacing a directory-lock release, let existing bootstrap processes finish
 first; the two release versions do not share a lock primitive.
+
+After acknowledging dispatch, the detached bootstrap owns failure reporting until
+it launches the task launcher. The parent passes its validated Task/Step/callback
+context as process-local `CLAWEVOLVE_BOOTSTRAP_*` variables, consumed before the
+child initializes its environment. These are internal handoff values, not host
+configuration. Nonzero exits (including explicit exits and caught TERM/INT)
+report `RUNNER_BOOTSTRAP_FAILED` through the existing Step report endpoint.
+Invocation-lock cleanup preserves the original exit status and does not replace
+the failure report.
+
+The task launcher keeps the same guard through environment preparation, working
+directory selection and handler exec. Successful exec transfers result reporting
+to the Stage handler; a handler's business result is never overwritten by a
+startup report. Bash 3's failed-exec behavior is handled explicitly. Both startup
+boundaries use the packaged `clawevolve_startup_failure.py` reporter, retaining the
+existing `OPENCLAW_RUNTIME_MAINTENANCE_FAILED` code for launcher failures. Transient
+report failures are retried up to three times with ten-second request timeouts;
+exhaustion is recorded in the runner log and never changes the startup exit code.
+Uncatchable termination (SIGKILL/host loss) and a callback service that remains
+unreachable cannot be resolved by an exit trap; this change adds no server-side
+lease or timeout policy. Startup reporting is exercised by
+`tests/test_runner_startup_failure.py` using real detached shells and a local HTTP
+receiver, including failures before any Stage handler runs.
