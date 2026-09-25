@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { IDatabase } from '../../../../../shared/server/db.js';
+import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { createRepairSourcePort, type RepairSourceReaders } from '../repair-source-adapter.js';
 
 const db = {} as IDatabase;
