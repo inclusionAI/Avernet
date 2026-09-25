@@ -11,9 +11,6 @@ export type PresentedIssueGroup = IssueGroup & { summary: IssueSummary | null; s
 export class IssueAggregationRepository {
   constructor(private readonly db: IDatabase) {}
 
-  /** Read-only source API for Workflow repair; does not depend on aggregate model output. */
-  listSources(workflowId: string): Promise<IssueGroup[]> { return this.groups(workflowId); }
-
   private async groups(workflowId: string): Promise<IssueGroup[]> {
     const analyses: IssueAnalysis[] = [];
     let afterId = 0;
