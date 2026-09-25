@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { SqliteDatabase } from '../../../../../shared/server/db.js';
 import { migrations } from '../../../../../shared/server/schema.js';
+import { repairBatchMigrations } from '../../../../../shared/server/schema-repair-batch.js';
 import { digestRepairJson, type RepairItem } from '../../contracts/repair-batch.js';
 import type { RepairExecutionPort, RepairGeneratedResult, RepairSourcePort } from '../../contracts/repair-workbench.js';
 
@@ -10,7 +11,11 @@ export async function repairFixture(count = 2) {
   raw.exec(`CREATE TABLE workflow_specs (workflow_id TEXT PRIMARY KEY); INSERT INTO workflow_specs VALUES ('wf-1'), ('wf-2');`);
   const legacy = migrations.flatMap(m => m.sql).find(sql => sql.startsWith('CREATE TABLE IF NOT EXISTS workflow_healing_outcomes ('))!;
   await db.exec(db.dialect.renderDdl(legacy));
-  for (const m of migrations.filter(m => [72, 117, 122, 123].includes(m.version))) for (const sql of m.sql) await db.exec(db.dialect.renderDdl(sql));
+  const fixtureMigrations = [
+    ...migrations.filter(m => [72, 117].includes(m.version)),
+    ...repairBatchMigrations.filter(m => !m.mysqlOnly),
+  ];
+  for (const m of fixtureMigrations) for (const sql of m.sql) await db.exec(db.dialect.renderDdl(sql));
   const items: RepairItem[] = Array.from({ length: count }, (_, i) => ({ itemId: `item-${i}`, groupKey: `group-${i}`,
     proposalKey: digestRepairJson({ proposal: i }), contentRevision: 1, previousItemId: null,
     proposal: { summary: `Fix problem ${i}` }, instruction: '', sources: [{ kind: 'suggestion', suggestionId: `suggestion-${i}`,

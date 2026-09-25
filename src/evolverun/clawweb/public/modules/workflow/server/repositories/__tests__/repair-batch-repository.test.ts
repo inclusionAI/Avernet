@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SqliteDatabase } from '../../../../../shared/server/db.js';
 import { migrations } from '../../../../../shared/server/schema.js';
+import { repairBatchMigrations } from '../../../../../shared/server/schema-repair-batch.js';
 import { RepairBatchRepository } from '../repair-batch-repository.js';
 import { digestRepairJson, validateRepairBatchInput, type RepairBatchInput, type RepairItem } from '../../contracts/repair-batch.js';
 
@@ -36,7 +37,10 @@ describe('repair item/revision storage using real SQLite', () => {
         created_by VARCHAR(128), gmt_create INTEGER DEFAULT (unixepoch()), gmt_modified INTEGER DEFAULT (unixepoch())
       );
       INSERT INTO workflow_healing_outcomes (outcome_id, lesson_id, action) VALUES ('legacy', 'lesson-1', 'legacy');`);
-    const additions = migrations.filter(m => m.version >= 122 && !m.mysqlOnly);
+    const additions = [
+      ...migrations.filter(m => m.version === 72),
+      ...repairBatchMigrations.filter(m => !m.mysqlOnly),
+    ];
     expect(additions.length).toBeGreaterThan(0);
     for (const migration of additions) for (const sql of migration.sql) await db.exec(db.dialect.renderDdl(sql));
     repo = new RepairBatchRepository(db);
