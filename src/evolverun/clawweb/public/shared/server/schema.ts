@@ -22,8 +22,6 @@ import { cleanupEvolveSchema } from './migrations/evolve-schema-cleanup.js';
  * - SQLite: Uses AFTER UPDATE triggers for gmt_modified auto-update
  */
 
-import { repairBatchMigrations } from "./schema-repair-batch.js";
-
 export type DbType = "sqlite" | "mysql" | "zdas";
 
 /**
@@ -3296,5 +3294,4 @@ END`,
     sql: [],
     migrate: cleanupEvolveSchema,
   },
-  ...repairBatchMigrations,
 ];
