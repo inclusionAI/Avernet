@@ -88,7 +88,7 @@ describe.each([false, true])("Optimize StageTest constructed input (dedicated st
     expect(created.status).toBe(201);
     const { taskId, stepId } = created.body;
     const prepare = await input(taskId, stepId);
-    const fixtureKey = `${dedicated ? "packages/" : ""}evolve/stage-tests/${taskId}/fixtures/skill-description-v2/package.zip`;
+    const fixtureKey = `${dedicated ? "packages/" : ""}stage-tests/${taskId}/fixtures/skill-description-v2/package.zip`;
     expect(putObject).toHaveBeenCalledWith(fixtureKey, expect.any(Buffer), "application/zip");
     expect(signedUrl).toHaveBeenCalledWith(fixtureKey, "GET", expect.any(Number));
     expect(prepare).toMatchObject({ protocolVersion: "clawevolve.skill-candidate/v1", action: "prepare",

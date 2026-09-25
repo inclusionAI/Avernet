@@ -78,9 +78,14 @@ describe("fixed Stage test Skill fixture", () => {
       writes.push([key, bytes]); return { etag: "test" };
     }));
     expect(writes).toHaveLength(1);
-    expect(writes[0][0]).toBe("evolve/stage-tests/EV-NEW/fixtures/skill-description-v2/package.zip");
+    expect(writes[0][0]).toBe("stage-tests/EV-NEW/fixtures/skill-description-v2/package.zip");
     expect(frozen).toMatchObject({ fixtureId: "skill-description-v2", version: 2, sha256: current.sha256 });
     expect(stageTestFixtureInput("EV-NEW", frozen).fixture_id).toBe("skill-description-v2");
+    const legacyPath = { ...frozen, ref: frozen.ref.replace("/stage-tests/", "/evolve/stage-tests/") };
+    expect(stageTestFixtureInput("EV-NEW", legacyPath).fixture_id).toBe("skill-description-v2");
+    expect(() => stageTestFixtureInput("EV-NEW", {
+      ...legacyPath, ref: legacyPath.ref.replace("/EV-NEW/", "/EV-OTHER/"),
+    })).toThrow(/不一致/);
     const old = { ...frozen, fixtureId: "skill-description-v1" as const, version: 1 as const,
       sha256: previous.sha256, ref: frozen.ref.replace("skill-description-v2", "skill-description-v1") };
     expect(stageTestFixtureInput("EV-NEW", old).fixture_id).toBe("skill-description-v1");

@@ -19,10 +19,11 @@ function safeKey(value: string): string {
 
 function packageKey(value: string): string {
   safeKey(value);
-  if (!/^evolve\/(skills|stage-implementations|stage-tests)\//.test(value)) {
+  const logicalKey = value.replace(/^evolve\//, "");
+  if (!/^(skills|stage-implementations|stage-tests)\//.test(logicalKey)) {
     throw new Error("文件不属于 Skill 包存储范围");
   }
-  return value;
+  return logicalKey;
 }
 
 function location(input: Location): Location {
@@ -69,7 +70,7 @@ export class SkillPackageStorage {
   }
 
   matches(ref: string, key: string): boolean {
-    return this.resolve(ref).logicalKey === packageKey(key);
+    return packageKey(this.resolve(ref).logicalKey) === packageKey(key);
   }
 
   async put(key: string, content: Buffer | Uint8Array | string): Promise<string> {

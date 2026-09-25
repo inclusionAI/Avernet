@@ -12,8 +12,8 @@ The host owns configuration and credentials. No credentials enter task inputs.
 
 The binding covers uploaded Stage implementations, registered Skill versions,
 frozen task baselines/candidates, and constructed Stage test fixture ZIPs. New
-references include the configured bucket and prefix; the existing logical paths
-(`evolve/skills/`, `evolve/stage-implementations/`, `evolve/stage-tests/`) follow
+references include the configured bucket and prefix; the logical paths
+(`skills/`, `stage-implementations/`, `stage-tests/`) follow
 that prefix. Both upload and signing use the same reference. Business Skill
 execution and the container download protocol are unchanged.
 
@@ -22,6 +22,13 @@ new writes use the new binding. Persisted references in the previous artifact bu
 remain readable and in-flight candidate PUT URLs continue using that store. This
 is explicit reference routing, not a retry against a different bucket after an error.
 Only configured locations may be read or signed. There is no automatic data migration.
+
+Persisted references with the previous `evolve/` logical-path prefix remain readable
+and signable at their exact original object keys, including candidate PUT URLs.
+Frozen fixture validation accepts either layout while still checking the task and
+fixture identity. Explicit legacy keys supplied by existing storage callers also
+remain supported. All new platform-generated paths omit that redundant layer;
+no existing object is renamed.
 
 Native Pack files, launch parameters, log archives, and feedback attachments retain
 the existing artifact storage. Deployments must keep the old store available while

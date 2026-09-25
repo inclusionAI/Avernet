@@ -17,7 +17,7 @@ describe("Skill package storage routing", () => {
   it("writes and reads the same bytes in the configured bucket/prefix and signs with the container store", async () => {
     const current = store(), legacy = store(), download = store();
     const packages = new SkillPackageStorage({ bucket: "skill-packages", prefix: "packages/", store: current, urlStore: download }, legacy);
-    const key = "evolve/stage-implementations/IMPL-1/v1/package.zip";
+    const key = "stage-implementations/IMPL-1/v1/package.zip";
     const bytes = Buffer.from("immutable package");
     const ref = await packages.put(key, bytes);
     expect(ref).toBe(`oss://skill-packages/packages/${key}`);
@@ -40,14 +40,47 @@ describe("Skill package storage routing", () => {
     expect(legacySigner.createSignedUrl).toHaveBeenCalledWith(oldKey, "PUT", 60, { "Content-Type": "application/zip" });
     expect(current.createSignedUrl).not.toHaveBeenCalled();
     expect(packages.matches(`oss://${getArtifactBucket()}/${oldKey}`, oldKey)).toBe(true);
+    expect(packages.matches(`oss://${getArtifactBucket()}/${oldKey}`, "skills/tasks/EV-OLD/candidate/package.zip")).toBe(true);
+  });
+
+  it.each([
+    "skills/SKILL-OLD/versions/v1/package.zip",
+    "stage-implementations/IMPL-OLD/v1/package.zip",
+    "stage-tests/EV-OLD/fixtures/skill-description-v2/package.zip",
+  ])("keeps persisted prefixed references at their original location: %s", async key => {
+    const current = store(), signer = store();
+    const packages = new SkillPackageStorage({ bucket: "skill-packages", prefix: "packages/", store: current, urlStore: signer });
+    const oldKey = `packages/evolve/${key}`;
+    const oldRef = `oss://skill-packages/${oldKey}`;
+    await current.putObject(oldKey, Buffer.from("old"));
+    current.putObject.mockClear();
+
+    expect((await packages.read(oldRef)).content.toString()).toBe("old");
+    expect(current.getObject).toHaveBeenCalledWith(oldKey);
+    await packages.sign(oldRef, "GET", 60);
+    await packages.sign(oldRef, "PUT", 60, { "Content-Type": "application/zip" });
+    expect(signer.createSignedUrl).toHaveBeenNthCalledWith(1, oldKey, "GET", 60);
+    expect(signer.createSignedUrl).toHaveBeenNthCalledWith(2, oldKey, "PUT", 60, { "Content-Type": "application/zip" });
+    expect(packages.matches(oldRef, key)).toBe(true);
+    expect(packages.matches(oldRef, key.replace("OLD", "OTHER"))).toBe(false);
+    expect(current.putObject).not.toHaveBeenCalled();
   });
 
   it("preserves the existing single-store behavior when the host supplies no dedicated storage", async () => {
     const legacy = store();
     const packages = new SkillPackageStorage(undefined, legacy);
-    const ref = await packages.put("evolve/skills/SKILL-1/versions/v1/package.zip", Buffer.from("skill"));
-    expect(ref).toBe(`oss://${getArtifactBucket()}/evolve/skills/SKILL-1/versions/v1/package.zip`);
+    const ref = await packages.put("skills/SKILL-1/versions/v1/package.zip", Buffer.from("skill"));
+    expect(ref).toBe(`oss://${getArtifactBucket()}/skills/SKILL-1/versions/v1/package.zip`);
     expect((await packages.read(ref)).content.toString()).toBe("skill");
+  });
+
+  it("preserves explicit legacy keys supplied by existing storage callers", async () => {
+    const current = store();
+    const packages = new SkillPackageStorage({ bucket: "skill-packages", prefix: "packages", store: current });
+    const key = "evolve/skills/SKILL-OLD/versions/v1/package.zip";
+    const ref = await packages.put(key, Buffer.from("old caller"));
+    expect(ref).toBe(`oss://skill-packages/packages/${key}`);
+    expect(current.putObject).toHaveBeenCalledWith(`packages/${key}`, Buffer.from("old caller"), "application/zip");
   });
 
   it.each([
@@ -56,6 +89,10 @@ describe("Skill package storage routing", () => {
     "oss://skill-packages/packages/evolve/skills/../secret",
     "oss://skill-packages/packages/evolve/skills/%2e%2e/secret",
     "oss://skill-packages/packages/evolve/skills/a.zip?key=x",
+    "oss://skill-packages/packages/skills/../secret",
+    "oss://skill-packages/packages/skills/%2e%2e/secret",
+    "oss://skill-packages/packages/skills/a.zip?key=x",
+    "oss://skill-packages/packages/other/a.zip",
   ])("rejects unconfigured or unsafe references before signing: %s", async ref => {
     const current = store();
     const packages = new SkillPackageStorage({ bucket: "skill-packages", prefix: "packages", store: current });

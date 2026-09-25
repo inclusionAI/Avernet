@@ -204,7 +204,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
       identity: requestIdentity,
     });
     const assetId = `SKILL-${randomUUID().slice(0, 12).toUpperCase()}`;
-    const objectKey = `evolve/skills/${assetId}/versions/v1/package.zip`;
+    const objectKey = `skills/${assetId}/versions/v1/package.zip`;
     await packages.put(objectKey, exported.packageBytes);
     const created = await input.repo.createAsset({
       assetId,
@@ -279,7 +279,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     const existingVersion = await input.repo.findVersion(asset.asset_id, versionId);
     if (existingVersion) { res.json(versionView(existingVersion)); return; }
     const packageDigest = createHash("sha256").update(candidate).digest("hex");
-    const key = `evolve/skills/${asset.asset_id}/versions/${versionId}/${packageDigest}.zip`;
+    const key = `skills/${asset.asset_id}/versions/${versionId}/${packageDigest}.zip`;
     // Freeze bytes once; repeated submissions may have different ZIP metadata.
     const pending = asset.pending_application_json ? JSON.parse(asset.pending_application_json) : null;
     if (pending?.operationId !== operationId) await packages.put(key, candidate);

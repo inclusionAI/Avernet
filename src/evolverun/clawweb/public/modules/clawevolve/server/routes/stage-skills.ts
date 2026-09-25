@@ -254,7 +254,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
       const displayName = binding.display_name;
       const implementationId = `IMPL-${randomUUID().slice(0, 12).toUpperCase()}`;
       const versionNo = await input.repo.nextVersion(stageSkillId);
-      const objectKey = `evolve/stage-implementations/${implementationId}/v${versionNo}/package.zip`;
+      const objectKey = `stage-implementations/${implementationId}/v${versionNo}/package.zip`;
       await packages.put(objectKey, req.file.buffer);
       const created = await input.repo.createImplementation({
         stageSkillId,

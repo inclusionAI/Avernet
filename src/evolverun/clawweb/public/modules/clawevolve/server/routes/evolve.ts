@@ -2891,7 +2891,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const testTarget: FrozenSkillTarget | undefined = testSkill && fixture ? {
       assetId: testSkill.asset_id, skillId: testSkill.skill_id, name: testSkill.name,
       baseline: { ref: fixture.ref, sha256: fixture.sha256 },
-      candidate: { ref: skillPackages.ref(`evolve/skills/tasks/${taskId}/candidate/package.zip`) },
+      candidate: { ref: skillPackages.ref(`skills/tasks/${taskId}/candidate/package.zip`) },
     } : undefined;
     const config: ExtendedTaskConfig = {
       stageTest: {
