@@ -54,6 +54,11 @@ function waitUntilAbort(signal?: AbortSignal, onAbort?: () => void): Promise<voi
 /** Active WS clients per account for status probing. */
 const activeClients = new Map<string, BcsWsClient>();
 
+/** Get the active BCS WebSocket client (for tool handlers needing session token). */
+export function getActiveBcsClient(accountId?: string): BcsWsClient | undefined {
+  return activeClients.get(accountId ?? 'default');
+}
+
 /** Whether agent events subscription has been initialized */
 let agentEventsInitialized = false;
 

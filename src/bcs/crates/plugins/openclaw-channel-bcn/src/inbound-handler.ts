@@ -373,6 +373,16 @@ export function resolveSessionKeyFromGroupId(groupId: string): string | undefine
   return groupIdToSessionKey.get(groupId);
 }
 
+/** Look up the BCS group ID for a session key (used by group context tools). */
+export function resolveBcsGroupId(sessionKey: string): string | undefined {
+  return sessionKeyToGroupId.get(sessionKey);
+}
+
+/** Look up the BCS session ID for a session key (used by group context tools). */
+export function resolveBcsSessionId(sessionKey: string): string | undefined {
+  return sessionKeyToBcsSessionId.get(sessionKey);
+}
+
 export function combineDeliveredReplyParts(deliveredParts: string[]): string | undefined {
   const combinedText = deliveredParts.join('\n\n').trim();
   return combinedText ? combinedText : undefined;

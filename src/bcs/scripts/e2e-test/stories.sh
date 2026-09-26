@@ -23,6 +23,7 @@ E2E_TESTS_STORIES=(
     "story_cli_operator_runs_sessions_and_services"
     "story_cli_operator_validates_channel_management"
     "story_session_file_workspace"
+    "story_bot_queries_group_context_status"
 )
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
     E2E_TESTS_STORIES+=("story_user_receives_group_event_webhooks")
@@ -1757,4 +1758,22 @@ story_operator_coordinates_with_cli() {
     test_cli_chat
     test_cli_list_groups
     test_cli_friend
+}
+
+# User story: A bot queries group context status to see active contexts and
+# available templates for its current scope.
+#
+# Flow:
+#   Authenticated bot calls POST /groupcontext/status with tenant/group scope.
+#
+# Critical assertions:
+#   - The endpoint returns 200 with contexts and templates arrays.
+story_bot_queries_group_context_status() {
+    info "Story: a bot queries group context status for its scope"
+
+    bot_post "/groupcontext/status" CEO \
+        '{"tenant_id":"e2e-tenant","group_id":"e2e-group","domain":"game_rule"}'
+    require_status "bot queries group context status" "200" || return
+    assert_json_eq "status returns empty contexts" "$RESPONSE" "contexts" "[]"
+    assert_json_eq "status returns empty templates" "$RESPONSE" "templates" "[]"
 }
