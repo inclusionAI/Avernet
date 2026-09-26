@@ -147,3 +147,55 @@ async fn chat_no_json_mode_prints_run_line_on_stdout() {
         stdout
     );
 }
+
+#[tokio::test]
+async fn detach_returns_after_durable_admission_without_polling() {
+    for (state, delivery, success) in [("pending", "queued", true), ("failed", "rejected_capacity", false)] {
+        let ctx = TestContext::new().await.unwrap();
+        Mock::given(method("POST"))
+            .and(wiremock::matchers::path("/bots/bot-target/chat-async"))
+            .and(wiremock::matchers::header("X-BCS-CHAT-VERSION", "3"))
+            .respond_with(ResponseTemplate::new(202).set_body_json(serde_json::json!({
+                "run_id":"queue-run", "bot_uuid":"bot-target", "session_id":"same-session", "status":state,
+                "delivery":{"delivery_id":"d", "message_id":"m", "status":delivery, "wait_reason":"bot_capacity", "state_version":1}
+            }))).expect(1).mount(&ctx.mock_server).await;
+        Mock::given(method("GET")).and(wiremock::matchers::path("/chat/runs/queue-run"))
+            .respond_with(ResponseTemplate::new(500)).expect(0).mount(&ctx.mock_server).await;
+        let output = ctx.cmd().args(["chat", "--token", "test-token", "--bot-uuid", "bot-target", "--message", "hello", "--detach"])
+            .output().unwrap();
+        assert_eq!(output.status.success(), success, "{}", String::from_utf8_lossy(&output.stderr));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["run_id"], "queue-run");
+        assert_eq!(value["session_id"], "same-session");
+        assert_eq!(value["submitted"], true);
+        assert_eq!(value["delivered"], false);
+        assert_eq!(value["delivery_status"], delivery);
+    }
+}
+
+#[tokio::test]
+async fn wait_until_running_keeps_the_previous_ack_wait_behavior() {
+    let ctx = TestContext::new().await.unwrap();
+    mock_chat_completed(&ctx).await;
+    let output = ctx.cmd().args(["chat", "--token", "test-token", "--bot-uuid", "bot-target", "--message", "hello", "--wait-until", "running"])
+        .output().unwrap();
+    assert_success(&output);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["delivered"], true);
+    assert_eq!(value["state"], "completed");
+}
+
+#[tokio::test]
+async fn chat_run_cancel_reports_unconfirmed_cancellation() {
+    let ctx = TestContext::new().await.unwrap();
+    Mock::given(method("POST")).and(wiremock::matchers::path("/chat/runs/existing/cancel"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "run_id":"existing", "cancelled":false, "state":"running", "response":{"content":""}, "version":4,
+            "delivery":{"delivery_id":"d", "message_id":"m", "status":"cancel_unknown", "state_version":5}
+        }))).expect(1).mount(&ctx.mock_server).await;
+    let output = ctx.cmd().args(["chat-run", "--token", "test-token", "cancel", "--run-id", "existing"]).output().unwrap();
+    assert_success(&output);
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["cancelled"], false);
+    assert_eq!(value["delivery"]["status"], "cancel_unknown");
+}

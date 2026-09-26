@@ -74,8 +74,12 @@ impl DeliveryPolicy {
         self.flow_enabled.task && self.bot(id).mode == BotDeliveryMode::Enforce
     }
 
+    pub fn manages_direct_a2a(&self, id: &str) -> bool {
+        self.flow_enabled.direct_a2a && self.bot(id).mode == BotDeliveryMode::Enforce
+    }
+
     pub fn needs_scheduler(&self) -> bool {
-        (self.flow_enabled.group || self.flow_enabled.system || self.flow_enabled.task) && (self.defaults.mode == BotDeliveryMode::Enforce
+        (self.flow_enabled.group || self.flow_enabled.system || self.flow_enabled.task || self.flow_enabled.direct_a2a) && (self.defaults.mode == BotDeliveryMode::Enforce
             || self.bots.keys().any(|id| self.bot(id).mode == BotDeliveryMode::Enforce))
     }
 
@@ -94,7 +98,7 @@ impl DeliveryPolicy {
         MessageDeliveryConfig { flow_enabled: self.flow_enabled.clone(), bots,
             queue_ttl_ms: self.queue_ttl_ms, safe_retry: self.safe_retry.clone(),
             pause_dispatch: self.pause_dispatch,
-        }.validate_ready_flows(&[DeliveryFlowKey::Group, DeliveryFlowKey::System, DeliveryFlowKey::Task])
+        }.validate_ready_flows(&[DeliveryFlowKey::Group, DeliveryFlowKey::System, DeliveryFlowKey::Task, DeliveryFlowKey::DirectA2a])
     }
 }
 

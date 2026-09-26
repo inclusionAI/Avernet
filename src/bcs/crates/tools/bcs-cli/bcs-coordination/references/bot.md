@@ -150,10 +150,10 @@ bcs update-status --status "online"
 
 ## chat - 1:1 对话
 
-向另一个 Bot 发送消息（通过 BCS 路由到目标 Bot 的 WebSocket 连接）：
+向另一个 Bot 发送消息，由 BCS 通过 WebSocket 或 HTTP Provider 投递。开启 Direct A2A 队列后，请求会按 Bot 并发上限和 Session 顺序执行：
 
 ```bash
-bcs chat --bot-uuid "<目标Bot UUID>" --message "<消息内容>" [--session-id "<会话ID>"] [--detach] [--timeout-ms <毫秒>]
+bcs chat --bot-uuid "<目标Bot UUID>" --message "<消息内容>" [--session-id "<会话ID>"] [--detach | --wait-until running] [--timeout-ms <毫秒>]
 ```
 
 **别名：** `invoke`
@@ -163,8 +163,9 @@ bcs chat --bot-uuid "<目标Bot UUID>" --message "<消息内容>" [--session-id 
 - `--bot-uuid`: 目标 Bot 的 UUID（**必需**）
 - `--message`: 消息内容（**必需**）
 - `--session-id`: 指定稳定会话 ID。多次调用传入同一个 `session_id` 时，会落到目标 Bot 侧同一会话中，共享上下文。
-- `--detach`: BCS 接受并启动 run 后立即返回，不等待完整回复；服务端 run 会继续执行。适合长耗时任务。
-- `--timeout-ms`: CLI 本地轮询预算（毫秒）。阻塞模式默认 30 分钟；配合 `--detach` 时默认等待首次确认 60 秒。该值不会改变 BCS run 生命周期，也不会传给 Provider 或下游 Bot。
+- `--detach`: BCS 受理后立即返回，不轮询。返回 `queued` 表示已经入队，尚未开始执行；可通过 `chat-run status` 查询进度。
+- `--wait-until running`: 等到 Bot 开始执行后返回，不等待完整回复；与 `--detach` 互斥。
+- `--timeout-ms`: CLI 本地轮询预算（毫秒）。阻塞模式默认 30 分钟，`--wait-until running` 默认 60 秒；`--detach` 不轮询。客户端超时不会取消服务端 run。
 
 **示例：**
 
@@ -174,11 +175,22 @@ bcs chat --bot-uuid "bot-dba" --message "请帮我查一下当前的锁等待情
 # 复用同一会话上下文继续追问
 bcs chat --bot-uuid "bot-dba" --session-id "bot-dba:aabb0011" --message "基于上次结论，下一步怎么处理？"
 
-# 长耗时任务只等待 Bot 确认接收
+# 长耗时任务受理后返回，可能仍在排队
 bcs chat --bot-uuid "bot-dba" --message "请完整分析最近1小时的慢查询" --detach
 ```
 
-> **注意**：目标 Bot 必须通过 WebSocket 连接到 BCS，否则返回错误。
+开启 Direct 队列后，离线或繁忙的 Bot 可以等待投递；未开启时沿用原直发路径。同一环境的 Session ID 只能属于 Group 或 Direct A2A 一种类型，类型冲突返回 `session_type_conflict`。
+
+### 查询与取消 run
+
+```bash
+bcs chat-run status --run-id "<run_id>"
+bcs chat-run cancel --run-id "<run_id>"
+```
+
+`delivery.status` 和 `delivery.wait_reason` 说明排队或取消进度。`cancelling` / `cancel_unknown` 表示停止尚未确认，需要继续查询，不能对用户宣称任务已取消。
+
+`--detach` 的 queued 结果为 `submitted=true`、`delivered=false`，退出码为 0；容量拒绝等终态失败退出码为 1。
 
 ### 何时使用 1:1 Chat
 
@@ -203,7 +215,7 @@ Bot：DBA回复：死锁是由于...
 | `get`           | Bot 详情：`bot_uuid`, `name`, `summary`, `skills`, `domains`, `status`, `visibility` |
 | `discover`      | 匹配的 Bot 列表（含 `is_friend` 字段，仅传入 `--collaborate-bot` 时） |
 | `update-status` | 更新确认                                        |
-| `chat`          | 阻塞模式返回目标 Bot 的回复消息，并包含 `run_id`, `session_id`, `state`；`--detach` 返回提交确认，包含 `run_id`, `session_id`, `state` |
+| `chat`          | 阻塞模式返回目标 Bot 的回复消息，并包含 `run_id`, `session_id`, `state`；`--detach` 返回受理结果，包含 `run_id`, `session_id`, `state`, `delivery_status`, `wait_reason` |
 
 ---
 

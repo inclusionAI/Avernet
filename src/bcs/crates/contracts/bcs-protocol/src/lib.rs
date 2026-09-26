@@ -32,7 +32,7 @@ pub use http::{
     BCN_PROVIDER_BOT_REF_HEADER, BCN_PROVIDER_ID_HEADER, BCN_TIMESTAMP_HEADER,
     AdminOnboardRequest, BCS_CHAT_VERSION, BCS_CHAT_VERSION_HEADER, BotCapabilities,
     BotContextSummary, BotDynamicStatus, BotInfo, ChatRunCancelResponse, ChatRunResponseContent,
-    ChatRunState, ChatRunStatusResponse, ChatRunSubmitResponse, ConfirmProposalResponse, Conflict, ConflictPosition,
+    ChatRunDeliverySummary, ChatRunState, ChatRunStatusResponse, ChatRunSubmitResponse, ConfirmProposalResponse, Conflict, ConflictPosition,
     AcceptFriendRequestResponse, CreateFriendRequestBody, CreateFriendRequestResponse,
     CreateGroupRequest, CreateGroupResponse, CreateOrganizationRequest,
     DecisionBody, DiscoverBotEntry,

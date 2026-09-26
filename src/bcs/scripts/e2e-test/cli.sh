@@ -258,6 +258,27 @@ test_cli_chat() {
         TESTS_FAILED=$((TESTS_FAILED+1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL+1))
+    local run_id
+    run_id=$(printf '%s' "$BCS_CLI_STDOUT" | jq -r '.run_id // empty')
+    if [[ -n "$run_id" ]]; then
+        if bcs_cli CEO chat-run status --run-id "$run_id"; then
+            pass "bcs-cli chat-run status returns the admitted run"
+            TESTS_PASSED=$((TESTS_PASSED+1))
+        else
+            fail "bcs-cli chat-run status failed"
+            TESTS_FAILED=$((TESTS_FAILED+1))
+        fi
+        TESTS_TOTAL=$((TESTS_TOTAL+1))
+        if bcs_cli CEO chat-run cancel --run-id "$run_id"; then
+            pass "bcs-cli chat-run cancel returns the authoritative cancellation state"
+            TESTS_PASSED=$((TESTS_PASSED+1))
+        else
+            fail "bcs-cli chat-run cancel failed"
+            TESTS_FAILED=$((TESTS_FAILED+1))
+        fi
+        TESTS_TOTAL=$((TESTS_TOTAL+1))
+    fi
+
 }
 
 # list-groups: list groups where the current session bot is a formal member.

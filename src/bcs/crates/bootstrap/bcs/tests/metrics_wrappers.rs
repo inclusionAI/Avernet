@@ -457,6 +457,7 @@ impl A2aChatRunService for A2aRunFake {
         cmd: AsyncA2aChatCommand,
     ) -> ServiceResult<AsyncA2aChatAccepted> {
         Ok(AsyncA2aChatAccepted {
+            delivery: None,
             run_id: cmd.run_id,
             bot_uuid: cmd.target_bot_id,
             session_id: cmd.session_key,

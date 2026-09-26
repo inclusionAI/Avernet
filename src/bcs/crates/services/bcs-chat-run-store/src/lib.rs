@@ -13,6 +13,7 @@
 
 pub mod memory;
 pub mod sql;
+mod sqlite_schema_v32;
 
 pub use memory::MemoryChatRunRepo;
 pub use sql::SqlChatRunRepo;

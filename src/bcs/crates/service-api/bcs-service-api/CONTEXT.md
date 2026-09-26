@@ -453,3 +453,11 @@ history-repair confirmations. Memory and SQL stores retain a completion marker
 only after opening/publication rows are repaired successfully. Later cleanup
 sweeps, including after restart, skip those source/message reads. Node-history
 Pending recovery and network delivery acknowledgements remain independent.
+
+## Direct A2A identity and projection contracts
+
+Session ports expose an environment-scoped identity registry used by both Group
+and Direct A2A. ChatRun ports expose nullable delivery/source IDs, durable managed
+checkpoint CAS and cursor recovery pages capped at eight records. DeliveryLookup
+supports an eight-ID recovery batch. Async acceptance may include a safe queue
+summary; HTTP version negotiation remains the adapter's responsibility.

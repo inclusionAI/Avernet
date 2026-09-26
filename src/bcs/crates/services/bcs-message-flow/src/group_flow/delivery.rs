@@ -229,6 +229,7 @@ pub(super) async fn publish_web_user_message(
         })
         .unwrap_or(MessageVisibilityDomain::ManagerWorker);
     let audience = match visibility_domain {
+        MessageVisibilityDomain::DirectA2a => Some(MessageAudience::FullOnly),
         MessageVisibilityDomain::Chat => None,
         MessageVisibilityDomain::ManagerWorker => {
             let mut actor_ids = vec![cmd.from_actor_id.clone()];

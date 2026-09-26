@@ -1,7 +1,19 @@
 -- Pre-Loop MySQL physical schema fixture for focused FL-07/08/09 contracts.
 -- Tables derive from 001, with the columns/indexes introduced by 007/016/017/018.
+-- Include the Session Store registry dependency from 031 while keeping Loop tables pre-028.
 -- This does not certify the full historical migration chain.
 
+CREATE TABLE bcs_session_registry (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  env VARCHAR(64) NOT NULL,
+  session_id VARCHAR(128) NOT NULL,
+  session_type VARCHAR(32) NOT NULL,
+  current_msg_seq BIGINT NULL,
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_session_registry (env, session_id)
+) DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `bcs_collaboration_definitions` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,

@@ -683,11 +683,12 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         let policy = match &self.policy { Some(live) => Some(live.snapshot.read().await), None => None };
         if let Some(policy) = &policy {
           for command in &mut commands {
-            if !matches!(command.flow_kind, bcs_domain::message_delivery::DeliveryFlowKind::Group | bcs_domain::message_delivery::DeliveryFlowKind::System | bcs_domain::message_delivery::DeliveryFlowKind::Task) { return Err(ManagedDeliveryError::Conflict); }
+            if !matches!(command.flow_kind, bcs_domain::message_delivery::DeliveryFlowKind::Group | bcs_domain::message_delivery::DeliveryFlowKind::System | bcs_domain::message_delivery::DeliveryFlowKind::Task | bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a) { return Err(ManagedDeliveryError::Conflict); }
             for target in &mut command.targets {
                 let drain = target.kind == DeliveryType::Send && target.semantic_projection_json.get("drain_context").and_then(|v| v.as_bool()) == Some(true)
                     && !self.repo.lookup(DeliveryLookup::LanePendingContextCarrier { bot: target.target_bot_id.clone(), session: command.message.session_id.clone(), now_ms: command.now_ms }).await?.is_empty();
                 let enabled = match command.flow_kind {
+                    bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a => policy.policy.manages_direct_a2a(&target.target_bot_id),
                     bcs_domain::message_delivery::DeliveryFlowKind::System => policy.policy.manages_system(&target.target_bot_id),
                     bcs_domain::message_delivery::DeliveryFlowKind::Task => policy.policy.manages_task(&target.target_bot_id),
                     _ => policy.policy.manages_group(&target.target_bot_id),
@@ -699,7 +700,11 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
                 }
                 target.max_queued = policy.policy.bot(&target.target_bot_id).max_queued;
             }
-            command.expire_at_ms = policy.policy.queue_ttl_ms.map(|ttl| command.now_ms.saturating_add(ttl as i64));
+            let policy_expiry = policy.policy.queue_ttl_ms.map(|ttl| command.now_ms.saturating_add(ttl as i64));
+            command.expire_at_ms = if command.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {
+                let deadline = command.targets.first().and_then(|t| t.semantic_projection_json.get("expires_at_ms")).and_then(|v| v.as_i64()).ok_or(ManagedDeliveryError::Conflict)?;
+                Some(policy_expiry.map_or(deadline, |expiry| expiry.min(deadline)))
+            } else { policy_expiry };
           }
         }
         if !self

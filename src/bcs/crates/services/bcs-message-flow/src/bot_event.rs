@@ -84,6 +84,9 @@ pub async fn handle_bot_event(
         lock.lock_owned().await
     };
     let managed = if managed.is_some() { crate::queued_admission::find_managed_run(flow, &cmd).await? } else { None };
+    if let Some(row) = managed.as_ref().filter(|row| row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a) {
+        return flow.direct_chat.as_ref().ok_or_else(|| ServiceError::InternalError("direct queue projection unavailable".into()))?.direct_event(flow, row, &cmd).await;
+    }
     if let Some(row) = &managed {
         use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
         if matches!(row.state.status, Status::Completed | Status::Failed | Status::Cancelled | Status::Expired | Status::RejectedCapacity) {

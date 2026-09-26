@@ -32,6 +32,7 @@ pub mod permission_request;
 pub mod provider;
 pub mod relation;
 pub mod session;
+pub mod session_registry;
 pub mod session_file;
 pub mod user_identity;
 
