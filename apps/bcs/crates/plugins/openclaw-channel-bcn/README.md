@@ -62,11 +62,11 @@ Select with the flag or env var (flag wins):
 
 ```bash
 # npm mode
-./scripts/singlebox.sh --bcn-plugin-source npm
-BCN_PLUGIN_SOURCE=npm ./scripts/singlebox.sh
+./singlebox/singlebox.sh --bcn-plugin-source npm
+BCN_PLUGIN_SOURCE=npm ./singlebox/singlebox.sh
 
 # pin a version in npm mode (default: latest)
-BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.24 ./scripts/singlebox.sh
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.24 ./singlebox/singlebox.sh
 ```
 
 ## Configure

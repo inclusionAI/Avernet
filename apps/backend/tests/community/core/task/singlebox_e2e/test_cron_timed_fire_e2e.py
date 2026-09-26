@@ -223,7 +223,7 @@ def _find_bot() -> tuple[str, str]:
                         return bot["bot_id"], bot.get("owner_id", _USER_ID)
             except Exception:
                 continue
-    raise RuntimeError("无法获取存活 bot — 请先 ./scripts/singlebox.sh start all")
+    raise RuntimeError("无法获取存活 bot — 请先 ./singlebox/singlebox.sh start all")
 
 
 def _inject_dingtalk_creds() -> None:

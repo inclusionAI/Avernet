@@ -139,7 +139,7 @@ allow_http_loopback = true
 allow_non_standard_ports = true
 ```
 
-可以使用 `./scripts/singlebox.sh --local start bcs` 启动 BCS，健康检查地址默认为
+可以使用 `./singlebox/singlebox.sh --local start bcs` 启动 BCS，健康检查地址默认为
 `http://127.0.0.1:21000/health`。如果 singlebox 会生成运行时配置，应先确认最终生效文件确实包含上述差异。
 仓库的 `bcs-config-local.toml` 默认启用 Event 记录和 dispatcher；MV-01 中的 disabled/record-only 模式需要
 作为用例显式覆盖，测试结束后恢复本地默认值。

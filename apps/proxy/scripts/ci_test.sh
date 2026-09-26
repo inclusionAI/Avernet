@@ -31,7 +31,7 @@ done
 [[ ${#_positional[@]} -ge 2 ]] && _run_overlay="${_positional[1]}"
 
 if [[ -z "$base" ]]; then
-  source "$repo_root/scripts/lib/resolve_base_ref.sh"
+  source "$repo_root/singlebox/lib/resolve_base_ref.sh"
   base="$(resolve_base_ref)" || {
     echo "sandbox-proxy CI failed: could not resolve changed-line coverage base ref" >&2
     exit 1

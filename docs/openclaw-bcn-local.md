@@ -7,7 +7,7 @@ This guide explains how to build from source and connect a local OpenClaw instan
 If you only want to try the local Avernet experience, start with [Quick Start](quick-start.md):
 
 ```bash
-./scripts/singlebox.sh
+./singlebox/singlebox.sh
 ```
 
 `singlebox.sh` automatically builds the BCN plugin, starts BCS, launches 5 local OpenClaw demo bots, and onboards them. This guide is useful when you want to:
@@ -39,14 +39,14 @@ Key points:
 Make sure BCS is running locally. The simplest way is to run the full local stack:
 
 ```bash
-./scripts/singlebox.sh
+./singlebox/singlebox.sh
 ```
 
 If you only want to start BCS without the default 5 demo bots, build BCS and the plugin first, then start BCS in bare mode:
 
 ```bash
-./scripts/singlebox.sh setup bcs
-./scripts/singlebox.sh --no-bcs-auto-onboard start bcs
+./singlebox/singlebox.sh setup bcs
+./singlebox/singlebox.sh --no-bcs-auto-onboard start bcs
 ```
 
 Check that BCS is healthy:
@@ -103,11 +103,11 @@ Select with the flag or env var (flag wins):
 
 ```bash
 # npm mode
-./scripts/singlebox.sh --bcn-plugin-source npm
-BCN_PLUGIN_SOURCE=npm ./scripts/singlebox.sh
+./singlebox/singlebox.sh --bcn-plugin-source npm
+BCN_PLUGIN_SOURCE=npm ./singlebox/singlebox.sh
 
 # pin a version in npm mode (default: latest)
-BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.15 ./scripts/singlebox.sh
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.15 ./singlebox/singlebox.sh
 ```
 
 ## Option 2: Manually Connect One Local OpenClaw Profile

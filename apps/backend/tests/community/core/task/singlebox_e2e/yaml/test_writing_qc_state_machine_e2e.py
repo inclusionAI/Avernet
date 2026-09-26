@@ -2,7 +2,7 @@
 
 gated by ``SINGLEBOX_TASK_E2E=1``。本地起好 singlebox 后跑(改了 task_service/executor/bcs 适配后**务必重启后端**):
 
-  ./scripts/singlebox.sh start all
+  ./singlebox/singlebox.sh start all
   SINGLEBOX_TASK_E2E=1 DEPLOY_PROFILE=singlebox \
     apps/backend/.venv/bin/python -m pytest \
       apps/backend/tests/community/core/task/singlebox_e2e/yaml/test_writing_qc_state_machine_e2e.py -s

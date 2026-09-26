@@ -1,7 +1,7 @@
 """SingleboxBcsAdapter live 集成测试(打真实本地 BCS :21000,建群 + 建 session,不经 Mock)。
 
 默认跳过:需 ``SINGLEBOX_TASK_E2E=1`` 且提供 ``SINGLEBOX_BOT_ID``(一个已在本地 BCS 注册的 bot id,
-即 singlebox 起栈后经 BCS WS onboarding 过的 bot)。本地起好 singlebox(``./scripts/singlebox.sh start all``)后:
+即 singlebox 起栈后经 BCS WS onboarding 过的 bot)。本地起好 singlebox(``./singlebox/singlebox.sh start all``)后:
 
   SINGLEBOX_TASK_E2E=1 SINGLEBOX_BOT_ID=<已注册的 bot id> SINGLEBOX_USER_ID=35983 \
     .venv/bin/python -m pytest \

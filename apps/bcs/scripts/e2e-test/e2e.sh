@@ -5,7 +5,7 @@
 #   BCS must be running with the 5 demo bots onboarded. The standard way is to
 #   start BCS + bots via singlebox with the default 5bots_profile:
 #
-#     ./scripts/singlebox.sh --local start bcs_bots
+#     ./singlebox/singlebox.sh --local start bcs_bots
 #
 #   This onboards 5 bots (CEO / 产品经理 / 研发 / 验证 / 客服), which e2e
 #   resolves by name (see BOT_*_ID defaults in common.sh).

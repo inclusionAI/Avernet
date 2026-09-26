@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 # 默认分支
 SOURCE_BRANCH="${1:-origin/hotfix_protected}"
 TARGET_BRANCH="${2:-HEAD}"
-SERVER_FILE="src/bcs/crates/bcs/src/server.rs"
+SERVER_FILE="apps/bcs/crates/bcs/src/server.rs"
 
 echo "=== Cherry-pick 完整性检查 ==="
 echo "Source: $SOURCE_BRANCH"

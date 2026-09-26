@@ -292,7 +292,7 @@ cd ocb-public/src/backend
 cd ocb-public/src/backend
 
 # 重启后端带上钉钉凭证
-#   ocb-public/scripts/singlebox.sh restart backend
+#   ocb-public/singlebox/singlebox.sh restart backend
 # 或手动 export：
 #   export TASK_DISCOVERY_DINGTALK_AK_ID=... \
 #           TASK_DISCOVERY_DINGTALK_AK_SECRET=... \
@@ -309,7 +309,7 @@ SINGLEBOX_CRON_E2E=1 SINGLEBOX_USER_ID=440718 \
 
 ```bash
 # 后端必须注入 principal signing key（dev key），否则 /openapi/v1 返回 401
-#   ocb-public/scripts/singlebox.sh restart backend
+#   ocb-public/singlebox/singlebox.sh restart backend
 
 SINGLEBOX_CRON_E2E=1 SINGLEBOX_USER_ID=440718 \
   .venv/bin/python -m pytest \

@@ -177,7 +177,7 @@ if [[ "$skip_start" -eq 0 ]]; then
   bcs_log="$repo_root/scripts/.dependencies/logs/bcs.log"
   # Use bcsfuse dev mode (SQLite) so e2e does not need an external MySQL.
   export BCSFUSE_PROVIDER_MODE=dev
-  "$repo_root/scripts/singlebox.sh" --standalone --with-bcs-coverage start bcsfuse bcs_bots
+  "$repo_root/singlebox/singlebox.sh" --standalone --with-bcs-coverage start bcsfuse bcs_bots
 elif [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
   bcs_e2e_mock_start "$cov_dir/mock-services"
 fi
@@ -264,7 +264,7 @@ if [[ "$no_stop" -eq 0 ]]; then
   #    frontend (e2e needs no frontend; do not kill the user's dev server). Pass
   #    --standalone so singlebox resolves the per-checkout standalone
   #    pid/profile paths started in step 1.
-  "$repo_root/scripts/singlebox.sh" --standalone stop bcs_bots bcsfuse
+  "$repo_root/singlebox/singlebox.sh" --standalone stop bcs_bots bcsfuse
 
   # 5. Aggregate cobertura + text table + JSON summary.
   # Three report passes over the on-disk profraw (no rebuild, ~seconds each):

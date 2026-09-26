@@ -9,7 +9,7 @@
 在仓库根目录先跑安全预检：
 
 ```bash
-./scripts/singlebox.sh check
+./singlebox/singlebox.sh check
 ```
 
 `check` 只打印将使用的路径，并检查 BCS / frontend 预检项：Cargo / `protoc`、Node.js 主版本、npm、源码目录和端口。除少量本地 runtime 目录初始化外，它不会安装依赖、构建代码、启动服务、杀进程或修改全局配置。`check` 不会提前校验 5bot 启动脚本里的 OpenClaw / `jq`，这些会在实际启动本地 bot stack 时检查。Rust 最低版本由 Cargo 在构建阶段按 workspace 的 `rust-version` 校验。如果失败，手动安装缺失项后重新跑同一个检查。
@@ -17,7 +17,7 @@
 如果你希望脚本帮助检查并安装缺失工具，可以改用：
 
 ```bash
-./scripts/singlebox.sh install-tools
+./singlebox/singlebox.sh install-tools
 ```
 
 `install-tools` 会先检查基础编译环境；如果编译器或 `make` 缺失，会输出适合当前系统的手动安装指引。它会在安装缺失的系统命令和开发库、OpenClaw、Rust/Cargo 以及 protobuf/protoc 前询问确认。Node.js 和 uv 是当前的例外：Node.js 22+ 缺失或版本过低时，脚本会自动通过 nvm 安装；uv 缺失时，会自动尝试 `pip`，然后尝试官方安装脚本。系统包安装被权限策略拒绝或执行失败时，脚本会输出可手动执行的命令。macOS 如果没有 Homebrew，会引导用户前往 [brew.sh](https://brew.sh/) 安装后重新运行。执行前请确认所有这些本机写入（包括 Node.js 和 uv 的自动安装路径）可以接受。
@@ -131,11 +131,11 @@ jq --version
 安装或升级依赖后，回到仓库根目录重新执行：
 
 ```bash
-./scripts/singlebox.sh check
+./singlebox/singlebox.sh check
 ```
 
 预检通过后，再继续主流程：
 
 ```bash
-./scripts/singlebox.sh
+./singlebox/singlebox.sh
 ```

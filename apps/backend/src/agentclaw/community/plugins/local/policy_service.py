@@ -2,7 +2,7 @@
 
 singlebox 是单用户本机环境,没有 "白名单 + 配额 + 抢名额" 的业务需求:
 - 只有当前登录人一个 user,没有多 user 抢容器配额一说;
-- backend SQLite 每次 ``./scripts/singlebox.sh start backend`` 都会被 ``rm`` 重建
+- backend SQLite 每次 ``./singlebox/singlebox.sh start backend`` 都会被 ``rm`` 重建
   (见 backend.sh:63),不可能在里面长期维护 ``ac_access_control_policy`` /
   ``ac_common_config`` 的种子数据;
 - 真 prod 上这些表由运维种,有真实数据,``PolicyService`` (走 DB 查询的实现)

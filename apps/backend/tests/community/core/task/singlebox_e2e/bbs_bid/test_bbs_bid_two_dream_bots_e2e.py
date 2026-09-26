@@ -1,6 +1,6 @@
 """BBS 主动触发(bid→select→claim→dispatch)两 dream-bot live singlebox e2e。
 
-gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 起好 singlebox 后跑
+gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./singlebox/singlebox.sh start all`` 起好 singlebox 后跑
 (launcher 已设 ``AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE``,见 scripts/modules/bcs.sh / backend.sh;
 改了 task_service/executor/bcs 适配/provisioner 后**务必重启后端**):
 

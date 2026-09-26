@@ -112,3 +112,4 @@ singlebox/.dependencies
 openspec
 
 scripts/undercover-game.sh
+singlebox/.dependencies
