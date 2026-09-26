@@ -13,7 +13,7 @@ skip_singlebox_coverage="${OCB_PRE_PUSH_SKIP_SINGLEBOX_COVERAGE:-0}"
 run_full_ci="${OCB_PRE_PUSH_RUN_CI:-0}"
 
 # 这个脚本既可以被 .githooks/pre-push 调用,也可以手动运行:
-#   scripts/ci/pre_push.sh --base origin/dev --head HEAD
+#   singlebox/ci/pre_push.sh --base origin/dev --head HEAD
 # base/head 用来计算“本次变更文件”,从而只跑受影响模块的 CI gate。
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -135,7 +135,7 @@ if matches_any '^apps/backend/'; then
   run_singlebox_coverage_once
 fi
 
-if matches_any '^(apps/backend/tests/community/(compatibility|acceptance/legacy_skills)/|scripts/ci/legacy_skill_compatibility\.sh)$'; then
+if matches_any '^(apps/backend/tests/community/(compatibility|acceptance/legacy_skills)/|singlebox/ci/legacy_skill_compatibility\.sh)$'; then
   run_heavy "$repo_root/singlebox/ci/legacy_skill_compatibility.sh"
 fi
 
@@ -153,10 +153,10 @@ if matches_any '^apps/baas/'; then
   fi
 fi
 
-if matches_any '^src/engine/'; then
+if matches_any '^engine/adapter/'; then
   # Engine 默认强卡点:
   # SAST 先兜底语法/高危 lint,再跑 engine 自己的 pytest/coverage gate。
-  run_required "$repo_root/scripts/ci/python_sast_local.sh" src/engine 1 --base "$base" --head "$head"
+  run_required "$repo_root/singlebox/ci/python_sast_local.sh" engine/adapter 1 --base "$base" --head "$head"
   run_heavy "$repo_root/engine/adapter/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
@@ -168,7 +168,7 @@ if matches_any '^apps/bcs/crates/plugins/deepseek-harness-channel-bcn/'; then
   run_heavy npm --prefix "$dsh_bcn_plugin" run ci
 fi
 
-if matches_any '^src/bcs/'; then
+if matches_any '^apps/bcs/'; then
   # BCS/BCN 默认强卡点:
   # 1) ci_test.sh 跑 Rust workspace 测试,第一个失败就退出。
   # 2) 统一 singlebox coverage 复用同一套真实产品栈,执行 BCS user-story
@@ -197,7 +197,7 @@ if matches_any '^apps/frontend/'; then
   run_heavy "$repo_root/apps/frontend/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
-if matches_any '^(scripts/singlebox\.sh|scripts/modules/|scripts/ci/singlebox_coverage(_report|_manifest_check)?\.(sh|py)|scripts/ci/singlebox_coverage_modules\.yaml|scripts/ci/verify_singlebox_coverage_artifacts\.py|apps/backend/tests/community/acceptance/|apps/baas/tests/e2e/)'; then
+if matches_any '^(singlebox/singlebox\.sh|singlebox/modules/|singlebox/ci/singlebox_coverage(_report|_manifest_check)?\.(sh|py)|singlebox/ci/singlebox_coverage_modules\.yaml|singlebox/ci/verify_singlebox_coverage_artifacts\.py|apps/backend/tests/community/acceptance/|apps/baas/tests/e2e/)'; then
   # singlebox 自身脚本或 live E2E 用例变更时,即便没有 Backend/BaaS 源码变更,
   # 也要触发 singlebox coverage gate。
   run_singlebox_coverage_once

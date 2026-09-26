@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/hybrid.sh — OpenClaw stack with optional Claude Code bots
+# singlebox/modules/hybrid.sh — OpenClaw stack with optional Claude Code bots
 [[ -n "${_HYBRID_SH_LOADED:-}" ]] && return 0
 _HYBRID_SH_LOADED=1
 

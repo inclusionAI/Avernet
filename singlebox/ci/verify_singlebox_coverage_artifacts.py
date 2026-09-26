@@ -46,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--reports-dir",
-        default="scripts/.dependencies/coverage/singlebox/reports",
+        default="singlebox/.dependencies/coverage/singlebox/reports",
         help="Directory containing summary.json and coverage artifacts.",
     )
     parser.add_argument("--backend-min", type=float, default=38.0)

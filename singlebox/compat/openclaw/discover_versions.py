@@ -21,7 +21,7 @@ def repository_root() -> Path:
 
 
 def plugin_package_path(repo_root: Path) -> Path:
-    return repo_root / "src/bcs/crates/plugins/openclaw-channel-bcn/package.json"
+    return repo_root / "apps/bcs/crates/plugins/openclaw-channel-bcn/package.json"
 
 
 def numeric_core(version: str) -> tuple[int, int, int]:

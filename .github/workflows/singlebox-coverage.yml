@@ -73,7 +73,7 @@ jobs:
           # so diffing the tree (not HEAD) against the base captures all PR-introduced
           # changes regardless of the merge-commit structure.
           mapfile -t files < <(git diff --name-only "${SINGLEBOX_BASE_REF}" -- \
-            scripts \
+            singlebox \
             apps/backend \
             apps/baas \
             apps/bcs \

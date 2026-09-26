@@ -1,6 +1,6 @@
 # BCSFuse Runtime Image for ACK / Aliyun Deployment
 #
-# Build context: repository root (so we can SELECTIVELY copy only src/bcsfuse).
+# Build context: repository root (so we can SELECTIVELY copy only apps/bcsfuse).
 # This keeps internal modules and other secrets out of the bcsfuse image.
 #
 # Usage from repo root:
@@ -41,7 +41,7 @@ RUN useradd --create-home --shell /bin/bash appuser
 WORKDIR /app
 
 # Copy package metadata first for layer caching.
-COPY src/bcsfuse/pyproject.toml src/bcsfuse/README.md ./
+COPY apps/bcsfuse/pyproject.toml apps/bcsfuse/README.md ./
 
 # Install package in editable mode with dev extras (tests are kept in image
 # for optional container self-verification; they are not run at startup).
@@ -49,14 +49,14 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir -e ".[dev]"
 
 # Copy only the public bcsfuse source tree. We intentionally avoid copying
-# apps/backend, src/bcs, apps/frontend, or any sibling internal modules.
-COPY src/bcsfuse/src ./src
-COPY src/bcsfuse/schemas ./schemas
-COPY src/bcsfuse/configs ./configs
-COPY src/bcsfuse/main.py ./
+# apps/backend, apps/bcs, apps/frontend, or any sibling internal modules.
+COPY apps/bcsfuse/src ./src
+COPY apps/bcsfuse/schemas ./schemas
+COPY apps/bcsfuse/configs ./configs
+COPY apps/bcsfuse/main.py ./
 
 # Copy legal / deployment notes only; no live credentials.
-COPY src/bcsfuse/LEGAL.md src/bcsfuse/FUSE_API_LOGIC.md ./
+COPY apps/bcsfuse/LEGAL.md apps/bcsfuse/FUSE_API_LOGIC.md ./
 
 RUN chown -R appuser:appuser /app
 

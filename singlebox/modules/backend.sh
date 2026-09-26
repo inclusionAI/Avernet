@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/backend.sh — Backend (agentclaw) service module
+# singlebox/modules/backend.sh — Backend (agentclaw) service module
 [[ -n "${_BACKEND_SH_LOADED:-}" ]] && return 0
 _BACKEND_SH_LOADED=1
 

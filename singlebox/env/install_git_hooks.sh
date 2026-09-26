@@ -31,7 +31,7 @@ fi
 hooks_before="$(git config --worktree --get core.hooksPath 2>/dev/null || git config --get core.hooksPath 2>/dev/null || true)"
 
 chmod +x .githooks/pre-push
-chmod +x devops/pre_push.sh
+chmod +x singlebox/ci/pre_push.sh
 chmod +x singlebox/ci/check_secrets.py
 chmod +x singlebox/ci/python_sast_local.sh
 chmod +x singlebox/ci/singlebox_coverage.sh

@@ -47,7 +47,7 @@ def _map_session(
 ) -> Session:
     """Engine session dict → public :class:`Session`.
 
-    Source: ``_session_to_dict`` in ``src/engine/.../api/session/router.py``.
+    Source: ``_session_to_dict`` in ``engine/adapter/.../api/session/router.py``.
     ``user_id`` is dropped (it is the caller) and ``ext_info`` is dropped
     (engine-specific opaque payload with no public contract).
     """

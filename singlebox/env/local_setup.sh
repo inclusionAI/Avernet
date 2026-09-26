@@ -21,7 +21,7 @@ die() {
 
 show_help() {
   cat <<'EOF'
-Usage: ./scripts/local_setup.sh [OPTIONS] [COMMAND] [SERVICE|GROUP]
+Usage: ./singlebox/singlebox.sh [OPTIONS] [COMMAND] [SERVICE|GROUP]
 
 Deprecated compatibility wrapper.
 
@@ -30,16 +30,16 @@ only forwards open-source local workflows and intentionally does not support the
 old internal dev setup.
 
 Common replacements:
-  ./scripts/local_setup.sh check
+  ./singlebox/singlebox.sh check
     -> ./singlebox/singlebox.sh check
 
-  ./scripts/local_setup.sh start bcs
+  ./singlebox/singlebox.sh start bcs
     -> ./singlebox/singlebox.sh --bcs-env local start bcs
 
-  ./scripts/local_setup.sh start bcs_frontend
+  ./singlebox/singlebox.sh start bcs_frontend
     -> ./singlebox/singlebox.sh --bcs-env local start bcs_frontend
 
-  ./scripts/local_setup.sh status
+  ./singlebox/singlebox.sh status
     -> ./singlebox/singlebox.sh status
 
 Unsupported legacy options:
@@ -80,7 +80,7 @@ main() {
 
   reject_internal_dev_mode "$@"
 
-  warn "scripts/local_setup.sh is deprecated; forwarding to scripts/singlebox.sh"
+  warn "singlebox/env/local_setup.sh is deprecated; forwarding to singlebox/singlebox.sh"
   local args=()
   local arg
   for arg in "$@"; do

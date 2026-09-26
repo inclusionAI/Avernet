@@ -147,7 +147,7 @@ def _create_feature_on_remote_target(
 
     _git(developer, "fetch", "origin", target_sha)
     _git(developer, "switch", "-c", "feature", target_sha)
-    _write(developer, "src/bcs/feature.txt", "intended BCS change\n")
+    _write(developer, "apps/bcs/feature.txt", "intended BCS change\n")
     _git(developer, "add", ".")
     _git(developer, "commit", "-m", "change only BCS")
     return _git(developer, "rev-parse", "HEAD")
@@ -305,7 +305,7 @@ class PrePushHookTest(unittest.TestCase):
             remote, publisher, developer = _create_repositories(root)
             stale_target_sha = _git(developer, "rev-parse", "origin/dev")
 
-            _write(publisher, "src/engine/target.txt", "target-only engine change\n")
+            _write(publisher, "engine/adapter/target.txt", "target-only engine change\n")
             _git(publisher, "add", ".")
             _git(publisher, "commit", "-m", "advance dev with engine")
             fresh_target_sha = _git(publisher, "rev-parse", "HEAD")
@@ -324,7 +324,7 @@ class PrePushHookTest(unittest.TestCase):
             )
 
             _git(developer, "switch", "-c", "feature", "rebase-target")
-            _write(developer, "src/bcs/feature.txt", "intended BCS change\n")
+            _write(developer, "apps/bcs/feature.txt", "intended BCS change\n")
             _git(developer, "add", ".")
             _git(developer, "commit", "-m", "change only BCS")
             feature_sha = _git(developer, "rev-parse", "HEAD")
@@ -332,8 +332,8 @@ class PrePushHookTest(unittest.TestCase):
             hook = _install_test_hook(developer)
             result = _invoke_hook(developer, remote, hook, feature_sha)
 
-            self.assertIn("src/bcs/feature.txt", result.stdout)
-            self.assertNotIn("src/engine/target.txt", result.stdout)
+            self.assertIn("apps/bcs/feature.txt", result.stdout)
+            self.assertNotIn("engine/adapter/target.txt", result.stdout)
 
     def test_uses_git_config_merge_target_when_environment_is_unset(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -356,7 +356,7 @@ class PrePushHookTest(unittest.TestCase):
             result = _invoke_hook(developer, remote, hook, feature_sha)
 
             self.assertIn("merge target: origin/release", result.stdout)
-            self.assertIn("src/bcs/feature.txt", result.stdout)
+            self.assertIn("apps/bcs/feature.txt", result.stdout)
             self.assertNotIn("apps/baas/target.txt", result.stdout)
 
     def test_environment_merge_target_overrides_git_config(self) -> None:
@@ -367,7 +367,7 @@ class PrePushHookTest(unittest.TestCase):
                 publisher,
                 developer,
                 target_branch="release",
-                target_path="src/engine/target.txt",
+                target_path="engine/adapter/target.txt",
             )
             _git(
                 developer,
@@ -388,15 +388,15 @@ class PrePushHookTest(unittest.TestCase):
             )
 
             self.assertIn("merge target: origin/release", result.stdout)
-            self.assertIn("src/bcs/feature.txt", result.stdout)
-            self.assertNotIn("src/engine/target.txt", result.stdout)
+            self.assertIn("apps/bcs/feature.txt", result.stdout)
+            self.assertNotIn("engine/adapter/target.txt", result.stdout)
 
     def test_missing_configured_target_rejects_push_without_dispatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             remote, _, developer = _create_repositories(root)
             _git(developer, "switch", "-c", "feature")
-            _write(developer, "src/bcs/feature.txt", "intended BCS change\n")
+            _write(developer, "apps/bcs/feature.txt", "intended BCS change\n")
             _git(developer, "add", ".")
             _git(developer, "commit", "-m", "change only BCS")
             feature_sha = _git(developer, "rev-parse", "HEAD")
@@ -422,7 +422,7 @@ class PrePushHookTest(unittest.TestCase):
             root = Path(temporary_directory)
             remote, _, developer = _create_repositories(root)
             _git(developer, "switch", "-c", "feature")
-            _write(developer, "src/bcs/feature.txt", "intended BCS change\n")
+            _write(developer, "apps/bcs/feature.txt", "intended BCS change\n")
             _git(developer, "add", ".")
             _git(developer, "commit", "-m", "change only BCS")
             feature_sha = _git(developer, "rev-parse", "HEAD")
@@ -454,7 +454,7 @@ class PrePushHookTest(unittest.TestCase):
             _git(publisher, "push", "origin", "unrelated")
 
             _git(developer, "switch", "-c", "feature")
-            _write(developer, "src/bcs/feature.txt", "intended BCS change\n")
+            _write(developer, "apps/bcs/feature.txt", "intended BCS change\n")
             _git(developer, "add", ".")
             _git(developer, "commit", "-m", "change only BCS")
             feature_sha = _git(developer, "rev-parse", "HEAD")
@@ -504,7 +504,11 @@ class PrePushHookTest(unittest.TestCase):
 
     def test_agent_docs_define_the_pre_push_target_contract(self) -> None:
         agents = AGENTS_PATH.read_text(encoding="utf-8")
-        claude = CLAUDE_PATH.read_text(encoding="utf-8")
+        # The community submodule owns AGENTS.md; CLAUDE.md is a monorepo-level
+        # doc that lives in the parent ocb checkout, not here. Assert it only
+        # when the submodule carries its own copy.
+        if CLAUDE_PATH.exists():
+            claude = CLAUDE_PATH.read_text(encoding="utf-8")
 
         for expected in (
             "origin/dev",
@@ -513,18 +517,19 @@ class PrePushHookTest(unittest.TestCase):
             "merge-base",
             "apps/backend/",
             "apps/baas/",
-            "src/engine/",
-            "src/bcs/",
+            "engine/adapter/",
+            "apps/bcs/",
             "apps/frontend/",
         ):
             self.assertIn(expected, agents)
-        for expected in (
-            "origin/dev",
-            "AVERNET_PRE_PUSH_MERGE_TARGET",
-            "avernet.prePush.mergeTarget",
-            "AGENTS.md",
-        ):
-            self.assertIn(expected, claude)
+        if CLAUDE_PATH.exists():
+            for expected in (
+                "origin/dev",
+                "AVERNET_PRE_PUSH_MERGE_TARGET",
+                "avernet.prePush.mergeTarget",
+                "AGENTS.md",
+            ):
+                self.assertIn(expected, claude)
 
 
 if __name__ == "__main__":

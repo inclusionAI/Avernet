@@ -20,7 +20,7 @@ check_no_private_domains() {
     "${ROOT}/singlebox/modules/demo_bot.sh"
     "${ROOT}/singlebox/modules/frontend.sh"
     "${ROOT}/singlebox/modules/gateway.sh"
-    "${ROOT}/apps/frontend/frontend_sprint_branch.sh"
+    "${ROOT}/singlebox/apps/frontend/frontend_sprint_branch.sh"
   )
 
   if grep -nE "$private_domain_pattern" "${files[@]}"; then

@@ -188,7 +188,7 @@ if echo "$FEATURES_RESULT" | grep -q '"error"'; then
     echo ""
     bold "Tests skipped due to connection failure."
     bold "To run these tests, start engine + relay first:"
-    bold "  cd src/engine && ./scripts/run.sh --port 20003 -l"
+    bold "  cd engine/adapter && ./scripts/run.sh --port 20003 -l"
     exit 0
 fi
 

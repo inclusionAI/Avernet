@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/demo_bot.sh — Default singlebox backend-created demo bot
+# singlebox/modules/demo_bot.sh — Default singlebox backend-created demo bot
 [[ -n "${_DEMO_BOT_SH_LOADED:-}" ]] && return 0
 _DEMO_BOT_SH_LOADED=1
 

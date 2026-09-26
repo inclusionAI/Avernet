@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/engine.sh — OpenClawEnterprise engine adapter module
+# singlebox/modules/engine.sh — OpenClawEnterprise engine adapter module
 [[ -n "${_ENGINE_SH_LOADED:-}" ]] && return 0
 _ENGINE_SH_LOADED=1
 

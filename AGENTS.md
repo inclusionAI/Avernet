@@ -50,7 +50,7 @@ ocb/
 | Module | Directory | Responsibility |
 | --- | --- | --- |
 | Frontend | `apps/frontend/` | Web workbench UI |
-| BCS | `src/bcs/` | Bot coordination, group chat, routing |
+| BCS | `apps/bcs/` | Bot coordination, group chat, routing |
 
 
 Entity ownership:
@@ -177,10 +177,10 @@ By default the pre-push hook runs in **lint-only** mode: for changed Python
 modules it runs the fast `python_sast_local.sh` SAST/lint gate, but skips the
 heavier unit tests, changed-line coverage, and Singlebox E2E. Set
 `OCB_PRE_PUSH_RUN_CI=1` to run the full gates for a push, or run
-`scripts/ci/pre_push.sh` manually. The module-gate table below describes the
+`singlebox/ci/pre_push.sh` manually. The module-gate table below describes the
 full behavior; in lint-only mode only the SAST/lint step of each Python module
 runs, and modules without a standalone lint step (`apps/gateway`, `apps/frontend`,
-`src/bcs`, and the singlebox coverage paths) run nothing.
+`apps/bcs`, and the singlebox coverage paths) run nothing.
 
 ```bash
 OCB_PRE_PUSH_RUN_CI=1 git push
@@ -219,8 +219,8 @@ Module gates are selected from the committed files in the resulting diff:
 | --- | --- |
 | `apps/backend/` | Backend SAST, unit tests, changed-line coverage, and singlebox coverage |
 | `apps/baas/` | BaaS SAST, unit tests, changed-line coverage, and singlebox coverage |
-| `src/engine/` | Engine SAST, unit tests, and changed-line coverage |
-| `src/bcs/` | BCS/BCN unit tests in fast-fail mode, then unified singlebox coverage with BCS user-story E2E |
+| `engine/adapter/` | Engine SAST, unit tests, and changed-line coverage |
+| `apps/bcs/` | BCS/BCN unit tests in fast-fail mode, then unified singlebox coverage with BCS user-story E2E |
 | `apps/frontend/` | Frontend CI |
 | `apps/proxy/` | sandbox-proxy lint, unit tests, and changed-line coverage |
 | singlebox scripts and Backend/BaaS acceptance or E2E paths | singlebox coverage |
@@ -228,12 +228,12 @@ Module gates are selected from the committed files in the resulting diff:
 The hook only checks committed changes in the pushed ref. Uncommitted working
 tree changes are outside the natural boundary of a pre-push hook.
 
-The unified `scripts/ci/singlebox_coverage.sh` starts one standalone product
+The unified `singlebox/ci/singlebox_coverage.sh` starts one standalone product
 stack and reuses it for Backend acceptance and BCS user-story E2E. BCS runs as
 an LLVM-instrumented server; the gate requires all BCS E2E stories to pass,
 runtime line coverage of at least 40%, method coverage of at least 36%, and
 100% HTTP endpoint and bcs-cli leaf-command coverage. Its canonical artifacts
-are copied to `scripts/.dependencies/coverage/singlebox/reports/bcs/` and are
+are copied to `singlebox/.dependencies/coverage/singlebox/reports/bcs/` and are
 included in `summary.json`, `summary.md`, and `dashboard.html`. Keep pre-push
 and `.github/workflows/singlebox-coverage.yml` pointed at this same entrypoint,
 then run `verify_singlebox_coverage_artifacts.py` against the generated report
@@ -241,8 +241,8 @@ directory so local pushes and GitHub PRs enforce the same artifact baseline.
 
 ### Singlebox Coverage Details
 
-`scripts/ci/singlebox_coverage.sh` reads
-`scripts/ci/singlebox_coverage_modules.yaml`. With no `--module` arguments it
+`singlebox/ci/singlebox_coverage.sh` reads
+`singlebox/ci/singlebox_coverage_modules.yaml`. With no `--module` arguments it
 runs every registered module; focused diagnosis can select one or more modules
 with repeated `--module <name>` arguments. The runner starts one standalone
 product stack, shares it across Backend acceptance stories and BCS user-story
@@ -250,7 +250,7 @@ E2E, then calculates the Core, Router API, and Plugin API denominators declared
 by each module.
 
 The per-module non-regression results and the shared-stack evidence are written
-to `scripts/.dependencies/coverage/singlebox/reports/`: `summary.json`,
+to `singlebox/.dependencies/coverage/singlebox/reports/`: `summary.json`,
 `summary.md`, `dashboard.html`, acceptance JUnit/logs, Backend and BaaS
 coverage reports, plus the copied BCS reports under `bcs/`. GitHub's
 `singlebox-coverage-artifacts` artifact uploads that same directory. The
@@ -259,7 +259,7 @@ runner, so local pre-push and PR CI enforce the same result.
 
 When adding a module, add meaningful live acceptance stories, declare the
 complete Core/Router/Plugin denominators in
-`scripts/ci/singlebox_coverage_modules.yaml`, establish thresholds from a
+`singlebox/ci/singlebox_coverage_modules.yaml`, establish thresholds from a
 fresh focused run, then run the default all-module gate to catch shared-stack
 interference. Do not inflate a result by excluding production Core paths or by
 adding test-only calls to domain logic.
@@ -305,7 +305,7 @@ Choose tests based on risk:
 - Contract change: update and run the relevant conformance tests.
 - Cross-module behavior change: run all affected module tests.
 - Architecture boundary change: run the architecture tests and update docs.
-- BCS Rust changes: read `src/bcs/AGENTS.md` first, then run the relevant Cargo
+- BCS Rust changes: read `apps/bcs/AGENTS.md` first, then run the relevant Cargo
   tests.
 
 If you cannot run a required test, state exactly what was not run and why.
@@ -317,7 +317,7 @@ If you cannot run a required test, state exactly what was not run and why.
 uv sync
 
 # BCS
-cd src/bcs
+cd apps/bcs
 cargo test --workspace
 ```
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/bcs_baas_provider.sh — local BCS Provider for merchant Claude bot
+# singlebox/modules/bcs_baas_provider.sh — local BCS Provider for merchant Claude bot
 [[ -n "${_BCS_BAAS_PROVIDER_SH_LOADED:-}" ]] && return 0
 _BCS_BAAS_PROVIDER_SH_LOADED=1
 

@@ -13,7 +13,7 @@ from pathlib import Path
 
 TOOL_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[4]
-PLUGIN_DIR = REPO_ROOT / "src/bcs/crates/plugins/openclaw-channel-bcn"
+PLUGIN_DIR = REPO_ROOT / "apps/bcs/crates/plugins/openclaw-channel-bcn"
 sys.path.insert(0, str(TOOL_DIR))
 
 from discover_versions import discover, select_versions  # noqa: E402

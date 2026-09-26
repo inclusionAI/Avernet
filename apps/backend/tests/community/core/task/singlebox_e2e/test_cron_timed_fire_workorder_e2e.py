@@ -14,7 +14,7 @@ gated by ``SINGLEBOX_CRON_E2E=1``。工单事件阶段需额外设置
   .venv/bin/python -m pytest \
     tests/community/core/task/singlebox_e2e/test_cron_timed_fire_workorder_e2e.py -s
 
-后端需用同一个签名 key 启动（dev 默认值见 ``scripts/modules/backend.sh``）::
+后端需用同一个签名 key 启动（dev 默认值见 ``singlebox/modules/backend.sh``）::
 
   AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="avernet-dev-signing-key-NOT-FOR-PROD" \
     ./singlebox/singlebox.sh restart backend
@@ -72,7 +72,7 @@ _FIRE_WAIT_S = 120
 # 工单事件通知配置
 # ---------------------------------------------------------------------------
 
-# dev 默认签名 key —— 与 scripts/modules/backend.sh 中
+# dev 默认签名 key —— 与 singlebox/modules/backend.sh 中
 # AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE 的默认值保持一致。
 _DEV_SIGNING_KEY = "avernet-dev-signing-key-NOT-FOR-PROD"
 

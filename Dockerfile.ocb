@@ -71,34 +71,34 @@ COPY . .
 
 # start_bcs_bots.sh is authored for BSD sed on macOS; patch the copied image
 # file so the same local 5bot path runs on GNU sed in Debian.
-RUN find scripts src/bcs/scripts -name '*.sh' -exec chmod +x {} + \
-    && perl -0pi -e "s/sed -i '' -e/sed -i -e/g" src/bcs/scripts/start_bcs_bots.sh
+RUN find scripts apps/bcs/scripts -name '*.sh' -exec chmod +x {} + \
+    && perl -0pi -e "s/sed -i '' -e/sed -i -e/g" apps/bcs/scripts/start_bcs_bots.sh
 
 RUN mkdir -p /tmp/bcs-panel-asset \
-    && cp -R src/bcs/assets/panel/. /tmp/bcs-panel-asset/ \
+    && cp -R apps/bcs/assets/panel/. /tmp/bcs-panel-asset/ \
     && cd /tmp/bcs-panel-asset \
     && HUSKY=0 npm ci \
     && npm run build \
-    && rm -rf /opt/ocb/src/bcs/assets/panel/dist /opt/ocb/src/bcs/assets/panel/node_modules \
-    && cp -R dist /opt/ocb/src/bcs/assets/panel/
+    && rm -rf /opt/ocb/apps/bcs/assets/panel/dist /opt/ocb/apps/bcs/assets/panel/node_modules \
+    && cp -R dist /opt/ocb/apps/bcs/assets/panel/
 
-RUN cargo build --manifest-path src/bcs/Cargo.toml --package bcs --package bcs-cli --package bcs-admin \
-    && find src/bcs/target/debug -mindepth 1 -maxdepth 1 \
+RUN cargo build --manifest-path apps/bcs/Cargo.toml --package bcs --package bcs-cli --package bcs-admin \
+    && find apps/bcs/target/debug -mindepth 1 -maxdepth 1 \
         ! -name bcs \
         ! -name bcs-cli \
         ! -name bcs-admin \
         -exec rm -rf {} +
 
 RUN mkdir -p /tmp/openclaw-channel-bcn \
-    && cp -R src/bcs/crates/plugins/openclaw-channel-bcn/. /tmp/openclaw-channel-bcn/ \
+    && cp -R apps/bcs/crates/plugins/openclaw-channel-bcn/. /tmp/openclaw-channel-bcn/ \
     && cd /tmp/openclaw-channel-bcn \
     && npm install \
     && npm run build \
     && npm prune --omit=dev \
-    && rm -rf /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn/dist /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn/node_modules \
-    && cp -R dist node_modules /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn/ \
+    && rm -rf /opt/ocb/apps/bcs/crates/plugins/openclaw-channel-bcn/dist /opt/ocb/apps/bcs/crates/plugins/openclaw-channel-bcn/node_modules \
+    && cp -R dist node_modules /opt/ocb/apps/bcs/crates/plugins/openclaw-channel-bcn/ \
     && mkdir -p /root/.openclaw/extensions \
-    && ln -sfn /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
+    && ln -sfn /opt/ocb/apps/bcs/crates/plugins/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
 
 RUN cd apps/frontend \
     && HUSKY=0 npm ci \
@@ -139,10 +139,10 @@ RUN if [ "${USE_CN_MIRROR}" = "1" ]; then npm config set registry "https://regis
 
 COPY --from=builder /opt/ocb /opt/ocb
 
-RUN mkdir -p /opt/ocb/scripts/.dependencies/logs /opt/ocb/scripts/.dependencies/data
+RUN mkdir -p /opt/ocb/singlebox/.dependencies/logs /opt/ocb/singlebox/.dependencies/data
 
 RUN mkdir -p /root/.openclaw/extensions \
-    && ln -sfn /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
+    && ln -sfn /opt/ocb/apps/bcs/crates/plugins/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
 
 COPY docker/ocb-frontend-server.js /usr/local/bin/ocb-frontend-server
 COPY docker/ocb-entrypoint.sh /usr/local/bin/ocb-entrypoint

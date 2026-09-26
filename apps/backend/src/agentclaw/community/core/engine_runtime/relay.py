@@ -73,7 +73,7 @@ from agentclaw.community.core.engine_runtime.engine_runtime_service_protocol imp
 logger = get_logger()
 
 #: The engine answers 501 for a capability it does not declare
-#: (``src/engine/.../api/caps.py``). That is the one upstream status with a
+#: (``engine/adapter/.../api/caps.py``). That is the one upstream status with a
 #: distinct public meaning, so it gets its own error rather than folding into
 #: the generic upstream failure.
 _CAPABILITY_UNSUPPORTED_STATUS = 501
@@ -352,7 +352,7 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         ``enveloped`` declares whether this engine route answers with the
         standard ``{success, data, …}`` envelope. Almost all do — but
         ``GET /api/engine/status`` returns ``EngineManager.status()`` **raw**
-        (``src/engine/.../api/engine/router.py``), with no ``success`` and no
+        (``engine/adapter/.../api/engine/router.py``), with no ``success`` and no
         ``data`` wrapper. Callers of those routes pass ``enveloped=False`` and
         the whole body becomes the payload. It is an explicit per-route fact
         rather than sniffing for a ``success`` key, because a body that happens

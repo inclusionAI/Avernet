@@ -55,7 +55,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/inclusionAI/Avernet.git",
-    "directory": "src/bcs/crates/plugins/openclaw-channel-bcn"
+    "directory": "apps/bcs/crates/plugins/openclaw-channel-bcn"
   },
   "license": "MIT",
   "publishConfig": {

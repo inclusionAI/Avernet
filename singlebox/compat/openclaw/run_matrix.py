@@ -117,7 +117,7 @@ def clear_selected_results(results_dir: Path, versions: list[str]) -> None:
 def parse_args() -> argparse.Namespace:
     repo_root = repository_root()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plugin-dir", type=Path, default=repo_root / "src/bcs/crates/plugins/openclaw-channel-bcn")
+    parser.add_argument("--plugin-dir", type=Path, default=repo_root / "apps/bcs/crates/plugins/openclaw-channel-bcn")
     parser.add_argument(
         "--output-dir",
         type=Path,

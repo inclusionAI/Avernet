@@ -155,7 +155,7 @@ def test_model_discovery_found_something():
 # document external tenants read. Rationale therefore belongs in `#` comments.
 # These markers are things that leaked once and must not again.
 _FORBIDDEN_IN_PUBLISHED_TEXT = (
-    "src/engine",          # internal source paths
+    "engine/adapter",      # internal source paths
     "singlebox",           # deployment tiers
     "OCB",                 # internal component names
     "teamclaw",

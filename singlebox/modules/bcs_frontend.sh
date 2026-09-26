@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/bcs_frontend.sh — Composite module: BCS + frontend with LOCAL_MODE handling
+# singlebox/modules/bcs_frontend.sh — Composite module: BCS + frontend with LOCAL_MODE handling
 [[ -n "${_BCS_FRONTEND_SH_LOADED:-}" ]] && return 0
 _BCS_FRONTEND_SH_LOADED=1
 

@@ -4,7 +4,7 @@ workspace="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 skills_root="${CLAWEVOLVE_SKILLS_ROOT:-$(cd "${workspace}/../clawweb-skills/clawevolve-skills" && pwd -P)}"
 if [[ "$#" != 2 || "$1" != "--config" ]]; then
   echo "Usage: bash $0 --config /absolute/path/singlebox.local.yaml" >&2
-  echo "Start Avernet with its existing scripts/singlebox.sh first; this command starts ClawWeb only." >&2
+  echo "Start Avernet with its existing singlebox/singlebox.sh first; this command starts ClawWeb only." >&2
   exit 2
 fi
 [[ -f "$2" ]] || { echo "Config not found: $2 (create it from configs/singlebox.example.yaml first)" >&2; exit 1; }

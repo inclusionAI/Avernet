@@ -21,7 +21,7 @@ from agentclaw.community.plugins.community.publish_ignore_runtime import HttpPub
 @pytest.fixture
 def contract(tmp_path, monkeypatch):
     repository = Path(__file__).resolve().parents[6]
-    monkeypatch.syspath_prepend(str(repository / "src/engine/src"))
+    monkeypatch.syspath_prepend(str(repository / "engine/adapter/src"))
     from engine.community.api.bot.router import router
     from engine.community.di.publish_ignore_config import PublishIgnoreModule
     from engine.community.plugins import publish_ignore

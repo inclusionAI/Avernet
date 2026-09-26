@@ -101,7 +101,7 @@ def test_every_published_enum_documents_its_members():
 # The base list mirrors the engine-runtime gate; the additions are markers that
 # leaked from the other groups before this gate existed.
 _FORBIDDEN_IN_PUBLISHED_TEXT = (
-    "src/engine",          # internal source paths
+    "engine/adapter",      # internal source paths
     "singlebox",           # deployment tiers
     "OCB",                 # internal component names
     "teamclaw",
