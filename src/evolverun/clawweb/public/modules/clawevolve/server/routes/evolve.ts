@@ -3645,13 +3645,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         const core = coreByStep.get(step.stepId);
         return { ...step, coreImplementation: core ? {
           stage: step.stepType, mode: "replace", implementationId: core.implementationId,
-          displayName: core.displayName ?? implementations.get(core.implementationId)?.display_name ?? null,
+          displayName: implementations.get(core.implementationId)?.display_name ?? core.displayName ?? null,
         } : null, stageExtension: step.stepType === "stage_extension" && run ? {
           stage: run.stage_key,
           mode: run.extension_mode,
           implementationId: run.implementation_id,
-          displayName: (frozen?.implementationId === run.implementation_id ? frozen.displayName : undefined)
-            ?? implementations.get(run.implementation_id)?.display_name ?? null,
+          displayName: implementations.get(run.implementation_id)?.display_name
+            ?? (frozen?.implementationId === run.implementation_id ? frozen.displayName : undefined) ?? null,
         } : null };
       }),
       interactions: stageSkillRepo ? (await stageSkillRepo.listInteractions(task.task_id)).map((item) => ({

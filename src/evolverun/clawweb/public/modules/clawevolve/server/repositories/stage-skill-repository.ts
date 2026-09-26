@@ -99,6 +99,24 @@ export class StageSkillRepository {
     );
   }
 
+  async renameDevelopment(stageSkillId: string, ownerUserId: string, displayName: string): Promise<StageDevelopmentRow | null> {
+    return this.db.transaction(async (tx) => {
+      const repo = new StageSkillRepository(tx);
+      const row = await repo.findDevelopment(stageSkillId);
+      if (!row || row.owner_user_id !== ownerUserId) return null;
+      const now = tx.dialect.now();
+      await tx.exec(
+        "UPDATE ce_stage_developments SET display_name = ?, gmt_modified = ? WHERE id = ? AND owner_user_id = ?",
+        [displayName, now, stageSkillId, ownerUserId],
+      );
+      await tx.exec(
+        "UPDATE ce_stage_skill_implementations SET display_name = ?, gmt_modified = ? WHERE stage_skill_id = ? AND owner_user_id = ?",
+        [displayName, now, stageSkillId, ownerUserId],
+      );
+      return repo.findDevelopment(stageSkillId);
+    });
+  }
+
   async deleteDraft(stageSkillId: string, ownerUserId: string): Promise<boolean> {
     if (!/^[1-9][0-9]*$/.test(stageSkillId)) return false;
     const result = await this.db.exec(

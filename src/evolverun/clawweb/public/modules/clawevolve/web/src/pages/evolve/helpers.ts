@@ -122,10 +122,19 @@ export function formatStepTime(value: number | string | null | undefined): strin
   return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
 }
 
+function timestampSeconds(value: number | string | null | undefined): number | null {
+  if (value == null) return null
+  const seconds = typeof value === 'number'
+    ? (value < 10_000_000_000 ? value : value / 1000)
+    : new Date(value).getTime() / 1000
+  return Number.isFinite(seconds) ? Math.floor(seconds) : null
+}
+
 export function stepDuration(step: EvolveStep): string {
-  const start = step.startedAt ?? (typeof step.gmtCreate === 'number' ? step.gmtCreate : Math.floor(new Date(step.gmtCreate).getTime() / 1000))
-  if (!start || Number.isNaN(start)) return '等待启动'
-  const end = step.completedAt ?? Math.floor(Date.now() / 1000)
+  const start = timestampSeconds(step.startedAt ?? step.gmtCreate)
+  if (start == null) return '等待启动'
+  const end = step.completedAt == null ? Math.floor(Date.now() / 1000) : timestampSeconds(step.completedAt)
+  if (end == null) return '—'
   const seconds = Math.max(0, end - start)
   if (seconds < 60) return `${seconds}s`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`

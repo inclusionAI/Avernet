@@ -145,3 +145,16 @@ it('keeps each native hardening feedback round and its own results selectable', 
     expect(inspector.textContent).not.toContain(`round-${round === 3 ? 1 : round + 1}.md`)
   }
 })
+
+
+it('renders database ISO timestamps as elapsed time on custom Stage cards', async () => {
+  const value = task([{ ...extension('PRE', 'diagnose', 'preprocess', 'succeeded', 1),
+    startedAt: '2026-09-26T01:00:00.000Z', completedAt: '2026-09-26T02:05:30.000Z',
+    gmtCreate: '2026-09-26T01:00:00.000Z',
+  } as unknown as EvolveStep]);
+  await renderTask(value);
+  const workflow = screen.getByRole('heading', { name: '进化工作流' }).closest('section')!;
+  const card = within(workflow).getByRole('button', { name: /诊断范围确认.*自定义/ });
+  expect(within(card).getByText('1h 5m')).toBeTruthy();
+  expect(workflow.textContent).not.toContain('NaN');
+});

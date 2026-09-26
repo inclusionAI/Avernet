@@ -49,6 +49,32 @@ async function setup() {
 }
 
 describe("independent Stage development record", () => {
+  it("renames an owned Stage and its versions without changing packages or registration", async () => {
+    const test = await setup(); const draft = await test.create();
+    const original = await (await test.upload(draft.stageSkillId)).json();
+    await test.repo.updateIntegrationTest(original.implementationId, "TEST", "test_passed");
+    await test.repo.registerImplementation(original.implementationId);
+    const before = await test.repo.findImplementation(original.implementationId);
+    const rename = (displayName: unknown, owner = "owner") => test.request(`/stage-developments/${draft.stageSkillId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ displayName }),
+    }, owner);
+    expect((await rename("Renamed Stage", "other")).status).toBe(404);
+    for (const invalid of ["", "   ", 17, "x".repeat(256)]) expect((await rename(invalid)).status).toBe(400);
+    const unsupported = await test.request(`/stage-developments/${draft.stageSkillId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayName: "Skill hardening", stage: "optimize" }),
+    });
+    expect(unsupported.status).toBe(400);
+    const response = await rename("  Skill hardening  ");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ stageSkillId: draft.stageSkillId, displayName: "Skill hardening" });
+    const after = await test.repo.findImplementation(original.implementationId);
+    expect(after).toEqual({ ...before, display_name: "Skill hardening", gmt_modified: after!.gmt_modified });
+    const next = await (await test.upload(draft.stageSkillId)).json();
+    expect(next.displayName).toBe("Skill hardening");
+    expect(next.version).toBe("v2");
+  });
+
   it("freezes the new Plan business contract from the owned development without upgrading old versions", async () => {
     const test = await setup();
     for (const flow of ["skill_evolution", "bot_evolution"]) {

@@ -76,7 +76,7 @@ async function detail(id = taskId) {
 }
 
 describe("GET task step Stage extension projection (real repositories)", () => {
-  it("maps every pre/post Step across rounds to its own run, independently of insertion order", async () => {
+  it("uses current display names while preserving frozen pre/post execution selections across rounds", async () => {
     await seedTask({
       diagnose: {
         preprocess: { enabled: true, implementationId: "diag-pre", displayName: "Frozen diagnose pre" },
@@ -109,16 +109,19 @@ describe("GET task step Stage extension projection (real repositories)", () => {
       if ("implementation" in step) await seedRun(step.stepId, step.implementation, step.stage, step.mode);
     }
     const response = await detail();
+    expect(response.config).toMatchObject({ stageExtensions: {
+      diagnose: { preprocess: { implementationId: "diag-pre", displayName: "Frozen diagnose pre" } },
+    } });
     expect(response.steps.map(step => ({ stepId: step.stepId, round: step.roundNo, stageExtension: step.stageExtension }))).toEqual([
-      { stepId: "D-PRE", round: null, stageExtension: { stage: "diagnose", mode: "preprocess", implementationId: "diag-pre", displayName: "Frozen diagnose pre" } },
+      { stepId: "D-PRE", round: null, stageExtension: { stage: "diagnose", mode: "preprocess", implementationId: "diag-pre", displayName: "Live renamed diag-pre" } },
       { stepId: "DIAGNOSE", round: null, stageExtension: null },
-      { stepId: "D-POST", round: null, stageExtension: { stage: "diagnose", mode: "postprocess", implementationId: "diag-post", displayName: "Frozen diagnose post" } },
-      { stepId: "R1-PRE", round: 1, stageExtension: { stage: "optimize", mode: "preprocess", implementationId: "opt-pre", displayName: "Frozen optimize pre" } },
+      { stepId: "D-POST", round: null, stageExtension: { stage: "diagnose", mode: "postprocess", implementationId: "diag-post", displayName: "Live renamed diag-post" } },
+      { stepId: "R1-PRE", round: 1, stageExtension: { stage: "optimize", mode: "preprocess", implementationId: "opt-pre", displayName: "Live renamed opt-pre" } },
       { stepId: "OPTIMIZE-1", round: 1, stageExtension: null },
-      { stepId: "R1-POST", round: 1, stageExtension: { stage: "optimize", mode: "postprocess", implementationId: "opt-post", displayName: "Frozen optimize post" } },
-      { stepId: "R2-PRE", round: 2, stageExtension: { stage: "optimize", mode: "preprocess", implementationId: "opt-pre", displayName: "Frozen optimize pre" } },
+      { stepId: "R1-POST", round: 1, stageExtension: { stage: "optimize", mode: "postprocess", implementationId: "opt-post", displayName: "Live renamed opt-post" } },
+      { stepId: "R2-PRE", round: 2, stageExtension: { stage: "optimize", mode: "preprocess", implementationId: "opt-pre", displayName: "Live renamed opt-pre" } },
       { stepId: "OPTIMIZE-2", round: 2, stageExtension: null },
-      { stepId: "R2-POST", round: 2, stageExtension: { stage: "optimize", mode: "postprocess", implementationId: "opt-post", displayName: "Frozen optimize post" } },
+      { stepId: "R2-POST", round: 2, stageExtension: { stage: "optimize", mode: "postprocess", implementationId: "opt-post", displayName: "Live renamed opt-post" } },
     ]);
   });
 
@@ -163,7 +166,7 @@ describe("GET task step Stage extension projection (real repositories)", () => {
     await seedRun("ROUND-1", "actual", "optimize");
     const response = await detail();
     expect(response.steps.map(step => step.stepId)).toEqual(["ROUND-1", "ROUND-2-MISSING-RUN"]);
-    expect(response.steps[0]?.stageExtension).toMatchObject({ implementationId: "actual", displayName: "Frozen name" });
+    expect(response.steps[0]?.stageExtension).toMatchObject({ implementationId: "actual", displayName: "Current implementation name" });
     expect(response.steps[1]?.stageExtension).toBeNull();
   });
 
