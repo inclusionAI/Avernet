@@ -42,6 +42,7 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalMode,
     WorkOrderBizType,
     WorkOrderDecision,
     WorkOrderApproverStatus,
@@ -84,6 +85,78 @@ def _skill_editor_requests(db) -> SkillEditorRequestRepository:
 def _work_orders(db) -> WorkOrderRepository:
     return WorkOrderRepository(db, _skill_editor_requests(db))
 
+
+def test_auto_event_is_created_pending_without_result_notice(db) -> None:
+    repository = _work_orders(db)
+    created = repository.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="friend-auto-1",
+        event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="applicant-auto",
+        approver_user_ids=["approver-auto"],
+        recipient_user_ids=["applicant-auto"],
+        title="friend request",
+        content=None,
+        apply_reason=None,
+        biz_data=json.dumps({"request_ids": ["request-auto-1"]}),
+        env="dev",
+    )
+    assert created.status.value == "PENDING"
+    with db.orm_session() as session:
+        order = session.query(WorkOrderModel).one()
+        approver = session.query(WorkOrderApproverModel).one()
+        assert order.status == WorkOrderStatus.PENDING.value
+        assert approver.status == WorkOrderApproverStatus.PENDING.value
+        assert session.query(WorkOrderNotificationModel).count() == 0
+
+
+def test_auto_finalize_only_approves_effective_reviewer(db) -> None:
+    repository = _work_orders(db)
+    created = repository.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        approval_mode=WorkOrderApprovalMode.AUTO,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="friend-auto-finalize",
+        event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="applicant-auto",
+        approver_user_ids=["first-approver", "final-approver"],
+        recipient_user_ids=["applicant-auto"],
+        title="friend request",
+        content=None,
+        apply_reason=None,
+        biz_data=json.dumps({"request_ids": ["request-auto-finalize"]}),
+        env="dev",
+    )
+    repository.claim_auto_approval(
+        work_order_id=created.work_order_id,
+        reviewer_user_id="final-approver",
+        env="dev",
+    )
+    with db.transactional_orm_session() as session:
+        session.query(WorkOrderApproverModel).filter(
+            WorkOrderApproverModel.work_order_id == created.work_order_id,
+            WorkOrderApproverModel.approver_user_id == "first-approver",
+        ).update({WorkOrderApproverModel.status: WorkOrderApproverStatus.CANCELLED.value})
+
+    repository.finalize_auto_approval(
+        work_order_id=created.work_order_id,
+        reviewer_user_id="final-approver",
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        states = {
+            item.approver_user_id: item.status
+            for item in session.query(WorkOrderApproverModel)
+            .filter(WorkOrderApproverModel.work_order_id == created.work_order_id)
+            .all()
+        }
+    assert states == {
+        "first-approver": WorkOrderApproverStatus.CANCELLED.value,
+        "final-approver": WorkOrderApproverStatus.APPROVED.value,
+    }
 
 def _space_skills(db) -> SpaceSkillRepository:
     return SpaceSkillRepository(db, _skill_editor_requests(db))

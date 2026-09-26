@@ -13,8 +13,10 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     WorkOrderEventStatus,
 )
 from agentclaw.community.api.work_order_service import WorkOrderServiceProtocol
+from agentclaw.community.core.work_orders.callbacks import WorkOrderCallbackCredential
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory as DomainNotificationCategory,
+    WorkOrderApprovalMode as DomainWorkOrderApprovalMode,
 )
 
 
@@ -23,9 +25,10 @@ def create_work_order_event_data(
     body: CreateWorkOrderEventRequest,
     actor_id: str,
     service: WorkOrderServiceProtocol,
+    callback_auth: WorkOrderCallbackCredential | None = None,
 ) -> WorkOrderEventCreated:
     """Delegate one event creation and translate its result to the HTTP DTO."""
-    result = service.create_work_order_event(
+    kwargs = dict(
         event_category=DomainNotificationCategory(body.event_category),
         biz_type=body.biz_type,
         biz_id=body.biz_id,
@@ -39,6 +42,12 @@ def create_work_order_event_data(
         biz_data=body.biz_data,
         actor_id=actor_id,
     )
+    # Keep the legacy MANUAL call shape unchanged for existing callers and
+    # mocks. AUTO is the only mode that needs the new service arguments.
+    if body.approval_mode.value != DomainWorkOrderApprovalMode.MANUAL.value:
+        kwargs["approval_mode"] = DomainWorkOrderApprovalMode(body.approval_mode)
+        kwargs["callback_auth"] = callback_auth
+    result = service.create_work_order_event(**kwargs)
     return WorkOrderEventCreated(
         event_category=result.event_category,
         work_order_id=result.work_order_id,

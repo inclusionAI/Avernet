@@ -19,7 +19,10 @@ from agentclaw.community.adapters.http.work_orders.converter import (
 )
 from agentclaw.community.api.work_order_service import WorkOrderServiceProtocol
 from agentclaw.community.core.gateway_principal import VerifiedCaller
+from agentclaw.community.core.work_orders.callbacks import WorkOrderCallbackCredential
 from agentclaw.community.di import Injected
+
+_CALLBACK_HEADER_NAMES = {"authorization", "x-avernet-principal", "x-request-id", "x-trace-id"}
 
 router = APIRouter(prefix="/api/v1/work-orders", tags=["work-orders"])
 
@@ -41,5 +44,9 @@ async def create_work_order_event_http(
         body=body,
         actor_id=caller.user_id,
         service=service,
+        callback_auth=WorkOrderCallbackCredential(headers={
+            key: value for key, value in request.headers.items()
+            if key.lower() in _CALLBACK_HEADER_NAMES
+        }),
     )
     return created(data, request)
