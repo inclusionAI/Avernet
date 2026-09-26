@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/bcs_bots.sh — Composite module: BCS server + 5 local bots
+# singlebox/modules/bcs_bots.sh — Composite module: BCS server + 5 local bots
 [[ -n "${_BCS_BOTS_SH_LOADED:-}" ]] && return 0
 _BCS_BOTS_SH_LOADED=1
 

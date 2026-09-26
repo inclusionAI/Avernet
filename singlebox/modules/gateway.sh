@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/gateway.sh — Gateway service module
+# singlebox/modules/gateway.sh — Gateway service module
 [[ -n "${_GATEWAY_SH_LOADED:-}" ]] && return 0
 _GATEWAY_SH_LOADED=1
 

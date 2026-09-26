@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/bots.sh — Local 5 OpenClaw bot gateway module
+# singlebox/modules/bots.sh — Local 5 OpenClaw bot gateway module
 [[ -n "${_BOTS_SH_LOADED:-}" ]] && return 0
 _BOTS_SH_LOADED=1
 

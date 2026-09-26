@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/baas.sh — BAAS (Bot as a Service) module
+# singlebox/modules/baas.sh — BAAS (Bot as a Service) module
 [[ -n "${_BAAS_SH_LOADED:-}" ]] && return 0
 _BAAS_SH_LOADED=1
 

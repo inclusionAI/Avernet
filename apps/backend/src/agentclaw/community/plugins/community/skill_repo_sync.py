@@ -17,7 +17,7 @@ TODO(totalfrank): FUTURE FEATURE (not a de-vendoring gap) — if a community
 deployment ever runs the engine in a *remote* runtime that can't see the host
 disk, add a community-native delivery (local dir → community ``ObjectStoragePlugin``
 tar/meta + ``ac_skill`` metadata) plus a matching engine read-path. That spans
-backend **and** ``src/engine``, so it needs its own SDD; it is out of scope for the
+backend **and** ``engine/adapter``, so it needs its own SDD; it is out of scope for the
 backend-only device/ARCA de-vendoring.
 """
 from __future__ import annotations

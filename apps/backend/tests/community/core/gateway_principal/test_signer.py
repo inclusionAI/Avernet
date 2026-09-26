@@ -3,7 +3,7 @@
 The tests mint tokens the way the gateway's ``BarePrincipalSigner`` does (via
 :func:`mint` from the verifier suite, so both files exercise one spelling of the
 contract) and then judge the re-addressed copy against **BCN's** published
-requirements — ``src/bcs/api-contracts/v1/gateway-principal/contract.md``:
+requirements — ``apps/bcs/api-contracts/v1/gateway-principal/contract.md``:
 ``alg=HS256``, ``typ=JWT``, ``kid=bare``, ``aud=bcs``, integer ``iat``/``exp``,
 a non-empty ``principals`` array.
 

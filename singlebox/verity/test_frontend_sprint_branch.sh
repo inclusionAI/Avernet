@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TOOL="${ROOT}/apps/frontend/frontend_sprint_branch.sh"
+TOOL="${ROOT}/singlebox/apps/frontend/frontend_sprint_branch.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2

@@ -14,7 +14,7 @@ fail() {
 
 make_fake_repo() {
   local tmp="$1"
-  mkdir -p "${tmp}/scripts/ci"
+  mkdir -p "${tmp}/singlebox/ci"
   mkdir -p \
     "${tmp}/apps/backend/tests/community/acceptance/devices" \
     "${tmp}/apps/backend/tests/community/acceptance/cron" \
@@ -33,7 +33,7 @@ modules:
       - tests/community/acceptance/devices
     system: backend
     core_paths:
-      - apps/agentclaw/community/core/devices/
+      - src/agentclaw/community/core/devices/
     router_api:
       items:
         - GET /api/v1/devices
@@ -51,7 +51,7 @@ modules:
       - tests/community/acceptance/cron
     system: backend
     core_paths:
-      - apps/agentclaw/community/core/cron/
+      - src/agentclaw/community/core/cron/
     router_api:
       items:
         - GET /api/cron
@@ -136,7 +136,7 @@ if [[ "${BCS_BOTS_DATA_DIR:-}" != "$expected_bot_data_dir" ]]; then
   exit 15
 fi
 printf '%s\n' "$*" >> "${PWD}/bcs-e2e.log"
-cov_dir="${PWD}/src/bcs/target/cov-e2e"
+cov_dir="${PWD}/apps/bcs/target/cov-e2e"
 [[ -f "${PWD}/fail-bcs-e2e-without-artifacts" ]] && exit 9
 mkdir -p "$cov_dir"
 cat > "$cov_dir/summary.json" <<'JSON'
@@ -154,7 +154,7 @@ fi
 [[ -f "${PWD}/fail-bcs-e2e" ]] && exit 7
 exit 0
 SH
-  chmod +x "${tmp}/src/bcs/scripts/e2e_coverage.sh"
+  chmod +x "${tmp}/apps/bcs/scripts/e2e_coverage.sh"
   mkdir -p "${tmp}/fake-bin"
   cat > "${tmp}/fake-bin/uv" <<'SH'
 #!/usr/bin/env bash

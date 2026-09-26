@@ -37,7 +37,7 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
     _git(repository, "commit", "-m", "baseline")
     base = _git(repository, "rev-parse", "HEAD")
 
-    changed = repository / "src/bcs/feature.rs"
+    changed = repository / "apps/bcs/feature.rs"
     changed.parent.mkdir(parents=True)
     changed.write_text("// BCS change\n", encoding="utf-8")
     _git(repository, "add", ".")

@@ -11,7 +11,7 @@ from agentclaw.community.plugins.local.process_manager import LocalProcessManage
 def _repo_bcn_plugin_path() -> Path | None:
     """The in-repo BCN plugin dir, or ``None`` if this tree doesn't ship it.
 
-    The ocb monorepo ships it at ``src/bcs/crates/plugins/openclaw-channel-bcn``; a
+    The ocb monorepo ships it at ``apps/bcs/crates/plugins/openclaw-channel-bcn``; a
     corp-absent staged/extracted community tree does not, so the production code
     falls back to ``~/.openclaw/extensions/...``.
     """

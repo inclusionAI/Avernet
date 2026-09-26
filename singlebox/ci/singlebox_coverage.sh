@@ -325,7 +325,7 @@ run_bcs_e2e() {
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     BCS_BOTS_DATA_DIR="$coverage_standalone_root/profiles" \
-    bash "$repo_root/src/bcs/scripts/e2e_coverage.sh" \
+    bash "$repo_root/apps/bcs/scripts/e2e_coverage.sh" \
       --skip-start \
       --bcs-line-min "$bcs_line_min" \
       --bcs-method-min "$bcs_method_min" \

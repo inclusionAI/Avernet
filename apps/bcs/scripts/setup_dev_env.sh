@@ -12,8 +12,8 @@ set -euo pipefail
 #   5. Aliyun crates.io mirror (avoids crates.io timeouts on the corp network)
 #
 # Usage:
-#   bash src/bcs/scripts/setup_dev_env.sh           # detect + install missing + configure mirror (default)
-#   bash src/bcs/scripts/setup_dev_env.sh --check   # check only, no install/no config change (read-only)
+#   bash apps/bcs/scripts/setup_dev_env.sh           # detect + install missing + configure mirror (default)
+#   bash apps/bcs/scripts/setup_dev_env.sh --check   # check only, no install/no config change (read-only)
 #
 # Idempotent: already-installed tools and configured mirror are skipped; safe to re-run.
 # Standalone (does not depend on scripts/utils.sh) so new contributors can run it right after clone.
@@ -219,6 +219,6 @@ else
   echo "Next steps:"
   echo "  build:    cd src/bcs && cargo build --workspace"
   echo "  test:     cd src/bcs && cargo nextest run --profile default --retries 0"
-  echo "  coverage: bash src/bcs/scripts/ci_test.sh --coverage"
+  echo "  coverage: bash apps/bcs/scripts/ci_test.sh --coverage"
   echo "  push (triggers pre-push gate): git push origin <branch>"
 fi

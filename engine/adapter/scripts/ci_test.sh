@@ -5,7 +5,6 @@ export UV_LINK_MODE="${UV_LINK_MODE:-copy}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 engine_dir="$(cd "$script_dir/.." && pwd)"
 repo_root="$(cd "$engine_dir/../.." && pwd)"
-ci_workspace="${CITEST_WORKSPACE:-$repo_root}"
 report_dir="$engine_dir/pytest_report"
 junit_report="$report_dir/TEST-junit.xml"
 coverage_report="$report_dir/TEST-cov.xml"
@@ -57,7 +56,7 @@ uv run --no-sync --with pytest-cov --with pytest-asyncio --with socksio pytest s
   --deselect src/engine/community/tests/di/test_profile_modules.py::TestProfileModules::test_corp_column_is_not_community_fallback \
   --deselect src/engine/community/tests/di/test_router_collection.py::test_corp_preserves_internal_production_aicoding_routes \
   --junitxml="$junit_report" \
-  --cov="$ci_workspace/src/engine/src" \
+  --cov="$engine_dir/src" \
   --cov-report="xml:$coverage_report" \
   --cov-report=term-missing
 pytest_status=$?
@@ -70,10 +69,10 @@ if [[ "$pytest_status" -ne 0 ]]; then
 fi
 
 check_args=(
-  "$repo_root/scripts/ci/report_check.py"
+  "$repo_root/singlebox/ci/report_check.py"
   --junit "$junit_report"
   --coverage "$coverage_report"
-  --source-root "$repo_root/src/engine/src"
+  --source-root "$engine_dir/src"
   --min-case-pass-rate 100
   --min-line-coverage 70
 )

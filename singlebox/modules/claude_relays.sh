@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/claude_relays.sh — one local vendored Claude Code relay
+# singlebox/modules/claude_relays.sh — one local vendored Claude Code relay
 [[ -n "${_CLAUDE_RELAYS_SH_LOADED:-}" ]] && return 0
 _CLAUDE_RELAYS_SH_LOADED=1
 

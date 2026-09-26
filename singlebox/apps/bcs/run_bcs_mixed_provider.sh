@@ -8,19 +8,19 @@
 #                            -> teamclaw-aicoding-relay
 #
 # Usage:
-#   scripts/run_bcs_mixed_provider.sh start [options]
-#   scripts/run_bcs_mixed_provider.sh stop
-#   scripts/run_bcs_mixed_provider.sh status
+#   singlebox/apps/bcs/run_bcs_mixed_provider.sh start [options]
+#   singlebox/apps/bcs/run_bcs_mixed_provider.sh stop
+#   singlebox/apps/bcs/run_bcs_mixed_provider.sh status
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENGINE_DIR="${PROJECT_ROOT}/src/engine"
-BCS_DIR="${PROJECT_ROOT}/src/bcs"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+ENGINE_DIR="${PROJECT_ROOT}/engine/adapter"
+BCS_DIR="${PROJECT_ROOT}/apps/bcs"
 BCS_CLI="${BCS_DIR}/target/debug/bcs-cli"
-BRIDGE="${PROJECT_ROOT}/src/bcs/scripts/mock_provider_bridge.py"
-SINGLEBOX="${SCRIPT_DIR}/singlebox.sh"
+BRIDGE="${BCS_DIR}/scripts/mock_provider_bridge.py"
+SINGLEBOX="${PROJECT_ROOT}/singlebox/singlebox.sh"
 DEP_DIR="${SCRIPT_DIR}/.dependencies"
 LOG_DIR="${DEP_DIR}/logs"
 STATE_DIR="${DEP_DIR}/mixed_provider"
@@ -158,7 +158,7 @@ require_dir() {
 
 preflight_setup_visibility() {
   local ext_dir="${HOME}/.openclaw/extensions"
-  local plugin_src="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
+  local plugin_src="${PROJECT_ROOT}/apps/bcs/crates/plugins/openclaw-channel-bcn"
 
   [[ "${DRY_RUN}" == "1" ]] && return 0
 
@@ -299,7 +299,7 @@ setup_bcs_and_plugin() {
 setup_bcn_plugin() {
   local extensions_dir="${HOME}/.openclaw/extensions"
   local plugin_link="${extensions_dir}/openclaw-channel-bcn"
-  local plugin_src="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
+  local plugin_src="${PROJECT_ROOT}/apps/bcs/crates/plugins/openclaw-channel-bcn"
   local tshy_self_link="${plugin_src}/src/node_modules/@alipay/openclaw-channel-bcn"
   local needs_build=0
 
@@ -350,7 +350,7 @@ start_clean_bcs() {
 }
 
 bcn_plugin_load_dir() {
-  local src="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
+  local src="${PROJECT_ROOT}/apps/bcs/crates/plugins/openclaw-channel-bcn"
   local package="${src}/package"
   if [[ -f "${package}/openclaw.plugin.json" && -f "${package}/dist/esm/index.js" ]]; then
     printf '%s\n' "${package}"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/all.sh — Group module: current all group
+# singlebox/modules/all.sh — Group module: current all group
 [[ -n "${_ALL_SH_LOADED:-}" ]] && return 0
 _ALL_SH_LOADED=1
 

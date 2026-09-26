@@ -69,7 +69,7 @@ def _hermes_cross_component_contract() -> dict:
     repo_root = Path(__file__).resolve().parents[6]
     path = (
         repo_root
-        / "src/engine/src/engine/community/core/skills/contracts"
+        / "engine/adapter/src/engine/community/core/skills/contracts"
         / "hermes_service_build_layout_v1.json"
     )
     return json.loads(path.read_text(encoding="utf-8"))

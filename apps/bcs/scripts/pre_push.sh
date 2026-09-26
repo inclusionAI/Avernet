@@ -12,7 +12,7 @@
 # opt-out flags.
 #
 # Usage:
-#   bash src/bcs/scripts/pre_push.sh --base <base> --head <head>
+#   bash apps/bcs/scripts/pre_push.sh --base <base> --head <head>
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
@@ -125,8 +125,8 @@ bcs_parallel_gates() {
 
   echo ""
   echo "== launching bcs gates in parallel =="
-  printf '  unit: src/bcs/scripts/ci_test.sh --fast-fail %s  (log: %s)\n' "${unit_cov_args[*]:-}" "$unit_log"
-  printf '  e2e:  src/bcs/scripts/e2e_coverage.sh --bcs-line-min 40 --bcs-method-min 36 --force-rebuild   (log: %s)\n' "$e2e_log"
+  printf '  unit: apps/bcs/scripts/ci_test.sh --fast-fail %s  (log: %s)\n' "${unit_cov_args[*]:-}" "$unit_log"
+  printf '  e2e:  apps/bcs/scripts/e2e_coverage.sh --bcs-line-min 40 --bcs-method-min 36 --force-rebuild   (log: %s)\n' "$e2e_log"
   echo ""
 
   _launch_tagged unit "$unit_exit" \

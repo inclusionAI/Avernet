@@ -34,7 +34,7 @@ target/
 data/
 tmp/
 temp/
-scripts/.dependencies/
+singlebox/.dependencies/
 .quickstart-openclaw/
 .openclaw-host-bcn/
 .standalone-openclaw/
@@ -48,8 +48,8 @@ test-bots/
 .env
 .env.*
 !.env.example
-src/bcs/configs/bcs-config.toml
-src/bcs/configs/bcs-config-prod.toml
+apps/bcs/configs/bcs-config.toml
+apps/bcs/configs/bcs-config-prod.toml
 *.pem
 *.key
 
@@ -79,7 +79,7 @@ docs/arch/generated/
 .codex/
 .agents/
 .mcp.json
-src/bcs/.agent
+apps/bcs/.agent
 *.claude
 *.codex
 CLAUDE.local.md
@@ -95,10 +95,10 @@ aideskdop_bcs*.json
 *.tgz
 
 # Local dependency checkouts
-src/bcs/submodules/
-src/bcs/testresult/
+apps/bcs/submodules/
+apps/bcs/testresult/
 **/pytest_report/
-src/bcs/target
+apps/bcs/target
 
 apps/bcs/submodules/
 apps/bcs/testresult/

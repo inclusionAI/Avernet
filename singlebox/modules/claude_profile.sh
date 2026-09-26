@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/claude_profile.sh — validated one-bot Claude profile input
+# singlebox/modules/claude_profile.sh — validated one-bot Claude profile input
 [[ -n "${_CLAUDE_PROFILE_SH_LOADED:-}" ]] && return 0
 _CLAUDE_PROFILE_SH_LOADED=1
 

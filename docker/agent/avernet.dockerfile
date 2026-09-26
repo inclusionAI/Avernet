@@ -38,7 +38,7 @@ FROM rust:1.91.0-bookworm AS bcs-cli-builder
 
 WORKDIR /opt/bcs
 
-COPY src/bcs/ /opt/bcs/
+COPY apps/bcs/ /opt/bcs/
 RUN cargo build --locked --release --package bcs-cli \
     && strip target/release/bcs-cli \
     && target/release/bcs-cli --help >/dev/null
@@ -95,7 +95,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     && which uv && uv --version
 
 # Build engine virtualenv from pyproject.toml.
-COPY src/engine/ /opt/engine/
+COPY engine/adapter/ /opt/engine/
 RUN uv venv --python 3 /opt/.venv \
     && UV_INDEX_URL="https://mirrors.aliyun.com/pypi/simple" \
        uv pip install --python /opt/.venv/bin/python -r /opt/engine/pyproject.toml \
@@ -107,7 +107,7 @@ RUN uv venv --python 3 /opt/.venv \
 
 # Build the vendored claude_code relay gateway (the Node WS server the engine's
 # claude_code mode connects to at ws://127.0.0.1:18900). Build command mirrors
-# scripts/modules/claude_relays.sh::claude_relays_setup (npm install --include=dev
+# singlebox/modules/claude_relays.sh::claude_relays_setup (npm install --include=dev
 # --ignore-scripts, tshy build via prepublishOnly), then prune devDeps like the
 # bcn plugin build below keeps the runtime layer lean. The repo ships no dist/;
 # it must be built here or the relay cannot run in the image.
@@ -119,7 +119,7 @@ RUN cd /opt/engine/src/engine/community/claude_code_gateway \
 
 # Build the openclaw-channel-bcn plugin (BCS WebSocket channel).
 # Mirrors Dockerfile.ocb: npm install → build → prune devDeps.
-COPY src/bcs/crates/plugins/openclaw-channel-bcn/ /tmp/openclaw-channel-bcn/
+COPY apps/bcs/crates/plugins/openclaw-channel-bcn/ /tmp/openclaw-channel-bcn/
 RUN cd /tmp/openclaw-channel-bcn \
     && npm install \
     && npm run build \
@@ -243,7 +243,7 @@ COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 # Install the source-built BCS CLI and its matching OpenClaw coordination skill.
 COPY --from=bcs-cli-builder /opt/bcs/target/release/bcs-cli /usr/local/bin/bcs-cli
-COPY src/bcs/crates/tools/bcs-cli/bcs-coordination/ /usr/local/lib/node_modules/openclaw/skills/bcs-coordination/
+COPY apps/bcs/crates/tools/bcs-cli/bcs-coordination/ /usr/local/lib/node_modules/openclaw/skills/bcs-coordination/
 RUN bcs-cli --help >/dev/null \
     && test -f /usr/local/lib/node_modules/openclaw/skills/bcs-coordination/SKILL.md
 

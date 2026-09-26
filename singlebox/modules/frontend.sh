@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/frontend.sh — Frontend service module
+# singlebox/modules/frontend.sh — Frontend service module
 [[ -n "${_FRONTEND_SH_LOADED:-}" ]] && return 0
 _FRONTEND_SH_LOADED=1
 

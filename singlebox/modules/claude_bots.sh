@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/claude_bots.sh — one Backend-created Claude Code normalCC bot
+# singlebox/modules/claude_bots.sh — one Backend-created Claude Code normalCC bot
 [[ -n "${_CLAUDE_BOTS_SH_LOADED:-}" ]] && return 0
 _CLAUDE_BOTS_SH_LOADED=1
 

@@ -140,7 +140,7 @@ def main():
     try:
         diff = subprocess.run(
             ["git", "-C", root, "diff", "--no-renames", "-U0",
-             f"{args.base_ref}", "--", "src/bcs"],
+             f"{args.base_ref}", "--", "apps/bcs"],
             check=True, capture_output=True, text=True,
         ).stdout
     except subprocess.CalledProcessError as e:
@@ -153,8 +153,8 @@ def main():
     for line in diff.splitlines():
         if line.startswith("+++ b/"):
             p = line[6:]
-            if p.startswith("src/bcs/"):
-                cur_path = p[len("src/bcs/"):]
+            if p.startswith("apps/bcs/"):
+                cur_path = p[len("apps/bcs/"):]
             else:
                 cur_path = None
             continue

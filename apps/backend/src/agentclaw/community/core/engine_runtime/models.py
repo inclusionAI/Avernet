@@ -15,7 +15,7 @@ class EngineResult:
     """One normalised engine response.
 
     The engine's own envelope is ``{success, data, message, warning, total}``
-    (``src/engine/.../api/response.py``). ``success`` is consumed by the relay —
+    (``engine/adapter/.../api/response.py``). ``success`` is consumed by the relay —
     a false value raises rather than reaching a caller — so only the three
     fields a caller can act on survive here.
 

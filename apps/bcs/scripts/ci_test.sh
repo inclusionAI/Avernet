@@ -19,8 +19,8 @@ set -euo pipefail
 # The bcs-test.aci.yml CI job calls this with --coverage (without --fast-fail,
 # runs to completion and emits a report).
 # Local manual usage:
-#   bash src/bcs/scripts/ci_test.sh --fast-fail          # gate at 100%, fail fast
-#   bash src/bcs/scripts/ci_test.sh --coverage            # run all + coverage, no gating
+#   bash apps/bcs/scripts/ci_test.sh --fast-fail          # gate at 100%, fail fast
+#   bash apps/bcs/scripts/ci_test.sh --coverage            # run all + coverage, no gating
 #
 # Enabled by default; set OCB_PRE_PUSH_ENABLE_BCS=0 to skip temporarily.
 

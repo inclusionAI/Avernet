@@ -16,7 +16,7 @@ HELPER_PATH = REPO_ROOT / "singlebox/lib/resolve_base_ref.sh"
 CI_TEST = {
     "backend": REPO_ROOT / "apps/backend/scripts/ci_test.sh",
     "baas": REPO_ROOT / "apps/baas/scripts/ci_test.sh",
-    "engine": REPO_ROOT / "src/engine/scripts/ci_test.sh",
+    "engine": REPO_ROOT / "engine/adapter/scripts/ci_test.sh",
     "gateway": REPO_ROOT / "apps/gateway/scripts/ci_test.sh",
 }
 

@@ -62,7 +62,7 @@ log = logging.getLogger("aicoding-data-proxy")
 ENGINE_URL_ENV = "AICODING_ENGINE_URL"
 
 #: Local-mode default; kept in sync with the engine adapter's bind in
-#: ``src/engine/scripts/run.sh`` (port 20003).
+#: ``engine/adapter/scripts/run.sh`` (port 20003).
 LOCAL_DEFAULT_ENGINE_URL = "http://127.0.0.1:20003"
 
 #: Headers that must be dropped before re-emitting a request — they

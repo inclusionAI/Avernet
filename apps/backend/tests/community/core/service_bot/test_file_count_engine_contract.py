@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def file_count_contract(tmp_path, monkeypatch):
     repository = Path(__file__).resolve().parents[6]
-    monkeypatch.syspath_prepend(str(repository / "src/engine/src"))
+    monkeypatch.syspath_prepend(str(repository / "engine/adapter/src"))
     from engine.community.api.file import router as file_router
     from engine.community.core.adapters.openclaw.file import OpenClawFileAdapter
     from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl

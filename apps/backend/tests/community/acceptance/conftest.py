@@ -107,7 +107,7 @@ def _engine_venv_ready() -> bool:
 
 
 def _ensure_engine_venv(env: dict[str, str]) -> None:
-    """BaaS local_proc starts engine adapter with src/engine/.venv when present.
+    """BaaS local_proc starts engine adapter with engine/adapter/.venv when present.
 
     In a clean worktree that venv may not exist; without it the adapter falls
     back to the BaaS interpreter and misses engine dependencies.
@@ -186,7 +186,7 @@ def live_baas():
         if not _wait_for_baas_healthy():
             raise RuntimeError(
                 f"baas not healthy within {BAAS_HEALTH_TIMEOUT_SEC}s; "
-                f"check scripts/.dependencies/logs/baas.log"
+                f"check singlebox/.dependencies/logs/baas.log"
             )
         yield BAAS_URL
         return
@@ -215,7 +215,7 @@ def live_baas():
         if not _wait_for_baas_healthy():
             raise RuntimeError(
                 f"baas not healthy within {BAAS_HEALTH_TIMEOUT_SEC}s; "
-                f"check scripts/.dependencies/logs/baas.log"
+                f"check singlebox/.dependencies/logs/baas.log"
             )
         yield BAAS_URL
     finally:

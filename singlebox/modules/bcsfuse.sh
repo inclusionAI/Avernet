@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/bcsfuse.sh — BCSFuse context fusion & semantic search module
+# singlebox/modules/bcsfuse.sh — BCSFuse context fusion & semantic search module
 [[ -n "${_BCSFUSE_SH_LOADED:-}" ]] && return 0
 _BCSFUSE_SH_LOADED=1
 

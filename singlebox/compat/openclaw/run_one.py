@@ -26,7 +26,7 @@ def repository_root() -> Path:
 
 
 def default_plugin_dir(repo_root: Path) -> Path:
-    return repo_root / "src/bcs/crates/plugins/openclaw-channel-bcn"
+    return repo_root / "apps/bcs/crates/plugins/openclaw-channel-bcn"
 
 
 def utc_now() -> str:

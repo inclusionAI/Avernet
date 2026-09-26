@@ -418,7 +418,7 @@ show_help() {
     echo "Mode:"
     echo "  (default)       Isolated standalone BCS + OpenClaw paths"
     echo "                  - Starts BAAS + Backend + BCS + BCSFuse + 5 bots + demo bot + frontend"
-    echo "                  - Writes BCS runtime under scripts/.dependencies/standalone"
+    echo "                  - Writes BCS runtime under singlebox/.dependencies/standalone"
     echo "                  - Writes OpenClaw profiles, workspaces, and plugin link under .standalone-openclaw"
     echo "  --standalone, -s Compatibility alias for the default mode"
     echo ""

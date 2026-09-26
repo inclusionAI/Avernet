@@ -25,7 +25,7 @@ root's** call, not this module's: ``EngineRuntimeModule`` builds the registry
 and injects it. Nothing here is process-wide state.
 
 The encoded form is the one the engine reverses in ``decode_session_key``
-(``src/engine/src/engine/community/shared/utils.py``): URL-safe base64 with the
+(``engine/adapter/src/engine/community/shared/utils.py``): URL-safe base64 with the
 padding stripped. URL-safe, because its alphabet (``A-Za-z0-9-_``) is already
 safe in a path segment — standard base64's ``/`` would split the segment in
 two — and unpadded, because that is the form the engine's decoder pads back

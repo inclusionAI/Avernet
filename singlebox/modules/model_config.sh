@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/modules/model_config.sh — Singlebox OpenClaw model config resolver
+# singlebox/modules/model_config.sh — Singlebox OpenClaw model config resolver
 [[ -n "${_MODEL_CONFIG_SH_LOADED:-}" ]] && return 0
 _MODEL_CONFIG_SH_LOADED=1
 
