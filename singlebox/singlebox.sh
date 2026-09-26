@@ -203,13 +203,13 @@ ensure_git_hooks_installed() {
         return 0
     fi
 
-    local installer="${PROJECT_ROOT}/singlebox/env/install_git_hooks.sh"
+    local installer="${PROJECT_ROOT}/devops/hook/install_git_hooks.sh"
     if [ ! -f "$installer" ]; then
         log_warn "Git hook installer not found: ${installer}"
         return 0
     fi
 
-    "$installer" --quiet || log_warn "Failed to install git hooks; run ./singlebox/env/install_git_hooks.sh manually"
+    "$installer" --quiet || log_warn "Failed to install git hooks; run ./devops/hook/install_git_hooks.sh manually"
 }
 
 # ============ 服务组展开 ============
