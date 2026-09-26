@@ -28,10 +28,22 @@ export default function SkillCenter() {
   }
 
   useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError('')
     void Promise.all([
-      loadAssets(),
+      api.evolve.listSkillAssets(),
       user?.userId ? api.bots.list({ ownerId: user.userId, status: 'all' }) : Promise.resolve({ bots: [] as DirectoryBot[] }),
-    ]).then(([, result]) => setBots(result.bots)).catch((reason) => setError(reason instanceof Error ? reason.message : '技能中心加载失败')).finally(() => setLoading(false))
+    ]).then(([result, directory]) => {
+      if (!active) return
+      setAssets(result.items)
+      setBots(directory.bots)
+    }).catch((reason) => {
+      if (active) setError(reason instanceof Error ? reason.message : '技能中心加载失败')
+    }).finally(() => {
+      if (active) setLoading(false)
+    })
+    return () => { active = false }
   }, [user?.userId])
 
   const filtered = assets.filter((asset) => [asset.name, asset.description, asset.spaceName, asset.ownerId, asset.botId, bots.find((bot) => bot.botId === asset.botId)?.botName].some((value) => value?.toLowerCase().includes(query.trim().toLowerCase())))

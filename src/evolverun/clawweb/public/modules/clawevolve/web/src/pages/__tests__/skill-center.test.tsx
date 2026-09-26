@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import SkillCenter from '../SkillCenter'
 import SkillDetail from '../SkillDetail'
@@ -9,11 +9,13 @@ import SkillEventLog from '../../components/SkillEventLog'
 
 const api = vi.hoisted(() => ({ evolve: { listSpaces: vi.fn(), listSkillAssets: vi.fn(), listSkillEvents: vi.fn(), getSkillAsset: vi.fn(), getSkillAssetHistory: vi.fn(), getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn(), createSkillVersion: vi.fn(), uploadSkillVersion: vi.fn() }, bots: { list: vi.fn() } }))
 vi.mock('../../api/client', () => ({ api }))
-vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: { userId: 'viewer' } }) }))
+const auth = vi.hoisted(() => ({ user: { userId: 'viewer' } as { userId: string } | null }))
+vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: auth.user }) }))
 const asset = { assetId: 'ASSET-1', name: 'Evidence Skill', description: 'Diagnose actual session evidence.', ownerId: 'owner', botId: 'BOT-1', skillId: '47', currentVersion: 'v2', updatedAt: 1789060000, versions: [{ versionId: 'VERSION-2', version: 'v2' }, { versionId: 'VERSION-1', version: 'v1' }] }
 function Location() { const location = useLocation(); return <output>{location.pathname}</output> }
 beforeEach(() => {
   vi.stubGlobal('React', React); vi.resetAllMocks()
+  auth.user = { userId: 'viewer' }
   api.evolve.listSpaces.mockResolvedValue({ items: [] })
   api.evolve.listSkillAssets.mockResolvedValue({ items: [asset] })
   api.bots.list.mockResolvedValue({ bots: [{ botId: 'BOT-1', botName: 'Evidence Bot' }] })
@@ -23,6 +25,20 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Skill center asset list and recorded events', () => {
+  it('keeps authenticated Bots when an earlier unauthenticated load finishes last', async () => {
+    let finishInitial!: (value: { items: typeof asset[] }) => void
+    api.evolve.listSkillAssets.mockReturnValueOnce(new Promise(resolve => { finishInitial = resolve }))
+    auth.user = null
+    const view = render(<MemoryRouter><SkillCenter /></MemoryRouter>)
+    auth.user = { userId: 'viewer' }
+    view.rerender(<MemoryRouter><SkillCenter /></MemoryRouter>)
+    await screen.findByText('Evidence Bot')
+    await act(async () => { finishInitial({ items: [asset] }) })
+    expect(screen.getByText('Evidence Bot')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '登记 Skill' }))
+    expect(screen.queryByText('当前没有可用 Bot')).toBeNull()
+  })
+
   it('keeps the registration form without the internal snapshot explanation', async () => {
     render(<MemoryRouter><SkillCenter /></MemoryRouter>)
     await screen.findByText('Evidence Skill')
