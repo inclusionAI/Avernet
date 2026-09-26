@@ -74,11 +74,11 @@ jobs:
           # changes regardless of the merge-commit structure.
           mapfile -t files < <(git diff --name-only "${SINGLEBOX_BASE_REF}" -- \
             scripts \
-            src/backend \
-            src/baas \
-            src/bcs \
-            src/engine \
-            src/frontend \
+            apps/backend \
+            apps/baas \
+            apps/bcs \
+            engine/adapter \
+            apps/frontend \
             .github/workflows/singlebox-coverage.yml \
             || true)
           n=${#files[@]}
@@ -112,8 +112,8 @@ jobs:
           # the lockfile-less BCN plugin build share the same tarball cache.
           cache: npm
           cache-dependency-path: |
-            src/frontend/package-lock.json
-            src/bcs/assets/panel/package-lock.json
+            apps/frontend/package-lock.json
+            apps/bcs/assets/panel/package-lock.json
 
       - name: Install Rust toolchain
         if: steps.changes.outputs.skip != 'true'
@@ -160,10 +160,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: |
-            src/backend/uv.lock
-            src/baas/uv.lock
-            src/bcsfuse/uv.lock
-            src/engine/uv.lock
+            apps/backend/uv.lock
+            apps/baas/uv.lock
+            apps/bcsfuse/uv.lock
+            engine/adapter/uv.lock
 
       - name: Show uv version
         if: steps.changes.outputs.skip != 'true'
@@ -179,7 +179,7 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
-          # Registry/git fetch only. NOT src/bcs/target: the instrumented
+          # Registry/git fetch only. NOT apps/bcs/target: the instrumented
           # build under target/cov-e2e/llvm-cov-target is force-rebuilt every
           # run (BCS_COVERAGE_FORCE_REBUILD=1) so coverage always reflects
           # the pushed source; caching those artifacts would risk stale
@@ -187,7 +187,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-singlebox-${{ hashFiles('src/bcs/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-singlebox-${{ hashFiles('apps/bcs/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-singlebox-
             ${{ runner.os }}-cargo-e2e-
@@ -197,7 +197,7 @@ jobs:
         if: steps.changes.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
-          # `setup_bcn_plugin` (scripts/modules/bcs.sh) rebuilds the plugin from
+          # `setup_bcn_plugin` (singlebox/modules/bcs.sh) rebuilds the plugin from
           # source on every run: three unlocked npm tree operations in a fresh
           # temp dir. package-lock.json is gitignored for this package, so npm
           # re-resolves all 2051 packages from the registry each time — the one
@@ -212,28 +212,28 @@ jobs:
           # prod-only tree the build reduces to before copying back: `ws` alone,
           # 232 KB, so this entry stays small against the repo cache budget.
           path: |
-            src/bcs/crates/plugins/openclaw-channel-bcn/dist
-            src/bcs/crates/plugins/openclaw-channel-bcn/node_modules
-          key: ${{ runner.os }}-bcn-plugin-${{ hashFiles('src/bcs/crates/plugins/openclaw-channel-bcn/package.json', 'src/bcs/crates/plugins/openclaw-channel-bcn/.npmrc') }}
+            apps/bcs/crates/plugins/openclaw-channel-bcn/dist
+            apps/bcs/crates/plugins/openclaw-channel-bcn/node_modules
+          key: ${{ runner.os }}-bcn-plugin-${{ hashFiles('apps/bcs/crates/plugins/openclaw-channel-bcn/package.json', 'apps/bcs/crates/plugins/openclaw-channel-bcn/.npmrc') }}
 
       - name: Validate shell scripts
         if: steps.changes.outputs.skip != 'true'
         run: |
-          bash -n scripts/singlebox.sh
-          bash -n scripts/ci/singlebox_coverage.sh
-          find scripts/modules -name "*.sh" -print0 | xargs -0 -n1 bash -n
+          bash -n singlebox/singlebox.sh
+          bash -n singlebox/ci/singlebox_coverage.sh
+          find singlebox/modules -name "*.sh" -print0 | xargs -0 -n1 bash -n
 
       - name: Run singlebox coverage
         if: steps.changes.outputs.skip != 'true'
         run: |
           echo "SINGLEBOX_COVERAGE_MODE=${SINGLEBOX_COVERAGE_MODE}"
-          bash scripts/ci/singlebox_coverage.sh
+          bash singlebox/ci/singlebox_coverage.sh
 
       - name: Verify singlebox coverage artifacts
         if: steps.changes.outputs.skip != 'true'
         run: |
-          python3 scripts/ci/verify_singlebox_coverage_artifacts.py \
-            --reports-dir scripts/.dependencies/coverage/singlebox/reports \
+          python3 singlebox/ci/verify_singlebox_coverage_artifacts.py \
+            --reports-dir singlebox/.dependencies/coverage/singlebox/reports \
             --bcs-line-min 40 \
             --bcs-method-min 36 \
             --bcs-router-min 100 \
@@ -242,16 +242,16 @@ jobs:
       - name: Show singlebox diagnostics on failure
         if: failure() && steps.changes.outputs.skip != 'true'
         run: |
-          bash scripts/singlebox.sh --standalone status all || true
-          bash scripts/singlebox.sh --local status all || true
-          find scripts/.dependencies/logs -maxdepth 2 -type f -print -exec tail -n 160 {} \; || true
+          bash singlebox/singlebox.sh --standalone status all || true
+          bash singlebox/singlebox.sh --local status all || true
+          find singlebox/.dependencies/logs -maxdepth 2 -type f -print -exec tail -n 160 {} \; || true
           find .standalone-openclaw -type f -name "*.log" -print -exec tail -n 160 {} \; || true
 
       - name: Stop singlebox
         if: always() && steps.changes.outputs.skip != 'true'
         run: |
-          bash scripts/singlebox.sh --standalone stop all || true
-          bash scripts/singlebox.sh --local stop all || true
+          bash singlebox/singlebox.sh --standalone stop all || true
+          bash singlebox/singlebox.sh --local stop all || true
 
       - name: Upload singlebox artifacts
         if: always() && steps.changes.outputs.skip != 'true'
@@ -259,14 +259,14 @@ jobs:
         with:
           name: singlebox-coverage-artifacts
           path: |
-            scripts/.dependencies/logs/**
-            scripts/.dependencies/coverage/singlebox/**
-            scripts/.dependencies/standalone/**
+            singlebox/.dependencies/logs/**
+            singlebox/.dependencies/coverage/singlebox/**
+            singlebox/.dependencies/standalone/**
             .standalone-openclaw/logs/**
-            src/bcs/target/cov-e2e/cobertura.xml
-            src/bcs/target/cov-e2e/coverage.txt
-            src/bcs/target/cov-e2e/summary.json
-            src/bcs/target/cov-e2e/endpoint_coverage.xml
-            src/bcs/target/cov-e2e/endpoint_coverage.txt
-            src/bcs/target/cov-e2e/cli_command_coverage.txt
+            apps/bcs/target/cov-e2e/cobertura.xml
+            apps/bcs/target/cov-e2e/coverage.txt
+            apps/bcs/target/cov-e2e/summary.json
+            apps/bcs/target/cov-e2e/endpoint_coverage.xml
+            apps/bcs/target/cov-e2e/endpoint_coverage.txt
+            apps/bcs/target/cov-e2e/cli_command_coverage.txt
           if-no-files-found: ignore

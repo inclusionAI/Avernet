@@ -5,7 +5,10 @@ import sys
 import unittest
 from pathlib import Path
 
-from scripts.ci.check_pr_title import is_valid_pr_title
+# The checker is a stdlib-only module living in singlebox/ci (no package
+# __init__.py). Resolve it for direct-script execution (see pr-title.yml).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from check_pr_title import is_valid_pr_title  # noqa: E402
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

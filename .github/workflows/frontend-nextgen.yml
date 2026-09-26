@@ -7,7 +7,7 @@ on:
       - main
       - 'REL*'
     paths:
-      - 'src/frontend-nextgen/**'
+      - 'apps/frontend-nextgen/**'
       - 'docker/services/frontend-nextgen.dockerfile'
       - 'docker/services/service-deployment.yaml'
       - 'docker/kube-deploy.sh'
@@ -17,7 +17,7 @@ on:
       - dev
       - main
     paths:
-      - 'src/frontend-nextgen/**'
+      - 'apps/frontend-nextgen/**'
       - 'docker/services/frontend-nextgen.dockerfile'
       - 'docker/services/service-deployment.yaml'
       - 'docker/kube-deploy.sh'
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: src/frontend-nextgen
+        working-directory: apps/frontend-nextgen
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: src/frontend-nextgen/package-lock.json
+          cache-dependency-path: apps/frontend-nextgen/package-lock.json
           registry-url: https://registry.npmjs.org
 
       - name: Install locked public dependencies

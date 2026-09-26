@@ -13,9 +13,9 @@ PR_MERGE_PARENT_EXPRESSION = (
     "${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}"
 )
 MODULE_JOBS = {
-    "bcs": ("BCS_BASE_REF", "src/bcs"),
+    "bcs": ("BCS_BASE_REF", "apps/bcs"),
     "backend": ("BACKEND_BASE_REF", "apps/backend"),
-    "engine": ("ENGINE_BASE_REF", "src/engine"),
+    "engine": ("ENGINE_BASE_REF", "engine/adapter"),
     "baas": ("BAAS_BASE_REF", "apps/baas"),
     "gateway": ("GATEWAY_BASE_REF", "apps/gateway"),
 }
@@ -90,7 +90,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
 
             for module_path in (
                 "apps/backend",
-                "src/engine",
+                "engine/adapter",
                 "apps/baas",
                 "apps/gateway",
             ):
@@ -99,7 +99,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
             _git(repository, "commit", "-m", "advance target branch")
 
             _git(repository, "switch", "pull-request")
-            _write(repository, "src/bcs/pull-request.txt", "pull request\n")
+            _write(repository, "apps/bcs/pull-request.txt", "pull request\n")
             _git(repository, "add", ".")
             _git(repository, "commit", "-m", "change only BCS")
 
@@ -119,7 +119,7 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
                 )
                 for job_name, (_, module_path) in MODULE_JOBS.items()
             }
-            self.assertEqual(changed_by_module["bcs"], "src/bcs/pull-request.txt")
+            self.assertEqual(changed_by_module["bcs"], "apps/bcs/pull-request.txt")
             self.assertEqual(changed_by_module["backend"], "")
             self.assertEqual(changed_by_module["engine"], "")
             self.assertEqual(changed_by_module["baas"], "")
