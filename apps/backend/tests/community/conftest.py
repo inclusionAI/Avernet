@@ -31,7 +31,7 @@ def pytest_addoption(parser):
     )
 
 
-# Ensure config is loaded from the backend root (src/backend), not src/agentclaw.
+# Ensure config is loaded from the backend root (apps/backend), not src/agentclaw.
 # This must happen before any module import that uses get_config(). Resolve the
 # root by walking up to the dir containing pytest.ini so it is independent of this
 # conftest's depth.
@@ -152,7 +152,7 @@ def pytest_sessionfinish(session, exitstatus):
     from pathlib import Path
     from agentclaw.community.testing.disk_leak_guard import find_leaked_sqlite_files
 
-    # The top-level ``os.chdir(_backend_root())`` puts us at ``src/backend/``.
+    # The top-level ``os.chdir(_backend_root())`` puts us at ``apps/backend/``.
     leaked = find_leaked_sqlite_files(Path.cwd())
     if leaked:
         names = ", ".join(str(p) for p in leaked)

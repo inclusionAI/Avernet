@@ -5,7 +5,7 @@ BCS 的 `tests/fixtures/fixed_loop_logical_view.json` 两节点循环体，以�
 `fixed_loop_preview.json` 校验响应。Loop 描述来自服务端 `loops` 字段，
 轮次与逻辑节点来自 execution metadata，不从执行 ID 猜测轮次。
 
-在 `src/frontend` 下运行（使用已安装的开发依赖）：
+在 `apps/frontend` 下运行（使用已安装的开发依赖）：
 
 ```bash
 npm test -- --runInBand src/pages/GroupChat

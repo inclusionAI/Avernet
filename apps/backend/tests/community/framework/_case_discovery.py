@@ -40,7 +40,7 @@ def load_endpoint_case_modules(endpoints_dir: pathlib.Path | None = None) -> Non
     endpoints_dir = endpoints_dir.resolve()
     if not endpoints_dir.exists():
         return
-    # ``src/backend`` is on sys.path, so module names are ``tests.<side>.…``.
+    # ``apps/backend`` is on sys.path, so module names are ``tests.<side>.…``.
     # tests/<side>/endpoints → three parents up is tests/ → its parent is backend.
     backend_root = endpoints_dir.parent.parent.parent
     for path in sorted(endpoints_dir.rglob("test_*.py")):

@@ -5,7 +5,7 @@ const https = require('https');
 const path = require('path');
 const { URL } = require('url');
 
-const root = path.resolve(process.env.FRONTEND_DIST_DIR || '/opt/ocb/src/frontend/dist');
+const root = path.resolve(process.env.FRONTEND_DIST_DIR || '/opt/ocb/apps/frontend/dist');
 const port = Number(process.env.FRONTEND_PORT || 8000);
 const bcsPort = process.env.BCS_PORT || 21000;
 const bcsTarget = new URL(process.env.FRONTEND_BCS_TARGET || `http://127.0.0.1:${bcsPort}`);

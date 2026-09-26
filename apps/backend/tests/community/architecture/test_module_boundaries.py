@@ -28,11 +28,11 @@ import yaml
 
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../apps/backend
 _SRC_ROOT = _BACKEND_ROOT / "src" / "agentclaw"
 # The repo root only matters for locating a ``docs/arch`` tree, where the generated
 # dependents view is written. Search for ``docs/arch`` but ONLY within this checkout —
-# up to the checkout root (the dir containing ``src/backend``), never above it. openocb
+# up to the checkout root (the dir containing ``apps/backend``), never above it. openocb
 # ships no ``docs/arch``, so ``_REPO_ROOT`` is normally ``None`` and the view is simply
 # not written. The bound is load-bearing: when openocb is embedded as a submodule inside
 # a superproject (e.g. ocb at ``<super>/openocb``), an unbounded ancestor walk would

@@ -34,7 +34,7 @@ import pytest
 
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]  # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]  # .../apps/backend
 _AGENTCLAW_ROOT = _BACKEND_ROOT / "src" / "agentclaw"
 _HTTP_ROOT = _AGENTCLAW_ROOT / "community" / "adapters" / "http"
 _API_ROOT = _AGENTCLAW_ROOT / "community" / "api"

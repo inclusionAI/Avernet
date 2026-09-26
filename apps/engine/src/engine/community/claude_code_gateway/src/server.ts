@@ -2,7 +2,7 @@
 //
 // This file composes the subsystems (stores, scheduler, router, bridges) and
 // exposes `startGatewayServer`. All protocol handling lives under:
-//   - src/gateway/      — ConnectionContext, dispatcher, per-topic handlers
+//   - apps/gateway/      — ConnectionContext, dispatcher, per-topic handlers
 //   - src/interaction/  — unified HITL registry + builders + resolve
 //   - src/runtime/      — session-owned runtime registry
 

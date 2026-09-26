@@ -7,7 +7,7 @@ The business flow is shared with route-A e2e via `tests/_flows/<module>/`.
 ## Run
 
 ```bash
-cd src/backend
+cd apps/backend
 RUN_ACCEPTANCE=1 uv run pytest tests/acceptance/skill_center/ -v -s
 ```
 

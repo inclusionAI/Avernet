@@ -50,7 +50,7 @@ test('signals and timeouts cannot produce success', () => {
 });
 test('package scope selects only OCB-owned internal packages', () => {
   const packages = [
-    { name: '@avernet/example', path: '.build/avernet/src/evolverun/clawweb/public/modules/example' },
+    { name: '@avernet/example', path: '.build/avernet/apps/evolverun/clawweb/public/modules/example' },
     { name: '@ocb/example', path: 'internal/modules/example' },
     { name: '@ocb/host', path: 'internal/bootstrap/clawweb' },
   ];

@@ -203,10 +203,10 @@ do_start() {
     if [[ -n "$debug_port" ]]; then
         log_info "Debug port: $debug_port (app starts immediately without waiting for debugger)"
         SERVER_ENV="$env_name" start_detached "$VENV_DIR/bin/python" -m debugpy --listen "0.0.0.0:$debug_port" \
-            "$WORK_DIR/src/gateway/community/main.py" -c "$CONFIG_DIR" --mode "$APP_MODE"
+            "$WORK_DIR/apps/gateway/community/main.py" -c "$CONFIG_DIR" --mode "$APP_MODE"
     else
         SERVER_ENV="$env_name" start_detached "$VENV_DIR/bin/python" \
-            "$WORK_DIR/src/gateway/community/main.py" -c "$CONFIG_DIR" --mode "$APP_MODE"
+            "$WORK_DIR/apps/gateway/community/main.py" -c "$CONFIG_DIR" --mode "$APP_MODE"
     fi
 
     APP_PID=$!

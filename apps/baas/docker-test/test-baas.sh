@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# src/baas/docker-test/test-baas.sh — build the baas image and run a full prod-mode test.
+# apps/baas/docker-test/test-baas.sh — build the baas image and run a full prod-mode test.
 #
 # Flow:
 #   1. Build baas:local from docker/services/baas.dockerfile
@@ -11,11 +11,11 @@
 #   3. Wait for the baas /health endpoint and report success / failure
 #
 # Usage:
-#   src/baas/docker-test/test-baas.sh            # build + up + health check (detached)
-#   src/baas/docker-test/test-baas.sh up         # same as above
-#   src/baas/docker-test/test-baas.sh build      # only rebuild baas:local
-#   src/baas/docker-test/test-baas.sh down       # tear down the test stack
-#   src/baas/docker-test/test-baas.sh status     # show compose ps (and curl /health)
+#   apps/baas/docker-test/test-baas.sh            # build + up + health check (detached)
+#   apps/baas/docker-test/test-baas.sh up         # same as above
+#   apps/baas/docker-test/test-baas.sh build      # only rebuild baas:local
+#   apps/baas/docker-test/test-baas.sh down       # tear down the test stack
+#   apps/baas/docker-test/test-baas.sh status     # show compose ps (and curl /health)
 #
 # The runtime stack is driven by docker-compose.baas-test.yml (single source
 # of truth for env wiring). Every value can be overridden via env:

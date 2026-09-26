@@ -6,9 +6,9 @@ somewhere"* — so the directory, the executable bit and exposure to the agent
 are all decided behind this interface. The platform sends no ``chmod`` and runs
 no shell command, and therefore no user-supplied name ever reaches one.
 
-Contract: ``src/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md``
+Contract: ``apps/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md``
 §4 A2. The platform caller is ``ArcaCliToolPort``
-(``src/backend/src/agentclaw/community/core/bot_config_manifest/cli_tools/arca_port.py``).
+(``apps/backend/src/agentclaw/community/core/bot_config_manifest/cli_tools/arca_port.py``).
 
 **Every member is ``@abstractmethod``, and implementations subclass this
 Protocol explicitly.** Both halves are load-bearing. This repository runs no
@@ -19,7 +19,7 @@ still resolves and the call silently returns ``None``. With ``@abstractmethod``,
 an implementation that dropped a method cannot be constructed at all.
 
 The same rule the backend states for its outbound ports
-(``src/backend/src/agentclaw/community/core/ports/README.md``), for the same
+(``apps/backend/src/agentclaw/community/core/ports/README.md``), for the same
 reason.
 """
 from __future__ import annotations

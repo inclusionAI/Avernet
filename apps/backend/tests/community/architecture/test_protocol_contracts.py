@@ -29,7 +29,7 @@ from agentclaw.community.plugin_api.base import Plugin
 
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]              # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]              # .../apps/backend
 # B11: the contract suites split into the community and corp test trees.
 _CONTRACTS_DIRS = (
     _BACKEND_ROOT / "tests" / "community" / "contracts",

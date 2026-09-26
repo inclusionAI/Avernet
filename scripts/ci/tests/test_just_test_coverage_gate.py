@@ -14,10 +14,10 @@ HELPER_PATH = REPO_ROOT / "scripts/lib/resolve_base_ref.sh"
 # module (see .github/workflows/unit-tests.yml). backend/engine have no justfile,
 # so ci_test.sh is their only local surface; baas/gateway also expose `just test-ci`.
 CI_TEST = {
-    "backend": REPO_ROOT / "src/backend/scripts/ci_test.sh",
-    "baas": REPO_ROOT / "src/baas/scripts/ci_test.sh",
+    "backend": REPO_ROOT / "apps/backend/scripts/ci_test.sh",
+    "baas": REPO_ROOT / "apps/baas/scripts/ci_test.sh",
     "engine": REPO_ROOT / "src/engine/scripts/ci_test.sh",
-    "gateway": REPO_ROOT / "src/gateway/scripts/ci_test.sh",
+    "gateway": REPO_ROOT / "apps/gateway/scripts/ci_test.sh",
 }
 
 # Changed-line coverage threshold each ci_test.sh passes to report_check.py
@@ -85,7 +85,7 @@ class ResolveBaseRefTest(unittest.TestCase):
         _run("git", "clone", "--branch", "dev", str(remote), str(developer), check=True)
         _git(developer, "config", "user.name", "CI Test")
         _git(developer, "config", "user.email", "ci-test@example.com")
-        _write(developer, "src/baas/feature.txt", "intended change\n")
+        _write(developer, "apps/baas/feature.txt", "intended change\n")
         _git(developer, "add", ".")
         _git(developer, "commit", "-m", "feature change")
         return remote, developer
@@ -130,7 +130,7 @@ class ResolveBaseRefTest(unittest.TestCase):
             root = Path(directory)
             remote, developer = self._make_remote_and_repo(root)
             # Publish a second branch the override will target.
-            self._add_branch(remote, developer, branch="release", path="src/baas/release.txt")
+            self._add_branch(remote, developer, branch="release", path="apps/baas/release.txt")
             override_target_sha = _git(developer, "rev-parse", "origin/release")
             # git config points at a no-op branch; env must win.
             _git(developer, "config", "avernet.prePush.mergeTarget", "origin/dev")
@@ -147,7 +147,7 @@ class ResolveBaseRefTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             remote, developer = self._make_remote_and_repo(root)
-            self._add_branch(remote, developer, branch="release", path="src/baas/release.txt")
+            self._add_branch(remote, developer, branch="release", path="apps/baas/release.txt")
             release_sha = _git(developer, "rev-parse", "origin/release")
             _git(developer, "config", "avernet.prePush.mergeTarget", "origin/release")
 
@@ -247,7 +247,7 @@ class CiTestCoverageGateWiringTest(unittest.TestCase):
         # `test` recipe. baas/gateway `just test` must stay on run_ci_pipeline
         # (fast dev path, no gate); re-introducing justfile delegation would be
         # a regression of this fix's scope decision.
-        for justfile in (REPO_ROOT / "src/baas/justfile", REPO_ROOT / "src/gateway/justfile"):
+        for justfile in (REPO_ROOT / "apps/baas/justfile", REPO_ROOT / "apps/gateway/justfile"):
             with self.subTest(justfile=str(justfile)):
                 text = justfile.read_text(encoding="utf-8")
                 self.assertIn("run_ci_pipeline", text)

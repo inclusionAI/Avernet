@@ -16,7 +16,7 @@ runs three checks directly against this checkout:
      enforcing acceptance gate: a shipped test that imports ``engine.corp`` (or a
      corp-only third-party package) fails here.
 
-Mirrors ``src/backend/scripts/community_selftest.py``. Run from ``src/engine``
+Mirrors ``apps/backend/scripts/community_selftest.py``. Run from ``src/engine``
 (the engine project root). Exit 0 on success.
 
 Usage::  python scripts/community_selftest.py [--skip-tests]

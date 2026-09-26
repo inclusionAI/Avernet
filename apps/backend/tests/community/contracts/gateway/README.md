@@ -2,7 +2,7 @@
 
 ## 概述
 
-基于 `src/mobile/docs/Gateway 透明转发接口文档.md`，对 Gateway 透明转发的全部上游接口实施契约测试。测试直接调用后端路由 Handler（非经由 Gateway 代理），通过 Mock 数据断言响应字段符合文档规范。
+基于 `apps/mobile/docs/Gateway 透明转发接口文档.md`，对 Gateway 透明转发的全部上游接口实施契约测试。测试直接调用后端路由 Handler（非经由 Gateway 代理），通过 Mock 数据断言响应字段符合文档规范。
 
 **当前状态**: 166 tests, all passing (63 HTTP + 16 Service-backed HTTP + 69 WebSocket + 10 Schema Conformance + 8 BCS Mock Conformance)
 
@@ -464,7 +464,7 @@ WebSocket 接口 (WS-1, WS-1a, WS-2, WS-MUX) 为 Gateway 层代理路由，后�
 ## 运行方式
 
 ```bash
-cd src/backend
+cd apps/backend
 
 # 全部契约测试
 uv run pytest tests/contracts/gateway/ -v

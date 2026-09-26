@@ -10,7 +10,7 @@
 >
 > 日期：2026-07-28
 >
-> 范围：`src/bcs`、`src/gateway`
+> 范围：`src/bcs`、`apps/gateway`
 >
 > 文档类型：架构与接口设计文档（High-Level Design）
 

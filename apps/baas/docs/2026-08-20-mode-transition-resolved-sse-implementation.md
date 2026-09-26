@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12, dataclasses, asyncio, pytest, unittest.mock, Ruff
 
-**Spec:** `src/baas/docs/2026-08-20-mode-transition-resolved-sse-design.md`
+**Spec:** `apps/baas/docs/2026-08-20-mode-transition-resolved-sse-design.md`
 
 ## Global Constraints
 
@@ -25,10 +25,10 @@
 ### Task 1: Type and convert the raw mode-transition event
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/core/service/bot_run/_interaction_protocol.py`
-- Modify: `src/baas/src/secbaas/community/core/service/sse/_default_converter.py`
-- Test: `src/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py`
-- Test: `src/baas/tests/unit/core/service/sse/test_default_converter.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_run/_interaction_protocol.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/sse/_default_converter.py`
+- Test: `apps/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py`
+- Test: `apps/baas/tests/unit/core/service/sse/test_default_converter.py`
 
 **Interfaces:**
 - Consumes: Engine payloads with `interactionId`, `kind = mode_switch`, `decision`, and raw lifecycle fields.
@@ -112,7 +112,7 @@ def test_mode_transition_resolved_maps_actual_engine_event_to_common_path(self):
 Run:
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/pytest tests/unit/core/service/bot_run/test_interaction_protocol.py -k mode_transition_resolved -q
 .venv/bin/pytest tests/unit/core/service/sse/test_default_converter.py -k mode_transition_resolved -q
 ```
@@ -165,7 +165,7 @@ Run the two commands from Step 3. Expected: all selected tests pass.
 - [x] **Step 6: Commit the boundary mapping**
 
 ```bash
-git add src/baas/src/secbaas/community/core/service/bot_run/_interaction_protocol.py src/baas/src/secbaas/community/core/service/sse/_default_converter.py src/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py src/baas/tests/unit/core/service/sse/test_default_converter.py
+git add apps/baas/src/secbaas/community/core/service/bot_run/_interaction_protocol.py apps/baas/src/secbaas/community/core/service/sse/_default_converter.py apps/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py apps/baas/tests/unit/core/service/sse/test_default_converter.py
 git commit -m "feat(baas): map mode transition resolved events"
 ```
 
@@ -174,9 +174,9 @@ git commit -m "feat(baas): map mode transition resolved events"
 ### Task 2: Subscribe and deliver the terminal mode-switch event once
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/core/service/bot_run/_session_state.py`
-- Modify: `src/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py`
-- Test: `src/baas/tests/unit/core/service/bot_run/test_async_chat_client_coverage.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_run/_session_state.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py`
+- Test: `apps/baas/tests/unit/core/service/bot_run/test_async_chat_client_coverage.py`
 
 **Interfaces:**
 - Consumes: `EngineInteractionResolvedEvent.from_mode_transition_payload` from Task 1 and existing `BotInteractionService.mark_resolved`.
@@ -248,7 +248,7 @@ sentinel and assert the log contains structural identity but not the sentinel.
 Run:
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/pytest tests/unit/core/service/bot_run/test_async_chat_client_coverage.py -k 'mode_transition_resolved or callback_registration or reconnect' -q
 ```
 
@@ -330,7 +330,7 @@ to the logged metadata.
 Run the command from Step 4 and the existing RPC fallback test:
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/pytest tests/unit/core/service/bot_run/test_async_chat_client_coverage.py -k 'mode_transition_resolved or mode_switch_dispatch or callback_registration or reconnect' -q
 ```
 
@@ -339,7 +339,7 @@ Expected: all selected tests pass, including the unchanged accepted-RPC fallback
 - [x] **Step 8: Commit the client delivery path**
 
 ```bash
-git add src/baas/src/secbaas/community/core/service/bot_run/_session_state.py src/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py src/baas/tests/unit/core/service/bot_run/test_async_chat_client_coverage.py
+git add apps/baas/src/secbaas/community/core/service/bot_run/_session_state.py apps/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py apps/baas/tests/unit/core/service/bot_run/test_async_chat_client_coverage.py
 git commit -m "feat(baas): deliver mode transition terminal SSE"
 ```
 
@@ -348,9 +348,9 @@ git commit -m "feat(baas): deliver mode transition terminal SSE"
 ### Task 3: Align compatibility documentation and run affected gates
 
 **Files:**
-- Modify: `src/baas/docs/2026-08-19-baas-bcn-interaction-sse-design.md`
-- Modify: `src/baas/docs/2026-08-20-bcn-interaction-resolve-design.md`
-- Modify: `src/baas/docs/2026-08-20-mode-transition-resolved-sse-implementation.md`
+- Modify: `apps/baas/docs/2026-08-19-baas-bcn-interaction-sse-design.md`
+- Modify: `apps/baas/docs/2026-08-20-bcn-interaction-resolve-design.md`
+- Modify: `apps/baas/docs/2026-08-20-mode-transition-resolved-sse-implementation.md`
 
 **Interfaces:**
 - Consumes: completed behavior from Tasks 1 and 2.
@@ -366,7 +366,7 @@ RPC response itself emits a terminal SSE.
 - [x] **Step 2: Run the focused affected suites**
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/pytest tests/unit/core/service/bot_run/test_interaction_protocol.py tests/unit/core/service/bot_run/test_async_chat_client_coverage.py tests/unit/core/service/sse/test_default_converter.py -q
 ```
 
@@ -375,7 +375,7 @@ Expected: all tests pass.
 - [x] **Step 3: Run the broader SSE and bot-run regression suites**
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/pytest tests/unit/core/service/sse tests/unit/core/service/bot_run -q
 ```
 
@@ -384,7 +384,7 @@ Expected: all collected tests pass.
 - [x] **Step 4: Run formatting, lint, and whitespace gates**
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/ruff format --check src/secbaas/community/core/service/bot_run/_interaction_protocol.py src/secbaas/community/core/service/bot_run/_session_state.py src/secbaas/community/core/service/bot_run/_async_chat_client.py src/secbaas/community/core/service/sse/_default_converter.py tests/unit/core/service/bot_run/test_interaction_protocol.py tests/unit/core/service/bot_run/test_async_chat_client_coverage.py tests/unit/core/service/sse/test_default_converter.py
 .venv/bin/ruff check src/secbaas/community/core/service/bot_run/_interaction_protocol.py src/secbaas/community/core/service/bot_run/_session_state.py src/secbaas/community/core/service/bot_run/_async_chat_client.py src/secbaas/community/core/service/sse/_default_converter.py tests/unit/core/service/bot_run/test_interaction_protocol.py tests/unit/core/service/bot_run/test_async_chat_client_coverage.py tests/unit/core/service/sse/test_default_converter.py
 cd ../..
@@ -399,7 +399,7 @@ Replace this plan's checkbox states only with commands actually completed, then
 commit the compatibility documentation:
 
 ```bash
-git add src/baas/docs/2026-08-19-baas-bcn-interaction-sse-design.md src/baas/docs/2026-08-20-bcn-interaction-resolve-design.md src/baas/docs/2026-08-20-mode-transition-resolved-sse-implementation.md
+git add apps/baas/docs/2026-08-19-baas-bcn-interaction-sse-design.md apps/baas/docs/2026-08-20-bcn-interaction-resolve-design.md apps/baas/docs/2026-08-20-mode-transition-resolved-sse-implementation.md
 git commit -m "docs(baas): document mode transition terminal events"
 ```
 

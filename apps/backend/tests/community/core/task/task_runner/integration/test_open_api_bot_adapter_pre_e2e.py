@@ -14,8 +14,8 @@
   [AVERNET_PRE_OPENAPI_MESSAGE=<prompt>] \\
   [AVERNET_PRE_OPENAPI_TIMEOUT=180] \\
   [AVERNET_PRE_OPENAPI_POLL_INTERVAL=5] \\
-  src/backend/.venv/bin/python -m pytest \\
-    src/backend/tests/community/core/task/task_runner/integration/test_open_api_bot_adapter_pre_e2e.py -s
+  apps/backend/.venv/bin/python -m pytest \\
+    apps/backend/tests/community/core/task/task_runner/integration/test_open_api_bot_adapter_pre_e2e.py -s
 
 # 场景
 

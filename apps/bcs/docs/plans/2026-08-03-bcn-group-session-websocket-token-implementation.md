@@ -622,12 +622,12 @@ git commit -m "feat(bcs): wire group session websocket authentication"
 
 **Files:**
 
-- Modify: `src/gateway/configs/application.yaml`
-- Modify: `src/gateway/tests/test_domain_map.py`
-- Modify: `src/gateway/tests/test_route_security.py`
-- Modify: `src/gateway/tests/test_log_redaction.py`
-- Modify: `src/gateway/tests/integration/test_relay_ws_route.py`
-- Modify: `src/gateway/tests/integration/test_forward_signs_principal.py`
+- Modify: `apps/gateway/configs/application.yaml`
+- Modify: `apps/gateway/tests/test_domain_map.py`
+- Modify: `apps/gateway/tests/test_route_security.py`
+- Modify: `apps/gateway/tests/test_log_redaction.py`
+- Modify: `apps/gateway/tests/integration/test_relay_ws_route.py`
+- Modify: `apps/gateway/tests/integration/test_forward_signs_principal.py`
 
 **Step 1: Write failing Gateway tests**
 
@@ -644,7 +644,7 @@ Require:
 **Step 2: Run tests to verify they fail**
 
 ```bash
-cd src/gateway
+cd apps/gateway
 uv run pytest tests/test_domain_map.py tests/test_route_security.py tests/test_log_redaction.py tests/integration/test_relay_ws_route.py tests/integration/test_forward_signs_principal.py -q
 ```
 
@@ -688,7 +688,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/gateway/configs/application.yaml src/gateway/tests
+git add apps/gateway/configs/application.yaml apps/gateway/tests
 git commit -m "feat(gateway): relay group session websocket"
 ```
 
@@ -755,7 +755,7 @@ cargo test --package bcs-message-flow --manifest-path src/bcs/Cargo.toml
 cargo test --package bcs-ws --manifest-path src/bcs/Cargo.toml
 cargo test --package bcs --test e2e_group_session_ws --manifest-path src/bcs/Cargo.toml
 cargo check --workspace --all-targets --manifest-path src/bcs/Cargo.toml
-cd src/gateway && uv run pytest -q
+cd apps/gateway && uv run pytest -q
 ```
 
 If time permits and the focused suites pass, run:
@@ -784,8 +784,8 @@ git commit -m "test(bcs): verify group session websocket parity"
 - Modify: `src/bcs/crates/adapters/ws/bcs-ws/src/web/group_session.rs`
 - Modify: `src/bcs/crates/adapters/ws/bcs-ws/tests/group_session_ws.rs`
 - Modify: `src/bcs/crates/bootstrap/bcs/tests/openapi_v1_mount.rs`
-- Modify: `src/gateway/configs/application.yaml`
-- Regenerate: `src/gateway/configs/schemas/bcn.openapi.json`
+- Modify: `apps/gateway/configs/application.yaml`
+- Regenerate: `apps/gateway/configs/schemas/bcn.openapi.json`
 - Modify: relevant BCS and Gateway tests, `CONTEXT.md` files, and current P0 plans containing the old path
 
 **Step 1: Point tests at the approved path**
@@ -806,7 +806,7 @@ CARGO_SHIM_SKIP_CLEAN=1 cargo test --manifest-path src/bcs/Cargo.toml \
   -p bcs-ws --test group_session_ws
 CARGO_SHIM_SKIP_CLEAN=1 cargo test --manifest-path src/bcs/Cargo.toml \
   -p bcs --test openapi_v1_mount
-cd src/gateway && uv run pytest \
+cd apps/gateway && uv run pytest \
   tests/test_domain_map.py tests/test_route_security.py \
   tests/test_log_redaction.py tests/integration/test_relay_ws_route.py -q
 ```
@@ -824,7 +824,7 @@ alias. Regenerate the deterministic schema with:
 
 ```bash
 uv run --with pyyaml python src/bcs/scripts/dump_openapi.py \
-  src/gateway/configs/schemas/bcn.openapi.json
+  apps/gateway/configs/schemas/bcn.openapi.json
 ```
 
 Update current documentation to explain that `/messages/ws` is the WebSocket
@@ -838,8 +838,8 @@ CARGO_SHIM_SKIP_CLEAN=1 cargo test --manifest-path src/bcs/Cargo.toml \
   -p bcs-ws --test group_session_ws
 CARGO_SHIM_SKIP_CLEAN=1 cargo test --manifest-path src/bcs/Cargo.toml \
   -p bcs --test openapi_v1_mount
-cd src/gateway && uv run pytest -q
-bash src/gateway/scripts/test_live_bcs_forwarding.sh
+cd apps/gateway && uv run pytest -q
+bash apps/gateway/scripts/test_live_bcs_forwarding.sh
 git diff --check
 ```
 
@@ -849,7 +849,7 @@ configuration, generated schema, and active plans finds no old public path.
 **Step 5: Commit**
 
 ```bash
-git add src/bcs src/gateway
+git add src/bcs apps/gateway
 git commit -m "fix(gateway): rename the BCN message websocket path"
 ```
 

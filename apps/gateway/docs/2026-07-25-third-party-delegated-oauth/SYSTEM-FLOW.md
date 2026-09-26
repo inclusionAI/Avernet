@@ -2,9 +2,9 @@
 
 **Status:** Reference note — decision recorded (not an SDD spec, no committed corp implementation)
 **Date:** 2026-07-25
-**Component:** `src/gateway` (teamclaw authorization server; public host `https://teamclawgw-pre.alipay.com`)
+**Component:** `apps/gateway` (teamclaw authorization server; public host `https://teamclawgw-pre.alipay.com`)
 **Scope:** The end-to-end system flow for a third-party server acting on behalf of one of our end users — corp and community — plus the token/consent model and the decided-vs-open agenda.
-**Related:** [`README.md`](./README.md) (the approach), `src/gateway/docs/2026-07-21-auth-design.md` (§7.1 signed Principal, §8 claims, §15 delegated mint).
+**Related:** [`README.md`](./README.md) (the approach), `apps/gateway/docs/2026-07-21-auth-design.md` (§7.1 signed Principal, §8 claims, §15 delegated mint).
 
 > 中文版见 [`SYSTEM-FLOW.zh-CN.md`](./SYSTEM-FLOW.zh-CN.md)。
 

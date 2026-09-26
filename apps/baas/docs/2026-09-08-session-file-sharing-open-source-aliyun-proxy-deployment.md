@@ -1,7 +1,7 @@
 # Session File Sharing — Open-Source Aliyun Proxy Deployment
 
 **Date:** 2026-09-08
-**Scope:** community tree only (`ocb-public/src/baas`). This document describes
+**Scope:** community tree only (`ocb-public/apps/baas`). This document describes
 the open-source aliyun deployment form added by phase 89: a pure-Python second
 leg that replaces the enterprise image's nginx hop. Operators deploy the
 community code with 8 environment variables, no nginx, no `FT_PROXY_HOST`.

@@ -4,8 +4,8 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起好 singlebox 后跑(改了 task_se
 
   ./scripts/singlebox.sh start all
   SINGLEBOX_TASK_E2E=1 DEPLOY_PROFILE=singlebox \
-    src/backend/.venv/bin/python -m pytest \
-      src/backend/tests/community/core/task/singlebox_e2e/yaml/test_writing_qc_state_machine_e2e.py -s
+    apps/backend/.venv/bin/python -m pytest \
+      apps/backend/tests/community/core/task/singlebox_e2e/yaml/test_writing_qc_state_machine_e2e.py -s
 
 # 场景
 

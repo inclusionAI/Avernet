@@ -7,10 +7,10 @@ export PROJECT_ROOT="$ROOT" LOG_DIR="$TEMP" DEP_DIR="$TEMP"
 source "$ROOT/scripts/modules/frontend.sh"
 FRONTEND_VARIANT=legacy
 frontend_select_variant
-[[ "$FRONTEND_DIR" == "$ROOT/src/frontend" && "$FRONTEND_DEFAULT_SCRIPT" == devs:local:oss ]]
+[[ "$FRONTEND_DIR" == "$ROOT/apps/frontend" && "$FRONTEND_DEFAULT_SCRIPT" == devs:local:oss ]]
 FRONTEND_VARIANT=nextgen
 frontend_select_variant
-[[ "$FRONTEND_DIR" == "$ROOT/src/frontend-nextgen" && "$FRONTEND_DEFAULT_SCRIPT" == dev:local ]]
+[[ "$FRONTEND_DIR" == "$ROOT/apps/frontend-nextgen" && "$FRONTEND_DEFAULT_SCRIPT" == dev:local ]]
 [[ "$FRONTEND_ROOT_ID" == root ]]
 FRONTEND_VARIANT=invalid
 if frontend_select_variant 2>/dev/null; then echo 'Invalid variant accepted' >&2; exit 1; fi

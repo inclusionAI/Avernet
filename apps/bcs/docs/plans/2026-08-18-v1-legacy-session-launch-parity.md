@@ -399,7 +399,7 @@ git commit -m "feat(bcs): share session collaboration startup"
 - Modify: `src/bcs/tests/openapi/test_session_v1_contract.py`
 - Modify: `src/bcs/api-contracts/v1/openapi/sessions.yaml`
 - Modify: `src/bcs/api-contracts/v1/domain-models.yaml`
-- Modify generated artifact: `src/gateway/configs/schemas/bcn.openapi.json`
+- Modify generated artifact: `apps/gateway/configs/schemas/bcn.openapi.json`
 
 **Step 1: Write failing OpenAPI assertions**
 
@@ -465,7 +465,7 @@ uv run python src/bcs/scripts/validate_openapi_contract.py \
   --root src/bcs/api-contracts/v1
 uv run python src/bcs/scripts/dump_openapi.py \
   --root src/bcs/api-contracts/v1 \
-  --output src/gateway/configs/schemas/bcn.openapi.json
+  --output apps/gateway/configs/schemas/bcn.openapi.json
 ```
 
 If `dump_openapi.py --help` shows a different output flag on this branch, use
@@ -487,7 +487,7 @@ Expected: validation and all tests pass.
 git add src/bcs/tests/openapi/test_session_v1_contract.py \
   src/bcs/api-contracts/v1/openapi/sessions.yaml \
   src/bcs/api-contracts/v1/domain-models.yaml \
-  src/gateway/configs/schemas/bcn.openapi.json
+  apps/gateway/configs/schemas/bcn.openapi.json
 git commit -m "feat(bcs): specify V1 session launch parity"
 ```
 

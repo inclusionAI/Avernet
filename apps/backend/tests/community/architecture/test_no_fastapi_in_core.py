@@ -21,7 +21,7 @@ import pytest
 
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../apps/backend
 # B11: the core layer now lives under BOTH community/ and corp/. Rule 7
 # (core is framework-free — no fastapi/starlette) is universal, so scan both.
 _CORE_ROOTS = (
@@ -41,7 +41,7 @@ _FORBIDDEN_EXACT = frozenset({"fastapi_injector"})
 # Temporary allowlist of files still being migrated as part of the Rule 7
 # widening (see specs/2026-05-21-rule7-httpexception-out-of-core/). Entries
 # are removed as each group of the migration lands; the goal is an empty set.
-# Paths are relative to src/backend/.
+# Paths are relative to apps/backend/.
 _ALLOWLIST: frozenset[str] = frozenset({
     # Interceptor module uses FastAPI Response/Request for permission checking.
     # This is adapter-shaped code that needs HTTP primitives.

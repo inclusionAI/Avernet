@@ -35,7 +35,7 @@ npm ci --include=dev --include=optional --no-audit --no-fund
 
 test_root="$clawweb_root"
 if [ -n "$ocb_root" ]; then
-  ocb_clawweb="$ocb_root/src/evolverun/clawweb"
+  ocb_clawweb="$ocb_root/apps/evolverun/clawweb"
   [ -f "$ocb_clawweb/package.json" ] || {
     echo "OCB ClawWeb workspace not found: $ocb_clawweb" >&2
     exit 1

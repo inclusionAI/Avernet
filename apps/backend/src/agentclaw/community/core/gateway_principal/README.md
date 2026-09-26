@@ -50,7 +50,7 @@ provides:
   - MIN_SIGNING_KEY_BYTES
   - PrincipalVerificationError
 consumes:
-  - "Gateway PrincipalSigner (the signing half of the contract, in src/gateway)"
+  - "Gateway PrincipalSigner (the signing half of the contract, in apps/gateway)"
   - "BCS/BCN GatewayPrincipalTokenVerifier (the target of a re-addressed token, in src/bcs)"
 internal_dependencies:
   - agentclaw.community.utils

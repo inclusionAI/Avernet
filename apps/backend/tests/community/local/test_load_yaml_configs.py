@@ -453,9 +453,9 @@ class TestEnvPlaceholderExpansion:
         """B11 monorepo: corp lives in the repo trunk, community in the submodule.
 
         In the ocb monorepo the community package resolves under
-        ``<repo>/ocb-public/src/backend/src/agentclaw/community`` while the corp
+        ``<repo>/ocb-public/apps/backend/src/agentclaw/community`` while the corp
         credential overlay sits in the trunk
-        ``<repo>/src/backend/src/agentclaw/corp/configs`` — the
+        ``<repo>/apps/backend/src/agentclaw/corp/configs`` — the
         ``agentclaw/corp`` sibling next to community does not exist there. A
         backend started from a monorepo worktree (scripts/singlebox.sh start
         backend) must still pick the corp overlay up, the same way an

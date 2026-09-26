@@ -4,7 +4,7 @@
 # MariaDB + Redis + gateway stack (docker-compose.gateway-test.yml) to verify
 # the image boots with the application-community.yaml overlay
 # (COMMUNITY_DEPLOY=community, SERVER_ENV=prod) and answers /health. The
-# compose file and its orchestration script live under src/gateway/docker-test/.
+# compose file and its orchestration script live under apps/gateway/docker-test/.
 
 docker-test-script := 'docker-test/test-gateway.sh'
 

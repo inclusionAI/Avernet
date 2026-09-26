@@ -4,7 +4,7 @@
 runtime mode. The caller decides which testing overrides to layer via
 ``extra_modules``; keeping the mode → module mapping here keeps the call sites
 (the ``test_injector`` fixture today; ``api/app.py``'s local boot later) from
-drifting apart. Mirror of ``src/backend/src/agentclaw/di/testing_modules.py``.
+drifting apart. Mirror of ``apps/backend/src/agentclaw/di/testing_modules.py``.
 
 F1: there are no mode-keyed engine testing modules yet — the only test override
 is the per-test :class:`TestingConfigModule`, which the fixture appends

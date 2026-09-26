@@ -76,11 +76,11 @@ requires = ["hatchling"]
 
 [tool.hatch.build.targets.wheel]
 # 只打包 src 目录，测试代码不进 whl
-packages = ["src/gateway"]
+packages = ["apps/gateway"]
 
 [tool.hatch.version]
 # 动态版本：从代码中的 __version__ 读取
-path = "src/gateway/community/__about__.py"
+path = "apps/gateway/community/__about__.py"
 
 [tool.hatch.build]
 exclude = [

@@ -1,7 +1,7 @@
 /**
  * Frozen SQLite migration fixtures; no Git or TS evaluation at test runtime.
  *
- * Source: src/evolverun/clawweb/public/shared/server/schema.ts
+ * Source: apps/evolverun/clawweb/public/shared/server/schema.ts
  * Feature: d27b6772d3158223f8b4876c587f8530f70c7f33
  * Upstream: 7a25bec0f40ffa1e0ae54538cc3934340d9cdb7b
  *   (origin/dev when captured on 2026-09-14).

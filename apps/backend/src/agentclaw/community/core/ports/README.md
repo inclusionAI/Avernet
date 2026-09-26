@@ -35,7 +35,7 @@ Here, both sides can import it and neither owns it.
 
 ## Rules
 
-- **Implementers declare the port in their bases.** `src/backend` runs no
+- **Implementers declare the port in their bases.** `apps/backend` runs no
   static type checker, so a structurally-satisfied Protocol is verified by
   nothing — not at import, not at construction, not in CI, and the pairing is
   then discoverable only by walking the DI graph. State it in the class.

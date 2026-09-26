@@ -15,7 +15,7 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 > `✅ DONE — PR #___`），在底部的 **Changelog（变更记录）** 里追加一条带日期的记录，
 > 并修正任何已经过时的描述。小步更新，勤更新。
 
-请结合更深入的工程交接文档，以及 `src/backend/specs/` 下的 SDD 文档一起阅读 ——
+请结合更深入的工程交接文档，以及 `apps/backend/specs/` 下的 SDD 文档一起阅读 ——
 `2026-07-26-tenant-isolation-foundation/`（Track A Stage 1，已随 PR #456 合并）
 与 `2026-07-27-openapi-v1-bots-track-b/`（Track B bots，已随 PR #494 合并）。
 两者各自都带有 `spec.md`、`plan.md`、`tasks.md`。
@@ -32,7 +32,7 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 ## 全局视角（请先读这一节）
 
 **目标：** 实现公共 `/openapi/v1` API，其调用方是**外部注册租户**。它位于
-`src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`。其中 **bots**、
+`apps/backend/src/agentclaw/community/adapters/http/openapi_v1/*`。其中 **bots**、
 **mcp**、**channels** 与 **skills** 类别已有实现 handler；其余类别保留各自在下方看板中的 readiness 状态。
 
 > 🔒 **这套界面端到端仍不可被真正调用，但原因已不再是"桩"。**
@@ -156,7 +156,7 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 | nodes | 1 | joseph | P2 | `openapi_v1/engine_runtime/nodes/` | ✅ **已实现 —— 2026-08-19**；只读列表，与当前前端保持一致 |
 
 > **范围规则（为什么只有这些）。** 只包装前端经 proxypass **直连**的 engine HTTP
-> （`src/frontend/src/requestConfig.ts:189-205`）。前端**经由后端**触达的 engine
+> （`apps/frontend/src/requestConfig.ts:189-205`）。前端**经由后端**触达的 engine
 > 路由 —— `/api/cron`（已经是 `routines` 类别）、`/api/file`、`/api/skills`、
 > `/api/mcp`、`/api/resource-materializations`、`/api/bash`、`/api/bot/config`、
 > `/api/work-items` —— 已经有后端契约在其之上，不纳入。仅 aicoding 的路由不纳入。
@@ -329,14 +329,14 @@ ALTER TABLE ac_user_mcp_config
   `openapi_v1/principal.py::caller_owner_id`。
 
 以上所有路径都位于
-`src/backend/src/agentclaw/community/` 之下。
+`apps/backend/src/agentclaw/community/` 之下。
 
 ---
 
 ## 认证接缝 —— 一个调用方如何变成"租户 + owner"
 
 两处公共接缝读的是**同一个**头，且每个请求只校验**一次**。
-SDD：`src/backend/specs/2026-07-30-gateway-principal-verifier/`。
+SDD：`apps/backend/specs/2026-07-30-gateway-principal-verifier/`。
 
 ```
 网关                校验凭证 → 解析出身份集合 → 签名
@@ -399,7 +399,7 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
    handler，而 `resources/router.py` 里有四个并不取；拒绝整个身份集合，意味着无法作用域
    的调用方**任何**路由都进不来（包括以后新增的）。`app` / `access_key` 究竟该拥有什么
    仍未定（认证设计 §14 Q4）；委托（§15）才是放宽它的设计路径。SDD：
-   `src/backend/specs/2026-08-02-public-api-user-only-principal/`。
+   `apps/backend/specs/2026-08-02-public-api-user-only-principal/`。
 2. **依赖（dependency）里抛出的已映射错误现在也会被套上信封。** `@envelope_errors`
    只包裹 handler，所以接缝的 401（在依赖里抛出）会绕过它；现在查表逻辑落在
    `responses.py::mapped_error_response`，应用的 catch-all 查的是同一张表。你新增的依赖
@@ -491,9 +491,9 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
    错误），以及**针对真实 Track A 守卫的跨租户隔离测试**（别的租户的 `{id}` 必须是被掩盖
    的 404）。内部测试套件保持不修改且全绿。
 8. 每个类别有自己的 SDD（`spec.md`/`plan.md`/`tasks.md`）和自己的 PR。可以把
-   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` +
+   `apps/backend/specs/2026-07-27-openapi-v1-bots-track-b/` +
    `openapi_v1/bots/router.py` 当作已经做过一遍的参考样板；第二个样板是
-   `src/backend/specs/2026-07-30-openapi-v1-mcp-track-b/` + `openapi_v1/mcp/router.py`
+   `apps/backend/specs/2026-07-30-openapi-v1-mcp-track-b/` + `openapi_v1/mcp/router.py`
    —— 它示范了当一个类别需要**从仍在运行的内部路由里抽取共享逻辑**（配方第 6 步）到
    `core/mcp/` 时的做法，并通过让内部测试套件保持不修改来证明抽取是行为保持的。
 
@@ -725,10 +725,10 @@ messages
 ```
 
 - `messages` —— 网关在 `/openapi/v1/bots/messages/ws/**` 上提供 Agent 的聊天 WebSocket，
-  并中继到 engine proxy（`src/gateway/configs/application.yaml`）。该占用**只在 socket
+  并中继到 engine proxy（`apps/gateway/configs/application.yaml`）。该占用**只在 socket
   平面**上成立，因此发往该地址的 HTTP 请求仍会到达本服务；这个名字是为将来要放在那里的
   HTTP 端点保留的。参见
-  `src/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/`。
+  `apps/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/`。
 
 一旦有路由发布了这份清单里的某个名字，就必须把它移到上面那份已路由的清单里 —— 约定测试会
 断言两份清单互不相交，因此"加了路由却没搬名字"会在测试里失败，而不是留给评审去发现。
@@ -861,7 +861,7 @@ fallback，GET 不会产生创建空间的副作用。
 清理/调整协作者和编辑者，也没有跨领域事务与补偿流程。因此不能把“Bot migrate”标记为完成，
 也不能在目标空间成员关系必须取代旧协作者授权的场景直接使用；完整能力仍需 B 线与 Business
 Space/协作团队共同建设 Migration Application Service。需重新生成
-`src/gateway/configs/schemas/bots.openapi.json`，并把 schema 与匹配的路由/鉴权配置同步到独立
+`apps/gateway/configs/schemas/bots.openapi.json`，并把 schema 与匹配的路由/鉴权配置同步到独立
 维护的 OCB/Sofapy Gateway；Avernet 现有宽泛的 `/openapi/v1/bots/**` 规则已覆盖该路径。
 
 _bots 上**刻意不暴露**的字段：创建时的顶层 `template_type`/`template_config` 和 `engine_options`（下游目前没有任何代码会读
@@ -1057,7 +1057,7 @@ Agent 状态。它们不是产品面，而是其它端点的数字所参照的�
 
 **路由。** HTTP 端点通过 `bots` domain 直达后端，网关无需改动。socket 需要自己的
 domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 即
-`src/gateway/configs/application.yaml` 中的 `bots-loadtest-ws`：仅 socket 平面、
+`apps/gateway/configs/application.yaml` 中的 `bots-loadtest-ws`：仅 socket 平面、
 原样转发到后端、无 rewrite。`ws` 这一段正是该占用所锚定的位置，与
 `/openapi/v1/bots/messages/ws/**` 同形，因此日后在 `loadtest` 下新增的 HTTP 端点
 天然落在其外。
@@ -1147,7 +1147,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   镜像）。本地 pre-push 钩子在这里跑不了 singlebox —— 用 `--no-verify` 推送并依赖远端 CI。
   **`--no-verify` 对 force-push 同样适用**（普通 `git push` 会运行约 10 分钟的钩子并超时）。
 - 执行会 `cd` 到仓库根目录的 `git` 命令后，cwd 会漂移到仓库根；跑 `uv run` 前先
-  `cd src/backend`。
+  `cd apps/backend`。
 
 ## Track B bots 中踩过的坑（PR #494）
 
@@ -1376,7 +1376,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   行与 DoD 第 6 项 → 后端这一半完成。**上游仍有闸口**：#599 合并，以及
   `route_security.yaml` 允许本界面真实的调用方；另外 `app` / `access_key` 调用方在有人
   就"它们归属于谁"定案之前一律 401。SDD：
-  `src/backend/specs/2026-07-30-gateway-principal-verifier/`。
+  `apps/backend/specs/2026-07-30-gateway-principal-verifier/`。
 - **2026-08-19** —— **新增只读 Node OpenAPI。** 当前前端与 Engine 只支持
   `GET /api/nodes`，所以公共 API 只增加
   `GET /openapi/v1/bots/{bot_id}/nodes`，沿用其他运行时组的 owner/editor、Bot grant 与
@@ -1460,7 +1460,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   真实后端验证器做往返验证 —— 形状一致、转发来的机密不外投、`aud`/`iss` 不符即拒。
   **新记为待办：** 没有任何跨仓测试钉住这份契约，任一侧改字段名都会让两边测试保持绿色
   而线上全 401。整套测试 10204 通过 / 3 跳过。SDD：
-  `src/backend/specs/2026-08-02-public-api-user-only-principal/`。
+  `apps/backend/specs/2026-08-02-public-api-user-only-principal/`。
 
 - **2026-08-19 —— Bot Editors 协作者 CRUD。** 公共面新增
   `GET/POST /openapi/v1/bots/{bot_id}/editors`、
@@ -1509,7 +1509,7 @@ domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 
   Track C 起就已过期，只有 32 条路径，而后端发布的是 43 条。新增测试
   `tests/…/openapi_v1/test_path_convention.py` 针对生成的文档断言该规则以及本文的保留名
   清单，使两者都在测试而非评审中失败。SDD：
-  `src/backend/specs/2026-08-03-openapi-v1-path-normalization/`。
+  `apps/backend/specs/2026-08-03-openapi-v1-path-normalization/`。
 - **2026-08-04** —— **Track B Skills 契约最终定为 6 个端点。** 删除独立的
   `/skills/active` 路由，改用列表的可选 `active` 过滤条件。同时定案了 Bot 范围的
   原始 ZIP 上传、同名替换、owner 与协作者语义、离线可读、变更操作的 Bot ready 闸口，

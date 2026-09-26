@@ -8,16 +8,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/unit-tests.yml"
-BACKEND_CI_PATH = REPO_ROOT / "src/backend/scripts/ci_test.sh"
+BACKEND_CI_PATH = REPO_ROOT / "apps/backend/scripts/ci_test.sh"
 PR_MERGE_PARENT_EXPRESSION = (
     "${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}"
 )
 MODULE_JOBS = {
     "bcs": ("BCS_BASE_REF", "src/bcs"),
-    "backend": ("BACKEND_BASE_REF", "src/backend"),
+    "backend": ("BACKEND_BASE_REF", "apps/backend"),
     "engine": ("ENGINE_BASE_REF", "src/engine"),
-    "baas": ("BAAS_BASE_REF", "src/baas"),
-    "gateway": ("GATEWAY_BASE_REF", "src/gateway"),
+    "baas": ("BAAS_BASE_REF", "apps/baas"),
+    "gateway": ("GATEWAY_BASE_REF", "apps/gateway"),
 }
 
 
@@ -89,10 +89,10 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
             _git(repository, "branch", "pull-request")
 
             for module_path in (
-                "src/backend",
+                "apps/backend",
                 "src/engine",
-                "src/baas",
-                "src/gateway",
+                "apps/baas",
+                "apps/gateway",
             ):
                 _write(repository, f"{module_path}/target-only.txt", "target branch\n")
             _git(repository, "add", ".")

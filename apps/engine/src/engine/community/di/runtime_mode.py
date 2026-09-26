@@ -6,7 +6,7 @@ reads it to decide whether to layer ``Testing*`` override modules via
 ``extra_modules``. Business code in ``core``/``api`` never sees it — Rule 14
 (no scattered ``if is_local_mode()``).
 
-Mirror of ``src/backend/src/agentclaw/di/runtime_mode.py`` (engine has a single
+Mirror of ``apps/backend/src/agentclaw/di/runtime_mode.py`` (engine has a single
 mode dimension for now; a database dimension can be added later if needed).
 """
 from __future__ import annotations

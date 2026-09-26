@@ -14,7 +14,7 @@ gap and nothing wider. The tests here pin the compatibility from both ends:
 * :func:`test_hash_key_output_uses_documented_pbkdf2_parameters` proves we
   *write* what secbaas would. The read-side test cannot catch a weakened salt or
   iteration count in this copy, and it is the only guard in a checkout that has
-  no ``src/baas`` on disk, where the parity tests below skip.
+  no ``apps/baas`` on disk, where the parity tests below skip.
 
 Neither parameter is recoverable from the stored string, which carries only the
 salt: the digest, the iteration count, and the encoding are implicit constants
@@ -50,7 +50,7 @@ import pytest
 
 from gateway.community.core.app import APIKeyGenerator
 
-# Produced by running src/baas/.../api_gateway/_key_gen.py — do NOT regenerate
+# Produced by running apps/baas/.../api_gateway/_key_gen.py — do NOT regenerate
 # these with the gateway's own copy, which would make the check circular.
 _SECBAAS_KEY = "5X1tk2yC6rxmKhUfWzN2GJ3CYiGGE22F"
 _SECBAAS_HASH = (
@@ -58,12 +58,12 @@ _SECBAAS_HASH = (
     ":UKS+A02LiRqVNsn0oOs9EiNO63ggsbZ3UHGnND6A08Q="
 )
 
-_SECBAAS_RELPATH = "src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py"
-_OURS_RELPATH = "src/gateway/src/gateway/community/core/app/_key_gen.py"
+_SECBAAS_RELPATH = "apps/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py"
+_OURS_RELPATH = "apps/gateway/apps/gateway/community/core/app/_key_gen.py"
 
 # The monorepo root is the ancestor holding both module trees. Derived from the
 # two paths above so that moving a module leaves one place to update *in this
-# file* — a second hardcoded "src/baas" here would make the guidance in
+# file* — a second hardcoded "apps/baas" here would make the guidance in
 # _secbaas_source() insufficient, since the probe would stop matching before the
 # relpath is ever read. The path is also spelled out in the docstring of
 # gateway/community/core/app/__init__.py, which nothing enforces.
@@ -76,8 +76,8 @@ def _monorepo_root() -> Path | None:
     """The ancestor holding both module trees, or ``None`` if there is none.
 
     Keyed on the module directories rather than on ``AGENTS.md``: this repo
-    already places that file at module level (``src/bcs``, ``src/frontend``), so
-    a future ``src/gateway/AGENTS.md`` would silently resolve the wrong root.
+    already places that file at module level (``src/bcs``, ``apps/frontend``), so
+    a future ``apps/gateway/AGENTS.md`` would silently resolve the wrong root.
 
     ``None`` is ambiguous between "the gateway was split out on its own" and
     "a module directory was renamed", and is treated as the former — the tests
@@ -115,7 +115,7 @@ def _load_secbaas_generator(source: Path) -> ModuleType:
     """Load the secbaas generator straight from disk.
 
     By file path rather than by package import because secbaas is deliberately
-    *not* a dependency of ``src/gateway/pyproject.toml`` — the plan rejects the
+    *not* a dependency of ``apps/gateway/pyproject.toml`` — the plan rejects the
     cross-module dependency and copies the class instead. The generator is
     stdlib-only, so the file loads cleanly on its own.
     """
@@ -208,7 +208,7 @@ def test_hash_key_output_uses_documented_pbkdf2_parameters() -> None:
     """Pin the write side against our own ``hash_key`` output.
 
     Without this, weakening the salt width or the iteration count in this copy
-    passes every other test in a checkout with no ``src/baas`` on disk: the
+    passes every other test in a checkout with no ``apps/baas`` on disk: the
     internal round-trips stay self-consistent under any change applied to
     ``hash_key`` and ``verify_key`` together, and the parity tests skip.
 
@@ -375,7 +375,7 @@ def test_copy_carries_no_cjk_prose() -> None:
     ``migrations/mysql``, whose comments ship to the database as column
     ``COMMENT``s, and is untouched there. Read from the imported module rather
     than from the tree, so it holds wherever the package is installed from and
-    needs no ``src/baas`` to run.
+    needs no ``apps/baas`` to run.
 
     The bound is ``U+2FFF`` — above every CJK ideograph, CJK punctuation and
     fullwidth form, below the punctuation English prose here actually uses (em

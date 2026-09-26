@@ -4,7 +4,7 @@
  *
  * BcnHome - BCN 产品首页（开源专属落地页）
  *
- * 页面样式和静态内容以 GitHub 最新 src/frontend/src/pages/BcnHome 为基线；
+ * 页面样式和静态内容以 GitHub 最新 apps/frontend/src/pages/BcnHome 为基线；
  * 本仓仅在其基础上叠加一期 BCN 开源登录态逻辑。
  */
 

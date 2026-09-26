@@ -27,7 +27,7 @@
 
 ### Task 3: Migrate internal BCS
 
-- Update internal `src/bcs-internal` operation callers and observation documentation. Remove the added OpenTelemetry-derived trace-ID fields from ZDAS, ZCache and AgentPass logs while retaining request IDs and timing evidence; preserve existing dependency protocol tracing fields.
+- Update internal `apps/bcs-internal` operation callers and observation documentation. Remove the added OpenTelemetry-derived trace-ID fields from ZDAS, ZCache and AgentPass logs while retaining request IDs and timing evidence; preserve existing dependency protocol tracing fields.
 - Consume the matching public revision through the existing `ocb-public` checkout. Keep internal SDKs and business-specific logs in their current crates.
 
 ### Task 4: Verify and deliver

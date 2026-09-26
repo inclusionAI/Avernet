@@ -100,7 +100,7 @@ RUN mkdir -p /tmp/openclaw-channel-bcn \
     && mkdir -p /root/.openclaw/extensions \
     && ln -sfn /opt/ocb/src/bcs/crates/plugins/openclaw-channel-bcn /root/.openclaw/extensions/openclaw-channel-bcn
 
-RUN cd src/frontend \
+RUN cd apps/frontend \
     && HUSKY=0 npm ci \
     && npm run build:oss \
     && rm -rf node_modules .umi .umi-production .cache src/.umi

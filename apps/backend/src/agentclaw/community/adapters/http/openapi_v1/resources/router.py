@@ -18,7 +18,7 @@ workstream before it is exposed to any external tenant: ``require_principal`` is
 still a ``None`` stub, so the gateway's signed-Principal seam is not in place
 yet. Do NOT expose to external callers until that lands (see
 ``openapi_v1/dependencies.py`` and the cross-team tenant isolation track in
-``src/backend/docs/openapi-v1/README.zh-CN.md``).
+``apps/backend/docs/openapi-v1/README.zh-CN.md``).
 
 Gates / follow-ups (block public-readiness, NOT a silent deployment):
 - The owner the operations address comes from ``OwnerIdDep`` — the caller by

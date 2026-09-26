@@ -1,7 +1,7 @@
 """Unit tests for BaasDormantClient (single-signal /alive only).
 
 Tests use the **real BaaS response envelope** verified against
-``src/baas/src/secbaas/adapters/web/bot_health_checker_router.py`` and
+``apps/baas/src/secbaas/adapters/web/bot_health_checker_router.py`` and
 ``api/health_check/bot/_models.py:BotAliveCheckResult``:
 
     {

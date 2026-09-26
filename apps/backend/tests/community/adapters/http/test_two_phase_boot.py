@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-_BACKEND_ROOT = Path(__file__).resolve().parents[4]      # .../src/backend
+_BACKEND_ROOT = Path(__file__).resolve().parents[4]      # .../apps/backend
 _SRC = _BACKEND_ROOT / "src"
 _MARKER = "@@JSON@@"
 

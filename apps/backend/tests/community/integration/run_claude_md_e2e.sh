@@ -6,7 +6,7 @@
 #
 # 用法:
 #   cd ocb_worktrees/feat-claude-md-crud
-#   bash src/backend/tests/integration/run_claude_md_e2e.sh
+#   bash apps/backend/tests/integration/run_claude_md_e2e.sh
 #
 # 退出码:
 #   0 = 全部通过
@@ -16,7 +16,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OCB_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-BACKEND_DIR="$OCB_ROOT/src/backend"
+BACKEND_DIR="$OCB_ROOT/apps/backend"
 
 BASE_URL="http://127.0.0.1:8888"
 ENTITY_TYPE="staff"

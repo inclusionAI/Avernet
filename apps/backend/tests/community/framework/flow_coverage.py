@@ -1,4 +1,4 @@
-# src/backend/tests/framework/flow_coverage.py
+# apps/backend/tests/framework/flow_coverage.py
 """E2 coverage matrix + E3 exempt list (Plan B).
 
 covered_modules(): union of every FlowCase.covers.
@@ -162,7 +162,7 @@ _BOT_APP_GRANT_EXEMPT_REASON = (
     "withdraw cycle and both scoping dimensions of the application's view), "
     "tests/community/adapters/http/openapi_v1/authorized_apps/test_router.py "
     "(all four operations end to end), the principal-seam assertions in "
-    "test_principal_seam.py, and src/gateway/tests/unit/core/authn/"
+    "test_principal_seam.py, and apps/gateway/tests/unit/core/authn/"
     "test_route_security.py against the shipped config. Drain this together "
     "with _GATEWAY_PRINCIPAL_EXEMPT_REASON — one gateway in the box unblocks "
     "both."

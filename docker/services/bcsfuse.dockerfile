@@ -49,7 +49,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir -e ".[dev]"
 
 # Copy only the public bcsfuse source tree. We intentionally avoid copying
-# src/backend, src/bcs, src/frontend, or any sibling internal modules.
+# apps/backend, src/bcs, apps/frontend, or any sibling internal modules.
 COPY src/bcsfuse/src ./src
 COPY src/bcsfuse/schemas ./schemas
 COPY src/bcsfuse/configs ./configs

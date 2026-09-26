@@ -105,7 +105,7 @@ fi
 
 mkdir -p "$data_directory"
 runtime_config="${data_directory}/clawweb.runtime.json"
-skills_root="${avernet_root}/src/evolverun/clawweb-skills/clawevolve-skills"
+skills_root="${avernet_root}/apps/evolverun/clawweb-skills/clawevolve-skills"
 
 if [[ -z "$model" && -f "$openclaw_home/openclaw.json" ]]; then
   model="$(node -e 'const fs=require("fs"); const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const m=j?.agents?.defaults?.model; process.stdout.write(typeof m==="string"?m:(m?.primary??""));' "$openclaw_home/openclaw.json")"

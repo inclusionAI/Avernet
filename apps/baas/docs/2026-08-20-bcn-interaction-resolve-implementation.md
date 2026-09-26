@@ -13,9 +13,9 @@
 ### Task 1: Add the typed interaction resolution contract
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/api/bot_interaction/_models.py`
-- Modify: `src/baas/src/secbaas/community/api/bot_interaction/__init__.py`
-- Test: `src/baas/tests/unit/core/service/test_bot_interaction_service.py`
+- Modify: `apps/baas/src/secbaas/community/api/bot_interaction/_models.py`
+- Modify: `apps/baas/src/secbaas/community/api/bot_interaction/__init__.py`
+- Test: `apps/baas/tests/unit/core/service/test_bot_interaction_service.py`
 
 **Step 1: Write the failing model test**
 
@@ -47,7 +47,7 @@ normalized payload and must continue to use `interaction.resolve`.
 
 **Step 2: Run the focused test and verify RED**
 
-Run from `src/baas`:
+Run from `apps/baas`:
 
 ```bash
 .venv/bin/pytest tests/unit/core/service/test_bot_interaction_service.py -q
@@ -69,20 +69,20 @@ Run the command from Step 2. Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/baas/src/secbaas/community/api/bot_interaction \
-  src/baas/tests/unit/core/service/test_bot_interaction_service.py
+git add apps/baas/src/secbaas/community/api/bot_interaction \
+  apps/baas/tests/unit/core/service/test_bot_interaction_service.py
 git commit -m "feat(baas): model normalized interaction resolutions"
 ```
 
 ### Task 2: Persist normalized resolutions and Provider idempotency
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/api/bot_interaction/_models.py`
-- Modify: `src/baas/src/secbaas/community/api/bot_interaction/_protocols.py`
-- Modify: `src/baas/src/secbaas/community/core/repository/bot_run_interaction/_record.py`
-- Modify: `src/baas/src/secbaas/community/core/service/bot_interaction/_service.py`
-- Test: `src/baas/tests/unit/core/service/test_bot_interaction_service.py`
-- Test: `src/baas/tests/unit/core/repository/bot_run_interaction/test_orm_repository.py`
+- Modify: `apps/baas/src/secbaas/community/api/bot_interaction/_models.py`
+- Modify: `apps/baas/src/secbaas/community/api/bot_interaction/_protocols.py`
+- Modify: `apps/baas/src/secbaas/community/core/repository/bot_run_interaction/_record.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_interaction/_service.py`
+- Test: `apps/baas/tests/unit/core/service/test_bot_interaction_service.py`
+- Test: `apps/baas/tests/unit/core/repository/bot_run_interaction/test_orm_repository.py`
 
 **Step 1: Write failing state-machine tests**
 
@@ -151,23 +151,23 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/baas/src/secbaas/community/api/bot_interaction \
-  src/baas/src/secbaas/community/core/repository/bot_run_interaction \
-  src/baas/src/secbaas/community/core/service/bot_interaction \
-  src/baas/src/secbaas/community/adapters/web/routers/open_api \
-  src/baas/tests/unit/core/service/test_bot_interaction_service.py \
-  src/baas/tests/unit/core/repository/bot_run_interaction/test_orm_repository.py \
-  src/baas/tests/unit/adapters/web/open_api
+git add apps/baas/src/secbaas/community/api/bot_interaction \
+  apps/baas/src/secbaas/community/core/repository/bot_run_interaction \
+  apps/baas/src/secbaas/community/core/service/bot_interaction \
+  apps/baas/src/secbaas/community/adapters/web/routers/open_api \
+  apps/baas/tests/unit/core/service/test_bot_interaction_service.py \
+  apps/baas/tests/unit/core/repository/bot_run_interaction/test_orm_repository.py \
+  apps/baas/tests/unit/adapters/web/open_api
 git commit -m "feat(baas): persist interaction resolution payloads"
 ```
 
 ### Task 3: Build exact Engine resolve frames
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/core/service/bot_run/_interaction_protocol.py`
-- Modify: `src/baas/src/secbaas/community/core/service/bot_run/_bot_websocket_client.py`
-- Test: `src/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py`
-- Test: `src/baas/tests/unit/core/service/bot_run/test_bot_websocket_client.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_run/_interaction_protocol.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_run/_bot_websocket_client.py`
+- Test: `apps/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py`
+- Test: `apps/baas/tests/unit/core/service/bot_run/test_bot_websocket_client.py`
 
 **Step 1: Write failing protocol tests**
 
@@ -207,19 +207,19 @@ Run the command from Step 2. Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/baas/src/secbaas/community/core/service/bot_run \
-  src/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py \
-  src/baas/tests/unit/core/service/bot_run/test_bot_websocket_client.py
+git add apps/baas/src/secbaas/community/core/service/bot_run \
+  apps/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py \
+  apps/baas/tests/unit/core/service/bot_run/test_bot_websocket_client.py
 git commit -m "feat(baas): build kind-specific engine resolve frames"
 ```
 
 ### Task 4: Carry the resolution through the owner worker
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py`
-- Test: `src/baas/tests/unit/core/service/bot_run/test_async_chat_client.py`
-- Test: `src/baas/tests/unit/core/service/bot_run/test_async_chat_client_coverage.py`
-- Test: `src/baas/tests/unit/core/service/bot_run/test_engine_dispatch_integration.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py`
+- Test: `apps/baas/tests/unit/core/service/bot_run/test_async_chat_client.py`
+- Test: `apps/baas/tests/unit/core/service/bot_run/test_async_chat_client_coverage.py`
+- Test: `apps/baas/tests/unit/core/service/bot_run/test_engine_dispatch_integration.py`
 
 **Step 1: Write a failing persistence-to-Engine test**
 
@@ -252,21 +252,21 @@ Run the command from Step 2. Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py \
-  src/baas/tests/unit/core/service/bot_run
+git add apps/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py \
+  apps/baas/tests/unit/core/service/bot_run
 git commit -m "feat(baas): dispatch complete interaction resolutions"
 ```
 
 ### Task 5: Add the BCN request/domain contract and normalization
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py`
-- Modify: `src/baas/src/secbaas/community/api/bcn/_models.py`
-- Modify: `src/baas/src/secbaas/community/api/bcn/_protocols.py`
-- Modify: `src/baas/src/secbaas/community/api/bcn/__init__.py`
-- Modify: `src/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
-- Test: `src/baas/tests/unit/core/service/bcn/test_bcn_service.py`
-- Test: `src/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
+- Modify: `apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py`
+- Modify: `apps/baas/src/secbaas/community/api/bcn/_models.py`
+- Modify: `apps/baas/src/secbaas/community/api/bcn/_protocols.py`
+- Modify: `apps/baas/src/secbaas/community/api/bcn/__init__.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
+- Test: `apps/baas/tests/unit/core/service/bcn/test_bcn_service.py`
+- Test: `apps/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
 
 **Step 1: Write failing request and normalization tests**
 
@@ -322,22 +322,22 @@ Run the command from Step 2. Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py \
-  src/baas/src/secbaas/community/api/bcn \
-  src/baas/src/secbaas/community/core/service/bcn/_bcn_service.py \
-  src/baas/tests/unit/core/service/bcn/test_bcn_service.py \
-  src/baas/tests/unit/adapters/web/open_api/test_bcn_router.py
+git add apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py \
+  apps/baas/src/secbaas/community/api/bcn \
+  apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py \
+  apps/baas/tests/unit/core/service/bcn/test_bcn_service.py \
+  apps/baas/tests/unit/adapters/web/open_api/test_bcn_router.py
 git commit -m "feat(baas): normalize BCN interaction resolutions"
 ```
 
 ### Task 6: Register `/bcn/downlink` and wire composition
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py`
-- Modify: `src/baas/src/secbaas/community/bootstrap/_core_services.py`
-- Modify: `src/baas/tests/architecture/check_protocols/api/bcn/check_bcn_downlink_service.py`
-- Test: `src/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
-- Test: `src/baas/tests/e2e/asgi/baseline/test_bcn_downlink_extended.py`
+- Modify: `apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py`
+- Modify: `apps/baas/src/secbaas/community/bootstrap/_core_services.py`
+- Modify: `apps/baas/tests/architecture/check_protocols/api/bcn/check_bcn_downlink_service.py`
+- Test: `apps/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
+- Test: `apps/baas/tests/e2e/asgi/baseline/test_bcn_downlink_extended.py`
 
 **Step 1: Write a failing route test**
 
@@ -377,11 +377,11 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py \
-  src/baas/src/secbaas/community/bootstrap/_core_services.py \
-  src/baas/tests/unit/adapters/web/open_api/test_bcn_router.py \
-  src/baas/tests/e2e/asgi/baseline/test_bcn_downlink_extended.py \
-  src/baas/tests/architecture/check_protocols/api/bcn/check_bcn_downlink_service.py
+git add apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py \
+  apps/baas/src/secbaas/community/bootstrap/_core_services.py \
+  apps/baas/tests/unit/adapters/web/open_api/test_bcn_router.py \
+  apps/baas/tests/e2e/asgi/baseline/test_bcn_downlink_extended.py \
+  apps/baas/tests/architecture/check_protocols/api/bcn/check_bcn_downlink_service.py
 git commit -m "feat(baas): register BCN interaction resolve downlink"
 ```
 
@@ -393,7 +393,7 @@ git commit -m "feat(baas): register BCN interaction resolve downlink"
 **Step 1: Run focused interaction and BCN suites**
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/pytest \
   tests/unit/core/service/test_bot_interaction_service.py \
   tests/unit/core/repository/bot_run_interaction \
@@ -453,10 +453,10 @@ git commit -m "test(baas): cover BCN interaction resolve delivery"
 ### Task 8: Harden validation, logging, terminalization, and retries
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py`
-- Modify: `src/baas/src/secbaas/community/core/service/bot_interaction/_service.py`
-- Modify: `src/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py`
-- Modify: `src/baas/src/secbaas/community/core/service/bot_run/_bot_websocket_client.py`
+- Modify: `apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_interaction/_service.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_run/_bot_websocket_client.py`
 - Test the corresponding router, state-service, and websocket paths.
 
 **Step 1: Add RED regressions**

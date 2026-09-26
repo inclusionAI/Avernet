@@ -15,8 +15,8 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple "uv${UV_VERSION:+==${UV_VERSION}}"
 
 # Install dependencies first (without the project) for better layer caching.
-# The default uv index is the Aliyun PyPI mirror (see src/backend/pyproject.toml).
-COPY src/backend/pyproject.toml src/backend/uv.lock src/backend/README.md ./
+# The default uv index is the Aliyun PyPI mirror (see apps/backend/pyproject.toml).
+COPY apps/backend/pyproject.toml apps/backend/uv.lock apps/backend/README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # (``python -m agentclaw.community.main``), so ``agentclaw.community`` has to be
 # on the venv's import path. src/agentclaw/ carries no __init__.py: it is a PEP
 # 420 namespace whose only child here is community/ (see the hatch wheel target).
-COPY src/backend/src ./src
+COPY apps/backend/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
@@ -84,14 +84,14 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
 
 COPY --from=builder /app/.venv /app/.venv
-COPY src/backend/src /app/src
+COPY apps/backend/src /app/src
 
 # YamlConfigProvider searches ${PWD}/configs before the packaged
 # agentclaw/community/configs, so this copy is the one an operator overrides:
 # mount a ConfigMap over /app/configs and the packaged pair stays as the
 # fallback. A mount must carry BOTH application.yaml and the profile overlay —
 # the loader skips a directory that holds only one of the pair.
-COPY src/backend/src/agentclaw/community/configs /app/configs
+COPY apps/backend/src/agentclaw/community/configs /app/configs
 
 # data/: the community overlay's storage roots are relative paths
 # (./data/workspace/*, ./data/objstore, ./data/oss, ./data/nas), so they resolve

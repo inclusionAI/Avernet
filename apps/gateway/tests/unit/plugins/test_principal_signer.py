@@ -256,7 +256,7 @@ def test_key_fingerprint_matches_the_backend_golden_values() -> None:
     and logs it at boot; diffing the two lines is how an operator answers "do
     both ends hold the same secret?". The two implementations live in separate
     distributions with no shared package, so nothing but this test and its twin
-    in ``src/backend/tests/community/core/gateway_principal/test_verifier.py``
+    in ``apps/backend/tests/community/core/gateway_principal/test_verifier.py``
     stops one side from drifting and quietly making the comparison meaningless.
     Change these expected values only when both change together.
     """

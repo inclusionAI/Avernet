@@ -77,7 +77,7 @@ Phase 1 只解决“单连接多 session 并发”和“session 级恢复”两�
 
 ### 3.1 Active Run 属于 Connection，而不是 Session
 
-文件：`src/gateway/connection-context.ts`
+文件：`apps/gateway/connection-context.ts`
 
 当前 `ConnectionContext` 内维护：
 
@@ -101,7 +101,7 @@ for (const [ , run ] of this.activeRuns) {
 
 ### 3.2 Pending Interaction 绑定 connId
 
-文件：`src/gateway/handlers/chat.ts`
+文件：`apps/gateway/handlers/chat.ts`
 
 注册 pending interaction 时写入：
 
@@ -140,7 +140,7 @@ pending.connId === ctx.connId
 
 ### 3.4 Chat Abort 也是 connection-local 的
 
-文件：`src/gateway/handlers/chat.ts`
+文件：`apps/gateway/handlers/chat.ts`
 
 当前 `chat.abort` 通过 `ctx.activeRuns` 找 run，并调用：
 
@@ -915,7 +915,7 @@ cancelOrphanCleanup(sessionKey: string): void
 getStatus(sessionKey: string): SessionStatus
 ```
 
-### 14.2 修改 `src/gateway/connection-context.ts`
+### 14.2 修改 `apps/gateway/connection-context.ts`
 
 调整：
 
@@ -924,7 +924,7 @@ getStatus(sessionKey: string): SessionStatus
 - 删除 `activeRuns`
 - `dispose()` 改为只做 detach / stopTicks
 
-### 14.3 修改 `src/gateway/handlers/chat.ts`
+### 14.3 修改 `apps/gateway/handlers/chat.ts`
 
 调整：
 
@@ -975,7 +975,7 @@ if (!runtimeRegistry.isController(pending.sessionKey, ctx.connId)) ...
 - continuation 恢复时应写回 session runtime
 - follow-up continuation 的输出目标应是当前 session controller，而不是历史 ctx 私有状态
 
-### 14.7 修改 `src/gateway/handlers/sessions.ts`
+### 14.7 修改 `apps/gateway/handlers/sessions.ts`
 
 新增方法：
 
@@ -983,7 +983,7 @@ if (!runtimeRegistry.isController(pending.sessionKey, ctx.connId)) ...
 - `session.detach`
 - `session.status`
 
-### 14.8 修改 `src/gateway/frame-dispatcher.ts`
+### 14.8 修改 `apps/gateway/frame-dispatcher.ts`
 
 注册新方法：
 

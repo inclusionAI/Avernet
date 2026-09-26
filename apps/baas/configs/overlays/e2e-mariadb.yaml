@@ -3,7 +3,7 @@
 # Enables schema creation and seed data so the E2E acceptance suite can run
 # against a freshly-created database. Requires a reachable MariaDB server.
 # Values below target the local E2E devbox container started by
-# `just test-e2e-mariadb` (in src/baas/justfiles/test-mariadb.just):
+# `just test-e2e-mariadb` (in apps/baas/justfiles/test-mariadb.just):
 #   docker run -d -p 33306:3306 \
 #     -e MARIADB_DATABASE=secbaas_test \
 #     -e MARIADB_USER=secbaas -e MARIADB_PASSWORD=secbaaspass mariadb:11

@@ -30,7 +30,7 @@ from agentclaw.community.plugins.local.oss_storage import MockObjectStoragePlugi
 # directory created once for this module so each of those tests packs a single
 # file. The default used to be ``""``; ``_resolve_skill_dir("")`` hands back
 # ``Path("")`` — the process CWD — so every one of them zipped the whole
-# ``src/backend`` checkout (``.venv`` included, ~250MB) and took ~11s apiece.
+# ``apps/backend`` checkout (``.venv`` included, ~250MB) and took ~11s apiece.
 _DEFAULT_SKILL_DIR = Path(tempfile.mkdtemp(prefix="skill-publish-default-"))
 (_DEFAULT_SKILL_DIR / "SKILL.md").write_text("test")
 

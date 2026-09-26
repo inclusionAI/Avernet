@@ -226,9 +226,9 @@ src/engine/
 
 **命名说明：** 顶层 `transport/`（引擎→上游）与 `api/transport/`（前端→适配器入口）是两类传输：前者抽象引擎对接上游进程的方式（WS / stdio），后者是 FastAPI 应用对外暴露的 WebSocket 入口。同名不同层，不会冲突。
 
-**前端 (src/frontend/src/):**
+**前端 (apps/frontend/src/):**
 ```
-src/frontend/src/
+apps/frontend/src/
 ├── services/
 │   └── backend-api/               # API Controller 层
 │       ├── EngineController.ts    # 引擎管理 API
@@ -3828,7 +3828,7 @@ spec:
 ### 16.1 引擎能力查询 Hook
 
 ```typescript
-// src/frontend/src/hooks/useEngineCapabilities.ts
+// apps/frontend/src/hooks/useEngineCapabilities.ts
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { EngineController } from '@/services/backend-api/EngineController';
@@ -3895,7 +3895,7 @@ export function useCapabilityGuard(capability: string, engineName?: string) {
 ### 16.2 能力感知组件
 
 ```tsx
-// src/frontend/src/components/engine/CapabilityGuard.tsx
+// apps/frontend/src/components/engine/CapabilityGuard.tsx
 
 import React from 'react';
 import { useCapabilityGuard } from '@/hooks/useEngineCapabilities';
@@ -3963,7 +3963,7 @@ export function MCPServerControl({ serverCode }: { serverCode: string }) {
 ### 16.3 引擎状态 Store
 
 ```typescript
-// src/frontend/src/stores/engineStore.ts
+// apps/frontend/src/stores/engineStore.ts
 
 import { create } from 'zustand';
 import { EngineCapabilities } from '@/hooks/useEngineCapabilities';
@@ -4038,7 +4038,7 @@ export const useEngineStore = create<EngineState>((set, get) => ({
 ### 16.4 引擎选择器组件
 
 ```tsx
-// src/frontend/src/components/engine/EngineSelector.tsx
+// apps/frontend/src/components/engine/EngineSelector.tsx
 
 import React from 'react';
 import { useEngineStore, EngineType } from '@/stores/engineStore';
@@ -4137,7 +4137,7 @@ export function EngineSelector() {
 ### 16.5 API Controller 扩展
 
 ```typescript
-// src/frontend/src/services/backend-api/EngineController.ts
+// apps/frontend/src/services/backend-api/EngineController.ts
 
 import { request } from '@/requestConfig';
 import type { ApiResponse } from '@/types';

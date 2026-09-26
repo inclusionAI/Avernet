@@ -123,12 +123,12 @@ def test_repository_manifest_registers_existing_coverage_modules_and_paths():
     for module_name in module_names:
         module = manifest["modules"][module_name]
         for target in module["acceptance_targets"]:
-            assert (repo_root / "src/backend" / target).exists(), target
+            assert (repo_root / "apps/backend" / target).exists(), target
         for core_path in module["core_paths"]:
-            assert (repo_root / "src/backend" / core_path).exists(), core_path
+            assert (repo_root / "apps/backend" / core_path).exists(), core_path
     for module in manifest["pending_modules"].values():
         for target in module["acceptance_targets"]:
-            assert (repo_root / "src/backend" / target).exists(), target
+            assert (repo_root / "apps/backend" / target).exists(), target
 
 
 def _coverage() -> dict:

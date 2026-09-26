@@ -27,7 +27,7 @@ import pathlib
 import pytest
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../apps/backend
 # B11: endpoint tests split into the community and corp test trees; the
 # no-mock-on-world.get rule is universal, so scan both.
 _ENDPOINTS_ROOTS = (

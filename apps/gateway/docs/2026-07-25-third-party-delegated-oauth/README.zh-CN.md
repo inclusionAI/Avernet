@@ -2,9 +2,9 @@
 
 **状态：** 参考记录 —— 决定已记录（非 SDD spec）
 **日期：** 2026-07-25
-**组件：** `src/gateway`（网关承载鉴权面；对外域名 `https://teamclawgw-pre.alipay.com`）
+**组件：** `apps/gateway`（网关承载鉴权面；对外域名 `https://teamclawgw-pre.alipay.com`）
 **范围：** 第三方服务器如何**代表我方某个终端用户**调用，而**全程不持有第一方会话令牌**。
-**关联：** `src/gateway/docs/2026-07-21-auth-design.md` —— 本文把该设计 **§15「模式 C」（OAuth 授权码，"用 Avernet 登录"）** 具体化；那里已埋点但暂缓。
+**关联：** `apps/gateway/docs/2026-07-21-auth-design.md` —— 本文把该设计 **§15「模式 C」（OAuth 授权码，"用 Avernet 登录"）** 具体化；那里已埋点但暂缓。
 
 > English version: [`README.md`](./README.md)。
 > **系统流程**（corp + community 时序图、授权模型、评审议程）：[`SYSTEM-FLOW.zh-CN.md`](./SYSTEM-FLOW.zh-CN.md)。
@@ -22,7 +22,7 @@
 1. `Authorization: Bearer <api_key>` —— 由 baas 校验，得到 App 及其**租户**（`APIKeyRecord.tenant`）。
 2. `IAM_TOKEN` cookie —— 经 IAM/BUService 解析出**终端用户**。
 
-现状实现见 `src/baas/src/secbaas/community/adapters/web/routers/open_api/dependencies.py`（`get_api_key_from_header`、`get_iam_token_from_cookie`、`get_bot_chat_context`）。
+现状实现见 `apps/baas/src/secbaas/community/adapters/web/routers/open_api/dependencies.py`（`get_api_key_from_header`、`get_iam_token_from_cookie`、`get_bot_chat_context`）。
 
 **为什么这是设计异味 —— 而不只是"多了一个令牌"：**
 
@@ -204,7 +204,7 @@ class OAuthBearerStrategy(AuthStrategy):
 
 ## 10. 下游凭证 —— 在 *client 的租户内、归属于* 用户 行事
 
-当请求抵达 runtime、需要调用 BaaS/MCP 时，它在 **client 的租户内、归属于 Alice** 行事（依 §8.2 —— 绝不使用 Alice 自己的租户或权限）。复用后端接缝 `CallerIdentityService.exchange_caller_identity()`（`src/backend/src/agentclaw/community/core/caller_identity/service.py:328`）。步骤 2 记录的授权**即**预授权；所签发的 caller 凭证经 `runtime_updater.update_caller_identity(...)` 装入 runtime，**绝不回吐给第三方**。该凭证必须锚定于 client 的 `org`/`tnt` —— **不得**悄悄把用户的租户或权限重新引入。
+当请求抵达 runtime、需要调用 BaaS/MCP 时，它在 **client 的租户内、归属于 Alice** 行事（依 §8.2 —— 绝不使用 Alice 自己的租户或权限）。复用后端接缝 `CallerIdentityService.exchange_caller_identity()`（`apps/backend/src/agentclaw/community/core/caller_identity/service.py:328`）。步骤 2 记录的授权**即**预授权；所签发的 caller 凭证经 `runtime_updater.update_caller_identity(...)` 装入 runtime，**绝不回吐给第三方**。该凭证必须锚定于 client 的 `org`/`tnt` —— **不得**悄悄把用户的租户或权限重新引入。
 
 需要一处签名改动：`exchange_caller_identity` 现取 `iam_token: str`。OAuth 路径下我们不持有 Alice 的活跃 `IAM_TOKEN`，因此 `CallerTokenProviderProtocol` 需要一个从 `(service_credential, subject_id, tenant, grant_ref)` 签发的重载，而非转发用户令牌。BUService 能否在没有用户活跃令牌的情况下签发此类委托凭证，是关键外部依赖 —— 见 §12。
 

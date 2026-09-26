@@ -6,7 +6,7 @@ enforced the user-pinned ``sha256`` and validated the ELF header by the time
 anything here sees bytes, so these models carry no source, no archive shape and
 no pin — just a command name and the file behind it.
 
-Contract: ``src/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md``
+Contract: ``apps/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md``
 §4 A2.
 """
 from __future__ import annotations

@@ -15,12 +15,12 @@ bounded_git() {
 frontend_select_variant() {
     case "${FRONTEND_VARIANT:-legacy}" in
         legacy)
-            FRONTEND_DIR="${PROJECT_ROOT}/src/frontend"
+            FRONTEND_DIR="${PROJECT_ROOT}/apps/frontend"
             FRONTEND_DEFAULT_SCRIPT="devs:local:oss"
             FRONTEND_ROOT_ID="root-master"
             ;;
         nextgen)
-            FRONTEND_DIR="${PROJECT_ROOT}/src/frontend-nextgen"
+            FRONTEND_DIR="${PROJECT_ROOT}/apps/frontend-nextgen"
             FRONTEND_DEFAULT_SCRIPT="dev:local"
             FRONTEND_ROOT_ID="root"
             ;;
@@ -120,7 +120,7 @@ frontend_pull() {
 
     # The pull target is the teamclaw external checkout and nothing else —
     # Avernet has no submodule, so an unset TEAMCLAW_DIR has nowhere to pull
-    # (src/frontend-nextgen is the in-repo nextgen export, not teamclaw).
+    # (apps/frontend-nextgen is the in-repo nextgen export, not teamclaw).
     local dir="${TEAMCLAW_DIR:-}"
     if [ -z "${dir}" ]; then
         log_error "frontend-pull updates the teamclaw checkout; TEAMCLAW_DIR is not set (set FRONTEND_VARIANT=teamclaw and TEAMCLAW_DIR in .env.local)"

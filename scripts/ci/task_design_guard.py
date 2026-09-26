@@ -17,7 +17,7 @@ from typing import Any, NamedTuple
 EXEMPT_LOGINS = frozenset({"regrecall", "xsandyguo"})
 DEFAULT_MANIFEST = "scripts/ci/task_design_guard.json"
 DEFAULT_SUBMITTERS = "docs/arch/task-design-guard-submitters.json"
-BACKEND_SOURCE_ROOT = Path("src/backend/src")
+BACKEND_SOURCE_ROOT = Path("apps/backend/src")
 PROTECTED_CONTROL_PATHS = frozenset(
     {
         ".github/workflows/task-design-guard.yml",

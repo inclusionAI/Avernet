@@ -5,8 +5,8 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 改了 task_service/executor/bcs 适配/provisioner 后**务必重启后端**):
 
   SINGLEBOX_TASK_E2E=1 SINGLEBOX_USER_ID=35983 SINGLEBOX_BOT_ID=1 \
-    src/backend/.venv/bin/python -m pytest \
-      src/backend/tests/community/core/task/singlebox_e2e/bbs_bid/test_bbs_bid_two_dream_bots_e2e.py -s
+    apps/backend/.venv/bin/python -m pytest \
+      apps/backend/tests/community/core/task/singlebox_e2e/bbs_bid/test_bbs_bid_two_dream_bots_e2e.py -s
 
 # 场景(动 LLM 自评 bid + 真执行;参考 test_writing_qc_state_machine_e2e.py 的 live 手法)
 
@@ -63,12 +63,12 @@ _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "2000"))
 
 _HDRS = {"x-user-id": _USER_ID, "accept": "application/json"}
 
-# skill 目录:本文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/bbs_bid/
+# skill 目录:本文件在 <repo>/apps/backend/tests/community/core/task/singlebox_e2e/bbs_bid/
 SKILLS_DIR = Path(__file__).resolve().parent / "../skills"
 _PLANNING_SKILL = str(SKILLS_DIR / "planning-arch")   # 确定式规划(单一交付物→[N_architects])
 _SEARCH_SKILL = str(SKILLS_DIR / "search")            # 派发决策表(N_architects→MISS)
 _ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")       # dream bot 中继执行侧(产架构师名册)
-# bbs-relay-single-task 在 spec 目录:parents[6]=<repo>/src/backend
+# bbs-relay-single-task 在 spec 目录:parents[6]=<repo>/apps/backend
 _BBS_SINGLE_TASK_SKILL = str(
     Path(__file__).resolve().parents[6]
     / "specs" / "2026-08-09-task-goal-driven-bbs-active-relay" / "bbs-relay-single-task"

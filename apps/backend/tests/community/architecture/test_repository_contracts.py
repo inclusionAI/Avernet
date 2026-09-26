@@ -32,7 +32,7 @@ import pytest
 import yaml
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]                  # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]                  # .../apps/backend
 _REPO_ROOT = (
     _BACKEND_ROOT / "src" / "agentclaw" / "community" / "core" / "repository"
 )

@@ -93,7 +93,7 @@ gateway_start() {
 # GATEWAY_PORT, so every kill stays inside the owned-process contract:
 # pidfile, then port, then the command pattern, each verified against
 # GATEWAY_DIR by cwd before terminate_process's graceful TERM → wait → KILL.
-# (Running src/gateway/scripts/app.sh stop directly stays blind; this module-
+# (Running apps/gateway/scripts/app.sh stop directly stays blind; this module-
 # level guard is what protects the singlebox paths.)
 gateway_stop() {
     log_info "Stopping Gateway..."

@@ -140,7 +140,7 @@ def test_config_keys_match_model() -> None:
     """
     if _AppConfig is None:
         pytest.skip(
-            "gateway package not importable — run from src/gateway/ "
+            "gateway package not importable — run from apps/gateway/ "
             "with `python -m pytest tests/architecture/`"
         )
 

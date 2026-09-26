@@ -63,8 +63,8 @@ mkdir -p "$SCHEMAS_DIR"
 # ── upstream registry ──────────────────────────────────────────────────────────
 _upstream_dir() {
     case "$1" in
-        backend) echo "src/backend" ;;
-        baas)    echo "src/baas" ;;
+        backend) echo "apps/backend" ;;
+        baas)    echo "apps/baas" ;;
         bcn)     echo "src/bcs" ;;
         bcn-internal) echo "src/bcs" ;;
         *)       echo "" ;;

@@ -13,11 +13,11 @@
 ### Task 1: Add failing BaaS transport and service tests
 
 **Files:**
-- Modify: `src/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
-- Modify: `src/baas/tests/unit/core/service/bcn/test_bcn_service.py`
-- Modify: `src/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py`
-- Modify: `src/baas/tests/unit/core/service/test_bot_interaction_service.py`
-- Modify: `src/baas/tests/e2e/asgi/baseline/test_bcn_downlink_extended.py`
+- Modify: `apps/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
+- Modify: `apps/baas/tests/unit/core/service/bcn/test_bcn_service.py`
+- Modify: `apps/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py`
+- Modify: `apps/baas/tests/unit/core/service/test_bot_interaction_service.py`
+- Modify: `apps/baas/tests/e2e/asgi/baseline/test_bcn_downlink_extended.py`
 
 **Step 1: Write the failing tests**
 
@@ -30,7 +30,7 @@ request fixture to a non-string value.
 Run:
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/pytest \
   tests/unit/adapters/web/open_api/test_bcn_router.py \
   tests/unit/core/service/bcn/test_bcn_service.py \
@@ -42,9 +42,9 @@ Expected: skip acceptance tests fail at Pydantic or normalization.
 ### Task 2: Relax BaaS value validation
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/api/bot_interaction/_models.py`
-- Modify: `src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py`
-- Modify: `src/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
+- Modify: `apps/baas/src/secbaas/community/api/bot_interaction/_models.py`
+- Modify: `apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
 
 **Step 1: Implement the minimum behavior**
 
@@ -62,7 +62,7 @@ Run the Task 1 command. Expected: all selected tests pass.
 ### Task 3: Update BaaS contract documentation
 
 **Files:**
-- Modify: `src/baas/docs/2026-08-20-bcn-interaction-resolve-design.md`
+- Modify: `apps/baas/docs/2026-08-20-bcn-interaction-resolve-design.md`
 
 Document empty/blank skip values and the absence of option membership checks.
 
@@ -71,7 +71,7 @@ Document empty/blank skip values and the absence of option membership checks.
 Run:
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/pytest \
   tests/unit/adapters/web/open_api/test_bcn_router.py \
   tests/unit/core/service/bcn/test_bcn_service.py \

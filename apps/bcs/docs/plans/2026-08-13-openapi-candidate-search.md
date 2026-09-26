@@ -156,7 +156,7 @@
 ### Task 8: Regenerate contracts and perform final regression verification
 
 **Files:**
-- Modify generated artifact: `src/gateway/configs/schemas/bcn.openapi.json`
+- Modify generated artifact: `apps/gateway/configs/schemas/bcn.openapi.json`
 - Verify all files changed from `origin/dev...HEAD`
 
 **Steps:**
@@ -174,7 +174,7 @@
    uv run pytest src/bcs/tests/openapi -q
    ```
 
-4. Regenerate `src/gateway/configs/schemas/bcn.openapi.json` with `src/bcs/scripts/dump_openapi.py`, regenerate a second temporary copy, and use `cmp` to prove determinism.
+4. Regenerate `apps/gateway/configs/schemas/bcn.openapi.json` with `src/bcs/scripts/dump_openapi.py`, regenerate a second temporary copy, and use `cmp` to prove determinism.
 5. Run the focused Rust suites:
 
    ```bash

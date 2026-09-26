@@ -40,7 +40,7 @@ _USER_ID = os.environ.get("SINGLEBOX_USER_ID", "146836")
 _TIMEOUT = float(os.environ.get("SINGLEBOX_TASK_E2E_TIMEOUT", "2000"))
 
 SKILLS_DIR = Path(__file__).parent / "skills"
-# bbs-relay-pickup skill 落在 spec 目录(spec 仓;非 src/backend/skills)。
+# bbs-relay-pickup skill 落在 spec 目录(spec 仓;非 apps/backend/skills)。
 _BBS_SKILL = str(
     Path(__file__).resolve().parents[5]
     / "specs" / "2026-08-09-task-goal-driven-task-runner-bbs" / "bbs-relay-pickup"

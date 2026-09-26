@@ -92,7 +92,7 @@ CLAUDE_CODE_GATEWAY_DEBUG=server,sdk npm run dev
 { type: 'event', event: string, payload?: unknown, seq?: number }
 ```
 
-支持的方法见 `src/gateway/handlers/` 目录，主要方法：
+支持的方法见 `apps/gateway/handlers/` 目录，主要方法：
 - `chat.send` / `chat.inject` / `chat.abort` — 聊天控制
 - `interaction.resolve` — HITL 审批响应
 - `session.list` / `session.get` / `session.delete` — 会话管理
@@ -111,7 +111,7 @@ CLAUDE_CODE_GATEWAY_DEBUG=server,sdk npm run dev
 
 需要审批的工具（`GATED_TOOLS`）：`AskUserQuestion`、`ExitPlanMode`、`Bash`、`Edit`、`Write`、`Read`
 
-相关文件：`src/interaction/`（注册与解析）、`src/gateway/handlers/`
+相关文件：`src/interaction/`（注册与解析）、`apps/gateway/handlers/`
 
 ## 目录结构
 
@@ -153,13 +153,13 @@ src/
 
 ### 添加新网关方法
 1. 在 `src/types.ts` 定义请求/响应类型
-2. 在 `src/gateway/handlers/` 创建处理器函数
-3. 在 `src/gateway/frame-dispatcher.ts` 的 `METHOD_HANDLERS` 中注册
+2. 在 `apps/gateway/handlers/` 创建处理器函数
+3. 在 `apps/gateway/frame-dispatcher.ts` 的 `METHOD_HANDLERS` 中注册
 
 ### 添加新事件类型
 1. 在 `src/types.ts` 扩展 `AgentEventStream` 或定义新事件类型
 2. 在桥接层（`claude-sdk-bridge.ts`）或编排器中发出事件
-3. 在 `src/gateway/orchestrator-bridge.ts` 转换为网关帧
+3. 在 `apps/gateway/orchestrator-bridge.ts` 转换为网关帧
 
 ### 添加需要审批的工具
 1. 在 `src/claude-sdk-bridge.ts` 的 `GATED_TOOLS` 集合中添加工具名

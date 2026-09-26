@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Update PR #1218 onto the latest `dev`, retain all backend provider-tag behavior, and remove every `src/frontend/**` change from the PR diff.
+**Goal:** Update PR #1218 onto the latest `dev`, retain all backend provider-tag behavior, and remove every `apps/frontend/**` change from the PR diff.
 
 **Architecture:** Rebase the existing backend feature and scope commits onto `origin/dev`. Preserve the upstream Group eventing/opening-message implementation while layering participant tags into the same DTO, migration, and Group Store paths. Keep BCS OpenAPI/protocol definitions as the authoritative backend contract and restore frontend files exactly to the target branch state.
 
@@ -90,8 +90,8 @@ Expected: both existing commits replay successfully and `git rev-list --left-rig
 ### Task 2: Remove frontend changes and align migration artifacts
 
 **Files:**
-- Modify: `src/frontend/src/pages/GroupChat/types.ts`
-- Modify: `src/frontend/src/services/backend-api/BcnController.ts`
+- Modify: `apps/frontend/src/pages/GroupChat/types.ts`
+- Modify: `apps/frontend/src/services/backend-api/BcnController.ts`
 - Rename: `src/bcs/migrations/mysql/009_group_participant_tags.sql` to `src/bcs/migrations/mysql/011_group_participant_tags.sql`
 - Modify: `src/bcs/docs/plans/2026-08-19-group-participant-provider-tags-design.md`
 
@@ -100,7 +100,7 @@ Expected: both existing commits replay successfully and `git rev-list --left-rig
 Remove only the provider-tag fields introduced by this PR from the two frontend files. Verify the result:
 
 ```bash
-git diff origin/dev...HEAD -- src/frontend
+git diff origin/dev...HEAD -- apps/frontend
 ```
 
 Expected: no output.
@@ -122,8 +122,8 @@ Run:
 
 ```bash
 git add -- \
-  src/frontend/src/pages/GroupChat/types.ts \
-  src/frontend/src/services/backend-api/BcnController.ts \
+  apps/frontend/src/pages/GroupChat/types.ts \
+  apps/frontend/src/services/backend-api/BcnController.ts \
   src/bcs/migrations/mysql/009_group_participant_tags.sql \
   src/bcs/migrations/mysql/011_group_participant_tags.sql \
   src/bcs/docs/plans/2026-08-19-group-participant-provider-tags-design.md
@@ -131,7 +131,7 @@ git diff --cached --check
 git commit --amend --no-verify --no-edit
 ```
 
-Expected: the PR tree has no `src/frontend/**` diff and contains only backend/docs changes.
+Expected: the PR tree has no `apps/frontend/**` diff and contains only backend/docs changes.
 
 ### Task 3: Validate the merged backend change
 
@@ -171,7 +171,7 @@ Run:
 
 ```bash
 git diff --check origin/dev...HEAD
-git diff --name-only origin/dev...HEAD | rg '^src/frontend/'
+git diff --name-only origin/dev...HEAD | rg '^apps/frontend/'
 git rev-list --left-right --count origin/dev...HEAD
 ```
 

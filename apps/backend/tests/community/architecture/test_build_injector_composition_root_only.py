@@ -37,7 +37,7 @@ import pathlib
 import pytest
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../apps/backend
 _AGENTCLAW_ROOT = _BACKEND_ROOT / "src" / "agentclaw"
 
 

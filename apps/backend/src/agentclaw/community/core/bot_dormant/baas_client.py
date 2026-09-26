@@ -13,7 +13,7 @@ recycling.
 records and are reflected in alive.last_session_time (limo, 2026-06-22).
 
 Response envelope (verified against
-``src/baas/src/secbaas/adapters/web/bot_health_checker_router.py:396`` and
+``apps/baas/src/secbaas/adapters/web/bot_health_checker_router.py:396`` and
 ``api/health_check/bot/_models.py:BotAliveCheckResult``)::
 
     {

@@ -110,7 +110,7 @@ Add contract, HTTP adapter, Service API, and application tests for:
 - preservation of Bot `auto/muted` management behavior;
 - preservation of missing-Bot behavior.
 
-Regenerate the Gateway-owned `src/gateway/configs/schemas/bcn.openapi.json`
+Regenerate the Gateway-owned `apps/gateway/configs/schemas/bcn.openapi.json`
 snapshot from the validated source contract and verify deterministic output.
 
 System-message parity with the legacy adapter and path-parameter renaming are

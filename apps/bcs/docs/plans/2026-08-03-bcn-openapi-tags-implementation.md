@@ -27,8 +27,8 @@
 ### Task 2: Preserve tag metadata in Gateway aggregation
 
 **Files:**
-- Modify: `src/gateway/tests/test_served_openapi.py`
-- Modify: `src/gateway/src/gateway/community/core/forwarding/_openapi.py`
+- Modify: `apps/gateway/tests/test_served_openapi.py`
+- Modify: `apps/gateway/apps/gateway/community/core/forwarding/_openapi.py`
 
 1. Add a failing test for ordered, name-based de-duplication of top-level tags.
 2. Run the focused Gateway test and confirm the served document omits tags.
@@ -39,8 +39,8 @@
 ### Task 3: Publish and verify the generated artifact
 
 **Files:**
-- Modify: `src/gateway/configs/schemas/bcn.openapi.json`
-- Modify: `src/gateway/tests/test_dump_and_publish_script.py`
+- Modify: `apps/gateway/configs/schemas/bcn.openapi.json`
+- Modify: `apps/gateway/tests/test_dump_and_publish_script.py`
 
 1. Require the dry-run artifact to contain the five tag declarations and
    verify the connection operations use the Session tag.

@@ -19,7 +19,7 @@ import pytest
 
 # Resolve package root regardless of cwd so this test is not fooled by `os.chdir`.
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]  # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]  # .../apps/backend
 _AGENTCLAW_ROOT = _BACKEND_ROOT / "src" / "agentclaw"
 
 

@@ -1,9 +1,9 @@
 """CLI tools router HTTP schemas.
 
 The wire shapes are fixed by the platform caller — ``ArcaCliToolPort`` in
-``src/backend/src/agentclaw/community/core/bot_config_manifest/cli_tools/arca_port.py``
+``apps/backend/src/agentclaw/community/core/bot_config_manifest/cli_tools/arca_port.py``
 — and by the contract in
-``src/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md`` §4 A2.
+``apps/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md`` §4 A2.
 Field names here are that contract; renaming one breaks delivery silently on
 the platform's next apply.
 """

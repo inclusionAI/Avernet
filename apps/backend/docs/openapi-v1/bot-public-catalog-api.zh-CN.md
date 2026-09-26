@@ -2,7 +2,7 @@
 
 > 版本：2026-09-08
 >
-> 机器可读权威契约为 `src/gateway/configs/schemas/bots.openapi.json`。
+> 机器可读权威契约为 `apps/gateway/configs/schemas/bots.openapi.json`。
 
 ## 1. 接口与权限
 

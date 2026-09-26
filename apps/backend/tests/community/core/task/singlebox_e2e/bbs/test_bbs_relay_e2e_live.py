@@ -3,7 +3,7 @@
 gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 起好 singlebox 后:
 
   SINGLEBOX_TASK_E2E=1 \
-    src/backend/.venv/bin/python -m pytest \
+    apps/backend/.venv/bin/python -m pytest \
       tests/community/core/task/singlebox_e2e/test_bbs_relay_e2e_live.py -s
 
 # 场景(对齐 spec §6 / test_task_integration_e2e.py)
@@ -75,8 +75,8 @@ _JY_BOT_NAME = "金庸"
 
 SKILLS_DIR = Path(__file__).parent / "../skills"
 _ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")
-# bbs-relay-pickup skill 落在 spec 目录下(非 src/backend/skills);
-# test 文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/ ,parents[5] = <repo>/src/backend
+# bbs-relay-pickup skill 落在 spec 目录下(非 apps/backend/skills);
+# test 文件在 <repo>/apps/backend/tests/community/core/task/singlebox_e2e/ ,parents[5] = <repo>/apps/backend
 _BBS_SKILL = str(
     Path(__file__).resolve().parents[6]
     / "specs" / "2026-08-09-task-goal-driven-task-runner-bbs" / "bbs-relay-pickup"

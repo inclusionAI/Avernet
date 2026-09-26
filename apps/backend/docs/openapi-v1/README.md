@@ -19,7 +19,7 @@ what, and how the pieces fit together._
 > and edit any prose that's now wrong. Small edits, often.
 
 Read this alongside the deeper engineering handoff and the SDD docs in
-`src/backend/specs/` — `2026-07-26-tenant-isolation-foundation/` (Track A
+`apps/backend/specs/` — `2026-07-26-tenant-isolation-foundation/` (Track A
 Stage 1, merged as PR #456) and `2026-07-27-openapi-v1-bots-track-b/` (Track B
 bots, merged as PR #494). Each carries `spec.md`, `plan.md`, `tasks.md`.
 
@@ -34,7 +34,7 @@ that file holds the inventory.
 
 **Goal:** implement the public `/openapi/v1` API, whose callers are **external
 registered tenants**. It lives under
-`src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`. The **bots**,
+`apps/backend/src/agentclaw/community/adapters/http/openapi_v1/*`. The **bots**,
 **mcp**, **channels**, and **skills** categories have implemented handlers; the
 remaining categories retain their independently tracked readiness states below.
 
@@ -175,7 +175,7 @@ DDL. Full ruling and per-endpoint mapping in
 | nodes | 1 | joseph | P2 | `openapi_v1/engine_runtime/nodes/` | ✅ **IMPLEMENTED — 2026-08-19**; read-only list matching the frontend |
 
 > **Scope rule (why only these).** Wrap engine HTTP the frontend reaches
-> **directly** through proxypass (`src/frontend/src/requestConfig.ts:189-205`).
+> **directly** through proxypass (`apps/frontend/src/requestConfig.ts:189-205`).
 > Engine routes the frontend reaches **via the backend** — `/api/cron` (already
 > the `routines` category), `/api/file`, `/api/skills`, `/api/mcp`,
 > `/api/resource-materializations`, `/api/bash`, `/api/bot/config`,
@@ -369,14 +369,14 @@ Category-agnostic; reuse as-is. These files are **on `dev`** (PR #456):
   `openapi_v1/principal.py::caller_owner_id`.
 
 All paths are under
-`src/backend/src/agentclaw/community/`.
+`apps/backend/src/agentclaw/community/`.
 
 ---
 
 ## The auth seam — how a caller becomes a tenant + an owner
 
 Both public seams read **one** header and verification happens **once** per
-request. SDD: `src/backend/specs/2026-07-30-gateway-principal-verifier/`.
+request. SDD: `apps/backend/specs/2026-07-30-gateway-principal-verifier/`.
 
 ```
 gateway            verifies credentials → resolves identity set → signs it
@@ -537,7 +537,7 @@ wrong half of the system.
    unscopeable caller cannot reach *any* route, present or future. What an `app`
    / `access_key` caller should own is still unsettled (auth design §14 Q4);
    delegation (§15) is the designed way to widen this. SDD:
-   `src/backend/specs/2026-08-02-public-api-user-only-principal/`.
+   `apps/backend/specs/2026-08-02-public-api-user-only-principal/`.
 2. **A mapped error raised in a dependency is now enveloped too.** `@envelope_errors`
    only wraps the handler, so the seam's 401 (raised in a dependency) escaped it;
    the lookup now lives in `responses.py::mapped_error_response` and the app's
@@ -671,9 +671,9 @@ rebuild it. Everything below is category-agnostic and lives in
    guard** (a foreign `{id}` must be a masked 404). Keep the internal suite
    unmodified and green.
 8. Own SDD (`spec.md`/`plan.md`/`tasks.md`) and own PR per category. Use
-   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` +
+   `apps/backend/specs/2026-07-27-openapi-v1-bots-track-b/` +
    `openapi_v1/bots/router.py` as the worked reference, and
-   `src/backend/specs/2026-07-30-openapi-v1-mcp-track-b/` +
+   `apps/backend/specs/2026-07-30-openapi-v1-mcp-track-b/` +
    `openapi_v1/mcp/router.py` for the second — the pattern for a category that
    **extracts shared logic** out of a live internal router (recipe step 6) into
    `core/mcp/` and proves the extraction by leaving the internal suite unmodified.
@@ -1242,10 +1242,10 @@ messages
 
 - `messages` — the gateway serves the bot's chat WebSocket at
   `/openapi/v1/bots/messages/ws/**`, relayed to the engine proxy
-  (`src/gateway/configs/application.yaml`). That claim is on the **socket plane
+  (`apps/gateway/configs/application.yaml`). That claim is on the **socket plane
   only**, so an HTTP request to the address still reaches this service; the name
   is held for the HTTP endpoint intended there. See
-  `src/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/`.
+  `apps/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/`.
 
 A name in this list must move to the routed list above the moment a route
 publishes it — the convention test asserts the two lists stay disjoint, so
@@ -1434,7 +1434,7 @@ compensation workflow. Do not mark “Bot migrate” complete or use this operat
 where target-Space membership must replace existing collaborator grants; that
 requires the B-line migration Application Service owned jointly with the
 Business Space/collaboration team. Regenerate
-`src/gateway/configs/schemas/bots.openapi.json`, then copy the schema and matching
+`apps/gateway/configs/schemas/bots.openapi.json`, then copy the schema and matching
 route/security configuration to the independently managed OCB/Sofapy Gateway;
 Avernet's broad `/openapi/v1/bots/**` rule already covers this path.
 
@@ -1815,7 +1815,7 @@ is the whole of it, not a summary of something machine-readable:
 **Routing.** The HTTP endpoint reaches the backend through the `bots` domain
 with no gateway change. The socket needs its own domain — `bots` declares no
 `protocols` and so serves HTTP only — which is `bots-loadtest-ws` in
-`src/gateway/configs/application.yaml`: socket-only, forwarded verbatim to the
+`apps/gateway/configs/application.yaml`: socket-only, forwarded verbatim to the
 backend, no rewrite. The `ws` segment is what that claim is pinned to, following
 `/openapi/v1/bots/messages/ws/**`, so an HTTP endpoint added under `loadtest`
 later falls outside it by construction.
@@ -1921,7 +1921,7 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   here — push with `--no-verify` and rely on remote CI. **`--no-verify` also
   applies to force-pushes** (a plain `git push` runs the ~10-min hook and times
   out).
-- cwd drifts to repo root after `git` commands that `cd` there; `cd src/backend`
+- cwd drifts to repo root after `git` commands that `cd` there; `cd apps/backend`
   before `uv run`.
 
 ## Gotchas learned in Track B bots (PR #494)
@@ -2244,7 +2244,7 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   row and DoD item 6 → backend half done. **Still gated upstream** on #599 merging
   and on `route_security.yaml` admitting this surface's real callers; and `app` /
   `access_key` callers 401 until somebody rules on what they own. SDD:
-  `src/backend/specs/2026-07-30-gateway-principal-verifier/`.
+  `apps/backend/specs/2026-07-30-gateway-principal-verifier/`.
 - **2026-08-19** — **Read-only Node OpenAPI added.** The frontend and Engine
   currently support only `GET /api/nodes`, so the public API adds exactly
   `GET /openapi/v1/bots/{bot_id}/nodes`, with the same owner/editor, grant and
@@ -2383,7 +2383,7 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   projected, and `aud`/`iss` mismatches are refused. **Filed as still-open:** no
   cross-repo test pins that contract, so a rename on either side leaves both
   suites green and 401s production. Full suite 10204 passed / 3 skipped. SDD:
-  `src/backend/specs/2026-08-02-public-api-user-only-principal/`.
+  `apps/backend/specs/2026-08-02-public-api-user-only-principal/`.
 - **2026-08-03** — **`/openapi/v1/bots` path normalization + channels removed.**
   Every component's routes now live under `/openapi/v1/bots/<component>/…` with
   `{bot_id}` as the first segment *inside* the component — see the new
@@ -2405,7 +2405,7 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   `tests/…/openapi_v1/test_path_convention.py`, asserts the rule — and this
   file's reserved-name list — against the generated document, so both fail here
   rather than in review. SDD:
-  `src/backend/specs/2026-08-03-openapi-v1-path-normalization/`.
+  `apps/backend/specs/2026-08-03-openapi-v1-path-normalization/`.
 - **2026-08-04** — **Track B Skills contract finalized at six endpoints.** Removed
   the separate `/skills/active` route in favor of the collection's optional
   `active` filter. Pinned Bot-scoped raw ZIP upload, same-name replacement,
@@ -2456,7 +2456,7 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   pre-existing markdown-formatting and live-server failures. Gateway half:
   `spi/authn/_models.py`, the `google` strategy (its `default_tenant` argument
   and DI wiring are gone), and a dated amendment in
-  `src/gateway/docs/2026-07-21-auth-design.md` §4.6, whose original text made
+  `apps/gateway/docs/2026-07-21-auth-design.md` §4.6, whose original text made
   `tenant` mandatory on every principal.
 - **2026-08-05** — **Every error this surface converts now leaves a log record.**
   `@envelope_errors` mapped a domain error to its status and fixed message and

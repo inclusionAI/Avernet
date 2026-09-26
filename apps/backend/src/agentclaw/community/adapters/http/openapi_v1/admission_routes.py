@@ -9,7 +9,7 @@ _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: reports it. Grouped by mode, with the reason each group has the mode it has.
 #:
 #: **This table has a counterpart at the edge.** The gateway's
-#: ``route_security`` (``src/gateway/configs/application.yaml``) decides which
+#: ``route_security`` (``apps/gateway/configs/application.yaml``) decides which
 #: identities are *resolvable* for a path; this decides which operations admit a
 #: machine caller once they arrive. Both must agree that a ``REFUSED`` operation
 #: still requires a human — an operation left open at both hops because someone

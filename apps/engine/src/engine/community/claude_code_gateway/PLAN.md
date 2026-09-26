@@ -128,8 +128,8 @@ content: m.content ?? [{ type: 'text' as const, text: m.text }],
 |------|------|
 | `src/types.ts` | 新增 `HistoryContentBlock` 类型（text/tool/thinking）；扩展 `SessionHistoryMessage` 加 `content?` |
 | `src/chat-orchestrator.ts` | 扩展 `OrchestratorHistoryEntry` 加 `content?`；`buildConversationContext` 用 `formatBlock` 格式化结构化内容 |
-| `src/gateway/orchestrator-bridge.ts` | `BridgeOrchestratorFn` 返回类型加 `getCollectedBlocks`；收集 toolEnd/commandOutput/thinkingDelta 事件 |
-| `src/gateway/handlers/chat.ts` | `toOrchestratorHistory` 传递 `content`；`handleChatSend` 完成时写入收集的 blocks；`handleChatHistory` 返回 `content` |
+| `apps/gateway/orchestrator-bridge.ts` | `BridgeOrchestratorFn` 返回类型加 `getCollectedBlocks`；收集 toolEnd/commandOutput/thinkingDelta 事件 |
+| `apps/gateway/handlers/chat.ts` | `toOrchestratorHistory` 传递 `content`；`handleChatSend` 完成时写入收集的 blocks；`handleChatHistory` 返回 `content` |
 | `src/interaction/resolve.ts` | 审批完成后写入 system history 消息（纯 text 摘要） |
 | `test/store.test.ts` | 验证带 `content` 的 history 消息存取 |
 
@@ -160,15 +160,15 @@ content: m.content ?? [{ type: 'text' as const, text: m.text }],
 | `HistoryContentBlock` 类型（text/thinking/tool_use） | `src/types.ts` | ✅ |
 | `ToolUseMeta` / `ToolResultMeta` / `ThinkingMeta` 类型 | `src/types.ts` | ✅ |
 | `SessionHistoryMessage` 扩展（`content?` + `metadata?` + 6 种 role） | `src/types.ts` | ✅ |
-| `CollectedEvent` 类型（assistant_text/tool_use/tool_result/thinking） | `src/gateway/orchestrator-bridge.ts` | ✅ |
-| `onCollectedEvent` 增量回调 + `pushEvent` 辅助函数 | `src/gateway/orchestrator-bridge.ts` | ✅ |
-| thinking 在 `contentBlockStop` 时立即推送（而非等 `lifecycle.end`） | `src/gateway/orchestrator-bridge.ts` | ✅ |
-| `lifecycle.end` 兜底推送未收集的 thinking | `src/gateway/orchestrator-bridge.ts` | ✅ |
-| `persistSingleEvent` 单事件持久化函数 | `src/gateway/handlers/chat.ts` | ✅ |
-| `persistCollectedEvents` 支持 `skipCount` 避免重复 | `src/gateway/handlers/chat.ts` | ✅ |
-| `handleChatSend` 传入 `onCollectedEvent` 回调实现增量持久化 | `src/gateway/handlers/chat.ts` | ✅ |
-| `handleChatHistory` 为 thinking/tool_use 生成 `content` blocks | `src/gateway/handlers/chat.ts` | ✅ |
-| `toOrchestratorHistory` 传递 `metadata`（含 tool_use/tool_result/thinking） | `src/gateway/handlers/chat.ts` | ✅ |
+| `CollectedEvent` 类型（assistant_text/tool_use/tool_result/thinking） | `apps/gateway/orchestrator-bridge.ts` | ✅ |
+| `onCollectedEvent` 增量回调 + `pushEvent` 辅助函数 | `apps/gateway/orchestrator-bridge.ts` | ✅ |
+| thinking 在 `contentBlockStop` 时立即推送（而非等 `lifecycle.end`） | `apps/gateway/orchestrator-bridge.ts` | ✅ |
+| `lifecycle.end` 兜底推送未收集的 thinking | `apps/gateway/orchestrator-bridge.ts` | ✅ |
+| `persistSingleEvent` 单事件持久化函数 | `apps/gateway/handlers/chat.ts` | ✅ |
+| `persistCollectedEvents` 支持 `skipCount` 避免重复 | `apps/gateway/handlers/chat.ts` | ✅ |
+| `handleChatSend` 传入 `onCollectedEvent` 回调实现增量持久化 | `apps/gateway/handlers/chat.ts` | ✅ |
+| `handleChatHistory` 为 thinking/tool_use 生成 `content` blocks | `apps/gateway/handlers/chat.ts` | ✅ |
+| `toOrchestratorHistory` 传递 `metadata`（含 tool_use/tool_result/thinking） | `apps/gateway/handlers/chat.ts` | ✅ |
 | `toOrchestratorHistory`（continuation.ts）传递 `metadata` | `src/interaction/continuation.ts` | ✅ |
 | `formatHistoryEntry` 支持 tool_use/tool_result/thinking 格式化 | `src/chat-orchestrator.ts` | ✅ |
 | 交互决策记录写入 system history 消息 | `src/interaction/resolve.ts` | ✅ |
@@ -179,7 +179,7 @@ content: m.content ?? [{ type: 'text' as const, text: m.text }],
 | 前端 `filterInvalidMessages` 支持 thinking 消息过滤 | `open-claw/src/utils/aicodingMessageUtils.ts` | ✅ |
 | 前端 `extractThinkingText` 辅助函数 | `open-claw/src/utils/aicodingMessageUtils.ts` | ✅ |
 | 前端 `loadHistoryForSession` 添加 `limit: 1000` 参数 | `open-claw/src/pages/Assistant/Chat/ChatPage.tsx` | ✅ |
-| OCB 前端同步更新 | `ocb/src/frontend/src/utils/aicodingMessageUtils.ts` | ✅ |
+| OCB 前端同步更新 | `ocb/apps/frontend/src/utils/aicodingMessageUtils.ts` | ✅ |
 | `server.ts` 传递 `store` 给 `handleHttpRequest` | `src/server.ts` | ✅ |
 
 ### 未实现

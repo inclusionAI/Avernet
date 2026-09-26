@@ -26,7 +26,7 @@ import pathlib
 
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]                       # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]                       # .../apps/backend
 _MODULES_DIR = _BACKEND_ROOT / "src" / "agentclaw" / "community" / "di" / "modules"
 
 _FORBIDDEN_IMPORT_PREFIX = "agentclaw.corp.plugins.prod"

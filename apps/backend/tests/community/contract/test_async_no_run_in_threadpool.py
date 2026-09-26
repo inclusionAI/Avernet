@@ -8,7 +8,7 @@ See docs/superpowers/plans/2026-05-18-fix-skills-api-broken-activate-deactivate.
 for the bugs this rule prevents.
 
 Detection strategy:
-1. Parse every .py file under src/backend/src/agentclaw/ with `ast`.
+1. Parse every .py file under apps/backend/src/agentclaw/ with `ast`.
 2. Find call sites of the form
    ``run_in_threadpool(<callable_expr>, ...)`` or
    ``await run_in_threadpool(<callable_expr>, ...)``.

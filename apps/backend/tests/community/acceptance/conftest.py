@@ -1,4 +1,4 @@
-# src/backend/tests/acceptance/conftest.py
+# apps/backend/tests/acceptance/conftest.py
 """Acceptance (路 B) fixtures — start real backend + baas, yield base_url + fs_root.
 
 These tests are off by default: every @pytest.mark.acceptance item is skipped
@@ -31,7 +31,7 @@ import httpx
 import pytest
 
 
-# conftest.py lives at src/backend/tests/acceptance/ → worktree root is parents[5]:
+# conftest.py lives at apps/backend/tests/acceptance/ → worktree root is parents[5]:
 #   [0]=acceptance [1]=tests [2]=backend [3]=src [4]=<worktree root>
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 LOCAL_SETUP = PROJECT_ROOT / "scripts" / "local_setup.sh"

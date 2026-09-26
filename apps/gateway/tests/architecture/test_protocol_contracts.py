@@ -34,7 +34,7 @@ def test_protocols_satisfy_contracts() -> None:
     if not CHECK_DIR.is_dir():
         pytest.skip(
             "check_protocols directory does not exist yet — "
-            "create src/gateway/tests/architecture/check_protocols/ "
+            "create apps/gateway/tests/architecture/check_protocols/ "
             "and add structural subtype check files to enable this test"
         )
 

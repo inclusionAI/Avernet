@@ -14,9 +14,9 @@
 
 **Files:**
 
-- Modify: `src/baas/tests/unit/core/service/sse/test_default_converter.py`
-- Modify: `src/baas/src/secbaas/community/core/service/sse/_default_converter.py`
-- Modify: `src/baas/docs/2026-08-19-baas-bcn-interaction-sse-design.md`
+- Modify: `apps/baas/tests/unit/core/service/sse/test_default_converter.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/sse/_default_converter.py`
+- Modify: `apps/baas/docs/2026-08-19-baas-bcn-interaction-sse-design.md`
 
 1. Change the converter unit test to require missing, null, non-string, empty, and whitespace-only commands to produce an interaction without a `command` field.
 2. Run the focused test and confirm it fails against the required-command implementation.

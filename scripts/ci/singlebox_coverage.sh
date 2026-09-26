@@ -131,10 +131,10 @@ fi
 resolve_reporter_command() {
   if [[ -n "${PYTHON:-}" ]]; then
     reporter_command=("$PYTHON")
-  elif [[ -x "$repo_root/src/backend/.venv/bin/python" ]]; then
-    reporter_command=("$repo_root/src/backend/.venv/bin/python")
+  elif [[ -x "$repo_root/apps/backend/.venv/bin/python" ]]; then
+    reporter_command=("$repo_root/apps/backend/.venv/bin/python")
   else
-    reporter_command=(uv run --project "$repo_root/src/backend" python)
+    reporter_command=(uv run --project "$repo_root/apps/backend" python)
   fi
 }
 
@@ -224,7 +224,7 @@ run_real_singlebox() {
     BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
-    SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE="$repo_root/src/backend/tests/community/acceptance/mcp/fixture_mcp_center.json" \
+    SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE="$repo_root/apps/backend/tests/community/acceptance/mcp/fixture_mcp_center.json" \
     bash "$repo_root/scripts/singlebox.sh" --standalone --with-bcs-coverage start all
   local acceptance_status=0
   local bcs_e2e_status=0
@@ -244,10 +244,10 @@ run_real_singlebox() {
   local backend_report_log="$coverage_root/backend-report.log"
   local baas_report_log="$coverage_root/baas-report.log"
   local backend_report_pid baas_report_pid
-  combine_python_coverage "backend" "$repo_root/src/backend" "$coverage_root/raw/backend" \
+  combine_python_coverage "backend" "$repo_root/apps/backend" "$coverage_root/raw/backend" \
     > "$backend_report_log" 2>&1 &
   backend_report_pid=$!
-  combine_python_coverage "baas" "$repo_root/src/baas" "$coverage_root/raw/baas" \
+  combine_python_coverage "baas" "$repo_root/apps/baas" "$coverage_root/raw/baas" \
     > "$baas_report_log" 2>&1 &
   baas_report_pid=$!
   wait "$backend_report_pid" || backend_coverage_status=$?
@@ -298,7 +298,7 @@ run_acceptance_smoke() {
   local junit_report="$report_dir/acceptance-junit.xml"
   local rc=0
   (
-    cd "$repo_root/src/backend"
+    cd "$repo_root/apps/backend"
     RUN_ACCEPTANCE=1 \
       SINGLEBOX_ACCEPTANCE_REUSE_LIVE=1 \
       SINGLEBOX_ACCEPTANCE_KEEP_ARTIFACTS=1 \
@@ -624,7 +624,7 @@ case "$mode" in
     resolve_reporter_command
     "${reporter_command[@]}" "$script_dir/singlebox_coverage_manifest_check.py" \
       --manifest "$module_manifest" \
-      --backend-root "$repo_root/src/backend"
+      --backend-root "$repo_root/apps/backend"
     resolve_coverage_scope
     run_real_singlebox
     ;;

@@ -58,7 +58,7 @@ import pytest
 
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]                # .../apps/backend
 # Endpoint cases live in the community and corp test trees; the rule is
 # universal, so scan whichever of the two exists.
 _ENDPOINTS_ROOTS = (

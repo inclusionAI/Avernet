@@ -1,6 +1,6 @@
 """The app credential scheme — a copy of secbaas's ``APIKeyGenerator``.
 
-Mirrors ``src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py``.
+Mirrors ``apps/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py``.
 secbaas's existing API-key records are migrated into ``avernet_application`` and
 must keep verifying with their original plaintext keys, so the *algorithm* here
 must not drift from that file: the stored hash records only its salt, leaving the
