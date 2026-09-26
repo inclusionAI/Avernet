@@ -5,6 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use bcs_domain::BotDeliveryTarget;
 use bcs_service_api::{
     CanResolveInteraction, CanResolveInteractionCommand, InteractionFrontendEvent,
     InteractionFrontendPort, InteractionInsertResult, InteractionKey, InteractionProviderCommand,
@@ -84,11 +85,17 @@ impl InteractionService for InteractionManagement {
                 request_id: Some(command.bcs_run_id),
             });
         }
-        if !command.provider_target.is_http_provider() {
-            return Err(ServiceError::InvalidOperation {
-                message: "interaction requested requires an HTTP Provider target".to_string(),
-                request_id: Some(command.bcs_run_id),
-            });
+        match &command.provider_target {
+            BotDeliveryTarget::WebSocket { bot_id } => {
+                if bot_id.trim().is_empty() {
+                    return Err(ServiceError::InvalidOperation {
+                        message: "interaction requested requires a non-empty WebSocket bot id"
+                            .to_string(),
+                        request_id: Some(command.bcs_run_id),
+                    });
+                }
+            }
+            BotDeliveryTarget::HttpProvider { .. } => {}
         }
         let payload_bytes = serde_json::to_vec(&command.payload)
             .map_err(|error| ServiceError::InvalidOperation {
@@ -1715,6 +1722,34 @@ mod tests {
             service.resolve(unoffered).await,
             Err(InteractionServiceError::InvalidRequest(_))
         ));
+        assert!(provider.calls.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn websocket_provider_targets_are_accepted_but_require_a_bot_id() {
+        let (service, _store, provider, _frontend) = service(true);
+
+        // A WebSocket target with a bot_id routes the downstream resolve via
+        // the Bot WebSocket registry — accepted like an HTTP Provider target.
+        let mut websocket = requested("interaction-ws");
+        websocket.provider_target = BotDeliveryTarget::WebSocket {
+            bot_id: "bot-ws".to_string(),
+        };
+        service
+            .on_provider_requested(websocket)
+            .await
+            .expect("WebSocket targets are deliverable through the Bot WebSocket registry");
+
+        // An empty bot_id cannot route the downstream resolve.
+        let mut anonymous = requested("interaction-ws-anonymous");
+        anonymous.provider_target = BotDeliveryTarget::WebSocket {
+            bot_id: "  ".to_string(),
+        };
+        let error = service
+            .on_provider_requested(anonymous)
+            .await
+            .expect_err("a WebSocket target without a bot id cannot be resolved downstream");
+        assert!(matches!(error, ServiceError::InvalidOperation { .. }));
         assert!(provider.calls.lock().await.is_empty());
     }
 

@@ -15,14 +15,14 @@ use bcs_protocol::{
     ResponseFrame, RouteSelectorWire,
 };
 use bcs_service_api::{
-    BotEventCommand, BotRunContextPort, BotRuntimeConnectCommand, BotRuntimeConnectionService,
-    BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotUseCaseError,
-    ChatEventState as AppChatEventState, CollaborationRuntimeService, ConnectError,
-    GroupDispatchContextPort, MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET, MessageFlowService,
-    MessageLogEventType, MessageLogMode, MessageLogStatus, Participant, ParticipantRole,
-    ServiceError, SessionCallbackDispatchPort, SessionManagementService, SessionUseCaseError,
-    SystemMessageService, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
-    TaskRunAliasRegistration,
+    BotEventCommand, BotRunContext, BotRunContextPort, BotRuntimeConnectCommand,
+    BotRuntimeConnectionService, BotRuntimeDisconnectCommand, BotRuntimeStatusCommand,
+    BotUseCaseError, ChatEventState as AppChatEventState, CollaborationRuntimeService,
+    ConnectError, GroupDispatchContextPort, MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET,
+    MessageFlowService, MessageLogEventType, MessageLogMode, MessageLogStatus, Participant,
+    ParticipantRole, ServiceError, SessionCallbackDispatchPort, SessionManagementService,
+    SessionUseCaseError, SystemMessageService, TaskCompleteCommand, TaskDispatchCommand,
+    TaskMessageCommand, TaskRunAliasRegistration,
 };
 use opentelemetry::Context;
 use opentelemetry::trace::TraceContextExt;
@@ -32,7 +32,7 @@ use tokio::sync::{Mutex, mpsc};
 use tracing::{Instrument, Span, debug, info, info_span, warn};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use super::run_event_v3::{NormalizedBotEvent, normalize_v3_event};
+use super::run_event_v3::NormalizedBotEvent;
 use crate::bot::{BotConnectionRegistry, normalize_client_kind};
 use crate::shared::RunChannelManager;
 
@@ -126,6 +126,7 @@ pub struct BotDispatchState {
     pub system_message: Option<Arc<dyn SystemMessageService>>,
     pub coordination_processed: Arc<Mutex<HashMap<String, u64>>>,
     pub agent_credential_backfill: Option<Arc<dyn super::AgentCredentialBackfillPort>>,
+    pub interactions: Arc<dyn bcs_service_api::InteractionService>,
 }
 
 async fn resolve_bot_event_scope(
@@ -591,6 +592,15 @@ async fn handle_response_frame(
         return Ok(());
     }
 
+    if state
+        .bot_connections
+        .resolve_pending_interaction_request(run_id, res.clone())
+        .await
+    {
+        debug!(request_id = %run_id, ok = res.ok, "matched interaction.resolve ResponseFrame");
+        return Ok(());
+    }
+
     // Check if this is a one-shot pending request (e.g., chat.history)
     let payload = if res.ok {
         res.payload.clone().unwrap_or(Value::Null)
@@ -867,6 +877,40 @@ fn response_payload_run_id(res: &ResponseFrame) -> Option<&str> {
         .filter(|payload_run_id| *payload_run_id != res.id)
 }
 
+/// V3 帳本校验：外层 frame seq 与 payload seq 一致、run 存在、身份匹配。
+/// 不含终态/过期检查——调用方需要在 agent/chat 专属的 terminal_fingerprint
+/// 幂等重放检查之后才做终态/过期判断（否则一个合法的终态重放帧会被误判为
+/// "run已终态"而报错，而不是被静默忽略）。也不含 agent/chat 专属的
+/// reserve_run_event_seq 占用——那一步只服务于流式消息事件的重放语义，
+/// Interaction 事件不应共用。
+/// pub(super) 可见性:bot 模块下的同级子模块 run_event_v3 需要调用它
+/// (run_event_v3.rs 自身的 pub(super) 函数同属这一可见性约定)。
+pub(super) async fn validate_v3_run_scope(
+    state: &BotDispatchState,
+    bot_id: &str,
+    run_id: &str,
+    session_id: &str,
+    seq: u64,
+    outer_seq: Option<u64>,
+) -> Result<BotRunContext> {
+    if outer_seq.is_some_and(|outer| outer != seq) {
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "V3 frame seq does not match payload seq".into(),
+        ));
+    }
+    let context = state
+        .bot_run_context
+        .get_context(run_id)
+        .await
+        .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 event runId is unknown".into()))?;
+    if context.bot_id != bot_id || context.bcs_session_id.as_deref() != Some(session_id) {
+        return Err(BotWsDispatchError::InvalidFrameFormat(
+            "V3 event run/session identity mismatch".into(),
+        ));
+    }
+    Ok(context)
+}
+
 /// Handle an EventFrame from a bot.
 ///
 /// EventFrames are streaming events from bots during chat sessions.
@@ -906,7 +950,18 @@ async fn handle_event_frame(
         v3_session_id,
         v3_seq,
     ) = if is_v3 {
-        normalize_v3_event(event)?
+        match super::run_event_v3::classify_v3_event(event)? {
+            super::run_event_v3::V3RunEvent::Interaction(interaction) => {
+                return super::run_event_v3::handle_interaction_event_v3(
+                    state,
+                    &bot_id,
+                    interaction,
+                    event.seq,
+                )
+                .await;
+            }
+            super::run_event_v3::V3RunEvent::Normalized(normalized) => normalized,
+        }
     } else {
         let Some(normalized) = normalize_legacy_event(event) else {
             match event.event.as_str() {
@@ -957,21 +1012,7 @@ async fn handle_event_frame(
             .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 event missing sessionId".into()))?;
         let seq = v3_seq
             .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 event missing seq".into()))?;
-        if event.seq.is_some_and(|outer| outer != seq) {
-            return Err(BotWsDispatchError::InvalidFrameFormat(
-                "V3 frame seq does not match payload seq".into(),
-            ));
-        }
-        let context = state
-            .bot_run_context
-            .get_context(&run_id)
-            .await
-            .ok_or_else(|| BotWsDispatchError::InvalidFrameFormat("V3 event runId is unknown".into()))?;
-        if context.bot_id != bot_id || context.bcs_session_id.as_deref() != Some(session_id) {
-            return Err(BotWsDispatchError::InvalidFrameFormat(
-                "V3 event run/session identity mismatch".into(),
-            ));
-        }
+        let context = validate_v3_run_scope(state, &bot_id, &run_id, session_id, seq, event.seq).await?;
         if let Some(fingerprint) = terminal_fingerprint.as_deref() {
             if state
                 .bot_connections
