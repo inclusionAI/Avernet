@@ -17,7 +17,7 @@ gated by ``SINGLEBOX_CRON_E2E=1``。工单事件阶段需额外设置
 后端需用同一个签名 key 启动（dev 默认值见 ``scripts/modules/backend.sh``）::
 
   AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="avernet-dev-signing-key-NOT-FOR-PROD" \
-    ./scripts/singlebox.sh restart backend
+    ./singlebox/singlebox.sh restart backend
 
 完整流程（全程不重启 backend）:
   0) 从 backend 获取 bot + 写入 mock 任务数据
@@ -192,7 +192,7 @@ def _find_bot() -> tuple[str, str]:
                         return bot["bot_id"], bot.get("owner_id", _USER_ID)
             except Exception:
                 continue
-    raise RuntimeError("无法获取存活 bot — 请先 ./scripts/singlebox.sh start all")
+    raise RuntimeError("无法获取存活 bot — 请先 ./singlebox/singlebox.sh start all")
 
 
 # ---------------------------------------------------------------------------

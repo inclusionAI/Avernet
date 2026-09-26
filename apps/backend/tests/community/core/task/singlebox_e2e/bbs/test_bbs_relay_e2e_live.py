@@ -1,6 +1,6 @@
 """BBS 自主接力 live e2e(金庸案例)。
 
-gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 起好 singlebox 后:
+gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./singlebox/singlebox.sh start all`` 起好 singlebox 后:
 
   SINGLEBOX_TASK_E2E=1 \
     apps/backend/.venv/bin/python -m pytest \

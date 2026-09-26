@@ -215,10 +215,10 @@ just the bare service), use the monorepo-level `singlebox.sh` script:
 # From the ocb repo root
 
 # 1. Check prerequisites (tools, ports, dependencies)
-./scripts/singlebox.sh check
+./singlebox/singlebox.sh check
 
 # 2. Start BCS + Frontend (E2E group)
-./scripts/singlebox.sh --local start bcs_frontend
+./singlebox/singlebox.sh --local start bcs_frontend
 ```
 
 This brings up:
@@ -236,16 +236,16 @@ send messages from the UI.
 
 ```bash
 # Start only BCS (no frontend)
-./scripts/singlebox.sh --local start bcs
+./singlebox/singlebox.sh --local start bcs
 
 # Start all services (BCS + Frontend + Backend + Engine + OpenClaw)
-./scripts/singlebox.sh --local start all
+./singlebox/singlebox.sh --local start all
 
 # Check what's running
-./scripts/singlebox.sh status
+./singlebox/singlebox.sh status
 
 # Stop everything
-./scripts/singlebox.sh stop all
+./singlebox/singlebox.sh stop all
 ```
 
 For more details, see the monorepo quick-start guide at `docs/quick-start.md`.

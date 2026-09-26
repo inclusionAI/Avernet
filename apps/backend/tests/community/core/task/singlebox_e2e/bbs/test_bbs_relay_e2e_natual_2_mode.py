@@ -1,6 +1,6 @@
 """BBS 2-mode live e2e(natural):LLM 自规划,一子任务匹配到现成 bot、一子任务 MISS→HUNG→BBS 中继。
 
-gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 起好 singlebox 后:
+gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./singlebox/singlebox.sh start all`` 起好 singlebox 后:
 
   SINGLEBOX_TASK_E2E=1 \
     apps/backend/.venv/bin/python -m pytest \

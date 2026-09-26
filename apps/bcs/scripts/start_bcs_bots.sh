@@ -27,7 +27,7 @@ OPENCLAW_WORKSPACE_LAYOUT="${OPENCLAW_WORKSPACE_LAYOUT:-profile-source}"
 OPENCLAW_EXTENSIONS_ROOT="${OPENCLAW_EXTENSIONS_ROOT:-$HOME/.openclaw/extensions}"
 OPENCLAW_EXTENSIONS_REPLACE_LINKS="${OPENCLAW_EXTENSIONS_REPLACE_LINKS:-0}"
 OPENCLAW_LOG_ROOT="${OPENCLAW_LOG_ROOT:-$BOTS_BASE_DIR/logs}"
-FIVE_BOTS_PROFILE_DIR="${FIVE_BOTS_PROFILE_DIR:-$REPO_ROOT/scripts/5bots_profile}"
+FIVE_BOTS_PROFILE_DIR="${FIVE_BOTS_PROFILE_DIR:-$REPO_ROOT/singlebox/agents/5bots_profile}"
 OPENCLAW_MODELS_JSON=""
 OPENCLAW_AGENT_MODEL_FIELDS_JSON="{}"
 if [ -z "${MOLTIS_BCS_CONFIG:-}" ]; then
@@ -242,7 +242,7 @@ singlebox_mode_option() {
 singlebox_cmd() {
     local action="$1"
     local target="$2"
-    echo "./scripts/singlebox.sh $(singlebox_mode_option) ${action} ${target}"
+    echo "./singlebox/singlebox.sh $(singlebox_mode_option) ${action} ${target}"
 }
 
 health_ready() {

@@ -190,7 +190,7 @@ jobs:
         # not interesting.
         continue-on-error: true
         run: |
-          ./scripts/singlebox.sh --standalone stop bcs_bots bcsfuse || true
+          ./singlebox/singlebox.sh --standalone stop bcs_bots bcsfuse || true
 
       - name: Upload e2e coverage artifacts
         if: always() && steps.changes.outputs.skip-bcs != 'true'

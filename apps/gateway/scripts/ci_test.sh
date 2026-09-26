@@ -26,8 +26,8 @@ done
 # locally with the same threshold as GitHub CI instead of being skipped.
 # CI always passes an explicit --base, so this branch only affects local runs.
 if [[ -z "$base" ]]; then
-  # shellcheck source=../../../scripts/lib/resolve_base_ref.sh
-  source "$repo_root/scripts/lib/resolve_base_ref.sh"
+  # shellcheck source=../../../singlebox/lib/resolve_base_ref.sh
+  source "$repo_root/singlebox/lib/resolve_base_ref.sh"
   base="$(resolve_base_ref)" || {
     echo "gateway CI failed: could not resolve changed-line coverage base ref" >&2
     exit 1

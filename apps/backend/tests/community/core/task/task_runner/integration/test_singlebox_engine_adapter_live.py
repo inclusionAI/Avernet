@@ -1,7 +1,7 @@
 """SingleboxEngineAdapter live 集成测试(打真实 singlebox per-bot 引擎 WebSocket,不经 Mock)。
 
 默认跳过:需 ``SINGLEBOX_TASK_E2E=1`` 且提供 ``SINGLEBOX_BOT_ID``(<bot_id>:建立于 singlebox 产品界面或
-``POST /api/bots``)。本地起好 singlebox(``./scripts/singlebox.sh start all``)后:
+``POST /api/bots``)。本地起好 singlebox(``./singlebox/singlebox.sh start all``)后:
 
   SINGLEBOX_TASK_E2E=1 SINGLEBOX_BOT_ID=20260814_yfchg86x \
     .venv/bin/python -m pytest tests/community/core/task/task_runner/integration/test_singlebox_engine_adapter_live.py -s

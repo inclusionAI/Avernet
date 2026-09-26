@@ -13,7 +13,7 @@ BCS_API_BASE_URL="${BCS_API_BASE_URL:-http://127.0.0.1:21000}"
 BCS_MOCK_USER_ID="${BCS_MOCK_USER_ID:-001}"
 BCS_MOCK_USER_NICK_NAME="${BCS_MOCK_USER_NICK_NAME:-admin}"
 
-# Bot IDs (must match the default 5bots_profile started by ./scripts/singlebox.sh --local start bcs_bots).
+# Bot IDs (must match the default 5bots_profile started by ./singlebox/singlebox.sh --local start bcs_bots).
 # Code names map to the 5bots_profile roles: CEO / 产品经理(PM) / 研发(ENG) / 验证(QA) / 客服(CS).
 BOT_CEO_ID="${BOT_CEO_ID:-CEO}"
 BOT_PM_ID="${BOT_PM_ID:-产品经理}"

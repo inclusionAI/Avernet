@@ -64,7 +64,7 @@ itself:
 ./scripts/frontend_sprint_branch.sh --list          # declared branch + remote sprint heads
 ./scripts/frontend_sprint_branch.sh sprint_teamclaw_S...
 git -C "$TEAMCLAW_DIR" fetch && git -C "$TEAMCLAW_DIR" checkout sprint_teamclaw_S...
-./scripts/singlebox.sh frontend-pull
+./singlebox/singlebox.sh frontend-pull
 ```
 
 Avernet has no submodule to carry the tracked branch in-tree, so

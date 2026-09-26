@@ -7,7 +7,7 @@
 如果你只是想跑通 Avernet 本地体验，优先使用 [Quick Start](quick-start.zh-CN.md)：
 
 ```bash
-./scripts/singlebox.sh
+./singlebox/singlebox.sh
 ```
 
 `singlebox.sh` 会自动构建 BCN 插件、启动 BCS、拉起 5 个本地 OpenClaw demo bot，并完成 onboard。本指南适合以下场景：
@@ -39,14 +39,14 @@ Local OpenClaw gateway
 先确保 BCS 在本机运行。最简单的方式是直接跑完整 local stack：
 
 ```bash
-./scripts/singlebox.sh
+./singlebox/singlebox.sh
 ```
 
 如果你只想启动 BCS，不想同时启动默认 5 个 demo bot，可以先构建 BCS 和插件，再以 bare BCS 模式启动：
 
 ```bash
-./scripts/singlebox.sh setup bcs
-./scripts/singlebox.sh --no-bcs-auto-onboard start bcs
+./singlebox/singlebox.sh setup bcs
+./singlebox/singlebox.sh --no-bcs-auto-onboard start bcs
 ```
 
 确认 BCS 健康检查通过：
@@ -103,11 +103,11 @@ openclaw --version
 
 ```bash
 # npm 模式
-./scripts/singlebox.sh --bcn-plugin-source npm
-BCN_PLUGIN_SOURCE=npm ./scripts/singlebox.sh
+./singlebox/singlebox.sh --bcn-plugin-source npm
+BCN_PLUGIN_SOURCE=npm ./singlebox/singlebox.sh
 
 # 在 npm 模式下指定版本（默认：latest）
-BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.15 ./scripts/singlebox.sh
+BCN_PLUGIN_SOURCE=npm BCN_PLUGIN_VERSION=1.0.15 ./singlebox/singlebox.sh
 ```
 
 ## 方式二：手动接入一个本机 OpenClaw profile

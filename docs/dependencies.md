@@ -14,7 +14,7 @@ needs the optional Docker dependency below; see the
 Run the safety preflight from the repository root first:
 
 ```bash
-./scripts/singlebox.sh check
+./singlebox/singlebox.sh check
 ```
 
 `check` only prints the paths it will use and checks the BCS / frontend
@@ -30,7 +30,7 @@ manually and run the same check again.
 If you want the script to help check and install missing tools, use:
 
 ```bash
-./scripts/singlebox.sh install-tools
+./singlebox/singlebox.sh install-tools
 ```
 
 `install-tools` first checks the basic compiler and build environment. If a
@@ -166,18 +166,18 @@ After installing or upgrading dependencies, return to the repository root and
 run:
 
 ```bash
-./scripts/singlebox.sh check
+./singlebox/singlebox.sh check
 ```
 
 After the preflight passes, continue with the main flow:
 
 ```bash
-./scripts/singlebox.sh
+./singlebox/singlebox.sh
 ```
 
 `--standalone` remains accepted as an explicit alias for the same isolated
 singlebox mode:
 
 ```bash
-./scripts/singlebox.sh --standalone
+./singlebox/singlebox.sh --standalone
 ```
