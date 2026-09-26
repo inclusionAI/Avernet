@@ -82,10 +82,10 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
 
     assert "singlebox/ci/singlebox_coverage.sh" in result.stdout
     assert "singlebox/ci/verify_singlebox_coverage_artifacts.py" in result.stdout
-    assert "src/bcs/scripts/ci_test.sh" not in result.stdout
+    assert "apps/bcs/scripts/ci_test.sh" not in result.stdout
 
     base = _git(repository, "rev-parse", "HEAD")
-    dsh_plugin = repository / "src/bcs/crates/plugins/deepseek-harness-channel-bcn/package.json"
+    dsh_plugin = repository / "apps/bcs/crates/plugins/deepseek-harness-channel-bcn/package.json"
     dsh_plugin.parent.mkdir(parents=True)
     dsh_plugin.write_text('{"name":"test"}\n', encoding="utf-8")
     _git(repository, "add", ".")
