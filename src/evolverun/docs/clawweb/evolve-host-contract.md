@@ -111,3 +111,17 @@ owned by Clawevolve. Manage it through the [configuration API](./evolve-app-conf
 or the environment's controlled database configuration process. All configuration
 API reads and writes require the host's existing administrator authorization;
 the asset-scoped task-defaults endpoint retains its existing access checks.
+
+
+## Stage display metadata
+
+`PATCH /api/evolve/stage-developments/:id` accepts only
+`{ "displayName": "..." }`. The current owner with access to the record's space
+may rename it; missing or inaccessible records return 404, and an empty name,
+a name longer than 255 characters, or other update fields return 400.
+
+The development and its implementation versions are renamed in one transaction.
+Packages, checksums, version numbers, registration and integration-test state do
+not change. Task cards show the current name of their actual implementation,
+falling back to the frozen name if its record is unavailable. The frozen task
+configuration and implementation selection remain unchanged.

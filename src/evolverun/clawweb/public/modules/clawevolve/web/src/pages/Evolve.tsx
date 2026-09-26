@@ -35,6 +35,7 @@ import {
 } from '../features/evolve/task-presentation'
 import { GitDiffView, TaskType } from './evolve/common'
 import { TaskList } from './evolve/TaskList'
+import { stepDuration } from './evolve/helpers'
 import { PackManagement } from './evolve/PackManagement'
 import StageSkillManagement from './StageSkillManagement'
 import StageSkillDevelopment from './StageSkillDevelopment'
@@ -2666,16 +2667,6 @@ function formatStepTime(value: number | string | null | undefined): string {
     : new Date(value)
   if (Number.isNaN(date.getTime())) return '—'
   return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
-}
-
-function stepDuration(step: EvolveStep): string {
-  const start = step.startedAt ?? (typeof step.gmtCreate === 'number' ? step.gmtCreate : Math.floor(new Date(step.gmtCreate).getTime() / 1000))
-  if (!start || Number.isNaN(start)) return '等待启动'
-  const end = step.completedAt ?? Math.floor(Date.now() / 1000)
-  const seconds = Math.max(0, end - start)
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
 
 function WorkflowNodeInspector({ step }: { step: EvolveStep }) {

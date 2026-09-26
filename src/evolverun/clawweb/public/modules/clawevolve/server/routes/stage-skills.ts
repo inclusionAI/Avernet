@@ -153,6 +153,20 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
     res.json(developmentView(row));
   }));
 
+  router.patch("/stage-developments/:id", asyncHandler(async (req, res) => {
+    const row = await input.repo.findDevelopment(String(req.params.id));
+    if (!row || row.owner_user_id !== actor(req) || !await readable(row, req)) {
+      res.status(404).json({ error: "开发记录不存在" }); return;
+    }
+    const displayName = typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
+    if (!displayName || displayName.length > 255 || Object.keys(req.body ?? {}).some((key) => key !== "displayName")) {
+      res.status(400).json({ error: "仅支持修改名称，名称须为 1–255 个字符" }); return;
+    }
+    const updated = await input.repo.renameDevelopment(String(row.id), row.owner_user_id, displayName);
+    if (!updated) { res.status(404).json({ error: "开发记录不存在" }); return; }
+    res.json(developmentView(updated));
+  }));
+
   router.delete("/stage-developments/:id", asyncHandler(async (req, res) => {
     const owner = actor(req);
     const row = await input.repo.findDevelopment(String(req.params.id));
