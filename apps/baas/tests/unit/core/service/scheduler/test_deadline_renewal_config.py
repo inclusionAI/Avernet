@@ -267,12 +267,12 @@ class TestSchedulerSkeleton:
 
 
 # Path bases for YAML config lookups. This test file lives at
-# submodules/avernet/appsbaas/tests/unit/core/service/scheduler/ inside the
+# submodules/avernet/apps/baas/tests/unit/core/service/scheduler/ inside the
 # community submodule; the community application.yaml is resolved relative
 # to the submodule's apps/baas root so it keeps working in a standalone
 # submodule checkout (community CI), while the enterprise YAML path is
 # resolved relative to the monorepo root and skipped when absent.
-_BAAS_ROOT = Path(__file__).resolve().parents[5]  # submodules/avernet/appsbaas
+_BAAS_ROOT = Path(__file__).resolve().parents[5]  # submodules/avernet/apps/baas
 _REPO_ROOT = Path(__file__).resolve().parents[8]  # monorepo root
 
 
