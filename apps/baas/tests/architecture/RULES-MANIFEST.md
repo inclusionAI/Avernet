@@ -132,12 +132,12 @@ All architecture doc references in the codebase (verified 2026-06-25):
 
 | Referencing File | Reference | Resolution |
 |---|---|---|
-| `src/baas/tests/architecture/RULES-MANIFEST.md` | `../../docs/arch/arch.rules.md` | ✅ Resolves correctly from manifest location |
-| `src/baas/tests/architecture/test_core_rules.py` | `RULES-MANIFEST.md` (3 references) | ✅ Same directory |
-| `src/baas/tests/architecture/test_structure_rules.py` | `RULES-MANIFEST.md` (3 references) | ✅ Same directory |
-| `src/baas/docs/micro-kernel-refactor.md` | `docs/arch/arch.rules.md` | ⚠ Does NOT resolve from `src/baas/docs/` — should be `../../docs/arch/arch.rules.md` |
-| `src/baas/docs/micro-kernel-refactor-compliance-audit.md` | `docs/arch/arch.rules.md` (3 references) | ⚠ Does NOT resolve from `src/baas/docs/` — should be `../../docs/arch/arch.rules.md` |
-| `src/baas/openspec/changes/add-arch-rules-tests/` | `arch.rules.md` (3 references) | ⚠ Relative paths may not resolve; depends on working directory |
+| `apps/baas/tests/architecture/RULES-MANIFEST.md` | `../../docs/arch/arch.rules.md` | ✅ Resolves correctly from manifest location |
+| `apps/baas/tests/architecture/test_core_rules.py` | `RULES-MANIFEST.md` (3 references) | ✅ Same directory |
+| `apps/baas/tests/architecture/test_structure_rules.py` | `RULES-MANIFEST.md` (3 references) | ✅ Same directory |
+| `apps/baas/docs/micro-kernel-refactor.md` | `docs/arch/arch.rules.md` | ⚠ Does NOT resolve from `apps/baas/docs/` — should be `../../docs/arch/arch.rules.md` |
+| `apps/baas/docs/micro-kernel-refactor-compliance-audit.md` | `docs/arch/arch.rules.md` (3 references) | ⚠ Does NOT resolve from `apps/baas/docs/` — should be `../../docs/arch/arch.rules.md` |
+| `apps/baas/openspec/changes/add-arch-rules-tests/` | `arch.rules.md` (3 references) | ⚠ Relative paths may not resolve; depends on working directory |
 
 ---
 
@@ -161,7 +161,7 @@ Phase 7-8 migration incomplete. Migrated items: `infra/dal/` → `core/repositor
 
 ### Issue 5: Arch doc path inconsistency
 
-`src/baas/docs/micro-kernel-refactor.md` and `src/baas/docs/micro-kernel-refactor-compliance-audit.md` reference `docs/arch/arch.rules.md` which does not resolve from their location. Should use `../../docs/arch/arch.rules.md`.
+`apps/baas/docs/micro-kernel-refactor.md` and `apps/baas/docs/micro-kernel-refactor-compliance-audit.md` reference `docs/arch/arch.rules.md` which does not resolve from their location. Should use `../../docs/arch/arch.rules.md`.
 
 ### Issue 6: No cross-plugin import restrictions enforced (Rule 15) — ✅ RESOLVED
 

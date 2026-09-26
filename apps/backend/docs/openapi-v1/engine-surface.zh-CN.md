@@ -19,7 +19,7 @@ Track A 和 Track B 都假设公共 API 的数据在**后端库表**里。Bot �
    url, available}`。
 2. 前端把命中前缀的请求重写成 `/proxypass/{target}{path}` 并带上
    `X-PROXYPASS-TOKEN` 头，本地模式则是 `http://{target}{path}`
-   （`src/frontend/src/requestConfig.ts:150-260`）。
+   （`apps/frontend/src/requestConfig.ts:150-260`）。
 
 这对内部 TeamClaw 前端没问题，对外部租户则是错的。它把 proxypass 拓扑和裸设备
 token 暴露了出去，并且让**从未被设计成公共契约的 engine** 成为集成方直接编程的对象。
@@ -53,7 +53,7 @@ Track C 并不包装其中的大多数。四条规则逐个裁定：
 | **C3** | **WebSocket** → **不包装。** | 公共 API 返回一条完整的 socket URL（凭据在其中），由调用方自己建连。转发帧等于把 engine 内部帧格式发布成公共契约。 |
 | **C4** | **仅 AICoding** → **不在范围内。** | 产品专有面，不属于租户契约。 |
 
-C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypass 前缀
+C1 的权威清单是 `apps/frontend/src/requestConfig.ts:189-205` 里的 proxypass 前缀
 数组 —— 前端会重写到 engine 的那一组路径前缀，就是它。
 
 ---

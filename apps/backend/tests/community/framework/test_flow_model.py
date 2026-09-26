@@ -1,4 +1,4 @@
-# src/backend/tests/framework/test_flow_model.py
+# apps/backend/tests/framework/test_flow_model.py
 """Tests for the declarative flow model (Plan B)."""
 from __future__ import annotations
 

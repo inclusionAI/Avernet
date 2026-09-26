@@ -809,8 +809,8 @@ git commit -m "fix(bcs): align V1 session message schema with legacy"
 
 **Files:**
 
-- Modify generated artifact: `src/gateway/configs/schemas/bcn.openapi.json`
-- Modify only if needed for a new targeted assertion: `src/gateway/tests/unit/core/forwarding/test_served_openapi.py`
+- Modify generated artifact: `apps/gateway/configs/schemas/bcn.openapi.json`
+- Modify only if needed for a new targeted assertion: `apps/gateway/tests/unit/core/forwarding/test_served_openapi.py`
 
 **Step 1: Export the deterministic candidate**
 
@@ -839,7 +839,7 @@ Expected: an array schema whose items are the fully resolved `GroupMessage`; no 
 Use `apply_patch` for a normal textual update when practical. Because this artifact is a one-line deterministic JSON file, a mechanical copy command is acceptable for this generated-file replacement:
 
 ```bash
-cp /tmp/bcn.openapi.json src/gateway/configs/schemas/bcn.openapi.json
+cp /tmp/bcn.openapi.json apps/gateway/configs/schemas/bcn.openapi.json
 ```
 
 Do not hand-edit the generated JSON.
@@ -854,8 +854,8 @@ Run:
 
 ```bash
 uv run --with pytest pytest \
-  src/gateway/tests/unit/core/forwarding/test_served_openapi.py \
-  src/gateway/tests/unit/scripts/test_gate_and_publish.py -q
+  apps/gateway/tests/unit/core/forwarding/test_served_openapi.py \
+  apps/gateway/tests/unit/scripts/test_gate_and_publish.py -q
 ```
 
 Expected: PASS. The compatibility gate itself may classify the approved V1 item replacement as breaking when comparing against an older published schema; do not weaken the gate. Release publication must use the repository's explicit approved-breaking workflow if that gate is run against the previous artifact.
@@ -868,7 +868,7 @@ Run the exporter again to a second temporary file and compare:
 uv run --with pyyaml python src/bcs/scripts/dump_openapi.py \
   /tmp/bcn.openapi.verify.json \
   --root src/bcs/api-contracts/v1
-cmp /tmp/bcn.openapi.verify.json src/gateway/configs/schemas/bcn.openapi.json
+cmp /tmp/bcn.openapi.verify.json apps/gateway/configs/schemas/bcn.openapi.json
 ```
 
 Expected: `cmp` exits 0 with no output.
@@ -876,8 +876,8 @@ Expected: `cmp` exits 0 with no output.
 **Step 7: Commit the generated artifact checkpoint**
 
 ```bash
-git add src/gateway/configs/schemas/bcn.openapi.json \
-  src/gateway/tests/unit/core/forwarding/test_served_openapi.py
+git add apps/gateway/configs/schemas/bcn.openapi.json \
+  apps/gateway/tests/unit/core/forwarding/test_served_openapi.py
 git commit -m "build(gateway): refresh BCN session message schema"
 ```
 
@@ -919,8 +919,8 @@ uv run --with pyyaml python src/bcs/scripts/validate_openapi_contract.py \
   --root src/bcs/api-contracts/v1
 uv run --with pytest --with pyyaml pytest src/bcs/tests/openapi -q
 uv run --with pytest pytest \
-  src/gateway/tests/unit/core/forwarding/test_served_openapi.py \
-  src/gateway/tests/unit/scripts/test_gate_and_publish.py -q
+  apps/gateway/tests/unit/core/forwarding/test_served_openapi.py \
+  apps/gateway/tests/unit/scripts/test_gate_and_publish.py -q
 ```
 
 Expected: all commands PASS.

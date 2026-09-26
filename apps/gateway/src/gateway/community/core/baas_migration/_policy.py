@@ -1,7 +1,7 @@
 """Reading secbaas's ``policy`` column the way secbaas reads it.
 
 A deliberate re-implementation of
-``src/baas/src/secbaas/community/api/api_gateway/_policy.py``, not an import:
+``apps/baas/src/secbaas/community/api/api_gateway/_policy.py``, not an import:
 the gateway does not depend on the ``secbaas`` package, and it must not start
 doing so for a migration that is meant to be deleted. The *semantics* are what
 have to match, and they are these — every one of them fail-closed:

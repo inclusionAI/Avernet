@@ -1,7 +1,7 @@
 # 会话中断历史记录保存：分析与优化
 
 > 文档日期：2026-05-11
-> 涉及模块：`src/store.ts`、`src/interaction/`、`src/gateway/handlers/chat.ts`、`src/gateway/orchestrator-bridge.ts`、`src/claude-sdk-bridge.ts`、`src/chat-orchestrator.ts`
+> 涉及模块：`src/store.ts`、`src/interaction/`、`apps/gateway/handlers/chat.ts`、`apps/gateway/orchestrator-bridge.ts`、`src/claude-sdk-bridge.ts`、`src/chat-orchestrator.ts`
 
 ---
 

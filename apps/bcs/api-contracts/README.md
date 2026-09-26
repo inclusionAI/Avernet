@@ -183,8 +183,8 @@ uv run --with pytest --with pyyaml \
 ```
 
 Generated bundle outputs are build artifacts and are not committed from BCS.
-The Gateway-owned schema snapshots `src/gateway/configs/schemas/bcn.openapi.json`
-and `src/gateway/configs/schemas/bcn.internal.openapi.json` must be regenerated
+The Gateway-owned schema snapshots `apps/gateway/configs/schemas/bcn.openapi.json`
+and `apps/gateway/configs/schemas/bcn.internal.openapi.json` must be regenerated
 from these contracts when Gateway consumers need updated BCN API JSON. The
 candidate YAML is reviewed before implementation;
 compatibility checks compare later revisions against an approved baseline.

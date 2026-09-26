@@ -1,7 +1,7 @@
 # openocb — the community (open-source) distribution manifest for agentclaw.community.
 #
 # Standalone community backend: pyproject + uv.lock at the backend project root
-# (src/backend/), source under src/agentclaw/community/ — a PEP 420 `agentclaw`
+# (apps/backend/), source under src/agentclaw/community/ — a PEP 420 `agentclaw`
 # namespace child (no agentclaw/__init__.py). openocb builds and tests from here
 # directly; `packages` below packages the namespace with just the community child.
 #
@@ -28,7 +28,7 @@ readme = "README.md"
 # this later, but it stays aligned with what the suite is tested against for now.
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  # ── Shared base — MIRRORS corp src/backend/pyproject.toml [project.dependencies].
+  # ── Shared base — MIRRORS corp apps/backend/pyproject.toml [project.dependencies].
   #    Keep in lockstep; the drift guard enforces it. ──
   "aiofiles>=25.1.0",
   "fastapi>=0.115.0",

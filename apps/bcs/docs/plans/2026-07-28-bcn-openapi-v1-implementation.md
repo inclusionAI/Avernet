@@ -1273,12 +1273,12 @@ git commit -m "feat(bcs): mount OpenAPI v1 beside legacy routes"
 
 **Files:**
 
-- Modify: `src/gateway/configs/upstreams.yaml`
-- Modify: `src/gateway/configs/route_security.yaml`
-- Modify: `src/gateway/tests/test_domain_map.py`
-- Modify: `src/gateway/tests/test_served_openapi.py`
-- Modify: `src/gateway/tests/integration/test_forward_route.py`
-- Add generated test fixture under: `src/gateway/tests/fixtures/bcn.openapi.json`
+- Modify: `apps/gateway/configs/upstreams.yaml`
+- Modify: `apps/gateway/configs/route_security.yaml`
+- Modify: `apps/gateway/tests/test_domain_map.py`
+- Modify: `apps/gateway/tests/test_served_openapi.py`
+- Modify: `apps/gateway/tests/integration/test_forward_route.py`
+- Add generated test fixture under: `apps/gateway/tests/fixtures/bcn.openapi.json`
 
 **Step 1: Write failing domain tests**
 
@@ -1307,7 +1307,7 @@ Also assert non-collaboration resources still resolve to their existing owners, 
 Run:
 
 ```bash
-cd src/gateway
+cd apps/gateway
 uv run pytest tests/test_domain_map.py tests/test_served_openapi.py -q
 ```
 
@@ -1330,7 +1330,7 @@ Do not claim BotPrincipal support until Task 15 is complete.
 Run:
 
 ```bash
-cd src/gateway
+cd apps/gateway
 uv run pytest tests/test_domain_map.py tests/test_served_openapi.py tests/integration/test_forward_route.py -q
 ```
 
@@ -1339,7 +1339,7 @@ Expected: PASS.
 **Step 6: Commit**
 
 ```bash
-git add src/gateway/configs src/gateway/tests
+git add apps/gateway/configs apps/gateway/tests
 git commit -m "feat(gateway): route BCN OpenAPI resource domains"
 ```
 
@@ -1350,15 +1350,15 @@ written owner approval. If not, stop here; do not expose V1 in production.
 
 **Files:**
 
-- Modify: `src/gateway/src/gateway/community/spi/authn/_models.py`
-- Modify: `src/gateway/src/gateway/community/bootstrap/_authn.py`
-- Modify: `src/gateway/src/gateway/community/adapters/web/_forward.py`
+- Modify: `apps/gateway/apps/gateway/community/spi/authn/_models.py`
+- Modify: `apps/gateway/apps/gateway/community/bootstrap/_authn.py`
+- Modify: `apps/gateway/apps/gateway/community/adapters/web/_forward.py`
 - Modify or create signer SPI files under:
-  `src/gateway/src/gateway/community/spi/authn/`
+  `apps/gateway/apps/gateway/community/spi/authn/`
 - Modify or create signer implementation under:
-  `src/gateway/src/gateway/community/plugins/authn/`
-- Modify: `src/gateway/tests/test_authn_models.py`
-- Create: `src/gateway/tests/test_principal_forwarding.py`
+  `apps/gateway/apps/gateway/community/plugins/authn/`
+- Modify: `apps/gateway/tests/test_authn_models.py`
+- Create: `apps/gateway/tests/test_principal_forwarding.py`
 - Create verifier implementation under:
   `src/bcs/crates/adapters/http/bcs-api-http/src/v1/common/`
 - Create: `src/bcs/crates/adapters/http/bcs-api-http/tests/principal_verification.rs`
@@ -1398,7 +1398,7 @@ Assert rejection of:
 Run:
 
 ```bash
-cd src/gateway
+cd apps/gateway
 uv run pytest tests/test_authn_models.py tests/test_principal_forwarding.py -q
 cd ../..
 cargo test --manifest-path src/bcs/Cargo.toml -p bcs-api-http --test principal_verification
@@ -1417,7 +1417,7 @@ do not expose the wire JWT type to Application or domain code.
 Run:
 
 ```bash
-cd src/gateway
+cd apps/gateway
 uv run pytest tests/test_auth_runner.py tests/test_authn_models.py tests/test_principal_forwarding.py -q
 cd ../..
 cargo test --manifest-path src/bcs/Cargo.toml -p bcs-api-http
@@ -1428,7 +1428,7 @@ Expected: PASS.
 **Step 7: Commit**
 
 ```bash
-git add src/gateway src/bcs/crates/adapters/http/bcs-api-http
+git add apps/gateway src/bcs/crates/adapters/http/bcs-api-http
 git commit -m "feat: forward and verify trusted Gateway principals"
 ```
 
@@ -1445,8 +1445,8 @@ git commit -m "feat: forward and verify trusted Gateway principals"
 - Modify: `scripts/ci/singlebox_coverage_modules.yaml`
 - Modify: `.github/workflows/singlebox-coverage.yml` if the canonical entrypoint
   does not already pick up the BCS contract gate
-- Modify: `src/gateway/scripts/gate_and_publish_openapi.py`
-- Modify: `src/gateway/tests/test_gate_and_publish.py`
+- Modify: `apps/gateway/scripts/gate_and_publish_openapi.py`
+- Modify: `apps/gateway/tests/test_gate_and_publish.py`
 
 **Step 1: Write failing deterministic-generation tests**
 
@@ -1500,7 +1500,7 @@ Run:
 ```bash
 uv run pytest src/bcs/tests/openapi -q
 src/bcs/scripts/ci_test.sh --fast-fail
-cd src/gateway
+cd apps/gateway
 uv run pytest tests/test_gate_and_publish.py tests/test_served_openapi.py -q
 ```
 
@@ -1509,7 +1509,7 @@ Expected: PASS.
 **Step 7: Commit**
 
 ```bash
-git add src/bcs/scripts src/bcs/tests/openapi scripts/ci .github/workflows src/gateway/scripts src/gateway/tests
+git add src/bcs/scripts src/bcs/tests/openapi scripts/ci .github/workflows apps/gateway/scripts apps/gateway/tests
 git commit -m "ci: generate and compatibility-check BCN OpenAPI"
 ```
 
@@ -1556,7 +1556,7 @@ Run:
 
 ```bash
 cargo test --manifest-path src/bcs/Cargo.toml --workspace
-cd src/gateway
+cd apps/gateway
 uv run pytest -q
 cd ../..
 scripts/ci/singlebox_coverage.sh --module bcs
@@ -1594,7 +1594,7 @@ Run:
 ```bash
 git diff --check
 cargo test --manifest-path src/bcs/Cargo.toml --workspace
-cd src/gateway
+cd apps/gateway
 uv run pytest -q
 cd ../..
 uv run pytest src/bcs/tests/openapi -q

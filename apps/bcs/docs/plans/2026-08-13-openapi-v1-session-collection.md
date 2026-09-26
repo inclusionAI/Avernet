@@ -510,11 +510,11 @@ git commit -m "feat(bcs): serve OpenAPI session collection routes"
 **Files:**
 
 - Modify: `src/bcs/crates/bootstrap/bcs/tests/openapi_v1_mount.rs`
-- Modify: `src/gateway/configs/schemas/bcn.openapi.json`
-- Modify: `src/gateway/tests/unit/scripts/test_dump_and_publish_script.py`
-- Modify: `src/gateway/tests/unit/scripts/test_gate_and_publish.py`
-- Modify: `src/gateway/tests/unit/core/forwarding/test_served_openapi.py`
-- Modify: `src/gateway/tests/unit/core/authn/test_route_security.py`
+- Modify: `apps/gateway/configs/schemas/bcn.openapi.json`
+- Modify: `apps/gateway/tests/unit/scripts/test_dump_and_publish_script.py`
+- Modify: `apps/gateway/tests/unit/scripts/test_gate_and_publish.py`
+- Modify: `apps/gateway/tests/unit/core/forwarding/test_served_openapi.py`
+- Modify: `apps/gateway/tests/unit/core/authn/test_route_security.py`
 
 **Step 1: Add failing mount and publication assertions**
 
@@ -534,11 +534,11 @@ Rename test functions that encode `41` in their names to `43`.
 **Step 2: Run publication tests to verify failure**
 
 ```bash
-uv run --project src/gateway pytest \
-  src/gateway/tests/unit/scripts/test_dump_and_publish_script.py \
-  src/gateway/tests/unit/scripts/test_gate_and_publish.py \
-  src/gateway/tests/unit/core/forwarding/test_served_openapi.py \
-  src/gateway/tests/unit/core/authn/test_route_security.py -q
+uv run --project apps/gateway pytest \
+  apps/gateway/tests/unit/scripts/test_dump_and_publish_script.py \
+  apps/gateway/tests/unit/scripts/test_gate_and_publish.py \
+  apps/gateway/tests/unit/core/forwarding/test_served_openapi.py \
+  apps/gateway/tests/unit/core/authn/test_route_security.py -q
 ```
 
 Expected: FAIL because the checked-in Gateway snapshot still has 41
@@ -550,7 +550,7 @@ Run from the repository root:
 
 ```bash
 uv run --with pyyaml python src/bcs/scripts/dump_openapi.py \
-  src/gateway/configs/schemas/bcn.openapi.json
+  apps/gateway/configs/schemas/bcn.openapi.json
 ```
 
 Expected: the deterministic JSON artifact is updated and contains 43
@@ -562,11 +562,11 @@ operations.
 cd src/bcs
 cargo test -p bcs --test openapi_v1_mount
 cd ../..
-uv run --project src/gateway pytest \
-  src/gateway/tests/unit/scripts/test_dump_and_publish_script.py \
-  src/gateway/tests/unit/scripts/test_gate_and_publish.py \
-  src/gateway/tests/unit/core/forwarding/test_served_openapi.py \
-  src/gateway/tests/unit/core/authn/test_route_security.py -q
+uv run --project apps/gateway pytest \
+  apps/gateway/tests/unit/scripts/test_dump_and_publish_script.py \
+  apps/gateway/tests/unit/scripts/test_gate_and_publish.py \
+  apps/gateway/tests/unit/core/forwarding/test_served_openapi.py \
+  apps/gateway/tests/unit/core/authn/test_route_security.py -q
 ```
 
 Expected: PASS.
@@ -576,11 +576,11 @@ Expected: PASS.
 ```bash
 git add \
   src/bcs/crates/bootstrap/bcs/tests/openapi_v1_mount.rs \
-  src/gateway/configs/schemas/bcn.openapi.json \
-  src/gateway/tests/unit/scripts/test_dump_and_publish_script.py \
-  src/gateway/tests/unit/scripts/test_gate_and_publish.py \
-  src/gateway/tests/unit/core/forwarding/test_served_openapi.py \
-  src/gateway/tests/unit/core/authn/test_route_security.py
+  apps/gateway/configs/schemas/bcn.openapi.json \
+  apps/gateway/tests/unit/scripts/test_dump_and_publish_script.py \
+  apps/gateway/tests/unit/scripts/test_gate_and_publish.py \
+  apps/gateway/tests/unit/core/forwarding/test_served_openapi.py \
+  apps/gateway/tests/unit/core/authn/test_route_security.py
 git commit -m "build(gateway): publish session collection OpenAPI"
 ```
 
@@ -624,11 +624,11 @@ Expected: PASS without changing the legacy route contract.
 ```bash
 uv run --with pyyaml python src/bcs/scripts/validate_openapi_contract.py \
   --root src/bcs/api-contracts/v1
-uv run --project src/gateway pytest \
-  src/gateway/tests/unit/scripts/test_dump_and_publish_script.py \
-  src/gateway/tests/unit/scripts/test_gate_and_publish.py \
-  src/gateway/tests/unit/core/forwarding/test_served_openapi.py \
-  src/gateway/tests/unit/core/authn/test_route_security.py -q
+uv run --project apps/gateway pytest \
+  apps/gateway/tests/unit/scripts/test_dump_and_publish_script.py \
+  apps/gateway/tests/unit/scripts/test_gate_and_publish.py \
+  apps/gateway/tests/unit/core/forwarding/test_served_openapi.py \
+  apps/gateway/tests/unit/core/authn/test_route_security.py -q
 ```
 
 Expected: `43 operations validated`; all tests PASS.

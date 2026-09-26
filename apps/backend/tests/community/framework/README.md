@@ -56,7 +56,7 @@ def get_user_not_found():
 Run:
 
 ```bash
-cd src/backend
+cd apps/backend
 uv run pytest tests/endpoints/ -v
 ```
 
@@ -334,7 +334,7 @@ If the route table changes drastically (a large refactor, mass-add of
 endpoints), rebuild the baseline from today's gaps:
 
 ```bash
-cd src/backend
+cd apps/backend
 python -m tests.framework.coverage_gate --regen
 ```
 

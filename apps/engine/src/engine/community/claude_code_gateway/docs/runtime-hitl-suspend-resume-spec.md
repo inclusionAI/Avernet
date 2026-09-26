@@ -427,7 +427,7 @@ if (pending.resolver) {
 
 ---
 
-## 8.6 `src/gateway/handlers/chat.ts`
+## 8.6 `apps/gateway/handlers/chat.ts`
 
 ### 目标
 
@@ -480,7 +480,7 @@ buildInteractionFromRuntimeToolRequest({
 
 ---
 
-## 8.8 `src/gateway/orchestrator-bridge.ts`
+## 8.8 `apps/gateway/orchestrator-bridge.ts`
 
 ### 目标
 

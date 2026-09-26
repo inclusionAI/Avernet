@@ -199,7 +199,7 @@ git commit -m "fix(bcs): restore explicit human session join boundary"
 - Modify: `src/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/dto/session.rs`
 - Modify: `src/bcs/crates/adapters/http/bcs-api-http/tests/session_routes.rs`
 - Modify: `src/bcs/crates/service-api/bcs-service-api/src/application/v1/session.rs`
-- Regenerate: `src/gateway/configs/schemas/bcn.openapi.json`
+- Regenerate: `apps/gateway/configs/schemas/bcn.openapi.json`
 
 **Step 1: Write failing OpenAPI assertions**
 
@@ -251,7 +251,7 @@ From the repository root, run:
 uv run --with pyyaml python src/bcs/scripts/validate_openapi_contract.py \
   --root src/bcs/api-contracts/v1
 uv run --with pyyaml python src/bcs/scripts/dump_openapi.py \
-  src/gateway/configs/schemas/bcn.openapi.json \
+  apps/gateway/configs/schemas/bcn.openapi.json \
   --root src/bcs/api-contracts/v1
 ```
 
@@ -277,7 +277,7 @@ git add src/bcs/tests/openapi/test_session_v1_contract.py \
   src/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/dto/session.rs \
   src/bcs/crates/adapters/http/bcs-api-http/tests/session_routes.rs \
   src/bcs/crates/service-api/bcs-service-api/src/application/v1/session.rs \
-  src/gateway/configs/schemas/bcn.openapi.json
+  apps/gateway/configs/schemas/bcn.openapi.json
 git commit -m "docs(bcs): define V1 acting creator actor semantics"
 ```
 

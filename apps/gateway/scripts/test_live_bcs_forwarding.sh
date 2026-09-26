@@ -4,7 +4,7 @@ set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 bcs_dir="${root_dir}/src/bcs"
-gateway_dir="${root_dir}/src/gateway"
+gateway_dir="${root_dir}/apps/gateway"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-live-bcs.XXXXXX")"
 config_file="${work_dir}/bcs-config-local.toml"
 log_file="${work_dir}/bcs.log"

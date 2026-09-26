@@ -8,7 +8,7 @@ pre/prod database, or historical Bot data.
 Run the fast baseline and report checks:
 
 ```bash
-cd src/backend
+cd apps/backend
 uv run pytest tests/community/compatibility/test_legacy_skill_harness.py -q
 ```
 

@@ -299,8 +299,8 @@ CLI bridge 的 `commandOutput` 事件已包含 `toolCallId`、`output`、`exitCo
 |------|------|
 | `src/types.ts` | 新增 `ToolUseMeta`、`ToolResultMeta`、`ThinkingMeta` 类型（含 `title`/`description`/`subject` 字段）；扩展 `SessionHistoryMessage` 加 `content?: ... \| null`、`metadata?` 字段，`role` 增加 `'tool_use'`、`'tool_result'`、`'thinking'` |
 | `src/chat-orchestrator.ts` | 扩展 `OrchestratorHistoryEntry` 加 `metadata?`；`buildConversationContext` 识别 `metadata` 中的 tool/thinking；新增 `formatHistoryEntry` |
-| `src/gateway/orchestrator-bridge.ts` | `BridgeOrchestratorFn` 返回类型加 `getCollectedEvents`；新增 `deriveToolMeta()` 推导 `title`/`description`/`subject`；在事件流中收集 `tool_use`/`tool_result`/`thinking`；lifecycle end 时回填 tool_result 的 subject |
-| `src/gateway/handlers/chat.ts` | `toOrchestratorHistory` 传递 `metadata`；`handleChatSend` 完成时将收集的事件写入 history（content: null, metadata 含 title/description/subject）；`handleChatHistory` 返回 `content` 和 `metadata` |
+| `apps/gateway/orchestrator-bridge.ts` | `BridgeOrchestratorFn` 返回类型加 `getCollectedEvents`；新增 `deriveToolMeta()` 推导 `title`/`description`/`subject`；在事件流中收集 `tool_use`/`tool_result`/`thinking`；lifecycle end 时回填 tool_result 的 subject |
+| `apps/gateway/handlers/chat.ts` | `toOrchestratorHistory` 传递 `metadata`；`handleChatSend` 完成时将收集的事件写入 history（content: null, metadata 含 title/description/subject）；`handleChatHistory` 返回 `content` 和 `metadata` |
 | `test/store.test.ts` | 验证带 `metadata` 的 history 消息的存取 |
 
 ## 向后兼容性

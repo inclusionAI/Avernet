@@ -1,7 +1,7 @@
 """Unit tests for MariaDbOrmPlugin.
 
 Mirrors the production layout
-``src/gateway/community/plugins/database/mariadb/_plugin.py``. These tests
+``apps/gateway/community/plugins/database/mariadb/_plugin.py``. These tests
 exercise the plugin's code paths without requiring a live MariaDB server by
 mocking the SQLAlchemy engine/session construction.
 """

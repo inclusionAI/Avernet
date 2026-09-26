@@ -17,7 +17,7 @@ three checks directly against this checkout:
      acceptance gate: a shipped test that imports ``agentclaw.corp`` (or a
      corp-only third-party package) fails here.
 
-Run from ``src/backend`` (the backend project root). Exit 0 on success.
+Run from ``apps/backend`` (the backend project root). Exit 0 on success.
 
 Usage::  python scripts/community_selftest.py [--skip-tests]
 """
@@ -29,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_BACKEND = Path(__file__).resolve().parents[1]   # .../src/backend
+_BACKEND = Path(__file__).resolve().parents[1]   # .../apps/backend
 _SRC = _BACKEND / "src"
 
 

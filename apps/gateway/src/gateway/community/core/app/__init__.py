@@ -7,7 +7,7 @@ Holds the ORM row (:class:`AppRow`), the canonical :class:`AppRepository` impl,
 The authn ``app_token`` strategy depends on the SPI, not this module.
 
 ``_key_gen.py`` is a **copy** of
-``src/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py`` and its
+``apps/baas/src/secbaas/community/core/service/api_gateway/_key_gen.py`` and its
 code must stay identical to it: secbaas's existing API-key records are migrated
 into ``avernet_application``, and the stored hash records only its salt, so the
 digest, iteration count, and encoding are implicit constants shared by both
@@ -18,7 +18,7 @@ trees with docstrings stripped, so prose is free and behaviour is not.
 
 ``tests/unit/plugins/test_app_key_gen.py`` fails on a one-sided change *when it
 runs*, which covers edits to this module. It does not cover the other direction:
-the gateway CI job is selected by changed paths under ``src/gateway``, so a
+the gateway CI job is selected by changed paths under ``apps/gateway``, so a
 commit touching only secbaas's copy skips this suite entirely. Until that gap is
 closed, a secbaas-side edit to the scheme must be paired with a gateway-side
 re-copy by hand.

@@ -1,4 +1,4 @@
-# src/backend/tests/framework/test_flow_coverage.py
+# apps/backend/tests/framework/test_flow_coverage.py
 """Tests for the e2e coverage matrix + exempt list (Plan B)."""
 from __future__ import annotations
 

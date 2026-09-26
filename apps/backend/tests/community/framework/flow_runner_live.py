@@ -1,4 +1,4 @@
-# src/backend/tests/community/framework/flow_runner_live.py
+# apps/backend/tests/community/framework/flow_runner_live.py
 """Live-backend FlowCase executor (路 B / acceptance).
 
 Mirrors flow_runner.run_flow's status/expect/extract semantics so a FlowCase

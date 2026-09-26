@@ -4,7 +4,7 @@
 _BCS_FRONTEND_SH_LOADED=1
 
 # The composite forces the LEGACY panel scripts (devs:local:oss / devs:dev,
-# neither of which exists in src/frontend-nextgen or the internal teamclaw
+# neither of which exists in apps/frontend-nextgen or the internal teamclaw
 # checkout) and its 'bcs frontend' expansion never starts the Gateway the
 # non-legacy UIs' OpenAPI/auth routes target. Refuse loudly up front instead
 # of leaving a half-started stack: BCS up, frontend dead on "Missing script"

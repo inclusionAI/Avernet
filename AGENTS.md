@@ -49,7 +49,7 @@ ocb/
 
 | Module | Directory | Responsibility |
 | --- | --- | --- |
-| Frontend | `src/frontend/` | Web workbench UI |
+| Frontend | `apps/frontend/` | Web workbench UI |
 | BCS | `src/bcs/` | Bot coordination, group chat, routing |
 
 
@@ -179,7 +179,7 @@ heavier unit tests, changed-line coverage, and Singlebox E2E. Set
 `OCB_PRE_PUSH_RUN_CI=1` to run the full gates for a push, or run
 `scripts/ci/pre_push.sh` manually. The module-gate table below describes the
 full behavior; in lint-only mode only the SAST/lint step of each Python module
-runs, and modules without a standalone lint step (`src/gateway`, `src/frontend`,
+runs, and modules without a standalone lint step (`apps/gateway`, `apps/frontend`,
 `src/bcs`, and the singlebox coverage paths) run nothing.
 
 ```bash
@@ -217,12 +217,12 @@ Module gates are selected from the committed files in the resulting diff:
 
 | Changed path | Pre-push gate |
 | --- | --- |
-| `src/backend/` | Backend SAST, unit tests, changed-line coverage, and singlebox coverage |
-| `src/baas/` | BaaS SAST, unit tests, changed-line coverage, and singlebox coverage |
+| `apps/backend/` | Backend SAST, unit tests, changed-line coverage, and singlebox coverage |
+| `apps/baas/` | BaaS SAST, unit tests, changed-line coverage, and singlebox coverage |
 | `src/engine/` | Engine SAST, unit tests, and changed-line coverage |
 | `src/bcs/` | BCS/BCN unit tests in fast-fail mode, then unified singlebox coverage with BCS user-story E2E |
-| `src/frontend/` | Frontend CI |
-| `src/proxy/` | sandbox-proxy lint, unit tests, and changed-line coverage |
+| `apps/frontend/` | Frontend CI |
+| `apps/proxy/` | sandbox-proxy lint, unit tests, and changed-line coverage |
 | singlebox scripts and Backend/BaaS acceptance or E2E paths | singlebox coverage |
 
 The hook only checks committed changes in the pushed ref. Uncommitted working
@@ -341,7 +341,7 @@ marked as TODO.
 
 Before changing Skills management, publication, mounting, or runtime
 activation, read
-`src/backend/src/agentclaw/community/core/skill_center/AGENTS.md`.
+`apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md`.
 
 - `skills-repo` and `skills-local` are complete content stores. An active
   Skills directory must expose only the Skills explicitly activated for the

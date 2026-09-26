@@ -3,7 +3,7 @@
 gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 起好 singlebox 后:
 
   SINGLEBOX_TASK_E2E=1 \
-    src/backend/.venv/bin/python -m pytest \
+    apps/backend/.venv/bin/python -m pytest \
       tests/community/core/task/singlebox_e2e/bbs/test_bbs_relay_e2e_natual_2_mode.py -s
 
 # 剧本(natural 2-mode:依赖 LLM 自规划 + 真实匹配)
@@ -70,8 +70,8 @@ _PLANNING_SKILL = str(SKILLS_DIR / "planning-arch")  # 通用 LLM 规划(非 cas
 _SEARCH_SKILL = str(SKILLS_DIR / "search")           # 派发决策 storage search(同 integration e2e;表里已加 arch 场景 node_id 行)
 _ACCEPTANCE_SKILL = str(SKILLS_DIR / "acceptance")   # N_hit worker 自验收
 _ARCH_SKILL = str(SKILLS_DIR / "arch-analysis")      # N_miss 升 BBS 后金庸中继执行侧 mock
-# bbs-relay-pickup skill 落在 spec 目录下(非 src/backend/skills);
-# test 文件在 <repo>/src/backend/tests/community/core/task/singlebox_e2e/bbs/ ,parents[6] = <repo>/src/backend
+# bbs-relay-pickup skill 落在 spec 目录下(非 apps/backend/skills);
+# test 文件在 <repo>/apps/backend/tests/community/core/task/singlebox_e2e/bbs/ ,parents[6] = <repo>/apps/backend
 _BBS_SKILL = str(
     Path(__file__).resolve().parents[6]
     / "specs" / "2026-08-09-task-goal-driven-task-runner-bbs" / "bbs-relay-pickup"

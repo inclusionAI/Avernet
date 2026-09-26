@@ -562,7 +562,7 @@ def test_key_fingerprint_matches_the_gateway_golden_values():
     sides log it at boot; comparing the two lines is how an operator tells "we
     hold different secrets" from "the secret is stale". The two implementations
     live in separate distributions with no shared package, so nothing but this
-    test and its twin in ``src/gateway/tests/unit/plugins/test_principal_signer
+    test and its twin in ``apps/gateway/tests/unit/plugins/test_principal_signer
     .py`` stops one side from drifting and quietly making the comparison
     meaningless. Change these expected values only when both change together.
     """

@@ -71,12 +71,12 @@ engine via the EngineManager / the `/api/claude_code/ws` endpoint.
 
 The open-source community engine intentionally does **not** replicate some
 corp-only chat behaviors. Each was verified against the in-repo frontend
-(`src/frontend/`) as **not load-bearing**:
+(`apps/frontend/`) as **not load-bearing**:
 
 | Dropped corp behavior | Why it's safe to drop |
 |---|---|
 | `final`→synthetic-`delta` re-emission (corp `engines/claude_code/chat.py`) | The frontend (`AICodingParser._finalizeInFlightMessages`) renders the assistant bubble directly from the `final` frame's `message.content` text blocks. The load-bearing contract is "the `final` frame carries `message.content`", which the community transport preserves — locked by `test_chat_stream_final_frame_preserves_message_content`. |
-| `/new` · `/reset` slash-command interception → `sessions.reset` + synthetic `agent/final` | The frontend never sends these as chat messages; session clear is a REST call (`DELETE /api/sessions/{id}/messages`). Zero references to `/new` / `/reset` / `agent/final` in `src/frontend/`. |
+| `/new` · `/reset` slash-command interception → `sessions.reset` + synthetic `agent/final` | The frontend never sends these as chat messages; session clear is a REST call (`DELETE /api/sessions/{id}/messages`). Zero references to `/new` / `/reset` / `agent/final` in `apps/frontend/`. |
 
 ## Known non-alignments (documented, not implemented this round)
 

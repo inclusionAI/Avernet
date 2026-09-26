@@ -46,14 +46,14 @@ LOG_DIR="${DEP_DIR}/logs"
 RUNTIME_DATA_DIR="${DEP_DIR}/data"
 
 # Monorepo 目录结构
-BACKEND_DIR="${PROJECT_ROOT}/src/backend"
-FRONTEND_DIR="${PROJECT_ROOT}/src/frontend"
+BACKEND_DIR="${PROJECT_ROOT}/apps/backend"
+FRONTEND_DIR="${PROJECT_ROOT}/apps/frontend"
 ENGINE_DIR="${PROJECT_ROOT}/src/engine"
 BCS_DIR="${PROJECT_ROOT}/src/bcs"
 BCSFUSE_DIR="${PROJECT_ROOT}/src/bcsfuse"
 RELAY_DIR="${RELAY_DIR:-${PROJECT_ROOT}/../teamclaw-aicoding-relay}"
-BAAS_DIR="${PROJECT_ROOT}/src/baas"
-GATEWAY_DIR="${PROJECT_ROOT}/src/gateway"
+BAAS_DIR="${PROJECT_ROOT}/apps/baas"
+GATEWAY_DIR="${PROJECT_ROOT}/apps/gateway"
 
 # 默认版本
 DEFAULT_OPENCLAW_VERSION=">=2026.3.28"
@@ -177,7 +177,7 @@ source "${SCRIPT_DIR}/modules/frontend.sh"
 # before anything is built.
 if ! frontend_select_variant; then
     log_warn "FRONTEND_VARIANT='${FRONTEND_VARIANT:-}' cannot be selected; using the legacy frontend mapping for read-only/lifecycle commands. start/setup will fail fast with the same error."
-    FRONTEND_DIR="${PROJECT_ROOT}/src/frontend"
+    FRONTEND_DIR="${PROJECT_ROOT}/apps/frontend"
     FRONTEND_DEFAULT_SCRIPT="devs:local:oss"
     FRONTEND_ROOT_ID="root-master"
 fi

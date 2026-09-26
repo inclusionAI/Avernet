@@ -2,9 +2,9 @@
 
 **状态：** 参考记录 —— 决定已记录（非 SDD spec，无 corp 实现承诺）
 **日期：** 2026-07-25
-**组件：** `src/gateway`（teamclaw 授权服务器；对外域名 `https://teamclawgw-pre.alipay.com`）
+**组件：** `apps/gateway`（teamclaw 授权服务器；对外域名 `https://teamclawgw-pre.alipay.com`）
 **范围：** 第三方服务器代表我方终端用户的端到端系统流程 —— corp 与 community —— 外加令牌/授权模型与"已定 vs 待议"议程。
-**关联：** [`README.zh-CN.md`](./README.zh-CN.md)（方案），`src/gateway/docs/2026-07-21-auth-design.md`（§7.1 签名 Principal、§8 claims、§15 委托签发）。
+**关联：** [`README.zh-CN.md`](./README.zh-CN.md)（方案），`apps/gateway/docs/2026-07-21-auth-design.md`（§7.1 签名 Principal、§8 claims、§15 委托签发）。
 
 > English version: [`SYSTEM-FLOW.md`](./SYSTEM-FLOW.md)。
 

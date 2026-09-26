@@ -356,7 +356,7 @@ def test_form_coop_group_without_provider_omits_caller_bot_token():
 def test_form_coop_group_opening_message_params_is_object():
     """state_machine 群带 task_id 时,opening_message.params 必须是 JSON object,不能字符串化。
 
-    BCS 契约(ocb-public/src/bcs/docs/custom-collaboration-opening-message-integration-guide.md §4):
+    BCS 契约(submodules/avernet/apps/bcs/docs/custom-collaboration-opening-message-integration-guide.md §4):
     params 是传给业务组件的 JSON object。字符串化会被真实 BCS 的 untagged enum ``OpeningMessage``
     422("data did not match any variant of untagged enum OpeningMessage");singlebox double 不校验
     opening_message,故此断言守住真实 BCS 契约、防 params 被错字符串化回退。

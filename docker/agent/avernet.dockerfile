@@ -152,14 +152,14 @@ RUN cd /tmp/openclaw-channel-bcn \
 # Layer caching: manifests + scripts/configs → `npm ci` (heavy) → rest of
 # source → build → prune. Source edits do not invalidate the npm ci layer.
 # node_modules / dist / *.tgz are excluded by the repo .dockerignore.
-COPY src/evolverun/taskguard/package.json \
-     src/evolverun/taskguard/package-lock.json \
-     src/evolverun/taskguard/tsconfig.json \
+COPY apps/evolverun/taskguard/package.json \
+     apps/evolverun/taskguard/package-lock.json \
+     apps/evolverun/taskguard/tsconfig.json \
      /tmp/taskguard/
 # scripts/ ships with the manifest stage so `npm run build` (scripts/build/*.mjs)
 # can be invoked without an extra source layer. configs/ arrives with the
 # full source COPY below.
-COPY src/evolverun/taskguard/scripts /tmp/taskguard/scripts
+COPY apps/evolverun/taskguard/scripts /tmp/taskguard/scripts
 RUN cd /tmp/taskguard \
     && npm ci --no-audit --no-fund --ignore-scripts \
     && npm cache clean --force
@@ -167,7 +167,7 @@ RUN cd /tmp/taskguard \
 # Layer the rest of the source on top. The COPY above does not overwrite
 # node_modules (it is .dockerignore'd from the build context). configs/,
 # skills/, packs/, src/ all land here, ready for `npm run build`.
-COPY src/evolverun/taskguard/ /tmp/taskguard/
+COPY apps/evolverun/taskguard/ /tmp/taskguard/
 
 # Build (tshy compile + facade skills + runtime asset bundling), then prune
 # devDeps so node_modules keeps ONLY the transitive closure reachable from
@@ -188,11 +188,11 @@ RUN cd /tmp/taskguard \
     && rm -rf /tmp/taskguard
 
 # Overlay the source-of-truth config so the docker image always ships the
-# latest baseUrl / apiKey / etc. from src/evolverun/taskguard/configs/.
+# latest baseUrl / apiKey / etc. from apps/evolverun/taskguard/configs/.
 # The cp -R configs/ above mirrors the source tree, but pinning a single
 # file guarantees application.yaml always reflects repo HEAD even if a
 # future build step mutates configs/ in /tmp.
-COPY src/evolverun/taskguard/configs/application.yaml \
+COPY apps/evolverun/taskguard/configs/application.yaml \
      /opt/openclawExt/taskguard/configs/application.yaml
 
 # Install supervisor in an isolated venv (avoids conflicts with engine site-packages).

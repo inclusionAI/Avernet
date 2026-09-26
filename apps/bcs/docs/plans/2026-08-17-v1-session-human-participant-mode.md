@@ -69,14 +69,14 @@
 ### Task 4: Verify the contract boundary
 
 **Files:**
-- Regenerate: `src/gateway/configs/schemas/bcn.openapi.json`
+- Regenerate: `apps/gateway/configs/schemas/bcn.openapi.json`
 - Verify all modified files above.
 
 **Step 1:** Run the OpenAPI contract validator and focused Python contract tests.
 
 **Step 2:** Generate the Gateway OpenAPI snapshot twice with
 `src/bcs/scripts/dump_openapi.py`, compare the temporary outputs, and replace
-`src/gateway/configs/schemas/bcn.openapi.json` with the deterministic result.
+`apps/gateway/configs/schemas/bcn.openapi.json` with the deterministic result.
 
 **Step 3:** Run:
 

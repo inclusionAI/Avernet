@@ -1,7 +1,7 @@
 # Protocol Contract Tests (Rule 25)
 
 Every Plugin Protocol under `agentclaw.plugins` has a conformance test
-suite under `src/backend/tests/contracts/test_<plugin>.py`. The arch
+suite under `apps/backend/tests/contracts/test_<plugin>.py`. The arch
 test `tests/architecture/test_protocol_contracts.py` enforces the
 mapping with a shrinking `EXEMPT_PROTOCOLS` set.
 

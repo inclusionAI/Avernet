@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# src/gateway/docker-test/test-gateway.sh — build the gateway image and run a full prod-mode test.
+# apps/gateway/docker-test/test-gateway.sh — build the gateway image and run a full prod-mode test.
 #
 # Flow:
 #   1. Build gateway:local from docker/services/gateway.dockerfile
@@ -8,11 +8,11 @@
 #   3. Wait for the gateway /health endpoint and report success / failure
 #
 # Usage:
-#   src/gateway/docker-test/test-gateway.sh            # build + up + health check (detached)
-#   src/gateway/docker-test/test-gateway.sh up         # same as above
-#   src/gateway/docker-test/test-gateway.sh build      # only rebuild gateway:local
-#   src/gateway/docker-test/test-gateway.sh down       # tear down the test stack
-#   src/gateway/docker-test/test-gateway.sh status     # show compose ps (and curl /health)
+#   apps/gateway/docker-test/test-gateway.sh            # build + up + health check (detached)
+#   apps/gateway/docker-test/test-gateway.sh up         # same as above
+#   apps/gateway/docker-test/test-gateway.sh build      # only rebuild gateway:local
+#   apps/gateway/docker-test/test-gateway.sh down       # tear down the test stack
+#   apps/gateway/docker-test/test-gateway.sh status     # show compose ps (and curl /health)
 #
 # The runtime stack is driven by docker-compose.gateway-test.yml (single source
 # of truth for env wiring). Every value can be overridden via env:

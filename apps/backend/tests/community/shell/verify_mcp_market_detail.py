@@ -3,7 +3,7 @@
 E2E 验证 /api/mcp/market/detail 的 live fetch 降级逻辑。
 
 用法:
-    cd src/backend
+    cd apps/backend
     uv run python tests/shell/verify_mcp_market_detail.py --server-code mcp.xxx
 
 如果需要验证 live fetch（带 IAM_TOKEN cookie）:

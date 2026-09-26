@@ -159,7 +159,7 @@ user_config:
   #
   # `backend` selects the store and drives engine setup (pooling, pragmas):
   # "mysql" covers OceanBase, which speaks the MySQL wire protocol in MySQL mode
-  # — the same target `src/gateway/migrations/mysql/` is written against. "sqlite"
+  # — the same target `apps/gateway/migrations/mysql/` is written against. "sqlite"
   # and "postgresql" are also accepted. `url` must name the same store; the
   # provider rejects a mismatch at boot rather than falling back silently.
   #

@@ -3,8 +3,8 @@
 An outbound port (``core/ports``, see its README) is the narrow contract a
 caller states for something it calls out to. Python would let any object
 satisfy one by shape, and this backend runs no static type checker
-(mypy/pyright are configured for ``src/gateway``, ``src/baas`` and
-``src/proxy``, not here), so a structurally-satisfied port is verified by
+(mypy/pyright are configured for ``apps/gateway``, ``apps/baas`` and
+``apps/proxy``, not here), so a structurally-satisfied port is verified by
 nothing: not at import, not at construction, not in CI. The relationship is
 then discoverable only by walking the DI graph — field type, to the provider
 that fills it, to the ``binder.bind`` that resolves it — which is four hops to

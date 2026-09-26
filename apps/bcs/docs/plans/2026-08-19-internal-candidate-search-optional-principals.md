@@ -37,8 +37,8 @@ authorization, so no Rust production change is required.
 ### Task 3: Regenerate and lock the Gateway snapshot
 
 **Files:**
-- Modify: `src/gateway/configs/schemas/bcn.internal.openapi.json`
-- Modify: `src/gateway/tests/unit/scripts/test_gate_and_publish.py`
+- Modify: `apps/gateway/configs/schemas/bcn.internal.openapi.json`
+- Modify: `apps/gateway/tests/unit/scripts/test_gate_and_publish.py`
 
 1. Add a snapshot assertion for all three optional Principal inputs.
 2. Regenerate the deterministic internal JSON from `internal.yaml`.

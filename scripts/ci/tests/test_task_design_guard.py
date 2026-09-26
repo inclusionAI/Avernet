@@ -17,7 +17,7 @@ sys.modules[SPEC.name] = GUARD
 SPEC.loader.exec_module(GUARD)
 
 QUALIFIED_CLASS = "agentclaw.community.core.task.task_runner.task_runner.TaskRunner"
-SOURCE_PATH = "src/backend/src/agentclaw/community/core/task/task_runner/task_runner.py"
+SOURCE_PATH = "apps/backend/src/agentclaw/community/core/task/task_runner/task_runner.py"
 MANIFEST_PATH = "scripts/ci/task_design_guard.json"
 SUBMITTERS_PATH = "docs/arch/task-design-guard-submitters.json"
 PROTECTED = GUARD.ProtectedClass(

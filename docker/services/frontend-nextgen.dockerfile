@@ -6,7 +6,7 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 # Build context is the repository root, as required by docker/build-image.sh.
-COPY src/frontend-nextgen/package.json src/frontend-nextgen/package-lock.json ./
+COPY apps/frontend-nextgen/package.json apps/frontend-nextgen/package-lock.json ./
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 RUN --mount=type=cache,id=frontend-nextgen-npm,target=/root/.npm,sharing=locked \
     npm ci \
@@ -20,7 +20,7 @@ RUN --mount=type=cache,id=frontend-nextgen-npm,target=/root/.npm,sharing=locked 
       --fetch-retry-maxtimeout=120000 \
       --fetch-timeout=300000
 
-COPY src/frontend-nextgen/ ./
+COPY apps/frontend-nextgen/ ./
 RUN npm run build
 
 ########## Runtime ##########
@@ -31,8 +31,8 @@ FROM nginx:1.27-alpine
 # distro's full-featured package.
 RUN apk add --no-cache iputils
 
-COPY src/frontend-nextgen/deploy/nginx/default.conf.template /etc/nginx/templates/default.conf.template
-COPY src/frontend-nextgen/deploy/docker-entrypoint.sh /docker-entrypoint.d/20-validate-teamclaw-env.sh
+COPY apps/frontend-nextgen/deploy/nginx/default.conf.template /etc/nginx/templates/default.conf.template
+COPY apps/frontend-nextgen/deploy/docker-entrypoint.sh /docker-entrypoint.d/20-validate-teamclaw-env.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 8080

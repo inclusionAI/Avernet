@@ -14,7 +14,7 @@
 
 **Files:**
 - Modify: `src/bcs/api-contracts/v1/openapi/groups.yaml`
-- Modify: `src/gateway/configs/schemas/bcn.openapi.json`
+- Modify: `apps/gateway/configs/schemas/bcn.openapi.json`
 - Modify: `src/bcs/tests/openapi/test_group_v1_contract.py`
 - Modify: `src/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/dto/group.rs`
 - Modify: `src/bcs/crates/adapters/http/bcs-api-http/tests/group_routes.rs`

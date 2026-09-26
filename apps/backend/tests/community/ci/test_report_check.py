@@ -17,7 +17,7 @@ def test_repository_relative_path_normalizes_absolute_source_root():
 
     actual = report_check.repository_relative_path(source_root, REPOSITORY_ROOT)
 
-    assert actual == Path("src/baas/packages/community/src")
+    assert actual == Path("apps/baas/packages/community/src")
 
 
 def test_find_repository_root_uses_nearest_worktree_marker(tmp_path):
@@ -32,7 +32,7 @@ def test_find_repository_root_uses_nearest_worktree_marker(tmp_path):
 def test_clean_git_environment_removes_hook_repository_overrides(monkeypatch):
     monkeypatch.setenv("GIT_DIR", "/main/.git/worktrees/feature")
     monkeypatch.setenv("GIT_WORK_TREE", "/main")
-    monkeypatch.setenv("GIT_PREFIX", "src/baas/")
+    monkeypatch.setenv("GIT_PREFIX", "apps/baas/")
     monkeypatch.setenv("GIT_INDEX_FILE", "/main/.git/index")
 
     actual = report_check.clean_git_environment()
@@ -52,7 +52,7 @@ def test_find_coverage_hits_prefers_source_relative_path_over_duplicate_basename
     }
 
     actual = report_check.find_coverage_hits(
-        "src/baas/packages/community/src/secbaas/plugins/sandbox/arca/local_proc/_workspace.py",
+        "apps/baas/packages/community/src/secbaas/plugins/sandbox/arca/local_proc/_workspace.py",
         coverage_hits,
         source_root,
         REPOSITORY_ROOT,

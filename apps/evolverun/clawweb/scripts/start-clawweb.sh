@@ -57,7 +57,7 @@ if [ -n "$machine_env" ]; then
   esac
 fi
 
-ocb_clawweb="$ocb_root/src/evolverun/clawweb"
+ocb_clawweb="$ocb_root/apps/evolverun/clawweb"
 [ -f "$ocb_clawweb/package.json" ] || { echo "OCB ClawWeb workspace not found: $ocb_clawweb" >&2; exit 1; }
 mkdir -p "$ocb_clawweb/.build"
 link_path="$ocb_clawweb/.build/avernet"

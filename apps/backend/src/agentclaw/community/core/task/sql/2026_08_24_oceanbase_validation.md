@@ -1,6 +1,6 @@
 # OceanBase Migration Validation Checklist — Task Graph Shared Persistence
 
-- **Spec:** `src/backend/specs/2026-08-24-task-graph-shared-persistence/spec.md`
+- **Spec:** `apps/backend/specs/2026-08-24-task-graph-shared-persistence/spec.md`
 - **Migration files:**
   - `2026_08_24_task_graph_shared_persistence.sql` — additive `task_info` graph metadata/version/lease columns, `task_callback` event-idempotency columns, `task_node`/`task_node_relation` natural-key uniqueness, recovery indexes, and the new `task_action_log` table.
   - `2026_08_24_task_action_log.sql` — standalone operator DDL for the append-only action log (identical table definition; bundled inside the combined migration as well).

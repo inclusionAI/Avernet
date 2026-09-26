@@ -12,14 +12,14 @@
 
 Implementation must follow @superpowers:test-driven-development. Before claiming completion, use @superpowers:verification-before-completion. Do not run `cargo fmt`; `src/bcs/CLAUDE.md` explicitly forbids global formatting.
 
-Reference design: `src/baas/docs/2026-08-19-baas-bcn-interaction-sse-design.md`.
+Reference design: `apps/baas/docs/2026-08-19-baas-bcn-interaction-sse-design.md`.
 
 ### Task 1: Replace passthrough with the BCN interaction envelope and exec mapping
 
 **Files:**
 
-- Modify: `src/baas/tests/unit/core/service/sse/test_default_converter.py:419`
-- Modify: `src/baas/src/secbaas/community/core/service/sse/_default_converter.py:1-168`
+- Modify: `apps/baas/tests/unit/core/service/sse/test_default_converter.py:419`
+- Modify: `apps/baas/src/secbaas/community/core/service/sse/_default_converter.py:1-168`
 
 **Step 1: Add a test helper that builds the real BaaS chunk shape**
 
@@ -128,7 +128,7 @@ These protect the existing resolved capability and the old Engine exec shape.
 
 **Step 2: Run the tests and verify the old passthrough fails**
 
-Run from `src/baas`:
+Run from `apps/baas`:
 
 ```bash
 uv run pytest tests/unit/core/service/sse/test_default_converter.py::TestInteractionBranch -q
@@ -460,7 +460,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/baas/src/secbaas/community/core/service/sse/_default_converter.py src/baas/tests/unit/core/service/sse/test_default_converter.py
+git add apps/baas/src/secbaas/community/core/service/sse/_default_converter.py apps/baas/tests/unit/core/service/sse/test_default_converter.py
 git commit -m "feat(baas): normalize exec interaction SSE events"
 ```
 
@@ -468,8 +468,8 @@ git commit -m "feat(baas): normalize exec interaction SSE events"
 
 **Files:**
 
-- Modify: `src/baas/tests/unit/core/service/sse/test_default_converter.py`
-- Modify: `src/baas/src/secbaas/community/core/service/sse/_default_converter.py`
+- Modify: `apps/baas/tests/unit/core/service/sse/test_default_converter.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/sse/_default_converter.py`
 
 **Step 1: Write failing ask_user mapping tests**
 
@@ -595,7 +595,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/baas/src/secbaas/community/core/service/sse/_default_converter.py src/baas/tests/unit/core/service/sse/test_default_converter.py
+git add apps/baas/src/secbaas/community/core/service/sse/_default_converter.py apps/baas/tests/unit/core/service/sse/test_default_converter.py
 git commit -m "feat(baas): map ask-user interaction questions"
 ```
 
@@ -603,8 +603,8 @@ git commit -m "feat(baas): map ask-user interaction questions"
 
 **Files:**
 
-- Modify: `src/baas/tests/unit/core/service/sse/test_default_converter.py`
-- Modify: `src/baas/src/secbaas/community/core/service/sse/_default_converter.py`
+- Modify: `apps/baas/tests/unit/core/service/sse/test_default_converter.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/sse/_default_converter.py`
 
 **Step 1: Write the failing captured-shape test**
 
@@ -719,7 +719,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/baas/src/secbaas/community/core/service/sse/_default_converter.py src/baas/tests/unit/core/service/sse/test_default_converter.py
+git add apps/baas/src/secbaas/community/core/service/sse/_default_converter.py apps/baas/tests/unit/core/service/sse/test_default_converter.py
 git commit -m "feat(baas): map mode-switch interaction events"
 ```
 
@@ -727,8 +727,8 @@ git commit -m "feat(baas): map mode-switch interaction events"
 
 **Files:**
 
-- Modify: `src/baas/tests/unit/core/service/sse/test_default_converter.py`
-- Modify if tests expose a gap: `src/baas/src/secbaas/community/core/service/sse/_default_converter.py`
+- Modify: `apps/baas/tests/unit/core/service/sse/test_default_converter.py`
+- Modify if tests expose a gap: `apps/baas/src/secbaas/community/core/service/sse/_default_converter.py`
 
 **Step 1: Add failure-isolation tests**
 
@@ -778,7 +778,7 @@ Ensure all interaction-specific failures are caught inside `_transform_interacti
 
 **Step 4: Run BaaS focused tests and lint**
 
-From `src/baas`:
+From `apps/baas`:
 
 ```bash
 uv run pytest tests/unit/core/service/sse/test_default_converter.py -q
@@ -790,7 +790,7 @@ Expected: both commands PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/baas/src/secbaas/community/core/service/sse/_default_converter.py src/baas/tests/unit/core/service/sse/test_default_converter.py
+git add apps/baas/src/secbaas/community/core/service/sse/_default_converter.py apps/baas/tests/unit/core/service/sse/test_default_converter.py
 git commit -m "test(baas): cover interaction SSE failure isolation"
 ```
 
@@ -901,7 +901,7 @@ Expected: hooks are installed for this worktree.
 
 **Step 2: Run the complete BaaS unit suite**
 
-From `src/baas`:
+From `apps/baas`:
 
 ```bash
 just test-ut

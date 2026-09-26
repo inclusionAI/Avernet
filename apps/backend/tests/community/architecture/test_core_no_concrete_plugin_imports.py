@@ -32,7 +32,7 @@ import pathlib
 import pytest
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
-_BACKEND_ROOT = _THIS_FILE.parents[3]                 # .../src/backend
+_BACKEND_ROOT = _THIS_FILE.parents[3]                 # .../apps/backend
 _AGENTCLAW_ROOT = _BACKEND_ROOT / "src" / "agentclaw"
 # B11: the core layer lives under BOTH community/ and corp/. Rule 14 (core must
 # not import concrete plugin impls) is universal, so scan both cores.

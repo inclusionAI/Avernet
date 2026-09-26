@@ -172,7 +172,7 @@ def parse_args() -> argparse.Namespace:
         default=repo_root / "scripts/ci/singlebox_coverage_modules.yaml",
     )
     parser.add_argument(
-        "--backend-root", type=Path, default=repo_root / "src/backend"
+        "--backend-root", type=Path, default=repo_root / "apps/backend"
     )
     return parser.parse_args()
 

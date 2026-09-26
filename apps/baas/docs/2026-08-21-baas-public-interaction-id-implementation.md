@@ -13,11 +13,11 @@
 ### Task 1: Define the deterministic public ID contract
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/api/bot_interaction/_models.py`
-- Modify: `src/baas/src/secbaas/community/api/bot_interaction/_protocols.py`
-- Modify: `src/baas/src/secbaas/community/api/bot_interaction/__init__.py`
-- Modify: `src/baas/src/secbaas/community/core/service/bot_interaction/_service.py`
-- Test: `src/baas/tests/unit/core/service/test_bot_interaction_service.py`
+- Modify: `apps/baas/src/secbaas/community/api/bot_interaction/_models.py`
+- Modify: `apps/baas/src/secbaas/community/api/bot_interaction/_protocols.py`
+- Modify: `apps/baas/src/secbaas/community/api/bot_interaction/__init__.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_interaction/_service.py`
+- Test: `apps/baas/tests/unit/core/service/test_bot_interaction_service.py`
 
 **Step 1: Write the failing test**
 
@@ -45,13 +45,13 @@ Run the command from Step 2 and expect PASS.
 ### Task 2: Persist and query the public ID
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/core/repository/bot_run_interaction/_record.py`
-- Modify: `src/baas/src/secbaas/community/core/repository/bot_run_interaction/_protocol.py`
-- Modify: `src/baas/src/secbaas/community/core/repository/bot_run_interaction/_orm_model.py`
-- Modify: `src/baas/src/secbaas/community/core/repository/bot_run_interaction/_orm_repository.py`
-- Modify: `src/baas/sqls/migrate_baas_bot_run_interaction.sql`
-- Create: `src/baas/sqls/migrate_baas_bot_run_interaction_public_id.sql`
-- Test: `src/baas/tests/unit/core/repository/bot_run_interaction/test_orm_repository.py`
+- Modify: `apps/baas/src/secbaas/community/core/repository/bot_run_interaction/_record.py`
+- Modify: `apps/baas/src/secbaas/community/core/repository/bot_run_interaction/_protocol.py`
+- Modify: `apps/baas/src/secbaas/community/core/repository/bot_run_interaction/_orm_model.py`
+- Modify: `apps/baas/src/secbaas/community/core/repository/bot_run_interaction/_orm_repository.py`
+- Modify: `apps/baas/sqls/migrate_baas_bot_run_interaction.sql`
+- Create: `apps/baas/sqls/migrate_baas_bot_run_interaction_public_id.sql`
+- Test: `apps/baas/tests/unit/core/repository/bot_run_interaction/test_orm_repository.py`
 
 **Step 1: Write the failing test**
 
@@ -78,12 +78,12 @@ Run the command from Step 2 and expect PASS.
 ### Task 3: Resolve only by the BaaS ID
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/core/service/bot_interaction/_service.py`
-- Modify: `src/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
-- Modify: `src/baas/src/secbaas/community/adapters/web/routers/open_api/message_router.py`
-- Test: `src/baas/tests/unit/core/service/test_bot_interaction_service.py`
-- Test: `src/baas/tests/unit/core/service/bcn/test_bcn_service.py`
-- Test: `src/baas/tests/unit/adapters/web/open_api/test_message_router.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_interaction/_service.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
+- Modify: `apps/baas/src/secbaas/community/adapters/web/routers/open_api/message_router.py`
+- Test: `apps/baas/tests/unit/core/service/test_bot_interaction_service.py`
+- Test: `apps/baas/tests/unit/core/service/bcn/test_bcn_service.py`
+- Test: `apps/baas/tests/unit/adapters/web/open_api/test_message_router.py`
 
 **Step 1: Write the failing test**
 
@@ -108,9 +108,9 @@ Run the focused test files and expect PASS.
 ### Task 4: Expose the BaaS ID on requested and resolved SSE events
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py`
-- Test: `src/baas/tests/unit/core/service/bot_run/test_async_chat_client_coverage.py`
-- Test: `src/baas/tests/unit/core/service/sse/test_default_converter.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bot_run/_async_chat_client.py`
+- Test: `apps/baas/tests/unit/core/service/bot_run/test_async_chat_client_coverage.py`
+- Test: `apps/baas/tests/unit/core/service/sse/test_default_converter.py`
 
 **Step 1: Write the failing test**
 
@@ -136,8 +136,8 @@ Run the focused test files and expect PASS.
 ### Task 5: Verify contracts and commit
 
 **Files:**
-- Modify: `src/baas/docs/2026-08-19-baas-bcn-interaction-sse-design.md`
-- Modify: `src/baas/docs/2026-08-20-bcn-interaction-resolve-design.md`
+- Modify: `apps/baas/docs/2026-08-19-baas-bcn-interaction-sse-design.md`
+- Modify: `apps/baas/docs/2026-08-20-bcn-interaction-resolve-design.md`
 - Verify: all files changed above
 
 **Step 1: Run focused interaction tests**

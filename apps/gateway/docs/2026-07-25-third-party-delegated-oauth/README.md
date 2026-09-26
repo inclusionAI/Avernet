@@ -2,9 +2,9 @@
 
 **Status:** Reference note — decision recorded (not an SDD spec)
 **Date:** 2026-07-25
-**Component:** `src/gateway` (the gateway hosts the auth surface; public host `https://teamclawgw-pre.alipay.com`)
+**Component:** `apps/gateway` (the gateway hosts the auth surface; public host `https://teamclawgw-pre.alipay.com`)
 **Scope:** How a third-party server acts **on behalf of one of our end users** without ever holding a first-party session token.
-**Related:** `src/gateway/docs/2026-07-21-auth-design.md` — this note concretizes that doc's **§15 "Mode C" (OAuth authorization-code, "Login with Avernet")**, which is earmarked but deferred.
+**Related:** `apps/gateway/docs/2026-07-21-auth-design.md` — this note concretizes that doc's **§15 "Mode C" (OAuth authorization-code, "Login with Avernet")**, which is earmarked but deferred.
 
 > 中文版见 [`README.zh-CN.md`](./README.zh-CN.md)。
 > **System flow** (corp + community sequence diagrams, consent model, review agenda): [`SYSTEM-FLOW.md`](./SYSTEM-FLOW.md).
@@ -22,7 +22,7 @@ Our OpenAPI surface (`/openapi/v1/*`, fronted by the gateway) is opened to third
 1. `Authorization: Bearer <api_key>` — validated by baas, yields the app plus its **tenant** (`APIKeyRecord.tenant`).
 2. `IAM_TOKEN` cookie — resolved through IAM/BUService to identify the **end user**.
 
-See the current implementation in `src/baas/src/secbaas/community/adapters/web/routers/open_api/dependencies.py` (`get_api_key_from_header`, `get_iam_token_from_cookie`, `get_bot_chat_context`).
+See the current implementation in `apps/baas/src/secbaas/community/adapters/web/routers/open_api/dependencies.py` (`get_api_key_from_header`, `get_iam_token_from_cookie`, `get_bot_chat_context`).
 
 **Why this is a smell — not just "one token too many":**
 
@@ -204,7 +204,7 @@ Two more alignment points with PR #420:
 
 ## 10. Downstream credential — act *within the client's tenant, attributed to* the user
 
-When the request reaches the runtime and must call BaaS/MCP, it acts **within the client's tenant, attributed to Alice** (per §8.2 — never with Alice's own tenant or personal permissions). Reuse the backend seam `CallerIdentityService.exchange_caller_identity()` (`src/backend/src/agentclaw/community/core/caller_identity/service.py:328`). The recorded consent from Step 2 **is** the pre-authorization; the minted caller credential is installed into the runtime via `runtime_updater.update_caller_identity(...)` and is **never returned to the partner**. The minted credential must stay anchored to the client's `org`/`tnt` — it must **not** silently reintroduce the user's tenant or permissions.
+When the request reaches the runtime and must call BaaS/MCP, it acts **within the client's tenant, attributed to Alice** (per §8.2 — never with Alice's own tenant or personal permissions). Reuse the backend seam `CallerIdentityService.exchange_caller_identity()` (`apps/backend/src/agentclaw/community/core/caller_identity/service.py:328`). The recorded consent from Step 2 **is** the pre-authorization; the minted caller credential is installed into the runtime via `runtime_updater.update_caller_identity(...)` and is **never returned to the partner**. The minted credential must stay anchored to the client's `org`/`tnt` — it must **not** silently reintroduce the user's tenant or permissions.
 
 One signature change is required: `exchange_caller_identity` currently takes `iam_token: str`. In the OAuth path we do not hold Alice's live `IAM_TOKEN`, so `CallerTokenProviderProtocol` needs an overload that mints from `(service_credential, subject_id, tenant, grant_ref)` instead of a forwarded user token. Whether BUService can issue such a delegated credential without the user's live token is the key external dependency — see §12.
 

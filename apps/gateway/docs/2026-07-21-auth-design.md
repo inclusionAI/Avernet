@@ -2,7 +2,7 @@
 
 **状态：** 草案 / 待评审
 **日期：** 2026-07-21
-**组件：** `src/gateway`（`gateway.community`，Python / FastAPI）
+**组件：** `apps/gateway`（`gateway.community`，Python / FastAPI）
 **范围：** 网关的认证（AuthN）与授权（AuthZ），本轮聚焦**第三方开发者**接入。
 **关联约束：** 仓库架构宪法 `docs/arch/arch.rules.md`（Rule 1 / 3 / 7 / 14 / 19 / 25）。
 
@@ -36,7 +36,7 @@
 
 ## 2. 现状盘点（本设计长在已有代码之上）
 
-### 2.1 `src/gateway` 组件既有约定（必须对齐）
+### 2.1 `apps/gateway` 组件既有约定（必须对齐）
 
 | 约定 | 位置 | 说明 |
 | --- | --- | --- |

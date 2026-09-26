@@ -1,6 +1,6 @@
 # ClawWeb test CI
 
-From `src/evolverun/clawweb`, use Node 20.19.0:
+From `apps/evolverun/clawweb`, use Node 20.19.0:
 
 ```sh
 npm ci --no-audit --no-fund
@@ -31,7 +31,7 @@ must be tracked separately; this change does not repair or skip them.
 
 ## Local entry
 
-From this repository's `src/evolverun/clawweb` directory:
+From this repository's `apps/evolverun/clawweb` directory:
 
 ```sh
 ./scripts/test-clawweb.sh

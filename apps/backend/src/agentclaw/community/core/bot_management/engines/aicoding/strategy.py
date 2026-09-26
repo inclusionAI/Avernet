@@ -716,7 +716,7 @@ class AicodingProvisioningStrategy(AicodingRestartBackupMixin, AicodingHostedWor
         """Build the relay-owned local chat session key for coding engines.
 
         Contract:
-        ``src/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
+        ``apps/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
         ``claude_code`` keeps the normalCC legacy form while ``aicoding`` uses
         the service-bot form parsed by teamclaw-aicoding-relay.
         """

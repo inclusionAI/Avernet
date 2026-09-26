@@ -126,12 +126,12 @@ This is called during `get_container()` before any providers are resolved.
 ### Directory Layout
 
 ```text
-src/gateway/
+apps/gateway/
 ├── configs/                    # Single application.yaml plus schema artifacts
 ├── docs/                       # OpenAPI docs
 ├── scripts/                    # CI and utility scripts
 ├── specs/                      # Architecture specifications
-├── src/gateway/community/
+├── apps/gateway/community/
 │   ├── adapters/web/           # FastAPI (HTTP delivery)
 │   ├── api/                    # Transport-agnostic service protocols
 │   ├── bootstrap/              # Composition root (DI wiring)
@@ -154,7 +154,7 @@ src/gateway/
 ## Quick Start
 
 ```bash
-cd src/gateway
+cd apps/gateway
 uv sync
 
 # Run in bare mode (no enterprise dependencies)

@@ -59,7 +59,7 @@ Tasks use only the stages they need. Bot diagnosis is read-only, while Bench dia
 From the Avernet repository root:
 
 ```bash
-cd src/evolverun/clawweb
+cd apps/evolverun/clawweb
 npm ci
 cd ../../..
 ```
@@ -67,7 +67,7 @@ cd ../../..
 ### Start
 
 ```bash
-bash src/evolverun/clawweb/scripts/start-clawweb-open.sh
+bash apps/evolverun/clawweb/scripts/start-clawweb-open.sh
 ```
 
 ![Start AgentEvolve from the command line](images/agent-evolve/agent-evolve-cli-start.png)
@@ -84,16 +84,16 @@ Explicit examples:
 
 ```bash
 # Use ~/.openclaw directly
-bash src/evolverun/clawweb/scripts/start-clawweb-open.sh \
+bash apps/evolverun/clawweb/scripts/start-clawweb-open.sh \
   --bot-source openclaw
 
 # Reuse an Avernet Singlebox Bot database
-bash src/evolverun/clawweb/scripts/start-clawweb-open.sh \
+bash apps/evolverun/clawweb/scripts/start-clawweb-open.sh \
   --bot-source singlebox \
   --user-id mock-user
 
 # Select a model and port
-bash src/evolverun/clawweb/scripts/start-clawweb-open.sh \
+bash apps/evolverun/clawweb/scripts/start-clawweb-open.sh \
   --bot-source openclaw \
   --model provider/model \
   --port 5173
@@ -229,15 +229,15 @@ Model choices come from the AgentEvolve module configuration, and the open-sourc
 
 ## Development and safety boundaries
 
-The public implementation is under `src/evolverun/clawweb`; public runtime Skills are under `src/evolverun/clawweb-skills/clawevolve-skills`.
+The public implementation is under `apps/evolverun/clawweb`; public runtime Skills are under `apps/evolverun/clawweb-skills/clawevolve-skills`.
 
 Public functionality must not depend on private services, endpoints, or credentials. Environment-specific values belong in arguments, configuration, or environment variables. Runtime data must not be written into the source tree. Workspace changes, Pack application, and cleanup must remain path-bounded and traceable.
 
 Useful checks:
 
 ```bash
-bash src/evolverun/clawweb-skills/clawevolve-skills/scripts/verify_public_skills.sh
-cd src/evolverun/clawweb
+bash apps/evolverun/clawweb-skills/clawevolve-skills/scripts/verify_public_skills.sh
+cd apps/evolverun/clawweb
 npm run check
 npm run build
 npm test

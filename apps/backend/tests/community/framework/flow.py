@@ -1,4 +1,4 @@
-# src/backend/tests/community/framework/flow.py
+# apps/backend/tests/community/framework/flow.py
 """Declarative business-flow model (Plan B).
 
 A FlowCase is data: an ordered list of FlowStep. The FlowRunner owns

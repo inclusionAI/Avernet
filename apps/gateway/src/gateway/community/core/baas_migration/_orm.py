@@ -17,7 +17,7 @@ done here on purpose and with a bounded lifetime — this endpoint exists to mov
 a finite population of secbaas keys once, and routing a one-shot backfill
 through a new service-to-service API would outlive the thing it serves. The
 definitions below must therefore track
-``src/backend/src/agentclaw/community/core/bot_app_grant/models.py`` column for
+``apps/backend/src/agentclaw/community/core/bot_app_grant/models.py`` column for
 column; drift between them is the failure this comment exists to prevent.
 
 Two things the backend's own model does that this mirror deliberately does not:

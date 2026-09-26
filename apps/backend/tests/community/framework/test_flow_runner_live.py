@@ -1,4 +1,4 @@
-# src/backend/tests/framework/test_flow_runner_live.py
+# apps/backend/tests/framework/test_flow_runner_live.py
 """run_flow_live self-tests: same chaining contract as run_flow + FsAssert.
 
 httpx.MockTransport stands in for a live backend so we test the executor's

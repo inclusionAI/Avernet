@@ -97,7 +97,7 @@
 ## 相关既有契约（本设计的先例与依赖）
 
 - `docs/arch/service-skills-layout-wire-contract.md` — 「引擎无关声明 + 引擎拥有物理映射」先例
-- `src/backend/src/agentclaw/community/kernel/bot_config/artifact.py` — teclaw 的 `BotConfigArtifact` 契约（本设计的编译目标之一；**除 `cli_tools` 外不改**）
-- `src/backend/src/agentclaw/community/core/bot_startup_script/README.md` — #935 startup script 的设计与安全论证（本设计全盘继承）
-- `src/backend/src/agentclaw/community/core/skills_pool/ports.py` — 意图层原子操作 Protocol 的先例
+- `apps/backend/src/agentclaw/community/kernel/bot_config/artifact.py` — teclaw 的 `BotConfigArtifact` 契约（本设计的编译目标之一；**除 `cli_tools` 外不改**）
+- `apps/backend/src/agentclaw/community/core/bot_startup_script/README.md` — #935 startup script 的设计与安全论证（本设计全盘继承）
+- `apps/backend/src/agentclaw/community/core/skills_pool/ports.py` — 意图层原子操作 Protocol 的先例
 - `src/engine/src/engine/community/core/skills/layout_planner.py` — 引擎能力声明 + fail-closed 的先例

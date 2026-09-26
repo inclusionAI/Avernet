@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024, Serde/serde_json, Tokio/Cargo tests, Python 3.12, Pydantic v2, dataclasses, pytest, Ruff.
 
-**Spec:** `src/baas/docs/2026-08-20-bcn-answer-header-design.md`
+**Spec:** `apps/baas/docs/2026-08-20-bcn-answer-header-design.md`
 
 ## Global Constraints
 
@@ -231,10 +231,10 @@ Only add `src/lib.rs` when Step 2 required a production change.
 ### Task 3: Require and preserve answer header at the BaaS boundary
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py`
-- Modify: `src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py`
-- Modify: `src/baas/src/secbaas/community/api/bcn/_models.py`
-- Test: `src/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
+- Modify: `apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py`
+- Modify: `apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py`
+- Modify: `apps/baas/src/secbaas/community/api/bcn/_models.py`
+- Test: `apps/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
 
 **Interfaces:**
 - Consumes: BCS Provider resolve answer `{header, question, values}`.
@@ -271,7 +271,7 @@ Extend invalid-answer cases with:
 
 - [ ] **Step 2: Run BaaS adapter tests and verify RED**
 
-Run from `src/baas`:
+Run from `apps/baas`:
 
 ```bash
 .venv/bin/pytest tests/unit/adapters/web/open_api/test_bcn_router.py -q
@@ -322,17 +322,17 @@ Expected: all tests pass.
 - [ ] **Step 5: Commit the BaaS boundary contract**
 
 ```bash
-git add src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink \
-  src/baas/src/secbaas/community/api/bcn/_models.py \
-  src/baas/tests/unit/adapters/web/open_api/test_bcn_router.py
+git add apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink \
+  apps/baas/src/secbaas/community/api/bcn/_models.py \
+  apps/baas/tests/unit/adapters/web/open_api/test_bcn_router.py
 git commit -m "feat(baas): require ask-user answer headers"
 ```
 
 ### Task 4: Normalize BaaS Engine answers from header
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
-- Test: `src/baas/tests/unit/core/service/bcn/test_bcn_service.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
+- Test: `apps/baas/tests/unit/core/service/bcn/test_bcn_service.py`
 
 **Interfaces:**
 - Consumes: strict `BcnInteractionAnswer.header/question/values` from Task 3.
@@ -412,18 +412,18 @@ header-based normalized values exactly.
 - [ ] **Step 5: Commit the BaaS normalization**
 
 ```bash
-git add src/baas/src/secbaas/community/core/service/bcn/_bcn_service.py \
-  src/baas/tests/unit/core/service/bcn/test_bcn_service.py
+git add apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py \
+  apps/baas/tests/unit/core/service/bcn/test_bcn_service.py
 git commit -m "feat(baas): normalize ask-user answers by header"
 ```
 
 ### Task 5: Enforce BaaS requested headers and independent question identity
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/core/service/sse/_default_converter.py`
-- Test: `src/baas/tests/unit/core/service/sse/test_default_converter.py`
-- Modify: `src/baas/docs/2026-08-20-bcn-answer-header-design.md`
-- Modify: `src/baas/docs/2026-08-20-bcn-answer-header-implementation.md`
+- Modify: `apps/baas/src/secbaas/community/core/service/sse/_default_converter.py`
+- Test: `apps/baas/tests/unit/core/service/sse/test_default_converter.py`
+- Modify: `apps/baas/docs/2026-08-20-bcn-answer-header-design.md`
+- Modify: `apps/baas/docs/2026-08-20-bcn-answer-header-implementation.md`
 
 **Interfaces:**
 - Consumes: Engine ask-user `questions[]` with required BaaS `header` and
@@ -447,7 +447,7 @@ content-free duplicate warning; never replace a previously converted question.
 - [ ] **Step 3: Run the complete converter regression and static checks**
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/pytest tests/unit/core/service/sse/test_default_converter.py -q
 .venv/bin/ruff check \
   src/secbaas/community/core/service/sse/_default_converter.py \
@@ -464,11 +464,11 @@ Expected: all commands exit zero.
 **Files:**
 - Verify: `src/bcs/crates/services/bcs-interaction/src/management.rs`
 - Verify: `src/bcs/crates/adapters/http/bcs-provider-http/`
-- Verify: `src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/`
-- Verify: `src/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
-- Verify: `src/baas/src/secbaas/community/core/service/sse/_default_converter.py`
-- Verify: `src/baas/docs/2026-08-20-bcn-answer-header-design.md`
-- Verify: `src/baas/docs/2026-08-20-bcn-answer-header-implementation.md`
+- Verify: `apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/`
+- Verify: `apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
+- Verify: `apps/baas/src/secbaas/community/core/service/sse/_default_converter.py`
+- Verify: `apps/baas/docs/2026-08-20-bcn-answer-header-design.md`
+- Verify: `apps/baas/docs/2026-08-20-bcn-answer-header-implementation.md`
 
 **Interfaces:**
 - Consumes: all Task 1-5 deliverables.
@@ -488,7 +488,7 @@ Expected: all tests pass.
 - [ ] **Step 2: Run complete affected BaaS tests**
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/pytest \
   tests/unit/adapters/web/open_api/test_bcn_router.py \
   tests/unit/core/service/bcn/test_bcn_service.py \
@@ -501,7 +501,7 @@ Expected: all tests pass.
 - [ ] **Step 3: Run changed-file static checks**
 
 ```bash
-cd src/baas
+cd apps/baas
 .venv/bin/ruff check \
   src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py \
   src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py \
@@ -526,8 +526,8 @@ Expected: both commands exit zero.
 rg -n 'questionId.*header|header.*questionId|fallback' \
   src/bcs/crates/services/bcs-interaction/src/management.rs \
   src/bcs/docs/bcs-provider-2.0-sse-protocol.md \
-  src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink \
-  src/baas/src/secbaas/community/core/service/bcn/_bcn_service.py
+  apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink \
+  apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py
 git diff --check
 git status --short
 ```
@@ -541,8 +541,8 @@ If verification exposed wording drift, update only the two answer-header docs
 and the BCS Provider protocol, then commit:
 
 ```bash
-git add src/baas/docs/2026-08-20-bcn-answer-header-design.md \
-  src/baas/docs/2026-08-20-bcn-answer-header-implementation.md \
+git add apps/baas/docs/2026-08-20-bcn-answer-header-design.md \
+  apps/baas/docs/2026-08-20-bcn-answer-header-implementation.md \
   src/bcs/docs/bcs-provider-2.0-sse-protocol.md
 git commit -m "docs(baas): align answer header contract"
 ```

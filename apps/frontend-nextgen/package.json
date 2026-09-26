@@ -7,7 +7,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/inclusionAI/Avernet.git",
-    "directory": "src/frontend-nextgen"
+    "directory": "apps/frontend-nextgen"
   },
   "scripts": {
     "dev": "max dev",

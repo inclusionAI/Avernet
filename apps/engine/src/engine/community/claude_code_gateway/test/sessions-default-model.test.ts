@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resolveDefaultSessionModel } from '../src/gateway/handlers/sessions.js';
+import { resolveDefaultSessionModel } from '../apps/gateway/handlers/sessions.js';
 
 // resolveDefaultSessionModel priority chain:
 //   RELAY_DEFAULT_MODEL (env) > settings.json env.ANTHROPIC_MODEL > 'claude-sonnet-4-5'

@@ -143,7 +143,7 @@ Another risk is cross-target leakage. Delivery tests use two participants with
 different tags and verify that each Provider request contains only the target
 participant's list.
 
-No frontend configuration UI, transport type, or other `src/frontend/**`
+No frontend configuration UI, transport type, or other `apps/frontend/**`
 change is included. The BCS OpenAPI and protocol definitions remain the
 authoritative backend contract; frontend consumers can adopt the field in a
 separate change when needed.

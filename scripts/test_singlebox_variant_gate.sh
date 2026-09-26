@@ -103,7 +103,7 @@ grep -q "serves the legacy BCS panel" <<<"$out" ||
     fail "bcs_frontend_start refusal must explain the legacy constraint; got: ${out}"
 
 # 5. gateway_stop must never kill a foreign listener on its port. It once
-#    delegated to app.sh stop first, and src/gateway/scripts/app.sh do_stop —
+#    delegated to app.sh stop first, and apps/gateway/scripts/app.sh do_stop —
 #    when tmp/app.port is absent (the steady state after any clean stop, since
 #    do_stop itself removes it) — resolves whatever PID holds the app port
 #    and kills it blindly (kill, 1s wait, kill -9) with no ownership check.
@@ -116,7 +116,7 @@ if command -v python3 >/dev/null 2>&1; then
     mkdir -p "${gw_dir}/scripts" "${TEMP}/unrelated-cwd"
     cat > "${gw_dir}/scripts/app.sh" <<'EOF'
 #!/usr/bin/env bash
-# Mimics src/gateway/scripts/app.sh do_stop's blind port kill (no ownership
+# Mimics apps/gateway/scripts/app.sh do_stop's blind port kill (no ownership
 # check): the port holder's PID is resolved and killed unconditionally.
 PORT_PID="$(lsof -t -nP -iTCP:"${APP_PORT:-${GATEWAY_PORT:-8889}}" -sTCP:LISTEN 2>/dev/null | head -1)"
 [ -n "$PORT_PID" ] || exit 0

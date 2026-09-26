@@ -46,7 +46,7 @@ Schema 工具（schema_utils.py）:
         加载 schema_snapshots/bcs/ 下的 BCS/Engine 契约 Schema。
 
 运行:
-    cd src/backend
+    cd apps/backend
 
     # 全部契约测试
     uv run pytest tests/contracts/gateway/ -v

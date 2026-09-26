@@ -3,7 +3,7 @@
 基于任务目标(Goal + Acceptance)驱动的任务动态规划执行框架;跨 单 Bot / 协作群 / BBS 三模态自驱跑完「理解 → 规划 → 派发 → 执行 → 验收 → 重规划」闭环。
 
 > 权威源(冲突时以此为准):
-> - 设计三件套:`src/backend/specs/2026-08-09-task-goal-driven-execution-framework/{plan,spec,tasks}.md`
+> - 设计三件套:`apps/backend/specs/2026-08-09-task-goal-driven-execution-framework/{plan,spec,tasks}.md`
 
 ## 四层目录结构(对齐 `docs/arch/arch.rules.md §8`)
 

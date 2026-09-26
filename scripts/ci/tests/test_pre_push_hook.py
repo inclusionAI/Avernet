@@ -343,7 +343,7 @@ class PrePushHookTest(unittest.TestCase):
                 publisher,
                 developer,
                 target_branch="release",
-                target_path="src/baas/target.txt",
+                target_path="apps/baas/target.txt",
             )
             _git(
                 developer,
@@ -357,7 +357,7 @@ class PrePushHookTest(unittest.TestCase):
 
             self.assertIn("merge target: origin/release", result.stdout)
             self.assertIn("src/bcs/feature.txt", result.stdout)
-            self.assertNotIn("src/baas/target.txt", result.stdout)
+            self.assertNotIn("apps/baas/target.txt", result.stdout)
 
     def test_environment_merge_target_overrides_git_config(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -511,11 +511,11 @@ class PrePushHookTest(unittest.TestCase):
             "AVERNET_PRE_PUSH_MERGE_TARGET",
             "avernet.prePush.mergeTarget",
             "merge-base",
-            "src/backend/",
-            "src/baas/",
+            "apps/backend/",
+            "apps/baas/",
             "src/engine/",
             "src/bcs/",
-            "src/frontend/",
+            "apps/frontend/",
         ):
             self.assertIn(expected, agents)
         for expected in (

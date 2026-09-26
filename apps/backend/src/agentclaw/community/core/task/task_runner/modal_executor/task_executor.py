@@ -683,7 +683,7 @@ class TaskExecutor(TaskExecutorBbsMixin):
             panel_component_name = gf.extend_props.get("panel_component_name")
             if _task_id and panel_component_name:
                 # BCS 契约:opening_message.params 必须是 JSON object,不能字符串化
-                # (见 ocb-public/src/bcs/docs/custom-collaboration-opening-message-integration-guide.md §4:
+                # (见 submodules/avernet/apps/bcs/docs/custom-collaboration-opening-message-integration-guide.md §4:
                 # params = 传给业务组件的 JSON object)。字符串化会被真实 BCS 判
                 # "data did not match any variant of untagged enum OpeningMessage" 422。
                 req_kwargs["opening_message"] = {

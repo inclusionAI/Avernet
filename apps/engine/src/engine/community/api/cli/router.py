@@ -2,7 +2,7 @@
 
 Marshals HTTP↔service and nothing else; placement lives in the engine's
 ``CliToolsService``. Contract:
-``src/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md`` §4 A2.
+``apps/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md`` §4 A2.
 Caller: ``ArcaCliToolPort`` (``…/bot_config_manifest/cli_tools/arca_port.py``).
 
 **Three response conventions the platform depends on**, each chosen because the

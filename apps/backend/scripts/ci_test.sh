@@ -101,7 +101,7 @@ run_without_git_local_env "$backend_python" -m pytest tests/community -v \
   "${xdist_args[@]}" \
   --continue-on-collection-errors \
   --junitxml="$junit_report" \
-  --cov="$ci_workspace/src/backend/src" \
+  --cov="$ci_workspace/apps/backend/src" \
   --cov-report="xml:$coverage_report" \
   --cov-report=term-missing
 pytest_status=$?
@@ -117,7 +117,7 @@ check_args=(
   "$repo_root/scripts/ci/report_check.py"
   --junit "$junit_report"
   --coverage "$coverage_report"
-  --source-root "$repo_root/src/backend/src"
+  --source-root "$repo_root/apps/backend/src"
   --min-case-pass-rate 100
   --min-line-coverage "$line_coverage_min"
 )

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root/src/backend"
+cd "$repo_root/apps/backend"
 
 uv run pytest \
   tests/community/compatibility/test_legacy_skill_harness.py \

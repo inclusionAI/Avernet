@@ -63,7 +63,7 @@ singlebox_coverage_ran=0
 
 matches_any() {
   # 判断本次变更文件里是否命中某个路径正则。
-  # 后面的模块分发都基于这个函数,例如 '^src/backend/'。
+  # 后面的模块分发都基于这个函数,例如 '^apps/backend/'。
   local pattern="$1"
   printf '%s\n' "$changed_files" | grep -Eq "$pattern"
 }
@@ -125,28 +125,28 @@ if [[ -z "$changed_files" ]]; then
   exit 0
 fi
 
-if matches_any '^src/backend/'; then
+if matches_any '^apps/backend/'; then
   # Backend 默认强卡点:
   # 1) python_sast_local.sh 近似线上 python-sast block 规则,且只扫本次变更 Python 文件
   # 2) backend ci_test.sh 跑 pytest + coverage + report_check
   # 3) singlebox coverage 默认并入 pre-push,保证 Backend 变更会跑 singlebox E2E 覆盖率入口。
-  run_required "$repo_root/scripts/ci/python_sast_local.sh" src/backend 1 --base "$base" --head "$head"
-  run_heavy "$repo_root/src/backend/scripts/ci_test.sh" --base "$base" --head "$head"
+  run_required "$repo_root/scripts/ci/python_sast_local.sh" apps/backend 1 --base "$base" --head "$head"
+  run_heavy "$repo_root/apps/backend/scripts/ci_test.sh" --base "$base" --head "$head"
   run_singlebox_coverage_once
 fi
 
-if matches_any '^(src/backend/tests/community/(compatibility|acceptance/legacy_skills)/|scripts/ci/legacy_skill_compatibility\.sh)$'; then
+if matches_any '^(apps/backend/tests/community/(compatibility|acceptance/legacy_skills)/|scripts/ci/legacy_skill_compatibility\.sh)$'; then
   run_heavy "$repo_root/scripts/ci/legacy_skill_compatibility.sh"
 fi
 
-if matches_any '^src/baas/'; then
+if matches_any '^apps/baas/'; then
   # BaaS 默认强卡点:
   # 1) 跑 BaaS 自己的 ci_test.sh
   # 2) 默认同样跑 singlebox coverage,用于保证 Backend + BaaS live E2E 入口被触发。
   # 如需临时跳过 BaaS CI,显式设置 OCB_PRE_PUSH_ENABLE_BAAS=0。
   if [[ "${OCB_PRE_PUSH_ENABLE_BAAS:-1}" == "1" ]]; then
-    run_required "$repo_root/scripts/ci/python_sast_local.sh" src/baas 1 --base "$base" --head "$head"
-    run_heavy "$repo_root/src/baas/scripts/ci_test.sh" --base "$base" --head "$head"
+    run_required "$repo_root/scripts/ci/python_sast_local.sh" apps/baas 1 --base "$base" --head "$head"
+    run_heavy "$repo_root/apps/baas/scripts/ci_test.sh" --base "$base" --head "$head"
     run_singlebox_coverage_once
   else
     echo "BaaS changes detected; BaaS CI gate skipped (OCB_PRE_PUSH_ENABLE_BAAS=0)"
@@ -182,22 +182,22 @@ if matches_any '^src/bcs/'; then
   fi
 fi
 
-if matches_any '^src/gateway/'; then
+if matches_any '^apps/gateway/'; then
   # Gateway CI: ruff lint + pytest + coverage + diff coverage (>=90%).
-  run_heavy "$repo_root/src/gateway/scripts/ci_test.sh" --base "$base" --head "$head"
+  run_heavy "$repo_root/apps/gateway/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
-if matches_any '^src/proxy/'; then
+if matches_any '^apps/proxy/'; then
   # sandbox-proxy CI: ruff lint + pytest + coverage + diff coverage (>=90%).
-  run_heavy "$repo_root/src/proxy/scripts/ci_test.sh" --base "$base" --head "$head"
+  run_heavy "$repo_root/apps/proxy/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
-if matches_any '^src/frontend/'; then
+if matches_any '^apps/frontend/'; then
   # Frontend 也通过模块自己的 ci_test.sh 作为统一入口。
-  run_heavy "$repo_root/src/frontend/scripts/ci_test.sh" --base "$base" --head "$head"
+  run_heavy "$repo_root/apps/frontend/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
-if matches_any '^(scripts/singlebox\.sh|scripts/modules/|scripts/ci/singlebox_coverage(_report|_manifest_check)?\.(sh|py)|scripts/ci/singlebox_coverage_modules\.yaml|scripts/ci/verify_singlebox_coverage_artifacts\.py|src/backend/tests/community/acceptance/|src/baas/tests/e2e/)'; then
+if matches_any '^(scripts/singlebox\.sh|scripts/modules/|scripts/ci/singlebox_coverage(_report|_manifest_check)?\.(sh|py)|scripts/ci/singlebox_coverage_modules\.yaml|scripts/ci/verify_singlebox_coverage_artifacts\.py|apps/backend/tests/community/acceptance/|apps/baas/tests/e2e/)'; then
   # singlebox 自身脚本或 live E2E 用例变更时,即便没有 Backend/BaaS 源码变更,
   # 也要触发 singlebox coverage gate。
   run_singlebox_coverage_once

@@ -3,7 +3,7 @@
 # Builds the baas image (via docker/build-image.sh) and brings up a
 # MariaDB + Redis + baas stack (docker-compose.baas-test.yml) to verify
 # the image boots under SERVER_ENV=prod and answers /health. The compose file
-# and its orchestration script live under src/baas/docker-test/.
+# and its orchestration script live under apps/baas/docker-test/.
 
 docker-test-script := 'docker-test/test-baas.sh'
 

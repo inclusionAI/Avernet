@@ -3,6 +3,6 @@
   "sourceCommit": "40ee0b1e0e961b0f1c0b1ade8f26848e1c75ffb3",
   "sourceDirty": false,
   "exportSchemaVersion": 1,
-  "target": "src/frontend-nextgen",
+  "target": "apps/frontend-nextgen",
   "tcChatVersion": "2.0.0"
 }

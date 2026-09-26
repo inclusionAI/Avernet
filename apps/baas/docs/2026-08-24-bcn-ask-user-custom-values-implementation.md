@@ -42,11 +42,11 @@
 ### Task 2: Accept custom values at the BaaS boundary
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py`
-- Modify: `src/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py`
-- Modify: `src/baas/src/secbaas/community/api/bcn/_models.py`
-- Modify: `src/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
-- Modify: `src/baas/tests/e2e/asgi/baseline/test_bcn_downlink_extended.py`
+- Modify: `apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py`
+- Modify: `apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_router.py`
+- Modify: `apps/baas/src/secbaas/community/api/bcn/_models.py`
+- Modify: `apps/baas/tests/unit/adapters/web/open_api/test_bcn_router.py`
+- Modify: `apps/baas/tests/e2e/asgi/baseline/test_bcn_downlink_extended.py`
 
 1. Add failing boundary tests for absent, custom-only, and mixed
    `customValues`.
@@ -60,9 +60,9 @@
 ### Task 3: Normalize into Engine-compatible resolution fields
 
 **Files:**
-- Modify: `src/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
-- Modify: `src/baas/tests/unit/core/service/bcn/test_bcn_service.py`
-- Modify: `src/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py`
+- Modify: `apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py`
+- Modify: `apps/baas/tests/unit/core/service/bcn/test_bcn_service.py`
+- Modify: `apps/baas/tests/unit/core/service/bot_run/test_interaction_protocol.py`
 
 1. Add failing normalization tests for custom-only and mixed multi-select
    answers.

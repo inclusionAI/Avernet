@@ -3,7 +3,7 @@
 Run in backend release CI, after ``scripts/dump_openapi.py`` produces the
 candidate description:
 
-    # 1. backend venv (run from src/backend) — produce the candidate public description
+    # 1. backend venv (run from apps/backend) — produce the candidate public description
     python scripts/dump_openapi.py /tmp/candidate.json
 
     # 2. gateway venv — gate for backward-compat, then publish on pass

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """任务执行图谱可视化 — 赛博霓虹风, 自带 API 代理(规避 CORS), 每 10s 轮询。
 
-    python3 src/backend/tests/community/core/task/singlebox_e2e/task_dashboard_viz.py
+    python3 apps/backend/tests/community/core/task/singlebox_e2e/task_dashboard_viz.py
     浏览器打开 http://localhost:8899/  (默认展示最新 task;可下拉按标题切换)
 """
 import http.server

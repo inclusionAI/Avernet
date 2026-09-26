@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# src/proxy/docker-test/test-proxy.sh — build the proxy image and run a full
+# apps/proxy/docker-test/test-proxy.sh — build the proxy image and run a full
 # bare-mode test.
 #
 # Flow:
@@ -10,11 +10,11 @@
 #   3. Wait for the proxy /health endpoint and report success / failure
 #
 # Usage:
-#   src/proxy/docker-test/test-proxy.sh            # build + up + health check
-#   src/proxy/docker-test/test-proxy.sh up         # same as above
-#   src/proxy/docker-test/test-proxy.sh build      # only rebuild proxy:local
-#   src/proxy/docker-test/test-proxy.sh down       # tear down the test stack
-#   src/proxy/docker-test/test-proxy.sh status     # show compose ps (and curl /health)
+#   apps/proxy/docker-test/test-proxy.sh            # build + up + health check
+#   apps/proxy/docker-test/test-proxy.sh up         # same as above
+#   apps/proxy/docker-test/test-proxy.sh build      # only rebuild proxy:local
+#   apps/proxy/docker-test/test-proxy.sh down       # tear down the test stack
+#   apps/proxy/docker-test/test-proxy.sh status     # show compose ps (and curl /health)
 
 set -euo pipefail
 

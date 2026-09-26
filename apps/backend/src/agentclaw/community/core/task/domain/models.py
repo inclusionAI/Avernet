@@ -1,6 +1,6 @@
 """任务目标驱动执行框架领域模型(对齐最新 classDiagram 2026-08-11)。
 
-权威源:`src/backend/specs/2026-08-09-task-goal-driven-execution-framework/plan.md §2`。
+权威源:`apps/backend/specs/2026-08-09-task-goal-driven-execution-framework/plan.md §2`。
 本模块为 shared kernel:纯 dataclass/enum + 中间类型,零依赖(不 import transport/框架)。
 结构归属由 ``Relation{type=DEPENDENCY}`` 分解树(单入)表达,``TaskNode`` 不持
 ``decomposed_by``/``depends_on``;``depth``/结构子/结构父均从 ``relations`` 派生。

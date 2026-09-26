@@ -4,7 +4,7 @@ The gateway forwards ``/openapi/v1/*`` transparently, so nothing internal may
 live under that prefix — every public route must sit under a prefix the
 gateway's shipped configuration routes and secures. Those prefixes are the
 declared upstream domains (``upstreams.domains`` and ``route_security`` in
-``src/gateway/configs/application.yaml``); a route under
+``apps/gateway/configs/application.yaml``); a route under
 any other ``/openapi/v1`` prefix is a leak, not a new domain, until that
 configuration declares it.
 """

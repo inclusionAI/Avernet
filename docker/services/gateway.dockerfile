@@ -15,14 +15,14 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple "uv${UV_VERSION:+==${UV_VERSION}}"
 
 # Install dependencies first (without the project) for better layer caching.
-# The default uv index is the Aliyun PyPI mirror (see src/gateway/pyproject.toml).
-COPY src/gateway/pyproject.toml src/gateway/uv.lock src/gateway/README.md ./
+# The default uv index is the Aliyun PyPI mirror (see apps/gateway/pyproject.toml).
+COPY apps/gateway/pyproject.toml apps/gateway/uv.lock apps/gateway/README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 # Then install the project itself — main.py discovers the runner through the
 # package's installed entry points, so this step is required, not optional.
-COPY src/gateway/src ./src
+COPY apps/gateway/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
@@ -53,8 +53,8 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
 
 COPY --from=builder /app/.venv /app/.venv
-COPY src/gateway/src /app/src
-COPY src/gateway/configs /app/configs
+COPY apps/gateway/src /app/src
+COPY apps/gateway/configs /app/configs
 
 # tmp/: scratch space used by scripts/app.sh conventions.
 # ~/logs/: default log location ($HOME/logs).
@@ -76,5 +76,5 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=6 \
     CMD curl -fsS "http://127.0.0.1:${GATEWAY_PORT:-8888}/health" >/dev/null || exit 1
 
 # Entry point selects the runner via installed entry points (bare = community).
-ENTRYPOINT ["python", "/app/src/gateway/community/main.py"]
+ENTRYPOINT ["python", "/app/apps/gateway/community/main.py"]
 CMD ["--config", "/app/configs", "--mode", "bare"]

@@ -445,7 +445,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backend-root",
         type=Path,
-        default=Path(__file__).resolve().parents[2] / "src/backend",
+        default=Path(__file__).resolve().parents[2] / "apps/backend",
     )
     parser.add_argument("--report-dir", type=Path)
     return parser.parse_args()

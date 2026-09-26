@@ -21,7 +21,7 @@ port `20003`), and today the client reaches them **directly**:
    url, available}`.
 2. Frontend rewrites matching request paths to `/proxypass/{target}{path}` with
    an `X-PROXYPASS-TOKEN` header, or `http://{target}{path}` in local mode
-   (`src/frontend/src/requestConfig.ts:150-260`).
+   (`apps/frontend/src/requestConfig.ts:150-260`).
 
 That is fine for the internal TeamClaw frontend and wrong for an external
 tenant. It publishes proxypass topology and a raw device token, and it makes the
@@ -59,7 +59,7 @@ Track C does not wrap most of them. Four rules decide each one:
 | **C4** | **AICoding-only** → **out of scope.** | Product-specific surface, not part of the tenant contract. |
 
 The authoritative list for C1 is the proxypass prefix list in
-`src/frontend/src/requestConfig.ts:189-205` — the exact set of path prefixes the
+`apps/frontend/src/requestConfig.ts:189-205` — the exact set of path prefixes the
 frontend rewrites to the engine.
 
 ---

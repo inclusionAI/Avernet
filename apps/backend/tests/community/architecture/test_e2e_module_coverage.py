@@ -1,4 +1,4 @@
-# src/backend/tests/architecture/test_e2e_module_coverage.py
+# apps/backend/tests/architecture/test_e2e_module_coverage.py
 """E3 — every core module is either covered by an e2e flow OR explicitly
 exempt in SINGLEBOX_E2E_EXEMPT (with a reason). No third state.
 

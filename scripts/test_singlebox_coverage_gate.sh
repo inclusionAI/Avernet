@@ -16,12 +16,12 @@ make_fake_repo() {
   local tmp="$1"
   mkdir -p "${tmp}/scripts/ci"
   mkdir -p \
-    "${tmp}/src/backend/tests/community/acceptance/devices" \
-    "${tmp}/src/backend/tests/community/acceptance/cron" \
-    "${tmp}/src/backend/src/agentclaw/community/core/devices" \
-    "${tmp}/src/backend/src/agentclaw/community/core/cron" \
-    "${tmp}/src/backend/src/agentclaw/community/plugin_api" \
-    "${tmp}/src/baas" \
+    "${tmp}/apps/backend/tests/community/acceptance/devices" \
+    "${tmp}/apps/backend/tests/community/acceptance/cron" \
+    "${tmp}/apps/backend/src/agentclaw/community/core/devices" \
+    "${tmp}/apps/backend/src/agentclaw/community/core/cron" \
+    "${tmp}/apps/backend/src/agentclaw/community/plugin_api" \
+    "${tmp}/apps/baas" \
     "${tmp}/src/bcs/scripts/e2e-test"
   cp "$SCRIPT" "${tmp}/scripts/ci/singlebox_coverage.sh"
   cp "$REPORTER" "${tmp}/scripts/ci/singlebox_coverage_report.py"
@@ -236,7 +236,7 @@ test_default_mode_runs_real_singlebox() {
   (
     cd "$tmp"
     PATH="${tmp}/fake-bin:$PATH" \
-      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      PYTHON="${ROOT}/apps/backend/.venv/bin/python" \
       SINGLEBOX_STUB_LOG="$log" \
       UV_STUB_LOG="$uv_log" \
       "${tmp}/scripts/ci/singlebox_coverage.sh" >/dev/null
@@ -264,7 +264,7 @@ test_default_mode_runs_real_singlebox() {
     [ -s "${tmp}/scripts/.dependencies/coverage/singlebox/reports/bcs/${artifact}" ] || \
       fail "BCS artifact missing: ${artifact}"
   done
-  "${ROOT}/src/backend/.venv/bin/python" - "${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json" <<'PY'
+  "${ROOT}/apps/backend/.venv/bin/python" - "${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json" <<'PY'
 import json
 import sys
 
@@ -288,7 +288,7 @@ test_model_config_mode_can_use_home() {
   (
     cd "$tmp"
     PATH="${tmp}/fake-bin:$PATH" \
-      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      PYTHON="${ROOT}/apps/backend/.venv/bin/python" \
       SINGLEBOX_COVERAGE_MODEL_CONFIG_MODE=home \
       SINGLEBOX_EXPECTED_MODEL_CONFIG_MODE=home \
       SINGLEBOX_STUB_LOG="$log" \
@@ -296,7 +296,7 @@ test_model_config_mode_can_use_home() {
       "${tmp}/scripts/ci/singlebox_coverage.sh" >/dev/null
   )
 
-  "${ROOT}/src/backend/.venv/bin/python" - "$summary" <<'PY'
+  "${ROOT}/apps/backend/.venv/bin/python" - "$summary" <<'PY'
 import json
 import sys
 
@@ -318,7 +318,7 @@ test_bcs_e2e_failure_preserves_reports_and_fails_gate() {
   output="$({
     cd "$tmp"
     PATH="${tmp}/fake-bin:$PATH" \
-      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      PYTHON="${ROOT}/apps/backend/.venv/bin/python" \
       SINGLEBOX_STUB_LOG="$log" UV_STUB_LOG="$uv_log" \
       "${tmp}/scripts/ci/singlebox_coverage.sh"
   } 2>&1)"
@@ -346,7 +346,7 @@ test_bcs_e2e_failure_without_artifacts_preserves_original_status() {
   output="$({
     cd "$tmp"
     PATH="${tmp}/fake-bin:$PATH" \
-      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      PYTHON="${ROOT}/apps/backend/.venv/bin/python" \
       SINGLEBOX_STUB_LOG="$log" UV_STUB_LOG="$uv_log" \
       "${tmp}/scripts/ci/singlebox_coverage.sh"
   } 2>&1)"
@@ -358,7 +358,7 @@ test_bcs_e2e_failure_without_artifacts_preserves_original_status() {
     fail "missing-artifact BCS failure should report the original status"
   summary="${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json"
   [ -s "$summary" ] || fail "top-level summary should survive missing BCS artifacts"
-  "${ROOT}/src/backend/.venv/bin/python" - "$summary" <<'PY'
+  "${ROOT}/apps/backend/.venv/bin/python" - "$summary" <<'PY'
 import json
 import sys
 
@@ -381,7 +381,7 @@ test_bcs_e2e_failure_with_malformed_artifacts_preserves_original_status() {
   output="$({
     cd "$tmp"
     PATH="${tmp}/fake-bin:$PATH" \
-      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      PYTHON="${ROOT}/apps/backend/.venv/bin/python" \
       SINGLEBOX_STUB_LOG="$log" UV_STUB_LOG="$uv_log" \
       "${tmp}/scripts/ci/singlebox_coverage.sh"
   } 2>&1)"
@@ -391,7 +391,7 @@ test_bcs_e2e_failure_with_malformed_artifacts_preserves_original_status() {
   [ "$rc" -eq 8 ] || fail "malformed BCS artifacts should not replace the original E2E status"
   summary="${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json"
   [ -s "$summary" ] || fail "top-level summary should survive malformed BCS artifacts"
-  "${ROOT}/src/backend/.venv/bin/python" - "$summary" <<'PY'
+  "${ROOT}/apps/backend/.venv/bin/python" - "$summary" <<'PY'
 import json
 import sys
 
@@ -426,7 +426,7 @@ test_module_mode_reports_device_metrics() {
   (
     cd "$tmp"
     PATH="${tmp}/fake-bin:$PATH" \
-      PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+      PYTHON="${ROOT}/apps/backend/.venv/bin/python" \
       SINGLEBOX_STUB_LOG="$log" \
       SINGLEBOX_STUB_DEVICE_HITS=1 \
       UV_STUB_LOG="$uv_log" \
@@ -437,7 +437,7 @@ test_module_mode_reports_device_metrics() {
   grep -F "run pytest tests/community/acceptance/devices" "$uv_log" >/dev/null || \
     fail "selected devices acceptance target was not executed"
   summary="${tmp}/scripts/.dependencies/coverage/singlebox/reports/summary.json"
-  "${ROOT}/src/backend/.venv/bin/python" - "$summary" <<'PY'
+  "${ROOT}/apps/backend/.venv/bin/python" - "$summary" <<'PY'
 import json
 import sys
 
@@ -462,7 +462,7 @@ YAML
   set +e
   output="$(
     cd "$tmp"
-    PYTHON="${ROOT}/src/backend/.venv/bin/python" \
+    PYTHON="${ROOT}/apps/backend/.venv/bin/python" \
       "${tmp}/scripts/ci/singlebox_coverage.sh" 2>&1
   )"
   rc=$?
