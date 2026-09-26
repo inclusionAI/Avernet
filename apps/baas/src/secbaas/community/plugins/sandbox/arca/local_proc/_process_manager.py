@@ -1093,7 +1093,7 @@ class LocalProcessManager:
 
     @staticmethod
     def _resolve_engine_src_dir() -> Path:
-        """Resolve the path to src/engine/src/."""
+        """Resolve the path to engine/adapter/src (the engine adapter source root)."""
         configured = os.environ.get("LOCAL_ENGINE_SRC_DIR")
         if configured:
             candidate = Path(configured).expanduser().resolve()
@@ -1105,12 +1105,12 @@ class LocalProcessManager:
 
         current = Path(__file__).resolve().parent
         for _ in range(16):
-            candidate = current / "src" / "engine" / "src"
+            candidate = current / "engine" / "adapter" / "src"
             if candidate.exists():
                 return candidate
             current = current.parent
         raise DeviceAllocateError(
-            "Could not find engine source directory (src/engine/src/). "
+            "Could not find engine source directory (engine/adapter/src/). "
             "Is the project structure intact?"
         )
 

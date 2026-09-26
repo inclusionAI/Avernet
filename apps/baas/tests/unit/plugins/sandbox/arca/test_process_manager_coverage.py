@@ -1404,7 +1404,8 @@ class TestResolveEngineSrcDir:
         monkeypatch.delenv("LOCAL_ENGINE_SRC_DIR", raising=False)
         result = pm.LocalProcessManager._resolve_engine_src_dir()
         assert result.name == "src"
-        assert result.parent.name == "engine"
+        assert result.parent.name == "adapter"
+        assert result.parent.parent.name == "engine"
 
     def test_resolve_engine_src_dir_not_found(self, monkeypatch):
         """When engine src dir cannot be found, raises DeviceAllocateError."""
@@ -1413,7 +1414,7 @@ class TestResolveEngineSrcDir:
         original_exists = Path.exists
 
         def fake_exists(self):
-            if self.name == "src" and self.parent.name == "engine":
+            if self.name == "src" and self.parent.parent.name == "engine" and self.parent.name == "adapter":
                 return False
             return original_exists(self)
 

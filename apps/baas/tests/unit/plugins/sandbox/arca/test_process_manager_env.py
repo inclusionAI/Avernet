@@ -253,7 +253,8 @@ def test_resolve_engine_src_dir_falls_back_to_repo_layout(monkeypatch):
     engine_src_dir = pm.LocalProcessManager._resolve_engine_src_dir()
 
     assert engine_src_dir.name == "src"
-    assert engine_src_dir.parent.name == "engine"
+    assert engine_src_dir.parent.name == "adapter"
+    assert engine_src_dir.parent.parent.name == "engine"
     assert (engine_src_dir / "engine" / "community" / "api" / "app.py").is_file()
 
 
