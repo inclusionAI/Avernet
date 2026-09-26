@@ -24,6 +24,7 @@ export default function EvolveBotPicker({
   onClear,
   disableUnsupported = true,
   compact = false,
+  inlineOptions = false,
 }: {
   bots: EvolveBotPickerOption[]
   value: string
@@ -35,6 +36,7 @@ export default function EvolveBotPicker({
   onClear?: () => void
   disableUnsupported?: boolean
   compact?: boolean
+  inlineOptions?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -62,7 +64,7 @@ export default function EvolveBotPicker({
         <span className="min-w-0"><span className="block truncate text-sm font-medium text-gray-900">{selected?.botName || selected?.botId || emptyOption?.label || '请选择 Bot'}</span>{!compact && <span className="mt-1 block truncate font-mono text-[10px] text-gray-500">{selected ? `${selected.ownerId ? `${selected.ownerId} / ` : ''}${selected.botId} / ${selected.env || '环境未知'}` : emptyOption?.description || '展开查看可用 Bot'}</span>}</span>
         <span aria-hidden="true" className={`text-xs text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}>⌄</span>
       </button>
-      {open && <div role="radiogroup" aria-label={ariaLabel} className="absolute z-30 mt-2 max-h-72 w-full space-y-2 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-2 shadow-xl">
+      {open && <div role="radiogroup" aria-label={ariaLabel} className={`${inlineOptions ? 'relative' : 'absolute'} z-30 mt-2 max-h-72 w-full space-y-2 overflow-y-auto rounded-xl border border-gray-200 bg-gray-50 p-2 shadow-xl`}>
       {emptyOption && <button ref={clearRef} type="button" role="radio" aria-checked={value === ''} onClick={() => { onClear?.(); setOpen(false) }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setOpen(false); rootRef.current?.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]')?.focus() } else if (event.key === 'ArrowDown') { event.preventDefault(); optionRefs.current.find(Boolean)?.focus() } }} className={`flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-3 text-left transition ${value === '' ? 'border-blue-500 bg-blue-50 shadow-sm ring-1 ring-blue-500/10' : 'border-transparent bg-white hover:border-gray-300'}`}><span><span className="block text-sm font-medium text-gray-900">{emptyOption.label}</span>{emptyOption.description && <span className="mt-1 block text-[10px] text-gray-500">{emptyOption.description}</span>}</span><span aria-hidden="true" className={`mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${value === '' ? 'border-blue-600 bg-blue-600' : 'border-gray-300 bg-white'}`}>{value === '' && <span className="h-1.5 w-1.5 rounded-full bg-white" />}</span></button>}
       {bots.map((bot, index) => {
         const key = evolveBotOptionKey(bot)

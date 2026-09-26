@@ -28,10 +28,10 @@ describe('Skill center asset list and recorded events', () => {
     await screen.findByText('Evidence Skill')
     fireEvent.click(screen.getByRole('button', { name: '登记 Skill' }))
     expect(screen.getByRole('heading', { name: '登记 Bot 中已有 Skill' })).toBeTruthy()
-    expect(screen.getAllByRole('combobox')).toHaveLength(3)
+    expect(screen.getAllByRole('combobox')).toHaveLength(2)
     expect(screen.getByRole('button', { name: '登记' })).toBeTruthy()
     expect(screen.queryByText('平台从 Host 读取完整 Skill，并保存登记时的 v1 冻结版本。')).toBeNull()
-    expect(screen.getByRole('combobox', { name: '所属 Bot' }).closest('label')?.className).toContain('block')
+    expect(screen.getByRole('button', { name: /请选择 Bot/ })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: 'Bot 中自己上传的 Skill' }).closest('label')?.className).toContain('block')
   })
 

@@ -378,9 +378,11 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     const sizeRejected = (error?.code === "HOST_LOCAL_SKILL_TOO_LARGE" && status === 413)
       || (error?.code === "HOST_LOCAL_SKILL_SIZE_UNAVAILABLE" && status === 502);
     const unavailable = error?.code === "HOST_LOCAL_SKILL_UNAVAILABLE" && (status === 502 || status === 503);
+    const botUnavailable = error?.code === "HOST_BOT_UNREACHABLE" && status === 503;
+    const botConflict = ["BOT_OWNER_AMBIGUOUS", "BOT_ENVIRONMENT_AMBIGUOUS", "BOT_ENVIRONMENT_UNAVAILABLE", "BOT_TARGET_CHANGED"].includes(error?.code) && status === 409;
     const rejected = error?.code === "HOST_LOCAL_SKILL_REQUEST_FAILED"
       && Number.isInteger(status) && status >= 400 && status < 500;
-    if ((!unavailable && !rejected && !sizeRejected) || typeof error?.message !== "string") { next(error); return; }
+    if ((!unavailable && !botUnavailable && !botConflict && !rejected && !sizeRejected) || typeof error?.message !== "string") { next(error); return; }
     res.status(status).json({ code: error.code, error: error.message });
   };
   router.use(hostSkillError);
