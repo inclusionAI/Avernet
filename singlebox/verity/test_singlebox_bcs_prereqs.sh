@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODULE="${ROOT}/modules/bcs.sh"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+MODULE="${ROOT}/singlebox/modules/bcs.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -11,10 +11,10 @@ fail() {
 
 setup_env() {
   export PROJECT_ROOT="$ROOT"
-  export SCRIPT_DIR="${ROOT}/scripts"
+  export SCRIPT_DIR="${ROOT}/singlebox"
   export DEP_DIR="$(mktemp -d)"
   export LOG_DIR="${DEP_DIR}/logs"
-  export BCS_DIR="${ROOT}/src/bcs"
+  export BCS_DIR="${ROOT}/apps/bcs"
   export BCS_PORT="21000"
   export BCS_CONFIG_DIR="${BCS_DIR}/configs"
   export BCS_CONFIG_FILE="${BCS_CONFIG_DIR}/bcs-config-local.toml"

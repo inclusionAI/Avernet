@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEMP="$(mktemp -d)"
 trap 'rm -rf "$TEMP"' EXIT
-source "$ROOT/env/utils.sh"
+source "$ROOT/singlebox/env/utils.sh"
 # Arguments with shell syntax must remain data, and setsid/exec must preserve PID.
 start_in_detached_session python3 -c '
 import json, os, sys

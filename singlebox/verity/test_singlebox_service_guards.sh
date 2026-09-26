@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -17,12 +17,12 @@ assert_eq() {
 
 setup_env() {
   export PROJECT_ROOT="$ROOT"
-  export SCRIPT_DIR="${ROOT}/scripts"
+  export SCRIPT_DIR="${ROOT}/singlebox"
   export DEP_DIR="$(mktemp -d)"
   export LOG_DIR="${DEP_DIR}/logs"
   export BACKEND_DIR="${ROOT}/apps/backend"
   export BAAS_APP_DIR="${ROOT}/apps/baas"
-  export ENGINE_DIR="${ROOT}/src/engine"
+  export ENGINE_DIR="${ROOT}/engine/adapter"
   mkdir -p "$LOG_DIR"
 
   log_info() { printf '[INFO] %s\n' "$*"; }
@@ -475,7 +475,7 @@ test_baas_start_passes_bcn_runtime_configuration() (
   export CHAT_ENGINE="openclaw"
   export BCS_PORT="21099"
   # shellcheck source=/dev/null
-  source "${ROOT}/modules/baas.sh"
+  source "${ROOT}/singlebox/modules/baas.sh"
 
   local plugin_dir captured_env sequence_file
   plugin_dir="$(mktemp -d)"
@@ -533,16 +533,16 @@ test_baas_start_aborts_when_bcn_plugin_setup_fails() (
 )
 
 test_5bot_openclaw_config_is_written_private() {
-  grep -F 'umask 077' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh" >/dev/null || \
+  grep -F 'umask 077' "${ROOT}/apps/bcs/scripts/start_bcs_bots.sh" >/dev/null || \
     fail "5bot openclaw config should be written under umask 077"
-  grep -F 'chmod 600 "$config_file"' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh" >/dev/null || \
+  grep -F 'chmod 600 "$config_file"' "${ROOT}/apps/bcs/scripts/start_bcs_bots.sh" >/dev/null || \
     fail "5bot openclaw config should be chmod 600"
 }
 
 test_local_bcs_launchers_supply_required_signing_keys() {
   local singlebox_start five_bot_start group_secret_default principal_secret_default
   singlebox_start="$(sed -n '/^start_bcs_binary()/,/^}/p' "${ROOT}/singlebox/modules/bcs.sh")"
-  five_bot_start="$(sed -n '/^start_bcs()/,/^}/p' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh")"
+  five_bot_start="$(sed -n '/^start_bcs()/,/^}/p' "${ROOT}/apps/bcs/scripts/start_bcs_bots.sh")"
   group_secret_default='export BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${BCS_SECRET_BCN_GROUP_SESSION_WS_JWT:-local-only-bcn-group-session-ws-jwt-signing-key}"'
   principal_secret_default='export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"'
 
@@ -561,11 +561,11 @@ test_local_bcs_launchers_supply_required_signing_keys() {
 }
 
 test_ready_banner_describes_full_stack() {
-  grep -F 'FULL SINGLEBOX STACK' "${ROOT}/scripts/env/utils.sh" >/dev/null || \
+  grep -F 'FULL SINGLEBOX STACK' "${ROOT}/singlebox/env/utils.sh" >/dev/null || \
     fail "ready banner should describe full singlebox stack"
-  grep -F 'BAAS BACKEND BCS' "${ROOT}/scripts/env/utils.sh" >/dev/null || \
+  grep -F 'BAAS BACKEND BCS' "${ROOT}/singlebox/env/utils.sh" >/dev/null || \
     fail "ready banner should include backend services"
-  grep -F '5BOTS DEMO FRONTEND' "${ROOT}/scripts/env/utils.sh" >/dev/null || \
+  grep -F '5BOTS DEMO FRONTEND' "${ROOT}/singlebox/env/utils.sh" >/dev/null || \
     fail "ready banner should include demo bot and frontend"
 }
 

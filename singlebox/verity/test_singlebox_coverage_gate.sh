@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="${ROOT}/ci/singlebox_coverage.sh"
-REPORTER="${ROOT}/ci/singlebox_coverage_report.py"
-MANIFEST_CHECKER="${ROOT}/ci/singlebox_coverage_manifest_check.py"
-MANIFEST="${ROOT}/ci/singlebox_coverage_modules.yaml"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT="${ROOT}/singlebox/ci/singlebox_coverage.sh"
+REPORTER="${ROOT}/singlebox/ci/singlebox_coverage_report.py"
+MANIFEST_CHECKER="${ROOT}/singlebox/ci/singlebox_coverage_manifest_check.py"
+MANIFEST="${ROOT}/singlebox/ci/singlebox_coverage_modules.yaml"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -22,7 +22,7 @@ make_fake_repo() {
     "${tmp}/apps/backend/src/agentclaw/community/core/cron" \
     "${tmp}/apps/backend/src/agentclaw/community/plugin_api" \
     "${tmp}/apps/baas" \
-    "${tmp}/src/bcs/scripts/e2e-test"
+    "${tmp}/apps/bcs/scripts/e2e-test"
   cp "$SCRIPT" "${tmp}/singlebox/ci/singlebox_coverage.sh"
   cp "$REPORTER" "${tmp}/singlebox/ci/singlebox_coverage_report.py"
   cp "$MANIFEST_CHECKER" "${tmp}/singlebox/ci/singlebox_coverage_manifest_check.py"
@@ -33,7 +33,7 @@ modules:
       - tests/community/acceptance/devices
     system: backend
     core_paths:
-      - src/agentclaw/community/core/devices/
+      - apps/agentclaw/community/core/devices/
     router_api:
       items:
         - GET /api/v1/devices
@@ -51,7 +51,7 @@ modules:
       - tests/community/acceptance/cron
     system: backend
     core_paths:
-      - src/agentclaw/community/core/cron/
+      - apps/agentclaw/community/core/cron/
     router_api:
       items:
         - GET /api/cron
@@ -64,7 +64,7 @@ modules:
       router_min_percent: 100
 YAML
   chmod +x "${tmp}/singlebox/ci/singlebox_coverage.sh"
-  cat > "${tmp}/src/bcs/scripts/e2e-test/mock_services.sh" <<'SH'
+  cat > "${tmp}/apps/bcs/scripts/e2e-test/mock_services.sh" <<'SH'
 #!/usr/bin/env bash
 bcs_e2e_mock_start() {
   BCS_E2E_MOCK_BASE_URL="http://127.0.0.1:39090"

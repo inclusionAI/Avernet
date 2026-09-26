@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -14,12 +14,12 @@ check_no_private_domains() {
     printf '%s' 'ali''pay[.](com|net)|agentclawproxy-[a-z]+[.]example[.]com'
   )"
   local files=(
-    "${ROOT}/modules/backend.sh"
-    "${ROOT}/ci/singlebox_coverage.sh"
-    "${ROOT}/singlebox.sh"
-    "${ROOT}/modules/demo_bot.sh"
-    "${ROOT}/modules/frontend.sh"
-    "${ROOT}/modules/gateway.sh"
+    "${ROOT}/singlebox/modules/backend.sh"
+    "${ROOT}/singlebox/ci/singlebox_coverage.sh"
+    "${ROOT}/singlebox/singlebox.sh"
+    "${ROOT}/singlebox/modules/demo_bot.sh"
+    "${ROOT}/singlebox/modules/frontend.sh"
+    "${ROOT}/singlebox/modules/gateway.sh"
     "${ROOT}/apps/frontend/frontend_sprint_branch.sh"
   )
 

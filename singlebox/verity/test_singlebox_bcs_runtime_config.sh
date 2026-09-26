@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
 export PROJECT_ROOT="$ROOT"
-export SCRIPT_DIR="${ROOT}/scripts"
+export SCRIPT_DIR="${ROOT}/singlebox"
 export DEP_DIR="${TEST_ROOT}/dependencies"
 export LOG_DIR="${DEP_DIR}/logs"
 export BCS_DIR="${TEST_ROOT}/bcs"
@@ -19,7 +19,7 @@ log_warn() { printf '[WARN] %s\n' "$*"; }
 log_error() { printf '[ERROR] %s\n' "$*" >&2; }
 
 # shellcheck source=/dev/null
-source "${ROOT}/modules/bcs.sh"
+source "${ROOT}/singlebox/modules/bcs.sh"
 
 # Runtime resource copying is outside this test's configuration boundary.
 prepare_bcs_runtime_config_resources() { return 0; }

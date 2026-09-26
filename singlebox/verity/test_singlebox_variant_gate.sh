@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SINGLEBOX="${ROOT}/singlebox.sh"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SINGLEBOX="${ROOT}/singlebox/singlebox.sh"
 TEMP="$(mktemp -d)"
 
 fail() {
@@ -85,11 +85,11 @@ grep -q "FRONTEND_VARIANT must be legacy, nextgen or teamclaw" <<<"$out" ||
 #    runs before any service call, so a function-level probe suffices.
 export PROJECT_ROOT="$ROOT" LOG_DIR="$TEMP" DEP_DIR="$TEMP" FRONTEND_PORT=28800 BCS_PORT=28801
 # shellcheck source=/dev/null
-source "${ROOT}/env/utils.sh"
+source "${ROOT}/singlebox/env/utils.sh"
 # shellcheck source=/dev/null
-source "${ROOT}/modules/frontend.sh"
+source "${ROOT}/singlebox/modules/frontend.sh"
 # shellcheck source=/dev/null
-source "${ROOT}/modules/bcs_frontend.sh"
+source "${ROOT}/singlebox/modules/bcs_frontend.sh"
 FRONTEND_VARIANT=nextgen frontend_select_variant
 if out="$(FRONTEND_VARIANT=nextgen bcs_frontend_setup 2>&1)"; then
     fail "bcs_frontend_setup must refuse non-legacy variants"
@@ -113,10 +113,10 @@ grep -q "serves the legacy BCS panel" <<<"$out" ||
 #    owned-process contract.
 if command -v python3 >/dev/null 2>&1; then
     gw_dir="${TEMP}/foreign-gw"
-    mkdir -p "${gw_dir}/scripts" "${TEMP}/unrelated-cwd"
-    cat > "${gw_dir}/scripts/app.sh" <<'EOF'
+    mkdir -p "${gw_dir}/singlebox" "${TEMP}/unrelated-cwd"
+    cat > "${gw_dir}/singlebox/app.sh" <<'EOF'
 #!/usr/bin/env bash
-# Mimics apps/gateway/scripts/app.sh do_stop's blind port kill (no ownership
+# Mimics apps/gateway/singlebox/app.sh do_stop's blind port kill (no ownership
 # check): the port holder's PID is resolved and killed unconditionally.
 PORT_PID="$(lsof -t -nP -iTCP:"${APP_PORT:-${GATEWAY_PORT:-8889}}" -sTCP:LISTEN 2>/dev/null | head -1)"
 [ -n "$PORT_PID" ] || exit 0
@@ -125,7 +125,7 @@ sleep 1
 kill -0 "$PORT_PID" 2>/dev/null && kill -9 "$PORT_PID" 2>/dev/null
 exit 0
 EOF
-    chmod +x "${gw_dir}/scripts/app.sh"
+    chmod +x "${gw_dir}/singlebox/app.sh"
 
     foreign_listener_pid=""
     foreign_port=28910
@@ -149,7 +149,7 @@ EOF
             # shellcheck source=/dev/null
             source "${1}/modules/gateway.sh"
             gateway_stop
-        ' _ "${ROOT}/scripts" 2>&1
+        ' _ "${ROOT}/singlebox" 2>&1
     )" || stop_rc=$?
     [ "$stop_rc" -eq 0 ] ||
         fail "gateway_stop must tolerate a foreign port holder (rc ${stop_rc}); got: ${stop_out}"
