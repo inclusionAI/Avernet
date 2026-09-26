@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODULE="${ROOT}/modules/demo_bot.sh"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+MODULE="${ROOT}/singlebox/modules/demo_bot.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -524,7 +524,7 @@ test_start_waits_for_backend_ready_without_auto_onboard() {
 test_all_order_includes_bots_and_demo_before_frontend() {
   setup_env
   # shellcheck source=/dev/null
-  source "${ROOT}/modules/all.sh"
+  source "${ROOT}/singlebox/modules/all.sh"
   # bcsfuse starts before bcs (all.sh's canonical order); this pin was left on
   # the older swap by an earlier order change — dev itself fails it today.
   assert_eq "baas backend bcsfuse bcs bots demo_bot frontend" "${START_ORDER[*]}" "all start order"
@@ -537,7 +537,7 @@ test_all_order_includes_bots_and_demo_before_frontend() {
 test_backend_ready_function_exists() {
   setup_env
   # shellcheck source=/dev/null
-  source "${ROOT}/modules/backend.sh"
+  source "${ROOT}/singlebox/modules/backend.sh"
   assert_eq "function" "$(type -t backend_ready)" "backend_ready type"
 }
 

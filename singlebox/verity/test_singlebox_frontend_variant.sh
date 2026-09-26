@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEMP="$(mktemp -d)"
 trap 'rm -rf "$TEMP"' EXIT
 export PROJECT_ROOT="$ROOT" LOG_DIR="$TEMP" DEP_DIR="$TEMP"
-source "$ROOT/modules/frontend.sh"
+source "$ROOT/singlebox/modules/frontend.sh"
 FRONTEND_VARIANT=legacy
 frontend_select_variant
 [[ "$FRONTEND_DIR" == "$ROOT/apps/frontend" && "$FRONTEND_DEFAULT_SCRIPT" == devs:local:oss ]]
@@ -93,7 +93,7 @@ printf 'PASS: teamclaw variant mapping, upstreams and Gateway lifecycle order\n'
 # pair (worktree + bare remote) so the semantics are the script's own git
 # calls, not a mock. utils.sh is needed for the log_* helpers.
 # ---------------------------------------------------------------------------
-source "$ROOT/scripts/env/utils.sh"
+source "$ROOT/singlebox/env/utils.sh"
 git init -q --bare "$TEMP/remote.git"
 TC_CLONE="$TEMP/tc-clone"
 git init -q -b main "$TC_CLONE"
@@ -137,7 +137,7 @@ printf 'PASS: teamclaw auto-update fast-forward, dirty-skip and opt-out\n'
 # export is not even visible here). The URL must carry 127.0.0.1, the docs'
 # canonical host: cookie jars are host-scoped, so localhost/127.0.0.1 must
 # never be mixed. The legacy variant must not advertise a page it does not use.
-source "$ROOT/scripts/env/utils.sh"
+source "$ROOT/singlebox/env/utils.sh"
 FRONTEND_VARIANT=nextgen
 banner="$(FRONTEND_PORT=28800 GATEWAY_PORT=28801 print_frontend_ready_banner)"
 grep -q "http://127.0.0.1:28801/_dev/login?next=28800" <<<"$banner" || {
@@ -171,11 +171,11 @@ pull_run() {
   if [ -n "${tc}" ]; then
     env PROJECT_ROOT="$ROOT" LOG_DIR="$TEMP" DEP_DIR="$TEMP" TEAMCLAW_DIR="${tc}" \
       OCB_SKIP_FRONTEND_INSTALL=1 \
-      bash -c "source '$ROOT/scripts/env/utils.sh'; source '$ROOT/singlebox/modules/frontend.sh'; frontend_pull $*" 2>&1
+      bash -c "source '$ROOT/singlebox/env/utils.sh'; source '$ROOT/singlebox/modules/frontend.sh'; frontend_pull $*" 2>&1
   else
     env -u TEAMCLAW_DIR PROJECT_ROOT="$ROOT" LOG_DIR="$TEMP" DEP_DIR="$TEMP" \
       OCB_SKIP_FRONTEND_INSTALL=1 \
-      bash -c "source '$ROOT/scripts/env/utils.sh'; source '$ROOT/singlebox/modules/frontend.sh'; frontend_pull $*" 2>&1
+      bash -c "source '$ROOT/singlebox/env/utils.sh'; source '$ROOT/singlebox/modules/frontend.sh'; frontend_pull $*" 2>&1
   fi
 }
 

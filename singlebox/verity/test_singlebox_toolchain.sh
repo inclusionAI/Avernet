@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -37,7 +37,7 @@ check_protobuf_installed() { return 1; }
 
 unset REQUIRED_RUST_TOOLCHAIN
 # shellcheck source=/dev/null
-source "${ROOT}/env/toolchain.sh"
+source "${ROOT}/singlebox/env/toolchain.sh"
 
 test_default_rust_toolchain() {
   assert_eq "stable" "$REQUIRED_RUST_TOOLCHAIN" "default Rust toolchain"

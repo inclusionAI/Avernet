@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 FAILS=0
 
 fail() {
@@ -53,7 +53,7 @@ JSON
 
 with_rule_test_env() {
     local temporary="$1"
-    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    BCS_DIR="${PROJECT_ROOT}/apps/bcs"
     LOG_DIR="${temporary}/logs"
     DEP_DIR="${temporary}/dependencies"
     BCS_PORT=21000
@@ -61,9 +61,9 @@ with_rule_test_env() {
     OPENCLAW_PROFILE_ROOT="${temporary}/profiles"
     OPENCLAW_PROFILE_PREFIX=""
     mkdir -p "$LOG_DIR" "$DEP_DIR" "$OPENCLAW_PROFILE_ROOT"
-    . "${SCRIPT_DIR}/env/utils.sh"
-    . "${SCRIPT_DIR}/modules/bcs.sh"
-    . "${SCRIPT_DIR}/modules/bots.sh"
+    . "${SCRIPT_DIR}/../env/utils.sh"
+    . "${SCRIPT_DIR}/../modules/bcs.sh"
+    . "${SCRIPT_DIR}/../modules/bots.sh"
 }
 
 test_rule_manifest_has_no_ports_or_sources() {

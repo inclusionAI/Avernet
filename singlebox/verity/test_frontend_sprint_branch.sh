@@ -9,7 +9,7 @@
 # so no probe ever touches ~/.config/teamclaw-frontend.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TOOL="${ROOT}/apps/frontend/frontend_sprint_branch.sh"
 
 fail() {

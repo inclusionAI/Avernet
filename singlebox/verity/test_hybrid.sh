@@ -2,7 +2,7 @@
 # Regression coverage for OpenClaw-only, mixed-provider, and legacy alias modes.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"
 
 cleanup() {
@@ -11,7 +11,7 @@ cleanup() {
 trap cleanup EXIT
 
 CLAUDE_PROFILE="$TMP/claude-profile"
-cp -R "$ROOT/agents/4bots_merchant_operations_profile_for_claude" "$CLAUDE_PROFILE"
+cp -R "$ROOT/singlebox/agents/4bots_merchant_operations_profile_for_claude" "$CLAUDE_PROFILE"
 mkdir -p "$TMP/claude-config" "$TMP/claude-workspace"
 python3 - "$CLAUDE_PROFILE/bots.json" "$TMP" <<'PY'
 import json
@@ -27,13 +27,13 @@ with open(path, 'w', encoding='utf-8') as stream:
     json.dump(profile, stream)
 PY
 
-export BOTS_PROFILE_DIR="$ROOT/agents/4bots_merchant_operations_profile"
+export BOTS_PROFILE_DIR="$ROOT/singlebox/agents/4bots_merchant_operations_profile"
 export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
 export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
 export SINGLEBOX_MODEL_CONFIG_MODE="home"
 export HYBRID_STATE_FILE="$TMP/hybrid-state.json"
 # shellcheck source=/dev/null
-source "$ROOT/singlebox.sh"
+source "$ROOT/singlebox/singlebox.sh"
 
 hybrid_validate_profiles
 [[ "$(bots_dynamic_count)" == "3" ]]
@@ -238,7 +238,7 @@ if validate_hybrid_profile_options hybrid; then
     echo 'Claude replacement options without an OpenClaw profile unexpectedly accepted' >&2
     exit 1
 fi
-export BOTS_PROFILE_DIR="$ROOT/agents/4bots_merchant_operations_profile"
+export BOTS_PROFILE_DIR="$ROOT/singlebox/agents/4bots_merchant_operations_profile"
 
 python3 - "$CLAUDE_PROFILE/bots.json" <<'PY'
 import json
@@ -419,7 +419,7 @@ test_provider_bot_cleanup_preserves_provider_credentials() (
 test_provider_bot_cleanup_preserves_provider_credentials
 
 test_clean_bots_removes_attached_claude_runtime() (
-    export BOTS_PROFILE_DIR="$ROOT/agents/4bots_merchant_operations_profile"
+    export BOTS_PROFILE_DIR="$ROOT/singlebox/agents/4bots_merchant_operations_profile"
     export CLAUDE_BOTS_STATE_FILE="$TMP/clean-claude-bots-state.json"
     export HYBRID_STATE_FILE="$TMP/clean-hybrid-state.json"
     local config_dir="$TMP/clean-claude-config"
@@ -544,7 +544,7 @@ test_hybrid_restart_restores_previous_selection_without_prompts() (
     local restart_state="$TMP/hybrid-restart-state.json"
     HYBRID_STATE_FILE="$restart_state"
     jq -n \
-        --arg bots_profile "$ROOT/agents/4bots_merchant_operations_profile" \
+        --arg bots_profile "$ROOT/singlebox/agents/4bots_merchant_operations_profile" \
         --arg claude_profile "$CLAUDE_PROFILE" \
         '{
           mode: "claude",
@@ -572,7 +572,7 @@ test_hybrid_restart_restores_previous_selection_without_prompts() (
 
     apply_hybrid_profile_defaults restart hybrid
     [ "$HYBRID_RESTART_FROM_STATE" = "1" ]
-    [ "$BOTS_PROFILE_DIR" = "$ROOT/agents/4bots_merchant_operations_profile" ]
+    [ "$BOTS_PROFILE_DIR" = "$ROOT/singlebox/agents/4bots_merchant_operations_profile" ]
     [ "$BOTS_EXCLUDED_PROFILE_SOURCE" = "platform-data" ]
     [ "$CLAUDE_PROFILE_DIR" = "$CLAUDE_PROFILE" ]
     [ "$HYBRID_CLAUDE_CONFIG_MODE" = "env-local" ]
@@ -590,7 +590,7 @@ test_hybrid_restart_restores_home_model_confirmation() (
     log_info() { :; }
     HYBRID_STATE_FILE="$TMP/hybrid-restart-home-state.json"
     jq -n \
-        --arg bots_profile "$ROOT/agents/4bots_merchant_operations_profile" \
+        --arg bots_profile "$ROOT/singlebox/agents/4bots_merchant_operations_profile" \
         '{
           mode: "openclaw",
           bots_profile_dir: $bots_profile,
@@ -626,7 +626,7 @@ test_hybrid_restart_without_state_is_rejected
 
 test_hybrid_claude_runtime_choice() (
     log_info() { :; }
-    export BOTS_PROFILE_DIR="$ROOT/agents/4bots_merchant_operations_profile"
+    export BOTS_PROFILE_DIR="$ROOT/singlebox/agents/4bots_merchant_operations_profile"
     export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
     export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
     claude_relay_find_cli() { printf '%s\n' "$TMP/fake-claude"; }
@@ -682,7 +682,7 @@ test_hybrid_anthropic_defaults_and_base_url_edit
 test_hybrid_missing_anthropic_env_is_rejected() (
     log_info() { :; }
     log_error() { :; }
-    export BOTS_PROFILE_DIR="$ROOT/agents/4bots_merchant_operations_profile"
+    export BOTS_PROFILE_DIR="$ROOT/singlebox/agents/4bots_merchant_operations_profile"
     export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
     export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
     unset HYBRID_CLAUDE_CONFIG_MODE ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_MODEL OPENCLAW_OPENAI_BASE_URL
@@ -699,7 +699,7 @@ test_hybrid_missing_anthropic_env_is_rejected
 test_hybrid_missing_claude_cancels_when_install_declined() (
     log_info() { :; }
     log_error() { :; }
-    export BOTS_PROFILE_DIR="$ROOT/agents/4bots_merchant_operations_profile"
+    export BOTS_PROFILE_DIR="$ROOT/singlebox/agents/4bots_merchant_operations_profile"
     export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
     export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
     export HYBRID_INSTALL_CLAUDE_CODE=no
@@ -716,7 +716,7 @@ test_hybrid_missing_claude_cancels_when_install_declined
 
 test_hybrid_missing_claude_installs_when_accepted() (
     log_info() { :; }
-    export BOTS_PROFILE_DIR="$ROOT/agents/4bots_merchant_operations_profile"
+    export BOTS_PROFILE_DIR="$ROOT/singlebox/agents/4bots_merchant_operations_profile"
     export BOTS_EXCLUDED_PROFILE_SOURCE="platform-data"
     export CLAUDE_PROFILE_DIR="$CLAUDE_PROFILE"
     export HYBRID_INSTALL_CLAUDE_CODE=yes
@@ -753,7 +753,7 @@ done
 test_hybrid_explicit_selection_switches_active_runtime() (
     HYBRID_STATE_FILE="$TMP/hybrid-transition-state.json"
     HYBRID_RUNTIME_SELECTION_EXPLICIT=0
-    export BOTS_PROFILE_DIR="$ROOT/agents/4bots_merchant_operations_profile"
+    export BOTS_PROFILE_DIR="$ROOT/singlebox/agents/4bots_merchant_operations_profile"
     unset BOTS_EXCLUDED_PROFILE_SOURCE CLAUDE_PROFILE_DIR HYBRID_CLAUDE_ACTIVE MERCHANT_HYBRID_ACTIVE
     : > "$events"
     hybrid_start

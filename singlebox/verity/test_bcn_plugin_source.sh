@@ -4,9 +4,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # utils.sh uses PROJECT_ROOT/SCRIPT_DIR-style vars from singlebox; define minimally.
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=/dev/null
-. "${SCRIPT_DIR}/env/utils.sh"
+. "${SCRIPT_DIR}/../env/utils.sh"
 
 FAILS=0
 fail() { printf 'FAIL: %s\n' "$*" >&2; FAILS=$((FAILS + 1)); }
@@ -114,14 +114,14 @@ test_clean_removes_symlink_to_global_npm_dir_with_custom_ext_root() {
 
   (
     PROJECT_ROOT="${PROJECT_ROOT}"
-    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    BCS_DIR="${PROJECT_ROOT}/apps/bcs"
     LOG_DIR="${tmp}/logs"
     DEP_DIR="${tmp}/dep"
     OPENCLAW_EXTENSIONS_ROOT="$ext"
     HOME="$tmp"
     mkdir -p "$LOG_DIR" "$DEP_DIR"
-    . "${SCRIPT_DIR}/env/utils.sh"
-    . "${SCRIPT_DIR}/modules/bcs.sh"
+    . "${PROJECT_ROOT}/singlebox/env/utils.sh"
+    . "${PROJECT_ROOT}/singlebox/modules/bcs.sh"
     remove_owned_bcn_plugin_symlink >/dev/null 2>&1
   ) || fail "cleanup should succeed for npm symlink"
 
@@ -131,13 +131,13 @@ test_clean_removes_symlink_to_global_npm_dir_with_custom_ext_root() {
 
 test_help_mentions_flag() {
   local out
-  out="$(bash "${SCRIPT_DIR}/singlebox.sh" --help 2>&1)"
+  out="$(bash "${PROJECT_ROOT}/singlebox/singlebox.sh" --help 2>&1)"
   assert_contains "$out" "--bcn-plugin-source"
   assert_contains "$out" "BCN_PLUGIN_SOURCE"
 }
 test_invalid_mode_flag_errors() {
   local out rc
-  out="$(bash "${SCRIPT_DIR}/singlebox.sh" --bcn-plugin-source bogus status 2>&1)"; rc=$?
+  out="$(bash "${PROJECT_ROOT}/singlebox/singlebox.sh" --bcn-plugin-source bogus status 2>&1)"; rc=$?
   [ "$rc" -ne 0 ] || fail "invalid --bcn-plugin-source should exit non-zero"
   assert_contains "$out" "source, npm"
 }
@@ -156,11 +156,11 @@ STUB
   # bcs.sh expects PROJECT_ROOT/BCS_DIR etc.; source utils then bcs in a subshell.
   local out
   out="$(
-    PROJECT_ROOT="${PROJECT_ROOT}" BCS_DIR="${PROJECT_ROOT}/src/bcs" \
+    PROJECT_ROOT="${PROJECT_ROOT}" BCS_DIR="${PROJECT_ROOT}/apps/bcs" \
     PATH="${bindir}:$PATH" OPENCLAW_EXTENSIONS_ROOT="$ext" HOME="$tmp" \
     BCN_PLUGIN_SOURCE=npm bash -c '
-      . "'"${SCRIPT_DIR}"'/env/utils.sh"
-      . "'"${SCRIPT_DIR}"'/modules/bcs.sh"
+      . "'"${PROJECT_ROOT}"'/singlebox/env/utils.sh"
+      . "'"${PROJECT_ROOT}"'/singlebox/modules/bcs.sh"
       setup_bcn_plugin >/dev/null 2>&1
       readlink "'"$ext"'/openclaw-channel-bcn" 2>/dev/null || echo NONE
     '
@@ -191,20 +191,20 @@ test_load_dir_source_mode() {
   local out
   out="$(
     PROJECT_ROOT="${PROJECT_ROOT}" bash -c '
-      . "'"${SCRIPT_DIR}"'/env/utils.sh"
-      . "'"${SCRIPT_DIR}"'/modules/bots.sh"
+      . "'"${PROJECT_ROOT}"'/singlebox/env/utils.sh"
+      . "'"${PROJECT_ROOT}"'/singlebox/modules/bots.sh"
       BCN_PLUGIN_SOURCE=source bots_bcn_plugin_load_dir
     '
   )"
-  assert_contains "$out" "src/bcs/crates/plugins/openclaw-channel-bcn"
+  assert_contains "$out" "apps/bcs/crates/plugins/openclaw-channel-bcn"
 }
 test_load_dir_npm_mode() {
   local tmp; tmp="$(mktemp -d)"; mkdir -p "${tmp}/openclaw-channel-bcn"
   local out
   out="$(
     PROJECT_ROOT="${PROJECT_ROOT}" OPENCLAW_EXTENSIONS_ROOT="$tmp" HOME="$tmp" bash -c '
-      . "'"${SCRIPT_DIR}"'/env/utils.sh"
-      . "'"${SCRIPT_DIR}"'/modules/bots.sh"
+      . "'"${PROJECT_ROOT}"'/singlebox/env/utils.sh"
+      . "'"${PROJECT_ROOT}"'/singlebox/modules/bots.sh"
       BCN_PLUGIN_SOURCE=npm bots_bcn_plugin_load_dir
     '
   )"
@@ -214,12 +214,12 @@ test_load_dir_npm_mode() {
 test_stack_script_forwards_mode() {
   # bots_run_stack_script forwards env by running the stack script; assert the
   # forwarding lines exist in the source (integration-by-inspection).
-  assert_contains "$(cat "${SCRIPT_DIR}/modules/bots.sh")" "BCN_PLUGIN_SOURCE=\"\${BCN_PLUGIN_SOURCE:-source}\""
-  assert_contains "$(cat "${SCRIPT_DIR}/modules/bots.sh")" "BCN_PLUGIN_VERSION=\"\${BCN_PLUGIN_VERSION:-latest}\""
+  assert_contains "$(cat "${PROJECT_ROOT}/singlebox/modules/bots.sh")" "BCN_PLUGIN_SOURCE=\"\${BCN_PLUGIN_SOURCE:-source}\""
+  assert_contains "$(cat "${PROJECT_ROOT}/singlebox/modules/bots.sh")" "BCN_PLUGIN_VERSION=\"\${BCN_PLUGIN_VERSION:-latest}\""
 }
 
 test_stack_script_has_npm_branch() {
-  local src; src="$(cat "${PROJECT_ROOT}/src/bcs/scripts/start_bcs_bots.sh")"
+  local src; src="$(cat "${PROJECT_ROOT}/apps/bcs/scripts/start_bcs_bots.sh")"
   assert_contains "$src" 'BCN_PLUGIN_SOURCE="${BCN_PLUGIN_SOURCE:-source}"'
   assert_contains "$src" 'if [ "$BCN_PLUGIN_SOURCE" = "npm" ]; then'
   # build must be skipped in npm mode
@@ -236,7 +236,7 @@ test_session_bot_uuid_requires_usable_session() {
     /^profile_dir_for\(\)/ {emit=1}
     /^workspace_dir_for\(\)/ {emit=0}
     emit {print}
-  ' "${PROJECT_ROOT}/src/bcs/scripts/start_bcs_bots.sh" > "$funcs"
+  ' "${PROJECT_ROOT}/apps/bcs/scripts/start_bcs_bots.sh" > "$funcs"
   mkdir -p "$(dirname "$session_file")"
 
   cat > "$session_file" <<JSON
@@ -286,11 +286,11 @@ test_stack_config_allows_plugin_path_refresh() {
     /^profile_dir_for\(\)/ {emit=1}
     /^load_bot_ports\(\)/ {emit=0}
     emit {print}
-  ' "${PROJECT_ROOT}/src/bcs/scripts/start_bcs_bots.sh" > "$funcs"
+  ' "${PROJECT_ROOT}/apps/bcs/scripts/start_bcs_bots.sh" > "$funcs"
 
   local profile_root="${tmp}/profiles"
   local workspace_root="${tmp}/workspaces"
-  local source_plugin="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
+  local source_plugin="${PROJECT_ROOT}/apps/bcs/crates/plugins/openclaw-channel-bcn"
   local npm_plugin="${tmp}/extensions/openclaw-channel-bcn"
   mkdir -p "${profile_root}/.openclaw-ceo" "${workspace_root}/ceo/workspace" "$npm_plugin"
   cat > "${profile_root}/.openclaw-ceo/openclaw.json" <<JSON
@@ -350,7 +350,7 @@ test_dynamic_config_refreshes_plugin_path() {
   local profile_root="${tmp}/profiles"
   local workspace_root="${tmp}/workspaces"
   local profile_source="${tmp}/profile-source"
-  local source_plugin="${PROJECT_ROOT}/src/bcs/crates/plugins/openclaw-channel-bcn"
+  local source_plugin="${PROJECT_ROOT}/apps/bcs/crates/plugins/openclaw-channel-bcn"
   local npm_plugin="${tmp}/extensions/openclaw-channel-bcn"
   local profile_dir="${profile_root}/.openclaw-ceo"
   local workspace_dir="${workspace_root}/ceo/workspace"
@@ -393,7 +393,7 @@ JSON
 
   (
     PROJECT_ROOT="${PROJECT_ROOT}"
-    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    BCS_DIR="${PROJECT_ROOT}/apps/bcs"
     LOG_DIR="${tmp}/logs"
     DEP_DIR="${tmp}/dep"
     BCS_PORT=21000
@@ -403,9 +403,9 @@ JSON
     OPENCLAW_WORKSPACE_ROOT="$workspace_root"
     OPENCLAW_WORKSPACE_LAYOUT="profile-source"
     mkdir -p "$LOG_DIR" "$DEP_DIR"
-    . "${SCRIPT_DIR}/env/utils.sh"
-    . "${SCRIPT_DIR}/modules/bcs.sh"
-    . "${SCRIPT_DIR}/modules/bots.sh"
+    . "${PROJECT_ROOT}/singlebox/env/utils.sh"
+    . "${PROJECT_ROOT}/singlebox/modules/bcs.sh"
+    . "${PROJECT_ROOT}/singlebox/modules/bots.sh"
     bots_bcn_plugin_load_dir() { printf '%s\n' "$npm_plugin"; }
     bots_dynamic_specs() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "CEO" "ceo" "30001" "ceo" "CEO summary" "strategy" "routing" "production" "openclaw"; }
     bots_dynamic_copy_profile_files() { return 0; }
@@ -484,12 +484,12 @@ JSON
   local model_fields
   model_fields="$({
     PROJECT_ROOT="${PROJECT_ROOT}"
-    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    BCS_DIR="${PROJECT_ROOT}/apps/bcs"
     OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
     LOG_DIR="${tmp}/logs"
     DEP_DIR="${tmp}/dep"
     BCS_PORT=21000
-    . "${SCRIPT_DIR}/modules/bots.sh"
+    . "${PROJECT_ROOT}/singlebox/modules/bots.sh"
     bots_dynamic_agent_model_fields_json
   })"
   printf '%s\n' "$model_fields" | jq -e '
@@ -501,34 +501,34 @@ JSON
 
   (
     PROJECT_ROOT="${PROJECT_ROOT}"
-    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    BCS_DIR="${PROJECT_ROOT}/apps/bcs"
     OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
     LOG_DIR="${tmp}/logs"
     DEP_DIR="${tmp}/dep"
     BCS_PORT=21000
-    . "${SCRIPT_DIR}/modules/bots.sh"
+    . "${PROJECT_ROOT}/singlebox/modules/bots.sh"
     bots_dynamic_config_matches_model_source "$matching_config"
   ) || fail "matching dynamic model config should be preserved"
   if (
     PROJECT_ROOT="${PROJECT_ROOT}"
-    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    BCS_DIR="${PROJECT_ROOT}/apps/bcs"
     OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
     LOG_DIR="${tmp}/logs"
     DEP_DIR="${tmp}/dep"
     BCS_PORT=21000
-    . "${SCRIPT_DIR}/modules/bots.sh"
+    . "${PROJECT_ROOT}/singlebox/modules/bots.sh"
     bots_dynamic_config_matches_model_source "$stale_config"
   ); then
     fail "stale dynamic model config should be refreshed"
   fi
   if (
     PROJECT_ROOT="${PROJECT_ROOT}"
-    BCS_DIR="${PROJECT_ROOT}/src/bcs"
+    BCS_DIR="${PROJECT_ROOT}/apps/bcs"
     OPENCLAW_MODEL_CONFIG_SOURCE="$model_source"
     LOG_DIR="${tmp}/logs"
     DEP_DIR="${tmp}/dep"
     BCS_PORT=21000
-    . "${SCRIPT_DIR}/modules/bots.sh"
+    . "${PROJECT_ROOT}/singlebox/modules/bots.sh"
     bots_dynamic_config_matches_model_source "$timeout_stale_config"
   ); then
     fail "dynamic model config without timeoutSeconds should be refreshed"
@@ -551,7 +551,7 @@ test_dynamic_config_copies_thinking_default
 # behind. Echoes "<fake_root>|<calls_file>|<ext_dir>".
 _bcn_source_fixture() {
   local tmp="$1"
-  local src="${tmp}/root/src/bcs/crates/plugins/openclaw-channel-bcn"
+  local src="${tmp}/root/apps/bcs/crates/plugins/openclaw-channel-bcn"
   local bindir="${tmp}/bin" calls="${tmp}/npm-calls" ext="${tmp}/ext"
   mkdir -p "$src" "$bindir" "$ext"
   printf '{"name":"stub","version":"0.0.0"}\n' > "${src}/package.json"
@@ -568,11 +568,11 @@ STUB
 
 _run_setup_bcn_source() {
   local root="$1" bindir="$2" ext="$3" home="$4"
-  PROJECT_ROOT="$root" BCS_DIR="${root}/src/bcs" \
+  PROJECT_ROOT="$root" BCS_DIR="${root}/apps/bcs" \
   PATH="${bindir}:$PATH" OPENCLAW_EXTENSIONS_ROOT="$ext" HOME="$home" \
   BCN_PLUGIN_SOURCE=source bash -c '
-    . "'"${SCRIPT_DIR}"'/env/utils.sh"
-    . "'"${SCRIPT_DIR}"'/modules/bcs.sh"
+    . "'"${PROJECT_ROOT}"'/singlebox/env/utils.sh"
+    . "'"${PROJECT_ROOT}"'/singlebox/modules/bcs.sh"
     setup_bcn_plugin
   ' >/dev/null 2>&1
 }
@@ -607,7 +607,7 @@ test_source_build_reinstalls_prod_deps_instead_of_pruning() {
   fi
   # The dev tree must be gone before the prod install, or the reinstall would
   # leave all 2051 packages in place and the reduction would be a no-op.
-  if [ -d "${root}/src/bcs/crates/plugins/openclaw-channel-bcn/node_modules/eslint" ]; then
+  if [ -d "${root}/apps/bcs/crates/plugins/openclaw-channel-bcn/node_modules/eslint" ]; then
     fail "dev dependencies survived into the copied-back tree"
   fi
   rm -rf "$tmp"
@@ -622,7 +622,7 @@ test_source_build_skips_when_already_built() {
   fixture="$(_bcn_source_fixture "$tmp")"
   root="${fixture%%|*}"; calls="$(printf '%s' "$fixture" | cut -d'|' -f2)"
   ext="${fixture##*|}"
-  src="${root}/src/bcs/crates/plugins/openclaw-channel-bcn"
+  src="${root}/apps/bcs/crates/plugins/openclaw-channel-bcn"
 
   mkdir -p "${src}/dist/esm" "${src}/node_modules"
   : > "${src}/dist/esm/index.js"

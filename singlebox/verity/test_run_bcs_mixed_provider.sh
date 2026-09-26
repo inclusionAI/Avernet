@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET="${SCRIPT_DIR}/run_bcs_mixed_provider.sh"
+TARGET="${SCRIPT_DIR}/../apps/bcs/run_bcs_mixed_provider.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
