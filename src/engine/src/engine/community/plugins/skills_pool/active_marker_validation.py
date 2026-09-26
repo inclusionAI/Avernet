@@ -77,6 +77,35 @@ def active_marker_valid(
     return True
 
 
+def startup_active_marker_valid(
+    marker: object,
+    *,
+    engine: str,
+    expected_contract_version: str,
+) -> bool:
+    """Validate a durable native or completed-migration active identity."""
+
+    if not (
+        isinstance(marker, dict)
+        and marker.get("engine") == engine
+        and marker.get("layout_contract_version") == expected_contract_version
+        and marker.get("activation_state") == "active"
+    ):
+        return False
+    has_preparation = "preparation_id" in marker
+    has_generation = "migration_generation" in marker
+    if has_preparation != has_generation:
+        return False
+    if not has_preparation:
+        return True
+    return bool(
+        isinstance(marker.get("preparation_id"), str)
+        and marker["preparation_id"]
+        and isinstance(marker.get("migration_generation"), str)
+        and marker["migration_generation"]
+    )
+
+
 def active_entries_failure_reason(
     layout: ActiveMarkerLayout,
     *,
