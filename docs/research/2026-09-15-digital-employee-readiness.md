@@ -24,7 +24,7 @@
 
 OCB 当前提交记录的 `ocb-public` gitlink 和本地子仓库 HEAD 均为
 `49b808f2bd4bf36c8fb95325a7895c9ebe280b01`，未包含上述执行身份改造。
-OCB `Dockerfile.backend` 从 `ocb-public/apps/backend/src/agentclaw/community`
+OCB `Dockerfile.backend` 从 `submodules/avernet/appsbackend/src/agentclaw/community`
 复制公共后端，不会读取旁边独立的 Avernet 工作目录。
 
 因此，独立 Avernet 中的运维接口、身份服务、持久化及新 Passport 契约，

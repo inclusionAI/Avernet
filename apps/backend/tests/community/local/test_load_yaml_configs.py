@@ -453,7 +453,7 @@ class TestEnvPlaceholderExpansion:
         """B11 monorepo: corp lives in the repo trunk, community in the submodule.
 
         In the ocb monorepo the community package resolves under
-        ``<repo>/ocb-public/apps/backend/src/agentclaw/community`` while the corp
+        ``<repo>/submodules/avernet/appsbackend/src/agentclaw/community`` while the corp
         credential overlay sits in the trunk
         ``<repo>/apps/backend/src/agentclaw/corp/configs`` — the
         ``agentclaw/corp`` sibling next to community does not exist there. A
