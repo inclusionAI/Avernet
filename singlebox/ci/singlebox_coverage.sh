@@ -11,12 +11,12 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 export UV_PYTHON="${UV_PYTHON:-3.12}"
 export SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY="${SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY:-singlebox-gateway-principal-key-not-for-production}"
 
-coverage_root="${SINGLEBOX_COVERAGE_ROOT:-$repo_root/scripts/.dependencies/coverage/singlebox}"
+coverage_root="${SINGLEBOX_COVERAGE_ROOT:-$repo_root/singlebox/.dependencies/coverage/singlebox}"
 report_dir="$coverage_root/reports"
 mode="${SINGLEBOX_COVERAGE_MODE:-real}"
 model_config_mode="${SINGLEBOX_COVERAGE_MODEL_CONFIG_MODE:-mock}"
 module_manifest="$script_dir/singlebox_coverage_modules.yaml"
-bcs_coverage_dir="$repo_root/src/bcs/target/cov-e2e"
+bcs_coverage_dir="$repo_root/apps/bcs/target/cov-e2e"
 bcs_line_min="${SINGLEBOX_COVERAGE_BCS_LINE_MIN:-40}"
 bcs_method_min="${SINGLEBOX_COVERAGE_BCS_METHOD_MIN:-36}"
 coverage_standalone_root=""
@@ -26,7 +26,7 @@ acceptance_targets=()
 explicit_acceptance_targets=()
 coverage_modules=()
 reporter_command=()
-source "$repo_root/src/bcs/scripts/e2e-test/mock_services.sh"
+source "$repo_root/apps/bcs/scripts/e2e-test/mock_services.sh"
 
 if [[ -n "${SINGLEBOX_COVERAGE_MODULE:-}" ]]; then
   requested_modules+=("$SINGLEBOX_COVERAGE_MODULE")

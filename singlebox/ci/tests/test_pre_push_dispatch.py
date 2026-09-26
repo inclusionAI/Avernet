@@ -60,7 +60,7 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
         env={**os.environ, "OCB_PRE_PUSH_RUN_CI": "1"},
     )
 
-    assert "src/bcs/scripts/ci_test.sh" in result.stdout
+    assert "apps/bcs/scripts/ci_test.sh" in result.stdout
     assert "singlebox/ci/singlebox_coverage.sh" in result.stdout
     assert "singlebox/ci/verify_singlebox_coverage_artifacts.py" in result.stdout
 
