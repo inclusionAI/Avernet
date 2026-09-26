@@ -485,7 +485,7 @@ active HumanInputRequest
 - Workbench 的 request 队列/投递状态展示；
 - 指标和完整错误码体系；
 - 真实钉钉群 destination 的已认证可达性确认；
-- public BCS 提交后更新 `ocb_2` 的 `ocb-public` gitlink，并执行跨仓端到端验收。
+- public BCS 提交后更新 `ocb_2` 的 `submodules/avernet` gitlink，并执行跨仓端到端验收。
 
 ## 10. 测试与验收
 
