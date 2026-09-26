@@ -38,6 +38,7 @@ export type RepairConfig = {
   publicBaseUrl: string;
   controlPlaneEnvironment: RepairControlPlaneEnvironment;
   aisSnapshotIds: Record<RepairControlPlaneEnvironment, number>;
+  aisBaseSnapshotIds?: Partial<Record<RepairControlPlaneEnvironment, number>>;
   decisionGraceSeconds: number;
   contextWaitSeconds: number;
   executionLeaseSeconds: number;
@@ -60,6 +61,7 @@ export function resolveRepairConfig(configPath?: string): RepairConfig {
     publicBaseUrl: resolveInsightHandoffConfig().publicBaseUrl,
     controlPlaneEnvironment: currentEnvironment === "prod" ? "prod" : "pre",
     aisSnapshotIds: repair.aisSnapshotIds,
+    aisBaseSnapshotIds: resolveAisBaseSnapshots(),
     decisionGraceSeconds: repair.decisionGraceSeconds,
     contextWaitSeconds: repair.contextWaitSeconds,
     executionLeaseSeconds: repair.executionLeaseSeconds,
@@ -104,4 +106,18 @@ export function resolveRepairConfig(configPath?: string): RepairConfig {
     );
   }
   return resolved;
+}
+
+/** Only explicitly configured environments opt new tasks into AIS Base. */
+function resolveAisBaseSnapshots(): Partial<Record<RepairControlPlaneEnvironment, number>> {
+  const result: Partial<Record<RepairControlPlaneEnvironment, number>> = {};
+  for (const environment of ["pre", "prod"] as const) {
+    const raw = process.env["REPAIR_AIS_BASE_" + environment.toUpperCase() + "_SNAPSHOT_ID"];
+    if (raw == null || raw === "") continue;
+    if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) <= 0) {
+      throw new Error("Invalid Repair AIS Base Snapshot ID");
+    }
+    result[environment] = Number(raw);
+  }
+  return result;
 }
