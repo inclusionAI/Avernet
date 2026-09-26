@@ -16,7 +16,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$repo_root"
+cd "$repo_root" && pwd
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
   echo "error: not inside a git repository" >&2
@@ -31,8 +31,8 @@ fi
 hooks_before="$(git config --worktree --get core.hooksPath 2>/dev/null || git config --get core.hooksPath 2>/dev/null || true)"
 
 chmod +x .githooks/pre-push
-chmod +x singlebox/ci/pre_push.sh
-chmod +x singlebox/ci/check_secrets.py
+chmod +x devops/hook/pre_push.sh
+chmod +x devops/hook/check_secrets.py
 chmod +x singlebox/ci/python_sast_local.sh
 chmod +x singlebox/ci/singlebox_coverage.sh
 chmod +x singlebox/ci/report_check.py

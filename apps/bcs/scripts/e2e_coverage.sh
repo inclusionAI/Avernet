@@ -31,7 +31,7 @@ set -euo pipefail
 # Coverage scope: bcs server (crate bcs) only; excludes the 5 bots / Python.
 
 repo_root="$(git rev-parse --show-toplevel)"
-bcs_dir="$repo_root/src/bcs"
+bcs_dir="$repo_root/apps/bcs"
 cov_dir="$bcs_dir/target/cov-e2e"
 out_xml="$cov_dir/cobertura.xml"
 report_file="$cov_dir/coverage.txt"
