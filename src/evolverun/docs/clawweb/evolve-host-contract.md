@@ -7,6 +7,16 @@ versions, interactions and UI. A host supplies `BotSkillGateway`,
 composition root supplies configuration and assembles their dependencies. `externalSkillId` / `external_skill_id` is an opaque
 provider identifier; public code must not interpret it as a provider-specific ID.
 
+Skill reads and registration return sanitized host failures as `{code, error}`.
+`HOST_BOT_UNREACHABLE` (503) means the selected Bot cannot currently be resolved
+or reached; it does not assert that an unobservable Bot is definitely offline.
+`HOST_LOCAL_SKILL_UNAVAILABLE` (502/503) covers unavailable Skill/file services.
+Bot owner/environment ambiguity, missing environment and changed targets retain
+their `BOT_*` conflict codes (409). Permission rejections retain 401/403. The
+registration form displays these messages and offers a read retry, without
+showing raw HTTP bodies or reusing a previous Bot's Skill list. Unknown errors
+still reach the normal server error handler and are not relabeled as offline.
+
 ## Singlebox and capability discovery
 
 `GET /api/evolve/capabilities` reports `skillManagement` and

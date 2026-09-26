@@ -388,6 +388,31 @@ describe("Skill historical snapshot availability", () => {
   });
 
   it.each([
+    [503, "HOST_BOT_UNREACHABLE", "Bot 不可达或当前无权访问，请确认 Bot 在线及访问权限后重试。"],
+    [409, "BOT_ENVIRONMENT_UNAVAILABLE", "Bot 环境缺失或不受支持，无法选择 Skill 服务"],
+    [409, "BOT_ENVIRONMENT_AMBIGUOUS", "Bot 标识对应多个环境，无法确定 Skill 所属 Bot"],
+    [409, "BOT_OWNER_AMBIGUOUS", "Bot 标识对应多个 Owner，无法确定 Skill 所属 Bot"],
+  ])("preserves Bot lookup failure %s / %s for both registration reads", async (statusCode, code, message) => {
+    const test = await startRouter(true);
+    const error = Object.assign(new Error(String(message)), { statusCode, code });
+    test.listLocalSkills.mockRejectedValue(error);
+    test.exportLocalSkill.mockRejectedValue(error);
+    const responses = [
+      await fetch(`${test.baseUrl}/skill-assets/available?botId=bot-1`, { headers: { "X-User-Id": "owner-1" } }),
+      await fetch(`${test.baseUrl}/skill-assets`, {
+        method: "POST", headers: { "X-User-Id": "owner-1", "Content-Type": "application/json" },
+        body: JSON.stringify({ botId: "bot-1", skillId: "47" }),
+      }),
+    ];
+    for (const response of responses) {
+      expect(response.status).toBe(statusCode);
+      expect(await response.json()).toEqual({ code, error: message });
+    }
+    expect(await test.repo.listAssets("owner-1")).toEqual([]);
+    expect(test.replaceLocalSkill).not.toHaveBeenCalled();
+  });
+
+  it.each([
     { code: "UNKNOWN_Host_ERROR", status: 503 },
     { code: "HOST_LOCAL_SKILL_UNAVAILABLE", status: 500 },
     { code: "HOST_LOCAL_SKILL_REQUEST_FAILED", status: 503 },

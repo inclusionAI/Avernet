@@ -6,7 +6,8 @@ import type { DirectoryBot } from '../types'
 import { Icon, PageTitle, Status } from './evolve/common'
 import { formatStepTime, primaryButton } from './evolve/helpers'
 import SkillTaskLaunchDialog, { type SkillTaskAction } from '../components/SkillTaskLaunchDialog'
-import SpaceSelector, { spaceLabel } from '../components/SpaceSelector'
+import { spaceLabel } from '../components/SpaceSelector'
+import SkillRegistrationDialog from '../components/SkillRegistrationDialog'
 import SkillListPagination, { skillListPageSize } from '../components/SkillListPagination'
 
 export default function SkillCenter() {
@@ -15,11 +16,6 @@ export default function SkillCenter() {
   const [launch, setLaunch] = useState<{ asset: EvolveSkillAsset; action: SkillTaskAction } | null>(null)
   const [assets, setAssets] = useState<EvolveSkillAsset[]>([])
   const [bots, setBots] = useState<DirectoryBot[]>([])
-  const [botId, setBotId] = useState('')
-  const [skills, setSkills] = useState<Array<{ skillId: string; displayName: string }>>([])
-  const [skillId, setSkillId] = useState('')
-  const [spaceId, setSpaceId] = useState('')
-  const [registering, setRegistering] = useState(false)
   const [showRegister, setShowRegister] = useState(false)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
@@ -38,30 +34,10 @@ export default function SkillCenter() {
     ]).then(([, result]) => setBots(result.bots)).catch((reason) => setError(reason instanceof Error ? reason.message : '技能中心加载失败')).finally(() => setLoading(false))
   }, [user?.userId])
 
-  useEffect(() => {
-    if (!botId) { setSkills([]); setSkillId(''); return }
-    void api.evolve.listAvailableLocalSkills(botId)
-      .then((result) => { setSkills(result.items); setSkillId('') })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : 'Bot Skill 加载失败'))
-  }, [botId])
-
-  const register = async () => {
-    if (!botId || !skillId) { setError('请选择 Bot 和要登记的 Skill'); return }
-    setRegistering(true); setError('')
-    try {
-      const asset = await api.evolve.registerSkillAsset({ botId, skillId, ...(spaceId ? { spaceId } : {}) })
-      await loadAssets()
-      setShowRegister(false)
-      navigate(`/evolve/skills/${encodeURIComponent(asset.assetId)}`)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Skill 登记失败')
-    } finally { setRegistering(false) }
-  }
-
   const filtered = assets.filter((asset) => [asset.name, asset.description, asset.spaceName, asset.ownerId, asset.botId, bots.find((bot) => bot.botId === asset.botId)?.botName].some((value) => value?.toLowerCase().includes(query.trim().toLowerCase())))
   const visiblePage = Math.min(page, Math.max(1, Math.ceil(filtered.length / skillListPageSize)))
   return <div className="w-full px-3 py-6 sm:px-4 lg:px-5">
-    <PageTitle title="技能管理" description="登记技能，查看版本内容，并发起诊断、加固或优化任务。" action={<button onClick={() => { setSpaceId(''); setShowRegister(true) }} className={primaryButton}><Icon name="plus" />登记 Skill</button>} />
+    <PageTitle title="技能管理" description="登记技能，查看版本内容，并发起诊断、加固或优化任务。" action={<button onClick={() => setShowRegister(true)} className={primaryButton}><Icon name="plus" />登记 Skill</button>} />
     <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
         <span className="rounded-md bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700">全部技能</span>
@@ -87,6 +63,10 @@ export default function SkillCenter() {
     </section>
     {error && !showRegister && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     {launch && <SkillTaskLaunchDialog key={`${launch.asset.assetId}:${launch.action}`} asset={launch.asset} action={launch.action} returnTo="/evolve/skills" onClose={() => setLaunch(null)} />}
-    {showRegister && <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/30 p-4" onClick={() => setShowRegister(false)}><div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}><div className="flex items-start justify-between"><div><h2 className="text-xl font-semibold text-gray-950">登记 Bot 中已有 Skill</h2></div><button className="text-sm text-gray-400" onClick={() => setShowRegister(false)}>关闭</button></div><div className="mt-5 space-y-4"><SpaceSelector value={spaceId} onChange={setSpaceId} disabled={registering} /><label className="block"><span className="mb-1.5 block text-xs font-medium text-gray-600">所属 Bot</span><select value={botId} onChange={(event) => setBotId(event.target.value)} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm"><option value="">请选择 Bot</option>{bots.map((bot) => <option key={`${bot.botId}:${bot.env ?? ''}`} value={bot.botId}>{bot.botName || bot.botId}</option>)}</select></label><label className="block"><span className="mb-1.5 block text-xs font-medium text-gray-600">Bot 中自己上传的 Skill</span><select value={skillId} onChange={(event) => setSkillId(event.target.value)} disabled={!botId} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm disabled:bg-gray-50"><option value="">请选择 Skill</option>{skills.map((skill) => <option key={skill.skillId} value={skill.skillId}>{skill.displayName}</option>)}</select></label>{error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}</div><div className="mt-6 flex justify-end gap-2"><button onClick={() => setShowRegister(false)} className="rounded-lg border border-gray-200 px-4 py-2 text-sm">取消</button><button disabled={registering || !botId || !skillId} onClick={() => void register()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{registering ? '登记中…' : '登记'}</button></div></div></div>}
+    {showRegister && <SkillRegistrationDialog bots={bots} botsLoading={loading} onClose={() => setShowRegister(false)} onRegistered={async asset => {
+      await loadAssets()
+      setShowRegister(false)
+      navigate(`/evolve/skills/${encodeURIComponent(asset.assetId)}`)
+    }} />}
   </div>
 }
