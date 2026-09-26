@@ -36,6 +36,9 @@ from agentclaw.community.core.service_bot.services.build_ignore_rules import (
     validate_required_paths,
 )
 from agentclaw.community.kernel.build_ignore import normalize_build_ignore_path
+from agentclaw.community.core.service_bot.services.bot_build_policy import (
+    PublishBuildPolicyConfig,
+)
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_bot_engine,
 )
@@ -66,7 +69,6 @@ from agentclaw.community.core.workspace.engines import parse_build_rsync_exclude
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bot_dir,
-    get_bot_nas_dir,
 )
 from agentclaw.community.core.workspace.skill_layout import FILESYSTEM_POOL_ENGINES
 from agentclaw.community.log import get_logger
@@ -152,6 +154,7 @@ class BotBuildService:
         teclaw_template_uuid: str,
         build_ignore_repository: BuildIgnoreRepositoryProtocol,
         env: str,
+        publish_build_policy: PublishBuildPolicyConfig = PublishBuildPolicyConfig(),
     ):
         """初始化 BotBuildService。
 
@@ -177,9 +180,53 @@ class BotBuildService:
         self._baas_template_resolver = baas_template_resolver
         self._build_ignore_repository = build_ignore_repository
         self._env = env
+        # Deploy-declared publish resource policy; never probe the host for
+        # environment facts in the build path (see PublishBuildPolicyConfig).
+        self._publish_policy = publish_build_policy
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
+
+    def _wait_for_device_ready(
+        self,
+        device_id: str,
+        timeout_seconds: float = 30.0,
+        poll_interval_seconds: float = 2.0,
+    ) -> None:
+        """Block until BaaS knows the bot's device (or timeout), best effort.
+
+        The build pipeline can trigger while the device is still booting
+        (e.g. right after bot creation); BaaS answers 404 "BOT_NOT_FOUND"
+        for exec_shell / get_ws_info until boot finishes, so probe the
+        ws-info entry until it exists. For a long-running ACTIVE device
+        the first probe returns and this is a single extra read. On
+        timeout it returns silently: the subsequent exec_shell calls
+        surface the real error.
+
+        Tenant resolution is left to BaasService — an empty ``tenant``
+        falls back to the deployment's ``BaasConfig.tenant``; never
+        hardcode one here.
+        """
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            try:
+                ws_info = self._baas_service.get_ws_info_by_bot_uuid(
+                    bot_uuid=device_id,
+                )
+                if ws_info:
+                    logger.info(
+                        "[BotBuildService._wait_for_device_ready] "
+                        f"device ready: {device_id}"
+                    )
+                    return
+            except Exception:
+                pass  # Still PENDING/404 — poll again.
+            time.sleep(poll_interval_seconds)
+        logger.warning(
+            "[BotBuildService._wait_for_device_ready] "
+            f"device {device_id} not ready after {timeout_seconds}s; "
+            "proceeding (exec_shell may fail)"
+        )
 
     def _resolve_sandbox_provider(self, bot: Dict[str, Any]) -> EngineSandboxProvider:
         engine_type = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
@@ -337,7 +384,7 @@ class BotBuildService:
             # Step 1: 计算源目录和目标目录（统一走 NAS 存储）
             # ============================================================
             source_nas_engine_type = bot.get("active_engine") or engine_type
-            nas_storage_id = get_bot_nas_dir(
+            nas_storage_id = self._path_factory.get_bot_nas_dir(
                 entity_id=entity_id,
                 bot_id=bot_id,
                 engine_type=source_nas_engine_type,
@@ -369,6 +416,15 @@ class BotBuildService:
             # ============================================================
             # Step 2: Bot 实例迁移
             # ============================================================
+            # 2.0 Wait for the device to register on BaaS before the build
+            # generates MCP / stage configs over it: a freshly created
+            # bot's device can still be mid-boot here, and every BaaS
+            # exec_shell / get_ws_info answers 404 "BOT_NOT_FOUND" until
+            # the boot finishes. For a long-running device this is a
+            # single extra read.
+            if device_id:
+                self._wait_for_device_ready(device_id)
+
             # 2.1 执行 rsync 迁移
             transfer_started = time.monotonic()
             migration_success = False
@@ -434,6 +490,10 @@ class BotBuildService:
                 "entity_id": entity_id,
                 "entity_type": entity_type,
                 "version": version_str,
+                # 部署声明的显式跳过（非静默态）: producer/发布流程可据此分支
+                "nas_migration_skipped": bool(
+                    migration_success and not source_dir.exists()
+                ),
                 "migration_path": runtime_artifact_root,
                 "build_target_path": str(target_dir),
                 "mcp_success": mcp_success,
@@ -1227,6 +1287,41 @@ class BotBuildService:
                 except OSError:
                     pass
 
+    def _chmod_nas_dir(
+        self,
+        nas_dir: Path | str | None,
+        *,
+        error_message: str,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        """chmod 755 a NAS staging dir when it exists (plain first, sudo fallback).
+
+        Absence is not an error here — the caller decides whether a missing
+        root is a declared no-NAS deployment (explicit skip) or a broken
+        mount (loud failure); chmod never preempts that decision with an
+        unrelated error. Plain chmod before sudo: a user-owned root needs
+        no escalation, and the sudo fallback covers root-owned mounts.
+        """
+        if nas_dir is None:
+            return
+        nas_path = Path(str(nas_dir))
+        if not nas_path.exists():
+            return
+        try:
+            self._run_local_command(
+                cmd=["chmod", "755", str(nas_path)],
+                command_name="chmod",
+                error_message=error_message,
+                timeout_seconds=timeout_seconds,
+            )
+        except Exception:
+            self._run_local_command(
+                cmd=["sudo", "chmod", "755", str(nas_path)],
+                command_name="sudo chmod",
+                error_message=error_message,
+                timeout_seconds=timeout_seconds,
+            )
+
     def _migrate_bot_instance(
         self,
         device_id: str,
@@ -1257,13 +1352,33 @@ class BotBuildService:
         )
 
         if is_nas:
-            self._run_local_command(
-                cmd=["sudo", "chmod", "755", str(nas_storage_id)],
-                command_name="sudo chmod",
+            self._chmod_nas_dir(
+                nas_storage_id,
                 error_message="chmod source directory failed",
             )
 
         if not source_dir.exists():
+            if is_nas and not self._publish_policy.nas_migration_required:
+                # The deployment declares it has no NAS staging
+                # (publish_build.nas_migration_required=false): skip the
+                # instance migration by explicit configuration. Never
+                # infer this from the host — that would fork build
+                # semantics per environment.
+                #
+                # The versioned target MUST still exist on disk before we
+                # report success — the build result pins
+                # build_target_path and later stage steps write their
+                # configs under it; a reported success referencing a
+                # never-created path is a silent failure (exactly what
+                # this policy exists to forbid).
+                target_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(
+                    f"[BotBuildService._migrate_bot_instance] "
+                    f"NAS staging not required by deployment policy; "
+                    f"skipping instance migration (target scaffolded): "
+                    f"{source_dir} -> {target_dir}"
+                )
+                return True
             logger.warning(
                 f"[BotBuildService._migrate_bot_instance] "
                 f"Source directory does not exist: {source_dir}"
@@ -1486,11 +1601,26 @@ class BotBuildService:
 
             # 检查返回结果
             if not result.stdout or not result.stdout.strip():
-                logger.warning(
+                if self._publish_policy.mcp_catalog_required:
+                    # Default (prod) semantics: an empty catalog hides a
+                    # broken mcporter or a dead device shell — fail the
+                    # build so the defect is visible, not shipped.
+                    logger.warning(
+                        f"[BotBuildService._generate_mcp_config] "
+                        f"Empty stdout from device {device_id}, "
+                        f"stderr={result.stderr}"
+                    )
+                    return False
+                # The deployment declares an empty catalog legal ("no
+                # remote MCP tools" is a valid device state there):
+                # continue without the remote MCP list.
+                logger.info(
                     f"[BotBuildService._generate_mcp_config] "
-                    f"Empty stdout from device {device_id}, stderr={result.stderr}"
+                    f"Empty MCP catalog from device {device_id} tolerated "
+                    f"by deployment policy; continuing without remote MCP "
+                    f"list, stderr={result.stderr}"
                 )
-                return False
+                return True
 
             # 解析 JSON
             try:
@@ -1765,7 +1895,7 @@ class BotBuildService:
         # Never trust a DB path as an arbitrary rsync source. Reconstruct the
         # exact versioned artifact path from the Bot identity and version.
         artifact_dir = get_bot_dir(entity_id, bot_id, entity_type) / str(source_version) / build_plan.migration_subpath
-        draft_nas_dir = get_bot_nas_dir(
+        draft_nas_dir = self._path_factory.get_bot_nas_dir(
             entity_id=entity_id,
             bot_id=bot_id,
             engine_type=build_plan.engine_type,
@@ -1775,9 +1905,18 @@ class BotBuildService:
         if not artifact_dir.exists():
             raise BotBuildMigrationError(f"历史构造物目录不存在: {artifact_dir}")
 
-        self._run_local_command(
-            cmd=["sudo", "chmod", "755", str(draft_nas_dir)],
-            command_name="sudo chmod",
+        # A missing draft NAS mount is a broken mount, not a resource-decl
+        # skip: restore_draft's whole product is "the device can see this
+        # workspace". mkdir onto the unmounted path would record success
+        # while the device never sees the data (EACCES / local-disk only)
+        # — the silent accident this build path must never hide.
+        if not draft_nas_dir.exists():
+            raise BotBuildMigrationError(
+                f"draft NAS mount point missing: {draft_nas_dir} — refusing "
+                f"to restore onto an unmounted path; check the NAS mount"
+            )
+        self._chmod_nas_dir(
+            draft_nas_dir,
             error_message="chmod draft NAS directory failed",
             timeout_seconds=remaining_timeout(),
         )

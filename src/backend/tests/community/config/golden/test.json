@@ -79,6 +79,10 @@
     "openclaw": {
       "skills_repo_url": ""
     },
+    "publish_build": {
+      "mcp_catalog_required": true,
+      "nas_migration_required": true
+    },
     "skill_scan": {
       "auth_app_key": "agentclaw",
       "enable_scheduled_scan": false,
@@ -248,6 +252,7 @@
     },
     "workspace": {
       "aicoding_root": "~/.aicoding",
+      "arca_root": "/home/admin/.merge_nas",
       "claude_code_root": "~/.claude_code",
       "claude_code_session_root": "/home/admin/.claude",
       "deepseek_harness_root": "/home/admin/.dsh",

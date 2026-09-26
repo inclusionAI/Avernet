@@ -140,9 +140,17 @@ def get_bot_nas_dir(
     bot_id: str,
     engine_type: str,
     entity_type: str = "staff",
+    arca_root: str | Path | None = None,
 ) -> Path:
-    """Bot 远端 NAS 挂载目录: DEFAULT_ARCA_ROOT/get_bot_nas_storage_id"""
-    return DEFAULT_ARCA_ROOT / get_bot_nas_storage_id(entity_id, bot_id, engine_type, entity_type)
+    """Bot 远端 NAS 挂载目录: {arca_root}/get_bot_nas_storage_id
+
+    ``arca_root`` 由调用方经注入传入（``WorkspaceConfig.arca_root``，
+    DI 边界做 expanduser/abspath）；缺省回落 ``DEFAULT_ARCA_ROOT``。
+    无 NAS 挂载的部署在 workspace 块指向自己的共享目录即可。本函数
+    不读 env / 不碰配置链 —— core 里环境差异只经注入参数进来。
+    """
+    root = Path(arca_root).expanduser() if arca_root else DEFAULT_ARCA_ROOT
+    return root / get_bot_nas_storage_id(entity_id, bot_id, engine_type, entity_type)
 
 
 def get_bot_nas_storage_id(
@@ -351,8 +359,15 @@ class WorkspacePathFactory:
     """
 
     @inject
-    def __init__(self, skill_repo_sync: SkillRepoSyncPlugin) -> None:
+    def __init__(
+        self,
+        skill_repo_sync: SkillRepoSyncPlugin,
+        arca_root: str = DEFAULT_ARCA_ROOT,
+    ) -> None:
         self._skill_repo_sync = skill_repo_sync
+        # 部署的 NAS staging 根（WorkspaceConfig.arca_root 经 DI 注入；
+        # 直接构造回落 prod 默认）。core 不读 env —— 环境差异只经参数进来。
+        self._arca_root = arca_root
 
     def get_entity_identity_dir(
         self, entity_id: str, entity_type: str = "staff", engine_type: str = "openclaw"
@@ -373,7 +388,9 @@ class WorkspacePathFactory:
         self, entity_id: str, bot_id: str, engine_type: str, entity_type: str = "staff"
     ) -> Path:
         # NAS 路径 (/home/admin/.merge_nas/...) 跟 aidesktop 无关, 不翻译。
-        return get_bot_nas_dir(entity_id, bot_id, engine_type, entity_type)
+        return get_bot_nas_dir(
+            entity_id, bot_id, engine_type, entity_type, arca_root=self._arca_root
+        )
 
     def get_bot_nas_storage_id(
         self, entity_id: str, bot_id: str, engine_type: str, entity_type: str = "staff"

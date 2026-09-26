@@ -202,3 +202,64 @@ def test_entity_identity_dir_proj():
     with patch("agentclaw.community.core.workspace.path_factory.get_bolt_base_dir", return_value=Path("/base")):
         result = get_entity_identity_dir("proj123", "proj", "openclaw")
         assert result == Path("/base/proj_proj123/data")
+
+
+def test_get_bot_nas_dir_defaults_to_prod_arca_root(monkeypatch):
+    """未注入 arca_root 时回落生产默认（常量，不读 env / 配置链）。"""
+    from agentclaw.community.core.workspace.path_factory import (
+        DEFAULT_ARCA_ROOT,
+        get_bot_nas_dir,
+    )
+
+    monkeypatch.setenv("SERVER_ENV", "dev")
+
+    assert get_bot_nas_dir("user123", "bot456", "openclaw") == (
+        DEFAULT_ARCA_ROOT / "dev_staff_user123_openclaw_bot456"
+    )
+
+
+def test_get_bot_nas_dir_honors_injected_arca_root(monkeypatch, tmp_path):
+    """call-side 注入的根（DI: WorkspaceConfig.arca_root）按环境解析——
+    core 不读 env，环境差异只经参数进来（AGENTS.md composition-root 规则）。"""
+    from agentclaw.community.core.workspace.path_factory import get_bot_nas_dir
+
+    root = tmp_path / "shared-merge-nas"
+    monkeypatch.setenv("SERVER_ENV", "dev")
+
+    assert get_bot_nas_dir(
+        "user123", "bot456", "openclaw", arca_root=str(root)
+    ) == (root / "dev_staff_user123_openclaw_bot456")
+
+
+def test_factory_get_bot_nas_dir_uses_injected_root(monkeypatch, tmp_path):
+    """WorkspacePathFactory 把 DI 注入的 arca_root 流到模块函数。"""
+    from agentclaw.community.plugins.local.skill_repo_sync import (
+        LocalSkillRepoSyncPlugin,
+    )
+    from agentclaw.community.core.workspace.path_factory import (
+        WorkspacePathFactory,
+    )
+
+    root = tmp_path / "from-di"
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    factory = WorkspacePathFactory(
+        skill_repo_sync=LocalSkillRepoSyncPlugin(),
+        arca_root=str(root),
+    )
+
+    assert factory.get_bot_nas_dir("user123", "bot456", "openclaw") == (
+        root / "dev_staff_user123_openclaw_bot456"
+    )
+
+
+def test_get_bot_nas_dir_expands_user_fallback_root(monkeypatch):
+    """~ 前缀的注入根照常 expanduser（local 部署惯用 ~/.xxx 形态）。"""
+    import os
+    from agentclaw.community.core.workspace.path_factory import get_bot_nas_dir
+
+    monkeypatch.setenv("SERVER_ENV", "dev")
+    result = get_bot_nas_dir(
+        "user123", "bot456", "openclaw", arca_root="~/merge_nas_local"
+    )
+
+    assert result.parent == Path(os.path.expanduser("~")) / "merge_nas_local"
