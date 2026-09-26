@@ -414,14 +414,6 @@ impl UserIdentityPort for StaticHumanIdentity {
         Ok(None)
     }
 
-    async fn update_token(
-        &self,
-        _user_id: &str,
-        _token: &str,
-        _expire_at: u64,
-    ) -> Result<(), AuthError> {
-        Ok(())
-    }
 }
 
 struct RecordingSessions {

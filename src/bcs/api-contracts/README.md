@@ -2,6 +2,19 @@
 
 ## Public Event Contract
 
+## Authentication HTTP Contract
+
+`v1/authentication/contract.md` is the binding security-behavior narrative for
+the V1 OpenAPI auth facade (`/openapi/v1/auth/**`). The wire schema lives in
+`v1/openapi.yaml` and `v1/openapi/auth.yaml`; the narrative documents the
+source precedence chain, cookie protocol (the `__Host-bcs_oauth_login`
+challenge + multiple `Set-Cookie` on callback), the `sid`/`revision` JWT
+schema, the error matrix (incl. CAS-conflict `401`, DB fault `503`,
+corrupt-record `500`, best-effort-logout prohibition), and the shared-writer
+rollout constraints. Structural assertions on the checked-in YAML are in
+`src/bcs/scripts/test_api_auth_contract.py`; the design is in
+`src/bcs/docs/superpowers/specs/2026-09-18-v1-api-auth-plugin-chain-design.md`.
+
 `events/v1/catalog.yaml` is the authoritative inventory for public BCS Event
 types and registered family wildcards. `events/v1/event-envelope.schema.json`
 defines the versioned envelope plus the discriminated data schema for every

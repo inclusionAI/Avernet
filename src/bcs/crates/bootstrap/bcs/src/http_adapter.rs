@@ -773,10 +773,14 @@ mod tests {
             internal_bot_attributes_service: v1_state.internal_bot_attributes_service.clone(),
             openapi_v1: v1_state.openapi_v1,
             user_identity_port: None,
+            auth_session_identities: None,
+            oauth_session_engine: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
             admin_invocation_runs: Arc::new(bcs_http::state::AdminInvocationStore::default()),
             connect_service: Arc::new(bcs_test_support::NoopConnectService),
             admission_service: Arc::new(bcs_test_support::NoopAdmissionService),
+            // No `[api.auth]` section in the test config → compat mode.
+            built_api_auth: None,
         })
     }
 

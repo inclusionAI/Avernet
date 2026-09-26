@@ -263,6 +263,7 @@ dependencies = [
  "base64 0.22.1",
  "bcs",
  "bcs-api-http",
+ "bcs-app-auth",
  "bcs-app-bot",
  "bcs-app-collaboration-definition",
  "bcs-app-collaboration-template",
@@ -432,6 +433,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-app-auth",
  "bcs-config-api",
  "bcs-domain",
  "bcs-service-api",
@@ -453,6 +455,17 @@ dependencies = [
  "ulid",
  "url",
  "urlencoding",
+]
+
+[[package]]
+name = "bcs-app-auth"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-service-api",
+ "bcs-test-support",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -685,8 +698,12 @@ dependencies = [
  "axum",
  "bcs-auth-api",
  "bcs-jwt",
+ "bcs-test-support",
+ "sha2",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1002,6 +1019,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "toml",
+ "url",
  "urlencoding",
 ]
 
@@ -1273,6 +1291,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64 0.22.1",
+ "bcs-app-auth",
  "bcs-app-session",
  "bcs-auth-api",
  "bcs-auth-local",
@@ -2022,10 +2041,14 @@ name = "bcs-user-identity"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-db-mysql",
+ "bcs-jwt",
  "bcs-service-api",
  "bcs-test-support",
+ "mysql_async",
  "tokio",
  "tracing",
  "uuid",

@@ -2,10 +2,20 @@ use std::sync::Arc;
 
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_local::LocalSqliteDbPlugin;
+use bcs_service_api::port::repo::auth_session::{
+    AuthSessionRepoPort, AuthSessionScope, AuthSessionVersion, InstallAuthSession, RotateAuthSession,
+};
 use bcs_service_api::UserIdentityRepoPort;
 use bcs_user_identity::{DbUserIdentityStore, MemoryUserIdentityRepo};
 
-async fn run_contract<R: UserIdentityRepoPort + ?Sized>(repo: &R) {
+/// Task 11 coverage transfer: the conformance suite no longer exercises the
+/// removed unconditional `update_token` write; session lifecycle cases run
+/// through the strict install/rotate CAS surface (the same contract driven by
+/// the central session harness — see
+/// `crates/bootstrap/bcs/tests/conformance_auth_session_identity.rs`). The
+/// token-hash column the strict writes maintain stays observable via the
+/// legacy read-only `get_by_token` lookup.
+async fn run_contract<R: UserIdentityRepoPort + AuthSessionRepoPort + ?Sized>(repo: &R) {
     // First login allocates a 12-char internal id.
     let id1 = repo.ensure_identity("cookie", "12345", Some("张三"), None, "dev").await.unwrap();
     assert_eq!(id1.len(), 12);
@@ -33,8 +43,21 @@ async fn run_contract<R: UserIdentityRepoPort + ?Sized>(repo: &R) {
     assert!(repo.lookup_by_user_id("nonexistent", "cookie").await.is_none());
     assert!(repo.lookup_by_user_id(&id1, "google").await.is_none());
 
-    // update_token: write token, then find by token.
-    repo.update_token(&id1, "jwt-abc-123", 9999).await.unwrap();
+    // Strict install: write the session binding, then find by token hash.
+    let scope = AuthSessionScope { user_id: id1.clone(), provider: "cookie".into(), env: "dev".into() };
+    let revision = repo.read_session_revision(&scope).await.unwrap();
+    repo.install_login_session(InstallAuthSession {
+        scope: scope.clone(),
+        expected_revision: revision,
+        next: AuthSessionVersion {
+            session_id: "sid-conformance-1".into(),
+            revision: revision + 1,
+            token_hash: "jwt-abc-123".into(),
+        },
+        expires_at: 9999,
+    })
+    .await
+    .unwrap();
     let by_token = repo.get_by_token("jwt-abc-123").await.expect("should find by token");
     assert_eq!(by_token.user_id, id1);
     assert_eq!(by_token.auth_source, "cookie");
@@ -50,8 +73,22 @@ async fn run_contract<R: UserIdentityRepoPort + ?Sized>(repo: &R) {
     // get_by_token: unknown token returns None.
     assert!(repo.get_by_token("nonexistent-token").await.is_none());
 
-    // update_token: overwrite token (single-session model).
-    repo.update_token(&id1, "jwt-new-token", 10000).await.unwrap();
+    // Strict rotate: atomic single-session overwrite (revision-gated).
+    repo.rotate_session(RotateAuthSession {
+        scope: scope.clone(),
+        expected: AuthSessionVersion {
+            session_id: "sid-conformance-1".into(),
+            revision: revision + 1,
+            token_hash: "jwt-abc-123".into(),
+        },
+        next: AuthSessionVersion {
+            session_id: "sid-conformance-1".into(),
+            revision: revision + 1,
+            token_hash: "jwt-new-token".into(),
+        },
+        expires_at: 10000,
+        now: 0,
+    }).await.unwrap();
     assert!(repo.get_by_token("jwt-abc-123").await.is_none(), "old token should no longer match");
     let by_new = repo.get_by_token("jwt-new-token").await.expect("should find by new token");
     assert_eq!(by_new.user_id, id1);
@@ -82,7 +119,7 @@ async fn sqlite_store_passes_contract() {
 // MySQL conformance parity (Rule 25):
 //
 // `DbUserIdentityStore::mysql` and `::sqlite` are the SAME struct over the same
-// `dyn DbPlugin` SQL; `flavor` differs only in `update_token`'s timestamp
+// `dyn DbPlugin` SQL; `flavor` differs only in the session-write timestamp
 // expression (`FROM_UNIXTIME(?)` vs `datetime(?, 'unixepoch')`) — every other
 // statement is flavor-independent. The sqlite run above therefore exercises the
 // shared production code path. A real MySQL/OB server is not available in CI,
@@ -122,9 +159,12 @@ async fn sqlite_db() -> Arc<dyn DbPlugin> {
             token VARCHAR(64),
             token_expire_at TIMESTAMP,
             env VARCHAR(64) NOT NULL,
+            session_id TEXT,
+            session_revision INTEGER NOT NULL DEFAULT 0,
+            session_expires_at INTEGER NOT NULL DEFAULT 0,
             UNIQUE (user_id),
             UNIQUE (auth_source, external_user_id, env)
-        )",
+        ) -- mirrors migration 028 (auth_session_version).",
     ))
     .await
     .expect("create user identity table");

@@ -28,6 +28,9 @@ if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
     E2E_TESTS_STORIES+=("story_user_receives_group_event_webhooks")
     E2E_TESTS_STORIES+=("story_provider_callback_survives_slow_judge")
 fi
+if [[ "${BCS_E2E_ENABLE_API_AUTH:-0}" = "1" ]]; then
+    E2E_TESTS_STORIES+=("story_v1_api_auth_chain")
+fi
 
 require_status() {
     local desc="$1" expected="$2"
@@ -1757,4 +1760,67 @@ story_operator_coordinates_with_cli() {
     test_cli_chat
     test_cli_list_groups
     test_cli_friend
+}
+
+# Critical assertions:
+#   - The chain's gateway source verifies the same signed principal the
+#     collaboration story mints (no behavior drift vs compatibility mode).
+#   - refresh/logout authorize the cookie, NEVER a Gateway principal; a
+#     malformed cookie takes the strict engine's 401 path.
+#   - The login URL callback is {public_base_url}/callback/github with no
+#     auth-route prefix doubling.
+# Registered only when the singlebox stack enabled the V1 [api.auth] chain
+# (BCS_E2E_ENABLE_API_AUTH=1 — see scripts/modules/bcs.sh).
+story_v1_api_auth_chain() {
+    info "Story: V1 API auth chain verifies principals, gates cookie flows, and builds login URLs"
+    local public_prefix="/openapi/v1"
+    local signing_key principal github_url expected_callback
+    signing_key="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+    if ! principal=$(python3 "${SCRIPT_DIR}/group_session_ws_probe.py" principal \
+        --user-id "$BCS_MOCK_USER_ID" \
+        --username "$BCS_MOCK_USER_NICK_NAME" \
+        --tenant "bcs-e2e" \
+        --signing-key "$signing_key"); then
+        fail "Gateway Principal generation failed"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        return
+    fi
+
+    api_request_headers GET "${public_prefix}/collaboration/bots/mine?limit=20" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "chain gateway source accepts a signed principal" "200" || return
+
+    api_request_headers GET "${public_prefix}/auth/user" "" \
+        "Cookie: bcs_session=e2e-garbage-session-cookie"
+    require_status "strict engine rejects a malformed session cookie" "401" || return
+    assert_json_eq "malformed cookie uses the stable error envelope" \
+        "$RESPONSE" "data.error_code" "unauthenticated"
+
+    api_request_headers POST "${public_prefix}/auth/refresh" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "refresh without a session cookie is unauthorized" "401" || return
+    assert_json_eq "cookie-less refresh uses the stable error envelope" \
+        "$RESPONSE" "data.error_code" "unauthenticated"
+
+    api_request_headers POST "${public_prefix}/auth/logout" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "logout without a session cookie stays idempotent OK" "200" || return
+
+    api_request_headers GET "${public_prefix}/auth/url" "" ""
+    require_status "chain login URL list is served" "200" || return
+    assert_json_eq "github is the configured OAuth provider" \
+        "$RESPONSE" "data.providers.0.name" "github"
+    github_url=$(printf '%s' "$RESPONSE" | python3 -c '
+import json, sys
+body = json.load(sys.stdin)
+print(body["data"]["providers"][0]["url"])')
+    assert_not_empty "login URL is present" "$github_url" || return
+    expected_callback=$(urlencode "${BCS_API_BASE_URL}/openapi/v1/auth/callback/github")
+    assert_contains "login URL points at the GitHub authorize endpoint" \
+        "$github_url" "https://github.com/login/oauth/authorize"
+    assert_contains "login URL callback is {public_base_url}/callback/github without path doubling" \
+        "$github_url" "redirect_uri=${expected_callback}"
+    assert_not_contains "login URL must not repeat the auth route prefix" \
+        "$github_url" "auth%2Fopenapi"
 }

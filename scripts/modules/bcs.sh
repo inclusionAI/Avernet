@@ -262,11 +262,64 @@ prepare_bcs_runtime_config() {
         log_info "Removed unsupported OpenAPI-v1 block from hybrid BCS runtime config"
     fi
 
+    # E2E-only V1 [api.auth] chain (BCS_E2E_ENABLE_API_AUTH=1, set by the
+    # e2e coverage flows): append the new chain to the GENERATED runtime
+    # config so the e2e suite exercises it instead of compatibility mode.
+    # The gateway source verifies the signed X-Avernet-Principal that the
+    # e2e client already mints; github is registered with dummy secret
+    # material so the chain's OAuth-side construction (strict session
+    # engine, login facade, browser-bound login state) runs at startup.
+    # The github provider performs no network call unless a login callback
+    # exchange is attempted, and no e2e case exercises one.
+    if [ "${BCS_E2E_ENABLE_API_AUTH:-0}" = "1" ]; then
+        append_e2e_api_auth_config "$base_config" "$local_config"
+        # Secrets for the appended chain, resolved through the env secret
+        # provider (BCS_SECRET_<NAME>, hyphens/dots normalised to _, upper).
+        # The gateway source reuses the SAME dev principal signing key the
+        # gateway/BCS ends already share, so e2e principal traffic verifies
+        # exactly as in compatibility mode.
+        export BCS_SECRET_PRINCIPAL_SIGNING_KEY="${BCS_SECRET_PRINCIPAL_SIGNING_KEY:-${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}}"
+        export BCS_SECRET_E2E_API_SESSION_SIGNING_KEY="${BCS_SECRET_E2E_API_SESSION_SIGNING_KEY:-bcs-e2e-api-session-signing-key-not-for-prod}"
+        export BCS_SECRET_E2E_GITHUB_CLIENT_SECRET="${BCS_SECRET_E2E_GITHUB_CLIENT_SECRET:-bcs-e2e-github-client-secret-not-for-prod}"
+        log_info "Appended e2e V1 [api.auth] chain (BCS_E2E_ENABLE_API_AUTH=1) to the runtime config"
+    fi
+
     prepare_bcs_runtime_config_resources "$config_dir" || return 1
 
     BCS_CONFIG_DIR="$config_dir"
     export BCS_CONFIG_DIR
     log_info "Prepared BCS runtime config from ${template} -> ${base_config}"
+}
+
+# Append the e2e-only V1 [api.auth] chain block to generated runtime configs.
+# The generated config is recreated from the tracked template on every
+# prepare call, so the append never accumulates. Table layout mirrors
+# configs/bcs-config-example.toml Mode C (contract §4.1).
+append_e2e_api_auth_config() {
+    local config_file
+    for config_file in "$@"; do
+        cat >> "$config_file" << EOF
+
+# --- Appended by singlebox (BCS_E2E_ENABLE_API_AUTH=1): e2e-only V1 auth chain.
+[api.auth]
+chain = ["gateway", "github"]
+public_base_url = "http://127.0.0.1:${BCS_PORT}/openapi/v1/auth"
+session_signing_key_secret = "e2e-api-session-signing-key"
+session_idle_timeout_minutes = 30
+success_redirect_path = "/"
+trusted_browser_origins = ["http://localhost:8000", "http://127.0.0.1:8000"]
+
+[api.auth.gateway]
+issuers = ["gateway", "backend"]
+audience = "bcs"
+key_id = "bare"
+signing_key_secret = "principal-signing-key"
+
+[api.auth.github]
+client_id = "bcs-e2e-github-client"
+client_secret_secret = "e2e-github-client-secret"
+EOF
+    done
 }
 
 # Build BCS, bcs-cli, and bcs-admin.

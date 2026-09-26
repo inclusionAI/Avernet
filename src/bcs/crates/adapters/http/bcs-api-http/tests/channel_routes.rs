@@ -3,7 +3,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
-use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_api_http::{
+    ApiState, AuthenticationContext, CredentialKind, PrincipalVerificationError, PrincipalVerifier,
+    VerifiedRequestIdentity, router,
+};
 use bcs_domain::{BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap};
 use bcs_service_api::application::channel::{
     ChannelInboundError, ChannelService, ChannelUseCaseError, CreateBindingCommand, InboundMessage,
@@ -40,13 +43,20 @@ impl PrincipalVerifier for HeaderVerifier {
     async fn verify(
         &self,
         headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(self.caller.clone())
+            Ok(VerifiedRequestIdentity {
+                caller: self.caller.clone(),
+                authentication_context: AuthenticationContext {
+                    source: "test".to_string(),
+                    credential_kind: CredentialKind::GatewayPrincipalHeader,
+                },
+                display: Default::default(),
+            })
         } else {
             Err(PrincipalVerificationError::Missing)
         }

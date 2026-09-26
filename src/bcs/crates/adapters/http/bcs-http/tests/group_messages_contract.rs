@@ -76,14 +76,6 @@ impl UserIdentityPort for NoUserIdentity {
         Ok(None)
     }
 
-    async fn update_token(
-        &self,
-        _user_id: &str,
-        _token: &str,
-        _expire_at: u64,
-    ) -> Result<(), AuthError> {
-        Ok(())
-    }
 }
 
 fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
