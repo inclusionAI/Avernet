@@ -1,0 +1,90 @@
+# DeepSeek PR Bot (DSH-powered)
+#
+# Runs on a self-hosted runner with the "deepseek-runner" label.
+# Triggered by comments starting with "@deepseekReviewer" on a PR.
+# The comment body after "@deepseekReviewer" is passed as the task to DSH.
+# If empty, DSH performs a full code review by default.
+#
+# Examples:
+#   @deepseekReviewer review
+#   @deepseekReviewer Does this PR change deployment logic?
+#   @deepseekReviewer Does this break the ABAC design?
+#
+# Setup:
+#   1. Deploy a self-hosted runner with the "deepseek-runner" label (see runner/setup.sh).
+#   2. Install DSH (dsh CLI) on the runner machine.
+#   3. Each developer adds DEEPSEEK_API_KEY_<username> in repo Settings → Secrets.
+#   4. Drop this file into the target repo's .github/workflows/ directory.
+name: DeepSeek PR Bot
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: dsh-review-${{ github.event.issue.number }}-${{ github.event.comment.id }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    name: DSH task
+    if: |
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '@deepseekReviewer') &&
+      !contains(github.event.comment.body, '<!-- dsh-review -->') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: [self-hosted, deepseek-runner]
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    steps:
+      - name: Run DSH task
+        run: |
+          set -e
+          PR_NUMBER="${{ github.event.issue.number }}"
+          TRIGGER_USER="${{ github.event.comment.user.login }}"
+          LOG_DIR="/home/avernet/review-config/logs"
+          mkdir -p "${LOG_DIR}"
+          LOG_FILE="${LOG_DIR}/pr-${PR_NUMBER}-$(date +%Y%m%d-%H%M%S).log"
+
+          # Extract the task from the comment: everything after the trigger word
+          RAW_BODY="${{ github.event.comment.body }}"
+          # The trigger is "@deepseekReviewer" with optional leading spaces
+          TASK=$(echo "${RAW_BODY}" | sed 's/^[[:space:]]*@deepseekReviewer[[:space:]]*//')
+
+          # Default to "review" if nothing follows
+          if [ -z "${TASK}" ]; then
+            TASK="review"
+          fi
+
+          cat > /tmp/task.txt <<'DSHTASK'
+          You are working on a pull request. The user asked:
+          
+          DSHTASK
+          echo "\"${TASK}\"" >> /tmp/task.txt
+
+          # Append the task prompt template from the runner host
+          cat /home/avernet/review-config/dsh-task-prompt.md >> /tmp/task.txt
+
+          echo "Starting DSH task for PR #${PR_NUMBER}: ${TASK}"
+          dsh --profile headless --patch /home/avernet/review-config/dsh-patch.yml "$(cat /tmp/task.txt)" 2>&1 | tee "${LOG_FILE}"
+          echo "DSH task completed. Log saved to ${LOG_FILE}"
+
+      - name: Report error on failure
+        if: failure()
+        run: |
+          gh pr comment "${{ github.event.issue.number }}" \
+            -R "${GH_REPO}" \
+            --body "## 🤖 DeepSeek
+
+          <sub>Triggered by @${{ github.event.comment.user.login }}</sub>
+
+          ---
+
+          **Error:** Task failed. Check [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
