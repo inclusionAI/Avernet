@@ -27,7 +27,9 @@ stands alone and is wired into the DI graph for callers to inject.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.engines.registry import prepare_instance_restart
+from agentclaw.community.core.bot_management.engines.registry import (
+    prepare_instance_restart, resolve_restart_strategy,
+)
 
 import asyncio
 import traceback
@@ -256,7 +258,6 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         owner_id: str,
         force_upgrade: bool = False,
         iam_token: Optional[str] = None,
-        _durable_worker: bool = False,
     ) -> Dict[str, Any]:
         """Return the caller's container ``connection``.
 
@@ -281,18 +282,28 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
                 silently swallowed).
         """
 
-        if force_upgrade and not _durable_worker and self._task_queue_service is not None:
+        if force_upgrade:
             bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-            if bot and str(bot.get("active_engine") or bot.get("engine_type") or "").lower() in {"aicoding", "claude_code"}:
-                from agentclaw.community.core.expert_chat.services.caller_restart_task import enqueue_caller_restart
-                enqueue_caller_restart(
-                    self._task_queue_service, user_id=user_id,
-                    bot_id=bot_id, owner_id=owner_id,
-                )
-                instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
-                return {"instance": instance, "connection": None, "need_poll": True,
-                        "restart_queued": True}
+            if bot:
+                ctx, strategy = resolve_restart_strategy(bot)
+                if strategy.submit_restart(
+                    ctx, scope="caller", task_queue=self._task_queue_service,
+                    payload={"user_id": user_id, "bot_id": bot_id, "owner_id": owner_id},
+                ):
+                    instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
+                    return {"instance": instance, "connection": None, "need_poll": True,
+                            "restart_queued": True}
 
+        return await self._get_caller_connection(
+            user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+            force_upgrade=force_upgrade, iam_token=iam_token,
+        )
+
+    async def _get_caller_connection(
+        self, user_id: str, bot_id: str, owner_id: str,
+        force_upgrade: bool = False, iam_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Original lifecycle continuation; queue workers do not re-submit."""
         publish_record, migration_path = self._resolve_build_artifact(
             bot_id, owner_id
         )

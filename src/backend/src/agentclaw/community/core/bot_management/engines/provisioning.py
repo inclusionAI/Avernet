@@ -254,6 +254,17 @@ class EngineProvisioningStrategy(ABC):
         """Async consumers use the same precondition; default performs no I/O."""
         return self.prepare_restart(ctx, **kwargs)
 
+    def submit_restart(self, ctx: BotProvisioningContext, *, scope: str,
+                       task_queue, payload: dict) -> bool:
+        """Optionally persist a restart before the caller returns pending.
+
+        False leaves execution to the existing caller; True means the task was
+        durably accepted (including joining an existing live task). Enqueue
+        failures propagate. Default engines never enqueue or inspect payloads.
+        Scope is ``bot`` or ``caller``; payload contains the original arguments.
+        """
+        return False
+
     async def execute_restart(self, ctx: BotProvisioningContext, restart, **kwargs):
         """Preserve inline execution unless the engine requires blocking work offload."""
         return restart(**kwargs)

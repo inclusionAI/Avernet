@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Callable, TYPE_CHECKING
 
-from agentclaw.community.core.task_queue.durable_restart import DurableRestartTaskHandler
+from agentclaw.community.core.bot_management.engines.aicoding.durable_restart import DurableRestartTaskHandler
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.kernel.lifecycle import LifecycleBase

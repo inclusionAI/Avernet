@@ -153,7 +153,7 @@ from agentclaw.community.core.bot_management.services.teclaw_provision_service i
 from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
     TeclawPublishTaskLifecycle,
 )
-from agentclaw.community.core.bot_management.services.restart_task import (
+from agentclaw.community.core.bot_management.engines.aicoding.bot_restart_task import (
     BotRestartTaskLifecycle,
 )
 from agentclaw.community.core.bot_management.services.template_service import (

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from injector import Binder, Module, inject, provider, singleton
+from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
 from agentclaw.community.api.human_bot_friendship_service import (
@@ -28,7 +28,7 @@ from agentclaw.community.core.expert_chat.services.expert_chat_instance_service 
     ExpertChatInstanceService,
 )
 from agentclaw.community.core.expert_chat.services.expert_chat_service import ExpertChatService
-from agentclaw.community.core.expert_chat.services.caller_restart_task import CallerRestartTaskLifecycle
+from agentclaw.community.core.bot_management.engines.aicoding.caller_restart_task import CallerRestartTaskLifecycle
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.bot_chat.bcn_friendship import (
     BcnHumanBotFriendshipService,
@@ -92,11 +92,11 @@ class ExpertChatModule(Module):
     @provider
     @inject
     def caller_restart_task_lifecycle(
-        self, registry: HandlerRegistry, injector
+        self, registry: HandlerRegistry, injector: Injector
     ) -> CallerRestartTaskLifecycle:
         return CallerRestartTaskLifecycle(
             registry=registry,
-            service_provider=lambda: injector.get(ExpertChatInstanceService),
+            restart=lambda **kwargs: injector.get(ExpertChatInstanceService)._get_caller_connection(**kwargs),
         )
 
     @singleton

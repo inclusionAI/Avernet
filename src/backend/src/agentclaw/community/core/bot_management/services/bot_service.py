@@ -4626,21 +4626,9 @@ class BotService(BotServiceProtocol):
         """
         bot = self.get_bot(kwargs['bot_id'], kwargs['user_id'])
         ctx, strategy = resolve_restart_strategy(bot)
-        from agentclaw.community.core.task_queue.services.task_queue_service import (
-            TaskQueueService,
-        )
-        if isinstance(self._task_queue_service, TaskQueueService) and getattr(
-            strategy, 'requires_durable_restart', False
+        if strategy.submit_restart(
+            ctx, scope="bot", task_queue=self._task_queue_service, payload=kwargs,
         ):
-            from agentclaw.community.core.bot_management.services.restart_task import (
-                enqueue_restart,
-            )
-            enqueue_restart(
-                self._task_queue_service,
-                bot_id=kwargs['bot_id'], user_id=kwargs['user_id'],
-                nick_name=kwargs.get('nick_name'),
-                extra_configs=kwargs.get('extra_configs'),
-            )
             result = dict(bot)
             result['status'] = 'PENDING'
             result['restart_queued'] = True

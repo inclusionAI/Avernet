@@ -315,6 +315,7 @@ async def test_http_dispatch_preserves_non_coding_execution_thread(engine):
     from agentclaw.community.core.bot_management.services.bot_service import BotService
     service = Mock()
     service.get_bot.return_value = {'active_engine': engine}
+    service._task_queue_service = None
     current_thread = threading.get_ident()
     service.restart_bot.side_effect = lambda **kwargs: threading.get_ident()
     with patch.object(backup.asyncio, 'to_thread', side_effect=AssertionError('unexpected offload')):
@@ -330,6 +331,7 @@ async def test_coding_execution_keeps_event_loop_available(engine):
     from agentclaw.community.core.bot_management.services.bot_service import BotService
     service = Mock()
     service.get_bot.return_value = {'active_engine': engine}
+    service._task_queue_service = None
     started, release = threading.Event(), threading.Event()
     current_thread = threading.get_ident()
 
