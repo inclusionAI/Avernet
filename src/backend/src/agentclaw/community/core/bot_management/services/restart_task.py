@@ -7,11 +7,11 @@ backup work out of the request without creating a second restart implementation.
 """
 from __future__ import annotations
 
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
+from agentclaw.community.core.task_queue.durable_restart import DurableRestartTaskHandler
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
-from agentclaw.community.core.task_queue.types import Complete, Fail, TaskOutcome
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 
 if TYPE_CHECKING:
@@ -34,29 +34,17 @@ def enqueue_restart(task_queue_service: TaskQueueService, *, bot_id: str, user_i
     )
 
 
-class BotRestartTaskHandler:
+class BotRestartTaskHandler(DurableRestartTaskHandler):
     def __init__(self, *, bot_service_provider: Callable[[], "BotService"]) -> None:
-        self._bot_service_provider = bot_service_provider
-
-    @property
-    def task_type(self) -> str:
-        return RESTART_TASK
-
-    def handle(self, payload: Optional[dict]) -> TaskOutcome:
-        if not isinstance(payload, dict) or not isinstance(payload.get("bot_id"), str) \
-                or not isinstance(payload.get("user_id"), str):
-            return Fail("invalid bot restart task payload")
-        try:
-            self._bot_service_provider().restart_bot(
+        super().__init__(
+            task_type=RESTART_TASK,
+            required_fields=("bot_id", "user_id"),
+            continuation=lambda payload: bot_service_provider().restart_bot(
                 bot_id=payload["bot_id"], user_id=payload["user_id"],
                 nick_name=payload.get("nick_name"),
                 extra_configs=payload.get("extra_configs"),
-            )
-        except Exception as exc:
-            # The worker's normal exception path retries with its durable lease;
-            # this explicit failure is reserved for deterministic lifecycle errors.
-            return Fail(f"bot restart failed: {type(exc).__name__}")
-        return Complete()
+            ),
+        )
 
 
 class BotRestartTaskLifecycle(LifecycleBase):

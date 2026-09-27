@@ -1,12 +1,11 @@
 """Durable caller-container restart task."""
 from __future__ import annotations
 
-import asyncio
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 
+from agentclaw.community.core.task_queue.durable_restart import DurableRestartTaskHandler
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
-from agentclaw.community.core.task_queue.types import Complete, Fail, TaskOutcome
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 
 if TYPE_CHECKING:
@@ -25,27 +24,17 @@ def enqueue_caller_restart(queue: TaskQueueService, *, user_id: str, bot_id: str
     )
 
 
-class CallerRestartTaskHandler:
+class CallerRestartTaskHandler(DurableRestartTaskHandler):
     def __init__(self, *, service_provider: Callable[[], "ExpertChatInstanceService"]):
-        self._service_provider = service_provider
-
-    @property
-    def task_type(self) -> str:
-        return RESTART_TASK
-
-    def handle(self, payload: Optional[dict]) -> TaskOutcome:
-        if not isinstance(payload, dict) or not all(isinstance(payload.get(k), str)
-                                                     for k in ("user_id", "bot_id", "owner_id")):
-            return Fail("invalid caller restart task payload")
-        try:
-            asyncio.run(self._service_provider().get_caller_connection(
+        super().__init__(
+            task_type=RESTART_TASK,
+            required_fields=("user_id", "bot_id", "owner_id"),
+            continuation=lambda payload: service_provider().get_caller_connection(
                 user_id=payload["user_id"], bot_id=payload["bot_id"],
                 owner_id=payload["owner_id"], force_upgrade=True,
                 _durable_worker=True,
-            ))
-        except Exception as exc:
-            return Fail(f"caller restart failed: {type(exc).__name__}")
-        return Complete()
+            ),
+        )
 
 
 class CallerRestartTaskLifecycle(LifecycleBase):
