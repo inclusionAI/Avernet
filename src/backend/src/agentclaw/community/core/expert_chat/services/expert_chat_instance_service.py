@@ -301,7 +301,8 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
 
     async def _get_caller_connection(
         self, user_id: str, bot_id: str, owner_id: str,
-        force_upgrade: bool = False, iam_token: Optional[str] = None,
+        force_upgrade: bool = False,
+        iam_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Original lifecycle continuation; queue workers do not re-submit."""
         publish_record, migration_path = self._resolve_build_artifact(
