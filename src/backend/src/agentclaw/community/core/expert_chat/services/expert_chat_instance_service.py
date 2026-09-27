@@ -74,6 +74,7 @@ from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol import ExpertChatInstanceServiceProtocol
+from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 
 logger = get_logger()
 
@@ -105,6 +106,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         token_provider: CallerTokenProviderProtocol,
         runtime_updater: CallerRuntimeUpdaterProtocol,
         common_config_service: CommonConfigService,
+        task_queue_service: TaskQueueService | None = None,
     ) -> None:
         self._instance_repo = instance_repo
         self._baas = baas_service
@@ -117,6 +119,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         self._token_provider = token_provider
         self._runtime_updater = runtime_updater
         self._common_config_service = common_config_service
+        self._task_queue_service = task_queue_service
         self._image_policy_resolver = PublishImagePolicyResolver(
             publish_repository=bot_publish_repo,
             common_config_service=common_config_service,
@@ -253,6 +256,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         owner_id: str,
         force_upgrade: bool = False,
         iam_token: Optional[str] = None,
+        _durable_worker: bool = False,
     ) -> Dict[str, Any]:
         """Return the caller's container ``connection``.
 
@@ -276,6 +280,18 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
             BaasServiceError: baas write failures propagate (D5 — never
                 silently swallowed).
         """
+
+        if force_upgrade and not _durable_worker and self._task_queue_service is not None:
+            bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+            if bot and str(bot.get("active_engine") or bot.get("engine_type") or "").lower() in {"aicoding", "claude_code"}:
+                from agentclaw.community.core.expert_chat.services.caller_restart_task import enqueue_caller_restart
+                enqueue_caller_restart(
+                    self._task_queue_service, user_id=user_id,
+                    bot_id=bot_id, owner_id=owner_id,
+                )
+                instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
+                return {"instance": instance, "connection": None, "need_poll": True,
+                        "restart_queued": True}
 
         publish_record, migration_path = self._resolve_build_artifact(
             bot_id, owner_id

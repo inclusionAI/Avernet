@@ -28,6 +28,8 @@ from agentclaw.community.core.expert_chat.services.expert_chat_instance_service 
     ExpertChatInstanceService,
 )
 from agentclaw.community.core.expert_chat.services.expert_chat_service import ExpertChatService
+from agentclaw.community.core.expert_chat.services.caller_restart_task import CallerRestartTaskLifecycle
+from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.bot_chat.bcn_friendship import (
     BcnHumanBotFriendshipService,
 )
@@ -85,6 +87,17 @@ class ExpertChatModule(Module):
         self, svc: ExpertChatInstanceService
     ) -> ExpertChatInstanceServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def caller_restart_task_lifecycle(
+        self, registry: HandlerRegistry, injector
+    ) -> CallerRestartTaskLifecycle:
+        return CallerRestartTaskLifecycle(
+            registry=registry,
+            service_provider=lambda: injector.get(ExpertChatInstanceService),
+        )
 
     @singleton
     @provider

@@ -4617,9 +4617,34 @@ class BotService(BotServiceProtocol):
         return updated_bot
 
     async def restart_bot_async(self, **kwargs) -> Dict[str, Any]:
-        """HTTP adapter entrypoint; retain the synchronous lifecycle and engine policy."""
+        """Submit coding-engine restarts durably; keep other engines unchanged.
+
+        The backup gate can legitimately take many minutes.  It must not be
+        awaited by an HTTP request, and it must not be a fire-and-forget task.
+        The existing synchronous lifecycle remains the single executor inside
+        the durable handler.
+        """
         bot = self.get_bot(kwargs['bot_id'], kwargs['user_id'])
         ctx, strategy = resolve_restart_strategy(bot)
+        from agentclaw.community.core.task_queue.services.task_queue_service import (
+            TaskQueueService,
+        )
+        if isinstance(self._task_queue_service, TaskQueueService) and getattr(
+            strategy, 'requires_durable_restart', False
+        ):
+            from agentclaw.community.core.bot_management.services.restart_task import (
+                enqueue_restart,
+            )
+            enqueue_restart(
+                self._task_queue_service,
+                bot_id=kwargs['bot_id'], user_id=kwargs['user_id'],
+                nick_name=kwargs.get('nick_name'),
+                extra_configs=kwargs.get('extra_configs'),
+            )
+            result = dict(bot)
+            result['status'] = 'PENDING'
+            result['restart_queued'] = True
+            return result
         return await strategy.execute_restart(ctx, self.restart_bot, **kwargs)
 
     def restart_bot(

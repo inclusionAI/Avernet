@@ -164,6 +164,10 @@ class AicodingBaasEngineBucketResolver:
 
 class AicodingProvisioningStrategy(AicodingRestartBackupMixin, AicodingHostedWorkspaceMixin, EngineProvisioningStrategy):
     """Provisioning strategy shared by ``aicoding`` and ``claude_code`` engines."""
+
+    # Only this engine has the potentially long, fail-closed restart backup
+    # precondition.  Other engines retain their original HTTP execution mode.
+    requires_durable_restart = True
     def __init__(self, engine_type: str) -> None:
         self._engine_type = engine_type
 
