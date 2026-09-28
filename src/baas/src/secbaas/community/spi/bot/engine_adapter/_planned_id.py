@@ -8,7 +8,8 @@ def extract_session_key_from_planned_id(planned_id: str) -> str:
 
     planned id 格式：
     - openclaw → agent:main:session:{key}:user:{user_id}
-    - claude_code / teclaw → agent:{tc_bot_id}:session:{key}:user:{user_id}
+    - aicoding / claude_code → agent:{user_id}:session:{key}:user:{tc_bot_id}
+    - 其余（基类默认）→ agent:{tc_bot_id}:session:{key}:user:{user_id}
 
     adapter 的 create_session(uuid=...) 期望接收裸 key（如 c03ad14d-...），
     而非完整 planned id。本函数提取 ``session:`` 与 ``:user:`` 之间的部分。
