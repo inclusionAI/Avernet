@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback } from 'react'
 import { approvalDisplay, type ApprovalDisplay } from '../../shared/approval-display'
 import { formatDuration } from '../utils/time'
 import { useParams } from 'react-router-dom'
+import {
+  ApprovalLoginRequiredError,
+  beginApprovalLogin,
+  clearApprovalLoginAttempt,
+  fetchApprovalJson,
+} from './approval-session-fetch'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -98,22 +104,15 @@ async function resolveApproval(
   comment?: string,
   detail?: Record<string, unknown>,
 ): Promise<ResolveResult> {
-  const res = await fetch(`/api/approval/${id}/resolve/session`, {
+  return fetchApprovalJson<ResolveResult>(`/api/approval/${id}/resolve/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, comment, detail }),
   })
-  const body = await res.json() as ResolveResult
-  if (!res.ok) {
-    return { ...body, error: body.message || body.error || `HTTP ${res.status}` }
-  }
-  return body
 }
 
 async function pollStatus(id: number): Promise<StatusResult> {
-  const res = await fetch(`/api/approval/${id}/status`)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
+  return fetchApprovalJson<StatusResult>(`/api/approval/${id}/status`)
 }
 
 // ── Format helper ──────────────────────────────────────────────────────
@@ -520,15 +519,7 @@ export default function Approval() {
     let cancelled = false
     const url = `/api/approval/${approvalId}`
 
-    fetch(url)
-      .then((res) => {
-        if (!res.ok) {
-          return res.json().catch(() => ({})).then((body) => {
-            throw new Error(body.message || `HTTP ${res.status}`)
-          })
-        }
-        return res.json()
-      })
+    fetchApprovalJson<ApprovalData>(url)
       .then((d: ApprovalData) => {
         if (!cancelled) {
           setData(d)
@@ -558,6 +549,13 @@ export default function Approval() {
       })
       .catch((err) => {
         if (!cancelled) {
+          if (err instanceof ApprovalLoginRequiredError) {
+            if (!beginApprovalLogin()) {
+              setError('未登录或登录状态已失效，请刷新页面后重试')
+              setLoading(false)
+            }
+            return
+          }
           setError(err instanceof Error ? err.message : '加载审批数据失败')
           setLoading(false)
         }
@@ -577,7 +575,9 @@ export default function Approval() {
               : prev,
           )
         })
-        .catch(() => { /* ignore */ })
+        .catch((err) => {
+          if (err instanceof ApprovalLoginRequiredError) beginApprovalLogin()
+        })
     }, 3000)
     return () => clearInterval(interval)
   }, [approvalId, data?.status])
@@ -603,11 +603,18 @@ export default function Approval() {
         const res = await resolveApproval(approvalId, action, comment || undefined, detail)
         setResult(res)
         if (res.ok) {
+          clearApprovalLoginAttempt()
           const freshUrl = `/api/approval/${approvalId}`
-          const fresh = await (await fetch(freshUrl)).json()
+          const fresh = await fetchApprovalJson<ApprovalData>(freshUrl)
           setData(fresh)
         }
       } catch (err) {
+        if (err instanceof ApprovalLoginRequiredError) {
+          if (!beginApprovalLogin()) {
+            setResult({ error: '未登录或登录状态已失效，请刷新页面后重试' })
+          }
+          return
+        }
         setResult({ error: err instanceof Error ? err.message : '操作失败' })
       } finally {
         setActionLoading(false)
