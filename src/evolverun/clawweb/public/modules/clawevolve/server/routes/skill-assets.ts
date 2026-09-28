@@ -191,7 +191,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     const space = await registrationSpace(input.hostSpaces, requestIdentity, req.body?.spaceId);
     const existing = await input.repo.findByExternalSkill(requestIdentity.userId, botId, skillId);
     if (existing) {
-      if (space && existing.space_id !== space.id) {
+      if ((existing.space_id ?? null) !== (space?.id ?? null)) {
         res.status(409).json({ error: "该 Skill 已登记在其他空间，不能通过重复登记变更归属" }); return;
       }
       const metadata = await displayMetadata([botId], requestIdentity);

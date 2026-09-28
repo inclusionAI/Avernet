@@ -22,22 +22,20 @@ export default function SkillCenter() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
 
-  const loadAssets = async () => {
-    const result = await api.evolve.listSkillAssets()
-    setAssets(result.items)
-  }
-
   useEffect(() => {
     let active = true
     setLoading(true)
     setError('')
-    void Promise.all([
+    void Promise.allSettled([
       api.evolve.listSkillAssets(),
       user?.userId ? api.bots.list({ ownerId: user.userId, status: 'all' }) : Promise.resolve({ bots: [] as DirectoryBot[] }),
     ]).then(([result, directory]) => {
       if (!active) return
-      setAssets(result.items)
-      setBots(directory.bots)
+      if (result.status === 'fulfilled') setAssets(result.value.items)
+      if (directory.status === 'fulfilled') setBots(directory.value.bots)
+      const failure = result.status === 'rejected' ? result.reason
+        : directory.status === 'rejected' ? directory.reason : null
+      if (failure) setError(failure instanceof Error ? failure.message : '技能中心加载失败')
     }).catch((reason) => {
       if (active) setError(reason instanceof Error ? reason.message : '技能中心加载失败')
     }).finally(() => {
@@ -75,8 +73,7 @@ export default function SkillCenter() {
     </section>
     {error && !showRegister && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     {launch && <SkillTaskLaunchDialog key={`${launch.asset.assetId}:${launch.action}`} asset={launch.asset} action={launch.action} returnTo="/evolve/skills" onClose={() => setLaunch(null)} />}
-    {showRegister && <SkillRegistrationDialog bots={bots} botsLoading={loading} onClose={() => setShowRegister(false)} onRegistered={async asset => {
-      await loadAssets()
+    {showRegister && <SkillRegistrationDialog bots={bots} botsLoading={loading} onClose={() => setShowRegister(false)} onRegistered={asset => {
       setShowRegister(false)
       navigate(`/evolve/skills/${encodeURIComponent(asset.assetId)}`)
     }} />}

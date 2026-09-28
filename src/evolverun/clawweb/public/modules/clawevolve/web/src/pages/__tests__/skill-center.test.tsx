@@ -144,6 +144,24 @@ describe('Skill center asset list and recorded events', () => {
     await waitFor(() => expect(api.evolve.getSkillVersionContent).toHaveBeenCalledWith('ASSET-1', 'VERSION-1'))
   })
 
+  it('renders a Markdown event summary as content rather than a plain-text title', async () => {
+    const summary = '# 加固总结\n\n## 检查结果\n\n- **保留业务语义**\n\n| 文件 | 结果 |\n| --- | --- |\n| `SKILL.md` | 已检查 |\n\n<script>alert(1)</script>\n\n![external](https://example.test/image.png)'
+    api.evolve.getSkillAsset.mockResolvedValue(asset)
+    api.evolve.getSkillAssetHistory.mockResolvedValue({ events: [{
+      eventId: 'HARDEN-1', type: 'hardening', status: 'waiting_user_input', taskId: 'TASK-HARDEN',
+      summary, outcome: null, actorType: 'user', actorId: 'owner', startedAt: 1789060000,
+    }] })
+    const view = render(<MemoryRouter initialEntries={['/evolve/skills/ASSET-1?selected=task:TASK-HARDEN&view=task']}><SkillDetail /></MemoryRouter>)
+    await screen.findByRole('heading', { name: '加固任务', level: 3 })
+    expect(screen.getByRole('heading', { name: '加固总结' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '检查结果' })).toBeTruthy()
+    expect(screen.getByRole('cell', { name: 'SKILL.md' }).querySelector('code')).toBeTruthy()
+    expect(screen.getByText('保留业务语义').tagName).toBe('STRONG')
+    expect(view.container.querySelector('script')).toBeNull()
+    expect(view.container.querySelector('img')).toBeNull()
+    expect(screen.getByRole('link', { name: '去处理' }).getAttribute('href')).toContain('/evolve/runs/TASK-HARDEN')
+  })
+
   it('creates a new Skill version from direct editing or package upload', async () => {
     const upgraded = {
       ...asset, currentVersion: 'v3',
@@ -300,7 +318,7 @@ describe('Skill center asset list and recorded events', () => {
     api.evolve.getSkillVersionContent.mockResolvedValue({ files: [{ path: 'SKILL.md', text: true }], selected: { path: 'SKILL.md', content: 'Current content' } })
     api.evolve.getSkillVersionDiff.mockResolvedValue({ baseline: { version: 'v1' }, files: [] })
     render(<MemoryRouter initialEntries={['/evolve/skills/ASSET-1?selected=task%3ATASK-WAIT&view=task&backTo=%2Fevolve%2Fskills%2Fevents']}><SkillDetail /></MemoryRouter>)
-    await screen.findByRole('heading', { name: '加固信息待确认' })
+    await screen.findByRole('heading', { name: '诊断任务', level: 3 })
     expect(screen.getByRole('button', { name: '← 返回技能事件日志' })).toBeTruthy()
     expect(screen.getByText('2 个版本 · 2 次诊断 · 0 次加固 · 0 次优化')).toBeTruthy()
     expect(screen.getByText('历史诊断')).toBeTruthy()

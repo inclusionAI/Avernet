@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, type EvolveSkillAsset, type EvolveSkillEvent } from '../api/client'
 
@@ -78,7 +80,7 @@ function SkillHistoryTimeline({ asset, events, selection, onSelect }: {
       <span className={`absolute -left-[1.35rem] top-4 h-2.5 w-2.5 rounded-full ring-4 ring-white ${event.type === 'diagnosis' ? 'bg-amber-400' : event.type === 'hardening' ? 'bg-violet-500' : 'bg-emerald-500'}`} />
       <span className="flex items-center justify-between gap-2"><span className={`rounded-md px-2 py-1 text-[11px] font-medium ${eventTones[event.type]}`}>{eventNames[event.type]}</span><span className="text-[10px] text-gray-400">{formatStepTime(event.startedAt)}</span></span>
       <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusTones[event.status]}`}>{statusNames[event.status]}</span>
-      {event.summary && <span className="mt-1.5 block truncate text-xs text-gray-500" title={event.summary}>{event.summary}</span>}
+      {event.summary && <span className="mt-1.5 block truncate text-xs text-gray-500"><ReactMarkdown allowedElements={[]} unwrapDisallowed skipHtml>{event.summary.split('\n').find((line) => line.trim()) ?? ''}</ReactMarkdown></span>}
       {(event.versionFrom || event.versionTo) && <span className="mt-1 block font-mono text-[10px] text-gray-400">{event.versionFrom?.version ?? '—'}{event.versionTo ? ` → ${event.versionTo.version}` : ''}</span>}
     </button>
   }
@@ -113,7 +115,10 @@ function EventSummary({ event, returnTo }: { event: EvolveSkillEvent; returnTo: 
   return <div className="space-y-5 p-5">
     {event.status === 'waiting_user_input' && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"><div><p className="text-sm font-semibold text-amber-900">等待用户输入</p><p className="mt-1 text-xs text-amber-700">任务需要完成交互后才能继续。</p></div>{event.taskId && <Link className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white hover:bg-amber-700" to={taskDetailPath(event.taskId, returnTo)}>去处理</Link>}</div>}
     <div className="rounded-xl border border-gray-200 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3"><div><span className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${eventTones[event.type]}`}>{eventNames[event.type]}</span><h3 className="mt-3 text-lg font-semibold text-gray-950">{event.summary || `${eventNames[event.type]}任务`}</h3><p className="mt-1 font-mono text-xs text-gray-400">{event.taskId ?? event.eventId}</p></div><span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusTones[event.status]}`}>{statusNames[event.status]}</span></div>
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><span className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${eventTones[event.type]}`}>{eventNames[event.type]}</span><h3 className="mt-3 text-lg font-semibold text-gray-950">{`${eventNames[event.type]}任务`}</h3><p className="mt-1 font-mono text-xs text-gray-400">{event.taskId ?? event.eventId}</p></div><span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusTones[event.status]}`}>{statusNames[event.status]}</span></div>
+      {event.summary && <div className="mt-4 space-y-3 overflow-x-auto break-words text-sm leading-6 text-gray-800 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_li]:ml-5 [&_ul]:list-disc [&_ol]:list-decimal [&_pre]:overflow-auto [&_pre]:whitespace-pre-wrap [&_table]:w-full [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-50 [&_th]:px-3 [&_th]:py-2 [&_td]:border [&_td]:border-gray-200 [&_td]:px-3 [&_td]:py-2">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={{ img: ({ alt }) => <span>{alt}</span> }}>{event.summary}</ReactMarkdown>
+      </div>}
       {event.outcome && <p className="mt-4 whitespace-pre-wrap rounded-lg bg-gray-50 px-3 py-2 text-sm leading-6 text-gray-700">{event.outcome}</p>}
       <dl className="mt-4 grid gap-3 text-xs text-gray-500 sm:grid-cols-2"><div><dt className="text-gray-400">版本</dt><dd className="mt-1 font-mono text-gray-700">{versionText}</dd></div><div><dt className="text-gray-400">发起时间</dt><dd className="mt-1 text-gray-700">{formatStepTime(event.startedAt)}</dd></div><div><dt className="text-gray-400">完成时间</dt><dd className="mt-1 text-gray-700">{formatStepTime(event.completedAt)}</dd></div><div><dt className="text-gray-400">发起人</dt><dd className="mt-1 font-mono text-gray-700">{event.actorType === 'system' ? '系统' : event.actorId ?? '—'}</dd></div></dl>
     </div>
