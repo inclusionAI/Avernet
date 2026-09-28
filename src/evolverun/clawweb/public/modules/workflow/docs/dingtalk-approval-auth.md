@@ -12,6 +12,12 @@ from the ClawWeb login request and checks that server-verified user against the
 approval record. The browser does not send an `empId`, and this path does not
 require the DingTalk JSAPI or an H5 application-domain allowlist.
 
+Approval API requests explicitly ask the host for JSON. When a DingTalk WebView
+has no valid ClawWeb session, the page recognizes the host's `USER_NOT_LOGIN`
+response (or an HTML login response), reloads the complete approval URL once,
+and lets the top-level host login flow return the user to that page. This keeps
+the approval URL intact without treating any query parameter as identity.
+
 The resolve request body is:
 
 ```json
@@ -48,6 +54,9 @@ The current external approval page does not call this flow.
 - Historical links containing `empId` or `corpId` still open, display, and can
   resolve an existing approval through the authenticated ClawWeb session.
   Those query parameters never authorize the action.
+- Legacy clients that depend on `empId` alone to approve without a verified
+  session are unsupported and must upgrade. The server does not restore that
+  insecure fallback.
 - An old cached page that submits only `empId` receives HTTP 401. Refreshing
   the page loads the session-authenticated flow.
 - The retained DingTalk flow still returns HTTP 503 when a deployment has no
