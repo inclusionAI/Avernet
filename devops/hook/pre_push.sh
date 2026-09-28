@@ -65,7 +65,7 @@ matches_any() {
   # 判断本次变更文件里是否命中某个路径正则。
   # 后面的模块分发都基于这个函数,例如 '^apps/backend/'。
   local pattern="$1"
-  printf '%s\n' "$changed_files" | grep -Eq "$pattern"
+  grep -Eq "$pattern" <<< "$changed_files"
 }
 
 run_required() {
