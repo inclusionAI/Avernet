@@ -62,10 +62,10 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   private tx<T>(fn: (tx: IDatabase) => Promise<T>): Promise<T> { return serial(this.db, () => this.db.transaction(fn)); }
   private actor(actorId: string): void { if (!requiredText(actorId, 128)) fail('INVALID_INPUT', 'Actor identity is required'); }
 
-  private async snapshot(db: IDatabase, workflowId: string, mode: 'summary' | 'full' = 'full') {
+  private async snapshot(db: IDatabase, workflowId: string, mode: 'summary' | 'full' = 'full', scope?: { itemIds: readonly string[] }) {
     if (!identity(workflowId, 190)) fail('INVALID_INPUT', 'Invalid workflowId');
     if (!(await db.query('SELECT workflow_id FROM workflow_specs WHERE workflow_id = ?', [workflowId])).length) fail('WORKFLOW_NOT_FOUND', 'Workflow does not exist');
-    const current = await this.sources.load(db, workflowId, mode);
+    const current = await this.sources.load(db, workflowId, mode, scope);
     current.forEach(source => validateRepairItem(source.item));
     const ordered = [...current].sort((a, b) => a.item.itemId.localeCompare(b.item.itemId));
     const inputDigest = sourceDigest(ordered);
@@ -117,7 +117,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
   async item(workflowId: string, itemId: string): Promise<RepairInboxItem> {
     return serial(this.db, async () => {
       if (!requiredText(itemId, 64)) fail('INVALID_INPUT', 'Invalid itemId');
-      const snapshot = await this.snapshot(this.db, workflowId, 'full');
+      const snapshot = await this.snapshot(this.db, workflowId, 'full', { itemIds: [itemId] });
       const item = snapshot.items.find(candidate => candidate.itemId === itemId);
       if (!item) fail('ITEM_NOT_FOUND', 'Repair item does not exist');
       boundedRepairJson(item, MAX_TASK_READ_BYTES);
@@ -168,7 +168,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const previous = taskId ? await this.readTask(tx, taskId) : null;
         if (previous && previous.workflowId !== request.workflowId) fail('ITEM_NOT_FOUND', 'Task is not in the requested workflow');
         await new RepairTaskRepository(tx).ensureNoLegacyApply(request.workflowId);
-        const snapshot = await this.snapshot(tx, request.workflowId);
+        const snapshot = await this.snapshot(tx, request.workflowId, 'full', { itemIds: request.itemIds });
         if (snapshot.inputDigest !== request.inputDigest) fail('SOURCE_CHANGED', 'Repair sources changed; refresh the issue inbox');
         const selected: RepairItem[] = [];
         for (const itemId of request.itemIds) {
@@ -184,9 +184,11 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
         const id = taskId ?? randomUUID();
         const feedback = 'feedback' in request ? request.feedback : '';
         const parentCandidateCommit = 'parentCandidateCommit' in request ? request.parentCandidateCommit : null;
+        const excludedSourceRefs = snapshot.items.filter(item => !request.itemIds.includes(item.itemId) && item.sourceAvailable)
+          .flatMap(item => item.sources).sort((a, b) => canonicalRepairJson(a).localeCompare(canonicalRepairJson(b)));
         const input: RepairBatchInput = { schemaVersion: 'workflow-repair/v2', taskId: id,
           revision: (previous?.latestAttempt.revision ?? 0) + 1, baseline, items: selected,
-          excludedSourceRefs: snapshot.items.filter(item => !request.itemIds.includes(item.itemId) && item.sourceAvailable).flatMap(item => item.sources),
+          excludedSources: { count: excludedSourceRefs.length, digest: digestRepairJson(excludedSourceRefs) },
           instructions: request.instructions, parentCandidateCommit, feedback,
           previousReportRef: previous?.latestSuccessful ? `${id}/revisions/${previous.latestSuccessful.revision}` : null,
           taskBranch: `repair/${request.workflowId}/${id}` };
@@ -269,7 +271,7 @@ class WorkflowRepairWorkbench implements RepairWorkbenchService {
       await repo.lockWorkflow(tx, input.workflowId);
       const retry = await repo.dispositionRetry(request);
       if (retry) return { ...(await repo.getItem(input.workflowId, input.itemId))!, ...retry, updatedAtMs: retry.disposition!.atMs };
-      const snapshot = await this.snapshot(tx, input.workflowId);
+      const snapshot = await this.snapshot(tx, input.workflowId, 'full', { itemIds: [input.itemId] });
       if (snapshot.inputDigest !== input.inputDigest) fail('SOURCE_CHANGED', 'Repair sources changed');
       let stored = await repo.getItem(input.workflowId, input.itemId);
       const source = snapshot.materializable.get(input.itemId);

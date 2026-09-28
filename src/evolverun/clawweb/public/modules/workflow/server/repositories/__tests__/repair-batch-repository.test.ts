@@ -16,7 +16,7 @@ const frozen = (items = [item()], revision = 1): RepairBatchInput => ({
   schemaVersion: 'workflow-repair/v2', taskId: 'task-1', revision,
   baseline: { workflowId: 'wf-1', packId: 'pack-1', releaseRevision: 0, activeDeployNumber: null,
     specDigest: 'd'.repeat(64), repoId: 'managed', specPath: 'workflows/demo.yaml', packCommit: 'e'.repeat(40), packDigest: 'f'.repeat(40) },
-  items, excludedSourceRefs: [], instructions: '', parentCandidateCommit: revision > 1 ? '1'.repeat(40) : null,
+  items, excludedSources: { count: 0, digest: digestRepairJson([]) }, instructions: '', parentCandidateCommit: revision > 1 ? '1'.repeat(40) : null,
   feedback: '', previousReportRef: null, taskBranch: 'repair/wf-1/task-1',
 });
 

@@ -34,6 +34,7 @@ function Workbench({ workflowId }: { workflowId: string }) {
   const initialized = useRef(false)
   const [form, setForm] = useState<'generate' | 'feedback' | null>(null)
   const [formSelection, setFormSelection] = useState<string[]>([])
+  const [formItems, setFormItems] = useState<RepairInboxItem[]>([])
   const [instructions, setInstructions] = useState('')
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)
@@ -46,6 +47,7 @@ function Workbench({ workflowId }: { workflowId: string }) {
   const [reason, setReason] = useState('')
   const [cancelOpen, setCancelOpen] = useState(false)
   const request = useRef({ payload: '', id: '' })
+  const knownItems = useRef(new Map<string, RepairInboxItem>())
   const reload = useCallback(() => setRefresh(value => value + 1), [])
 
   useEffect(() => {
@@ -59,6 +61,7 @@ function Workbench({ workflowId }: { workflowId: string }) {
         const result = await repairBatches.candidates(workflowId, { state: view.filter, page: view.page, pageSize: PAGE_SIZE })
         if (!current) return
         setData(result); setLoadError('')
+        result.items.forEach(item => knownItems.current.set(item.itemId, item))
         const eligible = result.items.filter(item => !exclusion(item)).map(item => item.itemId)
         const limit = Math.min(100, result.limits.maxItems)
         const wasInitialized = initialized.current
@@ -99,6 +102,13 @@ function Workbench({ workflowId }: { workflowId: string }) {
     setInstructions(mode === 'feedback' ? visibleDetail?.latestAttempt.input.instructions ?? '' : '')
     const chosen = mode === 'feedback' ? visibleDetail?.latestAttempt.input.items.map(item => item.itemId) ?? [] : selected
     setFormSelection(chosen.slice(0, limit))
+    const taskItems: RepairInboxItem[] = mode === 'feedback' ? (visibleDetail?.latestAttempt.input.items ?? []).map(item => ({
+      ...item, workflowId, episodeKey: 'frozen', state: 'processing', stateVersion: 0,
+      activeTaskId: view.taskId, activeRevision: visibleDetail?.latestAttempt.revision ?? null,
+      disposition: null, updatedAtMs: visibleDetail?.latestAttempt.updatedAtMs ?? 0, sourceAvailable: true,
+    })) : []
+    const rows = [...data.items, ...chosen.map(id => knownItems.current.get(id)).filter((item): item is RepairInboxItem => !!item), ...taskItems]
+    setFormItems([...new Map(rows.map(item => [item.itemId, item])).values()])
   }
   const requestId = (payload: unknown) => {
     const serialized = JSON.stringify(payload)
@@ -107,7 +117,7 @@ function Workbench({ workflowId }: { workflowId: string }) {
   }
   const submit = async () => {
     if (!data || !form || !canEdit || !data.capabilities.generation || busy) return
-    const invalidVisibleSelection = data.items.some(item => formSelection.includes(item.itemId) && !!exclusion(item, form === 'feedback' ? view.taskId : undefined))
+    const invalidVisibleSelection = formItems.some(item => formSelection.includes(item.itemId) && !!exclusion(item, form === 'feedback' ? view.taskId : undefined))
     if (!formSelection.length || invalidVisibleSelection) { setActionError('所选建议状态已变化，请重新选择后提交。'); return }
     const selection = { workflowId, inputDigest: data.inputDigest, itemIds: formSelection, instructions }
     const payload = form === 'feedback' && visibleDetail ? { ...selection, expectedAttemptRevision: visibleDetail.latestAttempt.revision,
@@ -193,7 +203,7 @@ function Workbench({ workflowId }: { workflowId: string }) {
       onFeedback={() => openForm('feedback')} onCancel={() => { setCancelOpen(true); setActionError('') }} onRetryDispatch={() => void retryDispatch()} dispatchError={dispatchError} />}
     {form && data && <RepairDialog title={form === 'feedback' ? '反馈并生成下一版' : '生成修复候选稿'} busy={busy} onClose={() => setForm(null)}>
       <p className="text-xs leading-5 text-slate-500">已选择 {formSelection.length} 项 · 可调整本次选择。只生成候选稿，不会应用或部署。</p>
-      <div className="my-3 max-h-64 overflow-auto"><RepairItems items={data.items} selected={formSelection} onToggle={id => setFormSelection(previous => toggle(previous, id))} canEdit={canEdit && !busy} limit={limit} taskId={form === 'feedback' ? view.taskId : undefined}
+      <div className="my-3 max-h-64 overflow-auto"><RepairItems items={formItems} selected={formSelection} onToggle={id => setFormSelection(previous => toggle(previous, id))} canEdit={canEdit && !busy} limit={limit} taskId={form === 'feedback' ? view.taskId : undefined}
         details={itemDetails} detailLoading={itemDetailLoading} detailErrors={itemDetailErrors} onLoadDetail={itemId => void loadItemDetail(itemId)} /></div>
       <label className="block text-xs font-medium">修复说明<textarea aria-label="修复说明" maxLength={20000} disabled={busy} className="mt-1 block min-h-24 w-full rounded-lg border border-slate-200 p-3 font-normal" value={instructions} onChange={event => setInstructions(event.target.value)} /></label>
       {form === 'feedback' && <label className="mt-3 block text-xs font-medium">修改反馈<textarea aria-label="修改反馈" maxLength={20000} disabled={busy} className="mt-1 block min-h-24 w-full rounded-lg border border-slate-200 p-3 font-normal" value={feedback} onChange={event => setFeedback(event.target.value)} /></label>}

@@ -30,6 +30,25 @@ describe('trusted workflow repair source adapter', () => {
     expect(result[0].item.sources[0]).toMatchObject({ kind: 'diagnosis_candidate', diagnosisId: 'd1', flowId: 'run-d1' });
     expect(result[0].item.proposal).toEqual(proposal());
   });
+  it('hydrates evidence only for the requested repair item', async () => {
+    const groups = async () => [{ workflowId: 'wf', signature: 'output-contract|llm', inputDigest: 'a'.repeat(64),
+      sources: [diagnosis('d1'), diagnosis('d2', proposal('修复脚本兼容性'))] }];
+    const summary = await createRepairSourcePort(readers({ groups })).load(db, 'wf', 'summary');
+    const selected = summary.find(row => row.item.instruction === '修复输出类型')!;
+    const evidence = vi.fn(async (_db: IDatabase, _workflow: string, eventIds: string[]) => eventIds.map(event_id => ({
+      event_id, workflow_id: 'wf', flow_id: `run-${event_id.slice(3)}`, node_id: 'llm', event_type: 'node.failed',
+      payload_json: event_id === 'ev-d2' ? '{bad' : '{"error":"expected number"}',
+    })));
+    const result = await createRepairSourcePort(readers({ groups, evidence })).load(db, 'wf', 'full', { itemIds: [selected.item.itemId] });
+    expect(evidence).toHaveBeenCalledTimes(1);
+    expect(evidence).toHaveBeenCalledWith(db, 'wf', ['ev-d1']);
+    expect(result.find(row => row.item.itemId === selected.item.itemId)?.item.context).toMatchObject({
+      diagnoses: [{ evidence: [{ payload: { error: 'expected number' } }] }],
+    });
+    expect(result.find(row => row.item.itemId !== selected.item.itemId)?.item.context).toMatchObject({
+      diagnoses: [{ evidenceEventIds: ['ev-d2'], evidenceCount: 1 }],
+    });
+  });
   it('merges exactly equal proposals and preserves different fixes for the same failure type', async () => {
     const source = createRepairSourcePort(readers({ groups: async () => [{ workflowId: 'wf', signature: 'output-contract|llm', inputDigest: 'a'.repeat(64), sources: [diagnosis(), diagnosis('d2'), diagnosis('d3', proposal('修复脚本兼容性'))] }] }));
     const result = await source.load(db, 'wf');

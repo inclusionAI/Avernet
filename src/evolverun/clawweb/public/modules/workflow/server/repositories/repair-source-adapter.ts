@@ -57,32 +57,16 @@ const legacyPriority: Partial<Record<RepairItemState, number>> = {
 };
 
 export function createRepairSourcePort(readers: RepairSourceReaders): RepairSourcePort {
-  return { async load(db, workflowId, mode = 'full') {
+  return { async load(db, workflowId, mode = 'full', scope) {
     const groups = await readers.groups(db, workflowId);
     const suggestions = await readers.suggestions(db, workflowId);
     if (groups.some(group => group.workflowId !== workflowId) || suggestions.some(row => row.workflow_id !== workflowId)) {
       throw new RepairBatchError('CONTENT_MISMATCH', 'Source belongs to another workflow');
     }
-    const eventIds = [...new Set(groups.flatMap(group => group.sources.flatMap(source => source.evidenceEventIds)))].sort();
-    const evidence = new Map<string, RepairEvidenceSource>();
-    if (mode === 'full') {
-      // Avoid database parameter limits; never silently discard citations after the first page.
-      for (let offset = 0; offset < eventIds.length; offset += 200) {
-        for (const row of await readers.evidence(db, workflowId, eventIds.slice(offset, offset + 200))) {
-          if (row.workflow_id === workflowId) evidence.set(row.event_id, row);
-        }
-      }
-    }
     const diagnosisContext = (source: DiagnosisSource): RecordValue => ({
       analysisId: source.analysisId, diagnosisId: source.diagnosisId, flowId: source.flowId,
       nodeId: source.nodeId, failureMode: source.failureMode, reasoning: source.reasoning, completedAtMs: source.completedAtMs,
-      ...(mode === 'summary' ? { evidenceEventIds: source.evidenceEventIds, evidenceCount: source.evidenceEventIds.length } : { evidence: source.evidenceEventIds.map(eventId => {
-        const entry = evidence.get(eventId);
-        if (!entry || entry.flow_id !== source.flowId) return { eventId, missing: true };
-        return { eventId, flowId: entry.flow_id, nodeId: entry.node_id ?? null, eventType: entry.event_type,
-          payloadDigest: entry.payload_digest ?? null, occurredAtMs: entry.occurred_at_ms ?? null,
-          payload: parsed(entry.payload_json, 'evidence payload') };
-      }) }),
+      evidenceEventIds: source.evidenceEventIds, evidenceCount: source.evidenceEventIds.length,
     });
     const items = new Map<string, SourceItem>();
     const get = (signature: string, value: RecordValue | null, instruction: string, textSourceId?: string): SourceItem => {
@@ -125,6 +109,31 @@ export function createRepairSourcePort(readers: RepairSourceReaders): RepairSour
       // Legacy work in progress is visible but is not silently re-enqueued as a new pending item.
       const state = legacyState(suggestion.status);
       if ((legacyPriority[state] ?? 0) > (legacyPriority[row.initialState ?? 'pending'] ?? 0)) row.initialState = state;
+    }
+    if (mode === 'full') {
+      const selectedIds = scope ? new Set(scope.itemIds) : null;
+      const selected = [...items.values()].filter(row => !selectedIds || selectedIds.has(row.item.itemId));
+      const eventIds = [...new Set(selected.flatMap(row => (row.item.context!.diagnoses as RecordValue[])
+        .flatMap(diagnosis => diagnosis.evidenceEventIds as string[])))].sort();
+      const evidence = new Map<string, RepairEvidenceSource>();
+      // Avoid database parameter limits; never silently discard citations after the requested item set.
+      for (let offset = 0; offset < eventIds.length; offset += 200) {
+        for (const row of await readers.evidence(db, workflowId, eventIds.slice(offset, offset + 200))) {
+          if (row.workflow_id === workflowId) evidence.set(row.event_id, row);
+        }
+      }
+      for (const row of selected) {
+        row.item.context!.diagnoses = (row.item.context!.diagnoses as RecordValue[]).map(diagnosis => {
+          const { evidenceEventIds, evidenceCount: _evidenceCount, ...summary } = diagnosis;
+          return { ...summary, evidence: (evidenceEventIds as string[]).map(eventId => {
+            const entry = evidence.get(eventId);
+            if (!entry || entry.flow_id !== diagnosis.flowId) return { eventId, missing: true };
+            return { eventId, flowId: entry.flow_id, nodeId: entry.node_id ?? null, eventType: entry.event_type,
+              payloadDigest: entry.payload_digest ?? null, occurredAtMs: entry.occurred_at_ms ?? null,
+              payload: parsed(entry.payload_json, 'evidence payload') };
+          }) };
+        });
+      }
     }
     for (const row of items.values()) {
       row.item.sources = [...new Map(row.item.sources.map(source => [canonicalRepairJson(source), source])).values()]

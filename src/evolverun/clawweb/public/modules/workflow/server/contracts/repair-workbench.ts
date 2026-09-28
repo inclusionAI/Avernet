@@ -34,7 +34,7 @@ export type RepairDiff = {
 
 /** Trusted server source read. Never accept proposal, evidence, baseline or actor from the browser. */
 export interface RepairSourcePort {
-  load(db: IDatabase, workflowId: string, mode?: 'summary' | 'full'): Promise<Array<{ item: RepairItem; episodeKey: string; initialState?: RepairItemState }>>;
+  load(db: IDatabase, workflowId: string, mode?: 'summary' | 'full', scope?: { itemIds: readonly string[] }): Promise<Array<{ item: RepairItem; episodeKey: string; initialState?: RepairItemState }>>;
 }
 export type RepairExecutionIdentity = { stepId: string; attempt: number; executionId: string };
 export type RepairDispatchRequest = { actorId: string; identity: RepairExecutionIdentity; input: RepairBatchInput };

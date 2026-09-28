@@ -35,7 +35,7 @@ export type RepairBaseline = {
 };
 export type RepairBatchInput = {
   schemaVersion: typeof REPAIR_BATCH_SCHEMA; taskId: string; revision: number; baseline: RepairBaseline;
-  items: RepairItem[]; excludedSourceRefs: SourceRef[]; instructions: string;
+  items: RepairItem[]; excludedSources: { count: number; digest: string }; instructions: string;
   parentCandidateCommit: string | null; feedback: string; previousReportRef: string | null; taskBranch: string;
 };
 export type RepairRevisionPhase = 'drafting' | 'review' | 'blocked' | 'publishing' | 'published' | 'no_change' | 'failed' | 'cancelled';
@@ -112,8 +112,7 @@ export function validateRepairBatchInput(value: unknown): RepairBatchInput {
   valid(Array.isArray(value.items) && value.items.length > 0 && value.items.length <= MAX_ITEMS, 'items');
   value.items.forEach(validateRepairItem);
   valid(new Set(value.items.map(item => item.itemId)).size === value.items.length, 'duplicate items');
-  valid(Array.isArray(value.excludedSourceRefs), 'excludedSourceRefs');
-  value.excludedSourceRefs.forEach(validateSourceRef);
+  valid(object(value.excludedSources) && integer(value.excludedSources.count) && digest(value.excludedSources.digest), 'excludedSources');
   valid(text(value.instructions, MAX_INSTRUCTIONS_CHARS, true) && text(value.feedback, MAX_INSTRUCTIONS_CHARS, true), 'instructions/feedback');
   valid(value.parentCandidateCommit === null || gitObject(value.parentCandidateCommit), 'parentCandidateCommit');
   valid(value.previousReportRef === null || text(value.previousReportRef, 2048), 'previousReportRef');

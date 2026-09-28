@@ -53,6 +53,13 @@ describe('repair workbench control service', () => {
     expect((await f.service.create('human', f.request)).taskId).toBe(revision.taskId);
     expect(f.calls).toHaveLength(1);
   });
+  it('stores a bounded digest for unselected sources instead of copying every source reference', async () => {
+    const f = await setup(100);
+    const revision = await f.service.create('human', { ...f.request, itemIds: ['item-0'] });
+    expect(revision.input.excludedSources).toEqual({ count: 99, digest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(revision.input).not.toHaveProperty('excludedSourceRefs');
+    expect(JSON.stringify(revision.input).length).toBeLessThan(20_000);
+  });
   it('rejects >100, stale digest, byte limits and cross-workflow selections before persisting tasks', async () => {
     const f = await setup(101);
     await expect(f.service.create('human', f.request)).rejects.toMatchObject({ code: 'INVALID_INPUT' });

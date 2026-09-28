@@ -27,7 +27,7 @@ function revision(n: number, phase: RepairRevision['phase']): RepairRevision {
   return { workflowId: 'wf-1', taskId: 'task-1', revision: n, phase, stateVersion: 1, requestId: 'request', requestDigest: 'digest',
     input: { schemaVersion: 'workflow-repair/v2', taskId: 'task-1', revision: n,
       baseline: { workflowId: 'wf-1', packId: 'pack', releaseRevision: 1, activeDeployNumber: 1, specDigest: 'digest', repoId: 'repo', specPath: 'workflows/wf-1.yaml', packCommit: 'base', packDigest: 'digest' },
-      items: [item('a')], excludedSourceRefs: [], instructions: '', parentCandidateCommit: null, feedback: '', previousReportRef: null, taskBranch: 'repair/wf-1/task-1' },
+      items: [item('a')], excludedSources: { count: 0, digest: 'digest' }, instructions: '', parentCandidateCommit: null, feedback: '', previousReportRef: null, taskBranch: 'repair/wf-1/task-1' },
     draft: phase === 'review' ? { candidateCommit: 'candidate-v1', summary: '保留的候选稿', itemResults: [{ itemId: 'a', status: 'changed', reason: '增加重试' }] } : null,
     checks: phase === 'review' ? { static: { status: 'passed' }, mock: { status: 'not_covered' }, coverage: [{ itemId: 'a', mode: 'none', assertionCount: 0 }], uncoveredChecks: ['external_resources'] } : null,
     candidateDigest: null, checksDigest: null, error: phase === 'failed' ? { message: 'AIS 服务失败' } : null, createdAtMs: 1, updatedAtMs: 2 }
@@ -67,6 +67,22 @@ describe('RepairWorkbench', () => {
     expect(within(dialog).getByText(/已选择 1 项/)).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: '确认生成' }))
     await waitFor(() => expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ itemIds: ['a'] })))
+  })
+  it('shows task-owned and cross-page selected items in the revision dialog', async () => {
+    const inbox = candidates([item('new-item')]);
+    inbox.tasks = [{ taskId: 'task-1', revision: 2, phase: 'failed', updatedAtMs: 2, itemCount: 1 }]
+    const taskItem = item('owned-item', 'processing')
+    const task = detail()
+    task.latestAttempt = { ...task.latestAttempt, input: { ...task.latestAttempt.input, items: [taskItem] } }
+    api.candidates.mockResolvedValue(inbox); api.task.mockResolvedValue(task)
+    const user = userEvent.setup(); render(<RepairWorkbench workflowId="wf-1" />)
+    await user.click(await screen.findByRole('button', { name: /打开任务 task-1/ }))
+    await user.click(await screen.findByRole('button', { name: '反馈并生成下一版' }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByRole('checkbox', { name: '选择 修复 owned-item' })).toBeChecked()
+    expect(within(dialog).getByRole('checkbox', { name: '选择 修复 new-item' })).not.toBeChecked()
+    await user.click(within(dialog).getByRole('checkbox', { name: '选择 修复 owned-item' }))
+    expect(within(dialog).getByRole('checkbox', { name: '选择 修复 owned-item' })).not.toBeChecked()
   })
   it('loads full evidence only when an item is expanded', async () => {
     const detailed = { ...item('a'), context: { diagnoses: [{ evidence: [{ payload: { error: 'full evidence' } }] }] } }
