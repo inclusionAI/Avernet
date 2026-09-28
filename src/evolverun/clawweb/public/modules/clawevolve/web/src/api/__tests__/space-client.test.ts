@@ -21,7 +21,7 @@ describe('module space API contracts', () => {
     expect(fetchJson).toHaveBeenLastCalledWith('/api/evolve/stage-skills?search=%E5%9B%A2%E9%98%9F+%26+stage')
   })
 
-  it('sends selected space and display name, omitting default personal space', async () => {
+  it('sends selected space and display name, omitting the default no-space selection', async () => {
     await api.evolve.registerSkillAsset({ botId: 'b1', skillId: 's1', spaceId: 't1' })
     expect(fetchJson).toHaveBeenLastCalledWith('/api/evolve/skill-assets', {
       method: 'POST', body: JSON.stringify({ botId: 'b1', skillId: 's1', spaceId: 't1' }),

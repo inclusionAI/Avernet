@@ -17,6 +17,18 @@ registration form displays these messages and offers a read retry, without
 showing raw HTTP bodies or reusing a previous Bot's Skill list. Unknown errors
 still reach the normal server error handler and are not relabeled as offline.
 
+## Optional registration space
+
+Skill and Stage registration default to no space: omitting `spaceId`, passing
+null or an empty string stores null space fields and retains owner-only access.
+This path does not query the host space directory. The selector offers this
+choice alongside the actual PERSONAL and TEAM spaces returned by the host;
+a failed or empty lookup must not prevent registration without a space.
+
+An explicitly selected space still requires a successful membership check.
+Missing access or a failed directory request must not silently change that
+selection to no space. Existing records keep their stored space ownership.
+
 ## Singlebox and capability discovery
 
 `GET /api/evolve/capabilities` reports `skillManagement` and

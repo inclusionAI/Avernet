@@ -22,7 +22,7 @@ export type SpaceOwnedRecord = {
   space_type?: "PERSONAL" | "TEAM" | null;
 };
 
-/** A missing space is a historical private record, never a shared scope. */
+/** Unassigned records remain owner-only, including historical private records. */
 export function canReadSpaceRecord(record: SpaceOwnedRecord, userId: string, spaces: readonly AccessibleSpace[]): boolean {
   if (!record.space_id) return record.owner_user_id === userId;
   const space = spaces.find((item) => item.id === record.space_id && item.type === record.space_type);
@@ -32,19 +32,16 @@ export function canReadSpaceRecord(record: SpaceOwnedRecord, userId: string, spa
 export async function registrationSpace(
   port: SpaceDirectory | undefined, identity: RequestIdentity, requested: unknown,
 ): Promise<AccessibleSpace | null> {
-  // Standalone deployments without a space provider retain their existing private-only mode.
-  // An explicit space must never silently fall back to private on such deployments.
-  if (!port) {
-    if (requested != null && requested !== "") throw localSpaceError(503, "宿主空间服务未配置");
-    return null;
-  }
   if (requested != null && typeof requested !== "string" && typeof requested !== "number") {
     throw localSpaceError(400, "空间 ID 不合法");
   }
   const id = requested == null ? "" : String(requested).trim();
+  // No space is an explicit owner-only choice, independent of the directory.
+  if (!id) return null;
+  if (!port) throw localSpaceError(503, "空间服务未配置");
   const spaces = await port.listAccessibleSpaces({ identity });
-  const space = id ? spaces.find((item) => item.id === id) : spaces.find((item) => item.type === "PERSONAL");
-  if (!space) throw localSpaceError(id ? 403 : 409, id ? "无权访问所选空间" : "请先在宿主 初始化个人空间");
+  const space = spaces.find((item) => item.id === id);
+  if (!space) throw localSpaceError(403, "无权访问所选空间");
   return space;
 }
 

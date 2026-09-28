@@ -117,7 +117,7 @@ describe("ClawEvolve module space errors under a generic-500 host", () => {
     const before = await snapshot();
     const response = await request(endpoint);
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ code: "EVOLVE_SPACE_ACCESS_REJECTED", error: "宿主空间服务未配置" });
+    expect(await response.json()).toEqual({ code: "EVOLVE_SPACE_ACCESS_REJECTED", error: "空间服务未配置" });
     expect(hostErrors).not.toHaveBeenCalled();
     expect(listAccessibleSpaces).not.toHaveBeenCalled();
     await expectUnchanged(before);

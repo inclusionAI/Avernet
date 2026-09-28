@@ -54,31 +54,35 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('space selection interactions', () => {
-  it('defaults to private and only offers real team memberships, including MEMBER', async () => {
+  it('defaults to no space and offers returned personal and team memberships', async () => {
     render(<Selector />)
     expect((screen.getByRole('combobox', { name: '所属空间' }) as HTMLSelectElement).value).toBe('')
     expect(screen.getByRole('status').textContent).toBe('正在加载空间…')
     await screen.findByRole('option', { name: '团队空间 · 研发空间' })
-    expect(screen.getAllByRole('option')).toHaveLength(2)
+    expect(screen.getAllByRole('option')).toHaveLength(3)
+    expect(screen.getByRole('option', { name: '无空间' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: '个人空间 · 个人空间' }).getAttribute('value')).toBe('personal-1')
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-1' } })
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('team-1')
-    expect(spaceLabel({ spaceId: null, spaceType: null, spaceName: null })).toBe('私有')
-    expect(spaceLabel({ spaceType: 'PERSONAL' })).toBe('私有')
-    expect(spaceLabel({ spaceId: 'unknown' })).not.toBe('私有')
+    expect(spaceLabel({ spaceId: null, spaceType: null, spaceName: null })).toBe('无空间')
+    expect(spaceLabel({ spaceType: 'PERSONAL', spaceName: '我的空间' })).toBe('个人空间 · 我的空间')
+    expect(spaceLabel({ spaceId: 'unknown' })).not.toBe('无空间')
   })
 
-  it('shows failure, disables the selector and retries instead of claiming an empty successful load', async () => {
+  it('keeps no-space selection available after a failed load and allows retry', async () => {
     api.evolve.listSpaces.mockRejectedValueOnce(new Error('Host unavailable'))
     render(<Selector />)
     expect((await screen.findByRole('alert')).textContent).toContain('Host unavailable')
-    expect((screen.getByRole('combobox') as HTMLSelectElement).disabled).toBe(true)
+    expect((screen.getByRole('combobox') as HTMLSelectElement).disabled).toBe(false)
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('')
+    expect(screen.getByRole('option', { name: '无空间' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await screen.findByRole('option', { name: '团队空间 · 研发空间' })
     expect(screen.queryByRole('alert')).toBeNull()
     expect((screen.getByRole('combobox') as HTMLSelectElement).disabled).toBe(false)
   })
 
-  it.each(['', 'team-1'])('registers a Skill with selected space %s and keeps list ownership visible', async (spaceId) => {
+  it.each(['', 'personal-1', 'team-1'])('registers a Skill with selected space %s and keeps list ownership visible', async (spaceId) => {
     render(<MemoryRouter><SkillCenter /><Location /></MemoryRouter>)
     await screen.findByText('已登记技能')
     expect(screen.getByText('团队空间 · 研发空间')).toBeTruthy()
@@ -91,6 +95,27 @@ describe('space selection interactions', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Bot 中自己上传的 Skill' }), { target: { value: 'skill-1' } })
     fireEvent.click(screen.getByRole('button', { name: '登记', exact: true }))
     await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledWith({ botId: 'bot-1', skillId: 'skill-1', ...(spaceId ? { spaceId } : {}) }))
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/evolve/skills/A1'))
+  })
+
+  it.each(['empty', 'unavailable'])('allows registration without a space when the directory is %s', async state => {
+    if (state === 'empty') api.evolve.listSpaces.mockResolvedValue({ items: [] })
+    else {
+      api.evolve.listSpaces.mockRejectedValue(new Error('Space directory unavailable'))
+      api.evolve.listSkillAssets.mockRejectedValue(new Error('Space directory unavailable'))
+    }
+    render(<MemoryRouter><SkillCenter /><Location /></MemoryRouter>)
+    await waitFor(() => expect(screen.queryByText('正在加载…')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: '登记 Skill' }))
+    await waitFor(() => expect(screen.queryByText('正在加载空间…')).toBeNull())
+    expect(screen.getByRole('option', { name: '无空间' })).toBeTruthy()
+    expect((screen.getByRole('combobox', { name: '所属空间' }) as HTMLSelectElement).disabled).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: /请选择 Bot/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /我的 Bot/ }))
+    await screen.findByRole('option', { name: '本地技能' })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Bot 中自己上传的 Skill' }), { target: { value: 'skill-1' } })
+    fireEvent.click(screen.getByRole('button', { name: '登记', exact: true }))
+    await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledWith({ botId: 'bot-1', skillId: 'skill-1' }))
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/evolve/skills/A1'))
   })
 
@@ -144,7 +169,7 @@ describe('space selection interactions', () => {
     api.evolve.listStageDevelopments.mockResolvedValue({ items: [{ ...draft, stageSkillId: 'LEGACY', spaceId: null, spaceType: null, spaceName: null }] })
     render(<MemoryRouter><StageSkillManagement /></MemoryRouter>)
     await screen.findByText('团队空间 · 研发空间')
-    expect(screen.getByText('私有')).toBeTruthy()
+    expect(screen.getByText('无空间')).toBeTruthy()
   })
 
   it('shows the exact Stage version ownership on its detail', async () => {

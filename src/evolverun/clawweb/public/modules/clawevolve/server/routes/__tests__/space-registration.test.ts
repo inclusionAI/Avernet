@@ -51,8 +51,7 @@ beforeEach(async () => {
   members = new Set([owner, member]);
   hostSpaces = {
     listAccessibleSpaces: vi.fn(async ({ identity }) => [
-      // TEAM intentionally comes first: omitted spaceId must select PERSONAL,
-      // not whichever space Host happens to return first.
+      // An omitted spaceId must not choose any returned membership implicitly.
       ...(members.has(identity.userId) ? [team] : []),
       ...(identity.userId === owner ? [otherTeam] : []),
       { id: `personal-${identity.userId}`, name: `${identity.userId} Personal`,
@@ -144,7 +143,8 @@ describe("Space registration with real repositories", () => {
   });
 
   it.each([
-    { selection: "default PERSONAL", spaceId: undefined, expected: personalView },
+    { selection: "no space", spaceId: undefined, expected: noSpaceView },
+    { selection: "explicit PERSONAL", spaceId: `personal-${owner}`, expected: personalView },
     { selection: "explicit TEAM", spaceId: team.id, expected: teamView },
   ])("registers Skill assets in $selection and persists the returned space", async ({ spaceId, expected }) => {
     const registered = await bodyOf(await registerAsset(spaceId), 201);
@@ -160,7 +160,8 @@ describe("Space registration with real repositories", () => {
   });
 
   it.each([
-    { selection: "default PERSONAL", spaceId: undefined, expected: personalView },
+    { selection: "no space", spaceId: undefined, expected: noSpaceView },
+    { selection: "explicit PERSONAL", spaceId: `personal-${owner}`, expected: personalView },
     { selection: "explicit TEAM", spaceId: team.id, expected: teamView },
   ])("creates Stage development in $selection with its chosen displayName", async ({ spaceId, expected }) => {
     const development = await bodyOf(await develop(spaceId), 201);
@@ -170,6 +171,40 @@ describe("Space registration with real repositories", () => {
       display_name: "Evidence Preprocessor",
     });
     expect(await bodyOf(await get(`/stage-developments/${development.stageSkillId}`))).toMatchObject(expected);
+  });
+
+  it.each(['empty', 'unavailable'])("registers without a space when the directory is %s", async state => {
+    if (state === 'empty') vi.mocked(hostSpaces.listAccessibleSpaces).mockResolvedValue([]);
+    else vi.mocked(hostSpaces.listAccessibleSpaces).mockRejectedValue(new Error('Space directory unavailable'));
+    const asset = await bodyOf(await registerAsset(), 201);
+    const development = await bodyOf(await develop(), 201);
+    expect(asset).toMatchObject(noSpaceView);
+    expect(development).toMatchObject(noSpaceView);
+    expect(hostSpaces.listAccessibleSpaces).not.toHaveBeenCalled();
+    expect(await assets.findAsset(asset.assetId)).toMatchObject({ owner_user_id: owner, space_id: null });
+    expect(await bodyOf(await get(`/skill-assets/${asset.assetId}`))).toMatchObject(noSpaceView);
+    expect((await get(`/skill-assets/${asset.assetId}`, member)).status).toBe(404);
+  });
+
+  it('does not silently register without a space when the selected space cannot be verified', async () => {
+    vi.mocked(hostSpaces.listAccessibleSpaces).mockRejectedValue(Object.assign(new Error('Space directory unavailable'), { status: 503 }));
+    const response = await registerAsset(team.id);
+    expect(response.status).toBe(503);
+    await response.text();
+    expect(await assets.listAssets(owner)).toEqual([]);
+    expect(hostLocalSkills.exportLocalSkill).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, `personal-${owner}`, team.id])('preserves the chosen space when registering an existing asset (%s)', async spaceId => {
+    const original = await bodyOf(await registerAsset(spaceId), 201);
+    const repeated = await bodyOf(await registerAsset(spaceId));
+    expect(repeated).toMatchObject({ assetId: original.assetId, existing: true });
+    const differentSpace = spaceId ? undefined : team.id;
+    const rejected = await registerAsset(differentSpace);
+    expect(rejected.status).toBe(409);
+    await rejected.text();
+    expect((await assets.findAsset(original.assetId))?.space_id).toBe(spaceId ?? null);
+    expect(hostLocalSkills.exportLocalSkill).toHaveBeenCalledTimes(1);
   });
 
   it.each(["Skill", "Stage"] as const)("rejects non-member %s registration with 403 before any side effect", async kind => {
@@ -188,7 +223,8 @@ describe("Space registration with real repositories", () => {
   });
 
   it.each([
-    { selection: "PERSONAL", spaceId: undefined, expected: personalView },
+    { selection: "no space", spaceId: undefined, expected: noSpaceView },
+    { selection: "PERSONAL", spaceId: `personal-${owner}`, expected: personalView },
     { selection: "TEAM", spaceId: team.id, expected: teamView },
   ])("upload inherits $selection development identity despite conflicting multipart fields", async ({ spaceId, expected }) => {
     const development = await bodyOf(await develop(spaceId), 201);
@@ -229,8 +265,8 @@ describe("Space registration with real repositories", () => {
   });
 
   it("keeps newly registered PERSONAL assets and Stages private from other team members", async () => {
-    const asset = await bodyOf(await registerAsset(), 201);
-    const development = await bodyOf(await develop(), 201);
+    const asset = await bodyOf(await registerAsset(`personal-${owner}`), 201);
+    const development = await bodyOf(await develop(`personal-${owner}`), 201);
     const implementation = await bodyOf(await upload(development.stageSkillId), 201);
     expect((await bodyOf(await get("/skill-assets", member))).items).toEqual([]);
     expect((await bodyOf(await get("/stage-skills", member))).items).toEqual([]);
