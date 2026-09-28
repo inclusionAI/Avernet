@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
-OWNER_LOGIN = "regrecall"
+EXEMPT_LOGINS = frozenset({"regrecall", "xsandyguo"})
 DEFAULT_MANIFEST = "scripts/ci/task_design_guard.json"
 DEFAULT_SUBMITTERS = "docs/arch/task-design-guard-submitters.json"
 BACKEND_SOURCE_ROOT = Path("src/backend/src")
@@ -513,8 +513,8 @@ def evaluate_pull_request(
     normalized_actor = actor.strip().casefold()
     if not normalized_actor:
         raise GuardFailure("pull request actor must be a non-empty GitHub login")
-    if normalized_actor == OWNER_LOGIN.casefold():
-        return Evaluation(Comparison((), ()), False, f"owner @{actor} bypass")
+    if normalized_actor in EXEMPT_LOGINS:
+        return Evaluation(Comparison((), ()), False, f"exempt @{actor} bypass")
 
     changed = changed_files(repository, base, head)
     changed_controls = sorted(changed.intersection(PROTECTED_CONTROL_PATHS))
@@ -523,7 +523,7 @@ def evaluate_pull_request(
             Violation(
                 "TRG900",
                 path,
-                f"guard control file may only be changed by @{OWNER_LOGIN}",
+                "guard control file may only be changed by an exempt submitter",
             )
             for path in changed_controls
         )
