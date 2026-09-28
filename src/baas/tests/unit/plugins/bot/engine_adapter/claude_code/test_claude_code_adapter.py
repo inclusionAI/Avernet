@@ -42,10 +42,11 @@ def test_ws_path(cls: type) -> None:
 
 @pytest.mark.parametrize("cls", ADAPTER_CLASSES)
 def test_session_consistency_key(cls: type) -> None:
+    """real claude_code 覆写为 user 前置亲和键（与 aicoding 同形）。"""
     adapter = cls()
     assert (
         adapter.session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1")
-        == "agent:b1:session:r1:user:u1"
+        == "agent:u1:session:r1:user:b1"
     )
 
 
