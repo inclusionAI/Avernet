@@ -522,7 +522,6 @@ export default function Approval() {
     fetchApprovalJson<ApprovalData>(url)
       .then((d: ApprovalData) => {
         if (!cancelled) {
-          clearApprovalLoginAttempt()
           setData(d)
           setLoading(false)
           if (d.detail && d.sections && d.status !== 'pending') {
@@ -604,6 +603,7 @@ export default function Approval() {
         const res = await resolveApproval(approvalId, action, comment || undefined, detail)
         setResult(res)
         if (res.ok) {
+          clearApprovalLoginAttempt()
           const freshUrl = `/api/approval/${approvalId}`
           const fresh = await fetchApprovalJson<ApprovalData>(freshUrl)
           setData(fresh)
