@@ -225,7 +225,9 @@ class ClawBotService(BotService):
         if sandbox_id is None:
             raise BotServiceError("ClawBotService requires sandbox_id in binding_info.")
         if session_pending:
-            user_id = resolve_user_id({}, binding_info, context, binding_info.entity_id)
+            user_id = resolve_user_id(
+                chat_metadata or {}, binding_info, context, binding_info.entity_id
+            )
             await self._materialize_session(
                 session_id=session_id,
                 binding_info=binding_info,
@@ -288,7 +290,9 @@ class ClawBotService(BotService):
             )
 
         if session_pending:
-            user_id = resolve_user_id({}, binding_info, context, binding_info.entity_id)
+            user_id = resolve_user_id(
+                chat_metadata or {}, binding_info, context, binding_info.entity_id
+            )
             await self._materialize_session(
                 session_id=session_id,
                 binding_info=binding_info,
