@@ -291,8 +291,31 @@ export class ApprovalCardRepository {
     }
   }
 
-  /** Find resolved (non-pending) card-web cards that workflow runtime should process. */
-  async findResolvedCardWeb(limit = 50): Promise<ApprovalCardRow[]> {
+  /**
+   * Find resolved (non-pending) card-web cards that workflow runtime should process.
+   *
+   * New runtimes send their botId so they do not scan other bots' cards.
+   * Rows without origin metadata remain visible for historical workflows, and
+   * omitting botId preserves the legacy unfiltered contract for old runtimes.
+   */
+  async findResolvedCardWeb(limit = 50, botId?: string): Promise<ApprovalCardRow[]> {
+    const normalizedBotId = botId?.trim();
+    if (normalizedBotId) {
+      const escapedBotId = normalizedBotId.replace(/[!%_]/g, "!$&");
+      return this.db.query<ApprovalCardRow>(
+        `SELECT ac.* FROM approval_cards ac
+         LEFT JOIN flow_runs fr ON fr.flow_id = ac.flow_id
+         WHERE ac.status != 'pending'
+           AND ac.delivery_mode = 'card-web'
+           AND (fr.origin_bot_id = ?
+                OR fr.origin_bot_id LIKE ? ESCAPE '!'
+                OR fr.origin_bot_id IS NULL
+                OR fr.origin_bot_id = '')
+         ORDER BY ac.resolved_at DESC LIMIT ?`,
+        [normalizedBotId, `${escapedBotId}:%`, limit],
+      );
+    }
+
     return this.db.query<ApprovalCardRow>(
       `SELECT * FROM approval_cards
        WHERE status != 'pending' AND delivery_mode = 'card-web'

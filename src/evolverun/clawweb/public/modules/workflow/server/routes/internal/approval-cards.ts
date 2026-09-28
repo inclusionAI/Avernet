@@ -21,21 +21,22 @@ const RESOLVED_CACHE_TTL_MS = 30_000; // 30 seconds
 
 type CachedResult = { data: unknown; timestamp: number };
 
-let _resolvedCache: CachedResult | null = null;
+const _resolvedCache = new Map<string, CachedResult>();
 
 /** Invalidate the resolved-cards cache (call on writes that change the set). */
 export function invalidateResolvedCache(): void {
-  _resolvedCache = null;
+  _resolvedCache.clear();
 }
 
 /** Return cached data if fresh, otherwise null. */
-function getResolvedCache(): unknown | null {
-  if (!_resolvedCache) return null;
-  if (Date.now() - _resolvedCache.timestamp > RESOLVED_CACHE_TTL_MS) {
-    _resolvedCache = null;
+function getResolvedCache(key: string): unknown | null {
+  const cached = _resolvedCache.get(key);
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp > RESOLVED_CACHE_TTL_MS) {
+    _resolvedCache.delete(key);
     return null;
   }
-  return _resolvedCache.data;
+  return cached.data;
 }
 
 export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCardRepository | null): Router {
@@ -130,17 +131,22 @@ export function createInternalApprovalCardsRouter(approvalCardRepo: ApprovalCard
     }
 
     try {
+      const limit = parseInt(_req.query.limit as string, 10) || 50;
+      const botId = typeof _req.query.botId === "string" && _req.query.botId.trim()
+        ? _req.query.botId.trim()
+        : undefined;
+      const cacheKey = `${botId ?? "*"}:${limit}`;
+
       // Serve from TTL cache if fresh — avoids hitting DB on every poll
-      const cached = getResolvedCache();
+      const cached = getResolvedCache(cacheKey);
       if (cached) {
         res.json(cached);
         return;
       }
 
-      const limit = parseInt(_req.query.limit as string, 10) || 50;
-      const cards = await approvalCardRepo.findResolvedCardWeb(limit);
+      const cards = await approvalCardRepo.findResolvedCardWeb(limit, botId);
       const body = { success: true, data: cards };
-      _resolvedCache = { data: body, timestamp: Date.now() };
+      _resolvedCache.set(cacheKey, { data: body, timestamp: Date.now() });
       res.json(body);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
