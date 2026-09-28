@@ -42,9 +42,9 @@ def test_ws_path_is_api_ws(factory: type) -> None:
 
 @pytest.mark.parametrize("factory", ADAPTERS)
 def test_session_consistency_key_returns_structured_key(factory: type) -> None:
-    """real aicoding 覆写返回结构化亲和键（与 claude_code/hermes 同形）。"""
+    """real aicoding 覆写为 user 前置亲和键（与 claude_code 同形，区别于基类默认）。"""
     key = factory().session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1")
-    assert key == "agent:b1:session:r1:user:u1"
+    assert key == "agent:u1:session:r1:user:b1"
 
 
 @pytest.mark.asyncio

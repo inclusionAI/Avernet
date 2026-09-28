@@ -335,6 +335,23 @@ class TestHandleTerminalError:
         assert state.state == "error"
         assert state.chat_complete.is_set()
 
+    def test_error_code_prefixes_msg_and_stores_on_state(self, mock_bot_ws):
+        """errorCode 前缀进 chunk 与 state.error_message，供 BotSessionError 透传。"""
+        state = SessionState()
+        state.stream_queue = asyncio.Queue()
+        AsyncChatClient._handle_terminal_error(
+            state, "sk1", "cwd already exists", "chat", error_code="SESSION_CWD_CONFLICT"
+        )
+        assert state.error_message == "SESSION_CWD_CONFLICT - cwd already exists"
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.type == "error"
+        assert chunk.content == "SESSION_CWD_CONFLICT - cwd already exists"
+
+    def test_no_error_code_keeps_plain_msg(self, mock_bot_ws):
+        state = SessionState()
+        AsyncChatClient._handle_terminal_error(state, "sk1", "boom", "agent")
+        assert state.error_message == "boom"
+
 
 # ==================== _on_chat additional branches ====================
 
