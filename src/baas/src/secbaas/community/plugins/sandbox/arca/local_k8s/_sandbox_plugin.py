@@ -8,7 +8,7 @@
 
 | 环境变量 | 默认值 | 必填 | 说明 |
 |---|---|---|---|
-| LOCAL_K8S_KUBECONFIG | $HOME/.kube/config | 否 | kubeconfig 文件路径 |
+| LOCAL_K8S_KUBECONFIG | $HOME/.kube/config | 否 | kubeconfig 文件路径；设为 ``in-cluster`` 时强制使用 Pod ServiceAccount |
 | LOCAL_K8S_CONTEXT | colima | 否 | 使用的 kubeconfig context |
 | LOCAL_K8S_NAMESPACE | default | 否 | 目标 namespace |
 | LOCAL_K8S_IMAGE | local-k8s-openclaw:latest | 否 | bot 容器镜像，可被 docker_image 入参覆盖 |
@@ -93,6 +93,23 @@ ENV_IMAGE_PULL_POLICY = "LOCAL_K8S_IMAGE_PULL_POLICY"
 ENV_NODE_PORT = "LOCAL_K8S_NODE_PORT"
 ENV_EXTRA_ENVS = "LOCAL_K8S_EXTRA_ENVS"
 ENV_OUTBOUND_RULE = "LOCAL_K8S_OUTBOUND_RULE"
+
+_INCLUSTER_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+
+
+def _use_incluster_config() -> bool:
+    """判断是否使用 Pod ServiceAccount 的 in-cluster 配置。
+
+    显式设置 ``LOCAL_K8S_KUBECONFIG=in-cluster`` 时强制启用；
+    否则当没有配置 kubeconfig 且 ServiceAccount token 文件存在时自动启用。
+    """
+    explicit = _env(ENV_KUBECONFIG)
+    if explicit and explicit.strip().lower() == "in-cluster":
+        return True
+    has_explicit_kubeconfig = bool(
+        _env(ENV_KUBECONFIG) or _env(_ENV_FALLBACK_KUBECONFIG_PATH)
+    )
+    return not has_explicit_kubeconfig and os.path.isfile(_INCLUSTER_TOKEN_PATH)
 
 
 def _env(name: str, default: Any = None) -> Any:
@@ -337,10 +354,28 @@ class LocalK8sClientManager:
     def __init__(self) -> None:
         self._lock = None  # 本插件同步调用，暂时不需要线程锁
         self._clients: dict[str, Any] = {}
+        self._incluster_loaded = False
 
     def get_client(self, kubeconfig: str, context: str | None = None) -> ApiClient:
         """获取或创建 ApiClient。"""
         from kubernetes import config as k8s_config
+
+        if _use_incluster_config():
+            if not self._incluster_loaded:
+                k8s_config.load_incluster_config()
+                self._incluster_loaded = True
+                logger.info("local_k8s: loaded in-cluster config from ServiceAccount")
+
+            client = self._clients.get("incluster")
+            if client is not None:
+                return client
+
+            from kubernetes.client import ApiClient
+
+            client = ApiClient()
+            self._clients["incluster"] = client
+            logger.info("local_k8s: created in-cluster ApiClient")
+            return client
 
         key = f"{context or ''}:{hash(kubeconfig) & 0xFFFFFFFF}"
         client = self._clients.get(key)
@@ -390,6 +425,8 @@ class LocalK8sArcaSandboxPlugin(ArcaSandboxPlugin):
         self._client_manager = LocalK8sClientManager()
 
     def _client(self) -> ApiClient:
+        if _use_incluster_config():
+            return self._client_manager.get_client("", None)
         return self._client_manager.get_client(_resolve_kubeconfig(), _context())
 
     def _create_header_rules_configmap(
