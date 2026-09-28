@@ -3593,6 +3593,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       page,
       pageSize,
       taskTypes: categories[category],
+      excludedTaskTypes: ['workflow_repair'],
       statuses: statusGroups[status],
       query: String(req.query.query ?? ""),
     });
@@ -3606,7 +3607,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   router.use("/tasks/:taskId", asyncHandler(async (req, res, next) => {
     if (!repo) { next(); return; }
     const task = await repo.findTask(String(req.params.taskId));
-    if (task?.task_type === "repair") {
+    if (task && ['repair', 'workflow_repair'].includes(task.task_type)) {
       res.status(404).json({ error: "任务不存在" }); return;
     }
     next();
@@ -4545,7 +4546,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   router.use("/internal/tasks/:taskId", asyncHandler(async (req, res, next) => {
     if (!repo) { next(); return; }
     const task = await repo.findTask(String(req.params.taskId));
-    if (task?.task_type === "repair") {
+    if (task && ['repair', 'workflow_repair'].includes(task.task_type)) {
       res.status(404).json({ error: "任务不存在" }); return;
     }
     next();

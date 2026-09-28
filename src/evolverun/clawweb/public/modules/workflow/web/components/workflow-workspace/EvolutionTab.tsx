@@ -16,6 +16,7 @@ import { aggregateDiagnoses, diffWorkflowPatchOperations, timeValue, type Diagno
 import { groupDiagnoses, useIssueGroups } from './issue-groups'
 import IssueSummary from './IssueSummary'
 import GroupRepairSelection from './GroupRepairSelection'
+import RepairWorkbench from './repair-batch/RepairWorkbench'
 
 export type EvoTab = 'diagnosis' | 'remedies'
 
@@ -881,7 +882,11 @@ export default function EvolutionTab({ workflowId, runId, analysisId, issueSigna
         </div>
       )}
 
-      {tab === 'diagnosis' && <DiagnosisPanel
+      {tab === 'diagnosis' && !runId && <RepairWorkbench workflowId={workflowId} />}
+      {tab === 'diagnosis' && <details open={!!runId || !!issueSignature} className={runId ? '' : 'rounded-xl border border-slate-200 bg-white p-4'}>
+        <summary className={runId ? 'hidden' : 'cursor-pointer text-sm font-medium text-slate-700'}>诊断证据与历史应用</summary>
+        {!runId && <p className="my-3 text-xs leading-5 text-slate-500">查看单次分析、未形成建议的问题及历史 Bot 直接应用记录；此处的历史应用不属于批次候选稿发布。</p>}
+        <DiagnosisPanel
         workflowId={workflowId}
         runId={runId}
         analysisId={analysisId}
@@ -894,7 +899,7 @@ export default function EvolutionTab({ workflowId, runId, analysisId, issueSigna
         onAction={handleSuggestionAction}
         onApply={setApplySuggestionIds}
         canEdit={canEdit}
-      />}
+      /></details>}
 
       {tab === 'remedies' && <RemediesPanel workflowId={workflowId} />}
 
