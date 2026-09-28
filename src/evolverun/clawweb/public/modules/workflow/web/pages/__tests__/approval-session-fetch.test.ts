@@ -55,6 +55,16 @@ describe('approval session fetch', () => {
     await expect(fetchApprovalJson('/api/approval/1', undefined, fetchImpl))
       .rejects.toBeInstanceOf(ApprovalLoginRequiredError)
   })
+
+  it('treats an HTTP 401 JSON response as a login requirement', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      error: 'Unauthorized',
+      message: '未登录',
+    }, { ok: false, status: 401 }))
+
+    await expect(fetchApprovalJson('/api/approval/1/resolve/session', undefined, fetchImpl))
+      .rejects.toBeInstanceOf(ApprovalLoginRequiredError)
+  })
 })
 
 describe('approval login handoff', () => {

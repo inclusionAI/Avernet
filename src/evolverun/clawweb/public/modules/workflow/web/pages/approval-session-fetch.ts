@@ -42,6 +42,7 @@ export async function fetchApprovalJson<T>(
   if (contentType.toLowerCase().includes('text/html')) {
     throw new ApprovalLoginRequiredError()
   }
+  if (response.status === 401) throw new ApprovalLoginRequiredError()
 
   let body: unknown
   try {
