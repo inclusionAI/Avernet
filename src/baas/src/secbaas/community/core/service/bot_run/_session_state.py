@@ -28,3 +28,7 @@ class SessionState:
     stream_queue: asyncio.Queue[Any] | None = None
     # 已向当前流暴露、正在等待 Engine 终态事件的 mode-switch interaction。
     pending_mode_transition_ids: set[str] = field(default_factory=set)
+    # error 终态的真实错误（含 errorCode 前缀，如
+    # "SESSION_CWD_CONFLICT - isolated session cwd ..."）。send_message 抛
+    # BotSessionError 时透传给调用方，避免只剩 "error state" 外壳。
+    error_message: str = ""
