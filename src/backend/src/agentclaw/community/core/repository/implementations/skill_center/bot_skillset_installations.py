@@ -1,8 +1,4 @@
-"""Bot-wide resolution from SkillSet membership to Installation rows.
-
-Separate from ``capability_desired_state``, which mutates one named Set: these
-range over every Set a Bot has and answer what its Installation table should say.
-"""
+"""Resolve SkillSet members and reconcile their Bot Installation rows."""
 
 from __future__ import annotations
 
@@ -133,6 +129,27 @@ def set_member_mcp_codes(scope, session, *, skill_set_id: int) -> set[str]:
 class BotSkillSetInstallations:
     """Mixed into the control-plane repository; uses its ``_db``, ``_scope``
     and ``_owned_set_scope``."""
+
+    def _member_ids(self, session, set_ids: set[int]) -> set[int]:
+        """Resolve the same Skill identities used by installation repair."""
+        ids: set[int] = set()
+        for set_id in sorted(set_ids):
+            ids |= set_member_skill_ids(self._scope, session, skill_set_id=set_id)
+        return ids
+
+    def _teardown_ids(self, session, set_ids: set[int]) -> set[int]:
+        """Include unresolved historical members when removing Installations."""
+        ids = self._member_ids(session, set_ids)
+        if not set_ids:
+            return ids
+        return ids | {
+            int(value[0])
+            for value in self._scope(
+                session.query(SkillSetSkill.skill_id), SkillSetSkill
+            )
+            .filter(SkillSetSkill.skill_set_id.in_(sorted(set_ids)))
+            .all()
+        }
 
     def flush_installations(
         self,
