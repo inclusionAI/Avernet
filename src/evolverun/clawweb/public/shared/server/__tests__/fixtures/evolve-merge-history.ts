@@ -7,9 +7,10 @@
  *   (origin/dev when captured on 2026-09-14).
  * Retrieved with git show <SHA>:<source>; never derived from current schema.
  *
- * The <=119 baseline is deliberately simulated: workflow_specs and ce_tasks/ce_steps DDL from
- * old v5, v32, v72 and v103 is needed by the post-119 migrations. Old v5 already
- * uses gmt_create/gmt_modified, so v7's legacy column rebuild is unnecessary.
+ * The <=119 baseline is deliberately simulated: workflow_specs, ce_tasks/ce_steps, and
+ * workflow_healing_outcomes DDL is needed by the post-119 migrations. Old v5 already
+ * uses gmt_create/gmt_modified, so v7's legacy column rebuild is unnecessary. The healing
+ * outcome shape below is the state after SQLite v117's table recreation.
  * v119 below is an explicit watermark, not a claim to replay unrelated tables.
  * Fresh-install coverage separately exercises the full production migration list.
  *
@@ -106,7 +107,33 @@ const baseline: HistoricalMigration[] = [
       `CREATE INDEX IF NOT EXISTS idx_ce_steps_bot_run ON ce_steps (bot_run_id)`,
     ],
   },
-  { version: 119, description: "Simulated pre-merge v119 baseline (affected tables only)", sql: [] },
+  {
+    version: 119,
+    description: "Simulated pre-merge v119 baseline (affected tables only)",
+    sql: [
+      `CREATE TABLE workflow_healing_outcomes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  outcome_id VARCHAR(64) NOT NULL,
+  lesson_id VARCHAR(64),
+  suggestion_id VARCHAR(64),
+  workflow_id VARCHAR(64),
+  node_id VARCHAR(64),
+  action VARCHAR(64) NOT NULL,
+  applied INTEGER NOT NULL DEFAULT 0,
+  succeeded INTEGER NOT NULL DEFAULT 0,
+  verdict VARCHAR(64) NOT NULL DEFAULT 'neutral',
+  note TEXT,
+  source_task_id VARCHAR(64),
+  source_step_id VARCHAR(64),
+  created_by VARCHAR(128),
+  gmt_create INTEGER NOT NULL DEFAULT (unixepoch()),
+  gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()),
+  UNIQUE (outcome_id)
+)`,
+      `CREATE INDEX idx_workflow_healing_outcomes_lesson ON workflow_healing_outcomes (lesson_id, gmt_create)`,
+      `CREATE INDEX idx_workflow_healing_outcomes_suggestion ON workflow_healing_outcomes (suggestion_id, gmt_create)`,
+    ],
+  },
 ];
 export const feature: HistoricalMigration[] = [
   ...baseline,
