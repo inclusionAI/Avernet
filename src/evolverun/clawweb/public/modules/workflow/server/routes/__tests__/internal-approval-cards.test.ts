@@ -1,18 +1,42 @@
 import { afterEach, describe, expect, it } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
-import { createInternalApprovalCardsRouter } from "../internal/approval-cards";
+import { createInternalApprovalCardsRouter, invalidateResolvedCache } from "../internal/approval-cards";
 import { ApprovalCardRepository } from "../../repositories/approval-card-repository";
 
 const servers: Server[] = [];
 
 afterEach(async () => {
+  invalidateResolvedCache();
   await Promise.all(
     servers.splice(0).map(
       (s) => new Promise<void>((resolve, reject) => s.close((err) => (err ? reject(err) : resolve()))),
     ),
   );
 });
+
+function resolvedCard(id: number, flowId: string) {
+  return {
+    id,
+    flow_id: flowId,
+    node_id: "review",
+    workflow_id: "wf-1",
+    workflow_title: null,
+    approval_type: null,
+    message: null,
+    card_fields_json: null,
+    approver_ids: "reviewer",
+    approver_names: null,
+    approval_policy: "any",
+    approved_by: "reviewer",
+    rejected_by: "",
+    status: "approved",
+    delivery_mode: "card-web",
+    created_at: 100,
+    resolved_at: 200,
+    comment: null,
+  };
+}
 
 type InsertCall = {
   sql: string;
@@ -151,5 +175,61 @@ describe("POST /approval-cards", () => {
 
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ success: false, error: "Service Unavailable" });
+  });
+});
+
+describe("GET /approval-cards/resolved", () => {
+  it("filters by the bot-id prefix while retaining historical unowned rows", async () => {
+    const { repo, queries } = makeRepo({});
+    const db = (repo as any).db;
+    db.query = async (sql: string, params: unknown[]) => {
+      queries.push({ sql, params });
+      return [resolvedCard(1, "flow-bot-a"), resolvedCard(2, "flow-legacy")];
+    };
+    const { base } = await createServer(repo);
+
+    const res = await fetch(`${base}/resolved?botId=bot-a&limit=7`);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      success: true,
+      data: [{ flow_id: "flow-bot-a" }, { flow_id: "flow-legacy" }],
+    });
+    expect(queries).toHaveLength(1);
+    expect(queries[0].sql).toContain("LEFT JOIN flow_runs");
+    expect(queries[0].sql).toContain("origin_bot_id = ?");
+    expect(queries[0].sql).toContain("origin_bot_id LIKE ?");
+    expect(queries[0].sql).toContain("origin_bot_id IS NULL");
+    expect(queries[0].params).toEqual(["bot-a", "bot-a:%", 7]);
+  });
+
+  it("keeps the legacy unfiltered query when botId is omitted", async () => {
+    const { repo, queries } = makeRepo({});
+    const { base } = await createServer(repo);
+
+    const res = await fetch(`${base}/resolved?limit=9`);
+
+    expect(res.status).toBe(200);
+    expect(queries).toHaveLength(1);
+    expect(queries[0].sql).not.toContain("flow_runs");
+    expect(queries[0].params).toEqual([9]);
+  });
+
+  it("does not reuse one bot's cached response for another bot", async () => {
+    const calls: string[] = [];
+    const repo = {
+      findResolvedCardWeb: async (_limit: number, botId?: string) => {
+        calls.push(botId ?? "legacy");
+        return [resolvedCard(botId === "bot-a" ? 1 : 2, `flow-${botId}`)];
+      },
+    } as unknown as ApprovalCardRepository;
+    const { base } = await createServer(repo);
+
+    const first = await fetch(`${base}/resolved?botId=bot-a`);
+    const second = await fetch(`${base}/resolved?botId=bot-b`);
+
+    expect((await first.json()).data[0].flow_id).toBe("flow-bot-a");
+    expect((await second.json()).data[0].flow_id).toBe("flow-bot-b");
+    expect(calls).toEqual(["bot-a", "bot-b"]);
   });
 });
