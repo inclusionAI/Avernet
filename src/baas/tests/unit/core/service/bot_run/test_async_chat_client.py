@@ -1727,6 +1727,49 @@ class TestBotSessionError:
             await client.send_message("Hi", session_key="sk-err")
 
     @pytest.mark.asyncio
+    async def test_send_message_error_detail_propagates_from_engine(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """引擎 chat error 事件的 errorCode/errorMessage 透传进 BotSessionError。"""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+            BotSessionError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        async def fire_engine_error_event(*args, **kwargs):
+            sk = kwargs["session_key"]
+            state = client._sessions.get(sk)
+            if state:
+                client._on_chat(
+                    {
+                        "sessionKey": sk,
+                        "state": "error",
+                        "errorCode": "SESSION_CWD_CONFLICT",
+                        "errorMessage": (
+                            "isolated session cwd /home/admin/.aicoding/workspace/x "
+                            "already exists and is not owned by this session"
+                        ),
+                    }
+                )
+            return {"ok": True}
+
+        mock_bot_ws_instance.chat_send.side_effect = fire_engine_error_event
+
+        with pytest.raises(BotSessionError) as exc_info:
+            await client.send_message("Hi", session_key="sk-err")
+
+        assert "SESSION_CWD_CONFLICT" in str(exc_info.value)
+        assert "isolated session cwd" in str(exc_info.value)
+
+    @pytest.mark.asyncio
     async def test_send_message_returns_normally_on_final_state(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
