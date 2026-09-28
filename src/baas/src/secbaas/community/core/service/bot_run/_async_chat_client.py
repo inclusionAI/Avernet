@@ -426,10 +426,13 @@ class AsyncChatClient:
                     # 无超时等待
                     await state.chat_complete.wait()
 
-                # 6. 检查是否以 error 状态终止
+                # 6. 检查是否以 error 状态终止（带上引擎侧真实错误，
+                #    否则上游 error 字段只剩 "error state" 外壳）
                 if state.state == "error":
+                    detail = f", error={state.error_message}" if state.error_message else ""
                     raise BotSessionError(
-                        f"session ended with error state: session_key={session_key}"
+                        f"session ended with error state: "
+                        f"session_key={session_key}{detail}"
                     )
 
                 return state.content, state.agent_payloads
@@ -787,11 +790,18 @@ class AsyncChatClient:
 
     @staticmethod
     def _handle_terminal_error(
-        state: SessionState, session_key: str, error_msg: str, source: str
+        state: SessionState,
+        session_key: str,
+        error_msg: str,
+        source: str,
+        error_code: str = "",
     ) -> None:
         msg = error_msg or f"{source} error"
+        if error_code:
+            msg = f"{error_code} - {msg}"
         logger.warning("[%s] error: sessionKey=%s, errMsg=%s", source, session_key, msg)
         state.state = "error"
+        state.error_message = msg
         state.chat_complete.set()
         AsyncChatClient._emit_stream_chunk(
             state, StreamChunk(type="error", content=msg)
@@ -875,7 +885,11 @@ class AsyncChatClient:
                     )
         elif chat_state == "error":
             self._handle_terminal_error(
-                state, session_key, payload.get("errorMessage", ""), "chat"
+                state,
+                session_key,
+                payload.get("errorMessage", ""),
+                "chat",
+                error_code=payload.get("errorCode", ""),
             )
         else:
             if self.verbose:
@@ -910,7 +924,11 @@ class AsyncChatClient:
         agent_state = payload.get("state", "")
         if agent_state and agent_state == "error":
             self._handle_terminal_error(
-                state, session_key, payload.get("errorMessage", ""), "agent"
+                state,
+                session_key,
+                payload.get("errorMessage", ""),
+                "agent",
+                error_code=payload.get("errorCode", ""),
             )
             return
 
