@@ -3,7 +3,8 @@ from unittest.mock import MagicMock
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 
 def _factory(local_root):
-    sync = MagicMock(); sync.get_local_skills_root.return_value = local_root
+    sync = MagicMock()
+    sync.get_local_skills_root.return_value = local_root
     return WorkspacePathFactory(skill_repo_sync=sync)
 
 def test_skills_dir_local_uses_global_root():

@@ -17,9 +17,11 @@ class _DB:
     def orm_session(self):
         db = self._f()
         try:
-            yield db; db.commit()
+            yield db
+            db.commit()
         except Exception:
-            db.rollback(); raise
+            db.rollback()
+            raise
         finally:
             db.close()
 

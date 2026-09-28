@@ -19,7 +19,7 @@ from agentclaw.community.core.task.task_runner.client.prompt_formatter import Pr
 
 
 def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = True,
-                      identity_resolver=None, on_bbs_report=None) -> TaskExecutor:
+                      identity_resolver=None, on_bbs_report=None) -> "TaskExecutor":  # noqa: F821
     # Lazy imports keep the client package importable from modal_executor modules
     # without creating a client -> modal_executor -> client cycle.
     from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
