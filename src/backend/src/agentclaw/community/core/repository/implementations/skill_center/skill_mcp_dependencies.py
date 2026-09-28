@@ -102,7 +102,24 @@ def skill_projection_mcp_dependency_codes(
         raise
 
 
+def set_skill_mcp_dependency_codes(
+    session: Session, skills: list[Skill], *, allow_unknown: bool
+) -> tuple[frozenset[str], bool]:
+    """Collect Set dependencies; keep unreadable cleanup metadata distinct from empty."""
+    codes: set[str] = set()
+    unknown = False
+    for skill in skills:
+        try:
+            codes.update(skill_projection_mcp_dependency_codes(session, skill))
+        except (TypeError, ValueError):
+            if not allow_unknown:
+                raise
+            unknown = True
+    return frozenset(codes), unknown
+
+
 __all__ = [
     "skill_mcp_dependency_codes",
     "skill_projection_mcp_dependency_codes",
+    "set_skill_mcp_dependency_codes",
 ]

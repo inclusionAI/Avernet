@@ -36,7 +36,6 @@ from agentclaw.community.core.repository.implementations.skill_center.bot_skills
     BotSkillSetInstallations,
     CENTER_MEMBERSHIP_IDENTITY_MISSING,
     center_membership_skill_uuid,
-    set_member_skill_ids,
 )
 from agentclaw.community.core.repository.implementations.skill_center.default_exclusion_commands import (
     DefaultExclusionCommands,
@@ -51,6 +50,7 @@ from agentclaw.community.core.repository.implementations.skill_center.manifest_d
     ManifestDirectClaimCommands,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
+    set_skill_mcp_dependency_codes,
     skill_projection_mcp_dependency_codes,
 )
 from agentclaw.community.core.repository.implementations.skill_center.legacy_skill_set_scope import LegacySkillSetScopeQueries
@@ -585,7 +585,19 @@ class CapabilityDesiredStateRepository(
                 .with_for_update()
                 .all()
             )
-            mcp_codes = {str(member.server_code) for member in mcp_members}
+            direct_mcp_codes = {str(member.server_code) for member in mcp_members}
+            skills = (
+                self._scope(session.query(Skill), Skill)
+                .filter(Skill.id.in_(sorted(ids)))
+                .order_by(Skill.id)
+                .with_for_update()
+                .all()
+            )
+            dependencies, mcp_scope_unknown = set_skill_mcp_dependency_codes(
+                session, skills, allow_unknown=not active
+            )
+            mcp_scope_unknown |= not active and bool(retired - ids)
+            mcp_codes = direct_mcp_codes | dependencies
             changed = bool(row.is_active) != active
             row.is_active = active
             if active:
@@ -600,7 +612,7 @@ class CapabilityDesiredStateRepository(
                         env=get_current_env(),
                         skill_id=skill_id,
                     )
-                for server_code in sorted(mcp_codes):
+                for server_code in sorted(direct_mcp_codes):
                     mcp_installations.install(
                         session,
                         bot_id=bot_id,
@@ -621,26 +633,25 @@ class CapabilityDesiredStateRepository(
                     bot_id=bot_id,
                     owner_id=owner_id,
                     env=get_current_env(),
-                    server_codes=mcp_codes,
+                    server_codes=direct_mcp_codes,
                 )
                 bot_mcp_configs.delete(
                     session,
                     bot_id=bot_id,
                     owner_id=owner_id,
                     env=get_current_env(),
-                    server_codes=mcp_codes,
+                    server_codes=direct_mcp_codes,
                 )
             session.flush()
-            # The projection needs to know which MCPs this Set just claimed
-            # or released, and they are only knowable under the row lock this
-            # transaction already holds. Returning them here keeps the
-            # command from issuing a second, unlocked query that could
-            # disagree with what was actually installed.
+            # The projection needs the Set's direct and Skill-derived MCP
+            # candidates. Resolve them under this transaction's row locks so
+            # the command does not issue a second, unlocked query.
             return DesiredStateMutation(
                 _item(row),
                 changed,
                 old,
                 mcp_codes=frozenset(mcp_codes),
+                mcp_scope_unknown=mcp_scope_unknown,
             )
 
     def restore_desired_state(
@@ -832,37 +843,6 @@ class CapabilityDesiredStateRepository(
     def _ordinary(row: SkillSet) -> None:
         if row.is_default:
             raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
-
-    def _member_ids(self, session, set_ids: set[int]) -> set[int]:
-        """The Skill ids the given Sets provide.
-
-        The same resolver the repair uses, so a mutation writes and removes
-        exactly the rows a repair would.
-        """
-        ids: set[int] = set()
-        for set_id in sorted(set_ids):
-            ids |= set_member_skill_ids(self._scope, session, skill_set_id=set_id)
-        return ids
-
-    def _teardown_ids(self, session, set_ids: set[int]) -> set[int]:
-        """Every Skill id these Sets could be holding installed.
-
-        Wider than :meth:`_member_ids` on purpose: a member that no longer
-        resolves — an OFFLINE ``center://`` row — still has an Installation row
-        to remove, and the guards would not let its owner remove it by hand.
-        Install from ``_member_ids``, tear down from here.
-        """
-        ids = self._member_ids(session, set_ids)
-        if not set_ids:
-            return ids
-        return ids | {
-            int(value[0])
-            for value in self._scope(
-                session.query(SkillSetSkill.skill_id), SkillSetSkill
-            )
-            .filter(SkillSetSkill.skill_set_id.in_(sorted(set_ids)))
-            .all()
-        }
 
     @staticmethod
     def _installations(session, bot_id: str, owner_id: str) -> set[int]:

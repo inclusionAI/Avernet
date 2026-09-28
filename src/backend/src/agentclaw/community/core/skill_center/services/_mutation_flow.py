@@ -72,6 +72,25 @@ def skill_release_scope(result: DesiredStateMutation) -> ProjectionScope:
     )
 
 
+def _set_mcp_required(result: DesiredStateMutation) -> bool:
+    # Repeating a Set command still reconciles the complete runtime.
+    return not result.changed or bool(result.mcp_codes) or result.mcp_scope_unknown
+
+
+def set_activation_scope(result: DesiredStateMutation) -> ProjectionScope:
+    """Deliver configuration for the Set's direct and Skill-derived MCP claims."""
+    return ProjectionScope(
+        skills=True, mcp=_set_mcp_required(result), claimed_mcp=result.mcp_codes,
+    )
+
+
+def set_deactivation_scope(result: DesiredStateMutation) -> ProjectionScope:
+    """Withdraw callable MCP scope without deleting retained configuration."""
+    return ProjectionScope(
+        skills=True, mcp=_set_mcp_required(result),
+    )
+
+
 def mcp_claim_scope(result: DesiredStateMutation) -> ProjectionScope:
     """Project only the MCP codes the committed mutation actually claimed."""
     return ProjectionScope(

@@ -49,6 +49,8 @@ from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
     mcp_claim_scope,
     mcp_release_scope,
+    set_activation_scope,
+    set_deactivation_scope,
     skill_claim_scope,
     skill_release_scope,
 )
@@ -774,9 +776,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_activate",
-            scope_from_result=lambda result: ProjectionScope(
-                skills=True, mcp=True, claimed_mcp=result.mcp_codes
-            ),
+            scope_from_result=set_activation_scope,
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -796,10 +796,9 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_deactivate",
-            # Deactivation withdraws callable state but keeps the Set and its
-            # configuration. Re-project both inventories without claiming or
-            # physically releasing MCP details.
-            scope=ProjectionScope(skills=True, mcp=True),
+            # Keep MCP configuration on the device when withdrawing callable
+            # scope; dependency-free Sets need only the Skill projection.
+            scope_from_result=set_deactivation_scope,
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -820,9 +819,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             bot_id=bot_id,
             actor_id=actor_id,
             action="skill_set_sync",
-            scope_from_result=lambda result: ProjectionScope(
-                skills=True, mcp=True, claimed_mcp=result.mcp_codes
-            ),
+            scope_from_result=set_activation_scope,
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),

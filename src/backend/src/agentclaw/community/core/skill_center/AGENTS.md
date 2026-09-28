@@ -84,6 +84,8 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 
 命令通过 `ProjectionScope` 表达变化范围；Skill claim/release 携带 MCP dependency candidates，由投影端结合完整有效集合过滤。不要把每次操作都扩大为 `everything()`。启动恢复等确实需要完整重投影的入口可使用它。
 
+普通 SkillSet 启停从事务内已解析的直接 MCP 成员和 Skill dependencies 构造保守候选集；状态确实变化且候选集为空时仅投影 Skill。启用时依赖 MCP 也作为 `claimed_mcp` 先交付配置；停用只撤销可调用范围，不物理删除设备配置。依赖未知时启用失败、停用保守投影 MCP；重复启停仍完整重投影以便重试收敛。详见 `src/backend/specs/2026-09-28-skillset-mcp-projection-scope/spec.md`。
+
 一次 MCP 投影通过 Reader `active_capabilities` 同步一次 Installation，返回精确 Skill 与 installed MCP 的 `BotCapabilitySnapshot`，供 Skill Plan 和唯一 Effective MCP collector 共用。快照不包括 Policy MCP、不保证跨表事务快照隔离，不能跨变更、重试或请求缓存；Skill-only 仍使用独立 Skill 读取。Default/exclusion 与完整回刷模式均保留。MCP 配置、移除和完整白名单下发在同一次 `project_mcps` 内复用一个解析后的 `DeviceSync`；不改变下发顺序、失败处理、POST-conflict-update 或 Passport 语义。
 
 ## 4. Local、Repo、Center 的内容身份

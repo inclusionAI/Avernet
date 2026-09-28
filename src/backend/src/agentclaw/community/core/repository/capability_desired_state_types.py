@@ -33,16 +33,13 @@ class DesiredStateMutation:
     previous_state: CapabilityDesiredState
     details: dict = field(default_factory=dict)
     mcp_codes: frozenset[str] = frozenset()
-    """MCP codes this mutation claimed or released, if it touched any.
+    """MCP codes whose runtime projection this mutation may affect.
 
-    Commands fill it when the committed mutation actually moves MCP state.
-    Explicit MCP and Direct commands name their changed code; activation learns
-    the Set's member codes; a Skill mutation learns the Skill's
-    ``mcp_dependencies``. No-op mutations leave it empty, so callers do not
-    synthesize a runtime delta from request parameters alone. The values are
-    resolved under the row lock the transaction already holds, so the scope
-    names what was actually installed rather than what a second, unlocked
-    query saw.
+    Explicit MCP and Direct commands name their changed code; Set activation
+    includes direct members and member Skill dependencies; a Skill mutation
+    names that Skill's dependencies. A repeated Set command may retain these
+    codes for runtime retry. The values are resolved under the row lock the
+    transaction already holds, rather than by a second, unlocked query.
 
     Candidates, not a verdict — the projector intersects them with the set it
     resolved, so a claim that does not survive projection is never delivered
@@ -56,6 +53,8 @@ class DesiredStateMutation:
     """
     updated_mcp_codes: frozenset[str] = frozenset()
     """MCP codes whose Bot-scoped connection override changed."""
+    mcp_scope_unknown: bool = False
+    """Set cleanup could not prove that every removed Skill has no MCP dependency."""
     source_transitions: tuple[tuple[str, str], ...] = ()
     """Internal, configuration-free ``(from_source, to_source)`` audit facts.
 

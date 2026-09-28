@@ -1095,7 +1095,7 @@ async def test_collaborator_command_keeps_desired_state_and_uses_true_owner():
         {"bot_id": "bot-1", "owner_id": "true-owner"},
         {"bot_id": "bot-1", "owner_id": "true-owner"},
     ]
-    _activate_scope = ProjectionScope(skills=True, mcp=True, claimed_mcp=frozenset())
+    _activate_scope = ProjectionScope(skills=True)
     assert runtime.reconcile_calls == [
         {
             "bot_id": "bot-1",
@@ -1521,10 +1521,11 @@ def test_default_read_rejects_missing_bot():
 @pytest.mark.asyncio
 async def test_legacy_sync_activates_additively_without_replacing_other_sets():
     repository = _Repository()
+    runtime = _Runtime(fail_first=False)
     service = SkillSetManagementService(
         repository=repository,
         bot_repo=_Bots(),
-        runtime=_SuccessfulRuntime(),
+        runtime=runtime,
         legacy_factory=object(),
         passport=object(),
         authorization=_Authorization(),
@@ -1553,6 +1554,7 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
             "default_engine_types": ("openclaw",),
         }
     ]
+    assert runtime.reconcile_calls[0]["scope"] == ProjectionScope(skills=True)
 
 
 @pytest.mark.asyncio
@@ -2188,7 +2190,7 @@ async def test_existing_coding_bot_can_activate_skill_set(bots) -> None:
 
 
 @pytest.mark.asyncio
-async def test_existing_claude_code_skill_set_deactivate_uses_full_projection():
+async def test_existing_claude_code_skill_set_deactivate_without_mcp_uses_skill_scope():
     repository = _Repository()
     runtime = _Runtime(
         snapshots=[_Runtime._skill_mappings(), ()],
@@ -2231,12 +2233,65 @@ async def test_existing_claude_code_skill_set_deactivate_uses_full_projection():
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "retired_mappings": _Runtime._skill_mappings(),
-            # deactivate declares what it released rather than reconciling:
-            # the Set's MCP codes come back on the mutation result, resolved
-            # under the row lock that uninstalled them.
-            "scope": ProjectionScope(skills=True, mcp=True, released_mcp=frozenset()),
+            "scope": ProjectionScope(skills=True),
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_skill_set_activate_claims_skill_dependency_mcp_configuration():
+    class _DependentSet(_Repository):
+        def set_skill_set_active(self, **kwargs) -> DesiredStateMutation:
+            return replace(
+                super().set_skill_set_active(**kwargs),
+                mcp_codes=frozenset({"mcp.weather"}),
+            )
+
+    runtime = _Runtime(fail_first=False)
+    await _skill_service(_DependentSet(), runtime).activate(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+        set_id="set-1",
+    )
+
+    assert runtime.reconcile_calls[0]["scope"] == ProjectionScope(
+        skills=True, mcp=True, claimed_mcp=frozenset({"mcp.weather"}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_skill_set_noop_keeps_full_projection_for_runtime_retry():
+    class _UnchangedSet(_Repository):
+        def set_skill_set_active(self, **kwargs) -> DesiredStateMutation:
+            return replace(super().set_skill_set_active(**kwargs), changed=False)
+
+    runtime = _Runtime(fail_first=False)
+    await _skill_service(_UnchangedSet(), runtime).deactivate(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+        set_id="set-1",
+    )
+
+    assert runtime.reconcile_calls[0]["scope"] == ProjectionScope(
+        skills=True, mcp=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_skill_set_deactivation_projects_mcp_when_dependencies_are_unknown():
+    class _UnknownSet(_Repository):
+        def set_skill_set_active(self, **kwargs) -> DesiredStateMutation:
+            return replace(
+                super().set_skill_set_active(**kwargs), mcp_scope_unknown=True,
+            )
+
+    runtime = _Runtime(fail_first=False)
+    await _skill_service(_UnknownSet(), runtime).deactivate(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+        set_id="set-1",
+    )
+
+    assert runtime.reconcile_calls[0]["scope"] == ProjectionScope(
+        skills=True, mcp=True,
+    )
 
 
 @pytest.mark.parametrize("bots", [_PlainClaudeCodeBots(), _LiteralAicodingBots()])
