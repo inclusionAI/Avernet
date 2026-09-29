@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   candidateWorkspacePath,
+  freezeSkillTarget,
   recordPreparedSkillCandidate,
   requirePreparedSkillCandidate,
   type FrozenSkillTarget,
@@ -53,4 +54,22 @@ describe("isolated Skill candidate handle", () => {
       },
     })).toThrow("隔离目录不一致");
   });
+});
+
+ it('reads and freezes only the registered Bot environment, rejecting a mismatched task', async () => {
+  const exportLocalSkill = vi.fn(async () => ({ packageBytes: Buffer.from('skill'), sha256: 'sha', displayName: 'example', botEnv: 'prod' }));
+  const put = vi.fn();
+  const input = {
+    taskId: 'EV-ENV', ownerUserId: 'owner', botId: 'default', botEnv: 'prod', assetId: 'ASSET',
+    identity: { userId: 'owner' }, hostLocalSkills: { exportLocalSkill },
+    skillAssetRepo: { findAsset: async () => ({ asset_id: 'ASSET', bot_id: 'default', bot_env: 'prod', owner_user_id: 'owner', external_skill_id: '47' }) },
+    skillPackages: { put, ref: (key: string) => key },
+  } as unknown as Parameters<typeof freezeSkillTarget>[0];
+  const frozen = await freezeSkillTarget(input);
+  expect(frozen.botEnv).toBe('prod');
+  expect(exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({ botId: 'default', botEnv: 'prod' }));
+  exportLocalSkill.mockClear(); put.mockClear();
+  await expect(freezeSkillTarget({ ...input, botEnv: 'pre' })).rejects.toMatchObject({ status: 409 });
+  expect(exportLocalSkill).not.toHaveBeenCalled();
+  expect(put).not.toHaveBeenCalled();
 });

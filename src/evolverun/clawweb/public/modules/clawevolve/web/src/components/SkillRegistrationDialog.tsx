@@ -39,6 +39,7 @@ export default function SkillRegistrationDialog({ bots, botsLoading = false, bot
   const [attempt, setAttempt] = useState(0)
   const bot = bots.find(item => evolveBotOptionKey(item) === botKey)
   const botId = bot?.botId ?? ''
+  const botEnv = bot?.env ?? ''
   const visibleBots = bots.filter(item => evolveBotOptionKey(item) === botKey ||
     [item.botName, item.botId, item.ownerId, item.env].some(value => value?.toLowerCase().includes(botQuery.trim().toLowerCase())))
 
@@ -46,18 +47,18 @@ export default function SkillRegistrationDialog({ bots, botsLoading = false, bot
     let active = true
     setSkills([]); setSkillId(''); setLoadError(''); setSubmitError('')
     setLoading(Boolean(botId))
-    if (botId) void api.evolve.listAvailableLocalSkills(botId)
+    if (botId) void api.evolve.listAvailableLocalSkills(botId, botEnv)
       .then(result => { if (active) setSkills(result.items) })
       .catch(reason => { if (active) setLoadError(registrationError(reason, 'Skill 列表读取失败，请稍后重试。')) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [botId, botKey, attempt])
+  }, [botId, botEnv, botKey, attempt])
 
   const register = async () => {
     if (submitting.current || !botId || !skillId || loading || loadError) return
     submitting.current = true; setRegistering(true); setSubmitError('')
     try {
-      const asset = await api.evolve.registerSkillAsset({ botId, skillId, ...(spaceId ? { spaceId } : {}) })
+      const asset = await api.evolve.registerSkillAsset({ botId, botEnv, skillId, ...(spaceId ? { spaceId } : {}) })
       await onRegistered(asset)
     } catch (reason) {
       setSubmitError(registrationError(reason, 'Skill 登记失败，请稍后重试。'))

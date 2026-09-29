@@ -10,6 +10,7 @@ export type SkillAssetRow = {
   space_type: "PERSONAL" | "TEAM" | null;
   space_name: string | null;
   bot_id: string;
+  bot_env?: string | null;
   external_skill_id: string;
   pending_application_json: string | null;
   display_name: string;
@@ -186,6 +187,7 @@ export class SkillAssetRepository {
     spaceName?: string | null;
     actorId?: string;
     botId: string;
+    botEnv?: string;
     externalSkillId: string;
     displayName: string;
     description?: string | null;
@@ -196,10 +198,10 @@ export class SkillAssetRepository {
       const now = tx.dialect.now();
       await tx.exec(
         `INSERT INTO ce_skill_assets
-         (asset_id, owner_user_id, space_id, space_type, space_name, bot_id, external_skill_id, display_name, description, current_version_no, gmt_create, gmt_modified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+         (asset_id, owner_user_id, space_id, space_type, space_name, bot_id, bot_env, external_skill_id, display_name, description, current_version_no, gmt_create, gmt_modified)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         [input.assetId, input.ownerUserId, input.spaceId ?? null, input.spaceType ?? null, input.spaceName ?? null,
-          input.botId, input.externalSkillId, input.displayName, input.description ?? null,
+          input.botId, input.botEnv ?? null, input.externalSkillId, input.displayName, input.description ?? null,
           now, now],
       );
       await tx.exec(

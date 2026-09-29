@@ -519,6 +519,7 @@ export type EvolveSkillVersion = {
 }
 
 export type EvolveSkillAsset = {
+  botEnv?: string | null
   botName?: string | null
   description?: string | null
   ownerId?: string | null
@@ -1161,8 +1162,10 @@ export const api = {
     deleteStageSkill(implementationId: string): Promise<{ deleted: boolean }> {
       return fetchJson(`${BASE}/evolve/stage-skills/${encodeURIComponent(implementationId)}`, { method: 'DELETE' })
     },
-    listAvailableLocalSkills(botId: string): Promise<{ items: Array<{ skillId: string; displayName: string; description?: string | null }> }> {
-      return fetchJson(`${BASE}/evolve/skill-assets/available?botId=${encodeURIComponent(botId)}`)
+    listAvailableLocalSkills(botId: string, botEnv?: string): Promise<{ items: Array<{ skillId: string; displayName: string; description?: string | null }> }> {
+      const query = new URLSearchParams({ botId })
+      if (botEnv) query.set('botEnv', botEnv)
+      return fetchJson(`${BASE}/evolve/skill-assets/available?${query}`)
     },
     listSkillAssets(params: { scope?: 'mine' | 'all'; ownerUserId?: string } = {}): Promise<{ items: EvolveSkillAsset[] }> {
       const sp = new URLSearchParams()
@@ -1176,7 +1179,7 @@ export const api = {
       if (params.ownerUserId?.trim()) sp.set('ownerUserId', params.ownerUserId.trim())
       return fetchJson(`${BASE}/evolve/skill-events${sp.size ? `?${sp}` : ''}`)
     },
-    registerSkillAsset(input: { botId: string; skillId: string }): Promise<EvolveSkillAsset> {
+    registerSkillAsset(input: { botId: string; botEnv?: string; skillId: string }): Promise<EvolveSkillAsset> {
       return fetchJson(`${BASE}/evolve/skill-assets`, { method: 'POST', body: JSON.stringify(input) })
     },
     getSkillAsset(assetId: string): Promise<EvolveSkillAsset> {

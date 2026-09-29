@@ -66,6 +66,7 @@ function assetView(
     ...botView(metadata, row.owner_user_id),
     createdAt: row.gmt_create,
     botId: row.bot_id,
+    botEnv: row.bot_env ?? null,
     skillId: row.external_skill_id,
     name: row.display_name,
     description: metadata?.descriptions.get(row.external_skill_id) ?? null,
@@ -188,10 +189,11 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-assets/available", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     const botId = String(req.query.botId ?? "").trim();
+    const botEnv = String(req.query.botEnv ?? "").trim().toLowerCase() || undefined;
     if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
     if (!botId) { res.status(400).json({ error: "请选择 Bot" }); return; }
     if (!input.hostLocalSkills) { res.status(503).json({ error: "宿主 Skill 服务不可用" }); return; }
-    const items = await input.hostLocalSkills.listLocalSkills({ botId, identity: requestIdentity });
+    const items = await input.hostLocalSkills.listLocalSkills({ botId, botEnv, identity: requestIdentity });
     res.json({ items });
   }));
 
@@ -211,6 +213,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.post("/skill-assets", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     const botId = String(req.body?.botId ?? "").trim();
+    const botEnv = String(req.body?.botEnv ?? "").trim().toLowerCase() || undefined;
     const skillId = String(req.body?.skillId ?? "").trim();
     if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
     if (!botId || !skillId) { res.status(400).json({ error: "请选择 Bot 中自己的 Skill" }); return; }
@@ -220,6 +223,9 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     const space = await registrationSpace(input.hostSpaces, requestIdentity, req.body?.spaceId);
     const existing = await input.repo.findByExternalSkill(requestIdentity.userId, botId, skillId);
     if (existing) {
+      if (existing.bot_env && botEnv && existing.bot_env !== botEnv) {
+        res.status(409).json({ code: "BOT_TARGET_CHANGED", error: "该 Skill 已登记的 Bot 环境与本次选择不一致" }); return;
+      }
       if ((existing.space_id ?? null) !== (space?.id ?? null)) {
         res.status(409).json({ error: "该 Skill 已登记在其他空间，不能通过重复登记变更归属" }); return;
       }
@@ -228,10 +234,14 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     }
     const exported = await input.hostLocalSkills.exportLocalSkill({
       botId,
+      botEnv,
       skillId,
       ownerUserId: requestIdentity.userId,
       identity: requestIdentity,
     });
+    if (botEnv && exported.botEnv && exported.botEnv !== botEnv) {
+      res.status(409).json({ code: "BOT_TARGET_CHANGED", error: "Bot 环境与选择不一致，请刷新后重试" }); return;
+    }
     const assetId = `SKILL-${randomUUID().slice(0, 12).toUpperCase()}`;
     const objectKey = `skills/${assetId}/versions/v1/package.zip`;
     await packages.put(objectKey, exported.packageBytes);
@@ -241,6 +251,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
       ownerUserId: requestIdentity.userId,
       ...spaceColumns(space),
       botId,
+      botEnv: exported.botEnv ?? botEnv,
       externalSkillId: skillId,
       displayName: exported.displayName,
       description: exported.description ?? null,
@@ -317,7 +328,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
       const applied = await applySkillVersion({
         repo: input.repo, host: input.hostLocalSkills, operationId, baselineBytes: baseline.content,
         readPackage: async ref => (await readSnapshot(packages, ref)).content,
-        replace: { botId: asset.bot_id, skillId: asset.external_skill_id, expectedSha256: base.package_sha256,
+        replace: { botId: asset.bot_id, botEnv: asset.bot_env ?? undefined, skillId: asset.external_skill_id, expectedSha256: base.package_sha256,
           ownerUserId: asset.owner_user_id, identity: requestIdentity },
         version: { kind: "manual", data: {
           versionId, assetId: asset.asset_id, baseVersionId,

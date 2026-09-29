@@ -2402,7 +2402,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       return;
     }
     const {
-      taskType: requestedTaskType, taskName, remark, userId, botId, botEnv,
+      taskType: requestedTaskType, taskName, remark, userId, botId, botEnv: rawBotEnv,
       apiKey: rawApiKey, judgeBackend: rawJudgeBackend,
       model = "", diagnoseIntent: rawDiagnoseIntent, maxSessions: rawMaxSessions = 10, maxRounds = 3,
       startDate, endDate, goal: rawGoal, inputMode: rawInputMode, nodeCommandYamls,
@@ -2424,6 +2424,16 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (deps.capabilities && ((targetSkillAssetId && !deps.capabilities.skillManagement)
       || ((taskType === "hardening" || hasEnabledStageExtensions(rawStageExtensions)) && !deps.capabilities.stageCustomization))) {
       res.status(404).json({ code: "EVOLVE_CAPABILITY_UNAVAILABLE", error: "当前宿主未启用此能力" }); return;
+    }
+    let botEnv = rawBotEnv;
+    if (targetSkillAssetId && skillAssetRepo) {
+      const asset = await skillAssetRepo.findAsset(targetSkillAssetId);
+      if (asset?.bot_env) {
+        if (botEnv && String(botEnv).trim().toLowerCase() !== asset.bot_env) {
+          res.status(409).json({ error: "任务 Bot 环境与登记 Skill 不一致" }); return;
+        }
+        botEnv = asset.bot_env;
+      }
     }
     const skillDiagnosis = Boolean(targetSkillAssetId) && taskType === "diagnose";
     let goal: string;
@@ -2675,6 +2685,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           taskId,
           ownerUserId: String(userId),
           botId: String(botId),
+          botEnv: botEnv || undefined,
           assetId: targetSkillAssetId,
           skillAssetRepo,
           hostLocalSkills,
@@ -3926,7 +3937,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const asset = await skillAssetRepo.findAsset(target.assetId);
     if (!asset || asset.owner_user_id !== (target.ownerUserId ?? task.user_id) || asset.bot_id !== task.bot_id
-      || asset.external_skill_id !== target.skillId) {
+      || asset.external_skill_id !== target.skillId
+      || (asset.bot_env && asset.bot_env !== (target.botEnv ?? config.botEnv))) {
       res.status(409).json({ error: "待更新的 宿主 Skill 与任务冻结目标不一致" }); return;
     }
     if (asset.space_id && !canReadSpaceRecord(asset, actorId, await deps.hostSpaces?.listAccessibleSpaces({ identity: {
@@ -3952,6 +3964,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (recordedVersion) {
       const live = await hostLocalSkills.exportLocalSkill({
         botId: task.bot_id,
+        botEnv: asset.bot_env ?? target.botEnv ?? (String(config.botEnv ?? "").trim() || undefined),
         skillId: target.skillId,
         ownerUserId: asset.owner_user_id,
         identity: {
@@ -3997,7 +4010,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         repo: skillAssetRepo, host: hostLocalSkills, operationId: `task:${task.task_id}`,
         readPackage: async ref => (await skillPackages.read(ref)).content,
         replace: {
-          botId: task.bot_id, skillId: target.skillId, ownerUserId: asset.owner_user_id,
+          botId: task.bot_id, botEnv: asset.bot_env ?? target.botEnv ?? (String(config.botEnv ?? "").trim() || undefined),
+          skillId: target.skillId, ownerUserId: asset.owner_user_id,
           expectedSha256: target.baseline.sha256,
           identity: { userId: task.user_id, authorization: req.header("Authorization") || undefined,
             cookie: req.header("Cookie") || undefined, referer: req.header("Referer") || undefined,

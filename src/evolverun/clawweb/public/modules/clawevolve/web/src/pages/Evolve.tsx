@@ -341,7 +341,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [searchParams, setSearchParams] = useSearchParams()
   const fixedSkillAssetId = searchParams.get('target') === 'skill' ? searchParams.get('assetId')?.trim() ?? '' : ''
   const [fixedSkill, setFixedSkill] = useState<{
-    assetId: string; botId: string; name: string; userId: string; actorId: string; taskType: string
+    assetId: string; botId: string; botEnv?: string | null; name: string; userId: string; actorId: string; taskType: string
   } | null>(null)
   const [fixedSkillError, setFixedSkillError] = useState('')
   const [botsOwnerId, setBotsOwnerId] = useState('')
@@ -470,7 +470,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
       if (defaults.assetId !== asset.assetId || defaults.botId !== asset.botId || !defaults.userId.trim()) {
         throw new Error('任务默认配置与固定 Skill 不匹配')
       }
-      setFixedSkill({ assetId: asset.assetId, botId: asset.botId, name: asset.name,
+      setFixedSkill({ assetId: asset.assetId, botId: asset.botId, botEnv: defaults.botEnv, name: asset.name,
         userId: defaults.userId, actorId: currentUserId, taskType })
       setTaskName(`${asset.name} · ${taskType === 'diagnose' ? '诊断' : taskType === 'hardening' ? '加固' : '优化'}`)
       setFocusIssue(defaults.diagnose.goal)
@@ -486,6 +486,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   useEffect(() => {
     if (!fixedSkillReady || !fixedSkill || botsOwnerId !== fixedSkill.userId) return
     const bot = bots.find((item) => item.botId === fixedSkill.botId
+      && (!fixedSkill.botEnv || item.env === fixedSkill.botEnv)
       && (!item.ownerId || item.ownerId === fixedSkill.userId))
     if (!bot) {
       setBotId(''); setBotEnv(''); setBotSelectionKey('')

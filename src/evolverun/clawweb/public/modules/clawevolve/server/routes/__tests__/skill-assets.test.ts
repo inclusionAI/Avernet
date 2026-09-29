@@ -695,3 +695,42 @@ describe("durable manual Skill application", () => {
     expect((await test.repo.findAsset("RECOVER"))?.pending_application_json).toBeNull();
   });
 });
+
+ it('persists the selected environment for distinct Skills on same-ID Bots through edit writeback', async () => {
+  const test = await startRouter(true);
+  const headers = { "X-User-Id": "owner-1", "Content-Type": "application/json" };
+  const baseline = await zip("# Baseline\n");
+  test.exportLocalSkill.mockImplementation(async (input) => ({ packageBytes: baseline, displayName: "Example",
+    sha256: `sha256:${createHash("sha256").update(baseline).digest("hex")}`, botEnv: input.botEnv }));
+  const ids: string[] = [];
+  for (const botEnv of ["pre", "prod"]) {
+    const available = await fetch(`${test.baseUrl}/skill-assets/available?botId=default&botEnv=${botEnv}`, { headers });
+    expect(available.status).toBe(200);
+    expect(test.listLocalSkills).toHaveBeenCalledWith(expect.objectContaining({ botId: "default", botEnv }));
+    const create = () => fetch(`${test.baseUrl}/skill-assets`, { method: "POST", headers,
+      body: JSON.stringify({ botId: "default", botEnv, skillId: botEnv === "pre" ? "47" : "48" }) });
+    const response = await create();
+    expect(response.status).toBe(201);
+    const asset = await response.json(); ids.push(asset.assetId);
+    expect(asset.botEnv).toBe(botEnv);
+    expect((await test.repo.findAsset(asset.assetId))?.bot_env).toBe(botEnv);
+    expect(await (await create()).json()).toMatchObject({ assetId: asset.assetId, existing: true, botEnv });
+    const [base] = await test.repo.listVersions(asset.assetId);
+    const edit = await fetch(`${test.baseUrl}/skill-assets/${asset.assetId}/versions`, { method: "POST", headers,
+      body: JSON.stringify({ mode: "edit", baseVersionId: base.version_id, edits: [{ path: "SKILL.md", content: "# Edited" }] }) });
+    expect(edit.status).toBe(201);
+    expect(test.replaceLocalSkill).toHaveBeenLastCalledWith(expect.objectContaining({ botId: "default", botEnv }));
+  }
+  expect(new Set(ids).size).toBe(2);
+});
+
+ it('deduplicates registration after an older caller resolves an unambiguous environment', async () => {
+  const test = await startRouter(true);
+  test.exportLocalSkill.mockResolvedValue({ packageBytes: await zip('# Skill'), displayName: 'Example', sha256: 'sha', botEnv: 'prod' });
+  const request = () => fetch(`${test.baseUrl}/skill-assets`, { method: 'POST',
+    headers: { 'X-User-Id': 'owner-1', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ botId: 'default', skillId: '47' }) });
+  const first = await (await request()).json();
+  expect(await (await request()).json()).toMatchObject({ assetId: first.assetId, botEnv: 'prod', existing: true });
+  expect(await test.repo.listAssets('owner-1')).toHaveLength(1);
+});
