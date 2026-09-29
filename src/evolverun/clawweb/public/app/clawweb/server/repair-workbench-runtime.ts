@@ -20,7 +20,7 @@ export function createWorkflowRepairRuntime(db: IDatabase, options: {
   execution?: RepairExecutionPort;
 }): { service: ReturnType<typeof createRepairWorkbenchService>; router: Router } {
   const sources = createRepairSourcePort({
-    groups: (tx, workflowId) => new IssueAggregationRepository(tx).listSources(workflowId),
+    groups: (tx, workflowId, sourceOptions) => new IssueAggregationRepository(tx).listSources(workflowId, sourceOptions),
     suggestions: async (tx, workflowId) => {
       const repo = new EvolveRepository(tx);
       const rows: RepairSuggestionSource[] = [];

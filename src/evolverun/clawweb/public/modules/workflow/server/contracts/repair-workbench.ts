@@ -5,11 +5,12 @@ import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 export type RepairCapabilities = { generation: boolean; diff: boolean; publication: false; reason: string | null };
 export type RepairInboxItem = StoredRepairItem & { sourceAvailable: boolean };
 export type RepairInboxFilter = 'pending' | 'processing' | 'awaiting_verification' | 'closed' | 'no_action' | 'all';
-export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number };
+export type RepairCandidatesQuery = { state?: RepairInboxFilter; page?: number; pageSize?: number; includeHistorical?: boolean };
 export type RepairTaskSummary = { taskId: string; revision: number; phase: RepairRevision['phase']; updatedAtMs: number; itemCount: number };
 export type RepairCandidatesResponse = {
   schemaVersion: 'workflow-repair/v2'; workflowId: string; inputDigest: string;
   items: RepairInboxItem[]; tasks: RepairTaskSummary[]; capabilities: RepairCapabilities;
+  includeHistorical: boolean; activeLookbackDays: number;
   counts: Record<RepairInboxFilter, number>;
   page: { page: number; pageSize: number; total: number; totalPages: number };
   limits: { maxItems: number; maxRequestBytes: number }; canEdit: boolean;
@@ -21,7 +22,7 @@ export type RepairTaskDetail = {
     errorCode: string | null; jobId: string | null; attempt: number; executionId: string | null; rawStatus: string | null };
 };
 export type RepairSelectionRequest = {
-  workflowId: string; itemIds: string[]; inputDigest: string; instructions: string; requestId: string;
+  workflowId: string; itemIds: string[]; inputDigest: string; instructions: string; requestId: string; includeHistorical?: boolean;
 };
 export type RepairFeedbackRequest = RepairSelectionRequest & {
   expectedAttemptRevision: number; parentCandidateCommit: string | null; feedback: string;
@@ -34,7 +35,7 @@ export type RepairDiff = {
 
 /** Trusted server source read. Never accept proposal, evidence, baseline or actor from the browser. */
 export interface RepairSourcePort {
-  load(db: IDatabase, workflowId: string, mode?: 'summary' | 'full', scope?: { itemIds: readonly string[] }): Promise<Array<{ item: RepairItem; episodeKey: string; initialState?: RepairItemState }>>;
+  load(db: IDatabase, workflowId: string, mode?: 'summary' | 'full', scope?: { itemIds?: readonly string[]; includeHistorical?: boolean }): Promise<Array<{ item: RepairItem; episodeKey: string; initialState?: RepairItemState }>>;
 }
 export type RepairExecutionIdentity = { stepId: string; attempt: number; executionId: string };
 export type RepairDispatchRequest = { actorId: string; identity: RepairExecutionIdentity; input: RepairBatchInput };
@@ -61,7 +62,7 @@ export interface RepairWorkbenchService {
   create(actorId: string, request: RepairSelectionRequest): Promise<RepairRevision>;
   revise(actorId: string, taskId: string, request: RepairFeedbackRequest): Promise<RepairRevision>;
   disposition(actorId: string, input: { workflowId: string; itemId: string; inputDigest: string; expectedStateVersion: number;
-    contentRevision: number; action: 'no_action' | 'restore'; reason: string; requestId: string }): Promise<StoredRepairItem>;
+    contentRevision: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }): Promise<StoredRepairItem>;
   cancel(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
   retryDispatch(actorId: string, taskId: string, expectedRevision: number): Promise<void>;
   reconcile(limit?: number): Promise<number>;

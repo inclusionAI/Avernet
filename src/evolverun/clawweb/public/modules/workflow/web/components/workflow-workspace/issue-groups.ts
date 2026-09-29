@@ -4,6 +4,7 @@ import { fetchJson, type EvolveRunDiagnosis } from '@avernet/clawweb-shared/web/
 export type IssueGroupView = {
   workflowId: string; signature: string; inputDigest: string; flowIds: string[];
   aggregationStatus: string; aggregationId: string | null; stale: boolean;
+  aggregationInputSummary?: { totalSources: number; fullSources: number; compactSources: number };
   sources: Array<{ sourceId: string; flowId: string; flowIds: string[]; analysisId: string; diagnosisId: string;
     nodeId: string | null; failureSignature: string; failureMode: string; reasoning: string; completedAtMs: number; evidenceEventIds: string[];
     proposal?: { summary: string; operations: unknown[] } }>;

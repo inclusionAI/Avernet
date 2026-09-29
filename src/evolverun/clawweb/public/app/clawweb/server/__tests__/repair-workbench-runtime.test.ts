@@ -15,7 +15,8 @@ async function fixture(dispatch?: (input: RepairDispatchRequest) => Promise<{ jo
   // Existing analysis tables are provisioned separately from Shared migrations,
   // matching the legacy evolution HTTP fixtures; this is not a new migration.
   await db.exec(`CREATE TABLE workflow_evolution_analysis_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, workflow_id TEXT, status TEXT, scope_type TEXT
+    id INTEGER PRIMARY KEY AUTOINCREMENT, workflow_id TEXT, status TEXT, scope_type TEXT,
+    requested_at_ms INTEGER, completed_at_ms INTEGER
   )`);
   await db.exec("INSERT INTO workflow_specs (workflow_id, spec_json) VALUES ('wf', '{}')");
   for (let index = 0; index < 39; index++) await db.exec(

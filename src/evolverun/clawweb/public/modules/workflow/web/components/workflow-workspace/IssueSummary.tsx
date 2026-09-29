@@ -10,6 +10,8 @@ export default function IssueSummary({ group }: { group: IssueGroupView }) {
     <h4 className="text-xs font-semibold text-slate-900">建议总览</h4>
     <p className="mt-2 text-xs text-slate-500">模型汇总的问题原因与依据，仅供参考；实际修复以勾选的原始建议为准。</p>
     {group.aggregationStatus !== 'completed' && <p role="status" className="mt-2 text-xs text-amber-700">{statusText}</p>}
+    {!!group.aggregationInputSummary?.compactSources && <p className="mt-2 text-xs text-slate-500">本次聚合覆盖 {group.aggregationInputSummary.totalSources} 条诊断：
+      {group.aggregationInputSummary.fullSources} 条完整输入，{group.aggregationInputSummary.compactSources} 条精简输入。</p>}
     {group.stale && <p className="mt-2 text-xs text-amber-700">以下为上次聚合，尚未覆盖最新分析。</p>}
     {group.summary && <>
       <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{group.summary.summary}</p>

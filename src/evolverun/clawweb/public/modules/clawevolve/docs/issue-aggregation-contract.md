@@ -6,8 +6,11 @@ ClawEvolve owns snapshots, selection and validation; Workflow owns presentation;
 ClawMind invokes the existing analysis Bot in a separate synthesis phase after
 single-run completion. No OCB-specific dependency or new model credential is used.
 Deploy Avernet before ClawMind: `/analysis-runs/:id/input` advertises the optional
-`issueAggregationSupported: true` capability. Older Bot versions ignore it;
-new Bots skip synthesis against servers without it.
+`issueAggregationSupported: true` capability and the supported
+`issueAggregationInputVersions`. Older Bot versions ignore the version list and
+receive the complete `workflow-issue-summary-input/v1` payload. A Bot receives
+the compact `workflow-issue-summary-input/v2` payload only when it explicitly
+requests that version, so Avernet can be deployed before the upgraded Bot.
 
 ## Input selection
 
@@ -44,8 +47,10 @@ Model prose is a diagnosis, not proof of root cause or successful remediation.
 These relative routes live under the existing signed internal Evolve router,
 not the browser router. Existing linked-task Bot validation applies to both.
 
-- `POST /analysis-runs/:id/aggregations`, body `{botId}`: requires a completed
-  non-aggregation parent. Returns `{jobs:[{id,input}]}` for changed affected groups.
+- `POST /analysis-runs/:id/aggregations`, body `{botId,inputVersion?}`: requires a
+  completed non-aggregation parent. Omitted `inputVersion` means the complete v1
+  shape; compact v2 is opt-in. Returns `{jobs:[{id,inputVersion,input}]}` for
+  changed affected groups.
 - `POST /analysis-runs/:id/aggregations/:aggregationId`, body `{botId,result}`
   or `{botId,failed:true}`: validates parent binding, references, coverage and CAS.
   Returns `{ok:true}`. Identical completed writes are idempotent; invalid writes
@@ -67,8 +72,18 @@ Each Bot model call is bounded to 120 seconds; new group calls stop after a
 180-second batch budget (an in-flight call can extend the batch up to 300 seconds).
 Failure to synthesize never rolls back an already saved single-run diagnosis.
 
-Groups exceeding 500 source diagnoses or 180,000 UTF-8 input bytes report
-`too_large`; they are never silently sampled. Hierarchical synthesis is not in v1.
+Before the model call, a group with many repeated diagnoses is converted into a
+bounded model view. At most 24 recent and structurally diverse sources retain the
+complete diagnosis/proposal payload; the remaining sources retain their source ID
+and either reference a full representative or carry a bounded reasoning excerpt.
+Representative diversity includes the bounded diagnosis reasoning as well as the
+structured repair action, so a shared fix cannot hide a distinct root cause.
+The frozen `scope_json` still stores the complete source snapshot, result validation
+still requires coverage of every source ID, and the browser exposes full/compact
+counts. This is input compaction, not silent source sampling.
+
+Groups exceeding 500 source diagnoses or 180,000 UTF-8 bytes *after compaction*
+report `too_large`. Hierarchical synthesis is not in v1.
 Historical groups are not automatically backfilled merely by opening a page.
 Run analysis triggers affected groups; reanalyzing an associated run refreshes
 them. There is no separate browser model-dispatch or bulk backfill endpoint in v1.

@@ -20,6 +20,7 @@ function candidates(items = [item('a'), item('b', 'processing'), item('c', 'no_a
     closed: items.filter(row => ['verified', 'ineffective'].includes(row.state)).length,
     no_action: items.filter(row => row.state === 'no_action').length, all: items.length }
   return { schemaVersion: 'workflow-repair/v2', workflowId: 'wf-1', inputDigest: 'digest', items, tasks: [],
+    includeHistorical: false, activeLookbackDays: 30,
     counts, page: { page: 1, pageSize: 20, total: items.length, totalPages: 1 },
     capabilities: { generation: true, diff: true, publication: false, reason: null }, limits: { maxItems: 100, maxRequestBytes: 65536 }, canEdit: true }
 }
@@ -48,10 +49,19 @@ describe('RepairWorkbench', () => {
     api.candidates.mockResolvedValueOnce(first).mockResolvedValueOnce(second)
     const user = userEvent.setup(); render(<RepairWorkbench workflowId="wf-1" />)
     expect(await screen.findByText('修复 a')).toBeInTheDocument()
-    expect(api.candidates).toHaveBeenCalledWith('wf-1', { state: 'pending', page: 1, pageSize: 20 })
+    expect(api.candidates).toHaveBeenCalledWith('wf-1', { state: 'pending', page: 1, pageSize: 20, includeHistorical: false })
     await user.click(screen.getByRole('button', { name: '下一页' }))
     expect(await screen.findByText('修复 b')).toBeInTheDocument()
-    expect(api.candidates).toHaveBeenLastCalledWith('wf-1', { state: 'pending', page: 2, pageSize: 20 })
+    expect(api.candidates).toHaveBeenLastCalledWith('wf-1', { state: 'pending', page: 2, pageSize: 20, includeHistorical: false })
+  })
+  it('loads historical problems only after the user opts in', async () => {
+    const user = userEvent.setup(); render(<RepairWorkbench workflowId="wf-1" />)
+    const toggle = await screen.findByRole('checkbox', { name: '包含超过 30 天未复现的历史问题' })
+    expect(toggle).not.toBeChecked()
+    await user.click(toggle)
+    await waitFor(() => expect(api.candidates).toHaveBeenLastCalledWith('wf-1', {
+      state: 'pending', page: 1, pageSize: 20, includeHistorical: true,
+    }))
   })
   it('keeps selections from another page when generating a candidate', async () => {
     const first = candidates([item('a')]); first.page = { page: 1, pageSize: 20, total: 21, totalPages: 2 }; first.counts.all = 21; first.counts.pending = 21
@@ -105,6 +115,20 @@ describe('RepairWorkbench', () => {
     expect(within(groups[0]).getAllByRole('checkbox')).toHaveLength(2)
     expect(within(groups[1]).getAllByRole('checkbox')).toHaveLength(1)
     expect(screen.queryByText('a'.repeat(64))).not.toBeInTheDocument()
+  })
+  it('collapses prompt variants for the same node into one repair theme without merging their selections', async () => {
+    const variant = (id: string, value: string) => ({ ...item(id), proposal: { summary: `建议 ${id}`,
+      operations: [{ op: 'replace', nodeId: 'scene-route', path: '/executor/prompt', value }] },
+      context: { signature: 'timeout:scene-route' } })
+    api.candidates.mockResolvedValue(candidates([variant('a', '禁止工具调用'), variant('b', '严格 JSON')]))
+    render(<RepairWorkbench workflowId="wf-1" />)
+    const theme = await screen.findByRole('group', { name: '修复主题 scene-route' })
+    expect(within(theme).getByText(/2 个建议变体/)).toBeInTheDocument()
+    expect(within(theme).getByText(/影响运行数未知/)).toBeInTheDocument()
+    expect(within(theme).queryByText('影响 2 个运行')).not.toBeInTheDocument()
+    expect(within(theme).getAllByRole('checkbox')).toHaveLength(2)
+    expect(within(theme).getByRole('checkbox', { name: '选择 建议 a' })).toBeChecked()
+    expect(within(theme).getByRole('checkbox', { name: '选择 建议 b' })).toBeChecked()
   })
   it('keeps unpersisted legacy preview read-only but permits dispositions on persisted history', async () => {
     const preview = { ...item('preview', 'pending', false), updatedAtMs: 0 }
@@ -196,7 +220,8 @@ describe('RepairWorkbench', () => {
     await user.type(screen.getByLabelText('处置原因'), '确认无需修改')
     api.disposition.mockResolvedValue(item('a', 'no_action'))
     await user.click(screen.getByRole('button', { name: '确认处置' }))
-    await waitFor(() => expect(api.disposition).toHaveBeenCalledWith('a', expect.objectContaining({ expectedStateVersion: 2, contentRevision: 1, reason: '确认无需修改', action: 'no_action' })))
+    await waitFor(() => expect(api.disposition).toHaveBeenCalledWith('a', expect.objectContaining({ expectedStateVersion: 2, contentRevision: 1,
+      reason: '确认无需修改', action: 'no_action', includeHistorical: false })))
   })
   it('never offers mutations to a readonly viewer', async () => {
     const data = candidates(); data.canEdit = false; api.candidates.mockResolvedValue(data)

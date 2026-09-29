@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildIssueGroups, validateIssueSummary } from '../issue-aggregation.js';
+import { buildAggregationModelInput, buildIssueGroups, validateIssueSummary } from '../issue-aggregation.js';
 
 const diagnosis = (id: string, signature = 'timeout · cli · fetch') => ({
   diagnosisId: id, flowIds: ['run-a'], nodeId: 'fetch', failureSignature: signature,
@@ -39,5 +39,34 @@ describe('issue aggregation', () => {
     expect(validateIssueSummary(result, group).causes).toHaveLength(2);
     expect(() => validateIssueSummary({ ...result, causes: [{ ...result.causes[0], sourceIds: ['invented'] }] }, group)).toThrow();
     expect(() => validateIssueSummary({ ...result, causes: result.causes.slice(0, 1) }, group)).toThrow();
+  });
+  it('keeps representative diagnoses detailed and compacts repeated tail sources without losing source ids', () => {
+    const inputs = Array.from({ length: 500 }, (_, index) => analysis(`a-${index}`, `run-${index}`, index + 1, [{
+      ...diagnosis(`d-${index}`),
+      reasoning: `共同超时原因 ${index % 3}`.repeat(80),
+      proposal: { schemaVersion: 'workflow-patch/v1', workflowId: 'wf', summary: `建议 ${index}`,
+        operations: [{ op: 'replace', nodeId: 'fetch', path: '/executor/prompt', value: index % 2 ? '禁止工具调用' : '严格 JSON' }] },
+    }]));
+    const group = buildIssueGroups('wf', inputs)[0];
+    const compact = buildAggregationModelInput(group);
+    expect(compact.inputSummary).toMatchObject({ totalSources: 500, fullSources: 24, compactSources: 476 });
+    expect(compact.sources.filter(source => source.detailLevel === 'full')).toHaveLength(24);
+    expect(compact.sources.filter(source => source.detailLevel === 'compact')).toHaveLength(476);
+    expect(compact.sources.map(source => source.sourceId).sort()).toEqual(group.sources.map(source => source.sourceId).sort());
+    expect(compact.sources.find(source => 'flowId' in source && source.flowId === 'run-499')?.detailLevel).toBe('full');
+    expect(compact.sources.some(source => source.detailLevel === 'compact' && !!source.representativeSourceId)).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(compact), 'utf8')).toBeLessThan(180_000);
+  });
+  it('keeps distinct causes representative even when they recommend the same repair action', () => {
+    const sharedProposal = { schemaVersion: 'workflow-patch/v1', workflowId: 'wf', summary: 'Increase timeout',
+      operations: [{ op: 'replace', nodeId: 'fetch', path: '/timeoutMs', value: 30_000 }] };
+    const inputs = Array.from({ length: 25 }, (_, index) => analysis(`a-${index}`, `run-${index}`, index + 1, [{
+      ...diagnosis(`d-${index}`), proposal: sharedProposal,
+      reasoning: index === 0 ? 'Old service deadlock requires separate investigation' : 'Shared upstream network latency',
+    }]));
+    const group = buildIssueGroups('wf', inputs)[0];
+    const uniqueSource = group.sources.find(source => source.reasoning.startsWith('Old service deadlock'))!;
+    const compact = buildAggregationModelInput(group);
+    expect(compact.sources.find(source => source.sourceId === uniqueSource.sourceId)?.detailLevel).toBe('full');
   });
 });

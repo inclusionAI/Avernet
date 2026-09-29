@@ -57,12 +57,15 @@ describe('repair workbench HTTP authorization and lifecycle', () => {
     expect((await f.request('/candidates?workflowId=wf-1&page=0')).status).toBe(400);
     expect((await f.request('/candidates?workflowId=wf-1&pageSize=201')).status).toBe(400);
     expect((await f.request('/candidates?workflowId=wf-1&state=forged')).status).toBe(400);
+    expect((await f.request('/candidates?workflowId=wf-1&includeHistorical=1')).status).toBe(400);
+    expect((await f.request('/candidates?workflowId=wf-1&includeHistorical=true')).body.includeHistorical).toBe(true);
   });
   it('keeps dispositions usable with generation unavailable and cancels with a JSON acknowledgement', async () => {
     const f = await setup(false);
     const inbox = (await f.request('/candidates?workflowId=wf-1')).body;
     const disposition = { workflowId: 'wf-1', inputDigest: inbox.inputDigest, expectedStateVersion: 0, contentRevision: 1, action: 'no_action', reason: '', requestId: 'ignore' };
-    expect((await f.request('/items/item-0/disposition', disposition)).body.state).toBe('no_action');
+    const ignored = await f.request('/items/item-0/disposition', disposition);
+    expect(ignored).toMatchObject({ status: 200, body: { state: 'no_action' } });
     expect((await f.request('/items/item-0/disposition', { ...disposition, expectedStateVersion: 1, action: 'restore', requestId: 'restore' })).body.state).toBe('pending');
     expect((await f.request('/', { workflowId: 'wf-1', inputDigest: inbox.inputDigest, itemIds: ['item-0'], instructions: '', requestId: 'create' })).status).toBe(503);
     const active = await setup();

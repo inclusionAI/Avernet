@@ -11,13 +11,14 @@ export const repairBatches = {
     if (query.state) params.set('state', query.state)
     if (query.page) params.set('page', String(query.page))
     if (query.pageSize) params.set('pageSize', String(query.pageSize))
+    if (query.includeHistorical) params.set('includeHistorical', 'true')
     return fetchJson<RepairCandidatesResponse>(`${base}/candidates?${params}`)
   },
   item: (workflowId: string, itemId: string) => fetchJson<RepairInboxItem>(`${base}/items/${segment(itemId)}?workflowId=${segment(workflowId)}`),
   task: (taskId: string) => fetchJson<RepairTaskDetail>(`${base}/${segment(taskId)}`),
   create: (request: RepairSelectionRequest) => post<RepairRevision>(base, request),
   revise: (taskId: string, request: RepairFeedbackRequest) => post<RepairRevision>(`${base}/${segment(taskId)}/revisions`, request),
-  disposition: (itemId: string, request: { workflowId: string; inputDigest: string; expectedStateVersion: number; contentRevision: number; action: 'no_action' | 'restore'; reason: string; requestId: string }) =>
+  disposition: (itemId: string, request: { workflowId: string; inputDigest: string; expectedStateVersion: number; contentRevision: number; action: 'no_action' | 'restore'; reason: string; requestId: string; includeHistorical?: boolean }) =>
     post<StoredRepairItem>(`${base}/items/${segment(itemId)}/disposition`, request),
   cancel: (taskId: string, expectedRevision: number) => post<unknown>(`${base}/${segment(taskId)}/cancel`, { expectedRevision }),
   retryDispatch: (taskId: string, expectedRevision: number) => post<{ ok: true }>(`${base}/${segment(taskId)}/retry-dispatch`, { expectedRevision }),
