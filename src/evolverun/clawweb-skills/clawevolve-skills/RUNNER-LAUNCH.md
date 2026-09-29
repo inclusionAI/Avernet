@@ -6,8 +6,9 @@ are unchanged by this transport protocol.
 
 Message uses `bash <release>/clawevolve_async_runner.sh --launch-url '<signed URL>'
 --launch-sha256 <SHA-256>`. ClawWeb first stores UTF-8 JSON in the host's existing
-Artifact store under `runner-launches/<SHA-256>.json`. A GET-only signed URL expires
-after one hour. Publication or signing errors fail dispatch; there is no inline
+Artifact store under `evolution/<taskId>/runner-launches/<SHA-256>.json`, alongside
+the task's other evolution artifacts. A GET-only signed URL expires after one
+hour. Publication or signing errors fail dispatch; there is no inline
 fallback. Storage is configured at the module composition root, alongside the
 existing artifact bucket and public origin. Content addressing preserves distinct
 HITL launches without overwriting earlier inputs.
