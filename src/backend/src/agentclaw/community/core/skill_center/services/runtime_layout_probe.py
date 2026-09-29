@@ -203,12 +203,22 @@ class CurrentRuntimeLayoutProbeService:
             return CurrentRuntimeLayoutProbeService._invalid_response(engine)
         data = envelope.data
         evidence = data.evidence.model_dump(exclude_none=True)
+        steady_active = (
+            engine == "openclaw"
+            and evidence.get("activation_state") == "active"
+            and isinstance(evidence.get("checks"), dict)
+            and evidence["checks"].get("active_marker_valid") is True
+            and evidence["checks"].get("active_root_valid") is True
+            and evidence["checks"].get("pool_local_valid") is True
+            and evidence["checks"].get("legacy_storage_entries_absent") is True
+        )
         if (
             data.engine != engine
             or data.layout_contract_version != LAYOUT_CONTRACT_VERSION
             or (
                 data.status is RuntimeLayoutProbeStatus.READY
                 and not isinstance(data.preparation_id, str)
+                and not steady_active
             )
         ):
             return CurrentRuntimeLayoutProbeService._invalid_response(engine)

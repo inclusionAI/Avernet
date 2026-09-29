@@ -68,6 +68,7 @@ def _make_baas_device_service(
         mcp_sync=MagicMock(),
         template_resolver=MagicMock(),
         vault=vault,
+        layout_confirmation=MagicMock(),
         template_service=template_service,
     )
 

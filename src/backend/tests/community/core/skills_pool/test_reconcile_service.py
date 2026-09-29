@@ -2146,6 +2146,54 @@ async def test_pool_active_reconciliation_probes_current_runtime() -> None:
 
 
 @pytest.mark.asyncio
+async def test_migrated_pool_active_accepts_repaired_minimal_openclaw_marker() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(runtime.probe_result, preparation_id=None)
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.ALREADY_ACTIVE
+    assert result.preparation_id is None
+    assert runtime.events == ["probe"]
+
+
+@pytest.mark.asyncio
+async def test_unfinished_migration_rejects_minimal_openclaw_marker() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime()
+    runtime.probe_result = replace(runtime.probe_result, preparation_id=None)
+
+    result = await build_service(layouts, runtime).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.evidence["reason"] == "active_runtime_identity_mismatch"
+
+
+@pytest.mark.asyncio
 async def test_pool_active_desktop_restart_republishes_pool_mappings() -> None:
     layouts = FakeLayoutRepository(
         claimed_state(

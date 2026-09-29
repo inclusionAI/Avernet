@@ -51,6 +51,7 @@ from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutState,
     SkillLayout,
     SkillLayoutPhase,
+    is_repaired_migrated_pool_active_state,
 )
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skills_pool.reconcile_models import (
@@ -835,7 +836,10 @@ class SkillsPoolReconcileService:
                 evidence=probe.evidence,
                 retryable=(probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR),
             )
-        if (
+        repaired_minimal_openclaw_marker = is_repaired_migrated_pool_active_state(
+            state, layout_engine, probe.layout_contract_version, probe.preparation_id
+        )
+        if not repaired_minimal_openclaw_marker and (
             probe.preparation_id is None
             or probe.preparation_id != state.preparation_id
             or probe.layout_contract_version != state.layout_contract_version

@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.startup_identity import resolve_startup_identity
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
     DeviceBindingInfo,
@@ -47,6 +48,7 @@ from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
+    LayoutInitializationConfirmationProtocol,
     McpSyncProtocol,
 )
 from agentclaw.community.log import get_logger
@@ -99,6 +101,7 @@ class DeviceService:
         vault: "Optional[TokenVault]" = None,
         sandbox_client: "Optional[SandboxRuntimeClient]" = None,
         task_queue_service: "TaskQueueService | None" = None,
+        layout_confirmation: "LayoutInitializationConfirmationProtocol",
     ):
         """Initialize device service.
 
@@ -130,6 +133,7 @@ class DeviceService:
         # construction paths (unit tests) that never hit that branch.
         self._sandbox_client = sandbox_client
         self._task_queue_service = task_queue_service
+        self._layout_confirmation = layout_confirmation
         logger.info("[DeviceService] Initialized")
 
     # =========================================================================
@@ -1151,7 +1155,14 @@ class DeviceService:
         return updated_record
 
     def report_device_status(
-        self, *, device_id: str, status: str, message: str | None, token: str
+        self,
+        *,
+        device_id: str,
+        status: str,
+        message: str | None,
+        token: str,
+        startup_identity: str | None = None,
+        layout_initialization: dict[str, object] | None = None,
     ) -> DeviceBindingRecord:
         """Report device startup status.
 
@@ -1172,6 +1183,14 @@ class DeviceService:
         if record.status == DeviceBindingStatus.RELEASED.value:
             raise InvalidDeviceStatusError("cannot report status for released device")
 
+        if layout_initialization is not None:
+            self._confirm_pool_layout_initialization(
+                record=record,
+                status=status,
+                startup_identity=startup_identity,
+                evidence=layout_initialization,
+            )
+
         # Update ac_bots.ext field
         self._update_bot_start_status(binding_id=record.id, status=status, message=message)
 
@@ -1191,6 +1210,46 @@ class DeviceService:
             raise DeviceNotFoundError(f"binding {record.id} not found after update")
 
         return updated_record
+
+    def _confirm_pool_layout_initialization(
+        self,
+        *,
+        record: DeviceBindingRecord,
+        status: str,
+        startup_identity: str | None,
+        evidence: dict[str, object],
+    ) -> None:
+        """Validate current startup identity before advancing layout state."""
+
+        if status != "SUCCEEDED":
+            raise InvalidDeviceStatusError(
+                "layout initialization evidence requires SUCCEEDED status"
+            )
+        expected_identity = resolve_startup_identity(record.device_props)
+        if (
+            expected_identity is None
+            or startup_identity is None
+            or startup_identity != expected_identity
+        ):
+            raise InvalidDeviceStatusError("stale startup identity")
+
+        bot = self._bot_query.get_by_binding_id(record.id)
+        if bot is None:
+            raise InvalidDeviceStatusError("Bot not found for layout confirmation")
+        bot_id = bot.get("bot_id")
+        engine = bot.get("active_engine")
+        if not isinstance(bot_id, str) or not bot_id or not isinstance(engine, str):
+            raise InvalidDeviceStatusError("invalid Bot identity for layout confirmation")
+
+        self._layout_confirmation.confirm(
+            binding_id=record.id,
+            startup_identity=startup_identity,
+            env=record.env,
+            entity_id=record.entity_id,
+            bot_id=bot_id,
+            expected_engine=engine,
+            evidence=evidence,
+        )
 
     def list_connectable_devices(
         self,

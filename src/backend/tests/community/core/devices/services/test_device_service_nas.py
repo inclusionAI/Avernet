@@ -34,6 +34,7 @@ def _make_service(repo=None, oss_record_repo=None) -> DeviceService:
         bot_sync=MagicMock(),
         oss_record_repo=oss_record_repo or MagicMock(),
         mcp_sync=MagicMock(),
+        layout_confirmation=MagicMock(),
     )
 
 

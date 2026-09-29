@@ -18,6 +18,7 @@ class SkillLayoutPhase(StrEnum):
     """Bot 布局迁移的持久化阶段。"""
 
     LEGACY_ACTIVE = "legacy_active"
+    POOL_INITIALIZING = "pool_initializing"
     POOL_PREPARING = "pool_preparing"
     POOL_READY = "pool_ready"
     POOL_ACTIVATING_PRE_CUTOVER = "pool_activating_pre_cutover"
@@ -109,4 +110,68 @@ def runtime_uses_pool_paths(state: BotSkillLayoutState) -> bool:
             SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
             SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
         }
+    )
+
+
+def is_pool_native_state(
+    state: BotSkillLayoutState,
+    *,
+    layout_contract_version: str,
+    engine_type: str,
+) -> bool:
+    """Return whether a row has the exact no-migration Pool-native shape."""
+
+    return (
+        state.persisted
+        and state.active_layout is SkillLayout.POOL
+        and state.target_layout is None
+        and state.phase
+        in {
+            SkillLayoutPhase.POOL_INITIALIZING,
+            SkillLayoutPhase.POOL_ACTIVE,
+        }
+        and state.migration_generation is None
+        and state.preparation_id is None
+        and not state.data_plane_cutover_committed
+        and state.layout_contract_version == layout_contract_version
+        and state.rollout_evidence is not None
+        and state.rollout_evidence.engine_type == engine_type
+    )
+
+
+def is_migrated_pool_active_state(
+    state: BotSkillLayoutState,
+    *,
+    layout_contract_version: str,
+) -> bool:
+    """Return whether an active Pool row retains completed migration identity."""
+
+    return (
+        state.persisted
+        and state.active_layout is SkillLayout.POOL
+        and state.target_layout is None
+        and state.phase is SkillLayoutPhase.POOL_ACTIVE
+        and isinstance(state.migration_generation, str)
+        and isinstance(state.preparation_id, str)
+        and state.data_plane_cutover_committed
+        and state.layout_contract_version == layout_contract_version
+    )
+
+
+def is_repaired_migrated_pool_active_state(
+    state: BotSkillLayoutState,
+    engine_type: str,
+    observed_contract_version: str | None,
+    observed_preparation_id: str | None,
+) -> bool:
+    """Whether a completed migration is observed through a minimal marker."""
+
+    return (
+        engine_type == "openclaw"
+        and observed_preparation_id is None
+        and observed_contract_version == state.layout_contract_version
+        and is_migrated_pool_active_state(
+            state,
+            layout_contract_version=state.layout_contract_version,
+        )
     )

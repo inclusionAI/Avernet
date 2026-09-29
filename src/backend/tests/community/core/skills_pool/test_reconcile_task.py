@@ -36,6 +36,7 @@ from agentclaw.community.core.skills_pool.quarantine import QuarantineStatus
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
+    RolloutEvidence,
     SkillLayout,
     SkillLayoutPhase,
 )
@@ -475,6 +476,84 @@ def test_ineligible_unclaimed_bot_never_probes_or_reconciles_runtime() -> None:
 
     assert handler.handle(_payload()) == Complete()
     assert len(claims.calls) == 1
+    assert reconcile.calls == []
+
+
+def test_pool_native_task_does_not_enter_migration_reconciliation() -> None:
+    state = replace(
+        _claimed_state(active_layout=SkillLayout.POOL),
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation=None,
+        preparation_id=None,
+        data_plane_cutover_committed=False,
+        rollout_evidence=RolloutEvidence(
+            env="pre",
+            config_id=7,
+            config_version="revision-1",
+            batch_id=None,
+            engine_type="openclaw",
+            decision_reason="owner_allowlist",
+        ),
+    )
+    handler, _, _, reconcile = _handler(
+        claim_results=[MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)],
+        reconcile_results=[],
+        state=state,
+    )
+
+    assert handler.handle(_payload()) == Complete()
+    assert reconcile.calls == []
+
+
+def test_pool_state_without_generation_must_match_native_shape() -> None:
+    state = replace(
+        _claimed_state(active_layout=SkillLayout.POOL),
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+        migration_generation=None,
+        preparation_id=None,
+        data_plane_cutover_committed=True,
+    )
+    handler, _, _, reconcile = _handler(
+        claim_results=[MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)],
+        reconcile_results=[],
+        state=state,
+    )
+
+    assert handler.handle(_payload()) == Fail(
+        "pool layout state has no migration identity"
+    )
+    assert reconcile.calls == []
+
+
+def test_pool_state_with_wrong_native_contract_is_not_skipped() -> None:
+    state = replace(
+        _claimed_state(active_layout=SkillLayout.POOL),
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation=None,
+        preparation_id=None,
+        data_plane_cutover_committed=False,
+        layout_contract_version="future-contract",
+        rollout_evidence=RolloutEvidence(
+            env="pre",
+            config_id=7,
+            config_version="revision-1",
+            batch_id=None,
+            engine_type="openclaw",
+            decision_reason="owner_allowlist",
+        ),
+    )
+    handler, _, _, reconcile = _handler(
+        claim_results=[MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)],
+        reconcile_results=[],
+        state=state,
+    )
+
+    assert handler.handle(_payload()) == Fail(
+        "pool layout state has no migration identity"
+    )
     assert reconcile.calls == []
 
 

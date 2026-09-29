@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING, Any, override
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.token_vault import TokenVault
-    from agentclaw.community.core.devices.protocols import BotQueryProtocol, BotSyncProtocol, McpSyncProtocol
+    from agentclaw.community.core.devices.protocols import (
+        BotQueryProtocol,
+        BotSyncProtocol,
+        LayoutInitializationConfirmationProtocol,
+        McpSyncProtocol,
+    )
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
 
 from agentclaw.community.core.devices.errors import (
@@ -116,6 +121,7 @@ class LocalDeviceService(DeviceService):
         mcp_sync: "McpSyncProtocol",
         lifecycle_executor: BaasDeviceLifecycleExecutor | None = None,
         vault: "TokenVault | None" = None,
+        layout_confirmation: "LayoutInitializationConfirmationProtocol",
     ):
         super().__init__(
             repository, default_engine,
@@ -123,6 +129,7 @@ class LocalDeviceService(DeviceService):
             oss_record_repo=oss_record_repo,
             mcp_sync=mcp_sync,
             vault=vault,
+            layout_confirmation=layout_confirmation,
         )
         self._config = config or {}
         self._baas_service = baas_service

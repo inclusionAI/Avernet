@@ -782,11 +782,30 @@ class TestReportDeviceRouting:
 
         result = router.report_device_status(
             device_id="staff_u001_default",
-            status="FAILED",
-            message="oops",
+            status="SUCCEEDED",
+            message=None,
             token="tok",
+            startup_identity="sandbox-1",
+            layout_initialization={
+                "actual_engine": "openclaw",
+                "actual_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "roots_initialized": True,
+            },
         )
-        mock_service.report_device_status.assert_called_once()
+        mock_service.report_device_status.assert_called_once_with(
+            device_id="staff_u001_default",
+            status="SUCCEEDED",
+            message=None,
+            token="tok",
+            startup_identity="sandbox-1",
+            layout_initialization={
+                "actual_engine": "openclaw",
+                "actual_layout": "pool",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "roots_initialized": True,
+            },
+        )
         assert result is updated
 
 

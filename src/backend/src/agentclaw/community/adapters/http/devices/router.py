@@ -46,6 +46,9 @@ from agentclaw.community.adapters.http.devices.schemas import (
 )
 from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.core.devices.models import OperatorContext
+from agentclaw.community.core.skills_pool.native_confirmation import (
+    PoolNativeLayoutConfirmationError,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -725,7 +728,6 @@ async def report_device_alive(
             DeviceNotFoundError,
             InvalidDeviceStatusError,
         )
-
         # Parse Bearer token
         if not authorization.startswith("Bearer "):
             raise HTTPException(
@@ -762,8 +764,6 @@ async def report_device_alive(
             error_code=40302,
             data=None,
         )
-
-
 @router.post("/callback/status", response_model=ApiResponse[DeviceBindingResponse])
 async def report_device_status(
     req: ReportDeviceStatusRequest,
@@ -793,6 +793,12 @@ async def report_device_status(
             status=req.status,
             message=req.message,
             token=token,
+            startup_identity=req.startup_identity,
+            layout_initialization=(
+                req.layout_initialization.model_dump()
+                if req.layout_initialization is not None
+                else None
+            ),
         )
 
         # service 返回 DeviceBindingRecord，统一转换
@@ -816,6 +822,13 @@ async def report_device_status(
             success=False,
             message=str(e),
             error_code=40302,
+            data=None,
+        )
+    except PoolNativeLayoutConfirmationError as e:
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=40904,
             data=None,
         )
 
