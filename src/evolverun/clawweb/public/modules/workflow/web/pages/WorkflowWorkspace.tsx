@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useCreateWorkflow, useEvolveDiagnoses, useEvolveLessons, useWorkflowTypes } from '../api/hooks'
+import { useCreateWorkflow, useWorkflowTypes } from '../api/hooks'
 import { getClientUser } from '@avernet/clawweb-shared/web/hooks/useClientUser'
 import Sidebar, { type WorkspaceView } from '../components/workflow-workspace/Sidebar'
 import OverviewTab from '../components/workflow-workspace/OverviewTab'
@@ -57,12 +57,6 @@ export default function WorkflowWorkspace() {
     return workflows.find((workflow) => workflow.workflow_id === (urlSelection ?? selectedId)) ?? workflows[0] ?? null
   }, [workflows, selectedId, urlWorkflowId])
   const workflowId = selectedWorkflow?.workflow_id ?? ''
-  const diagnosesQ = useEvolveDiagnoses({ workflowId, limit: 100, enabled: Boolean(workflowId) })
-  const lessonsQ = useEvolveLessons({ workflowId, limit: 100, enabled: Boolean(workflowId) })
-  const counts = {
-    diagnosis: new Set((diagnosesQ.data?.diagnoses ?? []).map((item) => item.failure_signature)).size,
-    remedies: lessonsQ.data?.lessons.length ?? 0,
-  }
 
   useEffect(() => {
     if (!legacyOpen) return
@@ -110,7 +104,7 @@ export default function WorkflowWorkspace() {
   if (isError) return <div className="p-6"><ErrorState message={error instanceof Error ? error.message : '加载工作流失败'} onRetry={() => void refetch()} /></div>
 
   return <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden bg-slate-50">
-    <Sidebar activeView={activeView} onViewChange={changeView} isAdmin={isAdmin} hasWorkflow={Boolean(selectedWorkflow)} counts={counts} />
+    <Sidebar activeView={activeView} onViewChange={changeView} isAdmin={isAdmin} hasWorkflow={Boolean(selectedWorkflow)} />
 
     <main className="flex min-w-0 flex-1 flex-col bg-slate-50">
       {activeView === 'dashboard' && isAdmin ? (

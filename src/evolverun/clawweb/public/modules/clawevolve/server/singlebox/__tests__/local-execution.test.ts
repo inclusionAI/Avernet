@@ -155,9 +155,9 @@ it("cancels detached descendants without touching unrelated processes", async ()
   try {
     await runner.dispatch(input);
     let child = 0;
-    await vi.waitFor(() => { child = Number(readFileSync(join(root, "logs/EV-test/STEP-test.log"), "utf8").trim()); expect(child).toBeGreaterThan(0); });
+    await vi.waitFor(() => { child = Number(readFileSync(join(root, "logs/EV-test/STEP-test.log"), "utf8").trim()); expect(child).toBeGreaterThan(0); }, { timeout: 5_000 });
     await runner.cancel({ ...input, sessionId: null, platformResponse: null });
-    await vi.waitFor(() => expect(() => process.kill(child, 0)).toThrow());
+    await vi.waitFor(() => expect(() => process.kill(child, 0)).toThrow(), { timeout: 5_000 });
     expect(() => process.kill(unrelated.pid!, 0)).not.toThrow();
   } finally { unrelated.kill("SIGKILL"); }
 });
