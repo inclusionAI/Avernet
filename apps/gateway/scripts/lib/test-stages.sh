@@ -8,7 +8,7 @@ run_unit_tests() {
         -m "not integration and not e2e" \
         -v \
         --junitxml="$REPORT_DIR/ut.xml" \
-        --cov=apps/gateway \
+        --cov=src/gateway \
         --cov-report=xml:"$REPORT_DIR/coverage.xml" \
         --cov-report=html:"$REPORT_DIR/html" \
         --color=yes
@@ -25,7 +25,7 @@ run_ci_tests() {
         -m "not e2e" \
         -v \
         --junitxml="$REPORT_DIR/TEST-unit.xml" \
-        --cov=apps/gateway \
+        --cov=src/gateway \
         --cov-report=xml:"$REPORT_DIR/TEST-cov.xml" \
         --cov-report=html:"$REPORT_DIR/html" \
         --color=yes
@@ -56,7 +56,7 @@ run_integration_tests() {
         -m integration \
         -v \
         --junitxml="$REPORT_DIR/it.xml" \
-        --cov=apps/gateway --cov-append \
+        --cov=src/gateway --cov-append \
         --cov-report=xml:"$REPORT_DIR/coverage.xml" \
         --cov-report=html:"$REPORT_DIR/html" \
         --color=yes
