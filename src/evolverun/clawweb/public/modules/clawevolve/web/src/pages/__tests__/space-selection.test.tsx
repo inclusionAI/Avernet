@@ -37,7 +37,7 @@ beforeEach(() => {
     { id: 'team-1', name: '研发空间', type: 'TEAM', role: 'MEMBER' },
   ] })
   api.evolve.listSkillAssets.mockResolvedValue({ items: [asset] })
-  api.bots.list.mockResolvedValue({ bots: [{ botId: 'bot-1', botName: '我的 Bot' }] })
+  api.bots.list.mockResolvedValue({ bots: [{ botId: 'bot-1', botName: '我的 Bot', env: 'prod' }] })
   api.evolve.listAvailableLocalSkills.mockResolvedValue({ items: [{ skillId: 'skill-1', displayName: '本地技能' }] })
   api.evolve.registerSkillAsset.mockResolvedValue(asset)
   api.evolve.stageCatalog.mockResolvedValue({ flows: [{ key: 'bot_evolution', name: 'Bot 自进化' }], stages: [
@@ -92,9 +92,10 @@ describe('space selection interactions', () => {
     fireEvent.click(screen.getByRole('button', { name: /请选择 Bot/ }))
     fireEvent.click(screen.getByRole('radio', { name: /我的 Bot/ }))
     await screen.findByRole('option', { name: '本地技能' })
+    expect(api.evolve.listAvailableLocalSkills).toHaveBeenCalledWith('bot-1', 'prod')
     fireEvent.change(screen.getByRole('combobox', { name: 'Bot 中自己上传的 Skill' }), { target: { value: 'skill-1' } })
     fireEvent.click(screen.getByRole('button', { name: '登记', exact: true }))
-    await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledWith({ botId: 'bot-1', skillId: 'skill-1', ...(spaceId ? { spaceId } : {}) }))
+    await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledWith({ botId: 'bot-1', botEnv: 'prod', skillId: 'skill-1', ...(spaceId ? { spaceId } : {}) }))
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/evolve/skills/A1'))
   })
 
@@ -113,9 +114,10 @@ describe('space selection interactions', () => {
     fireEvent.click(screen.getByRole('button', { name: /请选择 Bot/ }))
     fireEvent.click(screen.getByRole('radio', { name: /我的 Bot/ }))
     await screen.findByRole('option', { name: '本地技能' })
+    expect(api.evolve.listAvailableLocalSkills).toHaveBeenCalledWith('bot-1', 'prod')
     fireEvent.change(screen.getByRole('combobox', { name: 'Bot 中自己上传的 Skill' }), { target: { value: 'skill-1' } })
     fireEvent.click(screen.getByRole('button', { name: '登记', exact: true }))
-    await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledWith({ botId: 'bot-1', skillId: 'skill-1' }))
+    await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledWith({ botId: 'bot-1', botEnv: 'prod', skillId: 'skill-1' }))
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/evolve/skills/A1'))
   })
 
