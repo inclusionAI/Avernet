@@ -65,8 +65,8 @@ _upstream_dir() {
     case "$1" in
         backend) echo "apps/backend" ;;
         baas)    echo "apps/baas" ;;
-        bcn)     echo "src/bcs" ;;
-        bcn-internal) echo "src/bcs" ;;
+        bcn)     echo "apps/bcs" ;;
+        bcn-internal) echo "apps/bcs" ;;
         *)       echo "" ;;
     esac
 }

@@ -80,6 +80,9 @@ check_args=(
 if [[ -n "$base" ]]; then
   check_args+=(--base "$base" --head "$head" --min-change-line-coverage 90)
 fi
+
+echo "start args:$check_args"
+
 "$python_bin" "${check_args[@]}"
 echo "Coverage report: file://$report_dir/html/index.html"
 echo "--- end unit coverage report ---"
