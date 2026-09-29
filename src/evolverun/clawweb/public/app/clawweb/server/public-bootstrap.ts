@@ -19,6 +19,7 @@ import { adminAuthMiddleware } from "@avernet/clawweb-shared/server/middleware/a
 import { AdminUserRepository } from "@avernet/clawweb-shared/server/repositories/admin-user-repository";
 import type { ClawWebBootstrap } from "./bootstrap.js";
 import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
+import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 
 export function createClawWebBootstrap(): ClawWebBootstrap {
   return {
@@ -58,6 +59,14 @@ export function createClawWebBootstrap(): ClawWebBootstrap {
         });
       });
       app.use("/api/evolve", clawevolve.publicRouter);
+      app.use("/api/workflow-repairs", createWorkflowRepairRuntime(db, {
+        principal: async request => {
+          const identity = resolveAuthMeIdentity(request, { environment: context.environment });
+          if (!identity) return null;
+          return { actorId: identity.userId, isAdmin: identity.userId === "dev_local"
+            || await adminUserRepo.hasRole([identity.userId, identity.userName], "admin") };
+        },
+      }).router);
       app.use("/api/bench", clawevolve.benchRouter);
       app.use("/api/insight/v1", createInsightRouter(insight.service));
       // Approval API: user-facing (GET/POST /api/approval/:id/...) and internal (POST /api/approval-cards/...)

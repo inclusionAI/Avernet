@@ -21,6 +21,13 @@ export type SkillAssetRow = {
   gmt_modified: number | string;
 };
 
+export type SkillBotMetadataRow = {
+  bot_id: string;
+  bot_name: string | null;
+  owner_id: string | null;
+  entity_id: string | null;
+};
+
 export type SkillVersionRow = {
   id: number;
   version_id: string;
@@ -44,9 +51,24 @@ const skillAssetProjection = `SELECT a.*, v.package_ref AS current_package_ref,
   JOIN ce_skill_versions v ON v.asset_id = a.asset_id AND v.version_no = a.current_version_no`;
 const versionProjection = `SELECT v.*, source.version_no AS source_version_no
   FROM ce_skill_versions v LEFT JOIN ce_skill_versions source ON source.version_id = v.source_version_id`;
+const eventProjection = `SELECT e.*, vf.version_no AS version_from_no, vt.version_no AS version_to_no FROM ce_skill_events e
+  LEFT JOIN ce_skill_versions vf ON vf.version_id = e.version_from_id
+  LEFT JOIN ce_skill_versions vt ON vt.version_id = e.version_to_id
+  JOIN ce_skill_assets a ON a.asset_id = e.asset_id`;
 
 export class SkillAssetRepository {
-  constructor(private readonly db: IDatabase) {}
+  constructor(private readonly db: IDatabase, private readonly botDb: Pick<IDatabase, "query"> = db) {}
+
+  /** Display metadata for already-authorized records, never a source of access permissions. */
+  async listBotMetadata(botIds: readonly string[]): Promise<SkillBotMetadataRow[]> {
+    const ids = [...new Set(botIds.filter(Boolean))];
+    if (!ids.length) return [];
+    return this.botDb.query<SkillBotMetadataRow>(
+      `SELECT bot_id, bot_name, owner_id, entity_id FROM ac_bots
+       WHERE bot_id IN (${ids.map(() => "?").join(",")}) AND is_delete = 0 ORDER BY id DESC`,
+      ids,
+    ).catch(() => []);
+  }
 
   /** Only release after the host proves that no write was started. */
   async releaseUnstartedApplication(assetId: string, operationId: string, reservationId: string) {
@@ -106,15 +128,23 @@ export class SkillAssetRepository {
 
   async listEvents(ownerUserId: string, teamSpaceIds: readonly string[] = [], assetId?: string) {
     return this.db.query<SkillEventRow>(
-      `SELECT e.*, vf.version_no AS version_from_no, vt.version_no AS version_to_no FROM ce_skill_events e
-       LEFT JOIN ce_skill_versions vf ON vf.version_id = e.version_from_id
-       LEFT JOIN ce_skill_versions vt ON vt.version_id = e.version_to_id
-       JOIN ce_skill_assets a ON a.asset_id = e.asset_id
+      `${eventProjection}
        WHERE (e.owner_user_id = ?${teamSpaceIds.length
     ? ` OR (a.space_type = 'TEAM' AND a.space_id IN (${teamSpaceIds.map(() => '?').join(',')}))` : ''})
        ${assetId ? 'AND e.asset_id = ?' : ''}
        ORDER BY e.started_at DESC, e.id DESC`,
       [ownerUserId, ...teamSpaceIds, ...(assetId ? [assetId] : [])],
+    );
+  }
+
+  async listAllEvents(filters: { ownerUserId?: string; assetId?: string } = {}) {
+    const clauses: string[] = [];
+    const params: string[] = [];
+    if (filters.ownerUserId) { clauses.push('e.owner_user_id = ?'); params.push(filters.ownerUserId); }
+    if (filters.assetId) { clauses.push('e.asset_id = ?'); params.push(filters.assetId); }
+    return this.db.query<SkillEventRow>(
+      `${eventProjection}${clauses.length ? ` WHERE ${clauses.join(' AND ')}` : ''} ORDER BY e.started_at DESC, e.id DESC`,
+      params,
     );
   }
 
@@ -137,6 +167,13 @@ export class SkillAssetRepository {
     return this.db.query<SkillAssetRow>(
       `${skillAssetProjection} WHERE a.owner_user_id = ?${teamSpaceIds.length ? ` OR (a.space_type = 'TEAM' AND a.space_id IN (${teamSpaceIds.map(() => "?").join(",")}))` : ""} ORDER BY a.gmt_modified DESC, a.id DESC`,
       [ownerUserId, ...teamSpaceIds],
+    );
+  }
+
+  async listAllAssets(ownerUserId?: string): Promise<SkillAssetRow[]> {
+    return this.db.query<SkillAssetRow>(
+      `${skillAssetProjection}${ownerUserId ? ' WHERE a.owner_user_id = ?' : ''} ORDER BY a.gmt_modified DESC, a.id DESC`,
+      ownerUserId ? [ownerUserId] : [],
     );
   }
 

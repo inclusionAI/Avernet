@@ -31,7 +31,7 @@ _RUN_UUID_STR = "00000000-0000-0000-0000-0000000000aa"
 _UUID_PATCH = "secbaas.community.core.service.bot_run._baas_service.uuid.uuid4"
 _AGENT_KEY = f"agent:{_TC_BOT_ID}:session:{_RUN_UUID_STR}:user:{_USER_ID}"
 # aicoding / claude_code 覆写为 user 前置亲和键（区别于基类默认的 bot 前置）
-_AGENT_KEY_USER_FIRST = f"agent:{_USER_ID}:session:{_RUN_UUID_STR}:user:{_TC_BOT_ID}"
+_AGENT_KEY_USER_FIRST = f"user:{_USER_ID}:session:{_RUN_UUID_STR}:agent:{_TC_BOT_ID}"
 
 
 def _make_context():

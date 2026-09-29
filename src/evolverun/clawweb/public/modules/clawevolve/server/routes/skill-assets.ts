@@ -9,7 +9,7 @@ import type { BotSkillGateway } from "../contracts/bot-skill-gateway.js";
 import type { RequestIdentity } from "../contracts/request-identity.js";
 import type { SpaceDirectory } from "../contracts/space-directory.js";
 import { canReadSpaceRecord, registrationSpace, spaceColumns } from "../services/evolve/space-access.js";
-import type { SkillAssetRepository } from "../repositories/skill-asset-repository.js";
+import type { SkillAssetRepository, SkillBotMetadataRow } from "../repositories/skill-asset-repository.js";
 import { skillEventTestBench } from "../repositories/skill-audit.js";
 import { type ObjectStore } from "../services/object-storage/oss-object-store.js";
 import { editSkillPackage, parseSkillPackage, skillPackageDiff, skillPackagesEquivalent, skillPackageView } from "../services/evolve/skill-package-view.js";
@@ -39,7 +39,18 @@ function identity(req: Request): RequestIdentity | null {
   };
 }
 
-type DisplayMetadata = { ownerId: string | null; descriptions: Map<string, string | null> };
+type DisplayMetadata = { ownerId: string | null; bots: SkillBotMetadataRow[]; descriptions: Map<string, string | null> };
+
+function botView(metadata: DisplayMetadata | undefined, registeredOwner: string) {
+  const rows = metadata?.bots ?? [];
+  const knownOwner = metadata?.ownerId;
+  const match = rows.find(row => [row.owner_id, row.entity_id].includes(registeredOwner));
+  // Shared/default Bot IDs must not borrow another owner's display information.
+  const unique = rows[0]?.bot_id !== 'default'
+    && new Set(rows.map(row => row.owner_id || row.entity_id)).size === 1 ? rows[0] : undefined;
+  const bot = match ?? unique;
+  return { ownerId: bot?.owner_id || bot?.entity_id || (rows.length ? null : knownOwner ?? null), botName: bot?.bot_name ?? null };
+}
 
 function assetView(
   row: Awaited<ReturnType<SkillAssetRepository["findAsset"]>>,
@@ -52,7 +63,7 @@ function assetView(
     spaceId: row.space_id ?? null,
     spaceType: row.space_type ?? null,
     spaceName: row.space_name ?? null,
-    ownerId: metadata?.ownerId ?? null,
+    ...botView(metadata, row.owner_user_id),
     createdAt: row.gmt_create,
     botId: row.bot_id,
     skillId: row.external_skill_id,
@@ -79,7 +90,7 @@ async function readSnapshot(store: SkillPackageStorage, ref: string) {
 
 function eventView(
   event: Awaited<ReturnType<SkillAssetRepository["listEvents"]>>[number],
-  ownerId: string | null,
+  metadata?: DisplayMetadata,
 ) {
   const version = (id: string | null, no: number | null) => id && no != null
     ? { versionId: id, version: `v${no}` } : null;
@@ -88,7 +99,7 @@ function eventView(
     assetId: event.asset_id,
     name: event.display_name,
     description: event.description,
-    ownerId,
+    ...botView(metadata, event.owner_user_id),
     botId: event.bot_id,
     actorId: event.actor_id,
     actorType: event.actor_type,
@@ -128,35 +139,50 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   const router = Router();
   const packages = input.skillPackages ?? new SkillPackageStorage(undefined, input.artifactStore);
 
-  async function readable(asset: NonNullable<Awaited<ReturnType<SkillAssetRepository["findAsset"]>>>, requestIdentity: RequestIdentity) {
+  async function readable(asset: NonNullable<Awaited<ReturnType<SkillAssetRepository["findAsset"]>>>, requestIdentity: RequestIdentity, adminRead = false) {
+    if (adminRead) return true;
     return canReadSpaceRecord(asset, requestIdentity.userId,
       asset.space_id ? await input.hostSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [] : []);
   }
 
   async function displayMetadata(botIds: string[], requestIdentity: RequestIdentity, includeSkills = true) {
-    // Request-scoped deduplication: two metadata calls per distinct Bot, never
-    // per version/asset and never ZIP reads. Old registered assets benefit too.
-    const entries = await Promise.all([...new Set(botIds)].map(async (botId) => {
-      const query = { botId, identity: requestIdentity };
-      const [bot, skills] = await Promise.all([
-        input.hostLocalSkills?.getBotMetadata?.(query).catch(() => null),
-        includeSkills ? input.hostLocalSkills?.listLocalSkills(query).catch(() => []) : [],
-      ]);
-      return [botId, { ownerId: bot?.ownerId ?? null,
-        descriptions: new Map((skills ?? []).map((skill) => [skill.skillId, skill.description ?? null])),
-      }] as const;
-    }));
-    return new Map(entries);
+    const uniqueBotIds = [...new Set(botIds)];
+    const [botRows, entries] = await Promise.all([
+      input.repo.listBotMetadata(uniqueBotIds),
+      Promise.all(uniqueBotIds.map(async (botId) => {
+        const query = { botId, identity: requestIdentity };
+        const [bot, skills] = await Promise.all([
+          input.hostLocalSkills?.getBotMetadata?.(query).catch(() => null),
+          includeSkills ? input.hostLocalSkills?.listLocalSkills(query).catch(() => []) : [],
+        ]);
+        return [botId, { ownerId: bot?.ownerId ?? null,
+          descriptions: new Map((skills ?? []).map((skill) => [skill.skillId, skill.description ?? null])),
+        }] as const;
+      })),
+    ]);
+    return new Map(entries.map(([botId, metadata]) => [botId, {
+      ...metadata, bots: botRows.filter(row => row.bot_id === botId),
+    }]));
   }
+
+  router.get(["/skill-assets", "/skill-events"], (req, res, next) => {
+    if (req.query.scope === "all" && req.isClawEvolveAdmin !== true) {
+      res.status(403).json({ error: "Forbidden", message: "ClawEvolve 管理员权限不足" }); return;
+    }
+    next();
+  });
 
   router.get("/skill-events", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
-    const spaces = await input.hostSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [];
-    const events = await input.repo.listEvents(requestIdentity.userId,
-      spaces.filter((space) => space.type === 'TEAM').map((space) => space.id));
+    const all = req.query.scope === "all";
+    const spaces = all ? [] : await input.hostSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [];
+    const events = all
+      ? await input.repo.listAllEvents({ ownerUserId: String(req.query.ownerUserId ?? "").trim() || undefined })
+      : await input.repo.listEvents(requestIdentity.userId,
+        spaces.filter((space) => space.type === 'TEAM').map((space) => space.id));
     const metadata = await displayMetadata(events.map((event) => event.bot_id), requestIdentity, false);
-    res.json({ items: events.map((event) => eventView(event, metadata.get(event.bot_id)?.ownerId ?? null)) });
+    res.json({ items: events.map((event) => eventView(event, metadata.get(event.bot_id))) });
   }));
 
   router.get("/skill-assets/available", asyncHandler(async (req, res) => {
@@ -172,9 +198,12 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-assets", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
-    const spaces = await input.hostSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [];
-    const assets = (await input.repo.listAssets(requestIdentity.userId, spaces.filter((space) => space.type === "TEAM").map((space) => space.id)))
-      .filter((asset) => canReadSpaceRecord(asset, requestIdentity.userId, spaces));
+    const all = req.query.scope === "all";
+    const spaces = all ? [] : await input.hostSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [];
+    const assets = all
+      ? await input.repo.listAllAssets(String(req.query.ownerUserId ?? "").trim() || undefined)
+      : (await input.repo.listAssets(requestIdentity.userId, spaces.filter((space) => space.type === "TEAM").map((space) => space.id)))
+        .filter((asset) => canReadSpaceRecord(asset, requestIdentity.userId, spaces));
     const metadata = await displayMetadata(assets.map((asset) => asset.bot_id), requestIdentity);
     res.json({ items: assets.map((asset) => assetView(asset, metadata.get(asset.bot_id), requestIdentity.userId)) });
   }));
@@ -310,7 +339,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-assets/:assetId", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     const asset = await input.repo.findAsset(String(req.params.assetId));
-    if (!requestIdentity || !asset || !await readable(asset, requestIdentity)) {
+    if (!requestIdentity || !asset || !await readable(asset, requestIdentity, req.isClawEvolveAdmin === true)) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
     const metadata = await displayMetadata([asset.bot_id], requestIdentity);
@@ -323,20 +352,22 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-assets/:assetId/history", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     const asset = await input.repo.findAsset(String(req.params.assetId));
-    if (!requestIdentity || !asset || !await readable(asset, requestIdentity)) {
+    if (!requestIdentity || !asset || !await readable(asset, requestIdentity, req.isClawEvolveAdmin === true)) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
-    const spaces = await input.hostSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [];
-    const events = await input.repo.listEvents(requestIdentity.userId,
-      spaces.filter((space) => space.type === 'TEAM').map((space) => space.id), asset.asset_id);
+    const spaces = req.isClawEvolveAdmin ? [] : await input.hostSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [];
+    const events = req.isClawEvolveAdmin
+      ? await input.repo.listAllEvents({ assetId: asset.asset_id })
+      : await input.repo.listEvents(requestIdentity.userId,
+        spaces.filter((space) => space.type === 'TEAM').map((space) => space.id), asset.asset_id);
     const metadata = await displayMetadata([asset.bot_id], requestIdentity, false);
-    res.json({ events: events.map((event) => eventView(event, metadata.get(event.bot_id)?.ownerId ?? null)) });
+    res.json({ events: events.map((event) => eventView(event, metadata.get(event.bot_id))) });
   }));
 
   router.get("/skill-assets/:assetId/versions/:versionId/content", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     const asset = await input.repo.findAsset(String(req.params.assetId));
-    if (!requestIdentity || !asset || !await readable(asset, requestIdentity)) {
+    if (!requestIdentity || !asset || !await readable(asset, requestIdentity, req.isClawEvolveAdmin === true)) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
     if (!input.skillPackages && !input.artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }
@@ -349,7 +380,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-assets/:assetId/versions/:versionId/diff", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     const asset = await input.repo.findAsset(String(req.params.assetId));
-    if (!requestIdentity || !asset || !await readable(asset, requestIdentity)) {
+    if (!requestIdentity || !asset || !await readable(asset, requestIdentity, req.isClawEvolveAdmin === true)) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
     if (!input.skillPackages && !input.artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }

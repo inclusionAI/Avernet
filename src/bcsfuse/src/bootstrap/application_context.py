@@ -1,36 +1,43 @@
 """
-Application Context for OSS Deployment
+BCSFuse Application Context
 
 Provides centralized access to configuration and providers.
 """
 import os
 from typing import Optional
 
+from src.bootstrap.provider_registry import ProviderRegistry
+
 
 class ApplicationContext:
     """
-    Application Context for OSS Deployment.
+    Explicit dependency context for a BCSFuse deployment.
 
     Holds configuration and provider registry for the application.
     Supports runtime, dev, and test modes.
     """
 
-    def __init__(self, mode: str = "dev"):
+    def __init__(
+        self,
+        *,
+        mode: str,
+        startup_profile: str,
+        registry: ProviderRegistry,
+    ) -> None:
         """Initialize application context.
 
         Args:
             mode: Provider mode (runtime, dev, test).
+            startup_profile: Deployment composition name.
+            registry: Fully assembled provider registry.
         """
         self.mode = mode
-        self._registry = None
-        self._config = None
+        self.startup_profile = startup_profile
+        self._registry = registry
 
     @property
-    def registry(self):
+    def registry(self) -> ProviderRegistry:
         """Get provider registry."""
-        if self._registry is None:
-            from src.bootstrap.opensource import build_opensource_provider_registry
-            self._registry = build_opensource_provider_registry(mode=self.mode)
         return self._registry
 
     @property
@@ -71,4 +78,11 @@ def build_application_context(mode: Optional[str] = None) -> ApplicationContext:
             f"Invalid provider mode: {mode}. Must be one of: {valid_modes}"
         )
 
-    return ApplicationContext(mode=mode)
+    from src.bootstrap.opensource import build_opensource_provider_registry
+
+    registry = build_opensource_provider_registry(mode=mode)
+    return ApplicationContext(
+        mode=mode,
+        startup_profile="opensource",
+        registry=registry,
+    )

@@ -519,6 +519,7 @@ export type EvolveSkillVersion = {
 }
 
 export type EvolveSkillAsset = {
+  botName?: string | null
   description?: string | null
   ownerId?: string | null
   createdAt?: number | string
@@ -535,6 +536,7 @@ export type EvolveSkillAsset = {
 export type EvolveScoreComparison = { name: string | null; baseline: number | null; candidate: number | null; delta: number | null }
 
 export type EvolveSkillEvent = {
+  botName?: string | null
   eventId: string
   assetId: string
   name: string
@@ -1162,11 +1164,17 @@ export const api = {
     listAvailableLocalSkills(botId: string): Promise<{ items: Array<{ skillId: string; displayName: string; description?: string | null }> }> {
       return fetchJson(`${BASE}/evolve/skill-assets/available?botId=${encodeURIComponent(botId)}`)
     },
-    listSkillAssets(): Promise<{ items: EvolveSkillAsset[] }> {
-      return fetchJson(`${BASE}/evolve/skill-assets`)
+    listSkillAssets(params: { scope?: 'mine' | 'all'; ownerUserId?: string } = {}): Promise<{ items: EvolveSkillAsset[] }> {
+      const sp = new URLSearchParams()
+      if (params.scope) sp.set('scope', params.scope)
+      if (params.ownerUserId?.trim()) sp.set('ownerUserId', params.ownerUserId.trim())
+      return fetchJson(`${BASE}/evolve/skill-assets${sp.size ? `?${sp}` : ''}`)
     },
-    listSkillEvents(): Promise<{ items: EvolveSkillEvent[] }> {
-      return fetchJson(`${BASE}/evolve/skill-events`)
+    listSkillEvents(params: { scope?: 'mine' | 'all'; ownerUserId?: string } = {}): Promise<{ items: EvolveSkillEvent[] }> {
+      const sp = new URLSearchParams()
+      if (params.scope) sp.set('scope', params.scope)
+      if (params.ownerUserId?.trim()) sp.set('ownerUserId', params.ownerUserId.trim())
+      return fetchJson(`${BASE}/evolve/skill-events${sp.size ? `?${sp}` : ''}`)
     },
     registerSkillAsset(input: { botId: string; skillId: string }): Promise<EvolveSkillAsset> {
       return fetchJson(`${BASE}/evolve/skill-assets`, { method: 'POST', body: JSON.stringify(input) })

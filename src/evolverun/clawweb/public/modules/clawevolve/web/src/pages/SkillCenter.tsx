@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, type EvolveSkillAsset } from '../api/client'
+import { useEvolveAdminScope } from '../features/evolve/admin-scope'
 import { useClientUser } from '../hooks/useClientUser'
 import type { DirectoryBot } from '../types'
 import { Icon, PageTitle, Status } from './evolve/common'
@@ -13,10 +14,13 @@ import SkillListPagination, { skillListPageSize } from '../components/SkillListP
 export default function SkillCenter() {
   const navigate = useNavigate()
   const { user } = useClientUser()
+  const { enabled: adminMode, ownerUserId } = useEvolveAdminScope()
   const [launch, setLaunch] = useState<{ asset: EvolveSkillAsset; action: SkillTaskAction } | null>(null)
   const [assets, setAssets] = useState<EvolveSkillAsset[]>([])
   const [bots, setBots] = useState<DirectoryBot[]>([])
   const [showRegister, setShowRegister] = useState(false)
+  const [botsLoading, setBotsLoading] = useState(false)
+  const [botsError, setBotsError] = useState('')
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
@@ -26,25 +30,32 @@ export default function SkillCenter() {
     let active = true
     setLoading(true)
     setError('')
-    void Promise.allSettled([
-      api.evolve.listSkillAssets(),
-      user?.userId ? api.bots.list({ ownerId: user.userId, status: 'all' }) : Promise.resolve({ bots: [] as DirectoryBot[] }),
-    ]).then(([result, directory]) => {
-      if (!active) return
-      if (result.status === 'fulfilled') setAssets(result.value.items)
-      if (directory.status === 'fulfilled') setBots(directory.value.bots)
-      const failure = result.status === 'rejected' ? result.reason
-        : directory.status === 'rejected' ? directory.reason : null
-      if (failure) setError(failure instanceof Error ? failure.message : '技能中心加载失败')
+    setAssets([])
+    setPage(1)
+    void api.evolve.listSkillAssets({ scope: adminMode ? 'all' : 'mine', ownerUserId: adminMode ? ownerUserId : undefined }).then((result) => {
+      if (active) setAssets(result.items)
     }).catch((reason) => {
       if (active) setError(reason instanceof Error ? reason.message : '技能中心加载失败')
     }).finally(() => {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [user?.userId])
+  }, [user?.userId, adminMode, ownerUserId])
 
-  const filtered = assets.filter((asset) => [asset.name, asset.description, asset.spaceName, asset.ownerId, asset.botId, bots.find((bot) => bot.botId === asset.botId)?.botName].some((value) => value?.toLowerCase().includes(query.trim().toLowerCase())))
+  useEffect(() => {
+    if (!showRegister) return
+    let active = true
+    setBots([])
+    setBotsError('')
+    setBotsLoading(true)
+    const request = user?.userId ? api.bots.list({ ownerId: user.userId, status: 'all' }) : Promise.resolve({ bots: [] as DirectoryBot[] })
+    void request.then(result => { if (active) setBots(result.bots) })
+      .catch(reason => { if (active) setBotsError(reason instanceof Error ? reason.message : 'Bot 列表加载失败') })
+      .finally(() => { if (active) setBotsLoading(false) })
+    return () => { active = false }
+  }, [showRegister, user?.userId])
+
+  const filtered = assets.filter((asset) => [asset.name, asset.description, asset.spaceName, asset.ownerId, asset.botId, asset.botName].some((value) => value?.toLowerCase().includes(query.trim().toLowerCase())))
   const visiblePage = Math.min(page, Math.max(1, Math.ceil(filtered.length / skillListPageSize)))
   return <div className="w-full px-3 py-6 sm:px-4 lg:px-5">
     <PageTitle title="技能管理" description="登记技能，查看版本内容，并发起诊断、加固或优化任务。" action={<button onClick={() => setShowRegister(true)} className={primaryButton}><Icon name="plus" />登记 Skill</button>} />
@@ -60,7 +71,7 @@ export default function SkillCenter() {
         <tbody className="divide-y divide-gray-100">{filtered.slice((visiblePage - 1) * skillListPageSize, visiblePage * skillListPageSize).map((asset) => <tr key={asset.assetId} className="group transition hover:bg-gray-50/70">
           <td className="px-5 py-4"><div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Icon name="spark" /></span><div className="min-w-0"><button onClick={() => navigate(`/evolve/skills/${encodeURIComponent(asset.assetId)}`)} className="block max-w-full truncate text-left font-medium text-gray-900 hover:text-blue-600 hover:underline">{asset.name}</button><p className="mt-0.5 truncate text-xs text-gray-500" title={spaceLabel(asset)}>{spaceLabel(asset)}</p>{asset.description && <p title={asset.description} className="mt-0.5 truncate text-xs text-gray-400">{asset.description}</p>}</div></div></td>
           <td className="px-4 py-4"><span title={asset.ownerId ?? undefined} className="inline-block max-w-full truncate rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600">{asset.ownerId ?? '—'}</span></td>
-          <td className="px-4 py-4">{bots.find((bot) => bot.botId === asset.botId)?.botName && <p className="mb-0.5 truncate text-xs font-medium text-gray-700">{bots.find((bot) => bot.botId === asset.botId)?.botName}</p>}<p className="truncate font-mono text-[11px] text-gray-500" title={asset.botId}>{asset.botId}</p></td>
+          <td className="px-4 py-4">{asset.botName && <p className="mb-0.5 truncate text-xs font-medium text-gray-700">{asset.botName}</p>}<p className="truncate font-mono text-[11px] text-gray-500" title={asset.botId}>{asset.botId}</p></td>
           <td className="px-4 py-4"><span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">{asset.currentVersion}</span></td>
           <td className="px-4 py-4"><Status type="done">已登记</Status></td>
           <td className="whitespace-nowrap px-4 py-4 text-xs text-gray-500">{formatStepTime(asset.updatedAt)}</td>
@@ -73,7 +84,7 @@ export default function SkillCenter() {
     </section>
     {error && !showRegister && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     {launch && <SkillTaskLaunchDialog key={`${launch.asset.assetId}:${launch.action}`} asset={launch.asset} action={launch.action} returnTo="/evolve/skills" onClose={() => setLaunch(null)} />}
-    {showRegister && <SkillRegistrationDialog bots={bots} botsLoading={loading} onClose={() => setShowRegister(false)} onRegistered={asset => {
+    {showRegister && <SkillRegistrationDialog bots={bots} botsLoading={botsLoading} botsError={botsError} onClose={() => setShowRegister(false)} onRegistered={asset => {
       setShowRegister(false)
       navigate(`/evolve/skills/${encodeURIComponent(asset.assetId)}`)
     }} />}

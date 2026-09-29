@@ -6,16 +6,18 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import SkillCenter from '../SkillCenter'
 import SkillDetail from '../SkillDetail'
 import SkillEventLog from '../../components/SkillEventLog'
+import { EvolveAdminScopeProvider, useEvolveAdminScope } from '../../features/evolve/admin-scope'
 
-const api = vi.hoisted(() => ({ evolve: { listSpaces: vi.fn(), listSkillAssets: vi.fn(), listSkillEvents: vi.fn(), getSkillAsset: vi.fn(), getSkillAssetHistory: vi.fn(), getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn(), createSkillVersion: vi.fn(), uploadSkillVersion: vi.fn() }, bots: { list: vi.fn() } }))
+const api = vi.hoisted(() => ({ evolve: { adminOwners: vi.fn(), listSpaces: vi.fn(), listSkillAssets: vi.fn(), listSkillEvents: vi.fn(), getSkillAsset: vi.fn(), getSkillAssetHistory: vi.fn(), getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn(), createSkillVersion: vi.fn(), uploadSkillVersion: vi.fn() }, bots: { list: vi.fn() } }))
 vi.mock('../../api/client', () => ({ api }))
-const auth = vi.hoisted(() => ({ user: { userId: 'viewer' } as { userId: string } | null }))
+const auth = vi.hoisted(() => ({ user: { userId: 'viewer' } as { userId: string; isClawEvolveAdmin?: boolean } | null }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: auth.user }) }))
-const asset = { assetId: 'ASSET-1', name: 'Evidence Skill', description: 'Diagnose actual session evidence.', ownerId: 'owner', botId: 'BOT-1', skillId: '47', currentVersion: 'v2', updatedAt: 1789060000, versions: [{ versionId: 'VERSION-2', version: 'v2' }, { versionId: 'VERSION-1', version: 'v1' }] }
+const asset = { assetId: 'ASSET-1', name: 'Evidence Skill', description: 'Diagnose actual session evidence.', ownerId: 'owner', botId: 'BOT-1', botName: 'Evidence Bot', skillId: '47', currentVersion: 'v2', updatedAt: 1789060000, versions: [{ versionId: 'VERSION-2', version: 'v2' }, { versionId: 'VERSION-1', version: 'v1' }] }
 function Location() { const location = useLocation(); return <output>{location.pathname}</output> }
 beforeEach(() => {
   vi.stubGlobal('React', React); vi.resetAllMocks()
   auth.user = { userId: 'viewer' }
+  api.evolve.adminOwners.mockResolvedValue({ ownerUserIds: ['owner'] })
   api.evolve.listSpaces.mockResolvedValue({ items: [] })
   api.evolve.listSkillAssets.mockResolvedValue({ items: [asset] })
   api.bots.list.mockResolvedValue({ bots: [{ botId: 'BOT-1', botName: 'Evidence Bot' }] })
@@ -47,7 +49,7 @@ describe('Skill center asset list and recorded events', () => {
     expect(screen.getAllByRole('combobox')).toHaveLength(2)
     expect(screen.getByRole('button', { name: '登记' })).toBeTruthy()
     expect(screen.queryByText('平台从 Host 读取完整 Skill，并保存登记时的 v1 冻结版本。')).toBeNull()
-    expect(screen.getByRole('button', { name: /请选择 Bot/ })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /请选择 Bot/ })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: 'Bot 中自己上传的 Skill' }).closest('label')?.className).toContain('block')
   })
 
@@ -326,5 +328,97 @@ describe('Skill center asset list and recorded events', () => {
     const fullRecord = screen.getByRole('link', { name: '查看完整执行记录 ↗' })
     expect(fullRecord.getAttribute('href')).toContain('/evolve/runs/TASK-WAIT?returnTo=')
     expect(decodeURIComponent(fullRecord.getAttribute('href') ?? '')).toContain('/evolve/skills/ASSET-1?selected=task%3ATASK-WAIT&view=task')
+  })
+})
+
+
+function AdminControls() {
+  const { enabled, setEnabled, ownerUserId, setOwnerUserId } = useEvolveAdminScope()
+  return <>
+    <button onClick={() => setEnabled(!enabled)}>切换管理员视图</button>
+    <input aria-label="按工号筛选" value={ownerUserId} onChange={event => setOwnerUserId(event.target.value)} />
+  </>
+}
+
+describe('Skill pages share the existing administrator scope', () => {
+  it.each([
+    ['assets', SkillCenter, api.evolve.listSkillAssets],
+    ['events', SkillEventLog, api.evolve.listSkillEvents],
+  ] as const)('refreshes %s when administrator scope or owner changes', async (_name, Page, list) => {
+    auth.user = { userId: 'viewer', isClawEvolveAdmin: true }
+    render(<MemoryRouter><EvolveAdminScopeProvider><AdminControls /><Page /></EvolveAdminScopeProvider></MemoryRouter>)
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith({ scope: 'mine', ownerUserId: undefined }))
+    fireEvent.click(screen.getByRole('button', { name: '切换管理员视图' }))
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith({ scope: 'all', ownerUserId: '' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '按工号筛选' }), { target: { value: 'owner' } })
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith({ scope: 'all', ownerUserId: 'owner' }))
+    fireEvent.click(screen.getByRole('button', { name: '切换管理员视图' }))
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith({ scope: 'mine', ownerUserId: undefined }))
+  })
+
+  it.each([
+    ['assets', SkillCenter, api.evolve.listSkillAssets],
+    ['events', SkillEventLog, api.evolve.listSkillEvents],
+  ] as const)('discards a late administrator %s response after returning to normal scope', async (_name, Page, list) => {
+    auth.user = { userId: 'viewer', isClawEvolveAdmin: true }
+    let finishAdmin!: (result: { items: unknown[] }) => void
+    list.mockImplementation(({ scope }) => scope === 'all'
+      ? new Promise(resolve => { finishAdmin = resolve }) : Promise.resolve({ items: [] }))
+    render(<MemoryRouter><EvolveAdminScopeProvider><AdminControls /><Page /></EvolveAdminScopeProvider></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '切换管理员视图' }))
+    await waitFor(() => expect(finishAdmin).toBeTypeOf('function'))
+    fireEvent.click(screen.getByRole('button', { name: '切换管理员视图' }))
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith({ scope: 'mine', ownerUserId: undefined }))
+    await act(async () => { finishAdmin({ items: [{ ...asset, eventId: 'EVENT-1', type: 'registered', status: 'completed', name: 'Other user private Skill' }] }) })
+    expect(screen.queryByText('Other user private Skill')).toBeNull()
+  })
+
+  it('does not enable all-owner queries for a non-administrator', async () => {
+    render(<MemoryRouter><EvolveAdminScopeProvider><AdminControls /><SkillCenter /><SkillEventLog /></EvolveAdminScopeProvider></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '切换管理员视图' }))
+    await waitFor(() => {
+      expect(api.evolve.listSkillAssets).toHaveBeenLastCalledWith({ scope: 'mine', ownerUserId: undefined })
+      expect(api.evolve.listSkillEvents).toHaveBeenLastCalledWith({ scope: 'mine', ownerUserId: undefined })
+    })
+    expect(api.evolve.adminOwners).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('server-provided Skill Bot metadata', () => {
+  it('shows and searches another user Bot without loading the registration Bot list', async () => {
+    api.evolve.listSkillAssets.mockResolvedValue({ items: [{ ...asset, botName: 'Other owner Bot' }] })
+    api.bots.list.mockResolvedValue({ bots: [] })
+    render(<MemoryRouter><SkillCenter /></MemoryRouter>)
+    await screen.findByText('Other owner Bot')
+    expect(api.bots.list).not.toHaveBeenCalled()
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索技能' }), { target: { value: 'Other owner Bot' } })
+    expect(screen.getByText('Evidence Skill')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '登记 Skill' }))
+    await waitFor(() => expect(api.bots.list).toHaveBeenCalledWith({ ownerId: 'viewer', status: 'all' }))
+    await screen.findByText('当前没有可用 Bot')
+    expect(screen.getByText('Other owner Bot')).toBeTruthy()
+  })
+
+  it('shows and searches the Bot name in event records without a separate Bot lookup', async () => {
+    api.evolve.listSkillEvents.mockResolvedValue({ items: [{
+      eventId: 'EVENT', assetId: 'ASSET-1', name: 'Evidence Skill', botId: 'BOT-1', botName: 'Event Bot',
+      ownerId: 'other-owner', type: 'registered', status: 'completed', updatedAt: 1789060000,
+    }] })
+    render(<MemoryRouter><SkillEventLog /></MemoryRouter>)
+    await screen.findByText('Event Bot')
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索技能事件' }), { target: { value: 'Event Bot' } })
+    expect(screen.getByText('Evidence Skill')).toBeTruthy()
+    expect(api.bots.list).not.toHaveBeenCalled()
+  })
+
+  it('keeps a registration Bot query failure separate from the Skill list', async () => {
+    api.bots.list.mockRejectedValue(new Error('Bot directory unavailable'))
+    render(<MemoryRouter><SkillCenter /></MemoryRouter>)
+    await screen.findByText('Evidence Bot')
+    fireEvent.click(screen.getByRole('button', { name: '登记 Skill' }))
+    await screen.findByRole('alert')
+    expect(screen.getByRole('alert').textContent).toBe('Bot directory unavailable')
+    expect(screen.getByText('Evidence Bot')).toBeTruthy()
   })
 })

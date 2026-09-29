@@ -19,7 +19,9 @@ from secbaas.community.plugins.sandbox.arca.local_k8s import (
     LocalK8sArcaSandboxPlugin,
 )
 from secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin import (
+    LocalK8sClientManager,
     _image_pull_policy,
+    _use_incluster_config,
 )
 from secbaas.community.spi.sandbox.arca import ArcaSandboxInfo
 
@@ -614,3 +616,73 @@ class TestResolveOutboundRule:
         ):
             with pytest.raises(ValueError, match="LOCAL_K8S_OUTBOUND_RULE"):
                 _resolve_outbound_rule()
+
+
+class TestInClusterConfig:
+    """Tests for ServiceAccount / in-cluster config detection."""
+
+    @patch(
+        "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin.os.path.isfile",
+        return_value=False,
+    )
+    def test_explicit_incluster_forces_true(self, _mock_isfile) -> None:
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_KUBECONFIG": "in-cluster"},
+            clear=True,
+        ):
+            assert _use_incluster_config() is True
+
+    @patch(
+        "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin.os.path.isfile",
+        return_value=True,
+    )
+    def test_auto_incluster_when_token_present(self, _mock_isfile) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            assert _use_incluster_config() is True
+
+    @patch(
+        "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin.os.path.isfile",
+        return_value=True,
+    )
+    def test_explicit_kubeconfig_disables_incluster(self, _mock_isfile) -> None:
+        with patch.dict(
+            os.environ,
+            {"LOCAL_K8S_KUBECONFIG": "/tmp/kubeconfig"},
+            clear=True,
+        ):
+            assert _use_incluster_config() is False
+
+    @patch(
+        "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin.os.path.isfile",
+        return_value=False,
+    )
+    def test_no_kubeconfig_no_token_returns_false(self, _mock_isfile) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            assert _use_incluster_config() is False
+
+    def test_client_manager_loads_incluster_config(self) -> None:
+        manager = LocalK8sClientManager()
+        with (
+            patch(
+                "secbaas.community.plugins.sandbox.arca.local_k8s._sandbox_plugin._use_incluster_config",
+                return_value=True,
+            ),
+            patch(
+                "kubernetes.config.load_incluster_config",
+            ) as mock_load,
+            patch(
+                "kubernetes.client.ApiClient",
+            ) as mock_api_client_cls,
+        ):
+            mock_api_client = MagicMock()
+            mock_api_client_cls.return_value = mock_api_client
+
+            client = manager.get_client("", None)
+
+            mock_load.assert_called_once()
+            mock_api_client_cls.assert_called_once()
+            assert client is mock_api_client
+            # cached on second call
+            assert manager.get_client("", None) is mock_api_client
+            mock_load.assert_called_once()

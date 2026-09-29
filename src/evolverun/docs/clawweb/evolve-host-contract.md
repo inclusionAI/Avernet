@@ -29,6 +29,28 @@ An explicitly selected space still requires a successful membership check.
 Missing access or a failed directory request must not silently change that
 selection to no space. Existing records keep their stored space ownership.
 
+## Skill administrator view
+
+Skill management and Skill event logs reuse the Evolve administrator view and
+owner filter. `GET /api/evolve/skill-assets` and `GET /api/evolve/skill-events`
+default to the caller's existing owner/team access. `scope=all` requires the
+host-authenticated `req.isClawEvolveAdmin` flag; other callers receive 403.
+An optional `ownerUserId` filters by the Skill's registered owner only in this
+mode. Omitting it returns all registered Skills or events, including records
+without a space. The request does not impersonate the selected owner.
+
+As with task detail reads, administrators can also open Skill details, event
+history and frozen version content/diffs without a space membership check.
+This grants no additional editing, rollback, task execution or application
+permission; those operations retain their existing authorization checks.
+After visibility checks, Bot names and owners are enriched in one database query
+restricted to the returned records' Bot IDs, using the injected `botDb` when
+present. Shared Bot IDs are matched by owner; ambiguous metadata stays unknown.
+Missing metadata never hides an authorized record or grants mutation access.
+Existing host Skill description reads still use the caller's identity. The
+frontend consumes the returned `botName`; the personal Bot list is loaded only
+for the registration dialog and retains its original access rules.
+
 ## Singlebox and capability discovery
 
 `GET /api/evolve/capabilities` reports `skillManagement` and

@@ -296,16 +296,17 @@ def test_guarded_pr_author_is_blocked_on_structural_change(tmp_path: Path) -> No
     assert "TRG104" in result.stderr
 
 
-def test_owner_login_bypasses_silently_before_control_file_check(
-    tmp_path: Path,
+@pytest.mark.parametrize("actor", ["RegRecall", "XSandyGuo"])
+def test_exempt_login_bypasses_before_control_file_check(
+    tmp_path: Path, actor: str
 ) -> None:
     repository, base = _repository(tmp_path)
-    _commit(repository, MANIFEST_PATH, "not-json\n", "owner changes policy")
+    _commit(repository, MANIFEST_PATH, "not-json\n", "exempt user changes policy")
 
-    result = _run_guard(repository, base, actor="RegRecall")
+    result = _run_guard(repository, base, actor=actor)
 
     assert result.returncode == 0
-    assert "owner @RegRecall bypass" in result.stdout
+    assert f"exempt @{actor} bypass" in result.stdout
     assert result.stderr == ""
 
 
