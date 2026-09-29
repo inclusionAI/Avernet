@@ -2,8 +2,11 @@
 
 This release changes only the public Evolve database and its readers/writers.
 The host adapters and Bot backend schema are unchanged. The nine first-install
-CREATE statements are in `01-new-tables.mysql.sql`; they are generated from
-`public/shared/server/migrations/evolve-schema.ts` using the existing MySQL dialect.
+CREATE statements are in `01-new-tables.mysql.sql`; they follow
+`public/shared/server/migrations/evolve-schema.ts` and subsequent migrations
+through v139 using the existing MySQL dialect. The v139 `ce_skill_assets.bot_env`
+column is included for fresh installs; existing tables require the incremental
+ALTER documented in `../evolve-schema-v139/README.md`.
 Every table has an auto-increment `id` primary key and every column has a comment.
 There are no ordinary secondary indexes. Retained unique constraints enforce
 identity, version allocation, registration or configuration-key semantics.

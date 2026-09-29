@@ -20,6 +20,9 @@ Bot ID reuse is not evidence of duplicate Skill IDs.
 
 ## Managed database deployment
 
+Fresh installations use `../evolve-schema-v135/01-new-tables.mysql.sql`, which
+already includes `bot_env`; do not apply the ALTER below to those new tables.
+
 Before deploying the matching public and internal CW changes, add one nullable
 column to the existing table. No indexes are added or changed:
 
