@@ -1,8 +1,10 @@
 """Internal product adapter for scoped MCP Header groups."""
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
@@ -97,6 +99,25 @@ def test_internal_get_scoped_config_uses_authenticated_owner() -> None:
         {"key": "B", "value": "2", "bots": []},
         {"key": "A", "value": "3", "bots": ["bot-x"]},
     ]
+
+
+def test_internal_invalid_header_value_does_not_leak_to_logs(caplog) -> None:
+    from agentclaw.community.adapters.http.app import _validation_error_handler
+
+    client, _ = _client()
+    client.app.add_exception_handler(RequestValidationError, _validation_error_handler)
+    marker = "Bearer TEST_INVALID_INTERNAL_HEADER_CREDENTIAL"
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.post("/api/mcp/config-groups", json={
+            "server_code": "mcp.weather",
+            "endpoint_env": "PROD",
+            "transport_protocol": "SSE",
+            "params": [{"key": "Authorization", "value": {"secret": marker}, "bots": []}],
+        })
+
+    assert response.status_code == 422
+    assert marker not in caplog.text
 
 
 def test_internal_post_scoped_config_writes_owner_snapshot() -> None:
