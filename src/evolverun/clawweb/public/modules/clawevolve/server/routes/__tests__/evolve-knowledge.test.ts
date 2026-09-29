@@ -193,6 +193,10 @@ describe("evolve knowledge endpoints", () => {
     const compactJobs = await aggregates.prepare('large-parent', ISSUE_AGGREGATION_INPUT_V2);
     expect(compactJobs).toHaveLength(1);
     expect('inputSummary' in compactJobs[0].input ? compactJobs[0].input.inputSummary.compactSources : 0).toBe(26);
+    await db.exec('UPDATE workflow_evolution_analysis_runs SET requested_at_ms = 1 WHERE analysis_id = ?', [compactJobs[0].id]);
+    expect(await aggregates.prepare('large-parent')).toEqual([]);
+    expect((await aggregates.list('wf'))[0].aggregationStatus).toBe('too_large');
+    expect(await db.query("SELECT analysis_id FROM workflow_evolution_analysis_runs WHERE scope_type = 'issue_aggregate'")).toHaveLength(1);
   });
   it('freezes latest-run aggregation input, caches completed results and rejects stale or invented references', async () => {
     const insert = async (id: string, run: string, time: number, findings = true) => {

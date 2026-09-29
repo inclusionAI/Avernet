@@ -84,11 +84,12 @@ export class IssueAggregationRepository {
       const currentSnapshot = current ? JSON.parse(current.scope_json) as Snapshot : null;
       const requested = aggregationPayload(group, inputVersion);
       const tooLarge = Buffer.byteLength(canonicalJson(requested.input), 'utf8') > 180_000 || group.sources.length > 500;
+      const currentStatus = current?.status === 'queued' && Date.now() - current.requested_at_ms > 600_000 ? 'failed' : current?.status;
       return { ...group, summary: completed && frozen ? validateIssueSummary(JSON.parse(completed.result_json!), frozen) : null,
         summarySources: frozen?.sources ?? [],
         stale: !!completed && frozen?.inputDigest !== group.inputDigest,
-        aggregationStatus: current?.status === 'queued' && Date.now() - current.requested_at_ms > 600_000 ? 'failed'
-          : current?.status ?? (tooLarge ? 'too_large' : 'not_generated'), aggregationId: current?.analysis_id ?? null,
+        aggregationStatus: currentStatus === 'completed' || currentStatus === 'queued' ? currentStatus
+          : tooLarge ? 'too_large' : currentStatus ?? 'not_generated', aggregationId: current?.analysis_id ?? null,
         aggregationInputVersion: completedSnapshot?.inputVersion ?? (completed ? null : currentSnapshot?.inputVersion ?? null),
         aggregationInputSummary: completedSnapshot?.inputSummary ?? (completed ? null : currentSnapshot?.inputSummary ?? null),
       };
