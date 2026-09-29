@@ -8,6 +8,9 @@ from typing import Any
 from injector import inject
 
 from agentclaw.community.core.models.mcp import BotMCPConfig, UserMCPConfig
+from agentclaw.community.core.repository.implementations.skill_center.tables import (
+    bot_mcp_configs,
+)
 from agentclaw.community.core.repository.protocols.bot.mcp import (
     ScopedMCPConfigRepositoryProtocol,
 )
@@ -90,32 +93,18 @@ class ScopedMCPConfigRepository(ScopedMCPConfigRepositoryProtocol):
                 .with_for_update()
                 .all()
             )
-            existing_ids: set[str] = set()
-            for row in rows:
-                bot_id = str(row.bot_id)
-                existing_ids.add(bot_id)
-                config = _json_object(row.config)
+            existing = {str(row.bot_id): _json_object(row.config) for row in rows}
+            for bot_id in sorted(existing.keys() | bot_headers.keys()):
+                config = dict(existing.get(bot_id) or {})
                 if bot_headers.get(bot_id):
                     config["headers"] = bot_headers[bot_id]
                 else:
                     config.pop("headers", None)
-                if not config:
-                    session.delete(row)
-                else:
-                    row.config = json.dumps(config, ensure_ascii=False, sort_keys=True)
-
-            for bot_id, values in bot_headers.items():
-                if bot_id in existing_ids or not values:
-                    continue
-                session.add(
-                    BotMCPConfig(
-                        bot_id=bot_id,
-                        owner_id=user_id,
-                        server_code=server_code,
-                        config=json.dumps(
-                            {"headers": values}, ensure_ascii=False, sort_keys=True
-                        ),
-                        env=env,
-                        avernet_tenant=tenant,
-                    )
+                bot_mcp_configs.replace(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=user_id,
+                    server_code=server_code,
+                    config=config or None,
+                    env=env,
                 )

@@ -76,8 +76,8 @@ def read_scoped_config(
     bot_repo: BotRepository,
 ) -> ScopedMCPConfig:
     """Return only explicitly stored rules, not inherited Bot copies."""
-    user_config = config_service.get_user_unified_config(user_id, server_code) or {}
-    user_headers = user_config.get("headers") or {}
+    stored_default = config_service.get_user_unified_config(user_id, server_code) or {}
+    user_headers = stored_default.get("headers") or {}
     params = [
         HeaderGroup(key=key, value=value, bots=())
         for key, value in sorted(user_headers.items(), key=lambda item: item[0].lower())
@@ -99,8 +99,8 @@ def read_scoped_config(
     )
     return ScopedMCPConfig(
         server_code=server_code,
-        endpoint_env=user_config.get("endpoint_env") or "PROD",
-        transport_protocol=user_config.get("transport_protocol"),
+        endpoint_env=stored_default.get("endpoint_env") or "PROD",
+        transport_protocol=stored_default.get("transport_protocol"),
         params=tuple(params),
     )
 
