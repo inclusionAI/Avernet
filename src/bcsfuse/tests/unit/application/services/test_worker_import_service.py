@@ -40,7 +40,7 @@ class TestWorkerImportService:
             "identity": {"name": "API Bot", "handle": "@api-bot"},
             "responsibilities": ["testing"],
             "capabilities": [{"name": "test", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "protected", "trust_level": "trusted"},
         }
 
         worker = service.import_from_api(worker_data, actor="test_user")
@@ -57,7 +57,7 @@ class TestWorkerImportService:
             "identity": {"name": "API Bot", "handle": "@api-bot"},
             "responsibilities": ["testing"],
             "capabilities": [{"name": "test", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "protected", "trust_level": "trusted"},
         }
 
         service.import_from_api(worker_data, actor="test_user")
@@ -73,7 +73,7 @@ class TestWorkerImportService:
             "identity": {"name": "API Bot", "handle": "@api-bot"},
             "responsibilities": ["testing"],
             "capabilities": [{"name": "test", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "protected", "trust_level": "trusted"},
         }
 
         worker = service.import_from_api(worker_data, actor="test_user")
@@ -90,7 +90,7 @@ class TestWorkerImportService:
             "identity": {"name": "API Bot", "handle": "@api-bot"},
             "responsibilities": ["testing"],
             "capabilities": [{"name": "test", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "protected", "trust_level": "trusted"},
         }
 
         service.import_from_api(worker_data, actor="test_user")
@@ -108,10 +108,91 @@ class TestWorkerImportService:
             "identity": {"name": "API Bot", "handle": "@api-bot"},
             "responsibilities": ["testing"],
             "capabilities": [{"name": "test", "level": "expert"}],
-            "state": {"availability": "available", "trust_level": "trusted"},
+            "state": {"availability": "protected", "trust_level": "trusted"},
         }
 
         service.import_from_api(worker_data, actor="test_user")
 
         # 检查索引同步
         assert service._index_sync_adapter.has_event("worker_created")
+
+    def test_import_from_api_removes_created_worker_when_a_side_effect_fails(self):
+        """A failed registration remains retryable instead of leaving a duplicate."""
+
+        class FailOnceAuditLogStore(InMemoryWorkerAuditLogStore):
+            def __init__(self):
+                super().__init__()
+                self._should_fail = True
+
+            def append_log(self, audit_log):
+                if self._should_fail:
+                    self._should_fail = False
+                    raise RuntimeError("audit unavailable")
+                super().append_log(audit_log)
+
+        registry_store = InMemoryWorkerRegistryStore()
+        service = WorkerImportService(
+            registry_store=registry_store,
+            runtime_state_store=InMemoryWorkerRuntimeStateStore(),
+            profile_binding_store=InMemoryWorkerProfileBindingStore(),
+            audit_log_adapter=FailOnceAuditLogStore(),
+            index_sync_adapter=InMemoryWorkerIndexSyncAdapter(),
+        )
+        worker_data = {
+            "id": "wrk_retryable_registration",
+            "type": "bot",
+            "identity": {"name": "Retryable Bot", "handle": "@retryable-bot"},
+            "responsibilities": ["testing"],
+            "capabilities": [{"name": "test", "level": "expert"}],
+            "state": {"availability": "protected", "trust_level": "unverified"},
+            "active_profile_key": "wrk_retryable_registration:default",
+        }
+
+        with pytest.raises(RuntimeError, match="audit unavailable"):
+            service.import_from_api(dict(worker_data), actor="test_user")
+
+        assert registry_store.get_by_id("wrk_retryable_registration") is None
+
+        created = service.import_from_api(dict(worker_data), actor="test_user")
+
+        assert created.id == "wrk_retryable_registration"
+
+    def test_import_from_api_compensates_partially_written_index(self):
+        """An index failure removes both the durable worker and partial index data."""
+
+        class FailOnceIndexSyncAdapter(InMemoryWorkerIndexSyncAdapter):
+            def __init__(self):
+                super().__init__()
+                self._should_fail = True
+
+            def on_worker_created(self, worker):
+                super().on_worker_created(worker)
+                if self._should_fail:
+                    self._should_fail = False
+                    raise RuntimeError("index unavailable")
+
+        registry_store = InMemoryWorkerRegistryStore()
+        index_sync = FailOnceIndexSyncAdapter()
+        service = WorkerImportService(
+            registry_store=registry_store,
+            runtime_state_store=InMemoryWorkerRuntimeStateStore(),
+            profile_binding_store=InMemoryWorkerProfileBindingStore(),
+            audit_log_adapter=InMemoryWorkerAuditLogStore(),
+            index_sync_adapter=index_sync,
+        )
+        worker_data = {
+            "id": "wrk_partial_index",
+            "type": "bot",
+            "identity": {"name": "Indexed Bot", "handle": "@indexed-bot"},
+            "responsibilities": ["testing"],
+            "capabilities": [{"name": "test", "level": "expert"}],
+            "state": {"availability": "protected", "trust_level": "unverified"},
+        }
+
+        with pytest.raises(RuntimeError, match="index unavailable"):
+            service.import_from_api(dict(worker_data), actor="test_user")
+
+        assert registry_store.get_by_id("wrk_partial_index") is None
+        assert index_sync.get_calls_by_event("worker_deleted") == [
+            {"event": "worker_deleted", "worker_id": "wrk_partial_index"}
+        ]
