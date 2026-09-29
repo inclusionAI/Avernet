@@ -748,11 +748,17 @@ class ProfileEmbeddingIndexer:
         try:
             # 从底层 vector store 获取所有向量 ID
             inner_store = self._profile_store.vector_store
-            if hasattr(type(inner_store), "delete_by_profile"):
+            get_vector_ids = getattr(inner_store, "get_vector_ids", None)
+            if not callable(get_vector_ids):
+                native_delete = getattr(inner_store, "delete_by_profile", None)
+                if not callable(native_delete):
+                    raise AttributeError(
+                        "vector store must provide get_vector_ids or delete_by_profile"
+                    )
                 worker_id, profile_id = profile_key.rsplit(":", 1)
-                return inner_store.delete_by_profile(worker_id, profile_id)
+                return native_delete(worker_id, profile_id)
 
-            all_vector_ids = inner_store.get_vector_ids()
+            all_vector_ids = get_vector_ids()
 
             # 匹配两种格式：
             # 1. 精确匹配旧格式: {profile_key}
