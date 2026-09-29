@@ -303,7 +303,15 @@ class ProfileEmbeddingStore:
         Args:
             ids: 向量 ID 列表
         """
-        self._vector_store.delete(ids)
+        from src.infra.public.vectorstores.qdrant_local_vector_store import (
+            QdrantLocalVectorStore,
+        )
+
+        if isinstance(self._vector_store, QdrantLocalVectorStore):
+            for vector_id in ids:
+                self._vector_store.delete(vector_id)
+        else:
+            self._vector_store.delete(ids)
         logger.debug("[ProfileEmbeddingStore] Deleted %d vectors", len(ids))
 
     def get_fragments_by_profile(self, profile_key: str) -> list[tuple[str, list[float], dict]]:

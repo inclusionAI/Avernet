@@ -124,37 +124,61 @@ class WorkerImportService:
         # 持久化
         created = self._registry_store.create(worker)
 
-        # 初始化 runtime state
-        self._runtime_state_store.set_runtime_state(
-            worker_id=created.id,
-            runtime_state=WorkerRuntimeState.OFFLINE,
-            updated_by="system",
-        )
-
-        # 如果提供了 active_profile_key，创建 Profile Binding
-        if created.active_profile_key:
-            self._profile_binding_store.bind_profile(
+        index_sync_started = False
+        try:
+            # 初始化 runtime state
+            self._runtime_state_store.set_runtime_state(
                 worker_id=created.id,
-                profile_key=created.active_profile_key,
+                runtime_state=WorkerRuntimeState.OFFLINE,
+                updated_by="system",
+            )
+
+            # 如果提供了 active_profile_key，创建 Profile Binding
+            if created.active_profile_key:
+                self._profile_binding_store.bind_profile(
+                    worker_id=created.id,
+                    profile_key=created.active_profile_key,
+                    source_type=WorkerSourceType.API,
+                )
+                self._profile_binding_store.set_active_profile(
+                    worker_id=created.id,
+                    profile_key=created.active_profile_key,
+                )
+                logger.info(
+                    "Created profile binding for worker %s -> %s",
+                    created.id,
+                    created.active_profile_key,
+                )
+
+            # 记录审计日志
+            self._audit_log_adapter.append_log(WorkerAuditLog(
+                worker_id=created.id,
+                action=WorkerAuditAction.CREATED,
+                new_value=created.model_dump_json(),
                 source_type=WorkerSourceType.API,
-            )
-            self._profile_binding_store.set_active_profile(
-                worker_id=created.id,
-                profile_key=created.active_profile_key,
-            )
-            logger.info(f"Created profile binding for worker {created.id} -> {created.active_profile_key}")
+                performed_by=actor,
+            ))
 
-        # 记录审计日志
-        self._audit_log_adapter.append_log(WorkerAuditLog(
-            worker_id=created.id,
-            action=WorkerAuditAction.CREATED,
-            new_value=created.model_dump_json(),
-            source_type=WorkerSourceType.API,
-            performed_by=actor,
-        ))
-
-        # 触发索引同步
-        self._index_sync_adapter.on_worker_created(created)
+            # 触发索引同步。调用可能在抛错前已经写入部分索引，因此失败时需要补偿。
+            index_sync_started = True
+            self._index_sync_adapter.on_worker_created(created)
+        except Exception:
+            if index_sync_started:
+                try:
+                    self._index_sync_adapter.on_worker_deleted(created.id)
+                except Exception:
+                    logger.exception(
+                        "Failed to compensate worker index after registration error: %s",
+                        created.id,
+                    )
+            try:
+                self._registry_store.delete(created.id)
+            except Exception:
+                logger.exception(
+                    "Failed to compensate worker registry after registration error: %s",
+                    created.id,
+                )
+            raise
 
         logger.info(f"Worker {created.id} imported from API by {actor}")
 

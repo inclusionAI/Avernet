@@ -156,11 +156,7 @@ class WorkerRuntimeStateService:
         # 设置新状态
         self._runtime_state_store.set_runtime_state(
             worker_id=worker_id,
-            runtime_state={
-                "state": WorkerRuntimeState.ONLINE.value,
-                "heartbeat_at": None,
-                "metadata": {}
-            },
+            runtime_state=WorkerRuntimeState.ONLINE,
             updated_by=updated_by,
         )
 
@@ -172,9 +168,13 @@ class WorkerRuntimeStateService:
             worker.state.runtime_state = WorkerRuntimeState.ONLINE
             try:
                 worker = self._registry_store.update(worker)
-            except Exception as e:
-                logger.warning(f"[RuntimeStateService] Failed to update worker object: {e}")
-                # Continue anyway - runtime state is already saved
+            except Exception:
+                self._runtime_state_store.set_runtime_state(
+                    worker_id=worker_id,
+                    runtime_state=old_state,
+                    updated_by=updated_by,
+                )
+                raise
 
         # Phase C1: Sync denormalized column workers.runtime_state
         # Try to call sync_runtime_state_mirror if registry_store has it
@@ -319,11 +319,7 @@ class WorkerRuntimeStateService:
         # 设置新状态
         self._runtime_state_store.set_runtime_state(
             worker_id=worker_id,
-            runtime_state={
-                "state": WorkerRuntimeState.OFFLINE.value,
-                "heartbeat_at": None,
-                "metadata": {}
-            },
+            runtime_state=WorkerRuntimeState.OFFLINE,
             updated_by=updated_by,
         )
 
@@ -335,9 +331,13 @@ class WorkerRuntimeStateService:
             worker.state.runtime_state = WorkerRuntimeState.OFFLINE
             try:
                 worker = self._registry_store.update(worker)
-            except Exception as e:
-                logger.warning(f"[RuntimeStateService] Failed to update worker object: {e}")
-                # Continue anyway - runtime state is already saved
+            except Exception:
+                self._runtime_state_store.set_runtime_state(
+                    worker_id=worker_id,
+                    runtime_state=old_state,
+                    updated_by=updated_by,
+                )
+                raise
 
         # Phase C1: Sync denormalized column workers.runtime_state
         # Try to call sync_runtime_state_mirror if registry_store has it

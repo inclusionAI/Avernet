@@ -690,13 +690,12 @@ class ProfileEmbeddingIndexer:
                         if "runtime_state" in worker_state:
                             metadata["runtime_state"] = worker_state["runtime_state"]
                         logger.info(
-                            "[WORKER-STATE-TRACE] stage=payload_visibility_fields, fragment_id=%s, worker_id=%s, profile_id=%s, runtime_state=%r, availability=%r, lookup_key=%s",
+                            "[WORKER-STATE-TRACE] stage=payload_visibility_fields, fragment_id=%s, worker_id=%s, profile_id=%s, runtime_state=%r, availability=%r",
                             fragment_id,
                             metadata.get("worker_id"),
                             metadata.get("profile_id"),
                             metadata.get("runtime_state"),
                             metadata.get("availability"),
-                            lookup_key if 'lookup_key' in dir() else 'N/A'
                         )
                     else:
                         logger.warning(
@@ -749,7 +748,17 @@ class ProfileEmbeddingIndexer:
         try:
             # 从底层 vector store 获取所有向量 ID
             inner_store = self._profile_store.vector_store
-            all_vector_ids = inner_store.get_vector_ids()
+            get_vector_ids = getattr(inner_store, "get_vector_ids", None)
+            if not callable(get_vector_ids):
+                native_delete = getattr(inner_store, "delete_by_profile", None)
+                if not callable(native_delete):
+                    raise AttributeError(
+                        "vector store must provide get_vector_ids or delete_by_profile"
+                    )
+                worker_id, profile_id = profile_key.rsplit(":", 1)
+                return native_delete(worker_id, profile_id)
+
+            all_vector_ids = get_vector_ids()
 
             # 匹配两种格式：
             # 1. 精确匹配旧格式: {profile_key}

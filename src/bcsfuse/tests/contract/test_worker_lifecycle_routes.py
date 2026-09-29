@@ -51,7 +51,7 @@ def test_authenticated_product_route_deletes_worker_without_admin_routes(monkeyp
             assert worker_id == "bot:owner"
             return SimpleNamespace(items=[SimpleNamespace(profile_id="default")])
 
-        def delete_profile(self, worker_id, profile_id):
+        def delete_profile_vectors(self, worker_id, profile_id):
             events.append(f"profile:{worker_id}:{profile_id}")
 
     def delete_worker(worker_id):
