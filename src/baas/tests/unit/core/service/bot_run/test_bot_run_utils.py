@@ -823,12 +823,19 @@ class TestExtractSessionKeyFromPlannedId:
             == "k-9"
         )
 
+    def test_user_first_agent_tail_planned_id(self):
+        """aicoding / claude_code 的 user 前置格式（尾段 :agent:）同样提取裸 key。"""
+        assert (
+            extract_session_key_from_planned_id("user:u-1:session:k-8:agent:b-3")
+            == "k-8"
+        )
+
     def test_no_session_marker_returns_as_is(self):
         """无 ":session:" 标记（非 planned 构造）原样返回。"""
         assert extract_session_key_from_planned_id("sess-plain") == "sess-plain"
 
     def test_missing_user_marker_returns_as_is(self):
-        """有 ":session:" 但无 ":user:" 时格式不完整，原样返回。"""
+        """有 ":session:" 但无 ":user:/:agent:" 尾段时格式不完整，原样返回。"""
         assert (
             extract_session_key_from_planned_id("agent:main:session:abc-1")
             == "agent:main:session:abc-1"

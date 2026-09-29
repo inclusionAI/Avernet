@@ -44,7 +44,7 @@ def test_ws_path_is_api_ws(factory: type) -> None:
 def test_session_consistency_key_returns_structured_key(factory: type) -> None:
     """real aicoding 覆写为 user 前置亲和键（与 claude_code 同形，区别于基类默认）。"""
     key = factory().session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1")
-    assert key == "agent:u1:session:r1:user:b1"
+    assert key == "user:u1:session:r1:agent:b1"
 
 
 @pytest.mark.asyncio
@@ -56,7 +56,7 @@ async def test_create_adapter_session_resolves_key_and_creates(
     client = _FakeSessionClient(created_id="new-sess")
     sid, reused = await factory().create_adapter_session(
         session_client=client,
-        planned_id="agent:b1:session:run-1:user:u1",
+        planned_id="user:u1:session:run-1:agent:b1",
         user_id="u1",
         metadata={"title": "t", "model": "m"},
         bot_id="agent-1",
@@ -94,13 +94,13 @@ async def test_create_adapter_session_explicit_id_reuses(factory: type) -> None:
     client = _FakeSessionClient()
     sid, reused = await factory().create_adapter_session(
         session_client=client,
-        planned_id="agent:main:session:existing-key:user:u1",
+        planned_id="user:u1:session:existing-key:agent:b1",
         user_id="u1",
         metadata={},
         bot_id="agent-1",
         session_pending=False,
     )
-    assert (sid, reused) == ("agent:main:session:existing-key:user:u1", True)
+    assert (sid, reused) == ("user:u1:session:existing-key:agent:b1", True)
     assert client.create_calls == []
 
 
