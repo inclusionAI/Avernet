@@ -471,7 +471,7 @@ async def test_teclaw_is_noop_without_resolving_runtime():
 
 
 def test_real_engine_response_schema_is_accepted(monkeypatch):
-    engine_source = Path(__file__).resolve().parents[5] / "engine" / "src"
+    engine_source = Path(__file__).resolve().parents[6] / "engine" / "adapter" / "src"
     monkeypatch.syspath_prepend(str(engine_source))
     from engine.community.api.skills.schemas import (
         RuntimeLayoutProbeApiResponse,

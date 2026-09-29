@@ -71,7 +71,7 @@ class _UnusedFactory:
 async def test_prepare_delivery_apply_publishes_exact_cache_and_link(
     tmp_path: Path, monkeypatch
 ) -> None:
-    engine_src = Path(__file__).resolve().parents[5] / "engine" / "src"
+    engine_src = Path(__file__).resolve().parents[6] / "engine" / "adapter" / "src"
     monkeypatch.syspath_prepend(str(engine_src))
     from engine.community.plugins.skills_pool.center_content import (
         DownloadedCenterContentAdapter,

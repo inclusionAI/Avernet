@@ -466,7 +466,7 @@ class TestEnvPlaceholderExpansion:
         overlay_name = "application-test.yaml"
         repo = tmp_path
         community_agentclaw = (
-            repo / "submodules/avernet" / "src" / "backend" / "src" / "agentclaw"
+            repo / "submodules" / "avernet" / "apps" / "backend" / "src" / "agentclaw"
         )
         community_configs = community_agentclaw / "community" / "configs"
         community_configs.mkdir(parents=True)
@@ -476,7 +476,7 @@ class TestEnvPlaceholderExpansion:
         )
 
         corp_configs = (
-            repo / "src" / "backend" / "src" / "agentclaw" / "corp" / "configs"
+            repo / "apps" / "backend" / "src" / "agentclaw" / "corp" / "configs"
         )
         corp_configs.mkdir(parents=True)
         (corp_configs / "application-test-corp.yaml").write_text(

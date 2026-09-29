@@ -47,7 +47,7 @@ from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRunti
 def _aicoding_engine_api():
     """Load the sibling Engine source for the deliberate cross-layer test."""
 
-    engine_src = Path(__file__).resolve().parents[5] / "engine" / "src"
+    engine_src = Path(__file__).resolve().parents[6] / "engine" / "adapter" / "src"
     if str(engine_src) not in sys.path:
         sys.path.insert(0, str(engine_src))
     from engine.community.plugins.aicoding.layout_pool import (

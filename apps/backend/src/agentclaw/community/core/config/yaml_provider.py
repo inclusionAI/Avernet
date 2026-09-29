@@ -164,11 +164,11 @@ def _load_yaml_configs(
         if (
             ancestor.name == "src"
             and ancestor.parent.name == "backend"
-            and ancestor.parent.parent.name == "src"
+            and ancestor.parent.parent.name == "apps"
         ):
             corp_config_dirs.append(
-                ancestor.parent.parent.parent.parent
-                / "src"
+                ancestor.parent.parent.parent.parent.parent
+                / "apps"
                 / "backend"
                 / "src"
                 / "agentclaw"
