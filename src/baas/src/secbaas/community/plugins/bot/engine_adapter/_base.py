@@ -3,8 +3,8 @@
 `BaseEngineAdapter.create_adapter_session` 是统一的获取/物化入口：从
 `planned_id` 解析裸 session key（非 planned 格式原样返回），以 key 作为 uuid
 新建（引擎侧幂等）。`session_consistency_key` 默认返回通用亲和键格式（原
-`plan_session_id` 的 else 分支下沉至此）；openclaw 的 `agent:main:` 前缀差异
-由 `OpenClawAdapter`、teclaw 的探测-创建语义由 `TeClawAdapter` 各自覆写。
+`plan_session_id` 的 else 分支下沉至此）；openclaw 的 `agent:main:` 前缀差异、
+teclaw 的探测-创建语义、aicoding / claude_code 的 user 前置亲和键由各自 adapter 覆写。
 
 子类通过类属性 `engine_type` / `_WS_PATH` 定制标识与 WS 路径。
 """
@@ -37,9 +37,9 @@ class BaseEngineAdapter:
     ) -> str:
         """默认：通用亲和键格式 ``agent:{tc_bot_id}:session:{run_id}:user:{user_id}``。
 
-        原 plan_session_id 的 else 分支下沉至此（aicoding / hermes /
-        claude_code / teclaw 共用）；openclaw 的 ``agent:main:`` 前缀差异由
-        OpenClawAdapter 覆写。显式 session_id 由调用方前置处理。
+        原 plan_session_id 的 else 分支下沉至此（hermes 共用）；openclaw 的
+        ``agent:main:`` 前缀差异、teclaw 专属键、aicoding / claude_code 的
+        user 前置键由各自 adapter 覆写。显式 session_id 由调用方前置处理。
         """
         return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"
 

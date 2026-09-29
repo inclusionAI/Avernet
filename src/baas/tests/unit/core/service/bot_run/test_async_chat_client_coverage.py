@@ -340,7 +340,11 @@ class TestHandleTerminalError:
         state = SessionState()
         state.stream_queue = asyncio.Queue()
         AsyncChatClient._handle_terminal_error(
-            state, "sk1", "cwd already exists", "chat", error_code="SESSION_CWD_CONFLICT"
+            state,
+            "sk1",
+            "cwd already exists",
+            "chat",
+            error_code="SESSION_CWD_CONFLICT",
         )
         assert state.error_message == "SESSION_CWD_CONFLICT - cwd already exists"
         chunk = state.stream_queue.get_nowait()
