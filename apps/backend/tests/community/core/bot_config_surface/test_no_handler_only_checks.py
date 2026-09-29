@@ -69,6 +69,7 @@ CLASSIFIED: dict[str, dict[str, str]] = {
         "_category_label": "adapter: serialization",
         "_to_tenant": "adapter: serialization",
         "_to_config": "adapter: serialization",
+        "_to_scoped_config": "adapter: serialization of core scoped groups",
     },
     f"{_PREFIX}.bots.engine_config": {
         "_engine_config_coords": (
