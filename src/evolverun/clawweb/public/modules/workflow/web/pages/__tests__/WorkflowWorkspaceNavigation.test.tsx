@@ -3,6 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
+const queryHooks = vi.hoisted(() => ({
+  diagnoses: vi.fn(() => ({ data: { diagnoses: [] } })),
+  lessons: vi.fn(() => ({ data: { lessons: [] } })),
+}))
+
 vi.mock('../../api/hooks', () => ({
   useWorkflowTypes: () => ({
     data: [
@@ -15,9 +20,9 @@ vi.mock('../../api/hooks', () => ({
     refetch: vi.fn(),
   }),
   useCreateWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useEvolveDiagnoses: () => ({ data: { diagnoses: [] } }),
+  useEvolveDiagnoses: queryHooks.diagnoses,
   useEvolveSuggestions: () => ({ data: { suggestions: [] } }),
-  useEvolveLessons: () => ({ data: { lessons: [] } }),
+  useEvolveLessons: queryHooks.lessons,
 }))
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUser: () => ({ userId: 'admin-1', isAdmin: true }) }))
 vi.mock('../../components/workflow-workspace/OverviewTab', () => ({ default: () => <div>运行概览内容</div> }))
@@ -43,6 +48,15 @@ describe('unified task escort navigation', () => {
 
     expect(screen.getByRole('button', { name: '运行概览' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByText('运行概览内容')).toBeInTheDocument()
+    expect(queryHooks.diagnoses).not.toHaveBeenCalled()
+    expect(queryHooks.lessons).not.toHaveBeenCalled()
+  })
+
+  it('does not preload full evolution lists for sidebar counts', () => {
+    renderWorkspace('/workflows/workspace?workflowId=wf-1&tab=evolution&evoTab=diagnosis')
+    expect(queryHooks.diagnoses).not.toHaveBeenCalled()
+    expect(queryHooks.lessons).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '问题与优化' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('switches workflows from the page header instead of the sidebar', async () => {
@@ -70,7 +84,7 @@ describe('unified task escort navigation', () => {
   it('maps the legacy suggestion deep link to the combined issue and optimization view', () => {
     renderWorkspace()
 
-    expect(screen.getByRole('button', { name: '问题与优化 0' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '问题与优化' })).toHaveAttribute('aria-current', 'page')
     expect(screen.queryByRole('button', { name: /优化建议/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '任务护航' })).not.toBeInTheDocument()
   })
@@ -78,7 +92,7 @@ describe('unified task escort navigation', () => {
   it('keeps bare legacy evolution links on the issue and optimization view', () => {
     renderWorkspace('/workflows/workspace?workflowId=wf-1&tab=evolution')
 
-    expect(screen.getByRole('button', { name: '问题与优化 0' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '问题与优化' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByText('护航内容')).toBeInTheDocument()
   })
 

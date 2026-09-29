@@ -1,19 +1,21 @@
-import { fireEvent, render as renderView, screen, within } from '@testing-library/react'
+import { render as renderView, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-// Legacy evidence tests explicitly expand the secondary section; the new inbox is tested separately.
+// Keep a local render alias for the existing interaction tests.
 function render(ui: Parameters<typeof renderView>[0]) {
   const result = renderView(ui)
-  const disclosure = screen.queryByText('诊断证据与历史应用')
-  if (disclosure && !disclosure.closest('details')?.open) fireEvent.click(disclosure)
   return result
 }
-vi.mock('../../../api/repair-batches', () => ({ repairBatches: { candidates: () => new Promise(() => {}) } }))
+const repairCandidates = vi.hoisted(() => vi.fn(() => new Promise(() => {})))
+vi.mock('../../../api/repair-batches', () => ({ repairBatches: { candidates: repairCandidates } }))
 
 const lifecycle = vi.hoisted(() => ({ hideGroups: false, status: 'pending', canEdit: true }))
-afterEach(() => { lifecycle.hideGroups = false; lifecycle.status = 'pending'; lifecycle.canEdit = true })
+afterEach(() => {
+  lifecycle.hideGroups = false; lifecycle.status = 'pending'; lifecycle.canEdit = true
+  repairCandidates.mockClear()
+})
 
 vi.mock('../issue-groups', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../issue-groups')>();
@@ -221,18 +223,15 @@ vi.mock('../../../api/hooks', () => ({
 import EvolutionTab from '../EvolutionTab'
 
 describe('issue and optimization flow', () => {
-  it('makes the workflow inbox primary and keeps legacy evidence accessible by disclosure', async () => {
+  it('keeps the issue list primary without loading a second repair inbox', () => {
     renderView(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
-    expect(screen.getByRole('region', { name: '修复收件箱' })).toBeInTheDocument()
-    const summary = screen.getByText('诊断证据与历史应用')
-    expect(summary.closest('details')).not.toHaveAttribute('open')
-    await userEvent.click(summary)
-    expect(summary.closest('details')).toHaveAttribute('open')
+    expect(screen.queryByRole('region', { name: '修复收件箱' })).not.toBeInTheDocument()
+    expect(screen.queryByText('诊断证据与历史应用')).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '查看' }).length).toBeGreaterThan(0)
+    expect(repairCandidates).not.toHaveBeenCalled()
   })
   it('opens legacy evidence directly for a workflow issue deep link', () => {
     renderView(<MemoryRouter><EvolutionTab workflowId="wf-1" issueSignature="timeout:fetch-data" section="diagnosis" /></MemoryRouter>)
-    expect(screen.getByText('诊断证据与历史应用').closest('details')).toHaveAttribute('open')
     expect(screen.getByRole('dialog', { name: '问题详情' })).toBeInTheDocument()
   })
   it.each(['pending', 'applying', 'applied_unverified'])('preserves suggestion-only controls for %s', async (status) => {
