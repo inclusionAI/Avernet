@@ -9,6 +9,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { IssueAggregationRepository } from '../../repositories/issue-aggregation-repository.js';
+import { ISSUE_AGGREGATION_INPUT_V1, ISSUE_AGGREGATION_INPUT_V2, type IssueAggregationInputVersion } from '../../services/evolution/issue-aggregation.js';
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
 import type { EvolveRepository } from "../../repositories/evolve-repository.js";
 import crypto from "node:crypto";
@@ -274,7 +275,8 @@ export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
         }
       }
     }
-    res.json({ ...input, workflowSpecDigest, workflowSpec, issueAggregationSupported: true });
+    res.json({ ...input, workflowSpecDigest, workflowSpec, issueAggregationSupported: true,
+      issueAggregationInputVersions: [ISSUE_AGGREGATION_INPUT_V1, ISSUE_AGGREGATION_INPUT_V2] });
   });
 
   router.post("/analysis-runs/:analysisId/claim", async (req: Request, res: Response) => {
@@ -346,7 +348,12 @@ export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
       const parent = await workflowEvolutionRepo.findAnalysisRun(parentId);
       if (!parent) { res.status(404).json({ error: 'analysis_not_found' }); return; }
       await assertLinkedAnalysisBot(parent, textOrNull(req.body?.botId));
-      res.json({ jobs: await new IssueAggregationRepository(db).prepare(parentId) });
+      const requestedVersion = req.body?.inputVersion;
+      if (requestedVersion !== undefined && requestedVersion !== ISSUE_AGGREGATION_INPUT_V1 && requestedVersion !== ISSUE_AGGREGATION_INPUT_V2) {
+        throw new Error('unsupported aggregation input version');
+      }
+      const inputVersion = (requestedVersion ?? ISSUE_AGGREGATION_INPUT_V1) as IssueAggregationInputVersion;
+      res.json({ jobs: await new IssueAggregationRepository(db).prepare(parentId, inputVersion) });
     } catch (error) {
       res.status(error instanceof AnalysisBotMismatchError ? 403 : 400).json({ error: 'aggregation_request_failed' });
     }

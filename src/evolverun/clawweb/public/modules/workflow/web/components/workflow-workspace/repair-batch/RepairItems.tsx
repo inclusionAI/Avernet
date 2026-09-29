@@ -20,9 +20,9 @@ function repairTheme(item: RepairInboxItem): { key: string; title: string } | nu
   return { key: `${item.groupKey}:${nodes.join('\u0000')}`, title: nodes.join('、') }
 }
 
-function runCount(items: RepairInboxItem[]): number {
+function runCount(items: RepairInboxItem[]): number | null {
   const runs = new Set(items.flatMap(item => item.sources.flatMap(source => source.kind === 'diagnosis_candidate' ? [source.flowId] : [])))
-  return runs.size || new Set(items.flatMap(item => item.sources.map(source => source.kind === 'suggestion' ? `suggestion:${source.suggestionId}` : source.flowId))).size
+  return runs.size || null
 }
 
 export default function RepairItems({ items, allItems = items, selected, onToggle, canEdit, limit, taskId, onDisposition,
@@ -80,7 +80,7 @@ export default function RepairItems({ items, allItems = items, selected, onToggl
       <div className="space-y-2">{[...themed.entries()].map(([key, theme]) => theme.items.length > 1
         ? <details key={key} role="group" aria-label={`修复主题 ${theme.title}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
           <summary className="cursor-pointer text-sm font-medium text-slate-800">{theme.title} · {theme.items.length} 个建议变体
-            <span className="ml-2 text-xs font-normal text-slate-500">影响 {runCount(theme.items)} 个运行 · 已选择 {theme.items.filter(item => selected.includes(item.itemId)).length} 项</span>
+            <span className="ml-2 text-xs font-normal text-slate-500">{runCount(theme.items) === null ? '影响运行数未知' : `影响 ${runCount(theme.items)} 个运行`} · 已选择 {theme.items.filter(item => selected.includes(item.itemId)).length} 项</span>
           </summary>
           <div className="mt-3 space-y-2">{theme.items.map(renderItem)}</div>
         </details> : renderItem(theme.items[0]))}</div>

@@ -1,6 +1,7 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { canonicalJson, digestCanonicalJson, validateWorkflowEvolutionAnalysisResult } from '../services/evolution/contracts.js';
-import { buildAggregationModelInput, buildIssueGroups, validateIssueSummary, type IssueAggregationModelInput, type IssueAnalysis, type IssueGroup, type IssueSummary } from '../services/evolution/issue-aggregation.js';
+import { buildAggregationModelInput, buildIssueGroups, ISSUE_AGGREGATION_INPUT_V1, ISSUE_AGGREGATION_INPUT_V2, validateIssueSummary,
+  type IssueAggregationInputVersion, type IssueAggregationModelInput, type IssueAnalysis, type IssueGroup, type IssueSummary } from '../services/evolution/issue-aggregation.js';
 import type { WorkflowEvolutionAnalysisRow } from './workflow-evolution-repository.js';
 
 const SCOPE = 'issue_aggregate';
@@ -79,7 +80,9 @@ export class IssueAggregationRepository {
     });
   }
 
-  async prepare(parentAnalysisId: string): Promise<Array<{ id: string; input: IssueAggregationModelInput }>> {
+  async prepare(parentAnalysisId: string, inputVersion: IssueAggregationInputVersion = ISSUE_AGGREGATION_INPUT_V1): Promise<Array<{
+    id: string; inputVersion: IssueAggregationInputVersion; input: IssueGroup | IssueAggregationModelInput;
+  }>> {
     const parent = (await this.db.query<WorkflowEvolutionAnalysisRow>(
       'SELECT * FROM workflow_evolution_analysis_runs WHERE analysis_id = ?', [parentAnalysisId]))[0];
     if (!parent || parent.status !== 'completed' || parent.scope_type === SCOPE || !parent.workflow_id) throw new Error('completed run analysis required');
@@ -91,12 +94,12 @@ export class IssueAggregationRepository {
     const declaredFlows = Array.isArray(parentScope.flowIds) ? parentScope.flowIds.map(String) : [];
     const affectedFlows = new Set([...declaredFlows, ...(parent.flow_id ? [parent.flow_id] : []), ...parentResult.diagnoses.flatMap(d => d.flowIds)]);
     const affectedSignatures = new Set(parentResult.diagnoses.map(d => d.failureSignature));
-    const jobs: Array<{ id: string; input: IssueAggregationModelInput }> = [];
+    const jobs: Array<{ id: string; inputVersion: IssueAggregationInputVersion; input: IssueGroup | IssueAggregationModelInput }> = [];
     for (const { summary: _summary, summarySources: _sources, stale: _stale, aggregationStatus, aggregationId: previousId,
       aggregationInputSummary: _inputSummary, ...input } of groups) {
       if (!affectedSignatures.has(input.signature) && !_sources.some(source => affectedFlows.has(source.flowId))) continue;
       if (aggregationStatus === 'completed' || aggregationStatus === 'queued') continue;
-      const modelInput = buildAggregationModelInput(input);
+      const modelInput = inputVersion === ISSUE_AGGREGATION_INPUT_V2 ? buildAggregationModelInput(input) : input;
       // Every sourceId remains present. Inputs that still exceed the bound fail explicitly.
       if (Buffer.byteLength(canonicalJson(modelInput), 'utf8') > 180_000 || input.sources.length > 500) continue;
       const requestKey = digestCanonicalJson([SCOPE, input.inputDigest, previousId]);
@@ -108,7 +111,7 @@ export class IssueAggregationRepository {
            requested_by, requested_at_ms, state_version, gmt_create, gmt_modified)
           VALUES (?, ?, ?, ?, ?, 'queued', 'workflow-issue-summary/v1', ?, ?, 0, ?, ?)`,
         [id, requestKey, SCOPE, canonicalJson({ parentAnalysisId, input }), parent.workflow_id, parent.requested_by, now, this.db.dialect.now(), this.db.dialect.now()]);
-        jobs.push({ id, input: modelInput });
+        jobs.push({ id, inputVersion, input: modelInput });
       } catch (error) {
         const existing = (await this.db.query<{ analysis_id: string }>('SELECT analysis_id FROM workflow_evolution_analysis_runs WHERE request_key = ?', [requestKey]))[0];
         if (!existing) throw error;

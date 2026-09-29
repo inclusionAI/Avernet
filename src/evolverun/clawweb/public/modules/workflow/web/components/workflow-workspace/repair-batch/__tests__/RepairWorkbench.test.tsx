@@ -124,6 +124,8 @@ describe('RepairWorkbench', () => {
     render(<RepairWorkbench workflowId="wf-1" />)
     const theme = await screen.findByRole('group', { name: '修复主题 scene-route' })
     expect(within(theme).getByText(/2 个建议变体/)).toBeInTheDocument()
+    expect(within(theme).getByText(/影响运行数未知/)).toBeInTheDocument()
+    expect(within(theme).queryByText('影响 2 个运行')).not.toBeInTheDocument()
     expect(within(theme).getAllByRole('checkbox')).toHaveLength(2)
     expect(within(theme).getByRole('checkbox', { name: '选择 建议 a' })).toBeChecked()
     expect(within(theme).getByRole('checkbox', { name: '选择 建议 b' })).toBeChecked()

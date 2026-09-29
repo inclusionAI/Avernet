@@ -131,6 +131,34 @@ describe("evolve knowledge endpoints", () => {
     expect(recent.map(group => group.signature)).not.toContain('timeout-old');
     expect((await aggregates.listSources('wf')).map(group => group.signature)).toContain('timeout-old');
   });
+  it.each([
+    [undefined, 'workflow-issue-summary-input/v1', 0],
+    ['workflow-issue-summary-input/v2', 'workflow-issue-summary-input/v2', 1],
+  ] as const)('serves aggregation input version %s without changing the frozen snapshot', async (requestedVersion, expectedVersion, compactSources) => {
+    const diagnoses = Array.from({ length: 25 }, (_, index) => ({ diagnosisId: `d-${index}`, flowIds: ['run-a'], nodeId: 'fetch',
+      failureSignature: 'timeout', failureMode: 'timeout', severity: 'high', reasoning: `reason-${index}`, evidenceEventIds: [] }));
+    const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: 'parent', facts: [], inferences: [], unknowns: [], diagnoses };
+    await db.exec(`INSERT INTO workflow_evolution_analysis_runs
+      (analysis_id, request_key, scope_type, scope_json, flow_id, workflow_id, status, analysis_version, result_json, requested_at_ms, completed_at_ms)
+      VALUES ('parent', 'parent', 'single_run', '{}', 'run-a', 'wf', 'completed', 'v1', ?, 1, 1)`, [JSON.stringify(result)]);
+    if (!requestedVersion) {
+      const capability = await (await fetch(`${baseUrl}/internal/analysis-runs/parent/input`)).json();
+      expect(capability.issueAggregationInputVersions).toEqual([
+        'workflow-issue-summary-input/v1', 'workflow-issue-summary-input/v2',
+      ]);
+    }
+    await db.exec("UPDATE workflow_evolution_analysis_runs SET task_id = 'task', step_id = 'step' WHERE analysis_id = 'parent'");
+    vi.spyOn(repo, 'findTask').mockResolvedValue({ bot_id: 'assigned' } as never);
+    vi.spyOn(repo, 'findStep').mockResolvedValue({ task_id: 'task', step_type: 'run_analysis' } as never);
+    const response = await fetch(`${baseUrl}/internal/analysis-runs/parent/aggregations`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botId: 'assigned', ...(requestedVersion ? { inputVersion: requestedVersion } : {}) }) });
+    expect(response.status).toBe(200);
+    const { jobs: [job] } = await response.json();
+    expect(job.inputVersion).toBe(expectedVersion);
+    expect(job.input.sources).toHaveLength(25);
+    expect(job.input.sources.filter(source => 'detailLevel' in source && source.detailLevel === 'compact')).toHaveLength(compactSources);
+    if (!requestedVersion) expect(job.input.sources.every(source => 'flowId' in source && !('detailLevel' in source))).toBe(true);
+  });
   it('freezes latest-run aggregation input, caches completed results and rejects stale or invented references', async () => {
     const insert = async (id: string, run: string, time: number, findings = true) => {
       const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: id, facts: [], inferences: [], unknowns: [],

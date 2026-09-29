@@ -6,8 +6,11 @@ ClawEvolve owns snapshots, selection and validation; Workflow owns presentation;
 ClawMind invokes the existing analysis Bot in a separate synthesis phase after
 single-run completion. No OCB-specific dependency or new model credential is used.
 Deploy Avernet before ClawMind: `/analysis-runs/:id/input` advertises the optional
-`issueAggregationSupported: true` capability. Older Bot versions ignore it;
-new Bots skip synthesis against servers without it.
+`issueAggregationSupported: true` capability and the supported
+`issueAggregationInputVersions`. Older Bot versions ignore the version list and
+receive the complete `workflow-issue-summary-input/v1` payload. A Bot receives
+the compact `workflow-issue-summary-input/v2` payload only when it explicitly
+requests that version, so Avernet can be deployed before the upgraded Bot.
 
 ## Input selection
 
@@ -44,8 +47,10 @@ Model prose is a diagnosis, not proof of root cause or successful remediation.
 These relative routes live under the existing signed internal Evolve router,
 not the browser router. Existing linked-task Bot validation applies to both.
 
-- `POST /analysis-runs/:id/aggregations`, body `{botId}`: requires a completed
-  non-aggregation parent. Returns `{jobs:[{id,input}]}` for changed affected groups.
+- `POST /analysis-runs/:id/aggregations`, body `{botId,inputVersion?}`: requires a
+  completed non-aggregation parent. Omitted `inputVersion` means the complete v1
+  shape; compact v2 is opt-in. Returns `{jobs:[{id,inputVersion,input}]}` for
+  changed affected groups.
 - `POST /analysis-runs/:id/aggregations/:aggregationId`, body `{botId,result}`
   or `{botId,failed:true}`: validates parent binding, references, coverage and CAS.
   Returns `{ok:true}`. Identical completed writes are idempotent; invalid writes

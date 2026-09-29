@@ -3,6 +3,9 @@ import { digestCanonicalJson, type WorkflowEvolutionDiagnosis } from './contract
 export type IssueAnalysis = { analysisId: string; flowId: string | null; flowIds?: string[]; completedAtMs: number; diagnoses: WorkflowEvolutionDiagnosis[] };
 export type IssueSource = WorkflowEvolutionDiagnosis & { sourceId: string; analysisId: string; flowId: string; completedAtMs: number };
 export type IssueGroup = { workflowId: string; signature: string; inputDigest: string; flowIds: string[]; sources: IssueSource[] };
+export const ISSUE_AGGREGATION_INPUT_V1 = 'workflow-issue-summary-input/v1' as const;
+export const ISSUE_AGGREGATION_INPUT_V2 = 'workflow-issue-summary-input/v2' as const;
+export type IssueAggregationInputVersion = typeof ISSUE_AGGREGATION_INPUT_V1 | typeof ISSUE_AGGREGATION_INPUT_V2;
 export type AggregationModelSource =
   | (IssueSource & { detailLevel: 'full'; proposalRef?: string })
   | { sourceId: string; detailLevel: 'compact'; representativeSourceId?: string; proposalRef?: string; reasoningExcerpt?: string };
