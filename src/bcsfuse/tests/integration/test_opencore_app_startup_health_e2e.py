@@ -10,30 +10,46 @@ Tests:
 4. No internal provider imports required
 5. Startup/shutdown works correctly
 """
-import os
+from collections.abc import Iterator
+
 import pytest
 from fastapi.testclient import TestClient
 
 
 @pytest.fixture(scope="module")
-def test_client():
+def test_client(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[TestClient]:
     """Create test client for dev_smoke mode."""
-    # Set environment for dev_smoke mode
-    original_mode = os.getenv("BCSFUSE_PROVIDER_MODE")
-    os.environ["BCSFUSE_PROVIDER_MODE"] = "dev_smoke"
+    from src.infra.config.feature_flags import FeatureFlags
+
+    runtime_dir = tmp_path_factory.mktemp("bcsfuse-app")
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("BCSFUSE_PROVIDER_MODE", "dev_smoke")
+    monkeypatch.setenv(
+        "BCSFUSE_DATABASE_SQLITE_PATH",
+        str(runtime_dir / "bcsfuse.db"),
+    )
+    monkeypatch.setenv(
+        "BCSFUSE_FAISS_SQLITE_PATH",
+        str(runtime_dir / "faiss_index.db"),
+    )
+    monkeypatch.setenv(
+        "BCSFUSE_OBJECT_STORAGE_DIR",
+        str(runtime_dir / "object-storage"),
+    )
+    monkeypatch.setenv("ENABLE_PROFILE_EMBEDDING_INDEX", "false")
+    FeatureFlags.reset()
 
     try:
         from src.bootstrap.opensource_app import create_opensource_app
 
         app = create_opensource_app(mode="dev_smoke")
-        client = TestClient(app)
-        yield client
+        with TestClient(app) as client:
+            yield client
     finally:
-        # Restore original mode
-        if original_mode is not None:
-            os.environ["BCSFUSE_PROVIDER_MODE"] = original_mode
-        elif "BCSFUSE_PROVIDER_MODE" in os.environ:
-            del os.environ["BCSFUSE_PROVIDER_MODE"]
+        FeatureFlags.reset()
+        monkeypatch.undo()
 
 
 class TestOpencoreAppStartupHealthE2E:

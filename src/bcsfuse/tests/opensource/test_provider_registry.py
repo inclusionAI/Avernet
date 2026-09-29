@@ -67,8 +67,8 @@ def test_test_registry_can_be_built():
     return True
 
 
-def test_registry_contains_13_provider_keys():
-    """Test that registry contains all 13 required provider keys."""
+def test_registry_contains_required_provider_keys():
+    """Test that registry contains every required composition provider."""
     os.environ["STARTUP_PROFILE"] = "opensource"
 
     from src.bootstrap.opensource import build_opensource_provider_registry
@@ -77,6 +77,9 @@ def test_registry_contains_13_provider_keys():
 
     required_keys = [
         "config",
+        "secret_provider",
+        "startup_provider",
+        "context_provider",
         "auth",
         "worker_registry_store",
         "worker_runtime_state_store",
@@ -87,7 +90,7 @@ def test_registry_contains_13_provider_keys():
         "reranker_provider",
         "llm_provider",
         "cache_provider",
-        "audit_log_store",
+        "worker_audit_log_store",
         "object_storage_provider",
     ]
 
@@ -101,7 +104,7 @@ def test_registry_contains_13_provider_keys():
         print(f"  Available keys: {registry.keys()}")
         raise AssertionError(f"Missing required provider keys: {missing_keys}")
     else:
-        print(f"✓ Registry contains all 13 required provider keys")
+        print("✓ Registry contains all required provider keys")
         return True
 
 
@@ -265,7 +268,7 @@ def run_all_tests():
 
     tests = [
         test_test_registry_can_be_built,
-        test_registry_contains_13_provider_keys,
+        test_registry_contains_required_provider_keys,
         test_test_fallback_provider_types,
         test_dev_registry_can_be_built,
         test_dev_fallback_provider_types,

@@ -38,6 +38,12 @@ class ProviderRegistry:
         """
         return self._providers.get(name)
 
+    def require(self, name: str) -> Any:
+        """Get a required provider or fail composition immediately."""
+        if name not in self._providers:
+            raise LookupError(f"Required provider is not registered: {name}")
+        return self._providers[name]
+
     def has(self, name: str) -> bool:
         """Check if a provider exists.
 
