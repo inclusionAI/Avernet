@@ -174,6 +174,12 @@ def test_composed_app_matches_worker_profile_lifecycle_contract(composed_test_cl
         "deleted": True,
     }
     assert registry.get("worker_registry_store").get_by_id(worker_id) is None
+    assert registry.get("worker_profile_content_store").get(
+        worker_id, profile_id
+    ) is None
+    assert registry.get("worker_profile_binding_store").get_active_binding(
+        worker_id
+    ) is None
 
     deleted_again = client.delete(
         f"/v1/workers/{worker_id}",
@@ -358,6 +364,64 @@ def test_profile_activation_failure_compensates_new_binding(
     assert (
         registry.get("worker_profile_binding_store").get_active_binding(worker_id)
         is None
+    )
+
+
+def test_worker_update_failure_restores_previous_profile_activation(
+    composed_test_client,
+    monkeypatch,
+):
+    client, app = composed_test_client
+    worker_id = "wrk_worker_update_failure"
+    previous_profile_id = "previous"
+    target_profile_id = "target"
+    assert client.post(
+        "/v1/workers",
+        headers=AUTH_HEADERS,
+        json=_worker_payload(worker_id),
+    ).status_code == 201
+    for profile_id in (previous_profile_id, target_profile_id):
+        assert client.put(
+            f"/v1/workers/{worker_id}/profiles/{profile_id}",
+            headers=AUTH_HEADERS,
+            json={"display_name": profile_id, "soul_md": f"# {profile_id}"},
+        ).status_code == 200
+    assert client.put(
+        f"/v1/workers/{worker_id}/profiles/{previous_profile_id}/activate",
+        headers=AUTH_HEADERS,
+    ).status_code == 200
+
+    registry = app.state.context.registry
+    worker_store = registry.get("worker_registry_store")
+    original_update = worker_store.update
+    update_attempts = 0
+
+    def fail_first_update(worker):
+        nonlocal update_attempts
+        update_attempts += 1
+        if update_attempts == 1:
+            raise RuntimeError("worker registry update failed")
+        return original_update(worker)
+
+    monkeypatch.setattr(worker_store, "update", fail_first_update)
+    response = client.put(
+        f"/v1/workers/{worker_id}/profiles/{target_profile_id}/activate",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "ACTIVATE_PROFILE_ERROR"
+    active_profile = registry.get("worker_profile_content_store").get_active(
+        worker_id
+    )
+    assert active_profile.profile_id == previous_profile_id
+    active_binding = registry.get(
+        "worker_profile_binding_store"
+    ).get_active_binding(worker_id)
+    assert active_binding.profile_key == f"{worker_id}:{previous_profile_id}"
+    assert (
+        worker_store.get_by_id(worker_id).active_profile_key
+        == f"{worker_id}:{previous_profile_id}"
     )
 
 
