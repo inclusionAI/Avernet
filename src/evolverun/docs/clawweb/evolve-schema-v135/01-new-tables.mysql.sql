@@ -1,4 +1,4 @@
--- Fresh installation only. Existing feature databases must run migration v135.
+-- Fresh installation through v139. Existing feature databases must apply pending migrations.
 -- No ordinary indexes. No schema ledger updates. Not validated on a managed database.
 
 CREATE TABLE IF NOT EXISTS ce_stage_skill_implementations (
@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS ce_skill_assets (
   current_version_no BIGINT NOT NULL DEFAULT 1 COMMENT '当前生效版本号',
   gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  bot_env VARCHAR(32) DEFAULT NULL COMMENT '来源Bot环境；历史未记录时为空',
   UNIQUE INDEX uk_asset_id (asset_id),
   UNIQUE INDEX uk_owner_bot_skill (owner_user_id, bot_id, external_skill_id)
 ) COMMENT='Skill资产';
