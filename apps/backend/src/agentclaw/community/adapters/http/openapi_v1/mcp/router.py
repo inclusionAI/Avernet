@@ -518,19 +518,21 @@ async def get_scoped_mcp_config(
 @envelope_errors
 async def update_scoped_mcp_config(
     server_code: ServerCodePath,
-    body: McpScopedConfigWrite,
+    credential_body: McpScopedConfigWrite,
     request: Request,
     owner_id: UserIdDep,
     scoped_service: MCPScopedConfigServiceProtocol = Injected(MCPScopedConfigServiceProtocol),
 ) -> Envelope[McpScopedConfig]:
+    # The shared error logger redacts credential-named handler arguments before
+    # logging failures; group.value may contain a token under a generic name.
     config = await scoped_service.replace(
         user_id=owner_id,
         server_code=server_code,
-        endpoint_env=body.endpoint_env,
-        transport_protocol=body.transport_protocol,
+        endpoint_env=credential_body.endpoint_env,
+        transport_protocol=credential_body.transport_protocol,
         params=tuple(
             HeaderGroup(key=group.key, value=group.value, bots=tuple(group.bots))
-            for group in body.params
+            for group in credential_body.params
         ),
     )
     return envelope(_to_scoped_config(config), request)

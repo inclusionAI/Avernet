@@ -648,6 +648,26 @@ def test_put_scoped_config_requires_params(client):
     assert response.status_code == 422
 
 
+def test_put_scoped_config_failure_does_not_log_header_value(client, market, caplog):
+    import logging
+
+    marker = "Bearer TEST_HEADER_CREDENTIAL"
+    market.get_mcp_detail.return_value = None
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(
+            "/openapi/v1/bots/mcp/servers/mcp.weather/config-groups",
+            json={
+                "endpoint_env": "PROD",
+                "transport_protocol": "SSE",
+                "params": [{"key": "Authorization", "value": marker, "bots": []}],
+            },
+        )
+
+    assert response.status_code == 404
+    assert marker not in caplog.text
+    assert "credential_body='***redacted***'" in caplog.text
+
+
 @pytest.mark.parametrize("params", [
     [{"key": "A", "value": "3", "bots": ["foreign-bot"]}],
     [
