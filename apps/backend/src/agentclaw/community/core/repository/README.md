@@ -116,6 +116,8 @@ provides:
   - UserMCPConfigRepository
   - BotMCPConfigRepositoryProtocol
   - BotMCPConfigRepository
+  - ScopedMCPConfigRepositoryProtocol
+  - ScopedMCPConfigRepository
   - SourceCredentialRepository
   - CapabilityDesiredStateRepositoryProtocol
   - CapabilityDesiredStateRepository

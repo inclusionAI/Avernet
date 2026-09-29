@@ -181,7 +181,10 @@ def test_write_rejects_center_combination_without_any_installed_bot() -> None:
             transport_protocol="STREAMABLE_HTTP", params=(),
             config_service=config, bot_config_repo=MagicMock(), bot_repo=bots,
             command_repo=command, market_service=market,
-            sync_service=MagicMock(), capability_reader=MagicMock(),
+            sync_service=MagicMock(),
+            capability_reader=MagicMock(
+                effective_mcp_server_codes=MagicMock(return_value={"mcp.weather"})
+            ),
         ))
 
     command.replace.assert_not_called()
@@ -212,13 +215,49 @@ def test_write_rejects_platform_managed_header_before_db_mutation() -> None:
         asyncio.run(write_scoped_config(
             user_id="owner", server_code="mcp.weather", endpoint_env="PROD",
             transport_protocol="SSE",
-            params=(HeaderGroup(key="x-managed", value="literal", bots=()),),
+            params=(HeaderGroup(key=" x-managed ", value="literal", bots=()),),
             config_service=config, bot_config_repo=MagicMock(), bot_repo=bots,
             command_repo=command, market_service=center,
             sync_service=MagicMock(), capability_reader=MagicMock(),
         ))
 
     command.replace.assert_not_called()
+
+
+def test_write_does_not_validate_unrelated_bot_without_mcp() -> None:
+    config = MagicMock()
+    config.get_user_unified_config.return_value = {}
+    config.validate_scoped_headers.return_value = {"valid": True}
+    config.validate_effective_scoped_config.return_value = {
+        "valid": False, "error": "unsupported endpoint"
+    }
+    bots = MagicMock()
+    bots.list_live_bot_ids_by_owner.return_value = ["unrelated-bot"]
+    bots.get_by_id_and_owner.return_value = {
+        "bot_id": "unrelated-bot", "active_engine": "openclaw"
+    }
+    bot_configs = MagicMock()
+    bot_configs.list_by_owner_and_server_code.return_value = {}
+    market = MagicMock()
+    market.get_mcp_detail.return_value = {
+        "serverCode": "mcp.weather", "runMode": "REMOTE",
+        "endpoints": [
+            {"env": "PROD", "networkType": "INTRANET", "transportProtocol": "SSE"}
+        ],
+    }
+    capability = MagicMock()
+    capability.effective_mcp_server_codes.return_value = set()
+    command = MagicMock()
+    result = asyncio.run(write_scoped_config(
+        user_id="owner", server_code="mcp.weather", endpoint_env="PROD",
+        transport_protocol="SSE", params=(), config_service=config,
+        bot_config_repo=bot_configs, bot_repo=bots, command_repo=command,
+        market_service=market, sync_service=MagicMock(),
+        capability_reader=capability,
+    ))
+    command.replace.assert_called_once()
+    config.validate_effective_scoped_config.assert_not_called()
+    assert result.sync_summary["affected_bot_count"] == 0
 
 
 def test_write_reports_batch_projection_failure_without_reverting_committed_config() -> None:
@@ -302,7 +341,10 @@ def test_write_rejects_user_protocol_not_reachable_by_owned_bot_engine() -> None
             transport_protocol="STREAMABLE_HTTP", params=(),
             config_service=config, bot_config_repo=bot_configs, bot_repo=bots,
             command_repo=command, market_service=center,
-            sync_service=MagicMock(), capability_reader=MagicMock(),
+            sync_service=MagicMock(),
+            capability_reader=MagicMock(
+                effective_mcp_server_codes=MagicMock(return_value={"mcp.weather"})
+            ),
         ))
 
     command.replace.assert_not_called()

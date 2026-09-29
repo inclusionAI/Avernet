@@ -47,6 +47,8 @@ import inspect
 
 import pytest
 from agentclaw.community.api.file_count_service import FileCountServiceProtocol
+from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
+from agentclaw.community.core.mcp.scoped_config_flow import MCPScopedConfigService
 from agentclaw.community.core.service_bot.services.file_count_service import FileCountService
 from agentclaw.community.api.build_ignore_service import BuildIgnoreServiceProtocol
 from agentclaw.community.core.service_bot.services.build_ignore_service import BuildIgnoreService
@@ -314,6 +316,7 @@ from agentclaw.community.core.spaces.services import (
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (MCPScopedConfigServiceProtocol, MCPScopedConfigService),
     (FileCountServiceProtocol, FileCountService),
     (BuildIgnoreServiceProtocol, BuildIgnoreService),
     (BotCommonConfigServiceProtocol, BotCommonConfigService),

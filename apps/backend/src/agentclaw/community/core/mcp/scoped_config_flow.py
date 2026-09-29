@@ -4,7 +4,23 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
+
+from injector import inject
+
+from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
+from agentclaw.community.core.mcp.mcp_market_service_protocol import MCPMarketServiceProtocol
+from agentclaw.community.core.mcp.mcp_sync_service_protocol import MCPSyncServiceProtocol
+from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
+    EffectiveMCPStateReaderProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotMCPConfigRepositoryProtocol,
+    BotRepository,
+)
+from agentclaw.community.core.repository.protocols.bot.mcp import (
+    ScopedMCPConfigRepositoryProtocol,
+)
 
 from agentclaw.community.core.mcp.config_flow import (
     _normalize_transport_protocol,
@@ -34,13 +50,30 @@ class ScopedMCPConfig:
     sync_summary: dict[str, int] | None = None
 
 
+@runtime_checkable
+class MCPScopedConfigServiceProtocol(Protocol):
+    """Read and replace a user's complete Header-group snapshot."""
+
+    def read(self, *, user_id: str, server_code: str) -> ScopedMCPConfig: ...
+
+    async def replace(
+        self,
+        *,
+        user_id: str,
+        server_code: str,
+        endpoint_env: str,
+        transport_protocol: str | None,
+        params: tuple[HeaderGroup, ...],
+    ) -> ScopedMCPConfig: ...
+
+
 def read_scoped_config(
     *,
     user_id: str,
     server_code: str,
-    config_service: Any,
-    bot_config_repo: Any,
-    bot_repo: Any,
+    config_service: MCPConfigServiceProtocol,
+    bot_config_repo: BotMCPConfigRepositoryProtocol,
+    bot_repo: BotRepository,
 ) -> ScopedMCPConfig:
     """Return only explicitly stored rules, not inherited Bot copies."""
     user_config = config_service.get_user_unified_config(user_id, server_code) or {}
@@ -148,13 +181,13 @@ async def write_scoped_config(
     endpoint_env: str,
     transport_protocol: str | None,
     params: tuple[HeaderGroup, ...],
-    config_service: Any,
-    bot_config_repo: Any,
-    bot_repo: Any,
-    command_repo: Any,
-    market_service: Any,
-    sync_service: Any,
-    capability_reader: Any,
+    config_service: MCPConfigServiceProtocol,
+    bot_config_repo: BotMCPConfigRepositoryProtocol,
+    bot_repo: BotRepository,
+    command_repo: ScopedMCPConfigRepositoryProtocol,
+    market_service: MCPMarketServiceProtocol,
+    sync_service: MCPSyncServiceProtocol,
+    capability_reader: EffectiveMCPStateReaderProtocol,
 ) -> ScopedMCPConfig:
     """Validate, atomically persist, then best-effort project one snapshot."""
     _validate_endpoint_env(endpoint_env)
@@ -173,7 +206,7 @@ async def write_scoped_config(
     user_headers, bot_headers = _compile_groups(params, owned_ids)
     header_validation = config_service.validate_scoped_headers(
         server_code=server_code,
-        entries=tuple((group.key, group.value) for group in params),
+        entries=tuple((group.key.strip(), group.value) for group in params),
     )
     if not header_validation["valid"]:
         raise McpConfigValueError(header_validation["error"])
@@ -197,18 +230,20 @@ async def write_scoped_config(
             candidate_bot["headers"] = bot_headers[bot_id]
         else:
             candidate_bot.pop("headers", None)
-        validation = config_service.validate_effective_scoped_config(
-            server_code=server_code,
-            detail=detail,
-            bot_config=candidate_bot,
-            user_config=candidate_user,
-            engine_type=bot.get("active_engine") or bot.get("engine"),
-        )
-        if not validation["valid"]:
-            raise McpConfigValueError(f"Bot {bot_id}: {validation['error']}")
-        if server_code in capability_reader.effective_mcp_server_codes(
+        is_consumer = server_code in capability_reader.effective_mcp_server_codes(
             bot_id=bot_id, owner_id=user_id, bot=bot
-        ):
+        )
+        if is_consumer or bot_id in bot_headers:
+            validation = config_service.validate_effective_scoped_config(
+                server_code=server_code,
+                detail=detail,
+                bot_config=candidate_bot,
+                user_config=candidate_user,
+                engine_type=bot.get("active_engine") or bot.get("engine"),
+            )
+            if not validation["valid"]:
+                raise McpConfigValueError(f"Bot {bot_id}: {validation['error']}")
+        if is_consumer:
             consumers.append(bot_id)
 
     command_repo.replace(
@@ -263,3 +298,59 @@ async def write_scoped_config(
         sync_results=sync_results,
         sync_summary=sync_summary,
     )
+
+
+class MCPScopedConfigService(MCPScopedConfigServiceProtocol):
+    """One typed, transport-independent entry point for both HTTP adapters."""
+
+    @inject
+    def __init__(
+        self,
+        config_service: MCPConfigServiceProtocol,
+        bot_config_repo: BotMCPConfigRepositoryProtocol,
+        bot_repo: BotRepository,
+        command_repo: ScopedMCPConfigRepositoryProtocol,
+        market_service: MCPMarketServiceProtocol,
+        sync_service: MCPSyncServiceProtocol,
+        capability_reader: EffectiveMCPStateReaderProtocol,
+    ) -> None:
+        self._config_service = config_service
+        self._bot_config_repo = bot_config_repo
+        self._bot_repo = bot_repo
+        self._command_repo = command_repo
+        self._market_service = market_service
+        self._sync_service = sync_service
+        self._capability_reader = capability_reader
+
+    def read(self, *, user_id: str, server_code: str) -> ScopedMCPConfig:
+        return read_scoped_config(
+            user_id=user_id,
+            server_code=server_code,
+            config_service=self._config_service,
+            bot_config_repo=self._bot_config_repo,
+            bot_repo=self._bot_repo,
+        )
+
+    async def replace(
+        self,
+        *,
+        user_id: str,
+        server_code: str,
+        endpoint_env: str,
+        transport_protocol: str | None,
+        params: tuple[HeaderGroup, ...],
+    ) -> ScopedMCPConfig:
+        return await write_scoped_config(
+            user_id=user_id,
+            server_code=server_code,
+            endpoint_env=endpoint_env,
+            transport_protocol=transport_protocol,
+            params=params,
+            config_service=self._config_service,
+            bot_config_repo=self._bot_config_repo,
+            bot_repo=self._bot_repo,
+            command_repo=self._command_repo,
+            market_service=self._market_service,
+            sync_service=self._sync_service,
+            capability_reader=self._capability_reader,
+        )

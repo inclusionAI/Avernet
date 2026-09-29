@@ -32,6 +32,7 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
+from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
@@ -60,6 +61,7 @@ from agentclaw.community.core.repository.implementations.skill_center.mcp_defaul
     MCPDefaultExclusionReader,
 )
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
+from agentclaw.community.core.mcp.scoped_config_flow import MCPScopedConfigService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.skill_center.services.effective_mcp_state_reader import (
     EffectiveMCPStateReader,
@@ -95,6 +97,7 @@ class McpModule(Module):
         binder.bind(MCPMarketService, to=MCPMarketService, scope=singleton)
         binder.bind(MCPAuthService, to=MCPAuthService, scope=singleton)
         binder.bind(MCPConfigService, to=MCPConfigService, scope=singleton)
+        binder.bind(MCPScopedConfigService, to=MCPScopedConfigService, scope=singleton)
         binder.bind(
             EffectiveMCPStateReaderProtocol,
             to=EffectiveMCPStateReader,
@@ -198,6 +201,14 @@ class McpModule(Module):
     @provider
     @inject
     def _mcp_config_service_protocol(self, svc: MCPConfigService) -> MCPConfigServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _mcp_scoped_config_service_protocol(
+        self, svc: MCPScopedConfigService
+    ) -> MCPScopedConfigServiceProtocol:
         return svc
 
     @singleton

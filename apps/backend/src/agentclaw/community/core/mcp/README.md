@@ -9,6 +9,7 @@ purpose: "MCP (Model Context Protocol) domain — config, auth, and sync for MCP
 provides:
   - "EffectiveMCPStateReaderProtocol"
   - "MCPConfigService"
+  - "MCPScopedConfigService"
   - "MCPAuthService"
   - "MCPSyncService"
   - "MCPMarketService"
