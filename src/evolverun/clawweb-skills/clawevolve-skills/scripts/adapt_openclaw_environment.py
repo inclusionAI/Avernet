@@ -8,10 +8,16 @@ import json
 import os
 import shutil
 import stat
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+_release_platform = Path(__file__).resolve().parent / "platform"
+_source_platform = Path(__file__).resolve().parents[1] / "platform"
+sys.path.insert(0, str(_release_platform if _release_platform.is_dir() else _source_platform))
+from clawevolve_runtime.agent_registry import registration_lock
 
 
 SCHEMA_VERSION = 2
@@ -105,6 +111,7 @@ def ready_marker(config_path: Path, engine: str, plugins: list[str]) -> dict[str
     }
 
 
+@registration_lock()
 def check_and_adapt(config_path: Path, marker_path: Path) -> dict[str, Any]:
     if marker_is_current(marker_path, config_path):
         return {"ok": True, "status": "cached"}
@@ -151,6 +158,7 @@ def check_and_adapt(config_path: Path, marker_path: Path) -> dict[str, Any]:
     }
 
 
+@registration_lock()
 def restore(config_path: Path, backup_path: Path) -> None:
     if not backup_path.is_file():
         raise ValueError(f"backup is not a regular file: {backup_path}")

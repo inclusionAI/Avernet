@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
 from . import runtime
+from .agent_registry import registration_lock
 
 
 class CoreDispatchError(RuntimeError):
@@ -161,9 +162,10 @@ def _run_openclaw_agent(context: dict[str, Any], model: str) -> dict[str, Any]:
     env = os.environ.copy()
     validated = False
     try:
-        registered = subprocess.run(
-            add, capture_output=True, text=True, timeout=120, env=env, check=False,
-        )
+        with registration_lock():
+            registered = subprocess.run(
+                add, capture_output=True, text=True, timeout=120, env=env, check=False,
+            )
         if registered.returncode != 0:
             return {
                 "status": "failed", "agent_id": agent_id, "session_id": session_id,
@@ -211,10 +213,11 @@ def _run_openclaw_agent(context: dict[str, Any], model: str) -> dict[str, Any]:
         # or file references; presence of result.json alone is not success.
         if validated:
             try:
-                subprocess.run(
-                    [openclaw, "agents", "delete", agent_id, "--force", "--json"],
-                    capture_output=True, text=True, timeout=60, env=env, check=False,
-                )
+                with registration_lock():
+                    subprocess.run(
+                        [openclaw, "agents", "delete", agent_id, "--force", "--json"],
+                        capture_output=True, text=True, timeout=60, env=env, check=False,
+                    )
             except Exception:
                 pass
 

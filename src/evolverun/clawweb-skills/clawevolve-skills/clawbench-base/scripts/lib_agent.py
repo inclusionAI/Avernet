@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform"))
 from clawevolve_runtime.runner_environment import resolve_runner_environment
+from clawevolve_runtime.agent_registry import registration_lock
 
 import json
 import fnmatch
@@ -389,14 +390,15 @@ def _create_openclaw_agent_once(
             str(workspace_dir),
             "--non-interactive",
         ])
-        create_result = subprocess.run(
-            create_command,
-            capture_output=True,
-            text=True,
-            check=False,
-            shell=USE_SHELL,
-            timeout=timeout_seconds,
-        )
+        with registration_lock():
+            create_result = subprocess.run(
+                create_command,
+                capture_output=True,
+                text=True,
+                check=False,
+                shell=USE_SHELL,
+                timeout=timeout_seconds,
+            )
     except FileNotFoundError as exc:
         raise OpenClawAgentCreationError(f"openclaw CLI not found while creating agent {agent_id}: {exc}") from exc
     except subprocess.TimeoutExpired as exc:
@@ -498,14 +500,15 @@ def ensure_agent_exists(
                 workspace_dir,
             )
             try:
-                delete_result = subprocess.run(
-                    ["openclaw", "agents", "delete", delete_name, "--force"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    shell=USE_SHELL,
-                    timeout=OPENCLAW_AGENTS_DELETE_TIMEOUT_SECONDS,
-                )
+                with registration_lock():
+                    delete_result = subprocess.run(
+                        ["openclaw", "agents", "delete", delete_name, "--force"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        shell=USE_SHELL,
+                        timeout=OPENCLAW_AGENTS_DELETE_TIMEOUT_SECONDS,
+                    )
                 logger.info(
                     "Agent delete returned %s for %s",
                     delete_result.returncode,

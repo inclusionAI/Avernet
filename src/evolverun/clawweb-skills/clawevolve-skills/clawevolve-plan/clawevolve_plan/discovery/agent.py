@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -16,6 +15,7 @@ from typing import Any
 from .. import logger
 from ..io import atomic_write_text
 from .cleanup import agent_cleanup_command
+from clawevolve_runtime.agent_registry import file_lock, registration_lock
 
 
 class DiscoveryAgentError(RuntimeError):
@@ -144,7 +144,7 @@ def _run_cli_agent_message(
 
     try:
         try:
-            with _registration_lock():
+            with registration_lock():
                 _validate_openclaw_config(openclaw_path, env, diagnostics)
                 exists = _agent_in_json_registry(
                     openclaw_path, agent_id, env, diagnostics, phase="beforeAdd"
@@ -295,7 +295,7 @@ def _run_cli_agent_message(
     finally:
         if created:
             try:
-                with _registration_lock():
+                with registration_lock():
                     _cleanup_registered_agent(
                         openclaw_path, agent_id, env, diagnostics
                     )
@@ -660,41 +660,11 @@ def _agent_lifecycle_lock(agent_id: str):
             "/tmp/clawevolve-openclaw-agent-locks",
         )
     ) / f"{safe_agent_id}.lock"
-    with _file_lock(lock_path, timeout_seconds=_REGISTRATION_LOCK_TIMEOUT_SECONDS):
-        yield
-
-
-@contextmanager
-def _registration_lock():
-    lock_path = Path(
-        os.environ.get(
-            "CLAWEVOLVE_PLAN_AGENT_REGISTRATION_LOCK",
-            "/tmp/clawevolve-openclaw-agent-registration.lock",
-        )
-    )
-    with _file_lock(lock_path, timeout_seconds=_REGISTRATION_LOCK_TIMEOUT_SECONDS):
-        yield
-
-
-@contextmanager
-def _file_lock(lock_path: Path, *, timeout_seconds: int):
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+", encoding="utf-8") as handle:
-        deadline = time.monotonic() + timeout_seconds
-        while True:
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    raise DiscoveryAgentError(
-                        f"Timed out waiting for OpenClaw lock: {lock_path}"
-                    )
-                time.sleep(0.1)
-        try:
+    try:
+        with file_lock(lock_path, timeout_seconds=_REGISTRATION_LOCK_TIMEOUT_SECONDS):
             yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except TimeoutError as exc:
+        raise DiscoveryAgentError(str(exc)) from exc
 
 
 _OPENCLAW_BOOTSTRAP_FILES = (

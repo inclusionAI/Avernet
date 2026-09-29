@@ -109,6 +109,25 @@ local and container implementations own paths and environment preparation.
 Singlebox keeps its existing direct process execution; it does not use the
 internal Message adapter. Stage scheduling and business contracts are shared.
 
+## Concurrent Agent registration
+
+The Runner's `platform/clawevolve_runtime/agent_registry.py` owns the process
+lock around OpenClaw Agent registration/deletion. Native Diagnose, Plan,
+Optimize, Bench, custom Stage execution, environment preparation and runtime
+cleanup use the same lock:
+distinct Agent IDs still share a config that the CLI rewrites in full.
+Model execution remains outside this critical section.
+
+This reuses Plan's file lock, default path and existing
+`CLAWEVOLVE_PLAN_AGENT_REGISTRATION_LOCK` / `CLAWEVOLVE_PLAN_AGENT_LOCK_TIMEOUT`
+overrides (60-second default wait). All processes sharing a registry must use
+the same lock path. A lock timeout fails the operation rather than permitting
+an unlocked write. The lock coordinates participating Runner processes; it
+does not protect against other tools that rewrite the config without it.
+Deploy the complete Skills/Runner release so all writers participate. The
+launcher-side cleaner and the installed Skills runtime both include this
+helper. This changes no Stage contract or host service interface.
+
 ## Database-backed Skill task defaults
 
 `ce_app_config` stores generic JSON values under unique `config_key` entries.

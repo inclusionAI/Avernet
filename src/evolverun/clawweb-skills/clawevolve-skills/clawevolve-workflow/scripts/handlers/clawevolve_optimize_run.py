@@ -42,6 +42,7 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "platform"))
 from clawevolve_runtime.runner_environment import resolve_runner_environment
+from clawevolve_runtime.agent_registry import registration_lock
 from lib_clawevolve_bench import run_clawevolve_bench
 from lib_artifact_url_client import ArtifactUrlClient
 from lib_business_core import CoreWaiting, select_business_core, run_business_call, resolve_runtime_path, is_waiting as _business_is_waiting
@@ -8058,7 +8059,8 @@ def _openclaw_agent_message(
         add_ok = False
         for attempt in (1, 2):
             try:
-                add_proc = subprocess.run(add_cmd, capture_output=True, text=True, timeout=120, env=agent_env, start_new_session=True)
+                with registration_lock():
+                    add_proc = subprocess.run(add_cmd, capture_output=True, text=True, timeout=120, env=agent_env, start_new_session=True)
             except Exception as exc:
                 diag[f"addAttempt{attempt}Error"] = str(exc)
                 continue
