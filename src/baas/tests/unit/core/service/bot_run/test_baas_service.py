@@ -1207,15 +1207,15 @@ class TestCreateSessionEngineType:
                 context=_make_context(tenant=TENANT),
             )
             # 验证 wss_resolver 被调用时 path 使用了 engine_type（引擎专属 router）
-            # 非 openclaw 引擎统一返回结构化亲和键（无 session_id 时 run_id 现场生成）
+            # claude_code 覆写为 user 前置亲和键（无 session_id 时 run_id 现场生成）
             wss_resolver.dispatch_bot_ws_conn_info.assert_called_once_with(
                 bot_uuid=DEVICE_UUID,
                 port=20003,
                 path="/api/claude_code/ws",
                 tenant=TENANT,
                 device_affinity=(
-                    f"agent:{BOT_UUID}:session:00000000-0000-0000-0000-000000000002"
-                    f":user:{BOT_UUID}"
+                    f"user:{BOT_UUID}:session:00000000-0000-0000-0000-000000000002"
+                    f":agent:{BOT_UUID}"
                 ),
             )
 

@@ -1,7 +1,7 @@
 """Claude Code 引擎 adapter。
 
 薄封装:``ws_path`` 命中 engine 侧 claude_code 专属 router ``/api/claude_code/ws``;
-``session_consistency_key`` 覆写为 ``agent:{user_id}:session:{run_id}:user:{tc_bot_id}``
+``session_consistency_key`` 覆写为 ``user:{user_id}:session:{run_id}:agent:{tc_bot_id}``
 （user 段前置）;session 创建走基类通用逻辑。
 经 proxy→沙箱→engine 的现有 WS 通道工作，adapter 本身不做额外的连通性探活。
 """
@@ -24,4 +24,4 @@ class ClaudeCodeAdapter(BaseEngineAdapter):
         user_id: str,
         run_id: str,
     ) -> str:
-        return f"agent:{user_id}:session:{run_id}:user:{tc_bot_id}"
+        return f"user:{user_id}:session:{run_id}:agent:{tc_bot_id}"
