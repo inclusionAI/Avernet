@@ -544,7 +544,10 @@ Manifest 显式协议必须能在 Center 的对应环境中找到，不能 fallb
 
 **apply 做什么**：校验注册、权限及 Center 端点组合 → 在同一事务中收敛该 Bot
 的 MCP 安装关系和 override 配置 → best-effort 投影。配置字段优先级是
-Manifest/Bot > user config > Center/default；`headers: {}` 会屏蔽 user headers。
+Manifest/Bot > user config > Center/default。
+Manifest 只替换 Bot 显式 Header 集合；普通 Center 端点的最终 Header 按名称与
+user default 合并，同名由 Bot 覆盖。`headers: {}` 不再屏蔽 user headers；
+自定义 URL 仍不继承 user/default 凭据。
 
 **交付**：ARCA 系走现有按-MCP 推送（设备 `/api/mcp` 路径）；teclaw 在
 artifact 组装时进入 `mcp.servers[]`，凭证按现状于 compose 时从平台配置

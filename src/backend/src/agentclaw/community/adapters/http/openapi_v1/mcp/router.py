@@ -56,6 +56,16 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
+from agentclaw.community.core.mcp.effective_mcp_state_reader_protocol import (
+    EffectiveMCPStateReaderProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotMCPConfigRepositoryProtocol,
+    BotRepository,
+)
+from agentclaw.community.core.repository.protocols.bot.mcp import (
+    ScopedMCPConfigRepositoryProtocol,
+)
 from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
@@ -64,6 +74,12 @@ from agentclaw.community.core.mcp.config_flow import (
     list_marketplace_tenants,
     read_unified_config,
     write_unified_config,
+)
+from agentclaw.community.core.mcp.scoped_config_flow import (
+    HeaderGroup,
+    ScopedMCPConfig,
+    read_scoped_config,
+    write_scoped_config,
 )
 from agentclaw.community.core.mcp.errors import McpServerNotFoundError
 from agentclaw.community.core.mcp.presentation import (
@@ -77,6 +93,9 @@ from agentclaw.community.di import Injected
 
 from .schemas import (
     McpConfig,
+    McpHeaderGroup,
+    McpScopedConfig,
+    McpScopedConfigWrite,
     McpConfigWrite,
     BotMcpItem,
     McpPermission,
@@ -468,6 +487,85 @@ async def check_mcp_permission(
 
 
 # ── Unified config ──────────────────────────────────────────────────
+
+
+def _to_scoped_config(config: ScopedMCPConfig) -> McpScopedConfig:
+    return McpScopedConfig(
+        server_code=config.server_code,
+        endpoint_env=config.endpoint_env,
+        transport_protocol=config.transport_protocol,
+        params=[
+            McpHeaderGroup(key=group.key, value=group.value, bots=list(group.bots))
+            for group in config.params
+        ],
+        sync_results=list(config.sync_results) if config.sync_results is not None else None,
+        sync_summary=config.sync_summary,
+    )
+
+
+@router.get(
+    "/servers/{server_code}/config-groups",
+    response_model=Envelope[McpScopedConfig],
+    responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def get_scoped_mcp_config(
+    server_code: ServerCodePath,
+    request: Request,
+    owner_id: UserIdDep,
+    config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
+    bot_config_repo: BotMCPConfigRepositoryProtocol = Injected(BotMCPConfigRepositoryProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
+) -> Envelope[McpScopedConfig]:
+    config = read_scoped_config(
+        user_id=owner_id,
+        server_code=server_code,
+        config_service=config_service,
+        bot_config_repo=bot_config_repo,
+        bot_repo=bot_repo,
+    )
+    return envelope(_to_scoped_config(config), request)
+
+
+@router.put(
+    "/servers/{server_code}/config-groups",
+    response_model=Envelope[McpScopedConfig],
+    responses=USER_SCOPED_403,
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def update_scoped_mcp_config(
+    server_code: ServerCodePath,
+    body: McpScopedConfigWrite,
+    request: Request,
+    owner_id: UserIdDep,
+    config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
+    bot_config_repo: BotMCPConfigRepositoryProtocol = Injected(BotMCPConfigRepositoryProtocol),
+    bot_repo: BotRepository = Injected(BotRepository),
+    command_repo: ScopedMCPConfigRepositoryProtocol = Injected(ScopedMCPConfigRepositoryProtocol),
+    market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
+    sync_service: MCPSyncServiceProtocol = Injected(MCPSyncServiceProtocol),
+    capability_reader: EffectiveMCPStateReaderProtocol = Injected(EffectiveMCPStateReaderProtocol),
+) -> Envelope[McpScopedConfig]:
+    config = await write_scoped_config(
+        user_id=owner_id,
+        server_code=server_code,
+        endpoint_env=body.endpoint_env,
+        transport_protocol=body.transport_protocol,
+        params=tuple(
+            HeaderGroup(key=group.key, value=group.value, bots=tuple(group.bots))
+            for group in body.params
+        ),
+        config_service=config_service,
+        bot_config_repo=bot_config_repo,
+        bot_repo=bot_repo,
+        command_repo=command_repo,
+        market_service=market_service,
+        sync_service=sync_service,
+        capability_reader=capability_reader,
+    )
+    return envelope(_to_scoped_config(config), request)
 
 
 @router.get(

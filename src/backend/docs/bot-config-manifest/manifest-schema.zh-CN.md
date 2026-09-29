@@ -537,9 +537,11 @@ mcp:
 - `endpoint_env` 仅允许 `PROD`/`PRE`；`transport_protocol` 仅允许 `SSE`/
   `STREAMABLE_HTTP`。后端按两者的**组合**查询 Center 元数据；Manifest 显式
   指定的协议不存在时失败，不沿用旧设备链路的 fallback。
-- `headers` 是 Bot 级完整覆盖字段：省略时继承 user config；提供时替换 user
-  headers；`headers: {}` 显式屏蔽 user headers。平台默认/托管 Header 仍在最终层
-  合并，Manifest 与托管 Header 同名（大小写不敏感）时拒绝。
+- `headers` 完整替换该 Bot **显式声明的 Header 集合**，不修改 user config。
+  最终运行时按 Header 名称（大小写不敏感）与 user headers 逐项合并，同名由 Bot
+  覆盖；未声明的名称继续继承。`headers: {}` 表示该 Bot 不显式覆盖任何 Header，
+  因而继承 user headers。自定义 URL 仍按上述安全边界不继承 user/default 凭据。
+  平台默认/托管 Header 仍在最终层合并，Manifest 与托管 Header 同名时拒绝。
 - Center 标记为 LOCAL/stdio 的 MCP 可以只凭 `server_code` 安装，但拒绝非空
   `config`。
 - 校验：`server_code` 必须存在于注册表且租户有权限（复用现有

@@ -146,6 +146,8 @@ ACCOUNT_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # reads above are a different thing and are OPEN.)
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}/config"): AdmissionMode.REFUSED,
     ("PUT", "/openapi/v1/bots/mcp/servers/{server_code}/config"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/mcp/servers/{server_code}/config-groups"): AdmissionMode.REFUSED,
+    ("PUT", "/openapi/v1/bots/mcp/servers/{server_code}/config-groups"): AdmissionMode.REFUSED,
     (
         "GET",
         "/openapi/v1/bots/mcp/servers/{server_code}/permissions",

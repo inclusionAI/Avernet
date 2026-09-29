@@ -37,6 +37,7 @@ from agentclaw.community.core.repository.protocols.bot.collaborator import (
 )
 from agentclaw.community.core.repository.protocols.bot.mcp import (
     BotMCPConfigRepositoryProtocol,
+    ScopedMCPConfigRepositoryProtocol,
     UserMCPConfigRepository,
 )
 from agentclaw.community.core.repository.protocols.bot.cli_tool import (
@@ -60,6 +61,7 @@ __all__ = [
     "BotCollabLogRepositoryProtocol",
     "BotConfigManifestRepositoryProtocol",
     "BotMCPConfigRepositoryProtocol",
+    "ScopedMCPConfigRepositoryProtocol",
     "BotFriendRepositoryProtocol",
     "BotRepository",
     "BotRestartLockRepositoryProtocol",

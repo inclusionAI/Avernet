@@ -17,6 +17,10 @@ provides:
   - "UnifiedConfig"
   - "read_unified_config"
   - "write_unified_config"
+  - "HeaderGroup"
+  - "ScopedMCPConfig"
+  - "read_scoped_config"
+  - "write_scoped_config"
   - "list_marketplace_servers"
   - "list_marketplace_tenants"
   # Presentation helpers shared by both surfaces.
@@ -71,6 +75,12 @@ internal_dependencies:
 
 MCP config changes resolve per Bot: explicit `ac_bot_mcp_config` fields override
 the owner's `ac_user_mcp_config`, then Center/default values fill the remainder.
+For normal Center endpoints, Header maps merge by case-insensitive name: the
+Bot's explicitly named values win while other user-default names remain
+inherited. A Bot `headers: {}` no longer blocks user Headers. A product
+config-groups save atomically replaces user/Bot Header maps without changing
+installation or unrelated connection fields; projection after commit is
+best-effort. See ADR 0015 for the deliberate compatibility change.
 They propagate to running engines through `DeviceSync`; the same resolver is used
 for restart/whole-artifact composition. Contract changes therefore affect Manifest
 apply, user-config fan-out, every DeviceSync implementation, and OCB's ARCA adapter.

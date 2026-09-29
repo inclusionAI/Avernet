@@ -1,9 +1,9 @@
 """Pydantic schemas for MCP API endpoints."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MCPValidationResponse(BaseModel):
@@ -94,6 +94,37 @@ class MCPUnifiedConfigResponse(BaseModel):
     success: bool
     message: str
     data: Optional[MCPUnifiedConfigData] = None
+
+
+class MCPHeaderGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    value: str
+    bots: List[str] = Field(default_factory=list)
+
+
+class MCPScopedConfigData(BaseModel):
+    server_code: str
+    endpoint_env: str
+    transport_protocol: Optional[str]
+    params: List[MCPHeaderGroup]
+    sync_results: Optional[List[Dict[str, Any]]] = None
+    sync_summary: Optional[Dict[str, int]] = None
+
+
+class MCPScopedConfigResponse(BaseModel):
+    success: bool
+    data: MCPScopedConfigData
+
+
+class MCPScopedConfigRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    server_code: str
+    endpoint_env: Literal["PROD", "PRE"]
+    transport_protocol: Literal["SSE", "STREAMABLE_HTTP"] | None
+    params: List[MCPHeaderGroup]
 
 
 class MCPApplyPermissionRequest(BaseModel):

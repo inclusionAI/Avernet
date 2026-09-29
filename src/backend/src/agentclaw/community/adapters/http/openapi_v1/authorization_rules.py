@@ -621,6 +621,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PUT", "/openapi/v1/bots/mcp/servers/{server_code}/config"): NoCheck(
         "tenant-identical MCP catalogue and per-caller config"
     ),
+    ("GET", "/openapi/v1/bots/mcp/servers/{server_code}/config-groups"): NoCheck(
+        "the caller's own MCP defaults and owned Bot overrides"
+    ),
+    ("PUT", "/openapi/v1/bots/mcp/servers/{server_code}/config-groups"): NoCheck(
+        "the caller's own MCP defaults and owned Bot overrides"
+    ),
     ("GET", "/openapi/v1/bots/mcp/servers/{server_code}/permissions"): NoCheck(
         "tenant-identical MCP catalogue and per-caller config"
     ),

@@ -343,6 +343,37 @@ class McpConfig(BaseModel):
     )
 
 
+class McpHeaderGroup(BaseModel):
+    """One explicit Header value and its Bot scope; empty means user default."""
+
+    model_config = _STRICT
+
+    key: str
+    value: str
+    bots: list[str] = Field(default_factory=list)
+
+
+class McpScopedConfig(BaseModel):
+    """Editable user-default and owned-Bot Header groups for one MCP."""
+
+    server_code: str
+    endpoint_env: Literal["PROD", "PRE"]
+    transport_protocol: Literal["SSE", "STREAMABLE_HTTP"] | None
+    params: list[McpHeaderGroup]
+    sync_results: list[dict[str, Any]] | None = None
+    sync_summary: dict[str, int] | None = None
+
+
+class McpScopedConfigWrite(BaseModel):
+    """Complete editable Header-group snapshot for the caller's owned Bots."""
+
+    model_config = _STRICT
+
+    endpoint_env: Literal["PROD", "PRE"]
+    transport_protocol: Literal["SSE", "STREAMABLE_HTTP"] | None
+    params: list[McpHeaderGroup]
+
+
 class McpConfigWrite(BaseModel):
     """Write the unified config. An omitted (null) field means "leave unchanged".
 

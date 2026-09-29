@@ -885,8 +885,9 @@ mcp:
 - `config` 只允许 `url`、`headers`、`endpoint_env`、`transport_protocol`。
   Header 一期只放非敏感明文；`api_key` 仍通过既有账号级配置端点管理。
 - 配置逐字段优先级：Manifest Bot override > user config > Center/default。
-  `headers` 省略表示继承 user headers，`headers: {}` 表示屏蔽 user headers；平台
-  托管 Header 始终保留且不能被 Manifest 覆盖。
+  Bot 显式 Header 与 user headers 按名称逐项合并，同名由 Bot 覆盖；
+  `headers: {}` 表示没有 Bot 显式 Header，继续继承 user headers。平台托管 Header
+  始终保留且不能被 Manifest 覆盖；自定义 URL 不继承 user/default 凭据。
 - `endpoint_env` 与 `transport_protocol` 会按 Center 的同一个端点组合校验。
   Manifest 显式协议不存在时 apply 失败，不会偷偷 fallback。自定义 URL 只替换
   地址，transport 仍来自该选择结果；后端静态 server 配置不继承 user
