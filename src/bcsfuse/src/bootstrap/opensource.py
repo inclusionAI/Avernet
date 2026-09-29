@@ -5,8 +5,14 @@ Builds provider registry for OSS deployments in different modes.
 """
 import os
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from src.bootstrap.provider_registry import ProviderRegistry
+    from src.infra.public.config.yaml_env_config_provider import (
+        YamlEnvConfigProvider,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +50,19 @@ def build_opensource_provider_registry(mode: str = "runtime") -> "ProviderRegist
     from src.infra.public.cache.in_memory_cache_provider import InMemoryCacheProvider
     from src.infra.public.object_storage.local_runtime_object_storage_provider import LocalRuntimeObjectStorageProvider
     from src.infra.public.profile_sources.registry_worker_profile_source import RegistryWorkerProfileSource
+    from src.providers.public.env_secret_provider import EnvSecretProvider
+    from src.providers.public.noop_context_provider import NoopContextProvider
+    from src.providers.public.noop_startup_provider import NoopStartupProvider
 
     registry = ProviderRegistry()
 
     # Always register config provider
     config = YamlEnvConfigProvider()
     registry.register("config", config)
+
+    registry.register("secret_provider", EnvSecretProvider())
+    registry.register("startup_provider", NoopStartupProvider())
+    registry.register("context_provider", NoopContextProvider())
 
     # Always register DRM config provider (public, env-based)
     from src.infra.public.config.drm_config_provider import DrmConfigProvider

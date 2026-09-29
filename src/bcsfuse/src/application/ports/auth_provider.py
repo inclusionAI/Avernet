@@ -1,4 +1,4 @@
-from typing import Protocol, Any, Optional
+from typing import Any, Protocol
 
 
 class AuthProvider(Protocol):
@@ -8,7 +8,7 @@ class AuthProvider(Protocol):
     Public code must depend on this contract, not internal auth SDKs.
     """
 
-    def authenticate(self, token: str) -> Optional[dict]:
+    def authenticate(self, token: str) -> dict | None:
         """Authenticate a token and return user info.
 
         Args:
@@ -19,7 +19,7 @@ class AuthProvider(Protocol):
         """
         ...
 
-    def get_current_user(self, request: Any) -> Optional[dict]:
+    def get_current_user(self, request: Any) -> dict | None:
         """Get current authenticated user from request.
 
         Args:
@@ -39,5 +39,16 @@ class AuthProvider(Protocol):
 
         Returns:
             True if user has permission, False otherwise.
+        """
+        ...
+
+    def validate_request(self, request: Any) -> bool:
+        """Return whether an incoming request is authenticated.
+
+        Args:
+            request: HTTP request object
+
+        Returns:
+            True when the request carries valid authentication.
         """
         ...
