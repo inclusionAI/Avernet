@@ -21,10 +21,13 @@ export async function freezeRunnerLaunch(launch: RunnerLaunch, storage: LaunchSt
   if (!artifactStore?.putObject || !artifactUrlStore) {
     throw new Error("Runner 启动参数存储未配置");
   }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(launch.taskId)) {
+    throw new Error("Runner launch has an invalid task ID");
+  }
   const content = Buffer.from(JSON.stringify(launch), "utf8");
   const sha256 = createHash("sha256").update(content).digest("hex");
   // Content addressing prevents one HITL invocation from overwriting another.
-  const key = `runner-launches/${sha256}.json`;
+  const key = `evolution/${launch.taskId}/runner-launches/${sha256}.json`;
   await artifactStore.putObject(key, content, "application/json");
   const url = await artifactUrlStore.createSignedUrl(key, "GET", 3600);
   const parsed = new URL(url);

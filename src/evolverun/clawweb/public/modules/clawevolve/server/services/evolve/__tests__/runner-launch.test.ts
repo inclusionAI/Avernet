@@ -23,7 +23,7 @@ beforeEach(() => {
 it("freezes exact bytes before issuing a GET-only reference, including long Unicode input", async () => {
   const input = { ...launch, args: launch.args + " 加固".repeat(5000) };
   const reference = await freezeRunnerLaunch(input);
-  const key = `runner-launches/${reference.sha256}.json`;
+  const key = `evolution/${input.taskId}/runner-launches/${reference.sha256}.json`;
   const content = objects.get(key)!;
   expect(JSON.parse(content.toString())).toEqual(input);
   expect(createHash("sha256").update(content).digest("hex")).toBe(reference.sha256);
